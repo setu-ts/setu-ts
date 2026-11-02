@@ -124,6 +124,17 @@ describe('requireScopes', () => {
     expect(nt.calls).toBe(0);
   });
 
+  it('treats a non-array scopes member as holding none, never a substring match', async () => {
+    const guard = requireScopes('tools:read', 'tools:write');
+    // A mapper that copied the raw claim string; `includes` would match substrings.
+    const raw = { id: 'u1', scopes: 'xtools:readx xtools:writex' } as unknown as IPrincipal;
+    const { ctx, status } = createContext(raw);
+    const nt = createNext();
+    await guard(ctx, nt.next);
+    expect(status()).toBe(403);
+    expect(nt.calls).toBe(0);
+  });
+
   it('does not run downstream work on a refusal', async () => {
     const guard = requireScopes('tools:read');
     const { ctx } = createContext({ id: 'u1', scopes: [] });

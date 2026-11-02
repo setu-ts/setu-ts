@@ -121,6 +121,13 @@ export class RefreshTokenService {
         roles: principal.roles,
         permissions: principal.permissions,
         claims: principal.claims,
+        // A delegated principal stays delegated: the actor is written back as
+        // the RFC 8693 `act` claim, which the JWT strategy reads into
+        // `principal.actor`, so `requireAuth({ delegation })` still sees it on
+        // the minted token and on every rotation (the record keeps the principal).
+        ...(principal.actor === undefined
+          ? {}
+          : { act: { ...principal.actor.claims, sub: principal.actor.id } }),
         type: 'access',
         jti: accessTokenJti,
       },

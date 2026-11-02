@@ -658,6 +658,9 @@ app.router.post('/billing', { middleware: [directOnly], handler });
 `delegation` is `'allow'` (the default), `'forbid'` or `'require'`; a refusal is `403`. A present
 but malformed `act` — not an object, or an object with no usable `sub`/`client_id` — refuses the
 token itself (`401`), so an unidentifiable delegation cannot pass as a direct user.
+`RefreshTokenService` keeps a delegated principal delegated: the access token it mints, and every
+rotation, carries the actor back as the `act` claim, so exchanging a delegated token for a
+self-issued one does not turn the agent into the user.
 
 ## Signing a user in
 

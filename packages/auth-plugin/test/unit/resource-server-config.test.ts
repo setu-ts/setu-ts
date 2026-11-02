@@ -49,6 +49,11 @@ describe('compileResourceServer refusals', () => {
       [{ resource: 'https://resource.test/mcp#fragment' }, 'no query, fragment or userinfo'],
       [{ resource: 'https://user:secret@resource.test/mcp' }, 'userinfo'],
       [{ resource: 'https://resource.test/mcp', resourceName: '' }, 'non-empty string'],
+      // Route syntax in the path would turn the metadata route into a pattern.
+      [{ resource: 'https://resource.test/:id' }, "a ':' segment"],
+      [{ resource: 'https://resource.test/a/*' }, "a ':' segment or '*'"],
+      [{ resource: 'https://resource.test/a*b' }, "a ':' segment or '*'"],
+      [{ resource: 'https://resource.test/a\\b' }, 'must not contain'],
       [
         { resource: 'https://resource.test/mcp', authorizationServers: ['http://as.test'] },
         'authorizationServers entries',

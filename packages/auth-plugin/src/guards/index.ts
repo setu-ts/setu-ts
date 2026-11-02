@@ -305,7 +305,10 @@ export function requireScopes(first: string, ...rest: string[]): MiddlewareFunct
       respondWithAuthorizationFailure(ctx, 'authentication-required');
       return;
     }
-    const held = user.scopes ?? [];
+    // A non-array `scopes` (an application mapper that copied the raw claim
+    // string) is treated as ABSENT: `includes` on a string would match a
+    // substring, so `'xtools:readx'` would satisfy `tools:read`.
+    const held = Array.isArray(user.scopes) ? user.scopes : [];
     if (scopes.some((scope) => !held.includes(scope))) {
       ctx.state.set(REQUIRED_SCOPES_STATE_KEY, scopes);
       respondWithAuthorizationFailure(ctx, 'insufficient-privileges');

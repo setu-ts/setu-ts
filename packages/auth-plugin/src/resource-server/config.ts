@@ -102,6 +102,15 @@ export function compileResourceServer(
   if (url.search !== '' || url.hash !== '' || url.username !== '' || url.password !== '') {
     refuse('resource must carry no query, fragment or userinfo');
   }
+  // The path becomes a router pattern: a `:name` or `*` segment would make the
+  // metadata route match other paths, and URL parsing turns `\` into `/`, so the
+  // published `resource` would differ from the path it is served at.
+  if (
+    resource.includes('\\') ||
+    url.pathname.split('/').some((segment) => segment.startsWith(':') || segment.includes('*'))
+  ) {
+    refuse("resource path must not contain '\\', a ':' segment or '*'");
+  }
 
   const authorizationServers = compileAuthorizationServers(options.authorizationServers, issuers);
   const scopesSupported = compileScopesSupported(options.scopesSupported);
