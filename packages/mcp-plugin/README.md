@@ -146,12 +146,15 @@ startup refuses anonymous idempotency scopes. An anonymous side-effecting tool u
 ## Schemas and arguments
 
 The flat input object merges path parameters, branded query properties and branded body properties.
-The last validation brand for a target wins. Path parameters are required. A name in two sources, a
-non-object body/query schema, a non-scalar query property (arrays of scalars are allowed), or
-`$defs` in both query and body refuses startup. The body controls `additionalProperties`; without a
-body it is false. Unknown arguments and unusable path values become generic tool errors. Query
-arrays use repeated keys. Paths are encoded as single segments; empty, `.` and `..` values are
-refused. Validation still runs on the route, and validation refusals become `isError` results.
+The last validation brand for a target wins. Path parameters are required, except a final optional
+`:name?`, which is optional unless the route's params schema requires it; an omitted one drops its
+segment. A name in two sources, a non-object body/query schema, a non-scalar query property (arrays
+of scalars are allowed), or `$defs` in more than one of params, query and body refuses startup. The
+advertised schema is always closed (`additionalProperties: false`), whatever the body schema allows,
+because an argument with no source has nowhere to go. Unknown arguments and unusable path values
+become generic tool errors. Query arrays use repeated keys. Paths are encoded as single segments;
+empty, `.` and `..` values are refused. Validation still runs on the route, and validation refusals
+become `isError` results.
 
 The success status is the handler's response metadata status, or 200. A Zod object response schema
 at that status supplies `outputSchema`; other response roots do not. Output that fails its schema is

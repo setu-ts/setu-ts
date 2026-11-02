@@ -63,6 +63,7 @@ export function mergeInput(path: string, brands: ReadonlyMap<string, unknown>): 
     sources[name] = source;
   };
   const paramProperties = params === undefined ? {} : objectProperties(params);
+  const paramsRequired = Array.isArray(params?.required) ? params.required : [];
   for (const match of path.matchAll(/:([A-Za-z0-9_]+)(\?)?/g)) {
     const name = match[1]!;
     add(
@@ -70,8 +71,9 @@ export function mergeInput(path: string, brands: ReadonlyMap<string, unknown>): 
       Object.hasOwn(paramProperties, name) ? paramProperties[name] : { type: 'string' },
       'path',
     );
-    // The kernel's final `:name?` matches with or without the segment.
-    if (match[2] === undefined) required.add(name);
+    // The kernel's final `:name?` matches with or without the segment, so it is
+    // optional unless the route's own params schema requires it.
+    if (match[2] === undefined || paramsRequired.includes(name)) required.add(name);
   }
   for (const [source, schema] of [
     ['query', query],
@@ -92,8 +94,12 @@ export function mergeInput(path: string, brands: ReadonlyMap<string, unknown>): 
     if (Array.isArray(schema.required))
       for (const name of schema.required) if (typeof name === 'string') required.add(name);
   }
-  if (query?.$defs !== undefined && body?.$defs !== undefined)
-    throw new McpPluginConfigurationError('MCP query and body cannot both define $defs.');
+  // One root `$defs` is published, so only one source may define any: a second
+  // source's `$ref`s would otherwise point at definitions that were dropped.
+  if ([params, query, body].filter((schema) => schema?.$defs !== undefined).length > 1)
+    throw new McpPluginConfigurationError(
+      'MCP params, query and body cannot each define $defs; only one may.',
+    );
   const defs = body?.$defs ?? query?.$defs ?? params?.$defs;
   return {
     schema: {

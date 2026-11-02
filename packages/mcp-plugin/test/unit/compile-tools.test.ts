@@ -111,6 +111,21 @@ describe('tool compiler', () => {
       ]),
       '$defs',
     ],
+    // A path property's `$ref` would point at params definitions the merge drops.
+    [
+      new Map([
+        ['params', schema({ type: 'object', properties: {}, $defs: {} })],
+        ['body', schema({ type: 'object', properties: {}, $defs: {} })],
+      ]),
+      '$defs',
+    ],
+    [
+      new Map([
+        ['params', schema({ type: 'object', properties: {}, $defs: {} })],
+        ['query', schema({ type: 'object', properties: {}, $defs: {} })],
+      ]),
+      '$defs',
+    ],
   ])('refuses input %j', (brands, message) => {
     expect(() => mergeInput('/items/:id', brands)).toThrow(message);
   });
@@ -170,6 +185,13 @@ describe('tool compiler', () => {
     const compiled = tool({}, { ...declaration, route: { method: 'GET', path: '/items/:id?' } });
     expect(compiled.sources).toEqual({ id: 'path' });
     expect(compiled.schema.required).toEqual([]);
+  });
+  it('requires an optional path parameter that the params schema requires', () => {
+    const compiled = tool(
+      { middleware: [validate('params', z.object({ id: z.string() }))] },
+      { ...declaration, route: { method: 'GET', path: '/items/:id?' } },
+    );
+    expect(compiled.schema.required).toEqual(['id']);
   });
   it('records the idempotency key header and refuses a key MCP cannot supply', () => {
     const auth = withSecurityMetadata<MiddlewareFunction>(() => {}, { authenticated: true });
