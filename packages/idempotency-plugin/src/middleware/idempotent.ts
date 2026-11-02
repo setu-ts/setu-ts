@@ -11,7 +11,7 @@ import type {
   IRequestContext,
   MiddlewareFunction,
 } from '@setu-ts/common';
-import { CAPABILITIES } from '@setu-ts/common';
+import { CAPABILITIES, withIdempotencyMetadata } from '@setu-ts/common';
 import { IDEMPOTENCY_DERIVED_KEY_STATE_KEY } from '../constants.ts';
 import { validateRouteOptionShape } from '../core/options.ts';
 import { IdempotencyConfigurationError } from '../errors.ts';
@@ -48,43 +48,46 @@ export function idempotent(options?: IdempotentRouteOptions): MiddlewareFunction
     IIdempotencyService,
     MiddlewareFunction | IdempotencyConfigurationError
   >();
-  return (ctx, next) => {
-    if (!ctx.services.has(CAPABILITIES.IDEMPOTENCY)) {
-      // A REJECTION, never a synchronous throw: this member's declared return
-      // type includes a promise, and a caller writing `.catch(...)` must see it.
-      return Promise.reject(
-        new IdempotencyConfigurationError(
-          'idempotent()',
-          'idempotent(): no CAPABILITIES.IDEMPOTENCY provider is registered — add IdempotencyPlugin() to the application',
-        ),
-      );
-    }
-    const service = ctx.services.get<IIdempotencyService>(CAPABILITIES.IDEMPOTENCY);
-    let cached = cache.get(service);
-    if (cached === undefined) {
-      try {
-        cached = service.middleware(options);
-      } catch (error) {
-        if (error instanceof IdempotencyConfigurationError) {
-          cache.set(service, error);
-          // Through safeLog, so a throwing logger can neither replace the
-          // configuration error nor turn this rejection into a synchronous
-          // throw (M109a audit round 4).
-          safeLog(
-            () =>
-              ctx.services.has(CAPABILITIES.LOGGER)
-                ? ctx.services.get<ILogger>(CAPABILITIES.LOGGER)
-                : undefined,
-            'error',
-            'idempotent(): middleware configuration failed',
-            { error: error.message },
-          );
-        }
-        return Promise.reject(error);
+  return withIdempotencyMetadata(
+    (ctx, next) => {
+      if (!ctx.services.has(CAPABILITIES.IDEMPOTENCY)) {
+        // A REJECTION, never a synchronous throw: this member's declared return
+        // type includes a promise, and a caller writing `.catch(...)` must see it.
+        return Promise.reject(
+          new IdempotencyConfigurationError(
+            'idempotent()',
+            'idempotent(): no CAPABILITIES.IDEMPOTENCY provider is registered — add IdempotencyPlugin() to the application',
+          ),
+        );
       }
-      cache.set(service, cached);
-    }
-    if (cached instanceof IdempotencyConfigurationError) return Promise.reject(cached);
-    return cached(ctx, next);
-  };
+      const service = ctx.services.get<IIdempotencyService>(CAPABILITIES.IDEMPOTENCY);
+      let cached = cache.get(service);
+      if (cached === undefined) {
+        try {
+          cached = service.middleware(options);
+        } catch (error) {
+          if (error instanceof IdempotencyConfigurationError) {
+            cache.set(service, error);
+            // Through safeLog, so a throwing logger can neither replace the
+            // configuration error nor turn this rejection into a synchronous
+            // throw (M109a audit round 4).
+            safeLog(
+              () =>
+                ctx.services.has(CAPABILITIES.LOGGER)
+                  ? ctx.services.get<ILogger>(CAPABILITIES.LOGGER)
+                  : undefined,
+              'error',
+              'idempotent(): middleware configuration failed',
+              { error: error.message },
+            );
+          }
+          return Promise.reject(error);
+        }
+        cache.set(service, cached);
+      }
+      if (cached instanceof IdempotencyConfigurationError) return Promise.reject(cached);
+      return cached(ctx, next);
+    },
+    { idempotent: true },
+  );
 }

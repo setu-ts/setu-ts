@@ -46,6 +46,7 @@
     "test"
   ],
   "exclude": [
+    "packages/mcp-plugin/test/integration/mcp-deno.test.ts",
     "test/inspect-local-diagnostics.test.ts",
     "packages/diagnostics-plugin/test/unit/cache-observations.test.ts",
     "packages/diagnostics-plugin/test/unit/outbound-http-observations.test.ts",

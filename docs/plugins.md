@@ -1069,6 +1069,38 @@ the browser.
 
 ---
 
+### @setu-ts/mcp-plugin
+
+**Purpose:** Expose explicitly declared routes as Model Context Protocol tools through the kernel
+pipeline.
+
+**Capability Token:** None; the plugin registers an ordinary stateless POST endpoint.
+
+**Runtime Compatibility:**
+
+| Deno | Node | Bun | Workers |
+| ---- | ---- | --- | ------- |
+| ✅   | ✅   | ✅  | ✅      |
+
+Node has the full integration suite and Deno one native list/call proof. Bun is unproven until the
+0.13.0 published-artifact row runs. Workers has a workerd-condition bundle-resolution proof; a live
+Workers run remains a follow-on.
+
+**Features:**
+
+- Explicit tool declarations with Zod v4 input/output schemas
+- Caller-filtered lists with private cache hints, existing Bearer challenges on hidden calls
+- In-process dispatch through authentication, validation, tenancy, rate limits, idempotency and
+  audit
+- Optional `@modelcontextprotocol/server@^2.4.0` peer and legacy stateless clients
+
+**Links:**
+
+- [README](../packages/mcp-plugin/README.md)
+- [API Reference](./api/modules/mcp-plugin_src.html)
+
+---
+
 ### @setu-ts/graphql-plugin
 
 **Purpose:** GraphQL server with schema-first and code-first support.

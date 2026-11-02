@@ -62,6 +62,14 @@
       "net": [
         "127.0.0.1"
       ]
+    },
+    "mcp-plugin": {
+      "read": true,
+      "env": true,
+      "sys": [
+        "hostname",
+        "osRelease"
+      ]
     }
   },
   "imports": {
@@ -100,6 +108,8 @@
     "@opentelemetry/exporter-trace-otlp-http": "npm:@opentelemetry/exporter-trace-otlp-http@^0.220.0",
     "drizzle-orm/": "npm:drizzle-orm@0.45.2/",
     "@std/testing/bdd": "jsr:@std/testing@^1.0.19/bdd",
+    "@modelcontextprotocol/server": "npm:@modelcontextprotocol/server@^2.4.0",
+    "@modelcontextprotocol/client": "npm:@modelcontextprotocol/client@^2.4.0",
     "@setu-ts/common": "./../../packages/common/src/index.ts",
     "@setu-ts/kernel": "./../../packages/kernel/src/index.ts",
     "@setu-ts/runtime": "./../../packages/runtime/src/index.ts",
@@ -154,7 +164,8 @@
     "@setu-ts/localization-plugin": "./../../packages/localization-plugin/src/index.ts",
     "@setu-ts/localization-plugin/format": "./../../packages/localization-plugin/src/format/index.ts",
     "@setu-ts/diagnostics-plugin": "./../../packages/diagnostics-plugin/src/index.ts",
-    "@setu-ts/idempotency-plugin": "./../../packages/idempotency-plugin/src/index.ts"
+    "@setu-ts/idempotency-plugin": "./../../packages/idempotency-plugin/src/index.ts",
+    "@setu-ts/mcp-plugin": "./../../packages/mcp-plugin/src/index.ts"
   },
   "scopes": {
     "../../packages/cli/test/": {
@@ -173,6 +184,9 @@
       "vitest": "./vitest-shim.ts"
     },
     "../../test/": {
+      "vitest": "./vitest-shim.ts"
+    },
+    "../../packages/mcp-plugin/test/": {
       "vitest": "./vitest-shim.ts"
     }
   }

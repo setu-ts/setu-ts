@@ -14,18 +14,8 @@
  */
 
 import type { IRequestContext, MiddlewareFunction } from '@setu-ts/common';
-import { httpStatusHintOf } from '@setu-ts/common';
+import { REQUIRED_SCOPES_STATE_KEY, httpStatusHintOf } from '@setu-ts/common';
 import { isScopeToken } from './claims.ts';
-
-/**
- * Request-state key under which `requireScopes` records the scopes a route
- * required after refusing an authenticated caller with `403`.
- *
- * A string, not a symbol, because `IRequestContext.state` is
- * `Map<string, unknown>`; the value is validated again when read so a foreign
- * writer cannot make the challenge echo arbitrary text.
- */
-export const REQUIRED_SCOPES_STATE_KEY = 'auth-plugin:required-scopes';
 
 /** The fixed error codes an RFC 6750 challenge may carry. */
 export type BearerErrorCode = 'invalid_token' | 'insufficient_scope';
@@ -82,7 +72,7 @@ function carriesBearer(ctx: IRequestContext, header: string, scheme: string): bo
   return value.split(' ')[0]?.toLowerCase() === scheme;
 }
 
-/** Reads the required-scope list a `requireScopes` refusal recorded, if valid. */
+/** Reads required scopes recorded by `requireScopes` or the MCP access gate, if valid. */
 function requiredScopesOf(ctx: IRequestContext): readonly string[] | undefined {
   const value = ctx.state.get(REQUIRED_SCOPES_STATE_KEY);
   if (!Array.isArray(value) || value.length === 0) {

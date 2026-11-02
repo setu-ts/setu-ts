@@ -1,0 +1,66 @@
+{
+  "name": "@setu-ts/mcp-plugin",
+  "version": "0.11.0",
+  "description": "Expose declared routes as Model Context Protocol tools through the kernel pipeline",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/setu-ts/setu-ts.git",
+    "directory": "packages/mcp-plugin"
+  },
+  "homepage": "https://github.com/setu-ts/setu-ts/tree/main/packages/mcp-plugin",
+  "bugs": {
+    "url": "https://github.com/setu-ts/setu-ts/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "sideEffects": false,
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": "^22.23.4 || ^24.22.1 || >=26.12.1"
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md",
+    "LICENSE",
+    "AGENT_CARD.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@setu-ts/common": "workspace:^"
+  },
+  "peerDependencies": {
+    "@modelcontextprotocol/server": "^2.4.0"
+  },
+  "peerDependenciesMeta": {
+    "@modelcontextprotocol/server": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/client": "^2.4.0",
+    "@modelcontextprotocol/server": "^2.4.0",
+    "@setu-ts/auth-plugin": "workspace:^",
+    "@setu-ts/exceptions": "workspace:^",
+    "@setu-ts/idempotency-plugin": "workspace:^",
+    "@setu-ts/kernel": "workspace:^",
+    "@setu-ts/runtime": "workspace:^",
+    "@setu-ts/testing": "workspace:^",
+    "@setu-ts/validation-plugin": "workspace:^",
+    "@types/node": "^24",
+    "esbuild": "~0.28.0",
+    "typescript": "6.0.3",
+    "vitest": "5.0.3",
+    "zod-v4": "npm:zod@^4.6.6"
+  }
+}

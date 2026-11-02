@@ -155,6 +155,56 @@ check(
   failedToLoad.join('; '),
 );
 
+// M133: exercise the optional SDK and one tool call once the package is published.
+try {
+  const { McpPlugin } = await import('@setu-ts/mcp-plugin');
+  const mcpApp = createApplication({
+    plugins: [
+      RuntimePlugin(),
+      McpPlugin({
+        tools: [
+          {
+            name: 'compat_read',
+            description: 'Read compatibility value',
+            route: { method: 'GET', path: '/mcp-value' },
+          },
+        ],
+      }),
+    ],
+  });
+  mcpApp.router.get('/mcp-value', (ctx) => ctx.response.json({ ok: true }));
+  await mcpApp.start();
+  try {
+    const response = await mcpApp.fetch(
+      new Request('http://localhost/mcp', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          accept: 'application/json, text/event-stream',
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'tools/call',
+          params: { name: 'compat_read', arguments: {} },
+        }),
+      }),
+    );
+    const text = await response.text();
+    const result = JSON.parse(
+      text.startsWith('event:') ? text.split('data: ')[1].split('\n')[0] : text,
+    );
+    check(
+      'mcp-plugin dispatches one tool through the published kernel',
+      result.result.content[0].text === '{"ok":true}',
+    );
+  } finally {
+    await mcpApp.stop();
+  }
+} catch (error) {
+  check('mcp-plugin published tool call', false, String(error));
+}
+
 // 3. The entry points this suite drives directly are the documented shapes.
 check('kernel exports createApplication', typeof createApplication === 'function');
 check('runtime exports RuntimePlugin', typeof RuntimePlugin === 'function');

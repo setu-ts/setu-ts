@@ -1,6 +1,7 @@
 /** Single source of truth for the Node and Deno package-test lanes (M111b). */
 /** Converted suites that still prove Deno runtime behavior. */
 export const DENO_LANE_TESTS = [
+  'packages/mcp-plugin/test/integration/mcp-deno.test.ts',
   // Diagnostics connector proofs run on both supported listener runtimes.
   'test/inspect-local-diagnostics.test.ts',
   'packages/diagnostics-plugin/test/unit/cache-observations.test.ts',

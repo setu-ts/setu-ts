@@ -12,6 +12,21 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### MCP route tools (M133, `@setu-ts/mcp-plugin`)
+
+Existing applications require no migration. To opt in, run `setu add mcp`, declare the exact routes
+in `McpPlugin({ tools: [...] })`, and rate-limit those routes. POST/PUT/PATCH tools require a Zod v4
+body validation brand. POST/PATCH also requires `idempotent()` or an explicit `repeatable: true`.
+Object response schemas supply structured output. The SDK peer is `@modelcontextprotocol/server`
+`^2.4.0`; it is loaded only at bootstrap.
+
+Calls forward credentials and tenant headers and authenticate again through the kernel's new
+`dispatch` entry. Third-party `IApplication` implementations keep compiling because `dispatch` is
+optional, but must implement it to host this plugin. Branded identical calls in the store's TTL
+replay even when the caller intended a second operation; vary an argument such as a client reference
+when that is intended. Origin checks apply to the MCP endpoint, and accepted Origin is preserved for
+inner CSRF checks. Lists filter scopes/authentication; roles and policies still run on the route.
+
 ### Resource-server authentication (M132, `@setu-ts/auth-plugin`, `@setu-ts/common`)
 
 Two behaviour changes, and one new capability.

@@ -15,6 +15,7 @@ import {
   setUpgradeIntent,
 } from '@setu-ts/common';
 import type {
+  DispatchOptions,
   CliCommandHandler,
   DecoratorHandler,
   EnvVarSpec,
@@ -57,6 +58,7 @@ import { LifecycleManager } from '../lifecycle/lifecycle-manager.ts';
 import { createRequestContext } from '../context/request-context.ts';
 import { runDeferred, wrapDeferredStream } from '../context/deferred.ts';
 import type { RequestContextHandle } from '../context/request-context.ts';
+import { DispatchedRequest } from './dispatched-request.ts';
 import { coerceInjectBody, InjectedRequest } from './inject-body.ts';
 import { ResponseBuilder } from '../context/response.ts';
 import { DiagnosticsCollector } from '../diagnostics/collector.ts';
@@ -926,6 +928,21 @@ class Application implements IKernelApplication {
     }
     const adapter = this.#registry.get<IHttpAdapter>(CAPABILITIES.HTTP_ADAPTER);
     return await adapter.fetch(request);
+  }
+
+  /** Runs a web request through the pipeline, preserving streams and cancellation. */
+  async dispatch(request: Request, options?: DispatchOptions): Promise<Response> {
+    const response = await this.#handleRequest(new DispatchedRequest(request, options));
+    const snapshot = response.snapshot();
+    // Match the adapters: the web Response constructor refuses even an empty
+    // body at these statuses, and discarding a stream must release its source.
+    if ([204, 205, 304].includes(snapshot.status)) {
+      if (snapshot.streaming) void snapshot.body.cancel().catch(() => {});
+      return new Response(null, { status: snapshot.status, headers: snapshot.headers });
+    }
+    const body =
+      snapshot.body instanceof Uint8Array ? new Uint8Array(snapshot.body) : snapshot.body;
+    return new Response(body, { status: snapshot.status, headers: snapshot.headers });
   }
 
   /** Synthesizes an inject request and runs it through the full pipeline. */

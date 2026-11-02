@@ -1148,3 +1148,56 @@ export type ResponseSnapshotInit = {
   /** Header input accepted directly by the web-standard `Response` constructor. */
   readonly headers: HeadersInit;
 };
+
+/** Route idempotency marker shared by producers and tool compilers.
+ * @since 0.13.0
+ */
+export const IDEMPOTENCY_METADATA: unique symbol = Symbol.for('setu.idempotency.metadata');
+
+/** Describes a route protected by idempotency middleware.
+ * @since 0.13.0
+ */
+export interface RouteIdempotencyMetadata {
+  /** The middleware deduplicates repeated calls. */
+  readonly idempotent: true;
+}
+
+/** Brands a middleware in place, preserving its behavior and identity.
+ * @param middleware - Middleware to brand
+ * @param metadata - Idempotency description
+ * @returns The same middleware
+ * @since 0.13.0
+ */
+export function withIdempotencyMetadata<T extends MiddlewareFunction>(
+  middleware: T,
+  metadata: RouteIdempotencyMetadata,
+): T {
+  Object.defineProperty(middleware, IDEMPOTENCY_METADATA, {
+    value: metadata,
+    enumerable: false,
+    configurable: true,
+    writable: false,
+  });
+  return middleware;
+}
+
+/** Reads a valid idempotency brand; foreign values are treated as absent.
+ * @param middleware - Middleware to inspect
+ * @returns Its metadata, when valid
+ * @since 0.13.0
+ */
+export function idempotencyMetadataOf(
+  middleware: MiddlewareFunction,
+): RouteIdempotencyMetadata | undefined {
+  const value: unknown = (
+    middleware as MiddlewareFunction & {
+      readonly [IDEMPOTENCY_METADATA]?: unknown;
+    }
+  )[IDEMPOTENCY_METADATA];
+  return typeof value === 'object' &&
+    value !== null &&
+    'idempotent' in value &&
+    value.idempotent === true
+    ? (value as RouteIdempotencyMetadata)
+    : undefined;
+}

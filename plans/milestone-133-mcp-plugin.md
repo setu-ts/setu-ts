@@ -408,17 +408,17 @@ Per-file coverage ≥ 90% (branch/function/line) on every changed `src` file, re
   JSON-RPC, headers and arguments; a web page attempting DNS rebinding against a local server; a
   model fed hostile tool output.
 - **Obligations the audit probes (each with a positive control):** O1 the inner request carries no
-  outer `mcp-*`, `idempotency-key`, `origin` or body headers, and reaches a principal only through
-  the forwarded credential (a stripped credential → anonymous inner call); O2 `tools/list` is never
-  sent with `cacheScope: 'public'`; O3 a hidden tool's route never runs (401/403 at the HTTP level);
-  O4 a present, unlisted, cross-origin `Origin` is refused before the SDK; O5 no 5xx body, stack or
-  thrown message reaches a tool result; O6 a path argument cannot move the call to another route
-  (`..`, `%2F`, `/`, encoded dot segments); O7 a tool cannot bind to the MCP endpoint itself; O8 a
-  POST/PATCH tool is refused at startup without the idempotency brand or `repeatable`, and a retry
-  through the brand runs the handler once; O9 the inner response read is bounded by
-  `maxResultBytes`; O10 `tools/call` for a declared-but-hidden tool and for an unknown tool are
-  answered without dispatching, including a hidden tool inside a 2025-era JSON-RPC batch; O11 a
-  client disconnect aborts the inner call (`ctx.signal` aborted in the handler); O12 a path
+  outer `mcp-*`, `idempotency-key` or body headers (an accepted `origin` is forwarded, §3.4), and
+  reaches a principal only through the forwarded credential (a stripped credential → anonymous inner
+  call); O2 `tools/list` is never sent with `cacheScope: 'public'`; O3 a hidden tool's route never
+  runs (401/403 at the HTTP level); O4 a present, unlisted, cross-origin `Origin` is refused before
+  the SDK; O5 no 5xx body, stack or thrown message reaches a tool result; O6 a path argument cannot
+  move the call to another route (`..`, `%2F`, `/`, encoded dot segments); O7 a tool cannot bind to
+  the MCP endpoint itself; O8 a POST/PATCH tool is refused at startup without the idempotency brand
+  or `repeatable`, and a retry through the brand runs the handler once; O9 the inner response read
+  is bounded by `maxResultBytes`; O10 `tools/call` for a declared-but-hidden tool and for an unknown
+  tool are answered without dispatching, including a hidden tool inside a 2025-era JSON-RPC batch;
+  O11 a client disconnect aborts the inner call (`ctx.signal` aborted in the handler); O12 a path
   parameter the route uses for tenancy is chosen by the caller exactly as over HTTP — the probe
   confirms the route's own tenant and membership checks refuse another tenant's id, and that the
   plugin adds no path the HTTP route lacks.

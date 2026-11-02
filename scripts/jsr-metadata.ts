@@ -158,6 +158,11 @@ export const PACKAGE_METADATA: Readonly<Record<string, PackageMetadata>> = {
     // serve assets through Workers Assets or R2 via `cloudflare-plugin`.
     runtimeCompat: NO_EDGE,
   },
+  'mcp-plugin': {
+    description:
+      'Expose declared routes as Model Context Protocol tools through the kernel pipeline',
+    runtimeCompat: PORTABLE,
+  },
   'idempotency-plugin': {
     description: 'A repeated request, queue job or broker message does its work once per key',
     runtimeCompat: PORTABLE,

@@ -19,6 +19,8 @@
     "npm:@google-cloud/pubsub@6": "6.2.0",
     "npm:@google-cloud/storage@7": "7.22.0",
     "npm:@hono/node-server@2": "2.1.4_hono@4.13.13",
+    "npm:@modelcontextprotocol/client@^2.4.0": "2.4.0",
+    "npm:@modelcontextprotocol/server@^2.4.0": "2.4.0",
     "npm:@node-saml/node-saml@5": "5.1.0",
     "npm:@opentelemetry/api@^1.9.0": "1.9.1",
     "npm:@opentelemetry/context-async-hooks@2": "2.12.0_@opentelemetry+api@1.9.1",
@@ -928,6 +930,31 @@
     },
     "@levischuck/tiny-cbor@0.2.11": {
       "integrity": "sha512-llBRm4dT4Z89aRsm6u2oEZ8tfwL/2l6BwpZ7JcyieouniDECM5AqNgr/y08zalEIvW3RSK4upYyybDcmjXqAow=="
+    },
+    "@modelcontextprotocol/client@2.4.0": {
+      "integrity": "sha512-LgrD2OphHuG12vfKFKz6SOnq7bKHQmhGJIAYdD+MZBn2npHEyry6uD8zvktodtl5CQM85MO0anUyD9JwmUmxww==",
+      "dependencies": [
+        "@modelcontextprotocol/core",
+        "cross-spawn",
+        "eventsource",
+        "eventsource-parser",
+        "jose",
+        "pkce-challenge",
+        "zod"
+      ]
+    },
+    "@modelcontextprotocol/core@2.4.0": {
+      "integrity": "sha512-z8QBKqdfXLPzkLQuG4xp8hrVEMm1PZ1IgxMN2sMbJiFiAKOWXnAzogXn2W4aqIBlP1ea6U5yiqVquvUNM1Cj6Q==",
+      "dependencies": [
+        "zod"
+      ]
+    },
+    "@modelcontextprotocol/server@2.4.0": {
+      "integrity": "sha512-rgR9yxSaAJ+bcsi/XroT/S2AfPiIWloXAnrdfYSCms9ivVju0ishu/wW0J21Ho6+ZOR1r7RyeRbjiRuF87ix5Q==",
+      "dependencies": [
+        "@modelcontextprotocol/core",
+        "zod"
+      ]
     },
     "@mongodb-js/saslprep@1.6.0": {
       "integrity": "sha512-19jGXfpctLDJUELLUZGJ5BllcLT7rHdF+gTTaN2jzqu0bGkUhpdcYtgK2Vux+g3zuBAa0TM/W666QMIjYhYujw==",
@@ -2057,6 +2084,15 @@
     "events@3.3.0": {
       "integrity": "sha512-mQw+2fkQbALzQ7V0MY0IqdnXNOeTtP4r0lN9z7AAawCXgqea7bDii20AYrIBrFd/Hx0M2Ocz6S111CaFkUcb0Q=="
     },
+    "eventsource@3.0.7": {
+      "integrity": "sha512-CRT1WTyuQoD771GW56XEZFQ/ZoSfWid1alKGDYMmkt2yl8UXrVR4pspqWNEcqKvVIzg6PAltWjxcSSPrboA4iA==",
+      "dependencies": [
+        "eventsource-parser"
+      ]
+    },
+    "eventsource-parser@3.1.1": {
+      "integrity": "sha512-EKN1vKAMcZ8MlYMpaNuxN6R9yakzH6uajHcHVTqWJzvu5pWw9DyhbP35HH8MVBQ+dZjAfDxk+A8NiR9KWaXiyQ=="
+    },
     "expect-type@1.4.0": {
       "integrity": "sha512-KfYbmpRm0VbLjEvVa9yGwCi9GI34xvi7A/HXYWQO65CSD2u3MczUJSuwXKFIxlGsgBQizV9q5J9NHj4VG0n+pA=="
     },
@@ -2466,6 +2502,9 @@
         "@pkgjs/parseargs"
       ]
     },
+    "jose@6.2.14": {
+      "integrity": "sha512-3JasLuki1NRLQvY4wCoC37KZk4qxoBx2k2aFqLxT84IezqW0bkJKnNtxnZj/Fu1xsQivoc/lytxaRHJoGLjJ1A=="
+    },
     "js-tokens@10.0.0": {
       "integrity": "sha512-lM/UBzQmfJRo9ABXbPWemivdCW8V2G8FHaHdypQaIy523snUjog0W71ayWXTjiR+ixeMyVHN2XcpnTd/liPg/Q=="
     },
@@ -2829,6 +2868,9 @@
         "thread-stream"
       ],
       "bin": true
+    },
+    "pkce-challenge@5.0.1": {
+      "integrity": "sha512-wQ0b/W4Fr01qtpHlqSqspcj3EhBvimsdh0KlHhH8HRZnMsEa0ea2fTULOXOS9ccQr3om+GcGRk4e+isrZWV8qQ=="
     },
     "postcss@8.5.29": {
       "integrity": "sha512-49cGhUbXj8Qenv0iTMxA1cFBzxXoctpC9Ujd77t1WcbJIr6nF/eI7g/8MgxrYldFRuAXvja7xQRwavoW7kgrxQ==",
@@ -3474,6 +3516,8 @@
       "npm:@google-cloud/bigtable@6",
       "npm:@google-cloud/pubsub@6",
       "npm:@hono/node-server@2",
+      "npm:@modelcontextprotocol/client@^2.4.0",
+      "npm:@modelcontextprotocol/server@^2.4.0",
       "npm:@opentelemetry/api@^1.9.0",
       "npm:@opentelemetry/exporter-trace-otlp-http@0.220",
       "npm:@opentelemetry/resources@^2.9.0",
@@ -3669,6 +3713,15 @@
           "npm:hono@^4.12.30",
           "npm:nodemailer@10",
           "npm:vitest@5.0.3"
+        ]
+      },
+      "jsr:@setu-ts/mcp-plugin@0.11.0": {
+        "dependencies": [
+          "npm:@modelcontextprotocol/client@^2.4.0",
+          "npm:@modelcontextprotocol/server@^2.4.0",
+          "npm:esbuild@0.28",
+          "npm:vitest@5.0.3",
+          "npm:zod@^4.6.6"
         ]
       },
       "jsr:@setu-ts/messaging-plugin@0.11.0": {

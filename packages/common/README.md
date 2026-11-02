@@ -226,6 +226,7 @@ package fits the plugin architecture.
 | `fullJitterDelay`                     | function  |
 | `hasForbiddenAliasCharacter`          | function  |
 | `httpStatusHintOf`                    | function  |
+| `idempotencyMetadataOf`               | function  |
 | `installRequestIdentityGuard`         | function  |
 | `isConnectionFault`                   | function  |
 | `isConnectionFaultCode`               | function  |
@@ -285,6 +286,7 @@ package fits the plugin architecture.
 | `validationMetadataOf`                | function  |
 | `withDeadline`                        | function  |
 | `withHttpStatusHint`                  | function  |
+| `withIdempotencyMetadata`             | function  |
 | `withResponseMetadata`                | function  |
 | `withSecurityMetadata`                | function  |
 | `withValidationMetadata`              | function  |
@@ -306,6 +308,7 @@ package fits the plugin architecture.
 | `ERROR_RESPONDER_BRAND`               | const     |
 | `ERROR_RESPONDER_STATE_KEY`           | const     |
 | `HTTP_STATUS_HINT`                    | const     |
+| `IDEMPOTENCY_METADATA`                | const     |
 | `IDEMPOTENCY_RECORD_KIND`             | const     |
 | `INBOX_RECORD_KIND`                   | const     |
 | `MAX_PUBLISH_HEADER_NAME_BYTES`       | const     |
@@ -317,6 +320,7 @@ package fits the plugin architecture.
 | `OUTBOX_RECORD_KIND`                  | const     |
 | `PLUGIN_PRIORITY`                     | const     |
 | `REQUEST_ORIGIN_STATE_KEY`            | const     |
+| `REQUIRED_SCOPES_STATE_KEY`           | const     |
 | `RESERVED_HEADER_NAMES`               | const     |
 | `RESERVED_HEADER_PREFIXES`            | const     |
 | `RESPONSE_METADATA`                   | const     |
@@ -358,6 +362,7 @@ package fits the plugin architecture.
 | `DiagnosticsEvent`                    | interface |
 | `DiagnosticsNode`                     | interface |
 | `DiagnosticsSnapshot`                 | interface |
+| `DispatchOptions`                     | interface |
 | `EncodedPayload`                      | interface |
 | `EnvVarSpec`                          | interface |
 | `Err`                                 | interface |
@@ -577,6 +582,7 @@ package fits the plugin architecture.
 | `RoleDefinition`                      | interface |
 | `RoomBroadcastOptions`                | interface |
 | `RouteDefinition`                     | interface |
+| `RouteIdempotencyMetadata`            | interface |
 | `RouteInfo`                           | interface |
 | `RouteResponseMetadata`               | interface |
 | `RouteSchema`                         | interface |

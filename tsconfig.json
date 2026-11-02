@@ -156,6 +156,9 @@
     },
     {
       "path": "./packages/idempotency-plugin"
+    },
+    {
+      "path": "./packages/mcp-plugin"
     }
   ]
 }
