@@ -16451,10 +16451,12 @@ user cannot be told apart from the user, because nothing reads the RFC 8693 `act
 2. **RFC 9728 protected-resource metadata** served at `/.well-known/oauth-protected-resource` (and
    the path-suffixed form for a resource below the root), built from configuration: the resource
    identifier, the authorization servers, the supported scopes. Not an authorization server.
-3. **Audience binding (RFC 8707):** a trusted issuer accepts a list of audiences, and the plan
-   decides whether the configured resource identifier is required among them by default. A token
-   minted for another resource is refused; Setu never forwards an inbound token to an upstream
-   service (the MCP authorization page: servers "MUST NOT accept or transit any other tokens").
+3. **Audience binding (RFC 8707):** a trusted issuer accepts a list of audiences, and configuring
+   `resourceServer` does NOT require the resource identifier among them. The audience list is what
+   the issuer stamps for this resource — Entra an `api://<guid>` or app id, Auth0 an API identifier
+   — so forcing the resource URL would refuse valid deployments. A token minted for another resource
+   is refused; Setu never forwards an inbound token to an upstream service (the MCP authorization
+   page: servers "MUST NOT accept or transit any other tokens").
 4. **Delegation:** the `act` claim exposed as an optional `actor` on the principal, its nesting
    bounded, and a guard option that refuses or requires delegated tokens per route.
 5. **What is NOT built:** an authorization server, Dynamic Client Registration, Client ID Metadata

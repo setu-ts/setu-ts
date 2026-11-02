@@ -318,6 +318,7 @@ import {
   requireAuth,
   requirePermission,
   requireRole,
+  requireScopes,
 } from '@setu-ts/auth-plugin';
 
 app.router.get('/profile', { middleware: [requireAuth()], handler });
@@ -334,6 +335,7 @@ app.router.post('/bulk', {
   middleware: [requireAuth(), requireAllPermissions(['users:read', 'users:write'])],
   handler,
 });
+app.router.get('/tools', { middleware: [requireScopes('tools:read', 'tools:list')], handler });
 app.router.get('/health', { middleware: [publicRoute()], handler });
 ```
 
@@ -455,6 +457,7 @@ Workers application passes `new PasswordHasher(runtime, { iterations: 100_000 })
 | `strategies`                     | `readonly IAuthStrategy[]`                            | -                   | Caller-supplied strategies, appended after every built-in in declaration order.                                                                                                                                                                 |
 | `middleware`                     | `false \| AuthMiddlewareOption`                       | `{ priority: 300 }` | Move, exclude paths from, or disable the global authentication middleware.                                                                                                                                                                      |
 | `issuers`                        | `readonly TrustedIssuer[]`                            | -                   | Outside identity providers whose access tokens are accepted.                                                                                                                                                                                    |
+| `resourceServer`                 | `ResourceServerOptions`                               | -                   | M132 RFC 9728 protected-resource metadata and the `resource_metadata` challenge parameter.                                                                                                                                                      |
 | `http`                           | `IAuthHttp`                                           | `fetch`-based       | Outbound HTTP for issuer key sets, discovery documents, and the sign-in token exchange.                                                                                                                                                         |
 | `signIn`                         | `SignInConfig`                                        | -                   | Sign-in with outside providers; registers `IAuthSessionService`. Requires `SessionPlugin`.                                                                                                                                                      |
 
@@ -519,16 +522,18 @@ AuthPlugin({
 - **Algorithms.** RS256, PS256, ES256, ES384 and EdDSA (also spelled `Ed25519`), narrowed per issuer
   with `algorithms`. `none` and every `HS*` algorithm are refused before any key is looked up, so a
   token signed with HMAC using the provider's public key as the secret cannot pass.
-- **Claims.** `iss` exact, `aud` must contain `audience`, `exp` required; `exp`, `nbf` and a future
-  `iat` allow `clockToleranceSec` (default 30, at most 300). Expiry is refused at
-  `now >= exp + clockToleranceSec`; not-before is refused while `now + clockToleranceSec < nbf`.
-  `toPrincipal` receives the full verified claims and decides where roles live — the plugin never
-  guesses. **Namespace the id whenever this issuer is not the only identity source** — `sub` is
-  unique only within its issuer, and a self-issued `jwt`, another issuer, an API key, a session or a
-  custom strategy can each produce the same id. ``{ id: `${claims.iss}|${claims.sub}` }`` (as in the
-  example) separates an outside `sub` from the other sources only if none of them can produce an id
-  of that form — a self-issued `sub` or a user-chosen username could — so namespace every source
-  (for example ``{ id: `local|${id}` }``) or keep the other sources' ids free of the separator.
+- **Claims.** `iss` exact, `aud` (a string or an array) must contain ANY configured `audience`
+  value, `exp` required; `exp`, `nbf` and a future `iat` allow `clockToleranceSec` (default 30, at
+  most 300). Expiry is refused at `now >= exp + clockToleranceSec`; not-before is refused while
+  `now + clockToleranceSec < nbf`. A present but malformed RFC 8693 `act` claim refuses the token
+  (`act-malformed`), never ignored. `toPrincipal` receives the full verified claims and decides
+  where roles live — the plugin never guesses. **Namespace the id whenever this issuer is not the
+  only identity source** — `sub` is unique only within its issuer, and a self-issued `jwt`, another
+  issuer, an API key, a session or a custom strategy can each produce the same id.
+  ``{ id: `${claims.iss}|${claims.sub}` }`` (as in the example) separates an outside `sub` from the
+  other sources only if none of them can produce an id of that form — a self-issued `sub` or a
+  user-chosen username could — so namespace every source (for example ``{ id: `local|${id}` }``) or
+  keep the other sources' ids free of the separator.
 - **Rotation.** The key set is cached for `keySet.ttlMs` (default 10 minutes). A token naming an
   unknown `kid` triggers at most one refetch per `keySet.minRefreshIntervalMs` (default 60 s), and
   concurrent refetches share one request, so forged `kid`s cannot turn requests into outbound
@@ -547,13 +552,112 @@ AuthPlugin({
   reason per issuer, and repeats at `debug`; a successful refresh resets it. Both lines carry the
   fixed reason code, never the token.
 
-**Give the API its own audience.** Access-token type (`typ: at+jwt`, RFC 9068) is not enforced, so a
-provider's **ID token** whose `aud` equals `audience` could verify as an access token. That happens
-when an API reuses a sign-in client's id as its audience; configure a distinct resource identifier
-for the API instead. A token carrying Keycloak's `typ: "ID"` claim is refused either way, but other
-providers do not mark their ID tokens. **Multi-tenant Entra ID** (`common`/`organizations`) is not
-supported, because its discovery document carries a `{tenantid}` issuer template that cannot equal a
-configured issuer; a single-tenant Entra issuer works.
+**Give the API its own audience.** RFC 9068 access-token type (`typ: at+jwt`) is opt-in per issuer
+with `requireAccessTokenType: true`: the verifier then refuses, before key lookup, a JOSE header
+`typ` other than `at+jwt` or `application/at+jwt` (ASCII-case-insensitive), reporting the fixed
+reason `typ-mismatch`. It is off by default because Entra, Keycloak and others do not stamp it, so a
+provider's **ID token** whose `aud` equals a configured audience could still verify as an access
+token. That happens when an API reuses a sign-in client's id as its audience; configure a distinct
+resource identifier for the API instead, or turn the check on. A token carrying Keycloak's
+`typ: "ID"` claim is refused either way, but other providers do not mark their ID tokens.
+**Multi-tenant Entra ID** (`common`/`organizations`) is not supported, because its discovery
+document carries a `{tenantid}` issuer template that cannot equal a configured issuer; a
+single-tenant Entra issuer works.
+
+## Acting as a resource server
+
+An API or an MCP server can accept access tokens issued by an outside authorization server.
+Configure `issuers` to verify them and `resourceServer` to publish RFC 9728 protected-resource
+metadata and put the metadata URL in every Bearer challenge:
+
+```typescript
+import { AuthPlugin } from '@setu-ts/auth-plugin';
+
+AuthPlugin({
+  issuers: [
+    {
+      name: 'workforce',
+      issuer: 'https://id.example.com',
+      audience: ['api://orders', 'https://api.example.com'], // any match is accepted
+      keys: { discovery: true },
+      requireAccessTokenType: true,
+      toPrincipal: (claims) =>
+        typeof claims.sub === 'string' ? { id: `workforce|${claims.sub}` } : null,
+    },
+  ],
+  resourceServer: {
+    resource: 'https://api.example.com',
+    authorizationServers: ['https://id.example.com'],
+    scopesSupported: ['orders:read', 'orders:write'],
+    resourceName: 'Orders API',
+  },
+});
+```
+
+`resource` is published verbatim and used to derive the metadata path:
+`/.well-known/oauth-protected-resource` followed by the resource's path with a trailing `/` removed,
+so `https://api.example.com` serves `/.well-known/oauth-protected-resource` and
+`https://api.example.com/mcp` serves `/.well-known/oauth-protected-resource/mcp`. The document
+carries `resource`, `authorization_servers` (defaulting to the distinct `issuer` values of
+`issuers`), `scopes_supported`, `resource_name` and `bearer_methods_supported: ['header']`, omitting
+any absent or empty member. `GET` on that path is unguarded, answers `200` `application/json` with
+`Cache-Control: public, max-age=300` and `Access-Control-Allow-Origin: *`, and is fetched before a
+client has a token.
+
+With a bearer strategy (`jwt` or `issuers`) or `resourceServer` configured, the plugin adds a
+`WWW-Authenticate` header to a refused request: a `401` gets `Bearer` — with `error="invalid_token"`
+when a Bearer credential was sent, bare otherwise — and a scope `403` gets
+`Bearer error="insufficient_scope", scope="<required scopes>"`. `resource_metadata="<url>"` is
+appended to both when `resourceServer` is configured. An application-set header is left alone, an
+unrelated status (including the sign-in redirect) is untouched, and nothing from the request is
+echoed into the header.
+
+### Requiring OAuth scopes
+
+`requireScopes` enforces OAuth 2.0 scopes from the token's `scope` (space-delimited) or `scp`
+(string or array) claim. It is ALL-of: every listed scope is required, and an anonymous request is
+`401` while a signed-in principal missing one is `403` with the challenge above. These are OAuth
+scopes, **not** the tenant or organisation grants `scopedRbac`'s `requireScopedRole` calls "scopes".
+
+```typescript
+import { requireScopes } from '@setu-ts/auth-plugin';
+
+app.router.get('/orders', {
+  middleware: [requireScopes('orders:read')],
+  handler,
+});
+```
+
+Each scope must be an RFC 6749 §3.3 `scope-token` (no space, `"` or `\`) and may be listed only
+once; a bad or duplicate scope throws `AuthPluginConfigurationError` when the guard is built, not
+when a request arrives. The guard brands `{ authenticated: true, scopes }`, so
+`@setu-ts/openapi-plugin`'s `deriveSecurity` documents the scopes.
+
+**The audience list is the "issued for me" check.** A token is accepted when its `aud` contains any
+configured audience, so list what the authorization server stamps for this resource. It need not be
+the resource URL: Entra stamps `api://<guid>` or an application id, Auth0 an API identifier.
+Configuring `resourceServer` does **not** require `resource` to appear among the audiences.
+
+`requireAccessTokenType: true` opts into RFC 9068: a JOSE header `typ` other than `at+jwt` or
+`application/at+jwt` is refused before key lookup with the reason `typ-mismatch`. It defaults to
+`false` because Entra, Keycloak and others do not stamp it.
+
+### Refusing or requiring delegated tokens
+
+When a token carries an RFC 8693 `act` claim, `principal.actor` is `{ id, claims }` — the id is the
+claim's non-empty `sub`, else its `client_id`, and `claims` are the claim's members except a nested
+`act`, which is never read. A route can then require a direct user or a delegated one:
+
+```typescript
+import { requireAuth } from '@setu-ts/auth-plugin';
+
+const directOnly = requireAuth({ delegation: 'forbid' });
+app.router.post('/billing', { middleware: [directOnly], handler });
+```
+
+`delegation` is `'allow'` (the default), `'forbid'` or `'require'`; a refusal is `403`. A present
+but malformed `act` — not an object, or an object with no usable `sub`/`client_id` — refuses the
+token itself (`401`), so an unidentifiable delegation cannot pass as a direct user.
 
 ## Signing a user in
 
@@ -1541,8 +1645,10 @@ can document which operations require authentication without either package impo
 is documented as protected; one carrying `publicRoute()` is documented as public.
 
 The brand is symbol-keyed and non-enumerable — guard behaviour is unchanged — and it carries
-authentication presence only. An OpenAPI security requirement names a scheme, not a role, so
-`requireRole('admin')` documents that authentication is required and nothing about the role.
+authentication presence, plus the OAuth scopes a `requireScopes` guard requires. An OpenAPI security
+requirement names a scheme, not a role, so `requireRole('admin')` documents that authentication is
+required and nothing about the role; scopes are merged, sorted and de-duplicated into the derived
+requirement's scope list.
 
 ## License
 
@@ -1567,6 +1673,7 @@ MIT
 | `requireRole`                       | function  |
 | `requireScopedPermission`           | function  |
 | `requireScopedRole`                 | function  |
+| `requireScopes`                     | function  |
 | `safeReturnTo`                      | function  |
 | `AuthorizationDeniedError`          | class     |
 | `AuthPluginConfigurationError`      | class     |
@@ -1625,6 +1732,7 @@ MIT
 | `RefreshTokenStore`                 | interface |
 | `RequireAuthOptions`                | interface |
 | `ReserveAttemptResult`              | interface |
+| `ResourceServerOptions`             | interface |
 | `RoleDefinition`                    | interface |
 | `SamlModule`                        | interface |
 | `SamlPendingRequest`                | interface |

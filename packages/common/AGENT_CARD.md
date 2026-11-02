@@ -62,3 +62,6 @@ export function registerStatusRoutes(router: IRouterApi): void {
 - `ctx.response.status` and `ctx.response.header` chain; terminals include `json`, `text`, `html`,
   `redirect` and `send`.
 - `RouteDefinition.schema` carries documentation metadata; enforcing validation requires middleware.
+- `IPrincipal` may also carry `scopes` (OAuth 2.0 scopes, not tenant grants) and `actor` (the
+  outermost RFC 8693 `act`); `RouteSecurityMetadata.scopes` carries the scopes a guard requires on a
+  `withSecurityMetadata` brand.

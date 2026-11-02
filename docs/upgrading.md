@@ -12,6 +12,30 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### Resource-server authentication (M132, `@setu-ts/auth-plugin`, `@setu-ts/common`)
+
+Two behaviour changes, and one new capability.
+
+**A malformed `act` claim is refused.** If your authorization server mints tokens whose `act` is
+present but is not a JSON object with a non-empty `sub` or `client_id` — a string, an array, or an
+object carrying neither — those tokens were accepted before and now answer `401`; the issuer
+strategy reports the reason `act-malformed`. Decode a token your issuer mints and check that `act`
+is an object carrying `sub` (or `client_id`), for example `{ "act": { "sub": "agent-123" } }`; fix
+the issuer to emit that shape. A token without `act`, and one whose `act` is well formed, is
+unaffected.
+
+**Bearer 401s and scope 403s now carry `WWW-Authenticate`.** An application that configured `jwt`,
+`issuers` or `resourceServer` sends `WWW-Authenticate: Bearer …` on a `401` (with
+`error="invalid_token"` when the request carried a Bearer credential) and on a `403` from
+`requireScopes` (`error="insufficient_scope", scope="…"`). If a test asserted the header was absent,
+update it; a client that ignored the header is unaffected. Nothing from the request is echoed, and
+an application-set header is left alone.
+
+**Nothing else changes for users.** Existing `issuers` entries keep working: a single `audience`
+string is still accepted, `toPrincipal` still receives the verified claims, and the roles and
+permissions it returns are unchanged. `requireScopes`, `resourceServer` and
+`requireAuth({ delegation })` are opt-in.
+
 ### Optimistic locking and outage statuses (M128, `@setu-ts/database-plugin`, `@setu-ts/common`, `@setu-ts/multi-tenancy-plugin`)
 
 Replace a hand-written read-version / `updateWhere` / re-read sequence with

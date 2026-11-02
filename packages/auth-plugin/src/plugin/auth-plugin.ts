@@ -44,6 +44,10 @@ import { createDefaultAuthHttp } from '../issuers/auth-http.ts';
 import { IssuerStrategy } from '../strategies/issuer-strategy.ts';
 import { compileSignIn } from '../sign-in/config.ts';
 import type { CompiledSignIn } from '../sign-in/config.ts';
+import { compileResourceServer } from '../resource-server/config.ts';
+import type { CompiledResourceServer } from '../resource-server/config.ts';
+import { bearerChallenge } from '../resource-server/challenge.ts';
+import { registerMetadataRoute } from '../resource-server/metadata-route.ts';
 import { registerSignInRoutes } from '../sign-in/routes.ts';
 import { AuthSessionService } from '../sign-in/auth-session-service.ts';
 import { AuthSessionStrategy } from '../strategies/auth-session-strategy.ts';
@@ -126,6 +130,12 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
   // Outside issuers (M100b): validated here, at construction, because every
   // refusal is a configuration that would silently weaken verification.
   const compiledIssuers = options.issuers === undefined ? [] : compileIssuers(options.issuers);
+  // Resource-server metadata (M132): validated at construction too, so a bad
+  // resource URL never becomes a route the application cannot serve.
+  const compiledResourceServer: CompiledResourceServer | null =
+    options.resourceServer === undefined
+      ? null
+      : compileResourceServer(options.resourceServer, compiledIssuers);
   // Sign-in (M100c): validated HERE too, at construction, because every refusal
   // is a configuration that would otherwise fail at the provider — with an error
   // that names neither the option nor the route.
@@ -532,6 +542,29 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
         ctx.services.register(CAPABILITIES.JWT, jwtService);
       }
       ctx.services.register(CAPABILITIES.AUTH, authService);
+
+      if (compiledResourceServer !== null) {
+        registerMetadataRoute(ctx.router, compiledResourceServer);
+      }
+
+      // One challenge writer for every 401/scope-403 producer (M132 §3.3),
+      // in the auth band and registered BEFORE `auth` so it wraps it. It reads
+      // only the request and the response, so `middleware: false` keeps it: an
+      // app that authenticates per route still needs the challenge.
+      if (
+        options.jwt !== undefined ||
+        compiledIssuers.length > 0 ||
+        compiledResourceServer !== null
+      ) {
+        ctx.middleware.add(
+          bearerChallenge(
+            compiledResourceServer === null
+              ? {}
+              : { resourceMetadata: compiledResourceServer.metadataUrl },
+          ),
+          { name: 'bearer-challenge', priority: AUTH_MIDDLEWARE_PRIORITY },
+        );
+      }
 
       if (options.middleware !== false) {
         const configured = options.middleware ?? {};

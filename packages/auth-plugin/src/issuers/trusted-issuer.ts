@@ -25,13 +25,16 @@ export interface KeySetTimings {
 export interface CompiledIssuer {
   readonly name: string;
   readonly issuer: string;
-  readonly audience: string;
+  /** One or more accepted `aud` values; a token must contain any of them. */
+  readonly audiences: readonly string[];
   /** Explicit JWKS URL, or `null` when discovery supplies it. */
   readonly jwksUri: string | null;
   /** Discovery document URL, or `null` for an explicit JWKS URL. */
   readonly discoveryUrl: string | null;
   readonly algorithms: ReadonlySet<IssuerAlgorithm>;
   readonly clockToleranceSec: number;
+  /** Whether the verifier requires the RFC 9068 `at+jwt` header type. */
+  readonly requireAccessTokenType: boolean;
   readonly timings: KeySetTimings;
   readonly toPrincipal: (
     claims: Readonly<Record<string, unknown>>,
@@ -101,6 +104,44 @@ function refuse(name: string, reason: string): never {
   throw new AuthPluginConfigurationError(`auth-plugin: issuers['${name}'] ${reason}`);
 }
 
+/**
+ * Normalizes an issuer's `audience` to a non-empty list of non-empty strings.
+ *
+ * @param name - The issuer name, for the refusal message
+ * @param audience - The configured audience or list
+ * @returns The accepted audiences, frozen and in configuration order
+ * @throws {AuthPluginConfigurationError} On an empty list, an empty or
+ *   non-string entry, or a duplicate
+ */
+function compileAudiences(name: string, audience: unknown): readonly string[] {
+  if (typeof audience === 'string') {
+    if (audience.length === 0) {
+      refuse(name, 'needs a non-empty audience');
+    }
+    return Object.freeze([audience]);
+  }
+  if (!Array.isArray(audience)) {
+    refuse(name, 'needs a non-empty audience');
+  }
+  if (audience.length === 0) {
+    refuse(name, 'audience must not be an empty list');
+  }
+  const values: readonly unknown[] = audience;
+  const seen = new Set<string>();
+  const accepted: string[] = [];
+  for (const value of values) {
+    if (typeof value !== 'string' || value.length === 0) {
+      refuse(name, 'audience entries must be non-empty strings');
+    }
+    if (seen.has(value)) {
+      refuse(name, `duplicate audience '${value}'`);
+    }
+    seen.add(value);
+    accepted.push(value);
+  }
+  return Object.freeze(accepted);
+}
+
 function timing(name: string, key: keyof KeySetTimings, value: number | undefined): number {
   if (value === undefined) {
     return DEFAULT_TIMINGS[key];
@@ -144,11 +185,15 @@ export function compileIssuers(issuers: readonly TrustedIssuer[]): readonly Comp
       refuse(name, `duplicates the issuer '${entry.issuer}'`);
     }
     issuerValues.add(entry.issuer);
-    if (typeof entry.audience !== 'string' || entry.audience.length === 0) {
-      refuse(name, 'needs a non-empty audience');
-    }
+    const audiences = compileAudiences(name, entry.audience);
     if (typeof entry.toPrincipal !== 'function') {
       refuse(name, 'needs a toPrincipal function');
+    }
+    if (
+      entry.requireAccessTokenType !== undefined &&
+      typeof entry.requireAccessTokenType !== 'boolean'
+    ) {
+      refuse(name, 'requireAccessTokenType must be a boolean');
     }
 
     const algorithms = entry.algorithms ?? SUPPORTED_ALGORITHMS;
@@ -209,11 +254,12 @@ export function compileIssuers(issuers: readonly TrustedIssuer[]): readonly Comp
     return {
       name,
       issuer: entry.issuer,
-      audience: entry.audience,
+      audiences,
       jwksUri,
       discoveryUrl,
       algorithms: new Set(algorithms),
       clockToleranceSec: tolerance,
+      requireAccessTokenType: entry.requireAccessTokenType ?? false,
       timings,
       toPrincipal: entry.toPrincipal,
     };

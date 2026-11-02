@@ -6,6 +6,7 @@
 
 import type { IAuthStrategy, IJwtService, IPrincipal, IRequest } from '@setu-ts/common';
 import type { IAccessTokenRevocationStore } from '../stores/access-token-revocation-store.ts';
+import { parseActClaim, parseScopeClaim } from '../resource-server/claims.ts';
 
 /**
  * JWT strategy options.
@@ -74,12 +75,21 @@ export class JwtStrategy implements IAuthStrategy {
       const id = this.getStringClaim(payload, 'sub');
       const roles = this.getArrayClaim(payload, 'roles');
       const permissions = this.getArrayClaim(payload, 'permissions');
+      const scopes = parseScopeClaim(payload);
+      const act = parseActClaim(payload);
+      if (!act.ok) {
+        // A present but malformed `act` refuses the token: delegation that
+        // cannot be identified must not pass as a direct user token (M132 §3.9).
+        return null;
+      }
       const claims = this.buildClaims(payload);
 
       const principal: IPrincipal = {
         id,
         ...(roles ? { roles } : {}),
         ...(permissions ? { permissions } : {}),
+        ...(scopes === undefined ? {} : { scopes }),
+        ...(act.actor === undefined ? {} : { actor: act.actor }),
         ...(claims ? { claims } : {}),
       };
 

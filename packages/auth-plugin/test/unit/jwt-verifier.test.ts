@@ -32,7 +32,11 @@ function keySet(keys: readonly Jwk[] | null): KeySetReader & { forces: number } 
 
 function verifier(
   reader: KeySetReader,
-  overrides: { audience?: string; clockToleranceSec?: number } = {},
+  overrides: {
+    audience?: string | readonly string[];
+    clockToleranceSec?: number;
+    requireAccessTokenType?: boolean;
+  } = {},
 ): JwtVerifier {
   return new JwtVerifier({
     keySet: reader,
@@ -40,6 +44,9 @@ function verifier(
     algorithms: new Set(['RS256', 'ES256', 'EdDSA']),
     audience: overrides.audience ?? 'api',
     clockToleranceSec: overrides.clockToleranceSec ?? 30,
+    ...(overrides.requireAccessTokenType === undefined
+      ? {}
+      : { requireAccessTokenType: overrides.requireAccessTokenType }),
   });
 }
 
@@ -53,8 +60,12 @@ function claims(overrides: Record<string, unknown> = {}): Record<string, unknown
   };
 }
 
-function signed(key: TestKey, payload: Record<string, unknown>): Promise<string> {
-  return signToken(key, payload);
+function signed(
+  key: TestKey,
+  payload: Record<string, unknown>,
+  header: Record<string, unknown> = {},
+): Promise<string> {
+  return signToken(key, payload, header);
 }
 
 describe('JwtVerifier', () => {
@@ -209,6 +220,56 @@ describe('JwtVerifier', () => {
       ok: false,
       reason: 'audience-mismatch',
     });
+  });
+
+  it('accepts any configured audience and refuses when none matches', async () => {
+    const key = await generateTestKey('RS256', 'k1');
+    const v = verifier(keySet([key.jwk]), { audience: ['api', 'https://api.test'] });
+    for (const aud of ['api', 'https://api.test']) {
+      expect((await v.verify(await signed(key, claims({ aud })))).ok).toBe(true);
+    }
+    expect(await v.verify(await signed(key, claims({ aud: 'other' })))).toEqual({
+      ok: false,
+      reason: 'audience-mismatch',
+    });
+  });
+
+  it('checks the RFC 9068 typ before any key is read when enabled', async () => {
+    const key = await generateTestKey('RS256', 'k1');
+    let reads = 0;
+    const reader: KeySetReader = {
+      keys() {
+        reads += 1;
+        return Promise.resolve([key.jwk]);
+      },
+    };
+    const v = verifier(reader, { requireAccessTokenType: true });
+    expect(await v.verify(await signed(key, claims(), { typ: 'JWT' }))).toEqual({
+      ok: false,
+      reason: 'typ-mismatch',
+    });
+    expect(reads).toBe(0);
+  });
+
+  it('accepts at+jwt and application/at+jwt case-insensitively when enabled', async () => {
+    const key = await generateTestKey('RS256', 'k1');
+    const v = verifier(keySet([key.jwk]), { requireAccessTokenType: true });
+    for (const typ of ['at+jwt', 'AT+JWT', 'application/at+jwt', 'application/AT+JWT']) {
+      expect((await v.verify(await signed(key, claims(), { typ }))).ok).toBe(true);
+    }
+  });
+
+  it('refuses a missing or non-string typ when enabled, and accepts both when disabled', async () => {
+    const key = await generateTestKey('RS256', 'k1');
+    const required = verifier(keySet([key.jwk]), { requireAccessTokenType: true });
+    for (const typ of [undefined, 7]) {
+      const token = await signed(key, claims(), typ === undefined ? { typ: undefined } : { typ });
+      expect(await required.verify(token)).toEqual({ ok: false, reason: 'typ-mismatch' });
+    }
+
+    const optional = verifier(keySet([key.jwk]));
+    expect((await optional.verify(await signed(key, claims(), { typ: 'JWT' }))).ok).toBe(true);
+    expect((await optional.verify(await signed(key, claims(), { typ: undefined }))).ok).toBe(true);
   });
 
   it('requires exp, and honours the clock tolerance for exp/nbf/iat', async () => {

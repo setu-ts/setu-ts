@@ -726,9 +726,10 @@ export function isWebSocketUpgradeRequest(headers: Headers): boolean {
  * This is a **description**, not a mechanism: the middleware still performs
  * the enforcement, and removing the metadata changes no runtime behaviour.
  *
- * It deliberately carries authentication PRESENCE only. An OpenAPI security
- * requirement names a scheme, and no declared scheme can be inferred from a
- * role name, so roles and permissions are not represented here — see
+ * It carries authentication presence and, when the middleware enforces OAuth
+ * scopes, the scopes it requires. Scopes are part of an OAuth security
+ * requirement, which an OpenAPI document can name; roles and permissions are
+ * not, because no declared scheme can be inferred from a role name — see
  * `@setu-ts/openapi-plugin` for what a generated document can and cannot say.
  *
  * @since 0.2.0
@@ -739,6 +740,13 @@ export interface RouteSecurityMetadata {
    * when it explicitly marks the route public.
    */
   readonly authenticated: boolean;
+  /**
+   * OAuth 2.0 scopes the middleware requires (RFC 6749 §3.3). Present only on
+   * a middleware that enforces scopes; `authenticated` is `true` on such a
+   * guard. Not the tenant grants `@setu-ts/auth-plugin`'s scoped RBAC calls
+   * "scopes".
+   */
+  readonly scopes?: readonly string[];
 }
 
 /**
@@ -810,11 +818,18 @@ export function securityMetadataOf(
  * symbol is treated as absent rather than trusted.
  */
 function isRouteSecurityMetadata(value: unknown): value is RouteSecurityMetadata {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    typeof (value as { authenticated?: unknown }).authenticated === 'boolean'
-  );
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+  const candidate = value as { authenticated?: unknown; scopes?: unknown };
+  if (typeof candidate.authenticated !== 'boolean') {
+    return false;
+  }
+  const scopes = candidate.scopes;
+  if (scopes === undefined) {
+    return true;
+  }
+  return Array.isArray(scopes) && scopes.every((scope) => typeof scope === 'string');
 }
 
 /**

@@ -278,6 +278,7 @@ export type {
   IAuthStrategy,
   IJwtService,
   IPrincipal,
+  IPrincipalActor,
   JwtSignOptions,
   RbacConfig,
   RoleDefinition,

@@ -81,6 +81,45 @@ describe('route security metadata', () => {
     expect(securityMetadataOf(impostor)).toBeUndefined();
   });
 
+  it('should round-trip an OAuth scope list', () => {
+    const branded = withSecurityMetadata(passthrough(), {
+      authenticated: true,
+      scopes: ['tools:read', 'tools:list'],
+    });
+
+    expect(securityMetadataOf(branded)).toEqual({
+      authenticated: true,
+      scopes: ['tools:read', 'tools:list'],
+    });
+  });
+
+  it('should accept an empty scope list, which is distinct from absent', () => {
+    const branded = withSecurityMetadata(passthrough(), { authenticated: true, scopes: [] });
+
+    expect(securityMetadataOf(branded)).toEqual({ authenticated: true, scopes: [] });
+  });
+
+  it('should treat a present scopes value that is not a string array as absent', () => {
+    const values: unknown[] = ['tools:read', null, 7, { 0: 'tools:read' }];
+    for (const value of values) {
+      const impostor = passthrough();
+      Object.defineProperty(impostor, SECURITY_METADATA, {
+        value: { authenticated: true, scopes: value },
+      });
+
+      expect(securityMetadataOf(impostor)).toBeUndefined();
+    }
+  });
+
+  it('should reject a scope list containing a non-string entry', () => {
+    const impostor = passthrough();
+    Object.defineProperty(impostor, SECURITY_METADATA, {
+      value: { authenticated: true, scopes: ['tools:read', 7] },
+    });
+
+    expect(securityMetadataOf(impostor)).toBeUndefined();
+  });
+
   it('should treat a non-object under the symbol as absent', () => {
     const impostor = passthrough();
     Object.defineProperty(impostor, SECURITY_METADATA, { value: 'true' });

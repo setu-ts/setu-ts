@@ -8,6 +8,22 @@
 import type { IRequest } from '../http.ts';
 
 /**
+ * The actor a delegated token was issued for (RFC 8693 `act`).
+ *
+ * This is the CURRENT actor from the outermost `act` claim, never a prior
+ * actor nested inside it: RFC 8693 §4.1 makes only the outermost value the
+ * party acting now.
+ *
+ * @since 0.13.0
+ */
+export interface IPrincipalActor {
+  /** The actor's subject: the `act` claim's `sub`, or its `client_id`. */
+  readonly id: string;
+  /** The `act` claim's own members, excluding `act` itself. */
+  readonly claims: Readonly<Record<string, unknown>>;
+}
+
+/**
  * The authenticated identity attached to a request by authentication
  * middleware.
  *
@@ -20,6 +36,19 @@ export interface IPrincipal {
   readonly roles?: readonly string[];
   /** Permission names held by the principal. */
   readonly permissions?: readonly string[];
+  /**
+   * OAuth 2.0 scopes granted to the token (RFC 8693 §4.2, RFC 9068 §2.2.3).
+   *
+   * These are NOT the tenant or organisation grants `@setu-ts/auth-plugin`'s
+   * scoped RBAC calls "scopes" (M110b): a scope here is a permission string a
+   * resource server enforces with `requireScopes`.
+   */
+  readonly scopes?: readonly string[];
+  /**
+   * The actor this token was issued for when it is a delegated token
+   * (RFC 8693 `act`). Absent for a direct user token.
+   */
+  readonly actor?: IPrincipalActor;
   /** Additional claims from the credential. */
   readonly claims?: Readonly<Record<string, unknown>>;
 }
