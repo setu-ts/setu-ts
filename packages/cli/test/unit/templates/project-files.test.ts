@@ -454,7 +454,8 @@ describe('a template with a frontend build, on a Deno target', () => {
   it('emits the same development entry on Node and Bun, run by a dev script', () => {
     const deno = contentsOf([...projectFiles('shop', 'deno', host)], 'dev.ts');
     for (const [runtime, dev] of [
-      ['node', 'tsx dev.ts'],
+      // M131a X88-2: local Node scripts load `.env` through the runtime; Bun does it itself.
+      ['node', 'tsx --env-file-if-exists=.env dev.ts'],
       ['bun', 'bun run dev.ts'],
     ] as const) {
       const files = [

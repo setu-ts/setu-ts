@@ -262,7 +262,11 @@ export function resolveHost(host: TemplateHost, runtime: TargetRuntime): Resolve
  * @returns The dotenv file contents
  */
 function envFileContents(variables: readonly EnvVariable[]): string {
-  const header = '# Local configuration. This file is ignored by Git.\n';
+  // M131a X88-2: the local start scripts read this file into the environment
+  // before the process starts, so a value set here wins over a default.
+  const header =
+    '# Local configuration. This file is ignored by Git.\n' +
+    '# The local start scripts read it into the environment before the process starts.\n';
   if (variables.length === 0) return header;
   return `${header}# The values below are development placeholders. Replace them before deploying.\n${variables
     .map((variable) => `\n# ${variable.description}\n${variable.name}=${variable.develop}`)
@@ -1219,10 +1223,19 @@ function denoTasks(
   const entry = runtime === 'deno' ? 'main.ts' : 'src/index.ts';
   // Workers serves through a `fetch` export, so `deno run` binds nothing and
   // exits 0 — Deno's own warning names `deno serve` as the fix (X9-7).
+  // M131a X88-2: a local start script loads `.env` into the environment before
+  // the process starts (the plugin options are evaluated in createApp(), before
+  // any plugin runs, so only the process environment is available there). Deno
+  // uses `--env-file`; a missing `.env` is a hard error, so the flag is passed
+  // only when the manifest writes the dotenv. Production images and Compose keep
+  // the platform environment and pass no flag (the image CMD runs the entry
+  // directly, never `npm start`), so this flag cannot reach a container.
+  const denoEnvFile =
+    manifest?.envFilePath !== undefined ? `--env-file=${manifest.envFilePath} ` : '';
   const start =
     runtime === 'cloudflare-workers'
       ? `deno serve ${denoPermissions(manifest)} ${entry}`
-      : `deno run ${denoPermissions(manifest)} ${entry}`;
+      : `deno run ${denoPermissions(manifest)} ${denoEnvFile}${entry}`;
 
   // A3: every Deno template emits a `test` task now. `setu generate module`
   // writes a `<name>.test.ts`, and NO template declared a task that runs it — so
@@ -1245,8 +1258,8 @@ function denoTasks(
   const development =
     runtime === 'deno'
       ? {
-          'start:dev': `deno run --watch ${denoPermissions(manifest)} main.ts`,
-          'start:debug': `deno run --inspect ${denoPermissions(manifest)} main.ts`,
+          'start:dev': `deno run --watch ${denoPermissions(manifest)} ${denoEnvFile}main.ts`,
+          'start:debug': `deno run --inspect ${denoPermissions(manifest)} ${denoEnvFile}main.ts`,
         }
       : {};
 
@@ -1274,8 +1287,8 @@ function denoTasks(
     ...development,
     ...(runtime === 'deno' && manifest.npmBuild.devEntry !== undefined
       ? {
-          'start:dev': `deno task install && deno run -A --watch ${manifest.npmBuild.devEntry.path}`,
-          'start:debug': `deno task install && deno run -A --inspect ${manifest.npmBuild.devEntry.path}`,
+          'start:dev': `deno task install && deno run -A --watch ${denoEnvFile}${manifest.npmBuild.devEntry.path}`,
+          'start:debug': `deno task install && deno run -A --inspect ${denoEnvFile}${manifest.npmBuild.devEntry.path}`,
         }
       : {}),
     // The generated smoke test boots `createApp()`, which loads the server
@@ -1341,7 +1354,12 @@ export const DEVTOOL_ENTRY_MODULE = 'main.dev.ts';
  * @returns The `dev` and `check` task bodies
  */
 export function devtoolTasks(manifest?: TemplateManifest): Record<string, string> {
-  const run = `deno run ${denoPermissions(manifest)} ${DEVTOOL_ENTRY_MODULE}`;
+  // M131a X88-2: the local `dev` task loads `.env` through the runtime, exactly
+  // as the `start` task does, so `dev` differs from `start` only in the entry
+  // module. Deno's `--env-file` is a hard error when the file is missing, so
+  // the flag is passed only when the manifest writes the dotenv.
+  const envFile = manifest?.envFilePath !== undefined ? `--env-file=${manifest.envFilePath} ` : '';
+  const run = `deno run ${denoPermissions(manifest)} ${envFile}${DEVTOOL_ENTRY_MODULE}`;
   return {
     dev: manifest?.npmBuild === undefined ? run : `deno task build && ${run}`,
     check: `deno check main.ts ${CONFIG_MODULE} ${DEVTOOL_ENTRY_MODULE} && ${cliCheckCommand('deno')}`,
@@ -1632,22 +1650,30 @@ function npmScripts(runtime: TargetRuntime, manifest?: TemplateManifest): Record
   const frontend = manifest?.npmBuild?.script;
   const entry = devEntry?.path ?? 'main.ts';
   const bun = runtime === 'bun';
+  // M131a X88-2: a local start script loads `.env` into the environment before
+  // the process starts (the plugin options are evaluated in createApp(), before
+  // any plugin runs, so only the process environment is available there). Node
+  // uses `--env-file-if-exists` (safe when `.env` is absent); Bun loads `.env`
+  // itself, so it gets no flag. Production images and Compose keep the platform
+  // environment and pass no flag (the image CMD runs the entry directly, never
+  // `npm start`), so this flag cannot reach a container.
+  const envFile = bun ? '' : '--env-file-if-exists=.env ';
   return {
     ...(bun
       ? frontend === undefined
         ? {}
         : { build: frontend }
       : { build: `${frontend === undefined ? '' : `${frontend} && `}tsc --noEmit && setu build` }),
-    start: bun ? 'bun run main.ts' : 'node --enable-source-maps dist/main.js',
+    start: bun ? 'bun run main.ts' : `node ${envFile}--enable-source-maps dist/main.js`,
     'start:dev':
       devEntry === undefined
         ? bun
           ? 'bun --watch main.ts'
-          : `${NODE_RUNNER} watch main.ts`
+          : `${NODE_RUNNER} ${envFile}watch main.ts`
         : bun
           ? `bun run ${entry}`
-          : `${NODE_RUNNER} ${entry}`,
-    'start:debug': bun ? `bun --inspect ${entry}` : `node --inspect --import tsx ${entry}`,
+          : `${NODE_RUNNER} ${envFile}${entry}`,
+    'start:debug': bun ? `bun --inspect ${entry}` : `node ${envFile}--inspect --import tsx ${entry}`,
     ...generatedTestScripts(runtime, manifest),
     ...(frontend === undefined ? {} : { check: `${frontend} && tsc --noEmit && setu check` }),
   };

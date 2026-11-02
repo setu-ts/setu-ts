@@ -26,13 +26,17 @@ for (const host of [
       };
       const scripts = manifest.scripts ?? manifest.tasks!;
       if (runtime === 'node') {
+        // M131a X88-2: local Node scripts load `.env` through the runtime.
+        const envFile = '--env-file-if-exists=.env ';
         expect(scripts['build']).toBe(
           `${full ? 'react-router build && ' : ''}tsc --noEmit && setu build`,
         );
-        expect(scripts['start']).toBe('node --enable-source-maps dist/main.js');
-        expect(scripts['start:dev']).toBe(full ? 'tsx dev.ts' : 'tsx watch main.ts');
+        expect(scripts['start']).toBe(`node ${envFile}--enable-source-maps dist/main.js`);
+        expect(scripts['start:dev']).toBe(
+          `tsx ${envFile}${full ? 'dev.ts' : 'watch main.ts'}`,
+        );
         expect(scripts['start:debug']).toBe(
-          `node --inspect --import tsx ${full ? 'dev.ts' : 'main.ts'}`,
+          `node ${envFile}--inspect --import tsx ${full ? 'dev.ts' : 'main.ts'}`,
         );
         expect(files.find((file) => file.path === '.gitignore')!.contents).toContain('dist/');
       } else if (runtime === 'bun') {
@@ -41,11 +45,13 @@ for (const host of [
         expect(scripts['start:debug']).toBe(`bun --inspect ${full ? 'dev.ts' : 'main.ts'}`);
         expect(scripts['build']).toBe(full ? 'react-router build' : undefined);
       } else {
+        // M131a X88-2: full-stack writes a `.env`, so its Deno scripts load it.
+        const envFile = full ? '--env-file=.env ' : '';
         for (const flag of ['watch', 'inspect']) {
           const command = scripts[flag === 'watch' ? 'start:dev' : 'start:debug'];
           expect(command).toBe(
             full
-              ? `deno task install && deno run -A --${flag} dev.ts`
+              ? `deno task install && deno run -A --${flag} ${envFile}dev.ts`
               : scripts['start']!.replace('deno run ', `deno run --${flag} `),
           );
         }
