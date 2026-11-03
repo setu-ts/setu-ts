@@ -28,6 +28,17 @@ const ACCEPTED: readonly (readonly [label: string, source: string])[] = [
   ],
   ['a glob inside app', "const pages = import.meta.glob('./*.tsx');"],
   ['a glob over app through the page alias', "const all = import.meta.glob('~/routes/**/*.tsx');"],
+  // Re-audit R-3: mentions of a glob in text, and exclusion-only patterns, are not reaches.
+  ['a string mentioning import.meta.glob', 'const tip = "use import.meta.glob(x) carefully";'],
+  [
+    'JSX text mentioning import.meta.glob',
+    "export default function P() {\n  return <p>import.meta.glob('/src/**') is refused</p>;\n}",
+  ],
+  ['an exclusion pattern over src/', "const pages = import.meta.glob(['./*.tsx', '!/src/**']);"],
+  [
+    'a glob with a base inside app',
+    "const parts = import.meta.glob('./*.tsx', { base: './parts' });",
+  ],
   ['framework package', "import { getService } from '@setu-ts/react-router-plugin';"],
   ['relative inside app', "import { requireUser } from '../../server/require-user.server.ts';"],
   [
@@ -178,6 +189,21 @@ const REFUSED: readonly (readonly [
     1,
     '~kernel/**/*.ts',
   ],
+  // Re-audit R-1: the glob's base option anchors relative patterns.
+  [
+    'a glob anchored in src/ by a root-absolute base',
+    "const s = import.meta.glob('./**/*.service.ts', { eager: true, base: '/src/modules' });",
+    'glob',
+    1,
+    './**/*.service.ts',
+  ],
+  [
+    'a glob anchored in src/ by a relative base',
+    "const s = import.meta.glob('./**/*.ts', { base: '../../../src/modules' });",
+    'glob',
+    1,
+    './**/*.ts',
+  ],
 ];
 
 describe('scanPageSource', () => {
@@ -198,6 +224,28 @@ describe('scanPageSource', () => {
   it('reports a glob whose pattern it cannot read instead of passing it', async () => {
     const source = "const pattern = '/src/**';\nconst m = import.meta.glob(pattern);";
     expect(await scanPageSource(PAGE, source)).toBe('unreadable');
+  });
+
+  it.each([
+    ['a computed base', "const d = '/src';\nconst m = import.meta.glob('./*.ts', { base: d });"],
+    ['a spread options object', "const o = {};\nconst m = import.meta.glob('./*.ts', { ...o });"],
+    ['an options identifier', "const o = {};\nconst m = import.meta.glob('./*.ts', o);"],
+  ])('reports a glob with %s as unreadable', async (_label, source) => {
+    expect(await scanPageSource(PAGE, source)).toBe('unreadable');
+  });
+
+  it('resolves the project absolute path, plain or behind /@fs (re-audit R-2)', async () => {
+    for (const specifier of [
+      '/proj/src/modules/a/a.service.ts',
+      '/@fs/proj/src/modules/a/a.service.ts',
+    ])
+      expect(
+        await scanPageSource(PAGE, `import { s } from '${specifier}';\nvoid s;`, '/proj'),
+      ).toEqual([{ path: PAGE, line: 1, specifier, reason: 'value-import' }]);
+    // Another directory's absolute path is not this project's kernel.
+    expect(
+      await scanPageSource(PAGE, "import { s } from '/elsewhere/src/a.ts';\nvoid s;", '/proj'),
+    ).toEqual([]);
   });
 
   it('scans JavaScript pages too', async () => {

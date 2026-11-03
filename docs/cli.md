@@ -400,7 +400,9 @@ token, and a managed `index.ts` that registers the service with `requestService`
 writes `app/routes/_app/<name>._index.tsx`, a page guarded by `requireUser` whose loader reads the
 service with `getService`. `--page` is refused outside the full-stack template. A page may import
 kernel code only as `import type` or from a `*.token.ts` module through `~kernel/*`; `setu check`
-refuses any other value import (`setu.E017`).
+refuses any other value import (`setu.E017`), including an `import.meta.glob` that reaches `src/`.
+The check reads only the imports a page makes itself: a file outside `app/` that re-exports kernel
+code is not followed.
 
 In projects with `react-router-plugin`, `g route`, `g controller` and `g module` refuse kernel
 routes that would shadow an existing page, with its file named. To put an API at `/api/products`

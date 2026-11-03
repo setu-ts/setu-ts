@@ -62,15 +62,19 @@ function loaderFor(path: string): 'ts' | 'tsx' | 'js' | 'jsx' {
 /**
  * Resolves a specifier to a normalised project-relative path, or undefined for a
  * package specifier. Every spelling the bundler resolves is followed: the
- * `~kernel/` and `~/` aliases, a root-absolute path (Vite's project root), and a
- * relative path. A `?query` or `#hash` suffix, which Vite strips, is dropped
- * first. The result may start with `..` when the path leaves the project.
+ * `~kernel/` and `~/` aliases, the project's own absolute path (plain or behind
+ * Vite's `/@fs`), a root-absolute path (Vite's project root), and a relative
+ * path. A `?query` or `#hash` suffix, which Vite strips, is dropped first. The
+ * result starts with `..` when the path leaves the project.
  */
-function resolveSpecifier(file: string, specifier: string): string | undefined {
-  const bare = specifier.replace(/[?#][\s\S]*$/, '');
+function resolveSpecifier(file: string, specifier: string, root?: string): string | undefined {
+  let bare = specifier.replace(/[?#][\s\S]*$/, '');
+  if (bare.startsWith('/@fs/')) bare = bare.slice('/@fs'.length);
   let path: string;
   if (bare.startsWith(KERNEL_ALIAS)) path = `src/${bare.slice(KERNEL_ALIAS.length)}`;
   else if (bare.startsWith(PAGE_ALIAS)) path = `app/${bare.slice(PAGE_ALIAS.length)}`;
+  else if (root !== undefined && (bare === root || bare.startsWith(`${root}/`)))
+    path = bare.slice(root.length);
   else if (bare.startsWith('/')) path = bare.slice(1);
   else if (bare.startsWith('./') || bare.startsWith('../')) {
     const base = file.includes('/') ? file.slice(0, file.lastIndexOf('/')) : '';
@@ -86,10 +90,11 @@ function resolveSpecifier(file: string, specifier: string): string | undefined {
  *
  * @param file - The importing file, project-relative
  * @param specifier - The import specifier
+ * @param root - The project's absolute directory, when known
  * @returns The target under `src/`, or undefined
  */
-export function kernelTarget(file: string, specifier: string): string | undefined {
-  const resolved = resolveSpecifier(file, specifier);
+export function kernelTarget(file: string, specifier: string, root?: string): string | undefined {
+  const resolved = resolveSpecifier(file, specifier, root);
   if (resolved === undefined) return undefined;
   if (resolved === 'src' || resolved.startsWith('src/')) return resolved;
   return specifier.startsWith(KERNEL_ALIAS)
@@ -99,19 +104,32 @@ export function kernelTarget(file: string, specifier: string): string | undefine
 
 /**
  * Reports whether an `import.meta.glob` pattern can match a file under `src/`:
- * its literal directory prefix is `src/`, inside it, or an ancestor of it
- * (including any path that leaves the project).
+ * its literal directory prefix, after the call's `base` option, is `src/`,
+ * inside it, or an ancestor of it (including any path that leaves the project).
+ * A negative (`!`) pattern only excludes files, so it never reaches anything.
  *
  * @param file - The importing file, project-relative
  * @param pattern - One glob pattern
+ * @param base - The call's literal `base` option, if any
+ * @param root - The project's absolute directory, when known
  * @returns Whether the pattern reaches kernel code
  */
-export function globReachesKernel(file: string, pattern: string): boolean {
-  const positive = pattern.startsWith('!') ? pattern.slice(1) : pattern;
-  const wild = positive.search(/[*?{[]/);
-  const literal = wild < 0 ? positive : positive.slice(0, wild);
+export function globReachesKernel(
+  file: string,
+  pattern: string,
+  base?: string,
+  root?: string,
+): boolean {
+  if (pattern.startsWith('!')) return false;
+  const relative = !/^(?:\/|~)/.test(pattern);
+  const anchored =
+    base !== undefined && relative
+      ? `${/^(?:\.\.?\/|\/|~)/.test(base) ? base : `./${base}`}/${pattern}`
+      : pattern;
+  const wild = anchored.search(/[*?{[]/);
+  const literal = wild < 0 ? anchored : anchored.slice(0, wild);
   const dir = literal.includes('/') ? literal.slice(0, literal.lastIndexOf('/') + 1) : './';
-  const resolved = resolveSpecifier(file, dir === '' ? './' : dir);
+  const resolved = resolveSpecifier(file, /^(?:\.\.?\/|\/|~)/.test(dir) ? dir : `./${dir}`, root);
   if (resolved === undefined) return false;
   return (
     resolved === '' ||
@@ -129,21 +147,84 @@ const GLOB_CALL = /import\.meta\.glob\s*\(\s*/g;
 const GLOB_LITERAL =
   /^(?:(["'`])((?:(?!\1)[^\\$])*)\1|\[((?:\s*(["'])(?:(?!\4)[^\\])*\4\s*,?)*)\s*\])/;
 
+/** A `base` key with a literal string value, in a glob's options object. */
+const GLOB_BASE = /(?:["']base["']|\bbase)\s*:\s*(?:(["'`])((?:(?!\1)[^\\$])*)\1)?/;
+
 /**
- * The glob patterns of every `import.meta.glob` call in the emitted source, or
- * `unreadable` when a call's first argument is not a literal the scan can read.
+ * Blanks every string, template and comment body in emitted JavaScript, keeping
+ * offsets, so a code pattern found in the result is code: JSX text and string
+ * literals that merely mention `import.meta.glob` are not calls.
  */
-function globPatterns(emitted: string): readonly (readonly string[])[] | 'unreadable' {
-  const calls: string[][] = [];
-  for (const match of emitted.matchAll(GLOB_CALL)) {
-    const rest = emitted.slice(match.index + match[0].length);
-    const literal = GLOB_LITERAL.exec(rest);
+export function maskLiterals(code: string): string {
+  const out = code.split('');
+  const blank = (from: number, to: number): void => {
+    for (let k = from; k < to; k++) if (out[k] !== '\n') out[k] = ' ';
+  };
+  let i = 0;
+  while (i < code.length) {
+    const c = code[i]!;
+    if (c === '/' && code[i + 1] === '/') {
+      const end = code.indexOf('\n', i);
+      const stop = end < 0 ? code.length : end;
+      blank(i, stop);
+      i = stop;
+    } else if (c === '/' && code[i + 1] === '*') {
+      const end = code.indexOf('*/', i + 2);
+      const stop = end < 0 ? code.length : end + 2;
+      blank(i, stop);
+      i = stop;
+    } else if (c === '"' || c === "'" || c === '`') {
+      let j = i + 1;
+      while (j < code.length && code[j] !== c) j += code[j] === '\\' ? 2 : 1;
+      blank(i + 1, j);
+      i = j + 1;
+    } else i++;
+  }
+  return out.join('');
+}
+
+/** One glob call: its patterns and its literal `base` option, if any. */
+interface GlobCall {
+  readonly patterns: readonly string[];
+  readonly base?: string;
+}
+
+/**
+ * The patterns and `base` of every `import.meta.glob` call in the emitted
+ * source, or `unreadable` when a call's patterns or options are not literals the
+ * scan can read (an identifier, a spread, a computed `base`).
+ */
+function globCalls(emitted: string): readonly GlobCall[] | 'unreadable' {
+  const masked = maskLiterals(emitted);
+  const calls: GlobCall[] = [];
+  for (const match of masked.matchAll(GLOB_CALL)) {
+    const at = match.index + match[0].length;
+    const literal = GLOB_LITERAL.exec(emitted.slice(at));
     if (literal === null) return 'unreadable';
-    calls.push(
+    const patterns =
       literal[2] !== undefined
         ? [literal[2]]
-        : [...(literal[3] ?? '').matchAll(/(["'])((?:(?!\1)[^\\])*)\1/g)].map((m) => m[2]!),
-    );
+        : [...(literal[3] ?? '').matchAll(/(["'])((?:(?!\1)[^\\])*)\1/g)].map((m) => m[2]!);
+    const after = at + literal[0].length;
+    const next = /^\s*(,\s*)?(\)|\{)?/.exec(masked.slice(after))!;
+    if (next[2] === ')' || (next[1] === undefined && next[2] === undefined)) {
+      calls.push({ patterns });
+      continue;
+    }
+    if (next[2] !== '{') return 'unreadable';
+    const open = after + next[0].length - 1;
+    let depth = 0;
+    let close = open;
+    for (; close < masked.length; close++) {
+      if (masked[close] === '{') depth++;
+      else if (masked[close] === '}' && --depth === 0) break;
+    }
+    const options = emitted.slice(open, close + 1);
+    if (masked.slice(open, close + 1).includes('...')) return 'unreadable';
+    const base = GLOB_BASE.exec(options);
+    if (base === null) calls.push({ patterns });
+    else if (base[2] === undefined) return 'unreadable';
+    else calls.push({ patterns, base: base[2] });
   }
   return calls;
 }
@@ -206,11 +287,13 @@ function originalLine(source: string, specifier: string, occurrence: number): nu
  *
  * @param path - The page, project-relative
  * @param source - Its contents
+ * @param root - The project's absolute directory, so an absolute import into it resolves
  * @returns The violations, or `unreadable` when esbuild or the lexer refuses the file
  */
 export async function scanPageSource(
   path: string,
   source: string,
+  root?: string,
 ): Promise<readonly PageImportViolation[] | 'unreadable'> {
   let emitted: string;
   try {
@@ -230,7 +313,7 @@ export async function scanPageSource(
   const violations: PageImportViolation[] = [];
   const occurrences = new Map<string, number>();
   for (const span of lexed.spans) {
-    const target = kernelTarget(path, span.value);
+    const target = kernelTarget(path, span.value, root);
     if (target === undefined) continue;
     const occurrence = occurrences.get(span.value) ?? 0;
     occurrences.set(span.value, occurrence + 1);
@@ -243,29 +326,40 @@ export async function scanPageSource(
         reason,
       });
   }
-  const globs = globPatterns(emitted);
+  const globs = globCalls(emitted);
   if (globs === 'unreadable') return 'unreadable';
-  globs.forEach((patterns, index) => {
-    const reaching = patterns.find((pattern) => globReachesKernel(path, pattern));
+  const used = new Set<number>();
+  for (const call of globs) {
+    const reaching = call.patterns.find((pattern) =>
+      globReachesKernel(path, pattern, call.base, root),
+    );
     if (reaching !== undefined)
       violations.push({
         path,
-        line: globLine(source, index),
+        line: globLine(source, reaching, used),
         specifier: reaching,
         reason: 'glob',
       });
-  });
+  }
   return violations;
 }
 
-/** The line of the `index`-th `import.meta.glob` in the original source, comments masked. */
-function globLine(source: string, index: number): number {
+/**
+ * The line of the first not-yet-reported `import.meta.glob` in the original
+ * source whose call names `pattern`, comments masked. Line 1 when none is
+ * found, so a finding is never dropped.
+ */
+function globLine(source: string, pattern: string, used: Set<number>): number {
   const visible = maskComments(source) ?? source;
-  const calls = [...visible.matchAll(GLOB_CALL)];
-  const at = calls[index]?.index ?? 0;
-  let line = 1;
-  for (let j = 0; j < at; j++) if (visible.charCodeAt(j) === 10) line++;
-  return line;
+  for (const call of visible.matchAll(GLOB_CALL)) {
+    const window = visible.slice(call.index, call.index + 4096);
+    if (used.has(call.index) || !window.includes(pattern)) continue;
+    used.add(call.index);
+    let line = 1;
+    for (let j = 0; j < call.index; j++) if (visible.charCodeAt(j) === 10) line++;
+    return line;
+  }
+  return 1;
 }
 
 /**
@@ -337,6 +431,7 @@ export async function scanPageImports(fs: IFileSystem, dir: string): Promise<Pag
     const result = await scanPageSource(
       path,
       decoder.decode(await fs.readFile(joinPath(dir, path))),
+      dir.replace(/\/+$/, ''),
     );
     if (result === 'unreadable') unreadable.push(path);
     else violations.push(...result);
