@@ -48,6 +48,7 @@ const FENCE_COUNTS: Readonly<Record<string, number>> = {
   'packages/audit-plugin': 2,
   'packages/feature-flags-plugin': 2,
   'packages/idempotency-plugin': 1,
+  'packages/mcp-plugin': 1,
   'packages/localization-plugin': 2,
   'packages/multi-tenancy-plugin': 2,
   'packages/secrets-plugin': 2,

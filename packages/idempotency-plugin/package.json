@@ -59,6 +59,7 @@
     "@setu-ts/runtime": "workspace:^",
     "@setu-ts/scheduler-plugin": "workspace:^",
     "@setu-ts/sdk": "workspace:^",
+    "@setu-ts/testing": "workspace:^",
     "@setu-ts/validation-plugin": "workspace:^",
     "@types/node": "^24",
     "@types/pg": "^8.23.1",

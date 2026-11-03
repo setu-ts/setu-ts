@@ -721,16 +721,24 @@ here.
   OAuth scopes and `requireScopes`, Bearer challenges, RFC 9728 metadata, audience lists, opt-in
   `at+jwt`, the `act` actor with `requireAuth({ delegation })`; ships in `0.13.0`) — complete (PR
   #541).
+- **Milestone 133** (`mcp-plugin` (new) + `common` + `kernel` + `decorator-plugin` +
+  `idempotency-plugin` + `cli` — routes as MCP tools: `mcpTool()`/`@McpTool()` markers, a stateless
+  `POST /mcp` on the official SDK, in-process `IApplication.dispatch` with a route pin, per-call
+  timeout, the kernel empty-chunk stream guard) — complete (PR #545).
 - **Milestone 131a** (`common` + the Redis-backed plugins + `notification-plugin` + `cli` — Redis,
   node-redis and readiness: the V11-10 queue probe, notification out of readiness, `503`/`504`
   backend faults, `setu add` Redis arms, an OpenTelemetry preload, `.env` start scripts, URL
   userinfo masking; V11-10, V11-11, X88-1…X88-10) — complete (PR #543).
+- **Milestone 129** (`cli` + `common` + `openapi-plugin` — `setu client`: the typed client generated
+  with the project's own sdk and Prettier into a marker-owned `src/clientsdk/api.ts`, `--input` and
+  `--check`, `IOpenApiService` in `common`, `setu add sdk` scripts, and `setu add openapi`
+  installing `swagger-ui-dist`; V11-20) — complete (PR #547).
 - **Milestone 127** (`common` + `multi-tenancy-plugin` + `database-plugin` — a registry of real
   tenants: the `tenants` option (list, `ITenantRegistry` or factory), `404 Unknown Tenant` and `503`
   on registry fault through one check shared with `lookupTenant`, a bounded canonical-only cache,
   `createDatabaseTenantRegistry`, a fault warning with no registry message text) — complete (PR
   pending).
-- **Next milestone** — M129, M130 and M131b–d are open for `0.12.0`.
+- **Next milestone** — M130 and M131b–d are open for `0.12.0`.
 
 ## Verification (run before declaring any work done)
 

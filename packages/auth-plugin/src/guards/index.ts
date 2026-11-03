@@ -15,7 +15,7 @@ import { AuthPluginConfigurationError } from '../errors.ts';
 import type { RequireAuthOptions } from '../interfaces/index.ts';
 import { RETURN_TO_QUERY_PARAM, safeReturnTo } from '../sign-in/return-to.ts';
 import { isScopeToken } from '../resource-server/claims.ts';
-import { REQUIRED_SCOPES_STATE_KEY } from '../resource-server/challenge.ts';
+import { REQUIRED_SCOPES_STATE_KEY } from '@setu-ts/common';
 
 /**
  * Brand for a guard that requires an authenticated principal. Shared and

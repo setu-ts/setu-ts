@@ -49,6 +49,24 @@ describe('configModuleExists', () => {
 describe('loadApp', () => {
   const app = createFakeApp();
 
+  it('explains factory failures for the client caller with the no-boot remedy', async () => {
+    await expect(
+      loadApp(
+        '/app',
+        undefined,
+        () =>
+          Promise.resolve().then(() => ({
+            createApp: () => {
+              throw new Error('binding unavailable');
+            },
+          })),
+        'client',
+      ),
+    ).rejects.toThrow(
+      '`setu client` cannot read the OpenAPI document by booting the application; pass `--input <file|url>`',
+    );
+  });
+
   it('returns the application the factory produces', async () => {
     const loaded = await loadApp('/app', undefined, () =>
       Promise.resolve({ createApp: () => app }),

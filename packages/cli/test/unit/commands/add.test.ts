@@ -28,7 +28,112 @@ import { EVENTS_SEAM } from '../../../src/seams/events.ts';
 import { COMMAND_HANDLER_SEAM } from '../../../src/seams/cqrs.ts';
 import { runCli } from '../../../src/cli.ts';
 import { CLIENT_RANGES } from '../../../src/templates/client-dependencies.ts';
+import { SWAGGER_UI_DIST_VERSION } from '../../../src/templates/swagger-version.ts';
 import { listTransports } from '../../../src/workspace/transport.ts';
+
+describe('setu add openapi Swagger UI dependency (M129)', () => {
+  for (const runtime of ['node', 'deno', 'bun', 'cloudflare-workers'] as const) {
+    it(`records the integrity-matched Swagger UI pin only on socket runtimes: ${runtime}`, async () => {
+      const h = harness();
+      expect(
+        await runNewCommand(parseArgs(['api', '--runtime', runtime]), {
+          fs: h.fs,
+          cwd: '/app',
+          log: (line) => h.out.push(line),
+          error: (line) => h.err.push(line),
+        }),
+      ).toBe(0);
+      expect(await h.run(['openapi', '--dir', '/app/api'])).toBe(0);
+      const file = runtime === 'deno' ? 'deno.json' : 'package.json';
+      const manifest = JSON.parse(h.read(`/app/api/${file}`)) as Record<
+        string,
+        Record<string, string>
+      >;
+      const dependencies = manifest[runtime === 'deno' ? 'imports' : 'dependencies']!;
+      expect(dependencies['@setu-ts/openapi-plugin']).toBeDefined();
+      if (runtime === 'cloudflare-workers') {
+        expect(dependencies).not.toHaveProperty('swagger-ui-dist');
+      } else {
+        expect(dependencies['swagger-ui-dist']).toBe(
+          runtime === 'deno'
+            ? `npm:swagger-ui-dist@${SWAGGER_UI_DIST_VERSION}`
+            : SWAGGER_UI_DIST_VERSION,
+        );
+      }
+    });
+  }
+});
+
+describe('setu add sdk client scripts', () => {
+  for (const runtime of ['node', 'bun', 'deno', 'cloudflare-workers'] as const) {
+    it(`adds opt-in client scripts for ${runtime} without changing check`, async () => {
+      const deno = runtime === 'deno';
+      const path = deno ? '/app/deno.json' : '/app/package.json';
+      const key = deno ? 'tasks' : 'scripts';
+      const runner = deno ? cliInvocation(runtime) : 'setu';
+      const h = harness({
+        [path]: JSON.stringify({
+          [key]: { check: 'existing-check' },
+          ...(!deno ? { devDependencies: { '@setu-ts/cli': '^1' } } : {}),
+        }),
+        ...(runtime === 'bun' ? { '/app/bun.lock': '' } : {}),
+        ...(runtime === 'cloudflare-workers' ? { '/app/wrangler.toml': '' } : {}),
+      });
+      expect(await h.run(['sdk'])).toBe(0);
+      const manifest = JSON.parse(h.read(path)) as Record<string, Record<string, string>>;
+      expect(manifest[key]).toEqual({
+        check: 'existing-check',
+        client: `${runner} client`,
+        'client:check': `${runner} client --check`,
+      });
+    });
+  }
+  it('writes the scripts only to the manifest the runtime runs them from', async () => {
+    const h = harness({
+      '/app/package.json': JSON.stringify({ devDependencies: { '@setu-ts/cli': '^1' } }),
+      '/app/deno.json': JSON.stringify({ imports: {} }),
+      '/app/wrangler.toml': '',
+    });
+    expect(await h.run(['sdk'])).toBe(0);
+    expect(h.read('/app/package.json')).toContain('"client:check": "setu client --check"');
+    expect(JSON.parse(h.read('/app/deno.json'))).not.toHaveProperty('tasks');
+  });
+  it('uses the invocation prefix when the CLI is not a devDependency, and keeps each existing script', async () => {
+    for (const kept of ['client', 'client:check']) {
+      const h = harness({
+        '/app/package.json': JSON.stringify({ scripts: { [kept]: 'custom-client' } }),
+      });
+      expect(await h.run(['sdk'])).toBe(0);
+      const scripts = (
+        JSON.parse(h.read('/app/package.json')) as { scripts: Record<string, string> }
+      ).scripts;
+      expect(scripts[kept]).toBe('custom-client');
+      const added = kept === 'client' ? 'client:check' : 'client';
+      expect(scripts[added]).toBe(
+        `${cliInvocation('node')} client${added === 'client:check' ? ' --check' : ''}`,
+      );
+      expect(h.out.join('\n')).toContain(`left package.json ${kept} unchanged`);
+      const before = h.read('/app/package.json');
+      expect(await h.run(['sdk'])).toBe(0);
+      expect(h.read('/app/package.json')).toBe(before);
+    }
+  });
+  it('adds missing scripts even if sdk is already installed, but preserves malformed scripts', async () => {
+    const h = harness({
+      '/app/package.json': JSON.stringify({ dependencies: { '@setu-ts/sdk': `^${VERSION}` } }),
+    });
+    expect(await h.run(['sdk'])).toBe(0);
+    expect(h.read('/app/package.json')).toContain('client:check');
+    for (const scripts of [[], null, 'custom']) {
+      const bad = harness({ '/app/package.json': JSON.stringify({ scripts }) });
+      expect(await bad.run(['sdk'])).toBe(0);
+      expect((JSON.parse(bad.read('/app/package.json')) as { scripts: unknown }).scripts).toEqual(
+        scripts,
+      );
+      expect(bad.out.join('\n')).toContain('not an object');
+    }
+  });
+});
 
 describe('M121 transport additions', () => {
   // PR #519 review: guidance reads the starter's actual option and the provider's actual call.
@@ -2941,4 +3046,38 @@ describe('starter handler-arm wiring', () => {
     expect(h.read(path).match(/import \{ EVENT_HANDLERS \}/g)).toHaveLength(1);
     expect(h.read(path)).toContain('events: { handlers: EVENT_HANDLERS }');
   });
+});
+
+describe('M133 setu add mcp', () => {
+  it('adds the package and SDK optional peer to npm without inventing zero-config registration', async () => {
+    const h = harness({
+      '/app/package.json': JSON.stringify({ type: 'module', dependencies: {} }),
+    });
+    expect(await h.run(['mcp'])).toBe(0);
+    const manifest = JSON.parse(h.read('/app/package.json')) as {
+      dependencies: Record<string, string>;
+    };
+    expect(manifest.dependencies['@setu-ts/mcp-plugin']).toBe(`^${VERSION}`);
+    expect(manifest.dependencies['@modelcontextprotocol/server']).toBe('^2.4.0');
+    expect(h.out.join('\n')).not.toContain('McpPlugin()');
+  });
+  it('adds the package and SDK peer to Deno', async () => {
+    const h = harness({ '/app/deno.json': DENO_MANIFEST });
+    expect(await h.run(['mcp'])).toBe(0);
+    const manifest = JSON.parse(h.read('/app/deno.json')) as { imports: Record<string, string> };
+    expect(manifest.imports['@modelcontextprotocol/server']).toBe(
+      'npm:@modelcontextprotocol/server@^2.4.0',
+    );
+  });
+});
+
+it('setu add mcp installs the SDK peer for a Workers project', async () => {
+  const h = harness({
+    '/app/package.json': JSON.stringify({ scripts: { dev: 'wrangler dev' }, dependencies: {} }),
+    '/app/wrangler.toml': 'name = "edge"\n',
+  });
+  expect(await h.run(['mcp'])).toBe(0);
+  expect(JSON.parse(h.read('/app/package.json')).dependencies['@modelcontextprotocol/server']).toBe(
+    '^2.4.0',
+  );
 });

@@ -45,7 +45,7 @@ import { type Dirent } from 'node:fs';
 import { dirname, relative, resolve } from 'node:path';
 import { workspaceApps, workspaceMembers } from './lib/workspace.ts';
 
-import { DENO_LANE_TESTS, DENO_ONLY_SOURCES } from './test-lanes.ts';
+import { DENO_LANE_TESTS, DENO_ONLY_SOURCES, denoLaneGroup } from './test-lanes.ts';
 import { type ImportEdge, scanImportEdges } from './npm-specifier-audit.ts';
 import { PACKAGE_METADATA } from './jsr-metadata.ts';
 import { REPOSITORY_URL } from './npm-release-gate.ts';
@@ -802,7 +802,9 @@ export function renderLaneConfig(members: readonly MemberInput[], laneJson: stri
   const imports = { ...lane.imports };
   const permissions: Record<string, unknown> = {};
   for (const member of members) {
-    if (DENO_LANE_TESTS.some((path) => path.startsWith(`${member.dir}/test/`))) {
+    if (
+      DENO_LANE_TESTS.some((path) => denoLaneGroup(path) === member.dir.slice('packages/'.length))
+    ) {
       const manifest = JSON.parse(member.denoJson) as { test: { permissions: unknown } };
       permissions[member.dir.slice('packages/'.length)] = manifest.test.permissions;
     }

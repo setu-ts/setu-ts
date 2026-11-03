@@ -16211,9 +16211,9 @@ as data; the 409 Problem Details field by field; and the database benchmark
 openapi-typescript before they are fixed — the repository rule):
 
 1. **Load the document** by booting the project the way plugin commands already do (`loadApp`, a
-   no-port `start()`, `getSpec()`, `stop()` in a `finally`), or from `--from <file|url>` for Workers
-   projects and apps whose start needs a live database. A named refusal when openapi-plugin is not
-   registered.
+   no-port `start()`, `getSpec()`, `stop()` in a `finally`), or from `--input <file|url>` for
+   Workers projects and apps whose start needs a live database. A named refusal when openapi-plugin
+   is not registered.
 2. **Generate with the project's own `@setu-ts/sdk`**, lazily imported and awaited inside a
    `try`/`catch`; the CLI gains no sdk dependency.
 3. **Write a managed file** through the CLI's write-safety path, with `--dry-run`.
@@ -16472,9 +16472,9 @@ milestone is **security-audited** by a fresh agent before it merges.
 
 ## Milestone 133: `mcp-plugin` — Routes as Model Context Protocol Tools
 
-**Package(s):** new `packages/mcp-plugin`, `packages/common` (an MCP capability token; a public
-in-process dispatch entry on `IApplication`), `packages/kernel` (that entry), `packages/cli`
-(`setu add mcp`, agent card); docs and an example.
+**Package(s):** new `packages/mcp-plugin`, `packages/common` (a public in-process dispatch entry on
+`IApplication`), `packages/kernel` (that entry), `packages/cli` (`setu add mcp`, agent card); docs,
+a runnable README walkthrough and the integration-test app. No MCP capability token.
 
 **Source:** the AI-layer survey, track 02 and track 06. Distinct from the MCP server M116 deferred
 (listed under M116's "Not in this milestone"): that one would describe the _framework_ to a coding
@@ -16497,28 +16497,29 @@ GET bodies.
    are served (`legacy: 'stateless'`) or refused (`'reject'`), and how the per-request server
    factory stays cheap: tool definitions and their JSON Schemas are built once at registration
    (AI_GUIDELINES §14), and the factory only binds them.
-2. **Tools are declared by hand and opt-in:** a name, a model-facing description and required
-   scopes, bound to an existing route; the input schema derives from the route's validation
-   metadata, and a route with none is refused at registration. Nothing is exposed automatically —
-   every maintained integration the survey read declares tools explicitly, and auto-exposing every
-   route is the pattern their docs warn against. The spec's tool-name rules (1–128 characters of
-   `A-Z a-z 0-9 _ - .`, case-sensitive, unique per server) are SHOULDs; the plugin refuses a name
-   outside them, and a duplicate, at registration. A route with a response schema (M97b) supplies an
-   `outputSchema`, and its result is returned as `structuredContent` plus the serialized JSON as
-   text, since a server MUST return structured results that conform. `readOnlyHint` and
-   `idempotentHint` annotations are derived from the method and the idempotency binding, never
-   declared freely; clients treat annotations as untrusted anyway. The tool set is fixed at startup,
-   so the server advertises no `listChanged`. The plan decides whether CQRS commands are a second
-   binding target or wait for the command registry to carry schemas.
+2. **Tools are declared by hand and opt-in:** a name and model-facing description bound to an
+   existing route; required scopes derive from its security brands, and the input schema derives
+   from its validation metadata, and body-carrying methods without a body validation brand are
+   refused. Routes without inputs or with only path parameters are accepted. Nothing is exposed
+   automatically — every maintained integration the survey read declares tools explicitly, and
+   auto-exposing every route is the pattern their docs warn against. The spec's tool-name rules
+   (1–128 characters of `A-Z a-z 0-9 _ - .`, case-sensitive, unique per server) are SHOULDs; the
+   plugin refuses a name outside them, and a duplicate, at registration. A route with a response
+   schema (M97b) supplies an `outputSchema`, and its result is returned as `structuredContent` plus
+   the serialized JSON as text, since a server MUST return structured results that conform.
+   `readOnlyHint` and `idempotentHint` annotations are derived from the method and the idempotency
+   binding, never declared freely; clients treat annotations as untrusted anyway. The tool set is
+   fixed at startup, so the server advertises no `listChanged`. The plan decides whether CQRS
+   commands are a second binding target or wait for the command registry to carry schemas.
 3. **In-process dispatch through the route's own pipeline** as the verified principal and tenant.
-   The plugin maps the request's verified principal to the SDK's `authInfo` itself (the SDK takes it
-   only as a pass-through argument), and a tool call reaches its route via a new public entry on
+   The plugin forwards credential and tenant headers so authentication and tenancy run again; no
+   principal or `authInfo` is copied, and a tool call reaches its route via a new public entry on
    `IApplication` that takes an `AbortSignal` (the SDK's `ctx.mcpReq.signal` is passed through) and
    allows a streamed body (an optional member, per the versioning policy). Guards, validation,
    idempotency and audit run exactly as for an HTTP caller; nothing re-implements them.
-4. **The tool list is filtered** by what the caller's scopes and route guards allow, so a tool the
-   caller cannot call is not advertised; a call to it is still refused by the route. The spec allows
-   a list to vary by the authorization presented, but its `tools/list` response carries a cache hint
+4. **The tool list is filtered** by authentication and required scopes. Role, permission and policy
+   guards remain on the route, so a visible tool can still refuse a call there. The spec allows a
+   list to vary by the authorization presented, but its `tools/list` response carries a cache hint
    (`ttlMs`, `cacheScope`, with `public` in its example), so a filtered list must never go out under
    a shared cache scope; the plan names the scope it sends and tests it. A missing scope answers
    M132's `insufficient_scope` challenge; the plan reads the SDK's per-tool `scopeChallenge` option
@@ -16548,8 +16549,10 @@ GET bodies.
 different scopes and assert different lists; call a tool and assert the route's guard, validation,
 tenant and audit each ran (a refused guard short-circuits the handler); a validation refusal arrives
 as `isError` and an unknown tool as `-32602`; a filtered list never carries a shared cache scope; a
-retried call does not repeat its side effect; an internal error reaches the client redacted. Runs on
-Node, Deno, Bun and Workers. **Security-audited** by a fresh agent before it merges.
+retried call does not repeat its side effect; an internal error reaches the client redacted. Node
+has the full integration suite and Deno one native list/call proof. Bun is unproven until the 0.13.0
+published-artifact compat row runs. Workers has a workerd-condition bundle-resolution proof; a live
+workerd run is a follow-on. **Security-audited** by a fresh agent before it merges.
 
 ---
 
@@ -16978,7 +16981,7 @@ patch by construction and gains nothing new here.
 | 126       | ✅     | runtime + cli — a local diagnostics listener on Node, and the devtool opt-in for Node targets                                                                                                                                                                                             |
 | 127       | ✅     | common + multi-tenancy-plugin + database-plugin — a registry of real tenants: `tenants` option, Unknown Tenant 404, 503 on registry failure, bounded cache                                                                                                                                |
 | 128       | ✅     | database-plugin + common + multi-tenancy-plugin — optimistic locking (`updateVersioned`, `VersionConflictError`) and the database plugin under faults (X94-1 High, X94-2, V11-5, X94-3)                                                                                                   |
-| 129       | ⬜     | cli + common + openapi-plugin — `setu client`: the typed client as a command, with a `--check` drift gate                                                                                                                                                                                 |
+| 129       | ✅     | cli + common + openapi-plugin — `setu client`: the typed client as a command, with a `--check` drift gate                                                                                                                                                                                 |
 | 130       | ⬜     | react-router-plugin + cli + full-stack-starter — the full-stack template: kernel modules behind the pages, `getService`, the template half of smoke group G5                                                                                                                              |
 | 131       | ⬜     | the `v0.11.0` smoke closeout — four letters, regression first                                                                                                                                                                                                                             |
 | 131a      | ✅     | queue + Redis-backed plugins + notification + health + telemetry + logger + cli — Redis, node-redis and readiness (V11-10 regression)                                                                                                                                                     |
@@ -16986,7 +16989,7 @@ patch by construction and gains nothing new here.
 | 131c      | ⬜     | cli — gates, generators and workspace deploy (fix branches)                                                                                                                                                                                                                               |
 | 131d      | ⬜     | docs — documentation, examples and the website                                                                                                                                                                                                                                            |
 | 132       | ✅     | auth-plugin + common — resource-server authentication for agents and tools: scopes, `insufficient_scope` challenges, RFC 9728 metadata, audience binding, the `act` claim                                                                                                                 |
-| 133       | ⬜     | mcp-plugin (new) + common + kernel + cli — routes as MCP tools, dispatched in-process through the route's own pipeline                                                                                                                                                                    |
+| 133       | ✅     | mcp-plugin (new) + common + kernel + cli — routes as MCP tools, dispatched in-process through the route's own pipeline                                                                                                                                                                    |
 | 134       | ⬜     | ai-plugin (new) + common + telemetry + testing + cli — model calls with reserve/settle budgets, usage records, GenAI telemetry and redaction                                                                                                                                              |
 | 135       | ⬜     | vector-store-plugin (new) + common + cloudflare + cli — tenant-scoped retrieval with refused-not-ignored filters                                                                                                                                                                          |
 | 136       | ⬜     | ai-plugin + common + sse-plugin + database-plugin — durable agent runs: fenced lease, persisted steps, approvals, SSE replay                                                                                                                                                              |

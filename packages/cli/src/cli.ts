@@ -22,6 +22,7 @@ import {
 } from './constants.ts';
 import { runBuildCommand } from './commands/build.ts';
 import { runCheckCommand } from './commands/check.ts';
+import { runClientCommand } from './commands/client.ts';
 import { runSyncCommand } from './commands/sync.ts';
 import { runGenerateCommand } from './commands/generate.ts';
 import { runAddCommand } from './commands/add.ts';
@@ -120,6 +121,7 @@ function printHelp(log: (message: string) => void): void {
   log(`  add <plugin>                   Install a Setu-TS package into this project`);
   log(`  build                          Bundle a Node service for production`);
   log(`  check                          Check CLI-owned wiring (read-only)`);
+  log(`  client                         Generate or check the typed API client`);
   log(`  sync                           Rewrite CLI-managed barrels`);
   log(`  agents                         Write or check this project's AGENTS.md brief`);
   log(`  adopt                          Convert this project into a workspace`);
@@ -282,6 +284,9 @@ export async function runCli(argv: readonly string[], rawDeps: CliDependencies):
 
       case 'check':
         return await runCheckCommand(rest, deps);
+
+      case 'client':
+        return await runClientCommand(rest, deps);
 
       case 'sync':
         return await runSyncCommand(rest, deps);

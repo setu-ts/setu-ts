@@ -15,6 +15,7 @@ import {
   setUpgradeIntent,
 } from '@setu-ts/common';
 import type {
+  DispatchOptions,
   CliCommandHandler,
   DecoratorHandler,
   EnvVarSpec,
@@ -57,6 +58,8 @@ import { LifecycleManager } from '../lifecycle/lifecycle-manager.ts';
 import { createRequestContext } from '../context/request-context.ts';
 import { runDeferred, wrapDeferredStream } from '../context/deferred.ts';
 import type { RequestContextHandle } from '../context/request-context.ts';
+import { DispatchedRequest } from './dispatched-request.ts';
+import { guardEmptyChunks } from '../context/stream-guard.ts';
 import { coerceInjectBody, InjectedRequest } from './inject-body.ts';
 import { ResponseBuilder } from '../context/response.ts';
 import { DiagnosticsCollector } from '../diagnostics/collector.ts';
@@ -928,6 +931,21 @@ class Application implements IKernelApplication {
     return await adapter.fetch(request);
   }
 
+  /** Runs a web request through the pipeline, preserving streams and cancellation. */
+  async dispatch(request: Request, options?: DispatchOptions): Promise<Response> {
+    const response = await this.#handleRequest(new DispatchedRequest(request, options));
+    const snapshot = response.snapshot();
+    // Match the adapters: the web Response constructor refuses even an empty
+    // body at these statuses, and discarding a stream must release its source.
+    if ([204, 205, 304].includes(snapshot.status)) {
+      if (snapshot.streaming) void snapshot.body.cancel().catch(() => {});
+      return new Response(null, { status: snapshot.status, headers: snapshot.headers });
+    }
+    const body =
+      snapshot.body instanceof Uint8Array ? new Uint8Array(snapshot.body) : snapshot.body;
+    return new Response(body, { status: snapshot.status, headers: snapshot.headers });
+  }
+
   /** Synthesizes an inject request and runs it through the full pipeline. */
   async inject(request: InjectRequest): Promise<InjectResponse> {
     // Per-shape coercion (M95c §3.9): bytes verbatim, Blob awaited,
@@ -1448,6 +1466,15 @@ class Application implements IKernelApplication {
       return undefined;
     }
 
+    if (
+      request instanceof DispatchedRequest &&
+      request.expectedRoute !== undefined &&
+      routeResult.entry.pattern !== request.expectedRoute
+    ) {
+      respondWithError(ctx, { status: 404, title: 'Not Found' });
+      return undefined;
+    }
+
     // Install matched params via the internal setter (no readonly cast)
     const { definition, params, entry } = routeResult;
     handle.setParams(params);
@@ -1694,6 +1721,15 @@ class Application implements IKernelApplication {
     outcome: DiagnosticsEventOutcome,
   ): ResponseBuilder | Promise<ResponseBuilder> {
     const response = ctx.response as ResponseBuilder;
+    const streamed = response.streamingBody;
+    if (streamed !== undefined) {
+      // Every streamed body leaves through here (adapters and dispatch alike), so
+      // this is the one place an empty-chunk source can be stopped from starving
+      // the event loop.
+      response.stream(
+        guardEmptyChunks(streamed, this.#registry.get<IRuntimeServices>(CAPABILITIES.RUNTIME)),
+      );
+    }
     const cleanups = handle.takeDeferred();
     if (cleanups === undefined) {
       this.#inFlight--;

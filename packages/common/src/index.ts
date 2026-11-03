@@ -120,6 +120,7 @@ export {
   sealRequestIdentity,
 } from './request-identity.ts';
 export {
+  REQUIRED_SCOPES_STATE_KEY,
   CLIENT_IP_STATE_KEY,
   REQUEST_ORIGIN_STATE_KEY,
   CREDENTIAL_SOURCE_STATE_KEY,
@@ -160,6 +161,8 @@ export type {
   RouteSchema,
   RouteSecurityMetadata,
   RouteValidationMetadata,
+  RouteIdempotencyMetadata,
+  RouteMcpToolMetadata,
   SecurityRequirement,
   WebSocketUpgradeIntent,
 } from './http.ts';
@@ -174,6 +177,12 @@ export {
   setUpgradeIntent,
   UPGRADE_INTENT,
   upgradeIntentOf,
+  IDEMPOTENCY_METADATA,
+  withIdempotencyMetadata,
+  idempotencyMetadataOf,
+  MCP_TOOL_METADATA,
+  withMcpToolMetadata,
+  mcpToolMetadataOf,
   VALIDATION_METADATA,
   validationMetadataOf,
   withResponseMetadata,
@@ -243,10 +252,12 @@ export type {
   IRouterApi,
   MiddlewareOptions,
   RouteInfo,
+  DispatchOptions,
   StartOptions,
 } from './plugin.ts';
 
 // Domain service contracts
+export type { IOpenApiService } from './services/openapi.ts';
 export type { ILogger, LogMetadata } from './services/logger.ts';
 export type { IConfig } from './services/config.ts';
 export { validatedStateKey } from './services/validation.ts';

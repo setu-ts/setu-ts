@@ -250,6 +250,44 @@ by id and path. From a workspace root it checks every member. Generated projects
 `@setu-ts/cli` as a development dependency and run `setu check` from their `check` script. See
 [the CLI guide](https://github.com/setu-ts/setu-ts/blob/main/docs/cli.md#wiring-check-setu-check-and-setu-sync).
 
+## Typed API client
+
+```bash
+setu add sdk
+npm install
+npm run client          # generate src/clientsdk/api.ts
+npm run client:check    # opt-in CI drift gate; never writes
+setu client --input openapi.json
+setu client --input https://api.example.com/openapi.json --output src/clientsdk/api.ts
+```
+
+`setu client` loads the project's own `@setu-ts/sdk`. Without `--input`, it starts the application
+with no port, reads `IOpenApiService` after bootstrap, and always stops the app. Bootstrap hooks
+still run: databases connect and schedulers may start jobs. OpenApiPlugin must be registered; the
+REST template already includes it. `--input` reads JSON without loading the app, which also supports
+Workers projects that need live bindings. A file path is relative to the CWD; HTTP(S) requests use
+no credentials, time out after 30 seconds, and are capped at 16 MiB, as files are. YAML is not
+accepted. Environment-dependent routes may differ from deployment; use the served document for that
+exact API.
+
+`--factory <name>` defaults to `createApi`; `--type-name <name>` defaults to `Api` and resolves a
+component-name clash. `--dir <path>` selects one project or workspace member; workspace roots
+refuse. `--config <path>` overrides the boot module and cannot accompany `--input`. `--output` must
+be a relative `.ts` path inside the project; links are refused. Only files starting with the
+`setu client` marker can be replaced, and there is no force flag. Existing output over 1 MiB is
+refused by the writer. `--dry-run` prints the plan and cannot accompany `--check`.
+
+Node, Bun and Workers clients carry `/* eslint-disable */` and use the project's Prettier and
+configuration (the CLI copy only if the project has none). Deno clients carry file-level format and
+lint ignores. The marker contains no version or timestamp. `--check` compares the same formatted
+output: exit 0 when current, 1 when missing, different, or generation fails (drift names the first
+differing line); usage errors exit 2. `setu add sdk` adds `client` and `client:check` scripts (Deno
+tasks) without changing existing scripts or adding the drift gate to `check`.
+
+Full-stack documents currently include page and asset routes until M130; configure OpenApiPlugin's
+`exclude` option to omit those paths. See the
+[CLI guide](https://setu-ts.dev/docs/cli/#typed-client-setu-client).
+
 ## Agent briefs
 
 ```bash

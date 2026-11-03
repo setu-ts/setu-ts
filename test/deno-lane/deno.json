@@ -34,7 +34,9 @@
     "@aws-sdk/client-s3": "npm:@aws-sdk/client-s3@^3",
     "@opentelemetry/exporter-trace-otlp-http": "npm:@opentelemetry/exporter-trace-otlp-http@^0.220.0",
     "drizzle-orm/": "npm:drizzle-orm@0.45.2/",
-    "@std/testing/bdd": "jsr:@std/testing@^1.0.19/bdd"
+    "@std/testing/bdd": "jsr:@std/testing@^1.0.19/bdd",
+    "@modelcontextprotocol/server": "npm:@modelcontextprotocol/server@^2.4.0",
+    "@modelcontextprotocol/client": "npm:@modelcontextprotocol/client@^2.4.0"
   },
   "scopes": {
     "../../packages/cli/test/": {
@@ -53,6 +55,9 @@
       "vitest": "./vitest-shim.ts"
     },
     "../../test/": {
+      "vitest": "./vitest-shim.ts"
+    },
+    "../../packages/mcp-plugin/test/": {
       "vitest": "./vitest-shim.ts"
     }
   }

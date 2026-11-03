@@ -51,6 +51,25 @@ function harness(
 const noop: FakeCommand['handler'] = () => {};
 
 describe('runCommandsListing', () => {
+  it('retains plugin-command purpose wording when the application factory throws', async () => {
+    const h = harness();
+    expect(
+      await runCommandsListing(parseArgs([]), {
+        fs: h.fs,
+        cwd: '/app',
+        log: h.out.sink,
+        error: h.err.sink,
+        loadApp: () =>
+          Promise.resolve().then(() => ({
+            createApp: () => {
+              throw new Error('factory failed');
+            },
+          })),
+      }),
+    ).toBe(1);
+    expect(h.err.text()).toContain('Plugin commands are unavailable in this project');
+    expect(h.err.text()).not.toContain('pass `--input');
+  });
   it('lists the registered commands and exits 0', async () => {
     const h = harness(
       createFakeApp([

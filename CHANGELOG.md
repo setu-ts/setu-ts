@@ -8,6 +8,38 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Typed client command (M129, #547, `@setu-ts/cli`, `@setu-ts/common`,
+  `@setu-ts/openapi-plugin`).** `setu client` boots without a port or reads JSON with
+  `--input <file|url>`, generates `src/clientsdk/api.ts` with the project's own SDK, and writes a
+  marked managed file. `--check` is a read-only drift gate; `--dry-run` reports the write plan.
+  `--output`, `--factory`, `--type-name`, `--dir` and `--config` select paths and names.
+  `setu add sdk` adds opt-in `client` and `client:check` scripts without replacing existing ones.
+  `IOpenApiService` moves to common and remains re-exported by openapi-plugin; its shape is
+  unchanged. See the CLI guide for bootstrap effects, input bounds and write refusals.
+
+- **MCP route tools (M133, #545, `@setu-ts/mcp-plugin`, `@setu-ts/common`, `@setu-ts/kernel`,
+  `@setu-ts/auth-plugin`, `@setu-ts/idempotency-plugin`, `@setu-ts/decorator-plugin`,
+  `@setu-ts/cli`).** `McpPlugin`, `McpPluginOptions`, `McpToolDeclaration`,
+  `McpPluginConfigurationError` and `VERSION` expose explicitly declared routes through a stateless
+  SDK endpoint. Caller-filtered lists use private cache hints; calls re-enter guards, validation,
+  tenancy, rate limits, idempotency and audit. `timeoutMs` bounds each call (default 30000 ms, safe
+  integer 1–600000): the runtime deadline aborts the inner request and races dispatch/result
+  reading, cancelling the response reader and returning `The tool timed out.`. Functional
+  `mcpTool()` and method-only `@McpTool()` mark routes for discovery; `tools` is now optional.
+  Common's `MCP_TOOL_METADATA`, `RouteMcpToolMetadata`, `withMcpToolMetadata` and
+  `mcpToolMetadataOf` share the marker across both styles. Names are 1–64 characters; every marked
+  or listed route must declare security intent, and ambiguous or empty tool sets refuse startup.
+  Idempotency-branded tools require an authenticating security brand; the brand's `keyHeader` names
+  the header the route reads its key from, the derived key is sent there, and a route keyed by a
+  body field or a function refuses startup. `allowedOrigins` must list every browser UI origin,
+  including same-origin UIs. Common adds optional `IApplication.dispatch` and `DispatchOptions`,
+  implemented by the kernel with IP, abort and streaming support. `DispatchOptions.route` pins the
+  registered route pattern before route middleware runs. `IDEMPOTENCY_METADATA`,
+  `RouteIdempotencyMetadata`, `withIdempotencyMetadata` and `idempotencyMetadataOf` describe both
+  HTTP idempotency entry points. `REQUIRED_SCOPES_STATE_KEY` moves to common without changing its
+  value. `setu add mcp` installs the optional `@modelcontextprotocol/server@^2.4.0` peer. Existing
+  applications need no changes; see `docs/upgrading.md` for opt-in tool safety and replay behavior.
+
 - **A registry of real tenants (M127, PR pending, `@setu-ts/multi-tenancy-plugin`,
   `@setu-ts/common`, `@setu-ts/database-plugin`).** `MultiTenancyPlugin` takes `tenants` — a list,
   an `ITenantRegistry` (new in `common`) or a `RegistryFactory` — and checks every resolved id
@@ -176,6 +208,17 @@ All notable changes to this project are documented here. The format follows
   `RedisRateLimitStore` re-arms a key it finds without an expiry instead of answering 429 for ever.
 
 ### Fixed
+
+- **Swagger UI after `setu add openapi` (M129, #547, `@setu-ts/cli`).** Node, Deno and Bun now
+  install the exact `swagger-ui-dist` release that the Swagger UI integrity hashes match; without
+  it, an application using the default self-hosted assets could not boot. Workers receives no
+  additional dependency.
+
+- **kernel:** a streamed response whose source emits zero-length chunks without pause no longer
+  exhausts the heap. The Node adapter's writer reads the next chunk as soon as a write reports no
+  backpressure, which an empty chunk always does, so such a source starved the event loop until the
+  process aborted (over plain HTTP as well as MCP). Every streamed body now drops empty chunks and
+  waits a runtime timer turn after each one (M133 audit; #545).
 
 - **queue-plugin:** a stopped Redis reads `down` on the queue indicator again. The Redis adapter's
   probe answers `false` without I/O when the client's own `status` says it lost its connection

@@ -11,9 +11,9 @@ import type {
   IRequestContext,
   MiddlewareFunction,
 } from '@setu-ts/common';
-import { CAPABILITIES } from '@setu-ts/common';
+import { CAPABILITIES, withIdempotencyMetadata } from '@setu-ts/common';
 import { IDEMPOTENCY_DERIVED_KEY_STATE_KEY } from '../constants.ts';
-import { validateRouteOptionShape } from '../core/options.ts';
+import { routeIdempotencyMetadata, validateRouteOptionShape } from '../core/options.ts';
 import { IdempotencyConfigurationError } from '../errors.ts';
 import { safeLog } from '../core/safe-log.ts';
 
@@ -48,7 +48,7 @@ export function idempotent(options?: IdempotentRouteOptions): MiddlewareFunction
     IIdempotencyService,
     MiddlewareFunction | IdempotencyConfigurationError
   >();
-  return (ctx, next) => {
+  return withIdempotencyMetadata((ctx, next) => {
     if (!ctx.services.has(CAPABILITIES.IDEMPOTENCY)) {
       // A REJECTION, never a synchronous throw: this member's declared return
       // type includes a promise, and a caller writing `.catch(...)` must see it.
@@ -86,5 +86,5 @@ export function idempotent(options?: IdempotentRouteOptions): MiddlewareFunction
     }
     if (cached instanceof IdempotencyConfigurationError) return Promise.reject(cached);
     return cached(ctx, next);
-  };
+  }, routeIdempotencyMetadata(options));
 }

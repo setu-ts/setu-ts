@@ -6,6 +6,13 @@ import { runCli } from '../../../src/cli.ts';
 import { createFakeFs } from '../../fixtures/fake-fs.ts';
 
 describe('project brief rendering', () => {
+  it('describes generation and its opt-in CI drift check', () => {
+    const text = renderBrief(agentFacts({ commands: ['client', 'client:check'] }));
+    expect(text).toContain(
+      '`npm run client` — generate src/clientsdk/api.ts; boots the app unless --input is supplied',
+    );
+    expect(text).toContain('`npm run client:check` — read-only client drift gate');
+  });
   for (const runtime of ['node', 'bun', 'deno', 'cloudflare-workers'] as const) {
     for (const template of ['rest', 'full-stack']) {
       it(`glosses real ${runtime}/${template} development commands`, async () => {

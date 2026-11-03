@@ -184,11 +184,30 @@ export const ADDABLE: ReadonlyMap<string, IAddablePackage> = new Map([
   ['localization', { pkg: 'localization-plugin' }],
   ['logger', { pkg: 'logger-plugin' }],
   ['mail', { pkg: 'mail-plugin' }],
+  [
+    'mcp',
+    {
+      pkg: 'mcp-plugin',
+      peers: {
+        runtimes: ['node', 'deno', 'bun', 'cloudflare-workers'],
+        packages: ['@modelcontextprotocol/server'],
+      },
+    },
+  ],
   ['messaging', { pkg: 'messaging-plugin' }],
   ['metrics', { pkg: 'metrics-plugin' }],
   ['multi-tenancy', { pkg: 'multi-tenancy-plugin' }],
   ['notification', { pkg: 'notification-plugin' }],
-  ['openapi', { pkg: 'openapi-plugin' }],
+  [
+    'openapi',
+    {
+      pkg: 'openapi-plugin',
+      peers: {
+        runtimes: ['node', 'deno', 'bun'],
+        packages: ['swagger-ui-dist'],
+      },
+    },
+  ],
   ['queue', { pkg: 'queue-plugin' }],
   ['react-router', { pkg: 'react-router-plugin' }],
   ['realtime-backplane', { pkg: 'realtime-backplane-plugin' }],
@@ -1036,6 +1055,45 @@ function withPeerDependencies(
   return { contents: `${JSON.stringify(rewritten, null, 2)}\n`, added, moved };
 }
 
+/** Adds the opt-in client scripts; existing script bodies remain the developer's choice. */
+function withClientScripts(
+  source: string,
+  file: string,
+  runtime: TargetRuntime,
+  log: (line: string) => void,
+): string | undefined {
+  const parsed = JSON.parse(source) as Record<string, unknown>;
+  const key = file === 'package.json' ? 'scripts' : 'tasks';
+  const existing = parsed[key];
+  if (
+    existing !== undefined &&
+    (existing === null || typeof existing !== 'object' || Array.isArray(existing))
+  ) {
+    log(`left ${file} ${key} unchanged: not an object.`);
+    return undefined;
+  }
+  const scripts = { ...(existing as Record<string, unknown> | undefined) };
+  const dev = parsed['devDependencies'];
+  const localCli =
+    file === 'package.json' &&
+    typeof dev === 'object' &&
+    dev !== null &&
+    Object.hasOwn(dev, '@setu-ts/cli');
+  const runner = localCli ? 'setu' : cliInvocation(runtime);
+  let changed = false;
+  for (const [name, body] of [
+    ['client', `${runner} client`],
+    ['client:check', `${runner} client --check`],
+  ] as const) {
+    if (Object.hasOwn(scripts, name)) log(`left ${file} ${name} unchanged: already present.`);
+    else {
+      scripts[name] = body;
+      changed = true;
+    }
+  }
+  return changed ? `${JSON.stringify({ ...parsed, [key]: scripts }, null, 2)}\n` : undefined;
+}
+
 /**
  * Finds the local name for one named provider import in the generated config shape.
  *
@@ -1695,6 +1753,11 @@ export async function runAddCommand(
       }
     }
 
+    // Only the manifest the runtime runs scripts from: a Workers project's
+    // deno.json exists for plugin gating, and tasks there would never run.
+    if (bare === 'sdk' && (target.file === 'package.json') === (runtime !== 'deno')) {
+      updated = withClientScripts(updated ?? source, target.file, runtime, deps.log) ?? updated;
+    }
     if (updated === undefined) continue;
     edits.push({ path, contents: updated });
   }
