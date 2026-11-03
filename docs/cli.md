@@ -19,8 +19,8 @@ setu client --input https://api.example.com/openapi.json --output src/clientsdk/
 ```
 
 `setu client` generates `src/clientsdk/api.ts` with the project's installed `@setu-ts/sdk`.
-`setu add sdk` adds `client` and `client:check` scripts, or tasks on Deno. Existing scripts are
-preserved and noted. The runner is bare `setu` when the project has the CLI as a development
+`setu add sdk` adds `client` and `client:check` scripts (tasks in a Deno project). Existing scripts
+are preserved and noted. The runner is bare `setu` when the project has the CLI as a development
 dependency, otherwise the runtime's CLI invocation. The generated `check` script is unchanged:
 client drift checking is opt-in for CI.
 

@@ -361,9 +361,11 @@ the file is missing or stale. `--factory` and `--type-name` select the factory a
 
 ```typescript
 import { createClient } from '@setu-ts/sdk';
-import { createApi } from './src/clientsdk/api.ts';
 
-const api = createApi(createClient({ baseUrl: 'https://api.example.com' }));
+const client = createClient({ baseUrl: 'https://api.example.com' });
+// The generated factory takes it:
+// import { createApi } from './src/clientsdk/api.ts';
+// const api = createApi(client);
 ```
 
 For other tooling, `generateOpenApiClient(document, options?)` remains the pure OpenAPI 3.1 to

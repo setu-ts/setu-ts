@@ -78,7 +78,7 @@ export async function generateClientFile(
   } catch (cause) {
     if (!isMissingModule(cause, '@setu-ts/sdk')) throw cause;
     const error = new OptionalDependencyUnavailableError('@setu-ts/sdk', {
-      requiredBy: 'setu client',
+      requiredBy: '@setu-ts/cli',
       cause,
     });
     error.message += ' Run `setu add sdk`.';
