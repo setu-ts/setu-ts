@@ -63,8 +63,9 @@ describe('renderFunctionalModuleIndex with a module service', () => {
       controller: ['orders'],
       [MODULE_SERVICE_ARTIFACTS]: ['orders'],
     });
+    // `deno fmt` sorts specifiers by name, ignoring an inline `type` modifier.
     expect(source).toContain(
-      "import { requestService, type IRouterApi, type IServiceRegistry } from '@setu-ts/common';",
+      "import { type IRouterApi, type IServiceRegistry, requestService } from '@setu-ts/common';",
     );
     expect(source).toContain("import { ordersService } from './orders.service.ts';");
     expect(source).toContain("import { ORDERS } from './orders.token.ts';");

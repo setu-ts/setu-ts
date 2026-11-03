@@ -91,7 +91,7 @@ import type { ProductsService } from './products.service.ts';
 export const PRODUCTS = serviceToken<ProductsService>('module.products');
 `;
 
-const productsController = `import { resolveRequestService, type IRouterApi, type IServiceRegistry } from '@setu-ts/common';
+const productsController = `import { type IRouterApi, type IServiceRegistry, resolveRequestService } from '@setu-ts/common';
 
 import { PRODUCTS } from './products.token.ts';
 
@@ -104,9 +104,10 @@ import { PRODUCTS } from './products.token.ts';
 export function registerProductsRoutes(router: IRouterApi, services?: IServiceRegistry): void {
   void services;
   router.group('/api/products', (routes) => {
-    routes.get('/', async (ctx) =>
-      ctx.response.json({ items: await resolveRequestService(ctx, PRODUCTS).list() }),
-    );
+    routes.get('/', async (ctx) => {
+      const service = resolveRequestService(ctx, PRODUCTS);
+      return ctx.response.json({ items: await service.list() });
+    });
   });
 }
 `;

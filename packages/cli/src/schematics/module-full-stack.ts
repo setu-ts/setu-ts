@@ -98,8 +98,10 @@ export interface ${p}Service {
 export function ${names.camel}Service(ctx: IRequestContext): ${p}Service {
   void ctx;
   return {
-    list: () =>
-      Promise.resolve([...records.values()].sort((a, b) => a.name.localeCompare(b.name))),
+    list: () => {
+      const all = [...records.values()];
+      return Promise.resolve(all.sort((a, b) => a.name.localeCompare(b.name)));
+    },
     get: (id) => Promise.resolve(records.get(id)),
     create: (input) => {
       const record: ${p} = { id: crypto.randomUUID(), name: input.name };
@@ -134,7 +136,7 @@ export const ${names.screaming} = serviceToken<${names.pascal}Service>('module.$
 
 function controller(names: DerivedNames): string {
   const p = names.pascal;
-  return `import { resolveRequestService, type IRouterApi, type IServiceRegistry } from '@setu-ts/common';
+  return `import { type IRouterApi, type IServiceRegistry, resolveRequestService } from '@setu-ts/common';
 
 import type { ${p}Input } from './${names.kebab}.types.ts';
 import { ${names.screaming} } from './${names.kebab}.token.ts';
@@ -154,31 +156,32 @@ function inputOf(body: unknown): ${p}Input | undefined {
 export function ${routeRegistrarSymbol(names)}(router: IRouterApi, services?: IServiceRegistry): void {
   void services;
   router.group('/api/${names.kebab}', (routes) => {
-    routes.get('/', async (ctx) =>
-      ctx.response.json({ items: await resolveRequestService(ctx, ${names.screaming}).list() }),
-    );
+    routes.get('/', async (ctx) => {
+      const service = resolveRequestService(ctx, ${names.screaming});
+      return ctx.response.json({ items: await service.list() });
+    });
     routes.get('/:id', async (ctx) => {
-      const record = await resolveRequestService(ctx, ${names.screaming}).get(ctx.params['id'] ?? '');
+      const service = resolveRequestService(ctx, ${names.screaming});
+      const record = await service.get(ctx.params['id'] ?? '');
       return record === undefined
         ? ctx.response.status(404).json({ title: 'Not Found', status: 404 })
         : ctx.response.json(record);
     });
     routes.post('/', async (ctx) => {
       const input = inputOf(await ctx.request.json<unknown>());
-      if (input === undefined)
+      if (input === undefined) {
         return ctx.response.status(400).json({ title: 'Bad Request', status: 400 });
-      return ctx.response
-        .status(201)
-        .json(await resolveRequestService(ctx, ${names.screaming}).create(input));
+      }
+      const service = resolveRequestService(ctx, ${names.screaming});
+      return ctx.response.status(201).json(await service.create(input));
     });
     routes.patch('/:id', async (ctx) => {
       const input = inputOf(await ctx.request.json<unknown>());
-      if (input === undefined)
+      if (input === undefined) {
         return ctx.response.status(400).json({ title: 'Bad Request', status: 400 });
-      const record = await resolveRequestService(ctx, ${names.screaming}).update(
-        ctx.params['id'] ?? '',
-        input,
-      );
+      }
+      const service = resolveRequestService(ctx, ${names.screaming});
+      const record = await service.update(ctx.params['id'] ?? '', input);
       return record === undefined
         ? ctx.response.status(404).json({ title: 'Not Found', status: 404 })
         : ctx.response.json(record);

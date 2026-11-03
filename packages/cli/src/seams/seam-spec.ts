@@ -185,11 +185,18 @@ export function renderImport(symbols: readonly string[], module: string, typeOnl
  * relative order would be unobservable, because the emitted text is the same either
  * way. Keeping the arm would mean shipping a third branch nothing can reach.
  *
+ * An inline `type` modifier is not part of the sort key: `deno fmt` orders
+ * `{ requestService, type IRouterApi }` as `{ type IRouterApi, requestService }`
+ * (probed, M130).
+ *
  * @param symbols - The names to order
  * @returns The names, in the order `deno fmt` would leave them
  */
 function fmtSortSpecifiers(symbols: readonly string[]): string[] {
-  const key = (symbol: string): string => `${symbol.toLowerCase()}\u0000${symbol}`;
+  const key = (symbol: string): string => {
+    const name = symbol.replace(/^type /, '');
+    return `${name.toLowerCase()}\u0000${name}`;
+  };
   return [...symbols].sort((a, b) => (key(a) < key(b) ? -1 : 1));
 }
 

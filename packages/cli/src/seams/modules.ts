@@ -15,7 +15,7 @@ import { artifactNames } from '../utils/artifact-path.ts';
 
 import type { DerivedNames } from '../utils/names.ts';
 import type { GeneratorMode } from '../utils/generator-mode.ts';
-import { seamNames, type SeamArtifacts } from './seam-spec.ts';
+import { renderImport, seamNames, type SeamArtifacts } from './seam-spec.ts';
 import { FUNCTION_CONTROLLER_ARTIFACTS, routeRegistrarSymbol } from './http.ts';
 
 /** Application-level functional module registrar. */
@@ -45,10 +45,15 @@ function renderRegistrar(
   reExports = '',
   service?: ModuleServiceRegistration,
 ): string {
+  // Through renderImport, so the specifiers sort the way `deno fmt` sorts them:
+  // a Deno project is written as rendered and must pass its own `fmt --check`.
   const commonImport =
     service === undefined
-      ? "import type { IRouterApi, IServiceRegistry } from '@setu-ts/common';"
-      : "import { requestService, type IRouterApi, type IServiceRegistry } from '@setu-ts/common';";
+      ? renderImport(['IRouterApi', 'IServiceRegistry'], '@setu-ts/common', true)
+      : renderImport(
+          ['type IRouterApi', 'type IServiceRegistry', 'requestService'],
+          '@setu-ts/common',
+        );
   const serviceImports =
     service === undefined
       ? ''
@@ -61,7 +66,9 @@ function renderRegistrar(
       ? []
       : [
           '  if (services === undefined) {',
-          `    throw new Error('${symbol} needs the service registry: call registerModules(app.router, app.services).');`,
+          '    throw new Error(',
+          `      '${symbol} needs the service registry: call registerModules(app.router, app.services).',`,
+          '    );',
           '  }',
           `  services.register(${service.token}, requestService(${service.factory}));`,
         ];

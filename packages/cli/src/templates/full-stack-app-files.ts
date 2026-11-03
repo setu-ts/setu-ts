@@ -739,8 +739,8 @@ Business logic lives in kernel modules under \`src/modules/<name>/\`: the servic
 token and its \`/api/<name>\` routes. \`src/modules/products/\` is the example. A module registers its
 service per request (\`requestService\`), so a page and the API share one instance within a request.
 
-Pages live in \`app/\`: \`routes/\`, \`components/\`, client-safe \`lib/\` and server-only \`server/\`
-(the session, the CSRF token, the signed-in user and the \`requireUser\` guard). A loader reaches a
+Pages live in \`app/\`: \`routes/\`, \`components/\`, client-safe \`lib/\` and server-only \`server/\` (the
+session, the CSRF token, the signed-in user and the \`requireUser\` guard). A loader reaches a
 module's service in one line:
 
 \`\`\`ts
@@ -767,8 +767,8 @@ design.
 
 Tailwind 4 runs through Vite. The neutral shadcn theme lives in \`app/app.css\`; \`app/components/ui/\`
 contains the copied MIT Button and Card components. Add more with \`npx shadcn add <component>\` —
-\`components.json\` already points at the app aliases, and \`lucide-react\` supplies its icons.
-Combine Tailwind classes with \`cn\` from shadcn's \`cn\` package, which the components import too.
+\`components.json\` already points at the app aliases, and \`lucide-react\` supplies its icons. Combine
+Tailwind classes with \`cn\` from shadcn's \`cn\` package, which the components import too.
 
 The app shell has a fixed header and sidebar and one scrolling content region; navigation resets
 that region. Below the medium breakpoint the sidebar becomes a horizontal navigation row. The header
@@ -787,8 +787,8 @@ This project has two middleware layers. Pick by what the code needs to see.
 
 Use kernel middleware for cross-cutting concerns such as headers, auditing and rate limits. Use
 route middleware for page-level rules: \`app/server/require-user.server.ts\` redirects a visitor who
-is not signed in to \`/login\`, and puts the signed-in user on the context for the loader.
-\`/products\` attaches it; export it from a layout module to guard every route in that group.
+is not signed in to \`/login\`, and puts the signed-in user on the context for the loader. \`/products\`
+attaches it; export it from a layout module to guard every route in that group.
 
 ## Workspace libraries
 
