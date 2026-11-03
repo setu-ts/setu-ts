@@ -47,14 +47,16 @@ All notable changes to this project are documented here. The format follows
   fault answers `503` (`Tenant Registry Unavailable`), and no response byte names the id (the fault
   warning logs no registry message text, only error names and codes). The registry's tenant replaces
   the resolved one, so its canonical id reaches the session binding and cache prefix. Ids over 256
-  characters never reach the registry. Instance and factory registries are cached (`tenantCache`:
-  canonical hits only, TTL 30 s on the monotonic clock, 1 000 entries, 1 MiB, single-flight;
-  `TenantRegistryCacheOptions`). `IMultiTenancyService.lookupTenant(id)` runs the same check for
-  queue and message handlers and throws `TenantRegistryUnavailableError` (503 status hint) on a
-  fault. `createDatabaseTenantRegistry(options?: DatabaseTenantRegistryOptions)` in
-  `database-plugin` reads tenants from rows, with `activeField` for suspension and only `id`, `name`
-  and an explicit `toMetadata` on the tenant. The health indicator reports `registry`.
-  `apps/multi-tenant` lists `acme` and `globex`.
+  characters never reach the registry. With or without `tenants`, a non-string or empty id — from a
+  custom resolver or a `lookupTenant` payload — is refused (`404`), never admitted as tenant `''`.
+  Instance and factory registries are cached (`tenantCache`: canonical hits only, TTL 30 s on the
+  monotonic clock, 1 000 entries, 1 MiB, single-flight; `TenantRegistryCacheOptions`).
+  `IMultiTenancyService.lookupTenant(id)` runs the same check for queue and message handlers and
+  throws `TenantRegistryUnavailableError` (503 status hint) on a fault.
+  `createDatabaseTenantRegistry(options?: DatabaseTenantRegistryOptions)` in `database-plugin` reads
+  tenants from rows, with `activeField` for suspension and only `id`, `name` and an explicit
+  `toMetadata` on the tenant. The health indicator reports `registry`. `apps/multi-tenant` lists
+  `acme` and `globex`.
 - **Backend faults answer `503` or `504` (M131a, #543, `@setu-ts/common`, `@setu-ts/queue-plugin`,
   `@setu-ts/messaging-plugin`, `@setu-ts/realtime-backplane-plugin`).** `common` exports
   `BackendUnavailableError` (`503`, "The request was not applied."), `BackendOutcomeUnknownError`

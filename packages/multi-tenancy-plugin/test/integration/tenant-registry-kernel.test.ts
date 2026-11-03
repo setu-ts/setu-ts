@@ -195,4 +195,38 @@ describe('tenant registry — real kernel app', () => {
       await app.stop();
     }
   });
+
+  it('a custom resolver returning an empty or non-string id is refused on HTTP, with or without a registry, as lookupTenant refuses it', async () => {
+    for (const bad of ['', 42, undefined]) {
+      for (const tenants of [undefined, registry]) {
+        const resolver = {
+          resolve: (): Promise<Option<ITenant>> =>
+            Promise.resolve(some({ id: bad } as unknown as ITenant)),
+        };
+        const { app, handlerRuns } = await boot({
+          resolver,
+          required: false,
+          ...(tenants !== undefined && { tenants }),
+        });
+        try {
+          const res = await post(app, 'acme');
+          expect(res.statusCode, `${String(bad)} / ${tenants ? 'registry' : 'none'}`).toBe(404);
+          expect(handlerRuns()).toBe(0);
+          const tenancy = app.services.get<IMultiTenancyService>(CAPABILITIES.MULTI_TENANCY);
+          expect((await tenancy.lookupTenant(bad as string)).present).toBe(false);
+        } finally {
+          await app.stop();
+        }
+      }
+    }
+    // Control: a well-formed id from the same custom resolver is admitted without a registry.
+    const good = { resolve: (): Promise<Option<ITenant>> => Promise.resolve(some({ id: 'acme' })) };
+    const { app, handlerRuns } = await boot({ resolver: good });
+    try {
+      expect((await post(app, 'ignored')).statusCode).toBe(200);
+      expect(handlerRuns()).toBe(1);
+    } finally {
+      await app.stop();
+    }
+  });
 });

@@ -374,7 +374,11 @@ export function MultiTenancyPlugin(options: MultiTenancyPluginOptions): IPlugin 
             unknownTenantStatus: parsedRegistry.unknownTenantStatus,
           },
           ...(logger != null && { logger }),
-          ...(registryConfig.kind !== 'none' && { check: tenantCheck }),
+          // Always the shared check, registry or not, so the HTTP path and
+          // `lookupTenant` agree: without a registry it admits every
+          // non-empty string id and refuses a malformed one a custom
+          // resolver returned.
+          check: tenantCheck,
         }),
         { priority: middlewarePriority, name: 'tenant' },
       );

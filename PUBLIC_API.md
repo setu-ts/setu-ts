@@ -9235,8 +9235,9 @@ MultiTenancyPlugin({ resolver: 'header', tenants: createDatabaseTenantRegistry()
 queue job reading a tenant id from its payload calls it before the trusted `getRepositoryFor`. With
 no `tenants` configured it answers `some({ id })` for any non-empty string id — what the HTTP path
 admits — so it is not validation without a registry; a non-string or empty id is `none()` either
-way. A registry fault throws `TenantRegistryUnavailableError`, branded with a `503` status hint, so
-an HTTP handler that lets it escape answers `503` through `errorHandler`.
+way, and the tenant middleware refuses one a custom resolver returns with `unknownTenantStatus`. A
+registry fault throws `TenantRegistryUnavailableError`, branded with a `503` status hint, so an HTTP
+handler that lets it escape answers `503` through `errorHandler`.
 
 ### Options
 
