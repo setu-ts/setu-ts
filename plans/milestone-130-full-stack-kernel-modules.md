@@ -242,6 +242,13 @@ G5.
     - an `export * from`.
   - The scanner strips comments and ignores string literals that are not import specifiers. Its
     accepted and refused shapes are a data table in the test.
+  - **Implementation note (2026-11-03):** a pure text lexer misread JSX text (`It's`) as an
+    unterminated string and reported the template's own pages unreadable. The page is therefore
+    first transformed by esbuild (`tsx` loader, `verbatimModuleSyntax`), which is already a runtime
+    dependency of `@setu-ts/cli` (`setu build`, `utils/import-specifiers.ts`), and the shared lexer
+    reads that output: type imports are erased, and `import { type A }` appears as the side-effect
+    `import {} from …` it really is. Lines map back to the original source. A page esbuild or the
+    lexer cannot read is `setu.E018` `page-unreadable`, never a silent pass.
   - Severity is error, like E015. It can be silenced through `.setu-ts/check.json` like any finding.
 - **Why:**
   - It is the one check every runtime runs: `check` scripts call `setu check` on Node, Deno and Bun,
