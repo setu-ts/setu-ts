@@ -39,7 +39,7 @@ describe('the composed full-stack document', () => {
         loadRequestHandler: () =>
           Promise.resolve({
             handler: () => Promise.resolve(new Response('<html></html>')),
-            createLoadContext: () => ({ get: () => null, set: () => {} }),
+            createLoadContext: () => ({ get: <T>() => null as T, set: () => {} }),
           }),
       },
       openapi: { exclude: ['/api/hidden'] },
@@ -51,7 +51,7 @@ describe('the composed full-stack document', () => {
     try {
       const response = await app.inject({ method: 'GET', url: '/openapi.json' });
       expect(response.statusCode).toBe(200);
-      const paths = Object.keys((JSON.parse(response.body) as { paths: object }).paths);
+      const paths = Object.keys((JSON.parse(response.body ?? '{}') as { paths: object }).paths);
       expect(paths).toContain('/api/products');
       for (const absent of ['/api/hidden', '/__vite/{wildcard}', '/__vite/*', '/*', '/assets/*']) {
         expect(paths).not.toContain(absent);
