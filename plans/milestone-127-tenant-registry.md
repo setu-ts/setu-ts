@@ -128,8 +128,10 @@ Read at `develop` `29be2e77b`.
   5. the lookup returns anything other than `none()` or a `some` whose `value.id` is a non-empty
      string → throws `TenantRegistryUnavailableError` (a malformed answer is a registry fault, never
      an admitted tenant);
-  6. otherwise the lookup's result. The middleware and `IMultiTenancyService.lookupTenant` both call
-     this one function.
+  6. otherwise `none()`, or `some(snapshot)` where the snapshot is a fresh frozen copy holding only
+     `id`, `name` and `metadata` (`metadata` itself a frozen shallow copy), read ONCE from the
+     registry's answer (§8a R3). The middleware and `IMultiTenancyService.lookupTenant` both call
+     this one function, so neither ever holds the registry's own object.
 - **Why:** CLAUDE.md "one capability, one implementation": a queue handler validating a payload's
   tenant must get the answer the HTTP path would give. The length cap keeps a header-sized string
   out of a database query and out of the cache key — no resolver bounds it today (§1).
@@ -166,9 +168,12 @@ Read at `develop` `29be2e77b`.
 - **Logging:** the shared check (§3.3) logs, so a fault seen through the middleware or
   `lookupTenant` counts: on a registry fault it logs `warn`
   `'Tenant registry lookup failed; requests naming a tenant answer 503'` with
-  `{ error: describeError(cause) }`, once per transition from healthy to failing, and `info`
+  `{ error: <masked description> }`, once per transition from healthy to failing, and `info`
   `'Tenant registry lookups recovered'` on the first success after a failure (the M119g pattern).
-  The requested id is never logged.
+  The masked description is `describeError(cause)` with every occurrence of the requested id
+  replaced by `<tenant-id>` — both the raw id and the id as `describeError` renders it (the
+  rendering of `new Error(id)` without its `Error: ` prefix, trimmed), because a driver or custom
+  registry error may quote the bound value (§8a R1). The plugin composes no log text from the id.
 - **`unknownTenantStatus`:** an integer in 400–499, checked at `register()` (anything else refused
   by name); default 404. 404 because the request is well formed and names a resource that does not
   exist (survey in §3.10); an app wanting 400 or 403 sets it.
@@ -178,9 +183,13 @@ Read at `develop` `29be2e77b`.
 
 ### 3.6 Registry bodies through the configured error format
 
-- **Decision:** the two new refusals go through `respondWithError`, so with `errorHandler`
-  registered they are RFC 9457 Problem Details (`type`, `title`, `status`, `detail`, no `message`),
-  and without it the fallback `{ error, detail }`.
+- **Decision:** the two new refusals go through `respondWithError`, so they answer in whatever
+  format `errorHandler` is configured with. Under `errorHandler({ format: 'rfc9457' })` they are RFC
+  9457 Problem Details for a status-only problem: `type: 'about:blank'`, `title` the status phrase
+  (`Not Found`, `Service Unavailable`), `status`, `detail` the site's sentence, `instance` the path,
+  and no `message`. Under the default `errorHandler()` format, and with no handler at all, they use
+  the fallback `{ error, detail }` with `error` set to `Unknown Tenant` /
+  `Tenant Registry Unavailable` (corrected at the §8a re-review, R5).
 - **Test home:** `test/integration/tenant-registry-kernel.test.ts` — one app with `errorHandler`
   (Problem Details asserted field by field, `message` absent) and one without (fallback shape).
 
@@ -190,10 +199,13 @@ Read at `develop` `29be2e77b`.
   wraps an instance or factory-built registry; a static array registry is never wrapped. Option
   `tenantCache?: false | { ttlMs?: number; maxEntries?: number; maxBytes?: number }`, defaults
   `ttlMs: 30_000`, `maxEntries: 1_000`, `maxBytes: 1_048_576`.
-  - Only `some` results are cached, keyed by the REQUESTED id. The cached tenant is stored as a
-    frozen copy with frozen top-level `metadata` (as §3.2), because a cache hit hands the same
-    object to every request. Misses and throws are not cached, so a tenant created in the database
-    is admitted on its next request.
+  - Only `some` results are cached, keyed by the REQUESTED id, and only when the answer's canonical
+    `id` EQUALS the requested id. A hit that canonicalizes (a case-insensitive registry answering
+    `acme` for `ACME`) is returned uncached, so a client cycling spellings of a real tenant cannot
+    fill the cache and evict listed tenants (§8a R4); each such request costs one lookup, like a
+    miss (T6). The cached tenant is stored as a frozen copy with frozen top-level `metadata` (as
+    §3.2), because a cache hit hands the same object to every request. Misses and throws are not
+    cached, so a tenant created in the database is admitted on its next request.
   - Expiry is monotonic: `runtime.hrtime()` at insert plus `ttlMs`; an expired entry is a miss that
     looks up again.
   - Size of an entry = UTF-8 length of the key + UTF-8 length of `JSON.stringify` of the tenant. A
@@ -396,55 +408,113 @@ Per-file coverage read ANSI-stripped for every changed `src` file in `common`,
 
 ## 8a. Design security review
 
+- **Status:** reviewed at design time, then RE-REVIEWED against the implementation at `a99548e50`
+  (2026-11-03). The re-review's findings R1–R5 (below the threat table) are resolved as design
+  decisions in §3.3, §3.5, §3.6 and §3.7; the implementation must meet them before the audit runs.
 - **Reviewed flows:** F1 an HTTP request whose resolved id is checked (hit, miss, fault); F2 a
   request on an excluded path; F3 a request with no tenant under `required`; F4 a non-HTTP handler
   calling `lookupTenant`; F5 the cache filling and evicting under request-chosen ids; F6 a database
-  registry reading a tenant row.
+  registry reading a tenant row; F7 an HTTP handler that lets `lookupTenant`'s
+  `TenantRegistryUnavailableError` escape to `errorHandler`; F8 a WebSocket upgrade or gRPC call
+  naming a tenant; F9 a registry lookup that never settles.
 - **Boundaries:** B1 request → resolver → registry (request-supplied id); B2 registry → request (the
   tenant object installed on `ctx.request.tenant`); B3 registry → logs and response bodies; B4
-  payload → `lookupTenant` → `getRepositoryFor`.
+  payload → `lookupTenant` → `getRepositoryFor`; B5 a registry's own error → the fault `warn` and
+  `errorHandler`'s escaped-error log.
 - **Assets:** tenant data partitions; the set of tenants that can write rows; process memory;
-  database capacity; tenant-table columns not meant for requests.
+  database capacity; tenant-table columns not meant for requests; the cache's effectiveness for
+  listed tenants.
 - **Attackers:** X1 an anonymous client choosing any header, host, path or unverified JWT claim; X2
   a client flooding distinct ids; X3 a client using a suspended tenant's name; X4 a message producer
-  naming a tenant in a payload.
+  naming a tenant in a payload; X5 a client cycling spellings of a real tenant against a
+  case-insensitive registry.
 - **Threats and resolutions:**
 
-  | #   | Threat                                                                                      | Resolution                                                                                                                                                                                       |
-  | --- | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-  | T1  | an unlisted tenant is admitted                                                              | miss → `unknownTenantStatus`, `next()` not called (§3.5)                                                                                                                                         |
-  | T2  | registry fault falls open                                                                   | fault → 503, never admitted (§3.3 steps 3–5, §3.5)                                                                                                                                               |
-  | T3  | a malformed registry answer is admitted (`some({ id: '' })`, a non-Option)                  | treated as a fault (§3.3 step 5)                                                                                                                                                                 |
-  | T4  | the requested id is reflected (XSS in a body, log injection)                                | neither `detail` nor any log carries it (§3.5)                                                                                                                                                   |
-  | T5  | distinct-id flood: memory growth                                                            | misses not cached; cache bounded by entries AND bytes; in-flight map bounded by concurrency (§3.7)                                                                                               |
-  | T6  | distinct-id flood: one database query per request                                           | accepted risk — misses are not cached by decision (ROADMAP 5); the id cap bounds each query; rate limiting (`http-security-plugin` / auth rate limit) is the documented mitigation in the README |
-  | T7  | a header-sized id reaches the database and the cache                                        | `MAX_TENANT_ID_LENGTH` (§3.3 step 2)                                                                                                                                                             |
-  | T8  | the resolver chain falls through to a second resolver after a miss, letting the caller pick | no fallthrough (§3.5)                                                                                                                                                                            |
-  | T9  | two spellings of one tenant split its rows or session binding                               | the registry's id is canonical (§3.4)                                                                                                                                                            |
-  | T10 | a suspended tenant keeps access                                                             | admitted until its cache entry expires (≤ `ttlMs`, default 30 s) — accepted and documented; `ttlMs: 0` / `false` removes the window                                                              |
-  | T11 | secret tenant columns reach `ctx.request.tenant` and logs                                   | only `id`, `name` and an explicit `toMetadata` result (§3.8)                                                                                                                                     |
-  | T12 | prototype-named ids (`__proto__`, `constructor`) hit in the static registry                 | `Map`, not an object (probe in the test table)                                                                                                                                                   |
-  | T13 | a handler mutates the shared tenant object                                                  | frozen copies with frozen top-level `metadata`, in the static registry and the cache (§3.2, §3.7); deeper objects documented as shared                                                           |
-  | T14 | tenant existence disclosure (404 vs 200)                                                    | accepted: the set is the product's public hostnames in the subdomain case; an app can choose 403 for both unknown and unauthorized via `unknownTenantStatus`                                     |
-  | T15 | `lookupTenant` read as validation where no registry exists                                  | JSDoc first sentence + README (§3.9); same answer as the HTTP path by design                                                                                                                     |
-  | T16 | session tenant-binding bypassed by the replacement                                          | binding compare runs after replacement against the canonical id (§3.4)                                                                                                                           |
+  | #   | Threat                                                                                                 | Resolution                                                                                                                                                                                                                                                               |
+  | --- | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+  | T1  | an unlisted tenant is admitted                                                                         | miss → `unknownTenantStatus`, `next()` not called (§3.5)                                                                                                                                                                                                                 |
+  | T2  | registry fault falls open                                                                              | fault → 503, never admitted (§3.3 steps 3–5, §3.5)                                                                                                                                                                                                                       |
+  | T3  | a malformed registry answer is admitted (`some({ id: '' })`, a non-Option)                             | treated as a fault (§3.3 step 5)                                                                                                                                                                                                                                         |
+  | T4  | the requested id is reflected (XSS in a body, log injection)                                           | no response byte carries it; no log text the plugin composes carries it, and a registry error quoting it is masked to `<tenant-id>` (§3.5, R1); `describeError` already collapses CR/LF. Residual: `errorHandler`'s log of an escaped error's cause chain (R2, accepted) |
+  | T5  | distinct-id flood: memory growth                                                                       | misses not cached; cache bounded by entries AND bytes; in-flight map bounded by concurrency (§3.7)                                                                                                                                                                       |
+  | T6  | distinct-id flood: one database query per request                                                      | accepted risk — misses are not cached by decision (ROADMAP 5); the id cap bounds each query; rate limiting (`http-security-plugin` / auth rate limit) is the documented mitigation in the README                                                                         |
+  | T7  | a header-sized id reaches the database and the cache                                                   | `MAX_TENANT_ID_LENGTH` (§3.3 step 2)                                                                                                                                                                                                                                     |
+  | T8  | the resolver chain falls through to a second resolver after a miss, letting the caller pick            | no fallthrough (§3.5)                                                                                                                                                                                                                                                    |
+  | T9  | two spellings of one tenant split its rows or session binding                                          | the registry's id is canonical (§3.4)                                                                                                                                                                                                                                    |
+  | T10 | a suspended tenant keeps access                                                                        | admitted until its cache entry expires (≤ `ttlMs`, default 30 s) — accepted and documented; `ttlMs: 0` / `false` removes the window                                                                                                                                      |
+  | T11 | secret tenant columns reach `ctx.request.tenant` and logs                                              | only `id`, `name` and an explicit `toMetadata` result (§3.8); for EVERY registry arm the check's snapshot keeps only `id`/`name`/`metadata` (§3.3 step 6, R3)                                                                                                            |
+  | T12 | prototype-named ids (`__proto__`, `constructor`) hit in the static registry                            | `Map`, not an object (probe in the test table)                                                                                                                                                                                                                           |
+  | T13 | a handler mutates the shared tenant object                                                             | every admitted tenant is the check's frozen snapshot with frozen top-level `metadata` — every arm, cache on or off (§3.3 step 6, R3); deeper objects documented as shared                                                                                                |
+  | T14 | tenant existence disclosure (404 vs 200)                                                               | accepted: the set is the product's public hostnames in the subdomain case; an app can choose 403 for both unknown and unauthorized via `unknownTenantStatus`                                                                                                             |
+  | T15 | `lookupTenant` read as validation where no registry exists                                             | JSDoc first sentence + README (§3.9); same answer as the HTTP path by design                                                                                                                                                                                             |
+  | T16 | session tenant-binding bypassed by the replacement                                                     | binding compare runs after replacement against the canonical id (§3.4)                                                                                                                                                                                                   |
+  | T17 | a lookup that never settles holds requests open; distinct ids each hold one more (F9)                  | accepted: the plugin applies no timeout (§8); the database registry inherits the database plugin's command bound and answers 503 (probed, O13); the port's JSDoc and README tell custom registries to bound their I/O                                                    |
+  | T18 | spelling variants of a real tenant fill the cache and evict listed tenants (X5)                        | only hits whose canonical id equals the requested id are cached (§3.7, R4); variants cost one lookup each, as T6                                                                                                                                                         |
+  | T19 | a miss or fault falls open to "no tenant" when `required: false`                                       | never: a resolved id that the check refuses or cannot check is answered 404/503 whatever `required` says; only "nothing resolved" consults `required`                                                                                                                    |
+  | T20 | a consumer before the registry step keys state (rate-limit bucket, cache, flag) by an unchecked tenant | every reader of `request.tenant` and of the raw tenant header/claim runs after the tenant middleware or reads only `request.tenant` (enumerated, O11)                                                                                                                    |
+  | T21 | a timing oracle: a cached hit answers faster than a miss, even under `unknownTenantStatus: 403`        | accepted with T14: the status oracle is the larger one; README states that 403 hides existence in the status only                                                                                                                                                        |
 
-- **Obligations the audit probes (each with a positive control):** O1 a miss runs no handler and no
-  downstream middleware (control: a hit runs both); O2 a throwing, hanging-then-rejecting, and
-  malformed-answer registry each answer 503 (control: a healthy registry admits); O3 a 10 000-char
-  id never reaches `lookup` (control: a 256-char listed id is admitted); O4 the distinctive id
-  `"<x>\r\nX-Evil: 1"` appears in no response byte and no log line (control: it reaches the
-  registry's `lookup` argument); O5 100 000 distinct unknown ids leave the cache empty and the
-  in-flight map empty; 10 000 distinct HITS (a registry admitting every id) keep the cache within
-  `maxEntries` and `maxBytes` (control: a small set stays cached); O6 a different-case registry
-  answer is what the handler, the cache prefix and the session compare see; O7 a database registry's
-  tenant has no keys beyond `id`/`name`/`metadata` with a secret column present on the row; O8
-  `lookupTenant` and the middleware agree on hit, miss, over-long and fault (control: the
-  no-registry configuration admits on both); O9 an excluded path makes no lookup; O10 a factory
-  registry with `DatabasePlugin` registered after `MultiTenancyPlugin` answers correctly.
+- **Re-review findings at `a99548e50`** (each resolved before the audit):
+
+  | #   | Found in the implementation                                                                                                                                                                                                                                                                                                                  | Severity                       | Resolution                                                                                                                                                                                                                                          |
+  | --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | R1  | `TenantCheck` logs `describeError(error.cause ?? error)`; a registry error that quotes the bound value (a driver's `invalid input syntax for type uuid: "…"`, a custom `new Error('no tenant ' + id)`) puts the requested id in the log, contradicting T4. CR/LF are already collapsed, so this is disclosure of request text, not injection | Low                            | Mask the id in the description (§3.5). Test home: `tenant-check.test.ts` — a registry throwing `new Error(\`no tenant ${id}\`)`with the id`<x>\r\nX-Evil: 1`: the warn exists, carries `no tenant <tenant-id>`, and contains neither form of the id |
+  | R2  | An escaped `TenantRegistryUnavailableError` is logged by `errorHandler` with its whole `cause` chain — the registry's message again                                                                                                                                                                                                          | Low                            | Accepted: `errorHandler` logs every escaped error's cause, and the plugin cannot rewrite a foreign error. The README's `lookupTenant` paragraph says a registry error's message reaches the error log when a handler lets the error escape          |
+  | R3  | T13 held only for the static list and the cache: an instance/factory registry with `tenantCache: false` or `ttlMs: 0` hands its own (possibly shared, mutable, extra-keyed) object to every request; and the check validates `value.id` once while the middleware re-reads it for the session compare and cache prefix                       | Low (the registry is app code) | The check returns a frozen snapshot (§3.3 step 6). Test home: `tenant-check.test.ts` — an extra key is dropped, the result is frozen, a getter whose second read differs is read once                                                               |
+  | R4  | The cache cached every hit under the requested id: against a case-insensitive registry, 2^n spellings of one tenant are all hits that evict listed tenants, so their requests reach the store                                                                                                                                                | Medium                         | Cache only canonical-equal hits (§3.7). Test home: `caching-tenant-registry.test.ts` — a variant is answered but not cached; the canonical id is                                                                                                    |
+  | R5  | §3.6 assumed the Problem Details `title` is `Unknown Tenant`; under `format: 'rfc9457'` it is the status phrase, and the default `errorHandler()` format is not Problem Details                                                                                                                                                              | — (documentation)              | §3.6 corrected; probes assert per format                                                                                                                                                                                                            |
+
+- **Obligations the audit probes (each with a positive control):**
+  - **O1** a miss runs no handler, no downstream middleware and writes no row (read back through
+    `getRepositoryFor`), under `required: true` AND `required: false` (control: a hit runs both and
+    its write reads back).
+  - **O2** a throwing, a hanging-then-rejecting, and a malformed-answer registry
+    (`some({ id: '' })`, `some({})`, a non-Option, a bare string) each answer 503 under both
+    `required` values (control: a healthy registry admits).
+  - **O3** a 10 000-char id: `lookup` is called zero times (control: a 256-char listed id is
+    admitted with one call).
+  - **O4** the distinctive id `"<x>\r\nX-Evil: 1"` appears in no response byte (status line,
+    headers, body) and no log line, including with a registry whose error quotes the id (R1) — that
+    line exists and carries `<tenant-id>` (control: the id reached `lookup`'s argument).
+  - **O5** 100 000 distinct unknown ids leave the cache and the in-flight map empty; 10 000 distinct
+    canonical hits keep the cache within `maxEntries` and `maxBytes`; 1 000 case variants of one
+    real tenant against a case-insensitive registry leave only the canonical entry cached (R4)
+    (control: a small canonical set stays cached, one lookup each).
+  - **O6** a different-case registry answer is what the handler, the cache prefix and the session
+    compare see; a session bound to another tenant is still refused after replacement.
+  - **O7** a database registry's tenant has no keys beyond `id`/`name`/`metadata` with a secret
+    column on the row; a custom registry returning an extra key and a stateful `id` getter yields a
+    frozen snapshot without the key, read once (R3).
+  - **O8** `lookupTenant` and the middleware agree on hit, miss, over-long and fault under a factory
+    registry + cache + `unknownTenantStatus: 403` (control: the no-registry configuration admits on
+    both).
+  - **O9** an excluded path makes no lookup and installs no tenant even with a tenant header
+    (`ctx.request.tenant` is `undefined`, not an unchecked tenant).
+  - **O10** a factory registry with `DatabasePlugin` registered after `MultiTenancyPlugin` answers
+    correctly.
+  - **O11** (T20) the list of every reader of `request.tenant` and of a raw tenant header/claim
+    across `packages/*/src`, each with its middleware priority, shows none runs before the tenant
+    middleware on unchecked input.
+  - **O12** (F8) a WebSocket upgrade naming an unknown tenant is refused before the handshake (no
+    `101`) on the Node adapter, and a gRPC call naming one fails before the service method runs
+    (control: a listed tenant upgrades / is served). A runtime the audit cannot drive is recorded as
+    a support limit, not skipped silently.
+  - **O13** (T17) a database registry over an adapter whose `findOne` never settles answers 503
+    within the database plugin's command bound (control: a healthy adapter admits).
+  - **O14** (F7, R2) an escaped `TenantRegistryUnavailableError` answers the middleware's 503 body
+    under `format: 'default'` and `format: 'rfc9457'`; the registry's message appears only in the
+    error log line, as documented.
+- **Negative controls the audit must observe** (each control reverted, its probe seen failing, then
+  restored): the registry step in the middleware (O1); the length cap (O3); the malformed-answer
+  check (O2); the R1 mask (O4); the R3 snapshot (O7); canonical-only caching (O5); misses-not-cached
+  (O5); the never-fall-open rule for `required: false` (O1, O2).
+- **Defect-class sweep:** all fifteen classes of `.roo/skills/security-audit/SKILL.md` Step 4, each
+  marked applies or N/A with a reason. Known to apply: brands are not authorization (the 503 status
+  hint on `TenantRegistryUnavailableError` sets a status and grants nothing), bounded structures
+  (cache, in-flight map), log disclosure (R1/R2), and fail-closed on fault (T2, T19).
 - **Committed-tree audit:** yes — the change sits on the tenant boundary. Run by a fresh agent per
-  `.roo/skills/security-audit/SKILL.md` on the PR's head commit (never Codex); the record goes in
-  the PR.
+  `.roo/skills/security-audit/SKILL.md` on the PR's head commit AFTER R1, R3 and R4 land (never
+  Codex, never the implementing context); the record goes in the PR.
 
 ## 8. Risks & mitigations
 
