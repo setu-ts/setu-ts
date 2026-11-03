@@ -738,7 +738,12 @@ here.
   on registry fault through one check shared with `lookupTenant`, a bounded canonical-only cache,
   `createDatabaseTenantRegistry`, a fault warning with no registry message text) — complete (PR
   #548).
-- **Next milestone** — M130 and M131b–d are open for `0.12.0`.
+- **Milestone 130** (`common` + `react-router-plugin` + `full-stack-starter` + `cli` — the
+  full-stack template's kernel modules: `requestService`/`resolveRequestService` in `common`,
+  `getService` in loaders, `src/modules/` behind `app/` pages, `setu g module --page`, `setu.E017`
+  page value imports, OpenAPI page exclusions, `handleError`, the HMR port; X85-1, X85-2, X85-3,
+  X91-2, X91-5, X91-6, X91-7, V11-7, V11-19) — complete (PR pending).
+- **Next milestone** — M131b–d are open for `0.12.0`.
 
 ## Verification (run before declaring any work done)
 
