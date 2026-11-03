@@ -493,7 +493,7 @@ describe('template scaffolding — end to end', () => {
   // directory beside the template's own `app/services/`, wired by nothing and
   // checked by NEITHER of the project's own check paths. The route answered 404.
   describe('the full-stack seam host', () => {
-    // Two `deno task check:app` runs over the app and its modules: beyond the 30 s default.
+    // Two runs of the check:app task over the app and its modules: beyond the 30 s default.
     it(
       'type-checks a generated artifact through the project OWN check task',
       { timeout: 300_000 },
