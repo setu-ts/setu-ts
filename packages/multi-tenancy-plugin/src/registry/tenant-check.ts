@@ -11,7 +11,7 @@
  * @module
  */
 import type { ILogger, ITenant, ITenantRegistry, Option, SerializedError } from '@setu-ts/common';
-import { describeError, none, serializeError, some } from '@setu-ts/common';
+import { describeError, maskUrlUserinfo, none, serializeError, some } from '@setu-ts/common';
 import { TenantRegistryUnavailableError } from '../errors.ts';
 
 /**
@@ -256,28 +256,45 @@ export class TenantCheck {
   }
 }
 
-/** Longest rendered name or classifier value, in code points. */
+/** Longest rendered name or classifier value, in code points, marker included. */
 const MAX_FAULT_PART_LENGTH = 256;
 
-/** Longest rendered fault line, in code points. */
+/** Longest rendered fault line, in code points, marker included. */
 const MAX_FAULT_LINE_LENGTH = 2048;
 
-/** Collapses control and format characters and whitespace runs, then bounds the length. */
+/** Appended to a part or line cut at its bound; counted within the bound. */
+const TRUNCATION_MARKER = '… [truncated]';
+
+/**
+ * Collapses control and format characters and whitespace runs, then bounds the
+ * length: the result is at most `max` code points, the marker included.
+ */
 function cleanFaultPart(value: string, max: number): string {
   const collapsed = value.replace(/[\p{C}\s]+/gu, ' ').trim();
   const points = [...collapsed];
-  return points.length <= max ? collapsed : `${points.slice(0, max).join('')}… [truncated]`;
+  if (points.length <= max) return collapsed;
+  return `${points.slice(0, max - TRUNCATION_MARKER.length).join('')}${TRUNCATION_MARKER}`;
+}
+
+/**
+ * Renders one registry-supplied value (an error name or a classifier) for the
+ * line: the id masked FIRST, on the raw text — before collapsing control
+ * characters or cutting could split or alter it — then URL userinfo masked,
+ * then cleaned and bounded.
+ */
+function renderFaultValue(value: string, id: string): string {
+  return cleanFaultPart(maskUrlUserinfo(maskTenantId(value, id)), MAX_FAULT_PART_LENGTH);
 }
 
 /** Renders one serialized error without its message: `Name (code=…, …)`. */
-function describeWithoutMessage(error: SerializedError): string {
-  const name = cleanFaultPart(error.name, MAX_FAULT_PART_LENGTH) || 'Error';
+function describeWithoutMessage(error: SerializedError, id: string): string {
+  const name = renderFaultValue(error.name, id) || 'Error';
   const classifiers = Object.entries(error.classifiers ?? {}).map(
-    ([key, value]) => `${key}=${cleanFaultPart(String(value), MAX_FAULT_PART_LENGTH)}`,
+    ([key, value]) => `${key}=${renderFaultValue(String(value), id)}`,
   );
   const members =
     error.errors !== undefined && error.errors.length > 0
-      ? ` [${error.errors.map(describeWithoutMessage).join('; ')}]`
+      ? ` [${error.errors.map((member) => describeWithoutMessage(member, id)).join('; ')}]`
       : '';
   return `${name}${classifiers.length > 0 ? ` (${classifiers.join(', ')})` : ''}${members}`;
 }
@@ -297,19 +314,23 @@ function describeWithoutMessage(error: SerializedError): string {
  *   `Error (code=ECONNREFUSED, errno=-111, syscall=connect)`.
  *
  * A malformed registry answer, carried as the `cause`, therefore contributes
- * only its type name, never its contents. As a last line of defence the result
- * is passed through {@linkcode maskTenantId}, so a custom error that put the id
- * in its `name` or a `code` is masked too.
+ * only its type name, never its contents. Each name and classifier value has
+ * URL userinfo masked (as `describeError` does), and is passed through
+ * {@linkcode maskTenantId} before anything else touches it — but that mask
+ * only recognizes a standalone, unaltered copy of the id. A custom registry
+ * that writes the id into an error's `name` or `code` in an altered form
+ * (case-folded, encoded, cut mid-word) puts it in the line; registries should
+ * keep the id out of names and codes.
  *
  * @param error - The fault the check is about to throw
  * @param id - The requested id
- * @returns One bounded line with no registry message text
+ * @returns One line of at most 2048 code points, with no registry message text
  */
 export function describeRegistryFault(error: TenantRegistryUnavailableError, id: string): string {
   const own = serializeError(error);
   const parts = [`${own.name}: ${own.message}`];
   for (let cause = own.cause; cause !== undefined; cause = cause.cause) {
-    parts.push(describeWithoutMessage(cause));
+    parts.push(describeWithoutMessage(cause, id));
   }
-  return maskTenantId(cleanFaultPart(parts.join(' <- '), MAX_FAULT_LINE_LENGTH), id);
+  return cleanFaultPart(parts.join(' <- '), MAX_FAULT_LINE_LENGTH);
 }

@@ -160,9 +160,11 @@ export const tenancyPlugin = MultiTenancyPlugin({
 
 Neither refusal runs the handler, and no response byte names the requested id. The fault warning
 never carries a registry's error message — which may quote the id in any form — only each error's
-name and driver codes, e.g. `<- Error (code=ECONNREFUSED, errno=-111, syscall=connect)`. A miss does
-not fall through to the next resolver. The session binding compare and the cache prefix use the
-registry's id, so `ACME` and `acme` cannot split a tenant when the registry answers `acme`.
+name and driver codes, e.g. `<- Error (code=ECONNREFUSED, errno=-111, syscall=connect)`, with URL
+credentials masked. A registry you write should keep the id out of error names and codes too: only
+an unaltered copy of it there is masked. A miss does not fall through to the next resolver. The
+session binding compare and the cache prefix use the registry's id, so `ACME` and `acme` cannot
+split a tenant when the registry answers `acme`.
 
 `tenants` also takes an `ITenantRegistry` (`lookup(id)` returning `some(tenant)` or `none()`) or a
 factory resolved at `onInit`, such as `createDatabaseTenantRegistry()` from

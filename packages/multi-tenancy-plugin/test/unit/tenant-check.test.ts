@@ -300,6 +300,66 @@ describe('TenantCheck', () => {
     expect(logged).toContain('… [truncated]');
   });
 
+  async function faultLine(id: string, cause: unknown): Promise<string> {
+    const { logger, warns } = recordingLogger();
+    const check = new TenantCheck({
+      configured: true,
+      logger,
+      registry: { lookup: () => Promise.reject(cause) },
+    });
+    await expect(check.check(id)).rejects.toThrow(TenantRegistryUnavailableError);
+    return (warns[0]!.metadata as { error: string }).error;
+  }
+
+  it('D-2: URL credentials in an error name or a classifier are masked', async () => {
+    const error = Object.assign(new Error('down'), {
+      code: 'redis://svc:classifier-pw@cache:6379',
+    });
+    error.name = 'RedisError redis://svc:name-pw@cache:6379';
+    const logged = await faultLine('acme', error);
+    expect(logged).toContain('RedisError redis://');
+    expect(logged).not.toContain('name-pw');
+    expect(logged).not.toContain('classifier-pw');
+  });
+
+  it('D-1: the id is masked on the raw name, before control and private-use characters collapse', async () => {
+    const id = 'zq\u{E000}x\u0007y';
+    const error = new Error('down');
+    error.name = `Bad ${id}`;
+    const nested = Object.assign(new Error('outer', { cause: error }), { code: id });
+    const logged = await faultLine(id, nested);
+    expect(logged).toContain(`code=${MASKED_TENANT_ID}`);
+    expect(logged).toContain(`Bad ${MASKED_TENANT_ID}`);
+    expect(logged).not.toContain('zq');
+  });
+
+  it('D-3: the line and each part stay within their bounds, marker included', async () => {
+    let chain: Error = new Error('root');
+    for (let i = 0; i < 40; i++) {
+      const next = new Error('x', { cause: chain });
+      next.name = `N${i}${'n'.repeat(400)}`;
+      chain = next;
+    }
+    const logged = await faultLine('acme', chain);
+    expect([...logged].length).toBe(2048);
+    expect(logged.endsWith('… [truncated]')).toBe(true);
+    for (const part of logged.split(' <- ').slice(1, -1)) {
+      expect([...part].length).toBeLessThanOrEqual(256);
+    }
+  });
+
+  it('D-3: masking an id repeated in a name cannot push the line past its bound', async () => {
+    let chain: Error = new Error('root');
+    for (let i = 0; i < 20; i++) {
+      const next = new Error('x', { cause: chain });
+      next.name = Array.from({ length: 200 }, () => 'a').join(' ');
+      chain = next;
+    }
+    const logged = await faultLine('a', chain);
+    expect([...logged].length).toBeLessThanOrEqual(2048);
+    expect(logged).toContain(MASKED_TENANT_ID);
+  });
+
   it('maskTenantId leaves unrelated text alone', () => {
     expect(maskTenantId('Error: connection refused', 'acme')).toBe('Error: connection refused');
   });
