@@ -26,7 +26,7 @@ export function quotaProblemInit(
   };
 }
 
-/** A spent policy, carrying a value-free 429 status hint. @since 0.13.0 */
+/** A spent policy, carrying a value-free 429 status hint. @since 0.12.0 */
 export class QuotaExceededError extends Error {
   /** Stable discriminant across realms. */
   override readonly name = 'QuotaExceededError';
@@ -58,7 +58,7 @@ export class QuotaExceededError extends Error {
  * @param ctx - Request context with the live response writer
  * @param error - The quota refusal
  * @returns Nothing; the response is written in place
- * @since 0.13.0
+ * @since 0.12.0
  */
 export function respondQuotaExceeded(ctx: IRequestContext, error: QuotaExceededError): void {
   ctx.response.header('Retry-After', String(error.retryAfterSeconds));

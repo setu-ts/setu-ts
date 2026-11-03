@@ -16559,7 +16559,7 @@ workerd run is a follow-on. **Security-audited** by a fresh agent before it merg
 ## Milestone 134: AI SDK Recipes and Weighted Quotas
 
 **Package(s):** `packages/auth-plugin` (weighted reserve/settle quota), `packages/telemetry-plugin`
-(optional global provider registration); website guide and `apps/ai-chat`. Ships in `0.13.0`.
+(optional global provider registration); website guide and `apps/ai-chat`. Ships in `0.12.0`.
 
 **The problem.** Model calls need trusted identity, spend caps under concurrency and usage records
 that billing can deduplicate. The AI SDK already provides providers, bounded tool loops, structured

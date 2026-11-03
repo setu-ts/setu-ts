@@ -2,7 +2,7 @@
 import type { IRuntimeServices } from '@setu-ts/common';
 import { QuotaExceededError } from './refusal.ts';
 
-/** An immutable receipt issued by one quota. @since 0.13.0 */
+/** An immutable receipt issued by one quota. @since 0.12.0 */
 export type QuotaReservation = {
   /** Caller key, before the policy prefix. */
   readonly key: string;
@@ -12,7 +12,7 @@ export type QuotaReservation = {
   readonly amount: number;
 };
 
-/** Atomic storage port for weighted quotas. @since 0.13.0 */
+/** Atomic storage port for weighted quotas. @since 0.12.0 */
 export interface IQuotaStore {
   /** Atomically admits and adds amount only if the limit permits it. */
   reserve(
@@ -28,7 +28,7 @@ export interface IQuotaStore {
   close?(): Promise<void>;
 }
 
-/** Weighted quota configuration. @since 0.13.0 */
+/** Weighted quota configuration. @since 0.12.0 */
 export type QuotaOptions = {
   /** Non-empty lowercase policy name, matching [a-z0-9-]+. */
   readonly name: string;
@@ -42,7 +42,7 @@ export type QuotaOptions = {
   readonly runtime: IRuntimeServices;
 };
 
-/** Reserves units before work, then reconciles actual usage once. @since 0.13.0 */
+/** Reserves units before work, then reconciles actual usage once. @since 0.12.0 */
 export interface IQuota {
   /** Reserves units, or throws QuotaExceededError without charging. */
   reserve(key: string, amount: number): Promise<QuotaReservation>;
@@ -90,7 +90,7 @@ function currentWindow(now: number, window: QuotaOptions['window']) {
  * const receipt = await quota.reserve('tenant-a', 100);
  * await quota.settle(receipt, 80);
  * ```
- * @since 0.13.0
+ * @since 0.12.0
  */
 export function createQuota(options: QuotaOptions): IQuota {
   const { name, store, limit, window, runtime } = options;

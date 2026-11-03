@@ -2,7 +2,7 @@
 import { QuotaStoreUnavailableError } from '../errors.ts';
 import type { IQuotaStore } from './quota.ts';
 
-/** Minimal ioredis-style client; node-redis may use fromNodeRedis. @since 0.13.0 */
+/** Minimal ioredis-style client; node-redis may use fromNodeRedis. @since 0.12.0 */
 export interface IQuotaRedisClient {
   /** Runs constant Lua with all caller values in KEYS/ARGV. */
   eval(script: string, numkeys: number, ...args: (string | number)[]): Promise<unknown>;
@@ -38,7 +38,7 @@ return 1
 /**
  * Redis quota counters, with one atomic script per operation.
  * The injected client must bound commands; this store never times out a call itself.
- * @since 0.13.0
+ * @since 0.12.0
  */
 export class RedisQuotaStore implements IQuotaStore {
   readonly #client: IQuotaRedisClient;

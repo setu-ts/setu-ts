@@ -25,7 +25,7 @@ All notable changes to this project are documented here. The format follows
   `apps/ai-chat` demonstrate SDK tool loops, structured output, streaming, fallback, capture-off
   tracing and outbox/inbox usage delivery. AI dependencies stay in the application and root
   development tooling. No Setu AI package is introduced; existing applications need no changes.
-  Ships in 0.13.0.
+  Ships in 0.12.0.
 
 - **Typed client command (M129, #547, `@setu-ts/cli`, `@setu-ts/common`,
   `@setu-ts/openapi-plugin`).** `setu client` boots without a port or reads JSON with

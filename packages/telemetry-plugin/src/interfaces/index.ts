@@ -144,7 +144,7 @@ export interface TelemetryPluginOptions {
    * Registers the built provider with the OTel API (default: false).
    * One process has one global provider. A refused registration warns once;
    * shutdown leaves that registration in place.
-   * @since 0.13.0
+   * @since 0.12.0
    */
   registerGlobal?: boolean;
   /** Injectable loader for the OTel context manager. */

@@ -7,7 +7,7 @@ import type { IQuotaStore } from './quota.ts';
  * In-process quota storage with a synchronous atomic critical section.
  * An expired window reads as empty; amortised sweeps reclaim expired windows,
  * keeping memory proportional to live windows plus the sweep slack (minimum 1,024).
- * @since 0.13.0
+ * @since 0.12.0
  */
 export class MemoryQuotaStore implements IQuotaStore {
   readonly #runtime: IRuntimeServices;

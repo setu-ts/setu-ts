@@ -741,7 +741,7 @@ here.
 - **Milestone 134** (`auth-plugin` + `telemetry-plugin` + `docs/ai.md` + `apps/ai-chat` — AI SDK
   recipes and weighted quotas: `createQuota` with memory and Redis stores, the shared 429
   initializer, `registerGlobal`, a scaffold-shaped example proven against a real model; ships in
-  `0.13.0`) — complete (PR #549).
+  `0.12.0`) — complete (PR #549).
 - **Next milestone** — M130 and M131b–d are open for `0.12.0`.
 
 ## Verification (run before declaring any work done)
