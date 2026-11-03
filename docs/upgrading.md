@@ -42,17 +42,18 @@ inner CSRF checks. Lists filter scopes/authentication; roles and policies still 
 
 ### Full-stack kernel modules and `getService` (M130, `@setu-ts/cli`, `@setu-ts/common`, `@setu-ts/react-router-plugin`, `@setu-ts/full-stack-starter`)
 
-No package API changes behaviour; the additions are opt-in. The full-stack template changes shape,
-so a project scaffolded with 0.11 keeps working but does not match what `setu new` now writes. To
-port one:
+The package additions are opt-in; the one change existing applications see is the full-stack
+starter's OpenAPI exclusions below. The full-stack template changes shape, so a project scaffolded
+with 0.11 keeps working but does not match what `setu new` now writes. To port one:
 
 - Move business logic out of `app/features`, `app/services` and `app/models` into kernel modules
   under `src/modules/<name>/` (`setu g module <name>` writes the shape). Register each module's
   service with `services.register(TOKEN, requestService(factory))` and call
   `registerModules(app.router, app.services)` in `setu.config.ts`.
 - In loaders, replace reads of `servicesContext` and the logger and secrets keys with
-  `getService(context, TOKEN)`. `servicesContext` still works. Keep `populateLoadContext` for values
-  that are not services (the session and CSRF token).
+  `getService(context, TOKEN)`. `servicesContext` still works for plain services, but returns the
+  `requestService` wrapper for a module token: read those with `getService`. Keep
+  `populateLoadContext` for values that are not services (the session and CSRF token).
 - Add `"~kernel/*": ["./src/*"]` to `tsconfig.json` `paths` (and the Deno import map), and import
   kernel code from `app/` only as `import type` or from a `*.token.ts` module. `setu check` now
   reports any other value import as `setu.E017`, and a page it cannot parse as `setu.E018`; silence

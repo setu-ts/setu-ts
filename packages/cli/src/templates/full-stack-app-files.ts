@@ -715,6 +715,19 @@ export const FULL_STACK_APP_FILES: readonly GeneratedFile[] = [
  * @param runtime - The project's target runtime
  * @returns The README markdown
  */
+/**
+ * The \`dev.ts\` port note. Only a Node, Deno or Bun project has \`dev.ts\`, \`PORT\`
+ * and \`VITE_PORT\`; a Workers project develops with \`wrangler dev\`.
+ */
+const DEVELOPMENT_PORTS = `
+## Development ports
+
+\`start:dev\` serves the application on \`PORT\` (3000) and runs Vite's dev server on \`VITE_PORT\`
+(5173), bound to 127.0.0.1. The page loads modules through the application port, and the HMR socket
+connects to Vite's port directly, so an edit updates in place. A second dev server on the same
+\`VITE_PORT\` fails to start; give each project its own.
+`;
+
 export const FULL_STACK_README_SECTION = (invocation: string, runtime: string): string => {
   const command = `\`${invocation} generate middleware <name>\` (\`src/middleware/\`)`;
   const width = command.length;
@@ -799,12 +812,5 @@ attaches it; export it from a layout module to guard every route in that group.
 Import workspace libraries from \`.server.ts\` modules and \`setu.config.ts\`. The SSR build leaves
 their declared package names external so the server runtime resolves them through the workspace.
 Client modules cannot import a Deno workspace library: the browser bundle has no Deno workspace.
-
-## Development ports
-
-\`start:dev\` serves the application on \`PORT\` (3000) and runs Vite's dev server on \`VITE_PORT\`
-(5173), bound to 127.0.0.1. The page loads modules through the application port, and the HMR socket
-connects to Vite's port directly, so an edit updates in place. A second dev server on the same
-\`VITE_PORT\` fails to start; give each project its own.
-${workers}`;
+${workers === '' ? DEVELOPMENT_PORTS : workers}`;
 };

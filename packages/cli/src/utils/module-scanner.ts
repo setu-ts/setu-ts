@@ -299,9 +299,20 @@ export async function scanModuleArtifacts(
     withServices ? [controllers, moduleServiceSeam(module)] : [controllers],
   );
   if (!withServices) return scan;
-  // Only the module's own token registers; any other `*.token.ts` is the developer's.
+  // Only the module's own token registers; any other `*.token.ts` is the
+  // developer's, so it is neither listed nor reported as skipped, unreadable,
+  // adopted or hand-wired.
+  const ownToken = `${moduleDir}/${module}.token.ts`;
+  const keep = (entry: { readonly path: string }): boolean =>
+    !entry.path.endsWith('.token.ts') || entry.path === ownToken;
   const own = (scan.artifacts[MODULE_SERVICE_ARTIFACTS] ?? []).filter((name) => name === module);
-  return { ...scan, artifacts: { ...scan.artifacts, [MODULE_SERVICE_ARTIFACTS]: own } };
+  return {
+    artifacts: { ...scan.artifacts, [MODULE_SERVICE_ARTIFACTS]: own },
+    skipped: scan.skipped.filter(keep),
+    adopted: scan.adopted.filter(keep),
+    manual: scan.manual.filter(keep),
+    unreadable: scan.unreadable.filter(keep),
+  };
 }
 
 /**

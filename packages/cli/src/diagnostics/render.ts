@@ -125,7 +125,7 @@ function lines(finding: Finding): readonly string[] {
     case 'page-unreadable':
       return [
         `Cannot read the imports of ${escapeName(f.path)}, so whether it imports kernel code by value cannot be checked.`,
-        '  Simplify the import statements, or silence this finding in .setu-ts/check.json.',
+        '  It is over 1 MiB, cannot be parsed or read, sits past 32 directory levels or is reached through a symlink leaving app/. Fix that, or silence this finding in .setu-ts/check.json.',
       ];
     case 'unresolved-import':
       return [
@@ -145,8 +145,6 @@ function lines(finding: Finding): readonly string[] {
   }
 }
 
-/** Renders the generator's pre-write reports or its planned-barrel/module notices. */
-
 /** How each refused page import is described. */
 const PAGE_IMPORT_REASONS = {
   'value-import': 'by value',
@@ -156,6 +154,7 @@ const PAGE_IMPORT_REASONS = {
   glob: 'through an import.meta.glob pattern',
 } as const;
 
+/** Renders the generator's pre-write reports or its planned-barrel/module notices. */
 export function renderGenerateFindings(
   diagnosis: ProjectDiagnosis,
   error: (line: string) => void,

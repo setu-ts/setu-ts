@@ -46,8 +46,12 @@ const KERNEL_ALIAS = '~kernel/';
 /** The template's page alias, `~/*` → `app/*`; `~/../src/…` climbs out of it. */
 const PAGE_ALIAS = '~/';
 
-/** A token module: the one value import a page may make from the kernel. */
-const TOKEN_MODULE = /^src\/modules\/[^/]+\/[^/]+\.token\.ts$/;
+/**
+ * A token module: the one value import a page may make from the kernel, written
+ * with its `.ts` extension, its emitted `.js` one, or none (the bundler and the
+ * Node/Bun type-checker resolve all three to the same file).
+ */
+const TOKEN_MODULE = /^src\/modules\/[^/]+\/[^/]+\.token(?:\.[jt]s)?$/;
 
 /** Files under `app/` a page can be written in, and the esbuild loader for each. */
 const PAGE_FILE = /\.(?:[cm]?[jt]sx?)$/;
@@ -282,36 +286,69 @@ function globLine(
  */
 const MAX_PAGE_DEPTH = 32;
 
+/** What one walk has seen: real directory paths, and the real path of `app/`. */
+interface PageWalk {
+  readonly fs: IFileSystem;
+  readonly dir: string;
+  readonly seen: Set<string>;
+  appReal?: string;
+}
+
 /**
- * Collects every page file under `app/`, sorted. A page over
- * {@linkcode MAX_EXISTING_FILE_BYTES}, or a directory past
- * {@linkcode MAX_PAGE_DEPTH}, is collected as unreadable rather than read or
- * skipped, so neither becomes a silent pass.
+ * Collects every page file under `app/`, sorted. Anything the walk cannot read
+ * safely is collected as unreadable (E018) rather than read or skipped, so none
+ * becomes a silent pass: a page over {@linkcode MAX_EXISTING_FILE_BYTES}, a
+ * directory past {@linkcode MAX_PAGE_DEPTH}, a directory a symlink places
+ * outside `app/`, and an entry whose `stat` or `readdir` fails (`ELOOP`,
+ * `EACCES`). With `realPath` available a directory reached twice through
+ * symlinks is walked once, so a link loop costs one visit, not an exponential
+ * walk; without it the depth bound ends the walk.
  */
 async function pageFiles(
-  fs: IFileSystem,
-  dir: string,
+  walk: PageWalk,
   prefix: string,
   depth = 0,
 ): Promise<{ readonly pages: string[]; readonly unreadable: string[] }> {
+  const { fs, dir } = walk;
+  const path = joinPath(dir, prefix);
+  if (fs.realPath !== undefined) {
+    let real: string;
+    try {
+      real = await fs.realPath(path);
+    } catch (cause) {
+      if (isMissingPath(cause)) return { pages: [], unreadable: [] };
+      return { pages: [], unreadable: [prefix] };
+    }
+    walk.appReal ??= real;
+    if (real !== walk.appReal && !real.startsWith(`${walk.appReal}/`))
+      return { pages: [], unreadable: [prefix] };
+    if (walk.seen.has(real)) return { pages: [], unreadable: [] };
+    walk.seen.add(real);
+  }
   let entries: readonly string[];
   try {
-    entries = await fs.readdir(joinPath(dir, prefix));
+    entries = await fs.readdir(path);
   } catch (cause) {
     if (isMissingPath(cause)) return { pages: [], unreadable: [] };
-    throw cause;
+    return { pages: [], unreadable: [prefix] };
   }
   const pages: string[] = [];
   const unreadable: string[] = [];
   for (const entry of entries) {
     const relative = `${prefix}/${entry}`;
-    const stat = await fs.stat(joinPath(dir, relative));
+    let stat: Awaited<ReturnType<IFileSystem['stat']>>;
+    try {
+      stat = await fs.stat(joinPath(dir, relative));
+    } catch {
+      unreadable.push(relative);
+      continue;
+    }
     if (stat.isDirectory) {
       if (depth >= MAX_PAGE_DEPTH) {
         unreadable.push(relative);
         continue;
       }
-      const nested = await pageFiles(fs, dir, relative, depth + 1);
+      const nested = await pageFiles(walk, relative, depth + 1);
       pages.push(...nested.pages);
       unreadable.push(...nested.unreadable);
     } else if (stat.isFile && PAGE_FILE.test(entry)) {
@@ -338,7 +375,7 @@ export interface PageImportScan {
  */
 export async function scanPageImports(fs: IFileSystem, dir: string): Promise<PageImportScan> {
   const violations: PageImportViolation[] = [];
-  const found = await pageFiles(fs, dir, 'app');
+  const found = await pageFiles({ fs, dir, seen: new Set() }, 'app');
   const unreadable: string[] = [...found.unreadable];
   const decoder = new TextDecoder();
   for (const path of found.pages) {

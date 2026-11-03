@@ -285,7 +285,7 @@ export const FULL_STACK_TSCONFIG_OPTIONS: Readonly<Record<string, unknown>> = {
  * Import-map entries the emitted TypeScript needs under Deno.
  *
  * The Deno counterpart of the `paths` alias above: without it, `deno check`
- * cannot resolve `~/models/product.ts`. A trailing slash on both sides is
+ * cannot resolve `~/lib/theme.ts` or `~kernel/modules/products/products.token.ts`. A trailing slash on both sides is
  * required — Deno maps prefixes, not globs.
  */
 export const FULL_STACK_DENO_IMPORTS: Readonly<Record<string, string>> = {

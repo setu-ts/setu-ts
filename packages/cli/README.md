@@ -113,9 +113,12 @@ the `wrangler.toml` stanzas both need. Service discovery is not part of it: the 
 
 The only template that composes through a starter rather than inline wiring — its plugin set is
 twenty-two, and a generated file a human is meant to edit should not open with twenty-two imports
-they did not choose. It emits an `app/` tree with the `routes -> features -> services -> models`
-layering, `flatRoutes` `_app`/`_auth` layout groups, the `~/*` alias and the `.server.ts`
-convention, plus the Vite build files.
+they did not choose. Business logic lives in kernel modules under `src/modules/<name>/` (the
+service, its token, its `/api/<name>` routes; `src/modules/products/` is the example), and pages
+live in `app/`: `routes/`, `components/`, client-safe `lib/` and server-only `server/`. A loader
+reaches a module's service with `getService(context, TOKEN)`. It also emits `flatRoutes`
+`_app`/`_auth` layout groups, the `~/*` and `~kernel/*` aliases and the `.server.ts` convention,
+plus the Vite build files.
 
 It deliberately emits **no** `lib/session.server.ts`, `lib/csrf.server.ts`, `lib/sse.server.ts`,
 `lib/kv.server.ts` or `lib/service-logger.server.ts` — those are the session, SSE, secrets and
@@ -129,8 +132,8 @@ way to tell apart. `setu generate middleware` writes **kernel** middleware, whic
 request the application serves — health probes and API routes as well as SSR pages. React Router's
 own route `middleware` export runs only for the SSR routes it is attached to and reads React
 Router's context. The scaffold ships a worked example of the second:
-`app/middleware/require-user.server.ts` redirects a visitor who is not signed in to `/login` and
-puts the signed-in user on the context for the loader, and `/products` attaches it. The generated
+`app/server/require-user.server.ts` redirects a visitor who is not signed in to `/login` and puts
+the signed-in user on the context for the loader, and `/products` attaches it. The generated
 `README.md` carries a table comparing the two, and a kernel middleware generated into a project that
 installs `react-router-plugin` points at the route-level alternative in its own JSDoc.
 

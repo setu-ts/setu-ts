@@ -141,6 +141,27 @@ describe('scanModuleArtifacts module-service family', () => {
     });
     expect(scan.artifacts[MODULE_SERVICE_ARTIFACTS]).toEqual(['orders']);
   });
+
+  it('reports nothing about a second token file the developer owns (review finding 1)', async () => {
+    const fs = createFakeFs({
+      ...moduleSeed(FULL_STACK, TOKEN),
+      '/app/src/modules/orders/admin.token.ts': "export const ADMIN_TOKEN = 'module.admin';\n",
+    });
+    const scan = await scanModuleArtifacts(fs, '/app', 'orders', 'functional', {
+      moduleServices: true,
+    });
+    expect(scan.skipped.filter((s) => s.path.endsWith('.token.ts'))).toEqual([]);
+    expect(scan.unreadable).toEqual([]);
+    expect(scan.manual).toEqual([]);
+  });
+
+  it('still reports the module’s own token when it lacks its export', async () => {
+    const fs = createFakeFs(moduleSeed(FULL_STACK, "export const OTHER = 'module.orders';\n"));
+    const scan = await scanModuleArtifacts(fs, '/app', 'orders', 'functional', {
+      moduleServices: true,
+    });
+    expect(scan.skipped.map((s) => s.path)).toEqual(['src/modules/orders/orders.token.ts']);
+  });
 });
 
 describe('every index writer keeps the registration', () => {

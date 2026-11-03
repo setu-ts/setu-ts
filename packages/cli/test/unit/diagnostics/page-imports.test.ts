@@ -5,7 +5,10 @@
  *
  * @module
  */
+import * as nodeFs from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
+import { createNodeRuntimeServices } from '@setu-ts/runtime';
+import { tempDir } from '../../../../../test/node-helpers.ts';
 import {
   globReachesKernel,
   kernelTarget,
@@ -23,6 +26,12 @@ const ACCEPTED: readonly (readonly [label: string, source: string])[] = [
   ['export type', "export type { Product } from '~kernel/modules/products/products.types.ts';"],
   ['token module', "import { PRODUCTS } from '~kernel/modules/products/products.token.ts';"],
   ['page alias', "import { Card } from '~/components/ui/card.tsx';"],
+  // Review finding 7: the bundler and Node/Bun type-checking resolve these to the token file.
+  [
+    'an extensionless token module',
+    "import { PRODUCTS } from '~kernel/modules/products/products.token';",
+  ],
+  ['a .js token module', "import { PRODUCTS } from '~kernel/modules/products/products.token.js';"],
   [
     'a token module reached through the page alias',
     "import { PRODUCTS } from '~/../src/modules/products/products.token.ts';",
@@ -406,7 +415,9 @@ describe('scanPageImports bounds', () => {
 
   it('ends a directory loop at the depth bound and reports where it stopped', async () => {
     // A symlinked directory that points at its parent: every level lists itself.
-    const fs = createFakeFs({ '/p/app/root.tsx': '' });
+    // Without realPath the depth bound is what ends the walk.
+    const fs = { ...createFakeFs({ '/p/app/root.tsx': '' }) };
+    delete (fs as { realPath?: unknown }).realPath;
     const readdir = fs.readdir.bind(fs);
     const stat = fs.stat.bind(fs);
     fs.readdir = async (path: string) =>
@@ -422,6 +433,50 @@ describe('scanPageImports bounds', () => {
     const scan = await scanPageImports(fs, '/p');
     expect(scan.violations).toEqual([]);
     expect(scan.unreadable).toEqual([`app${'/loop'.repeat(33)}`]);
+  });
+});
+
+describe('scanPageImports over real symlinks (review finding 6)', () => {
+  it('walks a looped directory once and refuses a link out of app/', async () => {
+    const root = await tempDir({ prefix: 'page-walk-' });
+    try {
+      await nodeFs.mkdir(`${root}/app/routes`, { recursive: true });
+      await nodeFs.writeFile(
+        `${root}/app/routes/bad.tsx`,
+        "import { s } from '~kernel/modules/a/a.service.ts';\nvoid s;\n",
+      );
+      await nodeFs.symlink('.', `${root}/app/x`);
+      await nodeFs.symlink('.', `${root}/app/y`);
+      await nodeFs.symlink('..', `${root}/app/out`);
+      const scan = await scanPageImports(createNodeRuntimeServices().fs!, root);
+      expect(scan.violations.map((v) => v.path)).toEqual(['app/routes/bad.tsx']);
+      expect(scan.unreadable).toEqual(['app/out']);
+    } finally {
+      await nodeFs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('reports an entry whose stat fails instead of throwing', async () => {
+    const fs = createFakeFs({ '/p/app/root.tsx': '' });
+    const readdir = fs.readdir.bind(fs);
+    fs.readdir = async (path: string) =>
+      path === '/p/app' ? [...(await readdir(path)), 'broken'] : readdir(path);
+    const stat = fs.stat.bind(fs);
+    fs.stat = (path: string) =>
+      path === '/p/app/broken'
+        ? Promise.reject(Object.assign(new Error('ELOOP'), { code: 'ELOOP' }))
+        : stat(path);
+    expect(await scanPageImports(fs, '/p')).toEqual({ violations: [], unreadable: ['app/broken'] });
+  });
+
+  it('reports a directory it cannot list instead of throwing', async () => {
+    const fs = createFakeFs({ '/p/app/routes/a.tsx': '' });
+    const readdir = fs.readdir.bind(fs);
+    fs.readdir = (path: string) =>
+      path === '/p/app/routes'
+        ? Promise.reject(Object.assign(new Error('EACCES'), { code: 'EACCES' }))
+        : readdir(path);
+    expect(await scanPageImports(fs, '/p')).toEqual({ violations: [], unreadable: ['app/routes'] });
   });
 });
 

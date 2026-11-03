@@ -93,6 +93,10 @@ export async function loader({ context }: { context: RouterLoadContext }) {
 
 Override it with `populateLoadContext` to add your own keys.
 
+`servicesContext` suits plain registered services, as above. For a module's request-bound service
+use `getService` below: the registry holds such a service as its `requestService` wrapper, so
+`services.get(TOKEN)` returns the wrapper rather than the service.
+
 ### `getService` — a request-bound kernel service in one line
 
 Since 0.12.0 the context also carries a resolver bound to the current request (never the kernel

@@ -30,6 +30,9 @@ describe('full-stack app files', () => {
       expect(section.includes('wrangler secret put SESSION_SECRET')).toBe(
         runtime === 'cloudflare-workers',
       );
+      // Review finding 2: Workers has no dev.ts, PORT or VITE_PORT.
+      expect(section.includes('## Development ports')).toBe(runtime !== 'cloudflare-workers');
+      expect(section).not.toMatch(/\n\n\n/);
     });
   }
 

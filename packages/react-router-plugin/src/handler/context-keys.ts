@@ -22,6 +22,12 @@ import type { RouterContextKey } from '../interfaces/index.ts';
  * the type exists only because the key needs a default at all — React Router's
  * `get()` throws for an unset key that has none.
  *
+ * Superseded by `getService` for a module's request-bound service
+ * (since 0.12.0): the registry holds such a service as its `requestService`
+ * wrapper, so `services.get(TOKEN)` returns the wrapper, not the service. Only
+ * `getService` (or `resolveRequestService` in kernel code) builds the
+ * request's instance. Reading a plain registered service, as below, still works.
+ *
  * @example
  * ```typescript
  * import { servicesContext } from '@setu-ts/react-router-plugin';

@@ -51,6 +51,20 @@ describe('generation refuses kernel routes that shadow React Router pages', () =
     );
   });
 
+  it('refuses --page over an existing page, naming its file (review finding 3)', async () => {
+    const h = harness();
+    expect(await h.run(['g', 'module', 'products', '--page'])).toBe(1);
+    expect(h.fs.writes).toEqual([]);
+    expect(h.err.text()).toContain('the page /products already exists');
+    expect(h.err.text()).toContain('routes/_app/products._index.tsx');
+  });
+
+  it('allows --page where no page exists yet', async () => {
+    const h = harness();
+    expect(await h.run(['g', 'module', 'orders', '--page']), h.err.text()).toBe(0);
+    expect(h.fs.has('/app/app/routes/_app/orders._index.tsx')).toBe(true);
+  });
+
   it('refuses a full-stack module whose /api routes shadow a page', async () => {
     const api = [{ id: 'api-orders', path: 'api/orders', file: 'routes/_app/api.orders.tsx' }];
     const h = harness(undefined, () =>

@@ -487,16 +487,29 @@ export async function runGenerateCommand(
         `Notice: cannot check React Router pages (${escapeName(pages.reason)}); check ${base} and ${base}/:id against app/routes.ts and app/routes/ by hand.`,
       );
     } else {
-      const page = pages.paths.find((path) => kernelShadows(base, path));
-      if (page !== undefined) {
+      const shadowed = pages.paths.find((path) => kernelShadows(base, path));
+      if (shadowed !== undefined) {
         deps.error(
-          `Cannot generate ${schematicName} "${names.kebab}": its kernel routes ${base} and ${base}/:id would take precedence over the React Router page ${escapeName(page)} (${escapeName(pages.files.get(page)!)}).`,
+          `Cannot generate ${schematicName} "${names.kebab}": its kernel routes ${base} and ${base}/:id would take precedence over the React Router page ${escapeName(shadowed)} (${escapeName(pages.files.get(shadowed)!)}).`,
         );
         deps.error(
           schematicName === 'module'
             ? `Choose another module name: a full-stack module's routes are mounted at /api/<module name>.`
             : `Choose another name, or place the ${schematicName} in a module: setu g module api (with --adopt-controllers if the project has controllers), then setu g ${schematicName} ${names.kebab} --module api (which yields /api/${names.kebab}).`,
         );
+        return EXIT_ERROR;
+      }
+      // `--page` adds a page at /<name>: an existing page there would be
+      // shadowed or, for /login, the guarded page would redirect to itself.
+      const pagePath = `/${names.kebab}`;
+      const existing = page
+        ? pages.paths.find((path) => path.replace(/\/+$/, '') === pagePath)
+        : undefined;
+      if (existing !== undefined) {
+        deps.error(
+          `Cannot generate module "${names.kebab}" with --page: the page ${pagePath} already exists (${escapeName(pages.files.get(existing)!)}).`,
+        );
+        deps.error('Choose another module name, or generate the module without --page.');
         return EXIT_ERROR;
       }
     }

@@ -377,6 +377,9 @@ loaders share (M130).
   has no `slot`), and shared by every caller in that request. A factory that returns a non-object
   throws `TypeError`; a factory that throws is not cached, so the next call retries. Any other entry
   is returned as registered.
+- `IServiceRegistry.get(token)` on a `requestService` entry returns the frozen wrapper, not the
+  service: only `resolveRequestService` (and `getService` in a loader) builds the request's
+  instance. Kernel code and plugins reading a module's service use `resolveRequestService`.
 
 ```typescript
 // src/modules/products/products.token.ts — the only module a page imports by value
@@ -5109,7 +5112,9 @@ app.router.get('/api/health', (ctx) => {
   `createLoadContext` factory, and the optional `populateLoadContext` hook; its `render(ctx)` method
   delegates to `bridgeRequestToRR` and returns the `HandlerResult`.
 - `servicesContext: RouterContextKey<IServiceRegistry | null>` — context key holding the kernel
-  service registry. Always set by the plugin.
+  service registry. Always set by the plugin. Superseded by `getService` for a module's
+  request-bound service (since 0.12.0): the registry holds that service as its `requestService`
+  wrapper, so `services.get(TOKEN)` returns the wrapper, not the service.
 - `getService<T>(context, token: ServiceToken<T> | CapabilityToken): T` (since 0.12.0) — resolves a
   kernel service for the current request from a loader, action or `handleError`, through
   `resolveRequestService`. A module's request-bound service is the same instance a kernel `/api`
@@ -11403,7 +11408,7 @@ export async function createApp(env?: Readonly<Record<string, unknown>>): Promis
 Since 0.12.0 (M130) the template is split in two. Business logic lives in kernel modules under
 `src/modules/<name>/` — the service, its types, its token (`serviceToken`), its `/api/<name>` routes
 and a managed `index.ts` that registers the service with `requestService` — and
-`src/modules/ products/` is the worked example. Pages live in `app/`: `routes/`, `components/`,
+`src/modules/products/` is the worked example. Pages live in `app/`: `routes/`, `components/`,
 client-safe `lib/` and server-only `server/` (the session, CSRF and current-user keys, and the
 `requireUser` route middleware). A loader reaches a module's service with
 `getService(context, PRODUCTS)`, and the page and `/api/products` share one instance within a
