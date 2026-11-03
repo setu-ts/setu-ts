@@ -35,7 +35,7 @@
 
 import { existsSync } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 
 /**
@@ -98,3 +98,28 @@ export const importProjectModule: ProjectModuleLoader = async (url, root) => {
   const module: unknown = await tsImport(url, { parentURL: url, tsconfig });
   return module as Record<string, unknown>;
 };
+
+/**
+ * Imports a bare package from the project's installation, using its own configuration.
+ * @param specifier - The package to load
+ * @param root - The project root
+ * @returns The installed module's exports
+ */
+export async function importFromProject(
+  specifier: string,
+  root: string,
+): Promise<Record<string, unknown>> {
+  let tsx: typeof import('tsx/esm/api');
+  try {
+    tsx = await import('tsx/esm/api');
+  } catch (cause) {
+    throw new OptionalDependencyUnavailableError('tsx', { requiredBy: '@setu-ts/cli', cause });
+  }
+  const manifest = existsSync(join(root, 'package.json')) ? 'package.json' : 'deno.json';
+  const parentURL = pathToFileURL(join(root, manifest)).href;
+  const module: unknown = await tsx.tsImport(specifier, {
+    parentURL,
+    tsconfig: nearestTsconfig(parentURL, root),
+  });
+  return module as Record<string, unknown>;
+}

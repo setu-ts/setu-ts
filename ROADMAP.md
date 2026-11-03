@@ -16211,9 +16211,9 @@ as data; the 409 Problem Details field by field; and the database benchmark
 openapi-typescript before they are fixed — the repository rule):
 
 1. **Load the document** by booting the project the way plugin commands already do (`loadApp`, a
-   no-port `start()`, `getSpec()`, `stop()` in a `finally`), or from `--from <file|url>` for Workers
-   projects and apps whose start needs a live database. A named refusal when openapi-plugin is not
-   registered.
+   no-port `start()`, `getSpec()`, `stop()` in a `finally`), or from `--input <file|url>` for
+   Workers projects and apps whose start needs a live database. A named refusal when openapi-plugin
+   is not registered.
 2. **Generate with the project's own `@setu-ts/sdk`**, lazily imported and awaited inside a
    `try`/`catch`; the CLI gains no sdk dependency.
 3. **Write a managed file** through the CLI's write-safety path, with `--dry-run`.
@@ -16981,7 +16981,7 @@ patch by construction and gains nothing new here.
 | 126       | ✅     | runtime + cli — a local diagnostics listener on Node, and the devtool opt-in for Node targets                                                                                                                                                                                             |
 | 127       | ⬜     | common + multi-tenancy-plugin + database-plugin — a registry of real tenants: `tenants` option, Unknown Tenant 404, 503 on registry failure, bounded cache                                                                                                                                |
 | 128       | ✅     | database-plugin + common + multi-tenancy-plugin — optimistic locking (`updateVersioned`, `VersionConflictError`) and the database plugin under faults (X94-1 High, X94-2, V11-5, X94-3)                                                                                                   |
-| 129       | ⬜     | cli + common + openapi-plugin — `setu client`: the typed client as a command, with a `--check` drift gate                                                                                                                                                                                 |
+| 129       | ✅     | cli + common + openapi-plugin — `setu client`: the typed client as a command, with a `--check` drift gate                                                                                                                                                                                 |
 | 130       | ⬜     | react-router-plugin + cli + full-stack-starter — the full-stack template: kernel modules behind the pages, `getService`, the template half of smoke group G5                                                                                                                              |
 | 131       | ⬜     | the `v0.11.0` smoke closeout — four letters, regression first                                                                                                                                                                                                                             |
 | 131a      | ✅     | queue + Redis-backed plugins + notification + health + telemetry + logger + cli — Redis, node-redis and readiness (V11-10 regression)                                                                                                                                                     |

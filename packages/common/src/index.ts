@@ -257,6 +257,7 @@ export type {
 } from './plugin.ts';
 
 // Domain service contracts
+export type { IOpenApiService } from './services/openapi.ts';
 export type { ILogger, LogMetadata } from './services/logger.ts';
 export type { IConfig } from './services/config.ts';
 export { validatedStateKey } from './services/validation.ts';

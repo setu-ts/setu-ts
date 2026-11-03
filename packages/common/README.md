@@ -501,6 +501,7 @@ package fits the plugin architecture.
 | `InjectionToken`                      | interface |
 | `INotifier`                           | interface |
 | `IOpenApiApi`                         | interface |
+| `IOpenApiService`                     | interface |
 | `IOrmAdapter`                         | interface |
 | `IOutboundHttpDiagnosticsSource`      | interface |
 | `IOutboxStore`                        | interface |

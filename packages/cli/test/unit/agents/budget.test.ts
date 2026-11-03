@@ -40,6 +40,8 @@ describe('agent brief byte budgets', () => {
               'start:dev',
               'start:debug',
               'check',
+              'client',
+              'client:check',
               'test',
               'test:e2e',
               'dev',

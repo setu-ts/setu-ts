@@ -304,6 +304,7 @@ export async function denoInstallRefusal(
  * @param dir - The project root (absolute)
  * @param config - The `--config` override, when supplied
  * @param load - The module loader; defaults to a real import through `tsx`
+ * @param purpose - The caller whose boot failure is explained
  * @returns The unstarted application
  * @throws {Error} If the module cannot be imported, exports no
  * {@linkcode CONFIG_EXPORT} function, or that function does not produce an
@@ -313,6 +314,7 @@ export async function loadApp(
   dir: string,
   config?: string,
   load: AppLoader = importModule,
+  purpose: 'plugin commands' | 'client' = 'plugin commands',
 ): Promise<IApplication> {
   const url = toFileUrl(configModulePath(dir, config));
 
@@ -348,10 +350,13 @@ export async function loadApp(
     const detail = escapeName(cause instanceof Error ? cause.message : String(cause));
     throw new Error(
       `${CONFIG_EXPORT}() in ${escapeName(String(url))} threw: ${detail}\n` +
-        `  Plugin commands are unavailable in this project because building the ` +
-        `application failed. \`setu\` constructs it to discover them, with inert ` +
-        `platform bindings — anything a plugin READS at construction time will not ` +
-        `be there.`,
+        (purpose === 'client'
+          ? '  `setu client` cannot read the OpenAPI document by booting the application; ' +
+            'pass `--input <file|url>` to read a saved or served document instead.'
+          : `  Plugin commands are unavailable in this project because building the ` +
+            `application failed. \`setu\` constructs it to discover them, with inert ` +
+            `platform bindings — anything a plugin READS at construction time will not ` +
+            `be there.`),
       { cause },
     );
   }
