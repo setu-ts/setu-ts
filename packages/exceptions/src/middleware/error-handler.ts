@@ -51,7 +51,7 @@ import {
 } from '../formatters/error-formatter.ts';
 import { rfc9457Formatter } from '../formatters/rfc9457-formatter.ts';
 import { rfc7807Formatter } from '../formatters/rfc7807-formatter.ts';
-import { maskUrlUserinfoDeep } from './mask-url-userinfo-deep.ts';
+import { maskUrlUserinfoDeep, stringifyMasked } from './mask-url-userinfo-deep.ts';
 
 /**
  * Options for the {@linkcode errorHandler} middleware factory.
@@ -317,7 +317,7 @@ export function errorHandler(options?: ErrorHandlerOptions): MiddlewareFunction 
       // Serialize and send via `.send(bytes)` rather than `.json(body)` so
       // the content-type header we set is not overwritten by json()'s own
       // `application/json` default — RFC 9457 requires `application/problem+json`.
-      const bytes = new TextEncoder().encode(JSON.stringify(maskUrlUserinfoDeep(body)));
+      const bytes = new TextEncoder().encode(stringifyMasked(body));
       return ctx.response
         .status(responseError.statusCode)
         .header('content-type', contentType)

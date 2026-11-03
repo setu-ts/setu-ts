@@ -183,6 +183,25 @@ describe('served error bodies', () => {
     expect(shared.connection).toBe(CONNECTION_URL);
   });
 
+  // Review of the served-body fix: a walk over plain objects missed values that
+  // JSON.stringify serializes through toJSON or as an instance's own fields.
+  class Connection {
+    constructor(readonly dsn: string) {}
+  }
+  for (const [label, value] of [
+    ['a URL', new URL(CONNECTION_URL)],
+    ['a class instance', new Connection(CONNECTION_URL)],
+    ['an object with toJSON', { toJSON: () => CONNECTION_URL }],
+  ] as const) {
+    it(`masks ${label} in details`, async () => {
+      const { ctx, responseSnapshot } = createFakeContext();
+      await errorHandler({ logErrors: false })(ctx, () => {
+        throw new HttpError(409, 'conflict', { connection: value });
+      });
+      expectMasked(responseText(responseSnapshot().body));
+    });
+  }
+
   it('masks the instance composed by a responder without a full request context', () => {
     const { response, snapshot } = createFakeResponse();
     const responder = createErrorResponder(selectFormatter('rfc9457'), 'application/problem+json');
