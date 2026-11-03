@@ -290,6 +290,15 @@ pnpm --dir apps/cqrs run start
 
 ---
 
+### ai-chat
+
+The [AI chat example](../apps/ai-chat) follows the [AI guide](./ai.md): the SDK owns tool loops,
+structured output, UI streams and model fallback; Setu owns request identity, cancellation, quotas
+and outbox/inbox usage delivery. Run `pnpm --dir apps/ai-chat run smoke` for its Node-only proofs,
+including an in-process OTLP receiver and a content-capture positive control. Its standalone recipe
+files intentionally live directly under `src/`, including `chat.routes.ts`, rather than a generated
+controller module. A real endpoint is optional through `AI_COMPAT_BASE_URL`.
+
 ### multi-tenant
 
 **Concept.** Resolve a repository for the current request's tenant instead of selecting a global

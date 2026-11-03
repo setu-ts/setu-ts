@@ -8,6 +8,18 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Weighted quotas and AI SDK recipes (M134, #PR, `@setu-ts/auth-plugin`,
+  `@setu-ts/telemetry-plugin`).** `createQuota`, `IQuota`, `QuotaOptions`, `QuotaReservation`,
+  `IQuotaStore`, `MemoryQuotaStore`, `RedisQuotaStore` and `IQuotaRedisClient` add atomic weighted
+  reserve/settle budgets with epoch or UTC calendar windows, issued receipts and expiry.
+  `QuotaExceededError`, `QuotaStoreUnavailableError` and `respondQuotaExceeded` expose fail-closed
+  refusals. The rate limiter shares the quota body initializer with byte-identical output.
+  `TelemetryPlugin.registerGlobal` optionally connects library spans to Setu's provider; refused
+  registration warns once and shutdown retains it. The AI guide and Node `apps/ai-chat` demonstrate
+  SDK tool loops, structured output, streaming, fallback, capture-off tracing and outbox/inbox usage
+  delivery. AI dependencies stay in the application and root development tooling. No Setu AI package
+  is introduced; existing applications need no changes. Ships in 0.13.0.
+
 - **Typed client command (M129, #547, `@setu-ts/cli`, `@setu-ts/common`,
   `@setu-ts/openapi-plugin`).** `setu client` boots without a port or reads JSON with
   `--input <file|url>`, generates `src/clientsdk/api.ts` with the project's own SDK, and writes a

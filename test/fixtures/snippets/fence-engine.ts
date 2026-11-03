@@ -95,6 +95,7 @@ export const GUIDES = [
   'docs/runtime-deployment.md',
   'docs/authorization.md',
   'docs/webhooks.md',
+  'docs/ai.md',
 ] as const;
 
 /** The committed snippet compiler configuration used for all fence compilation. */

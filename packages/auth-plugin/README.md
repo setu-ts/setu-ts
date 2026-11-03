@@ -1609,6 +1609,39 @@ rateLimitMiddleware({
 starting at 1,024 entries. Each key retains its own window duration; live windows are never evicted
 for a hard cap, so active rate limits survive cleanup.
 
+## Weighted quotas (M134)
+
+`createQuota({ name, store, limit, window, runtime })` is a standalone reserve-then-settle quota.
+Choose non-negative safe integer units (tokens or micro-dollars). `reserve(key, amount)` atomically
+admits only within the limit and returns a frozen `QuotaReservation`; `settle(receipt, actual)`
+refunds or adds the difference to the original window, flooring usage at zero. `release(receipt)`
+settles zero. Settlement is idempotent, including concurrent calls; fabricated and foreign receipts
+throw `TypeError`. A store failure fails closed with `QuotaStoreUnavailableError`.
+
+`name` matches `[a-z0-9-]+`; keys are non-empty and at most 512 UTF-8 bytes. `limit` is a number or
+an asynchronous per-key callback returning a number or undefined (unlimited but still recorded).
+Amounts and resolved limits reject NaN, infinities, negative, fractional and unsafe integers before
+storage. Windows are epoch-aligned positive integer milliseconds, `utc-day` or `utc-month`. Usage
+expires at the window's end plus one day; settlement after a boundary still charges its old window.
+
+Use `new MemoryQuotaStore(runtime)` for one process, or `new RedisQuotaStore({ client, namespace })`
+for a shared budget. `IQuotaRedisClient` requires ioredis-style `eval(script, numkeys, ...args)` and
+`quit()`; node-redis can use common's `fromNodeRedis` adapter. The namespace must be non-empty.
+Redis passes caller data through KEYS/ARGV, uses atomic scripts and absolute expiry, and wraps
+failures with their original cause. `close()` quits the injected client, so dedicate that client to
+the store.
+
+`QuotaExceededError` carries the policy in `name`, whole `retryAfterSeconds` (at least one), and a
+429 status hint. Under `errorHandler({ format: 'rfc9457' })` its body has the IANA quota-exceeded
+type, title `Quota Exceeded`, detail `The quota for this request is spent.`, `violated-policies` and
+`retry-after` extensions. It carries no usage, tenant or limit. The hint contract has no headers;
+call `respondQuotaExceeded(ctx, error)` to include `Retry-After`. The request-rate limiter uses the
+same body initializer and preserves its existing bytes and headers.
+
+The [AI guide](https://github.com/setu-ts/setu-ts/blob/main/docs/ai.md) and
+[example](https://github.com/setu-ts/setu-ts/tree/main/apps/ai-chat) demonstrate trusted per-tenant
+keys, conservative provider-call reservations, settlement and transactional usage records.
+
 ## Diagnostics
 
 `AuthPlugin({ authorizationDiagnostics })` opts into minimized authorization-decision explanations
@@ -1664,6 +1697,17 @@ MIT
 
 | Export                              | Kind      |
 | ----------------------------------- | --------- |
+| `createQuota`                       | function  |
+| `respondQuotaExceeded`              | function  |
+| `MemoryQuotaStore`                  | class     |
+| `RedisQuotaStore`                   | class     |
+| `QuotaExceededError`                | class     |
+| `QuotaStoreUnavailableError`        | class     |
+| `IQuota`                            | interface |
+| `IQuotaStore`                       | interface |
+| `IQuotaRedisClient`                 | interface |
+| `QuotaOptions`                      | type      |
+| `QuotaReservation`                  | type      |
 | `authMiddleware`                    | function  |
 | `AuthPlugin`                        | function  |
 | `defaultRateLimitKey`               | function  |

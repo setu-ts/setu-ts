@@ -48,6 +48,14 @@ if (principal === null) {
 
 ## Other options
 
+- `createQuota({ name, store, limit, window, runtime })` reserves integer units before work, then
+  `settle(receipt, actual)` refunds or adds the difference once; `release(receipt)` refunds all.
+  `MemoryQuotaStore` is process-local; `RedisQuotaStore({ client, namespace })` uses atomic Lua.
+  Keys come from trusted request identity, never a model/body tenant field. Only issued receipts are
+  accepted. Use `respondQuotaExceeded(ctx, error)` for 429 with `Retry-After`; an uncaught
+  `QuotaExceededError` has the same body hint without a header. See the
+  [AI guide](../../docs/ai.md).
+
 - `apiKey`, `session`, `issuers` and `strategies` supply other passive authentication paths.
 - `requireScopes` (ALL-of OAuth scopes) and `resourceServer` (RFC 9728) serve token APIs.
 - `definePolicy` and `requirePolicy` evaluate application policies; scoped guards use `scopedRbac`.

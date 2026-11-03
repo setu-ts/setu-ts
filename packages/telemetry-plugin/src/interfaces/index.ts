@@ -140,6 +140,13 @@ export interface TelemetryPluginOptions {
   middleware?: boolean;
   /** Whether real OTel spans become active for nested work (default: `true`). */
   contextPropagation?: boolean;
+  /**
+   * Registers the built provider with the OTel API (default: false).
+   * One process has one global provider. A refused registration warns once;
+   * shutdown leaves that registration in place.
+   * @since 0.13.0
+   */
+  registerGlobal?: boolean;
   /** Injectable loader for the OTel context manager. */
   contextManagerFactory?: () => Promise<{ enable(): unknown; disable(): unknown }>;
   /**

@@ -270,6 +270,9 @@ type RuleName = keyof typeof RULES;
  * this test, so the list only shrinks when an example comes into line.
  */
 const EXCEPTIONS: Readonly<Record<string, Partial<Record<RuleName, string>>>> = {
+  'ai-chat': {
+    controllers: 'The approved M134 guide keeps its standalone route recipe in src/chat.routes.ts.',
+  },
   cloudflare: {
     entry: 'A Worker is started by workerd through worker.ts; main.ts only explains how to run it.',
   },

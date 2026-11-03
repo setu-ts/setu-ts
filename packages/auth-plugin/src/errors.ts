@@ -78,3 +78,14 @@ export class RateLimitStoreUnavailableError extends Error {
     });
   }
 }
+
+/** A quota backend failure; reservations fail closed. @since 0.13.0 */
+export class QuotaStoreUnavailableError extends Error {
+  /** Stable discriminant across realms. */
+  override readonly name = 'QuotaStoreUnavailableError';
+
+  /** @param cause - Original Redis failure */
+  constructor(cause: unknown) {
+    super('Quota storage is temporarily unavailable.', { cause });
+  }
+}

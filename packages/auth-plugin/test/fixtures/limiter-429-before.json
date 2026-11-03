@@ -1,0 +1,35 @@
+[
+  {
+    "format": "default",
+    "status": 429,
+    "headers": [
+      ["content-type", "application/json; charset=utf-8"],
+      ["ratelimit", "\"budget-policy\";r=0;t=0"],
+      ["ratelimit-policy", "\"budget-policy\";q=0;w=60"],
+      ["retry-after", "0"]
+    ],
+    "body": "{\"statusCode\":429,\"message\":\"Too Many Requests\",\"details\":{\"detail\":\"Custom refusal\"}}"
+  },
+  {
+    "format": "rfc9457",
+    "status": 429,
+    "headers": [
+      ["content-type", "application/problem+json"],
+      ["ratelimit", "\"budget-policy\";r=0;t=0"],
+      ["ratelimit-policy", "\"budget-policy\";q=0;w=60"],
+      ["retry-after", "0"]
+    ],
+    "body": "{\"violated-policies\":[\"budget-policy\"],\"type\":\"https://iana.org/assignments/http-problem-types#quota-exceeded\",\"title\":\"Quota Exceeded\",\"status\":429,\"detail\":\"Custom refusal\",\"instance\":\"/limited\"}"
+  },
+  {
+    "format": "rfc7807",
+    "status": 429,
+    "headers": [
+      ["content-type", "application/problem+json"],
+      ["ratelimit", "\"budget-policy\";r=0;t=0"],
+      ["ratelimit-policy", "\"budget-policy\";q=0;w=60"],
+      ["retry-after", "0"]
+    ],
+    "body": "{\"violated-policies\":[\"budget-policy\"],\"type\":\"https://iana.org/assignments/http-problem-types#quota-exceeded\",\"title\":\"Quota Exceeded\",\"status\":429,\"detail\":\"Custom refusal\",\"instance\":\"/limited\"}"
+  }
+]
