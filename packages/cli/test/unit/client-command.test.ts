@@ -372,8 +372,7 @@ describe('project client generation', () => {
         () => Promise.reject(cause),
       ),
     ).rejects.toMatchObject({
-      name: 'OptionalDependencyUnavailableError',
-      dependency: '@setu-ts/sdk',
+      message: expect.stringContaining('@setu-ts/sdk is not installed in this project') as unknown,
       cause,
     });
   });
@@ -422,21 +421,28 @@ describe('project client generation', () => {
     }
   });
 
-  it('reports a missing SDK with the optional dependency cause and setu add sdk remedy', async () => {
-    await expect(
-      generateClientFile(
-        DOCUMENT,
-        {},
-        'node',
-        '/app',
-        OUTPUT,
-        () => {},
-        () =>
-          Promise.resolve().then(() => {
-            throw missing();
-          }),
-      ),
-    ).rejects.toBeInstanceOf(OptionalDependencyUnavailableError);
+  it('reports a missing SDK as absent from the project, with the setu add sdk remedy', async () => {
+    const cause = missing();
+    const rejected = generateClientFile(
+      DOCUMENT,
+      {},
+      'node',
+      '/app',
+      OUTPUT,
+      () => {},
+      () =>
+        Promise.resolve().then(() => {
+          throw cause;
+        }),
+    );
+    await expect(rejected).rejects.toMatchObject({ cause });
+    // The sdk belongs in the project, not beside the CLI: the generic optional-peer
+    // wording ("install it where @setu-ts/cli is installed") would send the reader
+    // to the wrong place.
+    await expect(rejected).rejects.not.toBeInstanceOf(OptionalDependencyUnavailableError);
+    await expect(rejected).rejects.toThrow(
+      '@setu-ts/sdk is not installed in this project. `setu client` generates with the project',
+    );
     const h = harness({}, () =>
       Promise.resolve().then(() => {
         throw missing();
@@ -444,6 +450,25 @@ describe('project client generation', () => {
     );
     expect(await h.run()).toBe(1);
     expect(h.err.join('\n')).toContain('setu add sdk');
+  });
+  it('refuses an uninstalled Deno project before loading anything, even with --input', async () => {
+    const h = harness({
+      '/app/deno.json': '{"imports":{}}',
+      '/app/o.json': JSON.stringify(DOCUMENT),
+    });
+    expect(await h.run(['--input', 'o.json'])).toBe(1);
+    expect(h.err.join('\n')).toContain('Run `deno install`');
+    expect(h.importFromProject).not.toHaveBeenCalled();
+    expect(h.loadApp).not.toHaveBeenCalled();
+    // A Workers project carries a deno.json for plugin gating; it is not told to run deno install.
+    const workers = harness({
+      '/app/deno.json': '{"imports":{}}',
+      '/app/wrangler.toml': '',
+      '/app/o.json': JSON.stringify(DOCUMENT),
+    });
+    await workers.run(['--input', 'o.json']);
+    expect(workers.err.join('\n')).not.toContain('deno install');
+    expect(workers.importFromProject).toHaveBeenCalled();
   });
   it('does not misreport an SDK that throws during loading as absent', async () => {
     const h = harness({}, () =>

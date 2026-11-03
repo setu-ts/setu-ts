@@ -124,12 +124,14 @@ All line numbers read on `develop` at `9886d5a64`.
   `tsImport('@setu-ts/sdk', { parentURL: <file URL of root/package.json or deno.json> })`, so the
   specifier resolves from the PROJECT's `node_modules`, never the CLI's. The specifier is the
   literal `'@setu-ts/sdk'` at the single call site in `client/generate.ts`, awaited inside a
-  try/catch whose catch throws
-  `OptionalDependencyUnavailableError('@setu-ts/sdk', { requiredBy: 'setu client' })` with "run
-  `setu add sdk`". A loaded module whose `generateOpenApiClient` is not a function → exit 1 "the
-  installed @setu-ts/sdk has no generateOpenApiClient; update it". An `OpenApiCodegenError` → exit 1
-  with its message (e.g. the `Api` clash names `--type-name`). The CLI gains NO dependency on
-  `@setu-ts/sdk`.
+  try/catch. Only Node's not-found error for that exact specifier counts as absent; it becomes a
+  plain `Error` (with the original `cause`) saying the sdk is not installed in this project and to
+  run `setu add sdk`, then install. Not `OptionalDependencyUnavailableError`: its wording points at
+  where the CLI is installed, and the sdk belongs in the project (code review). An uninstalled Deno
+  project is refused by `denoInstallRefusal` before any import, on the `--input` path as well. A
+  loaded module whose `generateOpenApiClient` is not a function → exit 1 "the installed @setu-ts/sdk
+  has no generateOpenApiClient; update it". An `OpenApiCodegenError` → exit 1 with its message (e.g.
+  the `Api` clash names `--type-name`). The CLI gains NO dependency on `@setu-ts/sdk`.
 - **Why:** a bare `import('@setu-ts/sdk')` from the CLI resolves next to the CLI (global `npx`, or a
   different version in the workspace), so generated imports could mismatch the installed sdk. The
   project's copy guarantees they match. tsx is already the CLI's project loader.
@@ -193,7 +195,8 @@ All line numbers read on `develop` at `9886d5a64`.
 
 ### 3.8 `setu add sdk` scripts
 
-- **Decision:** `setu add sdk` adds `client` and `client:check` scripts (`tasks` on Deno), using the
+- **Decision:** `setu add sdk` adds `client` and `client:check` scripts (`tasks` on Deno), only to
+  the manifest the runtime runs them from (never a Workers project's gating `deno.json`), using the
   same runner the project's `check` script uses for `setu check`: bare `setu client` /
   `setu client --check` where `@setu-ts/cli` is a devDependency,
   `cliInvocation(runtime) + ' client'` otherwise. An existing `client` or `client:check` script is

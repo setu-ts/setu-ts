@@ -88,6 +88,16 @@ describe('setu add sdk client scripts', () => {
       });
     });
   }
+  it('writes the scripts only to the manifest the runtime runs them from', async () => {
+    const h = harness({
+      '/app/package.json': JSON.stringify({ devDependencies: { '@setu-ts/cli': '^1' } }),
+      '/app/deno.json': JSON.stringify({ imports: {} }),
+      '/app/wrangler.toml': '',
+    });
+    expect(await h.run(['sdk'])).toBe(0);
+    expect(h.read('/app/package.json')).toContain('"client:check": "setu client --check"');
+    expect(JSON.parse(h.read('/app/deno.json'))).not.toHaveProperty('tasks');
+  });
   it('uses the invocation prefix when the CLI is not a devDependency, and keeps each existing script', async () => {
     for (const kept of ['client', 'client:check']) {
       const h = harness({

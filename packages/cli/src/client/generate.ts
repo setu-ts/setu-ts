@@ -1,5 +1,4 @@
 /** Loads the project's SDK and renders the managed client using its formatter. @module */
-import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 import type { TargetRuntime } from '../constants.ts';
 import type { GeneratedFile } from '../utils/file-writer.ts';
 import { importFromProject } from '../utils/ts-loader.ts';
@@ -77,12 +76,14 @@ export async function generateClientFile(
     sdk = await load('@setu-ts/sdk', root);
   } catch (cause) {
     if (!isMissingModule(cause, '@setu-ts/sdk')) throw cause;
-    const error = new OptionalDependencyUnavailableError('@setu-ts/sdk', {
-      requiredBy: '@setu-ts/cli',
-      cause,
-    });
-    error.message += ' Run `setu add sdk`.';
-    throw error;
+    // Not OptionalDependencyUnavailableError: its wording sends the reader to
+    // where the CLI is installed, and this package belongs in the project.
+    throw new Error(
+      '@setu-ts/sdk is not installed in this project. `setu client` generates with the ' +
+        "project's own copy, so its generated imports match the installed version. Run " +
+        '`setu add sdk` if the project does not depend on it yet, then install its packages.',
+      { cause },
+    );
   }
   const generate = sdk['generateOpenApiClient'];
   if (typeof generate !== 'function')

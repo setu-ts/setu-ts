@@ -5,6 +5,7 @@ import { stringFlag } from '../args.ts';
 import { EXIT_ERROR, EXIT_INTERRUPTED, EXIT_OK, EXIT_USAGE } from '../constants.ts';
 import { readClientDocument, type IClientDocumentDependencies } from '../client/document-source.ts';
 import { CLIENT_MARKER, generateClientFile, type ClientPackageLoader } from '../client/generate.ts';
+import { denoInstallRefusal } from '../app-loader.ts';
 import { detectProject } from '../utils/project-detector.ts';
 import { detectTargetRuntime } from '../utils/runtime-detector.ts';
 import {
@@ -111,6 +112,15 @@ export async function runClientCommand(
       deps.error('Run `setu client` in a member, or pass `--dir <member>`.');
       return EXIT_ERROR;
     }
+    // Generation imports the project's sdk on every path, so an uninstalled Deno
+    // project is refused here too, not only by the boot path. Deno projects only:
+    // a Workers project's gating deno.json would otherwise get Deno guidance.
+    const runtime = await detectTargetRuntime(deps.fs, dir);
+    const refusal = runtime === 'deno' ? await denoInstallRefusal(deps.fs, dir) : undefined;
+    if (refusal !== undefined) {
+      deps.error(refusal);
+      return EXIT_ERROR;
+    }
     if (args.flags.check !== true) {
       const existing = await readExistingText(deps.fs, path);
       if (existing !== undefined && existing.split(/\r\n?|\n/)[0] !== CLIENT_MARKER) {
@@ -129,7 +139,7 @@ export async function runClientCommand(
         ...(factoryName === undefined ? {} : { factoryName }),
         ...(apiTypeName === undefined ? {} : { apiTypeName }),
       },
-      await detectTargetRuntime(deps.fs, dir),
+      runtime,
       dir,
       path,
       deps.error,

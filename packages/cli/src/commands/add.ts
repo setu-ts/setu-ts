@@ -1753,7 +1753,9 @@ export async function runAddCommand(
       }
     }
 
-    if (bare === 'sdk') {
+    // Only the manifest the runtime runs scripts from: a Workers project's
+    // deno.json exists for plugin gating, and tasks there would never run.
+    if (bare === 'sdk' && (target.file === 'package.json') === (runtime !== 'deno')) {
       updated = withClientScripts(updated ?? source, target.file, runtime, deps.log) ?? updated;
     }
     if (updated === undefined) continue;
