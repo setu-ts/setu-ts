@@ -1092,9 +1092,22 @@ describe('M111c declared artifact coverage', () => {
         async (dir: string) => JSON.parse(await readFile(`${dir}/package.json`, 'utf8')).name,
       ),
     );
-    expect(Object.keys(compat.dependencies).sort()).toEqual(expected.sort());
-    expect(expected).toHaveLength(52);
-    expect(Object.values(compat.dependencies).every((range) => range === 'latest')).toBe(true);
+    // A package between its introduction and its first publish cannot be
+    // installed from npm, so the compat suite lists it as pending instead.
+    const pendingSource = await readFile('compat/compat.test.mjs', 'utf8');
+    const pending = [
+      ...(/const PENDING_FIRST_PUBLISH = \[([^\]]*)\]/.exec(pendingSource)?.[1] ?? '').matchAll(
+        /'([^']+)'/g,
+      ),
+    ].map((match) => match[1]);
+    const installable = expected.filter((name) => !pending.includes(name));
+    expect(Object.keys(compat.dependencies).sort()).toEqual(
+      [...installable, '@modelcontextprotocol/server'].sort(),
+    );
+    expect(expected).toHaveLength(53);
+    expect(pending).toEqual(['@setu-ts/mcp-plugin']);
+    expect(installable.every((name) => compat.dependencies[name] === 'latest')).toBe(true);
+    expect(compat.dependencies['@modelcontextprotocol/server']).toBe('^2.4.0');
     expect(workspace.scripts['release:publish']).toBe('node scripts/npm-publish.ts');
     expect(workspace.scripts['release:placeholders']).toBe(
       'node scripts/write-npm-placeholders.ts',

@@ -721,6 +721,10 @@ here.
   OAuth scopes and `requireScopes`, Bearer challenges, RFC 9728 metadata, audience lists, opt-in
   `at+jwt`, the `act` actor with `requireAuth({ delegation })`; ships in `0.13.0`) — complete (PR
   #541).
+- **Milestone 133** (`mcp-plugin` (new) + `common` + `kernel` + `decorator-plugin` +
+  `idempotency-plugin` + `cli` — routes as MCP tools: `mcpTool()`/`@McpTool()` markers, a stateless
+  `POST /mcp` on the official SDK, in-process `IApplication.dispatch` with a route pin, per-call
+  timeout, the kernel empty-chunk stream guard) — complete (PR #545).
 - **Milestone 131a** (`common` + the Redis-backed plugins + `notification-plugin` + `cli` — Redis,
   node-redis and readiness: the V11-10 queue probe, notification out of readiness, `503`/`504`
   backend faults, `setu add` Redis arms, an OpenTelemetry preload, `.env` start scripts, URL

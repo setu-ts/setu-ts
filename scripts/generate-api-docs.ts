@@ -31,6 +31,7 @@ export const CLEAN_PACKAGES = new Set([
   'full-stack-starter',
   'http-security-plugin',
   'idempotency-plugin',
+  'mcp-plugin',
   'kernel',
   'localization-plugin',
   'logger-plugin',

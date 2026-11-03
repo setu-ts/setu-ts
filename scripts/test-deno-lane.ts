@@ -2,7 +2,7 @@ import { run as runProcess, type RunOptions, type RunResult } from './lib/run.ts
 import { rm } from 'node:fs/promises';
 import { isNotFound } from './lib/run.ts';
 /* eslint-disable no-console -- repository test runner */
-import { DENO_LANE_TESTS, DENO_ONLY_SOURCES } from './test-lanes.ts';
+import { DENO_LANE_TESTS, DENO_ONLY_SOURCES, denoLaneGroup } from './test-lanes.ts';
 import { belowThreshold, parseCoverageTable, validateTargetSet } from './deno-lane-coverage.ts';
 
 /** Runs the native-runtime proofs in their owning members permission scopes. */
@@ -43,7 +43,7 @@ export async function runDenoLane(
   });
   const groups = new Map<string, string[]>();
   for (const path of [...DENO_LANE_TESTS, 'test/deno-lane/vitest-shim.test.ts']) {
-    const member = path.startsWith('packages/') ? path.split('/')[1]! : 'root';
+    const member = denoLaneGroup(path);
     const group = groups.get(member) ?? [];
     group.push(path);
     groups.set(member, group);

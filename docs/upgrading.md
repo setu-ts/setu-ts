@@ -12,6 +12,34 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### MCP route tools (M133, `@setu-ts/mcp-plugin`)
+
+Existing applications require no migration. To opt in, run `setu add mcp`, register `McpPlugin({})`
+and mark chosen routes with `mcpTool()` or controller methods with `@McpTool()`. The optional
+`tools` list supplies exact method/path bindings as an alternative. Every tool route needs a
+security brand or defined `schema.security`; `publicRoute()` and `@Public()` declare public intent.
+Names must be unique and match `^[A-Za-z0-9_.-]{1,64}$`. Rate-limit tool routes. POST/PUT/PATCH
+tools require a Zod v4 body validation brand. POST/PATCH also requires `idempotent()` or an explicit
+`repeatable: true`. Object response schemas supply structured output. The SDK peer is
+`@modelcontextprotocol/server` `^2.4.0`; it is loaded only at bootstrap.
+
+`timeoutMs` defaults to 30000 ms (safe integer 1–600000). Its runtime deadline aborts the inner
+request and races dispatch and result reading, answering `The tool timed out.` even when the route
+ignores cancellation. Deadline or client abort cancels the response reader. A hung route remains in
+flight until it settles or the kernel's shutdown drain cap. A client abort still answers
+`The tool failed.`.
+
+List every browser UI origin in `allowedOrigins`, including same-origin UIs. Idempotency-branded
+tools need an authenticating security brand; anonymous side effects use `repeatable: true` without
+an idempotency brand or derived key. Tool dispatch pins the bound route pattern.
+
+Calls forward credentials and tenant headers and authenticate again through the kernel's new
+`dispatch` entry. Third-party `IApplication` implementations keep compiling because `dispatch` is
+optional, but must implement it to host this plugin. Branded identical calls in the store's TTL
+replay even when the caller intended a second operation; vary an argument such as a client reference
+when that is intended. Origin checks apply to the MCP endpoint, and accepted Origin is preserved for
+inner CSRF checks. Lists filter scopes/authentication; roles and policies still run on the route.
+
 ### Redis, readiness and outage statuses (M131a, `@setu-ts/common`, `@setu-ts/queue-plugin`, `@setu-ts/messaging-plugin`, `@setu-ts/realtime-backplane-plugin`, `@setu-ts/notification-plugin`, `@setu-ts/cli`)
 
 A `notification` outage no longer fails `/ready`. If your replicas must leave the load balancer when

@@ -17,6 +17,13 @@ export const TOOLING_PACKAGES: ReadonlySet<string> = new Set(['cli', 'create']);
 /** Bare package names, including non-addable starters and diagnostics. */
 export const PACKAGE_DATA: ReadonlyMap<string, IPackageData> = new Map<string, IPackageData>([
   [
+    'mcp-plugin',
+    {
+      description: 'MCP route tools',
+      tokens: [],
+    },
+  ],
+  [
     'common',
     {
       description:

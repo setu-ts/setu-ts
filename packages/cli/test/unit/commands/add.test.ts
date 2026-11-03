@@ -2942,3 +2942,37 @@ describe('starter handler-arm wiring', () => {
     expect(h.read(path)).toContain('events: { handlers: EVENT_HANDLERS }');
   });
 });
+
+describe('M133 setu add mcp', () => {
+  it('adds the package and SDK optional peer to npm without inventing zero-config registration', async () => {
+    const h = harness({
+      '/app/package.json': JSON.stringify({ type: 'module', dependencies: {} }),
+    });
+    expect(await h.run(['mcp'])).toBe(0);
+    const manifest = JSON.parse(h.read('/app/package.json')) as {
+      dependencies: Record<string, string>;
+    };
+    expect(manifest.dependencies['@setu-ts/mcp-plugin']).toBe(`^${VERSION}`);
+    expect(manifest.dependencies['@modelcontextprotocol/server']).toBe('^2.4.0');
+    expect(h.out.join('\n')).not.toContain('McpPlugin()');
+  });
+  it('adds the package and SDK peer to Deno', async () => {
+    const h = harness({ '/app/deno.json': DENO_MANIFEST });
+    expect(await h.run(['mcp'])).toBe(0);
+    const manifest = JSON.parse(h.read('/app/deno.json')) as { imports: Record<string, string> };
+    expect(manifest.imports['@modelcontextprotocol/server']).toBe(
+      'npm:@modelcontextprotocol/server@^2.4.0',
+    );
+  });
+});
+
+it('setu add mcp installs the SDK peer for a Workers project', async () => {
+  const h = harness({
+    '/app/package.json': JSON.stringify({ scripts: { dev: 'wrangler dev' }, dependencies: {} }),
+    '/app/wrangler.toml': 'name = "edge"\n',
+  });
+  expect(await h.run(['mcp'])).toBe(0);
+  expect(JSON.parse(h.read('/app/package.json')).dependencies['@modelcontextprotocol/server']).toBe(
+    '^2.4.0',
+  );
+});

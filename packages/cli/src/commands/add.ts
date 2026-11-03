@@ -184,6 +184,16 @@ export const ADDABLE: ReadonlyMap<string, IAddablePackage> = new Map([
   ['localization', { pkg: 'localization-plugin' }],
   ['logger', { pkg: 'logger-plugin' }],
   ['mail', { pkg: 'mail-plugin' }],
+  [
+    'mcp',
+    {
+      pkg: 'mcp-plugin',
+      peers: {
+        runtimes: ['node', 'deno', 'bun', 'cloudflare-workers'],
+        packages: ['@modelcontextprotocol/server'],
+      },
+    },
+  ],
   ['messaging', { pkg: 'messaging-plugin' }],
   ['metrics', { pkg: 'metrics-plugin' }],
   ['multi-tenancy', { pkg: 'multi-tenancy-plugin' }],

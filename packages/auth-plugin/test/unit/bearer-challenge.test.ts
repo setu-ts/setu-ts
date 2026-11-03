@@ -1,3 +1,4 @@
+import { REQUIRED_SCOPES_STATE_KEY } from '@setu-ts/common';
 /**
  * The single Bearer challenge writer: formatter table and middleware branches.
  *
@@ -7,11 +8,7 @@
 import { describe, expect, it } from 'vitest';
 import type { HandlerResult, IRequest, IRequestContext, IResponse } from '@setu-ts/common';
 import { authorizationFailureInit, withHttpStatusHint } from '@setu-ts/common';
-import {
-  bearerChallenge,
-  formatBearerChallenge,
-  REQUIRED_SCOPES_STATE_KEY,
-} from '../../src/resource-server/challenge.ts';
+import { bearerChallenge, formatBearerChallenge } from '../../src/resource-server/challenge.ts';
 
 /** A response whose status and headers are live, as the kernel's builder is. */
 function createContext(options: {

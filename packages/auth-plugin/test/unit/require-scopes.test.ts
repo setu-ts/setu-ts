@@ -10,7 +10,7 @@ import type { HandlerResult, IPrincipal, IRequestContext, IResponse } from '@set
 import { securityMetadataOf } from '@setu-ts/common';
 import { AuthPluginConfigurationError } from '../../src/errors.ts';
 import { requireScopes } from '../../src/guards/index.ts';
-import { REQUIRED_SCOPES_STATE_KEY } from '../../src/resource-server/challenge.ts';
+import { REQUIRED_SCOPES_STATE_KEY } from '@setu-ts/common';
 
 function createContext(user?: IPrincipal): {
   ctx: IRequestContext;

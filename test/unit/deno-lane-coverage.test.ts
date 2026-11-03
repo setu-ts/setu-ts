@@ -64,6 +64,11 @@ describe('Deno lane invocations', () => {
     ]);
     const tests = calls.filter((call) => call.args[0] === 'test');
     expect(tests).toHaveLength(6);
+    const mcpGroup = tests.find((call) =>
+      call.args.includes('packages/mcp-plugin/test/integration/mcp-deno.test.ts'),
+    );
+    expect(mcpGroup?.args).toContain('-P=diagnostics-plugin');
+    expect(mcpGroup?.args).toContain('--allow-sys=hostname,osRelease');
     const files = tests.flatMap((call) => call.args.filter((arg) => arg.endsWith('.test.ts')));
     expect(files.sort()).toEqual([...DENO_LANE_TESTS, 'test/deno-lane/vitest-shim.test.ts'].sort());
     const junit = new Set<string>();

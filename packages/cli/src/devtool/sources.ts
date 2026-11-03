@@ -189,6 +189,7 @@ export const FRAMEWORK_PACKAGES: ReadonlySet<string> = new Set([
   'localization-plugin',
   'logger-plugin',
   'mail-plugin',
+  'mcp-plugin',
   'messaging-plugin',
   'metrics-plugin',
   'microservice-starter',

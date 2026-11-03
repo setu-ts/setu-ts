@@ -8,6 +8,29 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **MCP route tools (M133, #545, `@setu-ts/mcp-plugin`, `@setu-ts/common`, `@setu-ts/kernel`,
+  `@setu-ts/auth-plugin`, `@setu-ts/idempotency-plugin`, `@setu-ts/decorator-plugin`,
+  `@setu-ts/cli`).** `McpPlugin`, `McpPluginOptions`, `McpToolDeclaration`,
+  `McpPluginConfigurationError` and `VERSION` expose explicitly declared routes through a stateless
+  SDK endpoint. Caller-filtered lists use private cache hints; calls re-enter guards, validation,
+  tenancy, rate limits, idempotency and audit. `timeoutMs` bounds each call (default 30000 ms, safe
+  integer 1–600000): the runtime deadline aborts the inner request and races dispatch/result
+  reading, cancelling the response reader and returning `The tool timed out.`. Functional
+  `mcpTool()` and method-only `@McpTool()` mark routes for discovery; `tools` is now optional.
+  Common's `MCP_TOOL_METADATA`, `RouteMcpToolMetadata`, `withMcpToolMetadata` and
+  `mcpToolMetadataOf` share the marker across both styles. Names are 1–64 characters; every marked
+  or listed route must declare security intent, and ambiguous or empty tool sets refuse startup.
+  Idempotency-branded tools require an authenticating security brand; the brand's `keyHeader` names
+  the header the route reads its key from, the derived key is sent there, and a route keyed by a
+  body field or a function refuses startup. `allowedOrigins` must list every browser UI origin,
+  including same-origin UIs. Common adds optional `IApplication.dispatch` and `DispatchOptions`,
+  implemented by the kernel with IP, abort and streaming support. `DispatchOptions.route` pins the
+  registered route pattern before route middleware runs. `IDEMPOTENCY_METADATA`,
+  `RouteIdempotencyMetadata`, `withIdempotencyMetadata` and `idempotencyMetadataOf` describe both
+  HTTP idempotency entry points. `REQUIRED_SCOPES_STATE_KEY` moves to common without changing its
+  value. `setu add mcp` installs the optional `@modelcontextprotocol/server@^2.4.0` peer. Existing
+  applications need no changes; see `docs/upgrading.md` for opt-in tool safety and replay behavior.
+
 - **Backend faults answer `503` or `504` (M131a, #543, `@setu-ts/common`, `@setu-ts/queue-plugin`,
   `@setu-ts/messaging-plugin`, `@setu-ts/realtime-backplane-plugin`).** `common` exports
   `BackendUnavailableError` (`503`, "The request was not applied."), `BackendOutcomeUnknownError`
@@ -156,6 +179,12 @@ All notable changes to this project are documented here. The format follows
   `RedisRateLimitStore` re-arms a key it finds without an expiry instead of answering 429 for ever.
 
 ### Fixed
+
+- **kernel:** a streamed response whose source emits zero-length chunks without pause no longer
+  exhausts the heap. The Node adapter's writer reads the next chunk as soon as a write reports no
+  backpressure, which an empty chunk always does, so such a source starved the event loop until the
+  process aborted (over plain HTTP as well as MCP). Every streamed body now drops empty chunks and
+  waits a runtime timer turn after each one (M133 audit; #545).
 
 - **queue-plugin:** a stopped Redis reads `down` on the queue indicator again. The Redis adapter's
   probe answers `false` without I/O when the client's own `status` says it lost its connection
