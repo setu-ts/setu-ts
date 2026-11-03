@@ -40,6 +40,24 @@ All notable changes to this project are documented here. The format follows
   value. `setu add mcp` installs the optional `@modelcontextprotocol/server@^2.4.0` peer. Existing
   applications need no changes; see `docs/upgrading.md` for opt-in tool safety and replay behavior.
 
+- **Full-stack kernel modules and `getService` (M130, `@setu-ts/cli`, `@setu-ts/common`,
+  `@setu-ts/react-router-plugin`, `@setu-ts/full-stack-starter`).** Common adds `serviceToken`,
+  `ServiceToken`, `requestService`, `RequestBoundService`, `resolveRequestService` and
+  `RequestServiceUnavailableError`: a request-bound service is built once per request and token from
+  the kernel request context and shared by every caller in that request. The React Router plugin
+  adds `getService(context, token)`, `serviceResolverContext`, `ServiceResolver` and
+  `ServiceResolverUnavailableError`; the load context holds a resolver closure, never the kernel
+  request context. The full-stack template now keeps business logic in `src/modules/<name>/` (the
+  `products` module, its `/api/products` routes and a request-bound service) and pages in `app/`
+  (`routes`, `components`, `lib`, server-only `server`), reached through the `~kernel/*` alias.
+  `setu g module` in a full-stack project writes a token, a request-bound service, `/api/<name>`
+  routes and tests that sign a session and send its CSRF token; `--page` adds a guarded page.
+  `setu check` refuses a value import of kernel code from `app/` (`setu.E017`) and reports an
+  unparseable page (`setu.E018`). The generated `entry.server.tsx` exports `handleError`, which
+  ignores aborted requests and 404s and logs other errors once through the logger. The full-stack
+  starter keeps page, asset and Vite proxy routes out of OpenAPI, merged with the application's
+  lists. The template pins `lucide-react` 1.67.0, binds the Vite HMR socket to `VITE_PORT` on every
+  runtime, and emits the Cloudflare Workers README section only for Workers.
 - **A registry of real tenants (M127, #548, `@setu-ts/multi-tenancy-plugin`, `@setu-ts/common`,
   `@setu-ts/database-plugin`).** `MultiTenancyPlugin` takes `tenants` — a list, an `ITenantRegistry`
   (new in `common`) or a `RegistryFactory` — and checks every resolved id before the request carries

@@ -711,7 +711,7 @@ export const FULL_STACK_APP_FILES: readonly GeneratedFile[] = [
  * Formatted as Prettier formats it, since the scaffold must pass its own
  * `fmt --check`.
  *
- * @param invocation - How the project runs the CLI (`npx setu`, `deno task setu`, …)
+ * @param invocation - How the project runs the CLI (`npx setu`, or a Deno project's `setu` task)
  * @param runtime - The project's target runtime
  * @returns The README markdown
  */

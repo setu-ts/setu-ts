@@ -40,6 +40,31 @@ replay even when the caller intended a second operation; vary an argument such a
 when that is intended. Origin checks apply to the MCP endpoint, and accepted Origin is preserved for
 inner CSRF checks. Lists filter scopes/authentication; roles and policies still run on the route.
 
+### Full-stack kernel modules and `getService` (M130, `@setu-ts/cli`, `@setu-ts/common`, `@setu-ts/react-router-plugin`, `@setu-ts/full-stack-starter`)
+
+No package API changes behaviour; the additions are opt-in. The full-stack template changes shape,
+so a project scaffolded with 0.11 keeps working but does not match what `setu new` now writes. To
+port one:
+
+- Move business logic out of `app/features`, `app/services` and `app/models` into kernel modules
+  under `src/modules/<name>/` (`setu g module <name>` writes the shape). Register each module's
+  service with `services.register(TOKEN, requestService(factory))` and call
+  `registerModules(app.router, app.services)` in `setu.config.ts`.
+- In loaders, replace reads of `servicesContext` and the logger and secrets keys with
+  `getService(context, TOKEN)`. `servicesContext` still works. Keep `populateLoadContext` for values
+  that are not services (the session and CSRF token).
+- Add `"~kernel/*": ["./src/*"]` to `tsconfig.json` `paths` (and the Deno import map), and import
+  kernel code from `app/` only as `import type` or from a `*.token.ts` module. `setu check` now
+  reports any other value import as `setu.E017`, and a page it cannot parse as `setu.E018`; silence
+  either in `.setu-ts/check.json` while porting.
+- Unsafe `/api` requests still pass the session's CSRF check. Browser code sends the page's token in
+  `x-csrf-token`; generated tests sign a session through `/login` first.
+- The full-stack starter now adds `react-router-plugin` to `openapi.excludeOwners` and `/__vite/*`
+  to `openapi.exclude`, so `/*`, `/assets/*` and the Vite proxy leave `/openapi.json` and any
+  generated client. The starter always adds these two entries, alongside the application's own.
+- The generated `dev.ts` pins the HMR socket to `VITE_PORT` (default 5173) on `127.0.0.1`; copy the
+  `server` block from `docs/react-router-dev.md`.
+
 ### A registry of real tenants (M127, `@setu-ts/multi-tenancy-plugin`, `@setu-ts/common`, `@setu-ts/database-plugin`)
 
 Nothing changes until you set `tenants`: without it any resolved non-empty string id is still the

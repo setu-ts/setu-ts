@@ -68,7 +68,7 @@ import { defineConfig } from 'vite';
  * the same alias is declared in tsconfig.json for the type-checker.
  */
 // Framework packages stay external, resolved by the server runtime. Bundling
-// would inline a second copy: context keys in app/lib/context-keys.server.ts
+// would inline a second copy: context keys in app/server/context-keys.server.ts
 // match by identity, so a loader must share the instance setu.config.ts holds.
 export const frameworkPackages = [${externals}
 ];

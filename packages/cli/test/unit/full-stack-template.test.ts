@@ -515,7 +515,7 @@ describe('full-stack template | manifest contributions', () => {
   it('declares the packages its emitted files import', () => {
     const packages = (FULL_STACK_TEMPLATE.packageImports ?? []).map((entry) => entry.pkg);
 
-    // Named by setu.config.ts's bridge, and by app/lib/context-keys.ts.
+    // Named by setu.config.ts's bridge, and by app/server/context-keys.server.ts.
     expect(packages).toContain('session-plugin');
     expect(packages).toContain('react-router-plugin');
   });

@@ -260,7 +260,7 @@ export const FULL_STACK_TEMPLATE: TemplateDefinition = {
     // resolveRequestService) and by app/entry.server.tsx; setu.config.ts names
     // no common symbol beyond IPlugin.
     { pkg: 'common' },
-    // Imported by app/lib/context-keys.server.ts for contextKeyFor(), so the
+    // Imported by app/server/context-keys.server.ts for contextKeyFor(), so the
     // manifest must carry it even though setu.config.ts names no symbol.
     { pkg: 'react-router-plugin', symbols: ['type ReactRouterPluginOptions'] },
   ],

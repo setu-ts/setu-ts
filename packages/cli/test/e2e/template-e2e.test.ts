@@ -252,12 +252,13 @@ describe('template scaffolding — end to end', () => {
       const sources = [
         `${project}/main.ts`,
         `${project}/setu.config.ts`,
-        `${project}/app/lib/context-keys.server.ts`,
+        `${project}/app/server/context-keys.server.ts`,
+        `${project}/app/server/session.server.ts`,
+        `${project}/app/server/require-user.server.ts`,
         `${project}/app/lib/load-context.ts`,
-        `${project}/app/config/services.server.ts`,
-        `${project}/app/models/product.ts`,
-        `${project}/app/services/products.server.ts`,
-        `${project}/app/features/products/products.server.ts`,
+        `${project}/src/modules/index.ts`,
+        `${project}/src/modules/products/index.ts`,
+        `${project}/src/modules/products/products.token.ts`,
       ];
       for (const source of sources) {
         expect((await nodeFs.stat(source)).isFile()).toBe(true);

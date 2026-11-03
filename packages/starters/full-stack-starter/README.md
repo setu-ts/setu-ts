@@ -231,7 +231,7 @@ export class PricingService {
   }
 }
 
-// Declare it beside the template's other keys in app/lib/context-keys.server.ts:
+// Declare it beside the template's other keys in app/server/context-keys.server.ts:
 // contextKeyFor reuses one key per name; separate { defaultValue: null } objects would not.
 export const pricingContext = contextKeyFor<PricingService | null>('app.pricing', null);
 
@@ -333,6 +333,11 @@ which generates a `setu.config.ts` calling `createFullStackAppFromConfig`:
 ```bash
 setu new my-app --template full-stack
 ```
+
+The starter also keeps the page catch-all, the asset routes and the generated `dev.ts` Vite proxy
+out of the OpenAPI document: it adds `react-router-plugin` to `openapi.excludeOwners` and
+`/__vite/*` to `openapi.exclude`, merged with the lists you pass. Without your own `excludeOwners`,
+OpenApiPlugin's default `['health-plugin', 'metrics-plugin']` still applies.
 
 ## Coming from NestJS
 

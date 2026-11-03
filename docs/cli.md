@@ -393,6 +393,15 @@ job in a starter that owns the queue requires `setu add queue` first; otherwise 
 before writing and explains that the starter already runs the queue. Functional jobs outside a
 queue-owning starter remain ungated.
 
+In a full-stack project, `setu g module <name>` writes a request-bound module: `<name>.token.ts`
+(`serviceToken`), a service factory taking the request context, `/api/<name>` routes that resolve it
+with `resolveRequestService`, generated tests that sign a session through `/login` and send its CSRF
+token, and a managed `index.ts` that registers the service with `requestService`. `--page` also
+writes `app/routes/_app/<name>._index.tsx`, a page guarded by `requireUser` whose loader reads the
+service with `getService`. `--page` is refused outside the full-stack template. A page may import
+kernel code only as `import type` or from a `*.token.ts` module through `~kernel/*`; `setu check`
+refuses any other value import (`setu.E017`).
+
 In projects with `react-router-plugin`, `g route`, `g controller` and `g module` refuse kernel
 routes that would shadow an existing page, with its file named. To put an API at `/api/products`
 while keeping the `/products` page, run `setu g module api`, then
@@ -958,28 +967,30 @@ From a workspace root it checks every `apps/<member>`, prefixing each line with 
 and exits with the worst result. A member that is a symbolic link, or that is reached through a
 linked `apps/` directory, is refused by name and fails the run, so neither command reaches files
 outside the workspace through it. Inside a project, `sync` also refuses to write through a link;
-`check` reads through one. A project with no seam directories (a `full-stack` project, or one that
-has never generated anything) prints `No CLI-owned seams in <dir>; nothing to check.` and exits `0`.
+`check` reads through one. A project with no seam directories (one that has never generated
+anything) prints `No CLI-owned seams in <dir>; nothing to check.` and exits `0`.
 
-| Id          | Severity | Finding                                                                                                                 |
-| ----------- | -------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `setu.E001` | error    | An artifact does not export what its barrel imports, so it is skipped                                                   |
-| `setu.E002` | error    | An artifact's file name is not a kebab-case identifier, so it is skipped                                                |
-| `setu.E003` | error    | A barrel does not list an artifact in its directory, or lists one that is not there                                     |
-| `setu.E004` | error    | A barrel is not a regular file, is over 1 MiB, or cannot be classified                                                  |
-| `setu.E005` | error    | An artifact is registered both by its barrel and by hand in `setu.config.ts`                                            |
-| `setu.E006` | error    | `setu.config.ts` does not reference a barrel on disk                                                                    |
-| `setu.E007` | error    | A feature module is missing its activation export or `@Module` declaration                                              |
-| `setu.E008` | error    | A feature module's directory name is not a kebab-case identifier                                                        |
-| `setu.E009` | error    | A feature module is not activated in `src/modules/index.ts`                                                             |
-| `setu.E010` | error    | `src/routes/` still holds files; it was merged into `src/controllers/`, so nothing imports them                         |
-| `setu.E011` | error    | `.setu-ts/check.json` is invalid                                                                                        |
-| `setu.E012` | error    | `setu.config.ts` exists but cannot be read: a directory, a special file, over 1 MiB, or no permission                   |
-| `setu.E013` | error    | An artifact in a seam directory cannot be read (a special file, over 1 MiB, or no permission), so its wiring is unknown |
-| `setu.W001` | warning  | `setu.config.ts` uses a construct the check cannot classify, so a barrel's wiring is unknown                            |
-| `setu.W002` | warning  | There is no `setu.config.ts`, so nothing can be checked for wiring                                                      |
-| `setu.W003` | warning  | `setu.config.ts` calls `registerGeneratedRoutes(app.router)` without `app.services`                                     |
-| `setu.W004` | warning  | A `.setu-ts/check.json` entry matched no finding                                                                        |
+| Id          | Severity | Finding                                                                                                                                                                  |
+| ----------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `setu.E001` | error    | An artifact does not export what its barrel imports, so it is skipped                                                                                                    |
+| `setu.E002` | error    | An artifact's file name is not a kebab-case identifier, so it is skipped                                                                                                 |
+| `setu.E003` | error    | A barrel does not list an artifact in its directory, or lists one that is not there                                                                                      |
+| `setu.E004` | error    | A barrel is not a regular file, is over 1 MiB, or cannot be classified                                                                                                   |
+| `setu.E005` | error    | An artifact is registered both by its barrel and by hand in `setu.config.ts`                                                                                             |
+| `setu.E006` | error    | `setu.config.ts` does not reference a barrel on disk                                                                                                                     |
+| `setu.E007` | error    | A feature module is missing its activation export or `@Module` declaration                                                                                               |
+| `setu.E008` | error    | A feature module's directory name is not a kebab-case identifier                                                                                                         |
+| `setu.E009` | error    | A feature module is not activated in `src/modules/index.ts`                                                                                                              |
+| `setu.E010` | error    | `src/routes/` still holds files; it was merged into `src/controllers/`, so nothing imports them                                                                          |
+| `setu.E011` | error    | `.setu-ts/check.json` is invalid                                                                                                                                         |
+| `setu.E012` | error    | `setu.config.ts` exists but cannot be read: a directory, a special file, over 1 MiB, or no permission                                                                    |
+| `setu.E013` | error    | An artifact in a seam directory cannot be read (a special file, over 1 MiB, or no permission), so its wiring is unknown                                                  |
+| `setu.E017` | error    | A page under `app/` imports `~kernel/*` or `src/` code by value (only `import type` and `*.token.ts` modules are allowed), so kernel code would reach the browser bundle |
+| `setu.E018` | error    | A page under `app/` cannot be parsed, so its kernel imports cannot be checked                                                                                            |
+| `setu.W001` | warning  | `setu.config.ts` uses a construct the check cannot classify, so a barrel's wiring is unknown                                                                             |
+| `setu.W002` | warning  | There is no `setu.config.ts`, so nothing can be checked for wiring                                                                                                       |
+| `setu.W003` | warning  | `setu.config.ts` calls `registerGeneratedRoutes(app.router)` without `app.services`                                                                                      |
+| `setu.W004` | warning  | A `.setu-ts/check.json` entry matched no finding                                                                                                                         |
 
 Barrels are compared as **sets of names**, read from their import and export declarations, so a
 barrel your formatter rewrote, reordered or re-quoted still passes. Ids are never reused: a retired

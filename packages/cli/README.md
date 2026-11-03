@@ -535,6 +535,13 @@ left alone, with the lines to change printed. From then on `controller`, `route`
 `setu check` reports controllers or services left outside modules (`setu.E014`) and imports in
 CLI-written files that no longer resolve (`setu.E015`).
 
+In a full-stack project, which is modular from the start, `setu g module <name>` writes a
+request-bound module instead: `<name>.token.ts`, a service factory taking the request context,
+`/api/<name>` routes and tests that sign a session and send its CSRF token. `--page` also writes a
+guarded page, `app/routes/_app/<name>._index.tsx`, whose loader reads the service with `getService`.
+Pages may import kernel code only as `import type` or from a `*.token.ts` module; `setu check`
+refuses any other value import (`setu.E017`) and a page it cannot parse (`setu.E018`).
+
 A module holds `<name>.controller.ts` (`GET /<name>`, `GET /<name>/:id`, `POST /<name>`,
 `PATCH /<name>/:id`), `<name>.service.ts` (an in-memory `Map` the JSDoc says to replace with a
 repository), `<name>.schemas.ts` (only when `validation-plugin` is installed), a CLI-owned

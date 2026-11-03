@@ -8,6 +8,7 @@
 ## Table of Contents
 
 - [Shared reconnect supervisor (`@setu-ts/common`)](#shared-reconnect-supervisor-setu-tscommon)
+- [Request-bound services (`@setu-ts/common`)](#request-bound-services-setu-tscommon)
 - [Dotenv parser (`@setu-ts/common`)](#dotenv-parser-setu-tscommon)
 
 1. [Installation](#installation)
@@ -356,6 +357,39 @@ Call `start()` to attach listeners, `fault()` to mark an outage and start drive-
 `recovered()` to clear a fault, and `stop()` to cancel scheduled attempts and dispose listeners.
 `faulted` reports the current fault window. A stopped supervisor is terminal; construct a new
 instance to start another lifecycle.
+
+## Request-bound services (`@setu-ts/common`)
+
+Since 0.12.0, common exports the request-bound service helpers that kernel routes and React Router
+loaders share (M130).
+
+- `type ServiceToken<T> = CapabilityToken & { readonly __service?: T }` — a capability token that
+  carries its service type. At run time it is the token string.
+- `serviceToken<T>(name: string): ServiceToken<T>` — validates `name` against the capability-token
+  grammar (lowercase kebab-case segments joined by dots) and throws `TypeError` on an illegal name.
+- `requestService<T extends object>(create: (ctx: IRequestContext) => T): RequestBoundService<T>` —
+  a frozen registry entry branded with `Symbol.for('setu.request-service')`, so a copy of `common`
+  inlined into an SSR bundle recognizes it. An object literal of the same shape is not branded and
+  resolves as a plain entry.
+- `resolveRequestService<T>(ctx, token): T` — throws `RequestServiceUnavailableError` (with a
+  `token` field) when nothing is registered under the token. A request-bound entry is built at most
+  once per request and token, cached with `ctx.slot` (or a per-context `WeakMap` when the context
+  has no `slot`), and shared by every caller in that request. A factory that returns a non-object
+  throws `TypeError`; a factory that throws is not cached, so the next call retries. Any other entry
+  is returned as registered.
+
+```typescript
+// src/modules/products/products.token.ts — the only module a page imports by value
+export const PRODUCTS = serviceToken<ProductsService>('module.products');
+
+// src/modules/products/index.ts — before the application starts
+services.register(PRODUCTS, requestService(productsService));
+
+// a kernel route
+router.get('/api/products', async (ctx) =>
+  ctx.response.json({ items: await resolveRequestService(ctx, PRODUCTS).list() }),
+);
+```
 
 ## Dotenv parser (`@setu-ts/common`)
 
@@ -5076,6 +5110,17 @@ app.router.get('/api/health', (ctx) => {
   delegates to `bridgeRequestToRR` and returns the `HandlerResult`.
 - `servicesContext: RouterContextKey<IServiceRegistry | null>` — context key holding the kernel
   service registry. Always set by the plugin.
+- `getService<T>(context, token: ServiceToken<T> | CapabilityToken): T` (since 0.12.0) — resolves a
+  kernel service for the current request from a loader, action or `handleError`, through
+  `resolveRequestService`. A module's request-bound service is the same instance a kernel `/api`
+  route resolving that token sees in the same request. Throws `ServiceResolverUnavailableError` when
+  the context carries no resolver (the request was not served by this plugin, or a page test did not
+  set one), and `RequestServiceUnavailableError` when nothing is registered under the token.
+- `serviceResolverContext: RouterContextKey<ServiceResolver | null>` (since 0.12.0) — the key the
+  bridge sets to a closure over the current request; the load context never holds the kernel
+  `IRequestContext` itself. Created with `contextKeyFor`, so its identity survives the SSR bundle. A
+  page test sets a fake: `context.set(serviceResolverContext, (token) => fakes[token])`.
+- `type ServiceResolver = <T>(token: ServiceToken<T> | CapabilityToken) => T` (since 0.12.0).
 - `userContext: RouterContextKey<IPrincipal | null>` — context key holding the authenticated
   principal, or `null` on an anonymous request.
 - `contextKeyFor<T>(name, defaultValue): RouterContextKey<T>` — returns the key for a name,
@@ -5124,7 +5169,7 @@ it resolved once — must create those keys with `contextKeyFor`, not with a `{ 
 literal:
 
 ```typescript
-// app/lib/context-keys.server.ts
+// app/server/context-keys.server.ts
 import { contextKeyFor } from '@setu-ts/react-router-plugin';
 import type { ISession } from '@setu-ts/common';
 
@@ -10587,6 +10632,7 @@ Any casing of the name produces identical output: `setu g controller user-profil
 | `--depends-on <member>`                         | `generate app`                                        | Repeat for each existing prerequisite. The member records the names in `setu.workspace.json`; the root dev runner starts prerequisites first and waits for `/ready`. Duplicate or missing names are usage errors, as is using it anywhere but `generate app`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `--module <name>`                               | `generate`, `add view`                                | Place a `controller`, `route`, `service`, `sse` or `schema` (or `add view`'s controller) inside the named feature module. The name must be an admitted module, else the refusal lists them. The first four require it once the project has modules, and a flat project refuses it. The file lands in `src/modules/<name>/`; a function controller is registered by the module's CLI-owned `index.ts`, and a class controller or service is added to the `@Module` declaration's `controllers` or `providers` array when that is a plain array literal (otherwise the line to add is printed). A module-scoped controller mounts at `/<module>/<name>`, and a module-scoped service registers under the token `<module>.<name>-service`. Every other schematic is app-wide and refuses the flag.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `--adopt-controllers`                           | `generate module`                                     | The first module only: move every file under `src/controllers/` and `src/services/` into it, keeping subfolders and URL paths, rewriting relative imports and switching `setu.config.ts`, all or nothing.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `--page`                                        | `generate module`                                     | Full-stack projects only: also write `app/routes/_app/<name>._index.tsx`, a `requireUser`-guarded page whose loader reads the module's service with `getService`. Refused outside the full-stack template.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `--devtool`                                     | `new`, `generate app`                                 | Opts a Deno or Node project/member into the local diagnostics connector through a runtime-neutral `main.dev.ts` entry that the production graph never imports. Node adds a `dev` script (`tsx main.dev.ts`) and a diagnostics-plugin devDependency; its existing `check` script covers the entry. Deno adds `dev` and widens `check`. A member records an allocated `devtoolPort`. Bun, Workers and starter-composed templates are refused by name. The entry reads `SETU_DEVTOOL_SESSION_ID` and `SETU_DEVTOOL_SESSION_KEY` from runtime services, refuses invalid pairs, and never generates, writes or prints credentials. The launcher names `SETU_DEVTOOL_MEMBER`; `scripts/dev.mjs` (Node) or `scripts/dev.ts` (Deno) forwards all three only to that member and blanks siblings. Node selects `npm run dev` for that member, `npm run start:dev` for others, and keeps selected children in the launcher process group. Stale runners are refused with a delete-and-rerun remedy. All three names are published CLI surface; the Deno root task grants environment access to exactly them. Node enablement writes only the member package.json, refuses conflicting framework pins or a developer-owned dev script, prints `npm install`, and never runs it. Older CLI-owned entries remain recognized. |
 | `--devtool-port <n>`                            | `new`, `generate app`, `devtool enable`               | The IPv4 loopback port the connector binds. Range-checked like `--port`; refused when it equals any member's application or devtool port. Absent, it is allocated in a workspace and probes 4919 through 5019 standalone.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `--transport <name>`                            | `new --workspace`                                     | How the workspace's services talk to each other: `http` (default), `grpc`, `memory`, `redis`, `rabbitmq`, `nats`, `kafka`, `pubsub`, `service-bus`. Recorded in `setu.workspace.json`; every member added later inherits it. A usage error on a standalone project, on `generate app`, or for an unknown value.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
@@ -11166,9 +11212,10 @@ A project scaffolded before a seam existed has no import of its barrel. Each bar
 the exact lines to add to `setu.config.ts`; add them once and every later generate is wired. The
 `rest`, `microservice` and `class-based` templates emit every applicable seam from scaffold time, so
 a new project is wired before anything is generated — and so does the **no-template path**, for the
-three seams that need no plugin (`route`, `middleware`, `plugin`). `--template full-stack` is
-deliberately not a host: its layering is `routes → features → services`, it composes through a
-starter factory, and its `createApp` has no plugin array to spread into.
+three seams that need no plugin (`route`, `middleware`, `plugin`). `--template full-stack` composes
+through a starter factory, so it hosts only the seams a starter-composed project can consume, and
+not the `controller` seam: it is modular from the start (M130), with `src/modules/` and its
+`registerModules` call already in `setu.config.ts`.
 
 **Artifacts generated before their family gained a second export are skipped, and reported.** A
 barrel imports specific symbols from each artifact, and two families gained one in this release:
@@ -11253,8 +11300,8 @@ refuses on that module's own files; the barrel is rewritten either way and lists
 A project scaffolded before this schematic existed has no barrel import: in class mode, add the two
 lines above to `setu.config.ts` once; in functional mode, `setu g module` prints the
 `registerModules` import and call to add. Every later `setu g module` is then wired automatically.
-`--template full-stack` is deliberately not a host: its layering is `routes → features → services`
-and it has no `src/modules/` concept.
+`--template full-stack` ships modular (M130): `src/modules/products/` and the `registerModules` call
+are already there, and `setu g module` adds request-bound modules beside it.
 
 `--module <name>` places a `service`, `route` (functional only), `controller` or `schema` inside an
 admitted module: in functional mode the file lands in `src/modules/<name>/` and the module's
@@ -11327,38 +11374,49 @@ flag for the other three is still deferred (see "Not in this release").
 ### `--template full-stack`
 
 ```typescript
-// setu.config.ts (--template full-stack)
+// setu.config.ts (--template full-stack), abridged
 import { createFullStackAppFromConfig } from '@setu-ts/full-stack-starter';
 import type { IKernelApplication } from '@setu-ts/kernel';
 import { getCsrfToken, getSession } from '@setu-ts/session-plugin';
-import { csrfContext, sessionContext } from './app/lib/context-keys.ts';
+import { csrfContext, sessionContext } from './app/server/context-keys.server.ts';
+import { registerModules } from './src/modules/index.ts';
 
-export async function createApp(): Promise<IKernelApplication> {
-  return await createFullStackAppFromConfig((config) => ({
-    reactRouter: {
-      serverBuildPath: './build/server/index.js',
-      assetsDir: './build/client/assets',
-      populateLoadContext: (ctx, context) => {
-        context.set(sessionContext, getSession(ctx));
-        context.set(csrfContext, getCsrfToken(ctx));
+export async function createApp(env?: Readonly<Record<string, unknown>>): Promise<IKernelApplication> {
+  const app = await createFullStackAppFromConfig(
+    (config) => ({
+      reactRouter: {
+        // serverBuild / serverBuildPath / assetsDir arms elided
+        populateLoadContext: (ctx, context) => {
+          context.set(sessionContext, getSession(ctx));
+          context.set(csrfContext, getCsrfToken(ctx));
+        },
       },
-    },
-    session: { secret: config.getOrThrow<string>('SESSION_SECRET'), csrf: {} },
-  }));
+      session: { secret: config.getOrThrow<string>('SESSION_SECRET'), csrf: {} },
+    }),
+    { env },
+  );
+  registerModules(app.router, app.services);
+  return app;
 }
 ```
 
-The emitted `app/` tree is the deliverable: `routes → features → services → models`, `flatRoutes`
-`_app`/`_auth` layout groups each wrapped in their own layout, the `~/*` alias, the `.server.ts`
-convention, and one worked feature. What it deliberately does **not** contain is a
-`lib/session.server.ts`, `lib/csrf.server.ts`, `lib/sse.server.ts`, `lib/kv.server.ts` or
-`lib/service-logger.server.ts` — those are the session, SSE, secrets and logger capabilities,
-reached through the registry the SSR plugin attaches to every request.
+Since 0.12.0 (M130) the template is split in two. Business logic lives in kernel modules under
+`src/modules/<name>/` — the service, its types, its token (`serviceToken`), its `/api/<name>` routes
+and a managed `index.ts` that registers the service with `requestService` — and
+`src/modules/ products/` is the worked example. Pages live in `app/`: `routes/`, `components/`,
+client-safe `lib/` and server-only `server/` (the session, CSRF and current-user keys, and the
+`requireUser` route middleware). A loader reaches a module's service with
+`getService(context, PRODUCTS)`, and the page and `/api/products` share one instance within a
+request. `app/` imports kernel code through the `~kernel/*` alias, and only as `import type` or from
+a `*.token.ts` module: `setu check` refuses any other value import (`setu.E017`). The generated
+`entry.server.tsx` exports `handleError`, which ignores aborted requests and 404s and logs
+everything else once through `getService(context, CAPABILITIES.LOGGER)` with `describeError`.
+`setu g module <name> --page` adds a module and its page.
 
-Session reaches loaders through a key the **application** declares, never a plugin-to-plugin import:
-`getSession` takes an `IRequestContext`, which a loader never sees, while `populateLoadContext`
-receives exactly that. `RouterContextKey` is exported from the SSR plugin so app code can declare
-keys without importing `react-router` on the server.
+Session values reach loaders through keys the **application** declares, never a plugin-to-plugin
+import: `getSession` takes an `IRequestContext`, which a loader never sees, while
+`populateLoadContext` receives exactly that. Services do not go through `populateLoadContext`;
+`getService` reaches them.
 
 Notes:
 
@@ -11578,6 +11636,11 @@ Notes:
 - **Workers portability varies by arm.** `di`, `realtime.websocket`, `realtime.sse`, and a
   `'memory'` backplane are Workers-portable. A `'redis'` backplane is not (raw socket); a
   `'messaging'` backplane is portable only if its broker is.
+- **The full-stack tier keeps pages, assets and the Vite proxy out of the OpenAPI document** (since
+  0.12.0). It adds `react-router-plugin` to `openapi.excludeOwners` and `/__vite/*` to
+  `openapi.exclude`, merged with the application's own lists, never replacing them; an application
+  that sets no `excludeOwners` keeps OpenApiPlugin's default `['health-plugin', 'metrics-plugin']`
+  as well.
 - **The full-stack tier leaves `SchedulerPlugin` out on Cloudflare Workers.** The plugin refuses
   that platform at `register()`, so registering it unconditionally made every full-stack Workers
   application fail to start. The starter reads the platform with `detectRuntime()`, as its own
