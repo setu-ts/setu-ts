@@ -36,6 +36,10 @@ const ACCEPTED: readonly (readonly [label: string, source: string])[] = [
   ],
   ['an exclusion pattern over src/', "const pages = import.meta.glob(['./*.tsx', '!/src/**']);"],
   [
+    'an eager glob picking the default export',
+    "const pages = import.meta.glob('./*.tsx', { eager: true, import: 'default' });",
+  ],
+  [
     'a glob with a base inside app',
     "const parts = import.meta.glob('./*.tsx', { base: './parts' });",
   ],
@@ -225,6 +229,13 @@ const REFUSED: readonly (readonly [
     'glob',
     1,
     './**/*.service.ts',
+  ],
+  [
+    'a base after a query record whose strings look like braces',
+    'const s = import.meta.glob(\'./*/*.service.ts\', { eager: true, query: { "}": "}", ")": "}" }, base: "/src/modules" });',
+    'glob',
+    1,
+    './*/*.service.ts',
   ],
 ];
 

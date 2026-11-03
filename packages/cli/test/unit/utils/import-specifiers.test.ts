@@ -91,6 +91,28 @@ describe('lexImportSpecifiers', () => {
     ]);
   });
 
+  it('reads structure from punctuation only (re-audit P-1)', () => {
+    const lexed = lexImportSpecifiers(
+      `import.meta.glob('./*/*.service.ts', { eager: true, query: { "}": "}", ")": "}" }, base: "/src/modules" });\n` +
+        `import.meta.glob('./*.ts', { query: { a: "}", b: ")" } });`,
+    );
+    expect(lexed.kind === 'ok' && lexed.globs).toEqual([
+      { start: 0, patterns: ['./*/*.service.ts'], base: '/src/modules' },
+      expect.objectContaining({ patterns: ['./*.ts'] }),
+    ]);
+  });
+
+  it('treats import and export object keys as keys (re-audit P-2)', () => {
+    const lexed = lexImportSpecifiers(
+      "const m = import.meta.glob('./*.tsx', { eager: true, import: 'default' });\nconst o = { export: 1 };",
+    );
+    expect(lexed).toEqual({
+      kind: 'ok',
+      spans: [],
+      globs: [{ start: 10, patterns: ['./*.tsx'] }],
+    });
+  });
+
   it.each([
     ['a non-literal pattern', 'import.meta.glob(p);'],
     ['a template pattern with a substitution', 'import.meta.glob(`./${d}/*.ts`);'],

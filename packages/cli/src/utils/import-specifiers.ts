@@ -213,7 +213,9 @@ function literalOf(token: IToken | undefined): string | undefined {
  * @returns The call, or undefined when it is not one the lexer can read
  */
 function readGlobCall(tokens: readonly IToken[], i: number): IGlobCall | undefined {
-  const text = (k: number): string | undefined => tokens[k]?.text;
+  // Structure is read from punctuation only: a string "}" is not a brace.
+  const text = (k: number): string | undefined =>
+    tokens[k]?.kind === 'punct' ? tokens[k].text : undefined;
   if (text(i + 5) !== '(') return undefined;
   let j = i + 6;
   const patterns: string[] = [];
@@ -251,7 +253,7 @@ function readGlobCall(tokens: readonly IToken[], i: number): IGlobCall | undefin
       } else {
         let depth = 0;
         while (j < tokens.length) {
-          const value = text(j)!;
+          const value = text(j);
           if (depth === 0 && (value === ',' || value === '}')) break;
           if (value === '(' || value === '[' || value === '{') depth++;
           else if (value === ')' || value === ']' || value === '}') depth--;
@@ -302,6 +304,8 @@ export function lexImportSpecifiers(source: string): LexedImports {
       continue;
     }
     if (token.text !== 'import' && token.text !== 'export') continue;
+    // `{ import: 'default' }` is an object key, not a declaration.
+    if (next?.kind === 'punct' && next.text === ':') continue;
     if (token.text === 'import' && next?.kind === 'punct' && next.text === '.') {
       if (
         tokens[i + 2]?.text === 'meta' &&
