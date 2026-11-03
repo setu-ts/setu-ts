@@ -63,6 +63,21 @@ describe('errorHandler logging and pure status prediction', () => {
     });
   }
 
+  it('masks URL userinfo inside an aggregate cause', async () => {
+    const logger = new FakeLogger();
+    const { ctx } = createFakeContext({ services: new Map([[CAPABILITIES.LOGGER, logger]]) });
+    const cause = new AggregateError(
+      [new Error('replica down: postgres://u:canary-pw@replica/x')],
+      'all replicas failed',
+    );
+    await errorHandler()(ctx, () => {
+      throw new HttpError(503, 'unavailable', undefined, cause);
+    });
+    const meta = JSON.stringify(logger.calls[0]?.meta);
+    expect(meta).toContain('postgres://***@replica/x');
+    expect(meta).not.toContain('canary-pw');
+  });
+
   it('masks URL userinfo in the runtime sink message', async () => {
     const records: Readonly<Record<string, unknown>>[] = [];
     const { ctx } = createFakeContext();
