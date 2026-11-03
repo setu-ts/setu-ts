@@ -246,6 +246,7 @@ telemetry-plugin option; ships in minor `0.13.0`.
 | `packages/auth-plugin/src/errors.ts`                                                  | `QuotaStoreUnavailableError`                                                                                                       |
 | `packages/telemetry-plugin/src/plugin/telemetry-plugin.ts`, `src/interfaces/index.ts` | the `registerGlobal` option (§3.7)                                                                                                 |
 | `apps/ai-chat/*`                                                                      | example: `setu.config.ts`, `src/budget-middleware.ts`, `src/usage.ts`, `src/chat.routes.ts`, `smoke.ts`, README                    |
+| root `package.json` devDependencies                                                   | `ai`, `@ai-sdk/openai-compatible`, `ai-fallback`, `@ai-sdk/otel` so the guide's fences compile in the tooling member               |
 | `scripts/check-apps.ts` and repo lists                                                | the new app joins `check:apps` (grep how `apps/multi-tenant` is listed)                                                            |
 | Docs                                                                                  | `docs/ai.md` (+ website nav), `packages/auth-plugin/README.md`, `AGENT_CARD.md`, `PUBLIC_API.md`, `CHANGELOG.md`, ROADMAP §2 edits |
 
