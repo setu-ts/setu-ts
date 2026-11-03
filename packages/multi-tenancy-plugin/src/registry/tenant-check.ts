@@ -318,9 +318,11 @@ function describeWithoutMessage(error: SerializedError, id: string): string {
  *
  * A malformed registry answer, carried as the `cause`, therefore contributes
  * only its type name, never its contents. Each name and classifier value has
- * URL userinfo masked (as `describeError` does), and is passed through
- * {@linkcode maskTenantId} before anything else touches it — but that mask
- * only recognizes a standalone, unaltered copy of the id. A custom registry
+ * URL userinfo masked first (as `describeError` does), then is passed through
+ * {@linkcode maskTenantId} before this plugin collapses or cuts it; a
+ * classifier arrives already masked and cut at 512 code points by
+ * `serializeError` (see `renderFaultValue`). That mask only recognizes a
+ * standalone, unaltered copy of the id. A custom registry
  * that writes the id into an error's `name` or `code` in an altered form
  * (case-folded, encoded, cut mid-word) puts it in the line; registries should
  * keep the id out of names and codes.
