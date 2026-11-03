@@ -152,6 +152,9 @@ function inputOf(body: unknown): ${p}Input | undefined {
  * The ${names.kebab} API, under \`/api\` so a kernel route never shadows a page.
  * Every unsafe request passes the session's CSRF check: browser code sends the
  * page's token in \`x-csrf-token\`.
+ *
+ * Not behind sign-in: the page's \`requireUser\` guard covers the page only.
+ * Add authentication here before these routes serve or accept real data.
  */
 export function ${routeRegistrarSymbol(names)}(router: IRouterApi, services?: IServiceRegistry): void {
   void services;

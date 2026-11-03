@@ -153,6 +153,7 @@ const PAGE_IMPORT_REASONS = {
   'inline-type-only': 'with inline `type` bindings only',
   'export-star': 'with `export *`',
   dynamic: 'with a dynamic import()',
+  glob: 'through an import.meta.glob pattern',
 } as const;
 
 export function renderGenerateFindings(

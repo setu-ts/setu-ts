@@ -53,6 +53,8 @@ describe('generateModule in a full-stack project', () => {
     const controller = byPath(files, 'src/modules/articles/articles.controller.ts');
     expect(controller).toContain("router.group('/api/articles'");
     expect(controller).toContain('resolveRequestService(ctx, ARTICLES)');
+    // The page is guarded; the API is not, and says so (M130 audit L-4).
+    expect(controller).toContain('Not behind sign-in');
     expect(byPath(files, 'src/modules/articles/articles.service.ts')).toContain(
       'export function articlesService(ctx: IRequestContext): ArticlesService',
     );

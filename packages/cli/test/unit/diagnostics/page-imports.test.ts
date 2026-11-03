@@ -22,6 +22,12 @@ const ACCEPTED: readonly (readonly [label: string, source: string])[] = [
   ['export type', "export type { Product } from '~kernel/modules/products/products.types.ts';"],
   ['token module', "import { PRODUCTS } from '~kernel/modules/products/products.token.ts';"],
   ['page alias', "import { Card } from '~/components/ui/card.tsx';"],
+  [
+    'a token module reached through the page alias',
+    "import { PRODUCTS } from '~/../src/modules/products/products.token.ts';",
+  ],
+  ['a glob inside app', "const pages = import.meta.glob('./*.tsx');"],
+  ['a glob over app through the page alias', "const all = import.meta.glob('~/routes/**/*.tsx');"],
   ['framework package', "import { getService } from '@setu-ts/react-router-plugin';"],
   ['relative inside app', "import { requireUser } from '../../server/require-user.server.ts';"],
   [
@@ -115,6 +121,63 @@ const REFUSED: readonly (readonly [
     6,
     '~kernel/modules/a/a.service.ts',
   ],
+  // The security audit's bypasses (M130): every spelling the bundler resolves.
+  [
+    'the page alias climbing into src/',
+    "import { productsService } from '~/../src/modules/products/products.service.ts';",
+    'value-import',
+    1,
+    '~/../src/modules/products/products.service.ts',
+  ],
+  [
+    'a root-absolute path into src/',
+    "import { productsService } from '/src/modules/products/products.service.ts';",
+    'value-import',
+    1,
+    '/src/modules/products/products.service.ts',
+  ],
+  [
+    'a query suffix dressing a service as a token',
+    "import { productsService } from '~kernel/modules/products/products.service.ts?x=.token.ts';",
+    'value-import',
+    1,
+    '~kernel/modules/products/products.service.ts?x=.token.ts',
+  ],
+  [
+    'a hash suffix dressing a service as a token',
+    "import { productsService } from '~kernel/modules/products/products.service.ts#.token.ts';",
+    'value-import',
+    1,
+    '~kernel/modules/products/products.service.ts#.token.ts',
+  ],
+  [
+    'a kernel alias climbing out of src/',
+    "import config from '~kernel/../setu.config.ts';",
+    'value-import',
+    1,
+    '~kernel/../setu.config.ts',
+  ],
+  [
+    'an eager glob over the services',
+    "const services = import.meta.glob('/src/modules/*/*.service.ts', { eager: true });",
+    'glob',
+    1,
+    '/src/modules/*/*.service.ts',
+  ],
+  [
+    'a glob from above the project root of app/',
+    "// first\nconst all = import.meta.glob('../../../**/*.ts');",
+    'glob',
+    2,
+    '../../../**/*.ts',
+  ],
+  [
+    'an array glob with one pattern into src/',
+    "const mods = import.meta.glob(['./*.tsx', '~kernel/**/*.ts']);",
+    'glob',
+    1,
+    '~kernel/**/*.ts',
+  ],
 ];
 
 describe('scanPageSource', () => {
@@ -131,6 +194,26 @@ describe('scanPageSource', () => {
   it('reports a file it cannot parse instead of passing it', async () => {
     expect(await scanPageSource(PAGE, "import { x } from '~kernel/a.ts")).toBe('unreadable');
   });
+
+  it('reports a glob whose pattern it cannot read instead of passing it', async () => {
+    const source = "const pattern = '/src/**';\nconst m = import.meta.glob(pattern);";
+    expect(await scanPageSource(PAGE, source)).toBe('unreadable');
+  });
+
+  it('scans JavaScript pages too', async () => {
+    const jsx =
+      "import { s } from '../../../src/modules/a/a.service.ts';\nexport default () => <p>{s}</p>;";
+    const page = 'app/routes/_app/legacy.jsx';
+    expect(await scanPageSource(page, jsx)).toEqual([
+      {
+        path: page,
+        line: 1,
+        specifier: '../../../src/modules/a/a.service.ts',
+        reason: 'value-import',
+      },
+    ]);
+    expect(await scanPageSource('app/lib/x.mjs', "import '/src/a.ts';")).toHaveLength(1);
+  });
 });
 
 describe('kernelTarget', () => {
@@ -140,6 +223,9 @@ describe('kernelTarget', () => {
     ['../../lib/x.ts', undefined],
     ['@setu-ts/common', undefined],
     ['~/lib/x.ts', undefined],
+    ['~/../src/modules/a/a.ts', 'src/modules/a/a.ts'],
+    ['/src/a.ts?raw', 'src/a.ts'],
+    ['~kernel/../main.ts', 'src/../main.ts'],
   ])('%s → %s', (specifier, target) => {
     expect(kernelTarget(PAGE, specifier)).toBe(target);
   });
@@ -152,10 +238,15 @@ describe('scanPageImports', () => {
       '/p/app/routes/bad.tsx': "import { aService } from '~kernel/modules/a/a.service.ts';\n",
       '/p/app/lib/util.ts': "import { aService } from '~kernel/modules/a/a.service.ts';\n",
       '/p/app/app.css': "@import '~kernel/modules/a/a.service.ts';\n",
+      '/p/app/routes/legacy.jsx': "import { a } from '/src/modules/a/a.service.ts';\n",
       '/p/app/routes/broken.tsx': "import { x } from '~kernel/a.ts",
     });
     const scan = await scanPageImports(fs, '/p');
-    expect(scan.violations.map((v) => v.path)).toEqual(['app/lib/util.ts', 'app/routes/bad.tsx']);
+    expect(scan.violations.map((v) => v.path)).toEqual([
+      'app/lib/util.ts',
+      'app/routes/bad.tsx',
+      'app/routes/legacy.jsx',
+    ]);
     expect(scan.unreadable).toEqual(['app/routes/broken.tsx']);
     expect(await scanPageImports(createFakeFs({ '/q/package.json': '{}' }), '/q')).toEqual({
       violations: [],

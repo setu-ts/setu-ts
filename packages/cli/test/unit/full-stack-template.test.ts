@@ -142,6 +142,12 @@ describe('full-stack template | the layering it emits', () => {
     expect(paths).not.toContain('app/lib/context-keys.server.ts');
   });
 
+  it('says the products API is not behind sign-in (M130 audit L-4)', () => {
+    expect(contentsOf('src/modules/products/products.controller.ts')).toContain(
+      'Not behind sign-in',
+    );
+  });
+
   it('registers the products service per request from the managed module index', () => {
     const index = contentsOf('src/modules/products/index.ts');
     expect(index).toContain('services.register(PRODUCTS, requestService(productsService));');

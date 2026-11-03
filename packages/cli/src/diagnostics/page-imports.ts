@@ -29,7 +29,8 @@ import { joinPath, MAX_EXISTING_FILE_BYTES } from '../utils/file-writer.ts';
 import { isMissingPath } from '../utils/filesystem-errors.ts';
 
 /** Why a page import is refused. */
-export type PageImportReason = 'value-import' | 'inline-type-only' | 'export-star' | 'dynamic';
+export type PageImportReason =
+  'value-import' | 'inline-type-only' | 'export-star' | 'dynamic' | 'glob';
 
 /** One refused import, with the line it starts on. */
 export interface PageImportViolation {
@@ -42,30 +43,109 @@ export interface PageImportViolation {
 /** The kernel alias every page reaches kernel code through. */
 const KERNEL_ALIAS = '~kernel/';
 
-/**
- * A token module: the one value import a page may make from the kernel. The
- * module directory may not be a `.` or `..` segment: an alias target is not
- * normalised, so `~kernel/modules/../x.token.ts` would otherwise pass as one.
- */
-const TOKEN_MODULE = /^src\/modules\/(?!\.\.?\/)[^/]+\/[^/]+\.token\.ts$/;
+/** The template's page alias, `~/*` → `app/*`; `~/../src/…` climbs out of it. */
+const PAGE_ALIAS = '~/';
 
-/** Files under `app/` a page can be written in. */
-const PAGE_FILE = /\.(?:ts|tsx)$/;
+/** A token module: the one value import a page may make from the kernel. */
+const TOKEN_MODULE = /^src\/modules\/[^/]+\/[^/]+\.token\.ts$/;
+
+/** Files under `app/` a page can be written in, and the esbuild loader for each. */
+const PAGE_FILE = /\.(?:[cm]?[jt]sx?)$/;
+
+/** The esbuild loader for a page file. */
+function loaderFor(path: string): 'ts' | 'tsx' | 'js' | 'jsx' {
+  if (path.endsWith('.tsx')) return 'tsx';
+  if (path.endsWith('.jsx')) return 'jsx';
+  return /\.[cm]?ts$/.test(path) ? 'ts' : 'js';
+}
+
+/**
+ * Resolves a specifier to a normalised project-relative path, or undefined for a
+ * package specifier. Every spelling the bundler resolves is followed: the
+ * `~kernel/` and `~/` aliases, a root-absolute path (Vite's project root), and a
+ * relative path. A `?query` or `#hash` suffix, which Vite strips, is dropped
+ * first. The result may start with `..` when the path leaves the project.
+ */
+function resolveSpecifier(file: string, specifier: string): string | undefined {
+  const bare = specifier.replace(/[?#][\s\S]*$/, '');
+  let path: string;
+  if (bare.startsWith(KERNEL_ALIAS)) path = `src/${bare.slice(KERNEL_ALIAS.length)}`;
+  else if (bare.startsWith(PAGE_ALIAS)) path = `app/${bare.slice(PAGE_ALIAS.length)}`;
+  else if (bare.startsWith('/')) path = bare.slice(1);
+  else if (bare.startsWith('./') || bare.startsWith('../')) {
+    const base = file.includes('/') ? file.slice(0, file.lastIndexOf('/')) : '';
+    path = `${base}/${bare}`;
+  } else return undefined;
+  return normalizeRelative(path);
+}
 
 /**
  * Resolves a specifier to its project-relative kernel target, or undefined when
- * it does not reach `src/`.
+ * it does not reach `src/`. A `~kernel/` specifier always counts as kernel, even
+ * one whose dot segments climb out of `src/`: it is reported, never passed.
  *
  * @param file - The importing file, project-relative
  * @param specifier - The import specifier
  * @returns The target under `src/`, or undefined
  */
 export function kernelTarget(file: string, specifier: string): string | undefined {
-  if (specifier.startsWith(KERNEL_ALIAS)) return `src/${specifier.slice(KERNEL_ALIAS.length)}`;
-  if (!specifier.startsWith('./') && !specifier.startsWith('../')) return undefined;
-  const base = file.includes('/') ? file.slice(0, file.lastIndexOf('/')) : '';
-  const resolved = normalizeRelative(`${base}/${specifier}`);
-  return resolved === 'src' || resolved.startsWith('src/') ? resolved : undefined;
+  const resolved = resolveSpecifier(file, specifier);
+  if (resolved === undefined) return undefined;
+  if (resolved === 'src' || resolved.startsWith('src/')) return resolved;
+  return specifier.startsWith(KERNEL_ALIAS)
+    ? `src/${specifier.slice(KERNEL_ALIAS.length)}`
+    : undefined;
+}
+
+/**
+ * Reports whether an `import.meta.glob` pattern can match a file under `src/`:
+ * its literal directory prefix is `src/`, inside it, or an ancestor of it
+ * (including any path that leaves the project).
+ *
+ * @param file - The importing file, project-relative
+ * @param pattern - One glob pattern
+ * @returns Whether the pattern reaches kernel code
+ */
+export function globReachesKernel(file: string, pattern: string): boolean {
+  const positive = pattern.startsWith('!') ? pattern.slice(1) : pattern;
+  const wild = positive.search(/[*?{[]/);
+  const literal = wild < 0 ? positive : positive.slice(0, wild);
+  const dir = literal.includes('/') ? literal.slice(0, literal.lastIndexOf('/') + 1) : './';
+  const resolved = resolveSpecifier(file, dir === '' ? './' : dir);
+  if (resolved === undefined) return false;
+  return (
+    resolved === '' ||
+    resolved === '..' ||
+    resolved.startsWith('../') ||
+    resolved === 'src' ||
+    resolved.startsWith('src/')
+  );
+}
+
+/** `import.meta.glob(` calls, with whatever follows the opening parenthesis. */
+const GLOB_CALL = /import\.meta\.glob\s*\(\s*/g;
+
+/** One string literal, or an array of them, as a glob's first argument. */
+const GLOB_LITERAL =
+  /^(?:(["'`])((?:(?!\1)[^\\$])*)\1|\[((?:\s*(["'])(?:(?!\4)[^\\])*\4\s*,?)*)\s*\])/;
+
+/**
+ * The glob patterns of every `import.meta.glob` call in the emitted source, or
+ * `unreadable` when a call's first argument is not a literal the scan can read.
+ */
+function globPatterns(emitted: string): readonly (readonly string[])[] | 'unreadable' {
+  const calls: string[][] = [];
+  for (const match of emitted.matchAll(GLOB_CALL)) {
+    const rest = emitted.slice(match.index + match[0].length);
+    const literal = GLOB_LITERAL.exec(rest);
+    if (literal === null) return 'unreadable';
+    calls.push(
+      literal[2] !== undefined
+        ? [literal[2]]
+        : [...(literal[3] ?? '').matchAll(/(["'])((?:(?!\1)[^\\])*)\1/g)].map((m) => m[2]!),
+    );
+  }
+  return calls;
 }
 
 /** The text of the statement a static specifier belongs to, from its keyword. */
@@ -136,7 +216,7 @@ export async function scanPageSource(
   try {
     emitted = (
       await transform(source, {
-        loader: path.endsWith('.tsx') ? 'tsx' : 'ts',
+        loader: loaderFor(path),
         format: 'esm',
         jsx: 'automatic',
         tsconfigRaw: { compilerOptions: { verbatimModuleSyntax: true } },
@@ -163,7 +243,29 @@ export async function scanPageSource(
         reason,
       });
   }
+  const globs = globPatterns(emitted);
+  if (globs === 'unreadable') return 'unreadable';
+  globs.forEach((patterns, index) => {
+    const reaching = patterns.find((pattern) => globReachesKernel(path, pattern));
+    if (reaching !== undefined)
+      violations.push({
+        path,
+        line: globLine(source, index),
+        specifier: reaching,
+        reason: 'glob',
+      });
+  });
   return violations;
+}
+
+/** The line of the `index`-th `import.meta.glob` in the original source, comments masked. */
+function globLine(source: string, index: number): number {
+  const visible = maskComments(source) ?? source;
+  const calls = [...visible.matchAll(GLOB_CALL)];
+  const at = calls[index]?.index ?? 0;
+  let line = 1;
+  for (let j = 0; j < at; j++) if (visible.charCodeAt(j) === 10) line++;
+  return line;
 }
 
 /**

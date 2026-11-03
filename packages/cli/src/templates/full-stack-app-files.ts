@@ -763,6 +763,10 @@ outside the browser authenticates with a bearer token once an \`auth\` arm is co
 check exempts bearer-authenticated requests. Without an auth arm, a plain POST answers 403 by
 design.
 
+The generated \`/api\` routes are not behind sign-in: \`requireUser\` guards pages, not kernel routes,
+and any visitor can get a session and its CSRF token from \`/login\`. Add authentication to a module's
+routes before they serve or accept real data.
+
 ## Styling and theme
 
 Tailwind 4 runs through Vite. The neutral shadcn theme lives in \`app/app.css\`; \`app/components/ui/\`

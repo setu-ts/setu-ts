@@ -100,6 +100,9 @@ import { PRODUCTS } from './products.token.ts';
  *
  * Resolves the same request-bound service the products page reads with
  * \`getService\`, so the page and the API cannot disagree.
+ *
+ * Not behind sign-in: the page's \`requireUser\` guard covers the page only.
+ * Add authentication here before these routes serve real data.
  */
 export function registerProductsRoutes(router: IRouterApi, services?: IServiceRegistry): void {
   void services;
