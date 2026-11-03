@@ -9,6 +9,10 @@ import type { PricedModel } from '../modules/chat/chat.budget.ts';
 /** Capability token this plugin provides. */
 export const CHAT_MODELS = createCapabilityToken('chat-models');
 
+// The AI SDK keeps telemetry integrations in a process-global list that never shrinks, so
+// registering once per application would duplicate every AI span per app ever started.
+let sdkTelemetryRegistered = false;
+
 /** The service registered under {@linkcode CHAT_MODELS}. */
 export interface IChatModelsService {
   /** Fallback order: each model is budgeted at its own prices. */
@@ -44,7 +48,10 @@ export function ChatModelsPlugin(): IPlugin {
         ...(env['AI_COMPAT_API_KEY'] ? { apiKey: env['AI_COMPAT_API_KEY'] } : {}),
       });
       // AI SDK spans reach Setu's tracer when telemetry-plugin registers globally.
-      registerTelemetry(new OpenTelemetry({ tracer: trace.getTracer('gen_ai') }));
+      if (!sdkTelemetryRegistered) {
+        registerTelemetry(new OpenTelemetry({ tracer: trace.getTracer('gen_ai') }));
+        sdkTelemetryRegistered = true;
+      }
       const service: IChatModelsService = {
         models: [
           {

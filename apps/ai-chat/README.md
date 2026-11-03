@@ -36,6 +36,7 @@ another budget or tool identity. Replace it with an authenticated membership-awa
 real application. The memory quota and database are process-local; production deployments need
 shared quota storage and a durable database/outbox. Configure actual prices and conservative
 template/media allowances. Prompt/completion capture is off; enabling it records unredacted content.
+Provider error messages are still logged and traced, and some providers quote input in them.
 
 The smoke builds each app with `createApp()` and replaces the models through
 `createTestApp({ overrides: [overrideCapability(CHAT_MODELS, …)] })`. It uses `MockLanguageModelV4`

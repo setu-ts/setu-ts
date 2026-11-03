@@ -12,12 +12,10 @@ import {
   Output,
   parseJsonEventStream,
   readUIMessageStream,
-  registerTelemetry,
   uiMessageChunkSchema,
   wrapLanguageModel,
 } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
-import { OpenTelemetry } from '@ai-sdk/otel';
 import { createFallback } from 'ai-fallback';
 import { trace, context } from '@opentelemetry/api';
 import { CAPABILITIES } from '@setu-ts/common';
@@ -344,7 +342,6 @@ describe('AI SDK recipes through Setu (Node)', () => {
     await once(receiver, 'listening');
     const address = receiver.address();
     assert.ok(address && typeof address === 'object');
-    registerTelemetry(new OpenTelemetry({ tracer: trace.getTracer('gen_ai') }));
     const app = await appWith([{ model: mock(), prices }], {
       serviceName: 'ai-smoke',
       exporter: 'otlp',

@@ -267,6 +267,17 @@ The smoke receives real OTLP/HTTP exports, checks request trace parenting and ab
 text, then turns capture on as a positive control. These are the SDK's `gen_ai.*` spans, not a
 second Setu GenAI instrumentation layer.
 
+**Capture off does not cover provider error text.** When a provider refuses a call, its error
+message reaches the span's `exception.message` and, through the scaffold's `errorHandler`, the
+server log with its cause. Some providers quote part of the input in that message. The client only
+ever sees a masked 500. Treat log and trace access as access to occasional prompt fragments, or
+replace the provider error with a value-free one before it leaves the route.
+
+Register the SDK's telemetry integration **once per process**. `registerTelemetry` appends to a
+process-global list that never shrinks, so registering per application duplicates every AI span for
+each application started in the process. The example's `ChatModelsPlugin` guards its call for that
+reason.
+
 ## Testing without a provider
 
 ```typescript

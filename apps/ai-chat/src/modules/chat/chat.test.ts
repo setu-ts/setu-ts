@@ -61,4 +61,22 @@ describe('chat module', () => {
       await app.stop();
     }
   });
+
+  it('registers AI SDK telemetry once per process, however many apps start', async () => {
+    // The SDK keeps registrations in a process-global list that never shrinks; one per app
+    // would emit a duplicate span set per application ever started (re-audit N6).
+    const registered = () =>
+      (globalThis as { AI_SDK_TELEMETRY_INTEGRATIONS?: unknown[] }).AI_SDK_TELEMETRY_INTEGRATIONS
+        ?.length ?? 0;
+    const first = await createTestApp({ app: createApp() });
+    const afterFirst = registered();
+    const second = await createTestApp({ app: createApp() });
+    try {
+      assert.ok(afterFirst >= 1);
+      assert.deepStrictEqual(registered(), afterFirst);
+    } finally {
+      await first.stop();
+      await second.stop();
+    }
+  });
 });
