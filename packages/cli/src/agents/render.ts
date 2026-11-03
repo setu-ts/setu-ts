@@ -40,6 +40,10 @@ function commandGloss(name: string, facts: ProjectFacts): string {
       return 'development loop; use this while editing';
     case 'start:debug':
       return 'development entry with the inspector';
+    case 'client':
+      return 'generate src/clientsdk/api.ts; boots the app unless --input is supplied';
+    case 'client:check':
+      return 'read-only client drift gate';
     case 'dev': {
       const body = facts.commandBodies[name] ?? '';
       if (body.includes('wrangler dev'))

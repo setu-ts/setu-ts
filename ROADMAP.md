@@ -16211,9 +16211,9 @@ as data; the 409 Problem Details field by field; and the database benchmark
 openapi-typescript before they are fixed — the repository rule):
 
 1. **Load the document** by booting the project the way plugin commands already do (`loadApp`, a
-   no-port `start()`, `getSpec()`, `stop()` in a `finally`), or from `--from <file|url>` for Workers
-   projects and apps whose start needs a live database. A named refusal when openapi-plugin is not
-   registered.
+   no-port `start()`, `getSpec()`, `stop()` in a `finally`), or from `--input <file|url>` for
+   Workers projects and apps whose start needs a live database. A named refusal when openapi-plugin
+   is not registered.
 2. **Generate with the project's own `@setu-ts/sdk`**, lazily imported and awaited inside a
    `try`/`catch`; the CLI gains no sdk dependency.
 3. **Write a managed file** through the CLI's write-safety path, with `--dry-run`.

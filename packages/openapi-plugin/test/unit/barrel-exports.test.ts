@@ -5,7 +5,8 @@
  */
 import { describe, expect, it } from 'vitest';
 import * as openapiPlugin from '../../src/index.ts';
-import type { OpenApiSchemaObject, SchemaNodeHook } from '../../src/index.ts';
+import type { IOpenApiService, OpenApiSchemaObject, SchemaNodeHook } from '../../src/index.ts';
+import type { IOpenApiService as CommonOpenApiService } from '@setu-ts/common';
 
 describe('Barrel exports', () => {
   it('exports OperationIdError with a reason and keeps allocation helpers internal', () => {
@@ -48,8 +49,9 @@ describe('Barrel exports', () => {
   });
 
   it('should export IOpenApiService type', () => {
-    // Types are erased at runtime, but we can verify the module exports correctly
-    expect(openapiPlugin).toBeDefined();
+    const service: IOpenApiService = { getSpec: () => ({ paths: {} }), addSchema: () => {} };
+    const shared: CommonOpenApiService = service;
+    expect(shared.getSpec()).toEqual({ paths: {} });
   });
   it('exports the SchemaNodeHook type (declared against the barrel)', () => {
     // Compile-time. This export was previously pinned by NOTHING but the

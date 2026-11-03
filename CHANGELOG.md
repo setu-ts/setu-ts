@@ -8,6 +8,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Typed client command (M129, #PR, `@setu-ts/cli`, `@setu-ts/common`,
+  `@setu-ts/openapi-plugin`).** `setu client` boots without a port or reads JSON with
+  `--input <file|url>`, generates `src/clientsdk/api.ts` with the project's own SDK, and writes a
+  marked managed file. `--check` is a read-only drift gate; `--dry-run` reports the write plan.
+  `--output`, `--factory`, `--type-name`, `--dir` and `--config` select paths and names.
+  `setu add sdk` adds opt-in `client` and `client:check` scripts without replacing existing ones.
+  `IOpenApiService` moves to common and remains re-exported by openapi-plugin; its shape is
+  unchanged. See the CLI guide for bootstrap effects, input bounds and write refusals.
+
 - **MCP route tools (M133, #545, `@setu-ts/mcp-plugin`, `@setu-ts/common`, `@setu-ts/kernel`,
   `@setu-ts/auth-plugin`, `@setu-ts/idempotency-plugin`, `@setu-ts/decorator-plugin`,
   `@setu-ts/cli`).** `McpPlugin`, `McpPluginOptions`, `McpToolDeclaration`,
@@ -179,6 +188,11 @@ All notable changes to this project are documented here. The format follows
   `RedisRateLimitStore` re-arms a key it finds without an expiry instead of answering 429 for ever.
 
 ### Fixed
+
+- **Swagger UI after `setu add openapi` (M129, #PR, `@setu-ts/cli`).** Node, Deno and Bun now
+  install the exact `swagger-ui-dist` release that the Swagger UI integrity hashes match; without
+  it, an application using the default self-hosted assets could not boot. Workers receives no
+  additional dependency.
 
 - **kernel:** a streamed response whose source emits zero-length chunks without pause no longer
   exhausts the heap. The Node adapter's writer reads the next chunk as soon as a write reports no

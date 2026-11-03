@@ -9,6 +9,14 @@
  */
 import { describe, expect, it } from 'vitest';
 import * as common from '../../src/index.ts';
+
+it('exports the shared OpenAPI service contract', () => {
+  const service: common.IOpenApiService = {
+    getSpec: () => ({ openapi: '3.1.0', paths: {} }),
+    addSchema: () => {},
+  };
+  expect(service.getSpec()).toEqual({ openapi: '3.1.0', paths: {} });
+});
 import type { RequestOrigin } from '../../src/index.ts';
 import type { HealthIndicatorOptions, IHealthApi, IHealthService } from '../../src/index.ts';
 

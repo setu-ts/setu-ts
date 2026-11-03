@@ -380,6 +380,7 @@ describe('help text agrees with the inventory', () => {
     ['add', ['add', '--help']],
     ['agents', ['agents', '--help']],
     ['check', ['check', '--help']],
+    ['client', ['client', '--help']],
     ['sync', ['sync', '--help']],
     ['adopt', ['adopt', '--help']],
     ['workspace ports', ['workspace', 'ports', '--help']],

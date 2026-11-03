@@ -240,6 +240,19 @@ All line numbers read on `develop` at `9886d5a64`.
 
 - **Test home:** none (naming); `flags.test.ts` pins the inventory.
 
+### 3.11 `setu add openapi` installs `swagger-ui-dist`
+
+- **Decision:** the `openapi` entry in `ADDABLE` (`cli/src/commands/add.ts`) gains
+  `peers: { runtimes: ['node', 'deno', 'bun'], packages: ['swagger-ui-dist'] }`, and `CLIENT_RANGES`
+  gains `'swagger-ui-dist'` at the exact `SWAGGER_UI_DIST_VERSION` (`templates/swagger-version.ts`)
+  that every template already pins, because the plugin's SRI hashes match that release. Workers is
+  not listed: its runtime has no `fs`, so self-hosted assets cannot serve there.
+- **Why:** found by this milestone's e2e gate. A minimal project after `setu add openapi` cannot
+  boot: openapi-plugin's default self-hosted Swagger UI imports `swagger-ui-dist`, which nothing
+  installed. Registered as a defect while building.
+- **Test home:** `test/unit/commands/add.test.ts` (Node, Deno, Bun record the exact pin; Workers
+  does not); `client-e2e.test.ts` case 2.
+
 ## 4. Exported surface — every symbol names its consumer
 
 **Breaking for implementors:** none. `IOpenApiService` keeps its shape and openapi-plugin keeps
@@ -267,21 +280,21 @@ The CLI adds no `src/index.ts` export: the command is reached through `bin`.
 
 ## 5. Implementation files
 
-| File                                                        | Purpose                                                                                                                                                        |
-| ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/common/src/services/openapi.ts`                   | `IOpenApiService` (moved, JSDoc kept, `@since 0.1.0`)                                                                                                          |
-| `packages/common/src/index.ts`                              | export the type                                                                                                                                                |
-| `packages/openapi-plugin/src/interfaces/openapi-service.ts` | becomes a type re-export from common                                                                                                                           |
-| `packages/cli/src/commands/client.ts`                       | `runClientCommand`: flags, project refusal, orchestration, exit codes                                                                                          |
-| `packages/cli/src/client/document-source.ts`                | boot path and `--input` path, validation, caps                                                                                                                 |
-| `packages/cli/src/client/generate.ts`                       | project sdk import, marker, header lines, formatting                                                                                                           |
-| `packages/cli/src/commands/plugin-commands.ts`              | `withStartedApp` extracted; `withPluginCommands` calls it                                                                                                      |
-| `packages/cli/src/app-loader.ts`                            | `purpose` argument in the factory-threw message                                                                                                                |
-| `packages/cli/src/utils/ts-loader.ts`                       | `importFromProject(specifier, root)`                                                                                                                           |
-| `packages/cli/src/cli.ts`, `flags.ts`, help text            | dispatch `client`, flag spec, `printHelp` line                                                                                                                 |
-| `packages/cli/src/commands/add.ts`                          | `sdk` scripts                                                                                                                                                  |
-| `packages/cli/src/agents/facts.ts`, `agents/render.ts`      | the command in agent briefs; it must fit the current 13312-byte budget by tightening wording, and a raise goes to the maintainer                               |
-| Docs                                                        | `packages/cli/README.md`, `packages/sdk/README.md` (replace the hand-written script), `docs/` CLI reference, `PUBLIC_API.md`, `CHANGELOG.md`, website CLI page |
+| File                                                        | Purpose                                                                                                                                                                       |
+| ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/common/src/services/openapi.ts`                   | `IOpenApiService` (moved, JSDoc kept; `@since 0.12.0`, the first common release that ships the file — `check:docs` refuses `0.1.0`; openapi-plugin's re-export keeps `0.1.0`) |
+| `packages/common/src/index.ts`                              | export the type                                                                                                                                                               |
+| `packages/openapi-plugin/src/interfaces/openapi-service.ts` | becomes a type re-export from common                                                                                                                                          |
+| `packages/cli/src/commands/client.ts`                       | `runClientCommand`: flags, project refusal, orchestration, exit codes                                                                                                         |
+| `packages/cli/src/client/document-source.ts`                | boot path and `--input` path, validation, caps                                                                                                                                |
+| `packages/cli/src/client/generate.ts`                       | project sdk import, marker, header lines, formatting                                                                                                                          |
+| `packages/cli/src/commands/plugin-commands.ts`              | `withStartedApp` extracted; `withPluginCommands` calls it                                                                                                                     |
+| `packages/cli/src/app-loader.ts`                            | `purpose` argument in the factory-threw message                                                                                                                               |
+| `packages/cli/src/utils/ts-loader.ts`                       | `importFromProject(specifier, root)`                                                                                                                                          |
+| `packages/cli/src/cli.ts`, `flags.ts`, help text            | dispatch `client`, flag spec, `printHelp` line                                                                                                                                |
+| `packages/cli/src/commands/add.ts`                          | `sdk` scripts                                                                                                                                                                 |
+| `packages/cli/src/agents/facts.ts`, `agents/render.ts`      | the command in agent briefs; it must fit the current 13312-byte budget by tightening wording, and a raise goes to the maintainer                                              |
+| Docs                                                        | `packages/cli/README.md`, `packages/sdk/README.md` (replace the hand-written script), `docs/` CLI reference, `PUBLIC_API.md`, `CHANGELOG.md`, website CLI page                |
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 

@@ -4,6 +4,17 @@ import { gatherFacts } from '../../../src/agents/facts.ts';
 import { createFakeFs } from '../../fixtures/fake-fs.ts';
 
 describe('read-only project facts', () => {
+  it('includes opt-in client scripts in project commands', async () => {
+    const facts = await gatherFacts(
+      createFakeFs({
+        '/app/package.json': JSON.stringify({
+          scripts: { client: 'setu client', 'client:check': 'setu client --check' },
+        }),
+      }),
+      '/app',
+    );
+    expect(facts.commands).toEqual(['client', 'client:check']);
+  });
   it('reads installed packages, style, scripts, seams and optional directories', async () => {
     const fs = createFakeFs({
       '/app/package.json': JSON.stringify({
