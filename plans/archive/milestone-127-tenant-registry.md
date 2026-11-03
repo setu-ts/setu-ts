@@ -1,7 +1,7 @@
 # Milestone 127 — A registry of real tenants (`@setu-ts/multi-tenancy-plugin`)
 
-> **Status:** Implementing. Branch: `feat/m127-tenant-registry`. `develop` and `main` are protected
-> — all work (implementation + fixes) stays on this one branch until it merges via a single PR.
+> **Status:** Complete. Branch: `feat/m127-tenant-registry`. `develop` and `main` are protected —
+> all work (implementation + fixes) stays on this one branch until it merges via a single PR.
 
 ## 0. Objective & scope
 
