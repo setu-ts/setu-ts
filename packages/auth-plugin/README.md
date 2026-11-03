@@ -1619,21 +1619,30 @@ settles zero. Settlement is idempotent, including concurrent calls; fabricated a
 throw `TypeError`. A store failure fails closed with `QuotaStoreUnavailableError`, which carries a
 value-free 503 status hint like `RateLimitStoreUnavailableError`.
 
-`name` matches `[a-z0-9-]+`; keys are non-empty and at most 512 UTF-8 bytes. `limit` is a number or
-an asynchronous per-key callback returning a number or undefined (unlimited but still recorded).
-Amounts and resolved limits reject NaN, infinities, negative, fractional and unsafe integers before
-storage. Windows are epoch-aligned positive integer milliseconds, `utc-day` or `utc-month`. Usage
-expires at the window's end plus one day; settlement after a boundary still charges its old window.
+`name` matches `[a-z0-9-]+`; keys are non-empty, well-formed Unicode strings of at most 512 UTF-8
+bytes. `limit` is a number or an asynchronous per-key callback returning a number or undefined
+(unlimited but still recorded). Both stores refuse a reservation that would take the counter above
+`Number.MAX_SAFE_INTEGER`, even on an unlimited key, using the normal not-admitted path rather than
+a 503. Amounts and resolved limits reject NaN, infinities, negative, fractional and unsafe integers
+before storage. Windows are epoch-aligned positive integer milliseconds, `utc-day` or `utc-month`.
+Usage expires at the window's end plus one day; settlement after a boundary still charges its old
+window.
 
 Use `new MemoryQuotaStore(runtime)` for one process, or `new RedisQuotaStore({ client, namespace })`
 for a shared budget. `IQuotaRedisClient` requires ioredis-style `eval(script, numkeys, ...args)` and
 `quit()`; node-redis can use common's `fromNodeRedis` adapter. The namespace must be non-empty.
 Redis passes caller data through KEYS/ARGV, uses atomic scripts and absolute expiry, and wraps
 failures with their original cause. `close()` quits the injected client, so dedicate that client to
-the store.
+the store. The application owns the injected client's `'error'` listener; the store attaches none.
+
+The store never times out a call itself: the injected client must bound commands. Use ioredis
+`new Redis(url, { commandTimeout: 15_000 })` or node-redis through
+`fromNodeRedis(createClient({ url }))`, which bounds commands at 15 seconds by default. An unbounded
+client lets a stalled Redis hold every request.
 
 `QuotaExceededError` (`name` `'QuotaExceededError'`) carries the policy in `policyName`, whole
-`retryAfterSeconds` (at least one), and a 429 status hint. Under
+`retryAfterSeconds` (at least one), and a 429 status hint. Its constructor throws `TypeError` unless
+the policy name is a non-empty string and the retry value is a safe integer of at least 1. Under
 `errorHandler({ format: 'rfc9457' })` its body has the IANA quota-exceeded type, title
 `Quota Exceeded`, detail `The quota for this request is spent.`, `violated-policies` and
 `retry-after` extensions. It carries no usage, tenant or limit. The hint contract has no headers;

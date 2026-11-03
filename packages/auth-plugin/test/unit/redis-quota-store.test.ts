@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { errorHandler } from '@setu-ts/exceptions';
 import { RedisQuotaStore, QuotaStoreUnavailableError } from '../../src/index.ts';
 import type { IQuotaRedisClient } from '../../src/index.ts';
 
@@ -64,18 +67,48 @@ describe('RedisQuotaStore', () => {
     );
   });
 
-  it('wraps reserve and adjustment backend failures without admitting (O5)', async () => {
-    const { client, store } = setup();
-    const fault = new Error('disconnected');
-    client.eval.mockRejectedValue(fault);
-    for (const operation of [
-      () => store.reserve('tenant', '0', 1, 10, 1000),
-      () => store.adjust('tenant', '0', -1, 1000),
-    ]) {
-      await expect(operation()).rejects.toMatchObject({
-        name: 'QuotaStoreUnavailableError',
-        cause: fault,
+  it.each(['disconnected', 'Command timed out'])(
+    'wraps reserve and adjustment backend failures without admitting and answers a value-free 503: %s (O5, F1)',
+    async (message) => {
+      const { client, store } = setup();
+      const fault = new Error(message);
+      client.eval.mockRejectedValue(fault);
+      for (const operation of [
+        () => store.reserve('tenant', '0', 1, 10, 1000),
+        () => store.adjust('tenant', '0', -1, 1000),
+      ]) {
+        const rejection = operation();
+        await expect(rejection).rejects.toBeInstanceOf(QuotaStoreUnavailableError);
+        await expect(rejection).rejects.toMatchObject({
+          name: 'QuotaStoreUnavailableError',
+          cause: fault,
+        });
+      }
+      const app = createApplication({ plugins: [RuntimePlugin()] });
+      app.middleware.add(errorHandler({ format: 'rfc9457', logErrors: false }), { priority: 1 });
+      app.router.get('/quota', {
+        handler: async (ctx) => {
+          await store.reserve('tenant', '0', 1, 10, 1000);
+          return ctx.response.text('must not run');
+        },
       });
-    }
-  });
+      await app.start();
+      try {
+        const response = await app.fetch(new Request('http://localhost/quota'));
+        expect(response.status).toBe(503);
+        expect(response.headers.get('content-type')).toBe('application/problem+json');
+        const body = await response.text();
+        expect(body).not.toContain(message);
+        expect(JSON.parse(body)).toEqual({
+          type: 'about:blank',
+          title: 'Service Unavailable',
+          status: 503,
+          detail: 'Quota storage is temporarily unavailable.',
+          instance: '/quota',
+        });
+      } finally {
+        await app.stop();
+      }
+    },
+  );
 });

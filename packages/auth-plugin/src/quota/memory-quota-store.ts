@@ -36,7 +36,7 @@ export class MemoryQuotaStore implements IQuotaStore {
   ): Promise<{ admitted: boolean; used: number }> {
     const storeKey = `${key}:${windowId}`;
     const used = this.#used(storeKey);
-    if (limit !== undefined && amount > limit - used)
+    if (amount > Number.MAX_SAFE_INTEGER - used || (limit !== undefined && amount > limit - used))
       return Promise.resolve({ admitted: false, used });
     const next = used + amount;
     this.#windows.set(storeKey, { used: next, expireAt });

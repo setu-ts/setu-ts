@@ -15,10 +15,17 @@ All notable changes to this project are documented here. The format follows
   `QuotaExceededError`, `QuotaStoreUnavailableError` and `respondQuotaExceeded` expose fail-closed
   refusals. The rate limiter shares the quota body initializer with byte-identical output.
   `TelemetryPlugin.registerGlobal` optionally connects library spans to Setu's provider; refused
-  registration warns once and shutdown retains it. The AI guide and Node `apps/ai-chat` demonstrate
-  SDK tool loops, structured output, streaming, fallback, capture-off tracing and outbox/inbox usage
-  delivery. AI dependencies stay in the application and root development tooling. No Setu AI package
-  is introduced; existing applications need no changes. Ships in 0.13.0.
+  registration warns once and shutdown retains it. Library spans from a second app still use the
+  first app's exporter and service.name, and are dropped after that first app stops. Only its own
+  Setu spans stay private. Quota keys now reject ill-formed Unicode; both stores refuse unsafe
+  accumulated reservations even for unlimited keys. The refusal constructor validates policy names
+  and retry seconds. RedisQuotaStore requires a client-owned command bound; it never times out calls
+  itself. Use ioredis `commandTimeout: 15_000` or common's `fromNodeRedis` with its default
+  15-second bound; unbounded clients can hold every request on stalled Redis. The AI guide and Node
+  `apps/ai-chat` demonstrate SDK tool loops, structured output, streaming, fallback, capture-off
+  tracing and outbox/inbox usage delivery. AI dependencies stay in the application and root
+  development tooling. No Setu AI package is introduced; existing applications need no changes.
+  Ships in 0.13.0.
 
 - **Typed client command (M129, #547, `@setu-ts/cli`, `@setu-ts/common`,
   `@setu-ts/openapi-plugin`).** `setu client` boots without a port or reads JSON with

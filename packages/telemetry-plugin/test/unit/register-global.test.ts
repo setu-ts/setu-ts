@@ -19,7 +19,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function setup(registerGlobal?: boolean) {
+function setup(registerGlobal?: boolean, serviceName = 'global-test') {
   const exporter = new sdk.InMemorySpanExporter();
   const warn = vi.fn();
   api.context.setGlobalContextManager(new AsyncLocalStorageContextManager().enable());
@@ -27,7 +27,7 @@ function setup(registerGlobal?: boolean) {
   const host = buildTracerHost({
     sdkMod: sdk as unknown as OtelSdkModule,
     resourcesMod: resources as unknown as OtelResourcesModule,
-    pluginOptions: { exporter: 'console', serviceName: 'global-test' },
+    pluginOptions: { exporter: 'console', serviceName },
     contextActivation: true,
     consoleExporterCtor: class {
       constructor() {
@@ -64,6 +64,41 @@ function setup(registerGlobal?: boolean) {
 }
 
 describe('TelemetryPlugin registerGlobal', () => {
+  it("keeps a second app's library spans on the first exporter and drops them after it stops (F4)", async () => {
+    const first = setup(true, 'first-app');
+    const second = setup(true, 'second-app');
+    await first.app.start();
+    await second.app.start();
+    try {
+      const service = second.app.services.get<ITelemetryService>(CAPABILITIES.TELEMETRY);
+      await service.withSpan('second-request', async () => {
+        api.trace.getTracer('library').startSpan('second-library').end();
+      });
+      await first.host.forceFlush();
+      await second.host.forceFlush();
+      const [library] = first.exporter.getFinishedSpans();
+      expect(library?.name).toBe('second-library');
+      expect(library?.resource.attributes['service.name']).toBe('first-app');
+      expect(second.exporter.getFinishedSpans().map((span) => span.name)).toEqual([
+        'second-request',
+      ]);
+      expect(second.warn.mock.calls[0]?.[0]).toContain("first app's exporter and service.name");
+      await first.app.stop();
+      const afterStop = first.exporter.getFinishedSpans().length;
+      await service.withSpan('second-request-after-stop', async () => {
+        api.trace.getTracer('library').startSpan('dropped-library').end();
+      });
+      await second.host.forceFlush();
+      expect(first.exporter.getFinishedSpans()).toHaveLength(afterStop);
+      expect(second.exporter.getFinishedSpans().map((span) => span.name)).toEqual([
+        'second-request',
+        'second-request-after-stop',
+      ]);
+    } finally {
+      await second.app.stop();
+      await first.app.stop();
+    }
+  });
   it('leaves the global provider untouched by default', async () => {
     const setGlobal = vi.spyOn(api.trace, 'setGlobalTracerProvider');
     const { app } = setup();
@@ -102,6 +137,9 @@ describe('TelemetryPlugin registerGlobal', () => {
     try {
       expect(warn).toHaveBeenCalledTimes(1);
       expect(warn.mock.calls[0]?.[0]).toContain('registration refused');
+      expect(warn.mock.calls[0]?.[0]).toContain("first app's exporter and service.name");
+      expect(warn.mock.calls[0]?.[0]).toContain('dropped after it stops');
+      expect(warn.mock.calls[0]?.[0]).toContain("Only this app's own spans");
       await app.services
         .get<ITelemetryService>(CAPABILITIES.TELEMETRY)
         .withSpan('private', async () => {});

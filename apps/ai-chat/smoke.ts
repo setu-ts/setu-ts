@@ -18,7 +18,7 @@ import {
 } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { OpenTelemetry } from '@ai-sdk/otel';
-import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
+import { createChatModels } from './src/modules/chat/chat.models.ts';
 import { createFallback } from 'ai-fallback';
 import { trace, context } from '@opentelemetry/api';
 import { CAPABILITIES } from '@setu-ts/common';
@@ -28,10 +28,10 @@ import { createRuntimeServices } from '@setu-ts/runtime';
 import type { IDatabaseService } from '@setu-ts/database-plugin';
 import type { IOutbox } from '@setu-ts/messaging-plugin';
 import { createApp } from './setu.config.ts';
-import { tenantTool } from './src/chat.routes.ts';
-import { budgetMiddleware } from './src/budget-middleware.ts';
-import { usageRecorded, writeUsage } from './src/usage.ts';
-import type { UsageRecord } from './src/usage.ts';
+import { tenantTool } from './src/modules/chat/chat.controller.ts';
+import { budgetMiddleware } from './src/modules/chat/chat.budget.ts';
+import { usageRecorded, writeUsage } from './src/modules/chat/chat.usage.ts';
+import type { UsageRecord } from './src/modules/chat/chat.usage.ts';
 
 type Model = ReturnType<typeof wrapLanguageModel>;
 type Result = Awaited<ReturnType<Model['doGenerate']>>;
@@ -49,7 +49,7 @@ const result = (text = 'scripted answer'): Result => ({
   usage,
   warnings: [],
 });
-function mock() {
+function mock(streamUsage: Result['usage'] = usage) {
   return new MockLanguageModelV4({
     doGenerate: async () => result(),
     doStream: async () => ({
@@ -60,7 +60,7 @@ function mock() {
             { type: 'text-start', id: 'text' },
             { type: 'text-delta', id: 'text', delta: 'scripted answer' },
             { type: 'text-end', id: 'text' },
-            { type: 'finish', usage, finishReason: { unified: 'stop', raw: 'stop' } },
+            { type: 'finish', usage: streamUsage, finishReason: { unified: 'stop', raw: 'stop' } },
           ] satisfies StreamPart[])
             controller.enqueue(part);
           controller.close();
@@ -206,6 +206,68 @@ describe('AI SDK recipes through Setu (Node)', () => {
     assert.equal(replies.filter((reply) => reply.status === 'fulfilled').length, 1);
     const refused = replies.find((reply) => reply.status === 'rejected');
     assert.ok(refused?.status === 'rejected' && refused.reason instanceof QuotaExceededError);
+  });
+
+  it('13: an abort while doStream is gated settles within two seconds and releases the reservation', async () => {
+    const entered = Promise.withResolvers<void>();
+    const gate = Promise.withResolvers<void>();
+    const stores = new Set<MemoryQuotaStore>();
+    const reserve = MemoryQuotaStore.prototype.reserve;
+    MemoryQuotaStore.prototype.reserve = function (...args) {
+      stores.add(this);
+      return reserve.apply(this, args);
+    };
+    const model = new MockLanguageModelV4({
+      doStream: async ({ abortSignal }) => {
+        entered.resolve();
+        await gate.promise;
+        abortSignal?.throwIfAborted();
+        return mock().doStream({ prompt: [] });
+      },
+    });
+    const app = createApp([{ model, prices }]);
+    await app.start();
+    let timer: ReturnType<typeof runtime.setTimeout> | undefined;
+    try {
+      const abort = new AbortController();
+      const response = app.fetch(chatRequest(abort.signal));
+      await entered.promise;
+      abort.abort(new Error('early abort probe'));
+      gate.resolve();
+      const expired = new Promise<string>((resolve) => {
+        timer = runtime.setTimeout(() => resolve('timed out'), 2000);
+      });
+      const outcome = await Promise.race([
+        response.then(
+          () => 'settled',
+          () => 'rejected',
+        ),
+        expired,
+      ]);
+      assert.notEqual(outcome, 'timed out');
+      assert.equal(stores.size, 1);
+      const [store] = stores;
+      assert.ok(store);
+      const period = new Date(runtime.now()).toISOString().slice(0, 10);
+      assert.equal(
+        (
+          await reserve.call(
+            store,
+            'ai-spend:demo-tenant',
+            period,
+            0,
+            undefined,
+            runtime.now() + 60_000,
+          )
+        ).used,
+        0,
+      );
+    } finally {
+      if (timer !== undefined) runtime.clearTimeout(timer);
+      gate.resolve();
+      MemoryQuotaStore.prototype.reserve = reserve;
+      await app.stop();
+    }
   });
 
   it('4: reads usage back once after a redelivered outbox envelope', async () => {
@@ -366,13 +428,93 @@ describe('AI SDK recipes through Setu (Node)', () => {
       const response = await app.fetch(chatRequest());
       assert.equal(response.status, 429);
       assert.ok(Number(response.headers.get('Retry-After')) >= 1);
-      assert.equal(
-        ((await response.json()) as Record<string, unknown>)['detail'],
-        'The quota for this request is spent.',
-      );
+      assert.deepEqual(await response.json(), {
+        type: 'https://iana.org/assignments/http-problem-types#quota-exceeded',
+        title: 'Quota Exceeded',
+        status: 429,
+        detail: 'The quota for this request is spent.',
+        instance: '/chat',
+        'violated-policies': ['ai-spend'],
+        'retry-after': Number(response.headers.get('Retry-After')),
+      });
       assert.equal(model.doStreamCalls.length, 0);
     } finally {
       await app.stop();
+    }
+  });
+
+  it('9: an unreachable streaming provider falls back and releases its reservation', async () => {
+    const first = new MockLanguageModelV4({
+      doStream: async () => {
+        throw new APICallError({
+          message: 'Cannot connect to API: test',
+          url: 'http://127.0.0.1:9',
+          requestBodyValues: {},
+          isRetryable: true,
+        });
+      },
+    });
+    const second = mock();
+    const reserve = MemoryQuotaStore.prototype.reserve;
+    const stores = new Set<MemoryQuotaStore>();
+    MemoryQuotaStore.prototype.reserve = function (...args) {
+      stores.add(this);
+      return reserve.apply(this, args);
+    };
+    const app = createApp([
+      { model: first, prices },
+      { model: second, prices },
+    ]);
+    await app.start();
+    try {
+      const response = await app.fetch(chatRequest());
+      assert.equal(response.status, 200);
+      assert.match(await response.text(), /scripted answer/);
+      assert.equal(first.doStreamCalls.length, 1);
+      assert.equal(second.doStreamCalls.length, 1);
+      assert.equal(stores.size, 1);
+      const [store] = stores;
+      assert.ok(store);
+      const window = new Date(runtime.now()).toISOString().slice(0, 10);
+      assert.equal(
+        (
+          await reserve.call(
+            store,
+            'ai-spend:demo-tenant',
+            window,
+            0,
+            undefined,
+            runtime.now() + 60_000,
+          )
+        ).used,
+        7,
+      );
+    } finally {
+      MemoryQuotaStore.prototype.reserve = reserve;
+      await app.stop();
+    }
+  });
+
+  it('shares one lazy quota within an app and isolates quotas across createApp calls', async () => {
+    const model = mock({ ...usage, inputTokens: { ...usage.inputTokens, total: undefined } });
+    const models = [{ model, prices: { ...prices, perMessage: 640_000 } }];
+    const first = createApp(models);
+    const second = createApp(models);
+    await first.start();
+    await second.start();
+    try {
+      const admitted = await first.fetch(chatRequest());
+      assert.equal(admitted.status, 200);
+      await admitted.text();
+      const refused = await first.fetch(chatRequest());
+      assert.equal(refused.status, 429);
+      await refused.text();
+      const independent = await second.fetch(chatRequest());
+      assert.equal(independent.status, 200);
+      await independent.text();
+    } finally {
+      await first.stop();
+      await second.stop();
     }
   });
 
@@ -388,6 +530,12 @@ describe('AI SDK recipes through Setu (Node)', () => {
           'known',
           'no-cache-detail',
           'unknown',
+          'negative-input',
+          'fractional-input',
+          'nan-input',
+          'negative-output',
+          'fractional-output',
+          'nan-output',
           'generate-failure',
           'stream-failure',
           'read-failure',
@@ -417,18 +565,38 @@ describe('AI SDK recipes through Setu (Node)', () => {
           const model = new MockLanguageModelV4({
             doGenerate: async () => {
               if (scenario === 'generate-failure') throw new Error('provider failed');
+              const badInput =
+                scenario === 'negative-input'
+                  ? -1
+                  : scenario === 'fractional-input'
+                    ? 1.5
+                    : scenario === 'nan-input'
+                      ? NaN
+                      : undefined;
+              const badOutput =
+                scenario === 'negative-output'
+                  ? -1
+                  : scenario === 'fractional-output'
+                    ? 1.5
+                    : scenario === 'nan-output'
+                      ? NaN
+                      : undefined;
               return {
                 ...result(),
                 usage:
-                  scenario === 'unknown'
-                    ? { ...usage, inputTokens: { ...usage.inputTokens, total: undefined } }
-                    : scenario === 'no-cache-detail'
-                      ? // The openai-compatible provider never reports cacheWrite.
-                        {
-                          inputTokens: { ...usage.inputTokens, cacheWrite: undefined },
-                          outputTokens: { ...usage.outputTokens, reasoning: undefined },
-                        }
-                      : usage,
+                  badInput !== undefined
+                    ? { ...usage, inputTokens: { ...usage.inputTokens, total: badInput } }
+                    : badOutput !== undefined
+                      ? { ...usage, outputTokens: { ...usage.outputTokens, total: badOutput } }
+                      : scenario === 'unknown'
+                        ? { ...usage, inputTokens: { ...usage.inputTokens, total: undefined } }
+                        : scenario === 'no-cache-detail'
+                          ? // The openai-compatible provider never reports cacheWrite.
+                            {
+                              inputTokens: { ...usage.inputTokens, cacheWrite: undefined },
+                              outputTokens: { ...usage.outputTokens, reasoning: undefined },
+                            }
+                          : usage,
               };
             },
             doStream: async () => {
@@ -530,6 +698,8 @@ describe('AI SDK recipes through Setu (Node)', () => {
             assert.ok(record);
             const full =
               scenario === 'unknown' ||
+              scenario.endsWith('-input') ||
+              scenario.endsWith('-output') ||
               scenario === 'abort' ||
               scenario === 'cancel' ||
               scenario === 'late-error';
@@ -573,17 +743,30 @@ describe('AI SDK recipes through Setu (Node)', () => {
     '8: real OpenAI-compatible endpoint',
     { skip: !runtime.env['AI_COMPAT_BASE_URL'] },
     async () => {
-      const provider = createOpenAICompatible({
-        name: 'compat',
-        baseURL: runtime.env['AI_COMPAT_BASE_URL']!,
-        ...(runtime.env['AI_COMPAT_API_KEY'] ? { apiKey: runtime.env['AI_COMPAT_API_KEY'] } : {}),
-      });
-      const reply = await generateText({
-        model: provider.chatModel(runtime.env['AI_COMPAT_MODEL'] ?? 'local'),
-        prompt: 'Reply with a short greeting.',
-        maxOutputTokens: 64,
-      });
-      assert.ok(reply.text.length > 0);
+      const { models, telemetry } = createChatModels(runtime.env);
+      const app = createApp(models, telemetry);
+      await app.start();
+      try {
+        const response = await app.fetch(
+          new Request('http://localhost/chat', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ prompt: 'Reply with a short greeting.' }),
+          }),
+        );
+        assert.equal(response.status, 200);
+        const body = await response.text();
+        assert.match(body, /data: \[DONE\]/);
+        const db = app.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+        const rows = () => db.getRepository<UsageRecord>('Usage').findAll();
+        await waitFor(async () => (await rows()).length === 1);
+        const [record] = await rows();
+        assert.equal(record!.usageKnown, true);
+        assert.ok(record!.inputTokens! > 0);
+        assert.ok(record!.outputTokens! > 0);
+      } finally {
+        await app.stop();
+      }
     },
   );
 });

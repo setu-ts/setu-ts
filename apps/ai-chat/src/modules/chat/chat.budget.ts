@@ -1,8 +1,13 @@
+import { APICallError, wrapLanguageModel } from 'ai';
 import type { LanguageModelMiddleware } from 'ai';
+import { createFallback, defaultShouldRetryThisError } from 'ai-fallback';
 import type { IRequestContext, IRuntimeServices, ILogger } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IQuota } from '@setu-ts/auth-plugin';
-import type { UsageRecord } from './usage.ts';
+import type { IDatabaseService } from '@setu-ts/database-plugin';
+import type { IOutbox } from '@setu-ts/messaging-plugin';
+import { writeUsage } from './chat.usage.ts';
+import type { UsageRecord } from './chat.usage.ts';
 
 // ai's public alias retains the V4 middleware shape; specifying v4 below keeps
 // provider types selected by the pinned ai release, with no independent provider pin.
@@ -18,6 +23,59 @@ export type BudgetPrices = {
   perMessage: number;
   perFile: number;
 };
+
+/** A V4 model with its own billing prices and input allowances. */
+export type PricedModel = { model: ReturnType<typeof wrapLanguageModel>; prices: BudgetPrices };
+
+/**
+ * Wires per-provider budgets, usage delivery and fallback for one request.
+ * @param ctx - Live request context with trusted identity and cancellation
+ * @param models - Providers with their individual prices
+ * @param quota - This application's shared quota
+ * @returns The SDK model and readiness promise; readiness rejects on an initial provider or quota failure
+ */
+export function budgetedModel(
+  ctx: IRequestContext,
+  models: readonly PricedModel[],
+  quota: IQuota,
+): {
+  model: ReturnType<typeof wrapLanguageModel>;
+  ready: Promise<void>;
+} {
+  const runtime = ctx.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
+  const db = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+  const outbox = ctx.services.get<IOutbox>(CAPABILITIES.OUTBOX);
+  const wrapped = models.map(({ model, prices }) =>
+    wrapLanguageModel({
+      model,
+      middleware: budgetMiddleware(ctx, quota, runtime, prices, (record) =>
+        writeUsage(db, outbox, record),
+      ),
+    }),
+  );
+  const ready = Promise.withResolvers<void>();
+  const model = wrapLanguageModel({
+    model: createFallback({
+      models: wrapped,
+      shouldRetryThisError: (error) =>
+        (APICallError.isInstance(error) && error.isRetryable) || defaultShouldRetryThisError(error),
+    }),
+    middleware: {
+      specificationVersion: 'v4',
+      async wrapStream({ doStream }) {
+        try {
+          const response = await doStream();
+          ready.resolve();
+          return response;
+        } catch (error) {
+          ready.reject(error);
+          throw error;
+        }
+      },
+    },
+  });
+  return { model, ready: ready.promise };
+}
 
 /**
  * Reserves each provider call separately and records its settlement through the outbox.
@@ -64,7 +122,16 @@ export function budgetMiddleware(
   // Only the two totals are priced. Providers omit detail counts routinely
   // (openai-compatible never reports cacheWrite), so those stay optional.
   function countsKnown(usage: Usage | undefined): boolean {
-    return usage?.inputTokens.total !== undefined && usage.outputTokens.total !== undefined;
+    const input = usage?.inputTokens.total;
+    const output = usage?.outputTokens.total;
+    return (
+      input !== undefined &&
+      Number.isSafeInteger(input) &&
+      input >= 0 &&
+      output !== undefined &&
+      Number.isSafeInteger(output) &&
+      output >= 0
+    );
   }
 
   function optional<K extends string>(name: K, value: number | undefined) {

@@ -13,6 +13,9 @@ export interface IQuotaRedisClient {
 const RESERVE_SCRIPT = `
 local used = tonumber(redis.call('GET', KEYS[1]) or '0')
 local amount = tonumber(ARGV[1])
+if amount > 9007199254740991 - used then
+  return {0, used}
+end
 if ARGV[2] ~= '' and amount > tonumber(ARGV[2]) - used then
   return {0, used}
 end
@@ -30,7 +33,11 @@ redis.call('PEXPIREAT', KEYS[1], ARGV[2])
 return 1
 `;
 
-/** Redis quota counters, with one atomic script per operation. @since 0.13.0 */
+/**
+ * Redis quota counters, with one atomic script per operation.
+ * The injected client must bound commands; this store never times out a call itself.
+ * @since 0.13.0
+ */
 export class RedisQuotaStore implements IQuotaStore {
   readonly #client: IQuotaRedisClient;
   readonly #namespace: string;

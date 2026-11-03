@@ -22,17 +22,87 @@ wrapper's return type to consume that type without a separate provider dependenc
 
 ## Stream a UI response
 
-```typescript
-import { streamText, wrapLanguageModel } from 'ai';
-import type { HandlerResult, IRequestContext } from '@setu-ts/common';
+The compiled controller excerpt imports the runnable example's budget helper. When copying the
+feature into an application, keep the chat module files together and use the sibling
+`./chat.budget.ts` import. The module owns one quota lazily per application.
 
-export function chat(ctx: IRequestContext, model: ReturnType<typeof wrapLanguageModel>): HandlerResult {
-  const result = streamText({
-    model, prompt: 'Explain reserve and settle.', maxOutputTokens: 128,
-    abortSignal: ctx.signal,
-    telemetry: { recordInputs: false, recordOutputs: false },
+```typescript
+import { streamText, isStepCount, tool } from 'ai';
+import { z } from 'zod';
+import type { HandlerResult, IRequestContext, IRouterApi } from '@setu-ts/common';
+import { QuotaExceededError, respondQuotaExceeded } from '@setu-ts/auth-plugin';
+import type { IQuota } from '@setu-ts/auth-plugin';
+import { budgetedModel } from '../../apps/ai-chat/src/modules/chat/chat.budget.ts';
+import type { PricedModel } from '../../apps/ai-chat/src/modules/chat/chat.budget.ts';
+
+const identitySchema = z.object({ tenantId: z.string(), principalId: z.string().optional() });
+
+/** A service checks trusted identity before returning tenant data. @returns The authorized tenant */
+export function readTenant(identity: z.infer<typeof identitySchema>): string {
+  if (!identity.tenantId) throw new Error('Tenant authorization failed');
+  return identity.tenantId;
+}
+
+/** Identity travels in the SDK side channel, never in model-settable tool input. */
+export const tenantTool = tool({
+  description: 'Read the current authorized tenant',
+  inputSchema: z.object({}),
+  contextSchema: identitySchema,
+  execute: (_input, { context }) => readTenant(context),
+});
+
+/** Answers initial quota refusals before a UI stream has been sent. */
+async function quotaRefusal(ctx: IRequestContext, next: () => Promise<void>): Promise<void> {
+  try {
+    await next();
+  } catch (error) {
+    if (error instanceof QuotaExceededError) {
+      respondQuotaExceeded(ctx, error);
+      return;
+    }
+    throw error;
+  }
+}
+
+/** Registers a UI-message streaming route over individually budgeted fallback models. @returns Nothing */
+export function registerChatRoutes(
+  router: IRouterApi,
+  models: readonly PricedModel[],
+  quota: (ctx: IRequestContext) => IQuota,
+): void {
+  router.post('/chat', {
+    middleware: [quotaRefusal],
+    handler: async (ctx) => {
+      const { prompt } = z
+        .object({ prompt: z.string().min(1).max(10_000) })
+        .parse(await ctx.request.json());
+      const tenantId = ctx.request.tenant?.id;
+      if (!tenantId) throw new TypeError('A server-resolved tenant is required');
+      const { model, ready } = budgetedModel(ctx, models, quota(ctx));
+      const result = streamText({
+        model,
+        prompt,
+        maxOutputTokens: 1024,
+        stopWhen: isStepCount(3),
+        abortSignal: ctx.signal,
+        tools: { tenant: tenantTool },
+        toolsContext: {
+          tenant: {
+            tenantId,
+            ...(ctx.request.user?.id === undefined ? {} : { principalId: ctx.request.user.id }),
+          },
+        },
+        telemetry: { recordInputs: false, recordOutputs: false },
+        // Initial errors are reported through ready before headers are sent.
+        onError: () => {},
+      });
+      await ready;
+      return sendUIResponse(ctx, result.toUIMessageStreamResponse());
+    },
   });
-  const response = result.toUIMessageStreamResponse();
+}
+
+function sendUIResponse(ctx: IRequestContext, response: Response): HandlerResult {
   ctx.response.status(response.status);
   response.headers.forEach((value, name) => ctx.response.header(name, value));
   return ctx.response.stream(response.body!);
@@ -44,10 +114,10 @@ The SDK produces SSE `data:` lines, ending with `data: [DONE]`, and the header
 wire format is already implemented by the SDK. The example smoke reads the result with
 `parseJsonEventStream`, `uiMessageChunkSchema` and `readUIMessageStream` from `ai`.
 
-`streamText` starts asynchronously. The example's [route](../apps/ai-chat/src/chat.routes.ts) waits
-for the first budgeted provider result before committing HTTP headers, so an initial quota refusal
-can answer 429. A failure after streaming has begun is a stream failure; the HTTP status has already
-been sent.
+`streamText` starts asynchronously. The example's
+[route](../apps/ai-chat/src/modules/chat/chat.controller.ts) waits for the first budgeted provider
+result before committing HTTP headers, so an initial quota refusal can answer 429. A failure after
+streaming has begun is a stream failure; the HTTP status has already been sent.
 
 ## Bounded tools with trusted identity
 
@@ -109,11 +179,13 @@ export async function answer(model: ReturnType<typeof wrapLanguageModel>): Promi
 ## Provider fallback
 
 ```typescript
-import { generateText, wrapLanguageModel } from 'ai';
-import { createFallback } from 'ai-fallback';
+import { APICallError, generateText, wrapLanguageModel } from 'ai';
+import { createFallback, defaultShouldRetryThisError } from 'ai-fallback';
 
 export async function fallback(primary: ReturnType<typeof wrapLanguageModel>, secondary: ReturnType<typeof wrapLanguageModel>): Promise<string> {
-  const result = await generateText({ model: createFallback({ models: [primary, secondary] }),
+  const result = await generateText({ model: createFallback({ models: [primary, secondary],
+    shouldRetryThisError: (error) => (APICallError.isInstance(error) && error.isRetryable) || defaultShouldRetryThisError(error),
+  }),
     prompt: 'Hello', maxOutputTokens: 128,
     telemetry: { recordInputs: false, recordOutputs: false },
   });
@@ -124,9 +196,10 @@ export async function fallback(primary: ReturnType<typeof wrapLanguageModel>, se
 Wrap **each** model with its own budget middleware and prices before passing it to `createFallback`.
 A first model that fails before its first stream part releases its reservation, then the second
 reserves at its own price. The smoke proves fallback after a 503 and reads the remaining budget to
-prove the first reservation was released. The library owns its retry classification; review that
-policy for your providers. Configure provider URLs and credentials on the server. Model output must
-never select an egress destination or carry an API key.
+prove the first reservation was released. The retryable APICallError arm also handles unreachable
+providers: the library's default status/message classifier alone misses connection failures with no
+HTTP status code. Configure provider URLs and credentials on the server. Model output must never
+select an egress destination or carry an API key.
 
 ## GenAI telemetry without content capture
 
@@ -150,8 +223,10 @@ Install telemetry-plugin's documented optional OTel peers when using its real ex
 `registerGlobal` defaults to false. When enabled, libraries tracing through the OTel API use Setu's
 provider, processors, sampler and diagnostics. Pass that API's tracer explicitly to `OpenTelemetry`
 to avoid retaining an early proxy tracer from a second installed API copy. Use one global provider
-per process: a refused second registration warns once and continues with a private provider.
-Shutdown does not unregister it.
+per process: only the first app's provider is global. A refused second registration warns once;
+library spans from the second app still go to the first app's exporter under its `service.name`, and
+are dropped after that first app stops. Only the second app's own Setu spans use its private
+provider. Shutdown does not unregister the global provider.
 
 Every call in the recipes sets `telemetry: { recordInputs: false, recordOutputs: false }`.
 **Enabling capture records prompt and completion content unredacted.** This milestone adds no
@@ -201,24 +276,32 @@ export function quotaRefusal(): MiddlewareFunction {
 }
 ```
 
+For `redisQuota`, construct the injected client with a command bound: ioredis
+`new Redis(url, { commandTimeout: 15_000 })` or `fromNodeRedis(createClient({ url }))`, which bounds
+commands at 15 seconds by default. The store never times out a call itself; an unbounded client lets
+a stalled Redis hold every request. The application owns the injected client's `'error'` listener.
+
 Amounts and limits are non-negative safe integers in caller-chosen units, such as micro-dollars.
 Reserve before work; settle once with actual usage, or release with zero. Only the issuing quota
 accepts its frozen receipt; replayed settlement does nothing. A per-key limit callback can return
-undefined for unlimited usage, which is still recorded. Keys are non-empty and at most 512 UTF-8
-bytes. Names match `[a-z0-9-]+`. Store failures refuse with `QuotaStoreUnavailableError`, which
-`errorHandler` answers as a value-free 503.
+undefined for unlimited usage, which is still recorded. Keys are non-empty, well-formed Unicode
+strings of at most 512 UTF-8 bytes. Names match `[a-z0-9-]+`. Store failures refuse with
+`QuotaStoreUnavailableError`, which `errorHandler` answers as a value-free 503.
 
 Windows are positive integer milliseconds aligned to the epoch, `utc-day`, or `utc-month`.
 Settlement always charges the reserved window; windows expire at their end plus one day. Memory
 storage is single-process and sweeps expired entries on access. Redis uses atomic constant Lua
-scripts, passing all caller values through KEYS/ARGV, with absolute expiry. Use Redis for a budget
-shared across processes. `RedisQuotaStore.close()` quits its injected client; use a dedicated
-client.
+scripts, passing all caller values through KEYS/ARGV, with absolute expiry. Even an unlimited key
+refuses reserves above `Number.MAX_SAFE_INTEGER` through the normal not-admitted path. Use Redis for
+a budget shared across processes. `RedisQuotaStore.close()` quits its injected client; use a
+dedicated client.
 
-`respondQuotaExceeded` adds `Retry-After`. An uncaught `QuotaExceededError` carries the same status
-hint through `errorHandler`, but the hint contract cannot carry a header. Under RFC 9457 both carry
-the IANA quota-exceeded type, the policy name and `retry-after` seconds; they expose no tenant usage
-or limit. The existing request-rate limiter keeps its original bytes and headers.
+`QuotaExceededError` requires a non-empty policy name and safe integer retry seconds of at least
+one, otherwise its constructor throws `TypeError`. `respondQuotaExceeded` adds `Retry-After`. An
+uncaught `QuotaExceededError` carries the same status hint through `errorHandler`, but the hint
+contract cannot carry a header. Under RFC 9457 both carry the IANA quota-exceeded type, the policy
+name and `retry-after` seconds; they expose no tenant usage or limit. The existing request-rate
+limiter keeps its original bytes and headers.
 
 ## Budget middleware
 
@@ -236,11 +319,15 @@ configured media allowance. The byte estimate often over-reserves English text b
 Prices and allowances must be conservative non-negative integer billing units; use your model's
 actual tariff and media limits. `maxOutputTokens` is required.
 
-The middleware refunds the difference when the input and output totals are known, charges the full
-reservation when either total is missing or the request aborts, and releases on provider failure
-before its first stream part. Cached input and reasoning tokens are included in their respective
-input/output totals, so this recipe uses one price for all input tokens and one for all output
-tokens.
+The middleware refunds the difference when the input and output totals are non-negative safe
+integers, charges the full reservation when either total is missing or invalid, or the request
+aborts, and releases on provider failure before its first stream part. Cached input and reasoning
+tokens are included in their respective input/output totals, so this recipe uses one price for all
+input tokens and one for all output tokens.
+
+OpenAI-compatible providers need `createOpenAICompatible({ ..., includeUsage: true })` for streamed
+usage; otherwise the middleware settles at the reservation. The compatible adapter maps missing
+`prompt_tokens` to an input total of zero, so a provider that omits it is undercharged on input.
 
 ```typescript
 import type { LanguageModelMiddleware } from 'ai';
@@ -291,7 +378,10 @@ export function budgetMiddleware(ctx: IRequestContext, quota: IQuota, runtime: I
 
   // Only the two totals are priced; providers omit detail counts (openai-compatible never reports cacheWrite).
   function countsKnown(usage: Usage | undefined): boolean {
-    return usage?.inputTokens.total !== undefined && usage.outputTokens.total !== undefined;
+    const input = usage?.inputTokens.total;
+    const output = usage?.outputTokens.total;
+    return input !== undefined && Number.isSafeInteger(input) && input >= 0 &&
+      output !== undefined && Number.isSafeInteger(output) && output >= 0;
   }
   function optional<K extends string>(name: K, value: number | undefined) {
     return value === undefined ? {} : ({ [name]: value } as Record<K, number>);
@@ -373,8 +463,12 @@ export function budgetMiddleware(ctx: IRequestContext, quota: IQuota, runtime: I
 }
 ```
 
-The complete [budget middleware](../apps/ai-chat/src/budget-middleware.ts) and
-[route wiring](../apps/ai-chat/src/chat.routes.ts) show how each fallback model gets its own prices.
+The module's `budgetedModel(ctx, models, quota)` resolves runtime, database and outbox services,
+wraps each model with its own prices, applies the fallback predicate, and exposes the readiness
+promise used by the controller. The complete
+[budget middleware](../apps/ai-chat/src/modules/chat/chat.budget.ts) and
+[route wiring](../apps/ai-chat/src/modules/chat/chat.controller.ts) show how each fallback model
+gets its own prices.
 
 ## Usage delivery
 

@@ -185,8 +185,9 @@ All line numbers on `develop` at `14c4255d2`; AI SDK facts from an install of `a
 
 ### 3.6 `apps/ai-chat`
 
-- **Decision:** a runnable example (`check`, `smoke`, `start`) with the guide's recipes as source
-  files and a `node:test` smoke that proves the ROADMAP gate with `MockLanguageModelV4`:
+- **Decision:** a runnable example (`check`, `smoke`, `start`) with the guide's recipes as
+  standalone source files under `src/modules/chat/` and a `node:test` smoke that proves the ROADMAP
+  gate with `MockLanguageModelV4`:
   1. the tool loop stops at the step cap, and an abort mid-stream ends the response;
   2. the route's stream, read by `parseJsonEventStream({ schema: uiMessageChunkSchema })` and
      `readUIMessageStream`, yields the scripted text;
@@ -200,8 +201,8 @@ All line numbers on `develop` at `14c4255d2`; AI SDK facts from an install of `a
      parent;
   6. a tool reads the tenant from `toolsContext`, never from model input;
   7. `ai-fallback` moves to the second model after a 503 from the first;
-  8. a guarded test against a real OpenAI-compatible endpoint (`AI_COMPAT_BASE_URL`, skipped when
-     unset).
+  8. a guarded streamed route test against a real OpenAI-compatible endpoint (`AI_COMPAT_BASE_URL`,
+     skipped when unset), reading back positive input/output counts with `usageKnown: true`.
 - **Why:** an example that runs is the test that the documented integration still works when the AI
   SDK moves (the guide pins majors; `check:apps` catches drift).
 - **Test home:** `apps/ai-chat/smoke.ts`.
@@ -252,20 +253,20 @@ telemetry-plugin option; ships in minor `0.13.0`.
 
 ## 5. Implementation files
 
-| File                                                                                  | Purpose                                                                                                                            |
-| ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/auth-plugin/src/index.ts`                                                   | barrel exports (§4)                                                                                                                |
-| `packages/auth-plugin/src/quota/quota.ts`                                             | `createQuota`, windows, validation, settle idempotency                                                                             |
-| `packages/auth-plugin/src/quota/memory-quota-store.ts`                                | memory store                                                                                                                       |
-| `packages/auth-plugin/src/quota/redis-quota-store.ts`                                 | Redis store, Lua scripts, client validation                                                                                        |
-| `packages/auth-plugin/src/quota/refusal.ts`                                           | `QuotaExceededError`, `respondQuotaExceeded`, the shared 429 init                                                                  |
-| `packages/auth-plugin/src/middleware/rate-limit-middleware.ts`                        | 429 branch built through `refusal.ts`                                                                                              |
-| `packages/auth-plugin/src/errors.ts`                                                  | `QuotaStoreUnavailableError`                                                                                                       |
-| `packages/telemetry-plugin/src/plugin/telemetry-plugin.ts`, `src/interfaces/index.ts` | the `registerGlobal` option (§3.7)                                                                                                 |
-| `apps/ai-chat/*`                                                                      | example: `setu.config.ts`, `src/budget-middleware.ts`, `src/usage.ts`, `src/chat.routes.ts`, `smoke.ts`, README                    |
-| root `package.json` devDependencies                                                   | `ai`, `@ai-sdk/openai-compatible`, `ai-fallback`, `@ai-sdk/otel` so the guide's fences compile in the tooling member               |
-| `scripts/check-apps.ts` and repo lists                                                | the new app joins `check:apps` (grep how `apps/multi-tenant` is listed)                                                            |
-| Docs                                                                                  | `docs/ai.md` (+ website nav), `packages/auth-plugin/README.md`, `AGENT_CARD.md`, `PUBLIC_API.md`, `CHANGELOG.md`, ROADMAP §2 edits |
+| File                                                                                  | Purpose                                                                                                                                                             |
+| ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/auth-plugin/src/index.ts`                                                   | barrel exports (§4)                                                                                                                                                 |
+| `packages/auth-plugin/src/quota/quota.ts`                                             | `createQuota`, windows, validation, settle idempotency                                                                                                              |
+| `packages/auth-plugin/src/quota/memory-quota-store.ts`                                | memory store                                                                                                                                                        |
+| `packages/auth-plugin/src/quota/redis-quota-store.ts`                                 | Redis store, Lua scripts, client validation                                                                                                                         |
+| `packages/auth-plugin/src/quota/refusal.ts`                                           | `QuotaExceededError`, `respondQuotaExceeded`, the shared 429 init                                                                                                   |
+| `packages/auth-plugin/src/middleware/rate-limit-middleware.ts`                        | 429 branch built through `refusal.ts`                                                                                                                               |
+| `packages/auth-plugin/src/errors.ts`                                                  | `QuotaStoreUnavailableError`                                                                                                                                        |
+| `packages/telemetry-plugin/src/plugin/telemetry-plugin.ts`, `src/interfaces/index.ts` | the `registerGlobal` option (§3.7)                                                                                                                                  |
+| `apps/ai-chat/*`                                                                      | example: `setu.config.ts`, `src/modules/index.ts`, `src/modules/chat/{index.ts,chat.controller.ts,chat.budget.ts,chat.usage.ts,chat.models.ts}`, `smoke.ts`, README |
+| root `package.json` devDependencies                                                   | `ai`, `@ai-sdk/openai-compatible`, `ai-fallback`, `@ai-sdk/otel` so the guide's fences compile in the tooling member                                                |
+| `scripts/check-apps.ts` and repo lists                                                | the new app joins `check:apps` (grep how `apps/multi-tenant` is listed)                                                                                             |
+| Docs                                                                                  | `docs/ai.md` (+ website nav), `packages/auth-plugin/README.md`, `AGENT_CARD.md`, `PUBLIC_API.md`, `CHANGELOG.md`, ROADMAP §2 edits                                  |
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 

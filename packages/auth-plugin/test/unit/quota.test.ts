@@ -93,7 +93,7 @@ describe('createQuota', () => {
 
   it('bounds keys in UTF-8 bytes (O7)', async () => {
     const { quota } = setup();
-    for (const key of ['', 'x'.repeat(513), 'é'.repeat(257)])
+    for (const key of ['', 'x'.repeat(513), 'é'.repeat(257), '\uD800'])
       await expect(quota.reserve(key, 0)).rejects.toThrow(TypeError);
     await expect(quota.reserve('é'.repeat(256), 0)).resolves.toMatchObject({ amount: 0 });
   });

@@ -41,6 +41,12 @@ export class QuotaExceededError extends Error {
    */
   constructor(policyName: string, retryAfterSeconds: number) {
     super(QUOTA_DETAIL);
+    if (typeof policyName !== 'string' || policyName.length === 0) {
+      throw new TypeError('Quota policyName must be a non-empty string');
+    }
+    if (!Number.isSafeInteger(retryAfterSeconds) || retryAfterSeconds < 1) {
+      throw new TypeError('Quota retryAfterSeconds must be a safe integer of at least 1');
+    }
     this.policyName = policyName;
     this.retryAfterSeconds = retryAfterSeconds;
     withHttpStatusHint(this, quotaProblemInit(policyName, QUOTA_DETAIL, retryAfterSeconds));

@@ -1,9 +1,7 @@
 import { createApplication } from '@setu-ts/kernel';
 import type { IKernelApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
-import { CAPABILITIES, some } from '@setu-ts/common';
-import { createQuota, MemoryQuotaStore } from '@setu-ts/auth-plugin';
-import type { IQuota } from '@setu-ts/auth-plugin';
+import { some } from '@setu-ts/common';
 import {
   DatabasePlugin,
   createDatabaseOutboxStore,
@@ -15,16 +13,15 @@ import { MultiTenancyPlugin } from '@setu-ts/multi-tenancy-plugin';
 import { TelemetryPlugin } from '@setu-ts/telemetry-plugin';
 import type { TelemetryPluginOptions } from '@setu-ts/telemetry-plugin';
 import { errorHandler } from '@setu-ts/exceptions';
-import { registerChatRoutes } from './src/chat.routes.ts';
-import type { PricedModel } from './src/chat.routes.ts';
-import { billingSubscription } from './src/usage.ts';
+import { registerModules } from './src/modules/index.ts';
+import type { PricedModel } from './src/modules/chat/chat.budget.ts';
+import { billingSubscription } from './src/modules/chat/chat.usage.ts';
 
 /** Builds the Node example without listening. The fixture tenant represents authenticated server identity. @returns An application */
 export function createApp(
   models: readonly PricedModel[],
   telemetry: TelemetryPluginOptions = {},
 ): IKernelApplication {
-  let quota: IQuota;
   const app = createApplication({
     plugins: [
       RuntimePlugin(),
@@ -42,23 +39,9 @@ export function createApp(
         inbox: { store: createDatabaseInboxStore() },
         subscriptions: [billingSubscription()],
       }),
-      {
-        name: 'ai-budget',
-        version: '1.0.0',
-        register(ctx) {
-          quota = createQuota({
-            name: 'ai-spend',
-            limit: 1_000_000,
-            window: 'utc-day',
-            store: new MemoryQuotaStore(ctx.runtime),
-            runtime: ctx.runtime,
-          });
-          registerChatRoutes(ctx.router, models, () => quota);
-        },
-        consumes: [CAPABILITIES.DATABASE, CAPABILITIES.OUTBOX],
-      },
     ],
   });
+  registerModules(app.router, models);
   app.middleware.add(errorHandler({ format: 'rfc9457', logErrors: false }), { priority: 0 });
   return app;
 }

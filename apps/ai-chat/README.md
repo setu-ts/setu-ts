@@ -2,8 +2,9 @@
 
 A Node 24 example of the AI SDK on Setu: weighted per-tenant reservations, UI message streaming,
 trusted tool context, provider fallback, content-free traces and transactional usage delivery. The
-standalone recipe files under `src/` match the [AI guide](../../docs/ai.md); this example keeps
-`chat.routes.ts` at that location so the guide's route is easy to find.
+standalone recipe files under `src/modules/chat/` match the [AI guide](../../docs/ai.md).
+`chat.controller.ts`, `chat.budget.ts`, `chat.usage.ts` and `chat.models.ts` are wired through the
+generated-style feature and module indexes. The module creates one shared quota lazily per app.
 
 ```bash
 pnpm --dir apps/ai-chat run check
@@ -15,7 +16,9 @@ Set `AI_COMPAT_BASE_URL`, `AI_COMPAT_MODEL` and optionally `AI_COMPAT_API_KEY` o
 start command defaults to `http://localhost:8080/v1` and model `local`, listens on port 3000 (or its
 first argument), and serves `POST /chat` with JSON `{ "prompt": "Hello" }`. Set
 `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` to export through telemetry-plugin with `registerGlobal`. The
-app pins one SDK release matching the installed `@ai-sdk/otel` dependency.
+app pins one SDK release matching the installed `@ai-sdk/otel` dependency. The compatible provider
+sets `includeUsage: true` so streamed calls report usage, and the route allows 1024 output tokens.
+Retryable connection failures can fall back to the next configured model.
 
 The demo tenancy resolver always returns `demo-tenant`; headers and body fields cannot choose
 another budget or tool identity. Replace it with an authenticated membership-aware resolver in a

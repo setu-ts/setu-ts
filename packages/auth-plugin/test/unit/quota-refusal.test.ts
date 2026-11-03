@@ -50,6 +50,16 @@ async function boot(format: ErrorFormat) {
 }
 
 describe('quota refusals', () => {
+  it.each([NaN, -3, 0, 1.5, Infinity, Number.MAX_SAFE_INTEGER + 1])(
+    'rejects invalid retryAfterSeconds %s (F6)',
+    (seconds) => {
+      expect(() => new QuotaExceededError('policy', seconds)).toThrow(TypeError);
+    },
+  );
+
+  it('rejects an empty policy name (F6)', () => {
+    expect(() => new QuotaExceededError('', 1)).toThrow(TypeError);
+  });
   it('names the error class and carries the policy separately', () => {
     const error = new QuotaExceededError('budget-policy', 7);
     expect(error.name).toBe('QuotaExceededError');

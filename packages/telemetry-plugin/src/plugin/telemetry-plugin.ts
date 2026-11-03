@@ -270,7 +270,7 @@ export function TelemetryPlugin(options: TelemetryPluginOptions = {}): IPlugin {
           }
           if (!api.trace.setGlobalTracerProvider(tracerHost.otelProvider as TracerProvider)) {
             ctx.logger?.warn(
-              'Global tracer provider registration refused; using the private provider',
+              "Global tracer provider registration refused; library spans keep using the first app's exporter and service.name and are dropped after it stops. Only this app's own spans use its private provider.",
             );
           }
         }

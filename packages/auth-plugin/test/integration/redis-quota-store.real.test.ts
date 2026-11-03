@@ -33,4 +33,24 @@ describe.skipIf(!url)('RedisQuotaStore real Redis (O2)', () => {
     await store.reserve('spend:expiry', '0', 1, 1, runtime.now() - 1);
     expect(await client.exists(`${namespace}:spend:expiry:0`)).toBe(0);
   });
+
+  it('refuses unlimited reservations beyond MAX_SAFE_INTEGER without a 503 (F2)', async () => {
+    const key = `${namespace}:spend:safe:0`;
+    const expiry = runtime.now() + 60_000;
+    try {
+      await store.reserve('spend:safe', '0', Number.MAX_SAFE_INTEGER - 1, undefined, expiry);
+      expect(await store.reserve('spend:safe', '0', 1, undefined, expiry)).toEqual({
+        admitted: true,
+        used: Number.MAX_SAFE_INTEGER,
+      });
+      expect(await store.reserve('spend:safe', '0', 1, undefined, expiry)).toEqual({
+        admitted: false,
+        used: Number.MAX_SAFE_INTEGER,
+      });
+      expect(await client.get(key)).toBe(String(Number.MAX_SAFE_INTEGER));
+      expect((await store.reserve('spend:safe', '0', 0, undefined, expiry)).admitted).toBe(true);
+    } finally {
+      await client.del(key);
+    }
+  });
 });

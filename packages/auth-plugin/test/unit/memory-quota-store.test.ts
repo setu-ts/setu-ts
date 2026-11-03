@@ -3,6 +3,22 @@ import { MemoryQuotaStore } from '../../src/index.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 
 describe('MemoryQuotaStore', () => {
+  it('refuses unlimited reservations beyond MAX_SAFE_INTEGER without corrupting the counter (F2)', async () => {
+    const store = new MemoryQuotaStore(createFakeRuntime(0));
+    await store.reserve('tenant', '0', Number.MAX_SAFE_INTEGER - 1, undefined, 1000);
+    expect(await store.reserve('tenant', '0', 1, undefined, 1000)).toEqual({
+      admitted: true,
+      used: Number.MAX_SAFE_INTEGER,
+    });
+    expect(await store.reserve('tenant', '0', 1, undefined, 1000)).toEqual({
+      admitted: false,
+      used: Number.MAX_SAFE_INTEGER,
+    });
+    expect(await store.reserve('tenant', '0', 0, undefined, 1000)).toEqual({
+      admitted: true,
+      used: Number.MAX_SAFE_INTEGER,
+    });
+  });
   it('atomically admits exactly ten of 50 concurrent reserves (O2)', async () => {
     const store = new MemoryQuotaStore(createFakeRuntime(0));
     const replies = await Promise.all(

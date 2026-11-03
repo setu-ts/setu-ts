@@ -127,8 +127,13 @@ export function createQuota(options: QuotaOptions): IQuota {
   return {
     async reserve(key, amount): Promise<QuotaReservation> {
       validateAmount(amount);
-      if (typeof key !== 'string' || key.length === 0 || encoder.encode(key).byteLength > 512) {
-        throw new TypeError('Quota key must be non-empty and at most 512 UTF-8 bytes');
+      if (
+        typeof key !== 'string' ||
+        key.length === 0 ||
+        !key.isWellFormed() ||
+        encoder.encode(key).byteLength > 512
+      ) {
+        throw new TypeError('Quota key must be well-formed, non-empty and at most 512 UTF-8 bytes');
       }
       const resolvedLimit = typeof limit === 'function' ? await limit(key) : limit;
       if (resolvedLimit !== undefined) validateAmount(resolvedLimit);
