@@ -86,6 +86,12 @@ export const EXCLUDED_EXAMPLES: readonly ExcludedExample[] = [
   // they differ from the matrix only in which plugins they import, and the build path does not
   // branch on that. Building all of them would multiply gate runtime for no new coverage.
   {
+    app: 'ai-chat',
+    kind: 'redundant',
+    reason:
+      'Same build shape as rest-api; it proves AI SDK recipes through a mock-model smoke, not an image.',
+  },
+  {
     app: 'cqrs',
     kind: 'redundant',
     reason: 'Same build shape as rest-api; differs only in the plugins it imports.',
