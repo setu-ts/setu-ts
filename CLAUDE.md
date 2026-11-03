@@ -738,6 +738,10 @@ here.
   on registry fault through one check shared with `lookupTenant`, a bounded canonical-only cache,
   `createDatabaseTenantRegistry`, a fault warning with no registry message text) — complete (PR
   #548).
+- **Milestone 134** (`auth-plugin` + `telemetry-plugin` + `docs/ai.md` + `apps/ai-chat` — AI SDK
+  recipes and weighted quotas: `createQuota` with memory and Redis stores, the shared 429
+  initializer, `registerGlobal`, a scaffold-shaped example proven against a real model; ships in
+  `0.13.0`) — complete (PR pending).
 - **Next milestone** — M130 and M131b–d are open for `0.12.0`.
 
 ## Verification (run before declaring any work done)
