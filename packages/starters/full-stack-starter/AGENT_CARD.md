@@ -50,7 +50,6 @@ await app.start({ port: 3000 });
 - On Workers, pass platform `env` to the config factory; non-string bindings are ignored.
 - Workers omit scheduling unless `scheduler` is supplied; explicitly enabling it fails startup.
 - A root static wildcard collides with the SSR catch-all; give `static` a separate `urlPrefix`.
-- OpenAPI omits page, asset and `/__vite/*` routes; the starter merges these into your excludes.
 
 ## Other options
 

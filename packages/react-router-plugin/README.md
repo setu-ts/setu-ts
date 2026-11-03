@@ -101,10 +101,16 @@ request context itself). `getService(context, token)` resolves through `resolveR
 kernel `/api` route resolving the same token in that request share one instance:
 
 ```typescript
-import { getService } from '@setu-ts/react-router-plugin';
-import { PRODUCTS } from '~kernel/modules/products/products.token.ts';
+import { serviceToken } from '@setu-ts/common';
+import { getService, type RouterLoadContext } from '@setu-ts/react-router-plugin';
 
-export async function loader({ context }: Route.LoaderArgs) {
+interface ProductsService {
+  list(): Promise<readonly { name: string }[]>;
+}
+// In a scaffolded project this lives in src/modules/products/products.token.ts.
+const PRODUCTS = serviceToken<ProductsService>('module.products');
+
+export async function loader({ context }: { context: RouterLoadContext }) {
   return { products: await getService(context, PRODUCTS).list() };
 }
 ```

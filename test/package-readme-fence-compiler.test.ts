@@ -116,7 +116,7 @@ const READMES: Readonly<Record<string, number>> = {
   'packages/websocket-plugin/README.md': 10,
   'packages/realtime-backplane-plugin/README.md': 3,
   'packages/resilience-plugin/README.md': 2,
-  'packages/react-router-plugin/README.md': 4,
+  'packages/react-router-plugin/README.md': 5,
   'packages/starters/rest-starter/README.md': 7,
   'packages/starters/microservice-starter/README.md': 6,
   'packages/starters/full-stack-starter/README.md': 8,

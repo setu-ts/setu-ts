@@ -493,51 +493,61 @@ describe('template scaffolding — end to end', () => {
   // directory beside the template's own `app/services/`, wired by nothing and
   // checked by NEITHER of the project's own check paths. The route answered 404.
   describe('the full-stack seam host', () => {
-    it('type-checks a generated artifact through the project OWN check task', async () => {
-      expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'full-stack'])).toBe(0);
-      const project = `${root}/shop`;
-      expect(await run(['g', 'route', 'widget', '--dir', project])).toBe(0);
-      await useWorkspacePackages(project);
+    // Two `deno task check:app` runs over the app and its modules: beyond the 30 s default.
+    it(
+      'type-checks a generated artifact through the project OWN check task',
+      { timeout: 300_000 },
+      async () => {
+        expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'full-stack'])).toBe(0);
+        const project = `${root}/shop`;
+        // The project is modular (M130), so a route goes into a module.
+        expect(await run(['g', 'route', 'widget', '--module', 'products', '--dir', project])).toBe(
+          0,
+        );
+        await useWorkspacePackages(project);
 
-      // A deliberate type error in the generated artifact. Before X5-8 this was
-      // clean under `check:app` (which globbed `app/` only) AND under
-      // `deno check main.ts setu.config.ts` (which never reached `src/`).
-      const path = `${project}/src/controllers/widget.controller.ts`;
-      const original = await nodeFs.readFile(path, 'utf8');
-      await nodeFs.writeFile(
-        path,
-        original.replace(
-          'export function registerWidgetRoutes',
-          'const broken: number = "x";\nexport function registerWidgetRoutes',
-        ),
-      );
+        // A deliberate type error in the generated artifact. Before X5-8 this was
+        // clean under `check:app` (which globbed `app/` only) AND under
+        // `deno check main.ts setu.config.ts` (which never reached `src/`).
+        const path = `${project}/src/modules/products/widget.controller.ts`;
+        const original = await nodeFs.readFile(path, 'utf8');
+        await nodeFs.writeFile(
+          path,
+          original.replace(
+            'export function registerWidgetRoutes',
+            'const broken: number = "x";\nexport function registerWidgetRoutes',
+          ),
+        );
 
-      const checkTask = () =>
-        runProcess(denoBinary(), {
+        const checkTask = () =>
+          runProcess(denoBinary(), {
+            args: ['task', 'check:app'],
+            cwd: project,
+            stdout: 'piped',
+            stderr: 'piped',
+          });
+        const broken = await checkTask();
+        expect(broken.code).not.toBe(0);
+
+        await nodeFs.writeFile(path, original);
+        const clean = await runProcess(denoBinary(), {
           args: ['task', 'check:app'],
           cwd: project,
           stdout: 'piped',
           stderr: 'piped',
         });
-      const broken = await checkTask();
-      expect(broken.code).not.toBe(0);
-
-      await nodeFs.writeFile(path, original);
-      const clean = await runProcess(denoBinary(), {
-        args: ['task', 'check:app'],
-        cwd: project,
-        stdout: 'piped',
-        stderr: 'piped',
-      });
-      expect(clean.code, new TextDecoder().decode(clean.stderr)).toBe(0);
-    });
+        expect(clean.code, new TextDecoder().decode(clean.stderr)).toBe(0);
+      },
+    );
 
     it('imports the seam barrels from the generated config', async () => {
       expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'full-stack'])).toBe(0);
       const config = await nodeFs.readFile(`${root}/shop/setu.config.ts`, 'utf8');
 
-      expect(config).toContain("from './src/controllers/index.ts'");
-      expect(config).toContain('registerGeneratedRoutes(app.router, app.services);');
+      // Modular from the start (M130): the module barrel, not src/controllers/.
+      expect(config).toContain("from './src/modules/index.ts'");
+      expect(config).toContain('registerModules(app.router, app.services);');
+      expect(config).not.toContain('./src/controllers/');
       // No plugin ARRAY exists on this path, so the plugin seam registers
       // imperatively instead of spreading.
       expect(config).toContain('app.register(generated)');
@@ -757,7 +767,9 @@ describe('setu generate module, end to end', () => {
     it(`type-checks the module test it generates into a ${label} project`, async () => {
       expect(await run(argv)).toBe(0);
       const project = `${root}/bare`;
-      expect(await run(['g', 'module', 'widget', '--dir', project, '--adopt-controllers'])).toBe(0);
+      // A full-stack project is modular from the start, so it has nothing to adopt.
+      const adopt = label === '--template full-stack' ? [] : ['--adopt-controllers'];
+      expect(await run(['g', 'module', 'widget', '--dir', project, ...adopt])).toBe(0);
 
       await useWorkspacePackages(project);
       const { code, stderr } = await denoCheck(project, [
