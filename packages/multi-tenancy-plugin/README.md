@@ -170,8 +170,10 @@ not check" and answers `503` — and must bound its own I/O. Instance and factor
 cached (`tenantCache`): hits whose canonical id equals the requested id only, for `ttlMs` (default
 30 s), so a suspended tenant stays admitted for up to that long (`ttlMs: 0` or `tenantCache: false`
 removes the window). Misses are never cached, so each request naming an unknown tenant runs one
-lookup: rate-limit a public resolver. Tenants are handed out as frozen copies with frozen top-level
-`metadata`; deeper objects in `metadata` are shared between requests, so do not mutate them.
+lookup: rate-limit a public resolver. Tenants are handed out as frozen copies holding only `id`, a
+string `name` and a plain-object `metadata` (an array, `Map` or class instance is dropped), with
+`metadata` frozen at the top level; deeper objects in `metadata` are shared between requests, so do
+not mutate them.
 
 A queue job or message handler checks a payload's tenant the same way:
 

@@ -6,7 +6,7 @@
  */
 import type { ITenant, ITenantRegistry, Option } from '@setu-ts/common';
 import { some } from '@setu-ts/common';
-import { snapshotAnswer } from './tenant-check.ts';
+import { markServedFromCache, snapshotAnswer } from './tenant-check.ts';
 
 /** Default TTL of a cached hit, in milliseconds. */
 export const DEFAULT_TENANT_CACHE_TTL_MS = 30_000;
@@ -49,8 +49,6 @@ export class CachingTenantRegistry implements ITenantRegistry {
   readonly #now: () => number;
   readonly #entries = new Map<string, CacheEntry>();
   readonly #inFlight = new Map<string, Promise<Option<ITenant>>>();
-  /** The answers handed out from the cache, so the check can tell them from real ones. */
-  readonly #cacheHits = new WeakSet<object>();
   #bytes = 0;
 
   /**
@@ -79,23 +77,14 @@ export class CachingTenantRegistry implements ITenantRegistry {
     return this.#inFlight.size;
   }
 
-  /**
-   * Reports whether `answer` was served from this cache rather than by the
-   * registry behind it — the tenant check ends a fault state only on a real
-   * answer.
-   */
-  isCacheHit(answer: unknown): boolean {
-    return typeof answer === 'object' && answer !== null && this.#cacheHits.has(answer);
-  }
-
   /** Serves a live cached hit, else looks up (single-flight) and caches a hit. */
   lookup(id: string): Promise<Option<ITenant>> {
     const cached = this.#entries.get(id);
     if (cached !== undefined) {
       if (this.#now() < cached.expiresAt) {
-        const hit = some(cached.tenant);
-        this.#cacheHits.add(hit);
-        return Promise.resolve(hit);
+        // Marked so the tenant check never treats a cache hit as proof the
+        // registry behind it has recovered.
+        return Promise.resolve(markServedFromCache(some(cached.tenant)));
       }
       this.#remove(id, cached);
     }

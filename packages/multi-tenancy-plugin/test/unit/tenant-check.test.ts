@@ -281,6 +281,37 @@ describe('TenantCheck', () => {
     expect(infos).toEqual([REGISTRY_RECOVERED_LOG]);
   });
 
+  it.each<[string, Record<string, unknown>]>([
+    ['a throwing method', { isCacheHit: (id: string) => id.toLowerCase() === 'x' }],
+    ['a data property', { isCacheHit: true }],
+    ['a method answering true', { isCacheHit: () => true }],
+  ])(
+    'C1: a user registry defining isCacheHit (%s) recovers normally after a fault',
+    async (_label, extra) => {
+      const { logger, warns, infos } = recordingLogger();
+      let failing = false;
+      const registry = {
+        ...extra,
+        lookup: (id: string) =>
+          failing ? Promise.reject(new Error('db down')) : Promise.resolve(some({ id })),
+      } as ITenantRegistry;
+      const check = new TenantCheck({ configured: true, registry, logger });
+      expect((await check.check('acme')).present).toBe(true);
+      failing = true;
+      await expect(check.check('acme')).rejects.toThrow(TenantRegistryUnavailableError);
+      failing = false;
+      for (let i = 0; i < 3; i++) {
+        const hit = await check.check('acme');
+        expect(hit.present && hit.value.id).toBe('acme');
+      }
+      expect(infos).toEqual([REGISTRY_RECOVERED_LOG]);
+      // The next real outage is reported again.
+      failing = true;
+      await expect(check.check('acme')).rejects.toThrow();
+      expect(warns).toHaveLength(2);
+    },
+  );
+
   it('A5: with no registry the admitted tenant is frozen too', async () => {
     const result = await new TenantCheck({ configured: false }).check('x');
     expect(Object.isFrozen(result.present && result.value)).toBe(true);

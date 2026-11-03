@@ -100,7 +100,11 @@ export function snapshotAnswer(answer: unknown): Option<ITenant> | undefined {
   }
 }
 
-/** Characters that make a match part of a longer word rather than a standalone quote. */
+/**
+ * Characters that make a match part of a longer word rather than a standalone
+ * quote. ASCII only: next to a non-ASCII letter the id is still masked, which
+ * errs towards masking more.
+ */
 const WORD_CHARACTER = '[A-Za-z0-9_-]';
 
 /** Escapes a string for literal use inside a regular expression. */
@@ -141,12 +145,25 @@ export function maskTenantId(text: string, id: string): string {
 }
 
 /**
- * The optional probe a caching registry offers: whether an answer was served
- * from its cache rather than by the registry behind it. Only a real answer
- * may end a fault state.
+ * The answers the plugin's own cache served without asking the registry
+ * behind it. Module-private: only {@linkcode markServedFromCache} adds to it
+ * and only {@linkcode TenantCheck} reads it, so no registry object — the
+ * application's included — is ever probed for a member, and a lookup in it
+ * cannot throw. A `WeakSet`, so it holds nothing alive.
  */
-interface CacheAwareRegistry {
-  isCacheHit?(answer: unknown): boolean;
+const servedFromCache = new WeakSet<object>();
+
+/**
+ * Records that `answer` came from the plugin's cache, not from a registry.
+ * Called by `CachingTenantRegistry` on each hit it serves; not exported from
+ * `src/index.ts`.
+ *
+ * @param answer - The cache hit about to be returned
+ * @returns The same answer
+ */
+export function markServedFromCache<T extends object>(answer: T): T {
+  servedFromCache.add(answer);
+  return answer;
 }
 
 /**
@@ -219,7 +236,10 @@ export class TenantCheck {
     // A cache hit says nothing about the registry behind it: only a real
     // answer ends a fault state, so a client alternating a cached tenant with
     // uncached ids cannot make the fault and recovery lines flap.
-    if (this.#failing && (registry as CacheAwareRegistry).isCacheHit?.(answer) !== true) {
+    if (
+      this.#failing &&
+      !(typeof answer === 'object' && answer !== null && servedFromCache.has(answer))
+    ) {
       this.#failing = false;
       this.#logger?.info(REGISTRY_RECOVERED_LOG);
     }

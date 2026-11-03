@@ -47,7 +47,8 @@ export interface DatabaseTenantRegistryOptions {
   readonly activeField?: string;
   /**
    * Builds `ITenant.metadata` from the row. Omitted: the tenant has no
-   * `metadata`. Copy only what a request may see.
+   * `metadata`. Copy only what a request may see. Return a plain object — an
+   * array, `Map`, class instance or object from another realm is dropped.
    */
   readonly toMetadata?: (
     row: Readonly<Record<string, unknown>>,

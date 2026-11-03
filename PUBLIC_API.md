@@ -1915,13 +1915,13 @@ otherwise the tenant is
 no other column reaches the request. Options are validated when the factory is created (`TypeError`
 naming the option).
 
-| `DatabaseTenantRegistryOptions` field | Default    | Meaning                                                         |
-| ------------------------------------- | ---------- | --------------------------------------------------------------- |
-| `entity`                              | `'Tenant'` | Entity holding one row per tenant                               |
-| `idField`                             | `'id'`     | Matched against the requested id; its value is the canonical id |
-| `nameField`                           | `'name'`   | Copied to `ITenant.name` when a string                          |
-| `activeField`                         | —          | A falsy value refuses the tenant (suspended, data kept)         |
-| `toMetadata`                          | —          | `(row) => metadata`; omitted → no `metadata`                    |
+| `DatabaseTenantRegistryOptions` field | Default    | Meaning                                                                                 |
+| ------------------------------------- | ---------- | --------------------------------------------------------------------------------------- |
+| `entity`                              | `'Tenant'` | Entity holding one row per tenant                                                       |
+| `idField`                             | `'id'`     | Matched against the requested id; its value is the canonical id                         |
+| `nameField`                           | `'name'`   | Copied to `ITenant.name` when a string                                                  |
+| `activeField`                         | —          | A falsy value refuses the tenant (suspended, data kept)                                 |
+| `toMetadata`                          | —          | `(row) => metadata`, a plain object (anything else is dropped); omitted → no `metadata` |
 
 **`__proto__` fields.** The conditional members refuse an own `__proto__` field in the predicate and
 the payload on every adapter. Cosmos DB and DynamoDB also refuse one in a plain `create`/`update`
