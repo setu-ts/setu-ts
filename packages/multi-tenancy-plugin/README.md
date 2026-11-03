@@ -143,7 +143,13 @@ anyone can mint tenants. With it, the middleware checks the first resolved id be
 carries it:
 
 ```typescript
-MultiTenancyPlugin({ resolver: 'subdomain', required: true, tenants: ['acme', 'globex'] });
+import { MultiTenancyPlugin } from '@setu-ts/multi-tenancy-plugin';
+
+export const tenancyPlugin = MultiTenancyPlugin({
+  resolver: 'subdomain',
+  required: true,
+  tenants: ['acme', 'globex'],
+});
 ```
 
 | Check                                    | Response                                                          |
@@ -169,9 +175,16 @@ Tenants are handed out as frozen copies with frozen top-level `metadata`; deeper
 A queue job or message handler checks a payload's tenant the same way:
 
 ```typescript
-const tenant = await tenancy.lookupTenant(payload.tenantId);
-if (!tenant.present) return; // unknown tenant
-await tenancy.getRepositoryFor<Order>(tenant.value.id, 'Order').create(order);
+import type { IMultiTenancyService } from '@setu-ts/common';
+
+export async function saveOrder(
+  tenancy: IMultiTenancyService,
+  payload: { tenantId: string; total: number },
+): Promise<void> {
+  const tenant = await tenancy.lookupTenant(payload.tenantId);
+  if (!tenant.present) return; // unknown tenant: drop the job
+  await tenancy.getRepositoryFor(tenant.value.id, 'Order').create({ total: payload.total });
+}
 ```
 
 `lookupTenant` throws `TenantRegistryUnavailableError` on a registry fault — let the job retry.

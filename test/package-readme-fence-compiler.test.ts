@@ -65,7 +65,7 @@ const READMES: Readonly<Record<string, number>> = {
   'packages/messaging-plugin/README.md': 17,
   // M89c: the tenant-in-a-behaviour recipe (`getRepositoryFor`) is the one new
   // fence — gated so it cannot ship uncompilable.
-  'packages/multi-tenancy-plugin/README.md': 4,
+  'packages/multi-tenancy-plugin/README.md': 6,
   'packages/scheduler-plugin/README.md': 3,
   // M90i: +1 for the trace-propagation example.
   'packages/queue-plugin/README.md': 10,
@@ -160,7 +160,7 @@ const READMES: Readonly<Record<string, number>> = {
   'packages/cli/README.md': 4,
   'packages/cloudflare-plugin/README.md': 9,
   'packages/cqrs-plugin/README.md': 2,
-  'packages/database-plugin/README.md': 18,
+  'packages/database-plugin/README.md': 19,
   'packages/notification-plugin/README.md': 3,
   'packages/openapi-plugin/README.md': 6,
   'packages/secrets-plugin/README.md': 6,
