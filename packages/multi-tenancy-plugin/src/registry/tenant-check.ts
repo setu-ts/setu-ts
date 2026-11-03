@@ -10,8 +10,8 @@
  *
  * @module
  */
-import type { ILogger, ITenant, ITenantRegistry, Option } from '@setu-ts/common';
-import { describeError, none, some } from '@setu-ts/common';
+import type { ILogger, ITenant, ITenantRegistry, Option, SerializedError } from '@setu-ts/common';
+import { describeError, none, serializeError, some } from '@setu-ts/common';
 import { TenantRegistryUnavailableError } from '../errors.ts';
 
 /**
@@ -246,14 +246,70 @@ export class TenantCheck {
     return snapshot;
   }
 
-  /** Logs the healthy→failing transition once (id masked), then returns the error to throw. */
+  /** Logs the healthy→failing transition once, then returns the error to throw. */
   #fault(error: TenantRegistryUnavailableError, id: string): TenantRegistryUnavailableError {
     if (!this.#failing) {
       this.#failing = true;
-      this.#logger?.warn(REGISTRY_FAULT_LOG, {
-        error: maskTenantId(describeError(error.cause ?? error), id),
-      });
+      this.#logger?.warn(REGISTRY_FAULT_LOG, { error: describeRegistryFault(error, id) });
     }
     return error;
   }
+}
+
+/** Longest rendered name or classifier value, in code points. */
+const MAX_FAULT_PART_LENGTH = 256;
+
+/** Longest rendered fault line, in code points. */
+const MAX_FAULT_LINE_LENGTH = 2048;
+
+/** Collapses control and format characters and whitespace runs, then bounds the length. */
+function cleanFaultPart(value: string, max: number): string {
+  const collapsed = value.replace(/[\p{C}\s]+/gu, ' ').trim();
+  const points = [...collapsed];
+  return points.length <= max ? collapsed : `${points.slice(0, max).join('')}… [truncated]`;
+}
+
+/** Renders one serialized error without its message: `Name (code=…, …)`. */
+function describeWithoutMessage(error: SerializedError): string {
+  const name = cleanFaultPart(error.name, MAX_FAULT_PART_LENGTH) || 'Error';
+  const classifiers = Object.entries(error.classifiers ?? {}).map(
+    ([key, value]) => `${key}=${cleanFaultPart(String(value), MAX_FAULT_PART_LENGTH)}`,
+  );
+  const members =
+    error.errors !== undefined && error.errors.length > 0
+      ? ` [${error.errors.map(describeWithoutMessage).join('; ')}]`
+      : '';
+  return `${name}${classifiers.length > 0 ? ` (${classifiers.join(', ')})` : ''}${members}`;
+}
+
+/**
+ * Renders a registry fault for the warn log WITHOUT any registry-supplied
+ * message text (M127 security audit F-1). A registry's or driver's message may
+ * quote the requested id in any encoding — verbatim, JSON-escaped,
+ * case-folded, truncated — so no mask over the message can be complete. The
+ * line therefore carries only:
+ *
+ * - the plugin's own `TenantRegistryUnavailableError` message, a fixed
+ *   sentence that never contains the id;
+ * - for each error in the cause chain, its `name` and the driver classifiers
+ *   `serializeError` allowlists (`code`, `errno`, `syscall`, `severity`,
+ *   `constraint`, `codeName`, `statusCode`) — e.g.
+ *   `Error (code=ECONNREFUSED, errno=-111, syscall=connect)`.
+ *
+ * A malformed registry answer, carried as the `cause`, therefore contributes
+ * only its type name, never its contents. As a last line of defence the result
+ * is passed through {@linkcode maskTenantId}, so a custom error that put the id
+ * in its `name` or a `code` is masked too.
+ *
+ * @param error - The fault the check is about to throw
+ * @param id - The requested id
+ * @returns One bounded line with no registry message text
+ */
+export function describeRegistryFault(error: TenantRegistryUnavailableError, id: string): string {
+  const own = serializeError(error);
+  const parts = [`${own.name}: ${own.message}`];
+  for (let cause = own.cause; cause !== undefined; cause = cause.cause) {
+    parts.push(describeWithoutMessage(cause));
+  }
+  return maskTenantId(cleanFaultPart(parts.join(' <- '), MAX_FAULT_LINE_LENGTH), id);
 }

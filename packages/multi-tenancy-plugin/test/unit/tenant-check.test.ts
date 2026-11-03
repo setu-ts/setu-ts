@@ -195,36 +195,109 @@ describe('TenantCheck', () => {
     }
   });
 
-  it('R1: the fault warn masks the requested id, raw and as rendered', async () => {
+  it.each<[string, (id: string) => string]>([
+    ['verbatim', (id) => `no tenant ${id}`],
+    ['quoted by a driver', (id) => `invalid input syntax for type uuid: "${id}"`],
+    ['JSON-escaped', (id) => `no document matches ${JSON.stringify({ id })}`],
+    ['upper-cased', (id) => `NO TENANT ${id.toUpperCase()}`],
+    ['truncated', (id) => `no tenant ${id.slice(0, 3)}`],
+  ])('F-1: the fault warn carries no registry message text — id %s', async (_label, render) => {
     const { logger, warns } = recordingLogger();
     const id = '<x>\r\nX-Evil: 1';
     const check = new TenantCheck({
       configured: true,
       logger,
-      registry: { lookup: (requested) => Promise.reject(new Error(`no tenant ${requested}`)) },
+      registry: { lookup: (requested) => Promise.reject(new Error(render(requested))) },
     });
     await expect(check.check(id)).rejects.toThrow(TenantRegistryUnavailableError);
     expect(warns).toHaveLength(1);
     const logged = (warns[0]!.metadata as { error: string }).error;
-    expect(logged).toContain(`no tenant ${MASKED_TENANT_ID}`);
-    expect(logged).not.toContain('X-Evil');
-    expect(logged).not.toContain('<x>');
+    expect(logged).toBe(
+      'TenantRegistryUnavailableError: The tenant registry lookup threw <- Error',
+    );
+    for (const fragment of ['X-Evil', 'x-evil', '<x>', '<X>', 'no tenant', 'NO TENANT']) {
+      expect(logged).not.toContain(fragment);
+    }
   });
 
-  it('R1: a driver error quoting the id in quotes is masked too', async () => {
+  it('F-1: driver classifiers and the error name reach the warn', async () => {
+    const { logger, warns } = recordingLogger();
+    const driverError = Object.assign(new Error('connect ECONNREFUSED 10.0.0.1:5432 acme'), {
+      code: 'ECONNREFUSED',
+      errno: -111,
+      syscall: 'connect',
+    });
+    const check = new TenantCheck({
+      configured: true,
+      logger,
+      registry: {
+        lookup: () =>
+          Promise.reject(new AggregateError([driverError], 'all hosts failed for acme')),
+      },
+    });
+    await expect(check.check('acme')).rejects.toThrow();
+    const logged = (warns[0]!.metadata as { error: string }).error;
+    expect(logged).toBe(
+      'TenantRegistryUnavailableError: The tenant registry lookup threw <- AggregateError ' +
+        '[Error (code=ECONNREFUSED, errno=-111, syscall=connect)]',
+    );
+    expect(logged).not.toContain('10.0.0.1');
+    expect(logged).not.toContain('all hosts failed');
+  });
+
+  it('F-1: an id smuggled into a custom error name or code is still masked', async () => {
+    const { logger, warns } = recordingLogger();
+    class TenantMissing extends Error {
+      code = 'acme';
+    }
+    const custom = new TenantMissing('x');
+    custom.name = 'NoSuchTenant acme';
+    const check = new TenantCheck({
+      configured: true,
+      logger,
+      registry: { lookup: () => Promise.reject(custom) },
+    });
+    await expect(check.check('acme')).rejects.toThrow();
+    const logged = (warns[0]!.metadata as { error: string }).error;
+    expect(logged).toBe(
+      `TenantRegistryUnavailableError: The tenant registry lookup threw <- NoSuchTenant ${MASKED_TENANT_ID} (code=${MASKED_TENANT_ID})`,
+    );
+  });
+
+  it('F-1: a malformed answer contributes only its type, never its contents', async () => {
     const { logger, warns } = recordingLogger();
     const check = new TenantCheck({
       configured: true,
       logger,
       registry: {
-        lookup: (requested) =>
-          Promise.reject(new Error(`invalid input syntax for type uuid: "${requested}"`)),
+        lookup: () =>
+          Promise.resolve({
+            present: 'yes',
+            value: { id: 'secret-row' },
+          } as unknown as Option<ITenant>),
       },
     });
-    await expect(check.check('not-a-uuid')).rejects.toThrow();
+    await expect(check.check('acme')).rejects.toThrow();
     const logged = (warns[0]!.metadata as { error: string }).error;
-    expect(logged).toContain(`uuid: "${MASKED_TENANT_ID}"`);
-    expect(logged).not.toContain('not-a-uuid');
+    expect(logged).toContain('malformed answer');
+    expect(logged).not.toContain('secret-row');
+    expect(logged).not.toContain('yes');
+  });
+
+  it('F-1: a control character in an error name cannot break the line, and long parts are bounded', async () => {
+    const { logger, warns } = recordingLogger();
+    const weird = new Error('x');
+    weird.name = `Bad\r\nName${'z'.repeat(400)}`;
+    const check = new TenantCheck({
+      configured: true,
+      logger,
+      registry: { lookup: () => Promise.reject(weird) },
+    });
+    await expect(check.check('acme')).rejects.toThrow();
+    const logged = (warns[0]!.metadata as { error: string }).error;
+    expect(logged).not.toMatch(/[\r\n]/);
+    expect(logged).toContain('Bad Name');
+    expect(logged).toContain('… [truncated]');
   });
 
   it('maskTenantId leaves unrelated text alone', () => {
@@ -347,7 +420,9 @@ describe('TenantCheck', () => {
     expect(warns).toHaveLength(1);
     expect(warns[0]!.message).toBe(REGISTRY_FAULT_LOG);
     const metadata = warns[0]!.metadata as { error: string };
-    expect(metadata.error).toContain('db down');
+    expect(metadata.error).toBe(
+      'TenantRegistryUnavailableError: The tenant registry lookup threw <- Error',
+    );
     expect(JSON.stringify(warns)).not.toContain(secret);
     expect(infos).toEqual([]);
 

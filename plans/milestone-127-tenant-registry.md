@@ -170,10 +170,15 @@ Read at `develop` `29be2e77b`.
   `'Tenant registry lookup failed; requests naming a tenant answer 503'` with
   `{ error: <masked description> }`, once per transition from healthy to failing, and `info`
   `'Tenant registry lookups recovered'` on the first success after a failure (the M119g pattern).
-  The masked description is `describeError(cause)` with every occurrence of the requested id
-  replaced by `<tenant-id>` — both the raw id and the id as `describeError` renders it (the
-  rendering of `new Error(id)` without its `Error: ` prefix, trimmed), because a driver or custom
-  registry error may quote the bound value (§8a R1). The plugin composes no log text from the id.
+  The description carries NO registry-supplied message text: the plugin's own fixed
+  `TenantRegistryUnavailableError` sentence, then for each error in the cause chain only its `name`
+  and the `serializeError` classifier allowlist (`code`, `errno`, `syscall`, …), with control
+  characters collapsed and each part bounded; a malformed answer contributes only its type. A driver
+  or custom registry error may quote the bound value in any encoding — verbatim, JSON-escaped,
+  case-folded — so no mask over the message can be complete (§8a R1, then audit F-1). As a last line
+  of defence the line is passed through `maskTenantId`, so an id smuggled into a custom error's
+  `name` or `code` is still masked. Operators lose the message text (`connection refused`); the
+  codes (`ECONNREFUSED`) remain.
 - **`unknownTenantStatus`:** an integer in 400–499, checked at `register()` (anything else refused
   by name); default 404. 404 because the request is well formed and names a resource that does not
   exist (survey in §3.10); an app wanting 400 or 403 sets it.
@@ -462,6 +467,7 @@ Per-file coverage read ANSI-stripped for every changed `src` file in `common`,
   | R2  | An escaped `TenantRegistryUnavailableError` is logged by `errorHandler` with its whole `cause` chain — the registry's message again                                                                                                                                                                                                          | Low                            | Accepted: `errorHandler` logs every escaped error's cause, and the plugin cannot rewrite a foreign error. The README's `lookupTenant` paragraph says a registry error's message reaches the error log when a handler lets the error escape          |
   | R3  | T13 held only for the static list and the cache: an instance/factory registry with `tenantCache: false` or `ttlMs: 0` hands its own (possibly shared, mutable, extra-keyed) object to every request; and the check validates `value.id` once while the middleware re-reads it for the session compare and cache prefix                       | Low (the registry is app code) | The check returns a frozen snapshot (§3.3 step 6). Test home: `tenant-check.test.ts` — an extra key is dropped, the result is frozen, a getter whose second read differs is read once                                                               |
   | R4  | The cache cached every hit under the requested id: against a case-insensitive registry, 2^n spellings of one tenant are all hits that evict listed tenants, so their requests reach the store                                                                                                                                                | Medium                         | Cache only canonical-equal hits (§3.7). Test home: `caching-tenant-registry.test.ts` — a variant is answered but not cached; the canonical id is                                                                                                    |
+  | F-1 | (Security audit at `081f526a3`.) The R1 mask only recognized a verbatim quote: a registry error quoting the id JSON-escaped or case-folded put the request text in the warn log                                                                                                                                                              | Low                            | The warn logs no registry message text at all, only error names and classifier codes (§3.5). Test home: `tenant-check.test.ts` F-1 cases — verbatim, driver-quoted, JSON-escaped, upper-cased and truncated quotes each absent; classifiers present |
   | R5  | §3.6 assumed the Problem Details `title` is `Unknown Tenant`; under `format: 'rfc9457'` it is the status phrase, and the default `errorHandler()` format is not Problem Details                                                                                                                                                              | — (documentation)              | §3.6 corrected; probes assert per format                                                                                                                                                                                                            |
 
 - **Obligations the audit probes (each with a positive control):**

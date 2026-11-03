@@ -158,8 +158,9 @@ export const tenancyPlugin = MultiTenancyPlugin({
 | not listed, or longer than 256 chars     | `unknownTenantStatus` (default `404`) `Unknown Tenant`            |
 | the registry threw or answered malformed | `503` `Tenant Registry Unavailable`                               |
 
-Neither refusal runs the handler, and no response byte names the requested id; the fault warning
-replaces it with `<tenant-id>` wherever a registry's error message quotes it verbatim. A miss does
+Neither refusal runs the handler, and no response byte names the requested id. The fault warning
+never carries a registry's error message — which may quote the id in any form — only each error's
+name and driver codes, e.g. `<- Error (code=ECONNREFUSED, errno=-111, syscall=connect)`. A miss does
 not fall through to the next resolver. The session binding compare and the cache prefix use the
 registry's id, so `ACME` and `acme` cannot split a tenant when the registry answers `acme`.
 
