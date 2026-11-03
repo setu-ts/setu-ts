@@ -158,19 +158,20 @@ export const tenancyPlugin = MultiTenancyPlugin({
 | not listed, or longer than 256 chars     | `unknownTenantStatus` (default `404`) `Unknown Tenant`            |
 | the registry threw or answered malformed | `503` `Tenant Registry Unavailable`                               |
 
-Neither refusal runs the handler, and neither body nor log line names the requested id. A miss does
-not fall through to the next resolver. The session binding compare and the cache prefix use the
-registry's id, so `ACME` and `acme` cannot split a tenant when the registry answers `acme`.
+Neither refusal runs the handler, and no response byte names the requested id; the fault warning
+replaces it with `<tenant-id>` even when a registry's error message quotes it. A miss does not fall
+through to the next resolver. The session binding compare and the cache prefix use the registry's
+id, so `ACME` and `acme` cannot split a tenant when the registry answers `acme`.
 
 `tenants` also takes an `ITenantRegistry` (`lookup(id)` returning `some(tenant)` or `none()`) or a
 factory resolved at `onInit`, such as `createDatabaseTenantRegistry()` from
 `@setu-ts/database-plugin`. A registry must answer `none()` for "not found" — a throw means "could
 not check" and answers `503` — and must bound its own I/O. Instance and factory registries are
-cached (`tenantCache`): hits only, for `ttlMs` (default 30 s), so a suspended tenant stays admitted
-for up to that long (`ttlMs: 0` or `tenantCache: false` removes the window). Misses are never
-cached, so each request naming an unknown tenant runs one lookup: rate-limit a public resolver.
-Tenants are handed out as frozen copies with frozen top-level `metadata`; deeper objects in
-`metadata` are shared between requests, so do not mutate them.
+cached (`tenantCache`): hits whose canonical id equals the requested id only, for `ttlMs` (default
+30 s), so a suspended tenant stays admitted for up to that long (`ttlMs: 0` or `tenantCache: false`
+removes the window). Misses are never cached, so each request naming an unknown tenant runs one
+lookup: rate-limit a public resolver. Tenants are handed out as frozen copies with frozen top-level
+`metadata`; deeper objects in `metadata` are shared between requests, so do not mutate them.
 
 A queue job or message handler checks a payload's tenant the same way:
 
@@ -187,8 +188,13 @@ export async function saveOrder(
 }
 ```
 
-`lookupTenant` throws `TenantRegistryUnavailableError` on a registry fault — let the job retry.
+`lookupTenant` throws `TenantRegistryUnavailableError` on a registry fault — let the job retry. If
+an HTTP handler lets it escape, `errorHandler` answers the same `503` and logs the error with its
+`cause` chain, so the registry's own message — which may quote the id — reaches the error log.
 Without `tenants` it answers `some({ id })` for any id, so it is not validation without a registry.
+
+`unknownTenantStatus: 403` answers an unknown tenant and a forbidden one alike in the status code
+only: a listed tenant served from the cache still answers faster than an unknown one.
 
 ## Options
 

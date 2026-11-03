@@ -4,6 +4,10 @@
  * payload's tenant gets the answer the HTTP path would give. Internal: not
  * exported from `src/index.ts`.
  *
+ * It also owns the ONE definition of a well-formed registry answer
+ * ({@linkcode snapshotAnswer}), shared with the caching registry so the cache
+ * can never store an answer the check would refuse.
+ *
  * @module
  */
 import type { ILogger, ITenant, ITenantRegistry, Option } from '@setu-ts/common';
@@ -24,19 +28,91 @@ export const REGISTRY_FAULT_LOG =
 /** The `info` emitted on the first success after a failure. */
 export const REGISTRY_RECOVERED_LOG = 'Tenant registry lookups recovered';
 
+/** What replaces the requested id wherever it appears in a logged registry error. */
+export const MASKED_TENANT_ID = '<tenant-id>';
+
+/** A plain (non-array) object, the only shape `metadata` may take. */
+function isPlainObject(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 /**
- * Reports whether a registry answer is a well-formed `Option<ITenant>`: the
- * `none()` shape, or a `some` whose value carries a non-empty string id.
+ * Builds the frozen tenant every request receives from a tenant-shaped value:
+ * `id`, plus `name` when it is a string and `metadata` when it is a plain
+ * object (itself a frozen shallow copy). Every member is read EXACTLY ONCE,
+ * so a getter cannot pass validation with one value and serve another; any
+ * other key on the value is dropped. Objects nested deeper inside `metadata`
+ * are not copied — they stay the application's.
+ *
+ * @param value - The candidate tenant
+ * @returns The frozen tenant, or `undefined` when `id` is not a non-empty string
  */
-function isWellFormed(answer: unknown): answer is Option<ITenant> {
-  if (typeof answer !== 'object' || answer === null) return false;
-  const option = answer as { present?: unknown; value?: unknown };
-  if (option.present === false) return true;
-  if (option.present !== true) return false;
-  const value = option.value as { id?: unknown } | null | undefined;
-  return (
-    typeof value === 'object' && value !== null && typeof value.id === 'string' && value.id !== ''
-  );
+function snapshotTenant(value: unknown): ITenant | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const { id, name, metadata } = value as { id?: unknown; name?: unknown; metadata?: unknown };
+  if (typeof id !== 'string' || id === '') return undefined;
+  return Object.freeze({
+    id,
+    ...(typeof name === 'string' && { name }),
+    ...(isPlainObject(metadata) && { metadata: Object.freeze({ ...metadata }) }),
+  });
+}
+
+/**
+ * Returns a frozen copy of a tenant — the static registry's storage form.
+ *
+ * @param tenant - The tenant to copy (its `id` already validated)
+ * @returns A frozen copy no handler can mutate at the top level
+ * @throws {TypeError} When `tenant.id` is not a non-empty string
+ */
+export function freezeTenant(tenant: ITenant): ITenant {
+  const frozen = snapshotTenant(tenant);
+  if (frozen === undefined) {
+    throw new TypeError('A tenant needs a non-empty string id.');
+  }
+  return frozen;
+}
+
+/**
+ * Validates and snapshots a registry answer — the single definition of
+ * well-formed, used by the check and by the cache. Every member of the answer
+ * and of its tenant is read once; a throwing accessor reads as malformed.
+ *
+ * @param answer - Whatever a registry's `lookup` resolved to
+ * @returns `none()`, `some(frozenTenant)`, or `undefined` when malformed
+ */
+export function snapshotAnswer(answer: unknown): Option<ITenant> | undefined {
+  try {
+    if (typeof answer !== 'object' || answer === null) return undefined;
+    const { present, value } = answer as { present?: unknown; value?: unknown };
+    if (present === false) return none();
+    if (present !== true) return undefined;
+    const tenant = snapshotTenant(value);
+    return tenant === undefined ? undefined : some(tenant);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Removes the requested id from a logged description. A registry or driver
+ * error may quote the bound value (`invalid input syntax for type uuid: "…"`),
+ * so both the raw id and the id as `describeError` renders it — control
+ * characters collapsed to spaces — are replaced.
+ *
+ * @param text - The description of the registry's error
+ * @param id - The requested id
+ * @returns The description with every occurrence of the id masked
+ */
+export function maskTenantId(text: string, id: string): string {
+  const rendered = describeError(new Error(id))
+    .replace(/^Error: /, '')
+    .trim();
+  let masked = text;
+  for (const form of new Set([id, rendered])) {
+    if (form !== '') masked = masked.split(form).join(MASKED_TENANT_ID);
+  }
+  return masked;
 }
 
 /**
@@ -70,7 +146,8 @@ export class TenantCheck {
    * Checks a tenant id.
    *
    * @param id - The requested id (untrusted)
-   * @returns `some(tenant)` to admit with the registry's tenant, `none()` to refuse
+   * @returns `some(tenant)` — a fresh frozen snapshot holding only `id`,
+   * `name` and `metadata` — to admit, `none()` to refuse
    * @throws {TenantRegistryUnavailableError} When the registry is not bound,
    * throws, or answers malformed
    */
@@ -83,6 +160,7 @@ export class TenantCheck {
         new TenantRegistryUnavailableError(
           'MultiTenancyPlugin: the tenants factory is resolved in onInit; a lookup before onInit has no registry',
         ),
+        id,
       );
     }
     let answer: unknown;
@@ -91,28 +169,33 @@ export class TenantCheck {
     } catch (cause) {
       throw this.#fault(
         new TenantRegistryUnavailableError('The tenant registry lookup threw', { cause }),
+        id,
       );
     }
-    if (!isWellFormed(answer)) {
+    const snapshot = snapshotAnswer(answer);
+    if (snapshot === undefined) {
       throw this.#fault(
         new TenantRegistryUnavailableError(
           'The tenant registry returned a malformed answer (expected none() or some({ id }))',
           { cause: answer },
         ),
+        id,
       );
     }
     if (this.#failing) {
       this.#failing = false;
       this.#logger?.info(REGISTRY_RECOVERED_LOG);
     }
-    return answer;
+    return snapshot;
   }
 
-  /** Logs the healthy→failing transition once, then returns the error to throw. */
-  #fault(error: TenantRegistryUnavailableError): TenantRegistryUnavailableError {
+  /** Logs the healthy→failing transition once (id masked), then returns the error to throw. */
+  #fault(error: TenantRegistryUnavailableError, id: string): TenantRegistryUnavailableError {
     if (!this.#failing) {
       this.#failing = true;
-      this.#logger?.warn(REGISTRY_FAULT_LOG, { error: describeError(error.cause ?? error) });
+      this.#logger?.warn(REGISTRY_FAULT_LOG, {
+        error: maskTenantId(describeError(error.cause ?? error), id),
+      });
     }
     return error;
   }

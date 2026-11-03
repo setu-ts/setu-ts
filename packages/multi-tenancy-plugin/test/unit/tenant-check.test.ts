@@ -7,9 +7,12 @@ import type { ILogger, ITenant, ITenantRegistry, Option } from '@setu-ts/common'
 import { none, some } from '@setu-ts/common';
 import { TenantRegistryUnavailableError } from '../../src/errors.ts';
 import {
+  MASKED_TENANT_ID,
+  maskTenantId,
   MAX_TENANT_ID_LENGTH,
   REGISTRY_FAULT_LOG,
   REGISTRY_RECOVERED_LOG,
+  snapshotAnswer,
   TenantCheck,
 } from '../../src/registry/tenant-check.ts';
 
@@ -120,15 +123,112 @@ describe('TenantCheck', () => {
     expect((error as Error).cause).toBe(answer);
   });
 
-  it("6. otherwise the lookup's own result, unchanged", async () => {
-    const tenant = { id: 'acme', name: 'Acme' };
-    const hit = some(tenant);
+  it('6. otherwise none(), or a frozen snapshot of the registry tenant (R3)', async () => {
+    const tenant = { id: 'acme', name: 'Acme', metadata: { plan: 'gold' } };
     const check = new TenantCheck({
       configured: true,
-      registry: { lookup: (id) => Promise.resolve(id === 'acme' ? hit : none()) },
+      registry: { lookup: (id) => Promise.resolve(id === 'acme' ? some(tenant) : none()) },
     });
-    expect(await check.check('acme')).toBe(hit);
+    const hit = await check.check('acme');
+    expect(hit.present && hit.value).toEqual(tenant);
+    expect(hit.present && hit.value).not.toBe(tenant);
+    expect(Object.isFrozen(hit.present && hit.value)).toBe(true);
+    expect(Object.isFrozen(hit.present && hit.value.metadata)).toBe(true);
     expect(await check.check('initech')).toBe(none());
+  });
+
+  it('R3: extra keys are dropped and the shared registry object is never handed out', async () => {
+    const shared = { id: 'acme', apiKey: 'sk-secret', metadata: { seats: 3 } };
+    const check = new TenantCheck({
+      configured: true,
+      registry: { lookup: () => Promise.resolve(some(shared as ITenant)) },
+    });
+    const first = await check.check('acme');
+    const tenant = first.present ? first.value : undefined;
+    expect(Object.keys(tenant ?? {})).toEqual(['id', 'metadata']);
+    expect(JSON.stringify(tenant)).not.toContain('sk-secret');
+    expect(() => {
+      (tenant!.metadata as Record<string, unknown>).seats = 99;
+    }).toThrow(TypeError);
+    expect(shared.metadata.seats).toBe(3);
+  });
+
+  it('R3: a stateful id getter is read exactly once', async () => {
+    let reads = 0;
+    const tenant = {
+      get id() {
+        reads++;
+        return reads === 1 ? 'acme' : 'globex';
+      },
+    };
+    const check = new TenantCheck({
+      configured: true,
+      registry: { lookup: () => Promise.resolve(some(tenant)) },
+    });
+    const hit = await check.check('acme');
+    expect(reads).toBe(1);
+    const value = hit.present ? hit.value : undefined;
+    expect(value?.id).toBe('acme');
+    expect(value?.id).toBe('acme');
+  });
+
+  it('R3: a throwing accessor on the answer is a fault, not a crash', async () => {
+    const answer = {
+      present: true,
+      get value(): never {
+        throw new Error('boom');
+      },
+    };
+    const check = new TenantCheck({
+      configured: true,
+      registry: { lookup: () => Promise.resolve(answer as unknown as Option<ITenant>) },
+    });
+    await expect(check.check('acme')).rejects.toBeInstanceOf(TenantRegistryUnavailableError);
+  });
+
+  it('snapshotAnswer: none, frozen some, and undefined for every malformed shape', () => {
+    expect(snapshotAnswer(none())).toBe(none());
+    const hit = snapshotAnswer(some({ id: 'a', name: 'A' }));
+    expect(hit?.present && hit.value).toEqual({ id: 'a', name: 'A' });
+    for (const bad of [some({ id: '' }), some({}), some(null), null, 'x', { present: 1 }]) {
+      expect(snapshotAnswer(bad)).toBeUndefined();
+    }
+  });
+
+  it('R1: the fault warn masks the requested id, raw and as rendered', async () => {
+    const { logger, warns } = recordingLogger();
+    const id = '<x>\r\nX-Evil: 1';
+    const check = new TenantCheck({
+      configured: true,
+      logger,
+      registry: { lookup: (requested) => Promise.reject(new Error(`no tenant ${requested}`)) },
+    });
+    await expect(check.check(id)).rejects.toThrow(TenantRegistryUnavailableError);
+    expect(warns).toHaveLength(1);
+    const logged = (warns[0]!.metadata as { error: string }).error;
+    expect(logged).toContain(`no tenant ${MASKED_TENANT_ID}`);
+    expect(logged).not.toContain('X-Evil');
+    expect(logged).not.toContain('<x>');
+  });
+
+  it('R1: a driver error quoting the id in quotes is masked too', async () => {
+    const { logger, warns } = recordingLogger();
+    const check = new TenantCheck({
+      configured: true,
+      logger,
+      registry: {
+        lookup: (requested) =>
+          Promise.reject(new Error(`invalid input syntax for type uuid: "${requested}"`)),
+      },
+    });
+    await expect(check.check('not-a-uuid')).rejects.toThrow();
+    const logged = (warns[0]!.metadata as { error: string }).error;
+    expect(logged).toContain(`uuid: "${MASKED_TENANT_ID}"`);
+    expect(logged).not.toContain('not-a-uuid');
+  });
+
+  it('maskTenantId leaves unrelated text alone', () => {
+    expect(maskTenantId('Error: connection refused', 'acme')).toBe('Error: connection refused');
   });
 
   it('logs warn once per healthy→failing transition and info on recovery, never with the id', async () => {

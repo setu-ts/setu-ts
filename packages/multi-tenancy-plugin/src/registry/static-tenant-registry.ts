@@ -6,27 +6,7 @@
  */
 import type { ITenant, ITenantRegistry, Option } from '@setu-ts/common';
 import { none, some } from '@setu-ts/common';
-import { MAX_TENANT_ID_LENGTH } from './tenant-check.ts';
-
-/**
- * Returns a fresh frozen copy of a tenant: `id`, plus `name` and `metadata`
- * when present, with `metadata` itself a frozen shallow copy. Objects nested
- * deeper inside `metadata` are not copied — they stay the application's.
- * Shared with the caching registry, which also hands one object to every
- * request naming the tenant.
- *
- * @param tenant - The tenant to copy
- * @returns A frozen copy no handler can mutate at the top level
- */
-export function freezeTenant(tenant: ITenant): ITenant {
-  return Object.freeze({
-    id: tenant.id,
-    ...(tenant.name !== undefined && { name: tenant.name }),
-    ...(tenant.metadata !== undefined && {
-      metadata: Object.freeze({ ...tenant.metadata }),
-    }),
-  });
-}
+import { freezeTenant, MAX_TENANT_ID_LENGTH } from './tenant-check.ts';
 
 /** The option name every refusal starts with. */
 const OPTION = 'MultiTenancyPlugin: the `tenants` option';

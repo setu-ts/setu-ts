@@ -3,7 +3,8 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { ITenant } from '@setu-ts/common';
-import { freezeTenant, StaticTenantRegistry } from '../../src/registry/static-tenant-registry.ts';
+import { StaticTenantRegistry } from '../../src/registry/static-tenant-registry.ts';
+import { freezeTenant } from '../../src/registry/tenant-check.ts';
 
 describe('StaticTenantRegistry', () => {
   it('a hit returns a frozen copy whose top-level metadata is frozen too', async () => {
@@ -73,5 +74,26 @@ describe('StaticTenantRegistry', () => {
 
   it('freezeTenant omits absent name and metadata', () => {
     expect(Object.keys(freezeTenant({ id: 'x' }))).toEqual(['id']);
+  });
+
+  it('freezeTenant keeps metadata only when it is a plain object, and name only when a string (C2)', () => {
+    const odd = { id: 'x', name: 7, metadata: null } as unknown as ITenant;
+    expect(freezeTenant(odd)).toEqual({ id: 'x' });
+    const stringy = { id: 'x', metadata: 'abc' } as unknown as ITenant;
+    expect(freezeTenant(stringy)).toEqual({ id: 'x' });
+    const listy = { id: 'x', metadata: ['a'] } as unknown as ITenant;
+    expect(freezeTenant(listy)).toEqual({ id: 'x' });
+  });
+
+  it('freezeTenant refuses a tenant without a non-empty string id', () => {
+    expect(() => freezeTenant({ id: '' })).toThrow(TypeError);
+  });
+
+  it('a listed tenant with extra keys is stored without them', async () => {
+    const registry = new StaticTenantRegistry([
+      { id: 'acme', apiKey: 'sk-secret' } as unknown as ITenant,
+    ]);
+    const hit = await registry.lookup('acme');
+    expect(hit.present && hit.value).toEqual({ id: 'acme' });
   });
 });

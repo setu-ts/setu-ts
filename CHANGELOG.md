@@ -12,11 +12,11 @@ All notable changes to this project are documented here. The format follows
   `@setu-ts/common`, `@setu-ts/database-plugin`).** `MultiTenancyPlugin` takes `tenants` — a list,
   an `ITenantRegistry` (new in `common`) or a `RegistryFactory` — and checks every resolved id
   before the request carries it: an unknown id answers `unknownTenantStatus` (default `404`,
-  `Unknown Tenant`), a registry fault answers `503` (`Tenant Registry Unavailable`), and neither
-  body nor log names the id. The registry's tenant replaces the resolved one, so its canonical id
-  reaches the session binding and cache prefix. Ids over 256 characters never reach the registry.
-  Instance and factory registries are cached (`tenantCache`: hits only, TTL 30 s on the monotonic
-  clock, 1 000 entries, 1 MiB, single-flight; `TenantRegistryCacheOptions`).
+  `Unknown Tenant`), a registry fault answers `503` (`Tenant Registry Unavailable`), and no response
+  byte names the id (the fault warning masks it). The registry's tenant replaces the resolved one,
+  so its canonical id reaches the session binding and cache prefix. Ids over 256 characters never
+  reach the registry. Instance and factory registries are cached (`tenantCache`: hits only, TTL 30 s
+  on the monotonic clock, 1 000 entries, 1 MiB, single-flight; `TenantRegistryCacheOptions`).
   `IMultiTenancyService.lookupTenant(id)` runs the same check for queue and message handlers and
   throws `TenantRegistryUnavailableError` (503 status hint) on a fault.
   `createDatabaseTenantRegistry(options?: DatabaseTenantRegistryOptions)` in `database-plugin` reads

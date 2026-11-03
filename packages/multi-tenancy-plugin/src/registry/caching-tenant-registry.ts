@@ -6,7 +6,7 @@
  */
 import type { ITenant, ITenantRegistry, Option } from '@setu-ts/common';
 import { some } from '@setu-ts/common';
-import { freezeTenant } from './static-tenant-registry.ts';
+import { snapshotAnswer } from './tenant-check.ts';
 
 /** Default TTL of a cached hit, in milliseconds. */
 export const DEFAULT_TENANT_CACHE_TTL_MS = 30_000;
@@ -98,14 +98,17 @@ export class CachingTenantRegistry implements ITenantRegistry {
 
   async #lookupAndStore(id: string): Promise<Option<ITenant>> {
     const answer = await this.#inner.lookup(id);
-    // A malformed answer is passed through untouched: the shared check turns
-    // it into a fault. Only a well-formed hit is copied and cached.
-    if (answer?.present !== true || typeof answer.value?.id !== 'string') {
-      return answer;
-    }
-    const tenant = freezeTenant(answer.value);
-    this.#store(id, tenant);
-    return some(tenant);
+    // The check's own definition of well-formed: a malformed answer (an empty
+    // id included) is passed through untouched for the check to turn into a
+    // fault, and is never cached. A miss is returned uncached too.
+    const snapshot = snapshotAnswer(answer);
+    if (snapshot === undefined || !snapshot.present) return answer;
+    // Only a CANONICAL hit is cached: an answer whose id differs from the
+    // requested one (a case-insensitive registry answering `acme` for `ACME`)
+    // is returned uncached, so spelling variants of one real tenant cannot
+    // fill the cache and evict listed tenants (M127 §8a R4).
+    if (snapshot.value.id === id) this.#store(id, snapshot.value);
+    return snapshot;
   }
 
   #store(id: string, tenant: ITenant): void {

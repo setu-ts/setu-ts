@@ -363,7 +363,16 @@ export function MultiTenancyPlugin(options: MultiTenancyPluginOptions): IPlugin 
         tenantMiddleware({
           service,
           resolvers,
-          options: { ...options, unknownTenantStatus: parsedRegistry.unknownTenantStatus },
+          // Only the fields the middleware reads (not `tenants`, `dataStore`, …).
+          options: {
+            ...(options.cache !== undefined && { cache: options.cache }),
+            ...(options.required !== undefined && { required: options.required }),
+            ...(options.rejectionStatus !== undefined && {
+              rejectionStatus: options.rejectionStatus,
+            }),
+            ...(options.exclude !== undefined && { exclude: options.exclude }),
+            unknownTenantStatus: parsedRegistry.unknownTenantStatus,
+          },
           ...(logger != null && { logger }),
           ...(registryConfig.kind !== 'none' && { check: tenantCheck }),
         }),

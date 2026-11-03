@@ -164,7 +164,7 @@ export function tenantMiddleware({
 
     if (resolved && check !== undefined) {
       // The registry step (M127). The check logs registry faults itself, once
-      // per transition and never with the id, so a fault seen here or through
+      // per transition with the id masked, so a fault seen here or through
       // `lookupTenant` counts the same.
       let checked: { readonly present: boolean; readonly value?: ITenant };
       try {

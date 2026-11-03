@@ -91,6 +91,58 @@ describe('CachingTenantRegistry', () => {
     expect(cache.size).toBe(1);
   });
 
+  it('R4: a canonicalizing hit is answered but not cached; the canonical id is', async () => {
+    const { registry, calls } = counting((id) =>
+      Promise.resolve(id.toLowerCase() === 'acme' ? some({ id: 'acme' }) : none()),
+    );
+    const cache = new CachingTenantRegistry(registry, LIMITS, clock().now);
+    for (const spelling of ['ACME', 'Acme', 'aCmE', 'ACME']) {
+      const hit = await cache.lookup(spelling);
+      expect(hit.present && hit.value.id).toBe('acme');
+    }
+    expect(cache.size).toBe(0);
+    expect(calls).toHaveLength(4);
+    await cache.lookup('acme');
+    await cache.lookup('acme');
+    expect(cache.size).toBe(1);
+    expect(calls).toHaveLength(5);
+  });
+
+  it('R4: 1 000 case variants of one tenant leave only the canonical entry cached', async () => {
+    const cache = new CachingTenantRegistry(
+      {
+        lookup: (id) =>
+          Promise.resolve(
+            id.toLowerCase() === 'acmecorporation' ? some({ id: 'acmecorporation' }) : none(),
+          ),
+      },
+      { ...LIMITS, maxEntries: 10 },
+      clock().now,
+    );
+    await cache.lookup('acmecorporation');
+    const base = 'acmecorporation';
+    for (let mask = 1; mask <= 1_000; mask++) {
+      const variant = [...base].map((ch, i) => ((mask >> i) & 1 ? ch.toUpperCase() : ch)).join('');
+      await cache.lookup(variant);
+    }
+    expect(cache.size).toBe(1);
+  });
+
+  it("an answer with an empty id is never cached (the check's definition of malformed)", async () => {
+    let bad = true;
+    const { registry, calls } = counting((id) =>
+      Promise.resolve(bad ? (some({ id: '' }) as Option<ITenant>) : some({ id })),
+    );
+    const cache = new CachingTenantRegistry(registry, LIMITS, clock().now);
+    const first = await cache.lookup('acme');
+    expect(first.present && first.value.id).toBe('');
+    expect(cache.size).toBe(0);
+    bad = false;
+    const second = await cache.lookup('acme');
+    expect(second.present && second.value.id).toBe('acme');
+    expect(calls).toHaveLength(2);
+  });
+
   it('a malformed answer is passed through uncached', async () => {
     const bad = some({}) as unknown as Option<ITenant>;
     const cache = new CachingTenantRegistry(

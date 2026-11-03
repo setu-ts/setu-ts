@@ -49,15 +49,15 @@ await db.transaction(async (uow) => {
 
 - The default adapter is memory and loses data when the process ends.
 - `findById` and `findOne` return `null` when absent.
-- Only repositories obtained from the unit of work share its transaction. Success commits; failure
-  attempts rollback and rejects.
+- Only unit-of-work repositories share its transaction; failure rolls back and rejects.
 - Unsupported transaction isolation levels reject rather than silently downgrading.
 - Raw `query` rejects on memory; `migrate` rejects on every current adapter.
-- Give a Drizzle `pg` Pool an `'error'` listener; see the README's Drizzle pool setup.
+- Give a Drizzle `pg` Pool an `'error'` listener (README).
 
 ## Other options
 
 - `type` also selects `'prisma'`, `'drizzle'`, `'mongodb'`, `'dynamodb'`, `'cosmos'`, `'bigtable'`
   or `'custom'`.
 - `name` selects a named database token; `readiness` configures migration readiness checks.
+- `createDatabaseTenantRegistry()` feeds multi-tenancy's `tenants` from rows.
 - `findAll` supports filtering and ordering; `findPage` supplies cursor pagination where supported.
