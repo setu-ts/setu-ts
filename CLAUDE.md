@@ -732,7 +732,7 @@ here.
 - **Milestone 129** (`cli` + `common` + `openapi-plugin` — `setu client`: the typed client generated
   with the project's own sdk and Prettier into a marker-owned `src/clientsdk/api.ts`, `--input` and
   `--check`, `IOpenApiService` in `common`, `setu add sdk` scripts, and `setu add openapi`
-  installing `swagger-ui-dist`; V11-20) — complete (PR pending).
+  installing `swagger-ui-dist`; V11-20) — complete (PR #547).
 - **Next milestone** — M127, M130 and M131b–d are open for `0.12.0`.
 
 ## Verification (run before declaring any work done)

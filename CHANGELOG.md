@@ -8,7 +8,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
-- **Typed client command (M129, #PR, `@setu-ts/cli`, `@setu-ts/common`,
+- **Typed client command (M129, #547, `@setu-ts/cli`, `@setu-ts/common`,
   `@setu-ts/openapi-plugin`).** `setu client` boots without a port or reads JSON with
   `--input <file|url>`, generates `src/clientsdk/api.ts` with the project's own SDK, and writes a
   marked managed file. `--check` is a read-only drift gate; `--dry-run` reports the write plan.
@@ -189,7 +189,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
-- **Swagger UI after `setu add openapi` (M129, #PR, `@setu-ts/cli`).** Node, Deno and Bun now
+- **Swagger UI after `setu add openapi` (M129, #547, `@setu-ts/cli`).** Node, Deno and Bun now
   install the exact `swagger-ui-dist` release that the Swagger UI integrity hashes match; without
   it, an application using the default self-hosted assets could not boot. Workers receives no
   additional dependency.
