@@ -199,8 +199,23 @@ describe('the first setu g module', () => {
     }
   });
 
-  it('switches a project whose flat homes hold only barrels, without --adopt-controllers', async () => {
+  it('adds a module to a full-stack project, which is modular from the start (M130)', async () => {
     const h = scaffold(FULL_STACK_TEMPLATE);
+    expect(h.fs.has('/app/src/controllers/index.ts')).toBe(false);
+    const before = h.fs.read('/app/setu.config.ts');
+    expect(before).toContain("import { registerModules } from './src/modules/index.ts';");
+    expect(await h.run(['module', 'catalog'])).toBe(0);
+    // No switch to make: the config is byte-identical, and nothing was removed.
+    expect(h.fs.read('/app/setu.config.ts')).toBe(before);
+    expect(h.out.text()).not.toContain('removed src/controllers/index.ts');
+    const barrel = h.fs.read('/app/src/modules/index.ts');
+    expect(barrel).toContain('registerCatalogModule(router, services);');
+    expect(barrel).toContain('registerProductsModule(router, services);');
+  });
+
+  it('switches a project whose flat homes hold only barrels, without --adopt-controllers', async () => {
+    // The REST scaffold minus its greeting example: only the empty barrels stay flat.
+    const h = scaffold({ ...REST_TEMPLATE, seamArtifacts: {}, files: [] });
     expect(h.fs.has('/app/src/controllers/index.ts')).toBe(true);
     expect(await h.run(['module', 'catalog'])).toBe(0);
     expect(h.fs.has('/app/src/controllers/index.ts')).toBe(false);

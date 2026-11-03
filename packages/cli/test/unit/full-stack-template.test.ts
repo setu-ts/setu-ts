@@ -109,15 +109,64 @@ describe('full-stack template | registration', () => {
 });
 
 describe('full-stack template | the layering it emits', () => {
-  it('emits the route, feature, service, model and lib layers', () => {
-    expect(paths).toContain('app/routes.ts');
-    expect(paths).toContain('app/root.tsx');
-    expect(paths).toContain('app/features/products/products.server.ts');
-    expect(paths).toContain('app/services/products.server.ts');
-    expect(paths).toContain('app/models/product.ts');
-    expect(paths).toContain('app/lib/context-keys.server.ts');
-    expect(paths).toContain('app/lib/load-context.ts');
-    expect(paths).toContain('app/config/services.server.ts');
+  it('emits pages in app/ and business logic in a kernel module (M130 §3.3, §3.4)', () => {
+    for (const path of [
+      'app/routes.ts',
+      'app/root.tsx',
+      'app/lib/load-context.ts',
+      'app/lib/nav-utils.ts',
+      'app/server/context-keys.server.ts',
+      'app/server/session.server.ts',
+      'app/server/require-user.server.ts',
+      'src/modules/products/products.types.ts',
+      'src/modules/products/products.service.ts',
+      'src/modules/products/products.token.ts',
+      'src/modules/products/products.controller.ts',
+      'src/modules/products/index.ts',
+      'src/modules/index.ts',
+    ])
+      expect(paths).toContain(path);
+    // The page-side layers the restructure removed: services come through getService.
+    for (const prefix of [
+      'app/config/',
+      'app/features/',
+      'app/models/',
+      'app/services/',
+      'app/middleware/',
+      'src/controllers/',
+    ])
+      expect(
+        paths.filter((path) => path.startsWith(prefix)),
+        prefix,
+      ).toEqual([]);
+    expect(paths).not.toContain('app/lib/context-keys.server.ts');
+  });
+
+  it('registers the products service per request from the managed module index', () => {
+    const index = contentsOf('src/modules/products/index.ts');
+    expect(index).toContain('services.register(PRODUCTS, requestService(productsService));');
+    expect(index).toContain('registerProductsRoutes(router, services);');
+    expect(contentsOf('src/modules/index.ts')).toContain(
+      'registerProductsModule(router, services);',
+    );
+    expect(contentsOf('src/modules/products/products.controller.ts')).toContain(
+      "router.group('/api/products'",
+    );
+    expect(contentsOf('src/modules/products/products.controller.ts')).toContain(
+      'resolveRequestService(ctx, PRODUCTS)',
+    );
+  });
+
+  it('keeps the token module to its token (pages import it by value)', () => {
+    const token = contentsOf('src/modules/products/products.token.ts');
+    const valueImports = [
+      ...token.matchAll(/^import\s+(?!type\b)\{([^}]*)\}\s+from\s+'([^']+)'/gm),
+    ];
+    expect(valueImports.map((m) => [m[1]!.trim(), m[2]])).toEqual([
+      ['serviceToken', '@setu-ts/common'],
+    ]);
+    expect(token).toContain("import type { ProductsService } from './products.service.ts';");
+    expect(token).toContain("serviceToken<ProductsService>('module.products')");
   });
 
   it('emits both layout groups and a route in each', () => {
@@ -148,21 +197,31 @@ describe('full-stack template | the React Router middleware example', () => {
   // and the scaffold used to demonstrate only the first. These pin the worked
   // example of the second, so a reader can see where one goes and how it hands a
   // loader a value.
-  it('emits the route middleware and the model it hands to loaders', () => {
-    expect(paths).toContain('app/middleware/require-user.server.ts');
-    expect(paths).toContain('app/models/user.ts');
+  it('emits the route middleware and the user type it hands to loaders', () => {
+    expect(paths).toContain('app/server/require-user.server.ts');
+    expect(contentsOf('app/server/context-keys.server.ts')).toContain(
+      'export interface CurrentUser',
+    );
   });
 
   it('attaches it to /products through the route module export', () => {
     const route = contentsOf('app/routes/_app/products._index.tsx');
-    expect(route).toContain("import { requireUser } from '~/middleware/require-user.server.ts';");
+    expect(route).toContain("import { requireUser } from '~/server/require-user.server.ts';");
     expect(route).toContain('export const middleware = [requireUser];');
     // The loader reads what the middleware set — the reason to use this layer at all.
     expect(route).toContain('getCurrentUser(context)');
+    // Data comes from the kernel module, through the ~kernel alias, types and token only.
+    expect(route).toContain('await getService(context, PRODUCTS).list()');
+    expect(route).toContain(
+      "import type { Product } from '~kernel/modules/products/products.types.ts';",
+    );
+    expect(route).toContain(
+      "import { PRODUCTS } from '~kernel/modules/products/products.token.ts';",
+    );
   });
 
   it('reads the session through its context key and sets the user through another', () => {
-    const middleware = contentsOf('app/middleware/require-user.server.ts');
+    const middleware = contentsOf('app/server/require-user.server.ts');
     expect(middleware).toContain('context.get(sessionContext)');
     expect(middleware).toContain('context.set(currentUserContext, { email })');
     expect(middleware).toContain("throw redirect('/login')");
@@ -170,7 +229,7 @@ describe('full-stack template | the React Router middleware example', () => {
     // A route middleware reusing the session plugin, not a second session: it never
     // reads the cookie itself.
     expect(middleware).not.toContain('request.headers');
-    expect(contentsOf('app/lib/context-keys.server.ts')).toContain(
+    expect(contentsOf('app/server/context-keys.server.ts')).toContain(
       "contextKeyFor<CurrentUser | null>('app.current-user', null)",
     );
   });
@@ -186,11 +245,11 @@ describe('full-stack template | the React Router middleware example', () => {
 
   it('explains both layers in the README section it contributes', () => {
     const render = FULL_STACK_TEMPLATE.manifest!.readmeSection!;
-    const section = typeof render === 'string' ? render : render('npx @setu-ts/cli@0.9.0');
+    const section = typeof render === 'string' ? render : render('npx @setu-ts/cli@0.9.0', 'node');
     expect(section).toContain('## Middleware\n');
     expect(section).toContain('`npx @setu-ts/cli@0.9.0 generate middleware <name>`');
     expect(section).toContain('`export const middleware = [...]`');
-    expect(section).toContain('`app/middleware/require-user.server.ts`');
+    expect(section).toContain('`app/server/require-user.server.ts`');
   });
 });
 
@@ -216,33 +275,47 @@ describe('full-stack template | what the plugins own is NOT reimplemented', () =
     });
   }
 
-  it('keeps the service accessor stateless, with no module-level cache', () => {
-    const services = contentsOf('app/config/services.server.ts');
-
-    // The module it replaces exists to memoise clients and secret lookups per
-    // process — which is what the kernel's service registry already is.
-    expect(services).not.toContain('new Map');
-    expect(services).toContain('loggerContext');
-    expect(services).toContain('secretsContext');
+  it('keeps the session accessor stateless, and carries no logger or secrets key', () => {
+    const session = contentsOf('app/server/session.server.ts');
+    // A module-level cache is what the kernel's service registry already is.
+    expect(session).not.toContain('new Map');
+    // Services come through getService now (M130 §3.3): no per-service keys.
+    const keys = contentsOf('app/server/context-keys.server.ts');
+    expect(keys).not.toContain('loggerContext');
+    expect(keys).not.toContain('secretsContext');
   });
 
-  it('imports framework VALUES only from server-only modules', () => {
-    // The client bundle inlines its imports; keep server framework values in
-    // `.server.ts` modules. Server-only modules may import them, because
-    // the server build treats framework packages as external — which is also
-    // what keeps context keys identical across that boundary. Type imports are
-    // erased and are fine anywhere.
+  it('imports framework VALUES only where the client bundle drops them', () => {
+    // The client bundle inlines its imports. Allowed: `.server.ts` modules and
+    // entry.server.tsx (server-only), and a route module's `getService`, which
+    // only its `loader` uses and React Router removes from the client build
+    // together with the loader. The scaffold e2e checks the built client bundle
+    // holds no framework or kernel code. Type imports are erased and fine anywhere.
+    const allowed = new Map<string, readonly string[]>([
+      ['app/entry.server.tsx', ['@setu-ts/common', '@setu-ts/react-router-plugin']],
+      ['app/routes/_app/products._index.tsx', ['@setu-ts/react-router-plugin']],
+    ]);
     for (const file of FULL_STACK_APP_FILES) {
       if (file.path.endsWith('.server.ts')) continue;
-
       for (const match of file.contents.matchAll(
         /^import\s+(?!type\b)[^;]*?from\s+'(@setu-ts\/[^']+)'/gm,
       )) {
-        throw new Error(
-          `${file.path} value-imports ${match[1]}; only .server.ts modules may do that`,
-        );
+        if (allowed.get(file.path)?.includes(match[1]!)) continue;
+        throw new Error(`${file.path} value-imports ${match[1]}; the client bundle would carry it`);
       }
     }
+    expect(contentsOf('app/routes/_app/products._index.tsx')).toMatch(
+      /^import \{ getService \} from '@setu-ts\/react-router-plugin';$/m,
+    );
+  });
+
+  it('logs SSR failures once, skipping 404s and aborted requests (X91-7)', () => {
+    const entry = contentsOf('app/entry.server.tsx');
+    expect(entry).toContain('export function handleError(');
+    expect(entry).toContain('if (request.signal.aborted) return;');
+    expect(entry).toContain('if (isRouteErrorResponse(error) && error.status === 404) return;');
+    expect(entry).toContain('getService<ILogger>(context, CAPABILITIES.LOGGER).error(');
+    expect(entry).toContain('error: describeError(error)');
   });
 
   it('gives the login form an action, so its CSRF token is actually consumed', () => {
@@ -265,12 +338,12 @@ describe('full-stack template | what the plugins own is NOT reimplemented', () =
   it('keeps the context keys in a server-only module', () => {
     // They value-import the key helper, so a client-reachable module declaring
     // them would break the client build.
-    expect(paths).toContain('app/lib/context-keys.server.ts');
-    expect(paths).not.toContain('app/lib/context-keys.ts');
+    expect(paths).toContain('app/server/context-keys.server.ts');
+    expect(paths).not.toContain('app/server/context-keys.ts');
   });
 
   it('builds every key through contextKeyFor, never a literal', () => {
-    const keys = contentsOf('app/lib/context-keys.server.ts');
+    const keys = contentsOf('app/server/context-keys.server.ts');
 
     // A `{ defaultValue }` literal is the defect: Vite inlines this module into
     // the server build while the runtime loads setu.config.ts from source, so
@@ -280,7 +353,7 @@ describe('full-stack template | what the plugins own is NOT reimplemented', () =
   });
 
   it('declares the session keys in app code, not in a plugin', () => {
-    const keys = contentsOf('app/lib/context-keys.server.ts');
+    const keys = contentsOf('app/server/context-keys.server.ts');
 
     expect(keys).toContain('sessionContext');
     expect(keys).toContain('csrfContext');
@@ -376,8 +449,12 @@ describe('full-stack template | the runtime-dependent argument', () => {
 });
 
 describe('full-stack template | manifest contributions', () => {
-  it('declares the alias every emitted module imports through', () => {
-    expect(FULL_STACK_TSCONFIG_OPTIONS['paths']).toEqual({ '~/*': ['./app/*'] });
+  it('declares the page alias and the ~kernel alias in tsconfig and the Deno import map', () => {
+    expect(FULL_STACK_TSCONFIG_OPTIONS['paths']).toEqual({
+      '~/*': ['./app/*'],
+      '~kernel/*': ['./src/*'],
+    });
+    expect(FULL_STACK_TEMPLATE.manifest?.denoImports?.['~kernel/']).toBe('./src/');
     // The alias specifically, not the whole map: this template's import map also
     // carries the shared test dependencies, because `setu generate module` is
     // ungated and can emit a `*.service.test.ts` here too. Those are pinned
@@ -481,9 +558,30 @@ describe('full-stack template | manifest contributions', () => {
     expect(vite).toContain("for (const file of ['deno.json', 'deno.jsonc', 'package.json'])");
     expect(vite).toContain('workspaceLibraries.push(manifest.name)');
     const render = FULL_STACK_TEMPLATE.manifest!.readmeSection!;
-    expect(typeof render === 'string' ? render : render('cli')).toContain(
+    expect(typeof render === 'string' ? render : render('cli', 'node')).toContain(
       'Client modules cannot import',
     );
+  });
+});
+
+describe('full-stack template | X85 rows (M130 §3.11)', () => {
+  it('pins lucide-react exactly, so shadcn components that import it type-check (X85-1)', () => {
+    expect(FULL_STACK_NPM_DEPENDENCIES['lucide-react']).toBe('1.67.0');
+    expect(FULL_STACK_TEMPLATE.manifest?.npmDependencies?.['lucide-react']).toBe('1.67.0');
+  });
+
+  it('points the HMR socket at Vite own port on an explicit host (X85-2, X85-3)', () => {
+    for (const runtime of ['node', 'deno', 'bun'] as const) {
+      const dev = projectFiles('probe', runtime, resolveHost(FULL_STACK_TEMPLATE, runtime)).find(
+        (file) => file.path === 'dev.ts',
+      )!.contents;
+      expect(dev, runtime).toContain("host: '127.0.0.1',");
+      expect(dev, runtime).toContain('strictPort: true,');
+      expect(dev, runtime).toContain(
+        "hmr: { host: 'localhost', port: vitePort, clientPort: vitePort },",
+      );
+      expect(dev, runtime).not.toContain('server: { port: vitePort, strictPort: true }');
+    }
   });
 });
 
@@ -574,25 +672,15 @@ describe('full-stack vite.config.ts | executed', () => {
 });
 
 describe('full-stack app files | module-level shape', () => {
-  it('marks every server-only module with the .server convention', () => {
-    const serverModules = FULL_STACK_APP_FILES.filter((file) =>
-      file.contents.includes('@setu-ts/common'),
-    ).map((file) => file.path);
-
-    // context-keys.ts is the one exception: it is a type-only import of a key
-    // shape, imported by both server and client code.
-    for (const path of serverModules) {
-      expect(path.endsWith('.server.ts') || path === 'app/lib/context-keys.ts').toBe(true);
-    }
+  it('keeps every app/server/ module server-only by name', () => {
+    const server = FULL_STACK_APP_FILES.filter((file) => file.path.startsWith('app/server/'));
+    expect(server.length).toBeGreaterThan(0);
+    for (const file of server) expect(file.path.endsWith('.server.ts'), file.path).toBe(true);
   });
 
-  it('keeps the model free of server-only imports', () => {
-    const model = contentsOf('app/models/product.ts');
-
-    // Shared by loaders and components, so a server import would break the
-    // client bundle.
-    expect(model).not.toContain('@setu-ts/');
-    expect(model).not.toContain('.server.ts');
+  it('keeps the kernel types module free of value imports (pages import it as a type)', () => {
+    const types = contentsOf('src/modules/products/products.types.ts');
+    expect(types).not.toMatch(/^import /m);
   });
 });
 

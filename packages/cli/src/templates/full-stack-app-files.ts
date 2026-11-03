@@ -1,19 +1,14 @@
 /**
- * The `app/` tree emitted by the `full-stack` template.
+ * The `app/` tree emitted by the `full-stack` template (M130 §3.3).
  *
- * The layering — `routes → features → services → models`, with `lib/` for glue
- * and `.server.ts` marking server-only modules — is the deliverable. It is
- * adapted from a production React Router 8 application, with one difference
- * that matters more than the layout: every cross-cutting concern that a
- * framework plugin already owns is REMOVED rather than reimplemented.
- *
- * A conventional React Router app grows a `lib/session.server.ts`,
- * `lib/csrf.server.ts`, `lib/sse.server.ts`, `lib/kv.server.ts`,
- * `lib/service-logger.server.ts` and a `config/services.server.ts` holding
- * module-level caches. Here those are the session, SSE, secrets and logger
- * capabilities, reached through the service registry the SSR plugin puts on
- * every request — so the skeleton ships the layering and NOT a second copy of
- * the framework.
+ * `app/` is pages only: `routes/`, `components/`, client-safe `lib/` and
+ * server-only `server/` glue (the session, the CSRF token, the signed-in user,
+ * the `requireUser` guard). Business logic lives in kernel modules under
+ * `src/modules/`, and a loader reaches a module's service with
+ * `getService(context, TOKEN)`, importing only types and token modules through
+ * the `~kernel/*` alias — `setu check` refuses any other value import
+ * (setu.E017). Framework capabilities a plugin owns (logger, secrets, cache) are
+ * reached the same way, never reimplemented here.
  *
  * @module
  */
@@ -109,7 +104,11 @@ export function ErrorBoundary() {
 `;
 
 const entryServerModule = `import { renderToReadableStream } from 'react-dom/server';
-import { type EntryContext, ServerRouter } from 'react-router';
+import { type EntryContext, isRouteErrorResponse, ServerRouter } from 'react-router';
+import { CAPABILITIES, describeError, type ILogger } from '@setu-ts/common';
+import { getService } from '@setu-ts/react-router-plugin';
+
+import type { AppLoadContext } from '~/lib/load-context.ts';
 
 /**
  * Server entry.
@@ -151,6 +150,25 @@ export default async function handleRequest(
     headers: responseHeaders,
   });
 }
+
+/**
+ * Reports a loader, action or render failure once, to the structured log.
+ *
+ * An unknown URL is a 404, not a fault, and an aborted request is the client
+ * leaving: neither is logged. Everything else goes through the application
+ * logger instead of a raw stack trace on stderr.
+ */
+export function handleError(
+  error: unknown,
+  { request, context }: { request: Request; context: AppLoadContext },
+): void {
+  if (request.signal.aborted) return;
+  if (isRouteErrorResponse(error) && error.status === 404) return;
+  getService<ILogger>(context, CAPABILITIES.LOGGER).error('SSR request failed', {
+    path: new URL(request.url).pathname,
+    error: describeError(error),
+  });
+}
 `;
 
 const entryClientModule = `import { startTransition, StrictMode } from 'react';
@@ -190,14 +208,14 @@ export interface AppLoadContext {
 `;
 
 const contextKeysModule = `import { contextKeyFor } from '@setu-ts/react-router-plugin';
-import type { ILogger, ISecretManager, ISession } from '@setu-ts/common';
-import type { CurrentUser } from '~/models/user.ts';
+import type { ISession } from '@setu-ts/common';
 
 /**
- * Context keys this application adds to every SSR request.
+ * Context keys for the values a page reads that are NOT services: the session,
+ * the CSRF token and the signed-in user. Services — a module's, or a
+ * capability such as the logger — come through \`getService(context, TOKEN)\`.
  *
- * \`setu.config.ts\` sets them; loaders and actions read them. Two things make
- * that work, and both are easy to break:
+ * Two things make these keys work, and both are easy to break:
  *
  * 1. **Keys come from \`contextKeyFor\`, never from a \`{ defaultValue }\`
  *    literal.** Vite INLINES application modules into the server build, while
@@ -206,95 +224,59 @@ import type { CurrentUser } from '~/models/user.ts';
  *    nothing. Resolving each key by NAME through the plugin gives both copies
  *    the same object.
  * 2. **This module is \`.server.ts\`.** It imports a framework package by value,
- *    which only the server build may do: framework packages are external there
- *    (see \`vite.config.ts\`) and resolve at runtime, whereas the client bundle
- *    would have to inline them.
- *
- * The session key is the clearest case for why the bridge lives in app code at
- * all: \`getSession\` needs the kernel request context, which a loader never
- * sees, while \`populateLoadContext\` receives exactly that — and doing it here
- * keeps the SSR plugin from importing the session plugin.
+ *    which only the server build may do.
  */
 
-/** The session for the current request. */
+/** The signed-in user, as a page sees it. Plain data. */
+export interface CurrentUser {
+  /** The address the user signed in with. */
+  readonly email: string;
+}
+
+/** The session for the current request; set in \`setu.config.ts\`. */
 export const sessionContext = contextKeyFor<ISession | null>('app.session', null);
 
 /**
- * The CSRF token for the current request, for embedding in a form.
- *
- * The synchronizer-token check lives in the session plugin's middleware; the
- * form only has to echo this value back.
+ * The CSRF token for the current request, for embedding in a form; set in
+ * \`setu.config.ts\`. The check itself lives in the session plugin's middleware.
  */
 export const csrfContext = contextKeyFor<string | null>('app.csrf', null);
 
-/** The application logger. */
-export const loggerContext = contextKeyFor<ILogger | null>('app.logger', null);
-
 /**
- * The secret manager.
- *
- * Replaces a hand-rolled key-vault module: the provider (env, AWS, GCP, Azure,
- * Vault) is chosen once in \`setu.config.ts\`, and reads are cached by the
- * plugin rather than by a module-level map here.
- */
-export const secretsContext = contextKeyFor<ISecretManager | null>('app.secrets', null);
-
-/**
- * The signed-in user, on the routes the \`requireUser\` route middleware guards.
- *
- * Unlike the keys above, \`setu.config.ts\` does not set this one: React Router
- * route middleware does, after reading the session — see
- * \`app/middleware/require-user.server.ts\`. It stays \`null\` on every route that
- * middleware does not guard.
+ * The signed-in user, on the routes \`requireUser\` guards. Set by that route
+ * middleware (\`app/server/require-user.server.ts\`), not by \`setu.config.ts\`;
+ * \`null\` everywhere else.
  */
 export const currentUserContext = contextKeyFor<CurrentUser | null>('app.current-user', null);
 `;
 
-const servicesAccessModule = `import type { ILogger, ISecretManager, ISession } from '@setu-ts/common';
+const sessionAccessModule = `import type { ISession } from '@setu-ts/common';
+
 import type { AppLoadContext } from '~/lib/load-context.ts';
-import type { CurrentUser } from '~/models/user.ts';
 import {
   csrfContext,
+  type CurrentUser,
   currentUserContext,
-  loggerContext,
-  secretsContext,
   sessionContext,
-} from '~/lib/context-keys.server.ts';
+} from '~/server/context-keys.server.ts';
 
 /**
- * Typed access to the framework services available on an SSR request.
- *
- * A conventional React Router app keeps a module-level \`Map\` here, caching one
- * HTTP client and one secret lookup per service for the life of the process.
- * That cache is exactly what the kernel's service registry already is, so this
- * module holds NO state: every value comes from the request context that
- * \`setu.config.ts\` populated, and nothing is memoised here.
+ * Typed access to the request values that are not services.
  *
  * @param value - The value read from the request context
- * @param name - The service name, for the error message
+ * @param name - The value's name, for the error message
  * @returns The value, once known to be present
- * @throws {Error} If the value is absent, which means either that the plugin
- * is not registered, that its context key is not set in populateLoadContext,
- * or that this ran outside a loader or action
+ * @throws {Error} If the value is absent: its key is not set in
+ * populateLoadContext, or this ran outside a loader or action
  */
-function requireValue<T>(value: T | null, name: string): T {
+export function requireValue<T>(value: T | null, name: string): T {
   if (value === null) {
     throw new Error(
-      \`No \${name} on this request. Register its plugin in setu.config.ts and set its \` +
-        'context key in populateLoadContext, and call this only from a loader or action.',
+      \`No \${name} on this request. Set its context key in populateLoadContext in \` +
+        'setu.config.ts, and call this only from a loader or action.',
     );
   }
   return value;
-}
-
-/** Resolves the application logger. */
-export function getLogger(context: AppLoadContext): ILogger {
-  return requireValue(context.get(loggerContext), 'logger');
-}
-
-/** Resolves the secret manager. */
-export function getSecrets(context: AppLoadContext): ISecretManager {
-  return requireValue(context.get(secretsContext), 'secret manager');
 }
 
 /** Resolves the session for the current request. */
@@ -316,15 +298,14 @@ export function getCsrfToken(context: AppLoadContext): string {
  * Resolves the signed-in user the \`requireUser\` route middleware put on the context.
  *
  * Throws on a route that middleware does not guard. That is deliberate: a loader
- * that needs a user should be unreachable without one, and a missing
- * \`export const middleware\` is a wiring mistake worth failing loudly on.
+ * that needs a user should be unreachable without one.
  */
 export function getCurrentUser(context: AppLoadContext): CurrentUser {
   const user = context.get(currentUserContext);
   if (user === null) {
     throw new Error(
       'No signed-in user on this request. Guard the route with ' +
-        '\`export const middleware = [requireUser];\` from ~/middleware/require-user.server.ts.',
+        '\`export const middleware = [requireUser];\` from ~/server/require-user.server.ts.',
     );
   }
   return user;
@@ -352,34 +333,6 @@ export function isActive(item: NavItem, pathname: string): boolean {
 }
 `;
 
-const productModel = `/**
- * Domain model. Plain data, shared by server modules and components — so it
- * must not import anything server-only.
- */
-
-/** A product in the catalogue. */
-export interface Product {
-  /** Stable identifier. */
-  readonly id: string;
-  /** Display name. */
-  readonly name: string;
-  /** Price in minor units. */
-  readonly priceCents: number;
-}
-
-/** Formats a price for display. */
-export function formatPrice(product: Product): string {
-  return \`$\${(product.priceCents / 100).toFixed(2)}\`;
-}
-`;
-
-const userModel = `/** The signed-in user, as the application sees it. Plain data, safe for client code. */
-export interface CurrentUser {
-  /** The address the user signed in with. */
-  readonly email: string;
-}
-`;
-
 /**
  * The worked React Router route middleware.
  *
@@ -393,7 +346,7 @@ export interface CurrentUser {
  */
 const requireUserMiddleware = `import { type MiddlewareFunction, redirect } from 'react-router';
 
-import { currentUserContext, sessionContext } from '~/lib/context-keys.server.ts';
+import { currentUserContext, sessionContext } from '~/server/context-keys.server.ts';
 
 /**
  * React Router route middleware: only a signed-in user gets past it.
@@ -438,58 +391,6 @@ export const requireUser: MiddlewareFunction<Response> = ({ context }, next) => 
   context.set(currentUserContext, { email });
   return next();
 };
-`;
-
-const productsService = `import type { AppLoadContext } from '~/lib/load-context.ts';
-import type { Product } from '~/models/product.ts';
-import { getLogger } from '~/config/services.server.ts';
-
-/**
- * Data access for products.
- *
- * The service layer owns talking to the outside world — a database, or another
- * service through the SDK client. It is given the request context rather than
- * reaching for a module-level singleton, so a test can drive it with a plain
- * object.
- */
-export async function listProducts(context: AppLoadContext): Promise<readonly Product[]> {
-  getLogger(context).debug('products: listing');
-
-  // Replace with a repository read, or an SDK client pointed at another
-  // service — adding its context key alongside the logger's. Static data keeps
-  // the skeleton runnable out of the box.
-  return await Promise.resolve([
-    { id: 'p-1', name: 'Standard plan', priceCents: 4900 },
-    { id: 'p-2', name: 'Premium plan', priceCents: 9900 },
-  ]);
-}
-`;
-
-const productsFeature = `import type { AppLoadContext } from '~/lib/load-context.ts';
-import type { Product } from '~/models/product.ts';
-import { listProducts } from '~/services/products.server.ts';
-
-/** What the products route renders. */
-export interface ProductsView {
-  /** The catalogue, ordered for display. */
-  readonly products: readonly Product[];
-  /** Total number of products, for the header. */
-  readonly total: number;
-}
-
-/**
- * The feature layer: use-case logic a route can call in one line.
- *
- * Routes stay thin (parse the request, call this, render), services stay
- * ignorant of presentation, and this is where the two meet.
- */
-export async function buildProductsView(context: AppLoadContext): Promise<ProductsView> {
-  const products = await listProducts(context);
-  return {
-    products: [...products].sort((left, right) => left.name.localeCompare(right.name)),
-    total: products.length,
-  };
-}
 `;
 
 const appLayout = `import { useEffect, useRef } from 'react';
@@ -590,7 +491,7 @@ const indexRoute = `import { Link, useLoaderData } from 'react-router';
 
 import { Card, CardContent } from '~/components/ui/card.tsx';
 import type { AppLoadContext } from '~/lib/load-context.ts';
-import { getSession } from '~/config/services.server.ts';
+import { getSession } from '~/server/session.server.ts';
 
 /** Reads the session on the server, so the greeting reflects the cookie. */
 export function loader({ context }: { context: AppLoadContext }) {
@@ -637,34 +538,41 @@ export default function IndexRoute() {
 }
 `;
 const productsRoute = `import { useLoaderData } from 'react-router';
+import { getService } from '@setu-ts/react-router-plugin';
 
 import { Card, CardContent } from '~/components/ui/card.tsx';
 import type { AppLoadContext } from '~/lib/load-context.ts';
-import { getCurrentUser } from '~/config/services.server.ts';
-import { buildProductsView } from '~/features/products/products.server.ts';
-import { requireUser } from '~/middleware/require-user.server.ts';
-import { formatPrice } from '~/models/product.ts';
+import { getCurrentUser } from '~/server/session.server.ts';
+import { requireUser } from '~/server/require-user.server.ts';
+import type { Product } from '~kernel/modules/products/products.types.ts';
+import { PRODUCTS } from '~kernel/modules/products/products.token.ts';
 
 /**
  * Route middleware: runs before the loader, and sends a visitor who is not
- * signed in to /login. See \`app/middleware/require-user.server.ts\` for how this
+ * signed in to /login. See \`app/server/require-user.server.ts\` for how this
  * layer differs from the kernel middleware \`setu generate middleware\` writes.
  */
 export const middleware = [requireUser];
 
 /**
- * Loads the view on the server.
+ * Loads the page on the server from the products kernel module.
  *
- * The request context carries the framework services \`setu.config.ts\` put
- * there, so the logger, database, cache and secrets are all reachable without a
- * module-level singleton or a second DI container — and without importing a
- * framework package into a module that also ships to the browser.
+ * \`getService\` resolves the module's service for THIS request — the same
+ * instance \`GET /api/products\` uses — without a module-level singleton and
+ * without importing kernel code by value: the type and the token are all a
+ * page imports from \`~kernel/*\`.
  */
 export async function loader({ context }: { context: AppLoadContext }) {
   // Set by the route middleware above; never null here, because the middleware
   // redirects before the loader runs when there is no user.
   const user = getCurrentUser(context);
-  return { ...(await buildProductsView(context)), signedInAs: user.email };
+  const products = await getService(context, PRODUCTS).list();
+  return { products, total: products.length, signedInAs: user.email };
+}
+
+/** Formats a price in minor units for display. */
+function formatPrice(product: Product): string {
+  return \`$\${(product.priceCents / 100).toFixed(2)}\`;
 }
 
 export default function ProductsRoute() {
@@ -691,7 +599,7 @@ const loginRoute = `import { Form, redirect, useActionData, useLoaderData } from
 
 import { Button } from '~/components/ui/button.tsx';
 import type { AppLoadContext } from '~/lib/load-context.ts';
-import { getCsrfToken, getSession } from '~/config/services.server.ts';
+import { getCsrfToken, getSession } from '~/server/session.server.ts';
 
 /**
  * Hands the form its CSRF token.
@@ -723,8 +631,8 @@ export async function action({ request, context }: { request: Request; context: 
   const form = await request.formData();
   const email = String(form.get('email') ?? '');
 
-  // Replace with a real credential check — resolve the auth service through a
-  // context key, exactly as the logger is resolved.
+  // Replace with a real credential check — resolve the auth service with
+  // getService(context, CAPABILITIES.AUTH), exactly as any service is resolved.
   if (email === '') {
     return { error: 'Email is required.' };
   }
@@ -783,14 +691,10 @@ export const FULL_STACK_APP_FILES: readonly GeneratedFile[] = [
   { path: 'app/entry.client.tsx', contents: entryClientModule },
   { path: 'app/app.css', contents: appCss },
   { path: 'app/lib/load-context.ts', contents: loadContextModule },
-  { path: 'app/lib/context-keys.server.ts', contents: contextKeysModule },
   { path: 'app/lib/nav-utils.ts', contents: navUtilsModule },
-  { path: 'app/config/services.server.ts', contents: servicesAccessModule },
-  { path: 'app/models/product.ts', contents: productModel },
-  { path: 'app/models/user.ts', contents: userModel },
-  { path: 'app/middleware/require-user.server.ts', contents: requireUserMiddleware },
-  { path: 'app/services/products.server.ts', contents: productsService },
-  { path: 'app/features/products/products.server.ts', contents: productsFeature },
+  { path: 'app/server/context-keys.server.ts', contents: contextKeysModule },
+  { path: 'app/server/session.server.ts', contents: sessionAccessModule },
+  { path: 'app/server/require-user.server.ts', contents: requireUserMiddleware },
   { path: 'app/components/layouts/AppLayout.tsx', contents: appLayout },
   { path: 'app/components/layouts/LoginLayout.tsx', contents: loginLayout },
   { path: 'app/routes/_app/_index.tsx', contents: indexRoute },
@@ -799,21 +703,72 @@ export const FULL_STACK_APP_FILES: readonly GeneratedFile[] = [
 ];
 
 /**
- * The full-stack README section on where middleware goes.
+ * The full-stack README sections: modules and the page boundary, calling the
+ * API, styling, middleware, workspace libraries and — on Workers only — the
+ * Workers deployment notes (V11-19: that section used to appear in every
+ * runtime's README and was wrong off Workers).
  *
- * A generated project has two middleware layers that look alike and are not
- * interchangeable, and the generic README said nothing about either. Formatted as
- * `deno fmt` formats it, since the scaffold must pass its own `fmt --check`.
+ * Formatted as Prettier formats it, since the scaffold must pass its own
+ * `fmt --check`.
+ *
+ * @param invocation - How the project runs the CLI (`npx setu`, `deno task setu`, …)
+ * @param runtime - The project's target runtime
+ * @returns The README markdown
  */
-export const FULL_STACK_README_SECTION = (invocation: string): string => {
+export const FULL_STACK_README_SECTION = (invocation: string, runtime: string): string => {
   const command = `\`${invocation} generate middleware <name>\` (\`src/middleware/\`)`;
   const width = command.length;
-  return `## Styling and theme
+  const workers =
+    runtime !== 'cloudflare-workers'
+      ? ''
+      : `
+## Deploying to Cloudflare Workers
+
+\`npx wrangler deploy\` builds the client and server, then bundles the Worker. The session secret is a
+Cloudflare secret, not a file: run \`npx wrangler secret put SESSION_SECRET\` once per environment
+before the first deploy. Local development reads \`.dev.vars\` instead, which the scaffold creates
+with a labelled-insecure development value.
+
+Everything in \`build/client\` is served by the platform before the Worker runs, so those requests
+skip the application's middleware: no security headers and no authentication apply to them. Put only
+public files in \`public/\`.
+`;
+  return `## Modules and pages
+
+Business logic lives in kernel modules under \`src/modules/<name>/\`: the service, its types, its
+token and its \`/api/<name>\` routes. \`src/modules/products/\` is the example. A module registers its
+service per request (\`requestService\`), so a page and the API share one instance within a request.
+
+Pages live in \`app/\`: \`routes/\`, \`components/\`, client-safe \`lib/\` and server-only \`server/\`
+(the session, the CSRF token, the signed-in user and the \`requireUser\` guard). A loader reaches a
+module's service in one line:
+
+\`\`\`ts
+import type { Product } from '~kernel/modules/products/products.types.ts';
+import { PRODUCTS } from '~kernel/modules/products/products.token.ts';
+
+const products: readonly Product[] = await getService(context, PRODUCTS).list();
+\`\`\`
+
+\`app/\` imports kernel code only through \`~kernel/*\`, and only types and \`*.token.ts\` modules:
+\`setu check\` refuses any other value import (setu.E017), so no server code reaches the browser
+bundle. Keep a token file to its token. Add a module, and optionally its page, with
+\`${invocation} generate module <name> --page\`.
+
+## Calling the API
+
+Every unsafe request (POST, PUT, PATCH, DELETE) passes the session's CSRF check, \`/api\` included.
+Browser code sends the page's token in an \`x-csrf-token\` header with the session cookie. A client
+outside the browser authenticates with a bearer token once an \`auth\` arm is configured: the CSRF
+check exempts bearer-authenticated requests. Without an auth arm, a plain POST answers 403 by
+design.
+
+## Styling and theme
 
 Tailwind 4 runs through Vite. The neutral shadcn theme lives in \`app/app.css\`; \`app/components/ui/\`
 contains the copied MIT Button and Card components. Add more with \`npx shadcn add <component>\` —
-\`components.json\` already points at the app aliases. Combine Tailwind classes with \`cn\` from
-shadcn's \`cn\` package, which the components import too.
+\`components.json\` already points at the app aliases, and \`lucide-react\` supplies its icons.
+Combine Tailwind classes with \`cn\` from shadcn's \`cn\` package, which the components import too.
 
 The app shell has a fixed header and sidebar and one scrolling content region; navigation resets
 that region. Below the medium breakpoint the sidebar becomes a horizontal navigation row. The header
@@ -831,8 +786,8 @@ This project has two middleware layers. Pick by what the code needs to see.
 | React Router route | only the SSR routes it is attached to                             | React Router's context, including the session | ${'`export const middleware = [...]` in a route module'.padEnd(width)} |
 
 Use kernel middleware for cross-cutting concerns such as headers, auditing and rate limits. Use
-route middleware for page-level rules: \`app/middleware/require-user.server.ts\` redirects a visitor
-who is not signed in to \`/login\`, and puts the signed-in user on the context for the loader.
+route middleware for page-level rules: \`app/server/require-user.server.ts\` redirects a visitor who
+is not signed in to \`/login\`, and puts the signed-in user on the context for the loader.
 \`/products\` attaches it; export it from a layout module to guard every route in that group.
 
 ## Workspace libraries
@@ -841,15 +796,11 @@ Import workspace libraries from \`.server.ts\` modules and \`setu.config.ts\`. T
 their declared package names external so the server runtime resolves them through the workspace.
 Client modules cannot import a Deno workspace library: the browser bundle has no Deno workspace.
 
-## Deploying to Cloudflare Workers
+## Development ports
 
-\`npx wrangler deploy\` builds the client and server, then bundles the Worker. The session secret is a
-Cloudflare secret, not a file: run \`npx wrangler secret put SESSION_SECRET\` once per environment
-before the first deploy. Local development reads \`.dev.vars\` instead, which the scaffold creates
-with a labelled-insecure development value.
-
-Everything in \`build/client\` is served by the platform before the Worker runs, so those requests
-skip the application's middleware: no security headers and no authentication apply to them. Put only
-public files in \`public/\`.
-`;
+\`start:dev\` serves the application on \`PORT\` (3000) and runs Vite's dev server on \`VITE_PORT\`
+(5173), bound to 127.0.0.1. The page loads modules through the application port, and the HMR socket
+connects to Vite's port directly, so an edit updates in place. A second dev server on the same
+\`VITE_PORT\` fails to start; give each project its own.
+${workers}`;
 };

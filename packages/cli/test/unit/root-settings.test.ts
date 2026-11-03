@@ -56,7 +56,18 @@ describe('generated imports match the formatter the project ships with', () => {
    * @returns The emitted statement, whitespace-collapsed
    */
   function commonImportOf(): string {
-    const host = resolveHost(getTemplate('full-stack')!, 'deno');
+    // No shipped template merges extra symbols into this import since M130
+    // dropped the full-stack logger/secrets bridge, so the sort is pinned on a
+    // host that still names several.
+    const host = resolveHost(
+      {
+        ...getTemplate('full-stack')!,
+        packageImports: [
+          { pkg: 'common', symbols: ['CAPABILITIES', 'type ILogger', 'type ISecretManager'] },
+        ],
+      },
+      'deno',
+    );
     const files = projectFiles('shop', 'deno', host);
     const config = files.find((f) => f.path === 'setu.config.ts')!;
     const match = config.contents.match(/import \{[^}]*\} from '@setu-ts\/common';/s);
