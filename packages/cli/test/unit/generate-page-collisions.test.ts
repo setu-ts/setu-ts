@@ -42,7 +42,27 @@ function harness(
 }
 
 describe('generation refuses kernel routes that shadow React Router pages', () => {
-  for (const schematic of ['route', 'controller', 'module']) {
+  it('lets a full-stack module share its page name: its routes mount at /api (M130 §3.6)', async () => {
+    const h = harness();
+    expect(await h.run(['g', 'module', 'products']), h.err.text()).toBe(0);
+    expect(h.err.text()).not.toContain('would take precedence');
+    expect(h.fs.read('/app/src/modules/products/products.controller.ts')).toContain(
+      "router.group('/api/products'",
+    );
+  });
+
+  it('refuses a full-stack module whose /api routes shadow a page', async () => {
+    const api = [{ id: 'api-orders', path: 'api/orders', file: 'routes/_app/api.orders.tsx' }];
+    const h = harness(undefined, () =>
+      Promise.resolve({ code: 0, stdout: JSON.stringify(api), stderr: '' }),
+    );
+    expect(await h.run(['g', 'module', 'orders'])).toBe(1);
+    expect(h.fs.writes).toEqual([]);
+    expect(h.err.text()).toContain('/api/orders and /api/orders/:id would take precedence');
+    expect(h.err.text()).toContain('routes/_app/api.orders.tsx');
+  });
+
+  for (const schematic of ['route', 'controller']) {
     for (const dryRun of [false, true]) {
       it(`refuses ${schematic} products before writing or printing a dry-run plan (${dryRun})`, async () => {
         const h = harness();
@@ -52,9 +72,7 @@ describe('generation refuses kernel routes that shadow React Router pages', () =
         expect(h.err.text()).toContain('app/routes/_app/products._index.tsx');
         expect(h.err.text()).toContain('/products and /products/:id would take precedence');
         expect(h.err.text()).toContain(
-          schematic === 'module'
-            ? "Choose another module name: a module's routes are mounted at /<module name>."
-            : `setu g module api (with --adopt-controllers if the project has controllers), then setu g ${schematic} products --module api (which yields /api/products)`,
+          `setu g module api (with --adopt-controllers if the project has controllers), then setu g ${schematic} products --module api (which yields /api/products)`,
         );
       });
     }

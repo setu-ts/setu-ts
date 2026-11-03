@@ -72,6 +72,11 @@ export interface SchematicOptions {
    */
   readonly modules?: readonly string[];
   /**
+   * `setu g module --page`: also write the module's React Router page. Read only
+   * by the module schematic in a full-stack project; refused elsewhere.
+   */
+  readonly page?: boolean;
+  /**
    * Pre-module-declaration directories that retain the old controller/service
    * barrel exports until their application converts to `MODULES`.
    *

@@ -148,6 +148,8 @@ function printSchematics(installed: ReadonlySet<string>, log: (message: string) 
   log('                      required for the first four once the project has modules');
   log('  --adopt-controllers The first module only: move src/controllers/ and src/services/');
   log('                      into it, rewriting imports and keeping their URLs');
+  log('  --page             g module in a full-stack project: also write its page route,');
+  log('                      reading the module service with getService');
 }
 
 /**
@@ -239,6 +241,11 @@ export async function runGenerateCommand(
 
   const schematicName = args.positionals[0];
   const adoptControllers = args.flags['adopt-controllers'] === true;
+  const page = args.flags['page'] === true;
+  if (page && schematicName !== 'module') {
+    deps.error('--page applies only to `g module` in a full-stack project, which adds its page.');
+    return EXIT_USAGE;
+  }
   if (adoptControllers && schematicName !== 'module') {
     deps.error(
       '--adopt-controllers applies only to `g module`, which moves the flat controllers and services into the new module.',
@@ -457,11 +464,23 @@ export async function runGenerateCommand(
     return EXIT_ERROR;
   }
 
+  if (page && !installed.has('react-router-plugin')) {
+    deps.error(
+      '--page needs the full-stack template (react-router-plugin): this project has no React Router pages.',
+    );
+    return EXIT_USAGE;
+  }
+
   if (
     installed.has('react-router-plugin') &&
     ['route', 'controller', 'module'].includes(schematicName)
   ) {
-    const base = `/${module === undefined ? '' : `${module}/`}${names.kebab}`;
+    // A full-stack module mounts its routes under /api (M130 §3.6), so a module
+    // and its page of the same name never collide.
+    const base =
+      schematicName === 'module'
+        ? `/api/${names.kebab}`
+        : `/${module === undefined ? '' : `${module}/`}${names.kebab}`;
     const pages = await readPagePaths(dir, deps.runCommand ?? createCommandRunner());
     if (!pages.ok) {
       deps.error(
@@ -475,7 +494,7 @@ export async function runGenerateCommand(
         );
         deps.error(
           schematicName === 'module'
-            ? `Choose another module name: a module's routes are mounted at /<module name>.`
+            ? `Choose another module name: a full-stack module's routes are mounted at /api/<module name>.`
             : `Choose another name, or place the ${schematicName} in a module: setu g module api (with --adopt-controllers if the project has controllers), then setu g ${schematicName} ${names.kebab} --module api (which yields /api/${names.kebab}).`,
         );
         return EXIT_ERROR;
@@ -492,6 +511,7 @@ export async function runGenerateCommand(
     migrations,
     artifacts: scan.artifacts,
     ...(module === undefined ? {} : { targetModule: module, moduleArtifacts: scan.artifacts }),
+    ...(page ? { page: true } : {}),
   };
 
   let generated: readonly GeneratedFile[];
