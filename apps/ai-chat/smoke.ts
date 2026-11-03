@@ -122,6 +122,8 @@ describe('AI SDK recipes through Setu (Node)', () => {
       const response = await app.fetch(chatRequest());
       assert.equal(response.status, 200);
       assert.equal(response.headers.get('x-vercel-ai-ui-message-stream'), 'v1');
+      // Connection management belongs to the server, not the SDK's suggested headers (K1).
+      assert.equal(response.headers.get('connection'), null);
       const [wire, parsed] = response.body!.tee();
       const wireText = new Response(wire).text();
       const chunks = parseJsonEventStream({

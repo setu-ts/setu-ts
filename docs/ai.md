@@ -123,7 +123,11 @@ export function registerChatRoutes(
 
 function sendUIResponse(ctx: IRequestContext, response: Response): HandlerResult {
   ctx.response.status(response.status);
-  response.headers.forEach((value, name) => ctx.response.header(name, value));
+  // The server owns connection management; the SDK's `connection: keep-alive` would
+  // override a client's `Connection: close` and hold its socket open.
+  response.headers.forEach((value, name) => {
+    if (name !== 'connection') ctx.response.header(name, value);
+  });
   return ctx.response.stream(response.body!);
 }
 ```
