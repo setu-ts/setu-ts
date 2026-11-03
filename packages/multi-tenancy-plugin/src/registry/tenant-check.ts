@@ -278,12 +278,15 @@ function cleanFaultPart(value: string, max: number): string {
 
 /**
  * Renders one registry-supplied value (an error name or a classifier) for the
- * line: the id masked FIRST, on the raw text — before collapsing control
- * characters or cutting could split or alter it — then URL userinfo masked,
- * then cleaned and bounded.
+ * line. URL userinfo is masked first: masking the id first would let a client
+ * whose id matches a URL's scheme (`redis`, `/`) break the URL apart so its
+ * credentials are no longer recognized. Then the id is masked, on text not yet
+ * collapsed or cut by this function, then the value is cleaned and bounded.
+ * A classifier arrives already cut at 512 code points by `serializeError`, so
+ * an id straddling that cut is only partly present and not recognized.
  */
 function renderFaultValue(value: string, id: string): string {
-  return cleanFaultPart(maskUrlUserinfo(maskTenantId(value, id)), MAX_FAULT_PART_LENGTH);
+  return cleanFaultPart(maskTenantId(maskUrlUserinfo(value), id), MAX_FAULT_PART_LENGTH);
 }
 
 /** Renders one serialized error without its message: `Name (code=…, …)`. */

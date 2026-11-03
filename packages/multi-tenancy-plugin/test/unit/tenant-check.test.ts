@@ -322,6 +322,15 @@ describe('TenantCheck', () => {
     expect(logged).not.toContain('classifier-pw');
   });
 
+  it('E-1: an id matching the URL scheme cannot unmask the credentials in an error name', async () => {
+    for (const id of ['redis', 'redis:', '/', 'u', 'hunter2', 'db', '@']) {
+      const error = new Error('down');
+      error.name = 'RedisError redis://u:hunter2@db:6379';
+      const logged = await faultLine(id, error);
+      expect(logged, id).not.toContain('hunter2');
+    }
+  });
+
   it('D-1: the id is masked on the raw name, before control and private-use characters collapse', async () => {
     const id = 'zq\u{E000}x\u0007y';
     const error = new Error('down');
