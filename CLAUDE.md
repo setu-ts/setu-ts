@@ -737,7 +737,7 @@ here.
   tenants: the `tenants` option (list, `ITenantRegistry` or factory), `404 Unknown Tenant` and `503`
   on registry fault through one check shared with `lookupTenant`, a bounded canonical-only cache,
   `createDatabaseTenantRegistry`, a fault warning with no registry message text) — complete (PR
-  pending).
+  #548).
 - **Next milestone** — M130 and M131b–d are open for `0.12.0`.
 
 ## Verification (run before declaring any work done)
