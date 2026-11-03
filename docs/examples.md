@@ -304,19 +304,23 @@ optional through `AI_COMPAT_BASE_URL`.
 store. The header resolver requires a tenant, and both note routes obtain their repository through
 that request context.
 
-`MultiTenancyPlugin` resolving the tenant from the `x-tenant-id` header, with `required: true`.
-Notes are stored per tenant, and a request with no tenant is refused.
+`MultiTenancyPlugin` resolving the tenant from the `x-tenant-id` header, with `required: true` and
+`tenants: ['acme', 'globex']`. Notes are stored per tenant, a request with no tenant is refused, and
+a request naming a tenant outside the list is refused before any handler runs.
 
 ```bash
 pnpm --dir apps/multi-tenant run start 3400
 curl -X POST localhost:3400/notes -H 'x-tenant-id: acme' -H 'content-type: application/json' -d '{"text":"a"}'   # 201
 curl localhost:3400/notes -H 'x-tenant-id: acme'                          # [ the note ]
 curl localhost:3400/notes -H 'x-tenant-id: globex'                        # []
+curl localhost:3400/notes -H 'x-tenant-id: initech'                       # 404 Unknown Tenant
 curl localhost:3400/notes                                                 # 400 Tenant Required
 ```
 
 **Read, in order:**
 
+- [`setu.config.ts`](../apps/multi-tenant/setu.config.ts) — the `tenants` list; any other id answers
+  `404 Unknown Tenant`.
 - [`src/modules/notes/`](../apps/multi-tenant/src/modules/notes/) — tenantNotes passes ctx to the
   multi-tenancy service's getRepository; registerNotesRoutes calls it for both create and findAll,
   so each request uses its tenant's notes.

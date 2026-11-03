@@ -3,6 +3,10 @@
  */
 import { describe, expect, it } from 'vitest';
 import { getTenantCachePrefix, tenantMiddleware } from '../../src/middleware/tenant-middleware.ts';
+import { TenantCheck } from '../../src/registry/tenant-check.ts';
+import { StaticTenantRegistry } from '../../src/registry/static-tenant-registry.ts';
+import type { ILogger, ITenant, ITenantRegistry, Option } from '@setu-ts/common';
+import { none, some } from '@setu-ts/common';
 import { SubdomainResolver } from '../../src/resolvers/subdomain-resolver.ts';
 import { MultiTenancyService } from '../../src/services/multi-tenancy-service.ts';
 import type { ISession, ITenantResolver } from '@setu-ts/common';
@@ -586,5 +590,283 @@ describe('tenant middleware', () => {
       expect(getNextCalled()).toBe(true);
       expect((ctx.request as { tenant?: { id: string } }).tenant?.id).toBe('a');
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// M127 — the registry step (§3.4, §3.5)
+// ---------------------------------------------------------------------------
+
+describe('tenant middleware — the registry step (M127)', () => {
+  /** A context whose response records status and body, and a recording next. */
+  function recordingContext(opts?: { path?: string; state?: Map<string, unknown> }) {
+    const base = makeContext(opts);
+    let status: number | undefined;
+    let body: unknown;
+    const response = {
+      status: (code: number) => {
+        status = code;
+        return response;
+      },
+      json: (value: unknown) => {
+        body = value;
+        return undefined;
+      },
+      snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: null }),
+    };
+    (base.ctx as { response: unknown }).response = response;
+    return { ...base, getStatus: () => status, getBody: () => body };
+  }
+
+  const resolving = (id: string): ITenantResolver =>
+    toITenantResolver({ resolve: () => Promise.resolve({ present: true, value: { id } }) });
+
+  function recordingLogger() {
+    const lines: string[] = [];
+    const record = (message: string, metadata?: unknown) =>
+      lines.push(`${message} ${JSON.stringify(metadata ?? {})}`);
+    const logger = {
+      level: 'info',
+      warn: record,
+      info: record,
+      error: record,
+      fatal: record,
+      debug: record,
+      trace: record,
+      child: () => logger,
+    } as unknown as ILogger;
+    return { logger, lines };
+  }
+
+  function checkOver(
+    registry: ITenantRegistry,
+    logger?: ILogger,
+  ): { check: TenantCheck; calls: string[] } {
+    const calls: string[] = [];
+    const check = new TenantCheck({
+      configured: true,
+      registry: {
+        lookup: (id) => {
+          calls.push(id);
+          return registry.lookup(id);
+        },
+      },
+      ...(logger !== undefined && { logger }),
+    });
+    return { check, calls };
+  }
+
+  it('a hit installs the registry tenant and calls next', async () => {
+    const { ctx, next, getNextCalled } = recordingContext();
+    const { check } = checkOver(new StaticTenantRegistry([{ id: 'acme', name: 'Acme' }]));
+    const mw = tenantMiddleware({
+      service: makeService(),
+      resolvers: [resolving('acme')],
+      options: {},
+      check,
+    });
+    await mw(ctx as never, next);
+    expect(getNextCalled()).toBe(true);
+    expect((ctx.request as { tenant?: ITenant }).tenant).toEqual({ id: 'acme', name: 'Acme' });
+  });
+
+  it('a miss answers 404 Unknown Tenant field by field, runs nothing downstream, never echoes the id', async () => {
+    const { ctx, next, getNextCalled, getStatus, getBody } = recordingContext();
+    const distinctive = '<x>\r\nX-Evil: 1';
+    const { logger, lines } = recordingLogger();
+    const { check, calls } = checkOver(new StaticTenantRegistry(['acme']), logger);
+    const mw = tenantMiddleware({
+      service: makeService(),
+      resolvers: [resolving(distinctive)],
+      options: {},
+      check,
+      logger,
+    });
+    await mw(ctx as never, next);
+    expect(getNextCalled()).toBe(false);
+    expect(getStatus()).toBe(404);
+    expect(getBody()).toEqual({
+      error: 'Unknown Tenant',
+      detail: 'The request names a tenant that does not exist',
+    });
+    expect(JSON.stringify(getBody())).not.toContain('X-Evil');
+    expect((ctx.request as { tenant?: ITenant }).tenant).toBeUndefined();
+    // Control: the id DID reach the registry.
+    expect(calls).toEqual([distinctive]);
+    expect(lines.join('\n')).not.toContain('X-Evil');
+  });
+
+  it('unknownTenantStatus sets the miss status', async () => {
+    const { ctx, next, getStatus } = recordingContext();
+    const { check } = checkOver(new StaticTenantRegistry(['acme']));
+    await tenantMiddleware({
+      service: makeService(),
+      resolvers: [resolving('initech')],
+      options: { unknownTenantStatus: 403 },
+      check,
+    })(ctx as never, next);
+    expect(getStatus()).toBe(403);
+  });
+
+  it('a registry fault answers 503 Tenant Registry Unavailable and runs nothing downstream', async () => {
+    const { ctx, next, getNextCalled, getStatus, getBody } = recordingContext();
+    const { check } = checkOver({ lookup: () => Promise.reject(new Error('down')) });
+    await tenantMiddleware({
+      service: makeService(),
+      resolvers: [resolving('acme')],
+      options: {},
+      check,
+    })(ctx as never, next);
+    expect(getNextCalled()).toBe(false);
+    expect(getStatus()).toBe(503);
+    expect(getBody()).toEqual({
+      error: 'Tenant Registry Unavailable',
+      detail: 'The tenant could not be checked; try again later',
+    });
+    expect(JSON.stringify(getBody())).not.toContain('acme');
+  });
+
+  it('a malformed registry answer is a 503, never an admitted tenant', async () => {
+    const { ctx, next, getNextCalled, getStatus } = recordingContext();
+    const { check } = checkOver({
+      lookup: () => Promise.resolve(some({ id: '' }) as Option<ITenant>),
+    });
+    await tenantMiddleware({
+      service: makeService(),
+      resolvers: [resolving('acme')],
+      options: {},
+      check,
+    })(ctx as never, next);
+    expect(getNextCalled()).toBe(false);
+    expect(getStatus()).toBe(503);
+  });
+
+  it('the canonical id flows to the cache prefix and the session compare (O6)', async () => {
+    const state = new Map<string, unknown>();
+    // A session bound to the CANONICAL id 'acme' passes under the spelling 'ACME'.
+    state.set(SESSION_TENANT_BINDING_STATE_KEY, true);
+    state.set(SESSION_STATE_KEY, {
+      get: (key: string) => (key === SESSION_TENANT_BINDING_KEY ? 'acme' : undefined),
+    } as unknown as ISession);
+    const { ctx, next, getNextCalled } = recordingContext({ state });
+    const { check } = checkOver({
+      lookup: (id) => Promise.resolve(id.toLowerCase() === 'acme' ? some({ id: 'acme' }) : none()),
+    });
+    await tenantMiddleware({
+      service: makeService(),
+      resolvers: [resolving('ACME')],
+      options: { cache: { prefix: true } },
+      check,
+    })(ctx as never, next);
+    expect(getNextCalled()).toBe(true);
+    expect((ctx.request as { tenant?: ITenant }).tenant?.id).toBe('acme');
+    expect(getTenantCachePrefix(ctx as never)).toBe('acme:');
+  });
+
+  it('a session bound to a different tenant is still refused after replacement', async () => {
+    const state = new Map<string, unknown>();
+    state.set(SESSION_TENANT_BINDING_STATE_KEY, true);
+    state.set(SESSION_STATE_KEY, {
+      get: (key: string) => (key === SESSION_TENANT_BINDING_KEY ? 'globex' : undefined),
+    } as unknown as ISession);
+    const { ctx, next, getNextCalled, getStatus } = recordingContext({ state });
+    const { check } = checkOver(new StaticTenantRegistry(['acme', 'globex']));
+    await tenantMiddleware({
+      service: makeService(),
+      resolvers: [resolving('acme')],
+      options: {},
+      check,
+    })(ctx as never, next);
+    expect(getNextCalled()).toBe(false);
+    expect(getStatus()).toBe(403);
+  });
+
+  it('the chain is not re-entered on a miss (no fallthrough to a second resolver)', async () => {
+    const { ctx, next, getStatus } = recordingContext();
+    let secondRan = false;
+    const second = toITenantResolver({
+      resolve: () => {
+        secondRan = true;
+        return Promise.resolve({ present: true, value: { id: 'acme' } });
+      },
+    });
+    const { check, calls } = checkOver(new StaticTenantRegistry(['acme']));
+    await tenantMiddleware({
+      service: makeService(),
+      resolvers: [resolving('initech'), second],
+      options: {},
+      check,
+    })(ctx as never, next);
+    expect(getStatus()).toBe(404);
+    expect(secondRan).toBe(false);
+    expect(calls).toEqual(['initech']);
+  });
+
+  it('an excluded path makes no lookup (O9)', async () => {
+    const { ctx, next, getNextCalled } = recordingContext({ path: '/health' });
+    const { check, calls } = checkOver(new StaticTenantRegistry(['acme']));
+    await tenantMiddleware({
+      service: makeService(),
+      resolvers: [resolving('initech')],
+      options: {},
+      check,
+    })(ctx as never, next);
+    expect(getNextCalled()).toBe(true);
+    expect(calls).toEqual([]);
+  });
+
+  it('required + nothing resolved is unchanged (no lookup, Tenant Required)', async () => {
+    const { ctx, next, getStatus, getBody } = recordingContext();
+    const { check, calls } = checkOver(new StaticTenantRegistry(['acme']));
+    await tenantMiddleware({
+      service: makeService(),
+      resolvers: [toITenantResolver({ resolve: () => Promise.resolve({ present: false }) })],
+      options: { required: true },
+      check,
+    })(ctx as never, next);
+    expect(getStatus()).toBe(400);
+    expect((getBody() as { error: string }).error).toBe('Tenant Required');
+    expect(calls).toEqual([]);
+  });
+
+  it('no check = unchanged: any resolved id is admitted', async () => {
+    const { ctx, next, getNextCalled } = recordingContext();
+    await tenantMiddleware({
+      service: makeService(),
+      resolvers: [resolving('anything-at-all')],
+      options: {},
+    })(ctx as never, next);
+    expect(getNextCalled()).toBe(true);
+    expect((ctx.request as { tenant?: ITenant }).tenant?.id).toBe('anything-at-all');
+  });
+
+  it('warns once while failing and logs info on recovery, through the middleware', async () => {
+    const { logger, lines } = recordingLogger();
+    let failing = true;
+    const { check } = checkOver(
+      {
+        lookup: (id) =>
+          failing ? Promise.reject(new Error('down')) : Promise.resolve(some({ id })),
+      },
+      logger,
+    );
+    const mw = tenantMiddleware({
+      service: makeService(),
+      resolvers: [resolving('acme')],
+      options: {},
+      check,
+      logger,
+    });
+    for (let i = 0; i < 3; i++) {
+      const { ctx, next } = recordingContext();
+      await mw(ctx as never, next);
+    }
+    failing = false;
+    const { ctx, next, getNextCalled } = recordingContext();
+    await mw(ctx as never, next);
+    expect(getNextCalled()).toBe(true);
+    expect(lines.filter((l) => l.startsWith('Tenant registry lookup failed'))).toHaveLength(1);
+    expect(lines.filter((l) => l.startsWith('Tenant registry lookups recovered'))).toHaveLength(1);
+    expect(lines.join('\n')).not.toContain('acme');
   });
 });

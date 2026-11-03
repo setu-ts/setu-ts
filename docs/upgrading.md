@@ -40,6 +40,17 @@ replay even when the caller intended a second operation; vary an argument such a
 when that is intended. Origin checks apply to the MCP endpoint, and accepted Origin is preserved for
 inner CSRF checks. Lists filter scopes/authentication; roles and policies still run on the route.
 
+### A registry of real tenants (M127, `@setu-ts/multi-tenancy-plugin`, `@setu-ts/common`, `@setu-ts/database-plugin`)
+
+Nothing changes until you set `tenants`: without it any resolved non-empty string id is still the
+tenant (a custom resolver that returned an empty or non-string id now gets `404 Unknown Tenant`
+rather than an empty tenant). To refuse invented tenants, add `tenants: ['acme', 'globex']` (or
+`createDatabaseTenantRegistry()` from `@setu-ts/database-plugin`); an unknown id then answers
+`404 Unknown Tenant` — set `unknownTenantStatus` for `400` or `403`. Replace a custom resolver that
+only filtered ids against a list with the plain resolver plus `tenants`. In a queue or message
+handler, call `tenancy.lookupTenant(payload.tenantId)` before `getRepositoryFor`. If you implement
+`IMultiTenancyService` yourself, add `lookupTenant` or delegate to `MultiTenancyService`.
+
 ### Redis, readiness and outage statuses (M131a, `@setu-ts/common`, `@setu-ts/queue-plugin`, `@setu-ts/messaging-plugin`, `@setu-ts/realtime-backplane-plugin`, `@setu-ts/notification-plugin`, `@setu-ts/cli`)
 
 A `notification` outage no longer fails `/ready`. If your replicas must leave the load balancer when

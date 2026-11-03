@@ -343,6 +343,39 @@ instead. `DatabaseTenantDataStore` is also exported for an application that hold
 `IDatabaseService` and constructs the store directly; its optional second constructor argument names
 the column for a store used outside the multi-tenancy plugin.
 
+## Tenant registry
+
+`createDatabaseTenantRegistry` answers the multi-tenancy plugin's `tenants` option from rows, so an
+unknown or suspended tenant is refused before any handler runs:
+
+```typescript
+import { createDatabaseTenantRegistry, DatabasePlugin } from '@setu-ts/database-plugin';
+import { MultiTenancyPlugin } from '@setu-ts/multi-tenancy-plugin';
+
+const plugins = [
+  MultiTenancyPlugin({
+    resolver: 'subdomain',
+    required: true,
+    tenants: createDatabaseTenantRegistry({ idField: 'slug', activeField: 'active' }),
+  }),
+  DatabasePlugin({ type: 'memory' }),
+];
+```
+
+| Option        | Default    | Meaning                                                         |
+| ------------- | ---------- | --------------------------------------------------------------- |
+| `entity`      | `'Tenant'` | Entity holding one row per tenant                               |
+| `idField`     | `'id'`     | Matched against the requested id; its value is the canonical id |
+| `nameField`   | `'name'`   | Copied to the tenant's `name` when a string                     |
+| `activeField` | —          | A falsy value refuses the tenant (suspended, data kept)         |
+| `toMetadata`  | —          | `(row) => metadata`; omitted → no `metadata`                    |
+
+Each lookup is `findOne({ where: { [idField]: id } })`. Only `id`, `name` and the `toMetadata`
+result reach `ctx.request.tenant` — an API key column on the tenant table does not. A row whose
+`idField` is not a non-empty string is a registry fault (`503`). The factory resolves the database
+at `onInit`, so `DatabasePlugin` may come after the tenancy plugin. Misses are not cached, so put a
+rate limit in front of a public resolver.
+
 ## Transactional outbox store
 
 `createDatabaseOutboxStore` is the shipped `IOutboxStore` (the port in `@setu-ts/common`) over
@@ -1538,6 +1571,7 @@ imperative begin/commit.
 | `createDatabaseOutboxStore`               | function  |
 | `createDatabaseRoleSource`                | function  |
 | `createDatabaseTenantDataStore`           | function  |
+| `createDatabaseTenantRegistry`            | function  |
 | `createDrizzleDatabase`                   | function  |
 | `createDrizzleDataSource`                 | function  |
 | `createInjectedBigtableLoader`            | function  |
@@ -1631,6 +1665,7 @@ imperative begin/commit.
 | `DatabasePoolCapacity`                    | interface |
 | `DatabaseReadinessOptions`                | interface |
 | `DatabaseRoleSourceOptions`               | interface |
+| `DatabaseTenantRegistryOptions`           | interface |
 | `DrizzleAdapterOptions`                   | interface |
 | `DrizzleCompositeKeyOptions`              | interface |
 | `DrizzleDatabase`                         | interface |

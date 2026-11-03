@@ -402,6 +402,7 @@ describe('@setu-ts/common barrel — M89c IMultiTenancyService.getRepositoryFor'
         update: () => Promise.resolve(null),
         delete: () => Promise.resolve(false),
       }),
+      lookupTenant: (id) => Promise.resolve({ present: true, value: { id } }),
       prefixCacheKey: (tenantId, key) => `${tenantId}:${key}`,
     };
 
@@ -409,6 +410,30 @@ describe('@setu-ts/common barrel — M89c IMultiTenancyService.getRepositoryFor'
       service.getRepositoryFor('acme', 'Widget');
     expect(typeof repo.findAll).toBe('function');
     expect(service.prefixCacheKey('acme', 'k')).toBe('acme:k');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// M127 — the tenant registry port and IMultiTenancyService.lookupTenant
+// ---------------------------------------------------------------------------
+
+describe('@setu-ts/common barrel — M127 ITenantRegistry', () => {
+  it('a structural ITenantRegistry compiles against the barrel and answers some/none', async () => {
+    const { none, some } = await import('../../src/index.ts');
+    const registry: import('../../src/index.ts').ITenantRegistry = {
+      lookup: (id) => Promise.resolve(id === 'acme' ? some({ id, name: 'Acme' }) : none()),
+    };
+    const hit = await registry.lookup('acme');
+    expect(hit.present).toBe(true);
+    expect(hit.present && hit.value).toEqual({ id: 'acme', name: 'Acme' });
+    expect((await registry.lookup('initech')).present).toBe(false);
+  });
+
+  it('IMultiTenancyService carries lookupTenant with the committed signature', async () => {
+    const { none } = await import('../../src/index.ts');
+    const lookupTenant: import('../../src/index.ts').IMultiTenancyService['lookupTenant'] = () =>
+      Promise.resolve(none());
+    expect((await lookupTenant('x')).present).toBe(false);
   });
 });
 

@@ -733,7 +733,12 @@ here.
   with the project's own sdk and Prettier into a marker-owned `src/clientsdk/api.ts`, `--input` and
   `--check`, `IOpenApiService` in `common`, `setu add sdk` scripts, and `setu add openapi`
   installing `swagger-ui-dist`; V11-20) — complete (PR #547).
-- **Next milestone** — M127, M130 and M131b–d are open for `0.12.0`.
+- **Milestone 127** (`common` + `multi-tenancy-plugin` + `database-plugin` — a registry of real
+  tenants: the `tenants` option (list, `ITenantRegistry` or factory), `404 Unknown Tenant` and `503`
+  on registry fault through one check shared with `lookupTenant`, a bounded canonical-only cache,
+  `createDatabaseTenantRegistry`, a fault warning with no registry message text) — complete (PR
+  #548).
+- **Next milestone** — M130 and M131b–d are open for `0.12.0`.
 
 ## Verification (run before declaring any work done)
 

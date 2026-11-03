@@ -8,6 +8,7 @@ import {
   type HealthCheckResult,
   type IPlugin,
   type IPluginContext,
+  type ITenantRegistry,
   type ITenantResolver,
   PLUGIN_PRIORITY,
   resolveRegistryEntry,
@@ -28,6 +29,12 @@ import { DatabasePerTenant } from '../strategies/database-strategy.ts';
 import { MemoryTenantDataStore } from '../stores/memory-tenant-store.ts';
 import { MultiTenancyService } from '../services/multi-tenancy-service.ts';
 import { tenantMiddleware } from '../middleware/tenant-middleware.ts';
+import {
+  CachingTenantRegistry,
+  type CachingTenantRegistryLimits,
+} from '../registry/caching-tenant-registry.ts';
+import { assertUsableRegistry, parseRegistryOptions } from '../registry/registry-options.ts';
+import { TenantCheck } from '../registry/tenant-check.ts';
 import { VERSION } from '../version.ts';
 
 // ---------------------------------------------------------------------------
@@ -203,6 +210,42 @@ export function MultiTenancyPlugin(options: MultiTenancyPluginOptions): IPlugin 
         );
       }
 
+      // Parse the registry options (M127) once; every refusal names its option.
+      const parsedRegistry = parseRegistryOptions(options);
+      const registryConfig = parsedRegistry.registry;
+      // Instance and factory registries may do I/O, so they are cached unless
+      // `tenantCache` turned it off; a static list is never wrapped.
+      const withCache = (
+        registry: ITenantRegistry,
+        cache: CachingTenantRegistryLimits | undefined,
+      ): ITenantRegistry =>
+        cache === undefined
+          ? registry
+          : new CachingTenantRegistry(registry, cache, () => ctx.runtime.hrtime());
+      const tenantCheck = new TenantCheck({
+        configured: registryConfig.kind !== 'none',
+        ...(registryConfig.kind === 'static' && { registry: registryConfig.registry }),
+        ...(registryConfig.kind === 'custom' && {
+          registry: withCache(registryConfig.registry, registryConfig.cache),
+        }),
+        ...(ctx.logger != null && { logger: ctx.logger }),
+      });
+      // The health indicator's `registry` field: `'factory'` until bound.
+      let registryKind: 'none' | 'static' | 'factory' | 'custom' = registryConfig.kind;
+      if (registryConfig.kind === 'factory') {
+        const { factory, cache } = registryConfig;
+        ctx.lifecycle.onInit(() => {
+          const registry: unknown = resolveRegistryEntry(
+            factory,
+            ctx.services,
+            'MultiTenancyPlugin.tenants',
+          );
+          assertUsableRegistry(registry, 'the factory result');
+          tenantCheck.bind(withCache(registry, cache));
+          registryKind = 'custom';
+        });
+      }
+
       // Build isolation strategy.
       const strategy = buildStrategy(database);
 
@@ -288,6 +331,7 @@ export function MultiTenancyPlugin(options: MultiTenancyPluginOptions): IPlugin 
       const service = new MultiTenancyService({
         ...(immediateStore !== undefined && { store: immediateStore }),
         ...(options.cache?.separator != null && { separator: options.cache.separator }),
+        check: tenantCheck,
       });
 
       // The resolved store, once known: the immediate store, or the factory's
@@ -319,8 +363,22 @@ export function MultiTenancyPlugin(options: MultiTenancyPluginOptions): IPlugin 
         tenantMiddleware({
           service,
           resolvers,
-          options,
+          // Only the fields the middleware reads (not `tenants`, `dataStore`, …).
+          options: {
+            ...(options.cache !== undefined && { cache: options.cache }),
+            ...(options.required !== undefined && { required: options.required }),
+            ...(options.rejectionStatus !== undefined && {
+              rejectionStatus: options.rejectionStatus,
+            }),
+            ...(options.exclude !== undefined && { exclude: options.exclude }),
+            unknownTenantStatus: parsedRegistry.unknownTenantStatus,
+          },
           ...(logger != null && { logger }),
+          // Always the shared check, registry or not, so the HTTP path and
+          // `lookupTenant` agree: without a registry it admits every
+          // non-empty string id and refuses a malformed one a custom
+          // resolver returned.
+          check: tenantCheck,
         }),
         { priority: middlewarePriority, name: 'tenant' },
       );
@@ -340,6 +398,7 @@ export function MultiTenancyPlugin(options: MultiTenancyPluginOptions): IPlugin 
                 : resolvedStore === immediateStore && providedStore === undefined
                   ? 'memory'
                   : 'custom',
+            registry: registryKind,
           },
         }),
       );
