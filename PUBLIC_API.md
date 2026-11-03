@@ -14118,14 +14118,18 @@ Contract notes:
   resolves to status ≥ 500 is masked to a generic `detail` before the response is built, so the
   failing SQL and its bound parameter values never reach the client. The real error is still written
   to the logger first. An `HttpError` (a message the developer chose for the caller) and every 4xx
-  pass through unmasked, and `maskInternalErrors: false` restores the previous body verbatim. This
-  is a behaviour change from the previous release — see the CHANGELOG.
+  pass through with only URL userinfo masked; `maskInternalErrors: false` also keeps internal-error
+  text with only URL userinfo masked. In every served string, `scheme://user:password@host` becomes
+  `scheme://***@host`, keeping the host visible. A custom `format` function's output is masked the
+  same way. The `respond` option's own result is application-owned and is **not** masked. See the
+  CHANGELOG for these behaviour changes.
 - **`includeStackTrace` is config-supplied**: pass `config.get('NODE_ENV') === 'development'` —
   never read `process.env` directly. The stack trace is secondary to the message, which is what
   carries the failing statement and its bound parameters; `maskInternalErrors` (default `true`) is
   what guards that message, not `includeStackTrace`. **Masking wins over this option**: a masked
   error carries no `stack` in the body even when this is `true`, because a stack begins with the
   very message that was masked. Set `maskInternalErrors: false` to see an internal error's stack.
+  Every served stack string has URL userinfo masked too, with the host kept visible.
 - **Short-circuit**: when `next()` throws, `errorHandler` produces a response (`HandlerResult`)
   without re-invoking `next()`.
 

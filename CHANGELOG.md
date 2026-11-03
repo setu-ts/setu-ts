@@ -229,12 +229,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
-- **The error handler masks URL credentials in what it logs (M130 audit, `@setu-ts/exceptions`).**
-  `errorHandler` logged an error's message unmasked, so a driver error such as
-  `connect failed: postgres://u:pw@db/x` put the password in the log line while the same record's
-  cause was masked by the logger's redaction. The message, and the serialized cause, now pass
-  through `maskUrlUserinfo` before they reach the logger, and the runtime error sink used when no
-  logger is registered masks the message, stack and cause the same way.
+- **The error handler masks URL credentials in what it logs and serves (M130 audit,
+  `@setu-ts/exceptions`).** `errorHandler` logged an error's message unmasked, so a driver error
+  such as `connect failed: postgres://u:pw@db/x` put the password in the log line while the same
+  record's cause was masked by the logger's redaction. The message, and the serialized cause, now
+  pass through `maskUrlUserinfo` before they reach the logger, and the runtime error sink used when
+  no logger is registered masks the message, stack and cause the same way. The response body is
+  masked too: a thrown `HttpError`'s served message, details and stack (under `includeStackTrace`),
+  4xx and 5xx alike, a custom formatter's output, and `respondWithError` bodies now serve
+  `postgres://***@db/x`, keeping the host. A `respond` hook's own result is not masked.
 
 - **Swagger UI after `setu add openapi` (M129, #547, `@setu-ts/cli`).** Node, Deno and Bun now
   install the exact `swagger-ui-dist` release that the Swagger UI integrity hashes match; without

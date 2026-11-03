@@ -21,6 +21,7 @@ import { httpStatusHintOf, resolveResponseStatus } from '@setu-ts/common';
 import { HttpError } from '../errors/http-error.ts';
 import { RESPONDER_DETAIL, RESPONDER_PROBLEM } from '../formatters/problem-details.ts';
 import type { ErrorHandlerFormatter } from '../formatters/error-formatter.ts';
+import { maskUrlUserinfoDeep } from './mask-url-userinfo-deep.ts';
 
 /**
  * The `application/problem+json` content type for Problem Details responses.
@@ -197,7 +198,7 @@ export function createErrorResponder(
       ) {
         body = { ...body, instance: target.request.path };
       }
-      const bytes = new TextEncoder().encode(JSON.stringify(body));
+      const bytes = new TextEncoder().encode(JSON.stringify(maskUrlUserinfoDeep(body)));
       target.response.status(status).header('content-type', contentType).send(bytes);
     },
   };
