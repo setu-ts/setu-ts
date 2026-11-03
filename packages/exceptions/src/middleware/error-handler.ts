@@ -32,6 +32,7 @@ import {
   CAPABILITIES,
   ERROR_RESPONDER_STATE_KEY,
   httpStatusHintOf,
+  maskUrlUserinfo,
   resolveResponseStatus,
   serializeError,
 } from '@setu-ts/common';
@@ -325,19 +326,41 @@ export function errorHandler(options?: ErrorHandlerOptions): MiddlewareFunction 
 }
 
 /**
+ * Masks URL userinfo in every string of a serialized error: its message, its
+ * stack (whose first line repeats the message) and its causes. Serialized
+ * errors are plain data, so only objects and arrays are walked.
+ *
+ * @param value - A `serializeError` result, or a member of one
+ * @returns The same shape with every string masked
+ */
+function maskSerialized<T>(value: T): T {
+  if (typeof value === 'string') return maskUrlUserinfo(value) as T;
+  if (Array.isArray(value)) return value.map((item: unknown) => maskSerialized(item)) as T;
+  if (typeof value !== 'object' || value === null) return value;
+  return Object.fromEntries(
+    Object.entries(value).map(([key, item]) => [key, maskSerialized(item)]),
+  ) as T;
+}
+
+/**
  * Logs once through the registered logger, or the runtime sink for 5xx when
  * no logger is registered. Handled 4xx without a logger stays silent.
  *
  * @param ctx - The request context
- * @param error - The error to log, carrying the unmasked message and cause
+ * @param error - The error to log; its message is logged with URL userinfo masked
  * @param statusCode - The status actually served, which a hint may have changed
  */
 function logError(ctx: IRequestContext, error: HttpError, statusCode: number): void {
+  // A driver error's message can carry a connection URL with its password
+  // (`postgres://u:pw@db`). The logger's redaction masks metadata, not the
+  // message, and the runtime sink has no redaction at all, so the message, the
+  // stack and the cause are masked here before they reach either sink.
+  const message = maskUrlUserinfo(error.message);
   if (!ctx.services.has(CAPABILITIES.LOGGER)) {
     if (statusCode >= 500 && ctx.services.has(CAPABILITIES.RUNTIME)) {
       ctx.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME).reportError?.({
         level: 'error',
-        ...serializeError(error),
+        ...maskSerialized(serializeError(error)),
         statusCode,
         requestId: ctx.id,
         method: ctx.request.method,
@@ -349,9 +372,9 @@ function logError(ctx: IRequestContext, error: HttpError, statusCode: number): v
   const logger = ctx.services.get<ILogger>(CAPABILITIES.LOGGER);
   // Serialize the cause (X2-5): a raw `Error` in log metadata renders as `{}`
   // under `JSON.stringify` because `message`/`stack` are non-enumerable.
-  logger[statusCode < 500 ? 'warn' : 'error'](error.message, {
+  logger[statusCode < 500 ? 'warn' : 'error'](message, {
     statusCode,
     requestId: ctx.id,
-    ...(error.cause !== undefined && { cause: serializeError(error.cause) }),
+    ...(error.cause !== undefined && { cause: maskSerialized(serializeError(error.cause)) }),
   });
 }

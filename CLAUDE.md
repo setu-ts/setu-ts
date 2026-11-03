@@ -742,7 +742,8 @@ here.
   full-stack template's kernel modules: `requestService`/`resolveRequestService` in `common`,
   `getService` in loaders, `src/modules/` behind `app/` pages, `setu g module --page`, `setu.E017`
   page value imports, OpenAPI page exclusions, `handleError`, the HMR port; X85-1, X85-2, X85-3,
-  X91-2, X91-5, X91-6, X91-7, V11-7, V11-19) — complete (PR pending).
+  X91-2, X91-5, X91-6, X91-7, V11-7, V11-19; plus `errorHandler` log masking) — complete (PR
+  pending).
 - **Next milestone** — M131b–d are open for `0.12.0`.
 
 ## Verification (run before declaring any work done)

@@ -43,6 +43,40 @@ describe('errorHandler logging and pure status prediction', () => {
     });
   }
 
+  // M130 audit: the message reached the log with a connection password in it,
+  // while the same record's cause was masked by the logger's redaction.
+  for (const [label, thrown, status] of [
+    ['a 5xx driver error', new Error('connect failed: postgres://u:canary-pw@db/x'), 500],
+    ['a 4xx HttpError', new HttpError(409, 'conflict at https://u:canary-pw@api.test/v1'), 409],
+  ] as const) {
+    it(`masks URL userinfo in the logged message for ${label}`, async () => {
+      const logger = new FakeLogger();
+      const { ctx } = createFakeContext({ services: new Map([[CAPABILITIES.LOGGER, logger]]) });
+      await errorHandler()(ctx, () => {
+        throw thrown;
+      });
+      expect(logger.calls).toHaveLength(1);
+      expect(logger.calls[0]?.level).toBe(status < 500 ? 'warn' : 'error');
+      expect(logger.calls[0]?.message).not.toContain('canary-pw');
+      expect(logger.calls[0]?.message).toMatch(/:\/\/\*\*\*@(db|api\.test)/);
+      expect(JSON.stringify(logger.calls[0]?.meta)).not.toContain('canary-pw');
+    });
+  }
+
+  it('masks URL userinfo in the runtime sink message', async () => {
+    const records: Readonly<Record<string, unknown>>[] = [];
+    const { ctx } = createFakeContext();
+    ctx.services.register(CAPABILITIES.RUNTIME, {
+      reportError: (record: Readonly<Record<string, unknown>>) => records.push(record),
+    });
+    await errorHandler()(ctx, () => {
+      throw new Error('connect failed: postgres://u:canary-pw@db/x');
+    });
+    expect(records).toHaveLength(1);
+    expect(JSON.stringify(records[0])).not.toContain('canary-pw');
+    expect(records[0]?.['message']).toBe('connect failed: postgres://***@db/x');
+  });
+
   for (const withLogger of [false, true]) {
     for (const status of [404, 500]) {
       it(`sink is exclusive to no-logger 5xx (${withLogger}, ${status})`, async () => {
