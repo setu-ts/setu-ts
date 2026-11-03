@@ -1,4 +1,5 @@
 /** The read-only owner of generated-project diagnostics. @module */
+import { scanPageImports, type PageImportReason } from './page-imports.ts';
 import type { IFileSystem } from '@setu-ts/common';
 import type { ArtifactScanAll, UnreadableArtifact } from '../utils/artifact-scanner.ts';
 import { DuplicateArtifactNameError, scanArtifacts } from '../utils/artifact-scanner.ts';
@@ -83,6 +84,14 @@ export type Finding =
   | { readonly kind: 'check-config-invalid'; readonly path: string; readonly entry: string }
   | { readonly kind: 'mixed-layout'; readonly files: readonly string[] }
   | { readonly kind: 'unresolved-import'; readonly path: string; readonly specifier: string }
+  | {
+      readonly kind: 'page-kernel-value-import';
+      readonly path: string;
+      readonly line: number;
+      readonly specifier: string;
+      readonly reason: PageImportReason;
+    }
+  | { readonly kind: 'page-unreadable'; readonly path: string }
   | { readonly kind: 'duplicate-name'; readonly family: string; readonly paths: readonly string[] }
   | { readonly kind: 'silence-unmatched'; readonly entry: string };
 
@@ -294,6 +303,11 @@ export async function diagnoseProject(
     generateFindings.push(mixed);
   }
   findings.push(...duplicates, ...(await unresolvedImports(fs, dir, modules.names, mode, config)));
+  // M130 §3.7: a page may import kernel types and token modules only.
+  const pages = await scanPageImports(fs, dir);
+  for (const violation of pages.violations)
+    findings.push({ kind: 'page-kernel-value-import', ...violation });
+  for (const path of pages.unreadable) findings.push({ kind: 'page-unreadable', path });
   const starter = composingStarter(config);
   return {
     ...(starter === undefined ? {} : { starter }),

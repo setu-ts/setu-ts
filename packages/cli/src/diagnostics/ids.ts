@@ -22,6 +22,8 @@ export const FINDING_IDS = {
   'mixed-layout': 'setu.E014',
   'unresolved-import': 'setu.E015',
   'duplicate-name': 'setu.E016',
+  'page-kernel-value-import': 'setu.E017',
+  'page-unreadable': 'setu.E018',
 } as const;
 
 /** Looks up an identity without parsing rendered prose. */

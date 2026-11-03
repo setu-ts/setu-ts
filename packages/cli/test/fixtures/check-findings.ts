@@ -58,4 +58,12 @@ export const CHECK_FINDINGS: readonly Finding[] = [
     family: 'controller',
     paths: ['src/controllers/a/orders.controller.ts', 'src/controllers/b/orders.controller.ts'],
   },
+  {
+    kind: 'page-kernel-value-import',
+    path: 'app/routes/_app/products._index.tsx',
+    line: 7,
+    specifier: '~kernel/modules/products/products.service.ts',
+    reason: 'value-import',
+  },
+  { kind: 'page-unreadable', path: 'app/routes/broken.tsx' },
 ];
