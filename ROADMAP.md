@@ -16623,6 +16623,11 @@ filter key inherits that failure.
 6. **Ingestion** (chunk, embed, upsert) as a queue job with an idempotent document id, so a re-run
    replaces rather than duplicates.
 
+**Re-examined at plan time (M134, 2026-11-04).** M134 chose to document and test the AI SDK rather
+than wrap it, so this plan decides whether decision 4's embedder port is still needed: the AI SDK
+already ships `embed` and `embedMany`, and the alternative is to accept vectors or an
+application-supplied embed function, and document embedding spend under M134's weighted quota.
+
 **Not in this milestone:** a document-loader library, re-ranking, hybrid lexical search.
 
 **Gate:** the filter conformance table on memory and a real PostgreSQL with pgvector; a query under
@@ -16665,6 +16670,13 @@ not a workflow engine**:
 
 General multi-step workflows belong to an engine; the plan decides whether this milestone ships
 adapter guidance or a first adapter, and to which engine.
+
+**Re-examined at plan time (M134, 2026-11-04).** These decisions assumed a Setu-owned tool loop.
+M134 instead uses the AI SDK's loop, which executes tools inside a step, so decision 2 (persist the
+reply before any tool runs) needs a step-at-a-time design over the SDK. The AI SDK 7.x also ships
+tool approval requests and a client stream resume, which overlap decisions 4 and 5. Before the plan
+is written, a fresh survey compares those, and existing durable-agent tooling, with what this
+milestone would build. The plan also names the package.
 
 **Gate:** kill the process between the model reply and the tool call — the run resumes with one
 model call and one side effect; a stale lease holder's write refused; an approval timing out on
@@ -16974,4 +16986,4 @@ patch by construction and gains nothing new here.
 | 133       | ✅     | mcp-plugin (new) + common + kernel + cli — routes as MCP tools, dispatched in-process through the route's own pipeline                                                                                                                                                                    |
 | 134       | ⬜     | auth-plugin + telemetry-plugin, AI SDK guide and example — weighted reserve/settle quotas, usage delivery and content-off library telemetry                                                                                                                                               |
 | 135       | ⬜     | vector-store-plugin (new) + common + cloudflare + cli — tenant-scoped retrieval with refused-not-ignored filters                                                                                                                                                                          |
-| 136       | ⬜     | ai-plugin + common + sse-plugin + database-plugin — durable agent runs: fenced lease, persisted steps, approvals, SSE replay                                                                                                                                                              |
+| 136       | ⬜     | package decided by its plan + common + sse-plugin + database-plugin — durable agent runs: fenced lease, persisted steps, approvals, SSE replay                                                                                                                                            |
