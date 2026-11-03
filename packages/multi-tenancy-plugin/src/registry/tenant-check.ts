@@ -31,9 +31,15 @@ export const REGISTRY_RECOVERED_LOG = 'Tenant registry lookups recovered';
 /** What replaces the requested id wherever it appears in a logged registry error. */
 export const MASKED_TENANT_ID = '<tenant-id>';
 
-/** A plain (non-array) object, the only shape `metadata` may take. */
+/**
+ * A plain object — prototype `Object.prototype` or `null` — the only shape
+ * `metadata` may take. Arrays, `Map`s and class instances are dropped rather
+ * than spread into an object that loses their contents.
+ */
 function isPlainObject(value: unknown): value is Readonly<Record<string, unknown>> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+  if (typeof value !== 'object' || value === null) return false;
+  const prototype: unknown = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
 }
 
 /**
@@ -94,25 +100,53 @@ export function snapshotAnswer(answer: unknown): Option<ITenant> | undefined {
   }
 }
 
+/** Characters that make a match part of a longer word rather than a standalone quote. */
+const WORD_CHARACTER = '[A-Za-z0-9_-]';
+
+/** Escapes a string for literal use inside a regular expression. */
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 /**
  * Removes the requested id from a logged description. A registry or driver
- * error may quote the bound value (`invalid input syntax for type uuid: "…"`),
- * so both the raw id and the id as `describeError` renders it — control
- * characters collapsed to spaces — are replaced.
+ * error may quote the bound value verbatim (`invalid input syntax for type
+ * uuid: "…"`), so both the raw id and the id as `describeError` renders it —
+ * control characters collapsed to spaces — are replaced.
+ *
+ * The replacement is ONE pass over the text, so an inserted marker is never
+ * searched again, and it masks a form only where it stands alone — not
+ * touching a letter, digit, `_` or `-` on either side — so a short id such as
+ * `e` cannot shred the rest of the message. A quote the registry altered
+ * (lower-cased, escaped, truncated) is not recognized.
  *
  * @param text - The description of the registry's error
  * @param id - The requested id
- * @returns The description with every occurrence of the id masked
+ * @returns The description with every standalone occurrence of the id masked
  */
 export function maskTenantId(text: string, id: string): string {
   const rendered = describeError(new Error(id))
     .replace(/^Error: /, '')
     .trim();
-  let masked = text;
-  for (const form of new Set([id, rendered])) {
-    if (form !== '') masked = masked.split(form).join(MASKED_TENANT_ID);
-  }
-  return masked;
+  const forms = [...new Set([id, rendered])]
+    .filter((form) => form !== '')
+    .sort((a, b) => b.length - a.length)
+    .map(escapeRegExp);
+  if (forms.length === 0) return text;
+  const pattern = new RegExp(
+    `(?<!${WORD_CHARACTER})(?:${forms.join('|')})(?!${WORD_CHARACTER})`,
+    'g',
+  );
+  return text.replace(pattern, MASKED_TENANT_ID);
+}
+
+/**
+ * The optional probe a caching registry offers: whether an answer was served
+ * from its cache rather than by the registry behind it. Only a real answer
+ * may end a fault state.
+ */
+interface CacheAwareRegistry {
+  isCacheHit?(answer: unknown): boolean;
 }
 
 /**
@@ -152,7 +186,7 @@ export class TenantCheck {
    * throws, or answers malformed
    */
   async check(id: string): Promise<Option<ITenant>> {
-    if (!this.#configured) return some({ id });
+    if (!this.#configured) return some(Object.freeze({ id }));
     if (id.length > MAX_TENANT_ID_LENGTH) return none();
     const registry = this.#registry;
     if (registry === undefined) {
@@ -182,7 +216,10 @@ export class TenantCheck {
         id,
       );
     }
-    if (this.#failing) {
+    // A cache hit says nothing about the registry behind it: only a real
+    // answer ends a fault state, so a client alternating a cached tenant with
+    // uncached ids cannot make the fault and recovery lines flap.
+    if (this.#failing && (registry as CacheAwareRegistry).isCacheHit?.(answer) !== true) {
       this.#failing = false;
       this.#logger?.info(REGISTRY_RECOVERED_LOG);
     }

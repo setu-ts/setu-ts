@@ -89,6 +89,32 @@ describe('StaticTenantRegistry', () => {
     expect(() => freezeTenant({ id: '' })).toThrow(TypeError);
   });
 
+  it('A2: an id getter is read once — validated, keyed and stored as the same value', async () => {
+    let reads = 0;
+    const entry = {
+      get id() {
+        reads++;
+        return reads === 1 ? 'acme' : 'globex';
+      },
+    };
+    const registry = new StaticTenantRegistry([entry]);
+    expect(reads).toBe(1);
+    const hit = await registry.lookup('acme');
+    expect(hit.present && hit.value).toEqual({ id: 'acme' });
+    expect((await registry.lookup('globex')).present).toBe(false);
+  });
+
+  it('A2: an entry whose getter turns empty is refused by name, not with a bare TypeError', () => {
+    let reads = 0;
+    const entry = {
+      get id() {
+        reads++;
+        return reads === 1 ? '' : 'acme';
+      },
+    };
+    expect(() => new StaticTenantRegistry([entry])).toThrow(/entry 0 has an empty id/);
+  });
+
   it('a listed tenant with extra keys is stored without them', async () => {
     const registry = new StaticTenantRegistry([
       { id: 'acme', apiKey: 'sk-secret' } as unknown as ITenant,

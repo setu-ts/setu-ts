@@ -159,9 +159,9 @@ export const tenancyPlugin = MultiTenancyPlugin({
 | the registry threw or answered malformed | `503` `Tenant Registry Unavailable`                               |
 
 Neither refusal runs the handler, and no response byte names the requested id; the fault warning
-replaces it with `<tenant-id>` even when a registry's error message quotes it. A miss does not fall
-through to the next resolver. The session binding compare and the cache prefix use the registry's
-id, so `ACME` and `acme` cannot split a tenant when the registry answers `acme`.
+replaces it with `<tenant-id>` wherever a registry's error message quotes it verbatim. A miss does
+not fall through to the next resolver. The session binding compare and the cache prefix use the
+registry's id, so `ACME` and `acme` cannot split a tenant when the registry answers `acme`.
 
 `tenants` also takes an `ITenantRegistry` (`lookup(id)` returning `some(tenant)` or `none()`) or a
 factory resolved at `onInit`, such as `createDatabaseTenantRegistry()` from

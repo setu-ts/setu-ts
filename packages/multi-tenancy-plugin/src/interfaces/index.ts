@@ -68,7 +68,9 @@ export interface TenantCacheOptions {
 
 /**
  * Bounds and TTL of the cache wrapped around an instance or factory `tenants`
- * registry. Only hits are cached, keyed by the requested id.
+ * registry. Only hits are cached, keyed by the requested id, and only when the
+ * registry's canonical id equals the requested one: under a case-insensitive
+ * registry, every other spelling of a tenant costs one lookup.
  *
  * @since 0.12.0
  */

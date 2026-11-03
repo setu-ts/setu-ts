@@ -49,6 +49,8 @@ export class CachingTenantRegistry implements ITenantRegistry {
   readonly #now: () => number;
   readonly #entries = new Map<string, CacheEntry>();
   readonly #inFlight = new Map<string, Promise<Option<ITenant>>>();
+  /** The answers handed out from the cache, so the check can tell them from real ones. */
+  readonly #cacheHits = new WeakSet<object>();
   #bytes = 0;
 
   /**
@@ -77,12 +79,23 @@ export class CachingTenantRegistry implements ITenantRegistry {
     return this.#inFlight.size;
   }
 
+  /**
+   * Reports whether `answer` was served from this cache rather than by the
+   * registry behind it — the tenant check ends a fault state only on a real
+   * answer.
+   */
+  isCacheHit(answer: unknown): boolean {
+    return typeof answer === 'object' && answer !== null && this.#cacheHits.has(answer);
+  }
+
   /** Serves a live cached hit, else looks up (single-flight) and caches a hit. */
   lookup(id: string): Promise<Option<ITenant>> {
     const cached = this.#entries.get(id);
     if (cached !== undefined) {
       if (this.#now() < cached.expiresAt) {
-        return Promise.resolve(some(cached.tenant));
+        const hit = some(cached.tenant);
+        this.#cacheHits.add(hit);
+        return Promise.resolve(hit);
       }
       this.#remove(id, cached);
     }

@@ -231,6 +231,74 @@ describe('TenantCheck', () => {
     expect(maskTenantId('Error: connection refused', 'acme')).toBe('Error: connection refused');
   });
 
+  it('F1: a one-letter id does not shred the message; only standalone quotes are masked', () => {
+    const text = 'TenantRegistryUnavailableError: connection refused at 10.0.0.1 <- no tenant "e"';
+    expect(maskTenantId(text, 'e')).toBe(
+      `TenantRegistryUnavailableError: connection refused at 10.0.0.1 <- no tenant "${MASKED_TENANT_ID}"`,
+    );
+    expect(maskTenantId('db 1 down; tenant 1', '1')).toBe(
+      `db ${MASKED_TENANT_ID} down; tenant ${MASKED_TENANT_ID}`,
+    );
+    expect(maskTenantId('acme-corp and acmes are not acme', 'acme')).toBe(
+      `acme-corp and acmes are not ${MASKED_TENANT_ID}`,
+    );
+  });
+
+  it('F1: the inserted marker is never searched again', () => {
+    expect(maskTenantId('no tenant " id"', ' id')).toBe(`no tenant "${MASKED_TENANT_ID}"`);
+    expect(maskTenantId('tenant id', 'id')).toBe(`tenant ${MASKED_TENANT_ID}`);
+    expect(maskTenantId('x', 'tenant')).toBe('x');
+  });
+
+  it('F1: regex metacharacters in the id are matched literally', () => {
+    expect(maskTenantId('a.c abc', 'a.c')).toBe(`${MASKED_TENANT_ID} abc`);
+    expect(maskTenantId('no (x) here', '(x)')).toBe(`no ${MASKED_TENANT_ID} here`);
+  });
+
+  it('A1: a cache hit during a fault does not log recovery; a real answer does', async () => {
+    const { logger, warns, infos } = recordingLogger();
+    let failing = false;
+    const inner: ITenantRegistry = {
+      lookup: (id) => (failing ? Promise.reject(new Error('down')) : Promise.resolve(some({ id }))),
+    };
+    const { CachingTenantRegistry } = await import('../../src/registry/caching-tenant-registry.ts');
+    const cache = new CachingTenantRegistry(
+      inner,
+      { ttlMs: 60_000, maxEntries: 10, maxBytes: 4_096 },
+      () => 0,
+    );
+    const check = new TenantCheck({ configured: true, registry: cache, logger });
+    await check.check('acme'); // cached
+    failing = true;
+    for (let i = 0; i < 5; i++) {
+      await expect(check.check(`unknown-${i}`)).rejects.toThrow();
+      expect((await check.check('acme')).present).toBe(true); // served from cache
+    }
+    expect(warns).toHaveLength(1);
+    expect(infos).toEqual([]);
+    failing = false;
+    await check.check('globex'); // a real answer
+    expect(infos).toEqual([REGISTRY_RECOVERED_LOG]);
+  });
+
+  it('A5: with no registry the admitted tenant is frozen too', async () => {
+    const result = await new TenantCheck({ configured: false }).check('x');
+    expect(Object.isFrozen(result.present && result.value)).toBe(true);
+  });
+
+  it('A6: Map, array and class-instance metadata are dropped, null-prototype kept', () => {
+    class Meta {
+      plan = 'gold';
+    }
+    for (const metadata of [new Map([['a', 1]]), ['a'], new Meta()]) {
+      const hit = snapshotAnswer(some({ id: 'a', metadata }));
+      expect(hit?.present && hit.value).toEqual({ id: 'a' });
+    }
+    const bare = Object.assign(Object.create(null) as Record<string, unknown>, { plan: 'gold' });
+    const kept = snapshotAnswer(some({ id: 'a', metadata: bare }));
+    expect(kept?.present && kept.value.metadata).toEqual({ plan: 'gold' });
+  });
+
   it('logs warn once per healthy→failing transition and info on recovery, never with the id', async () => {
     const { logger, warns, infos } = recordingLogger();
     let failing = true;

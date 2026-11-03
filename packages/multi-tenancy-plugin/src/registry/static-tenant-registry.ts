@@ -58,17 +58,26 @@ export class StaticTenantRegistry implements ITenantRegistry {
     }
     const tenants = new Map<string, ITenant>();
     entries.forEach((entry, index) => {
-      const tenant: ITenant =
-        typeof entry === 'string'
-          ? { id: entry }
-          : typeof entry === 'object' && entry !== null
-            ? entry
-            : ({ id: entry } as unknown as ITenant);
-      assertListedId(tenant.id, index);
-      if (tenants.has(tenant.id)) {
+      // `id` is read ONCE, then validated, and the stored copy is built from
+      // that one value, so a getter cannot validate as one id and be stored
+      // under (or as) another.
+      const isObject = typeof entry === 'object' && entry !== null;
+      const id: unknown = isObject ? (entry as { id?: unknown }).id : entry;
+      assertListedId(id, index);
+      if (tenants.has(id)) {
         throw new Error(`${OPTION} lists the id at entry ${index} more than once.`);
       }
-      tenants.set(tenant.id, freezeTenant(tenant));
+      // Only `name` and `metadata` are read from the entry; `id` is never
+      // read again (a spread would re-run its getter).
+      const { name, metadata } = isObject ? (entry as Partial<ITenant>) : {};
+      tenants.set(
+        id,
+        freezeTenant({
+          id,
+          ...(name !== undefined && { name }),
+          ...(metadata !== undefined && { metadata }),
+        }),
+      );
     });
     this.#tenants = tenants;
   }
