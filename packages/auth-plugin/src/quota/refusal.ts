@@ -28,20 +28,22 @@ export function quotaProblemInit(
 
 /** A spent policy, carrying a value-free 429 status hint. @since 0.13.0 */
 export class QuotaExceededError extends Error {
+  /** Stable discriminant across realms. */
+  override readonly name = 'QuotaExceededError';
   /** The violated policy name. */
-  override readonly name: string;
+  readonly policyName: string;
   /** Whole seconds until the reserved window resets (at least one). */
   readonly retryAfterSeconds: number;
 
   /**
-   * @param name - Violated policy name
+   * @param policyName - Violated policy name
    * @param retryAfterSeconds - Seconds until reset
    */
-  constructor(name: string, retryAfterSeconds: number) {
+  constructor(policyName: string, retryAfterSeconds: number) {
     super(QUOTA_DETAIL);
-    this.name = name;
+    this.policyName = policyName;
     this.retryAfterSeconds = retryAfterSeconds;
-    withHttpStatusHint(this, quotaProblemInit(name, QUOTA_DETAIL, retryAfterSeconds));
+    withHttpStatusHint(this, quotaProblemInit(policyName, QUOTA_DETAIL, retryAfterSeconds));
   }
 }
 
@@ -54,5 +56,5 @@ export class QuotaExceededError extends Error {
  */
 export function respondQuotaExceeded(ctx: IRequestContext, error: QuotaExceededError): void {
   ctx.response.header('Retry-After', String(error.retryAfterSeconds));
-  respondWithError(ctx, quotaProblemInit(error.name, QUOTA_DETAIL, error.retryAfterSeconds));
+  respondWithError(ctx, quotaProblemInit(error.policyName, QUOTA_DETAIL, error.retryAfterSeconds));
 }

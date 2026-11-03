@@ -128,16 +128,16 @@ All line numbers on `develop` at `14c4255d2`; AI SDK facts from an install of `a
     validated at construction (missing `eval` → `TypeError` naming it, the `validateClient`
     pattern). One Lua script each for reserve (GET, compare, INCRBY, PEXPIREAT) and adjust (INCRBY
     floored at 0, PEXPIREAT). Keys `${namespace}:${name}:${key}:${windowId}`. A Redis failure throws
-    `QuotaStoreUnavailableError` (named like `RateLimitStoreUnavailableError`) — fail closed: the
-    call is not admitted.
+    `QuotaStoreUnavailableError` (shaped like `RateLimitStoreUnavailableError`, with its value-free
+    503 status hint) — fail closed: the call is not admitted.
 - **Why:** atomic check-and-add needs one round trip; the idempotency store is the precedent.
 - **Test home:** `test/unit/memory-quota-store.test.ts`, `test/unit/redis-quota-store.test.ts` (fake
   `eval` recording calls) and a guarded real-Redis test (`REDIS_URL`).
 
 ### 3.4 The refusal
 
-- **Decision:** `QuotaExceededError` (exported) carries `name`, `retryAfterSeconds`, and a status
-  hint
+- **Decision:** `QuotaExceededError` (exported; `name` is `'QuotaExceededError'`) carries
+  `policyName`, `retryAfterSeconds`, and a status hint
   `{ status: 429, title: 'Too Many Requests', detail: 'The quota for this request is spent.', problem: { type: QUOTA_EXCEEDED_TYPE, title: 'Quota Exceeded', extensions: { 'violated-policies': [name], 'retry-after': retryAfterSeconds } } }`.
   An uncaught one is therefore answered as RFC 9457 by `errorHandler` without a header (the hint
   contract has none, §1). `respondQuotaExceeded(ctx, error)` (exported) writes `Retry-After` and

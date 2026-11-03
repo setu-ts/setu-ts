@@ -3,11 +3,7 @@ import { createFallback } from 'ai-fallback';
 import { z } from 'zod';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IRouterApi, IRuntimeServices } from '@setu-ts/common';
-import {
-  QuotaExceededError,
-  QuotaStoreUnavailableError,
-  respondQuotaExceeded,
-} from '@setu-ts/auth-plugin';
+import { QuotaExceededError, respondQuotaExceeded } from '@setu-ts/auth-plugin';
 import type { IQuota } from '@setu-ts/auth-plugin';
 import type { IDatabaseService } from '@setu-ts/database-plugin';
 import type { IOutbox } from '@setu-ts/messaging-plugin';
@@ -110,10 +106,7 @@ export function registerChatRoutes(
               : (snapshot.body ?? undefined),
           );
         }
-        if (error instanceof QuotaStoreUnavailableError)
-          return ctx.response
-            .status(503)
-            .json({ error: 'Quota storage is temporarily unavailable.' });
+        // QuotaStoreUnavailableError carries a 503 hint that errorHandler answers.
         throw error;
       }
     },

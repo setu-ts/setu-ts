@@ -175,9 +175,10 @@ const model = new MockLanguageModelV4({ doGenerate: () => Promise.resolve({
 await generateText({ model, prompt: 'Hello', telemetry: { recordInputs: false, recordOutputs: false } });
 ```
 
-Usage counts are nested and may be undefined; there is no provider-usage total field. `finishReason`
-is an object and a provider tool call's `input` is a JSON string. The example uses the SDK mock for
-tool steps, stream chunks, invalid structured output and fallback; Setu adds no test model.
+Usage counts are nested (`inputTokens.total`, `outputTokens.total` and their details) and any of
+them may be undefined; there is no combined input-plus-output total. `finishReason` is an object and
+a provider tool call's `input` is a JSON string. The example uses the SDK mock for tool steps,
+stream chunks, invalid structured output and fallback; Setu adds no test model.
 
 ## Weighted quotas
 
@@ -204,7 +205,8 @@ Amounts and limits are non-negative safe integers in caller-chosen units, such a
 Reserve before work; settle once with actual usage, or release with zero. Only the issuing quota
 accepts its frozen receipt; replayed settlement does nothing. A per-key limit callback can return
 undefined for unlimited usage, which is still recorded. Keys are non-empty and at most 512 UTF-8
-bytes. Names match `[a-z0-9-]+`. Store failures refuse with `QuotaStoreUnavailableError`.
+bytes. Names match `[a-z0-9-]+`. Store failures refuse with `QuotaStoreUnavailableError`, which
+`errorHandler` answers as a value-free 503.
 
 Windows are positive integer milliseconds aligned to the epoch, `utc-day`, or `utc-month`.
 Settlement always charges the reserved window; windows expire at their end plus one day. Memory
@@ -234,10 +236,11 @@ configured media allowance. The byte estimate often over-reserves English text b
 Prices and allowances must be conservative non-negative integer billing units; use your model's
 actual tariff and media limits. `maxOutputTokens` is required.
 
-The middleware refunds the difference when all usage counts are known, charges the full reservation
-when a count is missing or the request aborts, and releases on provider failure before its first
-stream part. Cached input and reasoning tokens are included in their respective input/output totals,
-so this recipe uses one price for all input tokens and one for all output tokens.
+The middleware refunds the difference when the input and output totals are known, charges the full
+reservation when either total is missing or the request aborts, and releases on provider failure
+before its first stream part. Cached input and reasoning tokens are included in their respective
+input/output totals, so this recipe uses one price for all input tokens and one for all output
+tokens.
 
 ```typescript
 import type { LanguageModelMiddleware } from 'ai';
@@ -286,8 +289,12 @@ export function budgetMiddleware(ctx: IRequestContext, quota: IQuota, runtime: I
     return inputBound * prices.inputPrice + params.maxOutputTokens * prices.outputPrice;
   }
 
+  // Only the two totals are priced; providers omit detail counts (openai-compatible never reports cacheWrite).
   function countsKnown(usage: Usage | undefined): boolean {
-    return usage !== undefined && Object.values(usage.inputTokens).every((value) => value !== undefined) && Object.values(usage.outputTokens).every((value) => value !== undefined);
+    return usage?.inputTokens.total !== undefined && usage.outputTokens.total !== undefined;
+  }
+  function optional<K extends string>(name: K, value: number | undefined) {
+    return value === undefined ? {} : ({ [name]: value } as Record<K, number>);
   }
 
   async function begin(params: CallParams, model: { provider: string; modelId: string }) {
@@ -304,7 +311,7 @@ export function budgetMiddleware(ctx: IRequestContext, quota: IQuota, runtime: I
         const settledAmount = known ? usage!.inputTokens.total! * prices.inputPrice + usage!.outputTokens.total! * prices.outputPrice : receipt.amount;
         await quota.settle(receipt, settledAmount);
         await write({ id, occurredAt, tenantId: tenantId!, ...(ctx.request.user?.id === undefined ? {} : { principalId: ctx.request.user.id }), provider: model.provider, model: model.modelId, usageKnown: known, settledAmount,
-          ...(known ? { inputTokens: usage!.inputTokens.total!, cacheReadTokens: usage!.inputTokens.cacheRead!, cacheWriteTokens: usage!.inputTokens.cacheWrite!, outputTokens: usage!.outputTokens.total!, reasoningTokens: usage!.outputTokens.reasoning! } : {}) });
+          ...(known ? { inputTokens: usage!.inputTokens.total!, outputTokens: usage!.outputTokens.total!, ...optional('cacheReadTokens', usage!.inputTokens.cacheRead), ...optional('cacheWriteTokens', usage!.inputTokens.cacheWrite), ...optional('reasoningTokens', usage!.outputTokens.reasoning) } : {}) });
       },
     };
   }

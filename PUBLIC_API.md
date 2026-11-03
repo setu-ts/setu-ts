@@ -3537,15 +3537,16 @@ store key with its policy name. `MemoryQuotaStore(runtime)` sweeps expiry on acc
 within one process. `RedisQuotaStore({ client, namespace })` requires a non-empty namespace and
 validated `eval`/`quit` client. Its keys are `${namespace}:${name}:${key}:${windowId}`. Constant Lua
 uses KEYS/ARGV and absolute PEXPIREAT expiry; Redis reserve/adjust failures throw
-`QuotaStoreUnavailableError` with the original cause. Its `close(): Promise<void>` quits the
-injected client. No driver is loaded by this store; common's `fromNodeRedis` supplies the EVAL
-adapter for node-redis.
+`QuotaStoreUnavailableError` with the original cause and a value-free 503 status hint (detail
+`Quota storage is temporarily unavailable.`). Its `close(): Promise<void>` quits the injected
+client. No driver is loaded by this store; common's `fromNodeRedis` supplies the EVAL adapter for
+node-redis.
 
-`new QuotaExceededError(name, retryAfterSeconds)` carries the policy in `name`, the whole seconds
-until reset (reserve clamps to at least one), and a status hint.
-`respondQuotaExceeded(ctx, error): void` adds `Retry-After` and writes through the configured
-responder. An uncaught hinted throw has no header because the hint contract carries none. Under RFC
-9457 the body is exactly:
+`new QuotaExceededError(policyName, retryAfterSeconds)` carries the policy in `policyName` (`name`
+is `'QuotaExceededError'`), the whole seconds until reset (reserve clamps to at least one), and a
+status hint. `respondQuotaExceeded(ctx, error): void` adds `Retry-After` and writes through the
+configured responder. An uncaught hinted throw has no header because the hint contract carries none.
+Under RFC 9457 the body is exactly:
 
 ```json
 {

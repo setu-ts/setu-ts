@@ -23,6 +23,22 @@ describe('MemoryQuotaStore', () => {
     expect(await store.reserve('tenant', '0', 0, 0, 1000)).toEqual({ admitted: true, used: 0 });
   });
 
+  it('reclaims expired windows in amortised sweeps, not on every call (O7)', async () => {
+    const runtime = createFakeRuntime(0);
+    const store = new MemoryQuotaStore(runtime);
+    for (let i = 0; i < 1_023; i++) await store.reserve(`tenant-${i}`, '0', 1, 10, 1000);
+    runtime.setNow(1000);
+    // Below the sweep threshold an expired window still reads as empty.
+    expect(await store.reserve('tenant-0', '0', 10, 10, 2000)).toEqual({
+      admitted: true,
+      used: 10,
+    });
+    // Reaching the threshold sweeps the expired windows; the live one survives.
+    await store.reserve('tenant-new', '0', 1, 10, 2000);
+    expect((await store.reserve('tenant-0', '0', 0, 10, 2000)).used).toBe(10);
+    expect((await store.reserve('tenant-5', '0', 0, 10, 2000)).used).toBe(0);
+  });
+
   it('sweeps expired windows on both reserve and adjust (O7)', async () => {
     const runtime = createFakeRuntime(0);
     const store = new MemoryQuotaStore(runtime);

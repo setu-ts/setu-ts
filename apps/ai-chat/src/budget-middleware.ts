@@ -61,12 +61,14 @@ export function budgetMiddleware(
     return inputBound * prices.inputPrice + params.maxOutputTokens * prices.outputPrice;
   }
 
+  // Only the two totals are priced. Providers omit detail counts routinely
+  // (openai-compatible never reports cacheWrite), so those stay optional.
   function countsKnown(usage: Usage | undefined): boolean {
-    return (
-      usage !== undefined &&
-      Object.values(usage.inputTokens).every((value) => value !== undefined) &&
-      Object.values(usage.outputTokens).every((value) => value !== undefined)
-    );
+    return usage?.inputTokens.total !== undefined && usage.outputTokens.total !== undefined;
+  }
+
+  function optional<K extends string>(name: K, value: number | undefined) {
+    return value === undefined ? {} : ({ [name]: value } as Record<K, number>);
   }
 
   async function begin(params: CallParams, model: { provider: string; modelId: string }) {
@@ -102,10 +104,10 @@ export function budgetMiddleware(
           ...(known
             ? {
                 inputTokens: usage!.inputTokens.total!,
-                cacheReadTokens: usage!.inputTokens.cacheRead!,
-                cacheWriteTokens: usage!.inputTokens.cacheWrite!,
+                ...optional('cacheReadTokens', usage!.inputTokens.cacheRead),
+                ...optional('cacheWriteTokens', usage!.inputTokens.cacheWrite),
                 outputTokens: usage!.outputTokens.total!,
-                reasoningTokens: usage!.outputTokens.reasoning!,
+                ...optional('reasoningTokens', usage!.outputTokens.reasoning),
               }
             : {}),
         });

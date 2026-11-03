@@ -1,22 +1,29 @@
-/** Single-process weighted counters; expiry is swept on access. @module */
+/** Single-process weighted counters; expired windows are swept in amortised batches. @module */
 import type { IRuntimeServices } from '@setu-ts/common';
+import { sweepExpired } from '../stores/sweep-expired.ts';
 import type { IQuotaStore } from './quota.ts';
 
-/** In-process quota storage with a synchronous atomic critical section. @since 0.13.0 */
+/**
+ * In-process quota storage with a synchronous atomic critical section.
+ * An expired window reads as empty; amortised sweeps reclaim expired windows,
+ * keeping memory proportional to live windows plus the sweep slack (minimum 1,024).
+ * @since 0.13.0
+ */
 export class MemoryQuotaStore implements IQuotaStore {
   readonly #runtime: IRuntimeServices;
   readonly #windows = new Map<string, { used: number; expireAt: number }>();
+  #sweepAt = 1_024;
 
-  /** @param runtime - Clock used to sweep expired windows */
+  /** @param runtime - Clock used to expire windows */
   constructor(runtime: IRuntimeServices) {
     this.#runtime = runtime;
   }
 
-  #sweep(): void {
+  #used(storeKey: string): number {
     const now = this.#runtime.now();
-    for (const [key, value] of this.#windows) {
-      if (value.expireAt <= now) this.#windows.delete(key);
-    }
+    this.#sweepAt = sweepExpired(this.#windows, this.#sweepAt, (entry) => entry.expireAt <= now);
+    const entry = this.#windows.get(storeKey);
+    return entry === undefined || entry.expireAt <= now ? 0 : entry.used;
   }
 
   /** @inheritdoc */
@@ -27,9 +34,8 @@ export class MemoryQuotaStore implements IQuotaStore {
     limit: number | undefined,
     expireAt: number,
   ): Promise<{ admitted: boolean; used: number }> {
-    this.#sweep();
     const storeKey = `${key}:${windowId}`;
-    const used = this.#windows.get(storeKey)?.used ?? 0;
+    const used = this.#used(storeKey);
     if (limit !== undefined && amount > limit - used)
       return Promise.resolve({ admitted: false, used });
     const next = used + amount;
@@ -39,9 +45,8 @@ export class MemoryQuotaStore implements IQuotaStore {
 
   /** @inheritdoc */
   adjust(key: string, windowId: string, delta: number, expireAt: number): Promise<void> {
-    this.#sweep();
     const storeKey = `${key}:${windowId}`;
-    const used = Math.max(0, (this.#windows.get(storeKey)?.used ?? 0) + delta);
+    const used = Math.max(0, this.#used(storeKey) + delta);
     this.#windows.set(storeKey, { used, expireAt });
     return Promise.resolve();
   }

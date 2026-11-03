@@ -79,7 +79,11 @@ export class RateLimitStoreUnavailableError extends Error {
   }
 }
 
-/** A quota backend failure; reservations fail closed. @since 0.13.0 */
+/**
+ * A quota backend failure carrying a value-free HTTP 503 hint; reservations fail closed.
+ * The driver failure is retained as cause.
+ * @since 0.13.0
+ */
 export class QuotaStoreUnavailableError extends Error {
   /** Stable discriminant across realms. */
   override readonly name = 'QuotaStoreUnavailableError';
@@ -87,5 +91,10 @@ export class QuotaStoreUnavailableError extends Error {
   /** @param cause - Original Redis failure */
   constructor(cause: unknown) {
     super('Quota storage is temporarily unavailable.', { cause });
+    withHttpStatusHint(this, {
+      status: 503,
+      title: 'Service Unavailable',
+      detail: 'Quota storage is temporarily unavailable.',
+    });
   }
 }

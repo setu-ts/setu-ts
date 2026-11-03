@@ -268,11 +268,17 @@ describe('AI SDK recipes through Setu (Node)', () => {
     await app.start();
     try {
       await (await app.fetch(chatRequest())).text();
-      await waitFor(async () => spans.some((span) => span.name.includes('/chat')));
+      const isAiSpan = (span: Span) =>
+        span.name.startsWith('invoke_agent') || span.name.startsWith('chat ');
+      // The request span and the SDK spans arrive in separate export batches, and
+      // the SDK's root span (invoke_agent, parented under the request) ends last.
+      await waitFor(
+        async () =>
+          spans.some((span) => span.name.includes('/chat')) &&
+          spans.some((span) => span.name.startsWith('invoke_agent')),
+      ).catch(() => undefined);
       const parent = spans.find((span) => span.name.includes('/chat'))!;
-      const aiSpans = spans.filter(
-        (span) => span.name.startsWith('invoke_agent') || span.name.startsWith('chat '),
-      );
+      const aiSpans = spans.filter(isAiSpan);
       assert.ok(
         aiSpans.length > 0,
         'SDK spans must actually reach Setu exporter: ' + JSON.stringify(spans),
@@ -380,6 +386,7 @@ describe('AI SDK recipes through Setu (Node)', () => {
         };
         for (const scenario of [
           'known',
+          'no-cache-detail',
           'unknown',
           'generate-failure',
           'stream-failure',
@@ -414,8 +421,14 @@ describe('AI SDK recipes through Setu (Node)', () => {
                 ...result(),
                 usage:
                   scenario === 'unknown'
-                    ? { ...usage, inputTokens: { ...usage.inputTokens, cacheRead: undefined } }
-                    : usage,
+                    ? { ...usage, inputTokens: { ...usage.inputTokens, total: undefined } }
+                    : scenario === 'no-cache-detail'
+                      ? // The openai-compatible provider never reports cacheWrite.
+                        {
+                          inputTokens: { ...usage.inputTokens, cacheWrite: undefined },
+                          outputTokens: { ...usage.outputTokens, reasoning: undefined },
+                        }
+                      : usage,
               };
             },
             doStream: async () => {
@@ -523,6 +536,11 @@ describe('AI SDK recipes through Setu (Node)', () => {
             assert.equal(record.usageKnown, !full);
             assert.equal(record.settledAmount, full ? reserved : 7);
             if (scenario === 'media') assert.ok(reserved >= prices.perFile);
+            if (scenario === 'no-cache-detail') {
+              assert.equal(record.inputTokens, 3);
+              assert.equal('cacheWriteTokens' in record, false);
+              assert.equal('reasoningTokens' in record, false);
+            }
             await quota.reserve('demo-tenant', 100_000 - record.settledAmount);
           }
         }

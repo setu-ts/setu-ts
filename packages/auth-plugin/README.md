@@ -1616,7 +1616,8 @@ Choose non-negative safe integer units (tokens or micro-dollars). `reserve(key, 
 admits only within the limit and returns a frozen `QuotaReservation`; `settle(receipt, actual)`
 refunds or adds the difference to the original window, flooring usage at zero. `release(receipt)`
 settles zero. Settlement is idempotent, including concurrent calls; fabricated and foreign receipts
-throw `TypeError`. A store failure fails closed with `QuotaStoreUnavailableError`.
+throw `TypeError`. A store failure fails closed with `QuotaStoreUnavailableError`, which carries a
+value-free 503 status hint like `RateLimitStoreUnavailableError`.
 
 `name` matches `[a-z0-9-]+`; keys are non-empty and at most 512 UTF-8 bytes. `limit` is a number or
 an asynchronous per-key callback returning a number or undefined (unlimited but still recorded).
@@ -1631,9 +1632,10 @@ Redis passes caller data through KEYS/ARGV, uses atomic scripts and absolute exp
 failures with their original cause. `close()` quits the injected client, so dedicate that client to
 the store.
 
-`QuotaExceededError` carries the policy in `name`, whole `retryAfterSeconds` (at least one), and a
-429 status hint. Under `errorHandler({ format: 'rfc9457' })` its body has the IANA quota-exceeded
-type, title `Quota Exceeded`, detail `The quota for this request is spent.`, `violated-policies` and
+`QuotaExceededError` (`name` `'QuotaExceededError'`) carries the policy in `policyName`, whole
+`retryAfterSeconds` (at least one), and a 429 status hint. Under
+`errorHandler({ format: 'rfc9457' })` its body has the IANA quota-exceeded type, title
+`Quota Exceeded`, detail `The quota for this request is spent.`, `violated-policies` and
 `retry-after` extensions. It carries no usage, tenant or limit. The hint contract has no headers;
 call `respondQuotaExceeded(ctx, error)` to include `Retry-After`. The request-rate limiter uses the
 same body initializer and preserves its existing bytes and headers.

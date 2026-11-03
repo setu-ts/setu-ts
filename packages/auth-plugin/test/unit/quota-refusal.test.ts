@@ -4,7 +4,12 @@ import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { errorHandler } from '@setu-ts/exceptions';
 import type { ErrorFormat } from '@setu-ts/exceptions';
-import { QuotaExceededError, rateLimitMiddleware, respondQuotaExceeded } from '../../src/index.ts';
+import {
+  QuotaExceededError,
+  QuotaStoreUnavailableError,
+  rateLimitMiddleware,
+  respondQuotaExceeded,
+} from '../../src/index.ts';
 import before from '../fixtures/limiter-429-before.json' with { type: 'json' };
 
 async function boot(format: ErrorFormat) {
@@ -35,11 +40,40 @@ async function boot(format: ErrorFormat) {
       throw new QuotaExceededError('budget-policy', 7);
     },
   });
+  app.router.get('/store-down', {
+    handler: () => {
+      throw new QuotaStoreUnavailableError(new Error('redis-secret-host:6379 refused'));
+    },
+  });
   await app.start();
   return app;
 }
 
 describe('quota refusals', () => {
+  it('names the error class and carries the policy separately', () => {
+    const error = new QuotaExceededError('budget-policy', 7);
+    expect(error.name).toBe('QuotaExceededError');
+    expect(error.policyName).toBe('budget-policy');
+    expect(String(error)).toBe('QuotaExceededError: The quota for this request is spent.');
+  });
+
+  it('answers a store outage 503 with a value-free body, like the rate limiter', async () => {
+    const app = await boot('rfc9457');
+    try {
+      const response = await app.fetch(new Request('http://localhost/store-down'));
+      expect(response.status).toBe(503);
+      const body = await response.text();
+      expect(JSON.parse(body)).toMatchObject({
+        status: 503,
+        title: 'Service Unavailable',
+        detail: 'Quota storage is temporarily unavailable.',
+      });
+      expect(body).not.toContain('redis-secret-host');
+    } finally {
+      await app.stop();
+    }
+  });
+
   it.each(before)('keeps the pre-refactor limiter 429 byte-identical: $format', async (fixture) => {
     const app = await boot(fixture.format as ErrorFormat);
     try {

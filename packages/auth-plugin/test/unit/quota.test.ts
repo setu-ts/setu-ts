@@ -25,7 +25,8 @@ describe('createQuota', () => {
     expect(receipt).toEqual({ key: 'tenant', amount: 10, windowId: '2026-01-31' });
     expect(Object.isFrozen(receipt)).toBe(true);
     await expect(quota.reserve('tenant', 1)).rejects.toMatchObject({
-      name: 'spend',
+      name: 'QuotaExceededError',
+      policyName: 'spend',
       retryAfterSeconds: 1,
     });
     await expect(quota.reserve('other', 10)).resolves.toMatchObject({ amount: 10 });
