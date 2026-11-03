@@ -8,7 +8,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
-- **Weighted quotas and AI SDK recipes (M134, #PR, `@setu-ts/auth-plugin`,
+- **Weighted quotas and AI SDK recipes (M134, #549, `@setu-ts/auth-plugin`,
   `@setu-ts/telemetry-plugin`).** `createQuota`, `IQuota`, `QuotaOptions`, `QuotaReservation`,
   `IQuotaStore`, `MemoryQuotaStore`, `RedisQuotaStore` and `IQuotaRedisClient` add atomic weighted
   reserve/settle budgets with epoch or UTC calendar windows, issued receipts and expiry.
