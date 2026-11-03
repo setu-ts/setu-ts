@@ -27,7 +27,13 @@ feature into an application, keep the chat module files together and use the sib
 `./chat.budget.ts` import. The module owns one quota lazily per application.
 
 ```typescript
-import { streamText, isStepCount, tool } from 'ai';
+import {
+  createUIMessageStreamResponse,
+  isStepCount,
+  streamText,
+  tool,
+  toUIMessageStream,
+} from 'ai';
 import { z } from 'zod';
 import type { HandlerResult, IRequestContext, IRouterApi } from '@setu-ts/common';
 import { QuotaExceededError, respondQuotaExceeded } from '@setu-ts/auth-plugin';
@@ -50,6 +56,8 @@ export const tenantTool = tool({
   contextSchema: identitySchema,
   execute: (_input, { context }) => readTenant(context),
 });
+
+const tools = { tenant: tenantTool };
 
 /** Answers initial quota refusals before a UI stream has been sent. */
 async function quotaRefusal(ctx: IRequestContext, next: () => Promise<void>): Promise<void> {
@@ -85,7 +93,7 @@ export function registerChatRoutes(
         maxOutputTokens: 1024,
         stopWhen: isStepCount(3),
         abortSignal: ctx.signal,
-        tools: { tenant: tenantTool },
+        tools,
         toolsContext: {
           tenant: {
             tenantId,
@@ -97,7 +105,10 @@ export function registerChatRoutes(
         onError: () => {},
       });
       await ready;
-      return sendUIResponse(ctx, result.toUIMessageStreamResponse());
+      return sendUIResponse(
+        ctx,
+        createUIMessageStreamResponse({ stream: toUIMessageStream({ stream: result.stream, tools }) }),
+      );
     },
   });
 }
