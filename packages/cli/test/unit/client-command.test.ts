@@ -286,6 +286,20 @@ describe('setu client', () => {
     expect(h.fs.writes).toEqual([]);
   });
 
+  it('reports a dry-run filesystem failure as exit 1, not a raw rejection', async () => {
+    const h = harness();
+    const stat = h.fs.stat.bind(h.fs);
+    let calls = 0;
+    // The ownership check's read passes; the dry-run plan's own read then fails.
+    h.fs.stat = (path: string) =>
+      path === OUTPUT && ++calls >= 2
+        ? Promise.reject(Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' }))
+        : stat(path);
+    expect(await h.run(['--dry-run'])).toBe(1);
+    expect(h.err.at(-1)).toContain('EACCES');
+    expect(h.fs.writes).toEqual([]);
+  });
+
   it('check accepts identical output without writing', async () => {
     const h = harness({ [OUTPUT]: TEXT });
     expect(await h.run(['--check'])).toBe(0);

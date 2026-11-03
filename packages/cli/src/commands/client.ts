@@ -166,7 +166,7 @@ export async function runClientCommand(
       deps.log(`${escapeName(output)} is up to date`);
       return EXIT_OK;
     }
-    if (args.flags['dry-run'] === true) return reportDryRunPlan(deps, [file]);
+    if (args.flags['dry-run'] === true) return await reportDryRunPlan(deps, [file]);
     const outcomes = await withFileTransaction(
       deps.fs,
       (fs) =>
