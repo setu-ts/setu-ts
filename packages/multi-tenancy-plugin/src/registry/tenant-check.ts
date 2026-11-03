@@ -196,13 +196,17 @@ export class TenantCheck {
   /**
    * Checks a tenant id.
    *
-   * @param id - The requested id (untrusted)
+   * @param id - The requested id (untrusted; `lookupTenant` passes payload
+   * data, which may not be a string at run time)
    * @returns `some(tenant)` — a fresh frozen snapshot holding only `id`,
-   * `name` and `metadata` — to admit, `none()` to refuse
+   * `name` and `metadata` — to admit, `none()` to refuse. A non-string or
+   * empty id is `none()` with or without a registry: no resolver ever
+   * produces one, so the HTTP path never admits one either.
    * @throws {TenantRegistryUnavailableError} When the registry is not bound,
    * throws, or answers malformed
    */
   async check(id: string): Promise<Option<ITenant>> {
+    if (typeof id !== 'string' || id === '') return none();
     if (!this.#configured) return some(Object.freeze({ id }));
     if (id.length > MAX_TENANT_ID_LENGTH) return none();
     const registry = this.#registry;

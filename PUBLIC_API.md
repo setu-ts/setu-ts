@@ -9233,10 +9233,10 @@ MultiTenancyPlugin({ resolver: 'header', tenants: createDatabaseTenantRegistry()
 
 `IMultiTenancyService.lookupTenant(id)` (since `0.12.0`) runs the SAME check for non-HTTP work: a
 queue job reading a tenant id from its payload calls it before the trusted `getRepositoryFor`. With
-no `tenants` configured it answers `some({ id })` — what the HTTP path admits — so it is not
-validation without a registry. A registry fault throws `TenantRegistryUnavailableError`, branded
-with a `503` status hint, so an HTTP handler that lets it escape answers `503` through
-`errorHandler`.
+no `tenants` configured it answers `some({ id })` for any non-empty string id — what the HTTP path
+admits — so it is not validation without a registry; a non-string or empty id is `none()` either
+way. A registry fault throws `TenantRegistryUnavailableError`, branded with a `503` status hint, so
+an HTTP handler that lets it escape answers `503` through `errorHandler`.
 
 ### Options
 

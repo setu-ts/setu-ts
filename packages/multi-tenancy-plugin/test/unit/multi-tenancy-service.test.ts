@@ -173,4 +173,28 @@ describe('multi tenancy service', () => {
     expect((await service.lookupTenant('initech')).present).toBe(false);
     expect(calls).toEqual(['acme', 'initech']);
   });
+
+  it('lookupTenant answers none() for a malformed payload id, with or without a registry, never throwing', async () => {
+    const malformed: unknown[] = [undefined, null, 42, '', { id: 'acme' }, ['acme']];
+    const calls: string[] = [];
+    const configured = new MultiTenancyService({
+      check: new TenantCheck({
+        configured: true,
+        registry: {
+          lookup: (id) => {
+            calls.push(id);
+            return Promise.resolve(some({ id }));
+          },
+        },
+      }),
+    });
+    const unconfigured = new MultiTenancyService({ store: {} as unknown as ITenantDataStore });
+    for (const service of [configured, unconfigured]) {
+      for (const id of malformed) {
+        const result = await service.lookupTenant(id as string);
+        expect(result.present, String(id)).toBe(false);
+      }
+    }
+    expect(calls).toEqual([]);
+  });
 });

@@ -114,8 +114,9 @@ export interface IMultiTenancyService {
     entity: string,
   ): ITenantRepository<Entity, Id>;
   /**
-   * With no `tenants` registry configured, answers `some({ id })` for any id —
-   * exactly what the HTTP path admits — so it is NOT validation unless the
+   * With no `tenants` registry configured, answers `some({ id })` for any
+   * non-empty string id — exactly what the HTTP path admits — and `none()` for
+   * a non-string or empty one, so it is NOT validation unless the
    * plugin was given a registry. With a registry, checks `id` through the SAME
    * check the tenant middleware runs: `some(tenant)` carries the registry's
    * canonical tenant, `none()` means the tenant does not exist or is not

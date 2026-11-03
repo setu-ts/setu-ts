@@ -196,7 +196,8 @@ export async function saveOrder(
 `lookupTenant` throws `TenantRegistryUnavailableError` on a registry fault — let the job retry. If
 an HTTP handler lets it escape, `errorHandler` answers the same `503` and logs the error with its
 `cause` chain, so the registry's own message — which may quote the id — reaches the error log.
-Without `tenants` it answers `some({ id })` for any id, so it is not validation without a registry.
+Without `tenants` it answers `some({ id })` for any non-empty string id, so it is not validation
+without a registry. A non-string or empty id (a malformed payload) is `none()` either way.
 
 `unknownTenantStatus: 403` answers an unknown tenant and a forbidden one alike in the status code
 only: a listed tenant served from the cache still answers faster than an unknown one.

@@ -47,7 +47,7 @@ export function registerOrderRoutes(router: IRouterApi): void {
 - The JWT resolver decodes an unverified claim; use authentication that separately verifies it.
 - `getRepositoryFor` trusts its explicit tenant id; HTTP routes should use the resolved context.
 - With `tenants`, an unlisted id answers 404 and a registry fault 503 before the handler. Without it
-  any resolved id is the tenant, and `lookupTenant` admits any id.
+  any resolved id is the tenant, and `lookupTenant` admits any non-empty string id.
 
 ## Other options
 

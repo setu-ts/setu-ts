@@ -45,8 +45,9 @@ export class MultiTenancyService implements IMultiTenancyService {
   }
 
   /**
-   * With no `tenants` registry, answers `some({ id })` — what the HTTP path
-   * admits — so it is not validation without one. With a registry, runs the
+   * With no `tenants` registry, answers `some({ id })` for a non-empty string
+   * id — what the HTTP path admits — so it is not validation without one. A
+   * non-string or empty id is `none()` either way. With a registry, runs the
    * SAME check as the tenant middleware.
    *
    * @throws {TenantRegistryUnavailableError} When the registry could not answer
