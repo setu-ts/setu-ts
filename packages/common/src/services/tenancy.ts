@@ -114,6 +114,27 @@ export interface IMultiTenancyService {
     entity: string,
   ): ITenantRepository<Entity, Id>;
   /**
+   * With no `tenants` registry configured, answers `some({ id })` for any
+   * non-empty string id — exactly what the HTTP path admits — and `none()` for
+   * a non-string or empty one, so it is NOT validation unless the
+   * plugin was given a registry. With a registry, checks `id` through the SAME
+   * check the tenant middleware runs: `some(tenant)` carries the registry's
+   * canonical tenant, `none()` means the tenant does not exist or is not
+   * active, and an over-long id is `none()` without consulting the registry.
+   *
+   * The entry point for non-HTTP work (a queue job, a scheduled task, a
+   * message handler) that reads a tenant id from its payload: call this
+   * before the trusted {@linkcode getRepositoryFor}.
+   *
+   * @param id - The tenant id to check (untrusted input)
+   * @returns The registry's tenant, or `none()` when unknown
+   * @throws {Error} When the registry could not be consulted (the plugin's
+   * `TenantRegistryUnavailableError`, branded with a 503 status hint) — retry
+   * rather than proceed
+   * @since 0.12.0
+   */
+  lookupTenant(id: string): Promise<Option<ITenant>>;
+  /**
    * Build a cache key that includes the tenant id, joined by the separator
    * the plugin was configured with (`cache.separator`, default `':'`). The
    * separator is deliberately NOT a per-call argument: this method is the
@@ -150,6 +171,41 @@ export interface ITenantResolver {
    * @returns `Some` with the tenant, or `None` when unresolvable
    */
   resolve(request: IRequest): Promise<Option<ITenant>>;
+}
+
+/**
+ * Answers which tenants exist. Consulted by the multi-tenancy plugin's tenant
+ * middleware for every resolved id (its `tenants` option) and by
+ * `IMultiTenancyService.lookupTenant`.
+ *
+ * - `none()` means "does not exist or is not active" — the request is refused
+ *   with the plugin's `unknownTenantStatus` (default 404).
+ * - `some(tenant)` admits the request; the returned tenant is what the
+ *   request carries, and its `id` is the canonical id.
+ * - A THROW means "could not check" (the request answers 503) — never throw
+ *   for "not found". Bound your own I/O: the plugin applies no timeout.
+ *
+ * Implemented by `database-plugin`'s `createDatabaseTenantRegistry` and by
+ * the plugin's internal static registry (a `tenants` array).
+ *
+ * @example
+ * ```typescript
+ * const registry: ITenantRegistry = {
+ *   async lookup(id) {
+ *     return id === 'acme' ? some({ id: 'acme', name: 'Acme' }) : none();
+ *   },
+ * };
+ * ```
+ * @since 0.12.0
+ */
+export interface ITenantRegistry {
+  /**
+   * Looks a tenant up by the id a request or payload named.
+   *
+   * @param id - The requested tenant id (untrusted input)
+   * @returns `Some` with the canonical tenant, or `None` when unknown/inactive
+   */
+  lookup(id: string): Promise<Option<ITenant>>;
 }
 
 /**

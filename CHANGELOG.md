@@ -40,6 +40,23 @@ All notable changes to this project are documented here. The format follows
   value. `setu add mcp` installs the optional `@modelcontextprotocol/server@^2.4.0` peer. Existing
   applications need no changes; see `docs/upgrading.md` for opt-in tool safety and replay behavior.
 
+- **A registry of real tenants (M127, #548, `@setu-ts/multi-tenancy-plugin`, `@setu-ts/common`,
+  `@setu-ts/database-plugin`).** `MultiTenancyPlugin` takes `tenants` — a list, an `ITenantRegistry`
+  (new in `common`) or a `RegistryFactory` — and checks every resolved id before the request carries
+  it: an unknown id answers `unknownTenantStatus` (default `404`, `Unknown Tenant`), a registry
+  fault answers `503` (`Tenant Registry Unavailable`), and no response byte names the id (the fault
+  warning logs no registry message text, only error names and codes). The registry's tenant replaces
+  the resolved one, so its canonical id reaches the session binding and cache prefix. Ids over 256
+  characters never reach the registry. With or without `tenants`, a non-string or empty id — from a
+  custom resolver or a `lookupTenant` payload — is refused (`404`), never admitted as tenant `''`.
+  Instance and factory registries are cached (`tenantCache`: canonical hits only, TTL 30 s on the
+  monotonic clock, 1 000 entries, 1 MiB, single-flight; `TenantRegistryCacheOptions`).
+  `IMultiTenancyService.lookupTenant(id)` runs the same check for queue and message handlers and
+  throws `TenantRegistryUnavailableError` (503 status hint) on a fault.
+  `createDatabaseTenantRegistry(options?: DatabaseTenantRegistryOptions)` in `database-plugin` reads
+  tenants from rows, with `activeField` for suspension and only `id`, `name` and an explicit
+  `toMetadata` on the tenant. The health indicator reports `registry`. `apps/multi-tenant` lists
+  `acme` and `globex`.
 - **Backend faults answer `503` or `504` (M131a, #543, `@setu-ts/common`, `@setu-ts/queue-plugin`,
   `@setu-ts/messaging-plugin`, `@setu-ts/realtime-backplane-plugin`).** `common` exports
   `BackendUnavailableError` (`503`, "The request was not applied."), `BackendOutcomeUnknownError`
@@ -110,6 +127,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **BREAKING for implementors: `IMultiTenancyService` gains the required `lookupTenant` (M127, #548,
+  `@setu-ts/common`).** Applications that only consume the service are unaffected; an out-of-tree
+  implementation must add `lookupTenant(id): Promise<Option<ITenant>>` or delegate to
+  `MultiTenancyService`.
 - **Notification is out of readiness by default (M131a, #543, `@setu-ts/notification-plugin`).** The
   `notification` indicator registers with `{ readiness: false }`, as `mail` already is (M119b):
   every channel addresses a dependency all replicas share, so `/ready` no longer fails while a

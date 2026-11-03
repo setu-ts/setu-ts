@@ -10,6 +10,7 @@
 export type {
   IMultiTenancyService,
   ITenant,
+  ITenantRegistry,
   ITenantRepository,
   ITenantResolver,
 } from '@setu-ts/common';
@@ -40,7 +41,11 @@ export { DatabasePerTenant } from './strategies/database-strategy.ts';
 export { MemoryTenantDataStore } from './stores/memory-tenant-store.ts';
 
 // Errors.
-export { TenantDataStoreNotReadyError, TenantNotResolvedError } from './errors.ts';
+export {
+  TenantDataStoreNotReadyError,
+  TenantNotResolvedError,
+  TenantRegistryUnavailableError,
+} from './errors.ts';
 
 // Internal interfaces (types only — exported for injection).
 export type {
@@ -55,4 +60,5 @@ export type {
   ResolverConfig,
   SubdomainResolverOptions,
   TenantCacheOptions,
+  TenantRegistryCacheOptions,
 } from './interfaces/index.ts';

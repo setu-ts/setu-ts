@@ -22,6 +22,16 @@ import {
   SESSION_TENANT_BINDING_STATE_KEY,
   tenantBindingMismatch,
 } from '@setu-ts/common';
+import { REGISTRY_UNAVAILABLE_DETAIL, REGISTRY_UNAVAILABLE_TITLE } from '../errors.ts';
+
+/**
+ * The tenant check the middleware consults for every resolved id — the
+ * plugin's internal `TenantCheck`, structurally. Omitted: every resolved id
+ * is admitted (the behaviour without a `tenants` registry).
+ */
+interface TenantCheckLike {
+  check(id: string): Promise<{ readonly present: boolean; readonly value?: ITenant }>;
+}
 
 /**
  * State key for the cache prefix — consumers should use `getTenantCachePrefix`
@@ -47,6 +57,8 @@ interface MiddlewareOptionsPartial {
   required?: boolean;
   rejectionStatus?: number;
   exclude?: readonly PathPattern[];
+  /** Status of the `Unknown Tenant` refusal when `check` refuses (default 404). */
+  unknownTenantStatus?: number;
 }
 
 /**
@@ -72,6 +84,8 @@ interface TenantMiddlewareOptions {
   resolvers: readonly ITenantResolver[];
   options?: MiddlewareOptionsPartial;
   logger?: ILogger;
+  /** The registry check (M127); omitted admits every resolved id. */
+  check?: TenantCheckLike;
 }
 
 /**
@@ -89,15 +103,25 @@ interface TenantMiddlewareOptions {
  *
  * A throwing resolver is caught, warned (when logger is present), treated as
  * `none()`, and the chain continues to the next resolver.
+ *
+ * With a `check` (the plugin's `tenants` registry, M127) the FIRST resolved id
+ * is checked before the request carries it — the chain is not re-entered on a
+ * miss. A miss answers `unknownTenantStatus` (`Unknown Tenant`), a registry
+ * fault answers `503` (`Tenant Registry Unavailable`); neither calls `next()`
+ * and neither body names the id. On a hit the REGISTRY's tenant replaces the
+ * resolved one, and the session binding compare and the cache prefix use its
+ * canonical id.
  */
 export function tenantMiddleware({
   service,
   resolvers,
   options,
   logger,
+  check,
 }: TenantMiddlewareOptions): MiddlewareFunction {
   const required = options?.required ?? false;
   const rejectionStatus = options?.rejectionStatus ?? 400;
+  const unknownTenantStatus = options?.unknownTenantStatus ?? 404;
   const cacheConfig = options?.cache;
 
   // The exemption list is resolved and PARTITIONED once at registration:
@@ -136,6 +160,32 @@ export function tenantMiddleware({
           });
         }
       }
+    }
+
+    if (resolved && check !== undefined) {
+      // The registry step (M127). The check logs registry faults itself, once
+      // per transition and without registry message text, so a fault seen here or through
+      // `lookupTenant` counts the same.
+      let checked: { readonly present: boolean; readonly value?: ITenant };
+      try {
+        checked = await check.check(resolved.id);
+      } catch {
+        respondWithError(ctx, {
+          status: 503,
+          title: REGISTRY_UNAVAILABLE_TITLE,
+          detail: REGISTRY_UNAVAILABLE_DETAIL,
+        });
+        return;
+      }
+      if (!checked.present || checked.value === undefined) {
+        respondWithError(ctx, {
+          status: unknownTenantStatus,
+          title: 'Unknown Tenant',
+          detail: 'The request names a tenant that does not exist',
+        });
+        return;
+      }
+      resolved = checked.value;
     }
 
     if (resolved) {

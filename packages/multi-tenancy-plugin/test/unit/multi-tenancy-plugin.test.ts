@@ -5,7 +5,8 @@ import { describe, expect, it } from 'vitest';
 import { MultiTenancyPlugin } from '../../src/plugin/multi-tenancy-plugin.ts';
 import { HeaderResolver } from '../../src/resolvers/header-resolver.ts';
 import { PathResolver } from '../../src/resolvers/path-resolver.ts';
-import { CAPABILITIES, type ITenantResolver, PLUGIN_PRIORITY } from '@setu-ts/common';
+import { CAPABILITIES, type ITenantResolver, none, PLUGIN_PRIORITY, some } from '@setu-ts/common';
+import { TenantRegistryUnavailableError } from '../../src/errors.ts';
 import type { ITenantDataStore } from '../../src/interfaces/index.ts';
 import { createRecordingFakeStore } from '../fixtures/fake-store.ts';
 import type { MultiTenancyService } from '../../src/services/multi-tenancy-service.ts';
@@ -823,6 +824,130 @@ describe('multi tenancy plugin', () => {
       expect(() => ctx.onInitCallbacks[0]!()).toThrow(
         'missing required ITenantDataStore method(s)',
       );
+    });
+  });
+
+  describe('tenants registry (M127)', () => {
+    const healthData = async (ctx: MockContext): Promise<Record<string, unknown>> => {
+      const result = (await ctx.healthRegistrations[0]!.checkFn()) as {
+        data: Record<string, unknown>;
+      };
+      return result.data;
+    };
+    const ctxWithClock = (): MockContext & { runtime: { hrtime(): number } } =>
+      Object.assign(makeMockContext(), {
+        runtime: { uuid: () => 'u', hrtime: () => 0 },
+      });
+
+    it('a factory is resolved in onInit, shape-checked, and flips health from factory to custom', async () => {
+      const ctx = ctxWithClock();
+      let received: unknown;
+      const plugin = MultiTenancyPlugin({
+        resolver: 'header',
+        tenants: (services) => {
+          received = services;
+          return { lookup: (id: string) => Promise.resolve(some({ id })) };
+        },
+      });
+      await plugin.register(ctxAsPlugin(ctx));
+      expect((await healthData(ctx)).registry).toBe('factory');
+      const service = ctx.registeredServices.get(CAPABILITIES.MULTI_TENANCY) as MultiTenancyService;
+      await expect(service.lookupTenant('acme')).rejects.toBeInstanceOf(
+        TenantRegistryUnavailableError,
+      );
+      expect(ctx.onInitCallbacks).toHaveLength(1);
+      await ctx.onInitCallbacks[0]!();
+      expect(received).toBe(ctx.services);
+      expect((await healthData(ctx)).registry).toBe('custom');
+      const hit = await service.lookupTenant('acme');
+      expect(hit.present && hit.value.id).toBe('acme');
+    });
+
+    it('a factory result without lookup is refused in onInit, naming the option', async () => {
+      const ctx = ctxWithClock();
+      const plugin = MultiTenancyPlugin({ resolver: 'header', tenants: () => ({}) as never });
+      await plugin.register(ctxAsPlugin(ctx));
+      expect(() => ctx.onInitCallbacks[0]!()).toThrow(
+        'MultiTenancyPlugin.tenants: the factory result is not an ITenantRegistry',
+      );
+    });
+
+    it('a throwing factory fails start naming MultiTenancyPlugin.tenants', async () => {
+      const ctx = ctxWithClock();
+      const plugin = MultiTenancyPlugin({
+        resolver: 'header',
+        tenants: () => {
+          throw new Error('no database');
+        },
+      });
+      await plugin.register(ctxAsPlugin(ctx));
+      expect(() => ctx.onInitCallbacks[0]!()).toThrow(
+        /Failed to resolve MultiTenancyPlugin\.tenants: no database/,
+      );
+    });
+
+    it('health registry values: none, static, custom', async () => {
+      for (const [tenants, expected] of [
+        [undefined, 'none'],
+        [['acme'], 'static'],
+        [{ lookup: () => Promise.resolve(none()) }, 'custom'],
+      ] as const) {
+        const ctx = ctxWithClock();
+        await MultiTenancyPlugin({
+          resolver: 'header',
+          ...(tenants !== undefined && { tenants }),
+        }).register(ctxAsPlugin(ctx));
+        expect((await healthData(ctx)).registry).toBe(expected);
+      }
+    });
+
+    it('an instance registry is wrapped in the cache (one lookup for repeated hits)', async () => {
+      const ctx = ctxWithClock();
+      let calls = 0;
+      await MultiTenancyPlugin({
+        resolver: 'header',
+        tenants: {
+          lookup: (id: string) => {
+            calls++;
+            return Promise.resolve(some({ id }));
+          },
+        },
+      }).register(ctxAsPlugin(ctx));
+      const service = ctx.registeredServices.get(CAPABILITIES.MULTI_TENANCY) as MultiTenancyService;
+      await service.lookupTenant('acme');
+      await service.lookupTenant('acme');
+      expect(calls).toBe(1);
+    });
+
+    it('tenantCache: false leaves an instance registry unwrapped', async () => {
+      const ctx = ctxWithClock();
+      let calls = 0;
+      await MultiTenancyPlugin({
+        resolver: 'header',
+        tenantCache: false,
+        tenants: {
+          lookup: (id: string) => {
+            calls++;
+            return Promise.resolve(some({ id }));
+          },
+        },
+      }).register(ctxAsPlugin(ctx));
+      const service = ctx.registeredServices.get(CAPABILITIES.MULTI_TENANCY) as MultiTenancyService;
+      await service.lookupTenant('acme');
+      await service.lookupTenant('acme');
+      expect(calls).toBe(2);
+    });
+
+    it('invalid registry options are refused at register()', async () => {
+      await expect(
+        Promise.resolve().then(() =>
+          MultiTenancyPlugin({
+            resolver: 'header',
+            unknownTenantStatus: 500,
+            tenants: ['a'],
+          }).register(ctxAsPlugin(ctxWithClock())),
+        ),
+      ).rejects.toThrow('unknownTenantStatus must be an integer in 400-499');
     });
   });
 });

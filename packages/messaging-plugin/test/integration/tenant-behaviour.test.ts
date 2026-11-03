@@ -26,7 +26,7 @@ import type {
   ITenantRepository,
   RegistryFactory,
 } from '@setu-ts/common';
-import type { IMultiTenancyService, ITenant } from '@setu-ts/common';
+import type { IMultiTenancyService, ITenant, Option } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 import { MessagingPlugin } from '../../src/plugin/messaging-plugin.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
@@ -63,6 +63,10 @@ class PerTenantMapTenancy implements IMultiTenancyService {
 
   getRepositoryFor<Entity, Id = string>(tenantId: string): ITenantRepository<Entity, Id> {
     return this.#repoFor<Entity, Id>(tenantId);
+  }
+
+  lookupTenant(id: string): Promise<Option<ITenant>> {
+    return Promise.resolve({ present: true, value: { id } });
   }
 
   prefixCacheKey(tenantId: string, key: string): string {

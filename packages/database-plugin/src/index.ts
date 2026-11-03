@@ -163,6 +163,10 @@ export {
   DatabaseTenantDataStore,
   TenantStoreStrategyUnsupportedError,
 } from './tenancy/database-tenant-data-store.ts';
+// Tenant registry (M127) — tenants are rows, for the multi-tenancy plugin's
+// `tenants` option.
+export { createDatabaseTenantRegistry } from './tenancy/database-tenant-registry.ts';
+export type { DatabaseTenantRegistryOptions } from './tenancy/database-tenant-registry.ts';
 
 // Scoped RBAC sources (M110b) — grants and per-scope custom roles read from the
 // application's database, for AuthPlugin's `scopedRbac` option.
