@@ -67,6 +67,13 @@ const REFUSED: readonly (readonly [
     '~kernel/modules/products/products.service.ts',
   ],
   [
+    'a token file outside a module, reached through a dot segment',
+    "import { X } from '~kernel/modules/../shared.token.ts';",
+    'value-import',
+    1,
+    '~kernel/modules/../shared.token.ts',
+  ],
+  [
     'export star, token module included',
     "export * from '~kernel/modules/products/products.token.ts';",
     'export-star',
@@ -154,6 +161,42 @@ describe('scanPageImports', () => {
       violations: [],
       unreadable: [],
     });
+  });
+});
+
+describe('scanPageImports bounds', () => {
+  it('reports a page over 1 MiB as unreadable instead of reading it', async () => {
+    const big = `import { aService } from '~kernel/modules/a/a.service.ts';\n${'//'.repeat(600_000)}`;
+    const fs = createFakeFs({ '/p/app/routes/big.tsx': big });
+    const read = fs.readFile.bind(fs);
+    const opened: string[] = [];
+    fs.readFile = (path: string) => {
+      opened.push(path);
+      return read(path);
+    };
+    const scan = await scanPageImports(fs, '/p');
+    expect(scan).toEqual({ violations: [], unreadable: ['app/routes/big.tsx'] });
+    expect(opened).toEqual([]);
+  });
+
+  it('ends a directory loop at the depth bound and reports where it stopped', async () => {
+    // A symlinked directory that points at its parent: every level lists itself.
+    const fs = createFakeFs({ '/p/app/root.tsx': '' });
+    const readdir = fs.readdir.bind(fs);
+    const stat = fs.stat.bind(fs);
+    fs.readdir = async (path: string) =>
+      path === '/p/app'
+        ? [...(await readdir(path)), 'loop']
+        : path.startsWith('/p/app/loop')
+          ? ['loop']
+          : readdir(path);
+    fs.stat = (path: string) =>
+      path.startsWith('/p/app/loop')
+        ? Promise.resolve({ isFile: false, isDirectory: true, size: 0 })
+        : stat(path);
+    const scan = await scanPageImports(fs, '/p');
+    expect(scan.violations).toEqual([]);
+    expect(scan.unreadable).toEqual([`app${'/loop'.repeat(33)}`]);
   });
 });
 

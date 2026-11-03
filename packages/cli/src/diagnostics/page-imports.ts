@@ -25,7 +25,7 @@ import type { IFileSystem } from '@setu-ts/common';
 import { lexImportSpecifiers, type ISpecifierSpan } from '../utils/import-specifiers.ts';
 import { maskComments } from '../devtool/sources.ts';
 import { normalizeRelative } from '../utils/artifact-path.ts';
-import { joinPath } from '../utils/file-writer.ts';
+import { joinPath, MAX_EXISTING_FILE_BYTES } from '../utils/file-writer.ts';
 import { isMissingPath } from '../utils/filesystem-errors.ts';
 
 /** Why a page import is refused. */
@@ -42,8 +42,12 @@ export interface PageImportViolation {
 /** The kernel alias every page reaches kernel code through. */
 const KERNEL_ALIAS = '~kernel/';
 
-/** A token module: the one value import a page may make from the kernel. */
-const TOKEN_MODULE = /^src\/modules\/[^/]+\/[^/]+\.token\.ts$/;
+/**
+ * A token module: the one value import a page may make from the kernel. The
+ * module directory may not be a `.` or `..` segment: an alias target is not
+ * normalised, so `~kernel/modules/../x.token.ts` would otherwise pass as one.
+ */
+const TOKEN_MODULE = /^src\/modules\/(?!\.\.?\/)[^/]+\/[^/]+\.token\.ts$/;
 
 /** Files under `app/` a page can be written in. */
 const PAGE_FILE = /\.(?:ts|tsx)$/;
@@ -162,23 +166,49 @@ export async function scanPageSource(
   return violations;
 }
 
-/** Collects every page file under `app/`, sorted. */
-async function pageFiles(fs: IFileSystem, dir: string, prefix: string): Promise<string[]> {
+/**
+ * Directory levels below `app/` the walk descends. Route trees are shallow; the
+ * bound exists so a symlinked directory loop ends instead of recursing forever.
+ */
+const MAX_PAGE_DEPTH = 32;
+
+/**
+ * Collects every page file under `app/`, sorted. A page over
+ * {@linkcode MAX_EXISTING_FILE_BYTES}, or a directory past
+ * {@linkcode MAX_PAGE_DEPTH}, is collected as unreadable rather than read or
+ * skipped, so neither becomes a silent pass.
+ */
+async function pageFiles(
+  fs: IFileSystem,
+  dir: string,
+  prefix: string,
+  depth = 0,
+): Promise<{ readonly pages: string[]; readonly unreadable: string[] }> {
   let entries: readonly string[];
   try {
     entries = await fs.readdir(joinPath(dir, prefix));
   } catch (cause) {
-    if (isMissingPath(cause)) return [];
+    if (isMissingPath(cause)) return { pages: [], unreadable: [] };
     throw cause;
   }
-  const found: string[] = [];
+  const pages: string[] = [];
+  const unreadable: string[] = [];
   for (const entry of entries) {
     const relative = `${prefix}/${entry}`;
     const stat = await fs.stat(joinPath(dir, relative));
-    if (stat.isDirectory) found.push(...(await pageFiles(fs, dir, relative)));
-    else if (stat.isFile && PAGE_FILE.test(entry)) found.push(relative);
+    if (stat.isDirectory) {
+      if (depth >= MAX_PAGE_DEPTH) {
+        unreadable.push(relative);
+        continue;
+      }
+      const nested = await pageFiles(fs, dir, relative, depth + 1);
+      pages.push(...nested.pages);
+      unreadable.push(...nested.unreadable);
+    } else if (stat.isFile && PAGE_FILE.test(entry)) {
+      (stat.size > MAX_EXISTING_FILE_BYTES ? unreadable : pages).push(relative);
+    }
   }
-  return found.sort();
+  return { pages: pages.sort(), unreadable: unreadable.sort() };
 }
 
 /** The result of scanning a project's pages. */
@@ -198,9 +228,10 @@ export interface PageImportScan {
  */
 export async function scanPageImports(fs: IFileSystem, dir: string): Promise<PageImportScan> {
   const violations: PageImportViolation[] = [];
-  const unreadable: string[] = [];
+  const found = await pageFiles(fs, dir, 'app');
+  const unreadable: string[] = [...found.unreadable];
   const decoder = new TextDecoder();
-  for (const path of await pageFiles(fs, dir, 'app')) {
+  for (const path of found.pages) {
     const result = await scanPageSource(
       path,
       decoder.decode(await fs.readFile(joinPath(dir, path))),
