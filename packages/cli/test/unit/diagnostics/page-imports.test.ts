@@ -204,6 +204,28 @@ const REFUSED: readonly (readonly [
     1,
     './**/*.ts',
   ],
+  // Re-audit N-1, N-2, N-4: globs are read from tokens, not from masked text.
+  [
+    'a glob after a regex literal holding a quote',
+    "const re = /'/;\nconst s = import.meta.glob('/src/modules/*/*.service.ts', { eager: true });",
+    'glob',
+    2,
+    '/src/modules/*/*.service.ts',
+  ],
+  [
+    'a glob inside a template substitution',
+    "const t = `${Object.keys(import.meta.glob('/src/modules/*/*.service.ts', { eager: true }))}`;",
+    'glob',
+    1,
+    '/src/modules/*/*.service.ts',
+  ],
+  [
+    'a real base hidden behind a commented one',
+    "const s = import.meta.glob('./**/*.service.ts', { eager: true, /* base: './' */ base: '/src/modules' });",
+    'glob',
+    1,
+    './**/*.service.ts',
+  ],
 ];
 
 describe('scanPageSource', () => {
@@ -230,8 +252,29 @@ describe('scanPageSource', () => {
     ['a computed base', "const d = '/src';\nconst m = import.meta.glob('./*.ts', { base: d });"],
     ['a spread options object', "const o = {};\nconst m = import.meta.glob('./*.ts', { ...o });"],
     ['an options identifier', "const o = {};\nconst m = import.meta.glob('./*.ts', o);"],
+    // Re-audit N-3: a computed key could be `base`.
+    [
+      'a computed key',
+      "const m = import.meta.glob('./**/*.ts', { eager: true, ['base']: '/src/modules' });",
+    ],
+    ['a shorthand base', "const base = '/src';\nconst m = import.meta.glob('./*.ts', { base });"],
+    ['the function used as a value', "const g = import.meta.glob;\nconst m = g('/src/**/*.ts');"],
   ])('reports a glob with %s as unreadable', async (_label, source) => {
     expect(await scanPageSource(PAGE, source)).toBe('unreadable');
+  });
+
+  it('reports each glob call on its own line (re-audit N-5)', async () => {
+    const source = [
+      "const a = import.meta.glob('./*.tsx');",
+      "const b = import.meta.glob('/src/a/*.ts');",
+      "// const c = import.meta.glob('/src/c/*.ts');",
+      "const d = import.meta.glob('./parts/*.tsx');",
+      "const e = import.meta.glob('/src/e/*.ts');",
+      "const f = import.meta.glob('~kernel/f/*.ts');",
+    ].join('\n');
+    const found = await scanPageSource(PAGE, source);
+    expect(found).not.toBe('unreadable');
+    expect((found as readonly { line: number }[]).map((v) => v.line)).toEqual([2, 5, 6]);
   });
 
   it('resolves the project absolute path, plain or behind /@fs (re-audit R-2)', async () => {

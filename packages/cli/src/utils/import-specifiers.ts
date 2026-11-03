@@ -37,9 +37,33 @@ export interface ISpecifierSpan {
   readonly kind: 'static' | 'dynamic';
 }
 
+/**
+ * One `import.meta.glob(…)` call, read from tokens (M130): its literal
+ * patterns and its literal `base` option, if any.
+ */
+export interface IGlobCall {
+  /** Offset of the `import` keyword. */
+  readonly start: number;
+  /** The patterns, in order, including `!` exclusions. */
+  readonly patterns: readonly string[];
+  /** The literal `base` option, when the call has one. */
+  readonly base?: string;
+}
+
 /** The lexer's reading of one file. */
 export type LexedImports =
-  | { readonly kind: 'ok'; readonly spans: readonly ISpecifierSpan[] }
+  | {
+      readonly kind: 'ok';
+      readonly spans: readonly ISpecifierSpan[];
+      /**
+       * Every `import.meta.glob` call, or `unreadable` when one is not a call
+       * of literal patterns with an options object of literal keys (a spread,
+       * a computed key, a non-literal `base`, or the function used as a value).
+       * Kept apart from `kind` so a glob never changes how the file's imports
+       * classify for other checks.
+       */
+      readonly globs: readonly IGlobCall[] | 'unreadable';
+    }
   | { readonly kind: 'unclassifiable'; readonly reason: string };
 
 interface IToken {
@@ -173,6 +197,77 @@ function tokenize(source: string): readonly IToken[] | undefined {
   return templates.length === 0 ? tokens : undefined;
 }
 
+/** A string token's text, or a template's when it has no substitution. */
+function literalOf(token: IToken | undefined): string | undefined {
+  if (token?.kind === 'string') return token.text;
+  if (token?.kind === 'template' && token.text.endsWith('`') && token.text.startsWith('`'))
+    return token.text.includes('${') ? undefined : token.text.slice(1, -1);
+  return undefined;
+}
+
+/**
+ * Reads the `import.meta.glob(…)` call whose `import` is at `i`.
+ *
+ * @param tokens - The file's tokens
+ * @param i - Index of the `import` token
+ * @returns The call, or undefined when it is not one the lexer can read
+ */
+function readGlobCall(tokens: readonly IToken[], i: number): IGlobCall | undefined {
+  const text = (k: number): string | undefined => tokens[k]?.text;
+  if (text(i + 5) !== '(') return undefined;
+  let j = i + 6;
+  const patterns: string[] = [];
+  const first = literalOf(tokens[j]);
+  if (first !== undefined) {
+    patterns.push(first);
+    j++;
+  } else if (text(j) === '[') {
+    j++;
+    for (;;) {
+      if (text(j) === ']') break;
+      const pattern = literalOf(tokens[j]);
+      if (pattern === undefined) return undefined;
+      patterns.push(pattern);
+      j++;
+      if (text(j) === ',') j++;
+      else if (text(j) !== ']') return undefined;
+    }
+    j++;
+  } else return undefined;
+  let base: string | undefined;
+  if (text(j) === ',') j++;
+  if (text(j) === '{') {
+    j++;
+    while (text(j) !== '}') {
+      const key = tokens[j];
+      if (key === undefined || (key.kind !== 'word' && key.kind !== 'string')) return undefined;
+      j++;
+      if (text(j) !== ':') return undefined;
+      j++;
+      if (key.text === 'base') {
+        base = literalOf(tokens[j]);
+        if (base === undefined) return undefined;
+        j++;
+      } else {
+        let depth = 0;
+        while (j < tokens.length) {
+          const value = text(j)!;
+          if (depth === 0 && (value === ',' || value === '}')) break;
+          if (value === '(' || value === '[' || value === '{') depth++;
+          else if (value === ')' || value === ']' || value === '}') depth--;
+          j++;
+        }
+      }
+      if (text(j) === ',') j++;
+      else if (text(j) !== '}') return undefined;
+    }
+    j++;
+    if (text(j) === ',') j++;
+  }
+  if (text(j) !== ')') return undefined;
+  return { start: tokens[i]!.start, patterns, ...(base === undefined ? {} : { base }) };
+}
+
 /**
  * Reads the import specifiers of one file with the lexer alone.
  *
@@ -184,6 +279,8 @@ export function lexImportSpecifiers(source: string): LexedImports {
   if (tokens === undefined)
     return { kind: 'unclassifiable', reason: 'an unterminated literal or comment' };
   const spans: ISpecifierSpan[] = [];
+  const globs: IGlobCall[] = [];
+  let globsReadable = true;
   const span = (token: IToken, typeOnly: boolean, kind: 'static' | 'dynamic'): ISpecifierSpan => ({
     start: token.start,
     end: token.end,
@@ -205,7 +302,18 @@ export function lexImportSpecifiers(source: string): LexedImports {
       continue;
     }
     if (token.text !== 'import' && token.text !== 'export') continue;
-    if (token.text === 'import' && next?.kind === 'punct' && next.text === '.') continue;
+    if (token.text === 'import' && next?.kind === 'punct' && next.text === '.') {
+      if (
+        tokens[i + 2]?.text === 'meta' &&
+        tokens[i + 3]?.text === '.' &&
+        tokens[i + 4]?.text === 'glob'
+      ) {
+        const call = readGlobCall(tokens, i);
+        if (call === undefined) globsReadable = false;
+        else globs.push(call);
+      }
+      continue;
+    }
     if (token.text === 'import' && next?.text === '(') {
       const argument = tokens[i + 2];
       const close = tokens[i + 3];
@@ -246,7 +354,7 @@ export function lexImportSpecifiers(source: string): LexedImports {
       return { kind: 'unclassifiable', reason: 'an import declaration it cannot read' };
     spans.push(span(literal, typeOnly, 'static'));
   }
-  return { kind: 'ok', spans };
+  return { kind: 'ok', spans, globs: globsReadable ? globs : 'unreadable' };
 }
 
 /** Counts each value, for an order-independent comparison. */

@@ -140,94 +140,8 @@ export function globReachesKernel(
   );
 }
 
-/** `import.meta.glob(` calls, with whatever follows the opening parenthesis. */
+/** `import.meta.glob(` texts in the original source, to map a call to its line. */
 const GLOB_CALL = /import\.meta\.glob\s*\(\s*/g;
-
-/** One string literal, or an array of them, as a glob's first argument. */
-const GLOB_LITERAL =
-  /^(?:(["'`])((?:(?!\1)[^\\$])*)\1|\[((?:\s*(["'])(?:(?!\4)[^\\])*\4\s*,?)*)\s*\])/;
-
-/** A `base` key with a literal string value, in a glob's options object. */
-const GLOB_BASE = /(?:["']base["']|\bbase)\s*:\s*(?:(["'`])((?:(?!\1)[^\\$])*)\1)?/;
-
-/**
- * Blanks every string, template and comment body in emitted JavaScript, keeping
- * offsets, so a code pattern found in the result is code: JSX text and string
- * literals that merely mention `import.meta.glob` are not calls.
- */
-export function maskLiterals(code: string): string {
-  const out = code.split('');
-  const blank = (from: number, to: number): void => {
-    for (let k = from; k < to; k++) if (out[k] !== '\n') out[k] = ' ';
-  };
-  let i = 0;
-  while (i < code.length) {
-    const c = code[i]!;
-    if (c === '/' && code[i + 1] === '/') {
-      const end = code.indexOf('\n', i);
-      const stop = end < 0 ? code.length : end;
-      blank(i, stop);
-      i = stop;
-    } else if (c === '/' && code[i + 1] === '*') {
-      const end = code.indexOf('*/', i + 2);
-      const stop = end < 0 ? code.length : end + 2;
-      blank(i, stop);
-      i = stop;
-    } else if (c === '"' || c === "'" || c === '`') {
-      let j = i + 1;
-      while (j < code.length && code[j] !== c) j += code[j] === '\\' ? 2 : 1;
-      blank(i + 1, j);
-      i = j + 1;
-    } else i++;
-  }
-  return out.join('');
-}
-
-/** One glob call: its patterns and its literal `base` option, if any. */
-interface GlobCall {
-  readonly patterns: readonly string[];
-  readonly base?: string;
-}
-
-/**
- * The patterns and `base` of every `import.meta.glob` call in the emitted
- * source, or `unreadable` when a call's patterns or options are not literals the
- * scan can read (an identifier, a spread, a computed `base`).
- */
-function globCalls(emitted: string): readonly GlobCall[] | 'unreadable' {
-  const masked = maskLiterals(emitted);
-  const calls: GlobCall[] = [];
-  for (const match of masked.matchAll(GLOB_CALL)) {
-    const at = match.index + match[0].length;
-    const literal = GLOB_LITERAL.exec(emitted.slice(at));
-    if (literal === null) return 'unreadable';
-    const patterns =
-      literal[2] !== undefined
-        ? [literal[2]]
-        : [...(literal[3] ?? '').matchAll(/(["'])((?:(?!\1)[^\\])*)\1/g)].map((m) => m[2]!);
-    const after = at + literal[0].length;
-    const next = /^\s*(,\s*)?(\)|\{)?/.exec(masked.slice(after))!;
-    if (next[2] === ')' || (next[1] === undefined && next[2] === undefined)) {
-      calls.push({ patterns });
-      continue;
-    }
-    if (next[2] !== '{') return 'unreadable';
-    const open = after + next[0].length - 1;
-    let depth = 0;
-    let close = open;
-    for (; close < masked.length; close++) {
-      if (masked[close] === '{') depth++;
-      else if (masked[close] === '}' && --depth === 0) break;
-    }
-    const options = emitted.slice(open, close + 1);
-    if (masked.slice(open, close + 1).includes('...')) return 'unreadable';
-    const base = GLOB_BASE.exec(options);
-    if (base === null) calls.push({ patterns });
-    else if (base[2] === undefined) return 'unreadable';
-    else calls.push({ patterns, base: base[2] });
-  }
-  return calls;
-}
 
 /** The text of the statement a static specifier belongs to, from its keyword. */
 function statementHead(source: string, span: ISpecifierSpan): string {
@@ -326,40 +240,40 @@ export async function scanPageSource(
         reason,
       });
   }
-  const globs = globCalls(emitted);
-  if (globs === 'unreadable') return 'unreadable';
-  const used = new Set<number>();
-  for (const call of globs) {
+  if (lexed.globs === 'unreadable') return 'unreadable';
+  const calls = [...(maskComments(source) ?? source).matchAll(GLOB_CALL)];
+  lexed.globs.forEach((call, index) => {
     const reaching = call.patterns.find((pattern) =>
       globReachesKernel(path, pattern, call.base, root),
     );
     if (reaching !== undefined)
       violations.push({
         path,
-        line: globLine(source, reaching, used),
+        line: globLine(source, calls, index, lexed.globs.length),
         specifier: reaching,
         reason: 'glob',
       });
-  }
+  });
   return violations;
 }
 
 /**
- * The line of the first not-yet-reported `import.meta.glob` in the original
- * source whose call names `pattern`, comments masked. Line 1 when none is
- * found, so a finding is never dropped.
+ * The line of the `index`-th glob call. Calls are matched to the original
+ * source by position when it shows exactly as many `import.meta.glob(` texts
+ * as esbuild's output has calls; otherwise (one mentioned in JSX text, say) the
+ * finding is reported on line 1 rather than on a wrong line.
  */
-function globLine(source: string, pattern: string, used: Set<number>): number {
-  const visible = maskComments(source) ?? source;
-  for (const call of visible.matchAll(GLOB_CALL)) {
-    const window = visible.slice(call.index, call.index + 4096);
-    if (used.has(call.index) || !window.includes(pattern)) continue;
-    used.add(call.index);
-    let line = 1;
-    for (let j = 0; j < call.index; j++) if (visible.charCodeAt(j) === 10) line++;
-    return line;
-  }
-  return 1;
+function globLine(
+  source: string,
+  calls: readonly RegExpExecArray[],
+  index: number,
+  count: number,
+): number {
+  if (calls.length !== count) return 1;
+  const at = calls[index]!.index;
+  let line = 1;
+  for (let j = 0; j < at; j++) if (source.charCodeAt(j) === 10) line++;
+  return line;
 }
 
 /**

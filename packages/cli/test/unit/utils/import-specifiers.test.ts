@@ -73,7 +73,40 @@ describe('lexImportSpecifiers', () => {
     const lexed = lexImportSpecifiers(
       "const a = require('pkg');\nconst b = loader.import('./x.ts');\nexport { a, b };\n",
     );
-    expect(lexed).toEqual({ kind: 'ok', spans: [] });
+    expect(lexed).toEqual({ kind: 'ok', spans: [], globs: [] });
+  });
+
+  it('reads import.meta.glob calls from tokens (M130)', () => {
+    const lexed = lexImportSpecifiers(
+      [
+        "const a = import.meta.glob('./*.tsx');",
+        "const b = import.meta.glob(['./a/*.ts', `!./a/x.ts`,], { eager: true, query: { raw: [1, (2)] }, 'base': '/src', });",
+        'const c = import.meta.glob(`./c/*.ts`, {});',
+      ].join('\n'),
+    );
+    expect(lexed.kind === 'ok' && lexed.globs).toEqual([
+      { start: 10, patterns: ['./*.tsx'] },
+      { start: 49, patterns: ['./a/*.ts', '!./a/x.ts'], base: '/src' },
+      { start: 165, patterns: ['./c/*.ts'] },
+    ]);
+  });
+
+  it.each([
+    ['a non-literal pattern', 'import.meta.glob(p);'],
+    ['a template pattern with a substitution', 'import.meta.glob(`./${d}/*.ts`);'],
+    ['a non-literal array element', "import.meta.glob(['./a.ts', p]);"],
+    ['a missing separator in the array', "import.meta.glob(['./a.ts' './b.ts']);"],
+    ['a non-literal base', "import.meta.glob('./*.ts', { base: d });"],
+    ['a computed key', "import.meta.glob('./*.ts', { ['base']: '/src' });"],
+    ['a shorthand key', "import.meta.glob('./*.ts', { base });"],
+    ['an options identifier', "import.meta.glob('./*.ts', o);"],
+    ['the function used as a value', 'const g = import.meta.glob;'],
+  ])('marks globs unreadable for %s without changing the imports', (_label, source) => {
+    expect(lexImportSpecifiers(`import { x } from 'pkg';\n${source}`)).toEqual({
+      kind: 'ok',
+      spans: [expect.objectContaining({ value: 'pkg' })],
+      globs: 'unreadable',
+    });
   });
 });
 
