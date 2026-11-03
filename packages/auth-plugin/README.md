@@ -1614,10 +1614,11 @@ for a hard cap, so active rate limits survive cleanup.
 `createQuota({ name, store, limit, window, runtime })` is a standalone reserve-then-settle quota.
 Choose non-negative safe integer units (tokens or micro-dollars). `reserve(key, amount)` atomically
 admits only within the limit and returns a frozen `QuotaReservation`; `settle(receipt, actual)`
-refunds or adds the difference to the original window, flooring usage at zero. `release(receipt)`
-settles zero. Settlement is idempotent, including concurrent calls; fabricated and foreign receipts
-throw `TypeError`. A store failure fails closed with `QuotaStoreUnavailableError`, which carries a
-value-free 503 status hint like `RateLimitStoreUnavailableError`.
+refunds or adds the difference to the original window, keeping usage between zero and
+`Number.MAX_SAFE_INTEGER`. `release(receipt)` settles zero. Settlement is idempotent, including
+concurrent calls; fabricated and foreign receipts throw `TypeError`. A store failure fails closed
+with `QuotaStoreUnavailableError`, which carries a value-free 503 status hint like
+`RateLimitStoreUnavailableError`.
 
 `name` matches `[a-z0-9-]+`; keys are non-empty, well-formed Unicode strings of at most 512 UTF-8
 bytes. `limit` is a number or an asynchronous per-key callback returning a number or undefined

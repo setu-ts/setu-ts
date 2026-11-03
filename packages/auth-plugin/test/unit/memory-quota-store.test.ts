@@ -19,6 +19,15 @@ describe('MemoryQuotaStore', () => {
       used: Number.MAX_SAFE_INTEGER,
     });
   });
+  it('clamps a settle that adds usage at MAX_SAFE_INTEGER, so the next reserve is refused (N3)', async () => {
+    const store = new MemoryQuotaStore(createFakeRuntime(0));
+    await store.reserve('tenant', '0', 10, undefined, 1000);
+    await store.adjust('tenant', '0', Number.MAX_SAFE_INTEGER, 1000);
+    expect(await store.reserve('tenant', '0', 1, undefined, 1000)).toEqual({
+      admitted: false,
+      used: Number.MAX_SAFE_INTEGER,
+    });
+  });
   it('atomically admits exactly ten of 50 concurrent reserves (O2)', async () => {
     const store = new MemoryQuotaStore(createFakeRuntime(0));
     const replies = await Promise.all(

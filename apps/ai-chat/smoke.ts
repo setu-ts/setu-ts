@@ -495,6 +495,67 @@ describe('AI SDK recipes through Setu (Node)', () => {
     }
   });
 
+  it('N1: a failure before the first model call answers instead of waiting on ready', async () => {
+    let calls = 0;
+    const model = new MockLanguageModelV4({
+      // Fails inside streamText before doStream, so the ready gate alone never settles.
+      supportedUrls: () => Promise.reject(new Error('supported URL lookup failed')),
+      doStream: async () => {
+        calls++;
+        throw new Error('unreached');
+      },
+    });
+    const app = createApp([{ model, prices }]);
+    await app.start();
+    try {
+      const outcome = await Promise.race([
+        app.fetch(chatRequest()).then(async (response) => {
+          await response.text();
+          return response.status;
+        }),
+        new Promise<'hung'>((resolve) => runtime.setTimeout(() => resolve('hung'), 2000)),
+      ]);
+      assert.equal(outcome, 500);
+      assert.equal(calls, 0);
+    } finally {
+      await Promise.race([
+        app.stop(),
+        new Promise<void>((resolve) => runtime.setTimeout(resolve, 1000)),
+      ]);
+    }
+  });
+
+  it('N2: a failed provider call is not retried in the background after the error response', async () => {
+    let calls = 0;
+    const flaky = new MockLanguageModelV4({
+      doStream: async () => {
+        calls++;
+        if (calls === 1)
+          throw new APICallError({
+            message: 'unavailable',
+            url: 'http://provider.invalid',
+            requestBodyValues: {},
+            statusCode: 503,
+          });
+        return (await mock().doStream({ prompt: [] })) as Awaited<ReturnType<Model['doStream']>>;
+      },
+    });
+    const app = createApp([{ model: flaky, prices }]);
+    await app.start();
+    try {
+      const response = await app.fetch(chatRequest());
+      await response.text();
+      assert.notEqual(response.status, 200);
+      // The SDK's default retry would call again after its 2 s initial backoff.
+      await new Promise<void>((resolve) => runtime.setTimeout(resolve, 2500));
+      assert.equal(calls, 1);
+      const db = app.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+      assert.deepEqual(await db.getRepository<UsageRecord>('Usage').findAll(), []);
+    } finally {
+      await app.stop();
+    }
+  });
+
   it('shares one lazy quota within an app and isolates quotas across createApp calls', async () => {
     const model = mock({ ...usage, inputTokens: { ...usage.inputTokens, total: undefined } });
     const models = [{ model, prices: { ...prices, perMessage: 640_000 } }];
@@ -536,6 +597,7 @@ describe('AI SDK recipes through Setu (Node)', () => {
           'negative-output',
           'fractional-output',
           'nan-output',
+          'unsafe-price',
           'generate-failure',
           'stream-failure',
           'read-failure',
@@ -584,19 +646,25 @@ describe('AI SDK recipes through Setu (Node)', () => {
               return {
                 ...result(),
                 usage:
-                  badInput !== undefined
-                    ? { ...usage, inputTokens: { ...usage.inputTokens, total: badInput } }
-                    : badOutput !== undefined
-                      ? { ...usage, outputTokens: { ...usage.outputTokens, total: badOutput } }
-                      : scenario === 'unknown'
-                        ? { ...usage, inputTokens: { ...usage.inputTokens, total: undefined } }
-                        : scenario === 'no-cache-detail'
-                          ? // The openai-compatible provider never reports cacheWrite.
-                            {
-                              inputTokens: { ...usage.inputTokens, cacheWrite: undefined },
-                              outputTokens: { ...usage.outputTokens, reasoning: undefined },
-                            }
-                          : usage,
+                  scenario === 'unsafe-price'
+                    ? // Each total is a safe integer; their priced sum is not (N4).
+                      {
+                        inputTokens: { ...usage.inputTokens, total: 9e15 },
+                        outputTokens: { ...usage.outputTokens, total: 9e15 },
+                      }
+                    : badInput !== undefined
+                      ? { ...usage, inputTokens: { ...usage.inputTokens, total: badInput } }
+                      : badOutput !== undefined
+                        ? { ...usage, outputTokens: { ...usage.outputTokens, total: badOutput } }
+                        : scenario === 'unknown'
+                          ? { ...usage, inputTokens: { ...usage.inputTokens, total: undefined } }
+                          : scenario === 'no-cache-detail'
+                            ? // The openai-compatible provider never reports cacheWrite.
+                              {
+                                inputTokens: { ...usage.inputTokens, cacheWrite: undefined },
+                                outputTokens: { ...usage.outputTokens, reasoning: undefined },
+                              }
+                            : usage,
               };
             },
             doStream: async () => {
@@ -700,6 +768,7 @@ describe('AI SDK recipes through Setu (Node)', () => {
               scenario === 'unknown' ||
               scenario.endsWith('-input') ||
               scenario.endsWith('-output') ||
+              scenario === 'unsafe-price' ||
               scenario === 'abort' ||
               scenario === 'cancel' ||
               scenario === 'late-error';

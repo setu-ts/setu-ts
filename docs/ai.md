@@ -91,6 +91,8 @@ export function registerChatRoutes(
         model,
         prompt,
         maxOutputTokens: 1024,
+        // The SDK would retry after the error response has gone out; ai-fallback fails over instead.
+        maxRetries: 0,
         stopWhen: isStepCount(3),
         abortSignal: ctx.signal,
         tools,
@@ -101,10 +103,16 @@ export function registerChatRoutes(
           },
         },
         telemetry: { recordInputs: false, recordOutputs: false },
-        // Initial errors are reported through ready before headers are sent.
+        // Errors before the stream reach the client through the awaits below.
         onError: () => {},
       });
-      await ready;
+      // ready settles once the first model call starts. A failure before any
+      // model call (prompt or URL-support checks) only rejects result.response,
+      // and nothing else starts the stream until headers are sent.
+      const failed = Promise.resolve(result.response).then(() => undefined);
+      // Later failures reach the client inside the UI stream, not here.
+      failed.catch(() => {});
+      await Promise.race([ready, failed]);
       return sendUIResponse(
         ctx,
         createUIMessageStreamResponse({ stream: toUIMessageStream({ stream: result.stream, tools }) }),
@@ -408,8 +416,10 @@ export function budgetMiddleware(ctx: IRequestContext, quota: IQuota, runtime: I
       async finish(usage?: Usage) {
         if (completed) return;
         completed = true;
-        const known = !ctx.signal.aborted && countsKnown(usage);
-        const settledAmount = known ? usage!.inputTokens.total! * prices.inputPrice + usage!.outputTokens.total! * prices.outputPrice : receipt.amount;
+        const priced = countsKnown(usage) ? usage!.inputTokens.total! * prices.inputPrice + usage!.outputTokens.total! * prices.outputPrice : undefined;
+        // Safe counts can still price past MAX_SAFE_INTEGER; those settle at the reservation.
+        const known = !ctx.signal.aborted && Number.isSafeInteger(priced);
+        const settledAmount = known ? priced! : receipt.amount;
         await quota.settle(receipt, settledAmount);
         await write({ id, occurredAt, tenantId: tenantId!, ...(ctx.request.user?.id === undefined ? {} : { principalId: ctx.request.user.id }), provider: model.provider, model: model.modelId, usageKnown: known, settledAmount,
           ...(known ? { inputTokens: usage!.inputTokens.total!, outputTokens: usage!.outputTokens.total!, ...optional('cacheReadTokens', usage!.inputTokens.cacheRead), ...optional('cacheWriteTokens', usage!.inputTokens.cacheWrite), ...optional('reasoningTokens', usage!.outputTokens.reasoning) } : {}) });

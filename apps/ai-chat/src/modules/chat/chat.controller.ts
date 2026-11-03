@@ -62,6 +62,8 @@ export function registerChatRoutes(
         model,
         prompt,
         maxOutputTokens: 1024,
+        // The SDK would retry after the error response has gone out; ai-fallback fails over instead.
+        maxRetries: 0,
         stopWhen: isStepCount(3),
         abortSignal: ctx.signal,
         tools,
@@ -72,10 +74,16 @@ export function registerChatRoutes(
           },
         },
         telemetry: { recordInputs: false, recordOutputs: false },
-        // Initial errors are reported through ready before headers are sent.
+        // Errors before the stream reach the client through the awaits below.
         onError: () => {},
       });
-      await ready;
+      // ready settles once the first model call starts. A failure before any
+      // model call (prompt or URL-support checks) only rejects result.response,
+      // and nothing else starts the stream until headers are sent.
+      const failed = Promise.resolve(result.response).then(() => undefined);
+      // Later failures reach the client inside the UI stream, not here.
+      failed.catch(() => {});
+      await Promise.race([ready, failed]);
       return sendUIResponse(
         ctx,
         createUIMessageStreamResponse({

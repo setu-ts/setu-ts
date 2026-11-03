@@ -22,7 +22,7 @@ export interface IQuotaStore {
     limit: number | undefined,
     expireAt: number,
   ): Promise<{ admitted: boolean; used: number }>;
-  /** Adjusts an existing window, flooring its usage at zero. */
+  /** Adjusts an existing window, keeping its usage between zero and MAX_SAFE_INTEGER. */
   adjust(key: string, windowId: string, delta: number, expireAt: number): Promise<void>;
   /** Closes owned resources. */
   close?(): Promise<void>;

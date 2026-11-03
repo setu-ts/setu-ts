@@ -28,6 +28,8 @@ const ADJUST_SCRIPT = `
 local next = redis.call('INCRBY', KEYS[1], ARGV[1])
 if next < 0 then
   redis.call('SET', KEYS[1], '0')
+elseif next > 9007199254740991 then
+  redis.call('SET', KEYS[1], '9007199254740991')
 end
 redis.call('PEXPIREAT', KEYS[1], ARGV[2])
 return 1

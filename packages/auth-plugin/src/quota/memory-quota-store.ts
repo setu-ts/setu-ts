@@ -46,7 +46,7 @@ export class MemoryQuotaStore implements IQuotaStore {
   /** @inheritdoc */
   adjust(key: string, windowId: string, delta: number, expireAt: number): Promise<void> {
     const storeKey = `${key}:${windowId}`;
-    const used = Math.max(0, this.#used(storeKey) + delta);
+    const used = Math.min(Number.MAX_SAFE_INTEGER, Math.max(0, this.#used(storeKey) + delta));
     this.#windows.set(storeKey, { used, expireAt });
     return Promise.resolve();
   }

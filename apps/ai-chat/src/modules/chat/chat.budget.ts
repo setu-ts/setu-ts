@@ -153,11 +153,13 @@ export function budgetMiddleware(
       async finish(usage?: Usage) {
         if (completed) return;
         completed = true;
-        const known = !ctx.signal.aborted && countsKnown(usage);
-        const settledAmount = known
+        const priced = countsKnown(usage)
           ? usage!.inputTokens.total! * prices.inputPrice +
             usage!.outputTokens.total! * prices.outputPrice
-          : receipt.amount;
+          : undefined;
+        // Safe counts can still price past MAX_SAFE_INTEGER; those settle at the reservation.
+        const known = !ctx.signal.aborted && Number.isSafeInteger(priced);
+        const settledAmount = known ? priced! : receipt.amount;
         await quota.settle(receipt, settledAmount);
         await write({
           id,

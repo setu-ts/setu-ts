@@ -3528,10 +3528,11 @@ reservation that would raise usage above `Number.MAX_SAFE_INTEGER`, even without
 this is a normal not-admitted result, not a store outage.
 
 Reserve atomically admits `used + amount <= limit` and returns a frozen receipt, or throws
-`QuotaExceededError`. Settlement adds `actual - amount`, floored at zero, to the reserved window;
-release settles zero. Fabricated or foreign receipts throw `TypeError`. Subsequent settle/release
-calls on an issued receipt are no-ops, including concurrent calls. The first settlement marks the
-receipt before awaiting storage; a failed adjustment is not replayed with that receipt.
+`QuotaExceededError`. Settlement adds `actual - amount`, kept between zero and
+`Number.MAX_SAFE_INTEGER`, to the reserved window; release settles zero. Fabricated or foreign
+receipts throw `TypeError`. Subsequent settle/release calls on an issued receipt are no-ops,
+including concurrent calls. The first settlement marks the receipt before awaiting storage; a failed
+adjustment is not replayed with that receipt.
 
 Numeric windows are epoch-aligned, with string ids of `floor(runtime.now() / window)`; calendar ids
 are UTC `YYYY-MM-DD` or `YYYY-MM`. Windows expire at their end plus one day. A quota prefixes the

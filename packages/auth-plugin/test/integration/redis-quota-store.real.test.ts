@@ -53,4 +53,19 @@ describe.skipIf(!url)('RedisQuotaStore real Redis (O2)', () => {
       await client.del(key);
     }
   });
+  it('clamps a settle that adds usage at MAX_SAFE_INTEGER, so the next reserve is refused, not a 503 (N3)', async () => {
+    const key = `${namespace}:spend:clamp:0`;
+    const expiry = runtime.now() + 60_000;
+    try {
+      await store.reserve('spend:clamp', '0', 10, undefined, expiry);
+      await store.adjust('spend:clamp', '0', Number.MAX_SAFE_INTEGER, expiry);
+      expect(await client.get(key)).toBe(String(Number.MAX_SAFE_INTEGER));
+      expect(await store.reserve('spend:clamp', '0', 1, undefined, expiry)).toEqual({
+        admitted: false,
+        used: Number.MAX_SAFE_INTEGER,
+      });
+    } finally {
+      await client.del(key);
+    }
+  });
 });
