@@ -61,10 +61,10 @@ All line numbers read on `develop` at `9886d5a64`.
 
 ## 2. Committed-doc conflicts — resolved here, shipped as named doc deliverables
 
-| #   | Conflict                                                                                                                                                                                                                   | Resolution (picked side)                                                                     | Doc deliverable (same PR)                                                                                                  |
-| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| C1  | PUBLIC_API.md shows `ctx.services.get<IOpenApiService>('openapi')` (l.10319) with the interface owned by openapi-plugin, while the CLI (a non-plugin consumer) must type the token without depending on the plugin.        | The interface moves to `common/src/services/openapi.ts`; openapi-plugin re-exports the type. | PUBLIC_API.md: `IOpenApiService` under the common services section; openapi-plugin section says "re-exported from common". |
-| C2  | The ROADMAP M129 section and the working note say `--from <file\|url>` and `--out src/api.ts`; the survey (§3.10) moves the flags to `--input` and `--output`, and this plan writes `src/client/api.ts` by default (§3.6). | This plan.                                                                                   | ROADMAP M129 decision 1 reads `--input <file\|url>`.                                                                       |
+| #   | Conflict                                                                                                                                                                                                                      | Resolution (picked side)                                                                     | Doc deliverable (same PR)                                                                                                  |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| C1  | PUBLIC_API.md shows `ctx.services.get<IOpenApiService>('openapi')` (l.10319) with the interface owned by openapi-plugin, while the CLI (a non-plugin consumer) must type the token without depending on the plugin.           | The interface moves to `common/src/services/openapi.ts`; openapi-plugin re-exports the type. | PUBLIC_API.md: `IOpenApiService` under the common services section; openapi-plugin section says "re-exported from common". |
+| C2  | The ROADMAP M129 section and the working note say `--from <file\|url>` and `--out src/api.ts`; the survey (§3.10) moves the flags to `--input` and `--output`, and this plan writes `src/clientsdk/api.ts` by default (§3.6). | This plan.                                                                                   | ROADMAP M129 decision 1 reads `--input <file\|url>`.                                                                       |
 
 ## 3. Design decisions
 
@@ -152,19 +152,21 @@ All line numbers read on `develop` at `9886d5a64`.
 
 ### 3.6 `--output` default and validation
 
-- **Decision:** default `src/client/api.ts`, relative to the project directory. `--output` must end
-  in `.ts`, be relative, and stay inside the project (`assertInsideProject`; a link anywhere on the
-  path is refused by `writeFiles`). Anything else is exit 2.
+- **Decision:** default `src/clientsdk/api.ts`, relative to the project directory. `--output` must
+  end in `.ts`, be relative, and stay inside the project (`assertInsideProject`; a link anywhere on
+  the path is refused by `writeFiles`). Anything else is exit 2.
 - **Why:** under `src/`, the project's own `tsc --noEmit` (`check` script) type-checks the client,
-  so a document change that breaks it is caught by the gate the project already runs.
+  so a document change that breaks it is caught by the gate the project already runs. The directory
+  is `clientsdk`, not `client`, so it is not mistaken for browser-side code (maintainer decision,
+  2026-11-03).
 - **Test home:** `client.test.ts`.
 
 ### 3.7 `--check`
 
 - **Decision:** loads and generates exactly as a write would (same marker, header lines,
-  formatting), then compares with the bytes at `--output`. Equal → exit 0, "src/client/api.ts is up
-  to date". Missing file → exit 1, "… does not exist; run `setu client`". Different → exit 1, "… is
-  out of date; run `setu client`" plus the first differing line number. Any load or generation
+  formatting), then compares with the bytes at `--output`. Equal → exit 0, "src/clientsdk/api.ts is
+  up to date". Missing file → exit 1, "… does not exist; run `setu client`". Different → exit 1, "…
+  is out of date; run `setu client`" plus the first differing line number. Any load or generation
   failure is also exit 1 (distinguished by message). Never writes.
 - **Why:** §3.10 (CI convention: one nonzero code, message says why).
 - **Test home:** `client.test.ts` (in sync, drifted, missing, failure).
