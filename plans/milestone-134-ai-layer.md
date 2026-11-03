@@ -80,7 +80,7 @@ All line numbers on `develop` at `14c4255d2`; AI SDK facts from an install of `a
 ### 3.1 The quota API
 
 - **Decision:** auth-plugin exports `createQuota(options: QuotaOptions): IQuota`, with
-  `QuotaOptions { name: string; store: QuotaStore; limit: number | ((key: string) => number | undefined | Promise<number | undefined>); window: number | 'utc-day' | 'utc-month'; runtime: IRuntimeServices }`
+  `QuotaOptions { name: string; store: IQuotaStore; limit: number | ((key: string) => number | undefined | Promise<number | undefined>); window: number | 'utc-day' | 'utc-month'; runtime: IRuntimeServices }`
   and
   `IQuota { reserve(key: string, amount: number): Promise<QuotaReservation>; settle(reservation, actual: number): Promise<void>; release(reservation): Promise<void> }`.
   - `amount` and `actual` must be finite integers ≥ 0; anything else (NaN, ±Infinity, negative,
@@ -90,9 +90,15 @@ All line numbers on `develop` at `14c4255d2`; AI SDK facts from an install of `a
     returns `{ key, windowId, amount }` (frozen). Otherwise it throws `QuotaExceededError`.
   - `settle` adds `actual − amount` to that reservation's window (a refund when negative, an extra
     charge when positive; the stored value never goes below 0). It is idempotent per reservation: a
-    second `settle` or `release` is a no-op (the quota keeps settled reservations in a `WeakSet`;
-    the reservation object stays frozen; nothing is stored).
+    second `settle` or `release` is a no-op (tracked in the quota's `WeakSet`, below; the
+    reservation object stays frozen).
   - `release(r)` is `settle(r, 0)`.
+  - `settle`/`release` accept only a reservation this quota issued and has not settled (a `WeakSet`
+    of issued reservations); a fabricated or foreign object throws `TypeError`, so a caller cannot
+    mint a refund.
+  - `key` must be a non-empty string of at most 512 UTF-8 bytes, else `TypeError`. A `limit`
+    callback that throws or rejects makes `reserve` reject with that error and reserve nothing (fail
+    closed).
 - **Why:** reserve-then-settle is the only form that holds a hard cap under concurrency (survey §05:
   gateway limits that record after completion overshoot). Integer units keep Lua arithmetic exact;
   callers choose the unit (tokens, micro-dollars).
@@ -115,7 +121,7 @@ All line numbers on `develop` at `14c4255d2`; AI SDK facts from an install of `a
 ### 3.3 Stores
 
 - **Decision:**
-  `QuotaStore { reserve(key, windowId, amount, limit | undefined, expireAt): Promise<{ admitted: boolean; used: number }>; adjust(key, windowId, delta, expireAt): Promise<void>; close?(): Promise<void> }`.
+  `IQuotaStore { reserve(key, windowId, amount, limit | undefined, expireAt): Promise<{ admitted: boolean; used: number }>; adjust(key, windowId, delta, expireAt): Promise<void>; close?(): Promise<void> }`.
   - `MemoryQuotaStore(runtime)`: a `Map`, single-process, synchronous critical section.
   - `RedisQuotaStore({ client, namespace })`: `client` structurally
     `IQuotaRedisClient { eval(script, numkeys, ...args): Promise<unknown>; quit(): Promise<unknown> }`,
@@ -142,7 +148,8 @@ All line numbers on `develop` at `14c4255d2`; AI SDK facts from an install of `a
   extension it never carried.
 - **Why:** one implementation of the 429 body; the header needs a context the deep throw site lacks.
 - **Test home:** `test/unit/quota-refusal.test.ts` (field-by-field body, forbidden fields absent,
-  both entry points under a non-default error format).
+  both entry points under a non-default error format; the rate limiter's 429 body and headers
+  byte-identical to the pre-change output, captured from `develop` as a fixture).
 
 ### 3.5 The guide `docs/ai.md`
 
@@ -151,15 +158,23 @@ All line numbers on `develop` at `14c4255d2`; AI SDK facts from an install of `a
   `toUIMessageStreamResponse()` through `status`/`header`/`stream`; the tool loop with
   `stopWhen: isStepCount(n)` and `abortSignal` from the request; structured `output` and
   `NoObjectGeneratedError`; tools with `toolsContext` carrying `ctx.request.tenant?.id` and
-  `ctx.request.user?.id`, authorization in the service; `ai-fallback`; `@ai-sdk/otel` registration
-  with Setu's telemetry, content capture off, and the warning that capture records content
-  unredacted; testing with `MockLanguageModelV4`; **the budget recipe**: a
+  `ctx.request.user?.id` (the quota key and tool identity come from server-set request identity,
+  never from model input or the request body), authorization in the service; `ai-fallback`;
+  `@ai-sdk/otel` registration with Setu's telemetry, content capture off, and the warning that
+  capture records content unredacted; testing with `MockLanguageModelV4`; **the budget recipe**: a
   `LanguageModelV4Middleware` that reserves
-  `inputUpperBound × inputPrice + maxOutputTokens × outputPrice` per model call (`inputUpperBound` =
-  UTF-8 byte length of the serialized prompt and tool definitions, an upper bound on tokens;
-  `maxOutputTokens` required), settles from `usage` (`undefined` counts as the reserved amount), and
-  releases when the call fails before its first stream part; **the usage recipe**: a record
-  `{ id, occurredAt, tenantId, principalId?, provider, model, inputTokens, cacheReadTokens, cacheWriteTokens, outputTokens, reasoningTokens }`
+  `inputBound × inputPrice + maxOutputTokens × outputPrice` per model call, where `inputBound` = the
+  UTF-8 byte length of the serialized text parts and tool definitions (a byte-level tokenizer emits
+  at most one token per byte) plus a per-message allowance for chat-template tokens plus a
+  configured per-file allowance for each image or file part (a URL's bytes bound nothing; the guide
+  says the cap is hard for text and only as tight as the allowance for media); `maxOutputTokens` is
+  required. It settles from `usage` priced the same way; when any count is `undefined`, or the
+  client aborted the stream, it settles the full reservation. It releases when `doGenerate` rejects
+  or `doStream` fails before its first part. Each model is wrapped with its own prices and
+  `ai-fallback` runs over the wrapped models, so a failed first model releases its reservation
+  before the second reserves its own. Abort comes from `ctx.signal` (`IRequestContext.signal`,
+  always live); **the usage recipe**: a record
+  `{ id, occurredAt, tenantId, principalId?, provider, model, usageKnown, inputTokens?, cacheReadTokens?, cacheWriteTokens?, outputTokens?, reasoningTokens?, settledAmount }`
   with `id = runtime.uuid()` taken before the call, written with
   `db.transaction((uow) => outbox.write(uow, usageRecorded, record, { options: { deduplicationId: record.id } }))`,
   and a billing consumer behind the inbox.
@@ -179,8 +194,10 @@ All line numbers on `develop` at `14c4255d2`; AI SDK facts from an install of `a
      Redis case is the auth-plugin guarded test);
   4. the usage record is read back once despite a redelivered outbox message (memory database,
      in-memory broker, inbox consumer);
-  5. with `@ai-sdk/otel` registered and capture off, the exported span carries no prompt text and
-     sits under the request span;
+  5. with `@ai-sdk/otel` registered, `registerGlobal: true` and capture off, the spans received by
+     an in-process OTLP/HTTP receiver the smoke starts (`exporter: 'otlp'`; the plugin has no
+     in-memory exporter kind) carry no prompt text and share the request span's trace id as their
+     parent;
   6. a tool reads the tenant from `toolsContext`, never from model input;
   7. `ai-fallback` moves to the second model after a 503 from the first;
   8. a guarded test against a real OpenAI-compatible endpoint (`AI_COMPAT_BASE_URL`, skipped when
@@ -216,7 +233,7 @@ telemetry-plugin option; ships in minor `0.13.0`.
 | ---------------------------------------------------------- | ------------------ | ------------------------------------------------------------------ |
 | `createQuota`                                              | function           | `apps/ai-chat` budget middleware; guide recipe                     |
 | `IQuota`, `QuotaOptions`, `QuotaReservation`               | types              | `createQuota`'s signature; the example's middleware                |
-| `QuotaStore`                                               | type               | both stores implement it; `QuotaOptions.store`                     |
+| `IQuotaStore`                                              | type               | both stores implement it; `QuotaOptions.store`                     |
 | `MemoryQuotaStore`, `RedisQuotaStore`, `IQuotaRedisClient` | class, class, type | `apps/ai-chat` (memory); guide (Redis)                             |
 | `QuotaExceededError`, `QuotaStoreUnavailableError`         | classes            | thrown by `reserve`; caught in the example's route                 |
 | `respondQuotaExceeded`                                     | function           | the example's route; the rate limiter's 429 (shared internal init) |
@@ -252,17 +269,17 @@ telemetry-plugin option; ships in minor `0.13.0`.
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
-| Test file                                                              | src covered                      | Key assertions                                                                                                                                                                                                                                                                                                          |
-| ---------------------------------------------------------------------- | -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/auth-plugin/test/unit/quota.test.ts`                         | `quota/quota.ts`                 | admit/refuse at the boundary; NaN/±Infinity/negative/fractional refused before the store; settle refund, extra charge, idempotent second settle; release; window ids across UTC day/month and epoch windows; a settle after the boundary hits the reserved window; `retryAfterSeconds` ≥ 1                              |
-| `packages/auth-plugin/test/unit/memory-quota-store.test.ts`            | `memory-quota-store.ts`          | 50 concurrent `reserve` of 1 over limit 10 → exactly 10 admitted; floor at 0; expiry sweep                                                                                                                                                                                                                              |
-| `packages/auth-plugin/test/unit/redis-quota-store.test.ts`             | `redis-quota-store.ts`           | Lua arguments and keys; validation refuses a client without `eval`; Redis error → `QuotaStoreUnavailableError`                                                                                                                                                                                                          |
-| `packages/auth-plugin/test/integration/redis-quota-store.real.test.ts` | real Redis (guarded `REDIS_URL`) | two concurrent reservations over the last budget → exactly one admitted; refund visible to the next reserve; key expires                                                                                                                                                                                                |
-| `packages/auth-plugin/test/unit/quota-refusal.test.ts`                 | `refusal.ts`, limiter 429        | body field by field (type, title, status, detail, `violated-policies`, `retry-after`; no `message`); `Retry-After` header via the helper; hinted throw through `errorHandler`; limiter and quota bodies share type, title and extension layout under a non-default format (one init function, both entry points driven) |
-| existing `rate-limit*.test.ts`                                         | limiter                          | unchanged and passing                                                                                                                                                                                                                                                                                                   |
-| `packages/telemetry-plugin/test/unit/register-global.test.ts`          | the `registerGlobal` branch      | §3.7                                                                                                                                                                                                                                                                                                                    |
-| `apps/ai-chat/smoke.ts`                                                | the recipes                      | §3.6 items 1–8                                                                                                                                                                                                                                                                                                          |
-| `test/guide-fence-compiler.test.ts`                                    | `docs/ai.md` fences              | compile, counts pinned                                                                                                                                                                                                                                                                                                  |
+| Test file                                                              | src covered                      | Key assertions                                                                                                                                                                                                                                                                                                                                                                                                       |
+| ---------------------------------------------------------------------- | -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/auth-plugin/test/unit/quota.test.ts`                         | `quota/quota.ts`                 | admit/refuse at the boundary; NaN/±Infinity/negative/fractional refused before the store; settle refund, extra charge, idempotent second settle; a forged or foreign reservation refused; key empty or over 512 bytes refused; a throwing limit callback reserves nothing; release; window ids across UTC day/month and epoch windows; a settle after the boundary hits the reserved window; `retryAfterSeconds` ≥ 1 |
+| `packages/auth-plugin/test/unit/memory-quota-store.test.ts`            | `memory-quota-store.ts`          | 50 concurrent `reserve` of 1 over limit 10 → exactly 10 admitted; floor at 0; expiry sweep                                                                                                                                                                                                                                                                                                                           |
+| `packages/auth-plugin/test/unit/redis-quota-store.test.ts`             | `redis-quota-store.ts`           | Lua arguments and keys; validation refuses a client without `eval`; Redis error → `QuotaStoreUnavailableError`                                                                                                                                                                                                                                                                                                       |
+| `packages/auth-plugin/test/integration/redis-quota-store.real.test.ts` | real Redis (guarded `REDIS_URL`) | two concurrent reservations over the last budget → exactly one admitted; refund visible to the next reserve; key expires                                                                                                                                                                                                                                                                                             |
+| `packages/auth-plugin/test/unit/quota-refusal.test.ts`                 | `refusal.ts`, limiter 429        | body field by field (type, title, status, detail, `violated-policies`, `retry-after`; no `message`); `Retry-After` header via the helper; hinted throw through `errorHandler`; limiter and quota bodies share type, title and extension layout under a non-default format (one init function, both entry points driven)                                                                                              |
+| existing `rate-limit*.test.ts`                                         | limiter                          | unchanged and passing                                                                                                                                                                                                                                                                                                                                                                                                |
+| `packages/telemetry-plugin/test/unit/register-global.test.ts`          | the `registerGlobal` branch      | §3.7                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `apps/ai-chat/smoke.ts`                                                | the recipes                      | §3.6 items 1–8                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `test/guide-fence-compiler.test.ts`                                    | `docs/ai.md` fences              | compile, counts pinned                                                                                                                                                                                                                                                                                                                                                                                               |
 
 ## 7. Verification gates
 
@@ -296,6 +313,35 @@ control; the guide's capture and egress advice is reviewed with it), per
   guide states the runtimes proven.
 - **Content capture is unredacted when enabled** → off by default in the recipe, stated in the guide
   and reviewed in the audit.
+- **The usage record is durable only from the outbox write onward.** A process that dies between the
+  provider's answer and the local transaction loses that record (and the settled reservation was
+  already applied) → stated in the guide; the window is one in-process step.
+- **Runtime coverage:** the quota code uses only `IRuntimeServices` and web APIs; its tests run on
+  Node, and the ROADMAP rewrite states the example is proven on Node only.
+
+## 8a. Security design review (input to the committed-tree audit)
+
+- **Assets:** a tenant's spend; usage records (billing input); prompt content in traces.
+- **Threats and resolutions:**
+  - T1 bypass by choosing the key → the key is built from `ctx.request.tenant?.id` set by the
+    tenancy plugin, never from body or model output (guide, smoke item 6). Obligation O1: the recipe
+    reads no client-supplied value into the key.
+  - T2 over-admission under concurrency → atomic Lua / single-threaded memory section (O2: the
+    50-way memory test and the real-Redis two-way test).
+  - T3 hostile amounts (NaN, ±Infinity, negative, fractional, > 2^53) → `TypeError` before the store
+    (O3: unit table).
+  - T4 minted refunds via a forged or replayed reservation → issued-reservation `WeakSet`, single
+    settle (O4).
+  - T5 store failure → fail closed with `QuotaStoreUnavailableError` (O5: fake `eval` rejecting).
+  - T6 Lua injection → keys and values only as `KEYS`/`ARGV`, never concatenated into the script
+    (O6: the script text is a constant).
+  - T7 memory growth from many keys → 512-byte key bound, window expiry, sweep on access (O7).
+  - T8 prompt content in spans → capture off in the recipe; `registerGlobal` exports only what the
+    AI SDK records (O8: smoke item 5 negative check, then a positive control with capture on).
+  - T9 a refusal leaking another tenant's state → the 429 carries only the policy name and seconds
+    to reset (O9: field-by-field body test).
+- **Accepted:** the byte bound over-reserves; media allowances are configuration, not proof; the
+  window between the provider answer and the outbox write.
 
 ## 9. Out of scope
 
