@@ -7,6 +7,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  globReachesKernel,
   kernelTarget,
   scanPageImports,
   scanPageSource,
@@ -330,6 +331,37 @@ describe('kernelTarget', () => {
     ['~kernel/../main.ts', 'src/../main.ts'],
   ])('%s → %s', (specifier, target) => {
     expect(kernelTarget(PAGE, specifier)).toBe(target);
+  });
+});
+
+describe('globReachesKernel', () => {
+  it.each([
+    ['a pattern without a wildcard', 'app/p.tsx', '../src/a.ts', undefined, true],
+    ['a bare wildcard beside the page', 'app/p.tsx', '*.tsx', undefined, false],
+    ['a bare subdirectory pattern', 'app/p.tsx', 'parts/*.tsx', undefined, false],
+    ['a bare base joined as relative', 'p.tsx', './*.ts', 'src', true],
+    ['an unknown alias', 'app/p.tsx', '~other/*.ts', undefined, false],
+    ['an exclusion', 'app/p.tsx', '!/src/**', undefined, false],
+  ] as const)('%s', (_label, file, pattern, base, reaches) => {
+    expect(globReachesKernel(file, pattern, base)).toBe(reaches);
+  });
+
+  it('resolves a page at the project root', () => {
+    expect(kernelTarget('page.tsx', './src/a.ts')).toBe('src/a.ts');
+  });
+});
+
+describe('scanPageSource edge cases', () => {
+  it('reports a page whose emitted code the lexer cannot classify', async () => {
+    expect(await scanPageSource(PAGE, "const x = require('./a.ts');\nvoid x;")).toBe('unreadable');
+  });
+
+  it('reports on line 1 when JSX text also mentions the glob', async () => {
+    const source =
+      "const s = import.meta.glob('/src/**/*.ts');\nexport default () => <p>import.meta.glob(x)</p>;";
+    expect(await scanPageSource(PAGE, source)).toEqual([
+      { path: PAGE, line: 1, specifier: '/src/**/*.ts', reason: 'glob' },
+    ]);
   });
 });
 
