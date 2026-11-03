@@ -6,7 +6,9 @@
   "scripts": {
     "check": "tsc -p tsconfig.json --noEmit",
     "smoke": "tsx smoke.ts",
-    "start": "tsx main.ts"
+    "start": "tsx main.ts",
+    "test": "tsx --test --test-force-exit '**/!(*.e2e).test.ts'",
+    "test:e2e": "tsx --test --test-force-exit '**/*.e2e.test.ts'"
   },
   "dependencies": {
     "@setu-ts/common": "workspace:^",
@@ -29,6 +31,18 @@
     "@opentelemetry/context-async-hooks": "^2.0.0",
     "@opentelemetry/exporter-trace-otlp-http": "^0.220.0",
     "@opentelemetry/resources": "^2.9.0",
-    "@opentelemetry/sdk-trace-base": "^2.9.0"
+    "@opentelemetry/sdk-trace-base": "^2.9.0",
+    "@setu-ts/config-plugin": "workspace:^",
+    "@setu-ts/logger-plugin": "workspace:^",
+    "@setu-ts/validation-plugin": "workspace:^",
+    "@setu-ts/http-security-plugin": "workspace:^",
+    "@setu-ts/health-plugin": "workspace:^",
+    "@setu-ts/metrics-plugin": "workspace:^",
+    "@setu-ts/openapi-plugin": "workspace:^",
+    "pino": "10.x",
+    "swagger-ui-dist": "5.33.3"
+  },
+  "devDependencies": {
+    "@setu-ts/testing": "workspace:^"
   }
 }

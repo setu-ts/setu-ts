@@ -6,11 +6,16 @@ import {
   toUIMessageStream,
 } from 'ai';
 import { z } from 'zod';
-import type { HandlerResult, IRequestContext, IRouterApi } from '@setu-ts/common';
+import type { HandlerResult, IRequestContext, IRouterApi, IServiceRegistry } from '@setu-ts/common';
 import { QuotaExceededError, respondQuotaExceeded } from '@setu-ts/auth-plugin';
-import type { IQuota } from '@setu-ts/auth-plugin';
+import { validateBody } from '@setu-ts/validation-plugin';
+import { CHAT_MODELS } from '../../plugins/chat-models.plugin.ts';
+import type { IChatModelsService } from '../../plugins/chat-models.plugin.ts';
 import { budgetedModel } from './chat.budget.ts';
-import type { PricedModel } from './chat.budget.ts';
+import { ChatBody } from './chat.schemas.ts';
+import { chatQuota } from './chat.service.ts';
+
+const chatBody = validateBody(ChatBody);
 
 const identitySchema = z.object({ tenantId: z.string(), principalId: z.string().optional() });
 
@@ -43,20 +48,17 @@ async function quotaRefusal(ctx: IRequestContext, next: () => Promise<void>): Pr
   }
 }
 
-/** Registers a UI-message streaming route over individually budgeted fallback models. @returns Nothing */
-export function registerChatRoutes(
-  router: IRouterApi,
-  models: readonly PricedModel[],
-  quota: (ctx: IRequestContext) => IQuota,
-): void {
+/** Registers the chat feature routes: UI-message streaming over individually budgeted fallback models. */
+export function registerChatRoutes(router: IRouterApi, services?: IServiceRegistry): void {
+  void services;
+  const quota = chatQuota();
   router.post('/chat', {
-    middleware: [quotaRefusal],
+    middleware: [quotaRefusal, chatBody],
     handler: async (ctx) => {
-      const { prompt } = z
-        .object({ prompt: z.string().min(1).max(10_000) })
-        .parse(await ctx.request.json());
+      const { prompt } = chatBody.value(ctx);
       const tenantId = ctx.request.tenant?.id;
       if (!tenantId) throw new TypeError('A server-resolved tenant is required');
+      const { models } = ctx.services.get<IChatModelsService>(CHAT_MODELS);
       const { model, ready } = budgetedModel(ctx, models, quota(ctx));
       const result = streamText({
         model,

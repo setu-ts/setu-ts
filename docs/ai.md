@@ -22,9 +22,14 @@ wrapper's return type to consume that type without a separate provider dependenc
 
 ## Stream a UI response
 
-The compiled controller excerpt imports the runnable example's budget helper. When copying the
-feature into an application, keep the chat module files together and use the sibling
-`./chat.budget.ts` import. The module owns one quota lazily per application.
+This is the example's whole controller, compiled as written; its imports point at the example's
+files. In an application it is `src/modules/chat/chat.controller.ts`, created by
+`setu generate module chat`, with `registerChatRoutes(router, services?)` kept as generated. The
+models come from the `CHAT_MODELS` capability of a plugin made with
+`setu generate plugin chat-models`, which reads the provider settings from the environment, and the
+module owns one quota per application (`chat.service.ts`). Nothing passes through the CLI-owned
+module indexes, so `setu generate` and `setu sync` can rewrite them safely. Tests replace the models
+with `overrideCapability(CHAT_MODELS, …)` from `@setu-ts/testing`.
 
 ```typescript
 import {
@@ -35,11 +40,16 @@ import {
   toUIMessageStream,
 } from 'ai';
 import { z } from 'zod';
-import type { HandlerResult, IRequestContext, IRouterApi } from '@setu-ts/common';
+import type { HandlerResult, IRequestContext, IRouterApi, IServiceRegistry } from '@setu-ts/common';
 import { QuotaExceededError, respondQuotaExceeded } from '@setu-ts/auth-plugin';
-import type { IQuota } from '@setu-ts/auth-plugin';
+import { validateBody } from '@setu-ts/validation-plugin';
+import { CHAT_MODELS } from '../../apps/ai-chat/src/plugins/chat-models.plugin.ts';
+import type { IChatModelsService } from '../../apps/ai-chat/src/plugins/chat-models.plugin.ts';
 import { budgetedModel } from '../../apps/ai-chat/src/modules/chat/chat.budget.ts';
-import type { PricedModel } from '../../apps/ai-chat/src/modules/chat/chat.budget.ts';
+import { ChatBody } from '../../apps/ai-chat/src/modules/chat/chat.schemas.ts';
+import { chatQuota } from '../../apps/ai-chat/src/modules/chat/chat.service.ts';
+
+const chatBody = validateBody(ChatBody);
 
 const identitySchema = z.object({ tenantId: z.string(), principalId: z.string().optional() });
 
@@ -72,20 +82,17 @@ async function quotaRefusal(ctx: IRequestContext, next: () => Promise<void>): Pr
   }
 }
 
-/** Registers a UI-message streaming route over individually budgeted fallback models. @returns Nothing */
-export function registerChatRoutes(
-  router: IRouterApi,
-  models: readonly PricedModel[],
-  quota: (ctx: IRequestContext) => IQuota,
-): void {
+/** Registers the chat feature routes: UI-message streaming over individually budgeted fallback models. */
+export function registerChatRoutes(router: IRouterApi, services?: IServiceRegistry): void {
+  void services;
+  const quota = chatQuota();
   router.post('/chat', {
-    middleware: [quotaRefusal],
+    middleware: [quotaRefusal, chatBody],
     handler: async (ctx) => {
-      const { prompt } = z
-        .object({ prompt: z.string().min(1).max(10_000) })
-        .parse(await ctx.request.json());
+      const { prompt } = chatBody.value(ctx);
       const tenantId = ctx.request.tenant?.id;
       if (!tenantId) throw new TypeError('A server-resolved tenant is required');
+      const { models } = ctx.services.get<IChatModelsService>(CHAT_MODELS);
       const { model, ready } = budgetedModel(ctx, models, quota(ctx));
       const result = streamText({
         model,
@@ -115,7 +122,9 @@ export function registerChatRoutes(
       await Promise.race([ready, failed]);
       return sendUIResponse(
         ctx,
-        createUIMessageStreamResponse({ stream: toUIMessageStream({ stream: result.stream, tools }) }),
+        createUIMessageStreamResponse({
+          stream: toUIMessageStream({ stream: result.stream, tools }),
+        }),
       );
     },
   });

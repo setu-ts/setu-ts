@@ -18,18 +18,23 @@ import {
 } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { OpenTelemetry } from '@ai-sdk/otel';
-import { createChatModels } from './src/modules/chat/chat.models.ts';
 import { createFallback } from 'ai-fallback';
 import { trace, context } from '@opentelemetry/api';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IMessageBroker, ITelemetryService, OutboxRecord } from '@setu-ts/common';
 import { createQuota, MemoryQuotaStore, QuotaExceededError } from '@setu-ts/auth-plugin';
 import { createRuntimeServices } from '@setu-ts/runtime';
+import { createTestApp, overrideCapability } from '@setu-ts/testing';
 import type { IDatabaseService } from '@setu-ts/database-plugin';
 import type { IOutbox } from '@setu-ts/messaging-plugin';
+import { TelemetryPlugin } from '@setu-ts/telemetry-plugin';
+import type { TelemetryPluginOptions } from '@setu-ts/telemetry-plugin';
 import { createApp } from './setu.config.ts';
 import { tenantTool } from './src/modules/chat/chat.controller.ts';
 import { budgetMiddleware } from './src/modules/chat/chat.budget.ts';
+import type { PricedModel } from './src/modules/chat/chat.budget.ts';
+import { CHAT_MODELS } from './src/plugins/chat-models.plugin.ts';
+import type { IChatModelsService } from './src/plugins/chat-models.plugin.ts';
 import { usageRecorded, writeUsage } from './src/modules/chat/chat.usage.ts';
 import type { UsageRecord } from './src/modules/chat/chat.usage.ts';
 
@@ -86,6 +91,23 @@ async function waitFor(check: () => Promise<boolean>): Promise<void> {
   assert.fail('Timed out waiting for observable state');
 }
 
+/**
+ * The application exactly as `setu.config.ts` composes it, with the generated chat-models
+ * capability replaced by test models (and, for item 5, a telemetry plugin aimed at the local
+ * receiver), not started.
+ */
+function appWith(models: readonly PricedModel[], telemetry?: TelemetryPluginOptions) {
+  return createTestApp({
+    app: createApp(),
+    ...(telemetry === undefined ? {} : { without: ['telemetry-plugin'] }),
+    overrides: [
+      overrideCapability(CHAT_MODELS, { models } satisfies IChatModelsService),
+      ...(telemetry === undefined ? [] : [TelemetryPlugin(telemetry)]),
+    ],
+    autoStart: false,
+  });
+}
+
 describe('AI SDK recipes through Setu (Node)', () => {
   it('1a/6: caps the tool loop and reads tenant identity from toolsContext, ignoring model input', async () => {
     const model = new MockLanguageModelV4({
@@ -116,7 +138,7 @@ describe('AI SDK recipes through Setu (Node)', () => {
   });
 
   it('2: the UI stream has SSE framing and is read by the SDK parser and message reader', async () => {
-    const app = createApp([{ model: mock(), prices }]);
+    const app = await appWith([{ model: mock(), prices }]);
     await app.start();
     try {
       const response = await app.fetch(chatRequest());
@@ -173,7 +195,7 @@ describe('AI SDK recipes through Setu (Node)', () => {
         }),
       }),
     });
-    const app = createApp([{ model, prices }]);
+    const app = await appWith([{ model, prices }]);
     await app.start();
     try {
       const abort = new AbortController();
@@ -227,7 +249,7 @@ describe('AI SDK recipes through Setu (Node)', () => {
         return mock().doStream({ prompt: [] });
       },
     });
-    const app = createApp([{ model, prices }]);
+    const app = await appWith([{ model, prices }]);
     await app.start();
     let timer: ReturnType<typeof runtime.setTimeout> | undefined;
     try {
@@ -273,7 +295,7 @@ describe('AI SDK recipes through Setu (Node)', () => {
   });
 
   it('4: reads usage back once after a redelivered outbox envelope', async () => {
-    const app = createApp([{ model: mock(), prices }]);
+    const app = await appWith([{ model: mock(), prices }]);
     await app.start();
     try {
       await (await app.fetch(chatRequest())).text();
@@ -323,7 +345,7 @@ describe('AI SDK recipes through Setu (Node)', () => {
     const address = receiver.address();
     assert.ok(address && typeof address === 'object');
     registerTelemetry(new OpenTelemetry({ tracer: trace.getTracer('gen_ai') }));
-    const app = createApp([{ model: mock(), prices }], {
+    const app = await appWith([{ model: mock(), prices }], {
       serviceName: 'ai-smoke',
       exporter: 'otlp',
       endpoint: `http://127.0.0.1:${address.port}/v1/traces`,
@@ -380,7 +402,7 @@ describe('AI SDK recipes through Setu (Node)', () => {
       },
     });
     const second = mock();
-    const app = createApp([{ model: second, prices }]);
+    const app = await appWith([{ model: second, prices }]);
     await app.start();
     try {
       app.router.get('/fallback-proof', {
@@ -424,7 +446,7 @@ describe('AI SDK recipes through Setu (Node)', () => {
 
   it('initial route quota refusal is a 429 before streaming and never calls the provider', async () => {
     const model = mock();
-    const app = createApp([{ model, prices: { ...prices, inputPrice: 1_000_000 } }]);
+    const app = await appWith([{ model, prices: { ...prices, inputPrice: 1_000_000 } }]);
     await app.start();
     try {
       const response = await app.fetch(chatRequest());
@@ -463,7 +485,7 @@ describe('AI SDK recipes through Setu (Node)', () => {
       stores.add(this);
       return reserve.apply(this, args);
     };
-    const app = createApp([
+    const app = await appWith([
       { model: first, prices },
       { model: second, prices },
     ]);
@@ -507,7 +529,7 @@ describe('AI SDK recipes through Setu (Node)', () => {
         throw new Error('unreached');
       },
     });
-    const app = createApp([{ model, prices }]);
+    const app = await appWith([{ model, prices }]);
     await app.start();
     try {
       const outcome = await Promise.race([
@@ -542,7 +564,7 @@ describe('AI SDK recipes through Setu (Node)', () => {
         return (await mock().doStream({ prompt: [] })) as Awaited<ReturnType<Model['doStream']>>;
       },
     });
-    const app = createApp([{ model: flaky, prices }]);
+    const app = await appWith([{ model: flaky, prices }]);
     await app.start();
     try {
       const response = await app.fetch(chatRequest());
@@ -561,8 +583,8 @@ describe('AI SDK recipes through Setu (Node)', () => {
   it('shares one lazy quota within an app and isolates quotas across createApp calls', async () => {
     const model = mock({ ...usage, inputTokens: { ...usage.inputTokens, total: undefined } });
     const models = [{ model, prices: { ...prices, perMessage: 640_000 } }];
-    const first = createApp(models);
-    const second = createApp(models);
+    const first = await appWith(models);
+    const second = await appWith(models);
     await first.start();
     await second.start();
     try {
@@ -582,7 +604,7 @@ describe('AI SDK recipes through Setu (Node)', () => {
   });
 
   it('budget middleware refunds known usage, releases early failures and fully charges unknown, aborted and failed streams', async () => {
-    const app = createApp([{ model: mock(), prices }]);
+    const app = await appWith([{ model: mock(), prices }]);
     app.router.get('/accounting', {
       handler: async (ctx) => {
         const params = {
@@ -814,8 +836,8 @@ describe('AI SDK recipes through Setu (Node)', () => {
     '8: real OpenAI-compatible endpoint',
     { skip: !runtime.env['AI_COMPAT_BASE_URL'] },
     async () => {
-      const { models, telemetry } = createChatModels(runtime.env);
-      const app = createApp(models, telemetry);
+      // The generated ChatModelsPlugin reads AI_COMPAT_* from the environment.
+      const app = createApp();
       await app.start();
       try {
         const response = await app.fetch(

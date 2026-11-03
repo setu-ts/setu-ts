@@ -271,21 +271,39 @@ importers:
       '@setu-ts/common':
         specifier: workspace:^
         version: link:../../packages/common
+      '@setu-ts/config-plugin':
+        specifier: workspace:^
+        version: link:../../packages/config-plugin
       '@setu-ts/database-plugin':
         specifier: workspace:^
         version: link:../../packages/database-plugin
       '@setu-ts/exceptions':
         specifier: workspace:^
         version: link:../../packages/exceptions
+      '@setu-ts/health-plugin':
+        specifier: workspace:^
+        version: link:../../packages/health-plugin
+      '@setu-ts/http-security-plugin':
+        specifier: workspace:^
+        version: link:../../packages/http-security-plugin
       '@setu-ts/kernel':
         specifier: workspace:^
         version: link:../../packages/kernel
+      '@setu-ts/logger-plugin':
+        specifier: workspace:^
+        version: link:../../packages/logger-plugin
       '@setu-ts/messaging-plugin':
         specifier: workspace:^
         version: link:../../packages/messaging-plugin
+      '@setu-ts/metrics-plugin':
+        specifier: workspace:^
+        version: link:../../packages/metrics-plugin
       '@setu-ts/multi-tenancy-plugin':
         specifier: workspace:^
         version: link:../../packages/multi-tenancy-plugin
+      '@setu-ts/openapi-plugin':
+        specifier: workspace:^
+        version: link:../../packages/openapi-plugin
       '@setu-ts/runtime':
         specifier: workspace:^
         version: link:../../packages/runtime
@@ -295,18 +313,31 @@ importers:
       '@setu-ts/telemetry-plugin':
         specifier: workspace:^
         version: link:../../packages/telemetry-plugin
+      '@setu-ts/validation-plugin':
+        specifier: workspace:^
+        version: link:../../packages/validation-plugin
       ai:
         specifier: 7.0.159
         version: 7.0.159(zod@4.6.7)
       ai-fallback:
         specifier: 3.0.0
         version: 3.0.0(@ai-sdk/provider-utils@5.0.72(zod@4.6.7))(@ai-sdk/provider@4.0.35)
+      pino:
+        specifier: 10.x
+        version: 10.4.0
+      swagger-ui-dist:
+        specifier: 5.33.3
+        version: 5.33.3
       tsx:
         specifier: ^4.20.6
         version: 4.23.15
       zod:
         specifier: ^4.6.6
         version: 4.6.7
+    devDependencies:
+      '@setu-ts/testing':
+        specifier: workspace:^
+        version: link:../../packages/testing
 
   apps/cloudflare:
     dependencies:
@@ -6078,6 +6109,9 @@ packages:
   stubs@3.0.0:
     resolution: {integrity: sha512-PdHt7hHUJKxvTCgbKX9C1V/ftOcjJQgz8BZwNfV5c4B6dcGqlpelTbJ999jBGZ2jYiPAwcX5dP6oBwVlBlUbxw==}
 
+  swagger-ui-dist@5.33.3:
+    resolution: {integrity: sha512-7xJKxAjf+/ajlW/V/dMfbiY+NC5BWtbvzzdI/AsX5UzMtOMudmFz/tjuKN0jN7QVe5drKKnx01CdYEJvTFvQlw==}
+
   swagger-ui-dist@5.34.0:
     resolution: {integrity: sha512-H6tAIjr3XqE31PbkZl0OFya1ziRLDfTwh3J6OHdumPtPCLfjTnyLeagl/55kFNZcTOz9a9QI9WP0FXldwiGJag==}
 
@@ -10040,6 +10074,10 @@ snapshots:
       anynum: 1.0.1
 
   stubs@3.0.0: {}
+
+  swagger-ui-dist@5.33.3:
+    dependencies:
+      '@scarf/scarf': 1.4.0
 
   swagger-ui-dist@5.34.0:
     dependencies:
