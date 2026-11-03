@@ -133,6 +133,8 @@ export async function diagnoseProject(
   const modules = await scanModules(fs, dir, mode);
   const layout = await projectLayout(fs, dir, modules);
   const specs = scanSeamSpecs(installed);
+  // M130: a full-stack module's request-bound service registers from its index.
+  const moduleScanOptions = { moduleServices: installed.has('react-router-plugin') };
   const duplicates: Finding[] = [];
   // Two files of one family with one base name would bind one symbol twice. The
   // scan refuses rather than alias them; the diagnosis reports it as E016 and
@@ -150,7 +152,7 @@ export async function diagnoseProject(
   const scan = await guarded(() =>
     options?.module === undefined
       ? scanArtifacts(scanFs, dir, specs)
-      : scanModuleArtifacts(scanFs, dir, options.module, mode),
+      : scanModuleArtifacts(scanFs, dir, options.module, mode, moduleScanOptions),
   );
   const findings: Finding[] = [
     ...modules.rejected.map((path) => ({ kind: 'module-rejected' as const, path })),
@@ -259,7 +261,9 @@ export async function diagnoseProject(
             outcome: code === undefined ? 'unclassifiable' : 'unwired',
           });
     }
-    const internal = await guarded(() => scanModuleArtifacts(scanFs, dir, module, mode));
+    const internal = await guarded(() =>
+      scanModuleArtifacts(scanFs, dir, module, mode, moduleScanOptions),
+    );
     if (options?.module === undefined) {
       addScan(internal);
       for (const issue of internal.unreadable)
