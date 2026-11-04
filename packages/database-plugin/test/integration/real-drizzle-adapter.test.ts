@@ -1554,8 +1554,7 @@ describe('M119e live PostgreSQL tenant and pool contract', () => {
   );
 
   it('reports a real idle-client termination once and survives', { skip: skipLivePg }, async () => {
-    const { attachPoolErrorListener } =
-      await import('../../src/adapters/drizzle/pool-error-listener.ts');
+    const { attachPoolErrorListener } = await import('@setu-ts/common');
     const pool = new Pool({ connectionString: livePgUrl!, max: 1, idleTimeoutMillis: 0 });
     const control = new Pool({ connectionString: livePgUrl! });
     const db = nodePostgresDrizzle(pool);

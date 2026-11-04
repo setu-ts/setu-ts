@@ -82,6 +82,56 @@ const TABLE: ReadonlyArray<readonly [label: string, shape: unknown, expected: Ou
     err('Error', "Socket timeout timeout. Expecting data, but didn't receive any in 300ms."),
     O,
   ],
+  // node-postgres (M135 audit F2, the messages database-plugin's classifier
+  // measured in M128): a lost or timed-out connection.
+  ['pg: connection lost mid-statement', err('Error', 'Connection terminated unexpectedly'), O],
+  ['pg: query read timeout', err('Error', 'Query read timeout'), O],
+  ['pg: pool connect timeout', err('Error', 'timeout exceeded when trying to connect'), U],
+  [
+    'pg: new connection timeout',
+    err('Error', 'Connection terminated due to connection timeout'),
+    U,
+  ],
+  // undici, as `fetch` wraps it (M135 audit F2): `TypeError: fetch failed` with
+  // the socket error as cause.
+  [
+    'undici: other side closed',
+    err('TypeError', 'fetch failed', {
+      cause: err('SocketError', 'other side closed', { code: 'UND_ERR_SOCKET' }),
+    }),
+    O,
+  ],
+  [
+    'undici: headers timeout',
+    err('TypeError', 'fetch failed', {
+      cause: err('HeadersTimeoutError', 'Headers Timeout Error', {
+        code: 'UND_ERR_HEADERS_TIMEOUT',
+      }),
+    }),
+    O,
+  ],
+  [
+    'undici: body timeout',
+    err('BodyTimeoutError', 'Body Timeout Error', { code: 'UND_ERR_BODY_TIMEOUT' }),
+    O,
+  ],
+  [
+    'undici: connect timeout',
+    err('TypeError', 'fetch failed', {
+      cause: err('ConnectTimeoutError', 'Connect Timeout Error', {
+        code: 'UND_ERR_CONNECT_TIMEOUT',
+      }),
+    }),
+    U,
+  ],
+  ['qdrant client timeout', err('QdrantClientTimeoutError', 'This operation was aborted'), O],
+  [
+    'pg connect timeout as measured (wrapping a termination)',
+    err('Error', 'Connection terminated due to connection timeout', {
+      cause: err('Error', 'Connection terminated unexpectedly'),
+    }),
+    U,
+  ],
   // Pass-through — unrecognised.
   ['a programming error', err('Error', 'Cannot read properties of undefined'), 'pass'],
   [

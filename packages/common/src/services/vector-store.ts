@@ -12,6 +12,7 @@
  */
 import type { IRequestContext } from '../http.ts';
 import type { IRuntimeServices } from '../runtime.ts';
+import type { ILogger } from './logger.ts';
 
 /**
  * The type a filterable metadata field is declared with.
@@ -224,9 +225,11 @@ export interface IVectorStoreAdapter {
    * Called once at registration, before any other method.
    *
    * @param runtime - Runtime services, e.g. `subtle` for id hashing
+   * @param logger - The application's logger when one is registered, for
+   *   faults the adapter reports outside a call (a dropped pooled connection)
    * @returns Once ready
    */
-  open(runtime: IRuntimeServices): Promise<void>;
+  open(runtime: IRuntimeServices, logger?: ILogger): Promise<void>;
   /**
    * Creates the collection or verifies an existing one, at registration.
    *

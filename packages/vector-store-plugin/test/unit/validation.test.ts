@@ -142,6 +142,58 @@ describe('validateFilter', () => {
     const inherited = Object.create({ field: 'tag', op: 'eq', value: 'x' }) as object;
     expect(() => validateFilter(inherited, FIELDS)).toThrow("exactly 'field', 'op' and 'value'");
   });
+
+  it('validates the same in-list it returns, read once (audit F6)', () => {
+    let reads = 0;
+    const shifting = new Proxy(['a'], {
+      get(target, key, receiver) {
+        // A second pass over the list sees an over-long value.
+        if (key === '0' && reads++ > 0) return 'x'.repeat(5000);
+        return Reflect.get(target, key, receiver) as unknown;
+      },
+    });
+    const out = validateFilter({ field: 'tag', op: 'in', value: shifting }, FIELDS) as {
+      value: readonly string[];
+    };
+    expect(out.value).toEqual(['a']);
+  });
+
+  it('bounds caller names quoted in refusals and survives a throwing toString (audit F7)', () => {
+    const long = 'f'.repeat(10_000);
+    let message = '';
+    try {
+      validateFilter({ field: long, op: 'eq', value: 'x' }, FIELDS);
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message).toContain('is not declared filterable');
+    expect(message.length).toBeLessThan(200);
+    const hostile = {
+      toString(): string {
+        throw new Error('boom');
+      },
+    };
+    expect(() => validateFilter({ field: hostile, op: 'eq', value: 'x' }, FIELDS)).toThrow(
+      VectorFilterError,
+    );
+    expect(() => validateFilter({ field: null, op: 'eq', value: 'x' }, FIELDS)).toThrow(
+      "filter field '<null>' is not declared",
+    );
+    expect(() => validateFilter({ field: 7, op: 'eq', value: 'x' }, FIELDS)).toThrow(
+      "filter field '<number>' is not declared",
+    );
+    expect(() => validateFilter({ field: 'tag', op: hostile, value: 'x' }, FIELDS)).toThrow(
+      VectorFilterError,
+    );
+    let recordMessage = '';
+    try {
+      validateRecords([{ id: 'r', vector: [1, 0, 0], metadata: { [long]: 'x' } }], 3, FIELDS);
+    } catch (error) {
+      recordMessage = (error as Error).message;
+    }
+    expect(recordMessage).toContain('is not declared filterable');
+    expect(recordMessage.length).toBeLessThan(200);
+  });
 });
 
 describe('record validation', () => {
@@ -245,14 +297,17 @@ describe('record validation', () => {
     [[-3.5e38, 0, 0], 'float32'],
     // Non-zero as a double, all zeros once rounded to float32.
     [[1e-46, 0, 0], 'all zeros'],
+    // The squared norm, accumulated in float32 as the backends do (audit F5).
+    [[1e30, 0, 0], 'float32 norm'],
+    [[1e-30, 0, 0], 'all zeros'],
   ])('refuses vector %j', (vector, message) => {
     expect(() => validateVector(vector, 3)).toThrow(VectorDimensionError);
     expect(() => validateVector(vector, 3)).toThrow(message);
   });
 
-  it('accepts the float32 extremes', () => {
-    expect(validateVector([3.4028234663852886e38, 0, 0], 3)).toEqual([3.4028234663852886e38, 0, 0]);
-    expect(validateVector([1.5e-45, 0, 0], 3)).toEqual([1.5e-45, 0, 0]);
+  it('accepts the largest and smallest vectors whose float32 norm is finite and non-zero', () => {
+    expect(validateVector([1e19, 0, 0], 3)).toEqual([1e19, 0, 0]);
+    expect(validateVector([1e-19, 0, 0], 3)).toEqual([1e-19, 0, 0]);
   });
 
   it('validates scopes and id lists', () => {

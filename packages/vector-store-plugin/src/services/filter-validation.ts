@@ -15,6 +15,7 @@ import {
   MAX_IN_VALUES,
   MAX_STRING_VALUE_BYTES,
   isBoundedString,
+  shownName,
 } from './limits.ts';
 
 const RANGE_OPS: ReadonlySet<string> = new Set(['gt', 'gte', 'lt', 'lte']);
@@ -85,7 +86,7 @@ function validateComparison(
   const { field, op, value } = record;
   if (typeof field !== 'string' || !fields.has(field)) {
     throw new VectorFilterError(
-      `filter field '${String(field)}' is not declared filterable for this collection`,
+      `filter field '${shownName(field)}' is not declared filterable for this collection`,
     );
   }
   const type = fields.get(field)!;
@@ -97,16 +98,19 @@ function validateComparison(
     if (type === 'boolean') {
       throw new VectorFilterError(`filter field '${field}' is boolean; use 'eq', not 'in'`);
     }
-    if (!Array.isArray(value) || value.length === 0 || value.length > MAX_IN_VALUES) {
+    // Copied once and the copy validated, so what is checked is what is returned.
+    const values: unknown[] | undefined =
+      Array.isArray(value) && value.length <= MAX_IN_VALUES ? [...(value as unknown[])] : undefined;
+    if (values === undefined || values.length === 0 || values.length > MAX_IN_VALUES) {
       throw new VectorFilterError(
         `filter field '${field}' 'in' takes 1 to ${MAX_IN_VALUES} values`,
       );
     }
-    for (const entry of value as unknown[]) assertValue(field, op, entry, type);
+    for (const entry of values) assertValue(field, op, entry, type);
     return Object.freeze({
       field,
       op,
-      value: Object.freeze([...(value as (string | number)[])]),
+      value: Object.freeze(values as (string | number)[]),
     });
   }
   if (typeof op === 'string' && RANGE_OPS.has(op)) {
@@ -118,7 +122,9 @@ function validateComparison(
     assertValue(field, op, value, type);
     return Object.freeze({ field, op: op as 'gt' | 'gte' | 'lt' | 'lte', value: value as number });
   }
-  throw new VectorFilterError(`filter field '${field}' uses unsupported operator '${String(op)}'`);
+  throw new VectorFilterError(
+    `filter field '${field}' uses unsupported operator '${shownName(op)}'`,
+  );
 }
 
 function assertValue(field: string, op: string, value: unknown, type: VectorFieldType): void {

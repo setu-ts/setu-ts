@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { EventEmitter } from 'node:events';
-import { describeError } from '@setu-ts/common';
-import { attachPoolErrorListener } from '../../src/adapters/drizzle/pool-error-listener.ts';
+import { describeError } from '../../src/errors/describe-error.ts';
+import { attachPoolErrorListener } from '../../src/pool-error-listener.ts';
 
 describe('attachPoolErrorListener', () => {
   it('attaches once and reports an idle error without throwing', () => {

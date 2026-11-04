@@ -38,6 +38,7 @@ export { causeMessage, serializeError } from './errors/serialize-error.ts';
 export type { SerializedError } from './errors/serialize-error.ts';
 // One bounded diagnostic line for string-only log sinks (M119g)
 export { describeError } from './errors/describe-error.ts';
+export { attachPoolErrorListener } from './pool-error-listener.ts';
 export { dispatchRealtimeFrame } from './realtime/dispatch.ts';
 export { createRealtimeHandlerErrorReporter } from './realtime/handler-errors.ts';
 export type {

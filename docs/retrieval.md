@@ -214,7 +214,12 @@ import { Pool } from 'pg';
 import { PgVectorStore, VectorStorePlugin } from '@setu-ts/vector-store-plugin';
 import type { PgVectorDatabase } from '@setu-ts/vector-store-plugin';
 
-const pool = new Pool({ connectionString: 'postgres://postgres:postgres@localhost:5432/postgres' });
+// Bounds: a hung database answers 503/504 instead of holding the request.
+const pool = new Pool({
+  connectionString: 'postgres://postgres:postgres@localhost:5432/postgres',
+  connectionTimeoutMillis: 5_000,
+  query_timeout: 15_000,
+});
 
 export const plugin = VectorStorePlugin({
   adapter: new PgVectorStore({
@@ -250,7 +255,8 @@ export default {
 
 `QdrantVectorStore` takes the application's official client and never imports it. The client is
 checked structurally at construction for `collectionExists`, `getCollection`, `createCollection`,
-`createPayloadIndex`, `upsert`, `query` and `delete`.
+`createPayloadIndex`, `upsert`, `query` and `delete`. Build it with a `timeout` in milliseconds
+(`new QdrantClient({ url, timeout: 15_000 })`); without one a hung server holds the request.
 
 ```typescript
 import { QdrantVectorStore, VectorStorePlugin } from '@setu-ts/vector-store-plugin';
@@ -380,6 +386,11 @@ pgvector and Qdrant when those URLs are set.
 
 ## Operational notes
 
+- Bound every backend call: the adapters set no timeouts of their own. node-postgres
+  `connectionTimeoutMillis` and `query_timeout` answer `503` before a statement is sent and `504`
+  after; `QdrantClient`'s `timeout` answers `504`.
+- The pgvector adapter gives the pool an `'error'` listener at startup, so a dropped connection is
+  reported through the application's logger instead of exiting the process.
 - A failed registration fails startup. That includes an unreachable backend, a missing extension, a
   dimension mismatch and a refused declaration.
 - The pgvector and Qdrant adapters classify transport failures: an unreachable backend answers 503,

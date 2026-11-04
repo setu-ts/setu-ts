@@ -55,7 +55,30 @@ export function utf8Bytes(value: string): number {
  * @returns True when it qualifies
  */
 export function isBoundedString(value: unknown, max: number): value is string {
+  // A string is never fewer UTF-8 bytes than UTF-16 code units, so an
+  // over-long one is refused before it is encoded.
   return (
-    typeof value === 'string' && value.length > 0 && value.isWellFormed() && utf8Bytes(value) <= max
+    typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= max &&
+    value.isWellFormed() &&
+    utf8Bytes(value) <= max
   );
+}
+
+/** Code units of a caller-supplied name quoted in a refusal (the log carries the message). */
+const MAX_SHOWN_NAME = 64;
+
+/**
+ * A caller-supplied name as a refusal may quote it: a string cut to 64 code
+ * units and made well-formed, or `<type>` for anything else, so a hostile
+ * value can neither flood the log nor throw from its own `toString`.
+ *
+ * @param value - The caller's field name, operator, key or collection
+ * @returns Text safe to interpolate into an error message
+ */
+export function shownName(value: unknown): string {
+  if (typeof value !== 'string') return `<${value === null ? 'null' : typeof value}>`;
+  const cut = value.length > MAX_SHOWN_NAME ? `${value.slice(0, MAX_SHOWN_NAME)}…` : value;
+  return cut.toWellFormed();
 }

@@ -87,6 +87,34 @@ async function opened(respond: Responder = healthy(), ensure?: 'create' | 'verif
 }
 
 describe('PgVectorStore', () => {
+  it('gives the app-owned pool an error listener at open, reporting through the logger (audit F1)', async () => {
+    const { EventEmitter } = await import('node:events');
+    const pool = new EventEmitter();
+    const recording = recordingDb(healthy());
+    const warnings: unknown[] = [];
+    const logger = { warn: (message: string) => warnings.push(message) };
+    const store = new PgVectorStore({ db: Object.assign(recording.db, { $client: pool }) });
+    await store.open(undefined, logger as never);
+    // An idle connection drop no longer reaches the process as an unhandled 'error'.
+    expect(() => pool.emit('error', new Error('Connection terminated unexpectedly'))).not.toThrow();
+    // A client checked out for a transaction gets its own listener.
+    const client = new EventEmitter();
+    pool.emit('acquire', client);
+    expect(() =>
+      client.emit('error', new Error('Connection terminated unexpectedly')),
+    ).not.toThrow();
+    expect(warnings).toEqual([
+      'Database pool reported an idle-connection error',
+      'Database pool reported a checked-out-connection error',
+    ]);
+    // Without a logger the listener still keeps the process alive.
+    const quiet = new EventEmitter();
+    await new PgVectorStore({
+      db: Object.assign(recordingDb(healthy()).db, { $client: quiet }),
+    }).open();
+    expect(() => quiet.emit('error', new Error('x'))).not.toThrow();
+  });
+
   it('refuses a db without execute and transaction, and a bad ensure mode', () => {
     expect(() => new PgVectorStore({ db: {} as never })).toThrow('execute() and transaction()');
     expect(() => new PgVectorStore(undefined as never)).toThrow('execute() and transaction()');

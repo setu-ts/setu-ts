@@ -86,7 +86,9 @@ interface QdrantPoint {
  * @example
  * ```typescript
  * VectorStorePlugin({
- *   adapter: new QdrantVectorStore({ client: new QdrantClient({ url: env.QDRANT_URL }) }),
+ *   adapter: new QdrantVectorStore({
+ *     client: new QdrantClient({ url: env.QDRANT_URL, timeout: 15_000 }),
+ *   }),
  *   collections: [{ name: 'documents', dimensions: 1024, filterable: { tag: 'string' } }],
  * });
  * ```

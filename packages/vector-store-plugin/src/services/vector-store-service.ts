@@ -20,7 +20,7 @@ import type {
 } from '@setu-ts/common';
 import type { ResolvedCollection } from './collection-spec.ts';
 import { validateFilter } from './filter-validation.ts';
-import { MAX_TOP_K } from './limits.ts';
+import { MAX_TOP_K, shownName } from './limits.ts';
 import {
   validateId,
   validateIds,
@@ -148,7 +148,7 @@ export class VectorStoreService implements IVectorStore {
 
   #collection(name: string): ResolvedCollection {
     const resolved = typeof name === 'string' ? this.#collections.get(name) : undefined;
-    if (resolved === undefined) throw new VectorCollectionUnknownError(String(name));
+    if (resolved === undefined) throw new VectorCollectionUnknownError(shownName(name));
     return resolved;
   }
 }

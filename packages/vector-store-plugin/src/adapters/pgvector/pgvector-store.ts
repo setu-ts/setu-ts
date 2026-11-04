@@ -7,12 +7,15 @@
  * @module
  */
 import {
+  attachPoolErrorListener,
   OptionalDependencyUnavailableError,
   VectorCollectionMismatchError,
   VectorOperationUnsupportedError,
   toBackendFault,
 } from '@setu-ts/common';
 import type {
+  ILogger,
+  IRuntimeServices,
   IVectorStoreAdapter,
   VectorCollectionSpec,
   VectorMatch,
@@ -97,7 +100,11 @@ async function loadDrizzleSql(): Promise<SqlTag> {
  *
  * @example
  * ```typescript
- * const pool = new Pool({ connectionString: env.DATABASE_URL });
+ * const pool = new Pool({
+ *   connectionString: env.DATABASE_URL,
+ *   connectionTimeoutMillis: 5_000,
+ *   query_timeout: 15_000,
+ * });
  * VectorStorePlugin({
  *   adapter: new PgVectorStore({ db: drizzle(pool), onClose: () => pool.end() }),
  *   collections: [{ name: 'documents', dimensions: 1024, filterable: { tag: 'string' } }],
@@ -141,8 +148,19 @@ export class PgVectorStore implements IVectorStoreAdapter {
     this.#load = load;
   }
 
-  /** @inheritdoc */
-  async open(): Promise<void> {
+  /**
+   * Loads Drizzle, checks the extension, and gives a node-postgres pool behind
+   * `db` (Drizzle's `$client`) an `'error'` listener: a connection dropped while
+   * idle, or while checked out for one of this adapter's transactions, would
+   * otherwise be an unhandled `'error'` event that exits the process. The
+   * application's own pool listener is kept.
+   *
+   * @param _runtime - Unused; part of the adapter contract
+   * @param logger - Where a dropped connection is reported, when registered
+   * @returns Once the extension is present and at least 0.8.0
+   */
+  async open(_runtime?: IRuntimeServices, logger?: ILogger): Promise<void> {
+    attachPoolErrorListener(this.#db, (message, meta) => logger?.warn(message, meta));
     this.#sql = await this.#load();
     const version = await this.#versionOf();
     if (version === undefined && this.#ensure === 'create') {

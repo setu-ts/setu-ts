@@ -25,7 +25,12 @@ All notable changes to this project are documented here. The format follows
   re-ingestion leave one copy; a filter is refused, never dropped; caller errors carry 400 status
   hints and backend faults answer 503/504. `setu add vector-store` installs the package and prints a
   registration. `apps/semantic-search` indexes queued documents and serves tenant-scoped search;
-  `docs/retrieval.md` is the guide. Ships in 0.12.0.
+  `docs/retrieval.md` is the guide. Ships in 0.12.0. `attachPoolErrorListener` moves from
+  database-plugin's internals to common, so `PgVectorStore` gives an app-owned node-postgres pool
+  the same `'error'` listener at startup and a dropped connection is reported instead of exiting the
+  process; `IVectorStoreAdapter.open` takes the optional logger it reports through. `toBackendFault`
+  also classifies node-postgres's lost and timed-out connections, undici's socket and timeout codes,
+  and `QdrantClientTimeoutError` (503 before any statement is sent, 504 after).
 
 - **MCP example and website guide (`@setu-ts/cli`, #554).** Offer `setu new --example mcp-tools`
   from 0.12.0, with scoped tools, idempotent retries, validation, rate limits, Origin checks and a

@@ -210,7 +210,12 @@ import { Pool } from 'pg';
 import { PgVectorStore, VectorStorePlugin } from '@setu-ts/vector-store-plugin';
 import type { PgVectorDatabase } from '@setu-ts/vector-store-plugin';
 
-const pool = new Pool({ connectionString: 'postgres://postgres:postgres@localhost:5432/postgres' });
+// Bounds: a hung database answers 503/504 instead of holding the request.
+const pool = new Pool({
+  connectionString: 'postgres://postgres:postgres@localhost:5432/postgres',
+  connectionTimeoutMillis: 5_000,
+  query_timeout: 15_000,
+});
 
 export const plugin = VectorStorePlugin({
   adapter: new PgVectorStore({
@@ -232,6 +237,13 @@ Every query runs in a transaction with `hnsw.ef_search` raised to at least 40 an
 stay in distance order. `replaceSource` runs in one transaction and serialises concurrent
 replacements of the same source with an advisory lock.
 
+**Bound every backend call.** The adapters set no timeouts of their own. Give the clients one, or a
+hung backend holds the request: node-postgres `connectionTimeoutMillis` and `query_timeout` (a
+timeout answers `503` before a statement is sent, `504` after), and `QdrantClient`'s `timeout` in
+milliseconds (`504`). The pgvector adapter gives the pool an `'error'` listener at startup, so a
+connection that drops — idle or inside a transaction — is reported through the application's logger
+instead of exiting the process.
+
 If the application uses `drizzle-kit push`, exclude these tables so it never offers to drop them:
 
 ```typescript
@@ -248,10 +260,11 @@ created for the store.
 
 ### Qdrant
 
-`new QdrantVectorStore({ client, onClose? })` takes the application's `QdrantClient`. The client is
-typed by a structural facade (`collectionExists`, `getCollection`, `createCollection`,
-`createPayloadIndex`, `upsert`, `query`, `delete`) that is checked at construction; the package
-never imports `@qdrant/js-client-rest`.
+`new QdrantVectorStore({ client, onClose? })` takes the application's `QdrantClient`, built with a
+`timeout` (for example `new QdrantClient({ url, timeout: 15_000 })`). The client is typed by a
+structural facade (`collectionExists`, `getCollection`, `createCollection`, `createPayloadIndex`,
+`upsert`, `query`, `delete`) that is checked at construction; the package never imports
+`@qdrant/js-client-rest`.
 
 ```typescript
 import { QdrantVectorStore, VectorStorePlugin } from '@setu-ts/vector-store-plugin';

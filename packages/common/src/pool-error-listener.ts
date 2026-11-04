@@ -1,5 +1,5 @@
-/** Reporting for app-owned Drizzle pools. @module */
-import { describeError } from '@setu-ts/common';
+/** Reporting for app-owned node-postgres (and mysql2) pools behind Drizzle. @module */
+import { describeError } from './errors/describe-error.ts';
 
 /** A structural Node `EventEmitter`, read without importing `node:events`. */
 type Emitter = {
@@ -35,7 +35,11 @@ const checkedOutListeners = new WeakMap<object, (error: unknown) => void>();
  * @param database - The application-owned Drizzle instance
  * @param warn - The optional logger's reporting function
  * @returns Whether the pool-level listener was attached
- * @since 0.11.0
+ * Used by `@setu-ts/database-plugin` for its Drizzle arm and by
+ * `@setu-ts/vector-store-plugin`'s `PgVectorStore`, so both report a lost
+ * connection the same way instead of letting it exit the process.
+ *
+ * @since 0.12.0
  */
 export function attachPoolErrorListener(
   database: unknown,

@@ -9,6 +9,7 @@
  */
 import { CAPABILITIES } from '@setu-ts/common';
 import type {
+  ILogger,
   IPlugin,
   IPluginContext,
   IRuntimeServices,
@@ -94,6 +95,7 @@ export function VectorStorePlugin(options: VectorStorePluginOptions): IPlugin {
     name: 'vector-store-plugin',
     version: VERSION,
     dependencies: [CAPABILITIES.RUNTIME],
+    optionalDependencies: [CAPABILITIES.LOGGER],
     provides: [CAPABILITIES.VECTOR_STORE],
     async register(ctx: IPluginContext): Promise<void> {
       const adapter = typeof source === 'function' ? await source(ctx.runtime) : source;
@@ -103,7 +105,12 @@ export function VectorStorePlugin(options: VectorStorePluginOptions): IPlugin {
       ctx.lifecycle.onShutdown(async () => {
         await adapter.close?.();
       });
-      await adapter.open(ctx.runtime);
+      // Optional: an adapter reports faults outside a call (a dropped pooled
+      // connection) through it.
+      const logger = ctx.services.has(CAPABILITIES.LOGGER)
+        ? ctx.services.get<ILogger>(CAPABILITIES.LOGGER)
+        : undefined;
+      await adapter.open(ctx.runtime, logger);
       for (const { spec } of collections.values()) await adapter.ensureCollection(spec);
       ctx.services.register(
         CAPABILITIES.VECTOR_STORE,

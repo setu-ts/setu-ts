@@ -130,6 +130,19 @@ describe('VectorStoreService', () => {
       (s) => s.deleteScope(3 as unknown as string, 't'),
       VectorCollectionUnknownError,
     ],
+    [
+      'a collection whose toString throws',
+      (s) =>
+        s.deleteScope(
+          {
+            toString(): string {
+              throw new Error('boom');
+            },
+          } as unknown as string,
+          't',
+        ),
+      VectorCollectionUnknownError,
+    ],
     ['an invalid scope', (s) => s.upsert('documents', '', []), VectorScopeInvalidError],
     [
       'a wrong-length vector',

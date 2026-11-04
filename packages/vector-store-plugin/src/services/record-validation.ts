@@ -17,6 +17,7 @@ import {
   isBoundedString,
   utf8Bytes,
   MAX_FLOAT32,
+  shownName,
 } from './limits.ts';
 
 /**
@@ -74,12 +75,16 @@ export function validateVector(vector: unknown, dimensions: number): number[] {
       throw new VectorDimensionError('every vector component must be within the float32 range');
     }
     copy.push(component);
-    // Backends store float32: a component that rounds to zero there counts as zero.
+    // Backends store and sum float32, so the squared norm is accumulated the
+    // same way: one that underflows to zero or overflows to infinity there has
+    // no defined cosine similarity.
     const stored = Math.fround(component);
-    squares += stored * stored;
+    squares = Math.fround(squares + Math.fround(stored * stored));
   }
-  // Cosine similarity is undefined for a zero vector.
   if (squares === 0) throw new VectorDimensionError('a vector must not be all zeros');
+  if (!Number.isFinite(squares)) {
+    throw new VectorDimensionError("a vector's float32 norm must be finite; scale it down");
+  }
   return copy;
 }
 
@@ -175,7 +180,9 @@ function validateMetadata(
   for (const key of Object.keys(metadata)) {
     const type = fields.get(key);
     if (type === undefined) {
-      throw new VectorRecordError(`record metadata key '${key}' is not declared filterable`);
+      throw new VectorRecordError(
+        `record metadata key '${shownName(key)}' is not declared filterable`,
+      );
     }
     const value = (metadata as Record<string, unknown>)[key];
     const valid =
