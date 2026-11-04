@@ -40,10 +40,8 @@ export const PRINTED_REGISTRATIONS = [
   ReactRouterPlugin({ serverBuildPath: '<server-build-module>' }),
   MultiTenancyPlugin({ resolver: 'header' }),
   ServiceDiscoveryPlugin({ provider: 'static', services: {} }),
-  VectorStorePlugin({
-    adapter: new MemoryVectorStore(),
-    collections: [{ name: 'documents', dimensions: 768 }],
-  }),
+  // prettier-ignore
+  VectorStorePlugin({ adapter: new MemoryVectorStore(), collections: [{ name: 'documents', dimensions: 768 }] }),
   // The only runtime `setu add cloudflare` accepts is cloudflare-workers, so
   // the printed form is the one whose factory takes `waitUntil` second
   // (M113d §3.8). The spread is required under `exactOptionalPropertyTypes`:
