@@ -269,18 +269,18 @@ export function backendSpecs(shard: Shard): IBackend[] {
       { POSTGRES_PASSWORD: 'postgres' },
     ),
     spec(
-      'qdrant',
-      'qdrant/qdrant:v1.20.0',
-      [6333, 6334],
-      ['@http', 'http://localhost:6333/readyz'],
-    ),
-    spec(
       'mongo',
       'mongo:7',
       [27017],
       ['mongosh', '--quiet', '--eval', 'db.runCommand({ ping: 1 }).ok'],
     ),
     redis,
+    spec(
+      'qdrant',
+      'qdrant/qdrant:v1.20.0',
+      [6333, 6334],
+      ['@http', 'http://localhost:6333/readyz'],
+    ),
     spec(
       'elasticmq',
       'softwaremill/elasticmq-native:1.7.1',

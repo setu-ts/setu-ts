@@ -35,7 +35,12 @@ import {
  *
  * @since 0.12.0
  */
-export type VectorStoreTenancy = 'required' | { readonly fixed: string };
+export type VectorStoreTenancy =
+  | 'required'
+  | {
+      /** The one scope every call through `scopeFor` uses. */
+      readonly fixed: string;
+    };
 
 /** Validates every call, then delegates to the adapter. */
 export class VectorStoreService implements IVectorStore {

@@ -29,9 +29,9 @@ async function membersWithConstant(): Promise<string[]> {
 }
 
 describe('src/version.ts agrees with deno.json and package.json', () => {
-  it('ships the constant on exactly the 45 members that read their version', async () => {
+  it('ships the constant on exactly the 46 members that read their version', async () => {
     // Plan §3.5: the seven that read none would carry dead surface.
-    expect(await membersWithConstant()).toHaveLength(45);
+    expect(await membersWithConstant()).toHaveLength(46);
   });
 
   it('every VERSION equals both manifest versions', async () => {

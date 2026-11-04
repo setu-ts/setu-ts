@@ -681,7 +681,7 @@ describe('real-backend CI wiring', () => {
       expect(text).toContain(
         'MONGODB_RS_URI: mongodb://127.0.0.1:27018/?replicaSet=rs0&directConnection=true',
       );
-      expect(text).toMatch(/\n {6}postgres:\n {8}image: postgres:16\n/);
+      expect(text).toMatch(/\n {6}postgres:\n {8}image: pgvector\/pgvector:0\.8\.1-pg16\n/);
       expect(text).toContain('POSTGRES_PASSWORD: postgres');
       expect(text).toContain('- 127.0.0.1:5433:5432');
       expect(text).toContain('--health-cmd "pg_isready -U postgres"');

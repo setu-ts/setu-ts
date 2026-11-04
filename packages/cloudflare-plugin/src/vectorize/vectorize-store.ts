@@ -40,9 +40,13 @@ const OPERATORS = { eq: '$eq', in: '$in', gt: '$gt', gte: '$gte', lt: '$lt', lte
 
 /** One vector as Vectorize takes and returns it. */
 export interface VectorizeVectorLike {
+  /** The stored id: the scope-separated record key. */
   readonly id: string;
+  /** The embedding. */
   readonly values: readonly number[];
+  /** The scope. */
   readonly namespace?: string;
+  /** Declared fields plus the adapter's `_id`, `_source` and `_content` keys. */
   readonly metadata?: Readonly<Record<string, VectorMetadataValue>>;
 }
 
@@ -53,7 +57,10 @@ export interface VectorizeVectorLike {
  */
 export interface VectorizeIndexLike {
   /** Index information; the current API reports dimensions but not the metric. */
-  describe(): Promise<{ readonly dimensions: number }>;
+  describe(): Promise<{
+    /** The index's vector length. */
+    readonly dimensions: number;
+  }>;
   /** Similarity query. */
   query(
     vector: readonly number[],
@@ -65,9 +72,13 @@ export interface VectorizeIndexLike {
       readonly filter?: Readonly<Record<string, unknown>>;
     },
   ): Promise<{
+    /** Closest first. */
     readonly matches: readonly {
+      /** The stored id. */
       readonly id: string;
+      /** Cosine similarity. */
       readonly score: number;
+      /** The stored metadata, when returned. */
       readonly metadata?: Readonly<Record<string, unknown>>;
     }[];
   }>;

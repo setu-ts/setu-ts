@@ -72,10 +72,34 @@ export interface VectorRecord {
  * @since 0.12.0
  */
 export type VectorFilter =
-  | { readonly field: string; readonly op: 'eq'; readonly value: VectorMetadataValue }
-  | { readonly field: string; readonly op: 'in'; readonly value: readonly (string | number)[] }
-  | { readonly field: string; readonly op: 'gt' | 'gte' | 'lt' | 'lte'; readonly value: number }
-  | { readonly and: readonly VectorFilter[] };
+  | {
+      /** A field declared in the collection's `filterable`. */
+      readonly field: string;
+      /** Equality. */
+      readonly op: 'eq';
+      /** A value of the field's declared type. */
+      readonly value: VectorMetadataValue;
+    }
+  | {
+      /** A field declared in the collection's `filterable`. */
+      readonly field: string;
+      /** Membership in a list. */
+      readonly op: 'in';
+      /** Strings for a string field, numbers for a number field. */
+      readonly value: readonly (string | number)[];
+    }
+  | {
+      /** A field declared in the collection's `filterable`. */
+      readonly field: string;
+      /** A numeric range bound. */
+      readonly op: 'gt' | 'gte' | 'lt' | 'lte';
+      /** The bound; the field must be declared `number`. */
+      readonly value: number;
+    }
+  | {
+      /** Clauses that must all match. */
+      readonly and: readonly VectorFilter[];
+    };
 
 /**
  * A similarity query.

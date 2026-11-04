@@ -42,7 +42,10 @@ const CLIENT_METHODS = [
  */
 export interface QdrantClientLike {
   /** `GET /collections/{name}/exists`. */
-  collectionExists(name: string): Promise<{ exists: boolean }>;
+  collectionExists(name: string): Promise<{
+    /** Whether the collection is present. */
+    exists: boolean;
+  }>;
   /** `GET /collections/{name}`. */
   getCollection(name: string): Promise<unknown>;
   /** `PUT /collections/{name}`. */

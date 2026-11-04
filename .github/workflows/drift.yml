@@ -86,8 +86,8 @@ jobs:
     services:
       # M107 §6 (C8): PostgreSQL for the outbox real-backend suites, on host port
       # 5433 (see OUTBOX_POSTGRES_URL above).
+      # M135 §3.15: pgvector's image is postgres:16 plus the extension.
       postgres:
-        # pgvector's image is postgres:16 plus the extension (M135 §3.15).
         image: pgvector/pgvector:0.8.1-pg16
         env:
           POSTGRES_PASSWORD: postgres
