@@ -159,6 +159,9 @@
     },
     {
       "path": "./packages/mcp-plugin"
+    },
+    {
+      "path": "./packages/vector-store-plugin"
     }
   ]
 }

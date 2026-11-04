@@ -162,6 +162,10 @@ export const PACKAGE_METADATA: Readonly<Record<string, PackageMetadata>> = {
     description: 'MCP route tools',
     runtimeCompat: PORTABLE,
   },
+  'vector-store-plugin': {
+    description: 'Tenant-scoped vector retrieval with filters that are refused, never ignored',
+    runtimeCompat: PORTABLE,
+  },
   'idempotency-plugin': {
     description: 'A repeated request, queue job or broker message does its work once per key',
     runtimeCompat: PORTABLE,

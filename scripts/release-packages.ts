@@ -36,6 +36,7 @@ export const PUBLISHED_PACKAGES: readonly string[] = [
   'packages/http-security-plugin',
   'packages/idempotency-plugin',
   'packages/mcp-plugin',
+  'packages/vector-store-plugin',
   'packages/localization-plugin',
   'packages/logger-plugin',
   'packages/mail-plugin',

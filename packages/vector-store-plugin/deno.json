@@ -1,0 +1,21 @@
+{
+  "name": "@setu-ts/vector-store-plugin",
+  "version": "0.11.0",
+  "license": "MIT",
+  "exports": "./src/index.ts",
+  "test": {
+    "permissions": {
+      "read": true,
+      "env": true,
+      "sys": [
+        "hostname",
+        "osRelease"
+      ]
+    }
+  },
+  "imports": {
+    "drizzle-orm": "npm:drizzle-orm@0.45.2",
+    "drizzle-orm/pg-core": "npm:drizzle-orm@0.45.2/pg-core",
+    "vitest": "npm:vitest@5.0.3"
+  }
+}
