@@ -64,6 +64,7 @@ describe('example scaffolding', () => {
     expect(h.fs.read(`${prefix}token.ts`)).toContain('issueDemoToken');
     // Its start runs dist/, so the next steps build before starting.
     const out = h.out.text();
+    for (const step of ['npm run smoke', 'npm run build', 'npm start']) expect(out).toContain(step);
     expect(out.indexOf('npm run smoke')).toBeLessThan(out.indexOf('npm run build'));
     expect(out.indexOf('npm run build')).toBeLessThan(out.indexOf('npm start'));
     expect(h.fs.read(`${prefix}tsconfig.json`)).not.toMatch(/extends|paths/);
