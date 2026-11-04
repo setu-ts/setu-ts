@@ -3558,15 +3558,16 @@ Numeric windows are epoch-aligned, with string ids of `floor(runtime.now() / win
 are UTC `YYYY-MM-DD` or `YYYY-MM`. Windows expire at their end plus one day. A quota prefixes the
 store key with its policy name. `MemoryQuotaStore(runtime)` sweeps expiry on access and is atomic
 within one process. `RedisQuotaStore({ client, namespace })` requires a non-empty namespace and
-validated `eval`/`quit` client. Its keys are `${namespace}:${name}:${key}:${windowId}`. Constant Lua
-uses KEYS/ARGV and absolute PEXPIREAT expiry; Redis reserve/adjust failures throw
-`QuotaStoreUnavailableError` with the original cause and a value-free 503 status hint (detail
-`Quota storage is temporarily unavailable.`). Its `close(): Promise<void>` quits the injected
-client. No driver is loaded by this store; common's `fromNodeRedis` supplies the EVAL adapter for
-node-redis. The store never times out a call itself: the injected client must bound commands, using
-ioredis `new Redis(url, { commandTimeout: 15_000 })` or `fromNodeRedis(createClient({ url }))` (15
-seconds by default). An unbounded client lets a stalled Redis hold every request. The application
-owns the injected client's `'error'` listener.
+validated `eval`/`quit` client. Its keys length-prefix each of namespace, `${name}:${key}` and
+window id (`3:app12:spend:tenant7:2026-01`), so a colon in a namespace or key cannot make two
+applications share a counter. Constant Lua uses KEYS/ARGV and absolute PEXPIREAT expiry; Redis
+reserve/adjust failures throw `QuotaStoreUnavailableError` with the original cause and a value-free
+503 status hint (detail `Quota storage is temporarily unavailable.`). Its `close(): Promise<void>`
+quits the injected client. No driver is loaded by this store; common's `fromNodeRedis` supplies the
+EVAL adapter for node-redis. The store never times out a call itself: the injected client must bound
+commands, using ioredis `new Redis(url, { commandTimeout: 15_000 })` or
+`fromNodeRedis(createClient({ url }))` (15 seconds by default). An unbounded client lets a stalled
+Redis hold every request. The application owns the injected client's `'error'` listener.
 
 `new QuotaExceededError(policyName, retryAfterSeconds)` carries the policy in `policyName` (`name`
 is `'QuotaExceededError'`), the whole seconds until reset (reserve clamps to at least one), and a

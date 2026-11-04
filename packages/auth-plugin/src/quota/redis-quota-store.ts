@@ -1,6 +1,7 @@
 /** Atomic weighted quotas through injected Redis EVAL. @module */
 import { QuotaStoreUnavailableError } from '../errors.ts';
 import type { IQuotaStore } from './quota.ts';
+import { quotaStoreKey } from './store-key.ts';
 
 /** Minimal ioredis-style client; node-redis may use fromNodeRedis. @since 0.12.0 */
 export interface IQuotaRedisClient {
@@ -74,7 +75,7 @@ export class RedisQuotaStore implements IQuotaStore {
       const reply = await this.#client.eval(
         RESERVE_SCRIPT,
         1,
-        `${this.#namespace}:${key}:${windowId}`,
+        quotaStoreKey(this.#namespace, key, windowId),
         amount,
         limit ?? '',
         expireAt,
@@ -99,7 +100,7 @@ export class RedisQuotaStore implements IQuotaStore {
       await this.#client.eval(
         ADJUST_SCRIPT,
         1,
-        `${this.#namespace}:${key}:${windowId}`,
+        quotaStoreKey(this.#namespace, key, windowId),
         delta,
         expireAt,
       );

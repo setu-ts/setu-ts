@@ -3,6 +3,15 @@ import { MemoryQuotaStore } from '../../src/index.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 
 describe('MemoryQuotaStore', () => {
+  it('keeps a colon-bearing key apart from a colon-bearing window', async () => {
+    // Joined with a plain colon, both pairs would address `a:b:c`.
+    const store = new MemoryQuotaStore(createFakeRuntime(0));
+    await store.reserve('a:b', 'c', 5, undefined, 1000);
+    expect(await store.reserve('a', 'b:c', 1, undefined, 1000)).toEqual({
+      admitted: true,
+      used: 1,
+    });
+  });
   it('refuses unlimited reservations beyond MAX_SAFE_INTEGER without corrupting the counter (F2)', async () => {
     const store = new MemoryQuotaStore(createFakeRuntime(0));
     await store.reserve('tenant', '0', Number.MAX_SAFE_INTEGER - 1, undefined, 1000);

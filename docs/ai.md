@@ -501,8 +501,11 @@ export function budgetMiddleware(ctx: IRequestContext, quota: IQuota, runtime: I
         },
         async cancel() {
           ctx.signal.removeEventListener('abort', abort);
-          await reader.cancel();
-          await call.finish();
+          try {
+            await reader.cancel();
+          } finally {
+            await call.finish();
+          }
         },
       });
       return { ...result, stream };

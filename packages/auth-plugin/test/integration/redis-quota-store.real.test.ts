@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Redis } from 'ioredis';
 import { RedisQuotaStore } from '../../src/index.ts';
+import { quotaStoreKey } from '../../src/quota/store-key.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 
 const url = process.env['REDIS_URL'];
@@ -26,16 +27,16 @@ describe.skipIf(!url)('RedisQuotaStore real Redis (O2)', () => {
     expect(results.filter((result) => result.admitted)).toHaveLength(1);
     await store.adjust('spend:tenant', '0', -1, expiry);
     expect((await store.reserve('spend:tenant', '0', 1, 1, expiry)).admitted).toBe(true);
-    await client.del(`${namespace}:spend:tenant:0`);
+    await client.del(quotaStoreKey(namespace, 'spend:tenant', '0'));
   });
 
   it('expires keys at the absolute deadline', async () => {
     await store.reserve('spend:expiry', '0', 1, 1, runtime.now() - 1);
-    expect(await client.exists(`${namespace}:spend:expiry:0`)).toBe(0);
+    expect(await client.exists(quotaStoreKey(namespace, 'spend:expiry', '0'))).toBe(0);
   });
 
   it('refuses unlimited reservations beyond MAX_SAFE_INTEGER without a 503 (F2)', async () => {
-    const key = `${namespace}:spend:safe:0`;
+    const key = quotaStoreKey(namespace, 'spend:safe', '0');
     const expiry = runtime.now() + 60_000;
     try {
       await store.reserve('spend:safe', '0', Number.MAX_SAFE_INTEGER - 1, undefined, expiry);
@@ -54,7 +55,7 @@ describe.skipIf(!url)('RedisQuotaStore real Redis (O2)', () => {
     }
   });
   it('clamps a settle that adds usage at MAX_SAFE_INTEGER, so the next reserve is refused, not a 503 (N3)', async () => {
-    const key = `${namespace}:spend:clamp:0`;
+    const key = quotaStoreKey(namespace, 'spend:clamp', '0');
     const expiry = runtime.now() + 60_000;
     try {
       await store.reserve('spend:clamp', '0', 10, undefined, expiry);

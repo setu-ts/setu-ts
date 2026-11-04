@@ -21,16 +21,37 @@ describe('RedisQuotaStore', () => {
       used: 3,
     });
     const first = client.eval.mock.calls[0]!;
-    expect(first.slice(1)).toEqual([1, 'app:spend:tenant:2026-01', 3, 10, 1000]);
+    expect(first.slice(1)).toEqual([1, '3:app12:spend:tenant7:2026-01', 3, 10, 1000]);
     const hostile = "'; redis.call('FLUSHALL'); --";
     await store.reserve(hostile, '2', 3, undefined, 2000);
     expect(client.eval.mock.calls[1]![0]).toBe(first[0]);
     expect(first[0]).not.toContain(hostile);
-    expect(client.eval.mock.calls[1]!.slice(1)).toEqual([1, `app:${hostile}:2`, 3, '', 2000]);
+    expect(client.eval.mock.calls[1]!.slice(1)).toEqual([
+      1,
+      `3:app${hostile.length}:${hostile}1:2`,
+      3,
+      '',
+      2000,
+    ]);
     await store.adjust('spend:tenant', '2026-01', -2, 1000);
-    expect(client.eval.mock.calls[2]!.slice(1)).toEqual([1, 'app:spend:tenant:2026-01', -2, 1000]);
+    expect(client.eval.mock.calls[2]!.slice(1)).toEqual([
+      1,
+      '3:app12:spend:tenant7:2026-01',
+      -2,
+      1000,
+    ]);
     await store.close();
     expect(client.quit).toHaveBeenCalledOnce();
+  });
+
+  it('keeps namespaces apart when a namespace or key contains a colon', async () => {
+    // Joined with plain colons, both tuples would address `app:spend:x:y:0`.
+    const { client, store } = setup();
+    const other = new RedisQuotaStore({ client, namespace: 'app:spend' });
+    await store.reserve('spend:x:y', '0', 1, undefined, 1000);
+    await other.reserve('x:y', '0', 1, undefined, 1000);
+    const [first, second] = client.eval.mock.calls.map((call) => call[2]);
+    expect(first).not.toBe(second);
   });
 
   it('returns a refused reply', async () => {

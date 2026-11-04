@@ -2,6 +2,7 @@
 import type { IRuntimeServices } from '@setu-ts/common';
 import { sweepExpired } from '../stores/sweep-expired.ts';
 import type { IQuotaStore } from './quota.ts';
+import { quotaStoreKey } from './store-key.ts';
 
 /**
  * In-process quota storage with a synchronous atomic critical section.
@@ -34,7 +35,7 @@ export class MemoryQuotaStore implements IQuotaStore {
     limit: number | undefined,
     expireAt: number,
   ): Promise<{ admitted: boolean; used: number }> {
-    const storeKey = `${key}:${windowId}`;
+    const storeKey = quotaStoreKey(key, windowId);
     const used = this.#used(storeKey);
     if (amount > Number.MAX_SAFE_INTEGER - used || (limit !== undefined && amount > limit - used))
       return Promise.resolve({ admitted: false, used });
@@ -45,7 +46,7 @@ export class MemoryQuotaStore implements IQuotaStore {
 
   /** @inheritdoc */
   adjust(key: string, windowId: string, delta: number, expireAt: number): Promise<void> {
-    const storeKey = `${key}:${windowId}`;
+    const storeKey = quotaStoreKey(key, windowId);
     const used = Math.min(Number.MAX_SAFE_INTEGER, Math.max(0, this.#used(storeKey) + delta));
     this.#windows.set(storeKey, { used, expireAt });
     return Promise.resolve();
