@@ -1150,12 +1150,12 @@ export type ResponseSnapshotInit = {
 };
 
 /** Route idempotency marker shared by producers and tool compilers.
- * @since 0.13.0
+ * @since 0.12.0
  */
 export const IDEMPOTENCY_METADATA: unique symbol = Symbol.for('setu.idempotency.metadata');
 
 /** Describes a route protected by idempotency middleware.
- * @since 0.13.0
+ * @since 0.12.0
  */
 export interface RouteIdempotencyMetadata {
   /** The middleware deduplicates repeated calls. */
@@ -1172,7 +1172,7 @@ export interface RouteIdempotencyMetadata {
  * @param middleware - Middleware to brand
  * @param metadata - Idempotency description
  * @returns The same middleware
- * @since 0.13.0
+ * @since 0.12.0
  */
 export function withIdempotencyMetadata<T extends MiddlewareFunction>(
   middleware: T,
@@ -1190,7 +1190,7 @@ export function withIdempotencyMetadata<T extends MiddlewareFunction>(
 /** Reads a valid idempotency brand; foreign values are treated as absent.
  * @param middleware - Middleware to inspect
  * @returns Its metadata, when valid
- * @since 0.13.0
+ * @since 0.12.0
  */
 export function idempotencyMetadataOf(
   middleware: MiddlewareFunction,
@@ -1210,12 +1210,12 @@ export function idempotencyMetadataOf(
 }
 
 /** Route tool marker shared by functional and decorated routes.
- * @since 0.13.0
+ * @since 0.12.0
  */
 export const MCP_TOOL_METADATA: unique symbol = Symbol.for('setu.mcp-tool.metadata');
 
 /** Describes an explicitly exposed MCP tool; missing identity comes from the route schema.
- * @since 0.13.0
+ * @since 0.12.0
  */
 export interface RouteMcpToolMetadata {
   /** Case-sensitive tool name (1–64 ASCII letters, digits, underscores, dots or hyphens). */
@@ -1232,7 +1232,7 @@ export interface RouteMcpToolMetadata {
  * @param middleware - Middleware to brand
  * @param metadata - Tool description
  * @returns The same middleware
- * @since 0.13.0
+ * @since 0.12.0
  */
 export function withMcpToolMetadata<T extends MiddlewareFunction>(
   middleware: T,
@@ -1250,7 +1250,7 @@ export function withMcpToolMetadata<T extends MiddlewareFunction>(
 /** Reads a valid tool brand; foreign or ill-typed values are treated as absent.
  * @param middleware - Middleware to inspect
  * @returns Its metadata, when valid
- * @since 0.13.0
+ * @since 0.12.0
  */
 export function mcpToolMetadataOf(
   middleware: MiddlewareFunction,

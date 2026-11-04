@@ -278,7 +278,7 @@ export function requireAuth(options?: RequireAuthOptions): MiddlewareFunction {
  *   handler,
  * });
  * ```
- * @since 0.13.0
+ * @since 0.12.0
  */
 export function requireScopes(first: string, ...rest: string[]): MiddlewareFunction {
   const required: string[] = [];

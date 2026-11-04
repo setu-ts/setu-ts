@@ -202,7 +202,7 @@ same HTTP controls.
 
 Node integration tests and one native Deno proof exercise list and call. The workerd condition has a
 bundle-resolution proof; a live Workers run is a follow-on. Bun compatibility is unproven until the
-0.13.0 artifacts are published and the compat row runs.
+0.12.0 artifacts are published and the compat row runs.
 
 ## Exports
 

@@ -3234,7 +3234,7 @@ what changed is that the refusal is legible.
 > returns `value` when it is a single-leading-slash path with no `\`, no control character and at
 > most 256 bytes after non-ASCII characters are percent-encoded (the encoded form), else `fallback`.
 
-> **Resource-server authentication (M132, 0.13.0).** Three additions make the plugin a correct OAuth
+> **Resource-server authentication (M132, 0.12.0).** Three additions make the plugin a correct OAuth
 > 2.0 resource server for an API or an MCP server accepting tokens an outside authorization server
 > issued. `IPrincipal.scopes` is filled from the `scope` claim — a space-delimited string, which
 > wins when present — or `scp` (a string, or an array of strings); a malformed claim yields no
