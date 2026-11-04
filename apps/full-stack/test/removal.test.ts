@@ -5,15 +5,12 @@
  * is not what it adds — it is what it does NOT contain. A conventional React
  * Router app grows a `lib/session.server.ts`, `lib/csrf.server.ts`,
  * `lib/sse.server.ts`, `lib/kv.server.ts` and `lib/service-logger.server.ts`,
- * each a hand-rolled version of a capability this framework already ships, plus
- * a `config/services.server.ts` holding module-level caches of clients.
+ * each a hand-rolled version of a capability this framework already ships.
  *
  * Here those concerns belong to the session, SSE, cache and logger plugins,
  * reached through the service registry the SSR plugin puts on every request.
- * `config/services.server.ts` still exists — a typed accessor is genuinely app
- * code — but it holds NO state, because the kernel's registry is the cache.
- * That distinction is the whole claim, so it is asserted rather than asserted
- * in a comment.
+ * `server/session.server.ts` provides stateless access to session and CSRF
+ * values; business services live in kernel modules and pages use getService.
  */
 import { readFile, stat } from 'node:fs/promises';
 import { isNotFound } from '../../../scripts/lib/run.ts';
@@ -51,8 +48,8 @@ describe('the full-stack example', () => {
     }
   });
 
-  it('keeps no module-level cache in its service accessors', async () => {
-    const source = await readFile(new URL('config/services.server.ts', APP_ROOT), 'utf8');
+  it('keeps no module-level cache in its session accessors', async () => {
+    const source = await readFile(new URL('server/session.server.ts', APP_ROOT), 'utf8');
 
     // Column zero only: an indented `let` inside a function body is ordinary
     // local state, while one at the top level is process-lifetime state that
@@ -80,15 +77,17 @@ describe('the full-stack example', () => {
     // A key set in populateLoadContext but never read is dead surface; a key
     // read but never set silently returns its default and renders an empty
     // page. Both directions are checked, because neither type-checks.
-    const keys = await readFile(new URL('lib/context-keys.server.ts', APP_ROOT), 'utf8');
-    const accessors = await readFile(new URL('config/services.server.ts', APP_ROOT), 'utf8');
+    const keys = await readFile(new URL('server/context-keys.server.ts', APP_ROOT), 'utf8');
+    const accessors = await readFile(new URL('server/session.server.ts', APP_ROOT), 'utf8');
     const config = await readFile(new URL('../setu.config.ts', import.meta.url), 'utf8');
 
     const exported = [...keys.matchAll(/export const (\w+Context)\b/g)].map((match) => match[1]);
-    expect(exported.length).toBeGreaterThan(0);
+    expect(exported.sort()).toEqual(['csrfContext', 'sessionContext']);
+    const set = [...config.matchAll(/context\.set\(\s*(\w+Context)\b/g)].map((match) => match[1]);
+    expect(set.sort()).toEqual(exported);
 
     for (const key of exported) {
-      // Whitespace-tolerant: `deno fmt` wraps a long `context.set(...)` call
+      // Whitespace-tolerant: Prettier wraps a long `context.set(...)` call
       // across lines, and the test must assert the wiring, not the formatting.
       const isSet = new RegExp(String.raw`context\.set\(\s*${key}\b`).test(config);
       expect(isSet, `${key} is never set in setu.config.ts`).toBe(true);
@@ -106,9 +105,15 @@ describe('the full-stack example', () => {
     // from source — so a `{ defaultValue }` literal produces two distinct key
     // objects, every read falls back to its default, and the page renders
     // empty with no error anywhere.
-    const source = await readFile(new URL('lib/context-keys.server.ts', APP_ROOT), 'utf8');
+    const source = await readFile(new URL('server/context-keys.server.ts', APP_ROOT), 'utf8');
 
     expect(source).toContain('contextKeyFor');
     expect(source).not.toMatch(/=\s*\{\s*defaultValue/);
+  });
+
+  it('keeps business modules outside the page tree', async () => {
+    for (const directory of ['features', 'services', 'models', 'config']) {
+      expect(await exists(directory), `app/${directory} must move into kernel modules`).toBe(false);
+    }
   });
 });

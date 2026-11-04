@@ -1,7 +1,7 @@
 import { Link, useLoaderData } from 'react-router';
 
 import type { AppLoadContext } from '~/lib/load-context.ts';
-import { getSession } from '~/config/services.server.ts';
+import { getSession } from '~/server/session.server.ts';
 
 /**
  * The landing page.

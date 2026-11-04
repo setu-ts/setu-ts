@@ -120,9 +120,9 @@ A few examples differ, and say why: `cloudflare` adds the Worker entry `worker.t
 `compiled-binary` adds the CommonJS entry `sea.ts` its executable is built from, `realtime-clients`
 adds a client driver that runs on several runtimes and a `worker.ts` that hosts it on workerd, and
 `microservices` composes two services, so it has one factory per service under `src/service-a/` and
-`src/service-b/`. `full-stack` keeps the React Router layout `setu new --template full-stack`
-scaffolded before 0.12.0 — `app/routes`, `app/features`, `app/services` — and reads its port from
-`PORT`, as that template does.
+`src/service-b/`. `full-stack` follows the current `setu new --template full-stack` layout: kernel
+modules under `src/modules/`, pages under `app/routes/`, and session glue under `app/server/`. It
+reads its port from `PORT`, as that template does.
 
 ## A learning path
 
@@ -536,15 +536,14 @@ curl localhost:3400/health        # {"status":"ok"}
 
 ### full-stack
 
-**Concept.** Bridge kernel capabilities into server-rendered route loaders through context keys. The
-composition writes session, CSRF, logger and database values into React Router context; the product
-loader reads its view through that context, and the smoke check verifies rendered database rows and
-a form login.
+**Concept.** Pages read request-bound kernel modules with `getService(context, TOKEN)`. The products
+module reads the database capability and serves both the SSR page and `/api/products`. Session and
+CSRF values reach loaders and actions through application context keys.
 
 A React Router 8 framework-mode application composed with `createFullStackAppFromConfig` from
-`@setu-ts/full-stack-starter`. Its smoke check writes a row through the database capability, renders
-an SSR page that shows it (proving `populateLoadContext` reached the loader), and completes a
-`<Form>` login whose CSRF token round-trips through the session plugin.
+`@setu-ts/full-stack-starter`. Its smoke check verifies an empty API catalogue before seeding,
+writes rows through the database capability, and checks the sorted API response and page HTML. It
+also completes a `<Form>` login whose CSRF token round-trips through the session plugin.
 
 ```bash
 pnpm --dir apps/full-stack run start            # builds first, then serves on PORT or 3000
@@ -555,14 +554,28 @@ pnpm --dir apps/full-stack run start            # builds first, then serves on P
 **Read, in order:**
 
 - [`setu.config.ts`](../apps/full-stack/setu.config.ts) — createApp enables SSR, session and the
-  memory database; populateLoadContext puts the four context values into the provider on each
-  request.
-- [`app/routes/`](../apps/full-stack/app/routes/) — The products loader calls
-  buildProductsView(context), and ProductsRoute renders the returned rows; the login loader reads
-  the CSRF context and its action writes the email into the session.
-- [`smoke.ts`](../apps/full-stack/smoke.ts) — seedProducts writes through the database service
-  before HTML assertions; the login test carries the session cookie and the rendered CSRF token into
-  its form post.
+  memory database, then calls registerModules(app.router, app.services). populateLoadContext sets
+  only the session and CSRF token.
+- [`src/modules/index.ts`](../apps/full-stack/src/modules/index.ts) and
+  [`products/index.ts`](../apps/full-stack/src/modules/products/index.ts) — registerModules
+  registers the products requestService factory and its API route before startup.
+- [`products.types.ts`](../apps/full-stack/src/modules/products/products.types.ts) and
+  [`products.token.ts`](../apps/full-stack/src/modules/products/products.token.ts) — the Product
+  interface and typed PRODUCTS token, the only kernel module a page imports by value.
+- [`products.service.ts`](../apps/full-stack/src/modules/products/products.service.ts) — reads
+  products through CAPABILITIES.DATABASE, logs through CAPABILITIES.LOGGER and sorts by name.
+- [`products.controller.ts`](../apps/full-stack/src/modules/products/products.controller.ts) — GET
+  /api/products resolves the same service through resolveRequestService(ctx, PRODUCTS).
+- [`products.seed.ts`](../apps/full-stack/src/modules/products/products.seed.ts) — PRODUCTS_ENTITY
+  and startup seeding, called by main.ts and smoke.ts after the database connects.
+- [`app/server/context-keys.server.ts`](../apps/full-stack/app/server/context-keys.server.ts) and
+  [`session.server.ts`](../apps/full-stack/app/server/session.server.ts) — stable session and CSRF
+  keys and their stateless accessors.
+- [`app/routes/_app/products._index.tsx`](../apps/full-stack/app/routes/_app/products._index.tsx) —
+  the loader calls getService(context, PRODUCTS).list() and returns products and total. The page
+  formats prices; kernel imports are types or the token only.
+- [`smoke.ts`](../apps/full-stack/smoke.ts) — checks database readback through the API and page,
+  then carries the session cookie and rendered CSRF token into a login form post.
 
 ---
 

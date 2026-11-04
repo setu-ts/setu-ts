@@ -1,15 +1,9 @@
-import { CAPABILITIES, type ILogger } from '@setu-ts/common';
-import type { IDatabaseService } from '@setu-ts/database-plugin';
 import { getCsrfToken, getSession } from '@setu-ts/session-plugin';
 import { createFullStackAppFromConfig } from '@setu-ts/full-stack-starter';
 import type { IKernelApplication } from '@setu-ts/kernel';
 
-import {
-  csrfContext,
-  databaseContext,
-  loggerContext,
-  sessionContext,
-} from '~/lib/context-keys.server.ts';
+import { csrfContext, sessionContext } from './app/server/context-keys.server.ts';
+import { registerModules } from './src/modules/index.ts';
 
 /**
  * Development session secret.
@@ -30,8 +24,8 @@ const DEV_SESSION_SECRET = 'example-only-session-secret-do-not-deploy';
  *
  * @returns The configured, unstarted application
  */
-export function createApp(): Promise<IKernelApplication> {
-  return createFullStackAppFromConfig((config) => ({
+export async function createApp(): Promise<IKernelApplication> {
+  const app = await createFullStackAppFromConfig((config) => ({
     // The SSR plugin, the session, and the database are all GATED arms of the
     // full-stack starter: a default-options full-stack app registers none of
     // them. Passing all three is what makes this example prove anything.
@@ -42,15 +36,13 @@ export function createApp(): Promise<IKernelApplication> {
       serverBuildPath: new URL('./build/server/index.js', import.meta.url).href,
       assetsDir: './build/client/assets',
       populateLoadContext: (ctx, context) => {
-        // The bridge between the kernel request context and a React Router
-        // loader: getSession() needs the kernel context, which a loader never
-        // sees. The keys come from contextKeyFor(), so the copy of
+        // Only non-service values need application context keys. Module
+        // services come through getService(context, TOKEN). The keys come
+        // from contextKeyFor(), so the copy of
         // context-keys.server.ts that Vite inlined into the server build
         // resolves to the same key objects this module holds.
         context.set(sessionContext, getSession(ctx));
         context.set(csrfContext, getCsrfToken(ctx));
-        context.set(loggerContext, ctx.services.get<ILogger>(CAPABILITIES.LOGGER));
-        context.set(databaseContext, ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE));
       },
     },
     session: {
@@ -62,4 +54,6 @@ export function createApp(): Promise<IKernelApplication> {
     httpSecurity: { headers: { referrerPolicy: 'same-origin' } },
     database: { type: 'memory' },
   }));
+  registerModules(app.router, app.services);
+  return app;
 }

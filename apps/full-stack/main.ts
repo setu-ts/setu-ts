@@ -4,7 +4,7 @@ import type { IDatabaseService } from '@setu-ts/database-plugin';
 import { createRuntimeServices } from '@setu-ts/runtime';
 
 import { createApp } from './setu.config.ts';
-import { seedProducts } from '~/services/products.server.ts';
+import { seedProducts } from './src/modules/products/products.seed.ts';
 
 const app = await createApp();
 const runtime = createRuntimeServices();

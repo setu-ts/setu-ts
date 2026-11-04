@@ -34,7 +34,7 @@ does not have.
 | [`cloudflare`](./cloudflare)                 | Worker bindings wire KV and cron (requires Wrangler).                                    |
 | [`realtime`](./realtime)                     | A publish on A reaches B's SSE client through Redis (requires Redis).                    |
 | [`realtime-clients`](./realtime-clients)     | SDK SSE resume/auth and WebSocket keep-alive on a real server.                           |
-| [`full-stack`](./full-stack)                 | An SSR React Router page renders rows read through the database capability.              |
+| [`full-stack`](./full-stack)                 | A request-bound kernel module serves database rows to an SSR page and API.               |
 | [`static-site`](./static-site)               | Static file serving with caching, ETags, and range requests.                             |
 
 See the [examples guide](../docs/examples.md) for learning paths and more details.

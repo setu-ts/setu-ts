@@ -168,7 +168,15 @@ for (const target of ['example', 'scaffold'] as const) {
         await signIn(page, origin);
         const response = await page.goto(`${origin}/products`);
         expect(response!.status()).toBe(200);
-        expect(await response!.text()).toContain('Products (');
+        const html = await response!.text();
+        expect(html).toContain('Products (');
+        // Both layouts expose their module through the API; the example reads
+        // persisted rows while the scaffold starts with a static catalogue.
+        const catalogue = await page.request.get(`${origin}/api/products`);
+        expect(catalogue.status()).toBe(200);
+        const body = (await catalogue.json()) as { items: { name: string }[] };
+        expect(body.items.length).toBeGreaterThan(0);
+        for (const product of body.items) expect(html).toContain(product.name);
       });
     });
     it('hydrates route state and changes pages without reloading the document', async () => {
