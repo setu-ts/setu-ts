@@ -118,6 +118,12 @@ export class ResponseBuilder implements IResponse {
     const staged = template ?? new Headers();
     if (template === undefined) {
       for (const name of Object.keys(headers)) staged.set(name, headers[name]!);
+      // Nothing set yet: the validated staging copy becomes the response's own
+      // headers, so the common call allocates one Headers, as it did before.
+      if (this.#headers === undefined && this.#responseInit === undefined) {
+        this.#headers = staged;
+        return this;
+      }
     }
     const destination = this.#materializeHeaders();
     staged.forEach((value, name) => destination.set(name, value));
