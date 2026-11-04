@@ -8,7 +8,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
-- **MCP example and website guide (`@setu-ts/cli`, PR pending).** Offer
+- **MCP example and website guide (`@setu-ts/cli`, #554).** Offer
   `setu new --example mcp-tools` from 0.12.0, with scoped tools, idempotent retries, validation,
   rate limits, Origin checks and a weighted archive quota. The standalone website guide includes the
   full scaffold-shaped application and official-client tests.
@@ -253,7 +253,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
-- **`setu check` reads a configuration that uses `env['KEY']` (`@setu-ts/cli`, PR pending).** Any
+- **`setu check` reads a configuration that uses `env['KEY']` (`@setu-ts/cli`, #554).** Any
   computed member access made `setu.config.ts` unclassifiable, so `setu check` warned that every
   barrel was unwired even when the configuration wired them all. Member access by one plain string
   naming an ordinary property, such as `createRuntimeServices().env['JWT_SECRET']`, now classifies
@@ -261,7 +261,7 @@ All notable changes to this project are documented here. The format follows
   variable keys, and a computed key directly after `{` or `,` are still refused.
 
 - **`setu check` and the CLI's configuration edits refuse the legacy accessor methods
-  (`@setu-ts/cli`, PR pending).** `__defineGetter__`, `__defineSetter__`, `__lookupGetter__` and
+  (`@setu-ts/cli`, #554).** `__defineGetter__`, `__defineSetter__`, `__lookupGetter__` and
   `__lookupSetter__` now make `setu.config.ts` unclassifiable, like `Object` and `Reflect`:
   `({}).__lookupGetter__('__proto__')` reaches a prototype through a string argument the lexer
   cannot see into.
