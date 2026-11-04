@@ -48,10 +48,14 @@
     }
   },
   "devDependencies": {
+    "@qdrant/js-client-rest": "1.20.0",
+    "@setu-ts/cloudflare-plugin": "workspace:^",
     "@setu-ts/kernel": "workspace:^",
     "@setu-ts/runtime": "workspace:^",
     "@types/node": "^24",
+    "@types/pg": "^8.23.1",
     "drizzle-orm": "0.45.2",
+    "pg": "^8.0.0",
     "typescript": "6.0.3",
     "vitest": "5.0.3"
   }
