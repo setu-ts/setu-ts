@@ -16692,6 +16692,195 @@ schedule across a restart; a reconnecting client receives exactly the missed chu
 
 ---
 
+## Milestone 137: OpenAPI Coverage — Forms, Lifecycle and Derived Responses
+
+**Source:** a review of `@setu-ts/openapi-plugin` against `@nestjs/swagger` (2026-11-04), narrowed
+to the gaps that leave a real API undocumentable or misdocumented, and checked against the sources
+of ASP.NET Core (`dotnet/aspnetcore` `227a6cc`), FastAPI (`69c67a1`), springdoc (`3316c45`),
+`@hono/zod-openapi` (`honojs/middleware` `9cb24a0`), NestJS (`ca016f9`) and three client generators
+— hey-api (`d6ba11f`), openapi-generator (`860e53f`) and openapi-fetch (`d46a319`). Nest's other
+decorators (callbacks, links, `x-` extensions, per-route security decorators, a compiler plugin,
+mapped-type helpers, per-request document patching, UI theming) are **out of scope**: each either
+duplicates a derivation Setu-TS already makes (`deriveSecurity`, Zod composition) or has no consumer
+yet. Multiple documents per application, a YAML endpoint, webhooks, discriminators and named enums
+are deferred until someone asks for them.
+
+**The principle the three letters share:** the document is derived from what the route enforces —
+validation brands, guard brands, the handler's response brand — and a declared field overrides a
+derived one per field. A new feature extends a derivation before it adds a decorator.
+
+| Letter    | Shape                                                                     | Packages                                                        | Size         |
+| --------- | ------------------------------------------------------------------------- | --------------------------------------------------------------- | ------------ |
+| **M137a** | document metadata, `deprecated`, per-route exclusion                      | `common`, `openapi-plugin`, `decorator-plugin`, `sdk` (codegen) | small        |
+| **M137b** | derived error responses and headers, declared response headers            | `common`, `openapi-plugin`, `auth-plugin`, `decorator-plugin`   | medium       |
+| **M137c** | form bodies and file uploads, in the document and in the generated client | `common`, `validation-plugin`, `openapi-plugin`, `sdk`          | medium–large |
+
+**Sequence.** M137a first (contained, no new derivation). M137b next. M137c last: it is the only
+letter that fixes a defect the code already admits — the validation-plugin README's "Stated limits:
+the generated OpenAPI document still describes a validated body as `application/json`" — but it is
+the riskiest, because a document fixed without the client turns into a generated client that drops
+the body. All three are additive surface (optional fields and options), so they ship in patches
+under the versioning policy below; the document changes they cause are named in the CHANGELOG, and
+`setu client --check` will report them as drift, which is the intended signal.
+
+### Milestone 137a: Document Metadata, Deprecation and Per-Route Exclusion
+
+**Package(s):** `packages/common` (`RouteSchema`), `packages/openapi-plugin`,
+`packages/decorator-plugin` (`ApiOperationConfig`), `packages/sdk` (codegen); docs.
+
+**The problem.** The emitted `info` object carries only `title`, `version` and `description`
+(`openapi-generator.ts` `generate()`); there is no `contact`, `license`, `termsOfService` or
+`externalDocs`, and tags are bare names with no description. No route can be marked deprecated. The
+only exclusion is `exclude` (an exact path, dropping **every** method on it — `isRouteExcluded` in
+`generators/declared-operation-ids.ts`) and `excludeOwners`, so `DELETE /users/:id` cannot be hidden
+while `GET /users/:id` stays documented.
+
+**Decisions:**
+
+1. **Two optional `RouteSchema` fields in common:** `deprecated?: boolean` (emitted as the
+   operation's `deprecated: true`) and `excludeFromDocument?: boolean` (the operation is omitted).
+   `ApiOperationConfig` gains the same two fields, so the decorator and functional entry points
+   write the same metadata.
+2. **Exclusion uses the one existing predicate.** `isRouteExcluded` also reads
+   `excludeFromDocument`, so `claimDeclaredOperationIds` skips a hidden route exactly as it skips a
+   path-excluded one — a hidden route's `operationId` can never cause an `OperationIdError`.
+3. **Document-level options on `OpenApiGeneratorOptions`:** `contact`, `license`, `termsOfService`,
+   `externalDocs`, and `tags` as `{ name, description?, externalDocs? }[]` emitted at the document's
+   top-level `tags`. OpenAPI 3.1 makes `license.identifier` and `license.url` mutually exclusive, so
+   supplying both is refused at construction with a named error, never emitted.
+4. **Generated clients carry the deprecation.** `sdk`'s codegen writes `/** @deprecated */` on the
+   method of a deprecated operation, so an editor flags the call site.
+
+**Out of scope:** RFC 9745 `Deprecation`/`Sunset` response headers (no adopter has asked; the field
+is documentation, not behaviour).
+
+**Gate:** the document fields asserted field by field against the OpenAPI 3.1 object names, absent
+fields included; `deprecated` and `excludeFromDocument` driven through **both** entry points
+(`RouteSchema` and `@ApiOperation`) with identical output; a hidden `DELETE` beside a documented
+`GET` on one path; a hidden route whose `operationId` duplicates a visible one raises no error; the
+`license` refusal; `setu client` output containing `@deprecated` for a deprecated route.
+
+### Milestone 137b: Derived Error Responses and Headers
+
+**Package(s):** `packages/common` (the security brand, a new rate-limit brand, the response
+wrapper), `packages/openapi-plugin`, `packages/auth-plugin` (brands on its guards and limiters),
+`packages/decorator-plugin` (`ApiResponseConfig`); docs.
+
+**The problem.** The statuses and headers Setu-TS's own middleware produces are absent from the
+document, although the middleware is already branded for three of them:
+
+| Runtime behaviour                                                                                                                  | Brand today                                                                                                | Missing from the document                                                                      |
+| ---------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| idempotency middleware reads `Idempotency-Key` and sends `Idempotent-Replayed` on a replay (`idempotency-plugin/src/constants.ts`) | yes: `withIdempotencyMetadata({ idempotent, keyHeader? })` — read by `mcp-plugin`, not by `openapi-plugin` | the request header parameter, the replay header, the refusal statuses                          |
+| auth guards answer 401 with `WWW-Authenticate`, and 403 when an authenticated caller lacks a scope, role, permission or policy     | yes: `withSecurityMetadata({ authenticated, scopes? })` — `deriveSecurity` reads it                        | every 401 and 403; and the brand cannot tell `requireAuth` (401 only) from a 403-capable guard |
+| `rateLimitMiddleware` and spent quotas answer 429 with `Retry-After` and the `RateLimit`/`RateLimit-Policy` fields                 | none                                                                                                       | the 429 and its headers                                                                        |
+| a body validator answers 415 for an unsupported media type (`validation-middleware.ts`)                                            | yes: the validation brand                                                                                  | the 415 (the derived 400 is already emitted)                                                   |
+| a handler answering `201` with `Location`, or with `ETag`                                                                          | none — only the handler knows                                                                              | any way to declare a response header                                                           |
+
+Every generated error response is also a bare `{ description }`, with no body schema.
+
+**Decisions:**
+
+1. **Derive from the brands, one option to turn it off.** A new `deriveErrorResponses?: boolean`
+   (default `true`, the precedent of `deriveRequestSchemas`) adds, per route: `401` with a
+   `WWW-Authenticate` header for an authenticated route; `403` for a route carrying a 403-capable
+   guard; `415` for a route with a body brand; `429` with `Retry-After`, `RateLimit` and
+   `RateLimit-Policy` for a rate-limited route; the `Idempotency-Key` header parameter (named by
+   `keyHeader`, with the requiredness and refusal statuses the idempotency middleware actually
+   enforces, read from its source in the plan) and an `Idempotent-Replayed` response header. A
+   **declared** status always wins over a derived one, per status.
+2. **The security brand gains one optional field,** `forbids?: true`, set by `requireScopes`,
+   `requireRole`, `requireAnyRole`, `requirePermission`, `requireAllPermissions`, `requirePolicy`,
+   `requireScopedRole` and `requireScopedPermission` — not by `requireAuth`; `requireMfa` takes
+   whichever its source shows it answers — so a 403 is documented only where one can occur.
+3. **A rate-limit brand in common,** `withRateLimitMetadata`/`rateLimitMetadataOf` (the pattern of
+   the three existing brands), applied by `rateLimitMiddleware` and the quota refusal
+   (`quotaProblemInit`), carrying whether the `RateLimit` fields are emitted (the middleware's
+   existing option) so the document never lists a header the route does not send.
+4. **Declared response headers.** The `{ schema?, description? }` response wrapper (already
+   unwrapped by `#normalizeResponse`) and `ApiResponseConfig` gain
+   `headers?: Record<string, { schema?, description?, required? }>`, emitted as the response's
+   `headers` object.
+5. **Error bodies only when the format is known.** The error body shape is the application's choice
+   (`ValidationPlugin({ errorFormat })` and the exceptions responder), which the generator cannot
+   read. An `errorSchema?: 'rfc9457'` option attaches one shared `ProblemDetails` component under
+   `application/problem+json` to every generated error response; omitted, error responses keep no
+   schema. The CLI templates, which already set both formats to `'rfc9457'`, set it too.
+
+**Gate:** a table-driven test — the brand set as data, each row naming the statuses and headers it
+must produce — run against the generator; and the same table run against a **live** app driving each
+guard, limiter and validator, asserting each documented status and header actually occurs, so the
+document cannot claim a response the route never sends. A declared status overrides a derived one.
+The `ProblemDetails` component asserted field by field against RFC 9457 (`type`, `title`, `status`,
+`detail`, `instance`). `requireAuth` alone documents no 403.
+
+### Milestone 137c: Form Bodies and File Uploads
+
+**Package(s):** `packages/common` (the validation brand, a file-field brand),
+`packages/validation-plugin` (`formFile()`), `packages/openapi-plugin`, `packages/sdk` (HTTP client
+and codegen); docs, and the validation-plugin README's stated limit removed.
+
+**The problem.** `validateBody(schema, { forms: true })` accepts JSON, urlencoded and multipart
+bodies (`validation-middleware.ts:197`), but the validation brand records only `{ target, schema }`
+and drops `forms`, and the generator writes `application/json` for every body
+(`openapi-generator.ts` `#createOperation`). A file field shaped as the framework's `FormFile` is
+emitted as an object with an empty `data` schema and an `x-setu-unrepresentable` diagnostic
+(measured 2026-11-04). The generated client reads only `content['application/json']`
+(`sdk/src/codegen/openapi-codegen.ts:604`) and the SDK's HTTP client sends only JSON, so a document
+fixed on its own would produce a client that silently drops the body.
+
+**What the reference implementations do** (read from source; see the commits above):
+
+- ASP.NET Core lists `multipart/form-data` and `application/x-www-form-urlencoded` for a form
+  parameter, **`multipart/form-data` alone when a file parameter is present**
+  (`RequestDelegateFactory.cs:129-130, 2104-2113`), refuses form and JSON body parameters on one
+  endpoint at startup, and refuses other content types at runtime.
+- FastAPI documents one form media type while Starlette's `request.form()` parses both; NestJS and
+  springdoc document `application/json` by default while Express's parsers accept urlencoded too —
+  the documented-less-than-accepted drift this letter must not reproduce.
+- hey-api sends **JSON whenever the body offers it**, else the first type
+  (`shared/src/openApi/3.1.x/parser/operation.ts:113`); openapi-generator sends **the first listed
+  type** (`DefaultCodegen.java:7585`). Both read `format: binary` as a file; hey-api also maps a
+  file-like `contentMediaType`.
+
+**Decisions:**
+
+1. **The validation brand records the encodings,** an optional `forms?: true` on
+   `RouteValidationMetadata`, set by both entry points (`validateBody` and
+   `IValidationService.middleware`).
+2. **A route without a file field** (`forms: true`) lists `application/json` **first**, then
+   `application/x-www-form-urlencoded` and `multipart/form-data`, with one schema under each — what
+   the route accepts. Both generators then send JSON, which works.
+3. **A route with a file field lists `multipart/form-data` only** (ASP.NET's rule): JSON validation
+   refuses a file and urlencoded cannot carry one, and a JSON entry would make hey-api clients send
+   JSON. The multipart entry carries an `encoding` object naming each file field's accepted media
+   types when they are declared.
+4. **A file-field brand and helper.** common gains a schema brand (`withFormFileMetadata` /
+   `formFileMetadataOf`, the existing brand pattern; `common` stays dependency-free).
+   validation-plugin exports `formFile({ mimeTypes?, maxBytes? })`, a Zod schema that validates the
+   `FormFile` shape, enforces both options, and carries the brand. The transformer emits a branded
+   field as `{ type: 'string', format: 'binary', contentMediaType: 'application/octet-stream' }`
+   (both keywords, because the generators read different ones); an array of them is an array of
+   binaries.
+5. **The SDK sends `FormData` only for a multipart-only body,** and JSON otherwise — the selection
+   is a fixed rule, not the order of a map. It never sets `Content-Type` on a `FormData` body (the
+   boundary must be the runtime's), and a file field is typed `Blob | File` with the filename taken
+   from `File.name` or a declared default, because `FormFile` requires one.
+6. **Every declared media type is enforced.** The route already answers 415 for an encoding it does
+   not accept, so the document lists exactly the accepted set — the property ASP.NET and Hono have.
+
+**Gate:** a `forms: true` route without a file documents three media types, JSON first; with a file,
+multipart alone with `format: binary` and the `encoding` entry; both validation entry points produce
+the same brand. An end-to-end test generates a client with `setu client`, uploads a real file
+through it to a running app, and reads the stored bytes and filename back; the same document is fed
+to hey-api and openapi-generator in the plan's verification and each generated client sends the
+encoding rule 2–3 predicts. The README's stated limit is deleted in the same change. The upload path
+crosses a trust boundary (client-supplied filenames and media types), so the letter is
+**security-audited** by a fresh agent before it merges (CLAUDE.md,
+`.roo/skills/security-audit/SKILL.md`).
+
+---
+
 ## Versioning Policy From `0.9.0`
 
 **Decision (2026-10-05):** from `0.9.0` on, the **patch** is the normal release (`0.9.1`, `0.9.2`,
@@ -16995,3 +17184,7 @@ patch by construction and gains nothing new here.
 | 134       | ✅     | auth-plugin + telemetry-plugin, AI SDK guide and example — weighted reserve/settle quotas, usage delivery and content-off library telemetry                                                                                                                                               |
 | 135       | ⬜     | vector-store-plugin (new) + common + cloudflare + cli — tenant-scoped retrieval with refused-not-ignored filters                                                                                                                                                                          |
 | 136       | ⬜     | package decided by its plan + common + sse-plugin + database-plugin — durable agent runs: fenced lease, persisted steps, approvals, SSE replay                                                                                                                                            |
+| 137       | ⬜     | OpenAPI coverage — forms, lifecycle and derived responses (three letters)                                                                                                                                                                                                                 |
+| 137a      | ⬜     | common + openapi-plugin + decorator-plugin + sdk — document metadata, `deprecated`, per-route exclusion                                                                                                                                                                                   |
+| 137b      | ⬜     | common + openapi-plugin + auth-plugin + decorator-plugin — derived 401/403/415/429 and idempotency headers, declared response headers, opt-in Problem Details schema                                                                                                                      |
+| 137c      | ⬜     | common + validation-plugin + openapi-plugin + sdk — form bodies and file uploads in the document and the generated client                                                                                                                                                                 |
