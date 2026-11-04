@@ -82,7 +82,7 @@ describe('TelemetryPlugin registerGlobal', () => {
       expect(second.exporter.getFinishedSpans().map((span) => span.name)).toEqual([
         'second-request',
       ]);
-      expect(second.warn.mock.calls[0]?.[0]).toContain("first app's exporter and service.name");
+      expect(second.warn.mock.calls[0]?.[0]).toContain('another provider is already global');
       await first.app.stop();
       const afterStop = first.exporter.getFinishedSpans().length;
       await service.withSpan('second-request-after-stop', async () => {
@@ -137,8 +137,9 @@ describe('TelemetryPlugin registerGlobal', () => {
     try {
       expect(warn).toHaveBeenCalledTimes(1);
       expect(warn.mock.calls[0]?.[0]).toContain('registration refused');
-      expect(warn.mock.calls[0]?.[0]).toContain("first app's exporter and service.name");
-      expect(warn.mock.calls[0]?.[0]).toContain('dropped after it stops');
+      expect(warn.mock.calls[0]?.[0]).toContain('another provider is already global');
+      // The refusal does not identify the global's owner, so the warning must not name one.
+      expect(warn.mock.calls[0]?.[0]).not.toContain('first app');
       expect(warn.mock.calls[0]?.[0]).toContain("Only this app's own spans");
       await app.services
         .get<ITelemetryService>(CAPABILITIES.TELEMETRY)

@@ -57,8 +57,10 @@ export function budgetedModel(
   const model = wrapLanguageModel({
     model: createFallback({
       models: wrapped,
+      // A typed provider error is decided by its own flag alone; the library's message
+      // matching applies only to untyped errors, such as a raw stream failure.
       shouldRetryThisError: (error) =>
-        (APICallError.isInstance(error) && error.isRetryable) || defaultShouldRetryThisError(error),
+        APICallError.isInstance(error) ? error.isRetryable : defaultShouldRetryThisError(error),
     }),
     middleware: {
       specificationVersion: 'v4',
@@ -251,8 +253,11 @@ export function budgetMiddleware(
         },
         async cancel() {
           ctx.signal.removeEventListener('abort', abort);
-          await reader.cancel();
-          await call.finish();
+          try {
+            await reader.cancel();
+          } finally {
+            await call.finish();
+          }
         },
       });
       return { ...result, stream };

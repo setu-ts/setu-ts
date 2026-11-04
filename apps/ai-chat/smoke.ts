@@ -516,6 +516,36 @@ describe('AI SDK recipes through Setu (Node)', () => {
     }
   });
 
+  it('a non-retryable provider error never fails over, whatever its message says', async () => {
+    const first = new MockLanguageModelV4({
+      doStream: async () => {
+        // The message holds a substring the library's default classifier would retry on.
+        throw new APICallError({
+          message: 'model overloaded: request rejected',
+          url: 'http://provider.invalid',
+          requestBodyValues: {},
+          statusCode: 400,
+          isRetryable: false,
+        });
+      },
+    });
+    const second = mock();
+    const app = await appWith([
+      { model: first, prices },
+      { model: second, prices },
+    ]);
+    await app.start();
+    try {
+      const response = await app.fetch(chatRequest());
+      await response.text();
+      assert.notEqual(response.status, 200);
+      assert.equal(first.doStreamCalls.length, 1);
+      assert.equal(second.doStreamCalls.length, 0);
+    } finally {
+      await app.stop();
+    }
+  });
+
   it('N1: a failure before the first model call answers instead of waiting on ready', async () => {
     let calls = 0;
     const model = new MockLanguageModelV4({
@@ -625,6 +655,7 @@ describe('AI SDK recipes through Setu (Node)', () => {
           'late-error',
           'abort',
           'cancel',
+          'cancel-failure',
           'missing-max',
           'media',
         ] as const) {
@@ -698,6 +729,17 @@ describe('AI SDK recipes through Setu (Node)', () => {
                     },
                   }),
                 };
+              if (scenario === 'cancel-failure')
+                return {
+                  stream: new ReadableStream<StreamPart>({
+                    start(controller) {
+                      controller.enqueue({ type: 'text-start', id: 't' });
+                    },
+                    cancel() {
+                      throw new Error('provider cancel failed');
+                    },
+                  }),
+                };
               return {
                 stream: new ReadableStream<StreamPart>({
                   start(controller) {
@@ -749,12 +791,22 @@ describe('AI SDK recipes through Setu (Node)', () => {
             assert.deepEqual(records, []);
             await quota.reserve('demo-tenant', 100_000);
           } else {
-            if (scenario === 'abort' || scenario === 'cancel' || scenario === 'late-error') {
+            if (
+              scenario === 'abort' ||
+              scenario === 'cancel' ||
+              scenario === 'cancel-failure' ||
+              scenario === 'late-error'
+            ) {
               const stream = await wrapped.doStream(params);
               const reader = stream.stream.getReader();
-              await reader.read();
+              // Cancelling before the first read leaves no pull parked on the provider, so
+              // only cancel() itself can settle the call.
+              if (scenario !== 'cancel-failure') await reader.read();
               if (scenario === 'abort') abort.abort();
               if (scenario === 'cancel') await reader.cancel();
+              // A rejected provider cancel still settles the reservation.
+              else if (scenario === 'cancel-failure')
+                await assert.rejects(reader.cancel(), /provider cancel failed/);
               else
                 while (!(await reader.read()).done) {
                   /* drain */
@@ -792,6 +844,7 @@ describe('AI SDK recipes through Setu (Node)', () => {
               scenario === 'unsafe-price' ||
               scenario === 'abort' ||
               scenario === 'cancel' ||
+              scenario === 'cancel-failure' ||
               scenario === 'late-error';
             assert.equal(record.usageKnown, !full);
             assert.equal(record.settledAmount, full ? reserved : 7);

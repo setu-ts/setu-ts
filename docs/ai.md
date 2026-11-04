@@ -216,7 +216,8 @@ import { createFallback, defaultShouldRetryThisError } from 'ai-fallback';
 
 export async function fallback(primary: ReturnType<typeof wrapLanguageModel>, secondary: ReturnType<typeof wrapLanguageModel>): Promise<string> {
   const result = await generateText({ model: createFallback({ models: [primary, secondary],
-    shouldRetryThisError: (error) => (APICallError.isInstance(error) && error.isRetryable) || defaultShouldRetryThisError(error),
+    shouldRetryThisError: (error) =>
+      APICallError.isInstance(error) ? error.isRetryable : defaultShouldRetryThisError(error),
   }),
     prompt: 'Hello', maxOutputTokens: 128,
     telemetry: { recordInputs: false, recordOutputs: false },
@@ -228,10 +229,12 @@ export async function fallback(primary: ReturnType<typeof wrapLanguageModel>, se
 Wrap **each** model with its own budget middleware and prices before passing it to `createFallback`.
 A first model that fails before its first stream part releases its reservation, then the second
 reserves at its own price. The smoke proves fallback after a 503 and reads the remaining budget to
-prove the first reservation was released. The retryable APICallError arm also handles unreachable
-providers: the library's default status/message classifier alone misses connection failures with no
-HTTP status code. Configure provider URLs and credentials on the server. Model output must never
-select an egress destination or carry an API key.
+prove the first reservation was released. A typed `APICallError` is decided by its own `isRetryable`
+flag alone, which also covers unreachable providers: the library's default status/message classifier
+misses connection failures with no HTTP status code, and would fail over a non-retryable error whose
+message happens to contain a word such as "overloaded". The default classifier still decides untyped
+errors, such as a raw stream failure. Configure provider URLs and credentials on the server. Model
+output must never select an egress destination or carry an API key.
 
 ## GenAI telemetry without content capture
 
