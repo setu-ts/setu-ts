@@ -16635,6 +16635,14 @@ than wrap it, so this plan decides whether decision 4's embedder port is still n
 already ships `embed` and `embedMany`, and the alternative is to accept vectors or an
 application-supplied embed function, and document embedding spend under M134's weighted quota.
 
+**As planned and built (M135, 2026-11-05).** No embedder port: the store takes vectors, and the
+application computes them with the AI SDK's `embed`/`embedMany` (decision 4 dropped; the
+maintainer's choice). Adapters: memory, pgvector through Drizzle, Qdrant (added) and Cloudflare
+Vectorize, which refuses `replaceSource` and `deleteScope` because Vectorize cannot delete by
+namespace or filter. Ingestion (decision 6) is the `apps/semantic-search` example's queue job over
+`replaceSource`, not a framework job. The common port is `IVectorStore` under
+`CAPABILITIES.VECTOR_STORE`.
+
 **Not in this milestone:** a document-loader library, re-ranking, hybrid lexical search.
 
 **Gate:** the filter conformance table on memory and a real PostgreSQL with pgvector; a query under
