@@ -31,7 +31,7 @@ const ALLOWED_GITHUB_KINDS = [
 describe('repository reading routes', () => {
   it('covers the release allowlist and all app READMEs', () => {
     expect(PACKAGES).toHaveLength(53);
-    expect(APPS).toHaveLength(18);
+    expect(APPS).toHaveLength(19);
     expect(PACKAGES.filter((pkg) => pkg.card)).toHaveLength(51);
     for (const [app, files] of Object.entries(EXAMPLE_FILES)) {
       expect(files, app).toContain('smoke.ts');

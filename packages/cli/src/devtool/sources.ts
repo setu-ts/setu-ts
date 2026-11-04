@@ -148,6 +148,12 @@ const UNDECIDABLE_IDENTIFIERS: ReadonlySet<string> = new Set([
   'setPrototypeOf',
   'defineProperty',
   'defineProperties',
+  // Legacy accessor methods: `({}).__lookupGetter__('__proto__')` reaches a
+  // prototype through a string the code mask blanks (2026-11-04 audit).
+  '__defineGetter__',
+  '__defineSetter__',
+  '__lookupGetter__',
+  '__lookupSetter__',
   'globalThis',
   'self',
   'window',
@@ -411,7 +417,9 @@ const LITERAL_BRACKET_PRECEDERS = '(=:[?|&<>!';
  * property no identifier names — `constructor`, `prototype` — so they are as
  * undecidable as the identifiers they spell (audit rounds 6 and 7). The rule is
  * an allowlist of positions, tracked with a bracket stack: a `[` after `,` counts
- * as a literal only inside `[…]` or `(…)`, never inside `{…}`.
+ * as a literal only inside `[…]` or `(…)`, never inside `{…}`. The one exception
+ * is a bracket holding a single plain string that names a decidable property
+ * ({@linkcode namedMemberAccess}), which names no more than the bare name does.
  *
  * @param code - The code mask
  * @param kept - The comment-only mask, whose strings show what a bracket holds
@@ -425,13 +433,51 @@ function indexesValue(code: string, kept: string): boolean {
       // Contents read with strings KEPT: in the code mask `['constructor']` is blank.
       let next = i + 1;
       while (next < kept.length && /\s/.test(kept[next]!)) next += 1;
-      if (kept[next] !== ']' && !literalBracket(code, previous, stack.at(-1))) return true;
+      if (
+        kept[next] !== ']' &&
+        !literalBracket(code, previous, stack.at(-1)) &&
+        !namedMemberAccess(code, kept, previous, next)
+      )
+        return true;
     }
     if (c === '(' || c === '[' || c === '{') stack.push(c);
     else if (c === ')' || c === ']' || c === '}') stack.pop();
     if (!/\s/.test(c)) previous = i;
   }
   return false;
+}
+
+/**
+ * Whether a `[` after a word, `)`, `]`, a non-null `!` or `?.` holds one plain string
+ * naming a decidable property: `env['JWT_SECRET']`, `x!['k']`, `x?.['k']`. Such a
+ * bracket names exactly the property the bare name would (`env.JWT_SECRET`), which the
+ * lexer already accepts. That also holds where the word is not a value: a computed key
+ * after a modifier (`{ get ['k']() {} }`, `static ['k'] = 1`) defines the same property
+ * as `get k()` or `static k`, and after a keyword (`return ['k']`) the bracket is an
+ * array of one string, which reaches nothing. The names that would differ, `__proto__`
+ * in an object literal and `constructor`/`prototype` in a class, are in
+ * {@linkcode UNDECIDABLE_IDENTIFIERS} and stay refused, as does any non-identifier
+ * name. A computed key directly after `{` or `,` (`{ ['k']: v }`), concatenation,
+ * variables and templates keep the audit round 6 and 7 refusal.
+ *
+ * @param code - The code mask
+ * @param kept - The comment-only mask, whose strings show what the bracket holds
+ * @param previous - Index of the last non-space code character before the `[`
+ * @param start - Index of the first non-space character inside the `[`
+ */
+function namedMemberAccess(code: string, kept: string, previous: number, start: number): boolean {
+  // Reached only after literalBracket, which already accepts a `[` at the start.
+  const before = code[previous]!;
+  const access = /[\w$)\]!]/.test(before) || (before === '.' && code[previous - 1] === '?');
+  if (!access) return false;
+  const quote = kept[start];
+  if (quote !== "'" && quote !== '"') return false;
+  const close = kept.indexOf(quote, start + 1);
+  const name = kept.slice(start + 1, close);
+  if (!/^[A-Za-z_$][\w$]*$/.test(name) || UNDECIDABLE_IDENTIFIERS.has(name)) return false;
+  let end = close + 1;
+  while (end < kept.length && /\s/.test(kept[end]!)) end += 1;
+  return kept[end] === ']';
 }
 
 /** Whether a `[` preceded by `code[previous]`, inside `enclosing`, opens a literal. */

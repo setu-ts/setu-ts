@@ -15,6 +15,19 @@ it('classifies code and imports, masks strings/comments and refuses undecidable 
   );
 });
 
+it('classifies a config reading env by bracket access, still refusing a computed constructor', () => {
+  const config = [
+    "import { registerModules } from './src/modules/index.ts';",
+    "const secret = createRuntimeServices().env['JWT_SECRET'] ?? 'demo';",
+    'registerModules(app.router, app.services);',
+  ].join('\n');
+  expect(classifyWiring(config, 'registerModules')).toBe('wired');
+  expect(classifyWiring(config, 'GENERATED_PLUGINS')).toBe('unwired');
+  expect(
+    classifyWiring(config.replace("['JWT_SECRET']", "['constructor']"), 'registerModules'),
+  ).toBe('unclassifiable');
+});
+
 it('checks every host export and preserves the narrower generator inventory', () => {
   for (const installed of [
     new Set<string>(),

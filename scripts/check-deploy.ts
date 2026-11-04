@@ -92,6 +92,11 @@ export const EXCLUDED_EXAMPLES: readonly ExcludedExample[] = [
       'Same build shape as rest-api; it proves AI SDK recipes through a mock-model smoke, not an image.',
   },
   {
+    app: 'mcp-tools',
+    kind: 'redundant',
+    reason: 'Same build shape as rest-api; proves MCP tools through an official-client smoke.',
+  },
+  {
     app: 'cqrs',
     kind: 'redundant',
     reason: 'Same build shape as rest-api; differs only in the plugins it imports.',

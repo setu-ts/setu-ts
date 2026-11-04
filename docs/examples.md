@@ -18,10 +18,11 @@ npm start       # serves until stopped
 `--example` creates a standalone Node project, fetching the example from the GitHub release tag
 matching the CLI version. GitHub must be reachable when scaffolding; `--dry-run` only lists paths
 and fetches nothing. Offered examples are `minimal`, `rest-api`, `database`, `di-decorators`,
-`cqrs`, `multi-tenant`, `static-site`, `worker-pool`, `graphql-demo`, `grpc`, `microservices` and
-`realtime`. The Redis-backed smoke checks can exit `77` when Redis is unavailable. For `full-stack`,
-use `--template full-stack`; the other excluded examples need repository scripts or source. See
-[the CLI guide](./cli.md#start-from-an-example) for the flag restrictions.
+`cqrs`, `multi-tenant`, `mcp-tools` (from 0.12.0), `static-site`, `worker-pool`, `graphql-demo`,
+`grpc`, `microservices` and `realtime`. The Redis-backed smoke checks can exit `77` when Redis is
+unavailable. For `full-stack`, use `--template full-stack`; the other excluded examples need
+repository scripts or source. See [the CLI guide](./cli.md#start-from-an-example) for the flag
+restrictions.
 
 An example is a teaching project, not a production starting point. Some carry fixed demonstration
 values: `rest-api` signs and verifies its tokens with the fixed `DEMO_JWT_SECRET` in
@@ -344,6 +345,45 @@ pnpm --dir apps/cqrs run start
   through the separate buses; main.ts and smoke.ts share these helpers.
 
 ---
+
+### mcp-tools
+
+Available from **0.12.0**, the [MCP tools example](../apps/mcp-tools) follows the generated REST
+module layout and exposes four explicitly marked routes through `POST /mcp`. Read-only tokens see
+only `list_items` and `read_item`; writers also see `create_item` and `archive_item`. The
+official-client smoke proves scope filtering, schemas, create/read, idempotent retries, validation,
+Bearer challenges, rate limits, socket Origin checks and a per-principal archive quota. Identical
+archive retries replay before the quota, and a missing item refunds its reservation.
+
+```bash
+pnpm --dir apps/mcp-tools run check
+pnpm --dir apps/mcp-tools run smoke
+pnpm --dir apps/mcp-tools test
+pnpm --dir apps/mcp-tools run test:e2e
+```
+
+From the 0.12.0 release, `setu new demo --example mcp-tools` downloads the matching CLI release's
+files from GitHub. Before release, the packed-package CLI e2e is the proof; after publication,
+repeat the command against the published CLI. Readers who cannot reach GitHub can build the same
+application from the [complete website guide](./mcp.md), which includes every source file. Use a
+shared idempotency store and quota store across replicas. The demo JWT secret and unbounded
+in-memory item storage are for local learning only.
+
+**Read, in order:**
+
+- [`setu.config.ts`](../apps/mcp-tools/setu.config.ts) — compose auth, idempotency and MCP without
+  changing the generated factory signature.
+- [`items.schemas.ts`](../apps/mcp-tools/src/modules/items/items.schemas.ts) — branded
+  body/query/path inputs and object responses.
+- [`items.service.ts`](../apps/mcp-tools/src/modules/items/items.service.ts) — storage isolated to
+  one application.
+- [`items.quota.ts`](../apps/mcp-tools/src/modules/items/items.quota.ts) — reserve, refund refusals
+  and settle successes.
+- [`items.controller.ts`](../apps/mcp-tools/src/modules/items/items.controller.ts) — scopes, rate
+  limits and tool markers, with replay before quota.
+- [`token.ts`](../apps/mcp-tools/token.ts) — issue a short-lived operator credential without
+  application logging.
+- [`smoke.ts`](../apps/mcp-tools/smoke.ts) — the official client in-process and over a socket.
 
 ### ai-chat
 

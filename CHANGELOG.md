@@ -8,6 +8,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **MCP example and website guide (`@setu-ts/cli`, #554).** Offer `setu new --example mcp-tools`
+  from 0.12.0, with scoped tools, idempotent retries, validation, rate limits, Origin checks and a
+  weighted archive quota. The standalone website guide includes the full scaffold-shaped application
+  and official-client tests. `setu new --example` now lists `npm run build` in its next steps when
+  an example starts from compiled output.
+
 - **Weighted quotas and AI SDK recipes (M134, #549, `@setu-ts/auth-plugin`,
   `@setu-ts/telemetry-plugin`).** `createQuota`, `IQuota`, `QuotaOptions`, `QuotaReservation`,
   `IQuotaStore`, `MemoryQuotaStore`, `RedisQuotaStore` and `IQuotaRedisClient` add atomic weighted
@@ -247,6 +253,24 @@ All notable changes to this project are documented here. The format follows
   `RedisRateLimitStore` re-arms a key it finds without an expiry instead of answering 429 for ever.
 
 ### Fixed
+
+- **`setu new --example` downloads the examples as they now stand (#553, `@setu-ts/cli`).** The
+  repository examples were brought back to the CLI scaffold's structure, with `apps/full-stack` on
+  the M130 module layout, and the offered file lists for `cqrs`, `di-decorators`, `graphql-demo` and
+  `grpc` were regenerated to match.
+
+- **`setu check` reads a configuration that uses `env['KEY']` (`@setu-ts/cli`, #554).** Any computed
+  member access made `setu.config.ts` unclassifiable, so `setu check` warned that every barrel was
+  unwired even when the configuration wired them all. Member access by one plain string naming an
+  ordinary property, such as `createRuntimeServices().env['JWT_SECRET']`, now classifies like
+  `env.JWT_SECRET`. Names such as `constructor`, `prototype` and `__proto__`, concatenated or
+  variable keys, and a computed key directly after `{` or `,` are still refused.
+
+- **`setu check` and the CLI's configuration edits refuse the legacy accessor methods
+  (`@setu-ts/cli`, #554).** `__defineGetter__`, `__defineSetter__`, `__lookupGetter__` and
+  `__lookupSetter__` now make `setu.config.ts` unclassifiable, like `Object` and `Reflect`:
+  `({}).__lookupGetter__('__proto__')` reaches a prototype through a string argument the lexer
+  cannot see into.
 
 - **The error handler masks URL credentials in what it logs and serves (M130 audit, #551,
   `@setu-ts/exceptions`).** `errorHandler` logged an error's message unmasked, so a driver error
