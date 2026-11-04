@@ -1,3 +1,5 @@
+import { serviceToken } from '@setu-ts/common';
+
 /** The notes the command side writes and the query side reads. */
 export interface NoteStore {
   add(note: string): void;
@@ -14,3 +16,6 @@ export function createNoteStore(): NoteStore {
     all: () => [...notes],
   };
 }
+
+/** The application-owned store shared by command and query handlers. */
+export const NOTE_STORE = serviceToken<NoteStore>('example.note-store');

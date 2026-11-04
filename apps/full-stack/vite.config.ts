@@ -6,12 +6,12 @@ import { defineConfig } from 'vite';
  * application. The framework owns the server, so `vite build` is a build step
  * and `main.ts` is the runtime.
  *
- * `resolve.tsconfigPaths` is what makes the `~/*` alias work at build time; the
- * same alias is declared in `tsconfig.json` for the type-checker.
+ * `resolve.tsconfigPaths` is what makes the `~/*` and `~kernel/*` aliases work at build time; the
+ * same aliases are declared in `tsconfig.json` for the type-checker.
  */
 // Framework packages stay external, resolved here by tsx through this app's
 // tsconfig paths. Bundling would inline a second copy: the context keys in
-// app/lib/context-keys.server.ts match by identity, so loaders must share the
+// app/server/context-keys.server.ts match by identity, so loaders must share the
 // module instance setu.config.ts holds.
 const frameworkPackages = [
   '@setu-ts/common',

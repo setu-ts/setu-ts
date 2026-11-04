@@ -12,8 +12,3 @@ export interface Product {
   /** Price in minor units. */
   readonly priceCents: number;
 }
-
-/** Formats a price for display. */
-export function formatPrice(product: Product): string {
-  return `$${(product.priceCents / 100).toFixed(2)}`;
-}

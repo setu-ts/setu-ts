@@ -4,7 +4,7 @@ import { RuntimePlugin } from '@setu-ts/runtime';
 import { SsePlugin } from '@setu-ts/sse-plugin';
 import { WebSocketPlugin } from '@setu-ts/websocket-plugin';
 import { registerModules } from './src/modules/index.ts';
-import { IdleSocketPlugin } from './src/plugins/idle-socket.plugin.ts';
+import { GENERATED_PLUGINS } from './src/plugins/index.ts';
 
 /**
  * Builds the server every realtime-client runtime check drives, without starting it.
@@ -17,11 +17,11 @@ export function createApp(): IKernelApplication {
       RuntimePlugin(),
       SsePlugin({ heartbeatMs: 10, retryMs: 1, scalingNotice: false }),
       WebSocketPlugin({ heartbeatMs: 20, idleTimeoutMs: 60, scalingNotice: false }),
-      IdleSocketPlugin(),
+      ...GENERATED_PLUGINS,
     ],
   });
 
-  registerModules(app.router);
+  registerModules(app.router, app.services);
 
   return app;
 }

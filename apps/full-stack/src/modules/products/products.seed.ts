@@ -1,7 +1,5 @@
 import type { IDatabaseService, IRepository } from '@setu-ts/database-plugin';
-import type { AppLoadContext } from '~/lib/load-context.ts';
-import type { Product } from '~/models/product.ts';
-import { getDatabase, getLogger } from '~/config/services.server.ts';
+import type { Product } from './products.types.ts';
 
 /**
  * The entity name both the seed and the read use.
@@ -41,21 +39,4 @@ export async function seedProducts(database: IDatabaseService): Promise<readonly
     created.push(await repository.create(product));
   }
   return created;
-}
-
-/**
- * Reads the catalogue for the current request.
- *
- * The service layer owns talking to the outside world. It is given the request
- * context rather than reaching for a module-level singleton, so a test can
- * drive it with a plain object and two concurrent requests can never share a
- * connection they did not ask for.
- *
- * @param context - The React Router request context
- * @returns Every product, in insertion order
- */
-export async function listProducts(context: AppLoadContext): Promise<readonly Product[]> {
-  getLogger(context).debug('products: listing');
-
-  return await getDatabase(context).getRepository<Product>(PRODUCTS_ENTITY).findAll();
 }

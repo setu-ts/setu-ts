@@ -15,7 +15,7 @@ export function createApp(redisUrl: string): IKernelApplication {
     ],
   });
 
-  registerModules(app.router);
+  registerModules(app.router, app.services);
 
   return app;
 }

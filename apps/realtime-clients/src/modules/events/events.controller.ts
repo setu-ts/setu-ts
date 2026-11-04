@@ -1,3 +1,4 @@
+import type { IServiceRegistry } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IRouterApi, ISseService } from '@setu-ts/common';
 import { SMOKE_TOKEN } from '../../contract.ts';
@@ -6,7 +7,8 @@ import { SMOKE_TOKEN } from '../../contract.ts';
  * Registers an authenticated SSE stream that sends one event and closes,
  * plus `/resume`, which reports the `Last-Event-ID` of the latest reconnect.
  */
-export function registerEventsRoutes(router: IRouterApi): void {
+export function registerEventsRoutes(router: IRouterApi, services?: IServiceRegistry): void {
+  void services;
   let eventCount = 0;
   let resumedWith: string | null = null;
 

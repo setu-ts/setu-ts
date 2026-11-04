@@ -1,9 +1,9 @@
 import { contextKeyFor } from '@setu-ts/react-router-plugin';
-import type { ILogger, ISession } from '@setu-ts/common';
-import type { IDatabaseService } from '@setu-ts/database-plugin';
+import type { ISession } from '@setu-ts/common';
 
 /**
- * Context keys this application adds to every SSR request.
+ * Context keys for session and CSRF values. Kernel services are resolved
+ * through getService(context, TOKEN), without application context keys.
  *
  * `setu.config.ts` sets them; loaders and actions read them. Two things make
  * that work, and both are easy to break:
@@ -36,17 +36,3 @@ export const sessionContext = contextKeyFor<ISession | null>('app.session', null
  * form only has to echo this value back.
  */
 export const csrfContext = contextKeyFor<string | null>('app.csrf', null);
-
-/** The application logger. */
-export const loggerContext = contextKeyFor<ILogger | null>('app.logger', null);
-
-/**
- * The database service.
- *
- * This is the key that makes the rendered page prove something: the products
- * the loader lists are rows read back through this service, not a literal in a
- * component. A conventional React Router app reaches a database through a
- * module-level client cached in `config/services.server.ts`; here the client is
- * the kernel's, resolved per request from the capability registry.
- */
-export const databaseContext = contextKeyFor<IDatabaseService | null>('app.database', null);

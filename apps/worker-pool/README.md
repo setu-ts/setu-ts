@@ -16,5 +16,9 @@ control, and the budget reported through `/health`.
 Wait for the task promise to settle before reading shared memory. A timeout kills the worker and may
 leave a partial write; concurrent access requires an Atomics protocol.
 
+The CLI has no worker-task schematic. `setu g job` creates queue/scheduler jobs, which are not the
+URL-loaded `defineWorkerTask` modules this example demonstrates. The existing `src/tasks/` files
+therefore stay as they are; no unused job or health-indicator barrel is added.
+
 Read the [example deep dive](../../docs/examples.md#worker-pool) for the concept and source
 walkthrough.

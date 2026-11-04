@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import type { IKernelApplication } from '@setu-ts/kernel';
-import { addNote, readNotes } from './src/modules/notes/index.ts';
+import { addNote, readNotes } from './src/modules/notes/notes.client.ts';
 import { createApp } from './setu.config.ts';
 
 describe('cqrs example', () => {
