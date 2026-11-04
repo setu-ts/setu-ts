@@ -152,6 +152,45 @@ for (const routeMiddleware of [false, true]) {
   }
 }
 
+it('M131b review: a handler that streams after an early buffered response still releases the request', async () => {
+  const { createApplication } = await import('../../src/index.ts');
+  const { RuntimePlugin } = await import('@setu-ts/runtime');
+  const gate = Promise.withResolvers<void>();
+  const cleaned = vi.fn();
+  const app = createApplication({ plugins: [RuntimePlugin()] });
+  app.middleware.add((ctx, next) => {
+    void next().catch(() => {});
+    return ctx.response.text('early');
+  });
+  app.router.get('/', async (ctx) => {
+    ctx.defer?.(cleaned);
+    await gate.promise;
+    // Too late: the client already has the buffered response.
+    return ctx.response.stream(
+      new ReadableStream<Uint8Array>({
+        pull(controller) {
+          controller.enqueue(new Uint8Array([65]));
+        },
+      }),
+    );
+  });
+  await app.start();
+  try {
+    expect((await app.inject({ method: 'GET', url: '/' })).body).toBe('early');
+    gate.resolve();
+    await vi.waitFor(() => expect(cleaned).toHaveBeenCalledOnce());
+    // Released from the drain: stop() does not wait out its deadline.
+    const stopped = await Promise.race([
+      app.stop().then(() => 'stopped'),
+      new Promise<string>((done) => setTimeout(() => done('still draining'), 1000)),
+    ]);
+    expect(stopped).toBe('stopped');
+  } finally {
+    gate.resolve();
+    await app.stop();
+  }
+});
+
 it('M131b 3.10 waits for handler after an early stream has already ended', async () => {
   const { createApplication } = await import('../../src/index.ts');
   const { RuntimePlugin } = await import('@setu-ts/runtime');

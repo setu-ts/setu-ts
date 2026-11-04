@@ -1654,9 +1654,11 @@ function generatedTestScripts(
  * a build, `node dist/main.js` dies with a raw `MODULE_NOT_FOUND` trace, so
  * this names the build script instead. Part of `start` itself rather than a
  * `prestart`, because pnpm and Bun do not run pre-scripts by default; the
- * double quotes work in both `sh` and `cmd`.
+ * double quotes work in both `sh` and `cmd`. `--input-type=commonjs` keeps
+ * `require` defined when Node 22 runs with
+ * `NODE_OPTIONS=--experimental-default-type=module`.
  */
-export const NODE_START_BUILD_CHECK = `node -e "require('node:fs').existsSync('dist/main.js')||(console.error('dist/main.js is missing; run the build script first'),process.exitCode=1)"`;
+export const NODE_START_BUILD_CHECK = `node --input-type=commonjs -e "require('node:fs').existsSync('dist/main.js')||(console.error('dist/main.js is missing; run the build script first'),process.exitCode=1)"`;
 
 /**
  * The `scripts` a generated `package.json` carries.

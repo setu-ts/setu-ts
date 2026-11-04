@@ -1753,17 +1753,21 @@ class Application implements IKernelApplication {
     if (pendingHandler !== undefined && !handle.handlerSettled) {
       // Keep the request in the shutdown drain, and leave defer open for work
       // registered by the handler after this early response has been sent.
+      const finish = async (): Promise<void> => {
+        const cleanups = handle.takeDeferred();
+        if (cleanups !== undefined) await runDeferred(cleanups, this.#registry);
+        this.#inFlight--;
+        this.#completeRequest(ctx, outcome);
+      };
       const streamed = response.streamingBody;
       if (streamed === undefined) {
-        void pendingHandler.then(() => this.#settleRequest(ctx, handle, outcome));
+        // The buffered response has already been returned. Settle against it:
+        // a stream the handler sets later is never read, so cleanup must not
+        // wait for it to be consumed.
+        void pendingHandler.then(finish);
       } else {
         const complete = (): void => {
-          void pendingHandler.then(async () => {
-            const cleanups = handle.takeDeferred();
-            if (cleanups !== undefined) await runDeferred(cleanups, this.#registry);
-            this.#inFlight--;
-            this.#completeRequest(ctx, outcome);
-          });
+          void pendingHandler.then(finish);
         };
         response.stream(
           wrapDeferredStream(
