@@ -48,10 +48,64 @@ const PAGE_ALIAS = '~/';
 
 /**
  * A token module: the one value import a page may make from the kernel, written
- * with its `.ts` extension, its emitted `.js` one, or none (the bundler and the
- * Node/Bun type-checker resolve all three to the same file).
+ * with its `.ts` extension, its emitted `.js` one, or none. The last two are
+ * accepted only when they resolve to the `.token.ts` file (see
+ * {@linkcode TokenResolver}).
  */
 const TOKEN_MODULE = /^src\/modules\/[^/]+\/[^/]+\.token(?:\.[jt]s)?$/;
+
+/**
+ * Reports whether a token import written without `.ts` (`x.token` or
+ * `x.token.js`) resolves to `x.token.ts`, as the bundler and type-checker see
+ * it. Without one, such an import is accepted on its spelling alone.
+ */
+export type TokenResolver = (target: string) => Promise<boolean>;
+
+/**
+ * Files the bundler tries before `x.token.ts` for each spelling: Vite tries the
+ * exact path, then `.mjs`, `.js` and `.mts` before `.ts`; for a `.js` spelling,
+ * an existing `.js` file wins over the `.ts` it would otherwise map to.
+ */
+function tokenShadows(target: string): {
+  readonly stem: string;
+  readonly before: readonly string[];
+} {
+  if (target.endsWith('.js')) {
+    const stem = target.slice(0, -'.js'.length);
+    return { stem, before: [target] };
+  }
+  return { stem: target, before: [target, `${target}.mjs`, `${target}.js`, `${target}.mts`] };
+}
+
+/**
+ * The {@linkcode TokenResolver} over a project's filesystem: `x.token.ts` is a
+ * file and nothing the bundler tries first exists.
+ *
+ * @param fs - The filesystem to read through
+ * @param dir - The project root
+ * @returns The resolver
+ */
+function tokenResolverFor(fs: IFileSystem, dir: string): TokenResolver {
+  const kind = async (path: string): Promise<'file' | 'directory' | 'missing' | 'unknown'> => {
+    try {
+      const stat = await fs.stat(joinPath(dir, path));
+      return stat.isFile ? 'file' : stat.isDirectory ? 'directory' : 'unknown';
+    } catch (cause) {
+      return isMissingPath(cause) ? 'missing' : 'unknown';
+    }
+  };
+  return async (target) => {
+    const { stem, before } = tokenShadows(target);
+    if ((await kind(`${stem}.ts`)) !== 'file') return false;
+    for (const path of before) {
+      // A directory is passed over for the next candidate; a file wins, and a
+      // path that cannot be read may be one, so either refuses the import.
+      const found = await kind(path);
+      if (found === 'file' || found === 'unknown') return false;
+    }
+    return true;
+  };
+}
 
 /** Files under `app/` a page can be written in, and the esbuild loader for each. */
 const PAGE_FILE = /\.(?:[cm]?[jt]sx?)$/;
@@ -166,11 +220,11 @@ function classify(
   emitted: string,
   span: ISpecifierSpan,
   target: string,
-): PageImportReason | undefined {
+): PageImportReason | 'token-spelling' | undefined {
   if (span.kind === 'dynamic') return 'dynamic';
   const head = statementHead(emitted, span);
   if (/^export\s*\*/.test(head)) return 'export-star';
-  if (TOKEN_MODULE.test(target)) return undefined;
+  if (TOKEN_MODULE.test(target)) return target.endsWith('.token.ts') ? undefined : 'token-spelling';
   // `import { type A }` is emitted as `import {} from …`: no binding, but the
   // declaration survives and loads the module.
   if (/^import\s*\{\s*\}\s*from\s*$/.test(head)) return 'inline-type-only';
@@ -206,12 +260,14 @@ function originalLine(source: string, specifier: string, occurrence: number): nu
  * @param path - The page, project-relative
  * @param source - Its contents
  * @param root - The project's absolute directory, so an absolute import into it resolves
+ * @param resolveToken - Checks a token import written without `.ts`
  * @returns The violations, or `unreadable` when esbuild or the lexer refuses the file
  */
 export async function scanPageSource(
   path: string,
   source: string,
   root?: string,
+  resolveToken?: TokenResolver,
 ): Promise<readonly PageImportViolation[] | 'unreadable'> {
   let emitted: string;
   try {
@@ -235,7 +291,13 @@ export async function scanPageSource(
     if (target === undefined) continue;
     const occurrence = occurrences.get(span.value) ?? 0;
     occurrences.set(span.value, occurrence + 1);
-    const reason = classify(emitted, span, target);
+    const classified = classify(emitted, span, target);
+    const reason =
+      classified !== 'token-spelling'
+        ? classified
+        : resolveToken === undefined || (await resolveToken(target))
+          ? undefined
+          : 'value-import';
     if (reason !== undefined)
       violations.push({
         path,
@@ -286,76 +348,104 @@ function globLine(
  */
 const MAX_PAGE_DEPTH = 32;
 
-/** What one walk has seen: real directory paths, and the real path of `app/`. */
+/**
+ * Directories one walk reads. Without `realPath` a directory reached twice
+ * through symlinks cannot be recognised, so several link loops multiply the
+ * walk; this bound ends it whatever the links do.
+ */
+const MAX_PAGE_DIRECTORIES = 4096;
+
+/** One walk's state: what it has seen and what it has collected so far. */
 interface PageWalk {
   readonly fs: IFileSystem;
   readonly dir: string;
   readonly seen: Set<string>;
+  readonly pages: string[];
+  readonly unreadable: string[];
+  directories: number;
   appReal?: string;
 }
 
 /**
- * Collects every page file under `app/`, sorted. Anything the walk cannot read
- * safely is collected as unreadable (E018) rather than read or skipped, so none
- * becomes a silent pass: a page over {@linkcode MAX_EXISTING_FILE_BYTES}, a
- * directory past {@linkcode MAX_PAGE_DEPTH}, a directory a symlink places
- * outside `app/`, and an entry whose `stat` or `readdir` fails (`ELOOP`,
- * `EACCES`). With `realPath` available a directory reached twice through
- * symlinks is walked once, so a link loop costs one visit, not an exponential
- * walk; without it the depth bound ends the walk.
+ * Resolves a path through `realPath` and reports whether it stays inside
+ * `app/`; the first path resolved is `app/` itself. Returns 'missing' for a
+ * path that is gone and 'outside' for one that cannot be resolved or that a
+ * symlink places outside `app/`.
  */
-async function pageFiles(
+async function realInsideApp(
   walk: PageWalk,
-  prefix: string,
-  depth = 0,
-): Promise<{ readonly pages: string[]; readonly unreadable: string[] }> {
+  realPath: NonNullable<IFileSystem['realPath']>,
+  path: string,
+): Promise<string | 'missing' | 'outside'> {
+  let real: string;
+  try {
+    real = await realPath(path);
+  } catch (cause) {
+    return isMissingPath(cause) ? 'missing' : 'outside';
+  }
+  walk.appReal ??= real;
+  return real === walk.appReal || real.startsWith(`${walk.appReal}/`) ? real : 'outside';
+}
+
+/**
+ * Collects every page file under `app/` into the walk. Anything the walk cannot
+ * read safely is collected as unreadable (E018) rather than read or skipped, so
+ * none becomes a silent pass: a page over {@linkcode MAX_EXISTING_FILE_BYTES}, a
+ * directory past {@linkcode MAX_PAGE_DEPTH} or beyond
+ * {@linkcode MAX_PAGE_DIRECTORIES}, a directory or page a symlink places outside
+ * `app/`, and an entry whose `stat` or `readdir` fails (`ELOOP`, `EACCES`). With
+ * `realPath` available a directory reached twice through symlinks is walked
+ * once, so a link loop costs one visit; without it the directory bound ends the
+ * walk.
+ */
+async function pageFiles(walk: PageWalk, prefix: string, depth = 0): Promise<void> {
   const { fs, dir } = walk;
   const path = joinPath(dir, prefix);
+  if (walk.directories >= MAX_PAGE_DIRECTORIES) {
+    walk.unreadable.push(prefix);
+    return;
+  }
+  walk.directories += 1;
   if (fs.realPath !== undefined) {
-    let real: string;
-    try {
-      real = await fs.realPath(path);
-    } catch (cause) {
-      if (isMissingPath(cause)) return { pages: [], unreadable: [] };
-      return { pages: [], unreadable: [prefix] };
+    const real = await realInsideApp(walk, fs.realPath.bind(fs), path);
+    if (real === 'missing') return;
+    if (real === 'outside') {
+      walk.unreadable.push(prefix);
+      return;
     }
-    walk.appReal ??= real;
-    if (real !== walk.appReal && !real.startsWith(`${walk.appReal}/`))
-      return { pages: [], unreadable: [prefix] };
-    if (walk.seen.has(real)) return { pages: [], unreadable: [] };
+    if (walk.seen.has(real)) return;
     walk.seen.add(real);
   }
   let entries: readonly string[];
   try {
     entries = await fs.readdir(path);
   } catch (cause) {
-    if (isMissingPath(cause)) return { pages: [], unreadable: [] };
-    return { pages: [], unreadable: [prefix] };
+    if (!isMissingPath(cause)) walk.unreadable.push(prefix);
+    return;
   }
-  const pages: string[] = [];
-  const unreadable: string[] = [];
   for (const entry of entries) {
     const relative = `${prefix}/${entry}`;
     let stat: Awaited<ReturnType<IFileSystem['stat']>>;
     try {
       stat = await fs.stat(joinPath(dir, relative));
     } catch {
-      unreadable.push(relative);
+      walk.unreadable.push(relative);
       continue;
     }
     if (stat.isDirectory) {
-      if (depth >= MAX_PAGE_DEPTH) {
-        unreadable.push(relative);
-        continue;
-      }
-      const nested = await pageFiles(walk, relative, depth + 1);
-      pages.push(...nested.pages);
-      unreadable.push(...nested.unreadable);
+      if (depth >= MAX_PAGE_DEPTH) walk.unreadable.push(relative);
+      else await pageFiles(walk, relative, depth + 1);
     } else if (stat.isFile && PAGE_FILE.test(entry)) {
-      (stat.size > MAX_EXISTING_FILE_BYTES ? unreadable : pages).push(relative);
+      // A page file linked from outside `app/` is bundled like any other, so it
+      // is resolved too: one that leaves `app/` is reported, never scanned as a page.
+      const outside =
+        fs.realPath !== undefined &&
+        (await realInsideApp(walk, fs.realPath.bind(fs), joinPath(dir, relative))) === 'outside';
+      (outside || stat.size > MAX_EXISTING_FILE_BYTES ? walk.unreadable : walk.pages).push(
+        relative,
+      );
     }
   }
-  return { pages: pages.sort(), unreadable: unreadable.sort() };
 }
 
 /** The result of scanning a project's pages. */
@@ -375,14 +465,17 @@ export interface PageImportScan {
  */
 export async function scanPageImports(fs: IFileSystem, dir: string): Promise<PageImportScan> {
   const violations: PageImportViolation[] = [];
-  const found = await pageFiles({ fs, dir, seen: new Set() }, 'app');
-  const unreadable: string[] = [...found.unreadable];
+  const walk: PageWalk = { fs, dir, seen: new Set(), pages: [], unreadable: [], directories: 0 };
+  await pageFiles(walk, 'app');
+  const unreadable = walk.unreadable.sort();
   const decoder = new TextDecoder();
-  for (const path of found.pages) {
+  const resolveToken = tokenResolverFor(fs, dir);
+  for (const path of walk.pages.sort()) {
     const result = await scanPageSource(
       path,
       decoder.decode(await fs.readFile(joinPath(dir, path))),
       dir.replace(/\/+$/, ''),
+      resolveToken,
     );
     if (result === 'unreadable') unreadable.push(path);
     else violations.push(...result);

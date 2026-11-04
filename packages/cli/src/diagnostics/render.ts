@@ -125,7 +125,7 @@ function lines(finding: Finding): readonly string[] {
     case 'page-unreadable':
       return [
         `Cannot read the imports of ${escapeName(f.path)}, so whether it imports kernel code by value cannot be checked.`,
-        '  It is over 1 MiB, cannot be parsed or read, sits past 32 directory levels or is reached through a symlink leaving app/. Fix that, or silence this finding in .setu-ts/check.json.',
+        '  It is over 1 MiB, cannot be parsed or read, sits past 32 directory levels or 4096 directories, or is reached through a symlink leaving app/. Fix that, or silence this finding in .setu-ts/check.json.',
       ];
     case 'unresolved-import':
       return [

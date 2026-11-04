@@ -398,6 +398,77 @@ describe('scanPageImports', () => {
   });
 });
 
+describe('token imports written without .ts (re-audit L-7)', () => {
+  const page = (specifier: string) => `import { T } from '${specifier}';\nvoid T;\n`;
+  const TOKEN = 'src/modules/m/x.token';
+  for (const [label, specifier, files, refused] of [
+    ['extensionless, .ts present', '~kernel/modules/m/x.token', [`${TOKEN}.ts`], false],
+    ['.js spelling, .ts present', '~kernel/modules/m/x.token.js', [`${TOKEN}.ts`], false],
+    [
+      'extensionless, a directory beside the .ts',
+      '~kernel/modules/m/x.token',
+      [`${TOKEN}.ts`, `${TOKEN}/index.ts`],
+      false,
+    ],
+    [
+      'extensionless, only a directory index',
+      '~kernel/modules/m/x.token',
+      [`${TOKEN}/index.ts`],
+      true,
+    ],
+    ['extensionless, only a .tsx', '~kernel/modules/m/x.token', [`${TOKEN}.tsx`], true],
+    [
+      'extensionless, a .js shadows the .ts',
+      '~kernel/modules/m/x.token',
+      [`${TOKEN}.ts`, `${TOKEN}.js`],
+      true,
+    ],
+    [
+      'extensionless, a file at the exact path',
+      '~kernel/modules/m/x.token',
+      [`${TOKEN}.ts`, TOKEN],
+      true,
+    ],
+    [
+      '.js spelling, a .js file exists',
+      '~kernel/modules/m/x.token.js',
+      [`${TOKEN}.ts`, `${TOKEN}.js`],
+      true,
+    ],
+  ] as const) {
+    it(`${refused ? 'refuses' : 'accepts'} ${label}`, async () => {
+      const fs = createFakeFs({
+        '/p/app/routes/a.tsx': page(specifier),
+        ...Object.fromEntries(files.map((file) => [`/p/${file}`, 'export const T = 1;\n'])),
+      });
+      const scan = await scanPageImports(fs, '/p');
+      expect(scan.unreadable).toEqual([]);
+      expect(scan.violations).toEqual(
+        refused ? [{ path: 'app/routes/a.tsx', line: 1, specifier, reason: 'value-import' }] : [],
+      );
+    });
+  }
+
+  it('refuses when a candidate the bundler tries first cannot be read', async () => {
+    const fs = createFakeFs({
+      '/p/app/routes/a.tsx': page('~kernel/modules/m/x.token'),
+      [`/p/${TOKEN}.ts`]: 'export const T = 1;\n',
+    });
+    const stat = fs.stat.bind(fs);
+    fs.stat = (path: string) =>
+      path === `/p/${TOKEN}.mjs`
+        ? Promise.reject(Object.assign(new Error('EACCES'), { code: 'EACCES' }))
+        : stat(path);
+    expect((await scanPageImports(fs, '/p')).violations.map((v) => v.reason)).toEqual([
+      'value-import',
+    ]);
+  });
+
+  it('accepts the spelling alone when scanning source without a filesystem', async () => {
+    expect(await scanPageSource('app/a.tsx', page('~kernel/modules/m/x.token'))).toEqual([]);
+  });
+});
+
 describe('scanPageImports bounds', () => {
   it('reports a page over 1 MiB as unreadable instead of reading it', async () => {
     const big = `import { aService } from '~kernel/modules/a/a.service.ts';\n${'//'.repeat(600_000)}`;
@@ -434,6 +505,35 @@ describe('scanPageImports bounds', () => {
     expect(scan.violations).toEqual([]);
     expect(scan.unreadable).toEqual([`app${'/loop'.repeat(33)}`]);
   });
+
+  it('ends several directory loops at the directory bound without realPath', async () => {
+    // Re-audit L-8: two links per level double the walk at every level, so the
+    // depth bound alone would visit 2^32 directories.
+    const fs = { ...createFakeFs({ '/p/app/root.tsx': '' }) };
+    delete (fs as { realPath?: unknown }).realPath;
+    const readdir = fs.readdir.bind(fs);
+    const stat = fs.stat.bind(fs);
+    const looped = (path: string) => /^\/p\/app\/[xy](\/|$)/.test(path);
+    fs.readdir = async (path: string) =>
+      path === '/p/app'
+        ? [...(await readdir(path)), 'x', 'y']
+        : looped(path)
+          ? ['x', 'y']
+          : readdir(path);
+    fs.stat = (path: string) =>
+      looped(path) ? Promise.resolve({ isFile: false, isDirectory: true, size: 0 }) : stat(path);
+    let listed = 0;
+    const counted = fs.readdir;
+    fs.readdir = (path: string) => {
+      listed += 1;
+      return counted(path);
+    };
+    const scan = await scanPageImports(fs, '/p');
+    expect(listed).toBe(4096);
+    expect(scan.violations).toEqual([]);
+    expect(scan.unreadable.length).toBeGreaterThan(0);
+    expect(scan.unreadable.every((path) => /^app(\/[xy])+$/.test(path))).toBe(true);
+  });
 });
 
 describe('scanPageImports over real symlinks (review finding 6)', () => {
@@ -454,6 +554,47 @@ describe('scanPageImports over real symlinks (review finding 6)', () => {
     } finally {
       await nodeFs.rm(root, { recursive: true, force: true });
     }
+  });
+
+  it('refuses a page file a symlink places outside app/ (re-audit L-6)', async () => {
+    const root = await tempDir({ prefix: 'page-walk-' });
+    try {
+      await nodeFs.mkdir(`${root}/app/routes`, { recursive: true });
+      await nodeFs.mkdir(`${root}/app/lib`, { recursive: true });
+      await nodeFs.mkdir(`${root}/src/modules/products`, { recursive: true });
+      await nodeFs.writeFile(
+        `${root}/src/modules/products/products.service.ts`,
+        'export const s = 1;\n',
+      );
+      await nodeFs.writeFile(
+        `${root}/app/routes/ok.tsx`,
+        "import { a } from '~/lib/a.ts';\nvoid a;\n",
+      );
+      await nodeFs.writeFile(`${root}/app/lib/a.ts`, 'export const a = 1;\n');
+      await nodeFs.symlink(
+        '../../src/modules/products/products.service.ts',
+        `${root}/app/routes/g.ts`,
+      );
+      await nodeFs.symlink(
+        '../../src/modules/products/products.service.ts',
+        `${root}/app/lib/svc.ts`,
+      );
+      await nodeFs.symlink('a.ts', `${root}/app/lib/alias.ts`);
+      const scan = await scanPageImports(createNodeRuntimeServices().fs!, root);
+      expect(scan).toEqual({ violations: [], unreadable: ['app/lib/svc.ts', 'app/routes/g.ts'] });
+    } finally {
+      await nodeFs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('reports a page file it cannot resolve', async () => {
+    const fs = createFakeFs({ '/p/app/a.tsx': '', '/p/app/b.tsx': '' });
+    const realPath = fs.realPath!.bind(fs);
+    fs.realPath = (path: string) =>
+      path === '/p/app/b.tsx'
+        ? Promise.reject(Object.assign(new Error('EACCES'), { code: 'EACCES' }))
+        : realPath(path);
+    expect(await scanPageImports(fs, '/p')).toEqual({ violations: [], unreadable: ['app/b.tsx'] });
   });
 
   it('reports an entry whose stat fails instead of throwing', async () => {

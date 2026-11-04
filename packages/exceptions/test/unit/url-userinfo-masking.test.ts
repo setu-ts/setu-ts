@@ -192,6 +192,9 @@ describe('served error bodies', () => {
     ['a URL', new URL(CONNECTION_URL)],
     ['a class instance', new Connection(CONNECTION_URL)],
     ['an object with toJSON', { toJSON: () => CONNECTION_URL }],
+    ['a String object', new String(CONNECTION_URL)],
+    ['a toJSON returning a String object', { toJSON: () => new String(CONNECTION_URL) }],
+    ['an object key', { [CONNECTION_URL]: 1 }],
   ] as const) {
     it(`masks ${label} in details`, async () => {
       const { ctx, responseSnapshot } = createFakeContext();

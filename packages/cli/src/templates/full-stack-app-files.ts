@@ -703,19 +703,6 @@ export const FULL_STACK_APP_FILES: readonly GeneratedFile[] = [
 ];
 
 /**
- * The full-stack README sections: modules and the page boundary, calling the
- * API, styling, middleware, workspace libraries and — on Workers only — the
- * Workers deployment notes (V11-19: that section used to appear in every
- * runtime's README and was wrong off Workers).
- *
- * Formatted as Prettier formats it, since the scaffold must pass its own
- * `fmt --check`.
- *
- * @param invocation - How the project runs the CLI (`npx setu`, or a Deno project's `setu` task)
- * @param runtime - The project's target runtime
- * @returns The README markdown
- */
-/**
  * The \`dev.ts\` port note. Only a Node, Deno or Bun project has \`dev.ts\`, \`PORT\`
  * and \`VITE_PORT\`; a Workers project develops with \`wrangler dev\`.
  */
@@ -728,6 +715,19 @@ connects to Vite's port directly, so an edit updates in place. A second dev serv
 \`VITE_PORT\` fails to start; give each project its own.
 `;
 
+/**
+ * The full-stack README sections: modules and the page boundary, calling the
+ * API, styling, middleware, workspace libraries and — on Workers only — the
+ * Workers deployment notes (V11-19: that section used to appear in every
+ * runtime's README and was wrong off Workers).
+ *
+ * Formatted as Prettier formats it, since the scaffold must pass its own
+ * `fmt --check`.
+ *
+ * @param invocation - How the project runs the CLI (`npx setu`, or a Deno project's `setu` task)
+ * @param runtime - The project's target runtime
+ * @returns The README markdown
+ */
 export const FULL_STACK_README_SECTION = (invocation: string, runtime: string): string => {
   const command = `\`${invocation} generate middleware <name>\` (\`src/middleware/\`)`;
   const width = command.length;
