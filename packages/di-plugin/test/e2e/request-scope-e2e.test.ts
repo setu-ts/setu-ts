@@ -184,8 +184,12 @@ it('M131b 3.10 keeps a request scope alive until an early-responded handler sett
       );
     },
   });
+  let detached: Promise<void> | undefined;
   app.middleware.add((ctx, next) => {
-    void next().catch(() => {});
+    detached = next();
+    // Handled here so the early response does not see an unhandled rejection;
+    // the test awaits `detached` itself, so a failed assertion still fails it.
+    detached.catch(() => {});
     return ctx.response.text('early');
   });
   let scope: IContainer | undefined;
@@ -203,6 +207,7 @@ it('M131b 3.10 keeps a request scope alive until an early-responded handler sett
     expect(scope).toBeDefined();
     expect(disposed).not.toHaveBeenCalled();
     gate.resolve();
+    await detached;
     await vi.waitFor(() => expect(disposed).toHaveBeenCalledOnce());
   } finally {
     gate.resolve();

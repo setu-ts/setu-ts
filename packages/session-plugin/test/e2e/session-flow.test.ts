@@ -7,7 +7,7 @@
  *
  * @module
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { CAPABILITIES } from '@setu-ts/common';
@@ -267,6 +267,45 @@ describe('session e2e (real kernel app)', () => {
       );
       expect(revocation).toHaveLength(1);
       expect(JSON.stringify(revocation[0]![1])).toContain('store down');
+      await app.stop();
+    });
+
+    it('surfaces the handler error when the revocation warning itself throws', async () => {
+      const store = {
+        read: () => Promise.resolve(null),
+        write: () => Promise.resolve(),
+        destroy: () => Promise.reject(new Error('store down')),
+      };
+      const { app } = buildApp({ store: store as never });
+      const noop = (): void => undefined;
+      const warn = vi.fn(() => {
+        throw new Error('logger down');
+      });
+      app.services.register(CAPABILITIES.LOGGER, {
+        debug: noop,
+        info: noop,
+        warn,
+        error: noop,
+        child: () => undefined,
+      } as never);
+      const seen: unknown[] = [];
+      app.middleware.add(
+        async (_ctx, next) => {
+          try {
+            await next();
+          } catch (error) {
+            seen.push(error);
+            throw error;
+          }
+        },
+        { priority: 0 },
+      );
+      await app.start();
+      const cookie = cookieOf((await app.inject(get('/bump'))).headers);
+      expect((await app.inject(get('/regenerate-then-throw', cookie))).statusCode).toBe(500);
+      expect(warn).toHaveBeenCalledOnce();
+      expect(seen).toHaveLength(1);
+      expect((seen[0] as Error).message).toBe('handler failed after regenerating');
       await app.stop();
     });
 

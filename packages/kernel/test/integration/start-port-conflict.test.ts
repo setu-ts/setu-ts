@@ -25,13 +25,10 @@ it('M131b 3.1 rejects a real port conflict and closes startup resources', async 
     ],
   });
   try {
-    const result = await Promise.race([
-      app.start({ port: address.port, hostname: '127.0.0.1' }).then(
-        () => 'unexpected start',
-        (error: unknown) => error,
-      ),
-      new Promise<string>((resolve) => setTimeout(() => resolve('start did not reject'), 250)),
-    ]);
+    const result = await app.start({ port: address.port, hostname: '127.0.0.1' }).then(
+      () => 'unexpected start',
+      (error: unknown) => error,
+    );
     expect(result).toMatchObject({ code: 'EADDRINUSE' });
     expect(close).toHaveBeenCalledOnce();
   } finally {

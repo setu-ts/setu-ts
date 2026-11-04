@@ -339,13 +339,10 @@ it('M131b 3.1 real Node bind rejects EADDRINUSE and resolves after free bind', a
   };
   process.on('uncaughtException', observe);
   try {
-    const result = await Promise.race([
-      adapter.listen(address.port, '127.0.0.1').then(
-        () => 'unexpected bind',
-        (error: unknown) => error,
-      ),
-      new Promise<string>((resolve) => setTimeout(() => resolve('bind did not reject'), 250)),
-    ]);
+    const result = await adapter.listen(address.port, '127.0.0.1').then(
+      () => 'unexpected bind',
+      (error: unknown) => error,
+    );
     expect(result).toMatchObject({ code: 'EADDRINUSE' });
     expect(uncaught).toEqual([]);
     const handle = await adapter.listen(0, '127.0.0.1');

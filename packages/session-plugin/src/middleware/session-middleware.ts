@@ -93,13 +93,17 @@ export function sessionMiddleware(
       // superseded is still deleted (M131b, audit F1).
       // Best effort: a store that cannot delete must not replace the request's
       // own error with its fault, but the fault is reported, not dropped (audit R1).
+      // A logger that throws while reporting must not replace that error either.
       await service.revokeSuperseded(session).catch((fault: unknown) => {
-        if (ctx.services.has(CAPABILITIES.LOGGER)) {
+        if (!ctx.services.has(CAPABILITIES.LOGGER)) return;
+        try {
           ctx.services
             .get<ILogger>(CAPABILITIES.LOGGER)
             .warn('Session revocation failed on an errored request', {
               error: describeError(fault),
             });
+        } catch {
+          // The request's own error is rethrown below.
         }
       });
       throw error;
