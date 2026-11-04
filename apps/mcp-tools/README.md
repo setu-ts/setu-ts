@@ -24,7 +24,8 @@ start command runs `dist/main.js` with `instrumentation.mjs`.
 Use `JWT_SECRET` to replace the clearly named local demo default. `MCP_RESOURCE` defaults to
 `http://localhost:3000`; `MCP_RATE_MAX` defaults to 60 requests per principal, per tool, per minute.
 After starting with the chosen secret, run `npm run token -- "items:read items:write"` in this
-directory with the same environment to print a five-minute operator credential. Never log it.
+directory with the same environment to print a five-minute operator credential. Like `start`, it
+reads `.env`, so a secret kept there signs tokens the server accepts. Never log it.
 Configure a desktop client's Streamable HTTP URL as `http://localhost:3000/mcp` with a Bearer header.
 The default empty `allowedOrigins` list accepts non-browser requests with no Origin; browser UIs
 need an explicitly listed exact origin.

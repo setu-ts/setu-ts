@@ -836,6 +836,10 @@ In another terminal, use the same secret to issue the short-lived credential:
 env JWT_SECRET=replace-with-a-local-secret-at-least-32-characters npx tsx token.ts "items:read items:write"
 ```
 
+If you keep `JWT_SECRET` in `.env`, which `npm start` loads, load it for the script too:
+`npx tsx --env-file-if-exists=.env token.ts`. Otherwise the script signs with the demo default and
+the server refuses the token.
+
 Add an HTTP/Streamable HTTP server in your desktop MCP client's connection settings with URL
 `http://localhost:3000/mcp` and an `Authorization: Bearer <the issued token>` header. For a
 read-only connection, issue `items:read` instead. Refresh the credential after five minutes. Clients
@@ -846,7 +850,7 @@ checked-in configuration. No stdio bridge is part of this example.
 
 Node integration tests and one native Deno proof exercise list and call. The workerd condition has a
 bundle-resolution proof; a live Workers run is a follow-on. Bun compatibility is unproven until the
-0.13.0 artifacts are published and the compat row runs.
+0.12.0 artifacts are published and the compat row runs.
 
 That paragraph is the package reference's verification status; 0.12.0 availability does not extend
 those runtime proofs. This example targets Node. See the

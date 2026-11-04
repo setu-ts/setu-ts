@@ -14,7 +14,7 @@
     "test": "tsx --test --test-force-exit '**/!(*.e2e).test.ts'",
     "test:e2e": "tsx --test --test-force-exit '**/*.e2e.test.ts'",
     "smoke": "tsx smoke.ts",
-    "token": "tsx token.ts"
+    "token": "tsx --env-file-if-exists=.env token.ts"
   },
   "dependencies": {
     "@setu-ts/common": "workspace:^",
