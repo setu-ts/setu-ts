@@ -308,9 +308,9 @@ describe.each(REDIS_CLIENTS)('%s', (redisVariant) => {
             await runProcess('docker', { args: ['unpause', containerId] });
           }
           await runProcess('docker', { args: ['start', containerId] });
-          // close() reports a connection that has not yet come back from the outage
-          // as `Command timed out`; thrown here it would replace the failure above,
-          // which CI then showed with no test frame at all.
+          // close() rethrows the first failure of releasing its connections, such as
+          // `Command timed out`. Thrown here it would replace the body's failure, which
+          // is how CI came to report a bare timeout with no test frame.
           await app.stop().catch((error: unknown) => {
             if (failure === undefined) throw error;
           });
