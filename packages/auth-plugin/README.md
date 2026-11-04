@@ -1631,10 +1631,11 @@ window.
 
 Use `new MemoryQuotaStore(runtime)` for one process, or `new RedisQuotaStore({ client, namespace })`
 for a shared budget. `IQuotaRedisClient` requires ioredis-style `eval(script, numkeys, ...args)` and
-`quit()`; node-redis can use common's `fromNodeRedis` adapter. The namespace must be non-empty.
-Redis passes caller data through KEYS/ARGV, uses atomic scripts and absolute expiry, and wraps
-failures with their original cause. `close()` quits the injected client, so dedicate that client to
-the store. The application owns the injected client's `'error'` listener; the store attaches none.
+`quit()`; node-redis can use common's `fromNodeRedis` adapter. The namespace must be non-empty and
+well-formed UTF-16. Redis passes caller data through KEYS/ARGV, uses atomic scripts and absolute
+expiry, and wraps failures with their original cause. `close()` quits the injected client, so
+dedicate that client to the store. The application owns the injected client's `'error'` listener;
+the store attaches none.
 
 The store never times out a call itself: the injected client must bound commands. Use ioredis
 `new Redis(url, { commandTimeout: 15_000 })` or node-redis through

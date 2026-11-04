@@ -57,8 +57,13 @@ export class RedisQuotaStore implements IQuotaStore {
         throw new TypeError(`RedisQuotaStore client requires ${method}`);
       }
     }
-    if (typeof options.namespace !== 'string' || options.namespace.length === 0)
-      throw new TypeError('RedisQuotaStore namespace must be non-empty');
+    // Redis receives UTF-8, so a lone surrogate would encode like U+FFFD and share a key.
+    if (
+      typeof options.namespace !== 'string' ||
+      options.namespace.length === 0 ||
+      !options.namespace.isWellFormed()
+    )
+      throw new TypeError('RedisQuotaStore namespace must be non-empty and well-formed');
     this.#client = options.client;
     this.#namespace = options.namespace;
   }

@@ -86,6 +86,10 @@ describe('RedisQuotaStore', () => {
     expect(() => new RedisQuotaStore({ client: setup().client, namespace: '' })).toThrow(
       'namespace',
     );
+    // A lone surrogate reaches Redis as the same UTF-8 bytes as U+FFFD.
+    expect(() => new RedisQuotaStore({ client: setup().client, namespace: 'app-\ud800' })).toThrow(
+      'well-formed',
+    );
   });
 
   it.each(['disconnected', 'Command timed out'])(
