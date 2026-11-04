@@ -40,7 +40,7 @@ All notable changes to this project are documented here. The format follows
   value. `setu add mcp` installs the optional `@modelcontextprotocol/server@^2.4.0` peer. Existing
   applications need no changes; see `docs/upgrading.md` for opt-in tool safety and replay behavior.
 
-- **Full-stack kernel modules and `getService` (M130, `@setu-ts/cli`, `@setu-ts/common`,
+- **Full-stack kernel modules and `getService` (M130, #551, `@setu-ts/cli`, `@setu-ts/common`,
   `@setu-ts/react-router-plugin`, `@setu-ts/full-stack-starter`).** Common adds `serviceToken`,
   `ServiceToken`, `requestService`, `RequestBoundService`, `resolveRequestService` and
   `RequestServiceUnavailableError`: a request-bound service is built once per request and token from
@@ -229,7 +229,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
-- **The error handler masks URL credentials in what it logs and serves (M130 audit,
+- **The error handler masks URL credentials in what it logs and serves (M130 audit, #551,
   `@setu-ts/exceptions`).** `errorHandler` logged an error's message unmasked, so a driver error
   such as `connect failed: postgres://u:pw@db/x` put the password in the log line while the same
   record's cause was masked by the logger's redaction. The message, and the serialized cause, now
