@@ -99,17 +99,19 @@ describe('federated sign-in with a second factor', () => {
     // Enrol the federated principal directly against the store the form uses.
     const enrol = new TotpService({ store, runtime: rt(), issuer: 'Test' });
     const { secret } = await enrol.beginEnrolment(PRINCIPAL_ID, 'user-1');
+    // Enrol on the current step and complete on the next: both stay inside the ±1 window
+    // even if the wall clock crosses a step boundary between them (a previous step would not).
     const step = totpCounter(rt().now());
-    expect(
-      (await enrol.confirmEnrolment(PRINCIPAL_ID, await codeAt(secret, step - 1))).status,
-    ).toBe('ok');
+    expect((await enrol.confirmEnrolment(PRINCIPAL_ID, await codeAt(secret, step))).status).toBe(
+      'ok',
+    );
 
     (await federate(jar)).body?.cancel();
     const completed = await json(
       await jar.fetch(harness.app, '/mfa/complete', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ code: await codeAt(secret, step) }),
+        body: JSON.stringify({ code: await codeAt(secret, step + 1) }),
       }),
     );
     expect(completed.result).toBe('signed-in');

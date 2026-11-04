@@ -16557,7 +16557,7 @@ different scopes and assert different lists; call a tool and assert the route's 
 tenant and audit each ran (a refused guard short-circuits the handler); a validation refusal arrives
 as `isError` and an unknown tool as `-32602`; a filtered list never carries a shared cache scope; a
 retried call does not repeat its side effect; an internal error reaches the client redacted. Node
-has the full integration suite and Deno one native list/call proof. Bun is unproven until the 0.13.0
+has the full integration suite and Deno one native list/call proof. Bun is unproven until the 0.12.0
 published-artifact compat row runs. Workers has a workerd-condition bundle-resolution proof; a live
 workerd run is a follow-on. **Security-audited** by a fresh agent before it merges.
 

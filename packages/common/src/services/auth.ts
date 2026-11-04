@@ -14,7 +14,7 @@ import type { IRequest } from '../http.ts';
  * actor nested inside it: RFC 8693 §4.1 makes only the outermost value the
  * party acting now.
  *
- * @since 0.13.0
+ * @since 0.12.0
  */
 export interface IPrincipalActor {
   /** The actor's subject: the `act` claim's `sub`, or its `client_id`. */

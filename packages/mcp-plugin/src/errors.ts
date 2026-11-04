@@ -1,7 +1,7 @@
 /** Configuration failures for MCP construction and bootstrap. @module */
 
 /** A malformed option or a route that cannot be exposed as a tool.
- * @since 0.13.0
+ * @since 0.12.0
  */
 export class McpPluginConfigurationError extends Error {
   /** @param message - The configuration refusal */

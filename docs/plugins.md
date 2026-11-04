@@ -1083,7 +1083,7 @@ pipeline.
 | ✅   | ✅   | ✅  | ✅      |
 
 Node has the full integration suite and Deno one native list/call proof. Bun is unproven until the
-0.13.0 published-artifact row runs. Workers has a workerd-condition bundle-resolution proof; a live
+0.12.0 published-artifact row runs. Workers has a workerd-condition bundle-resolution proof; a live
 Workers run remains a follow-on.
 
 **Features:**

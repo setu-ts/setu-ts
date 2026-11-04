@@ -10,7 +10,7 @@ import { withMcpToolMetadata } from '@setu-ts/common';
  * ```typescript
  * mcpTool({ name: 'read_order', description: 'Read an order' });
  * ```
- * @since 0.13.0
+ * @since 0.12.0
  */
 export function mcpTool(meta: RouteMcpToolMetadata = {}): MiddlewareFunction {
   return withMcpToolMetadata((_ctx, next) => next(), meta);
