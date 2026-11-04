@@ -62,6 +62,10 @@ describe('example scaffolding', () => {
     expect(h.fs.read(`${prefix}smoke.ts`)).toContain('./smoke-helpers.ts');
     expect(h.fs.read(`${prefix}smoke-helpers.ts`)).not.toContain('source-register');
     expect(h.fs.read(`${prefix}token.ts`)).toContain('issueDemoToken');
+    // Its start runs dist/, so the next steps build before starting.
+    const out = h.out.text();
+    expect(out.indexOf('npm run smoke')).toBeLessThan(out.indexOf('npm run build'));
+    expect(out.indexOf('npm run build')).toBeLessThan(out.indexOf('npm start'));
     expect(h.fs.read(`${prefix}tsconfig.json`)).not.toMatch(/extends|paths/);
     expect(h.fs.writes.map((path) => path.slice(prefix.length)).sort()).toEqual(
       [...examplePaths('mcp-tools')].sort(),
@@ -90,6 +94,8 @@ describe('example scaffolding', () => {
       expect(h.out.text()).toContain('cd demo && npm install');
       // The smoke check exits; `npm start` serves until stopped, so it comes last.
       expect(h.out.text().indexOf('npm run smoke')).toBeLessThan(h.out.text().indexOf('npm start'));
+      // A tsx start needs no build step.
+      expect(h.out.text()).not.toContain('npm run build');
       expect(h.fs.writes.map((path) => path.slice(prefix.length)).sort()).toEqual(
         [...examplePaths('grpc')].sort(),
       );

@@ -11,7 +11,8 @@ All notable changes to this project are documented here. The format follows
 - **MCP example and website guide (`@setu-ts/cli`, #554).** Offer `setu new --example mcp-tools`
   from 0.12.0, with scoped tools, idempotent retries, validation, rate limits, Origin checks and a
   weighted archive quota. The standalone website guide includes the full scaffold-shaped application
-  and official-client tests.
+  and official-client tests. `setu new --example` now lists `npm run build` in its next steps when
+  an example starts from compiled output.
 
 - **Weighted quotas and AI SDK recipes (M134, #549, `@setu-ts/auth-plugin`,
   `@setu-ts/telemetry-plugin`).** `createQuota`, `IQuota`, `QuotaOptions`, `QuotaReservation`,
