@@ -43,9 +43,12 @@ full so the project is reconstructible; `setu sync` owns them.
 ### `setu.config.ts`
 
 The discovery environment remains the first parameter; development diagnostics remain the second.
-The secret comes from `JWT_SECRET` with a clearly named local demo fallback. Use a separately
-provisioned secret for a deployment. `MCP_RATE_MAX` is validated at startup and defaults to 60
-requests per principal, per tool, per minute. `MCP_RESOURCE` identifies this resource server.
+The secret comes from `JWT_SECRET` with a clearly named local demo fallback. **That fallback is
+public**: it is printed in this guide and the example, so anyone can mint a token it accepts. The
+application starts without `JWT_SECRET`, including from `npm start` and the Docker image, so a
+deployment must set it to a separately provisioned secret. `MCP_RATE_MAX` is validated at startup
+and defaults to 60 requests per principal, per tool, per minute. `MCP_RESOURCE` identifies this
+resource server.
 
 ```typescript
 // file: setu.config.ts
