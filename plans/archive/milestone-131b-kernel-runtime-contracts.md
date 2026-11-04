@@ -1,8 +1,8 @@
 # Milestone 131b — Kernel, runtime and plugin contracts (`@setu-ts/runtime`, `@setu-ts/kernel` and 14 more)
 
-> **Status:** Planning. Branch: `feat/m131b-kernel-runtime-contracts`. `develop` and `main` are
-> protected — all work (implementation + fixes) stays on this one branch until it merges via a
-> single PR into `develop`.
+> **Status:** Complete (PR pending). Branch: `feat/m131b-kernel-runtime-contracts`. `develop` and
+> `main` are protected — all work (implementation + fixes) stays on this one branch until it merges
+> via a single PR into `develop`.
 
 ## 0. Objective & scope
 
