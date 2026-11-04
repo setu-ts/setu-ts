@@ -482,6 +482,15 @@ describe('development source policies', () => {
       "const o = x[/* c */ 'constructor'];",
       "const o = { get ['__proto__']() { return 1; } };",
       "class C { static ['prototype'] = 1; }",
+      // Legacy accessor methods reach a prototype through a blanked string argument.
+      "const g = ({}).__lookupGetter__('__proto__');",
+      "x.__defineGetter__('k', f);",
+      "x.__defineSetter__('k', f);",
+      "x.__lookupSetter__('k');",
+      "const g = x['__lookupGetter__'];",
+      "const g = x['__defineGetter__'];",
+      "const g = x['__defineSetter__'];",
+      "const g = x['__lookupSetter__'];",
       "const o = { a: 1, ['JWT']: v };",
     ]) {
       expect(maskSourceCode(source), source).toBeUndefined();

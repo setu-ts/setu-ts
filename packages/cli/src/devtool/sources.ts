@@ -148,6 +148,12 @@ const UNDECIDABLE_IDENTIFIERS: ReadonlySet<string> = new Set([
   'setPrototypeOf',
   'defineProperty',
   'defineProperties',
+  // Legacy accessor methods: `({}).__lookupGetter__('__proto__')` reaches a
+  // prototype through a string the code mask blanks (2026-11-04 audit).
+  '__defineGetter__',
+  '__defineSetter__',
+  '__lookupGetter__',
+  '__lookupSetter__',
   'globalThis',
   'self',
   'window',

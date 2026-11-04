@@ -260,6 +260,12 @@ All notable changes to this project are documented here. The format follows
   like `env.JWT_SECRET`. Names such as `constructor`, `prototype` and `__proto__`, concatenated or
   variable keys, and a computed key directly after `{` or `,` are still refused.
 
+- **`setu check` and the CLI's configuration edits refuse the legacy accessor methods
+  (`@setu-ts/cli`, PR pending).** `__defineGetter__`, `__defineSetter__`, `__lookupGetter__` and
+  `__lookupSetter__` now make `setu.config.ts` unclassifiable, like `Object` and `Reflect`:
+  `({}).__lookupGetter__('__proto__')` reaches a prototype through a string argument the lexer
+  cannot see into.
+
 - **The error handler masks URL credentials in what it logs and serves (M130 audit, #551,
   `@setu-ts/exceptions`).** `errorHandler` logged an error's message unmasked, so a driver error
   such as `connect failed: postgres://u:pw@db/x` put the password in the log line while the same
