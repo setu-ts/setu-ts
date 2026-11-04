@@ -8,6 +8,25 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Tenant-scoped vector retrieval (M135, `@setu-ts/common`, `@setu-ts/vector-store-plugin`,
+  `@setu-ts/cloudflare-plugin`, `@setu-ts/cli`).** `CAPABILITIES.VECTOR_STORE` and `IVectorStore`
+  add similarity search whose tenant scope is a required argument of every data method, never a
+  filter key. `VectorStorePlugin` registers the service under `VectorStorePluginOptions`;
+  `IVectorStoreAdapter` is the backend contract. `MemoryVectorStore`, `PgVectorStore` (Drizzle,
+  pgvector ≥ 0.8.0) and `QdrantVectorStore` ship in the package with `MemoryVectorStoreOptions`,
+  `PgVectorDatabase`, `PgVectorExecutor`, `PgVectorStoreOptions`, `QdrantClientLike`,
+  `QdrantVectorStoreOptions`, `VectorStoreTenancy` and `VERSION`. `VectorizeVectorStore`,
+  `VectorizeIndexLike`, `VectorizeVectorLike` and `VectorizeVectorStoreOptions` add the Workers
+  adapter to cloudflare-plugin. Common adds `VectorCollectionSpec`, `VectorRecord`, `VectorQuery`,
+  `VectorMatch`, `VectorFilter`, `VectorFieldType`, `VectorMetadataValue`, `vectorRecordKey`,
+  `VectorScopeRequiredError`, `VectorScopeInvalidError`, `VectorFilterError`,
+  `VectorDimensionError`, `VectorRecordError`, `VectorCollectionUnknownError`,
+  `VectorCollectionMismatchError` and `VectorOperationUnsupportedError`. `replaceSource` makes
+  re-ingestion leave one copy; a filter is refused, never dropped; caller errors carry 400 status
+  hints and backend faults answer 503/504. `setu add vector-store` installs the package and prints a
+  registration. `apps/semantic-search` indexes queued documents and serves tenant-scoped search;
+  `docs/retrieval.md` is the guide. Ships in 0.12.0.
+
 - **MCP example and website guide (`@setu-ts/cli`, #554).** Offer `setu new --example mcp-tools`
   from 0.12.0, with scoped tools, idempotent retries, validation, rate limits, Origin checks and a
   weighted archive quota. The standalone website guide includes the full scaffold-shaped application

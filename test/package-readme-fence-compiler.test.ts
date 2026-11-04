@@ -141,6 +141,7 @@ const READMES: Readonly<Record<string, number>> = {
   // derived-key forwarding example.
   'packages/idempotency-plugin/README.md': 3,
   'packages/mcp-plugin/README.md': 2,
+  'packages/vector-store-plugin/README.md': 8,
   // M98a: +1 for the kernel-diagnostics polling example.
   'packages/kernel/README.md': 3,
   'packages/logger-plugin/README.md': 4,
@@ -159,7 +160,7 @@ const READMES: Readonly<Record<string, number>> = {
   // pinned counts; the UNGATED exemption is deleted, so this record is now
   // every package README on disk.
   'packages/cli/README.md': 4,
-  'packages/cloudflare-plugin/README.md': 9,
+  'packages/cloudflare-plugin/README.md': 10,
   'packages/cqrs-plugin/README.md': 2,
   'packages/database-plugin/README.md': 19,
   'packages/notification-plugin/README.md': 3,
@@ -208,7 +209,7 @@ describe('package README fences compile (X8-8, X6-2/X7-1)', () => {
     // Pin the SIZE of the target list too: without this, deleting an entry
     // shrinks both sides of the equality below and the gate passes vacuously
     // (negative control §6.7 of the M70n plan).
-    expect(Object.keys(READMES)).toHaveLength(53);
+    expect(Object.keys(READMES)).toHaveLength(54);
 
     // And pin the COVERAGE: the gated set is every package README on disk —
     // M119i deleted the known-gap list, so a new package cannot ship an

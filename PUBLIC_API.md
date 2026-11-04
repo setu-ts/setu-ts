@@ -10,6 +10,7 @@
 - [Shared reconnect supervisor (`@setu-ts/common`)](#shared-reconnect-supervisor-setu-tscommon)
 - [Request-bound services (`@setu-ts/common`)](#request-bound-services-setu-tscommon)
 - [Dotenv parser (`@setu-ts/common`)](#dotenv-parser-setu-tscommon)
+- [Vector store (`@setu-ts/common` + `@setu-ts/vector-store-plugin`)](#vector-store-setu-tscommon--setu-tsvector-store-plugin)
 
 1. [Installation](#installation)
 2. [Full Stack Application](#full-stack-application)
@@ -413,6 +414,108 @@ import { parseEnv } from '@setu-ts/common';
 parseEnv('export A="x y"\nB=plain # note\nEMPTY=\n');
 // { A: 'x y', B: 'plain', EMPTY: '' }
 ```
+
+## Vector store (`@setu-ts/common` + `@setu-ts/vector-store-plugin`)
+
+Since 0.12.0, `@setu-ts/vector-store-plugin` provides tenant-scoped similarity search over
+collections declared up front. The scope is a required argument of every data method, not a filter
+key, and a filter names only declared metadata fields and is refused, never ignored. The store takes
+vectors and never embeds text. `@setu-ts/cloudflare-plugin` adds the Workers adapter.
+
+### Shared contract (`@setu-ts/common`)
+
+`CAPABILITIES.VECTOR_STORE` is `'vector-store'`; `VectorStorePlugin` registers `IVectorStore` under
+it. Every data method takes the collection and the scope first:
+
+```typescript
+interface IVectorStore {
+  scopeFor(ctx: IRequestContext): string;
+  upsert(collection: string, scope: string, records: readonly VectorRecord[]): Promise<void>;
+  replaceSource(
+    collection: string,
+    scope: string,
+    sourceId: string,
+    records: readonly VectorRecord[],
+  ): Promise<void>;
+  query(collection: string, scope: string, query: VectorQuery): Promise<readonly VectorMatch[]>;
+  delete(collection: string, scope: string, ids: readonly string[]): Promise<void>;
+  deleteScope(collection: string, scope: string): Promise<void>;
+}
+```
+
+`scopeFor` returns the request's tenant id, or the configured fixed scope for every request. Results
+are ordered by cosine similarity descending, then id ascending; `score` is in `[-1, 1]`.
+
+| Export                                       | Kind       | Purpose                                                                     |
+| -------------------------------------------- | ---------- | --------------------------------------------------------------------------- |
+| `IVectorStore`                               | interface  | The registered service                                                      |
+| `IVectorStoreAdapter`                        | interface  | A backend: `open`, `ensureCollection`, the five data methods, `close?()`    |
+| `VectorCollectionSpec`                       | interface  | `name`, `dimensions`, `filterable?`                                         |
+| `VectorRecord`, `VectorQuery`, `VectorMatch` | interfaces | One stored vector, one query, one result                                    |
+| `VectorFilter`                               | type       | `eq`/`in`/`gt`/`gte`/`lt`/`lte` comparisons and `and`                       |
+| `VectorFieldType`, `VectorMetadataValue`     | types      | `'string' \| 'number' \| 'boolean'`; the matching metadata values           |
+| `vectorRecordKey(subtle, scope, id)`         | function   | SHA-256 over a length-prefixed scope and id, as 64 lowercase hex characters |
+
+`VectorScopeRequiredError`, `VectorScopeInvalidError`, `VectorFilterError`, `VectorDimensionError`,
+`VectorRecordError`, `VectorCollectionUnknownError`, `VectorCollectionMismatchError` and
+`VectorOperationUnsupportedError` are exported from common so the service and all four adapters
+throw the same classes. The first five carry a 400 status hint; `VectorCollectionUnknownError`
+carries 500 (a programming error) and `VectorOperationUnsupportedError` 501.
+`VectorCollectionMismatchError` has no hint because it fails registration.
+
+### Plugin and adapters (`@setu-ts/vector-store-plugin`)
+
+`VectorStorePlugin({ adapter, collections, tenancy? })` returns the `vector-store-plugin` plugin. It
+depends on the runtime, provides `CAPABILITIES.VECTOR_STORE`, and is single-instance. During
+registration it resolves an adapter or adapter factory, calls `open`, creates or verifies every
+declared collection in order, registers the service, and closes the adapter at shutdown. A failure
+in any step fails application startup.
+
+| Export                                                                                                                                                                 | Kind     | Purpose                                                                 |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ----------------------------------------------------------------------- |
+| `VectorStorePlugin`                                                                                                                                                    | function | Registers the service; options `adapter`, `collections`, `tenancy?`     |
+| `MemoryVectorStore`                                                                                                                                                    | class    | In-process brute-force adapter; the conformance reference               |
+| `PgVectorStore`                                                                                                                                                        | class    | PostgreSQL with pgvector ≥ 0.8, over the application's Drizzle database |
+| `QdrantVectorStore`                                                                                                                                                    | class    | Qdrant, over an application-supplied client                             |
+| `VectorStoreTenancy`                                                                                                                                                   | type     | `'required'` (default) or `{ fixed: string }`                           |
+| `VectorStorePluginOptions`, `MemoryVectorStoreOptions`, `PgVectorDatabase`, `PgVectorExecutor`, `PgVectorStoreOptions`, `QdrantClientLike`, `QdrantVectorStoreOptions` | types    | Option and facade types                                                 |
+
+`collections` is required and non-empty. A name matches `^[a-z][a-z0-9_]{0,39}$`, dimensions are an
+integer 1–4,096, and `filterable` declares at most 10 fields matching `^[a-z][a-z0-9_]{0,63}$` and
+not named `scope`, `id`, `source_id` or `content`. `PgVectorStore` takes `db` (a raw Drizzle
+database, not the opaque `DrizzleDatabase` given to `DatabasePlugin`) and
+`ensure: 'create' | 'verify'`; `QdrantVectorStore` takes a structural `QdrantClientLike`; every
+built-in adapter takes `onClose` and never closes a client it did not create. `drizzle-orm@0.45.2`
+is an optional peer, loaded lazily only by `PgVectorStore`.
+
+Limits, enforced by the service before any adapter call: `topK` 1–50, 500 records per write, 1,000
+ids per delete, 64-byte scope, 256-byte record or source id, 8 KiB content, 64-byte string metadata
+or filter value, 100 values per `in`, `and` depth 4 and 32 clauses per filter. `replaceSource`
+writes the source's new records and then deletes its stale records in the same scope.
+
+| Operation       | memory | pgvector | Qdrant | Vectorize |
+| --------------- | ------ | -------- | ------ | --------- |
+| `upsert`        | yes    | yes      | yes    | yes       |
+| `query`         | yes    | yes      | yes    | yes       |
+| `delete`        | yes    | yes      | yes    | yes       |
+| `replaceSource` | yes    | yes      | yes    | refused   |
+| `deleteScope`   | yes    | yes      | yes    | refused   |
+
+Vectorize refuses those two with `VectorOperationUnsupportedError` because it has no delete by
+namespace or filter; the pgvector adapter indexes at most 2,000 dimensions and Vectorize at most
+1,536. See [the package README](packages/vector-store-plugin/README.md) for adapter setup, error
+meanings and the full limits table.
+
+### Vectorize (`@setu-ts/cloudflare-plugin`)
+
+`VectorizeVectorStore`, `VectorizeIndexLike`, `VectorizeVectorLike` and
+`VectorizeVectorStoreOptions` are exported since 0.12.0. `VectorizeVectorStore({ index, onClose? })`
+takes a structural facade of the current `Vectorize` binding (`describe`, `query`, `upsert`,
+`deleteByIds`), checked at construction. The scope is the namespace, and the stored id is
+`vectorRecordKey(scope, id)` with the caller's id in metadata. `ensureCollection` verifies only the
+reported dimensions, because the binding does not report the metric. Writes apply asynchronously.
+
+---
 
 ## RuntimePlugin() (`@setu-ts/runtime`)
 
@@ -15532,6 +15635,7 @@ other runtime — and injection is what the platform docs recommend for testabil
 | `asUpgradeResponse`, `DurableObjectUpgradeResponse`                                                                                                                                                                                                                                                                                     | fn + type     |
 | `createDefaultDurableObjectWebSocketHost`, `DurableObjectWebSocketHost`, `DurableObjectWebSocketPair`                                                                                                                                                                                                                                   | fn + types    |
 | `IDurableObjectState`, `IDurableObjectStorage`, `IDurableObjectWebSocket`, `IDurableObjectClientSocket`, `DurableObjectMessageEvent`                                                                                                                                                                                                    | types         |
+| `VectorizeVectorStore`, `VectorizeIndexLike`, `VectorizeVectorLike`, `VectorizeVectorStoreOptions`                                                                                                                                                                                                                                      | class + types |
 | `IKvNamespace`, `IR2Bucket`, `IR2Object`, `IR2ObjectBody`, `ID1Database`, `ID1PreparedStatement`, `D1Result`, `IQueueProducer`, `IQueueMessage`, `IQueueMessageBatch`, `IScheduledController`, `IServiceBinding`, `IDurableObjectNamespace`, `CloudflareWorkerEnv`, `KvPutOptions`, `KvListOptions`, `KvListResult`, `QueueSendOptions` | types         |
 | `isKvNamespace`, `isR2Bucket`, `isD1Database`, `isQueueProducer`, `isDurableObjectNamespace`                                                                                                                                                                                                                                            | guards        |
 | `CloudflareBindingMissingError`, `CloudflareUnsupportedError`, `CloudflareObjectNotFoundError`, `CloudflareRequestTimeoutError`, `CloudflareRemoteHandlerError`                                                                                                                                                                         | errors        |

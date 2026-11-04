@@ -41,8 +41,8 @@ pass it in. The memory adapter needs nothing beyond the package.
 ## Usage
 
 Collections are required and are validated when the plugin is created. The adapter creates or
-verifies them during registration, so an unreachable backend or a mismatched index fails
-application startup rather than the first request.
+verifies them during registration, so an unreachable backend or a mismatched index fails application
+startup rather than the first request.
 
 ```typescript
 import { createApplication } from '@setu-ts/kernel';
@@ -70,11 +70,11 @@ called once, during registration.
 
 ## Collections
 
-| Property      | Rule                                                                                        |
-| ------------- | ------------------------------------------------------------------------------------------- |
-| `name`        | `^[a-z][a-z0-9_]{0,39}$`; unique per application                                            |
-| `dimensions`  | Integer 1–4,096; an adapter may support fewer and refuses at registration                   |
-| `filterable?` | At most 10 fields, each `'string'`, `'number'` or `'boolean'`                               |
+| Property      | Rule                                                                      |
+| ------------- | ------------------------------------------------------------------------- |
+| `name`        | `^[a-z][a-z0-9_]{0,39}$`; unique per application                          |
+| `dimensions`  | Integer 1–4,096; an adapter may support fewer and refuses at registration |
+| `filterable?` | At most 10 fields, each `'string'`, `'number'` or `'boolean'`             |
 
 Field names match `^[a-z][a-z0-9_]{0,63}$` and may not be `scope`, `id`, `source_id` or `content`,
 which the adapters use for their own columns or payload keys. Only declared fields may appear in a
@@ -123,8 +123,8 @@ export function documentsPlugin(): IPlugin {
 Pass the scope as the second argument of `upsert`, `replaceSource`, `query`, `delete` and
 `deleteScope`. A scope is a non-empty, well-formed string of at most 64 UTF-8 bytes; anything else
 throws `VectorScopeInvalidError`. Each adapter maps it to its strongest native boundary: a primary
-key column in pgvector, an `is_tenant` payload index and a `must` condition in Qdrant, a namespace in
-Vectorize, and a map key in memory.
+key column in pgvector, an `is_tenant` payload index and a `must` condition in Qdrant, a namespace
+in Vectorize, and a map key in memory.
 
 `tenancy: { fixed: 'shared' }` makes `scopeFor` return that scope for every request, tenant or not.
 Use it for a store opened without multi-tenancy, never to let tenant and tenant-less requests share
@@ -173,26 +173,26 @@ every record of one tenant in the collection, for offboarding.
 
 ## Limits
 
-| Limit                                | Value                       |
-| ------------------------------------ | --------------------------- |
-| Dimensions per collection            | 4,096                       |
-| Filterable fields per collection     | 10                          |
-| Matches per query (`topK`)           | 50                          |
-| Records per `upsert`/`replaceSource` | 500                         |
-| Ids per `delete`                     | 1,000                       |
-| Scope                                | 64 UTF-8 bytes              |
-| Record or source id                  | 256 UTF-8 bytes             |
-| Record `content`                     | 8,192 UTF-8 bytes           |
-| String metadata or filter value      | 64 UTF-8 bytes              |
-| Values in one `in` clause            | 100                         |
-| `and` nesting depth                  | 4                           |
-| Clauses in one filter                | 32                          |
+| Limit                                | Value             |
+| ------------------------------------ | ----------------- |
+| Dimensions per collection            | 4,096             |
+| Filterable fields per collection     | 10                |
+| Matches per query (`topK`)           | 50                |
+| Records per `upsert`/`replaceSource` | 500               |
+| Ids per `delete`                     | 1,000             |
+| Scope                                | 64 UTF-8 bytes    |
+| Record or source id                  | 256 UTF-8 bytes   |
+| Record `content`                     | 8,192 UTF-8 bytes |
+| String metadata or filter value      | 64 UTF-8 bytes    |
+| Values in one `in` clause            | 100               |
+| `and` nesting depth                  | 4                 |
+| Clauses in one filter                | 32                |
 
 Every limit is enforced by the service before the adapter sees the call, and is the tightest of the
 four backends so a request behaves the same everywhere. A vector must have exactly the collection's
-declared length, finite components and a non-zero norm; otherwise it throws
-`VectorDimensionError`. A `topK` outside 1–50, a `minScore` outside `[-1, 1]`, an over-size batch
-and an over-size id, content or metadata value throw `VectorRecordError`.
+declared length, finite components and a non-zero norm; otherwise it throws `VectorDimensionError`.
+A `topK` outside 1–50, a `minScore` outside `[-1, 1]`, an over-size batch and an over-size id,
+content or metadata value throw `VectorRecordError`.
 
 ## Adapters
 
@@ -201,7 +201,7 @@ and an over-size id, content or metadata value throw `VectorRecordError`.
 `new PgVectorStore({ db, ensure?, onClose? })` takes a raw Drizzle PostgreSQL database
 (`drizzle(pool)` from `drizzle-orm/node-postgres`, `drizzle(client)` from
 `drizzle-orm/postgres-js`), not the opaque handle given to `DatabasePlugin`. Construction refuses a
-database without `execute` and `transaction`. pgvector 0.8.0 or later is required.
+database without `execute` and `transaction`. pgvector 0.8 or later is required.
 
 ```typescript
 import { drizzle } from 'drizzle-orm/node-postgres';
@@ -249,8 +249,8 @@ created for the store.
 
 `new QdrantVectorStore({ client, onClose? })` takes the application's `QdrantClient`. The client is
 typed by a structural facade (`collectionExists`, `getCollection`, `createCollection`,
-`createPayloadIndex`, `upsert`, `query`, `delete`) that is checked at construction; the package never
-imports `@qdrant/js-client-rest`.
+`createPayloadIndex`, `upsert`, `query`, `delete`) that is checked at construction; the package
+never imports `@qdrant/js-client-rest`.
 
 ```typescript
 import { QdrantVectorStore, VectorStorePlugin } from '@setu-ts/vector-store-plugin';
@@ -267,8 +267,8 @@ export const plugin = VectorStorePlugin({
 Each collection becomes a Qdrant collection `vs_<name>` with `distance: 'Cosine'`. The adapter
 creates a `scope` keyword payload index marked `is_tenant`, a `source_id` index, and one index per
 declared filterable field. An existing collection is verified by size and distance. Point ids are
-the first 128 bits of `vectorRecordKey(scope, id)` formatted as a UUID, so two tenants writing the
-same id never meet; the original id travels in the payload.
+the first 128 bits of `vectorRecordKey(subtle, scope, id)` formatted as a UUID, so two tenants
+writing the same id never meet; the original id travels in the payload.
 
 `replaceSource` is an upsert followed by a delete of the source's stale points. The two calls are
 not atomic, so replacements of the same source must not run concurrently; serialise them per source.
@@ -278,7 +278,7 @@ not atomic, so replacements of the same source must not run concurrently; serial
 `VectorizeVectorStore` lives in `@setu-ts/cloudflare-plugin`. It takes the current `Vectorize`
 binding (not the deprecated beta `VectorizeIndex`), through a structural facade validated at
 construction. The scope is the namespace, and the stored id is the 64-character hexadecimal
-`vectorRecordKey(scope, id)`; the caller's id travels in metadata.
+`vectorRecordKey(subtle, scope, id)`; the caller's id travels in metadata.
 
 ```typescript
 import { VectorizeVectorStore } from '@setu-ts/cloudflare-plugin';
@@ -324,8 +324,8 @@ stale ones yourself, or give each tenant group its own index.
 
 `VectorCollectionMismatchError` and a refused declaration fail registration, so the application does
 not start. The pgvector and Qdrant adapters classify transport failures with `toBackendFault`: an
-unreachable backend answers 503 and an unanswered request answers 504, with no connection details
-in the served detail.
+unreachable backend answers 503 and an unanswered request answers 504, with no connection details in
+the served detail.
 
 ## Embeddings stay in the application
 
@@ -366,21 +366,21 @@ calls.
 
 ## Exports
 
-| Export                       | Kind      |
-| ---------------------------- | --------- |
-| `VectorStorePlugin`          | function  |
-| `MemoryVectorStore`          | class     |
-| `PgVectorStore`              | class     |
-| `QdrantVectorStore`          | class     |
-| `VERSION`                    | const     |
-| `MemoryVectorStoreOptions`   | interface |
-| `PgVectorDatabase`           | interface |
-| `PgVectorExecutor`           | interface |
-| `PgVectorStoreOptions`       | interface |
-| `QdrantClientLike`           | interface |
-| `QdrantVectorStoreOptions`   | interface |
-| `VectorStorePluginOptions`   | interface |
-| `VectorStoreTenancy`         | type      |
+| Export                     | Kind      |
+| -------------------------- | --------- |
+| `VectorStorePlugin`        | function  |
+| `MemoryVectorStore`        | class     |
+| `PgVectorStore`            | class     |
+| `QdrantVectorStore`        | class     |
+| `VERSION`                  | const     |
+| `MemoryVectorStoreOptions` | interface |
+| `PgVectorDatabase`         | interface |
+| `PgVectorExecutor`         | interface |
+| `PgVectorStoreOptions`     | interface |
+| `QdrantClientLike`         | interface |
+| `QdrantVectorStoreOptions` | interface |
+| `VectorStorePluginOptions` | interface |
+| `VectorStoreTenancy`       | type      |
 
 Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.

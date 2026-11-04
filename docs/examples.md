@@ -1,6 +1,6 @@
 # Examples
 
-The [`apps/`](../apps/) directory holds seventeen runnable applications. Each example teaches one
+The [`apps/`](../apps/) directory holds twenty runnable applications. Each example teaches one
 concept, and its `smoke.ts` proves it. Follow the learning path below, then use the deep dives to
 connect each file to the behavior it implements.
 
@@ -17,12 +17,12 @@ npm start       # serves until stopped
 
 `--example` creates a standalone Node project, fetching the example from the GitHub release tag
 matching the CLI version. GitHub must be reachable when scaffolding; `--dry-run` only lists paths
-and fetches nothing. Offered examples are `minimal`, `rest-api`, `database`, `di-decorators`,
-`cqrs`, `multi-tenant`, `mcp-tools` (from 0.12.0), `static-site`, `worker-pool`, `graphql-demo`,
-`grpc`, `microservices` and `realtime`. The Redis-backed smoke checks can exit `77` when Redis is
-unavailable. For `full-stack`, use `--template full-stack`; the other excluded examples need
-repository scripts or source. See [the CLI guide](./cli.md#start-from-an-example) for the flag
-restrictions.
+and fetches nothing. Offered examples are `minimal`, `rest-api`, `mcp-tools` (from 0.12.0),
+`semantic-search` (from 0.12.0), `database`, `di-decorators`, `cqrs`, `multi-tenant`, `static-site`,
+`worker-pool`, `graphql-demo`, `grpc`, `microservices` and `realtime`. The Redis-backed smoke checks
+can exit `77` when Redis is unavailable. For `full-stack`, use `--template full-stack`; the other
+excluded examples, including `ai-chat`, need repository scripts or source. See
+[the CLI guide](./cli.md#start-from-an-example) for the flag restrictions.
 
 An example is a teaching project, not a production starting point. Some carry fixed demonstration
 values: `rest-api` signs and verifies its tokens with the fixed `DEMO_JWT_SECRET` in
@@ -392,6 +392,46 @@ structured output, UI streams and model fallback; Setu owns request identity, ca
 and outbox/inbox usage delivery. Run `pnpm --dir apps/ai-chat run smoke` for its Node-only proofs,
 including an in-process OTLP receiver and a content-capture positive control. A real endpoint is
 optional through `AI_COMPAT_BASE_URL`.
+
+### semantic-search
+
+**Concept.** The [semantic search example](../apps/semantic-search) queues an upload, indexes it in
+the background, and searches the result by meaning inside the caller's tenant. The route returns
+`202` before any embedding work runs; the job resolves the tenant again, because a queued job
+outlives the request.
+
+`POST /documents` validates `{ id, text, tag? }` and queues `ingest-document` with the tenant the
+request resolved. The job drops the write if that tenant no longer exists, splits the text into
+800-character chunks, embeds them with the AI SDK, and calls `replaceSource`, so re-ingesting a
+shorter document leaves exactly its new chunks. `GET /documents/search?q=&tag=&limit=` embeds the
+query and returns the closest chunks; `limit` is 1–20 and defaults to 5. Both routes read the scope
+from `x-tenant-id`, so a request without one answers `400` and an unknown tenant `404`.
+
+The store is process memory by default. Set `PGVECTOR_URL` to run the same code on PostgreSQL with
+pgvector 0.8+; set `EMBED_BASE_URL`, `EMBED_MODEL`, `EMBED_DIMENSIONS` and, when the server needs
+one, `EMBED_API_KEY` for an OpenAI-compatible embedding server. The defaults target llama.cpp on
+port 8081 with Qwen3-Embedding-0.6B at 1024 dimensions.
+
+```bash
+pnpm --dir apps/semantic-search run smoke
+EMBED_BASE_URL=http://localhost:8081/v1 pnpm --dir apps/semantic-search run smoke   # adds the live-model case
+```
+
+**Read, in order:**
+
+- [`setu.config.ts`](../apps/semantic-search/setu.config.ts) — declares the `documents` collection
+  with `tag` filterable, composes multi-tenancy and the vector store, and queues the ingest job.
+- [`documents.controller.ts`](../apps/semantic-search/src/modules/documents/documents.controller.ts)
+  — queues ingest and searches the caller's scope.
+- [`documents.service.ts`](../apps/semantic-search/src/modules/documents/documents.service.ts) —
+  chunking, `embedMany`, `replaceSource` and the query filter.
+- [`ingest-document.job.ts`](../apps/semantic-search/src/jobs/ingest-document.job.ts) — re-checks
+  the tenant before it writes anything.
+- [`smoke.ts`](../apps/semantic-search/smoke.ts) — a deterministic mock model proves background
+  indexing, tenant isolation, replacement, a refused filter and a dimension mismatch; `PGVECTOR_URL`
+  and a reachable embedding server add the backend and live-model cases.
+
+See [Retrieval (vector search)](./retrieval.md) for the plugin, its adapters and its limits.
 
 ### multi-tenant
 
