@@ -10,6 +10,7 @@ import { mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import ts from 'typescript';
 import { run } from '../scripts/lib/run.ts';
 
 const ROOT = resolve(import.meta.dirname, '..');
@@ -171,6 +172,43 @@ function readLayout(functional: Snapshot, classBased: Snapshot): Layout {
 /** A layout rule: an empty list means the app follows it. */
 type Rule = (app: Snapshot, layout: Layout) => string[];
 
+/** Finds router verbs without treating cache/map operations or quoted examples as routes. */
+function registersRoutes(source: string): boolean {
+  const file = ts.createSourceFile('routes.ts', source, ts.ScriptTarget.Latest, true);
+  const routers = new Set(['router', 'routes']);
+  const verbs = new Set(['get', 'post', 'put', 'patch', 'delete']);
+  const isRouter = (node: ts.Expression): boolean =>
+    (ts.isIdentifier(node) && routers.has(node.text)) ||
+    (ts.isPropertyAccessExpression(node) && node.name.text === 'router');
+  const bindings = (node: ts.Node): void => {
+    if ((ts.isParameter(node) || ts.isVariableDeclaration(node)) && ts.isIdentifier(node.name)) {
+      if (node.type !== undefined) {
+        if (/\bIRouterApi\b/.test(node.type.getText(file))) routers.add(node.name.text);
+        else routers.delete(node.name.text);
+      }
+      if (ts.isVariableDeclaration(node) && node.initializer !== undefined) {
+        if (isRouter(node.initializer)) routers.add(node.name.text);
+        else if (ts.isNewExpression(node.initializer)) routers.delete(node.name.text);
+      }
+    }
+    ts.forEachChild(node, bindings);
+  };
+  bindings(file);
+  let found = false;
+  const calls = (node: ts.Node): void => {
+    if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      verbs.has(node.expression.name.text) &&
+      isRouter(node.expression.expression)
+    )
+      found = true;
+    ts.forEachChild(node, calls);
+  };
+  calls(file);
+  return found;
+}
+
 const RULES = {
   /** The application is composed in the generated composition file, by the generated factory. */
   composition(app, layout) {
@@ -211,6 +249,20 @@ const RULES = {
     return [...app.keys()]
       .filter((path) => path.startsWith('src/') && path.endsWith('.routes.ts'))
       .map((path) => `${path} registers routes outside a controller (name it *.controller.ts)`);
+  },
+
+  /** Generated flat projects use src/controllers; feature projects use src/modules. */
+  routeLocation(app) {
+    return [...app.entries()]
+      .filter(
+        ([path, source]) =>
+          path.startsWith('src/') &&
+          !path.startsWith('src/modules/') &&
+          !path.startsWith('src/controllers/') &&
+          /\.[cm]?[jt]sx?$/.test(path) &&
+          registersRoutes(source),
+      )
+      .map(([path]) => `${path} registers routes outside src/modules/ or src/controllers/`);
   },
 
   /** Feature helpers use the feature name; generated artifacts may have their own names. */
@@ -283,6 +335,12 @@ const EXCEPTIONS: Readonly<Record<string, Partial<Record<RuleName, string>>>> = 
     composition:
       'It composes two services, one factory each under src/service-a/ and src/service-b/.',
     entry: 'main.ts is a run-and-exit demonstration of two services, not a server.',
+    routeLocation:
+      'Each independently composed service keeps its route in src/service-a/ or src/service-b/.',
+  },
+  'plugin-development': {
+    routeLocation:
+      'The greeting plugin demonstrates registering its contributed route in src/plugins/.',
   },
 };
 
@@ -390,6 +448,54 @@ describe('each layout rule can fail', () => {
     ).toEqual([
       'src/modules/news/news.routes.ts registers routes outside a controller (name it *.controller.ts)',
     ]);
+  });
+
+  it.each(['get', 'post', 'put', 'patch', 'delete'])(
+    'routeLocation: refuses a flat router.%s call',
+    (verb) => {
+      expect(
+        RULES.routeLocation(app({ 'src/chat.ts': `router.${verb}('/chat', handler);` })),
+      ).toEqual(['src/chat.ts registers routes outside src/modules/ or src/controllers/']);
+    },
+  );
+
+  it('routeLocation: finds nested, property and typed/aliased router calls', () => {
+    for (const source of [
+      "app.router.post('/chat', handler);",
+      "plugin.router.get('/chat', handler);",
+      "function register(api: IRouterApi) { api.patch('/chat', handler); }",
+      "const endpoints = app.router; endpoints.delete('/chat', handler);",
+    ]) {
+      expect(RULES.routeLocation(app({ 'src/features/chat.ts': source }))).toHaveLength(1);
+    }
+  });
+
+  it('routeLocation: accepts generated controllers and feature modules', () => {
+    expect(
+      RULES.routeLocation(
+        app({
+          'src/controllers/chat.controller.ts': "router.get('/chat', handler);",
+          'src/modules/chat/chat.controller.ts': "router.post('/chat', handler);",
+          'setu.config.ts': "app.router.get('/health', handler);",
+        }),
+      ),
+    ).toEqual([]);
+  });
+
+  it('routeLocation: ignores maps, headers, cache calls, comments and strings', () => {
+    expect(
+      RULES.routeLocation(
+        app({
+          'src/store.ts': `
+      const router = new Map(); router.get('key');
+      const headers = new Headers(); headers.delete('key');
+      cache.get('key'); bindings.kv('x').put('key', value);
+      // router.post('/quoted', handler);
+      const text = "app.router.get('/quoted', handler)";
+    `,
+        }),
+      ),
+    ).toEqual([]);
   });
 
   it('featureFiles: refuses a file not named after its feature', () => {

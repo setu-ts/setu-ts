@@ -3,7 +3,7 @@ import { McpPluginConfigurationError } from './errors.ts';
 import { VERSION } from './version.ts';
 
 /** One explicitly exposed route; annotations are derived from the route.
- * @since 0.13.0
+ * @since 0.12.0
  */
 export interface McpToolDeclaration {
   /** Case-sensitive tool name (1–64 ASCII letters, digits, underscores, dots or hyphens). */
@@ -22,7 +22,7 @@ export interface McpToolDeclaration {
 }
 
 /** Options for the stateless MCP endpoint.
- * @since 0.13.0
+ * @since 0.12.0
  */
 export interface McpPluginOptions {
   /** Optional explicit declarations, merged with route markers at bootstrap. */

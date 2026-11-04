@@ -427,7 +427,7 @@ export interface StartOptions {
 }
 
 /** Options for in-process dispatch through the application's request pipeline.
- * @since 0.13.0
+ * @since 0.12.0
  */
 export interface DispatchOptions {
   /** Caller-reported peer for in-process code; this is not a verified socket address. */
@@ -486,7 +486,7 @@ export interface IApplication {
    * @param request - Request whose signal and body are preserved
    * @param options - Optional reported peer and required registered route pattern
    * @returns The pipeline's web response
-   * @since 0.13.0
+   * @since 0.12.0
    */
   dispatch?(request: Request, options?: DispatchOptions): Promise<Response>;
   /**

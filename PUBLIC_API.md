@@ -3234,7 +3234,7 @@ what changed is that the refusal is legible.
 > returns `value` when it is a single-leading-slash path with no `\`, no control character and at
 > most 256 bytes after non-ASCII characters are percent-encoded (the encoded form), else `fallback`.
 
-> **Resource-server authentication (M132, 0.13.0).** Three additions make the plugin a correct OAuth
+> **Resource-server authentication (M132, 0.12.0).** Three additions make the plugin a correct OAuth
 > 2.0 resource server for an API or an MCP server accepting tokens an outside authorization server
 > issued. `IPrincipal.scopes` is filled from the `scope` claim — a space-delimited string, which
 > wins when present — or `scp` (a string, or an array of strings); a malformed claim yields no
@@ -3543,6 +3543,91 @@ app.router.post('/auth/logout', async (ctx) => {
   return ctx.response.json({ ok: true });
 });
 ```
+
+### Weighted quotas (M134)
+
+Auth-plugin exports `createQuota`, `MemoryQuotaStore`, `RedisQuotaStore`, `QuotaExceededError`,
+`QuotaStoreUnavailableError`, `respondQuotaExceeded`, and types `IQuota`, `QuotaOptions`,
+`QuotaReservation`, `IQuotaStore`, `IQuotaRedisClient`. They register no plugin or capability token.
+
+```typescript
+type QuotaReservation = { readonly key: string; readonly windowId: string; readonly amount: number };
+type QuotaOptions = {
+  readonly name: string;
+  readonly store: IQuotaStore;
+  readonly limit: number | ((key: string) => number | undefined | Promise<number | undefined>);
+  readonly window: number | 'utc-day' | 'utc-month';
+  readonly runtime: IRuntimeServices;
+};
+interface IQuota {
+  reserve(key: string, amount: number): Promise<QuotaReservation>;
+  settle(reservation: QuotaReservation, actual: number): Promise<void>;
+  release(reservation: QuotaReservation): Promise<void>;
+}
+interface IQuotaStore {
+  reserve(key: string, windowId: string, amount: number, limit: number | undefined, expireAt: number): Promise<{ admitted: boolean; used: number }>;
+  adjust(key: string, windowId: string, delta: number, expireAt: number): Promise<void>;
+  close?(): Promise<void>;
+}
+interface IQuotaRedisClient {
+  eval(script: string, numkeys: number, ...args: (string | number)[]): Promise<unknown>;
+  quit(): Promise<unknown>;
+}
+```
+
+`createQuota(options: QuotaOptions): IQuota` validates a non-empty `[a-z0-9-]+` policy name,
+positive safe integer millisecond window or UTC calendar window, and non-negative safe integer
+limits. Keys must be non-empty, well-formed Unicode strings and at most 512 UTF-8 bytes; amounts,
+actual usage and callback limits reject NaN, infinities, negative, fractional and unsafe values with
+`TypeError` before storage. A limit callback receives the caller key; returning undefined means
+unlimited but still recorded, and a thrown/rejected callback reserves nothing. Both stores refuse a
+reservation that would raise usage above `Number.MAX_SAFE_INTEGER`, even without a configured limit;
+this is a normal not-admitted result, not a store outage.
+
+Reserve atomically admits `used + amount <= limit` and returns a frozen receipt, or throws
+`QuotaExceededError`. Settlement adds `actual - amount`, kept between zero and
+`Number.MAX_SAFE_INTEGER`, to the reserved window; release settles zero. Fabricated or foreign
+receipts throw `TypeError`. Subsequent settle/release calls on an issued receipt are no-ops,
+including concurrent calls. The first settlement marks the receipt before awaiting storage; a failed
+adjustment is not replayed with that receipt.
+
+Numeric windows are epoch-aligned, with string ids of `floor(runtime.now() / window)`; calendar ids
+are UTC `YYYY-MM-DD` or `YYYY-MM`. Windows expire at their end plus one day. A quota prefixes the
+store key with its policy name. `MemoryQuotaStore(runtime)` sweeps expiry on access and is atomic
+within one process. `RedisQuotaStore({ client, namespace })` requires a non-empty, well-formed
+namespace and validated `eval`/`quit` client. Its keys length-prefix each of namespace,
+`${name}:${key}` and window id (`3:app12:spend:tenant7:2026-01`), so a colon in a namespace or key
+cannot make two applications share a counter. Constant Lua uses KEYS/ARGV and absolute PEXPIREAT
+expiry; Redis reserve/adjust failures throw `QuotaStoreUnavailableError` with the original cause and
+a value-free 503 status hint (detail `Quota storage is temporarily unavailable.`). Its
+`close(): Promise<void>` quits the injected client. No driver is loaded by this store; common's
+`fromNodeRedis` supplies the EVAL adapter for node-redis. The store never times out a call itself:
+the injected client must bound commands, using ioredis `new Redis(url, { commandTimeout: 15_000 })`
+or `fromNodeRedis(createClient({ url }))` (15 seconds by default). An unbounded client lets a
+stalled Redis hold every request. The application owns the injected client's `'error'` listener.
+
+`new QuotaExceededError(policyName, retryAfterSeconds)` carries the policy in `policyName` (`name`
+is `'QuotaExceededError'`), the whole seconds until reset (reserve clamps to at least one), and a
+status hint. Its constructor throws `TypeError` unless `policyName` is a non-empty string and
+`retryAfterSeconds` is a safe integer of at least 1. `respondQuotaExceeded(ctx, error): void` adds
+`Retry-After` and writes through the configured responder. An uncaught hinted throw has no header
+because the hint contract carries none. Under RFC 9457 the body is exactly:
+
+```json
+{
+  "violated-policies": ["ai-spend"],
+  "retry-after": 7,
+  "type": "https://iana.org/assignments/http-problem-types#quota-exceeded",
+  "title": "Quota Exceeded",
+  "status": 429,
+  "detail": "The quota for this request is spent.",
+  "instance": "/chat"
+}
+```
+
+There is no `message`, tenant id, usage or limit in that Problem Details body. The request-rate
+limiter shares its initializer, keeps its own detail, omits the `retry-after` body extension, and
+preserves its pre-M134 body/header bytes. See [AI calls with Setu](docs/ai.md).
 
 ### Rate Limiting (M16b)
 
@@ -9778,21 +9863,22 @@ bypass the lazy import entirely.
 
 ### Options
 
-| Option                  | Type                                                       | Required        | Description                                                                                                                                                                                             |
-| ----------------------- | ---------------------------------------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `serviceName`           | `string`                                                   | Yes (real mode) | Service name reported to the exporter                                                                                                                                                                   |
-| `serviceVersion`        | `string`                                                   | No              | Service version (default: `'1.0.0'`)                                                                                                                                                                    |
-| `exporter`              | `'otlp' \| 'console'`                                      | No              | Exporter kind; absent = noop mode                                                                                                                                                                       |
-| `endpoint`              | `string`                                                   | Yes (otlp)      | OTLP HTTP endpoint URL                                                                                                                                                                                  |
-| `headers`               | `Record<string, string>`                                   | No              | Optional OTLP HTTP headers                                                                                                                                                                              |
-| `sampling`              | `{ type: 'traceidratio'; ratio: number }`                  | No              | Sampling config (default ratio: 1.0)                                                                                                                                                                    |
-| `tracerProviderFactory` | `() => Promise<TracerHost>`                                | No              | Injectable factory to bypass lazy import                                                                                                                                                                |
-| `middleware`            | `boolean`                                                  | No              | Register request-span middleware (default: `true`)                                                                                                                                                      |
-| `spanProcessor`         | `'simple' \| 'batch'`                                      | No              | Span processor (`'simple'` by default)                                                                                                                                                                  |
-| `instrumentations`      | `InstrumentationsConfig`                                   | No              | Auto-instrumentation config (runtime-gated no-op)                                                                                                                                                       |
-| `contextPropagation`    | `boolean`                                                  | No              | Activate real OTel spans (default: `true`)                                                                                                                                                              |
-| `contextManagerFactory` | `() => Promise<{ enable(): unknown; disable(): unknown }>` | No              | Injectable context-manager **factory** — it returns a promise of a manager, not a manager. The return type is structural, so it can resolve to an OTel context manager with no import from this package |
-| `diagnostics`           | `TraceDiagnosticsOptions`                                  | No              | Opt-in minimized completed-span observations for the local diagnostics connector (M98g, below)                                                                                                          |
+| Option                  | Type                                                       | Required        | Description                                                                                                                                                                                                                                                             |
+| ----------------------- | ---------------------------------------------------------- | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `serviceName`           | `string`                                                   | Yes (real mode) | Service name reported to the exporter                                                                                                                                                                                                                                   |
+| `serviceVersion`        | `string`                                                   | No              | Service version (default: `'1.0.0'`)                                                                                                                                                                                                                                    |
+| `exporter`              | `'otlp' \| 'console'`                                      | No              | Exporter kind; absent = noop mode                                                                                                                                                                                                                                       |
+| `endpoint`              | `string`                                                   | Yes (otlp)      | OTLP HTTP endpoint URL                                                                                                                                                                                                                                                  |
+| `headers`               | `Record<string, string>`                                   | No              | Optional OTLP HTTP headers                                                                                                                                                                                                                                              |
+| `sampling`              | `{ type: 'traceidratio'; ratio: number }`                  | No              | Sampling config (default ratio: 1.0)                                                                                                                                                                                                                                    |
+| `tracerProviderFactory` | `() => Promise<TracerHost>`                                | No              | Injectable factory to bypass lazy import                                                                                                                                                                                                                                |
+| `middleware`            | `boolean`                                                  | No              | Register request-span middleware (default: `true`)                                                                                                                                                                                                                      |
+| `spanProcessor`         | `'simple' \| 'batch'`                                      | No              | Span processor (`'simple'` by default)                                                                                                                                                                                                                                  |
+| `instrumentations`      | `InstrumentationsConfig`                                   | No              | Auto-instrumentation config (runtime-gated no-op)                                                                                                                                                                                                                       |
+| `registerGlobal`        | `boolean`                                                  | No              | Default false. Only the first app is global; a refused second registration warns. Second-app library spans use the first app's exporter/service.name and are dropped after it stops; only its own Setu spans use the private provider. Shutdown does not unregister it. |
+| `contextPropagation`    | `boolean`                                                  | No              | Activate real OTel spans (default: `true`)                                                                                                                                                                                                                              |
+| `contextManagerFactory` | `() => Promise<{ enable(): unknown; disable(): unknown }>` | No              | Injectable context-manager **factory** — it returns a promise of a manager, not a manager. The return type is structural, so it can resolve to an OTel context manager with no import from this package                                                                 |
+| `diagnostics`           | `TraceDiagnosticsOptions`                                  | No              | Opt-in minimized completed-span observations for the local diagnostics connector (M98g, below)                                                                                                                                                                          |
 
 ### Trace diagnostics (M98g)
 

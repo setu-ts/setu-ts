@@ -117,6 +117,6 @@ export const CREDENTIAL_SOURCE_STATE_KEY = 'auth-plugin:credential-source';
  * Required OAuth scopes recorded by auth-plugin's requireScopes and mcp-plugin's
  * pre-SDK access gate after a refusal. Auth-plugin's bearer-challenge is the
  * reader; it validates tokens again before writing WWW-Authenticate.
- * @since 0.13.0
+ * @since 0.12.0
  */
 export const REQUIRED_SCOPES_STATE_KEY = 'auth-plugin:required-scopes';

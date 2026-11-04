@@ -238,6 +238,7 @@ describe.each(REDIS_CLIENTS)('%s', (redisVariant) => {
         );
         const frame = { kind: 'ws-room' as const, origin: 'x', name: 'lobby', data: 'hi' };
         let paused = false;
+        let failure: unknown;
         try {
           // The first command on a loaded runner can outlast the short command
           // bound before anything is paused (seen once on CI as an unattributed
@@ -299,12 +300,20 @@ describe.each(REDIS_CLIENTS)('%s', (redisVariant) => {
             30_000,
           );
           expect(publishRecord(source!)!.succeeded).toBeGreaterThan(before.succeeded);
+        } catch (error) {
+          failure = error;
+          throw error;
         } finally {
           if (paused) {
             await runProcess('docker', { args: ['unpause', containerId] });
           }
           await runProcess('docker', { args: ['start', containerId] });
-          await app.stop();
+          // close() rethrows the first failure of releasing its connections, such as
+          // `Command timed out`. Thrown here it would replace the body's failure, which
+          // is how CI came to report a bare timeout with no test frame.
+          await app.stop().catch((error: unknown) => {
+            if (failure === undefined) throw error;
+          });
         }
       },
     );

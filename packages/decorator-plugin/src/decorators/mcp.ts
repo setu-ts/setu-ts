@@ -15,7 +15,7 @@ import type { SetuMethodDecorator } from '../metadata/context-bridge.ts';
  * @McpTool({ description: 'List orders' })
  * list() { return this.orders.list(); }
  * ```
- * @since 0.13.0
+ * @since 0.12.0
  */
 export function McpTool(meta: RouteMcpToolMetadata = {}): SetuMethodDecorator {
   const decorate = methodDecorator((store, target, handler) => {

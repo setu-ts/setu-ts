@@ -32,7 +32,7 @@ function completedResponse(ctx: IRequestContext): HandlerResult {
  * ```typescript
  * McpPlugin({ tools: [{ name: 'read', description: 'Read an item', route: { method: 'GET', path: '/items/:id' } }] });
  * ```
- * @since 0.13.0
+ * @since 0.12.0
  */
 export function McpPlugin(options: McpPluginOptions): IPlugin {
   const resolved = resolveOptions(options);

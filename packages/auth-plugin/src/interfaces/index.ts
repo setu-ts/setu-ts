@@ -292,7 +292,7 @@ export interface IAuthHttp {
  * `Host` or forwarded headers, so a spoofed host cannot make the server
  * publish metadata naming another resource.
  *
- * @since 0.13.0
+ * @since 0.12.0
  */
 export interface ResourceServerOptions {
   /**
