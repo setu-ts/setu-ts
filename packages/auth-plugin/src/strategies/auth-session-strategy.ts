@@ -26,6 +26,7 @@ import {
   verifyAuthSessionRecord,
 } from '../sign-in/auth-session-service.ts';
 import type { AuthSessionChecks } from '../sign-in/auth-session-service.ts';
+import { sessionStampRevocations } from '../sign-in/session-stamp.ts';
 import type { SessionStampCheck } from '../sign-in/session-stamp.ts';
 
 /** Options for {@linkcode AuthSessionStrategy}. */
@@ -80,6 +81,8 @@ export class AuthSessionStrategy implements IAuthStrategy {
    * Opens the session from the request's headers and resolves its principal.
    *
    * @param request - The incoming request
+   * A definite stamp mismatch marks the request for writable HTTP middleware
+   * revocation. Read-only fromHeaders callers remain suspension-only.
    * @returns The principal, or `null` when the session carries no usable identity
    */
   async authenticate(request: IRequest): Promise<IPrincipal | null> {
@@ -91,6 +94,8 @@ export class AuthSessionStrategy implements IAuthStrategy {
     if (record === null) {
       return null;
     }
-    return verifyAuthSessionRecord(record, this.#checks);
+    return verifyAuthSessionRecord(record, this.#checks, () => {
+      sessionStampRevocations.set(request, true);
+    });
   }
 }

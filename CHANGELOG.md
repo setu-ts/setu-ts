@@ -8,6 +8,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Named route registration refusals (M131b, `@setu-ts/common`, `@setu-ts/kernel`,
+  `@setu-ts/decorator-plugin`).** `RouteRegistrationError` carries reason, method, path and cause;
+  decorated refusals name the controller and method.
+- **Client body-read errors (M131b, `@setu-ts/runtime`, `@setu-ts/common`,
+  `@setu-ts/metrics-plugin`).** `RequestBodyReadError` carries a fixed safe 400 hint and the native
+  cause. Logging keeps only its class and fixed detail; metrics labels the hinted status and counts
+  only 5xx as errors. Bun's native size refusal becomes `RequestBodyTooLargeError`/413, with an
+  optional cap and Infinity/generic detail for an unknown native bound.
+
 - **Weighted quotas and AI SDK recipes (M134, #549, `@setu-ts/auth-plugin`,
   `@setu-ts/telemetry-plugin`).** `createQuota`, `IQuota`, `QuotaOptions`, `QuotaReservation`,
   `IQuotaStore`, `MemoryQuotaStore`, `RedisQuotaStore` and `IQuotaRedisClient` add atomic weighted
@@ -165,6 +174,22 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **Atomic header batches (M131b, `@setu-ts/common`, `@setu-ts/kernel`).** `setHeaders` validates
+  every entry before writing any, preserving prior headers on refusal and caching frozen errors.
+- **Cleanup after the handler (M131b, `@setu-ts/common`, `@setu-ts/kernel`, `@setu-ts/di-plugin`).**
+  An early middleware response returns immediately while request cleanup and shutdown drain retain
+  the running handler; scopes are not disposed under it.
+- **Typed-token documentation (M131b, `@setu-ts/common`, `@setu-ts/di-plugin`).** `createToken<T>`
+  carries compile-time inference only; T is erased and tsx/start:dev does not type-check. Use tsc
+  through generated check/build scripts.
+- **Session-stamp revocation (M131b, `@setu-ts/auth-plugin`).** A definite mismatch deletes the HTTP
+  auth record and regenerates its session; a reader fault suspends one request and preserves the
+  record. Stored old ids remain revoked if a stamp is reverted. Copied stateless cookies and
+  read-only fromHeaders callers retain the documented limits.
+- **Model component names (M131b, `@setu-ts/openapi-plugin`, `@setu-ts/sdk`).** Hoisted schemas use
+  their Zod id or their site plus schema path, with roots reserved before descendants. Nullable
+  primitives stay inline. Regenerated clients can rename component types.
+
 - **BREAKING for implementors: `IMultiTenancyService` gains the required `lookupTenant` (M127, #548,
   `@setu-ts/common`).** Applications that only consume the service are unaffected; an out-of-tree
   implementation must add `lookupTenant(id): Promise<Option<ITenant>>` or delegate to
@@ -247,6 +272,41 @@ All notable changes to this project are documented here. The format follows
   `RedisRateLimitStore` re-arms a key it finds without an expiry instead of answering 429 for ever.
 
 ### Fixed
+
+- **`setu new --example` file lists match the examples (#553, `@setu-ts/cli`).** The examples now
+  follow the CLI scaffold's structure (the full-stack example on the M130 module layout, every
+  example's module and plugin barrels written by `setu sync`), and the example manifest
+  `setu new --example` downloads from lists their current files; the cqrs and di-decorators lists
+  named files that no longer exist.
+- **Node startup bind failures (M131b, `@setu-ts/runtime`, `@setu-ts/common`).** The default Node
+  host waits for binding and rejects with the native error; injected hosts share that obligation.
+- **Devtool startup reporting (M131b, `@setu-ts/cli`).** The generated entry catches creation/start
+  failures, prints connector-start guidance and exits 1.
+- **Node start without a build (M131b, `@setu-ts/cli`).** The start script checks dist/main.js and
+  names the build script before launch; generated fixtures are recaptured.
+- **Unhandled client hints (M131b, `@setu-ts/kernel`, `@setu-ts/common`, `@setu-ts/logger-plugin`,
+  `@setu-ts/metrics-plugin`).** Without `errorHandler`, a 4xx-hinted failure is served with its
+  hinted status, title and detail, as `errorHandler` would, and logged at `warn`; unhinted errors
+  and 5xx hints keep the opaque 500. The new `fallbackErrorStatus` in `@setu-ts/common` is that
+  rule, and request logging and HTTP metrics label a thrown error with the status actually served
+  (`responder?.statusFor?.(error) ?? fallbackErrorStatus(error)`), so metrics also stop counting a
+  thrown `HttpError` under `errorHandler` as 500.
+- **Trusted diagnostics sockets (M131b, `@setu-ts/runtime`).** At the 32-socket cap, idle untrusted
+  sockets are evicted before trusted ones; only sent authenticated success responses establish
+  trust.
+- **Devtool usage (M131b, `@setu-ts/cli`).** Both usage strings name setu devtool enable.
+- **Whole-graph boot findings (M131b, `@setu-ts/di-plugin`, `@setu-ts/decorator-plugin`).** A
+  controller cannot stop validation at its own subgraph; aliases and repeated findings are
+  deduplicated.
+- **Retry policy validation (M131b, `@setu-ts/resilience-plugin`).** Invalid attempt counts or
+  delays throw RangeError at registration/wrap time; a limit of 1 executes once.
+- **Kafka first-join replay (M131b, `@setu-ts/messaging-plugin`).** The consumer skips its already
+  delivered partition window after a first-join rewind, while delivering earlier historical offsets.
+- **Full-stack form posts (M131b, `@setu-ts/full-stack-starter`, `@setu-ts/react-router-plugin`,
+  `@setu-ts/http-security-plugin`).** With React Router configured, both starter entry points
+  default referrerPolicy to same-origin and preserve explicit or disabled-header choices.
+- **View document doctype (M131b, `@setu-ts/cli`, `@setu-ts/view-plugin`).** The generated layout
+  emits a doctype; renderView and @Render continue sending engine output unchanged.
 
 - **The error handler masks URL credentials in what it logs and serves (M130 audit, #551,
   `@setu-ts/exceptions`).** `errorHandler` logged an error's message unmasked, so a driver error

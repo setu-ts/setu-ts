@@ -591,13 +591,13 @@ describe('OpenApiGenerator — per-document component reset', () => {
     // mechanical `$def` and delivered straight to `#componentSchemas` — never
     // recorded in `#schemaMap` — so the per-document reset (which only removes
     // map-tracked components) left it behind and a second generate() leaked
-    // the first document's `PostFirstBody` into an unrelated document.
+    // the first document's `PostFirstBodyA` into an unrelated document.
     const gen = generator();
     const child = z4.object({ tag: z4.string() });
     const first = gen.generate([
       route('POST', '/first', { body: z4.object({ a: child, b: child }) }),
     ]);
-    expect(first.components?.schemas?.PostFirstBody).toEqual({
+    expect(first.components?.schemas?.PostFirstBodyA).toEqual({
       type: 'object',
       properties: { tag: { type: 'string' } },
       required: ['tag'],
@@ -606,7 +606,7 @@ describe('OpenApiGenerator — per-document component reset', () => {
     const second = gen.generate([
       route('POST', '/second', { body: z4.object({ id: z4.string() }) }),
     ]);
-    expect(second.components?.schemas?.PostFirstBody).toBeUndefined();
+    expect(second.components?.schemas?.PostFirstBodyA).toBeUndefined();
     expect(second.components).toBeUndefined();
   });
 

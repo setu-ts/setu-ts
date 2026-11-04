@@ -11,7 +11,9 @@
  * does not normalize.
  *
  * The `cause` chain is serialized recursively to a bounded depth so a
- * self-referential cause cannot recurse forever.
+ * self-referential cause cannot recurse forever. RequestBodyReadError's native
+ * cause is limited to its class and the wrapper's fixed detail, so request data
+ * carried by a native read failure never reaches a log sink.
  *
  * @module
  */
@@ -221,8 +223,16 @@ function serializeErrorInstance(
     out.classifiers = classifiers;
   }
   if (depth > 0 && cause !== undefined) {
+    // Native body-read messages may contain request data. The runtime retains
+    // the original cause for inspection, but operational logs carry only its
+    // class and the fixed wrapper detail (M131b's body-read disclosure contract).
     const serializedCause = serializeValue(cause, depth - 1, budget);
-    if (serializedCause !== undefined) out.cause = serializedCause;
+    if (serializedCause !== undefined) {
+      out.cause =
+        name === 'RequestBodyReadError'
+          ? { name: isError(cause) ? serializedCause.name : typeof cause, message: out.message }
+          : serializedCause;
+    }
   }
   if (depth > 0 && errors !== undefined) {
     const aggregate = serializeAggregateErrors(errors, depth - 1, budget);

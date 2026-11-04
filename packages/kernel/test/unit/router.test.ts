@@ -398,3 +398,21 @@ describe('Router', () => {
     expect(result).toBe(null);
   });
 });
+
+it.each([
+  ['regex-parameter', '/x/:id{[0-9]+}'],
+  ['unsupported-pattern', '/files/*.json'],
+  ['duplicate', '/x'],
+] as const)('M131b 3.11 names %s route refusals', async (reason, path) => {
+  const { RouteRegistrationError } = await import('@setu-ts/common');
+  const router = new Router();
+  const handler = (ctx: import('@setu-ts/common').IRequestContext) => ctx.response.text('ok');
+  if (reason === 'duplicate') router.get(path, handler);
+  try {
+    router.get(path, handler);
+    throw new Error('expected refusal');
+  } catch (error) {
+    expect(error).toBeInstanceOf(RouteRegistrationError);
+    expect(error).toMatchObject({ reason, method: 'GET', path });
+  }
+});

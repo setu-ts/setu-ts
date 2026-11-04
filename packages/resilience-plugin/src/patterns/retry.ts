@@ -9,6 +9,23 @@ import type { ITimers } from '../interfaces/index.ts';
 import { abortReasonOf, throwIfAborted } from './abort.ts';
 
 /**
+ * Refuses retry policies that cannot execute a finite, positive attempt count.
+ * @param policy - Policy selected at registration or wrap time
+ * @param label - Configuration location for the diagnostic
+ * @returns Nothing
+ * @throws {RangeError} For an unsafe/nonpositive integer limit or a negative/nonfinite delay
+ * @internal
+ */
+export function validateRetryPolicy(policy: RetryPolicy, label: string): void {
+  if (!Number.isSafeInteger(policy.limit) || policy.limit < 1) {
+    throw new RangeError(`${label}: limit must be a safe integer greater than or equal to 1`);
+  }
+  if (!Number.isFinite(policy.delay) || policy.delay < 0) {
+    throw new RangeError(`${label}: delay must be finite and non-negative`);
+  }
+}
+
+/**
  * Computes the backoff delay before a given attempt.
  *
  * @param attempt - 1-based attempt number the delay precedes (the delay before

@@ -218,3 +218,45 @@ describe('HttpCollector', () => {
     expect(duration.getSum({ method: 'GET', status: '200' })).toBeCloseTo(0.25, 6);
   });
 });
+
+it.each([
+  [400, 400],
+  [413, 413],
+  [503, 500],
+] as const)(
+  'M131b 3.4 counts a thrown %s-hinted error as the %s the kernel fallback serves',
+  async (hint, served) => {
+    const { withHttpStatusHint } = await import('@setu-ts/common');
+    const { collector, requests, errors, active, duration } = setup();
+    const failure = withHttpStatusHint(new Error('read'), {
+      status: hint,
+      title: 'hint',
+      detail: 'safe',
+    });
+    await expect(
+      collector.middleware(createFakeContext(), () => {
+        throw failure;
+      }),
+    ).rejects.toBe(failure);
+    const labels = { method: 'GET', status: String(served) };
+    expect(requests.getValue(labels)).toBe(1);
+    expect(errors.getValue(labels)).toBe(served >= 500 ? 1 : 0);
+    expect(duration.getCount(labels)).toBe(1);
+    expect(active.getValue()).toBe(0);
+  },
+);
+
+it('M131b 3.4 counts the status an error responder predicts', async () => {
+  const { ERROR_RESPONDER_STATE_KEY } = await import('@setu-ts/common');
+  const { collector, requests, errors } = setup();
+  const ctx = createFakeContext();
+  ctx.state.set(ERROR_RESPONDER_STATE_KEY, { statusFor: () => 404, respond: () => undefined });
+  const failure = new Error('not found');
+  await expect(
+    collector.middleware(ctx, () => {
+      throw failure;
+    }),
+  ).rejects.toBe(failure);
+  expect(requests.getValue({ method: 'GET', status: '404' })).toBe(1);
+  expect(errors.getValue({ method: 'GET', status: '404' })).toBe(0);
+});

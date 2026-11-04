@@ -171,13 +171,56 @@ describe('M119a partitionsToSeek', () => {
           new Set([0]),
           { '0': '10' },
           first === undefined ? new Map() : new Map([[0, first]]),
-        ),
+        ).seeks,
       ).toEqual(first === undefined || BigInt(first) > 10n ? [{ partition: 0, offset: '10' }] : []);
     },
   );
   it('ignores unassigned, committed, and missing-minimum partitions', () => {
     expect(
-      partitionsToSeek([0, 1, 2], new Set([1, 2, 3]), { '0': '0', '1': '12', '3': '0' }, new Map()),
+      partitionsToSeek([0, 1, 2], new Set([1, 2, 3]), { '0': '0', '1': '12', '3': '0' }, new Map())
+        .seeks,
     ).toEqual([{ partition: 1, offset: '12' }]);
   });
+});
+
+it('M131b 3.14 computes and consumes per-partition skip windows without numeric truncation', async () => {
+  const { skipDeliveredOffset } = await import('../../src/brokers/kafka-start-offsets.ts');
+  const decision = partitionsToSeek(
+    [0, 1, 2],
+    new Set([0, 1, 2]),
+    { 0: '0', 1: '9007199254740993', 2: '0' },
+    new Map([
+      [0, '2'],
+      [1, '9007199254740995'],
+      [2, '5'],
+    ]),
+    new Map([
+      [0, '3'],
+      [1, '9007199254740996'],
+    ]),
+  );
+  expect(decision.seeks).toEqual([
+    { partition: 0, offset: '0' },
+    { partition: 1, offset: '9007199254740993' },
+    { partition: 2, offset: '0' },
+  ]);
+  expect([...decision.skipThrough]).toEqual([
+    [0, { from: '2', to: '3' }],
+    [1, { from: '9007199254740995', to: '9007199254740996' }],
+  ]);
+  for (const [partition, offset, skip] of [
+    [0, '0', false],
+    [0, '1', false],
+    [0, '2', true],
+    [0, '3', true],
+    [1, '9007199254740994', false],
+    [1, '9007199254740995', true],
+    [2, '5', false],
+    [0, '4', false],
+    [0, '2', false],
+  ] as const) {
+    expect(skipDeliveredOffset(decision.skipThrough, partition, offset)).toBe(skip);
+  }
+  expect(decision.skipThrough.has(0)).toBe(false);
+  expect(decision.skipThrough.has(1)).toBe(true);
 });

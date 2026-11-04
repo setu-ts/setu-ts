@@ -133,10 +133,13 @@ All lines are on `develop` at `53e7a9fa4`.
   `errorHandler` then logs it at `warn` (existing `< 500` rule). Without `errorHandler`, the
   kernel's `#finishFailure` (`application.ts:1695-1716`) today answers 500 and reports at `error`
   whatever the hint says; it now honours a hint whose status is 400–499: it answers that status with
-  the hint's detail and the status's standard title through `respondWithError`, and reports at
-  `warn`. Other hints and unhinted errors keep today's 500 and `error`. The metrics HTTP collector
-  reads `httpStatusHintOf(error)?.status ?? 500` for a throw and increments the errors counter only
-  when that status is ≥ 500.
+  the hint's own title and detail through `respondWithError` (as `errorHandler`'s
+  `buildErrorFromInit` does), and reports at `warn`. Other hints and unhinted errors keep today's
+  500 and `error`. That rule is one exported function, `fallbackErrorStatus` in `@setu-ts/common`,
+  and every place that predicts the served status for a throw uses
+  `responder?.statusFor?.(error) ?? fallbackErrorStatus(error)`: the HTTP metrics collector (errors
+  counted only when that status is ≥ 500) and the request logger, which read `?? 500` and logged a
+  409 response as 500 (found at verification, 2026-11-04).
 - **Why:** the peer leaving is not a server fault, and a counted 500 per cancelled upload makes the
   error-rate alert lie.
 - **Test home:** `packages/runtime/test/unit/fetch-mapping.test.ts` (a body stream that errors →
@@ -260,7 +263,11 @@ All lines are on `develop` at `53e7a9fa4`.
   (`session.delete(AUTH_SESSION_KEY)`) and calls `session.regenerate()`. `verifiedCurrent(ctx)` does
   the same directly. A `reader-fault` answers anonymous for that request and leaves the record (a
   store outage must not sign everyone out). Non-HTTP `fromHeaders` callers (WebSocket upgrade) stay
-  suspension-only, which the README states.
+  suspension-only, which the README states. With the default encrypted-cookie strategy there is no
+  server-side record to delete, so a copied old cookie authenticates again if the stamp is restored
+  to its old value: the README, PUBLIC_API and upgrade notes say stamps must only move forward and
+  that a store is needed when copied cookies must stay revoked (maintainer decision 2026-11-04,
+  after implementation found the limit; no stamp-history mechanism).
 - **Why:** reverting a stamp revived every old cookie.
 - **Test home:** `packages/auth-plugin/test/unit/session-stamp.test.ts` (three states),
   `test/unit/auth-session-strategy.test.ts` (mismatch marks; reader fault does not), and
@@ -330,10 +337,11 @@ schemas change (regenerated clients rename types); a cancelled upload answers 40
 an application without `errorHandler` now answers a 4xx-hinted error (for example
 `MalformedRequestBodyError`) with its hinted status instead of 500.
 
-| Exported symbol                              | Kind  | Consumer / real code path that READS it                                                                                                                                                 |
-| -------------------------------------------- | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `RouteRegistrationError` (`@setu-ts/common`) | class | thrown by `kernel/src/router/router.ts`; caught and rewrapped by `decorator-plugin`'s `registerOnRouter`; applications branch on `reason`                                               |
-| `RequestBodyReadError` (`@setu-ts/runtime`)  | class | thrown by `fetch-mapping.ts`; its status hint is read by `exceptions` `errorHandler` and `metrics-plugin`'s collector; applications may `instanceof` it like `RequestBodyTooLargeError` |
+| Exported symbol                              | Kind     | Consumer / real code path that READS it                                                                                                                                                 |
+| -------------------------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `RouteRegistrationError` (`@setu-ts/common`) | class    | thrown by `kernel/src/router/router.ts`; caught and rewrapped by `decorator-plugin`'s `registerOnRouter`; applications branch on `reason`                                               |
+| `RequestBodyReadError` (`@setu-ts/runtime`)  | class    | thrown by `fetch-mapping.ts`; its status hint is read by `exceptions` `errorHandler` and `metrics-plugin`'s collector; applications may `instanceof` it like `RequestBodyTooLargeError` |
+| `fallbackErrorStatus` (`@setu-ts/common`)    | function | the kernel's `#finishFailure`; `logger-plugin`'s request logger and `metrics-plugin`'s HTTP collector when no error responder is present                                                |
 
 No other export is added or removed. `validateRetryPolicy`, `fullStackHttpSecurityOptions` (not
 exported from the starter's `src/index.ts`) and the Kafka skip window are internal.
@@ -440,9 +448,10 @@ Trust boundaries crossed: session lifetime (§3.13), the diagnostics connector's
 Threats and obligations, each probed by the committed-tree audit (a fresh Claude agent, per
 CLAUDE.md, never Codex):
 
-- **T1 (§3.13):** a reverted stamp or a replayed old cookie is accepted. **O1:** after a mismatch,
-  the old cookie and the old session id are anonymous forever; a reader fault never deletes a
-  record.
+- **T1 (§3.13):** a reverted stamp or a replayed old cookie is accepted. **O1:** with a server-side
+  session store, after a mismatch the old session id is anonymous forever; with encrypted-cookie
+  sessions, an old cookie stays anonymous while the stamp keeps moving forward (restoring an old
+  stamp is documented as unsupported); a reader fault never deletes a record.
 - **T2 (§3.5):** an unpaired client gains `trusted` and pins sockets. **O2:** a socket becomes
   trusted only after a response below 400; an unauthenticated flood cannot evict a paired socket.
 - **T3 (§3.4):** `RequestBodyReadError`'s detail or log echoes request data. **O3:** the served body
@@ -454,8 +463,6 @@ CLAUDE.md, never Codex):
 
 - Validating the circuit-breaker and bulkhead numbers (equally unchecked today) — V11-13 is the
   retry limit; a follow-up row if wanted.
-- The metrics collector counting a thrown `HttpError` without a status hint as 500 — pre-existing
-  and unrelated to the body-read row.
 
 - A framework request-timeout feature or an abort signal on early settlement (`ctx.signal` keeps its
   contract) — none planned.

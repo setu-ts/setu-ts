@@ -18,7 +18,7 @@ import type { ITimers, ResiliencePluginOptions } from '../interfaces/index.ts';
 import { throwIfAborted } from '../patterns/abort.ts';
 import { CircuitBreaker } from '../patterns/circuit-breaker.ts';
 import { Bulkhead } from '../patterns/bulkhead.ts';
-import { runWithRetry } from '../patterns/retry.ts';
+import { runWithRetry, validateRetryPolicy } from '../patterns/retry.ts';
 import { runWithTimeout } from '../patterns/timeout.ts';
 
 /**
@@ -56,6 +56,7 @@ export class ResilienceService implements IResilienceService {
    * @param options - Which patterns to apply and their policies
    * @returns A hardened callable reusing one shared pattern chain, accepting an
    * optional caller-owned signal
+   * @throws {RangeError} When the selected retry policy has an invalid limit or delay
    * @throws {Error} When a pattern is requested as `true` with no matching
    * `default*` policy configured on the plugin
    */
@@ -137,8 +138,10 @@ export class ResilienceService implements IResilienceService {
           'resilience.wrap: retry: true requires defaultRetry in ResiliencePlugin options',
         );
       }
+      validateRetryPolicy(this.#options.defaultRetry, 'resilience.wrap retry');
       return this.#options.defaultRetry;
     }
+    validateRetryPolicy(value, 'resilience.wrap retry');
     return value;
   }
 

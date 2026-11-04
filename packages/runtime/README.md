@@ -94,7 +94,7 @@ RuntimePlugin({ platform: 'node' });
 RuntimePlugin({ maxBodyBytes: 10 * 1024 * 1024 });
 ```
 
-Omitted, the read is unbounded — the released behaviour, byte for byte.
+Omitted, no framework read cap is imposed; the native runtime may still impose its own limit.
 
 This is the layer no request header can switch off.
 `HttpSecurityPlugin({ requestSize: { maxBodySize } })` refuses on a **declared** `Content-Length`
@@ -107,8 +107,8 @@ set `maxBodyBytes` to the same value as `maxBodySize` or higher.
 
 A body past the cap rejects with `RequestBodyTooLargeError`, branded with a `413` HTTP status hint,
 so an application running `errorHandler` answers `413 Payload Too Large` in its configured format
-rather than a masked `500`. With no `errorHandler` registered the brand has no reader and the
-kernel's opaque `500` answers instead.
+rather than a masked `500`. Without `errorHandler`, the kernel also honors this 4xx hint using its
+default response format and warns; only unhinted and 5xx-hinted failures keep its opaque 500.
 
 **`0` refuses every request that carries a body** — it does NOT disable the check, which is what `0`
 means for `maxDepth`/`maxNodes`/`maxBatchSize` elsewhere in this framework. Omitting the option is
@@ -170,6 +170,25 @@ for the full API contract and
 [`ARCHITECTURE.md`](https://github.com/setu-ts/setu-ts/blob/main/ARCHITECTURE.md) for how this
 package fits the plugin architecture.
 
+## Bind failures and client body-read failures
+
+`IHttpAdapter.listen(port, hostname?)` resolves only after the socket is bound and rejects with the
+native bind error on failure. The default Node host waits for listening/error, so a taken port
+rejects startup with `code: 'EADDRINUSE'`. An injected `NodeServeHost.serve` must honor the same
+obligation; its close-only handle does not let the adapter observe binding itself.
+
+`RequestBodyReadError` retains the native cause and carries status 400 with the fixed detail
+`The request body could not be read; the client closed the connection.` Logging through the shared
+serializer includes only the cause's class and fixed detail, never native request data. These client
+faults log at warn and do not increment the HTTP metrics 5xx errors counter.
+
+`RequestBodyTooLargeError(maxBodyBytes?: number)` carries status 413. A configured limit is kept in
+`maxBodyBytes`; a Bun native-size refusal with no framework cap uses `Infinity` for an unknown
+native bound and the generic detail `Request body exceeds the runtime maximum size.` Existing
+configured-cap detail is unchanged. Even without `errorHandler`, the kernel now serves 4xx hints
+with standard titles and explicit details at warn; unhinted and 5xx-hinted failures retain its
+opaque 500/error fallback. The body cap's omission does not remove a native runtime's own limit.
+
 ## Exports
 
 ### `@setu-ts/runtime`
@@ -211,6 +230,7 @@ package fits the plugin architecture.
 | `DenoHttpAdapter`                      | class     |
 | `NodeHttpAdapter`                      | class     |
 | `NodeUpgradeCoordinator`               | class     |
+| `RequestBodyReadError`                 | class     |
 | `RequestBodyTooLargeError`             | class     |
 | `RpcInterceptorStore`                  | class     |
 | `BunFileInfo`                          | interface |

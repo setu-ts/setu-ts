@@ -1650,6 +1650,15 @@ function generatedTestScripts(
 }
 
 /**
+ * The check a generated Node `start` script runs first (M131b, X87-3): without
+ * a build, `node dist/main.js` dies with a raw `MODULE_NOT_FOUND` trace, so
+ * this names the build script instead. Part of `start` itself rather than a
+ * `prestart`, because pnpm and Bun do not run pre-scripts by default; the
+ * double quotes work in both `sh` and `cmd`.
+ */
+export const NODE_START_BUILD_CHECK = `node -e "require('node:fs').existsSync('dist/main.js')||(console.error('dist/main.js is missing; run the build script first'),process.exitCode=1)"`;
+
+/**
  * The `scripts` a generated `package.json` carries.
  *
  * Node builds type-check and bundle; Bun builds only a declared frontend.
@@ -1691,7 +1700,9 @@ function npmScripts(runtime: TargetRuntime, manifest?: TemplateManifest): Record
         ? {}
         : { build: frontend }
       : { build: `${frontend === undefined ? '' : `${frontend} && `}tsc --noEmit && setu build` }),
-    start: bun ? `bun ${envFile}run main.ts` : `node ${nodeFlags}--enable-source-maps dist/main.js`,
+    start: bun
+      ? `bun ${envFile}run main.ts`
+      : `${NODE_START_BUILD_CHECK} && node ${nodeFlags}--enable-source-maps dist/main.js`,
     'start:dev':
       devEntry === undefined
         ? bun

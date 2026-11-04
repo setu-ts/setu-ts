@@ -48,7 +48,10 @@ await callApi();
 | `defaultBulkhead`       | `BulkheadPolicy`       | Consumed when a `wrap` sets `bulkhead: true`.       |
 
 Setting a pattern to `true` with **no matching plugin default throws** — an unconfigured policy is a
-mistake, not a silent no-op.
+mistake, not a silent no-op. A retry `limit` must be a safe integer at least 1 and `delay` must be
+finite and non-negative. Invalid `defaultRetry` throws `RangeError` during plugin registration; an
+invalid policy selected by `wrap` throws `RangeError` when wrapping, before the function runs.
+`limit: 1` is valid and executes one attempt. Delays are milliseconds.
 
 ## Errors
 

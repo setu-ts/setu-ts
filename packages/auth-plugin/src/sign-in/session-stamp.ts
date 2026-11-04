@@ -11,7 +11,7 @@
  * @module
  */
 
-import type { IPrincipal } from '@setu-ts/common';
+import type { IPrincipal, IRequest } from '@setu-ts/common';
 import type { SessionStamp } from '../interfaces/index.ts';
 import { constantTimeEquals } from '../mfa/totp-codes.ts';
 import { encodeBase64Url } from '../utils/base64url.ts';
@@ -23,6 +23,9 @@ export interface SessionStampCheck {
   /** Web Crypto, from `runtime.subtle`. */
   readonly subtle: SubtleCrypto;
 }
+
+/** Requests with a definite stamp mismatch, consumed by HTTP auth middleware. @internal */
+export const sessionStampRevocations: WeakMap<IRequest, true> = new WeakMap();
 
 const encoder = new TextEncoder();
 
@@ -55,27 +58,27 @@ export async function digestSessionStamp(
 /**
  * Whether the principal's current stamp matches the one recorded at sign-in.
  *
- * Fails closed: a reader that throws or returns a non-string answers `false`,
+ * Fails closed: a reader that throws or returns a non-string answers `reader-fault`,
  * never the recorded value. Two `null`s match; a `null` and a string do not.
  *
  * @param check - The reader and the digest primitive
  * @param principal - The principal the request resolved
  * @param recorded - The digest the session recorded, or `null`
- * @returns `true` when the stamps match
+ * @returns Match, definite mismatch, or reader fault; only a mismatch revokes
  */
 export async function sessionStampMatches(
   check: SessionStampCheck,
   principal: IPrincipal,
   recorded: string | null,
-): Promise<boolean> {
+): Promise<'match' | 'mismatch' | 'reader-fault'> {
   let current: string | null;
   try {
     current = await digestSessionStamp(check, principal);
   } catch {
-    return false;
+    return 'reader-fault';
   }
   if (current === null || recorded === null) {
-    return current === recorded;
+    return current === recorded ? 'match' : 'mismatch';
   }
-  return constantTimeEquals(current, recorded);
+  return constantTimeEquals(current, recorded) ? 'match' : 'mismatch';
 }

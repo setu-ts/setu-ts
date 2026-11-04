@@ -9,8 +9,11 @@ import type {
   IPrincipal,
   IRequest,
   IRequestContext,
+  ISessionService,
   MiddlewareFunction,
 } from '@setu-ts/common';
+import { AUTH_SESSION_KEY } from '../sign-in/auth-session-service.ts';
+import { sessionStampRevocations } from '../sign-in/session-stamp.ts';
 import { CAPABILITIES, CREDENTIAL_SOURCE_STATE_KEY, replacePrincipal } from '@setu-ts/common';
 
 /**
@@ -27,7 +30,8 @@ type AuthServiceWithSource = IAuthService & {
 
 /**
  * Authentication middleware that runs passive strategies and populates ctx.request.user.
- * Always calls next() - it authenticates only, does not authorize.
+ * Revokes definite session-stamp mismatches before continuing; reader faults
+ * leave the session unchanged. Always calls next() - it authenticates only, does not authorize.
  *
  * @returns Middleware function
  *
@@ -74,10 +78,14 @@ export function authMiddleware(): MiddlewareFunction {
     } catch {
       // Authentication error - don't set user, but continue
       // Authorization guards will handle the 401
-      await next();
-      return;
+      principal = null;
     }
 
+    if (sessionStampRevocations.delete(ctx.request)) {
+      const session = ctx.services.get<ISessionService>(CAPABILITIES.SESSION).from(ctx);
+      session.delete(AUTH_SESSION_KEY);
+      session.regenerate();
+    }
     if (principal !== null) {
       replacePrincipal(ctx.request, principal);
       if (source !== undefined) {

@@ -212,11 +212,13 @@ function withAmr(principal: IPrincipal, record: AuthSessionRecord): IPrincipal {
  *
  * @param record - A parsed signed-in record
  * @param checks - The configured re-checks
+ * @param onMismatch - Revokes a definite stamp mismatch; never called for a reader fault
  * @returns The frozen principal with `claims.amr` from the record, or `null`
  */
 export async function verifyAuthSessionRecord(
   record: AuthSessionRecord,
   checks: AuthSessionChecks,
+  onMismatch?: () => void,
 ): Promise<IPrincipal | null> {
   let principal: IPrincipal | null = record.principal;
   if (checks.refreshPrincipal !== undefined) {
@@ -233,11 +235,12 @@ export async function verifyAuthSessionRecord(
   }
   // The stamp is compared against the principal this read resolved, so a
   // `refreshPrincipal` that loaded the user can carry the stamp in a claim.
-  if (
-    checks.sessionStamp !== undefined &&
-    !(await sessionStampMatches(checks.sessionStamp, principal, record.stamp ?? null))
-  ) {
-    return null;
+  if (checks.sessionStamp !== undefined) {
+    const result = await sessionStampMatches(checks.sessionStamp, principal, record.stamp ?? null);
+    if (result !== 'match') {
+      if (result === 'mismatch') onMismatch?.();
+      return null;
+    }
   }
   return withAmr(principal, record);
 }
@@ -470,12 +473,20 @@ export class AuthSessionService implements IAuthSessionService {
    * `IAuthSessionService`, whose `current` is synchronous.
    *
    * @param ctx - The request context whose session is read
+   * A definite stamp mismatch removes the auth record and regenerates the session;
+   * a reader fault suspends this read without changing the record.
    * @returns The re-checked principal with `claims.amr`, or `null`
    * @throws {Error} If the session middleware did not run for this request
    */
-  verifiedCurrent(ctx: IRequestContext): Promise<IPrincipal | null> {
-    const record = parseAuthSessionRecord(this.#sessionService.from(ctx).get(AUTH_SESSION_KEY));
-    return record === null ? Promise.resolve(null) : verifyAuthSessionRecord(record, this.#checks);
+  async verifiedCurrent(ctx: IRequestContext): Promise<IPrincipal | null> {
+    const session = this.#sessionService.from(ctx);
+    const record = parseAuthSessionRecord(session.get(AUTH_SESSION_KEY));
+    return record === null
+      ? null
+      : await verifyAuthSessionRecord(record, this.#checks, () => {
+          session.delete(AUTH_SESSION_KEY);
+          session.regenerate();
+        });
   }
 
   /**

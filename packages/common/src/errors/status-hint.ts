@@ -305,3 +305,32 @@ function isConformingStatus(status: unknown): status is number {
   if (!Number.isInteger(status)) return false;
   return status >= MIN_HINT_STATUS && status <= MAX_HINT_STATUS;
 }
+
+/**
+ * The status the kernel serves for a thrown value when no error responder (such
+ * as `errorHandler`) handles it: a status hint between 400 and 499 is served as
+ * hinted, and everything else — unhinted errors and 5xx hints — as `500`.
+ *
+ * This is the one rule for that fallback. The kernel serves it, and middleware
+ * that predicts the served status (request logging, HTTP metrics) uses
+ * `responder?.statusFor?.(error) ?? fallbackErrorStatus(error)`, so a log line or
+ * a metric label never disagrees with the response.
+ *
+ * @example
+ * ```typescript
+ * import { fallbackErrorStatus, withHttpStatusHint } from '@setu-ts/common';
+ *
+ * fallbackErrorStatus(
+ *   withHttpStatusHint(new Error('stale'), { status: 409, title: 'Conflict', detail: 'Stale.' }),
+ * ); // 409
+ * fallbackErrorStatus(new Error('fault')); // 500
+ * ```
+ *
+ * @param error - The thrown value
+ * @returns The status the kernel's fallback serves for it
+ * @since 0.12.0
+ */
+export function fallbackErrorStatus(error: unknown): number {
+  const status = httpStatusHintOf(error)?.status;
+  return status !== undefined && status >= 400 && status <= 499 ? status : 500;
+}

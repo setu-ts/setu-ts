@@ -1898,6 +1898,9 @@ importers:
         specifier: workspace:^
         version: link:../common
     devDependencies:
+      '@setu-ts/exceptions':
+        specifier: workspace:^
+        version: link:../exceptions
       '@setu-ts/health-plugin':
         specifier: workspace:^
         version: link:../health-plugin
@@ -2247,6 +2250,9 @@ importers:
       '@setu-ts/kernel':
         specifier: workspace:^
         version: link:../kernel
+      '@setu-ts/openapi-plugin':
+        specifier: workspace:^
+        version: link:../openapi-plugin
       '@setu-ts/runtime':
         specifier: workspace:^
         version: link:../runtime
@@ -2259,6 +2265,9 @@ importers:
       vitest:
         specifier: 5.0.3
         version: 5.0.3(@opentelemetry/api@1.10.0)(@types/node@24.19.2)(@vitest/coverage-v8@5.0.3)(vite@8.3.5(@types/node@24.19.2)(esbuild@0.28.2)(tsx@4.23.15)(yaml@2.9.1))
+      zod:
+        specifier: ^4.6.6
+        version: 4.6.7
 
   packages/secrets-plugin:
     dependencies:

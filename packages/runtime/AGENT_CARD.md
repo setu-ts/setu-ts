@@ -36,11 +36,16 @@ export const runtimePlugin = RuntimePlugin({ maxBodyBytes: 10 * 1024 * 1024 });
 
 ## Behaviour the types do not show
 
-- Platform detection runs when `RuntimePlugin` is constructed, unless `platform` is supplied.
+- `RuntimePlugin` detects the platform unless `platform` is supplied.
 - `maxBodyBytes` counts bytes actually read, including chunked bodies. Omitted means unbounded; zero
   refuses bodies. Negative, fractional or unsafe-integer limits throw at construction.
-- A body over the limit rejects with `RequestBodyTooLargeError`; an error responder is needed to
-  serve its 413 hint instead of the kernel's generic 500.
+- A body over the limit rejects with `RequestBodyTooLargeError` (413). Its optional cap is Infinity
+  for an unknown native bound, with generic detail. Native read failures become
+  `RequestBodyReadError` (400), with fixed detail and the native cause retained.
+- The kernel honors 4xx hints at warn even without errorHandler; 5xx hints and unhinted failures
+  keep its opaque 500/error fallback. HTTP metrics count hinted 4xx without a 5xx error increment.
+- `IHttpAdapter.listen` and an injected `NodeServeHost.serve` resolve once bound and reject on bind
+  failure. The default Node host waits for listening/error.
 - `runtime.hrtime()` and `ctx.startTime` are monotonic milliseconds; `runtime.now()` is epoch time.
 - On Workers, only string entries from `env` populate `runtime.env`; the option is ignored on Node,
   Deno and Bun. Workers omit `fs`, `workers`, `dns` and `onSignal`.

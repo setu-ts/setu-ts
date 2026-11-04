@@ -12,7 +12,7 @@ import {
   NodeHttpServerHandle,
 } from '../../src/adapters/node/node-http-adapter.ts';
 import { UPGRADE_INTENT } from '@setu-ts/common';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createTestContext } from '@setu-ts/testing';
 
 describe('Node socket peer', () => {
@@ -322,3 +322,81 @@ describe('node-http-adapter | performUpgrade via fetch path', () => {
     expect(onCloseReason).toBe('Upgrade unsupported on fetch path');
   });
 });
+
+it('M131b 3.1 real Node bind rejects EADDRINUSE and resolves after free bind', async () => {
+  const { createServer } = await import('node:net');
+  const held = createServer();
+  await new Promise<void>((resolve, reject) => {
+    held.once('error', reject);
+    held.listen(0, '127.0.0.1', resolve);
+  });
+  const address = held.address();
+  if (address === null || typeof address === 'string') throw new Error('TCP address expected');
+  const adapter = new NodeHttpAdapter();
+  const uncaught: unknown[] = [];
+  const observe = (error: unknown): void => {
+    uncaught.push(error);
+  };
+  process.on('uncaughtException', observe);
+  try {
+    const result = await Promise.race([
+      adapter.listen(address.port, '127.0.0.1').then(
+        () => 'unexpected bind',
+        (error: unknown) => error,
+      ),
+      new Promise<string>((resolve) => setTimeout(() => resolve('bind did not reject'), 250)),
+    ]);
+    expect(result).toMatchObject({ code: 'EADDRINUSE' });
+    expect(uncaught).toEqual([]);
+    const handle = await adapter.listen(0, '127.0.0.1');
+    await adapter.close(handle);
+  } finally {
+    process.removeListener('uncaughtException', observe);
+    await new Promise<void>((resolve, reject) =>
+      held.close((error) => (error ? reject(error) : resolve())),
+    );
+  }
+});
+
+for (const fails of [false, true]) {
+  it(`M131b 3.1 waits for the default host bind event fails=${fails}`, async () => {
+    const { EventEmitter } = await import('node:events');
+    const server = Object.assign(new EventEmitter(), { close: vi.fn() });
+    const serve = vi.fn((_options: unknown, ready: () => void) => {
+      server.once('listening', () => ready());
+      return server;
+    });
+    vi.doMock('@hono/node-server', () => ({ serve }));
+    try {
+      const adapter = new NodeHttpAdapter();
+      let settled = false;
+      const listening = adapter.listen(12345, '127.0.0.1');
+      const observed = listening.then(
+        () => {
+          settled = true;
+        },
+        () => {
+          settled = true;
+        },
+      );
+      await vi.waitFor(() => expect(serve).toHaveBeenCalledOnce());
+      expect(settled).toBe(false);
+      expect(server.listenerCount('error')).toBe(1);
+      if (fails) {
+        const error = Object.assign(new Error('taken'), { code: 'EADDRINUSE' });
+        server.emit('error', error);
+        await expect(listening).rejects.toBe(error);
+        expect(server.close).toHaveBeenCalledOnce();
+        expect(server.listenerCount('listening')).toBe(0);
+      } else {
+        server.emit('listening');
+        const handle = await listening;
+        expect(server.listenerCount('error')).toBe(0);
+        await adapter.close(handle);
+      }
+      await observed;
+    } finally {
+      vi.doUnmock('@hono/node-server');
+    }
+  });
+}

@@ -2139,3 +2139,34 @@ describe('KafkaBroker — the guarded import (M113d §3.1)', () => {
     }
   });
 });
+
+it('M131b 3.14 delivers each offset once across a first-join rewind', async () => {
+  const factory = new FakeKafkaFactory();
+  const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), { client: factory });
+  await broker.connect();
+  const seen: string[] = [];
+  try {
+    await broker.subscribe(
+      'orders',
+      (body, metadata) => {
+        expect(body).toEqual({});
+        seen.push(metadata.messageId!);
+      },
+      { queue: 'workers' },
+    );
+    const consumer = factory.consumer({ groupId: 'workers' });
+    const admin = factory.admins[1]!;
+    const pending = Promise.withResolvers<Awaited<ReturnType<typeof admin.fetchOffsets>>>();
+    vi.spyOn(admin, 'fetchOffsets').mockReturnValueOnce(pending.promise);
+    const join = consumer.join({ orders: [0] });
+    for (const offset of ['2', '3'])
+      await consumer.deliver('orders', new FakeKafkaMessage('{}', offset, '1000', {}));
+    pending.resolve([{ topic: 'orders', partitions: [{ partition: 0, offset: '-1' }] }]);
+    await join;
+    for (const offset of ['0', '1', '2', '3', '4'])
+      await consumer.deliver('orders', new FakeKafkaMessage('{}', offset, '1000', {}));
+    expect(seen).toEqual(['0:2', '0:3', '0:0', '0:1', '0:4']);
+  } finally {
+    await broker.disconnect();
+  }
+});

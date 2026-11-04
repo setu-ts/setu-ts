@@ -1,3 +1,4 @@
+import type { KafkaSkipWindow } from './kafka-start-offsets.ts';
 import type {
   ISubscription,
   MessageHandler,
@@ -17,6 +18,7 @@ import {
 import {
   minimumStartOffsets,
   partitionsToSeek,
+  skipDeliveredOffset,
   isKafkaStartModule,
   optionalKafkaStartModule,
   startAwareRoundRobin,
@@ -942,6 +944,8 @@ export class KafkaBroker implements MessageBrokerAdapter {
     // — colliding across partitions and breaking the de-duplication the
     // identity exists for (90d verification, Finding 1).
     const firstDelivered = new Map<number, string>();
+    const lastDelivered = new Map<number, string>();
+    const skipThrough = new Map<number, KafkaSkipWindow>();
     const eachMessage = async ({
       partition,
       message,
@@ -968,6 +972,9 @@ export class KafkaBroker implements MessageBrokerAdapter {
         offset: string;
       };
 
+      // Resolving eachMessage lets kafkajs auto-commit the duplicate without
+      // deserializing it or invoking application code a second time.
+      if (skipDeliveredOffset(skipThrough, partition, msgTyped.offset)) return;
       if (!firstDelivered.has(partition)) firstDelivered.set(partition, msgTyped.offset);
       const valueBytes = msgTyped.value ?? new Uint8Array(0);
       const content = new TextDecoder().decode(valueBytes);
@@ -986,6 +993,7 @@ export class KafkaBroker implements MessageBrokerAdapter {
 
       // Handler success triggers auto-commit; failure prevents commit
       await handler(deserialized, metadata);
+      lastDelivered.set(partition, msgTyped.offset);
     };
 
     const activeConsumer: ActiveConsumer = {
@@ -1047,13 +1055,17 @@ export class KafkaBroker implements MessageBrokerAdapter {
             ),
         );
         // Decision and seeks are synchronous: no delivery can interleave.
-        for (const { partition, offset } of partitionsToSeek(
+        const decision = partitionsToSeek(
           payload.memberAssignment[topic] ?? [],
           uncommitted,
           minimum,
           firstDelivered,
-        )) {
+          lastDelivered,
+        );
+        for (const { partition, offset } of decision.seeks) {
           consumerTyped.seek({ topic, partition, offset });
+          const window = decision.skipThrough.get(partition);
+          if (window !== undefined) skipThrough.set(partition, window);
         }
       } catch (error) {
         warn(error);

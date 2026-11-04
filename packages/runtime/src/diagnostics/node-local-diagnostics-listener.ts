@@ -181,6 +181,7 @@ export class NodeLocalDiagnosticsListenerFactory implements ILocalDiagnosticsLis
     // Map insertion order is idle recency; a count protects pipelined responses
     // from becoming evictable while any response is still being served.
     const sockets = new Map<Socket, number>();
+    const trusted = new WeakSet<Socket>();
     const handleRequest = (request: IncomingMessage, response: ServerResponse): void => {
       const socket = request.socket;
       const busy = sockets.get(socket);
@@ -192,6 +193,7 @@ export class NodeLocalDiagnosticsListenerFactory implements ILocalDiagnosticsLis
           const pending = sockets.get(socket);
           // The peer may have closed before this response completed.
           if (pending === undefined) return;
+          if (response.headersSent && response.statusCode < 400) trusted.add(socket);
           sockets.delete(socket);
           sockets.set(socket, pending - 1);
         };
@@ -206,8 +208,11 @@ export class NodeLocalDiagnosticsListenerFactory implements ILocalDiagnosticsLis
         let oldestIdle: Socket | undefined;
         for (const [candidate, busy] of sockets) {
           if (busy === 0) {
-            oldestIdle = candidate;
-            break;
+            oldestIdle ??= candidate;
+            if (!trusted.has(candidate)) {
+              oldestIdle = candidate;
+              break;
+            }
           }
         }
         if (oldestIdle === undefined) {

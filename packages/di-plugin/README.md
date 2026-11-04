@@ -60,7 +60,7 @@ const providers: IPlugin = {
 const app = createApplication({ plugins: [RuntimePlugin(), DiPlugin(), providers] });
 
 app.router.get('/now', (ctx) => {
-  // One UnitOfWork per request, released when the response is finished.
+  // One UnitOfWork per request, released only after its handler has settled.
   const scope = ctx.services.get<IContainer>(CAPABILITIES.DI_CONTAINER).forRequest(ctx);
   const uow = scope.resolve(UNIT_OF_WORK);
   return ctx.response.json({ now: uow.clock.now() });
@@ -70,8 +70,19 @@ await app.start({ port: 3000 });
 ```
 
 A token is a string, a typed token from `createToken<T>(name)`, or a class; `resolve` infers the
-type from the last two. A factory declares its dependencies in `inject` and receives them as
-arguments: `{ useFactory: (clock: Clock) => new UnitOfWork(clock), inject: [Clock] }`.
+type from the last two at compile time. `T` is erased at runtime: the token does not check that a
+provider's value has the intended type. Run `tsc` through the generated `check` and `build` scripts;
+`start:dev` / `tsx` does not type-check.
+
+Request scopes are disposed only after the handler settles. Buffered responses normally await
+cleanup before being handed back; streaming responses clean up at end, error or cancellation. If
+middleware sends an early response without awaiting `next()`, that response returns immediately,
+while the scope stays alive until the handler and cleanup finish. Shutdown drain waits within its
+existing bound. Boot validation reports controller-reachable and unrelated graph findings together,
+once per failing edge/cycle/captive pair, including class aliases.
+
+A factory declares its dependencies in `inject` and receives them as arguments:
+`{ useFactory: (clock: Clock) => new UnitOfWork(clock), inject: [Clock] }`.
 
 ## Options
 

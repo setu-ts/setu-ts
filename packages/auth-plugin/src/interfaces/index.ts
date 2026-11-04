@@ -665,8 +665,11 @@ export type RefreshPrincipal = (
  *
  * `IAuthSessionService.signIn` records a SHA-256 digest of the value; every
  * request compares the digest of the current value with it in constant time. A
- * different value, a throw, or anything other than a string or `null` makes the
- * request anonymous. `null` means the user has no stamp, and matches only a
+ * different value deletes the HTTP auth record and regenerates its session.
+ * A throw or malformed value only suspends this request without mutation.
+ * Permanent old-cookie revocation requires a store; a copied stateless cookie
+ * can revive if the stamp is reverted. Read-only callers remain suspension-only.
+ * `null` means the user has no stamp, and matches only a
  * session recorded with none.
  *
  * Called with the principal the request resolved — the session snapshot, or
@@ -834,8 +837,11 @@ export interface SignInConfig {
   refreshPrincipal?: RefreshPrincipal;
   /**
    * Reads the user's current session stamp. Recorded at sign-in and compared on
-   * every request; changing the stamp on the user record ends every session
-   * the user holds. Absent, no stamp is recorded or compared. See
+   * every request. A definite mismatch deletes the HTTP auth record and
+   * regenerates the session; a reader fault only suspends that request. Store-backed
+   * old ids stay revoked. A copied stateless cookie can revive if the stamp is
+   * reverted, so use a store for permanent revocation. Read-only fromHeaders
+   * callers remain suspension-only. Absent, no stamp is recorded or compared. See
    * {@linkcode SessionStamp}.
    *
    * @since 0.11.0

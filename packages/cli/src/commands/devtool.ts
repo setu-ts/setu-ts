@@ -362,9 +362,7 @@ async function planSourceWrites(
 
 /** Prints the command's usage. */
 function printUsage(log: (message: string) => void): void {
-  log(
-    `Usage: ${cliInvocation('deno')} devtool enable [member] [--devtool-port <n>] [--dir <path>] [--dry-run]`,
-  );
+  log(`Usage: setu devtool enable [member] [--devtool-port <n>] [--dir <path>] [--dry-run]`);
   log('');
   log('Enables the local diagnostics connector on a project that already exists:');
   log('writes main.dev.ts, adds the `dev` and `check` tasks, and widens the root');
@@ -383,7 +381,7 @@ function printUsage(log: (message: string) => void): void {
 }
 
 /** The usage line shared by every subcommand refusal. */
-const USAGE = `Usage: ${cliInvocation('deno')} devtool enable [member] [--devtool-port <n>] [--dir <path>] [--dry-run]`;
+const USAGE = `Usage: setu devtool enable [member] [--devtool-port <n>] [--dir <path>] [--dry-run]`;
 
 /**
  * Runs `setu devtool enable`.

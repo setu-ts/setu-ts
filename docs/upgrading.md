@@ -12,6 +12,57 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### Kernel, runtime and plugin contracts (M131b, `@setu-ts/kernel`, `@setu-ts/runtime`, `@setu-ts/auth-plugin`, `@setu-ts/resilience-plugin`, `@setu-ts/openapi-plugin`, `@setu-ts/messaging-plugin`, `@setu-ts/full-stack-starter`, `@setu-ts/cli`)
+
+- **Header batches are atomic.** If `setHeaders` throws, none of its entries was written. Remove
+  code that relied on partial writes, and make custom IResponse implementations validate the batch
+  before applying it.
+- **Request cleanup waits for the handler.** Buffered responses normally await cleanup. If
+  middleware responds early without awaiting next(), the response returns immediately but scopes and
+  deferred cleanup stay alive until the handler settles. Shutdown drain retains that work within its
+  existing bound; ctx.signal still means connection severance.
+- **A definite session-stamp mismatch revokes the HTTP auth record.** It deletes the record and
+  regenerates the session. With a store, old ids remain revoked even if the stamp is restored. A
+  copied encrypted-cookie session can revive on a reverted stamp because it has no server-side
+  revocation record: use a store when old-cookie replay must stay revoked and advance stamps
+  monotonically. A reader fault remains a one-request suspension without mutation; read-only
+  fromHeaders/WebSocket callers remain suspension-only. Sign in again after a definite mismatch.
+- **Retry options are validated earlier.** `defaultRetry` is checked during registration, and
+  selected policies at wrap time: limit must be a safe integer at least 1, delay finite and
+  non-negative. Invalid policies throw RangeError. Use limit 1 for one attempt.
+- **OpenAPI component names can change.** A reused node uses its own Zod id, otherwise its site plus
+  schema path (for example PostOrdersBodyLinesItems). Roots keep their own name and nullable
+  primitives stay inline. Regenerate document and SDK together; inspect setu client --check for
+  renamed component types. Explicit ids keep names stable across operation ordering.
+- **Cancelled/failed body reads are client faults.** RequestBodyReadError carries a fixed 400 detail
+  and retains the native cause. It logs at warn; HTTP metrics labels the hinted status and
+  increments errors only for 5xx. Update tests/dashboards that expected a 500 or error-level upload
+  cancellation. Bun's size message maps to RequestBodyTooLargeError/413; an omitted cap is reported
+  as Infinity with a generic native-limit detail, not an invented configured limit.
+- **The kernel fallback now honors 4xx hints without errorHandler.** It serves the hint's status,
+  title and detail, as `errorHandler` would, and logs at warn. Request logging and HTTP metrics now
+  label such a response with the status actually served (`fallbackErrorStatus`), and metrics count a
+  thrown `HttpError` under `errorHandler` with its served status rather than 500. Unhinted and
+  5xx-hinted errors retain opaque 500/error. Applications using errorHandler keep its configured
+  format. `RouteRegistrationError` now lets startup code branch on regex-parameter,
+  unsupported-pattern or duplicate, and decorated messages identify the controller/method; catch
+  this class instead of matching generic Error strings.
+- **Node start waits for binding.** A taken port rejects startup with its native code. Injected
+  NodeServeHost implementations must also wait until bound. Regenerate the devtool entry to gain its
+  creation/start catch and connector guidance. New Node start scripts check dist/main.js first; run
+  build before start. Devtool help now names setu devtool enable.
+- **Other contract repairs.** Boot validation now reports controller and unrelated findings together
+  once. Diagnostics admission prefers idle untrusted sockets before trusted sockets at its unchanged
+  32-socket cap. Kafka suppresses its already-delivered first-join rewind window; ordinary
+  at-least-once redelivery remains.
+- **Browser documents.** With reactRouter set, both full-stack factories default the HTTP security
+  referrer policy to same-origin unless the application supplied a policy or disabled it/headers.
+  Hand-composed React Router apps should set that policy themselves to avoid Origin: null form
+  refusals. The generated view layout now emits its doctype; update existing full-document layouts
+  with raw('<!DOCTYPE html>') before html. Fragments, renderView and @Render remain unchanged.
+- **Typed DI tokens still have no runtime type guard.** T is erased. Run generated check/build
+  (tsc); start:dev/tsx does not type-check.
+
 ### MCP route tools (M133, `@setu-ts/mcp-plugin`)
 
 Existing applications require no migration. To opt in, run `setu add mcp`, register `McpPlugin({})`

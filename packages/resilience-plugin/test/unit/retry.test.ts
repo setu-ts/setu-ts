@@ -207,3 +207,27 @@ describe('runWithRetry cancellation', () => {
     expect(seen).toEqual([false, false, false]);
   });
 });
+
+describe('M131b 3.12 retry validation', () => {
+  for (const policy of [
+    { limit: 0, delay: 0 },
+    { limit: NaN, delay: 0 },
+    { limit: 1.5, delay: 0 },
+    { limit: -1, delay: 0 },
+    { limit: Infinity, delay: 0 },
+    { limit: Number.MAX_SAFE_INTEGER + 1, delay: 0 },
+    { limit: 1, delay: -1 },
+    { limit: 1, delay: NaN },
+    { limit: 1, delay: Infinity },
+  ]) {
+    it(`refuses invalid policies at wrap: ${JSON.stringify(policy)}`, async () => {
+      const { ResilienceService } = await import('../../src/services/resilience-service.ts');
+      const runtime = new FakeRuntime();
+      const service = new ResilienceService(runtime);
+      const retry = { ...policy, backoff: 'fixed' as const };
+      expect(() => service.wrap(() => Promise.resolve(1), { retry })).toThrow(RangeError);
+      const defaults = new ResilienceService(runtime, { defaultRetry: retry });
+      expect(() => defaults.wrap(() => Promise.resolve(1), { retry: true })).toThrow(RangeError);
+    });
+  }
+});

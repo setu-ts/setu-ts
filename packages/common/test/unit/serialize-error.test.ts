@@ -383,3 +383,18 @@ describe('causeMessage', () => {
     expect(barrel.causeMessage).toBe(causeMessage);
   });
 });
+
+it.each([new Error('CANARY'), 'CANARY'])(
+  'M131b 3.4 logs body read native class without request detail',
+  (cause) => {
+    const failure = new Error('safe body detail', { cause });
+    failure.name = 'RequestBodyReadError';
+    const logged = serializeError(failure);
+    expect(logged.cause).toEqual({
+      name: cause instanceof Error ? 'Error' : 'string',
+      message: 'safe body detail',
+    });
+    expect(JSON.stringify(logged)).not.toContain('CANARY');
+    expect(failure.cause).toBe(cause);
+  },
+);

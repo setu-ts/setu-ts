@@ -127,7 +127,33 @@ export class Compiler {
 
   #validate(tokens: readonly ContainerToken[]): void {
     const findings: ValidationFinding[] = [];
+    const walked = new Set<ProviderEntry>();
+    const keys: { kind: ValidationFinding['kind']; members: readonly unknown[] }[] = [];
+    const add = (finding: ValidationFinding): void => {
+      const path = finding.path;
+      const members = (
+        finding.kind === 'missing'
+          ? path.slice(-2)
+          : finding.kind === 'captive'
+            ? [finding.token, path[path.length - 1]!]
+            : [...new Set(path)]
+      ).map((token) => this.#registry.get(token) ?? token);
+      const duplicate = keys.some(
+        (key) =>
+          key.kind === finding.kind &&
+          key.members.length === members.length &&
+          (finding.kind === 'cycle'
+            ? members.every((member) => key.members.includes(member))
+            : members.every((member, index) => key.members[index] === member)),
+      );
+      if (!duplicate) {
+        keys.push({ kind: finding.kind, members });
+        findings.push(finding);
+      }
+    };
     for (const root of tokens) {
+      const rootEntry = this.#registry.get(root);
+      if (rootEntry !== undefined && walked.has(rootEntry)) continue;
       const detector = new CircularDetector();
       const walk = (
         token: ContainerToken,
@@ -138,17 +164,18 @@ export class Compiler {
         try {
           detector.enter(token);
         } catch {
-          findings.push({ kind: 'cycle', token, path: next.slice(next.indexOf(token)) });
+          add({ kind: 'cycle', token, path: next.slice(next.indexOf(token)) });
           return;
         }
         try {
           const entry = this.#registry.get(token);
           if (entry === undefined) {
-            if (!this.has(token)) findings.push({ kind: 'missing', token, path: next });
+            if (!this.has(token)) add({ kind: 'missing', token, path: next });
             return;
           }
+          walked.add(entry);
           if (captive !== undefined && entry.scope === 'scoped') {
-            findings.push({
+            add({
               kind: 'captive',
               token: captive,
               path: next.slice(next.indexOf(captive)),

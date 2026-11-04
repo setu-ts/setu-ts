@@ -819,10 +819,11 @@ app.router.get('/account', (ctx) =>
   principal, or `null` to make the request anonymous. It runs per request, so it is opt-in; a
   throwing re-read is treated as anonymous, never as the stale snapshot.
 - **Ending every session of one user** is `signIn.sessionStamp` — see below.
-- **`IAuthSessionService.current(ctx)` is the stored snapshot**: neither re-read runs, so it still
-  returns a user whose session `refreshPrincipal` or the stamp has ended. Decide who may act from
-  `ctx.request.user`, which the `auth-session` strategy re-checked. The plugin's own passkey
-  registration routes re-check the same way.
+- **`IAuthSessionService.current(ctx)` reads the stored snapshot without re-checking it.** Use
+  `ctx.request.user` for authorization. A reader fault or `refreshPrincipal` refusal can leave the
+  snapshot present while this request is anonymous; a definite stamp mismatch deletes the auth
+  record, so subsequent snapshot reads return null. The plugin's passkey registration uses the
+  verified read and applies the same mismatch revocation.
 
 ### Ending every session of a user
 
@@ -830,8 +831,17 @@ Keep a stamp on your user record — a `sessionVersion` counter, or a prefix of 
 Laravel, Django and Devise do — and give `signIn` a reader for it. `IAuthSessionService.signIn`
 records a SHA-256 digest of the stamp; every request compares the digest of the current stamp with
 it, in constant time. Change the stamp and every session of that user answers anonymous on its next
-request — `ctx.request.user` is unset, and passkey registration refuses it — on the cookie strategy
-as well as the store strategy.
+request — `ctx.request.user` is unset, and passkey registration refuses it. A definite mismatch
+removes the auth record and regenerates the writable HTTP session; the store strategy deletes the
+old session id, so restoring the previous stamp cannot revive that stored session. The current
+browser also receives a replacement cookie without its auth record. With the encrypted-cookie
+strategy, a copied old cookie cannot be revoked server-side and can authenticate again if the stamp
+is reverted: use a store when old-cookie replay must remain revoked, and advance stamps
+monotonically. A throwing reader or malformed return suspends only this request and leaves the
+record and id unchanged, so an identity-store outage does not sign everyone out.
+`verifiedCurrent(ctx)` applies the same mutation for the plugin's own identity reads. Read-only
+`fromHeaders` callers (including WebSocket upgrades) remain suspension-only because they cannot
+commit a session change.
 
 ```typescript
 import type { IPrincipal } from '@setu-ts/common';
@@ -1710,19 +1720,9 @@ MIT
 
 | Export                              | Kind      |
 | ----------------------------------- | --------- |
-| `createQuota`                       | function  |
-| `respondQuotaExceeded`              | function  |
-| `MemoryQuotaStore`                  | class     |
-| `RedisQuotaStore`                   | class     |
-| `QuotaExceededError`                | class     |
-| `QuotaStoreUnavailableError`        | class     |
-| `IQuota`                            | interface |
-| `IQuotaStore`                       | interface |
-| `IQuotaRedisClient`                 | interface |
-| `QuotaOptions`                      | type      |
-| `QuotaReservation`                  | type      |
 | `authMiddleware`                    | function  |
 | `AuthPlugin`                        | function  |
+| `createQuota`                       | function  |
 | `defaultRateLimitKey`               | function  |
 | `definePolicy`                      | function  |
 | `publicRoute`                       | function  |
@@ -1737,6 +1737,7 @@ MIT
 | `requireScopedPermission`           | function  |
 | `requireScopedRole`                 | function  |
 | `requireScopes`                     | function  |
+| `respondQuotaExceeded`              | function  |
 | `safeReturnTo`                      | function  |
 | `AuthorizationDeniedError`          | class     |
 | `AuthPluginConfigurationError`      | class     |
@@ -1744,12 +1745,16 @@ MIT
 | `MalformedPasswordHashError`        | class     |
 | `MemoryAccessTokenRevocationStore`  | class     |
 | `MemoryPasskeyStore`                | class     |
+| `MemoryQuotaStore`                  | class     |
 | `MemoryRateLimitStore`              | class     |
 | `MemoryRefreshTokenStore`           | class     |
 | `MemorySamlRequestStore`            | class     |
 | `MemoryTotpStore`                   | class     |
 | `PasswordHasher`                    | class     |
+| `QuotaExceededError`                | class     |
+| `QuotaStoreUnavailableError`        | class     |
 | `RateLimitStoreUnavailableError`    | class     |
+| `RedisQuotaStore`                   | class     |
 | `RedisRateLimitStore`               | class     |
 | `RefreshTokenService`               | class     |
 | `SamlRuntimeLoadError`              | class     |
@@ -1772,6 +1777,9 @@ MIT
 | `IJwtService`                       | interface |
 | `IPasskeyStore`                     | interface |
 | `IPrincipal`                        | interface |
+| `IQuota`                            | interface |
+| `IQuotaRedisClient`                 | interface |
+| `IQuotaStore`                       | interface |
 | `ISamlRequestStore`                 | interface |
 | `ITotpStore`                        | interface |
 | `JwtOptions`                        | interface |
@@ -1823,6 +1831,8 @@ MIT
 | `IssuerKeySource`                   | type      |
 | `PasskeySaveResult`                 | type      |
 | `PolicyDenial`                      | type      |
+| `QuotaOptions`                      | type      |
+| `QuotaReservation`                  | type      |
 | `RecoveryCodesResult`               | type      |
 | `RecoveryVerifyResult`              | type      |
 | `RefreshPrincipal`                  | type      |

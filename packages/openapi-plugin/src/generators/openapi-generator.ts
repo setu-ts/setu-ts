@@ -40,12 +40,21 @@ function defaultPathParamSchema(): OpenApiSchemaObject {
  * component: an object, an array, or a composition (`anyOf`/`allOf`) or
  * enumeration of them.
  *
- * A constrained primitive is deliberately excluded — see the call site.
+ * A constrained primitive and a nullable primitive union are deliberately
+ * excluded — reusable components name structural models.
  *
  * @param schema - The transformed schema
  * @returns `true` when the schema earns a `components/schemas` entry
  */
 function isStructuralShape(schema: OpenApiSchemaObject): boolean {
+  if (
+    schema.anyOf?.length === 2 &&
+    schema.anyOf.some((arm) => arm.type === 'null') &&
+    schema.anyOf.some(
+      (arm) => arm.type !== undefined && !['object', 'array', 'null'].includes(arm.type),
+    )
+  )
+    return false;
   return (
     schema.type === 'object' ||
     schema.type === 'array' ||
@@ -53,6 +62,30 @@ function isStructuralShape(schema: OpenApiSchemaObject): boolean {
     schema.allOf !== undefined ||
     schema.enum !== undefined
   );
+}
+
+/** Produces a name suffix from schema positions, keeping author-chosen field names. */
+function schemaPathName(path: readonly (string | number)[]): string {
+  const parts: (string | number)[] = [];
+  for (let index = 0; index < path.length; index++) {
+    const part = path[index]!;
+    if (['properties', 'patternProperties', '$defs', 'definitions'].includes(String(part))) {
+      const key = path[++index];
+      if (key !== undefined) parts.push(key);
+    } else parts.push(part);
+  }
+  return parts.length === 0 ? '' : toPascalCase(parts.join('-'));
+}
+
+/** Reads Zod's public metadata API without coupling the generator to Zod internals. */
+function schemaId(schema: unknown): string | undefined {
+  try {
+    const candidate = schema as { meta?: () => { id?: unknown } | undefined } | null | undefined;
+    const id = typeof candidate?.meta === 'function' ? candidate.meta()?.id : undefined;
+    return typeof id === 'string' && id.length > 0 ? id : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -488,6 +521,8 @@ export class OpenApiGenerator {
   readonly #operationDiagnostics: { at: string; reason: string }[] = [];
   /** The operationId of the operation currently being built. */
   #currentOperationId = '';
+  /** Reserved before a hoisted root descends into its children. */
+  #pendingHoistName: string | undefined;
 
   /**
    * Creates a new OpenAPI generator.
@@ -524,8 +559,18 @@ export class OpenApiGenerator {
       // the CURRENT site's name hint. During the COUNT pass nothing may be
       // stored — the transformer still needs A name to rewrite pointers with,
       // so it gets a throwaway that `onDefinition` refuses to deliver.
-      onDefinitionClaim: (hint: string): string =>
-        this.#pass === 'count' ? `\u0000count:${hint}` : this.#claimComponentName(),
+      onDefinitionClaim: (
+        hint: string,
+        path: readonly (string | number)[] = [],
+        root = false,
+      ): string => {
+        if (this.#pass === 'count') return `\u0000count:${hint}`;
+        if (root && this.#pendingHoistName !== undefined) return this.#pendingHoistName;
+        const explicit = !root && !/^__schema\d+$/.test(hint);
+        return this.#claimComponentName(
+          explicit ? hint : toPascalCase(this.#nameHint) + schemaPathName(path),
+        );
+      },
       onDefinition: (name: string, schema: OpenApiSchemaObject): void => {
         if (this.#pass === 'emit') {
           this.#componentSchemas.set(name, schema);
@@ -541,7 +586,7 @@ export class OpenApiGenerator {
         }
       },
     };
-    this.#transformer = new ZodToOpenApi((schema) => this.#hook(schema), channels);
+    this.#transformer = new ZodToOpenApi((schema, path) => this.#hook(schema, path), channels);
     this.#parameterTransformer = new ZodToOpenApi(undefined, channels);
     this.#schemaMap = new Map();
     this.#componentSchemas = new Map();
@@ -1160,8 +1205,8 @@ export class OpenApiGenerator {
    * Resolves a schema, potentially creating a $ref for deduplication.
    *
    * An anonymous schema referenced by two or more sites is hoisted to
-   * `components/schemas` under a name derived from its FIRST use site (never
-   * `Schema<n>`) and every one of those sites emits a `$ref`; a schema used
+   * `components/schemas` under its own Zod id, or its FIRST site's name plus
+   * the node's path inside that schema (never `Schema<n>`) and every one of those sites emits a `$ref`; a schema used
    * exactly once is inlined. Reuse is keyed on schema object IDENTITY, so two
    * structurally identical but separately constructed schemas are two schemas.
    * Only structural shapes are hoisted — see `isStructuralShape`. Parameter
@@ -1269,9 +1314,10 @@ export class OpenApiGenerator {
    * another.
    *
    * @param schema - The node the transformer is about to convert
+   * @param path - JSON Schema path from the current conversion root
    * @returns A `$ref`, or `undefined` to transform normally
    */
-  #hook(schema: unknown): OpenApiSchemaObject | undefined {
+  #hook(schema: unknown, path: readonly (string | number)[] = []): OpenApiSchemaObject | undefined {
     // The node currently BEING hoisted must transform normally, or it would
     // answer itself with a `$ref` to the component it is building.
     if (this.#hoisting.has(schema)) return undefined;
@@ -1310,25 +1356,37 @@ export class OpenApiGenerator {
 
     if ((this.#schemaCounts.get(schema)?.[bucket] ?? 0) < 2) return undefined;
 
+    const id = schemaId(schema);
+    const preferred = id === undefined ? toPascalCase(this.#nameHint) + schemaPathName(path) : id;
+    const name = this.#claimComponentName(preferred);
+    const previousName = this.#pendingHoistName;
+    const previousHint = this.#nameHint;
+    this.#pendingHoistName = name;
+    this.#nameHint = preferred;
     this.#hoisting.add(schema);
     // `this.#io`, not the default: this is the component the hoisting site
     // will reference, so it must carry THAT site's side. Defaulting here gave
     // a hoisted request body the output shape while an inline one — the only
     // case a single-use schema produces — was correct, which is why it took a
     // reused request schema to surface.
-    const transformed = this.#recordHoistedRoot(
-      schema,
-      this.#transformer.transform(schema, this.#io),
-    );
-    this.#hoisting.delete(schema);
+    let transformed: OpenApiSchemaObject;
+    try {
+      transformed = this.#recordHoistedRoot(schema, this.#transformer.transform(schema, this.#io));
+    } finally {
+      this.#hoisting.delete(schema);
+      this.#pendingHoistName = previousName;
+      this.#nameHint = previousHint;
+    }
 
     // Only a structural shape earns a component. A `$ref` to `{type:'string'}`
     // is larger than the schema it replaces, and `components/schemas` is where
     // a reader looks for MODELS — a reused `z.string().uuid()` hoisted under a
     // name taken from whichever route happened to reach it first is noise.
-    if (!isStructuralShape(transformed)) return transformed;
+    if (!isStructuralShape(transformed)) {
+      if (!this.#componentSchemas.has(name)) this.#reservedNames.delete(name);
+      return transformed;
+    }
 
-    const name = this.#claimComponentName();
     this.#schemaMap.set(schema, { ...this.#schemaMap.get(schema), [bucket]: name });
     this.#componentSchemas.set(name, transformed);
     return { $ref: `#/components/schemas/${name}` };

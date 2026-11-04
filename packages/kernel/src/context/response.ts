@@ -25,7 +25,7 @@ const BINARY_INIT = responseInit({ 'content-type': 'application/octet-stream' })
  * itself, and the frozen records that cannot have one. Both are weak: an entry
  * lives exactly as long as the record a caller holds.
  */
-const HEADER_TEMPLATES = new WeakMap<object, Headers>();
+const HEADER_TEMPLATES = new WeakMap<object, Headers | { error: unknown }>();
 const UNTEMPLATABLE = new WeakSet<object>();
 
 /**
@@ -36,12 +36,14 @@ const UNTEMPLATABLE = new WeakSet<object>();
  * frozen, with an ordinary or null prototype, and every string-keyed own
  * property a data property holding a string. Validation is the platform's
  * own — the template is built with `Headers.set`, as `header()` would — and a
- * record it refuses is remembered as untemplatable and applied entry by entry,
- * so it throws exactly where the same `header()` calls would.
+ * record it refuses caches the error and rethrows it before any response write.
  */
 function headerTemplate(record: Readonly<Record<string, string>>): Headers | undefined {
   const cached = HEADER_TEMPLATES.get(record);
-  if (cached !== undefined) return cached;
+  if (cached !== undefined) {
+    if ('error' in cached) throw cached.error;
+    return cached;
+  }
   if (!Object.isFrozen(record) || UNTEMPLATABLE.has(record)) return undefined;
   const prototype: unknown = Object.getPrototypeOf(record);
   let template: Headers | undefined;
@@ -57,8 +59,9 @@ function headerTemplate(record: Readonly<Record<string, string>>): Headers | und
         }
         template.set(name, descriptor.value);
       }
-    } catch {
-      template = undefined;
+    } catch (error) {
+      HEADER_TEMPLATES.set(record, { error });
+      throw error;
     }
   }
   if (template === undefined) {
@@ -99,8 +102,8 @@ export class ResponseBuilder implements IResponse {
 
   /**
    * Sets several headers. A frozen record's validated template is copied in
-   * one step when no headers exist yet; otherwise each entry goes through
-   * {@linkcode ResponseBuilder.header}.
+   * one step when no headers exist yet. Atomic: if any entry is invalid, none
+   * is set. Other records are validated in scratch Headers before copying.
    *
    * @param headers - Header names and values
    * @returns This response, for chaining
@@ -112,9 +115,12 @@ export class ResponseBuilder implements IResponse {
       this.#headers = new Headers(template);
       return this;
     }
-    for (const name of Object.keys(headers)) {
-      this.header(name, headers[name]!);
+    const staged = template ?? new Headers();
+    if (template === undefined) {
+      for (const name of Object.keys(headers)) staged.set(name, headers[name]!);
     }
+    const destination = this.#materializeHeaders();
+    staged.forEach((value, name) => destination.set(name, value));
     return this;
   }
 

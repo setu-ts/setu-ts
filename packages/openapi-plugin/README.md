@@ -45,9 +45,10 @@ by `$ref` from each of those sites.
 
 Reuse means the **same schema object**, not an equal one: two separately constructed but
 structurally identical schemas are two schemas and each stays where it is. Only object, array,
-composition and enum shapes are hoisted — a reused primitive is smaller inline than as a `$ref`.
-Parameter schemas are never hoisted, because a parameter list is built by destructuring the
-transformed object's `properties`, and a `$ref` has none.
+composition and enum shapes are hoisted; nullable primitives stay inline, like other primitives,
+because a reused primitive is smaller inline than as a `$ref`. Parameter schemas are never hoisted,
+because a parameter list is built by destructuring the transformed object's `properties`, and a
+`$ref` has none.
 
 A route's schemas come from its declared `schema` field **or** are derived from the validation
 middleware guarding it, so a route already carrying `validateBody(...)` does not repeat itself.
@@ -81,6 +82,15 @@ await app.start({ port: 3000 });
 // GET /openapi.json → the spec
 // GET /docs         → Swagger UI
 ```
+
+## Component names when regenerating a client
+
+A hoisted node uses its own Zod `.meta({ id })` / registry id when it has one; otherwise its name
+uses the first operation's body/response hint plus the node's schema path, such as
+`PostOrdersBodyLinesItems`. Roots reserve their own name before descending. Nullable primitives stay
+inline. Explicit ids keep names independent of operation order; anonymous nodes still depend on
+their first use site. This changes some component/type names from 0.11.0: regenerate the document
+and client together and review the `setu client --check` diff.
 
 ## Options
 

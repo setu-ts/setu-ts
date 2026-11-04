@@ -1,5 +1,9 @@
 import { expect, it } from 'vitest';
-import { projectFiles, resolveHost } from '../../src/templates/project-files.ts';
+import {
+  NODE_START_BUILD_CHECK,
+  projectFiles,
+  resolveHost,
+} from '../../src/templates/project-files.ts';
 import { MINIMAL_HOST } from '../../src/templates/minimal.ts';
 import { REST_TEMPLATE } from '../../src/templates/rest.ts';
 import { CLASS_BASED_TEMPLATE } from '../../src/templates/class-based.ts';
@@ -14,7 +18,7 @@ for (const host of [
   FULL_STACK_TEMPLATE,
 ]) {
   for (const runtime of ['node', 'bun', 'deno'] as const) {
-    it(`renders production and development scripts for ${'name' in host ? host.name : 'minimal'}/${runtime}`, () => {
+    it(`M131b 3.3 renders production and development scripts for ${'name' in host ? host.name : 'minimal'}/${runtime}`, () => {
       const files = projectFiles('probe', runtime, resolveHost(host, runtime));
       const full = host === FULL_STACK_TEMPLATE;
       const manifest = JSON.parse(
@@ -32,7 +36,9 @@ for (const host of [
         expect(scripts['build']).toBe(
           `${full ? 'react-router build && ' : ''}tsc --noEmit && setu build`,
         );
-        expect(scripts['start']).toBe(`node ${envFile}--enable-source-maps dist/main.js`);
+        expect(scripts['start']).toBe(
+          `${NODE_START_BUILD_CHECK} && node ${envFile}--enable-source-maps dist/main.js`,
+        );
         expect(scripts['start:dev']).toBe(
           full ? `tsx ${envFile}dev.ts` : `tsx watch ${envFile}main.ts`,
         );
