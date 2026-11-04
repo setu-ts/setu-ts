@@ -243,6 +243,9 @@ export const ADDABLE: ReadonlyMap<string, IAddablePackage> = new Map([
       peers: { runtimes: ['deno', 'node', 'bun', 'cloudflare-workers'], packages: ['zod'] },
     },
   ],
+  // Collections and the adapter's client are the application's, so the
+  // registration is printed, never inserted (M135 §3.13).
+  ['vector-store', { pkg: 'vector-store-plugin' }],
   [
     'view',
     {
@@ -389,6 +392,9 @@ function registrationLine(bare: string): string | undefined {
     return "ReactRouterPlugin({ serverBuildPath: '<server-build-module>' })";
   }
   if (bare === 'multi-tenancy-plugin') return "MultiTenancyPlugin({ resolver: 'header' })";
+  if (bare === 'vector-store-plugin') {
+    return "VectorStorePlugin({ adapter: new MemoryVectorStore(), collections: [{ name: 'documents', dimensions: 768 }] })";
+  }
   if (bare === 'service-discovery-plugin') {
     return "ServiceDiscoveryPlugin({ provider: 'static', services: {} })";
   }

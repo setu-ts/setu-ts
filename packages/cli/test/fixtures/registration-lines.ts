@@ -19,6 +19,7 @@ import { ReactRouterPlugin } from '@setu-ts/react-router-plugin';
 import { ServiceDiscoveryPlugin } from '@setu-ts/service-discovery-plugin';
 import { SessionPlugin } from '@setu-ts/session-plugin';
 import { StaticPlugin } from '@setu-ts/static-plugin';
+import { MemoryVectorStore, VectorStorePlugin } from '@setu-ts/vector-store-plugin';
 
 /** Stands in for the Workers environment the printed line names. */
 declare const env: Record<string, unknown>;
@@ -39,6 +40,10 @@ export const PRINTED_REGISTRATIONS = [
   ReactRouterPlugin({ serverBuildPath: '<server-build-module>' }),
   MultiTenancyPlugin({ resolver: 'header' }),
   ServiceDiscoveryPlugin({ provider: 'static', services: {} }),
+  VectorStorePlugin({
+    adapter: new MemoryVectorStore(),
+    collections: [{ name: 'documents', dimensions: 768 }],
+  }),
   // The only runtime `setu add cloudflare` accepts is cloudflare-workers, so
   // the printed form is the one whose factory takes `waitUntil` second
   // (M113d §3.8). The spread is required under `exactOptionalPropertyTypes`:

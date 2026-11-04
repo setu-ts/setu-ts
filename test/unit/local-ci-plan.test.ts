@@ -333,7 +333,7 @@ describe('local CI plan', () => {
     expect(ci.jobs.node.steps.filter((step) => step.run?.includes('docker run '))).toHaveLength(
       full.length - Object.keys(ci.jobs.node.services).length,
     );
-    expect(full).toHaveLength(13);
+    expect(full).toHaveLength(14);
     expect(backendSpecs('cli-1')).toEqual(full);
     expect(backendSpecs('messaging')).toEqual(full);
     for (const [name, service] of Object.entries(ci.jobs.node.services))

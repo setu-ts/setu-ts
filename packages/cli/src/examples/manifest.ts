@@ -70,6 +70,7 @@ export const EXAMPLE_MANIFEST: Readonly<
     binary: [],
     smokeHelper: true,
   },
+  'semantic-search': { files: [], binary: [], smokeHelper: false },
   database: {
     files: [
       'README.md',

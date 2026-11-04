@@ -24,6 +24,13 @@ export const PACKAGE_DATA: ReadonlyMap<string, IPackageData> = new Map<string, I
     },
   ],
   [
+    'vector-store-plugin',
+    {
+      description: 'Tenant-scoped vector retrieval with filters that are refused, never ignored',
+      tokens: ['VECTOR_STORE'],
+    },
+  ],
+  [
     'common',
     {
       description:

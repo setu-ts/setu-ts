@@ -262,11 +262,17 @@ export function backendSpecs(shard: Shard): IBackend[] {
   return [
     spec(
       'postgres',
-      'postgres:16',
+      'pgvector/pgvector:0.8.1-pg16',
       [5433],
       ['pg_isready', '-U', 'postgres', '-p', '5433'],
       ['-c', 'port=5433'],
       { POSTGRES_PASSWORD: 'postgres' },
+    ),
+    spec(
+      'qdrant',
+      'qdrant/qdrant:v1.20.0',
+      [6333, 6334],
+      ['@http', 'http://localhost:6333/readyz'],
     ),
     spec(
       'mongo',

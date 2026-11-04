@@ -72,6 +72,21 @@ describe('example scaffolding', () => {
       [...examplePaths('mcp-tools')].sort(),
     );
   });
+  it('downloads the semantic-search example with the vector store and AI SDK ranges', async () => {
+    const h = harness();
+    expect(await h.run(['new', 'demo', '--example', 'semantic-search']), h.err.text()).toBe(0);
+    const prefix = '/work/demo/';
+    const manifest = JSON.parse(h.fs.read(`${prefix}package.json`));
+    expect(manifest.dependencies['@setu-ts/vector-store-plugin']).toBe(`^${VERSION}`);
+    expect(manifest.dependencies['@setu-ts/multi-tenancy-plugin']).toBe(`^${VERSION}`);
+    expect(manifest.dependencies['ai']).toBe('7.0.159');
+    expect(manifest.dependencies['drizzle-orm']).toBe('0.45.2');
+    expect(manifest.scripts.check).toBe('tsc --noEmit');
+    expect(h.fs.read(`${prefix}.env.example`)).toContain('EMBED_DIMENSIONS=1024');
+    expect(h.fs.writes.map((path) => path.slice(prefix.length)).sort()).toEqual(
+      [...examplePaths('semantic-search')].sort(),
+    );
+  });
   it('downloads version-tagged sources, rewrites manifests and prints runnable next steps through both entry points', async () => {
     for (const argv of [['new', 'demo'], createArgs(['demo'])]) {
       const h = harness();
