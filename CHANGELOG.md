@@ -8,7 +8,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
-- **Tenant-scoped vector retrieval (M135, `@setu-ts/common`, `@setu-ts/vector-store-plugin`,
+- **Tenant-scoped vector retrieval (M135, #558, `@setu-ts/common`, `@setu-ts/vector-store-plugin`,
   `@setu-ts/cloudflare-plugin`, `@setu-ts/cli`).** `CAPABILITIES.VECTOR_STORE` and `IVectorStore`
   add similarity search whose tenant scope is a required argument of every data method, never a
   filter key. `VectorStorePlugin` registers the service under `VectorStorePluginOptions`;

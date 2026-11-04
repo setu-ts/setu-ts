@@ -752,7 +752,7 @@ here.
   tenant-scoped retrieval: `IVectorStore` under `CAPABILITIES.VECTOR_STORE`, the scope a required
   argument, filters refused rather than ignored, memory/pgvector/Qdrant adapters plus
   `VectorizeVectorStore`, `setu add vector-store`, the `semantic-search` example; ships in `0.12.0`)
-  — complete (PR pending).
+  — complete (PR #558).
 - **Next milestone** — M131b–d are open for `0.12.0`.
 
 ## Verification (run before declaring any work done)
