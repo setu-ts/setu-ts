@@ -471,12 +471,16 @@ export async function scanPageImports(fs: IFileSystem, dir: string): Promise<Pag
   const decoder = new TextDecoder();
   const resolveToken = tokenResolverFor(fs, dir);
   for (const path of walk.pages.sort()) {
-    const result = await scanPageSource(
-      path,
-      decoder.decode(await fs.readFile(joinPath(dir, path))),
-      dir.replace(/\/+$/, ''),
-      resolveToken,
-    );
+    // A page `stat` could see may still fail to read (EACCES, or removed since
+    // the walk): it is reported like any other page the check cannot read.
+    let source: string;
+    try {
+      source = decoder.decode(await fs.readFile(joinPath(dir, path)));
+    } catch {
+      unreadable.push(path);
+      continue;
+    }
+    const result = await scanPageSource(path, source, dir.replace(/\/+$/, ''), resolveToken);
     if (result === 'unreadable') unreadable.push(path);
     else violations.push(...result);
   }

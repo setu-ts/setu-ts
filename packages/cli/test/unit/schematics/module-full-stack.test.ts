@@ -172,6 +172,16 @@ describe('setu generate module --page', () => {
     expect(h.fs.has('/app/src/modules/articles/index.ts')).toBe(false);
   });
 
+  it('refuses --page in a class-based full-stack project (PR review)', async () => {
+    const h = project({
+      '@setu-ts/react-router-plugin': '^0.11.0',
+      '@setu-ts/decorator-plugin': '^0.11.0',
+    });
+    expect(await h.run(['module', 'articles', '--page'])).toBe(2);
+    expect(h.err.text()).toContain('--page needs functional generation');
+    expect(h.fs.has('/app/src/modules/articles/index.ts')).toBe(false);
+  });
+
   it('refuses --page on any schematic but module', async () => {
     const h = project({ '@setu-ts/react-router-plugin': '^0.11.0' });
     expect(await h.run(['service', 'billing', '--page'])).toBe(2);

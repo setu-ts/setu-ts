@@ -14067,13 +14067,13 @@ Contract notes:
   receives that `HttpError` and the live `IRequestContext`; returning or resolving a `HandlerResult`
   built through `ctx.response` bypasses framework formatting, so the application owns the returned
   status, headers, and body (for example, an HTML error page). Returning or resolving `undefined` is
-  the only fallback signal and preserves the configured formatter exactly. Logging retains the
-  unmasked diagnostic and records the selected response status. This hook is deliberately limited to
-  `errorHandler`'s caught-error path: the M70f responder still formats unmatched-path `404`,
-  malformed-request `400`, shutdown-drain `503`, and other responder-based terminals, including when
-  no full request context exists. The status ownership is the part easiest to lose — `renderView`
-  takes no status, so the natural spelling serves `200` for every branded error, and the one-line
-  fix belongs in the hook:
+  the only fallback signal and preserves the configured formatter exactly. Logging keeps the error's
+  own message and cause, with URL userinfo masked, and records the selected response status. This
+  hook is deliberately limited to `errorHandler`'s caught-error path: the M70f responder still
+  formats unmatched-path `404`, malformed-request `400`, shutdown-drain `503`, and other
+  responder-based terminals, including when no full request context exists. The status ownership is
+  the part easiest to lose — `renderView` takes no status, so the natural spelling serves `200` for
+  every branded error, and the one-line fix belongs in the hook:
 
   ```typescript
   async respond(error, ctx): Promise<HandlerResult | undefined> {

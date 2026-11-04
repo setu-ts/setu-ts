@@ -90,9 +90,10 @@ export interface ErrorHandlerOptions {
    * response: its `detail`/`message` becomes the status title
    * (`'Internal Server Error'`) and the raw message — which for a failed
    * query carries the SQL and its bound parameter values — is dropped from the
-   * body. The log is unaffected: `logErrors` still records the unmasked error
-   * and its cause chain, so an operator loses nothing unless `logErrors` is
-   * _also_ `false`, the configuration that already logs nothing.
+   * body. The log keeps it: `logErrors` still records the error's own message
+   * and its cause chain (with only URL userinfo masked), so an operator loses
+   * nothing unless `logErrors` is _also_ `false`, the configuration that
+   * already logs nothing.
    *
    * A deliberately thrown `HttpError` keeps its text as written —
    * `instanceof HttpError` is the line between "the developer wrote this for
@@ -158,8 +159,9 @@ const PROBLEM_DETAILS_FORMATTERS: ReadonlySet<ErrorHandlerFormatter> = new Set([
  * 4. When configured, lets the application write its own response. A returned
  *    or resolved `HandlerResult` short-circuits formatting; `undefined` falls
  *    through.
- * 5. When `logErrors` is on and a logger is registered, the unmasked error is
- *    logged with the status the selected response serves.
+ * 5. When `logErrors` is on and a logger is registered, the error's own message
+ *    and cause (URL userinfo masked) are logged with the status the selected
+ *    response serves.
  * 6. Otherwise, formats the error via {@linkcode selectFormatter}, optionally
  *    enriches it with a `stack` trace, and sends it with the right status and
  *    content type. The middleware **returns a `HandlerResult`** (short-circuit)
@@ -289,7 +291,8 @@ export function errorHandler(options?: ErrorHandlerOptions): MiddlewareFunction 
         return result;
       }
 
-      // Log the unmasked diagnostic and cause chain, with the status the
+      // Log the error's own message and cause chain (URL userinfo masked, the
+      // 500 title replacement not applied), with the status the
       // formatter below will actually serve. A hint may change a normalized
       // `500` to `501`, so logging the pre-hint status would mislead operators.
       if (logErrors) {
@@ -302,7 +305,7 @@ export function errorHandler(options?: ErrorHandlerOptions): MiddlewareFunction 
       // the SQL and its bound parameter values straight back into the body that
       // was just masked — defeating the mask through the one option documented
       // as unsafe in production. A masked error therefore carries no stack at
-      // all; the unmasked one is in the log, where `logErrors` already sent it.
+      // all; the error's own text is in the log, where `logErrors` already sent it.
       //
       // The condition is `responseError === error` rather than `!masked`
       // because a hinted response is the second case with the same property:

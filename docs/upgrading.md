@@ -51,13 +51,16 @@ with 0.11 keeps working but does not match what `setu new` now writes. To port o
   service with `services.register(TOKEN, requestService(factory))` and call
   `registerModules(app.router, app.services)` in `setu.config.ts`.
 - In loaders, replace reads of `servicesContext` and the logger and secrets keys with
-  `getService(context, TOKEN)`. `servicesContext` still works for plain services, but returns the
-  `requestService` wrapper for a module token: read those with `getService`. Keep
-  `populateLoadContext` for values that are not services (the session and CSRF token).
-- Add `"~kernel/*": ["./src/*"]` to `tsconfig.json` `paths` (and the Deno import map), and import
-  kernel code from `app/` only as `import type` or from a `*.token.ts` module. `setu check` now
-  reports any other value import as `setu.E017`, and a page it cannot parse as `setu.E018`; silence
-  either in `.setu-ts/check.json` while porting.
+  `getService(context, TOKEN)`; a capability token carries no type, so name it, as in
+  `getService<ILogger>(context, CAPABILITIES.LOGGER)`. `servicesContext` still works for plain
+  services, but returns the `requestService` wrapper for a module token: read those with
+  `getService`. Keep `populateLoadContext` for values that are not services (the session and CSRF
+  token).
+- Add `"~kernel/*": ["./src/*"]` to `tsconfig.json` `paths` (a Deno project also adds the prefix
+  entry `"~kernel/": "./src/"` to `imports` in `deno.json`), and import kernel code from `app/` only
+  as `import type` or from a `*.token.ts` module. `setu check` now reports any other value import as
+  `setu.E017`, and a page it cannot parse as `setu.E018`; silence either in `.setu-ts/check.json`
+  while porting.
 - Unsafe `/api` requests still pass the session's CSRF check. Browser code sends the page's token in
   `x-csrf-token`; generated tests sign a session through `/login` first.
 - The full-stack starter now adds `react-router-plugin` to `openapi.excludeOwners` and `/__vite/*`

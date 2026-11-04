@@ -470,6 +470,14 @@ export async function runGenerateCommand(
     );
     return EXIT_USAGE;
   }
+  // A class-based project generates the class module shape, which has no page
+  // (`generateModule` writes the full-stack shape only in functional mode).
+  if (page && mode === 'class-based') {
+    deps.error(
+      '--page needs functional generation: decorator-plugin makes this project class-based, and the class-based module has no page.',
+    );
+    return EXIT_USAGE;
+  }
 
   if (
     installed.has('react-router-plugin') &&

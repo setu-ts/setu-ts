@@ -610,6 +610,16 @@ describe('scanPageImports over real symlinks (review finding 6)', () => {
     expect(await scanPageImports(fs, '/p')).toEqual({ violations: [], unreadable: ['app/broken'] });
   });
 
+  it('reports a page it cannot read instead of throwing (PR review)', async () => {
+    const fs = createFakeFs({ '/p/app/a.tsx': '', '/p/app/b.tsx': '' });
+    const readFile = fs.readFile.bind(fs);
+    fs.readFile = (path: string) =>
+      path === '/p/app/b.tsx'
+        ? Promise.reject(Object.assign(new Error('EACCES'), { code: 'EACCES' }))
+        : readFile(path);
+    expect(await scanPageImports(fs, '/p')).toEqual({ violations: [], unreadable: ['app/b.tsx'] });
+  });
+
   it('reports a directory it cannot list instead of throwing', async () => {
     const fs = createFakeFs({ '/p/app/routes/a.tsx': '' });
     const readdir = fs.readdir.bind(fs);

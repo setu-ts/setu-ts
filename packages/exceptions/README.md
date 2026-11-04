@@ -56,9 +56,10 @@ custom formatter output and stacks, has URL userinfo masked (`scheme://user:pass
 
 `respond` is called after error normalization, masking, and status resolution. It can return or
 resolve an HTML (or another application-owned) result through `ctx.response`; the callback owns that
-result's status, headers, and body, which is not masked. The log retains the unmasked diagnostic and
-records the status that result serves. It applies only to errors caught by `errorHandler`, not
-responder-based terminals such as an unmatched-path `404`.
+result's status, headers, and body, which is not masked. The log keeps the error's own message and
+cause, with URL userinfo masked as in every other sink, and records the status that result serves.
+It applies only to errors caught by `errorHandler`, not responder-based terminals such as an
+unmatched-path `404`.
 
 The natural spelling of the hook omits the one statement that matters and serves `200` for every
 branded error: `renderView(ctx, Component, props)` takes no status, and nothing else sets it. The
