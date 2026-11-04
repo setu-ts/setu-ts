@@ -24,6 +24,7 @@ import {
 } from '@setu-ts/common';
 import type { RateLimitStore } from '../stores/rate-limit-store.ts';
 import { MemoryRateLimitStore } from '../stores/rate-limit-store.ts';
+import { quotaProblemInit } from '../quota/refusal.ts';
 
 /**
  * Options for rate limiting middleware.
@@ -97,14 +98,6 @@ export const DEFAULT_RATE_LIMIT_EXCLUDED_PATHS: readonly PathPattern[] = [
   '/openapi.json',
   '/docs',
 ];
-
-/**
- * The IANA-registered problem type a refused request is identified as.
- *
- * Not exported from `src/index.ts`: callers receive it in the body, never as a
- * constant to match on.
- */
-const QUOTA_EXCEEDED_TYPE = 'https://iana.org/assignments/http-problem-types#quota-exceeded';
 
 /**
  * The largest integer an RFC 9651 `sf-integer` can carry (RFC 9651 §3.3.1:
@@ -243,16 +236,7 @@ export function rateLimitMiddleware(options: RateLimitOptions): MiddlewareFuncti
       // error format. `Retry-After` is written first so it survives whichever
       // formatter answers.
       ctx.response.header('Retry-After', String(resetAfter));
-      respondWithError(ctx, {
-        status: 429,
-        title: 'Too Many Requests',
-        detail: message,
-        problem: {
-          type: QUOTA_EXCEEDED_TYPE,
-          title: 'Quota Exceeded',
-          extensions: { 'violated-policies': [policyName] },
-        },
-      });
+      respondWithError(ctx, quotaProblemInit(policyName, message));
       return;
     }
 

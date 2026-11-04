@@ -48,10 +48,10 @@ if (principal === null) {
 
 ## Other options
 
-- `apiKey`, `session`, `issuers` and `strategies` supply other passive authentication paths.
+- `apiKey`, `session`, `issuers` and `strategies` supply other passive auth paths.
 - `requireScopes` (ALL-of OAuth scopes) and `resourceServer` (RFC 9728) serve token APIs.
-- `definePolicy` and `requirePolicy` evaluate application policies; scoped guards use `scopedRbac`.
-- `signIn.mfa` and `signIn.passkeys` add factors; `RefreshTokenService` and `rateLimitMiddleware`
-  are standalone helpers.
-- `signIn` with `providers: []` is password-only; `signIn.sessionStamp` reads the user record's
-  stamp. Changing it ends every session of that user.
+- `definePolicy` and `requirePolicy` evaluate policies; scoped guards use `scopedRbac`.
+- `signIn.mfa` and `signIn.passkeys` add factors. `RefreshTokenService`, `rateLimitMiddleware` and
+  `createQuota` (weighted budgets) are standalone.
+- `signIn` with `providers: []` is password-only; `signIn.sessionStamp` reads a user-record stamp;
+  changing it ends all of that user's sessions.

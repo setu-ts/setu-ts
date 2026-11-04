@@ -16563,57 +16563,39 @@ workerd run is a follow-on. **Security-audited** by a fresh agent before it merg
 
 ---
 
-## Milestone 134: `ai-plugin` — Model Calls With Budgets, Telemetry and Redaction
+## Milestone 134: AI SDK Recipes and Weighted Quotas
 
-**Package(s):** new `packages/ai-plugin`, `packages/common` (an AI capability token and its
-interfaces), `packages/telemetry-plugin` (GenAI spans and metrics), `packages/testing` (a scripted
-fake model), `packages/cli` (`setu add ai`, agent card); docs and an example.
+**Package(s):** `packages/auth-plugin` (weighted reserve/settle quota), `packages/telemetry-plugin`
+(optional global provider registration); website guide and `apps/ai-chat`. Ships in `0.12.0`.
 
-**Source:** the AI-layer survey, tracks 01 (providers), 05 (cost and security) and 06.
+**The problem.** Model calls need trusted identity, spend caps under concurrency and usage records
+that billing can deduplicate. The AI SDK already provides providers, bounded tool loops, structured
+output, UI streams and test models; its ecosystem provides fallback and GenAI telemetry.
 
-**The problem.** A SaaS application calling a model needs per-tenant spend limits, usage records it
-can bill from, traces that do not capture prompts by default, provider fallback, a test double, and
-streaming to its UI. The AI SDK supplies providers, not any of those, and Setu has no AI token at
-all (`common/src/tokens.ts`).
+**Decisions:** use and test `ai` 7.x (`LanguageModelV4`), `ai-fallback` 3.x and `@ai-sdk/otel` 1.x.
+No Setu AI package, AI token, tool loop, fake model or GenAI instrumentation is added. AI
+dependencies belong only to the example and root development tooling. The website guide compiles its
+recipes.
 
-**Decisions the plan takes:**
+Auth-plugin adds `createQuota`, `MemoryQuotaStore`, `RedisQuotaStore`, issued frozen reservations,
+single settlement/release, integer billing units, epoch/UTC calendar windows and fail-closed Redis
+storage. Its quota refusal and existing limiter share the 429 initializer while preserving limiter
+bytes. `TelemetryPlugin.registerGlobal` defaults to false; opt-in library spans reach Setu's
+existing provider. One process owns one global provider; shutdown does not unregister it.
 
-1. **Providers are the AI SDK's `LanguageModelV4`** (`@ai-sdk/provider`), a pinned-major optional
-   peer; any AI SDK provider package works, including OpenAI-compatible endpoints for local models.
-   Setu does not write provider adapters. The plan reads the provider interface from the installed
-   package, not memory.
-2. **Setu runs the tool loop itself** (step cap, per-step abort, tool errors returned to the model),
-   as Spring AI 2.0 and `laravel/ai` both moved the loop out of the provider. Tool execution can
-   call a route in-process through M133's dispatch entry, so tools inherit the same pipeline.
-3. **Structured output** validated against a Zod schema, with a named error on a reply that does not
-   parse.
-4. **Streaming to the browser** in the AI SDK's UI message stream format over `sse-plugin`, so the
-   AI SDK's React hooks work unchanged against a Setu route.
-5. **Budgets reserve, then settle:** a budget port that reserves an estimated cost before the call
-   and settles the actual usage after, refusing at reservation when the tenant's budget is spent —
-   the only form that holds under concurrency (gateway limits checked after the fact overshoot). A
-   memory and a Redis implementation; the plan decides the estimate rule and the 429 Problem Details
-   shape.
-6. **One usage record per call,** idempotent on a call id, written through the transactional outbox
-   when the messaging plugin is present, so billing can consume it at least once without double
-   counting.
-7. **Telemetry on the OTel GenAI conventions,** pinned to a named revision because they are still in
-   development; prompt and completion content off by default, and when enabled, passed through the
-   redaction seam before it reaches a span.
-8. **Fallback between providers** through the resilience plugin, retrying only errors the plan
-   classifies as transient.
-9. **A scripted fake model** in `@setu-ts/testing`, replaying tool calls and stream chunks, so an
-   app's AI flows are testable without a network.
+The budget recipe reserves per model call using a conservative byte/template/media input bound and
+required maximum output tokens; known usage refunds the difference, unknown/aborted usage charges
+the reservation, and pre-output failure releases it before fallback. Trusted request identity
+supplies quota/tool tenancy. A producer call id keys usage through the existing transactional outbox
+and inbox. Usage becomes durable only at the outbox write. Content capture stays off; enabling it
+records unredacted content. A redacting processor and billing vendors remain out of scope.
 
-**Not in this milestone:** agent frameworks as dependencies (Mastra, Genkit, LangChain.js), prompt
-management, evaluations, and an LLM gateway.
-
-**Gate:** the tool loop against the fake model (step cap, abort mid-stream); two concurrent calls
-over one tenant's last budget — exactly one is admitted; the usage record read back once despite a
-redelivered outbox message; a span with content capture off carries no prompt text, and with it on
-carries the redacted form; the UI message stream consumed by the AI SDK's own client parser; one
-guarded test against a real OpenAI-compatible endpoint. Runs on Node, Deno, Bun and Workers.
-**Security-audited** (redaction and egress) before it merges.
+**Gate:** Node example smoke proves step cap, mid-stream abort, UI parsing with the SDK's parser,
+last-budget concurrency, usage read back once after redelivery, OTLP request parenting with capture
+off and a capture-on positive control, trusted tool identity, 503 fallback and an optional real
+OpenAI-compatible endpoint. Quota tests prove atomic memory admission and guarded real Redis; guide
+fences compile. Deno, Bun and Workers AI SDK integration remains unverified. **Security-audited**
+before merge, including quota abuse controls, capture and egress guidance.
 
 ---
 
@@ -16641,12 +16623,17 @@ filter key inherits that failure.
 3. **Filter fields are declared up front** per collection; a filter naming an undeclared field, or
    one an adapter cannot translate, throws a named error before any I/O. One conformance table runs
    every filter case across every adapter, as data.
-4. **An embedder port** with an AI SDK embedding-model arm (shared with M134's peer), batching and a
-   dimension check against the collection.
+4. **An embedder port** with an AI SDK embedding-model arm (building on the AI SDK and M134 quota),
+   batching and a dimension check against the collection.
 5. **Adapters, in order:** memory (zero-dependency default), pgvector through Drizzle, then
    Cloudflare Vectorize. MongoDB Atlas and Cosmos DB vector search are named follow-ons.
 6. **Ingestion** (chunk, embed, upsert) as a queue job with an idempotent document id, so a re-run
    replaces rather than duplicates.
+
+**Re-examined at plan time (M134, 2026-11-04).** M134 chose to document and test the AI SDK rather
+than wrap it, so this plan decides whether decision 4's embedder port is still needed: the AI SDK
+already ships `embed` and `embedMany`, and the alternative is to accept vectors or an
+application-supplied embed function, and document embedding spend under M134's weighted quota.
 
 **Not in this milestone:** a document-loader library, re-ranking, hybrid lexical search.
 
@@ -16659,7 +16646,7 @@ merges.
 
 ## Milestone 136: Durable Agent Runs
 
-**Package(s):** `packages/ai-plugin` (the run primitive), `packages/common` (run contracts),
+**Package(s):** a run primitive over the AI SDK and M134 quota, `packages/common` (run contracts),
 `packages/sse-plugin` (a bounded replay log), `packages/database-plugin` (run storage); docs.
 
 **Source:** the AI-layer survey, track 04.
@@ -16690,6 +16677,13 @@ not a workflow engine**:
 
 General multi-step workflows belong to an engine; the plan decides whether this milestone ships
 adapter guidance or a first adapter, and to which engine.
+
+**Re-examined at plan time (M134, 2026-11-04).** These decisions assumed a Setu-owned tool loop.
+M134 instead uses the AI SDK's loop, which executes tools inside a step, so decision 2 (persist the
+reply before any tool runs) needs a step-at-a-time design over the SDK. The AI SDK 7.x also ships
+tool approval requests and a client stream resume, which overlap decisions 4 and 5. Before the plan
+is written, a fresh survey compares those, and existing durable-agent tooling, with what this
+milestone would build. The plan also names the package.
 
 **Gate:** kill the process between the model reply and the tool call — the run resumes with one
 model call and one side effect; a stale lease holder's write refused; an approval timing out on
@@ -16997,6 +16991,6 @@ patch by construction and gains nothing new here.
 | 131d      | ⬜     | docs — documentation, examples and the website                                                                                                                                                                                                                                            |
 | 132       | ✅     | auth-plugin + common — resource-server authentication for agents and tools: scopes, `insufficient_scope` challenges, RFC 9728 metadata, audience binding, the `act` claim                                                                                                                 |
 | 133       | ✅     | mcp-plugin (new) + common + kernel + cli — routes as MCP tools, dispatched in-process through the route's own pipeline                                                                                                                                                                    |
-| 134       | ⬜     | ai-plugin (new) + common + telemetry + testing + cli — model calls with reserve/settle budgets, usage records, GenAI telemetry and redaction                                                                                                                                              |
+| 134       | ✅     | auth-plugin + telemetry-plugin, AI SDK guide and example — weighted reserve/settle quotas, usage delivery and content-off library telemetry                                                                                                                                               |
 | 135       | ⬜     | vector-store-plugin (new) + common + cloudflare + cli — tenant-scoped retrieval with refused-not-ignored filters                                                                                                                                                                          |
-| 136       | ⬜     | ai-plugin + common + sse-plugin + database-plugin — durable agent runs: fenced lease, persisted steps, approvals, SSE replay                                                                                                                                                              |
+| 136       | ⬜     | package decided by its plan + common + sse-plugin + database-plugin — durable agent runs: fenced lease, persisted steps, approvals, SSE replay                                                                                                                                            |

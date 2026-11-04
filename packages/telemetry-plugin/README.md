@@ -6,6 +6,12 @@ OpenTelemetry distributed tracing. Registers an `ITelemetryService` under `CAPAB
 Without an `exporter` the plugin runs in noop mode. With an exporter, install the optional peers for
 the features you enable; the SDK is loaded during registration.
 
+`registerGlobal: true` opts into the process-global OTel provider; it defaults to false. Only the
+first app's provider can be global. A refused second registration warns once: library spans from the
+second app still use the first app's exporter and `service.name`, and are dropped after that first
+app stops. Only the second app's own Setu spans use its private provider. Shutdown does not
+unregister the global provider. Use one global provider per process.
+
 Install peers within the ranges declared by this package's `peerDependencies`, where this package is
 installed — usually the root in an npm/Yarn/Bun workspace. A peer nested only under a member cannot
 be loaded by a root-hoisted plugin. `setu add telemetry` records the four console-exporter peers in

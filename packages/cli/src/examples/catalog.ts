@@ -19,6 +19,8 @@ export type ExampleName = (typeof EXAMPLES)[number];
 
 /** Repository-dependent examples and the supported way to start instead. */
 export const EXCLUDED_EXAMPLES: Readonly<Record<string, string>> = {
+  'ai-chat':
+    'proves in-repository AI recipes against the new quota surface; use --template rest and follow the AI guide, or run it in the repository',
   'full-stack': 'uses repository scripts and package source; use --template full-stack',
   'compiled-binary':
     'uses repository build scripts; use --template rest or run it in the repository',

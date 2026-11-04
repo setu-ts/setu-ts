@@ -43,6 +43,7 @@ export const DOCS_NAV: DocsNavGroup[] = [
       { slug: 'plugins', label: 'Plugin catalog' },
       { slug: 'custom-plugins', label: 'Custom plugins' },
       { slug: 'health-indicators', label: 'Health indicators' },
+      { slug: 'ai', label: 'AI calls and budgets' },
     ],
   },
   {
