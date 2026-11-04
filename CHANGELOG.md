@@ -8,10 +8,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
-- **MCP example and website guide (`@setu-ts/cli`, #554).** Offer
-  `setu new --example mcp-tools` from 0.12.0, with scoped tools, idempotent retries, validation,
-  rate limits, Origin checks and a weighted archive quota. The standalone website guide includes the
-  full scaffold-shaped application and official-client tests.
+- **MCP example and website guide (`@setu-ts/cli`, #554).** Offer `setu new --example mcp-tools`
+  from 0.12.0, with scoped tools, idempotent retries, validation, rate limits, Origin checks and a
+  weighted archive quota. The standalone website guide includes the full scaffold-shaped application
+  and official-client tests.
 
 - **Weighted quotas and AI SDK recipes (M134, #549, `@setu-ts/auth-plugin`,
   `@setu-ts/telemetry-plugin`).** `createQuota`, `IQuota`, `QuotaOptions`, `QuotaReservation`,
@@ -253,11 +253,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
-- **`setu check` reads a configuration that uses `env['KEY']` (`@setu-ts/cli`, #554).** Any
-  computed member access made `setu.config.ts` unclassifiable, so `setu check` warned that every
-  barrel was unwired even when the configuration wired them all. Member access by one plain string
-  naming an ordinary property, such as `createRuntimeServices().env['JWT_SECRET']`, now classifies
-  like `env.JWT_SECRET`. Names such as `constructor`, `prototype` and `__proto__`, concatenated or
+- **`setu check` reads a configuration that uses `env['KEY']` (`@setu-ts/cli`, #554).** Any computed
+  member access made `setu.config.ts` unclassifiable, so `setu check` warned that every barrel was
+  unwired even when the configuration wired them all. Member access by one plain string naming an
+  ordinary property, such as `createRuntimeServices().env['JWT_SECRET']`, now classifies like
+  `env.JWT_SECRET`. Names such as `constructor`, `prototype` and `__proto__`, concatenated or
   variable keys, and a computed key directly after `{` or `,` are still refused.
 
 - **`setu check` and the CLI's configuration edits refuse the legacy accessor methods
