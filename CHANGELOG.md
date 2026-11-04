@@ -258,7 +258,7 @@ All notable changes to this project are documented here. The format follows
   barrel was unwired even when the configuration wired them all. Member access by one plain string
   naming an ordinary property, such as `createRuntimeServices().env['JWT_SECRET']`, now classifies
   like `env.JWT_SECRET`. Names such as `constructor`, `prototype` and `__proto__`, concatenated or
-  variable keys, and computed object keys are still refused.
+  variable keys, and a computed key directly after `{` or `,` are still refused.
 
 - **The error handler masks URL credentials in what it logs and serves (M130 audit, #551,
   `@setu-ts/exceptions`).** `errorHandler` logged an error's message unmasked, so a driver error

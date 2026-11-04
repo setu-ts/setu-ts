@@ -412,8 +412,8 @@ const LITERAL_BRACKET_PRECEDERS = '(=:[?|&<>!';
  * undecidable as the identifiers they spell (audit rounds 6 and 7). The rule is
  * an allowlist of positions, tracked with a bracket stack: a `[` after `,` counts
  * as a literal only inside `[…]` or `(…)`, never inside `{…}`. The one exception
- * is member access by a single plain string naming a decidable property
- * ({@linkcode namedMemberAccess}), which reaches no more than dot access does.
+ * is a bracket holding a single plain string that names a decidable property
+ * ({@linkcode namedMemberAccess}), which names no more than the bare name does.
  *
  * @param code - The code mask
  * @param kept - The comment-only mask, whose strings show what a bracket holds
@@ -442,12 +442,17 @@ function indexesValue(code: string, kept: string): boolean {
 }
 
 /**
- * Whether a `[` is member access by one plain string naming a decidable property:
- * `env['JWT_SECRET']`, `x!['k']`, `x?.['k']`. That reaches exactly what `env.JWT_SECRET`
- * reaches, which the lexer already accepts, so it is refused only when the name is
- * one {@linkcode UNDECIDABLE_IDENTIFIERS} lists (`x['constructor']`) or is not an
- * identifier at all. Computed object keys (`{ ['k']: v }`), concatenation, variables
- * and templates keep the audit round 6 and 7 refusal.
+ * Whether a `[` after a word, `)`, `]`, a non-null `!` or `?.` holds one plain string
+ * naming a decidable property: `env['JWT_SECRET']`, `x!['k']`, `x?.['k']`. Such a
+ * bracket names exactly the property the bare name would (`env.JWT_SECRET`), which the
+ * lexer already accepts. That also holds where the word is not a value: a computed key
+ * after a modifier (`{ get ['k']() {} }`, `static ['k'] = 1`) defines the same property
+ * as `get k()` or `static k`, and after a keyword (`return ['k']`) the bracket is an
+ * array of one string, which reaches nothing. The names that would differ, `__proto__`
+ * in an object literal and `constructor`/`prototype` in a class, are in
+ * {@linkcode UNDECIDABLE_IDENTIFIERS} and stay refused, as does any non-identifier
+ * name. A computed key directly after `{` or `,` (`{ ['k']: v }`), concatenation,
+ * variables and templates keep the audit round 6 and 7 refusal.
  *
  * @param code - The code mask
  * @param kept - The comment-only mask, whose strings show what the bracket holds

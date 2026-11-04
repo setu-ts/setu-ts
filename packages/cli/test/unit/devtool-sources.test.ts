@@ -457,6 +457,11 @@ describe('development source policies', () => {
       "const s = o?.['k'];",
       "const s = f()['k'];",
       "const s = a['b']['c'];",
+      // After a modifier word a computed key names the same property as the plain key.
+      "const o = { get ['k']() { return 1; } };",
+      "class C { static ['k'] = 1; }",
+      // After a keyword the bracket is an array of one string, which reaches nothing.
+      "function f() { return ['k']; }",
     ]) {
       expect(maskSourceCode(source), source).toBeDefined();
     }
@@ -474,6 +479,9 @@ describe('development source policies', () => {
       "const o = x['cоnstructor'];",
       "const o = { ['JWT']: v };",
       "const o = x.['k'];",
+      "const o = x[/* c */ 'constructor'];",
+      "const o = { get ['__proto__']() { return 1; } };",
+      "class C { static ['prototype'] = 1; }",
       "const o = { a: 1, ['JWT']: v };",
     ]) {
       expect(maskSourceCode(source), source).toBeUndefined();
