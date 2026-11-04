@@ -31,6 +31,9 @@ cutting a release renames that heading to the version and is a rename, not a rec
   never restore an old one. A reader fault remains a one-request suspension without mutation;
   read-only fromHeaders/WebSocket callers remain suspension-only. Sign in again after a definite
   mismatch.
+- **A throwing request still revokes a regenerated session's old row.** With a session store, a
+  handler that calls `regenerate()` and then throws (a failed sign-in or second-factor step) now
+  loses the pre-login stored session, such as an anonymous cart; previously the old row survived.
 - **Retry options are validated earlier.** `defaultRetry` is checked during registration, and
   selected policies at wrap time: limit must be a safe integer at least 1, delay finite,
   non-negative and at most 2147483647 ms (a runtime timer clamps anything longer to 1 ms). Invalid

@@ -589,7 +589,10 @@ export class OpenApiGenerator {
         const explicit = !root && !/^__schema\d+$/.test(hint) && isComponentName(hint);
         return explicit
           ? this.#claimIdName(hint)
-          : this.#claimComponentName(toPascalCase(this.#nameHint) + schemaPathName(path));
+          : this.#claimComponentName(
+              toPascalCase(this.#nameHint) + schemaPathName(path),
+              this.#otherSiteRoots(),
+            );
       },
       onDefinition: (name: string, schema: OpenApiSchemaObject): void => {
         if (this.#pass === 'emit') {
@@ -1271,6 +1274,7 @@ export class OpenApiGenerator {
     // Every parameter site is request-side: a path parameter, a query string
     // and a header are all things a CLIENT sends.
     this.#io = 'input';
+    if (this.#pass === 'count') this.#siteRootNames.add(toPascalCase(nameHint));
     try {
       return this.#parameterTransformer.transform(schema, 'input');
     } finally {
@@ -1381,7 +1385,10 @@ export class OpenApiGenerator {
     const declared = schemaId(schema);
     const id = declared !== undefined && isComponentName(declared) ? declared : undefined;
     const preferred = id ?? toPascalCase(this.#nameHint) + schemaPathName(path);
-    const name = id === undefined ? this.#claimComponentName(preferred) : this.#claimIdName(id);
+    const name =
+      id === undefined
+        ? this.#claimComponentName(preferred, this.#otherSiteRoots())
+        : this.#claimIdName(id);
     const previousName = this.#pendingHoistName;
     const previousHint = this.#nameHint;
     this.#pendingHoistName = name;
@@ -1500,9 +1507,19 @@ export class OpenApiGenerator {
    * @returns A reserved component name
    */
   #claimIdName(id: string): string {
+    return this.#claimComponentName(id, this.#otherSiteRoots());
+  }
+
+  /**
+   * Every site root name except the current site's own, so a nested or id-named
+   * component can never take another operation's root, whatever the route order
+   * (M131b re-audit R2); the current root stays available to the site itself.
+   *
+   * @returns The root names to treat as taken
+   */
+  #otherSiteRoots(): ReadonlySet<string> {
     const current = toPascalCase(this.#nameHint);
-    const roots = new Set([...this.#siteRootNames].filter((root) => root !== current));
-    return this.#claimComponentName(id, roots);
+    return new Set([...this.#siteRootNames].filter((root) => root !== current));
   }
 
   /**

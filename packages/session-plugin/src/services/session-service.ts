@@ -191,6 +191,8 @@ export class SessionService implements ISessionService {
    * new session is not written then, but a `regenerate()` is a revocation of
    * the old id (an auth-session stamp mismatch relies on it, M131b), and the old
    * row must not survive the throw. A no-op without a store or a regeneration.
+   * A sign-in or second-factor step that regenerates and then throws therefore
+   * also loses the pre-login stored session (fails closed; the user starts again).
    *
    * @param session - The request's session
    * @since 0.12.0

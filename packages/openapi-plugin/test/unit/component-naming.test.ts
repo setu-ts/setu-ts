@@ -76,3 +76,24 @@ it("M131b audit F5: an id equal to another operation's root name leaves that roo
     properties: { lines: { items: { $ref: '#/components/schemas/PostOrdersBody2' } } },
   });
 });
+
+it('M131b re-audit R2: a nested name never takes another route root, whatever the order', () => {
+  // `/a`'s nested `body` property derives `PostABodyBody`, the very name the
+  // `/a/body` operation's own body uses.
+  const inner = z.object({ deep: z.string() });
+  const real = z.object({ real: z.string() });
+  const a = route('/a', z.object({ body: inner, again: inner }));
+  const ab = [route('/a/body', real), route('/a/body2', real)];
+  for (const routes of [
+    [a, ...ab],
+    [...ab, a],
+  ]) {
+    const doc = new OpenApiGenerator({}).generate(routes);
+    expect(doc.paths['/a/body']!.post!.requestBody).toMatchObject({
+      content: { 'application/json': { schema: { $ref: '#/components/schemas/PostABodyBody' } } },
+    });
+    expect(doc.components!.schemas!['PostABodyBody']).toMatchObject({
+      properties: { real: expect.any(Object) },
+    });
+  }
+});

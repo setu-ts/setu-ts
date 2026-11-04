@@ -834,15 +834,16 @@ it, in constant time. Change the stamp and every session of that user answers an
 request — `ctx.request.user` is unset, and passkey registration refuses it. A definite mismatch
 removes the auth record and regenerates the writable HTTP session when the old cookie is next
 presented, even if that request throws; the store strategy deletes the old session id then, so a
-later stamp restore cannot revive it. The current browser also receives a replacement cookie without
-its auth record. Revocation needs that presentation: an id never presented while the stamp differed,
-and a copied encrypted-cookie session (which has no server-side record), authenticate again if the
-stamp is restored. So a stamp must only move forward on either strategy: to end sessions, set a new
-value, never an old one. A throwing reader or malformed return suspends only this request and leaves
-the record and id unchanged, so an identity-store outage does not sign everyone out.
-`verifiedCurrent(ctx)` applies the same mutation for the plugin's own identity reads. Read-only
-`fromHeaders` callers (including WebSocket upgrades) remain suspension-only because they cannot
-commit a session change.
+later stamp restore cannot revive it. When that request completes normally, the browser also
+receives a replacement cookie without its auth record; a request that throws sends none. Revocation
+needs that presentation: an id never presented while the stamp differed, and any copy of an
+encrypted-cookie session (which has no server-side record, even after it was presented),
+authenticate again if the stamp is restored. So a stamp must only move forward on either strategy:
+to end sessions, set a new value, never an old one. A throwing reader or malformed return suspends
+only this request and leaves the record and id unchanged, so an identity-store outage does not sign
+everyone out. `verifiedCurrent(ctx)` applies the same mutation for the plugin's own identity reads.
+Read-only `fromHeaders` callers (including WebSocket upgrades) remain suspension-only because they
+cannot commit a session change.
 
 ```typescript
 import type { IPrincipal } from '@setu-ts/common';

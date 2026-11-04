@@ -278,6 +278,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **A regenerated session's old row is deleted even when the request throws (M131b,
+  `@setu-ts/session-plugin`).** `regenerate()` is a revocation, so the session middleware deletes
+  the superseded store row before rethrowing a request's error (a store fault there is logged at
+  `warn`). A sign-in or second-factor step that regenerates and then throws now also loses the
+  pre-login stored session, such as an anonymous cart; the user starts sign-in again.
 - **`setu new --example` file lists match the examples (#553, `@setu-ts/cli`).** The examples now
   follow the CLI scaffold's structure (the full-stack example on the M130 module layout, every
   example's module and plugin barrels written by `setu sync`), and the example manifest

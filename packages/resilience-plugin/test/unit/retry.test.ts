@@ -250,4 +250,8 @@ describe('M131b audit F4: timer-bounded delays', () => {
     expect(computeBackoffMs(3, policy)).toBe(2_147_483_647);
     expect(computeBackoffMs(30, policy)).toBe(2_147_483_647);
   });
+
+  it('keeps a zero exponential delay at zero past 2^1024 (re-audit O-2)', () => {
+    expect(computeBackoffMs(1025, { limit: 2000, delay: 0, backoff: 'exponential' })).toBe(0);
+  });
 });

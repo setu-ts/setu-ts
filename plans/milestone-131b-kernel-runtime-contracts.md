@@ -265,9 +265,11 @@ All lines are on `develop` at `53e7a9fa4`.
   store outage must not sign everyone out). Non-HTTP `fromHeaders` callers (WebSocket upgrade) stay
   suspension-only, which the README states. With the default encrypted-cookie strategy there is no
   server-side record to delete, so a copied old cookie authenticates again if the stamp is restored
-  to its old value: the README, PUBLIC_API and upgrade notes say stamps must only move forward and
-  that a store is needed when copied cookies must stay revoked (maintainer decision 2026-11-04,
-  after implementation found the limit; no stamp-history mechanism).
+  to its old value, as does a stored id never presented while the stamp differed: the README,
+  PUBLIC_API and upgrade notes say revocation happens when the old cookie is next presented (even on
+  a request that throws, audit F1) and that stamps must only move forward on both strategies
+  (maintainer decision 2026-11-04, after implementation found the limit; no stamp-history
+  mechanism).
 - **Why:** reverting a stamp revived every old cookie.
 - **Test home:** `packages/auth-plugin/test/unit/session-stamp.test.ts` (three states),
   `test/unit/auth-session-strategy.test.ts` (mismatch marks; reader fault does not), and

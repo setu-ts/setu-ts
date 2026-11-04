@@ -248,10 +248,25 @@ describe('session e2e (real kernel app)', () => {
         destroy: () => Promise.reject(new Error('store down')),
       };
       const { app } = buildApp({ store: store as never });
+      const warnings: unknown[][] = [];
+      const noop = (): void => undefined;
+      app.services.register(CAPABILITIES.LOGGER, {
+        debug: noop,
+        info: noop,
+        warn: (...args: unknown[]) => warnings.push(args),
+        error: noop,
+        child: () => undefined,
+      } as never);
       await app.start();
       const cookie = cookieOf((await app.inject(get('/bump'))).headers);
       const failed = await app.inject(get('/regenerate-then-throw', cookie));
       expect(failed.statusCode).toBe(500);
+      // Reported, not dropped (audit R1).
+      const revocation = warnings.filter(
+        ([message]) => message === 'Session revocation failed on an errored request',
+      );
+      expect(revocation).toHaveLength(1);
+      expect(JSON.stringify(revocation[0]![1])).toContain('store down');
       await app.stop();
     });
 

@@ -46,6 +46,8 @@ export function validateRetryPolicy(policy: RetryPolicy, label: string): void {
  * honours, so a long exponential schedule waits rather than retrying at once
  */
 export function computeBackoffMs(attempt: number, policy: RetryPolicy): number {
+  // A zero delay stays zero: `0 * 2 ** 1024` is `0 * Infinity`, which is NaN.
+  if (policy.delay === 0) return 0;
   const delay = policy.backoff === 'exponential' ? policy.delay * 2 ** (attempt - 1) : policy.delay;
   return Math.min(delay, MAX_TIMER_DELAY_MS);
 }

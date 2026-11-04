@@ -3239,18 +3239,19 @@ what changed is that the refusal is legible.
 > promotion. On every request the `auth-session` strategy resolves the principal (snapshot or
 > `refreshPrincipal`), calls `sessionStamp` with it, and compares digests in constant time; a
 > mismatch makes the request anonymous, deletes the auth record and regenerates its writable HTTP
-> session. With a store, the old session id remains revoked if the stamp is restored. With stateless
-> encrypted cookies, a copied old cookie can revive on a reverted stamp because no server record
-> exists to delete: use a store for permanent old-cookie revocation and advance stamps
-> monotonically. A throwing reader or malformed return is a reader fault: anonymous for that
-> request, leaving the auth record/id unchanged. `verifiedCurrent(ctx)` uses the same revocation
-> rule. Read-only `fromHeaders` callers (including WebSocket upgrades) stay suspension-only. A
-> record without `stamp` reads as `null`, which matches only a user whose stamp is `null`. The
-> plugin's passkey registration routes admit through the same re-checks (`refreshPrincipal`, then
-> the stamp), so a session either has ended cannot enrol a credential;
-> `IAuthSessionService.current(ctx)` remains the synchronous, un-re-checked snapshot. A non-function
-> `sessionStamp` throws `AuthPluginConfigurationError` from `AuthPlugin(...)`. No API bumps the
-> stamp: the application changes it on its own user record.
+> session when the old cookie is next presented, even if that request throws. With a store, an id
+> revoked that way stays revoked if the stamp is later restored; an id never presented while the
+> stamp differed is not revoked, and a copied encrypted-cookie session has no server-side record to
+> revoke, so both authenticate again on a restored stamp. A stamp must only move forward: to end
+> sessions, set a new value, never restore an old one. A throwing reader or malformed return is a
+> reader fault: anonymous for that request, leaving the auth record/id unchanged.
+> `verifiedCurrent(ctx)` uses the same revocation rule. Read-only `fromHeaders` callers (including
+> WebSocket upgrades) stay suspension-only. A record without `stamp` reads as `null`, which matches
+> only a user whose stamp is `null`. The plugin's passkey registration routes admit through the same
+> re-checks (`refreshPrincipal`, then the stamp), so a session either has ended cannot enrol a
+> credential; `IAuthSessionService.current(ctx)` remains the synchronous, un-re-checked snapshot. A
+> non-function `sessionStamp` throws `AuthPluginConfigurationError` from `AuthPlugin(...)`. No API
+> bumps the stamp: the application changes it on its own user record.
 > `requireAuth(options?: RequireAuthOptions)`,
 > `RequireAuthOptions = { readonly signInPage?: string; readonly delegation?: 'allow' | 'forbid' | 'require' }`:
 > without options, unchanged. With `signInPage` (a same-origin absolute path that `safeReturnTo`
