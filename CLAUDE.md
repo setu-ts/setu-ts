@@ -753,7 +753,7 @@ here.
   kernel, runtime and plugin contracts: Node bind waits, cancelled uploads as client faults with one
   served-status rule, atomic `setHeaders`, cleanup after the handler, whole-graph boot validation,
   `RouteRegistrationError`, session-stamp revocation, Kafka first-join skip window, stable OpenAPI
-  component names; 17 smoke rows) — complete (PR pending).
+  component names; 17 smoke rows) — complete (PR #557).
 - **Next milestone** — M131c–d are open for `0.12.0`.
 
 ## Verification (run before declaring any work done)
