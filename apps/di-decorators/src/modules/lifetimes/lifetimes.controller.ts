@@ -1,7 +1,8 @@
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IContainer, IRequestContext } from '@setu-ts/common';
 import { Controller, Ctx, Get, Inject, Params, Service } from '@setu-ts/decorator-plugin';
-import { ScopedReportService, SingletonReportService } from './lifetimes.services.ts';
+import { ScopedReportService } from './scoped-report.service.ts';
+import { SingletonReportService } from './singleton-report.service.ts';
 
 /**
  * Per-request identity and lifetime comparisons.

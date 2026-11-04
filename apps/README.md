@@ -3,13 +3,20 @@
 Each directory is a member of the pnpm workspace (`pnpm-workspace.yaml` lists `apps/*`) with a
 private `package.json`: `@setu-ts/*` as `workspace:^` dependencies, `start` and `smoke` scripts that
 run through `tsx`, and a generated `tsconfig.json` extending `../../tsconfig.apps.json`. `tsx`
-applies that config's `paths`, so an example runs HEAD source with no build first. Run its `smoke`
-script to verify the claim below. Examples have the layout `setu new` scaffolds — a `setu.config.ts`
-factory, a `main.ts` entry and `src/modules/<feature>/` — described in the
-[examples guide](../docs/examples.md#how-every-example-is-laid-out), except where the guide says
-otherwise: `microservices`, for one, composes two services with one factory each.
-`test/apps-layout.test.ts` checks every example against projects the CLI scaffolds from this tree,
-so the two cannot drift apart.
+applies that config's `paths`, so framework imports run HEAD source. The full-stack example builds
+its frontend first. Run an example's `smoke` script to verify the claim below. Examples use the
+structure the CLI writes for their artifacts: `setu.config.ts`, `main.ts`, and CLI-owned module,
+plugin or CQRS barrels where those seams are used. Module compositions call
+`registerModules(app.router, app.services)`; class-based ones also pass `MODULES` to
+DecoratorPlugin, and custom plugins register through `GENERATED_PLUGINS`. `setu sync` regenerates
+those files and `setu check` checks their wiring. No example adds an empty barrel for an unused
+artifact family.
+
+The [examples guide](../docs/examples.md#how-every-example-is-laid-out) explains the layouts:
+single-route examples need no modules; GraphQL and gRPC keep their transport-specific files inside
+modules with generated indexes; worker-pool tasks have no CLI schematic; `microservices`
+deliberately keeps two factories under `src/service-a/` and `src/service-b/`. The layout gate in
+`test/apps-layout.test.ts` compares the examples with projects generated from this checkout.
 
 M37 kept the examples out of the Deno workspace so an application-only npm dependency could never
 reach a published package's graph. They are members of the pnpm workspace because a published

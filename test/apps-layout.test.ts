@@ -213,15 +213,18 @@ const RULES = {
       .map((path) => `${path} registers routes outside a controller (name it *.controller.ts)`);
   },
 
-  /** Every file in a feature folder is its index or is named after the feature. */
+  /** Feature helpers use the feature name; generated artifacts may have their own names. */
   featureFiles(app) {
     const problems: string[] = [];
     for (const path of app.keys()) {
       const parts = /^src\/modules\/([^/]+)\/([^/]+)$/.exec(path);
       if (parts === null) continue;
       const [, feature, file] = parts as unknown as [string, string, string];
-      if (file !== 'index.ts' && !file.startsWith(`${feature}.`)) {
-        problems.push(`${path} is not named after its feature (${feature}.*)`);
+      // `setu g service report --module notes` writes report.service.ts,
+      // just as g controller and g schema can add independently named files.
+      const generatedArtifact = /^[a-z][a-z0-9-]*\.(?:controller|service|schemas)\.ts$/.test(file);
+      if (file !== 'index.ts' && !file.startsWith(`${feature}.`) && !generatedArtifact) {
+        problems.push(`${path} is neither a generated artifact nor a feature-named helper`);
       }
     }
     return problems;
@@ -275,14 +278,6 @@ const EXCEPTIONS: Readonly<Record<string, Partial<Record<RuleName, string>>>> = 
   },
   cqrs: {
     entry: 'main.ts is a run-and-exit demonstration, not a server.',
-    moduleIndex: 'Its feature registers CQRS handlers through CqrsPlugin options, not routes.',
-  },
-  'graphql-demo': {
-    moduleIndex:
-      'Its feature is a schema and resolvers passed to GraphqlPlugin options, not routes.',
-  },
-  grpc: {
-    moduleIndex: 'Its feature is an RPC service registered through GrpcPlugin options, not routes.',
   },
   microservices: {
     composition:
@@ -398,14 +393,24 @@ describe('each layout rule can fail', () => {
   });
 
   it('featureFiles: refuses a file not named after its feature', () => {
-    expect(RULES.featureFiles(app({ 'src/modules/news/platform.controller.ts': '' }))).toHaveLength(
-      1,
-    );
+    expect(RULES.featureFiles(app({ 'src/modules/news/platform.ts': '' }))).toHaveLength(1);
+  });
+
+  it('featureFiles: accepts independently named generated artifacts inside a module', () => {
+    expect(
+      RULES.featureFiles(
+        app({
+          'src/modules/lifetimes/scoped-report.service.ts': '',
+          'src/modules/news/platform.controller.ts': '',
+          'src/modules/news/create.schemas.ts': '',
+        }),
+      ),
+    ).toEqual([]);
   });
 
   it('moduleIndex: refuses a feature the index does not import the generated way', () => {
     const files = {
-      'setu.config.ts': 'registerModules(app.router);',
+      'setu.config.ts': 'registerModules(app.router, app.services);',
       'src/modules/index.ts':
         "import { registerNewsRoutes } from './news/news.controller.ts';\nexport function registerModules() {}",
       'src/modules/news/news.controller.ts': '',

@@ -1,3 +1,4 @@
+import type { IServiceRegistry } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IMessageBroker, IRequestContext, IRouterApi } from '@setu-ts/common';
 import { AUDIT_TOPIC, DOUBLE_TOPIC } from '../../bindings.ts';
@@ -7,7 +8,8 @@ function broker(ctx: IRequestContext): IMessageBroker {
 }
 
 /** Registers a publish over the Cloudflare queue and a request/reply through a Durable Object. */
-export function registerAuditRoutes(router: IRouterApi): void {
+export function registerAuditRoutes(router: IRouterApi, services?: IServiceRegistry): void {
+  void services;
   router.post('/publish/:note', async (ctx) => {
     await broker(ctx).publish(AUDIT_TOPIC, { note: ctx.params.note });
     return ctx.response.status(202).send();

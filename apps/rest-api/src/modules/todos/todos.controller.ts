@@ -1,11 +1,11 @@
 import { CAPABILITIES } from '@setu-ts/common';
-import type { IRouterApi, IRuntimeServices } from '@setu-ts/common';
+import type { IRouterApi, IRuntimeServices, IServiceRegistry } from '@setu-ts/common';
 import { requireAuth } from '@setu-ts/auth-plugin';
 import { notFound } from '@setu-ts/exceptions';
 import { validateBody } from '@setu-ts/validation-plugin';
 import { ProblemDetails } from '../../shared/schemas/problem-details.schemas.ts';
 import { CreateTodoBody, TodoResponse } from './todos.schemas.ts';
-import type { TodoStore } from './todos.service.ts';
+import { createTodoStore } from './todos.service.ts';
 
 const createBody = validateBody(CreateTodoBody);
 
@@ -15,7 +15,9 @@ const createBody = validateBody(CreateTodoBody);
  * The request body is documented from `validateBody`, and the `:id` path
  * parameter is documented as a string without a `params` schema.
  */
-export function registerTodosRoutes(router: IRouterApi, todos: TodoStore): void {
+export function registerTodosRoutes(router: IRouterApi, services?: IServiceRegistry): void {
+  void services;
+  const todos = createTodoStore();
   router.group('/todos', (routes) => {
     routes.post('/', {
       middleware: [requireAuth(), createBody],

@@ -1,3 +1,4 @@
+import type { IServiceRegistry } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IRequestContext, IRouterApi } from '@setu-ts/common';
 import type { ICloudflareBindings, IKvNamespace } from '@setu-ts/cloudflare-plugin';
@@ -8,7 +9,8 @@ function kv(ctx: IRequestContext): IKvNamespace {
 }
 
 /** Registers routes that read and write the KV namespace by key. */
-export function registerValuesRoutes(router: IRouterApi): void {
+export function registerValuesRoutes(router: IRouterApi, services?: IServiceRegistry): void {
+  void services;
   router.group('/value', (routes) => {
     routes.post('/:key', async (ctx) => {
       const { value } = await ctx.request.json<{ value: string }>();

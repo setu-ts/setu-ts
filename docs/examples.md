@@ -58,19 +58,44 @@ with Wrangler.
 
 ## How every example is laid out
 
-Each example has the layout of a project after its first `setu g module`, so the shape to copy is
-the shape the CLI gives you. A new project starts flat, with its controllers in `src/controllers/`
-and its services in `src/services/`. The first `setu g module` moves the scaffold's untouched
-greeting example into `src/modules/<feature>/` by itself; controllers or services you have written
-or changed there need `--adopt-controllers`, or it refuses and lists them:
+Examples use the same artifact paths and CLI-managed registration barrels as `setu new` and
+`setu generate`, keeping only the plugins and artifacts their lesson needs. They do not copy a
+template's unused seams. A new project starts flat; the first `setu g module` moves the scaffold's
+untouched greeting into `src/modules/<feature>/`. Changed flat controllers or services require
+`--adopt-controllers` instead.
 
 ```text
 apps/<name>/
-  setu.config.ts          createApp(): the plugin composition, without starting it
-  main.ts                 starts createApp() on a port and stops it cleanly on SIGTERM
-  src/modules/<feature>/  one folder per feature: <feature>.controller.ts, .service.ts, .schemas.ts
-  smoke.ts                proves the example's claim with node:test against createApp()
+  setu.config.ts                      createApp(): composition without starting
+  main.ts                             startup and shutdown, or a run-and-exit demonstration
+  src/modules/index.ts                managed registerModules(router, services?)
+  src/modules/<feature>/index.ts      managed register<Feature>Module(router, services?)
+  src/modules/<feature>/              controllers, services and schemas used by the feature
+  src/plugins/index.ts                managed GENERATED_PLUGINS, when custom plugins exist
+  src/cqrs/index.ts                   managed COMMAND_HANDLERS and QUERY_HANDLERS, when used
+  smoke.ts                            the example's behavioral proof
 ```
+
+`setu.config.ts` calls `registerModules(app.router, app.services)` and spreads `GENERATED_PLUGINS`
+into its plugin list where those artifacts exist. Class-based modules also have
+`<feature>.module.ts` declarations, and their managed activation barrel exports `MODULES`, passed as
+`DecoratorPlugin({ modules: [...MODULES] })` in addition to calling `registerModules`. The module's
+declaration owns its providers; additional services use their own `<name>.service.ts` filenames.
+
+Generate artifacts with the CLI and regenerate its owned files with `setu sync`; their managed
+headers are part of the shape. `setu check` checks the wiring. These examples have no custom
+middleware, event-handler, health-indicator or metric artifacts, so they do not add empty barrels
+for those families. Using HealthPlugin or a plugin-provided indicator alone does not create a source
+artifact.
+
+The smallest examples (`minimal`, `static-site`, `compiled-binary`) register their single route
+directly in the factory, as the scaffold does for its root route. GraphQL resolvers and gRPC
+services have no dedicated schematic: their existing files stay inside standard modules with
+CLI-owned indexes, while GraphqlPlugin and GrpcPlugin still own transport registration. The
+CLI-owned registrars in those two modules have no HTTP controllers to register. Worker-pool task
+modules stay in `src/tasks/`; `setu g job` generates queue/scheduler jobs, a different artifact. The
+`microservices` layout is a deliberate exception: two services have separate factories under
+`src/service-a/` and `src/service-b/`.
 
 `setu.config.ts` composes and does not start, so `main.ts` and `smoke.ts` run the same application.
 The smoke check starts it with no port and drives it with `app.inject()`, so most proofs need no
@@ -194,6 +219,10 @@ reads the written todo back.
 
 **Read, in order:**
 
+- [`src/modules/index.ts`](../apps/rest-api/src/modules/index.ts) and
+  [`todos/index.ts`](../apps/rest-api/src/modules/todos/index.ts) — CLI-owned activation barrels
+  forward the router and service registry to the feature controller.
+
 - [`src/modules/todos/`](../apps/rest-api/src/modules/todos/) — registerTodosRoutes puts requireAuth
   before the bound createBody validator and reads that validator's value when creating a todo.
 - [`setu.config.ts`](../apps/rest-api/setu.config.ts) — createApp turns on the REST starter's auth,
@@ -223,6 +252,16 @@ curl localhost:3400/lifetimes   # same flags, a different scopedId
 ```
 
 **Read, in order:**
+
+- [`src/modules/index.ts`](../apps/di-decorators/src/modules/index.ts) — the CLI-owned MODULES array
+  and registerModules registrar; setu.config.ts consumes both.
+- [`greeting/index.ts`](../apps/di-decorators/src/modules/greeting/index.ts) and
+  [`lifetimes/index.ts`](../apps/di-decorators/src/modules/lifetimes/index.ts) — managed module
+  indexes re-export declarations and register any function controllers.
+- [`singleton-report.service.ts`](../apps/di-decorators/src/modules/lifetimes/singleton-report.service.ts)
+  and
+  [`scoped-report.service.ts`](../apps/di-decorators/src/modules/lifetimes/scoped-report.service.ts)
+  — independently named service artifacts listed by LifetimesModule.
 
 - [`src/modules/greeting/`](../apps/di-decorators/src/modules/greeting/) — GreetingController
   injects GREETING_SERVICE by constructor position; GreetingService registers that token with
@@ -258,6 +297,10 @@ through Drizzle or Prisma, or MongoDB and the other adapters. See
 
 **Read, in order:**
 
+- [`src/modules/index.ts`](../apps/database/src/modules/index.ts) and
+  [`notes/index.ts`](../apps/database/src/modules/notes/index.ts) — CLI-owned activation barrels
+  forward the router and service registry to the feature controller.
+
 - [`src/modules/notes/`](../apps/database/src/modules/notes/) — notesRepository resolves the notes
   repository from the database service; registerNotesRoutes uses it for create, findById and update.
 - [`smoke.ts`](../apps/database/smoke.ts) — The database.transaction callback throws after creating
@@ -270,7 +313,7 @@ through Drizzle or Prisma, or MongoDB and the other adapters. See
 
 **Concept.** Separate a mutation's command handler from the query that reads its result. Both
 handlers share one feature store; the command handler's factory resolves the runtime clock, while
-the query handler needs no capability.
+the query handler reads the same application-owned store.
 
 `CqrsPlugin` with one command handler and one query handler. `pnpm --dir apps/cqrs run start` sends
 a command, reads the result through the query bus, prints it and exits; it is not a server. The
@@ -284,9 +327,21 @@ pnpm --dir apps/cqrs run start
 
 **Read, in order:**
 
-- [`src/modules/notes/`](../apps/cqrs/src/modules/notes/) — notesHandlers creates the shared store;
-  addNoteHandler stamps writes with runtime.now(), and readNotesHandler returns the store through
-  the separate query registration.
+- [`setu.config.ts`](../apps/cqrs/setu.config.ts) — creates an application-owned note store,
+  consumes COMMAND_HANDLERS and QUERY_HANDLERS in CqrsPlugin, and calls registerModules.
+- [`src/cqrs/index.ts`](../apps/cqrs/src/cqrs/index.ts) — the CLI-owned handler barrel. CQRS
+  handlers are app-wide; the CLI rejects `--module` for these schematics.
+- [`add-note.command-handler.ts`](../apps/cqrs/src/cqrs/add-note.command-handler.ts) — its factory
+  resolves the store and runtime clock; the handler stamps each write with runtime.now().
+- [`read-notes.query-handler.ts`](../apps/cqrs/src/cqrs/read-notes.query-handler.ts) — its factory
+  resolves the same store; the handler returns a copy without changing it.
+- [`src/modules/index.ts`](../apps/cqrs/src/modules/index.ts) and
+  [`notes/index.ts`](../apps/cqrs/src/modules/notes/index.ts) — standard managed module indexes;
+  this run-and-exit example has no HTTP controller.
+- [`notes.service.ts`](../apps/cqrs/src/modules/notes/notes.service.ts) — the store token and
+  factory, creating independent state for each application.
+- [`notes.client.ts`](../apps/cqrs/src/modules/notes/notes.client.ts) — addNote and readNotes send
+  through the separate buses; main.ts and smoke.ts share these helpers.
 
 ---
 
@@ -310,6 +365,10 @@ curl localhost:3400/notes                                                 # 400 
 ```
 
 **Read, in order:**
+
+- [`src/modules/index.ts`](../apps/multi-tenant/src/modules/index.ts) and
+  [`notes/index.ts`](../apps/multi-tenant/src/modules/notes/index.ts) — CLI-owned activation barrels
+  forward the router and service registry to the feature controller.
 
 - [`setu.config.ts`](../apps/multi-tenant/setu.config.ts) — the `tenants` list; any other id answers
   `404 Unknown Tenant`.
@@ -335,6 +394,9 @@ pnpm --dir apps/plugin-development run test                  # the plugin's own 
 ```
 
 **Read, in order:**
+
+- [`src/plugins/index.ts`](../apps/plugin-development/src/plugins/index.ts) — the generated plugin
+  barrel; setu.config.ts spreads GENERATED_PLUGINS beside RuntimePlugin.
 
 - [`src/plugins/greeting.plugin.ts`](../apps/plugin-development/src/plugins/greeting.plugin.ts) —
   GreetingPlugin declares GREETING in provides, registers an IGreetingService under it, and resolves
@@ -398,6 +460,10 @@ WebSocket rooms are shown in [realtime-clients](#realtime-clients) and in the
 
 **Read, in order:**
 
+- [`src/modules/index.ts`](../apps/realtime/src/modules/index.ts) and
+  [`news/index.ts`](../apps/realtime/src/modules/news/index.ts) — CLI-owned activation barrels
+  forward the router and service registry to the feature controller.
+
 - [`src/modules/news/`](../apps/realtime/src/modules/news/) — registerNewsRoutes adds each /events
   connection to NEWS_CHANNEL and publishes POST /publish messages to that same channel.
 - [`smoke.ts`](../apps/realtime/smoke.ts) — startReplica launches each server separately; the
@@ -418,6 +484,12 @@ keep-alive. Its smoke check needs Bun installed and runs Wrangler through `npx` 
 use); a missing one fails the check rather than skipping it.
 
 **Read, in order:**
+
+- [`src/modules/index.ts`](../apps/realtime-clients/src/modules/index.ts) and
+  [`events/index.ts`](../apps/realtime-clients/src/modules/events/index.ts) — managed module
+  activation with the router and service registry.
+- [`src/plugins/index.ts`](../apps/realtime-clients/src/plugins/index.ts) — GENERATED_PLUGINS
+  registers IdleSocketPlugin, whose dependency waits for WebSocketPlugin.
 
 - [`setu.config.ts`](../apps/realtime-clients/setu.config.ts) — createApp composes SSE and WebSocket
   plugins with short heartbeat and idle timings, plus the idle-socket plugin used by the driver.
@@ -451,6 +523,10 @@ changing the GraphQL transports, not part of `check:apps`.
 
 **Read, in order:**
 
+- [`src/modules/index.ts`](../apps/graphql-demo/src/modules/index.ts) and
+  [`books/index.ts`](../apps/graphql-demo/src/modules/books/index.ts) — standard CLI-owned module
+  activation; GraphqlPlugin registers the transport directly in setu.config.ts.
+
 - [`setu.config.ts`](../apps/graphql-demo/setu.config.ts) — createApp supplies typeDefs and a fresh
   createResolvers result to GraphqlPlugin, with WebSocket/SSE subscriptions, a persisted-query cache
   and batching.
@@ -477,6 +553,10 @@ curl localhost:5000/health                       # {"status":"ok"}
 
 **Read, in order:**
 
+- [`src/modules/index.ts`](../apps/grpc/src/modules/index.ts) and
+  [`echo/index.ts`](../apps/grpc/src/modules/echo/index.ts) — standard CLI-owned module activation;
+  GrpcPlugin registers the transport directly in setu.config.ts.
+
 - [`src/modules/echo/`](../apps/grpc/src/modules/echo/) — echoServiceRegistration couples the
   revived ECHO_SERVICE descriptor to echo and ping implementations; the descriptor is embedded, so
   this example does not require a generation step.
@@ -502,6 +582,14 @@ pnpm --dir apps/cloudflare run smoke            # needs `wrangler` on PATH
 ```
 
 **Read, in order:**
+
+- [`setu.config.ts`](../apps/cloudflare/setu.config.ts) — registers this application's WORKER_ENV,
+  spreads GENERATED_PLUGINS and calls registerModules(app.router, app.services).
+- [`src/plugins/index.ts`](../apps/cloudflare/src/plugins/index.ts) — the CLI-owned barrel registers
+  CloudflareRuntimePlugin and MessagingSubscriptionsPlugin. The zero-argument runtime plugin reads
+  WORKER_ENV at startup, keeping environments isolated between applications.
+- [`src/modules/index.ts`](../apps/cloudflare/src/modules/index.ts) — the managed audit, diagnostics
+  and values module indexes activate their controllers.
 
 - [`worker.ts`](../apps/cloudflare/worker.ts) — createWorkerHandler shares one startup promise,
   clears failed starts for retry, and supplies the same app to fetch and queue; scheduled writes its
@@ -596,6 +684,9 @@ pnpm --dir apps/worker-pool run smoke
 ```
 
 **Read, in order:**
+
+- [`setu.config.ts`](../apps/worker-pool/setu.config.ts) — composes the pool and its health
+  reporting; worker task URLs are separate from the CLI's queue/scheduler job schematic.
 
 - [`src/tasks/`](../apps/worker-pool/src/tasks/) — defineWorkerTask registers a spin that
   deliberately busy-waits; the fill task writes through a Uint8Array view and returns its length,

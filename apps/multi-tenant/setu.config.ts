@@ -24,7 +24,7 @@ export function createApp(): IKernelApplication {
     ],
   });
 
-  registerModules(app.router);
+  registerModules(app.router, app.services);
 
   return app;
 }

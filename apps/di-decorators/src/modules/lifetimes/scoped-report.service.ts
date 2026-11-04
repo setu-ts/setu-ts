@@ -2,12 +2,8 @@ import type { IRuntimeServices } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 import { Inject, Injectable } from '@setu-ts/decorator-plugin';
 
-export const SINGLETON_REPORT = 'singleton-report';
+/** The request-scoped service token. */
 export const SCOPED_REPORT = 'scoped-report';
-
-/** One instance for the whole application. */
-@Injectable({ scope: 'singleton', token: SINGLETON_REPORT })
-export class SingletonReportService {}
 
 /**
  * One instance per lazy request scope.

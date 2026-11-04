@@ -1,3 +1,4 @@
+import type { IServiceRegistry } from '@setu-ts/common';
 import type { IRouterApi } from '@setu-ts/common';
 import { notFound } from '@setu-ts/exceptions';
 import { validateBody } from '@setu-ts/validation-plugin';
@@ -8,7 +9,8 @@ const createBody = validateBody(CreateNoteBody);
 const updateBody = validateBody(UpdateNoteBody);
 
 /** Registers the notes routes over the database repository. */
-export function registerNotesRoutes(router: IRouterApi): void {
+export function registerNotesRoutes(router: IRouterApi, services?: IServiceRegistry): void {
+  void services;
   router.group('/notes', (routes) => {
     routes.post('/', {
       middleware: [createBody],
