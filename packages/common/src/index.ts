@@ -53,6 +53,28 @@ export { PrimaryKeyChangeError, assertPrimaryKeyUnchanged } from './errors/prima
 export { UnknownPayloadFieldError } from './errors/unknown-payload-field.ts';
 export { InvalidFieldValueError } from './errors/invalid-field-value.ts';
 export { InvalidCursorError } from './errors/invalid-cursor.ts';
+export {
+  VectorCollectionMismatchError,
+  VectorCollectionUnknownError,
+  VectorDimensionError,
+  VectorFilterError,
+  VectorOperationUnsupportedError,
+  VectorRecordError,
+  VectorScopeInvalidError,
+  VectorScopeRequiredError,
+} from './errors/vector-store.ts';
+export { vectorRecordKey } from './vector-record-key.ts';
+export type {
+  IVectorStore,
+  IVectorStoreAdapter,
+  VectorCollectionSpec,
+  VectorFieldType,
+  VectorFilter,
+  VectorMatch,
+  VectorMetadataValue,
+  VectorQuery,
+  VectorRecord,
+} from './services/vector-store.ts';
 export { OptionalDependencyUnavailableError } from './errors/optional-dependency.ts';
 // HTTP status hint (M89b, X19-1) — how a package that cannot import
 // `@setu-ts/exceptions` states the status its own error should be answered with
