@@ -51,7 +51,6 @@ async function appWith(model?: MockEmbeddingModelV4, pgvector = false) {
   try {
     return await createTestApp({
       app: createApp(),
-      without: ['logger-plugin'],
       overrides:
         model === undefined
           ? []
