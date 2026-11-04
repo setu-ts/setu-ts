@@ -36,7 +36,7 @@ All notable changes to this project are documented here. The format follows
   `IOpenApiService` moves to common and remains re-exported by openapi-plugin; its shape is
   unchanged. See the CLI guide for bootstrap effects, input bounds and write refusals.
 
-- **MCP route tools (M133, #545, `@setu-ts/mcp-plugin`, `@setu-ts/common`, `@setu-ts/kernel`,
+- **MCP route tools (M133, #545, #552, `@setu-ts/mcp-plugin`, `@setu-ts/common`, `@setu-ts/kernel`,
   `@setu-ts/auth-plugin`, `@setu-ts/idempotency-plugin`, `@setu-ts/decorator-plugin`,
   `@setu-ts/cli`).** `McpPlugin`, `McpPluginOptions`, `McpToolDeclaration`,
   `McpPluginConfigurationError` and `VERSION` expose explicitly declared routes through a stateless
@@ -129,7 +129,7 @@ All notable changes to this project are documented here. The format follows
   default redaction rule below, exported for text that never passes through a redaction service
   (X88-8).
 
-- **Resource-server authentication (M132, #541, `@setu-ts/auth-plugin`, `@setu-ts/common`,
+- **Resource-server authentication (M132, #541, #552, `@setu-ts/auth-plugin`, `@setu-ts/common`,
   `@setu-ts/openapi-plugin`).** `IPrincipal` gains `scopes` (from the OAuth 2.0 `scope`/`scp`
   claims, `scope` winning when both are present) and `actor` (an `IPrincipalActor`,
   `{ id, claims }`, from the outermost RFC 8693 `act`), and `RouteSecurityMetadata` gains `scopes`.

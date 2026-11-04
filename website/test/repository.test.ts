@@ -73,7 +73,7 @@ describe('repository reading routes', () => {
       [
         'src/modules/todos/',
         'apps/rest-api',
-        `/examples/rest-api/#${fileAnchor(EXAMPLE_FILES['rest-api'][0])}`,
+        `/examples/rest-api/#${fileAnchor(EXAMPLE_FILES['rest-api'].find((file) => file.startsWith('src/modules/todos/'))!)}`,
       ],
       [
         'https://github.com/setu-ts/setu-ts/blob/main/packages/kernel/README.md#usage',
