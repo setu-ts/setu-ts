@@ -84,7 +84,7 @@ async function loadDrizzleSql(): Promise<SqlTag> {
     orm = await import('drizzle-orm');
   } catch (cause) {
     throw new OptionalDependencyUnavailableError('drizzle-orm', {
-      requiredBy: '@setu-ts/vector-store-plugin (PgVectorStore)',
+      requiredBy: '@setu-ts/vector-store-plugin',
       cause,
     });
   }

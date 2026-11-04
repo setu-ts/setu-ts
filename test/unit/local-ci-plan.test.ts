@@ -344,7 +344,7 @@ describe('local CI plan', () => {
       expect(workflow).toContain(full.find((spec) => spec.name === name)!.image);
     for (const shard of [...SHARDS, 'compat', 'deno-lane', 'node-build'] as const)
       expect(() => assertUniquePorts(backendSpecs(shard))).not.toThrow();
-    expect(backendSpecs('static').map((spec) => spec.name)).toEqual(['redis']);
+    expect(backendSpecs('static').map((spec) => spec.name)).toEqual(['redis', 'postgres']);
     for (const shard of ['tooling', 'compat', 'deno-lane', 'node-build', 'cli-coverage'] as const)
       expect(backendSpecs(shard)).toEqual([]);
     expect(full.find((spec) => spec.name === 'keycloak')!.args).toContain(

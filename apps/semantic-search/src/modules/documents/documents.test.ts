@@ -7,6 +7,9 @@ import { EMBEDDINGS } from '../../plugins/embeddings.plugin.ts';
 import type { IEmbeddingsService } from '../../plugins/embeddings.plugin.ts';
 import { splitText } from './documents.service.ts';
 
+// These tests use the memory store; `npm run smoke` covers pgvector.
+delete process.env['PGVECTOR_URL'];
+
 /** A deterministic model: each text maps to a fixed axis by its first word. */
 function axisModel(): MockEmbeddingModelV4 {
   const axes = ['cats', 'dogs', 'tax'];

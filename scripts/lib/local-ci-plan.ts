@@ -250,7 +250,17 @@ export function backendSpecs(shard: Shard): IBackend[] {
     memory = '512m',
   ): IBackend => ({ name, image, ports, memory, args, env, probe });
   const redis = spec('redis', 'redis:7', [6379], ['redis-cli', 'ping']);
-  if (shard === 'static') return [redis];
+  const postgres = spec(
+    'postgres',
+    'pgvector/pgvector:0.8.1-pg16',
+    [5433],
+    ['pg_isready', '-U', 'postgres', '-p', '5433'],
+    ['-c', 'port=5433'],
+    { POSTGRES_PASSWORD: 'postgres' },
+  );
+  // M135: the examples' smokes (check:apps) run in static and read PGVECTOR_URL,
+  // which CI's job-level services answer on every shard.
+  if (shard === 'static') return [redis, postgres];
   if (
     shard === 'tooling' ||
     shard === 'deno-lane' ||
@@ -260,14 +270,7 @@ export function backendSpecs(shard: Shard): IBackend[] {
   )
     return [];
   return [
-    spec(
-      'postgres',
-      'pgvector/pgvector:0.8.1-pg16',
-      [5433],
-      ['pg_isready', '-U', 'postgres', '-p', '5433'],
-      ['-c', 'port=5433'],
-      { POSTGRES_PASSWORD: 'postgres' },
-    ),
+    postgres,
     spec(
       'mongo',
       'mongo:7',

@@ -32,7 +32,9 @@ At `http://localhost:3000` (set `PORT` to change it):
 
 Both document routes take the tenant from `x-tenant-id`. The example registers the fixed tenants
 `acme` and `globex`. A request without the header answers `400`; an unknown tenant answers `404`.
-Each tenant has its own vector scope, so a search never returns another tenant's chunks.
+Each tenant has its own vector scope, so a search never returns another tenant's chunks. The header
+is declared with `validateHeaders`, so Swagger UI at `/docs` shows an `x-tenant-id` field for
+"Try it out".
 
 ## How ingestion works
 

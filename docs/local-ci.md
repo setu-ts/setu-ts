@@ -18,13 +18,13 @@ automatically when absent. Rebuild it with `docker build -t setu-ci-runner:local
 after changing the Dockerfile. Commands and endpoint environments come directly from
 `.github/workflows/ci.yml`.
 
-Each shard has its own network namespace. Each CLI shard, messaging and packages get all 13 CI
-backends; static gets Redis for the realtime and microservices app smokes; tooling gets none.
-Containers publish no host ports. PostgreSQL listens on 5433 and Keycloak on 8180, with its
-management port reserved at 9100. There is no CPU pinning by default. Containers have explicit
-memory caps, including 6 GiB for each test runner (8 GiB for tooling, which has no backends) and 3
-GiB for each Keycloak backend (it reached the earlier 2 GiB cap in measured runs, so 3 GiB leaves
-headroom).
+Each shard has its own network namespace. Each CLI shard, messaging and packages get all 14 CI
+backends; static gets Redis for the realtime and microservices app smokes and the pgvector
+PostgreSQL for the semantic-search smoke; tooling gets none. Containers publish no host ports.
+PostgreSQL listens on 5433 and Keycloak on 8180, with its management port reserved at 9100. There is
+no CPU pinning by default. Containers have explicit memory caps, including 6 GiB for each test
+runner (8 GiB for tooling, which has no backends) and 3 GiB for each Keycloak backend (it reached
+the earlier 2 GiB cap in measured runs, so 3 GiB leaves headroom).
 
 The automatic concurrency is `min(5, floor(available GiB / 8), floor(available threads / 2))`, with
 a minimum of one. Linux `MemAvailable` supplies the memory reading (falling back to `os.freemem()`);

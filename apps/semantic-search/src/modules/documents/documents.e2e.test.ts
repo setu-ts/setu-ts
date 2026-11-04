@@ -2,6 +2,9 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import { startTestServer } from '../../../test/support/server.ts';
 
+// These tests use the memory store; `npm run smoke` covers pgvector.
+delete process.env['PGVECTOR_URL'];
+
 describe('documents e2e', () => {
   it('accepts a document over HTTP, refuses invalid input and documents its routes', async () => {
     const server = await startTestServer();
@@ -28,9 +31,18 @@ describe('documents e2e', () => {
       assert.deepStrictEqual(invalid.status, 400);
       await invalid.text();
       const spec = await fetch(server.baseUrl + '/openapi.json');
-      const document: { paths: Record<string, unknown> } = await spec.json();
-      assert.deepStrictEqual(Object.hasOwn(document.paths, '/documents'), true);
-      assert.deepStrictEqual(Object.hasOwn(document.paths, '/documents/search'), true);
+      type Operation = { parameters?: { name: string; in: string; required?: boolean }[] };
+      const document: { paths: Record<string, Record<string, Operation>> } = await spec.json();
+      // Swagger's "Try it out" can only send the tenant if the header is declared.
+      for (const [path, method] of [
+        ['/documents', 'post'],
+        ['/documents/search', 'get'],
+      ] as const) {
+        const header = document.paths[path]?.[method]?.parameters?.find(
+          (parameter) => parameter.name === 'x-tenant-id',
+        );
+        assert.deepStrictEqual([header?.in, header?.required], ['header', true], path);
+      }
     } finally {
       await server.stop();
     }

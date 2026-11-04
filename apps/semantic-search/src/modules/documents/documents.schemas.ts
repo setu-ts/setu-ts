@@ -1,5 +1,12 @@
 import { z } from 'zod';
 
+/**
+ * The tenant both routes act for. Declared so the OpenAPI document (and Swagger's
+ * "Try it out") carries the header; the multi-tenancy plugin resolves it.
+ */
+export const DocumentsTenantHeaders = z.object({ 'x-tenant-id': z.string().min(1).max(64) });
+export type DocumentsTenantHeaders = z.infer<typeof DocumentsTenantHeaders>;
+
 /** A document to index; the id is the caller's and re-ingesting it replaces its chunks. */
 export const IngestDocumentsBody = z.object({
   id: z.string().regex(/^[A-Za-z0-9._-]{1,128}$/),
