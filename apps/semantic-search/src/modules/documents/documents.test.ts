@@ -82,5 +82,15 @@ describe('documents module', () => {
       splitText(`start ${long}`).map((chunk) => chunk.length),
       [5, 800, 800, 100],
     );
+    // A cut inside a surrogate pair would leave a chunk the store refuses.
+    const emoji = splitText(`${'x'.repeat(799)}😀${'y'.repeat(10)}`);
+    assert.deepStrictEqual(
+      emoji.map((chunk) => chunk.isWellFormed()),
+      emoji.map(() => true),
+    );
+    assert.deepStrictEqual(
+      emoji.join('').replaceAll(' ', ''),
+      `${'x'.repeat(799)}😀${'y'.repeat(10)}`,
+    );
   });
 });

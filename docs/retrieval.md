@@ -80,9 +80,10 @@ every record of one tenant in the collection, for offboarding.
 ## Search
 
 `query(collection, scope, { vector, topK, filter?, minScore? })` returns at most `topK` matches,
-ordered by cosine similarity descending and then by record id ascending. That tie-break is defined
-on every adapter. `score` is in `[-1, 1]`; `minScore` drops lower matches on the same scale. An
-adapter may return fewer than `topK`, including under a selective filter.
+ordered by cosine similarity descending and then by record id ascending, compared by UTF-16 code
+unit on every adapter. The tie-break orders the returned set: a tie that straddles the `topK` cut
+may keep either record. `score` is in `[-1, 1]`; `minScore` drops lower matches on the same scale.
+An adapter may return fewer than `topK`, including under a selective filter.
 
 A tenant's route takes its scope from `scopeFor`, which reads the tenant resolved by the
 multi-tenancy middleware:
@@ -190,7 +191,8 @@ without the field never matches a comparison on it.
 
 The service enforces every limit before the adapter sees the call, and each value is the tightest of
 the four backends so a request behaves the same everywhere. A vector must have exactly the
-collection's length, finite components and a non-zero norm (`VectorDimensionError`). A `topK`
+collection's length, finite components within the float32 range (the precision pgvector, Qdrant and
+Vectorize store) and a non-zero norm after float32 rounding (`VectorDimensionError`). A `topK`
 outside 1–50, a `minScore` outside `[-1, 1]`, an over-size batch and an over-size id, content or
 metadata value throw `VectorRecordError`.
 

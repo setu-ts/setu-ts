@@ -21,6 +21,11 @@ export const MAX_SCOPE_BYTES = 64;
 export const MAX_ID_BYTES = 256;
 /** UTF-8 bytes in a record's content (inside Vectorize's 10 KiB metadata cap). */
 export const MAX_CONTENT_BYTES = 8192;
+/**
+ * The largest finite float32. pgvector, Qdrant and Vectorize store float32, so a
+ * larger component would become infinite in the backend.
+ */
+export const MAX_FLOAT32 = 3.4028234663852886e38;
 /** UTF-8 bytes in a string metadata or filter value (Vectorize indexes only the first 64). */
 export const MAX_STRING_VALUE_BYTES = 64;
 /** Values in one `in` clause. */

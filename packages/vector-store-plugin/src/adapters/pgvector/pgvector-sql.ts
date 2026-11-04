@@ -235,7 +235,7 @@ export function queryStatement(
     query.filter === undefined ? sql`` : sql` AND ${filterCondition(sql, query.filter)}`;
   const minScore =
     query.minScore === undefined ? sql`` : sql` WHERE candidates.score >= ${query.minScore}`;
-  return sql`SELECT candidates.id, candidates.source_id, candidates.content, candidates.metadata, candidates.score FROM (SELECT id, source_id, content, metadata, 1 - (embedding <=> ${vector}::vector) AS score FROM ${sql.identifier(tableNames(spec).table)} WHERE scope = ${scope}${where} ORDER BY embedding <=> ${vector}::vector LIMIT ${query.topK}) AS candidates${minScore} ORDER BY candidates.score DESC, candidates.id ASC`;
+  return sql`SELECT candidates.id, candidates.source_id, candidates.content, candidates.metadata, candidates.score FROM (SELECT id, source_id, content, metadata, 1 - (embedding <=> ${vector}::vector) AS score FROM ${sql.identifier(tableNames(spec).table)} WHERE scope = ${scope}${where} ORDER BY embedding <=> ${vector}::vector LIMIT ${query.topK}) AS candidates${minScore} ORDER BY candidates.score DESC, candidates.id COLLATE "C" ASC`;
 }
 
 /**

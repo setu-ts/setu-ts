@@ -240,9 +240,19 @@ describe('record validation', () => {
     [[1, '0', 0], 'finite number'],
     [[0, 0, 0], 'all zeros'],
     [[-0, 0, 0], 'all zeros'],
+    // Finite as a double but infinite once stored as float32 (pgvector, Qdrant, Vectorize).
+    [[1e39, 0, 0], 'float32'],
+    [[-3.5e38, 0, 0], 'float32'],
+    // Non-zero as a double, all zeros once rounded to float32.
+    [[1e-46, 0, 0], 'all zeros'],
   ])('refuses vector %j', (vector, message) => {
     expect(() => validateVector(vector, 3)).toThrow(VectorDimensionError);
     expect(() => validateVector(vector, 3)).toThrow(message);
+  });
+
+  it('accepts the float32 extremes', () => {
+    expect(validateVector([3.4028234663852886e38, 0, 0], 3)).toEqual([3.4028234663852886e38, 0, 0]);
+    expect(validateVector([1.5e-45, 0, 0], 3)).toEqual([1.5e-45, 0, 0]);
   });
 
   it('validates scopes and id lists', () => {

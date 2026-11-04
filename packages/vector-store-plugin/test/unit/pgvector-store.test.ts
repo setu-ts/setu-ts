@@ -291,7 +291,7 @@ describe('PgVectorStore', () => {
     expect(statements[2]!.text.startsWith('SELECT candidates.id, candidates.source_id')).toBe(true);
     expect(statements.every((s) => s.inTransaction)).toBe(true);
     expect(statements[2]!.text).toBe(
-      'SELECT candidates.id, candidates.source_id, candidates.content, candidates.metadata, candidates.score FROM (SELECT id, source_id, content, metadata, 1 - (embedding <=> $1::vector) AS score FROM "vs_documents" WHERE scope = $2 AND (metadata -> $3::text) = $4::jsonb ORDER BY embedding <=> $5::vector LIMIT $6) AS candidates WHERE candidates.score >= $7 ORDER BY candidates.score DESC, candidates.id ASC',
+      'SELECT candidates.id, candidates.source_id, candidates.content, candidates.metadata, candidates.score FROM (SELECT id, source_id, content, metadata, 1 - (embedding <=> $1::vector) AS score FROM "vs_documents" WHERE scope = $2 AND (metadata -> $3::text) = $4::jsonb ORDER BY embedding <=> $5::vector LIMIT $6) AS candidates WHERE candidates.score >= $7 ORDER BY candidates.score DESC, candidates.id COLLATE "C" ASC',
     );
     expect(statements[2]!.params).toEqual([
       '[1,0,0]',

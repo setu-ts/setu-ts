@@ -190,9 +190,10 @@ every record of one tenant in the collection, for offboarding.
 
 Every limit is enforced by the service before the adapter sees the call, and is the tightest of the
 four backends so a request behaves the same everywhere. A vector must have exactly the collection's
-declared length, finite components and a non-zero norm; otherwise it throws `VectorDimensionError`.
-A `topK` outside 1–50, a `minScore` outside `[-1, 1]`, an over-size batch and an over-size id,
-content or metadata value throw `VectorRecordError`.
+declared length, finite components within the float32 range and a non-zero norm after float32
+rounding; otherwise it throws `VectorDimensionError`. A `topK` outside 1–50, a `minScore` outside
+`[-1, 1]`, an over-size batch and an over-size id, content or metadata value throw
+`VectorRecordError`.
 
 ## Adapters
 
@@ -311,16 +312,16 @@ stale ones yourself, or give each tenant group its own index.
 
 ## Errors
 
-| Error                             | Thrown when                                                          | Status hint |
-| --------------------------------- | -------------------------------------------------------------------- | ----------- |
-| `VectorScopeRequiredError`        | Tenancy is `'required'` and the request has no tenant                | 400         |
-| `VectorScopeInvalidError`         | A scope is empty, ill-formed or over 64 bytes                        | 400         |
-| `VectorFilterError`               | A filter clause names an undeclared field or breaks an operator rule | 400         |
-| `VectorDimensionError`            | A vector has the wrong length, a non-finite component or zero norm   | 400         |
-| `VectorRecordError`               | A record, id, metadata value, batch, `topK` or `minScore` is invalid | 400         |
-| `VectorCollectionUnknownError`    | A call names a collection the plugin was not configured with         | 500         |
-| `VectorCollectionMismatchError`   | An existing collection's dimensions or metric disagree               | —           |
-| `VectorOperationUnsupportedError` | The backend cannot perform the operation or support the declaration  | 501         |
+| Error                             | Thrown when                                                                              | Status hint |
+| --------------------------------- | ---------------------------------------------------------------------------------------- | ----------- |
+| `VectorScopeRequiredError`        | Tenancy is `'required'` and the request has no tenant                                    | 400         |
+| `VectorScopeInvalidError`         | A scope is empty, ill-formed or over 64 bytes                                            | 400         |
+| `VectorFilterError`               | A filter clause names an undeclared field or breaks an operator rule                     | 400         |
+| `VectorDimensionError`            | A vector has the wrong length, a component that is not finite as a float32, or zero norm | 400         |
+| `VectorRecordError`               | A record, id, metadata value, batch, `topK` or `minScore` is invalid                     | 400         |
+| `VectorCollectionUnknownError`    | A call names a collection the plugin was not configured with                             | 500         |
+| `VectorCollectionMismatchError`   | An existing collection's dimensions or metric disagree                                   | —           |
+| `VectorOperationUnsupportedError` | The backend cannot perform the operation or support the declaration                      | 501         |
 
 `VectorCollectionMismatchError` and a refused declaration fail registration, so the application does
 not start. The pgvector and Qdrant adapters classify transport failures with `toBackendFault`: an

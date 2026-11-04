@@ -267,7 +267,12 @@ export class VectorizeVectorStore implements IVectorStoreAdapter {
  * @throws {VectorFilterError} When the filter cannot be expressed exactly
  */
 export function translateFilter(filter: VectorFilter): Record<string, Record<string, unknown>> {
-  const fields: Record<string, Record<string, unknown>> = {};
+  // A null prototype: `constructor` is a legal field name, and on `{}` the
+  // inherited Object constructor would swallow its clause.
+  const fields: Record<string, Record<string, unknown>> = Object.create(null) as Record<
+    string,
+    Record<string, unknown>
+  >;
   const visit = (node: VectorFilter): void => {
     if ('and' in node) {
       for (const child of node.and) visit(child);

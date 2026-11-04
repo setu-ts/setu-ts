@@ -16,6 +16,7 @@ import {
   MAX_STRING_VALUE_BYTES,
   isBoundedString,
   utf8Bytes,
+  MAX_FLOAT32,
 } from './limits.ts';
 
 /**
@@ -69,8 +70,13 @@ export function validateVector(vector: unknown, dimensions: number): number[] {
     if (typeof component !== 'number' || !Number.isFinite(component)) {
       throw new VectorDimensionError('every vector component must be a finite number');
     }
+    if (Math.abs(component) > MAX_FLOAT32) {
+      throw new VectorDimensionError('every vector component must be within the float32 range');
+    }
     copy.push(component);
-    squares += component * component;
+    // Backends store float32: a component that rounds to zero there counts as zero.
+    const stored = Math.fround(component);
+    squares += stored * stored;
   }
   // Cosine similarity is undefined for a zero vector.
   if (squares === 0) throw new VectorDimensionError('a vector must not be all zeros');

@@ -41,8 +41,12 @@ export function splitText(text: string): string[] {
       chunks.push(current);
       current = '';
     }
-    for (let start = 0; start < word.length; start += CHUNK_SIZE) {
-      const piece = word.slice(start, start + CHUNK_SIZE);
+    for (let start = 0; start < word.length;) {
+      let end = Math.min(start + CHUNK_SIZE, word.length);
+      // Never cut a surrogate pair: the store refuses ill-formed text.
+      if (end < word.length && /[\uD800-\uDBFF]/.test(word[end - 1]!)) end -= 1;
+      const piece = word.slice(start, end);
+      start = end;
       current = current === '' ? piece : `${current} ${piece}`;
       if (current.length >= CHUNK_SIZE) {
         chunks.push(current);

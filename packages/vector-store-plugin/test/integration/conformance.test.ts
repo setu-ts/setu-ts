@@ -35,7 +35,14 @@ const QDRANT_URL = process.env['QDRANT_URL'];
 const runtime = { subtle: globalThis.crypto.subtle } as IRuntimeServices;
 const RUN = Math.floor(Math.random() * 1e9).toString(36);
 const COLLECTION = `conf_${RUN}`;
-const FILTERABLE = { tag: 'string', year: 'number', public: 'boolean' } as const;
+// `constructor` is the one Object.prototype member the field grammar admits;
+// an accumulator built on `{}` once dropped its clause (M135 review).
+const FILTERABLE = {
+  tag: 'string',
+  year: 'number',
+  public: 'boolean',
+  constructor: 'string',
+} as const;
 
 const A = 'tenant-a';
 const B = 'tenant-b';
@@ -269,6 +276,34 @@ describe.each(ARMS.filter((arm) => arm.enabled).map((arm) => [arm.name, arm] as 
         'a1',
         'b2',
       ]);
+    });
+
+    it('filters on a field named constructor instead of dropping the clause', async () => {
+      const scope = 'tenant-ctor';
+      await store.upsert(COLLECTION, scope, [
+        { id: 'c1', vector: [1, 0, 0, 0], metadata: { constructor: 'x', tag: 't' } },
+        { id: 'c2', vector: [1, 0, 0, 0], metadata: { constructor: 'y', tag: 't' } },
+      ]);
+      const filter: VectorFilter = {
+        and: [
+          { field: 'constructor', op: 'eq', value: 'x' },
+          { field: 'tag', op: 'eq', value: 't' },
+        ],
+      };
+      const found = await store.query(COLLECTION, scope, { vector: QUERY, topK: 10, filter });
+      expect(found.map((m) => m.id)).toEqual(['c1']);
+    });
+
+    it('breaks score ties by id in code-unit order, punctuation included', async () => {
+      const scope = 'tenant-ties';
+      const ids = ['ab#0', 'a-b#0', 'a#2', 'a-1', 'B'];
+      await store.upsert(
+        COLLECTION,
+        scope,
+        ids.map((id) => ({ id, vector: [1, 0, 0, 0] })),
+      );
+      const found = await store.query(COLLECTION, scope, { vector: QUERY, topK: 10 });
+      expect(found.map((m) => m.id)).toEqual(['B', 'a#2', 'a-1', 'a-b#0', 'ab#0']);
     });
 
     it('deleteScope removes every record of one scope above 1,000 records and leaves others', async () => {
