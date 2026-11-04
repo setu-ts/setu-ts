@@ -363,7 +363,9 @@ export interface IRequestContext {
   /**
    * Registers cleanup in reverse registration order, after the handler settles.
    * Buffered responses normally wait for cleanup; an early middleware response
-   * is sent immediately and cleanup waits for the running handler. Streaming
+   * is sent immediately and cleanup waits for the running handler — even past
+   * shutdown: a handler still running when `stop()`'s drain bound expires has
+   * its cleanup run when it settles, after `stop()` returned. Streaming
    * responses also wait for end, error, or cancellation.
    * Calls after completion run immediately. Failures are reported at warn.
    * Each asynchronous cleanup is bounded at 5000 ms; expiry warns once and

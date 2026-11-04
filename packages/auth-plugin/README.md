@@ -832,13 +832,14 @@ Laravel, Django and Devise do — and give `signIn` a reader for it. `IAuthSessi
 records a SHA-256 digest of the stamp; every request compares the digest of the current stamp with
 it, in constant time. Change the stamp and every session of that user answers anonymous on its next
 request — `ctx.request.user` is unset, and passkey registration refuses it. A definite mismatch
-removes the auth record and regenerates the writable HTTP session; the store strategy deletes the
-old session id, so restoring the previous stamp cannot revive that stored session. The current
-browser also receives a replacement cookie without its auth record. With the encrypted-cookie
-strategy, a copied old cookie cannot be revoked server-side and can authenticate again if the stamp
-is reverted: use a store when old-cookie replay must remain revoked, and advance stamps
-monotonically. A throwing reader or malformed return suspends only this request and leaves the
-record and id unchanged, so an identity-store outage does not sign everyone out.
+removes the auth record and regenerates the writable HTTP session when the old cookie is next
+presented, even if that request throws; the store strategy deletes the old session id then, so a
+later stamp restore cannot revive it. The current browser also receives a replacement cookie without
+its auth record. Revocation needs that presentation: an id never presented while the stamp differed,
+and a copied encrypted-cookie session (which has no server-side record), authenticate again if the
+stamp is restored. So a stamp must only move forward on either strategy: to end sessions, set a new
+value, never an old one. A throwing reader or malformed return suspends only this request and leaves
+the record and id unchanged, so an identity-store outage does not sign everyone out.
 `verifiedCurrent(ctx)` applies the same mutation for the plugin's own identity reads. Read-only
 `fromHeaders` callers (including WebSocket upgrades) remain suspension-only because they cannot
 commit a session change.

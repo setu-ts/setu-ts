@@ -219,6 +219,9 @@ describe('M131b 3.12 retry validation', () => {
     { limit: 1, delay: -1 },
     { limit: 1, delay: NaN },
     { limit: 1, delay: Infinity },
+    // M131b audit F4: a runtime timer clamps anything above 2^31 - 1 ms to 1 ms.
+    { limit: 1, delay: 2_147_483_648 },
+    { limit: 1, delay: 1e308 },
   ]) {
     it(`refuses invalid policies at wrap: ${JSON.stringify(policy)}`, async () => {
       const { ResilienceService } = await import('../../src/services/resilience-service.ts');
@@ -230,4 +233,21 @@ describe('M131b 3.12 retry validation', () => {
       expect(() => defaults.wrap(() => Promise.resolve(1), { retry: true })).toThrow(RangeError);
     });
   }
+});
+
+describe('M131b audit F4: timer-bounded delays', () => {
+  it('accepts the longest delay a timer honours', async () => {
+    const { validateRetryPolicy } = await import('../../src/patterns/retry.ts');
+    expect(() =>
+      validateRetryPolicy({ limit: 2, delay: 2_147_483_647, backoff: 'fixed' }, 'test'),
+    ).not.toThrow();
+  });
+
+  it('caps a long exponential schedule at the timer maximum', () => {
+    const policy: RetryPolicy = { limit: 40, delay: 1_000_000_000, backoff: 'exponential' };
+    expect(computeBackoffMs(1, policy)).toBe(1_000_000_000);
+    expect(computeBackoffMs(2, policy)).toBe(2_000_000_000);
+    expect(computeBackoffMs(3, policy)).toBe(2_147_483_647);
+    expect(computeBackoffMs(30, policy)).toBe(2_147_483_647);
+  });
 });

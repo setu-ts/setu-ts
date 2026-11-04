@@ -48,6 +48,11 @@ function buildApp(options: Partial<SessionPluginOptions> = {}) {
     return ctx.response.json({ id: session.id });
   });
 
+  app.router.get('/regenerate-then-throw', (ctx) => {
+    getSession(ctx).regenerate();
+    throw new Error('handler failed after regenerating');
+  });
+
   app.router.get('/logout', (ctx) => {
     getSession(ctx).destroy();
     return ctx.response.json({ ok: true });
@@ -207,6 +212,46 @@ describe('session e2e (real kernel app)', () => {
       const second = await app.inject(get('/read', cookie));
       expect(second.json<{ count: number | null }>().count).toBe(1);
 
+      await app.stop();
+    });
+
+    it('revokes the superseded row even when the request throws (M131b audit F1)', async () => {
+      const { app } = buildApp({ store: 'memory' });
+      await app.start();
+
+      const first = await app.inject(get('/bump'));
+      const cookie = cookieOf(first.headers);
+
+      // The throw skips the commit, so the new session is never written, but a
+      // regeneration is a revocation: the old id must stop reading its row.
+      const failed = await app.inject(get('/regenerate-then-throw', cookie));
+      expect(failed.statusCode).toBe(500);
+
+      const after = await app.inject(get('/read', cookie));
+      const read = after.json<{ count: number | null; isNew: boolean }>();
+      expect(read.count).toBe(null);
+      expect(read.isNew).toBe(true);
+
+      await app.stop();
+    });
+
+    it('surfaces the handler error when revoking the superseded row also fails', async () => {
+      // A store that can read and write but not delete: the revocation on the
+      // throw path is best effort and must not replace the request's own error.
+      const rows = new Map<string, unknown>();
+      const store = {
+        read: (id: string) => Promise.resolve((rows.get(id) as never) ?? null),
+        write: (id: string, data: unknown) => {
+          rows.set(id, data);
+          return Promise.resolve();
+        },
+        destroy: () => Promise.reject(new Error('store down')),
+      };
+      const { app } = buildApp({ store: store as never });
+      await app.start();
+      const cookie = cookieOf((await app.inject(get('/bump'))).headers);
+      const failed = await app.inject(get('/regenerate-then-throw', cookie));
+      expect(failed.statusCode).toBe(500);
       await app.stop();
     });
 

@@ -389,6 +389,7 @@ it.each([new Error('CANARY'), 'CANARY'])(
   (cause) => {
     const failure = new Error('safe body detail', { cause });
     failure.name = 'RequestBodyReadError';
+    Object.defineProperty(failure, Symbol.for('setu.serialize.redact-cause'), { value: true });
     const logged = serializeError(failure);
     expect(logged.cause).toEqual({
       name: cause instanceof Error ? 'Error' : 'string',
@@ -398,3 +399,19 @@ it.each([new Error('CANARY'), 'CANARY'])(
     expect(failure.cause).toBe(cause);
   },
 );
+
+it('M131b audit F3: an error only NAMED RequestBodyReadError keeps its cause in the log', () => {
+  const failure = new Error('application failure', { cause: new Error('real diagnostic') });
+  failure.name = 'RequestBodyReadError';
+  expect(JSON.stringify(serializeError(failure))).toContain('real diagnostic');
+});
+
+it('M131b audit F3: a brand read that throws is no brand', () => {
+  const failure = new Error('outer', { cause: new Error('kept') });
+  Object.defineProperty(failure, Symbol.for('setu.serialize.redact-cause'), {
+    get() {
+      throw new Error('hostile getter');
+    },
+  });
+  expect(JSON.stringify(serializeError(failure))).toContain('kept');
+});

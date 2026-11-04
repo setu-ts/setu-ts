@@ -19,21 +19,28 @@ cutting a release renames that heading to the version and is a rename, not a rec
   before applying it.
 - **Request cleanup waits for the handler.** Buffered responses normally await cleanup. If
   middleware responds early without awaiting next(), the response returns immediately but scopes and
-  deferred cleanup stay alive until the handler settles. Shutdown drain retains that work within its
-  existing bound; ctx.signal still means connection severance.
+  deferred cleanup stay alive until the handler settles. Shutdown drain waits for that work within
+  its existing bound; a handler still running when the bound expires has its cleanup run when it
+  settles, after `stop()` returned and the close hooks ran. ctx.signal still means connection
+  severance.
 - **A definite session-stamp mismatch revokes the HTTP auth record.** It deletes the record and
-  regenerates the session. With a store, old ids remain revoked even if the stamp is restored. A
-  copied encrypted-cookie session can revive on a reverted stamp because it has no server-side
-  revocation record: use a store when old-cookie replay must stay revoked and advance stamps
-  monotonically. A reader fault remains a one-request suspension without mutation; read-only
-  fromHeaders/WebSocket callers remain suspension-only. Sign in again after a definite mismatch.
+  regenerates the session when the old cookie is next presented, even if that request then throws.
+  With a store, an id revoked that way stays revoked if the stamp is later restored; an id never
+  presented while the stamp differed is not revoked, and a copied encrypted-cookie session has no
+  server-side record to revoke. So a stamp must only move forward: to end sessions, set a new value,
+  never restore an old one. A reader fault remains a one-request suspension without mutation;
+  read-only fromHeaders/WebSocket callers remain suspension-only. Sign in again after a definite
+  mismatch.
 - **Retry options are validated earlier.** `defaultRetry` is checked during registration, and
-  selected policies at wrap time: limit must be a safe integer at least 1, delay finite and
-  non-negative. Invalid policies throw RangeError. Use limit 1 for one attempt.
+  selected policies at wrap time: limit must be a safe integer at least 1, delay finite,
+  non-negative and at most 2147483647 ms (a runtime timer clamps anything longer to 1 ms). Invalid
+  policies throw RangeError. Use limit 1 for one attempt.
 - **OpenAPI component names can change.** A reused node uses its own Zod id, otherwise its site plus
   schema path (for example PostOrdersBodyLinesItems). Roots keep their own name and nullable
   primitives stay inline. Regenerate document and SDK together; inspect setu client --check for
-  renamed component types. Explicit ids keep names stable across operation ordering.
+  renamed component types. Explicit ids keep names stable across operation ordering; an id must
+  match `[A-Za-z0-9._-]+` to be used as a name, and an id equal to another operation's root name
+  gets a suffix rather than taking it.
 - **Cancelled/failed body reads are client faults.** RequestBodyReadError carries a fixed 400 detail
   and retains the native cause. It logs at warn; HTTP metrics labels the hinted status and
   increments errors only for 5xx. Update tests/dashboards that expected a 500 or error-level upload

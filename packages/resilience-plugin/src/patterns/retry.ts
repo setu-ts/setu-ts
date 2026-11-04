@@ -9,19 +9,29 @@ import type { ITimers } from '../interfaces/index.ts';
 import { abortReasonOf, throwIfAborted } from './abort.ts';
 
 /**
+ * The longest delay a runtime timer honours (2^31 - 1 ms, about 24.8 days).
+ * Node, Deno and Bun all clamp a longer `setTimeout` to 1 ms, so a larger
+ * delay would retry at once instead of waiting (M131b audit F4).
+ */
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
+/**
  * Refuses retry policies that cannot execute a finite, positive attempt count.
  * @param policy - Policy selected at registration or wrap time
  * @param label - Configuration location for the diagnostic
  * @returns Nothing
- * @throws {RangeError} For an unsafe/nonpositive integer limit or a negative/nonfinite delay
+ * @throws {RangeError} For an unsafe/nonpositive integer limit, or a delay that is negative,
+ * not finite, or longer than a runtime timer can wait (2^31 - 1 ms)
  * @internal
  */
 export function validateRetryPolicy(policy: RetryPolicy, label: string): void {
   if (!Number.isSafeInteger(policy.limit) || policy.limit < 1) {
     throw new RangeError(`${label}: limit must be a safe integer greater than or equal to 1`);
   }
-  if (!Number.isFinite(policy.delay) || policy.delay < 0) {
-    throw new RangeError(`${label}: delay must be finite and non-negative`);
+  if (!Number.isFinite(policy.delay) || policy.delay < 0 || policy.delay > MAX_TIMER_DELAY_MS) {
+    throw new RangeError(
+      `${label}: delay must be finite, non-negative and at most ${MAX_TIMER_DELAY_MS} ms`,
+    );
   }
 }
 
@@ -32,13 +42,12 @@ export function validateRetryPolicy(policy: RetryPolicy, label: string): void {
  * the 2nd attempt is `computeBackoffMs(1, policy)`)
  * @param policy - The retry policy
  * @returns Delay in milliseconds: `'fixed'` ⇒ `delay`; `'exponential'` ⇒
- * `delay · 2^(attempt-1)`
+ * `delay · 2^(attempt-1)`; either capped at the longest delay a runtime timer
+ * honours, so a long exponential schedule waits rather than retrying at once
  */
 export function computeBackoffMs(attempt: number, policy: RetryPolicy): number {
-  if (policy.backoff === 'exponential') {
-    return policy.delay * 2 ** (attempt - 1);
-  }
-  return policy.delay;
+  const delay = policy.backoff === 'exponential' ? policy.delay * 2 ** (attempt - 1) : policy.delay;
+  return Math.min(delay, MAX_TIMER_DELAY_MS);
 }
 
 /**

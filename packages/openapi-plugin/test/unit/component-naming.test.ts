@@ -41,3 +41,38 @@ it('M131b 3.15 keeps nullable primitives inline', () => {
     content: { 'application/json': { schema: { anyOf: [{ type: 'string' }, { type: 'null' }] } } },
   });
 });
+
+it('M131b audit F5: an id outside the component-name grammar falls back to the site name', () => {
+  const line = z.object({ value: z.string() }).meta({ id: 'Order/Line #2 ~x' });
+  const orders = z.object({ lines: z.array(line) });
+  const doc = new OpenApiGenerator({}).generate([
+    route('/orders', orders),
+    route('/orders-again', orders),
+  ]);
+  const schemas = doc.components!.schemas!;
+  for (const name of Object.keys(schemas)) expect(name).toMatch(/^[A-Za-z0-9._-]+$/);
+  expect(schemas['PostOrdersBodyLinesItems']).toMatchObject({ type: 'object' });
+  expect(schemas['PostOrdersBody']).toMatchObject({
+    properties: { lines: { items: { $ref: '#/components/schemas/PostOrdersBodyLinesItems' } } },
+  });
+});
+
+it("M131b audit F5: an id equal to another operation's root name leaves that root its name", () => {
+  // The nested schema's id is the name the /orders body will claim; it is
+  // resolved first (from /returns), so without the reservation it would take it.
+  const line = z.object({ value: z.string() }).meta({ id: 'PostOrdersBody' });
+  const returns = z.object({ lines: z.array(line) });
+  const orders = z.object({ total: z.number() });
+  const doc = new OpenApiGenerator({}).generate([
+    route('/returns', returns),
+    route('/returns-again', returns),
+    route('/orders', orders),
+    route('/orders-again', orders),
+  ]);
+  const schemas = doc.components!.schemas!;
+  expect(schemas['PostOrdersBody']).toMatchObject({ properties: { total: expect.any(Object) } });
+  expect(schemas['PostOrdersBody2']).toMatchObject({ properties: { value: expect.any(Object) } });
+  expect(schemas['PostReturnsBody']).toMatchObject({
+    properties: { lines: { items: { $ref: '#/components/schemas/PostOrdersBody2' } } },
+  });
+});

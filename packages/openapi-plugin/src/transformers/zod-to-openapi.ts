@@ -552,7 +552,14 @@ export class ZodToOpenApi {
 
     // A document with no reused schemas carries no `$defs` at all; the root
     // force-hoist below must still apply to it.
-    const defs = (root.$defs ?? {}) as Record<string, Record<string, unknown>>;
+    // Keyed by the JSON-Pointer token (RFC 6901: `~` as `~0`, `/` as `~1`) the
+    // `$ref` strings carry, so a schema id containing `/` or `~` still finds its
+    // definition (M131b audit F5); an id without them is unchanged.
+    const defs = Object.fromEntries(
+      Object.entries((root.$defs ?? {}) as Record<string, Record<string, unknown>>).map(
+        ([key, value]) => [key.replace(/~/g, '~0').replace(/\//g, '~1'), value],
+      ),
+    ) as Record<string, Record<string, unknown>>;
     delete root.$defs;
 
     // Alias resolution: a hook splice lands INSIDE the mechanical $def (both

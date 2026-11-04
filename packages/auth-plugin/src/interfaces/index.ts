@@ -667,8 +667,9 @@ export type RefreshPrincipal = (
  * request compares the digest of the current value with it in constant time. A
  * different value deletes the HTTP auth record and regenerates its session.
  * A throw or malformed value only suspends this request without mutation.
- * Permanent old-cookie revocation requires a store; a copied stateless cookie
- * can revive if the stamp is reverted. Read-only callers remain suspension-only.
+ * Revocation happens when the old cookie is next presented, so the value must
+ * only move forward: restoring an old value revives sessions not yet presented
+ * and copied encrypted-cookie sessions. Read-only callers remain suspension-only.
  * `null` means the user has no stamp, and matches only a
  * session recorded with none.
  *
@@ -838,10 +839,10 @@ export interface SignInConfig {
   /**
    * Reads the user's current session stamp. Recorded at sign-in and compared on
    * every request. A definite mismatch deletes the HTTP auth record and
-   * regenerates the session; a reader fault only suspends that request. Store-backed
-   * old ids stay revoked. A copied stateless cookie can revive if the stamp is
-   * reverted, so use a store for permanent revocation. Read-only fromHeaders
-   * callers remain suspension-only. Absent, no stamp is recorded or compared. See
+   * regenerates the session when the old cookie is next presented; a reader fault
+   * only suspends that request. Move the stamp forward only: restoring an old
+   * value revives sessions not yet presented and copied encrypted-cookie
+   * sessions. Read-only fromHeaders callers remain suspension-only. Absent, no stamp is recorded or compared. See
    * {@linkcode SessionStamp}.
    *
    * @since 0.11.0

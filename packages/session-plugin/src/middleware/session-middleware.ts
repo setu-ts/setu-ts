@@ -84,7 +84,16 @@ export function sessionMiddleware(
       ctx.state.set(SESSION_TENANT_BINDING_STATE_KEY, true);
     }
 
-    await next();
+    try {
+      await next();
+    } catch (error) {
+      // A throw skips the commit, but not a revocation: the row a regeneration
+      // superseded is still deleted (M131b, audit F1).
+      // Best effort: a store that cannot delete must not replace the request's
+      // own error with its fault.
+      await service.revokeSuperseded(session).catch(() => undefined);
+      throw error;
+    }
 
     // A request the bearer exemption admitted restored no session; committing
     // whatever its handler wrote would send that session as `Set-Cookie` and, on

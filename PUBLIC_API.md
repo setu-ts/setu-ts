@@ -13267,12 +13267,14 @@ cleanups in reverse registration order only after the handler settles: normally 
 response is handed back (awaiting any that return a promise), and when a streaming body ends, errors
 or is cancelled. An early middleware response returns immediately, but its cleanup and
 shutdown-drain accounting wait for the running handler; late handler cleanup registrations join that
-same cleanup list. On failure, cleanup follows the error response construction. Each asynchronous
-cleanup is bounded at 5000 ms: on expiry the kernel reports it and moves on, and the cleanup's later
-outcome is ignored. A cleanup's throw or rejection is reported at `warn` through the logger
-capability when one is registered, and never changes the response; a `defer` after completion runs
-at once. The member is optional, so no implementor breaks: the kernel's context implements it,
-`createTestContext` does not. A request that never calls it stays on the synchronous path.
+same cleanup list. A handler still running when `stop()`'s drain bound expires keeps its cleanup
+until it settles, which is then after `stop()` returned and the close hooks ran. On failure, cleanup
+follows the error response construction. Each asynchronous cleanup is bounded at 5000 ms: on expiry
+the kernel reports it and moves on, and the cleanup's later outcome is ignored. A cleanup's throw or
+rejection is reported at `warn` through the logger capability when one is registered, and never
+changes the response; a `defer` after completion runs at once. The member is optional, so no
+implementor breaks: the kernel's context implements it, `createTestContext` does not. A request that
+never calls it stays on the synchronous path.
 
 **`IRequestContext.slot?<T>(key, create)`** (M125) — owner-keyed per-request storage. It returns the
 value this request holds under `key`, compared by object identity, and on the first call for that

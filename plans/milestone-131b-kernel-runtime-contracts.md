@@ -457,7 +457,9 @@ CLAUDE.md, never Codex):
 - **T3 (§3.4):** `RequestBodyReadError`'s detail or log echoes request data. **O3:** the served body
   and the log carry the fixed detail and the native error class only.
 - **T4 (§3.10):** a detached cleanup outlives shutdown or runs twice. **O4:** each deferred cleanup
-  runs exactly once, after the handler settles, within the shutdown drain's bound.
+  runs exactly once, after the handler settles; the shutdown drain waits for it within its bound,
+  and a handler still running when the bound expires has its cleanup run when it settles, after
+  `stop()` returned (documented; disposing its scope earlier would reintroduce X90-5; audit F6).
 
 ## 9. Out of scope
 

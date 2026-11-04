@@ -184,11 +184,16 @@ All notable changes to this project are documented here. The format follows
   through generated check/build scripts.
 - **Session-stamp revocation (M131b, `@setu-ts/auth-plugin`).** A definite mismatch deletes the HTTP
   auth record and regenerates its session; a reader fault suspends one request and preserves the
-  record. Stored old ids remain revoked if a stamp is reverted. Copied stateless cookies and
-  read-only fromHeaders callers retain the documented limits.
+  record. Revocation takes effect when the old cookie is next presented, including on a request that
+  throws (the session plugin deletes the superseded store row before rethrowing). A stamp must only
+  move forward: restoring an old value revives cookies not yet presented, and copied
+  encrypted-cookie sessions; read-only fromHeaders callers stay suspension-only.
 - **Model component names (M131b, `@setu-ts/openapi-plugin`, `@setu-ts/sdk`).** Hoisted schemas use
-  their Zod id or their site plus schema path, with roots reserved before descendants. Nullable
-  primitives stay inline. Regenerated clients can rename component types.
+  their Zod id or their site plus schema path, with roots reserved before descendants; an id is
+  never given a name another operation's root uses, and an id outside the OpenAPI component-name
+  grammar (`[A-Za-z0-9._-]`) is ignored in favour of the site name, with ids containing `/` or `~`
+  now resolving instead of leaving a dangling `$ref`. Nullable primitives stay inline. Regenerated
+  clients can rename component types.
 
 - **BREAKING for implementors: `IMultiTenancyService` gains the required `lookupTenant` (M127, #548,
   `@setu-ts/common`).** Applications that only consume the service are unaffected; an out-of-tree
@@ -299,7 +304,9 @@ All notable changes to this project are documented here. The format follows
   controller cannot stop validation at its own subgraph; aliases and repeated findings are
   deduplicated.
 - **Retry policy validation (M131b, `@setu-ts/resilience-plugin`).** Invalid attempt counts or
-  delays throw RangeError at registration/wrap time; a limit of 1 executes once.
+  delays throw RangeError at registration/wrap time, including a delay longer than a runtime timer
+  can wait (2^31 - 1 ms, which Node, Deno and Bun clamp to 1 ms); a computed exponential backoff is
+  capped there. A limit of 1 executes once.
 - **Kafka first-join replay (M131b, `@setu-ts/messaging-plugin`).** The consumer skips its already
   delivered partition window after a first-join rewind, while delivering earlier historical offsets.
 - **Full-stack form posts (M131b, `@setu-ts/full-stack-starter`, `@setu-ts/react-router-plugin`,

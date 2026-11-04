@@ -97,6 +97,9 @@ export class RequestBodyReadError extends Error {
     const detail = 'The request body could not be read; the client closed the connection.';
     super(detail, { cause });
     this.name = 'RequestBodyReadError';
+    // The shared error serializer logs only this cause's class (common's
+    // redact-cause brand); the native message may carry request data.
+    Object.defineProperty(this, Symbol.for('setu.serialize.redact-cause'), { value: true });
     withHttpStatusHint(this, { status: 400, title: 'Bad Request', detail });
   }
 }

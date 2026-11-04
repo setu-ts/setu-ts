@@ -31,6 +31,39 @@ it('M131b 3.13 revokes a stored session permanently after a definite mismatch', 
   }
 });
 
+it('M131b audit F1: a mismatch seen by a throwing request still revokes the stored session', async () => {
+  let stamp = 'v1';
+  const { app } = await buildSignInApp({
+    session: { store: 'memory' },
+    signIn: { providers: [], sessionStamp: () => stamp },
+    plugins: [
+      {
+        name: 'throwing-route',
+        version: '1.0.0',
+        register(ctx) {
+          ctx.router.get('/boom', () => {
+            throw new Error('handler failed');
+          });
+        },
+      },
+    ],
+  });
+  const jar = new CookieJar();
+  try {
+    await jar.fetch(app, '/password-login', { method: 'POST' });
+    const oldCookie = jar.cookie!;
+    const withCookie = (path: string): Request =>
+      new Request(`http://localhost${path}`, { headers: { cookie: oldCookie } });
+    stamp = 'v2';
+    // The mismatch is detected on a request whose handler throws: no commit runs.
+    expect((await app.fetch(withCookie('/boom'))).status).toBe(500);
+    stamp = 'v1';
+    expect((await app.fetch(withCookie('/me'))).status).toBe(401);
+  } finally {
+    await app.stop();
+  }
+});
+
 it('M131b 3.13 reader faults suspend one request without deleting or rotating its session', async () => {
   let unavailable = false;
   const { app } = await buildSignInApp({

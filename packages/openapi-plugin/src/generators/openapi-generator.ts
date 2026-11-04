@@ -108,6 +108,20 @@ function toPascalCase(hint: string): string {
 }
 
 /**
+ * Whether a schema's own id can be a component name as written. OpenAPI 3.1
+ * component keys must match `^[a-zA-Z0-9.\-_]+$`, and the name is also a JSON
+ * Pointer token in every `$ref`. An id outside that grammar is not used: the
+ * schema is named from its site and path instead, as an id-less schema is, so
+ * the hook and the `$defs` route always agree on one valid name (M131b audit F5).
+ *
+ * @param id - A Zod `meta({ id })` or `$defs` key
+ * @returns Whether the id is usable verbatim
+ */
+function isComponentName(id: string): boolean {
+  return /^[A-Za-z0-9._-]+$/.test(id);
+}
+
+/**
  * OpenAPI 3.1 document structure.
  *
  * @since 0.1.0
@@ -462,6 +476,12 @@ export class OpenApiGenerator {
    */
   readonly #reservedNames = new Set<string>();
   /**
+   * Every site's root component name (`<op>Body`, `<op>Response200`, …),
+   * recorded on the count pass so a schema id can never take a name an
+   * operation's own root will claim later in the emit pass (M131b audit F5).
+   */
+  readonly #siteRootNames = new Set<string>();
+  /**
    * Component names delivered through the zod v4 `$defs` channel DURING the
    * current {@linkcode generate} call.
    *
@@ -566,10 +586,10 @@ export class OpenApiGenerator {
       ): string => {
         if (this.#pass === 'count') return `\u0000count:${hint}`;
         if (root && this.#pendingHoistName !== undefined) return this.#pendingHoistName;
-        const explicit = !root && !/^__schema\d+$/.test(hint);
-        return this.#claimComponentName(
-          explicit ? hint : toPascalCase(this.#nameHint) + schemaPathName(path),
-        );
+        const explicit = !root && !/^__schema\d+$/.test(hint) && isComponentName(hint);
+        return explicit
+          ? this.#claimIdName(hint)
+          : this.#claimComponentName(toPascalCase(this.#nameHint) + schemaPathName(path));
       },
       onDefinition: (name: string, schema: OpenApiSchemaObject): void => {
         if (this.#pass === 'emit') {
@@ -663,6 +683,7 @@ export class OpenApiGenerator {
       this.#operationIds.clear();
       this.#schemaCounts.clear();
       this.#reservedNames.clear();
+      this.#siteRootNames.clear();
       this.#pass = 'count';
       for (const route of routes) {
         if (this.#isExcluded(route)) continue;
@@ -1224,6 +1245,7 @@ export class OpenApiGenerator {
     const previousIo = this.#io;
     this.#nameHint = nameHint;
     this.#io = io;
+    if (this.#pass === 'count') this.#siteRootNames.add(toPascalCase(nameHint));
     try {
       return this.#recordHoistedRoot(schema, this.#transformer.transform(schema, io));
     } finally {
@@ -1356,9 +1378,10 @@ export class OpenApiGenerator {
 
     if ((this.#schemaCounts.get(schema)?.[bucket] ?? 0) < 2) return undefined;
 
-    const id = schemaId(schema);
-    const preferred = id === undefined ? toPascalCase(this.#nameHint) + schemaPathName(path) : id;
-    const name = this.#claimComponentName(preferred);
+    const declared = schemaId(schema);
+    const id = declared !== undefined && isComponentName(declared) ? declared : undefined;
+    const preferred = id ?? toPascalCase(this.#nameHint) + schemaPathName(path);
+    const name = id === undefined ? this.#claimComponentName(preferred) : this.#claimIdName(id);
     const previousName = this.#pendingHoistName;
     const previousHint = this.#nameHint;
     this.#pendingHoistName = name;
@@ -1467,6 +1490,22 @@ export class OpenApiGenerator {
   }
 
   /**
+   * Claims a component name for a schema's own (valid) id, never a name
+   * another site's root will claim (M131b audit F5), so an id equal to
+   * `PostOrdersBody` cannot push that operation's body to `PostOrdersBody2`.
+   * The current site's own root stays available, so a root schema with an id
+   * still takes it.
+   *
+   * @param id - The schema's Zod id or `$defs` key
+   * @returns A reserved component name
+   */
+  #claimIdName(id: string): string {
+    const current = toPascalCase(this.#nameHint);
+    const roots = new Set([...this.#siteRootNames].filter((root) => root !== current));
+    return this.#claimComponentName(id, roots);
+  }
+
+  /**
    * Claims a free component name derived from the site that first hoisted the
    * schema (`PostOrdersResponse409`), suffixing on collision.
    *
@@ -1483,11 +1522,14 @@ export class OpenApiGenerator {
    * presence check alone would hand it out twice.
    *
    * @param preferred - The name to try first; defaults to the current site's hint
+   * @param avoid - Further names to treat as taken
    * @returns A component name not already in use, reserved before it is returned
    */
-  #claimComponentName(preferred?: string): string {
+  #claimComponentName(preferred?: string, avoid?: ReadonlySet<string>): string {
     const taken = (candidate: string): boolean =>
-      this.#componentSchemas.has(candidate) || this.#reservedNames.has(candidate);
+      this.#componentSchemas.has(candidate) ||
+      this.#reservedNames.has(candidate) ||
+      avoid?.has(candidate) === true;
     const reserve = (candidate: string): string => {
       this.#reservedNames.add(candidate);
       return candidate;

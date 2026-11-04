@@ -11,9 +11,10 @@
  * does not normalize.
  *
  * The `cause` chain is serialized recursively to a bounded depth so a
- * self-referential cause cannot recurse forever. RequestBodyReadError's native
- * cause is limited to its class and the wrapper's fixed detail, so request data
- * carried by a native read failure never reaches a log sink.
+ * self-referential cause cannot recurse forever. An error branded with the
+ * redact-cause symbol (the runtime's `RequestBodyReadError`) has its cause
+ * limited to its class and the wrapper's fixed detail, so request data carried
+ * by a native read failure never reaches a log sink.
  *
  * @module
  */
@@ -184,6 +185,28 @@ function serializeValue(
     : { name: 'Error', message: safeString(value) };
 }
 
+/**
+ * The brand an error sets (an own property, value `true`) when its `cause` may
+ * carry request data that must not reach a log: the serialized cause keeps only
+ * the cause's class and the wrapper's own message. Registered with `Symbol.for`
+ * so the runtime's `RequestBodyReadError` can set it without a `common` export;
+ * a name string would let any error named alike hide its real diagnostic
+ * (M131b audit F3).
+ */
+const REDACT_CAUSE = Symbol.for('setu.serialize.redact-cause');
+
+/** Whether an error carries the {@linkcode REDACT_CAUSE} brand; a throwing read is no brand. */
+function redactsCause(error: Error): boolean {
+  try {
+    return (
+      Object.hasOwn(error, REDACT_CAUSE) &&
+      (error as unknown as Record<symbol, unknown>)[REDACT_CAUSE] === true
+    );
+  } catch {
+    return false;
+  }
+}
+
 /** Serializes one `Error` after its guarded members have been read. */
 function serializeErrorInstance(
   error: Error,
@@ -228,10 +251,9 @@ function serializeErrorInstance(
     // class and the fixed wrapper detail (M131b's body-read disclosure contract).
     const serializedCause = serializeValue(cause, depth - 1, budget);
     if (serializedCause !== undefined) {
-      out.cause =
-        name === 'RequestBodyReadError'
-          ? { name: isError(cause) ? serializedCause.name : typeof cause, message: out.message }
-          : serializedCause;
+      out.cause = redactsCause(error)
+        ? { name: isError(cause) ? serializedCause.name : typeof cause, message: out.message }
+        : serializedCause;
     }
   }
   if (depth > 0 && errors !== undefined) {
