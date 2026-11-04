@@ -52,6 +52,6 @@ if (principal === null) {
 - `definePolicy` and `requirePolicy` evaluate policies; scoped guards use `scopedRbac`.
 - `signIn.mfa` and `signIn.passkeys` add factors; `createQuota` adds weighted budgets.
 - `signIn` with `providers: []` is password-only. A `signIn.sessionStamp` mismatch revokes the
-  session when its cookie is next presented; reader faults only suspend. Move stamps forward only:
-  restoring an old value revives unpresented sessions and copied cookie sessions. `fromHeaders` only
-  suspends.
+  session when the session strategy next checks its cookie (a valid bearer token wins first); reader
+  faults only suspend. Move stamps forward only: restoring an old value revives unpresented sessions
+  and copied cookie sessions. `fromHeaders` only suspends.

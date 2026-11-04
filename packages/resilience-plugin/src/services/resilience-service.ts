@@ -25,6 +25,24 @@ import { runWithTimeout } from '../patterns/timeout.ts';
  * The concrete resilience service registered under `CAPABILITIES.RESILIENCE`.
  * Internal to the plugin — not exported from `src/index.ts`.
  */
+/**
+ * Copies a retry policy, then validates the copy. The retry loop reads the
+ * policy on every call, so keeping the caller's object would let an edit made
+ * after `wrap` bypass the validation done here.
+ *
+ * @param policy - The caller's or the plugin's default retry policy
+ * @returns A validated, frozen copy
+ */
+function validatedRetryCopy(policy: RetryPolicy): RetryPolicy {
+  const copy: RetryPolicy = Object.freeze({
+    limit: policy.limit,
+    delay: policy.delay,
+    backoff: policy.backoff,
+  });
+  validateRetryPolicy(copy, 'resilience.wrap retry');
+  return copy;
+}
+
 export class ResilienceService implements IResilienceService {
   readonly #runtime: IRuntimeServices;
   readonly #options: ResiliencePluginOptions;
@@ -138,11 +156,9 @@ export class ResilienceService implements IResilienceService {
           'resilience.wrap: retry: true requires defaultRetry in ResiliencePlugin options',
         );
       }
-      validateRetryPolicy(this.#options.defaultRetry, 'resilience.wrap retry');
-      return this.#options.defaultRetry;
+      return validatedRetryCopy(this.#options.defaultRetry);
     }
-    validateRetryPolicy(value, 'resilience.wrap retry');
-    return value;
+    return validatedRetryCopy(value);
   }
 
   /** Resolves the effective bulkhead policy, or `undefined` for none. */

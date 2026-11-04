@@ -235,6 +235,30 @@ describe('M131b 3.12 retry validation', () => {
   }
 });
 
+it('M131b review: an edit to the policy after wrap does not reach the call', async () => {
+  const { ResilienceService } = await import('../../src/services/resilience-service.ts');
+  const runtime = new FakeRuntime();
+  for (const fromDefault of [false, true]) {
+    const policy = { limit: 2, delay: 0, backoff: 'fixed' as const };
+    const service = new ResilienceService(
+      runtime,
+      fromDefault ? { defaultRetry: policy } : undefined,
+    );
+    let calls = 0;
+    const call = service.wrap(
+      () => {
+        calls += 1;
+        return calls < 2 ? Promise.reject(new Error('transient')) : Promise.resolve('ok');
+      },
+      { retry: fromDefault ? true : policy },
+    );
+    // Neither edit passes validation; the wrapped call keeps the validated copy.
+    (policy as { limit: number }).limit = 0;
+    await expect(call()).resolves.toBe('ok');
+    expect(calls).toBe(2);
+  }
+});
+
 describe('M131b audit F4: timer-bounded delays', () => {
   it('accepts the longest delay a timer honours', async () => {
     const { validateRetryPolicy } = await import('../../src/patterns/retry.ts');

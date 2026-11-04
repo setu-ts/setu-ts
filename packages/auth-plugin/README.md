@@ -833,7 +833,9 @@ records a SHA-256 digest of the stamp; every request compares the digest of the 
 it, in constant time. Change the stamp and every session of that user answers anonymous on its next
 request — `ctx.request.user` is unset, and passkey registration refuses it. A definite mismatch
 removes the auth record and regenerates the writable HTTP session when the old cookie is next
-presented, even if that request throws; the store strategy deletes the old session id then, so a
+presented on a request the session strategy authenticates, even if that request throws (strategies
+answer first-match, so a request that also carries a valid bearer token is authenticated by the JWT
+strategy and leaves the cookie unchecked); the store strategy deletes the old session id then, so a
 later stamp restore cannot revive it. When that request completes normally, the browser also
 receives a replacement cookie without its auth record; a request that throws sends none. Revocation
 needs that presentation: an id never presented while the stamp differed, and any copy of an
