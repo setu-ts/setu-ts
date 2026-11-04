@@ -719,7 +719,7 @@ here.
   conditional writes, and the fault group: X94-1, X94-2, V11-5, X94-3) — complete (PR #540).
 - **Milestone 132** (`auth-plugin` + `common` + `openapi-plugin` — resource-server authentication:
   OAuth scopes and `requireScopes`, Bearer challenges, RFC 9728 metadata, audience lists, opt-in
-  `at+jwt`, the `act` actor with `requireAuth({ delegation })`; ships in `0.13.0`) — complete (PR
+  `at+jwt`, the `act` actor with `requireAuth({ delegation })`; ships in `0.12.0`) — complete (PR
   #541).
 - **Milestone 133** (`mcp-plugin` (new) + `common` + `kernel` + `decorator-plugin` +
   `idempotency-plugin` + `cli` — routes as MCP tools: `mcpTool()`/`@McpTool()` markers, a stateless

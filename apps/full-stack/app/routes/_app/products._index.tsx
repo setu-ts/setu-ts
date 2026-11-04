@@ -1,23 +1,29 @@
 import { useLoaderData } from 'react-router';
+import { getService } from '@setu-ts/react-router-plugin';
 
 import type { AppLoadContext } from '~/lib/load-context.ts';
-import { buildProductsView } from '~/features/products/products.server.ts';
-import { formatPrice } from '~/models/product.ts';
+import type { Product } from '~kernel/modules/products/products.types.ts';
+import { PRODUCTS } from '~kernel/modules/products/products.token.ts';
 
 /**
  * Loads the view on the server.
  *
- * The request context carries the framework services `setu.config.ts` put
- * there, so the logger and database are reachable without a module-level
- * singleton or a second DI container — and without importing a framework
- * package into a module that also ships to the browser.
+ * getService binds the products module to the current kernel request, so the
+ * loader uses the same business logic as GET /api/products. Only the module's
+ * token is imported by value; its implementation stays under src/.
  *
  * Everything rendered below came out of the database capability. That is the
  * point of this example, and `smoke.ts` asserts it by seeding a row and then
  * looking for it in this page's HTML.
  */
 export async function loader({ context }: { context: AppLoadContext }) {
-  return await buildProductsView(context);
+  const products = await getService(context, PRODUCTS).list();
+  return { products, total: products.length };
+}
+
+/** Formats a price in minor units for display. */
+function formatPrice(product: Product): string {
+  return `$${(product.priceCents / 100).toFixed(2)}`;
 }
 
 export default function ProductsRoute() {

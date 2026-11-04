@@ -1,3 +1,4 @@
+import type { IServiceRegistry } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IRouterApi, ISseService } from '@setu-ts/common';
 
@@ -10,7 +11,8 @@ export const NEWS_CHANNEL = 'news';
  * A message published on any replica reaches subscribers on every replica,
  * because the channel publishes through the realtime backplane.
  */
-export function registerNewsRoutes(router: IRouterApi): void {
+export function registerNewsRoutes(router: IRouterApi, services?: IServiceRegistry): void {
+  void services;
   router.get('/events', (ctx) => {
     const sse = ctx.services.get<ISseService>(CAPABILITIES.SSE);
     const connection = sse.open(ctx);

@@ -1084,7 +1084,7 @@ export function renderAppsTsconfig(): string {
   );
 }
 
-/** Generated per-app roots; full-stack replaces paths to add its React route alias. */
+/** Generated per-app roots; full-stack replaces paths to add its page and kernel aliases. */
 export function renderAppTsconfig(app: string): string {
   return (
     JSON.stringify(
@@ -1094,7 +1094,11 @@ export function renderAppTsconfig(app: string): string {
           ? {
               compilerOptions: {
                 jsx: 'react-jsx',
-                paths: { ...sourcePaths('../../'), '~/*': ['./app/*'] },
+                paths: {
+                  ...sourcePaths('../../'),
+                  '~/*': ['./app/*'],
+                  '~kernel/*': ['./src/*'],
+                },
               },
             }
           : {}),

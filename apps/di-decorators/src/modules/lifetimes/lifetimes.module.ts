@@ -1,6 +1,7 @@
 import { Module } from '@setu-ts/decorator-plugin';
 import { LifetimesController } from './lifetimes.controller.ts';
-import { ScopedReportService, SingletonReportService } from './lifetimes.services.ts';
+import { ScopedReportService } from './scoped-report.service.ts';
+import { SingletonReportService } from './singleton-report.service.ts';
 
 /**
  * Demonstrates singleton and lazily created HTTP request lifetimes.

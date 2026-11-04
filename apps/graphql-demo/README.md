@@ -76,5 +76,10 @@ scripts; the root formatter and linter also cover it. The interop suite remains 
 check: run `pnpm --dir apps/graphql-demo run interop` when changing the GraphQL transports. Release
 scripts publish framework packages, not this app.
 
+`src/modules/index.ts` and `src/modules/books/index.ts` are CLI-owned module indexes, called through
+`registerModules(app.router, app.services)`. The CLI has no GraphQL-resolver schematic:
+`books.schema.ts` and `books.resolvers.ts` remain application-owned, and `setu.config.ts` supplies
+them to `GraphqlPlugin`. The module registrar has no HTTP controllers.
+
 Read the [example deep dive](../../docs/examples.md#graphql-demo) for the concept and source
 walkthrough.

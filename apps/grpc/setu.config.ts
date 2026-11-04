@@ -4,6 +4,8 @@ import type { IKernelApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { connectModule, echoServiceRegistration } from './src/modules/echo/echo.service.ts';
 
+import { registerModules } from './src/modules/index.ts';
+
 /** Builds an application serving gRPC-family RPC and ordinary HTTP on one port, without starting it. */
 export function createApp(): IKernelApplication {
   const app = createApplication({
@@ -13,5 +15,6 @@ export function createApp(): IKernelApplication {
   // An ordinary HTTP route beside the RPC procedures.
   app.router.get('/health', (ctx) => ctx.response.json({ status: 'ok' }));
 
+  registerModules(app.router, app.services);
   return app;
 }

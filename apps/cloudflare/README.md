@@ -20,5 +20,11 @@ Create a local KV namespace and replace the placeholder id before using this in 
 smoke task starts local Wrangler, reads and writes KV, and invokes the scheduled handler; it skips
 only when Wrangler is unavailable.
 
+`src/plugins/index.ts` is CLI-owned and registers both custom plugins through `GENERATED_PLUGINS`.
+Before startup, `setu.config.ts` registers the invocation environment under `WORKER_ENV`; the
+zero-argument `CloudflareRuntimePlugin` resolves it from that application registry.
+`src/modules/index.ts` and each feature index are also CLI-owned, activated with
+`registerModules(app.router, app.services)`.
+
 Read the [example deep dive](../../docs/examples.md#cloudflare) for the concept and source
 walkthrough.
