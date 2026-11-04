@@ -51,8 +51,6 @@ if (principal === null) {
 - `requireScopes` (ALL-of OAuth scopes) and `resourceServer` (RFC 9728) serve token APIs.
 - `definePolicy` and `requirePolicy` evaluate policies; scoped guards use `scopedRbac`.
 - `signIn.mfa` and `signIn.passkeys` add factors; `createQuota` adds weighted budgets.
-- `signIn` with `providers: []` is password-only. A `signIn.sessionStamp` mismatch deletes the HTTP
-  auth record and regenerates the session when the old cookie is next presented; reader faults
-  suspend without mutation. Stamps must only move forward: restoring an old value revives sessions
-  not yet presented and copied encrypted-cookie sessions. Read-only `fromHeaders` callers remain
-  suspension-only.
+- `signIn` with `providers: []` is password-only. A `signIn.sessionStamp` mismatch revokes the
+  session when its cookie is next presented; reader faults only suspend. Move stamps forward only:
+  restoring an old value revives sessions not yet presented.
