@@ -10,6 +10,7 @@ import {
 } from '../seams/modules.ts';
 import { moduleService, moduleRoutes, moduleSchemas, moduleController } from './module-files.ts';
 import { renderModuleTest, renderModuleE2e, renderTestServer } from './test-harness.ts';
+import { generateFullStackModule } from './module-full-stack.ts';
 
 function classModule(names: DerivedNames): string {
   return `import { Module } from '@setu-ts/decorator-plugin';
@@ -41,8 +42,16 @@ export function generateModule(
   names: DerivedNames,
   options: ModuleOptions,
 ): readonly GeneratedFile[] {
-  const dir = `${MODULES_DIR}/${names.kebab}`;
   const classBased = generatorMode(options.plugins) === 'class-based';
+  // M130 §3.6: a full-stack (functional-only) project gets the request-bound
+  // module shape behind /api/<name>, and `--page` adds its React Router page.
+  if (options.plugins.has('react-router-plugin') && !classBased)
+    return generateFullStackModule(names, {
+      runtime: options.runtime,
+      ...(options.modules === undefined ? {} : { modules: options.modules }),
+      ...(options.page === undefined ? {} : { page: options.page }),
+    });
+  const dir = `${MODULES_DIR}/${names.kebab}`;
   const validation = options.plugins.has('validation-plugin');
   const exceptions = options.plugins.has('exceptions');
   const files: GeneratedFile[] = [

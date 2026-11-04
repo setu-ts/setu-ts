@@ -93,6 +93,35 @@ export async function loader({ context }: { context: RouterLoadContext }) {
 
 Override it with `populateLoadContext` to add your own keys.
 
+`servicesContext` suits plain registered services, as above. For a module's request-bound service
+use `getService` below: the registry holds such a service as its `requestService` wrapper, so
+`services.get(TOKEN)` returns the wrapper rather than the service.
+
+### `getService` — a request-bound kernel service in one line
+
+Since 0.12.0 the context also carries a resolver bound to the current request (never the kernel
+request context itself). `getService(context, token)` resolves through `resolveRequestService` from
+`@setu-ts/common`, so a module's request-bound service is built once per request and the page and a
+kernel `/api` route resolving the same token in that request share one instance:
+
+```typescript
+import { serviceToken } from '@setu-ts/common';
+import { getService, type RouterLoadContext } from '@setu-ts/react-router-plugin';
+
+interface ProductsService {
+  list(): Promise<readonly { name: string }[]>;
+}
+// In a scaffolded project this lives in src/modules/products/products.token.ts.
+const PRODUCTS = serviceToken<ProductsService>('module.products');
+
+export async function loader({ context }: { context: RouterLoadContext }) {
+  return { products: await getService(context, PRODUCTS).list() };
+}
+```
+
+It throws `ServiceResolverUnavailableError` outside a request this plugin served. In a page test,
+set `serviceResolverContext` on the `RouterContextProvider` to a fake `ServiceResolver`.
+
 ### Declaring your own context keys — always with `contextKeyFor`
 
 A hand-written `{ defaultValue }` literal type-checks and then **silently returns its default**:
@@ -103,7 +132,7 @@ with no error anywhere. Construct every key through [`contextKeyFor`](#full-api)
 name so both copies share one object:
 
 ```typescript
-// app/lib/context-keys.server.ts
+// app/server/context-keys.server.ts
 import { contextKeyFor } from '@setu-ts/react-router-plugin';
 import type { ISession } from '@setu-ts/common';
 
@@ -141,38 +170,42 @@ stateless.
 
 ## Exports
 
-| Export                     | Kind      |
-| -------------------------- | --------- |
-| `assembleHandler`          | function  |
-| `assertSsrRuntime`         | function  |
-| `bridgeRequestToRR`        | function  |
-| `contextKeyFor`            | function  |
-| `createLoadContextFactory` | function  |
-| `createPublicFileHandler`  | function  |
-| `createStaticAssetHandler` | function  |
-| `loadRequestHandler`       | function  |
-| `ReactRouterPlugin`        | function  |
-| `viteDevExternals`         | function  |
-| `SsrService`               | class     |
-| `CAPABILITIES`             | const     |
-| `servicesContext`          | const     |
-| `userContext`              | const     |
-| `HandlerResult`            | interface |
-| `IFileSystem`              | interface |
-| `IRequestContext`          | interface |
-| `ISsrService`              | interface |
-| `RouterContextKey`         | interface |
-| `RouterLoadContext`        | interface |
-| `SsrRuntime`               | interface |
-| `ViteDevExternalId`        | interface |
-| `ViteDevExternalsOptions`  | interface |
-| `ViteDevExternalsPlugin`   | interface |
-| `ViteHookContext`          | interface |
-| `ViteResolvedEnvironments` | interface |
-| `PopulateLoadContext`      | type      |
-| `ReactRouterPluginOptions` | type      |
-| `RouteHandler`             | type      |
-| `SsrRequestHandler`        | type      |
+| Export                            | Kind      |
+| --------------------------------- | --------- |
+| `assembleHandler`                 | function  |
+| `assertSsrRuntime`                | function  |
+| `bridgeRequestToRR`               | function  |
+| `contextKeyFor`                   | function  |
+| `createLoadContextFactory`        | function  |
+| `createPublicFileHandler`         | function  |
+| `createStaticAssetHandler`        | function  |
+| `getService`                      | function  |
+| `loadRequestHandler`              | function  |
+| `ReactRouterPlugin`               | function  |
+| `viteDevExternals`                | function  |
+| `ServiceResolverUnavailableError` | class     |
+| `SsrService`                      | class     |
+| `CAPABILITIES`                    | const     |
+| `serviceResolverContext`          | const     |
+| `servicesContext`                 | const     |
+| `userContext`                     | const     |
+| `HandlerResult`                   | interface |
+| `IFileSystem`                     | interface |
+| `IRequestContext`                 | interface |
+| `ISsrService`                     | interface |
+| `RouterContextKey`                | interface |
+| `RouterLoadContext`               | interface |
+| `SsrRuntime`                      | interface |
+| `ViteDevExternalId`               | interface |
+| `ViteDevExternalsOptions`         | interface |
+| `ViteDevExternalsPlugin`          | interface |
+| `ViteHookContext`                 | interface |
+| `ViteResolvedEnvironments`        | interface |
+| `PopulateLoadContext`             | type      |
+| `ReactRouterPluginOptions`        | type      |
+| `RouteHandler`                    | type      |
+| `ServiceResolver`                 | type      |
+| `SsrRequestHandler`               | type      |
 
 Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.

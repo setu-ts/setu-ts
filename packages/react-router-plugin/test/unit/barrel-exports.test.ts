@@ -113,3 +113,16 @@ describe('barrel exports', () => {
     expect(_opt.serverBuildPath).toBe('./build/server');
   });
 });
+
+describe('getService exports (M130)', () => {
+  it('exports getService, its key, error and resolver type', async () => {
+    const barrel = await import('../../src/index.ts');
+    const resolver: import('../../src/index.ts').ServiceResolver = <T>() => ({ ok: true }) as T;
+    expect(typeof barrel.getService).toBe('function');
+    expect(barrel.serviceResolverContext.defaultValue).toBe(null);
+    expect(new barrel.ServiceResolverUnavailableError().name).toBe(
+      'ServiceResolverUnavailableError',
+    );
+    expect(resolver('module.x')).toEqual({ ok: true });
+  });
+});

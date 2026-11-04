@@ -113,9 +113,12 @@ the `wrangler.toml` stanzas both need. Service discovery is not part of it: the 
 
 The only template that composes through a starter rather than inline wiring — its plugin set is
 twenty-two, and a generated file a human is meant to edit should not open with twenty-two imports
-they did not choose. It emits an `app/` tree with the `routes -> features -> services -> models`
-layering, `flatRoutes` `_app`/`_auth` layout groups, the `~/*` alias and the `.server.ts`
-convention, plus the Vite build files.
+they did not choose. Business logic lives in kernel modules under `src/modules/<name>/` (the
+service, its token, its `/api/<name>` routes; `src/modules/products/` is the example), and pages
+live in `app/`: `routes/`, `components/`, client-safe `lib/` and server-only `server/`. A loader
+reaches a module's service with `getService(context, TOKEN)`. It also emits `flatRoutes`
+`_app`/`_auth` layout groups, the `~/*` and `~kernel/*` aliases and the `.server.ts` convention,
+plus the Vite build files.
 
 It deliberately emits **no** `lib/session.server.ts`, `lib/csrf.server.ts`, `lib/sse.server.ts`,
 `lib/kv.server.ts` or `lib/service-logger.server.ts` — those are the session, SSE, secrets and
@@ -129,8 +132,8 @@ way to tell apart. `setu generate middleware` writes **kernel** middleware, whic
 request the application serves — health probes and API routes as well as SSR pages. React Router's
 own route `middleware` export runs only for the SSR routes it is attached to and reads React
 Router's context. The scaffold ships a worked example of the second:
-`app/middleware/require-user.server.ts` redirects a visitor who is not signed in to `/login` and
-puts the signed-in user on the context for the loader, and `/products` attaches it. The generated
+`app/server/require-user.server.ts` redirects a visitor who is not signed in to `/login` and puts
+the signed-in user on the context for the loader, and `/products` attaches it. The generated
 `README.md` carries a table comparing the two, and a kernel middleware generated into a project that
 installs `react-router-plugin` points at the route-level alternative in its own JSDoc.
 
@@ -534,6 +537,14 @@ left alone, with the lines to change printed. From then on `controller`, `route`
 `sse` require `--module <name>`, and `setu add view` does too; a flat project refuses `--module`.
 `setu check` reports controllers or services left outside modules (`setu.E014`) and imports in
 CLI-written files that no longer resolve (`setu.E015`).
+
+In a full-stack project, which is modular from the start, `setu g module <name>` writes a
+request-bound module instead: `<name>.token.ts`, a service factory taking the request context,
+`/api/<name>` routes and tests that sign a session and send its CSRF token. `--page` also writes a
+guarded page, `app/routes/_app/<name>._index.tsx`, whose loader reads the service with `getService`.
+Pages may import kernel code only as `import type` or from a `*.token.ts` module; `setu check`
+refuses any other value import (`setu.E017`) and a page it cannot parse (`setu.E018`). It reads only
+a page's own imports, not re-exports in files outside `app/`.
 
 A module holds `<name>.controller.ts` (`GET /<name>`, `GET /<name>/:id`, `POST /<name>`,
 `PATCH /<name>/:id`), `<name>.service.ts` (an in-memory `Map` the JSDoc says to replace with a

@@ -40,6 +40,25 @@ All notable changes to this project are documented here. The format follows
   value. `setu add mcp` installs the optional `@modelcontextprotocol/server@^2.4.0` peer. Existing
   applications need no changes; see `docs/upgrading.md` for opt-in tool safety and replay behavior.
 
+- **Full-stack kernel modules and `getService` (M130, #551, `@setu-ts/cli`, `@setu-ts/common`,
+  `@setu-ts/react-router-plugin`, `@setu-ts/full-stack-starter`).** Common adds `serviceToken`,
+  `ServiceToken`, `requestService`, `RequestBoundService`, `resolveRequestService` and
+  `RequestServiceUnavailableError`: a request-bound service is built once per request and token from
+  the kernel request context and shared by every caller in that request. The React Router plugin
+  adds `getService(context, token)`, `serviceResolverContext`, `ServiceResolver` and
+  `ServiceResolverUnavailableError`; the load context holds a resolver closure, never the kernel
+  request context. The full-stack template now keeps business logic in `src/modules/<name>/` (the
+  `products` module, its `/api/products` routes and a request-bound service) and pages in `app/`
+  (`routes`, `components`, `lib`, server-only `server`), reached through the `~kernel/*` alias.
+  `setu g module` in a full-stack project writes a token, a request-bound service, `/api/<name>`
+  routes and tests that sign a session and send its CSRF token; `--page` adds a guarded page and is
+  refused where a page already exists. `setu check` refuses a value import of kernel code from
+  `app/` (`setu.E017`) and reports a page it cannot parse or read safely, including one a symlink
+  places outside `app/` (`setu.E018`). The generated `entry.server.tsx` exports `handleError`, which
+  ignores aborted requests and 404s and logs other errors once through the logger. The full-stack
+  starter keeps page, asset and Vite proxy routes out of OpenAPI, merged with the application's
+  lists. The template pins `lucide-react` 1.67.0, binds the Vite HMR socket to `VITE_PORT` on every
+  runtime, and emits the Cloudflare Workers README section only for Workers.
 - **A registry of real tenants (M127, #548, `@setu-ts/multi-tenancy-plugin`, `@setu-ts/common`,
   `@setu-ts/database-plugin`).** `MultiTenancyPlugin` takes `tenants` — a list, an `ITenantRegistry`
   (new in `common`) or a `RegistryFactory` — and checks every resolved id before the request carries
@@ -209,6 +228,16 @@ All notable changes to this project are documented here. The format follows
   `RedisRateLimitStore` re-arms a key it finds without an expiry instead of answering 429 for ever.
 
 ### Fixed
+
+- **The error handler masks URL credentials in what it logs and serves (M130 audit, #551,
+  `@setu-ts/exceptions`).** `errorHandler` logged an error's message unmasked, so a driver error
+  such as `connect failed: postgres://u:pw@db/x` put the password in the log line while the same
+  record's cause was masked by the logger's redaction. The message, and the serialized cause, now
+  pass through `maskUrlUserinfo` before they reach the logger, and the runtime error sink used when
+  no logger is registered masks the message, stack and cause the same way. The response body is
+  masked too: a thrown `HttpError`'s served message, details and stack (under `includeStackTrace`),
+  4xx and 5xx alike, a custom formatter's output, and `respondWithError` bodies now serve
+  `postgres://***@db/x`, keeping the host. A `respond` hook's own result is not masked.
 
 - **Swagger UI after `setu add openapi` (M129, #547, `@setu-ts/cli`).** Node, Deno and Bun now
   install the exact `swagger-ui-dist` release that the Swagger UI integrity hashes match; without

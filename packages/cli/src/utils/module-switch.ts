@@ -25,7 +25,23 @@ import type { IFileSystem } from '@setu-ts/common';
 import { maskComments, referencesIdentifier } from '../devtool/sources.ts';
 import { readBarrel } from '../diagnostics/barrel-drift.ts';
 import { controllerClassSymbol, FUNCTION_CONTROLLER_ARTIFACTS } from '../seams/http.ts';
-import { renderClassModuleIndex, renderFunctionalModuleIndex } from '../seams/modules.ts';
+import {
+  MODULE_SERVICE_ARTIFACTS,
+  renderClassModuleIndex,
+  renderFunctionalModuleIndex,
+} from '../seams/modules.ts';
+
+/**
+ * Whether a rendered module index registers the module's own request-bound
+ * service, so a re-render keeps it.
+ *
+ * @param source - The index the schematic rendered
+ * @param token - The module's token symbol
+ * @returns True when the index registers that token
+ */
+function registersService(source: string, token: string): boolean {
+  return source.includes(`services.register(${token}, requestService(`);
+}
 import { seamNames, type SeamArtifacts } from '../seams/seam-spec.ts';
 import { walkProjectFiles } from '../workspace/adopt.ts';
 import { artifactNames, normalizeRelative } from './artifact-path.ts';
@@ -440,6 +456,11 @@ function adoptedRegistration(
           input.mode === 'functional'
             ? renderFunctionalModuleIndex(names, {
                 controller: [input.module, ...controllers],
+                // Keep the module's request-bound service (M130 §3.4): the
+                // switch must not erase a registration the schematic rendered.
+                ...(registersService(file.contents, names.screaming)
+                  ? { [MODULE_SERVICE_ARTIFACTS]: [input.module] }
+                  : {}),
               })
             : renderClassModuleIndex(names, {
                 controller: [input.module, ...controllers],

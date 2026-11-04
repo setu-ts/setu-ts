@@ -61,6 +61,8 @@ describe('exceptions barrel exports', () => {
       // implementation detail of both; a package that needs the behaviour
       // reaches `respondWithError` or brands with `withHttpStatusHint`.
       'buildErrorFromInit',
+      // Both serving paths share this final masking step; it is internal.
+      'maskUrlUserinfoDeep',
     ] as const;
 
     for (const name of internal) {

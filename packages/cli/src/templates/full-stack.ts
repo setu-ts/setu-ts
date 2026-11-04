@@ -23,6 +23,8 @@ import {
 import { renderConfigOptions } from './env-file.ts';
 import { FULL_STACK_UI_FILES } from './full-stack-ui-files.ts';
 import { FULL_STACK_APP_FILES, FULL_STACK_README_SECTION } from './full-stack-app-files.ts';
+import { fullStackModuleFiles } from './full-stack-module-files.ts';
+import { REGISTER_MODULES_EXPORT } from '../seams/modules.ts';
 import { TEST_DEPENDENCY_MANIFEST } from './test-deps.ts';
 import {
   buildFullStackBuildFiles,
@@ -142,15 +144,13 @@ function fullStackArgs(context: AppFactoryRenderContext): string {
           // the absolute path fallback; development supplies the Vite runtime.
           ${reactRouterArm}
           populateLoadContext: (ctx, context) => {
-            // The bridge between the kernel request context and a React Router
-            // loader: getSession() needs the kernel context, which a loader never
-            // sees. The keys come from contextKeyFor(), so the copy of
-            // context-keys.server.ts inlined into the server build resolves to the
-            // same key objects this module holds.
+            // The values a page reads that are not services. Services — a
+            // module's, or the logger — come through getService(context, TOKEN),
+            // which the plugin binds to this request. The keys come from
+            // contextKeyFor(), so the copy of context-keys.server.ts inlined into
+            // the server build resolves to the same key objects this module holds.
             context.set(sessionContext, getSession(ctx));
             context.set(csrfContext, getCsrfToken(ctx));
-            context.set(loggerContext, ctx.services.get<ILogger>(CAPABILITIES.LOGGER));
-            context.set(secretsContext, ctx.services.get<ISecretManager>(CAPABILITIES.SECRETS));
           },
         },
         session: {
@@ -186,11 +186,14 @@ function fullStackArgs(context: AppFactoryRenderContext): string {
  * winning.
  */
 const FULL_STACK_LOCAL_IMPORTS: readonly LocalImport[] = [
-  {
-    symbols: ['csrfContext', 'loggerContext', 'secretsContext', 'sessionContext'],
-    from: './app/lib/context-keys.server.ts',
-  },
+  { symbols: ['csrfContext', 'sessionContext'], from: './app/server/context-keys.server.ts' },
+  // Modular from the start (M130 §3.4): the template ships src/modules/, and
+  // `setu g module` adds to the barrel this import reads.
+  { symbols: [REGISTER_MODULES_EXPORT], from: './src/modules/index.ts' },
 ];
+
+/** The statement that registers every module's routes and request-bound service. */
+const FULL_STACK_MODULE_SETUP = `${REGISTER_MODULES_EXPORT}(app.router, app.services);`;
 
 /**
  * The seams a full-stack project hosts.
@@ -206,7 +209,12 @@ const FULL_STACK_LOCAL_IMPORTS: readonly LocalImport[] = [
  * — `seamsFor` filters them — so what remains is exactly the set a
  * starter-composed project can consume.
  */
-const FULL_STACK_SEAMS = seamsFor(new Set<string>());
+// The controller family is dropped: a full-stack project is modular from the
+// start, and a flat `src/controllers/` barrel beside `src/modules/` would be the
+// "mixed" layout every generator refuses (M130 §3.4).
+const FULL_STACK_SEAMS = seamsFor(new Set<string>()).filter(
+  (spec) => spec.schematic !== 'controller',
+);
 
 /**
  * The `full-stack` template definition.
@@ -239,6 +247,7 @@ export const FULL_STACK_TEMPLATE: TemplateDefinition = {
     { path: '/', purpose: 'the home page, server-rendered by React Router' },
     { path: '/products', purpose: 'a page behind sign-in; it redirects to `/login`' },
     { path: '/login', purpose: 'the sign-in form' },
+    { path: '/api/products', purpose: 'the products module API, the same service the page reads' },
   ],
   packageImports: [
     // The annotation that restores excess-property checking on the resolver
@@ -247,14 +256,17 @@ export const FULL_STACK_TEMPLATE: TemplateDefinition = {
     { pkg: 'full-stack-starter', symbols: ['type FullStackStarterOptions'] },
     // The load-context bridge in the generated setu.config.ts.
     { pkg: 'session-plugin', symbols: ['getCsrfToken', 'getSession'] },
-    // The capability tokens and service types the bridge resolves.
-    { pkg: 'common', symbols: ['CAPABILITIES', 'type ILogger', 'type ISecretManager'] },
-    // Imported by app/lib/context-keys.server.ts for contextKeyFor(), so the
+    // Imported by the products module (serviceToken, requestService,
+    // resolveRequestService) and by app/entry.server.tsx; setu.config.ts names
+    // no common symbol beyond IPlugin.
+    { pkg: 'common' },
+    // Imported by app/server/context-keys.server.ts for contextKeyFor(), so the
     // manifest must carry it even though setu.config.ts names no symbol.
     { pkg: 'react-router-plugin', symbols: ['type ReactRouterPluginOptions'] },
   ],
   files: [
     ...FULL_STACK_APP_FILES,
+    ...fullStackModuleFiles(),
     ...FULL_STACK_UI_FILES,
     ...buildFullStackBuildFiles(FULL_STACK_APP_FRAMEWORK_PACKAGES),
     ...seamFiles(FULL_STACK_SEAMS),
@@ -262,11 +274,15 @@ export const FULL_STACK_TEMPLATE: TemplateDefinition = {
   localImports: [...FULL_STACK_LOCAL_IMPORTS, ...seamLocalImports(FULL_STACK_SEAMS)],
   // Statements rather than plugin-array entries: this host composes through a
   // starter, so `plugins` must stay empty and there is nothing to spread into.
-  setupCalls: [...seamSetupCalls(FULL_STACK_SEAMS), ...seamPluginRegistrations(FULL_STACK_SEAMS)],
+  setupCalls: [
+    FULL_STACK_MODULE_SETUP,
+    ...seamSetupCalls(FULL_STACK_SEAMS),
+    ...seamPluginRegistrations(FULL_STACK_SEAMS),
+  ],
   extraTasks: FULL_STACK_CHECK_TASK,
   manifest: {
-    readmeSection: (cli) =>
-      FULL_STACK_README_SECTION(cli) +
+    readmeSection: (cli, runtime) =>
+      FULL_STACK_README_SECTION(cli, runtime) +
       `
 ## Behind a TLS proxy
 

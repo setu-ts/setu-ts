@@ -2058,7 +2058,7 @@ ${
 ${cliInvocation(runtime)} generate service billing
 ${cliInvocation(runtime)} generate --help
 \`\`\`
-${manifest?.readmeSection === undefined ? '' : `\n${typeof manifest.readmeSection === 'string' ? manifest.readmeSection : manifest.readmeSection(cliInvocation(runtime))}`}${
+${manifest?.readmeSection === undefined ? '' : `\n${typeof manifest.readmeSection === 'string' ? manifest.readmeSection : manifest.readmeSection(cliInvocation(runtime), runtime)}`}${
     runtime === 'cloudflare-workers'
       ? ''
       : `

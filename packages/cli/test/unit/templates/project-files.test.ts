@@ -41,18 +41,28 @@ describe('functional hosts and generated test tasks', () => {
   });
   for (const target of ['node', 'deno', 'bun', 'cloudflare-workers'] as const) {
     for (const name of ['minimal', 'rest', 'microservice', 'full-stack']) {
-      it(`starts flat and splits unit/e2e tasks for ${name} on ${target}`, () => {
+      it(`starts in its layout and splits unit/e2e tasks for ${name} on ${target}`, () => {
         const host = resolveHost(name === 'minimal' ? MINIMAL_HOST : getTemplate(name)!, target);
         const files = [...projectFiles('svc', target, host)];
         const config = contentsOf(files, 'setu.config.ts');
-        // A new project starts flat: the first `setu g module` writes the module
-        // barrel and switches these lines.
-        expect(config).toContain(
-          "import { registerGeneratedRoutes } from './src/controllers/index.ts'",
-        );
-        expect(config).toContain('registerGeneratedRoutes(app.router, app.services);');
-        expect(config).not.toContain('registerModules');
-        expect(files.some((file) => file.path === 'src/modules/index.ts')).toBe(false);
+        if (name === 'full-stack') {
+          // M130 §3.4: full-stack is modular from the start — its products
+          // service is a kernel module, so there is no flat controller home.
+          expect(config).toContain("import { registerModules } from './src/modules/index.ts'");
+          expect(config).toContain('registerModules(app.router, app.services);');
+          expect(config).not.toContain('registerGeneratedRoutes');
+          expect(files.some((file) => file.path === 'src/modules/index.ts')).toBe(true);
+          expect(files.some((file) => file.path === 'src/controllers/index.ts')).toBe(false);
+        } else {
+          // A new project starts flat: the first `setu g module` writes the module
+          // barrel and switches these lines.
+          expect(config).toContain(
+            "import { registerGeneratedRoutes } from './src/controllers/index.ts'",
+          );
+          expect(config).toContain('registerGeneratedRoutes(app.router, app.services);');
+          expect(config).not.toContain('registerModules');
+          expect(files.some((file) => file.path === 'src/modules/index.ts')).toBe(false);
+        }
         // V10-23: every target, Workers included, emits socket test support and
         // the app-level e2e smoke test. Workers boots the real Worker on workerd
         // through the same `startTestServer()`.
@@ -825,7 +835,13 @@ describe('the routes a generated README lists', () => {
     // The factory hides HealthPlugin, MetricsPlugin and OpenApiPlugin from the
     // wirings, so only its `composes` declaration can put them here.
     expect(resolveHost(getTemplate('full-stack')!, 'deno').plugins).toEqual([]);
-    expect(pathsOf('full-stack')).toEqual(['/', '/products', '/login', ...PLUGIN_PATHS]);
+    expect(pathsOf('full-stack')).toEqual([
+      '/',
+      '/products',
+      '/login',
+      '/api/products',
+      ...PLUGIN_PATHS,
+    ]);
   });
 
   it('keeps the list after a runtime swap', () => {

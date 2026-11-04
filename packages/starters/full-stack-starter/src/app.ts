@@ -24,6 +24,41 @@ import { ReactRouterPlugin } from '@setu-ts/react-router-plugin';
 import { StaticPlugin } from '@setu-ts/static-plugin';
 
 /**
+ * OpenApiPlugin's own default `excludeOwners`. Restated here because the
+ * starter must ADD to the defaults, and supplying any list replaces them; the
+ * integration test proves the composed list still keeps health and metrics
+ * routes out of the document.
+ */
+const OPENAPI_DEFAULT_EXCLUDED_OWNERS: readonly string[] = ['health-plugin', 'metrics-plugin'];
+
+/** Route owners a full-stack document never lists: page catch-all and assets. */
+const FULL_STACK_EXCLUDED_OWNERS: readonly string[] = ['react-router-plugin'];
+
+/** Exact paths a full-stack document never lists: the generated `dev.ts` Vite proxy. */
+const FULL_STACK_EXCLUDED_PATHS: readonly string[] = ['/__vite/*'];
+
+/**
+ * Adds the full-stack OpenAPI exclusions (M130 §3.9) to the application's own:
+ * the React Router plugin's page and asset routes, and the dev-only Vite proxy.
+ * Application lists are merged, never replaced; an application that omits
+ * `excludeOwners` keeps OpenApiPlugin's defaults.
+ *
+ * @internal
+ * @param openapi - The application's OpenAPI options, if any.
+ * @returns The options handed to the REST tier's OpenApiPlugin.
+ */
+export function fullStackOpenApiOptions(
+  openapi: FullStackStarterOptions['openapi'],
+): NonNullable<FullStackStarterOptions['openapi']> {
+  const owners = new Set([
+    ...(openapi?.excludeOwners ?? OPENAPI_DEFAULT_EXCLUDED_OWNERS),
+    ...FULL_STACK_EXCLUDED_OWNERS,
+  ]);
+  const paths = new Set([...(openapi?.exclude ?? []), ...FULL_STACK_EXCLUDED_PATHS]);
+  return { ...openapi, excludeOwners: [...owners], exclude: [...paths] };
+}
+
+/**
  * Builds the canonical full-stack plugin set. Composes from {@linkcode buildMicroservicePlugins}
  * and appends the full-stack plugins (cache, events, cqrs, scheduler, audit, secrets, storage, mail).
  * On Cloudflare Workers the scheduler is left out unless `options.scheduler` is given (see
@@ -61,7 +96,7 @@ export function composeFullStackPlugins(
       : [SchedulerPlugin(options.scheduler)];
   // Start with the microservice base set
   const plugins: IPlugin[] = [
-    ...buildMicroservicePlugins(options),
+    ...buildMicroservicePlugins({ ...options, openapi: fullStackOpenApiOptions(options.openapi) }),
     // Full-stack always-on additions (all have sensible defaults)
     CachePlugin(options.cache),
     EventsPlugin(options.events),

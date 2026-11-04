@@ -953,6 +953,15 @@ describe('scoped RBAC exports (M110b)', () => {
   });
 });
 
+it('exports the request-bound service helpers (M130)', () => {
+  const token: common.ServiceToken<{ n: number }> = common.serviceToken('module.n');
+  const entry: common.RequestBoundService<{ n: number }> = common.requestService(() => ({ n: 1 }));
+  expect(token).toBe('module.n');
+  expect(typeof entry.create).toBe('function');
+  expect(typeof common.resolveRequestService).toBe('function');
+  expect(new common.RequestServiceUnavailableError('module.n').token).toBe('module.n');
+});
+
 it('exports connection fault classification', () => {
   expect(common.isConnectionFault({ code: 'ECONNREFUSED' })).toBe(true);
   expect(typeof common.isConnectionFaultCode).toBe('function');

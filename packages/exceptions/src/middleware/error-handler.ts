@@ -32,6 +32,7 @@ import {
   CAPABILITIES,
   ERROR_RESPONDER_STATE_KEY,
   httpStatusHintOf,
+  maskUrlUserinfo,
   resolveResponseStatus,
   serializeError,
 } from '@setu-ts/common';
@@ -50,6 +51,7 @@ import {
 } from '../formatters/error-formatter.ts';
 import { rfc9457Formatter } from '../formatters/rfc9457-formatter.ts';
 import { rfc7807Formatter } from '../formatters/rfc7807-formatter.ts';
+import { maskUrlUserinfoDeep, stringifyMasked } from './mask-url-userinfo-deep.ts';
 
 /**
  * Options for the {@linkcode errorHandler} middleware factory.
@@ -60,6 +62,7 @@ export interface ErrorHandlerOptions {
   /**
    * The error body format: `'default'`, `'rfc9457'`, the deprecated
    * `'rfc7807'`, or a custom formatter function. Defaults to `'default'`.
+   * Custom formatter output has URL userinfo masked in string values too.
    */
   readonly format?: ErrorFormat | ErrorHandlerFormatter;
   /**
@@ -76,7 +79,9 @@ export interface ErrorHandlerOptions {
    * {@linkcode ErrorHandlerOptions.maskInternalErrors} carries **no** stack in
    * the body even when this option is `true`, because a stack begins with the
    * very message that was masked. Set `maskInternalErrors: false` to see the
-   * stack of an internal error.
+   * stack of an internal error. Served text is otherwise kept as written,
+   * except URL userinfo (`scheme://user:password@host`) is masked in every
+   * served string, including the stack; the host stays visible.
    */
   readonly includeStackTrace?: boolean;
   /**
@@ -85,13 +90,17 @@ export interface ErrorHandlerOptions {
    * response: its `detail`/`message` becomes the status title
    * (`'Internal Server Error'`) and the raw message — which for a failed
    * query carries the SQL and its bound parameter values — is dropped from the
-   * body. The log is unaffected: `logErrors` still records the unmasked error
-   * and its cause chain, so an operator loses nothing unless `logErrors` is
-   * _also_ `false`, the configuration that already logs nothing.
+   * body. The log keeps it: `logErrors` still records the error's own message
+   * and its cause chain (with only URL userinfo masked), so an operator loses
+   * nothing unless `logErrors` is _also_ `false`, the configuration that
+   * already logs nothing.
    *
-   * A deliberately thrown `HttpError` is never masked — `instanceof HttpError`
-   * is the line between "the developer wrote this for a caller" and "this
-   * escaped from a driver". `false` restores the previous behaviour verbatim.
+   * A deliberately thrown `HttpError` keeps its text as written —
+   * `instanceof HttpError` is the line between "the developer wrote this for
+   * a caller" and "this escaped from a driver". `false` also keeps
+   * internal-error text as written.
+   * In either case, URL userinfo (`scheme://user:password@host`) is masked in
+   * every served string, stack included; the host stays visible.
    */
   readonly maskInternalErrors?: boolean;
   /**
@@ -107,7 +116,8 @@ export interface ErrorHandlerOptions {
    * it may resolve that result asynchronously. Return or resolve to `undefined`
    * to fall through to the configured formatter unchanged.
    *
-   * The hook owns its returned response's status, headers, and body. It is
+   * The hook owns its returned response's status, headers, and body; that
+   * application-owned result is not masked. It is
    * called only for errors caught by this middleware, not responder-based
    * terminals such as an unmatched-path `404`.
    */
@@ -149,8 +159,9 @@ const PROBLEM_DETAILS_FORMATTERS: ReadonlySet<ErrorHandlerFormatter> = new Set([
  * 4. When configured, lets the application write its own response. A returned
  *    or resolved `HandlerResult` short-circuits formatting; `undefined` falls
  *    through.
- * 5. When `logErrors` is on and a logger is registered, the unmasked error is
- *    logged with the status the selected response serves.
+ * 5. When `logErrors` is on and a logger is registered, the error's own message
+ *    and cause (URL userinfo masked) are logged with the status the selected
+ *    response serves.
  * 6. Otherwise, formats the error via {@linkcode selectFormatter}, optionally
  *    enriches it with a `stack` trace, and sends it with the right status and
  *    content type. The middleware **returns a `HandlerResult`** (short-circuit)
@@ -209,8 +220,9 @@ export function errorHandler(options?: ErrorHandlerOptions): MiddlewareFunction 
 
       // Mask a driver-shaped 500 for the response: the raw message becomes the
       // status title so the body carries neither the statement nor the values.
-      // A deliberately thrown HttpError is never masked, and a 4xx is left
-      // alone — only a non-HttpError with status >= 500 is rewritten.
+      // Only a non-HttpError with status >= 500 is replaced by its title.
+      // HttpError and 4xx text stays as written, except URL userinfo is masked
+      // in every served string when the finished body is serialized below.
       //
       // A hinted error is exempt, and the exemption is narrow by construction
       // rather than by trust: what it serves is the hint's own `detail`, a
@@ -279,7 +291,8 @@ export function errorHandler(options?: ErrorHandlerOptions): MiddlewareFunction 
         return result;
       }
 
-      // Log the unmasked diagnostic and cause chain, with the status the
+      // Log the error's own message and cause chain (URL userinfo masked, the
+      // 500 title replacement not applied), with the status the
       // formatter below will actually serve. A hint may change a normalized
       // `500` to `501`, so logging the pre-hint status would mislead operators.
       if (logErrors) {
@@ -292,7 +305,7 @@ export function errorHandler(options?: ErrorHandlerOptions): MiddlewareFunction 
       // the SQL and its bound parameter values straight back into the body that
       // was just masked — defeating the mask through the one option documented
       // as unsafe in production. A masked error therefore carries no stack at
-      // all; the unmasked one is in the log, where `logErrors` already sent it.
+      // all; the error's own text is in the log, where `logErrors` already sent it.
       //
       // The condition is `responseError === error` rather than `!masked`
       // because a hinted response is the second case with the same property:
@@ -307,7 +320,7 @@ export function errorHandler(options?: ErrorHandlerOptions): MiddlewareFunction 
       // Serialize and send via `.send(bytes)` rather than `.json(body)` so
       // the content-type header we set is not overwritten by json()'s own
       // `application/json` default — RFC 9457 requires `application/problem+json`.
-      const bytes = new TextEncoder().encode(JSON.stringify(body));
+      const bytes = new TextEncoder().encode(stringifyMasked(body));
       return ctx.response
         .status(responseError.statusCode)
         .header('content-type', contentType)
@@ -329,15 +342,20 @@ export function errorHandler(options?: ErrorHandlerOptions): MiddlewareFunction 
  * no logger is registered. Handled 4xx without a logger stays silent.
  *
  * @param ctx - The request context
- * @param error - The error to log, carrying the unmasked message and cause
+ * @param error - The error to log; its message is logged with URL userinfo masked
  * @param statusCode - The status actually served, which a hint may have changed
  */
 function logError(ctx: IRequestContext, error: HttpError, statusCode: number): void {
+  // A driver error's message can carry a connection URL with its password
+  // (`postgres://u:pw@db`). The logger's redaction masks metadata, not the
+  // message, and the runtime sink has no redaction at all, so the message, the
+  // stack and the cause are masked here before they reach either sink.
+  const message = maskUrlUserinfo(error.message);
   if (!ctx.services.has(CAPABILITIES.LOGGER)) {
     if (statusCode >= 500 && ctx.services.has(CAPABILITIES.RUNTIME)) {
       ctx.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME).reportError?.({
         level: 'error',
-        ...serializeError(error),
+        ...maskUrlUserinfoDeep(serializeError(error)),
         statusCode,
         requestId: ctx.id,
         method: ctx.request.method,
@@ -349,9 +367,9 @@ function logError(ctx: IRequestContext, error: HttpError, statusCode: number): v
   const logger = ctx.services.get<ILogger>(CAPABILITIES.LOGGER);
   // Serialize the cause (X2-5): a raw `Error` in log metadata renders as `{}`
   // under `JSON.stringify` because `message`/`stack` are non-enumerable.
-  logger[statusCode < 500 ? 'warn' : 'error'](error.message, {
+  logger[statusCode < 500 ? 'warn' : 'error'](message, {
     statusCode,
     requestId: ctx.id,
-    ...(error.cause !== undefined && { cause: serializeError(error.cause) }),
+    ...(error.cause !== undefined && { cause: maskUrlUserinfoDeep(serializeError(error.cause)) }),
   });
 }

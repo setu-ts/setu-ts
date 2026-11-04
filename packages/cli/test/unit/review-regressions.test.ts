@@ -192,7 +192,7 @@ describe('M113i review regressions', () => {
     it(`pins generated middleware guidance for ${runtime}`, () => {
       const files = projectFiles('shop', runtime, resolveHost(getTemplate('full-stack')!, runtime));
       expect(
-        files.find((file) => file.path === 'app/middleware/require-user.server.ts')!.contents,
+        files.find((file) => file.path === 'app/server/require-user.server.ts')!.contents,
       ).toContain(`\`${invocation} generate middleware <name>\``);
     });
   }

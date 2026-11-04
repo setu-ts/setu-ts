@@ -217,7 +217,7 @@ import type { RouterLoadContext } from '@setu-ts/react-router-plugin';
 import type { ILocalizer } from '@setu-ts/common';
 import { localizerFor } from '@setu-ts/localization-plugin';
 
-// app/lib/context-keys.server.ts
+// app/server/context-keys.server.ts
 export const localizerContext = contextKeyFor<ILocalizer | null>('app.localizer', null);
 
 // setu.config.ts
