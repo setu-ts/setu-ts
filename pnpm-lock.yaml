@@ -2979,6 +2979,9 @@ importers:
       '@setu-ts/cloudflare-plugin':
         specifier: workspace:^
         version: link:../cloudflare-plugin
+      '@setu-ts/exceptions':
+        specifier: workspace:^
+        version: link:../exceptions
       '@setu-ts/kernel':
         specifier: workspace:^
         version: link:../kernel

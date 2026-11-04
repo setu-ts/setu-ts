@@ -50,6 +50,7 @@
   "devDependencies": {
     "@qdrant/js-client-rest": "1.20.0",
     "@setu-ts/cloudflare-plugin": "workspace:^",
+    "@setu-ts/exceptions": "workspace:^",
     "@setu-ts/kernel": "workspace:^",
     "@setu-ts/multi-tenancy-plugin": "workspace:^",
     "@setu-ts/runtime": "workspace:^",
