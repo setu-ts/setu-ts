@@ -824,15 +824,20 @@ it('M131b 3.5 never trusts the default status before a response is sent', async 
 
 it('M131b 3.5 leaves a sent unauthenticated refusal untrusted', async () => {
   const f = fixture();
+  let calls = 0;
   await f.factory.listen({
     ...options,
+    // The first (oldest) socket gets a sent success and becomes trusted; every
+    // later one gets a sent 401 refusal.
     handler: () =>
-      diagnosticsResponse({
-        streaming: false,
-        status: 401,
-        headers: new Headers(),
-        body: 'refused',
-      }),
+      calls++ === 0
+        ? diagnosticsResponse()
+        : diagnosticsResponse({
+            streaming: false,
+            status: 401,
+            headers: new Headers(),
+            body: 'refused',
+          }),
   });
   try {
     const sockets = arrive(f.server, 32);
@@ -842,7 +847,10 @@ it('M131b 3.5 leaves a sent unauthenticated refusal untrusted', async () => {
       response.emit('finish');
     }
     arrive(f.server);
-    expect(sockets[0]!.destroyed).toBe(true);
+    // Were a 401 to establish trust, every socket would be trusted and the
+    // oldest — the success — would be evicted instead.
+    expect(sockets[0]!.destroyed).toBe(false);
+    expect(sockets[1]!.destroyed).toBe(true);
   } finally {
     await f.factory.closeActive();
   }
