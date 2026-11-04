@@ -2,6 +2,7 @@
 export const EXAMPLES = [
   'minimal',
   'rest-api',
+  'mcp-tools',
   'database',
   'di-decorators',
   'cqrs',

@@ -1,0 +1,55 @@
+{
+  "name": "setu-ts-example-mcp-tools",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "check": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint --config lint.config.js .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "build": "tsc --noEmit && setu build",
+    "start": "node --import ./instrumentation.mjs --env-file-if-exists=.env --enable-source-maps dist/main.js",
+    "start:dev": "tsx watch --import ./instrumentation.mjs --env-file-if-exists=.env main.ts",
+    "start:debug": "node --import ./instrumentation.mjs --env-file-if-exists=.env --inspect --import tsx main.ts",
+    "test": "tsx --test --test-force-exit '**/!(*.e2e).test.ts'",
+    "test:e2e": "tsx --test --test-force-exit '**/*.e2e.test.ts'",
+    "smoke": "tsx smoke.ts",
+    "token": "tsx token.ts"
+  },
+  "dependencies": {
+    "@setu-ts/common": "workspace:^",
+    "@setu-ts/kernel": "workspace:^",
+    "@setu-ts/runtime": "workspace:^",
+    "@setu-ts/config-plugin": "workspace:^",
+    "@setu-ts/logger-plugin": "workspace:^",
+    "@setu-ts/validation-plugin": "workspace:^",
+    "@setu-ts/http-security-plugin": "workspace:^",
+    "@setu-ts/health-plugin": "workspace:^",
+    "@setu-ts/metrics-plugin": "workspace:^",
+    "@setu-ts/openapi-plugin": "workspace:^",
+    "@setu-ts/exceptions": "workspace:^",
+    "pino": "10.x",
+    "swagger-ui-dist": "5.33.3",
+    "zod": "^4.6.6",
+    "@setu-ts/auth-plugin": "workspace:^",
+    "@setu-ts/idempotency-plugin": "workspace:^",
+    "@setu-ts/mcp-plugin": "workspace:^",
+    "@modelcontextprotocol/server": "^2.4.0"
+  },
+  "scarfSettings": {
+    "enabled": false
+  },
+  "devDependencies": {
+    "@setu-ts/testing": "workspace:^",
+    "@types/node": "^24.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "~6.0.3",
+    "@setu-ts/cli": "workspace:^",
+    "@modelcontextprotocol/client": "^2.4.0",
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.12.0",
+    "prettier": "^3.9.10",
+    "typescript-eslint": "^8.71.1"
+  },
+  "private": true
+}

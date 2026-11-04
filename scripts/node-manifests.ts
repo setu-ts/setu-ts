@@ -592,6 +592,7 @@ export function renderRootPackageJson(): string {
         'drizzle-orm': EXTERNAL_RANGES['drizzle-orm'],
         // docs/ai.md fences compile against the AI SDK (M134); ai pins the release
         // @ai-sdk/otel itself depends on.
+        '@modelcontextprotocol/client': '^2.4.0',
         ai: '7.0.159',
         '@ai-sdk/openai-compatible': '^3',
         'ai-fallback': '3.0.0',

@@ -40,6 +40,9 @@ building production-ready applications with our plugin-first, runtime-independen
   - Route guards, `@RequirePolicy`, and checks inside a handler
   - The fixed evaluation rules
 
+- [Tools for AI agents (MCP)](./mcp.md)
+  - Scoped route tools, retries, rate limits and per-principal archive quotas
+
 - [AI calls with Setu-TS](./ai.md)
   - AI SDK streaming, tools, fallback and telemetry
   - Weighted quotas and transactional usage records

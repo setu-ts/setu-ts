@@ -187,6 +187,9 @@ importers:
       '@hono/node-server':
         specifier: ^2.0.0
         version: 2.1.5(hono@4.13.14)
+      '@modelcontextprotocol/client':
+        specifier: ^2.4.0
+        version: 2.4.0
       '@types/node':
         specifier: ^24
         version: 24.19.2
@@ -565,6 +568,94 @@ importers:
       tsx:
         specifier: ^4.20.6
         version: 4.23.15
+
+  apps/mcp-tools:
+    dependencies:
+      '@modelcontextprotocol/server':
+        specifier: ^2.4.0
+        version: 2.4.0
+      '@setu-ts/auth-plugin':
+        specifier: workspace:^
+        version: link:../../packages/auth-plugin
+      '@setu-ts/common':
+        specifier: workspace:^
+        version: link:../../packages/common
+      '@setu-ts/config-plugin':
+        specifier: workspace:^
+        version: link:../../packages/config-plugin
+      '@setu-ts/exceptions':
+        specifier: workspace:^
+        version: link:../../packages/exceptions
+      '@setu-ts/health-plugin':
+        specifier: workspace:^
+        version: link:../../packages/health-plugin
+      '@setu-ts/http-security-plugin':
+        specifier: workspace:^
+        version: link:../../packages/http-security-plugin
+      '@setu-ts/idempotency-plugin':
+        specifier: workspace:^
+        version: link:../../packages/idempotency-plugin
+      '@setu-ts/kernel':
+        specifier: workspace:^
+        version: link:../../packages/kernel
+      '@setu-ts/logger-plugin':
+        specifier: workspace:^
+        version: link:../../packages/logger-plugin
+      '@setu-ts/mcp-plugin':
+        specifier: workspace:^
+        version: link:../../packages/mcp-plugin
+      '@setu-ts/metrics-plugin':
+        specifier: workspace:^
+        version: link:../../packages/metrics-plugin
+      '@setu-ts/openapi-plugin':
+        specifier: workspace:^
+        version: link:../../packages/openapi-plugin
+      '@setu-ts/runtime':
+        specifier: workspace:^
+        version: link:../../packages/runtime
+      '@setu-ts/validation-plugin':
+        specifier: workspace:^
+        version: link:../../packages/validation-plugin
+      pino:
+        specifier: 10.x
+        version: 10.4.0
+      swagger-ui-dist:
+        specifier: 5.33.3
+        version: 5.33.3
+      zod:
+        specifier: ^4.6.6
+        version: 4.6.7
+    devDependencies:
+      '@eslint/js':
+        specifier: ^10.0.1
+        version: 10.0.1(eslint@10.12.0)
+      '@modelcontextprotocol/client':
+        specifier: ^2.4.0
+        version: 2.4.0
+      '@setu-ts/cli':
+        specifier: workspace:^
+        version: link:../../packages/cli
+      '@setu-ts/testing':
+        specifier: workspace:^
+        version: link:../../packages/testing
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.19.2
+      eslint:
+        specifier: ^10.12.0
+        version: 10.12.0
+      prettier:
+        specifier: ^3.9.10
+        version: 3.9.10
+      tsx:
+        specifier: ^4.20.0
+        version: 4.23.15
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+      typescript-eslint:
+        specifier: ^8.71.1
+        version: 8.71.2(eslint@10.12.0)(typescript@6.0.3)
 
   apps/microservices:
     dependencies:

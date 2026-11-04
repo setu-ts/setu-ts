@@ -8,6 +8,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **MCP example and website guide (`@setu-ts/cli`, PR pending).** Offer
+  `setu new --example mcp-tools` from 0.12.0, with scoped tools, idempotent retries, validation,
+  rate limits, Origin checks and a weighted archive quota. The standalone website guide includes the
+  full scaffold-shaped application and official-client tests.
+
 - **Weighted quotas and AI SDK recipes (M134, #549, `@setu-ts/auth-plugin`,
   `@setu-ts/telemetry-plugin`).** `createQuota`, `IQuota`, `QuotaOptions`, `QuotaReservation`,
   `IQuotaStore`, `MemoryQuotaStore`, `RedisQuotaStore` and `IQuotaRedisClient` add atomic weighted

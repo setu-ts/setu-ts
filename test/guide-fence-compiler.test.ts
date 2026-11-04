@@ -22,6 +22,7 @@
 
 import { run as runProcess } from './../scripts/lib/run.ts';
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -128,12 +129,12 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
     // the layout tree and the worker-pool commands.
     // M119i: repository setup adds one shell fence.
     // site/--example adds one shell fence.
-    total: 22,
+    total: 23,
     ts: 1,
     compile: 1,
     external: 0,
     pseudocode: 0,
-    skipped: 21,
+    skipped: 22,
   },
   'docs/decorators.md': {
     // 28 at M76. Two blocks left the guide there: the `deno.json` "Enable
@@ -233,6 +234,7 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
     skipped: 0,
   },
   'docs/ai.md': { total: 10, ts: 9, compile: 9, external: 0, pseudocode: 0, skipped: 1 },
+  'docs/mcp.md': { total: 19, ts: 16, compile: 16, external: 0, pseudocode: 0, skipped: 3 },
 };
 
 const EXPECTED_AGGREGATE: FenceCounts = {
@@ -272,12 +274,12 @@ const EXPECTED_AGGREGATE: FenceCounts = {
   // M131a: +1 skipped shell fence in docs/cli.md (Redis arms); the telemetry README
   // preload fence is a package README, outside this corpus.
   // M129: +1 skipped shell fence in docs/cli.md (`setu client`).
-  total: 322,
-  ts: 238,
-  compile: 205,
+  total: 342,
+  ts: 254,
+  compile: 221,
   external: 33,
   pseudocode: 0,
-  skipped: 84,
+  skipped: 88,
 };
 
 describe('actual-fence compiler — every curated guide (shared engine)', () => {
@@ -291,11 +293,26 @@ describe('actual-fence compiler — every curated guide (shared engine)', () => 
     await writeProjectStubs(SCRATCH_DIR);
     const failures: string[] = [];
     const compiler = {};
+    // Named files form the complete MCP guide project. Materialize every file
+    // before checking any one, so relative imports resolve to the guide's own
+    // code rather than permissive stubs or the repository example.
+    const projectFiles = new Map<number, string>();
+    for (const classified of toCompile) {
+      const fence = classified.fence;
+      if (fence.guide !== 'docs/mcp.md') continue;
+      const name = /^\/\/ file: ((?:[\w-]+\/)*[\w.-]+\.ts)$/m.exec(fence.code)?.[1];
+      if (name === undefined) continue;
+      const file = `${SCRATCH_DIR}/mcp/${name}`;
+      await mkdir(dirname(file), { recursive: true });
+      await writeFile(file, assembleSource(fence, classified));
+      projectFiles.set(fence.index, file);
+    }
     for (const classified of toCompile) {
       const fence = classified.fence;
       const safe = fence.guide.replace(/[/.]/g, '_');
       const file =
-        `${SCRATCH_DIR}/${safe}-f${fence.index}-L${fence.line}` + `.${fenceExtension(fence.lang)}`;
+        (fence.guide === 'docs/mcp.md' ? projectFiles.get(fence.index) : undefined) ??
+        `${SCRATCH_DIR}/${safe}-f${fence.index}-L${fence.line}.${fenceExtension(fence.lang)}`;
       const { assembleSource } = await import('./fixtures/snippets/fence-engine.ts');
       const source = assembleSource(fence, classified);
       await writeFile(file, source);

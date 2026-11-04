@@ -47,6 +47,26 @@ function harness(
 afterEach(() => vi.unstubAllGlobals());
 
 describe('example scaffolding', () => {
+  it('downloads the MCP example with standalone SDK ranges, scripts and local smoke imports', async () => {
+    const h = harness();
+    expect(await h.run(['new', 'demo', '--example', 'mcp-tools']), h.err.text()).toBe(0);
+    const prefix = '/work/demo/';
+    const manifest = JSON.parse(h.fs.read(`${prefix}package.json`));
+    expect(manifest.dependencies['@setu-ts/mcp-plugin']).toBe(`^${VERSION}`);
+    expect(manifest.dependencies['@modelcontextprotocol/server']).toBe('^2.4.0');
+    expect(manifest.devDependencies['@modelcontextprotocol/client']).toBe('^2.4.0');
+    expect(manifest.scripts.check).toBe('tsc --noEmit');
+    expect(manifest.scripts.start).toContain('dist/main.js');
+    expect(manifest.scripts.build).toContain('setu build');
+    expect(h.fs.read(`${prefix}instrumentation.mjs`)).toContain('node:module');
+    expect(h.fs.read(`${prefix}smoke.ts`)).toContain('./smoke-helpers.ts');
+    expect(h.fs.read(`${prefix}smoke-helpers.ts`)).not.toContain('source-register');
+    expect(h.fs.read(`${prefix}token.ts`)).toContain('issueDemoToken');
+    expect(h.fs.read(`${prefix}tsconfig.json`)).not.toMatch(/extends|paths/);
+    expect(h.fs.writes.map((path) => path.slice(prefix.length)).sort()).toEqual(
+      [...examplePaths('mcp-tools')].sort(),
+    );
+  });
   it('downloads version-tagged sources, rewrites manifests and prints runnable next steps through both entry points', async () => {
     for (const argv of [['new', 'demo'], createArgs(['demo'])]) {
       const h = harness();
