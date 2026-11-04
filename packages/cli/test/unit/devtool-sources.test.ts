@@ -444,6 +444,59 @@ describe('development source policies', () => {
     }
   });
 
+  // `env['X']` reaches exactly what `env.X` reaches, so a single plain string naming
+  // a decidable property is accepted; every shape that could spell or smuggle an
+  // undecidable name keeps the round 6 and 7 refusal.
+  it('accepts member access by one plain decidable name, refuses every other shape', () => {
+    for (const source of [
+      "const s = env['JWT_SECRET'] ?? 'd';",
+      "const s = env['X'];",
+      'const s = env["X"];',
+      "const s = env[ 'X' ];",
+      "const s = o!['k'];",
+      "const s = o?.['k'];",
+      "const s = f()['k'];",
+      "const s = a['b']['c'];",
+      // After a modifier word a computed key names the same property as the plain key.
+      "const o = { get ['k']() { return 1; } };",
+      "class C { static ['k'] = 1; }",
+      // After a keyword the bracket is an array of one string, which reaches nothing.
+      "function f() { return ['k']; }",
+    ]) {
+      expect(maskSourceCode(source), source).toBeDefined();
+    }
+    for (const source of [
+      "const o = x['constructor'];",
+      "const o = x['__proto__'];",
+      'const o = x["prototype"];',
+      "const o = x['globalThis'];",
+      "const o = x['k', 'constructor'];",
+      "const o = x['k' + y];",
+      "const o = x['k']['constructor'];",
+      'const o = x[k];',
+      "const o = x['a-b'];",
+      "const o = x[''];",
+      "const o = x['cоnstructor'];",
+      "const o = { ['JWT']: v };",
+      "const o = x.['k'];",
+      "const o = x[/* c */ 'constructor'];",
+      "const o = { get ['__proto__']() { return 1; } };",
+      "class C { static ['prototype'] = 1; }",
+      // Legacy accessor methods reach a prototype through a blanked string argument.
+      "const g = ({}).__lookupGetter__('__proto__');",
+      "x.__defineGetter__('k', f);",
+      "x.__defineSetter__('k', f);",
+      "x.__lookupSetter__('k');",
+      "const g = x['__lookupGetter__'];",
+      "const g = x['__defineGetter__'];",
+      "const g = x['__defineSetter__'];",
+      "const g = x['__lookupSetter__'];",
+      "const o = { a: 1, ['JWT']: v };",
+    ]) {
+      expect(maskSourceCode(source), source).toBeUndefined();
+    }
+  });
+
   it('detects an import map that points a framework name elsewhere', async () => {
     const map = (imports: Record<string, string>) => ({ imports });
     for (const same of [

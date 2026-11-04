@@ -590,6 +590,7 @@ export function renderRootPackageJson(): string {
         zod: EXTERNAL_RANGES['zod-v4']!.replace('npm:zod@', ''),
         graphql: EXTERNAL_RANGES.graphql,
         'drizzle-orm': EXTERNAL_RANGES['drizzle-orm'],
+        '@modelcontextprotocol/client': EXTERNAL_RANGES['@modelcontextprotocol/client'],
         // docs/ai.md fences compile against the AI SDK (M134); ai pins the release
         // @ai-sdk/otel itself depends on.
         ai: '7.0.159',

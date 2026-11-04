@@ -8,6 +8,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **MCP example and website guide (`@setu-ts/cli`, #554).** Offer `setu new --example mcp-tools`
+  from 0.12.0, with scoped tools, idempotent retries, validation, rate limits, Origin checks and a
+  weighted archive quota. The standalone website guide includes the full scaffold-shaped application
+  and official-client tests. `setu new --example` now lists `npm run build` in its next steps when
+  an example starts from compiled output.
 - **Named route registration refusals (M131b, `@setu-ts/common`, `@setu-ts/kernel`,
   `@setu-ts/decorator-plugin`).** `RouteRegistrationError` carries reason, method, path and cause;
   decorated refusals name the controller and method.
@@ -283,11 +288,6 @@ All notable changes to this project are documented here. The format follows
   the superseded store row before rethrowing a request's error (a store fault there is logged at
   `warn`). A sign-in or second-factor step that regenerates and then throws now also loses the
   pre-login stored session, such as an anonymous cart; the user starts sign-in again.
-- **`setu new --example` file lists match the examples (#553, `@setu-ts/cli`).** The examples now
-  follow the CLI scaffold's structure (the full-stack example on the M130 module layout, every
-  example's module and plugin barrels written by `setu sync`), and the example manifest
-  `setu new --example` downloads from lists their current files; the cqrs and di-decorators lists
-  named files that no longer exist.
 - **Node startup bind failures (M131b, `@setu-ts/runtime`, `@setu-ts/common`).** The default Node
   host waits for binding and rejects with the native error; injected hosts share that obligation.
 - **Devtool startup reporting (M131b, `@setu-ts/cli`).** The generated entry catches creation/start
@@ -319,6 +319,23 @@ All notable changes to this project are documented here. The format follows
   default referrerPolicy to same-origin and preserve explicit or disabled-header choices.
 - **View document doctype (M131b, `@setu-ts/cli`, `@setu-ts/view-plugin`).** The generated layout
   emits a doctype; renderView and @Render continue sending engine output unchanged.
+- **`setu new --example` downloads the examples as they now stand (#553, `@setu-ts/cli`).** The
+  repository examples were brought back to the CLI scaffold's structure, with `apps/full-stack` on
+  the M130 module layout, and the offered file lists for `cqrs`, `di-decorators`, `graphql-demo` and
+  `grpc` were regenerated to match.
+
+- **`setu check` reads a configuration that uses `env['KEY']` (`@setu-ts/cli`, #554).** Any computed
+  member access made `setu.config.ts` unclassifiable, so `setu check` warned that every barrel was
+  unwired even when the configuration wired them all. Member access by one plain string naming an
+  ordinary property, such as `createRuntimeServices().env['JWT_SECRET']`, now classifies like
+  `env.JWT_SECRET`. Names such as `constructor`, `prototype` and `__proto__`, concatenated or
+  variable keys, and a computed key directly after `{` or `,` are still refused.
+
+- **`setu check` and the CLI's configuration edits refuse the legacy accessor methods
+  (`@setu-ts/cli`, #554).** `__defineGetter__`, `__defineSetter__`, `__lookupGetter__` and
+  `__lookupSetter__` now make `setu.config.ts` unclassifiable, like `Object` and `Reflect`:
+  `({}).__lookupGetter__('__proto__')` reaches a prototype through a string argument the lexer
+  cannot see into.
 
 - **The error handler masks URL credentials in what it logs and serves (M130 audit, #551,
   `@setu-ts/exceptions`).** `errorHandler` logged an error's message unmasked, so a driver error

@@ -15,6 +15,9 @@
     "skipLibCheck": true,
     "types": ["node", "deno"],
     "paths": {
+      "@modelcontextprotocol/client": [
+        "../../../node_modules/@modelcontextprotocol/client/dist/index.d.mts"
+      ],
       "@setu-ts/common": ["../../../packages/common/src/index.ts"],
       "@opentelemetry/api": [
         "../../../packages/telemetry-plugin/node_modules/@opentelemetry/api/dist/index.d.mts"

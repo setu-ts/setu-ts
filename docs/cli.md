@@ -100,11 +100,11 @@ failed download leaves the target untouched and names a template alternative. Dr
 manifest's output paths without fetching anything. Existing file collisions are refused through the
 same writer used by template scaffolds.
 
-Choose `minimal`, `rest-api`, `database`, `di-decorators`, `cqrs`, `multi-tenant`, `static-site`,
-`worker-pool`, `graphql-demo`, `grpc`, `microservices` or `realtime`. Unknown names list those
-choices; excluded names explain the repository dependency and an alternative. `full-stack` uses
-`--template full-stack`; `compiled-binary`, `cloudflare`, `realtime-clients` and
-`plugin-development` need repository scripts or source.
+Choose `minimal`, `rest-api`, `mcp-tools` (from 0.12.0), `database`, `di-decorators`, `cqrs`,
+`multi-tenant`, `static-site`, `worker-pool`, `graphql-demo`, `grpc`, `microservices` or `realtime`.
+Unknown names list those choices; excluded names explain the repository dependency and an
+alternative. `full-stack` uses `--template full-stack`; `compiled-binary`, `cloudflare`,
+`realtime-clients` and `plugin-development` need repository scripts or source.
 
 Examples keep their own composition: `--template`, `--workspace`, `--style`, `--broker`, `--queue`,
 `--redis-client`, `--devtool`, `--devtool-port`, `--logger`, `--env-file`, `--transport`,

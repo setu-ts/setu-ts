@@ -173,6 +173,18 @@ export async function runExampleNew(
   deps.log(`Created ${names.kebab} from ${example}. Next:`);
   deps.log(`  cd ${names.kebab} && npm install`);
   deps.log("  npm run smoke   # the example's own proof; exits when done");
+  if (
+    startsFromBuild(files.find((file) => file.path === joinPath(root, 'package.json'))?.contents)
+  ) {
+    deps.log('  npm run build   # start runs the compiled output');
+  }
   deps.log('  npm start       # serves until stopped');
   return EXIT_OK;
+}
+
+/** Whether the downloaded manifest's `start` runs compiled `dist/` output its `build` writes. */
+function startsFromBuild(manifest: string | undefined): boolean {
+  if (manifest === undefined) return false;
+  const scripts = (JSON.parse(manifest) as { scripts?: Record<string, string> }).scripts ?? {};
+  return scripts['build'] !== undefined && /\bdist\//.test(scripts['start'] ?? '');
 }
