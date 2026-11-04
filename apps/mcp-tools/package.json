@@ -34,7 +34,8 @@
     "@setu-ts/auth-plugin": "workspace:^",
     "@setu-ts/idempotency-plugin": "workspace:^",
     "@setu-ts/mcp-plugin": "workspace:^",
-    "@modelcontextprotocol/server": "^2.4.0"
+    "@modelcontextprotocol/server": "^2.4.0",
+    "tsx": "^4.20.0"
   },
   "scarfSettings": {
     "enabled": false
@@ -42,7 +43,6 @@
   "devDependencies": {
     "@setu-ts/testing": "workspace:^",
     "@types/node": "^24.0.0",
-    "tsx": "^4.20.0",
     "typescript": "~6.0.3",
     "@setu-ts/cli": "workspace:^",
     "@modelcontextprotocol/client": "^2.4.0",

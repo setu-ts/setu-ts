@@ -55,7 +55,7 @@ import {
   type KernelDiagnosticsOptions,
 } from '@setu-ts/kernel';
 import type { IPlugin } from '@setu-ts/common';
-import { RuntimePlugin } from '@setu-ts/runtime';
+import { createRuntimeServices, RuntimePlugin } from '@setu-ts/runtime';
 import { ConfigPlugin } from '@setu-ts/config-plugin';
 import { LoggerPlugin } from '@setu-ts/logger-plugin';
 import { ValidationPlugin } from '@setu-ts/validation-plugin';
@@ -115,9 +115,9 @@ export function createApp(
       MetricsPlugin({ customMetrics: [...CUSTOM_METRICS] }),
       OpenApiPlugin(),
       AuthPlugin({
-        jwt: { secret: process.env.JWT_SECRET ?? DEMO_JWT_SECRET },
+        jwt: { secret: createRuntimeServices().env.JWT_SECRET ?? DEMO_JWT_SECRET },
         resourceServer: {
-          resource: process.env.MCP_RESOURCE ?? 'http://localhost:3000',
+          resource: createRuntimeServices().env.MCP_RESOURCE ?? 'http://localhost:3000',
           scopesSupported: ['items:read', 'items:write'],
         },
       }),
