@@ -318,7 +318,8 @@ Compared with (survey track 03, primary sources cited there):
   wire through the queue plugin; `schematics/job.ts`, `registry.ts:168-176`),
   `generate plugin embeddings`; greeting removed; `setu sync`. CLI-owned files byte-identical,
   `setu check` clean, structure diff limited to retrieval additions (the `apps/mcp-tools` rules).
-  Routes: `POST /documents` (validated body; enqueues the job) and `GET /search?q=&tag=`. The job
+  Routes: `POST /documents` (validated body; enqueues the job; 202) and
+  `GET /documents/search?q=&tag=&limit=` (inside the generated `/documents` group). The job
   validates the tenant with `lookupTenant`, splits text with a plain splitter, embeds with
   `embedMany`, and calls `replaceSource`. Tenancy: header resolver with a fixed tenant registry.
   Store: memory by default; pgvector when `PGVECTOR_URL` is set, built in the `adapter` factory. The
