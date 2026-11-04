@@ -232,6 +232,7 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
     pseudocode: 0,
     skipped: 0,
   },
+  'docs/ai.md': { total: 10, ts: 9, compile: 9, external: 0, pseudocode: 0, skipped: 1 },
 };
 
 const EXPECTED_AGGREGATE: FenceCounts = {
@@ -271,12 +272,12 @@ const EXPECTED_AGGREGATE: FenceCounts = {
   // M131a: +1 skipped shell fence in docs/cli.md (Redis arms); the telemetry README
   // preload fence is a package README, outside this corpus.
   // M129: +1 skipped shell fence in docs/cli.md (`setu client`).
-  total: 312,
-  ts: 229,
-  compile: 196,
+  total: 322,
+  ts: 238,
+  compile: 205,
   external: 33,
   pseudocode: 0,
-  skipped: 83,
+  skipped: 84,
 };
 
 describe('actual-fence compiler — every curated guide (shared engine)', () => {
