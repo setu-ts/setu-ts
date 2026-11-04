@@ -31,6 +31,12 @@ export {
 } from './handler/server-build.ts';
 export { bridgeRequestToRR } from './handler/request-bridge.ts';
 export { contextKeyFor, servicesContext, userContext } from './handler/context-keys.ts';
+export {
+  getService,
+  serviceResolverContext,
+  ServiceResolverUnavailableError,
+} from './handler/get-service.ts';
+export type { ServiceResolver } from './handler/get-service.ts';
 export { viteDevExternals } from './dev/vite-dev-externals.ts';
 export type {
   ViteDevExternalId,

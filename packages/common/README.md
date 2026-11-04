@@ -36,6 +36,7 @@ Without `requiredBy`, the message says `the package that loads it` generically.
 | Plugin contract     | `IPlugin`, `IPluginContext`, `IApplication`, context APIs (`IRouterApi`, `IMiddlewareApi`, `ILifecycleApi`, …)                                                                                                                                                                                                  |
 | Service registry    | `IServiceRegistry`, `RegisterOptions`, `ServiceFactory`                                                                                                                                                                                                                                                         |
 | HTTP abstractions   | `IRequest`, `IResponse`, `IRequestContext`, `IMiddleware`, `MiddlewareFunction`, `RouteHandler`, `RouteDefinition`, `ResponseSnapshot`, `ResponseSnapshotInit`                                                                                                                                                  |
+| Request services    | `serviceToken()`, `ServiceToken`, `requestService()`, `RequestBoundService`, `resolveRequestService()`, `RequestServiceUnavailableError` — one instance per request and token, shared by kernel routes and React Router loaders (0.12.0)                                                                        |
 | Runtime abstraction | `IRuntimeServices`, `IFileSystem`, `IHttpAdapter`                                                                                                                                                                                                                                                               |
 | Optional DI         | `IContainer`, `Provider`, `ServiceScope`, `createToken`, `InjectionToken`, `ContainerToken`, `InjectEntry`                                                                                                                                                                                                      |
 | Domain contracts    | `ILogger`, `IConfig`, `IValidationService`, `IHealthIndicator`, `IMetric`, `IJwtService`, `IOrmAdapter`, `ICacheStore`, `IEventBus`, `IMessageBroker`, `IQueue`, `ISecretManager`, `IAuditLogger`, `ICircuitBreaker`, `IStorage`, `IMailer`, `INotifier`, `IFeatureFlags`, `ITenantResolver`, `ITenantRegistry` |
@@ -289,9 +290,11 @@ package fits the plugin architecture.
 | `replacePrincipal`                    | function  |
 | `replaceTenant`                       | function  |
 | `requestOriginOf`                     | function  |
+| `requestService`                      | function  |
 | `resolveKeysetSort`                   | function  |
 | `resolveProbeTiming`                  | function  |
 | `resolveRegistryEntry`                | function  |
+| `resolveRequestService`               | function  |
 | `resolveResponseStatus`               | function  |
 | `respondWithAuthorizationFailure`     | function  |
 | `respondWithError`                    | function  |
@@ -304,6 +307,7 @@ package fits the plugin architecture.
 | `securityMetadataOf`                  | function  |
 | `serializeCookie`                     | function  |
 | `serializeError`                      | function  |
+| `serviceToken`                        | function  |
 | `setUpgradeIntent`                    | function  |
 | `some`                                | function  |
 | `sortFingerprint`                     | function  |
@@ -331,6 +335,7 @@ package fits the plugin architecture.
 | `OptionalDependencyUnavailableError`  | class     |
 | `PrimaryKeyChangeError`               | class     |
 | `ReconnectSupervisor`                 | class     |
+| `RequestServiceUnavailableError`      | class     |
 | `UnknownPayloadFieldError`            | class     |
 | `UnsupportedFormEncodingError`        | class     |
 | `CAPABILITIES`                        | const     |
@@ -614,6 +619,7 @@ package fits the plugin architecture.
 | `RedactionContext`                    | interface |
 | `RedactionPolicy`                     | interface |
 | `RegisterOptions`                     | interface |
+| `RequestBoundService`                 | interface |
 | `RequestOptions`                      | interface |
 | `RetryOptions`                        | interface |
 | `RetryPolicy`                         | interface |
@@ -803,6 +809,7 @@ package fits the plugin architecture.
 | `ServiceFactory`                      | type      |
 | `ServiceOutcome`                      | type      |
 | `ServiceScope`                        | type      |
+| `ServiceToken`                        | type      |
 | `SessionData`                         | type      |
 | `SessionView`                         | type      |
 | `SignInOutcome`                       | type      |

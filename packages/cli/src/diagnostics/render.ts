@@ -115,6 +115,18 @@ function lines(finding: Finding): readonly string[] {
         `This project has modules and also keeps controllers or services outside them: ${escapeName(f.files.join(', '))}.`,
         '  A project keeps them in one place: move them into a module, then run `setu sync`.',
       ];
+    case 'page-kernel-value-import':
+      return [
+        `${escapeName(f.path)}:${f.line} imports ${escapeName(f.specifier)} ${PAGE_IMPORT_REASONS[f.reason]}, which would carry kernel code into the browser bundle.`,
+        f.reason === 'inline-type-only'
+          ? '  Write `import type { … }`: braces of `type` bindings still leave a side-effect import.'
+          : '  A page imports kernel code only as `import type`, or a `*.token.ts` module; reach the service with getService(context, TOKEN).',
+      ];
+    case 'page-unreadable':
+      return [
+        `Cannot read the imports of ${escapeName(f.path)}, so whether it imports kernel code by value cannot be checked.`,
+        '  It is over 1 MiB, cannot be parsed or read, sits past 32 directory levels or 4096 directories, or is reached through a symlink leaving app/. Fix that, or silence this finding in .setu-ts/check.json.',
+      ];
     case 'unresolved-import':
       return [
         `${escapeName(f.path)} imports ${escapeName(f.specifier)}, which does not exist.`,
@@ -132,6 +144,15 @@ function lines(finding: Finding): readonly string[] {
       ];
   }
 }
+
+/** How each refused page import is described. */
+const PAGE_IMPORT_REASONS = {
+  'value-import': 'by value',
+  'inline-type-only': 'with inline `type` bindings only',
+  'export-star': 'with `export *`',
+  dynamic: 'with a dynamic import()',
+  glob: 'through an import.meta.glob pattern',
+} as const;
 
 /** Renders the generator's pre-write reports or its planned-barrel/module notices. */
 export function renderGenerateFindings(

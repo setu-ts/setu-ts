@@ -64,11 +64,11 @@ import { defineConfig } from 'vite';
  * application. The framework owns the server, so \`vite build\` is a build step
  * and \`setu\`/\`main.ts\` is the runtime.
  *
- * \`resolve.tsconfigPaths\` is what makes the \`~/*\` alias work at build time;
+ * \`resolve.tsconfigPaths\` is what makes the \`~/*\` and \`~kernel/*\` aliases work at build time;
  * the same alias is declared in tsconfig.json for the type-checker.
  */
 // Framework packages stay external, resolved by the server runtime. Bundling
-// would inline a second copy: context keys in app/lib/context-keys.server.ts
+// would inline a second copy: context keys in app/server/context-keys.server.ts
 // match by identity, so a loader must share the instance setu.config.ts holds.
 export const frameworkPackages = [${externals}
 ];
@@ -251,6 +251,10 @@ export const FULL_STACK_NPM_DEV_DEPENDENCIES: Readonly<Record<string, string>> =
 export const FULL_STACK_NPM_DEPENDENCIES: Readonly<Record<string, string>> = {
   // shadcn's own class merger: current registry sources import `cn` from it.
   cn: '^0.5.0',
+  // components.json declares the lucide icon library, and shadcn's Dialog,
+  // DropdownMenu and Select import it (X85-1). Exact: read from `npm view` at
+  // M130 implementation.
+  'lucide-react': '1.67.0',
   'class-variance-authority': '^0.7.1',
   'radix-ui': '^1.8.1',
   'react-router': REACT_ROUTER_RANGE,
@@ -262,7 +266,8 @@ export const FULL_STACK_NPM_DEPENDENCIES: Readonly<Record<string, string>> = {
  * `compilerOptions` the emitted TypeScript needs, merged into the project's
  * `tsconfig.json`.
  *
- * `paths` is the `~/*` alias every emitted module imports through;
+ * `paths` holds the `~/*` alias every emitted page module imports through, and
+ * `~kernel/*`, the one spelling pages use to reach kernel types and tokens;
  * `allowImportingTsExtensions` is what lets those imports carry the `.ts`
  * extension that Deno requires, so ONE import style works under both
  * type-checkers.
@@ -273,18 +278,21 @@ export const FULL_STACK_TSCONFIG_OPTIONS: Readonly<Record<string, unknown>> = {
   types: ['vite/client'],
   allowImportingTsExtensions: true,
   noEmit: true,
-  paths: { '~/*': ['./app/*'] },
+  paths: { '~/*': ['./app/*'], '~kernel/*': ['./src/*'] },
 };
 
 /**
  * Import-map entries the emitted TypeScript needs under Deno.
  *
  * The Deno counterpart of the `paths` alias above: without it, `deno check`
- * cannot resolve `~/models/product.ts`. A trailing slash on both sides is
+ * cannot resolve `~/lib/theme.ts` or `~kernel/modules/products/products.token.ts`. A trailing slash on both sides is
  * required — Deno maps prefixes, not globs.
  */
 export const FULL_STACK_DENO_IMPORTS: Readonly<Record<string, string>> = {
   '~/': './app/',
+  // Pages reach kernel types and token modules only through this alias, which
+  // is what makes the boundary checkable (setu.E017, M130 §3.5).
+  '~kernel/': './src/',
 };
 
 /**
@@ -368,7 +376,16 @@ const viteServer = await vite.createServer({
   root,
   configFile: \`\${root}/vite.config.ts\`,
   base: BASE,
-  server: { port: vitePort, strictPort: true },
+  // Vite's own port for the HMR socket on every runtime, never the app port:
+  // the app-port upgrade failed on Node and Deno and reloaded the page on Bun
+  // (X85-2, X85-3). An explicit host also makes strictPort refuse a second
+  // server: unhosted, one bound IPv4 and the other IPv6, and both started.
+  server: {
+    host: '127.0.0.1',
+    port: vitePort,
+    strictPort: true,
+    hmr: { host: 'localhost', port: vitePort, clientPort: vitePort },
+  },
   plugins: [viteDevExternals({
     packages: [...frameworkPackages, ...workspaceLibraries],
     // Resolve with the runtime: routes share this entry's module and context-key identity.

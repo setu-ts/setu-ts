@@ -121,8 +121,8 @@ A few examples differ, and say why: `cloudflare` adds the Worker entry `worker.t
 adds a client driver that runs on several runtimes and a `worker.ts` that hosts it on workerd, and
 `microservices` composes two services, so it has one factory per service under `src/service-a/` and
 `src/service-b/`. `full-stack` keeps the React Router layout `setu new --template full-stack`
-scaffolds — `app/routes`, `app/features`, `app/services` — and reads its port from `PORT`, as that
-template does.
+scaffolded before 0.12.0 — `app/routes`, `app/features`, `app/services` — and reads its port from
+`PORT`, as that template does.
 
 ## A learning path
 

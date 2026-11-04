@@ -51,11 +51,20 @@ it(
         expect(await cli(['g', schematic!, name!, '--dir', project]), output.join('\n')).toBe(0);
       }
       expect(await cli(['check', '--dir', project]), output.join('\n')).toBe(0);
-      expect(await cli(['g', 'route', 'products', '--dir', project]), output.join('\n')).toBe(1);
-      expect(output.join('\n')).toContain('app/routes/_app/products._index.tsx');
-      await expect(
-        nodeFs.stat(`${project}/src/controllers/products.controller.ts`),
-      ).rejects.toThrow();
+      // Modular from the start (M130): a top-level route asks for its module.
+      expect(await cli(['g', 'route', 'products', '--dir', project]), output.join('\n')).toBe(2);
+      expect(output.join('\n')).toContain('pass --module <name> (existing: products)');
+      // A real page collision, read through the real `react-router routes`: a
+      // page at /api/orders would be shadowed by the orders module's /api routes.
+      await nodeFs.writeFile(
+        `${project}/app/routes/_app/api.orders.tsx`,
+        'export default function Orders() {\n  return null;\n}\n',
+      );
+      expect(await cli(['g', 'module', 'orders', '--dir', project]), output.join('\n')).toBe(1);
+      expect(output.join('\n')).toContain('app/routes/_app/api.orders.tsx');
+      expect(output.join('\n')).toContain('/api/orders and /api/orders/:id would take precedence');
+      await expect(nodeFs.stat(`${project}/src/modules/orders/index.ts`)).rejects.toThrow();
+      await nodeFs.rm(`${project}/app/routes/_app/api.orders.tsx`);
       // Developer edits stay in artifact modules. Barrels and configuration remain CLI-authored.
       for (const [path, before, after] of [
         [

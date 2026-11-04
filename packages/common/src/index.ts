@@ -258,6 +258,14 @@ export type {
 
 // Domain service contracts
 export type { IOpenApiService } from './services/openapi.ts';
+/** Request-bound services and typed service tokens (M130). */
+export {
+  RequestServiceUnavailableError,
+  requestService,
+  resolveRequestService,
+  serviceToken,
+} from './services/request-service.ts';
+export type { RequestBoundService, ServiceToken } from './services/request-service.ts';
 export type { ILogger, LogMetadata } from './services/logger.ts';
 export type { IConfig } from './services/config.ts';
 export { validatedStateKey } from './services/validation.ts';

@@ -166,6 +166,44 @@ it('runs the deno full-stack scaffold check task', { timeout: 900_000 }, async (
   }
 });
 
+// M130 §7 on Deno and Bun (the Node half, with the boot, is
+// `full-stack-modules-e2e.test.ts`): a generated module and page must leave the
+// project formatted, checked and its generated tests passing with no hand edit.
+// The Deno half is the one that caught generated imports `deno fmt` reorders.
+for (const target of ['deno', 'bun'] as const) {
+  it(
+    `g module --page keeps a ${target} full-stack project formatted, checked and tested`,
+    { timeout: 900_000 },
+    async () => {
+      expect(await run(['new', 'shop', '--runtime', target, '--template', 'full-stack'])).toBe(0);
+      const project = `${root}/shop`;
+      expect(await run(['g', 'module', 'articles', '--page', '--dir', project])).toBe(0);
+      const overlay = await startOverlay();
+      try {
+        if (target === 'deno') {
+          const formatted = await denoRun(project, ['fmt', '--check']);
+          expect(formatted.code, formatted.output).toBe(0);
+        }
+        const install = await runIn(
+          project,
+          target,
+          target === 'deno' ? ['task', 'install'] : ['install'],
+          overlay,
+        );
+        expect(install.code, install.output).toBe(0);
+        const task = (name: string): string[] =>
+          target === 'deno' ? ['task', name] : ['run', name];
+        const checked = await runIn(project, target, task('check'), overlay);
+        expect(checked.code, checked.output).toBe(0);
+        const tested = await runIn(project, target, task('test'), overlay);
+        expect(tested.code, tested.output).toBe(0);
+      } finally {
+        await overlay.close();
+      }
+    },
+  );
+}
+
 /** Templates that wire an HTTP surface and boot without an npm build. */
 // X5-3's fix and its gate are the same change: `full-stack` was excluded from
 // this list because it could not boot — it had no `build` task, so `deno task

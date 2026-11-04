@@ -261,13 +261,17 @@ describe('seam hosts', () => {
     // X5-8: it used to host none, so `setu generate route` — which the generated
     // README tells the developer to run — wrote a module and a barrel that
     // `setu.config.ts` imported neither of, and the route answered 404.
+    // M130 §3.4: modular from the start — the module barrels replace the flat
+    // controller barrel, and registerModules replaces registerGeneratedRoutes.
     const fullStack = getTemplate('full-stack')!;
     expect(barrels(fullStack)).toEqual([
-      'src/controllers/index.ts',
       'src/middleware/index.ts',
+      'src/modules/index.ts',
+      'src/modules/products/index.ts',
       'src/plugins/index.ts',
     ]);
-    expect(fullStack.setupCalls ?? []).toContain(
+    expect(fullStack.setupCalls ?? []).toContain('registerModules(app.router, app.services);');
+    expect(fullStack.setupCalls ?? []).not.toContain(
       'registerGeneratedRoutes(app.router, app.services);',
     );
   });

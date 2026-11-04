@@ -444,9 +444,10 @@ describe('runNewCommand', () => {
       for (const file of [
         'app/routes.ts',
         'app/root.tsx',
-        'app/lib/context-keys.server.ts',
+        'app/server/context-keys.server.ts',
         'app/lib/load-context.ts',
-        'app/features/products/products.server.ts',
+        'src/modules/products/products.service.ts',
+        'src/modules/index.ts',
         'vite.config.ts',
         'react-router.config.ts',
       ]) {

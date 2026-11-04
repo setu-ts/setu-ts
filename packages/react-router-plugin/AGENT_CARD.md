@@ -24,17 +24,21 @@ export const frontend = ReactRouterPlugin({
 Put this in the frontend route module:
 
 ```ts
-import { CAPABILITIES } from '@setu-ts/common';
-import type { ILogger } from '@setu-ts/common';
-import { servicesContext, userContext } from '@setu-ts/react-router-plugin';
-import type { RouterLoadContext } from '@setu-ts/react-router-plugin';
+import { serviceToken } from '@setu-ts/common';
+import { getService, type RouterLoadContext } from '@setu-ts/react-router-plugin';
 
-export function loader({ context }: { context: RouterLoadContext }) {
-  const services = context.get(servicesContext);
-  services?.get<ILogger>(CAPABILITIES.LOGGER).info('Rendering account page');
-  return { user: context.get(userContext)?.id ?? null };
+interface ProductsService {
+  list(): Promise<readonly { name: string }[]>;
+}
+const PRODUCTS = serviceToken<ProductsService>('module.products');
+
+export async function loader({ context }: { context: RouterLoadContext }) {
+  return { products: await getService(context, PRODUCTS).list() };
 }
 ```
+
+`getService` resolves through `resolveRequestService` (`@setu-ts/common`): a module registered with
+`requestService` is built once per request and shared with kernel routes in that request.
 
 ## Behaviour the types do not show
 
@@ -43,7 +47,8 @@ export function loader({ context }: { context: RouterLoadContext }) {
 - Omitting `assetsDir` mounts no asset route. The default `assetUrlPrefix` is `/assets/`.
 - `publicFiles` defaults to true: client-build root files use revalidation caching.
 - `basename` must match the frontend config; specific kernel routes beat the SSR catch-all.
-- Every SSR request sets `servicesContext` and `userContext`; anonymous users resolve to null.
+- Every SSR request sets `servicesContext`, `userContext` and `serviceResolverContext`; anonymous
+  users resolve to null. `getService` throws `ServiceResolverUnavailableError` outside a request.
 - Route-middleware refusals on document requests render through React Router's error boundary.
 
 ## Other options

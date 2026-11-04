@@ -65,6 +65,8 @@ it('renders each stable id with its severity and strict counts', () => {
     'This project has modules and also keeps controllers or services outside them: src/controllers/orders.controller.ts.',
     'src/modules/index.ts imports ./gone/index.ts, which does not exist.',
     'Two controller files share a base name and would bind one symbol: src/controllers/a/orders.controller.ts, src/controllers/b/orders.controller.ts.',
+    'app/routes/_app/products._index.tsx:7 imports ~kernel/modules/products/products.service.ts by value, which would carry kernel code into the browser bundle.',
+    'Cannot read the imports of app/routes/broken.tsx, so whether it imports kernel code by value cannot be checked.',
   ];
   for (const [index, finding] of CHECK_FINDINGS.entries()) {
     for (const strict of [false, true]) {
@@ -171,4 +173,34 @@ it('refuses extra arguments and unsupported flags before any writes and document
     expect(await h.run([verb, '-h'])).toBe(0);
     expect(h.log.text()).toContain(`Usage: setu ${verb}`);
   }
+});
+
+it('refuses a page value import as setu.E017 and lets .setu-ts/check.json silence it (M130 §3.7)', async () => {
+  const page = 'app/routes/_app/products._index.tsx';
+  const seed = {
+    '/app/package.json': JSON.stringify({
+      dependencies: { '@setu-ts/react-router-plugin': '^0.11.0' },
+    }),
+    [`/app/${page}`]:
+      "import type { Product } from '~kernel/modules/products/products.types.ts';\n" +
+      "import { PRODUCTS } from '~kernel/modules/products/products.token.ts';\n" +
+      "import { productsService } from '~kernel/modules/products/products.service.ts';\n",
+  };
+  const refused = harness(seed);
+  expect(await refused.run(['check'])).toBe(1);
+  expect(refused.err.text()).toContain(
+    `error setu.E017: ${page}:3 imports ~kernel/modules/products/products.service.ts by value`,
+  );
+  // The type import and the token import on lines 1 and 2 are allowed.
+  expect(refused.err.text()).not.toContain(`${page}:1`);
+  expect(refused.err.text()).not.toContain(`${page}:2`);
+
+  const silenced = harness({
+    ...seed,
+    '/app/.setu-ts/check.json': JSON.stringify({ silence: ['setu.E017'] }),
+  });
+  expect(await silenced.run(['check'])).toBe(0);
+  expect(silenced.log.lines.at(-1)).toBe(
+    'setu check: 0 error(s), 0 warning(s), 1 silenced in /app.',
+  );
 });

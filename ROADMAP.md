@@ -16273,6 +16273,13 @@ page signed in and asserts the data came from the module's service; a template b
 hand edit to `setu.config.ts` is needed for a page to use a module's service; the folded rows each
 re-checked.
 
+**Shipped (M130).** As decided, with two plan-time choices recorded here: the "lint rule" of
+decision 3 is a `setu check` finding, `setu.E017` (with `setu.E018` for a page it cannot parse),
+because it is the one gate every runtime's `check` script runs (maintainer decision, 2026-11-03);
+and a module's request-bound service is a `requestService` factory over the kernel request context,
+resolved through `resolveRequestService` in `common`, rather than M125's DI scope, which the
+functional-only template does not install.
+
 ---
 
 ## Milestone 131: The `v0.11.0` Smoke Closeout
@@ -16976,7 +16983,7 @@ patch by construction and gains nothing new here.
 | 127       | ✅     | common + multi-tenancy-plugin + database-plugin — a registry of real tenants: `tenants` option, Unknown Tenant 404, 503 on registry failure, bounded cache                                                                                                                                |
 | 128       | ✅     | database-plugin + common + multi-tenancy-plugin — optimistic locking (`updateVersioned`, `VersionConflictError`) and the database plugin under faults (X94-1 High, X94-2, V11-5, X94-3)                                                                                                   |
 | 129       | ✅     | cli + common + openapi-plugin — `setu client`: the typed client as a command, with a `--check` drift gate                                                                                                                                                                                 |
-| 130       | ⬜     | react-router-plugin + cli + full-stack-starter — the full-stack template: kernel modules behind the pages, `getService`, the template half of smoke group G5                                                                                                                              |
+| 130       | ✅     | react-router-plugin + cli + full-stack-starter — the full-stack template: kernel modules behind the pages, `getService`, the template half of smoke group G5                                                                                                                              |
 | 131       | ⬜     | the `v0.11.0` smoke closeout — four letters, regression first                                                                                                                                                                                                                             |
 | 131a      | ✅     | queue + Redis-backed plugins + notification + health + telemetry + logger + cli — Redis, node-redis and readiness (V11-10 regression)                                                                                                                                                     |
 | 131b      | ⬜     | runtime + kernel + di + decorator + resilience + auth + messaging + openapi + diagnostics — kernel, runtime and plugin contracts (fix branches)                                                                                                                                           |

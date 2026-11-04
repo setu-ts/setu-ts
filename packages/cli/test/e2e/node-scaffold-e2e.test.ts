@@ -122,6 +122,9 @@ function expectedFor(path: string, host: string): Partial<Served> & Record<strin
       return { status: 200, landed: '/login', ...has('<form') };
     case '/login':
       return { status: 200, landed: path, ...has('<form') };
+    case '/api/products':
+      // The template module's API (M130): the same service the /products page reads.
+      return { status: 200, landed: path, json: true, ...has('"items"') };
     case '/':
       return host === 'full-stack'
         ? { status: 200, landed: path, ...has('<html') }
