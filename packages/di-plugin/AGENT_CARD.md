@@ -36,8 +36,8 @@ function greet(request: IRequestContext): Greeting {
   singletons.
 - `useFactory` receives its `inject` dependencies as arguments; a factory without `inject` is not
   checked at boot.
-- `createToken<T>` erases T; no runtime check runs. Use generated `check` / `build` (`tsc`);
-  `start:dev` / `tsx` does not type-check.
+- `createToken<T>` erases T; no runtime check runs. Type-check with `tsc --noEmit` or `deno check`;
+  `start:dev` / `tsx` does not.
 - Cleanup waits for the handler after early responses; shutdown drain keeps its bound. Boot findings
   include controllers and aliases without duplicates.
 - `forRequest` needs the kernel's request context; test request scopes with `createTestApp`.

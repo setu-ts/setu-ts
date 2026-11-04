@@ -20,7 +20,9 @@ All notable changes to this project are documented here. The format follows
   `@setu-ts/metrics-plugin`).** `RequestBodyReadError` carries a fixed safe 400 hint and the native
   cause. Logging keeps only its class and fixed detail; metrics labels the hinted status and counts
   only 5xx as errors. Bun's native size refusal becomes `RequestBodyTooLargeError`/413, with an
-  optional cap and Infinity/generic detail for an unknown native bound.
+  optional cap and Infinity/generic detail for an unknown native bound. Bun answers that client
+  itself with an empty 413, so the mapped error reaches the handler, logs and metrics, not the
+  response body.
 
 - **Weighted quotas and AI SDK recipes (M134, #549, `@setu-ts/auth-plugin`,
   `@setu-ts/telemetry-plugin`).** `createQuota`, `IQuota`, `QuotaOptions`, `QuotaReservation`,
@@ -193,7 +195,8 @@ All notable changes to this project are documented here. The format follows
   preserves the record. Revocation takes effect when the old cookie is next presented, including on
   a request that throws (the session plugin deletes the superseded store row before rethrowing). A
   stamp must only move forward: restoring an old value revives cookies not yet presented, and copied
-  encrypted-cookie sessions; read-only fromHeaders callers stay suspension-only.
+  encrypted-cookie sessions; read-only fromHeaders callers stay suspension-only, as does an auth
+  middleware given a custom priority that runs before the session middleware.
 - **Model component names (M131b, #557, `@setu-ts/openapi-plugin`, `@setu-ts/sdk`).** Hoisted
   schemas use their Zod id or their site plus schema path, with roots reserved before descendants;
   an id is never given a name another operation's root uses, and an id outside the OpenAPI
@@ -302,7 +305,9 @@ All notable changes to this project are documented here. The format follows
   `warn`; unhinted errors and 5xx hints keep the opaque 500. The new `fallbackErrorStatus` in
   `@setu-ts/common` is that rule, and request logging and HTTP metrics label a thrown error with the
   status actually served (`responder?.statusFor?.(error) ?? fallbackErrorStatus(error)`), so metrics
-  also stop counting a thrown `HttpError` under `errorHandler` as 500.
+  also stop counting a thrown `HttpError` under `errorHandler` as 500. `fallbackErrorHint` returns
+  the served hint itself, read once, so the kernel's status, title and detail come from one
+  snapshot.
 - **Trusted diagnostics sockets (M131b, #557, `@setu-ts/runtime`).** At the 32-socket cap, idle
   untrusted sockets are evicted before trusted ones; only sent authenticated success responses
   establish trust.

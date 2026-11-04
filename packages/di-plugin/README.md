@@ -71,8 +71,8 @@ await app.start({ port: 3000 });
 
 A token is a string, a typed token from `createToken<T>(name)`, or a class; `resolve` infers the
 type from the last two at compile time. `T` is erased at runtime: the token does not check that a
-provider's value has the intended type. Run `tsc` through the generated `check` and `build` scripts;
-`start:dev` / `tsx` does not type-check.
+provider's value has the intended type. Run the project's type-checker (`tsc --noEmit`, or
+`deno check` on Deno) to enforce it; `start:dev` / `tsx` strips types without checking them.
 
 Request scopes are disposed only after the handler settles. Buffered responses normally await
 cleanup before being handed back; streaming responses clean up at end, error or cancellation. If

@@ -97,3 +97,27 @@ it('M131b re-audit R2: a nested name never takes another route root, whatever th
     });
   }
 });
+
+it('M131b review: a schema behind .optional() still shares its component with a plain site', () => {
+  const address = z.object({ street: z.string(), city: z.string() });
+  const doc = new OpenApiGenerator({}).generate([
+    route('/a', z.object({ x: address.optional() })),
+    route('/b', z.object({ y: address })),
+  ]);
+  const schemas = doc.components!.schemas!;
+  expect(Object.keys(schemas)).toEqual(['PostABodyX']);
+  expect(doc.paths['/a']!.post!.requestBody).toMatchObject({
+    content: {
+      'application/json': {
+        schema: { properties: { x: { $ref: '#/components/schemas/PostABodyX' } } },
+      },
+    },
+  });
+  expect(doc.paths['/b']!.post!.requestBody).toMatchObject({
+    content: {
+      'application/json': {
+        schema: { properties: { y: { $ref: '#/components/schemas/PostABodyX' } } },
+      },
+    },
+  });
+});

@@ -207,6 +207,20 @@ function redactsCause(error: Error): boolean {
   }
 }
 
+/**
+ * Class names a redacted cause may keep. `name` is an ordinary writable
+ * property, so any other value is logged as `Error` rather than copied.
+ */
+const REDACTED_CAUSE_NAMES: ReadonlySet<string> = new Set([
+  'Error',
+  'AbortError',
+  'TimeoutError',
+  'TypeError',
+  'RangeError',
+  'SyntaxError',
+  'DOMException',
+]);
+
 /** Serializes one `Error` after its guarded members have been read. */
 function serializeErrorInstance(
   error: Error,
@@ -252,7 +266,14 @@ function serializeErrorInstance(
     const serializedCause = serializeValue(cause, depth - 1, budget);
     if (serializedCause !== undefined) {
       out.cause = redactsCause(error)
-        ? { name: isError(cause) ? serializedCause.name : typeof cause, message: out.message }
+        ? {
+            name: isError(cause)
+              ? REDACTED_CAUSE_NAMES.has(serializedCause.name)
+                ? serializedCause.name
+                : 'Error'
+              : typeof cause,
+            message: out.message,
+          }
         : serializedCause;
     }
   }

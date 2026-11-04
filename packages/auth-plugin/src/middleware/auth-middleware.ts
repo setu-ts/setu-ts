@@ -14,7 +14,12 @@ import type {
 } from '@setu-ts/common';
 import { AUTH_SESSION_KEY } from '../sign-in/auth-session-service.ts';
 import { sessionStampRevocations } from '../sign-in/session-stamp.ts';
-import { CAPABILITIES, CREDENTIAL_SOURCE_STATE_KEY, replacePrincipal } from '@setu-ts/common';
+import {
+  CAPABILITIES,
+  CREDENTIAL_SOURCE_STATE_KEY,
+  replacePrincipal,
+  SESSION_STATE_KEY,
+} from '@setu-ts/common';
 
 /**
  * The plugin's own `AuthService` exposes `authenticateWithSource`, the `IAuthService`
@@ -81,7 +86,13 @@ export function authMiddleware(): MiddlewareFunction {
       principal = null;
     }
 
-    if (sessionStampRevocations.delete(ctx.request)) {
+    // Revocation needs the writable session the session middleware loads. At a
+    // custom priority that runs before it, the mismatch stays suspension-only
+    // (anonymous for this request), like a read-only `fromHeaders` caller.
+    if (
+      sessionStampRevocations.delete(ctx.request) &&
+      ctx.state.get(SESSION_STATE_KEY) !== undefined
+    ) {
       const session = ctx.services.get<ISessionService>(CAPABILITIES.SESSION).from(ctx);
       session.delete(AUTH_SESSION_KEY);
       session.regenerate();

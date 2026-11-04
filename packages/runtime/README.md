@@ -184,10 +184,12 @@ faults log at warn and do not increment the HTTP metrics 5xx errors counter.
 
 `RequestBodyTooLargeError(maxBodyBytes?: number)` carries status 413. A configured limit is kept in
 `maxBodyBytes`; a Bun native-size refusal with no framework cap uses `Infinity` for an unknown
-native bound and the generic detail `Request body exceeds the runtime maximum size.` Existing
-configured-cap detail is unchanged. Even without `errorHandler`, the kernel now serves 4xx hints
-with standard titles and explicit details at warn; unhinted and 5xx-hinted failures retain its
-opaque 500/error fallback. The body cap's omission does not remove a native runtime's own limit.
+native bound and the generic detail `Request body exceeds the runtime maximum size.` Bun answers
+that client itself with an empty `413`, so the detail reaches the handler, logs and metrics but not
+the response body. Existing configured-cap detail is unchanged. Even without `errorHandler`, the
+kernel now serves 4xx hints with standard titles and explicit details at warn; unhinted and
+5xx-hinted failures retain its opaque 500/error fallback. The body cap's omission does not remove a
+native runtime's own limit.
 
 ## Exports
 

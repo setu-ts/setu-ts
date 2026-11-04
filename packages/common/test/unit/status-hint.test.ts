@@ -14,6 +14,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  fallbackErrorHint,
   fallbackErrorStatus,
   HTTP_STATUS_HINT,
   type HttpStatusHint,
@@ -405,5 +406,18 @@ describe('fallbackErrorStatus (M131b)', () => {
     ['null', null, 500],
   ] as const)('serves %s as %s', (_label, error, expected) => {
     expect(fallbackErrorStatus(error)).toBe(expected);
+  });
+});
+
+describe('fallbackErrorHint (M131b review)', () => {
+  it('returns the served client hint and undefined for the opaque 500', () => {
+    const conflict = withHttpStatusHint(new Error('x'), { status: 409, title: 't', detail: 'd' });
+    expect(fallbackErrorHint(conflict)).toMatchObject({ status: 409, title: 't', detail: 'd' });
+    expect(
+      fallbackErrorHint(
+        withHttpStatusHint(new Error('x'), { status: 503, title: 't', detail: 'd' }),
+      ),
+    ).toBeUndefined();
+    expect(fallbackErrorHint(new Error('fault'))).toBeUndefined();
   });
 });

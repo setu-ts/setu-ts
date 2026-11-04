@@ -400,6 +400,23 @@ it.each([new Error('CANARY'), 'CANARY'])(
   },
 );
 
+it('M131b review: a redacted cause keeps a standard class name and drops any other', () => {
+  const named = (name: string): Error => {
+    const cause = new Error('CANARY native detail');
+    cause.name = name;
+    const failure = new Error('safe body detail', { cause });
+    Object.defineProperty(failure, Symbol.for('setu.serialize.redact-cause'), { value: true });
+    return failure;
+  };
+  expect(serializeError(named('AbortError')).cause).toEqual({
+    name: 'AbortError',
+    message: 'safe body detail',
+  });
+  const hostile = serializeError(named('token=CANARY-secret'));
+  expect(hostile.cause).toEqual({ name: 'Error', message: 'safe body detail' });
+  expect(JSON.stringify(hostile)).not.toContain('CANARY');
+});
+
 it('M131b audit F3: an error only NAMED RequestBodyReadError keeps its cause in the log', () => {
   const failure = new Error('application failure', { cause: new Error('real diagnostic') });
   failure.name = 'RequestBodyReadError';

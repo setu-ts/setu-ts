@@ -38,9 +38,14 @@ export function partitionsToSeek(
     const first = firstDelivered.get(partition);
     if (first !== undefined && BigInt(first) <= BigInt(offset)) continue;
     seeks.push({ partition, offset });
-    const last = lastDelivered.get(partition);
-    if (first !== undefined && last !== undefined)
-      skipThrough.set(partition, { from: first, to: last });
+    // A partition whose first delivery has not completed yet gets an empty
+    // window (`to` one below `from`); `extendSkipWindow` widens it if that
+    // delivery succeeds, and the replay clears it if the delivery failed.
+    if (first !== undefined)
+      skipThrough.set(partition, {
+        from: first,
+        to: lastDelivered.get(partition) ?? String(BigInt(first) - 1n),
+      });
   }
   return { seeks, skipThrough };
 }
@@ -66,6 +71,25 @@ export function skipDeliveredOffset(
     return false;
   }
   return current >= BigInt(window.from);
+}
+
+/**
+ * Widens a partition's live first-join window to cover a delivery that
+ * completed after the window was decided. A window already cleared stays
+ * cleared, and a window is never narrowed.
+ * @param windows - First-join rewind windows owned by this consumer
+ * @param partition - Partition of the completed delivery
+ * @param offset - Decimal offset of the completed delivery
+ * @internal
+ */
+export function extendSkipWindow(
+  windows: Map<number, KafkaSkipWindow>,
+  partition: number,
+  offset: string,
+): void {
+  const window = windows.get(partition);
+  if (window !== undefined && BigInt(offset) > BigInt(window.to))
+    windows.set(partition, { from: window.from, to: offset });
 }
 
 /**

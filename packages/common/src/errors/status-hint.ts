@@ -331,6 +331,32 @@ function isConformingStatus(status: unknown): status is number {
  * @since 0.12.0
  */
 export function fallbackErrorStatus(error: unknown): number {
-  const status = httpStatusHintOf(error)?.status;
-  return status !== undefined && status >= 400 && status <= 499 ? status : 500;
+  return fallbackErrorHint(error)?.status ?? 500;
+}
+
+/**
+ * The status hint the kernel's fallback serves for a thrown value, read once:
+ * the hint when its status is between 400 and 499, otherwise `undefined` (the
+ * fallback then serves an opaque `500`). {@linkcode fallbackErrorStatus} is
+ * this rule's status; a caller that also needs the hint's `title` and `detail`
+ * reads both from this one snapshot, so a stateful hint cannot make the status
+ * and the body disagree.
+ *
+ * @example
+ * ```typescript
+ * import { fallbackErrorHint, withHttpStatusHint } from '@setu-ts/common';
+ *
+ * fallbackErrorHint(
+ *   withHttpStatusHint(new Error('stale'), { status: 409, title: 'Conflict', detail: 'Stale.' }),
+ * ); // { status: 409, title: 'Conflict', detail: 'Stale.' }
+ * fallbackErrorHint(new Error('fault')); // undefined
+ * ```
+ *
+ * @param error - The thrown value
+ * @returns The served client-error hint, or `undefined` for the opaque 500
+ * @since 0.12.0
+ */
+export function fallbackErrorHint(error: unknown): HttpStatusHint | undefined {
+  const hint = httpStatusHintOf(error);
+  return hint !== undefined && hint.status >= 400 && hint.status <= 499 ? hint : undefined;
 }

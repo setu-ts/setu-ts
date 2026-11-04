@@ -19,6 +19,7 @@ import {
   minimumStartOffsets,
   partitionsToSeek,
   skipDeliveredOffset,
+  extendSkipWindow,
   isKafkaStartModule,
   optionalKafkaStartModule,
   startAwareRoundRobin,
@@ -994,6 +995,9 @@ export class KafkaBroker implements MessageBrokerAdapter {
       // Handler success triggers auto-commit; failure prevents commit
       await handler(deserialized, metadata);
       lastDelivered.set(partition, msgTyped.offset);
+      // A delivery still in flight when the first-join window was decided is
+      // part of what the rewind replays: widen that window over it.
+      extendSkipWindow(skipThrough, partition, msgTyped.offset);
     };
 
     const activeConsumer: ActiveConsumer = {

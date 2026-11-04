@@ -248,6 +248,7 @@ package fits the plugin architecture.
 | `err`                                 | function  |
 | `errorResponderOf`                    | function  |
 | `extractContextFromHeaders`           | function  |
+| `fallbackErrorHint`                   | function  |
 | `fallbackErrorStatus`                 | function  |
 | `formEncodingOf`                      | function  |
 | `fromNodeRedis`                       | function  |

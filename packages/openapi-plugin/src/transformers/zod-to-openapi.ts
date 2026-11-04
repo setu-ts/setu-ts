@@ -137,6 +137,26 @@ function zod4DefType(zodSchema: unknown): string {
 }
 
 /**
+ * Whether `clone` derives from `original` through zod's `_zod.parent` chain —
+ * the link `.meta()` and `.describe()` clones carry. A wrapper such as
+ * `.optional()` holds its inner schema as `innerType` instead, so it is not a
+ * clone of it.
+ *
+ * @param clone - The outermost node recorded at a path
+ * @param original - The node being visited at that path
+ * @returns Whether `clone` is a transparent metadata clone of `original`
+ */
+function isCloneOf(clone: unknown, original: unknown): boolean {
+  type Node = { _zod?: { parent?: unknown } };
+  let current = (clone as Node)._zod?.parent;
+  while (current !== undefined) {
+    if (current === original) return true;
+    current = (current as Node)._zod?.parent;
+  }
+  return false;
+}
+
+/**
  * Walks a JSON-Schema tree collecting every `$ref` string, without copying.
  *
  * @param node - The node to walk
@@ -452,7 +472,8 @@ export class ZodToOpenApi {
     try {
       if (this.#onSchema !== undefined) {
         // Transparent metadata clones share a public path with their parent.
-        // Only the outermost node may claim the name at that path.
+        // Only the outermost clone may claim the name at that path; a wrapper
+        // such as `.optional()` does not hide its inner schema from the hook.
         schema.toJSONSchema({
           reused: 'ref',
           cycles: 'ref',
@@ -491,7 +512,10 @@ export class ZodToOpenApi {
     const isConversionRoot = ctx.zodSchema === this.#zod4ConversionRoot;
     const outermost = this.#conversionNodes.get(JSON.stringify(ctx.path));
     const replacement =
-      isConversionRoot || (outermost !== undefined && outermost !== ctx.zodSchema)
+      isConversionRoot ||
+      (outermost !== undefined &&
+        outermost !== ctx.zodSchema &&
+        isCloneOf(outermost, ctx.zodSchema))
         ? undefined
         : this.#onSchema?.(ctx.zodSchema, ctx.path);
     if (replacement !== undefined) {

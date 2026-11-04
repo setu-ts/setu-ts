@@ -11,8 +11,7 @@ import {
   errorResponderOf,
   isPromiseLike,
   respondWithError,
-  httpStatusHintOf,
-  fallbackErrorStatus,
+  fallbackErrorHint,
   serializeError,
   setUpgradeIntent,
 } from '@setu-ts/common';
@@ -1711,15 +1710,15 @@ class Application implements IKernelApplication {
     handle: RequestContextHandle,
   ): ResponseBuilder | Promise<ResponseBuilder> {
     try {
-      const status = fallbackErrorStatus(err);
-      const hint = status < 500 ? httpStatusHintOf(err) : undefined;
+      // One read of the hint decides both the status and the body.
+      const hint = fallbackErrorHint(err);
       this.#reportUnhandledError(err, ctx, hint === undefined ? 'error' : 'warn');
       respondWithError(
         ctx,
         hint === undefined
           ? { status: 500, title: 'Internal Server Error' }
           : {
-              status,
+              status: hint.status,
               title: hint.title,
               detail: hint.detail,
             },

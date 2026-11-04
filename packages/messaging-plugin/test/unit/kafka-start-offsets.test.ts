@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { AssignerProtocol, PartitionAssigners } from 'kafkajs';
 import type { PartitionAssigner } from 'kafkajs';
 import {
+  extendSkipWindow,
   minimumStartOffsets,
   partitionsToSeek,
   MAX_MEMBER_METADATA_BYTES,
@@ -9,7 +10,7 @@ import {
   optionalKafkaStartModule,
   startAwareRoundRobin,
 } from '../../src/brokers/kafka-start-offsets.ts';
-import type { IKafkaStartModule } from '../../src/brokers/kafka-start-offsets.ts';
+import type { IKafkaStartModule, KafkaSkipWindow } from '../../src/brokers/kafka-start-offsets.ts';
 
 const module = { AssignerProtocol, PartitionAssigners } as unknown as IKafkaStartModule;
 const member = (json: string) => ({
@@ -207,6 +208,8 @@ it('M131b 3.14 computes and consumes per-partition skip windows without numeric 
   expect([...decision.skipThrough]).toEqual([
     [0, { from: '2', to: '3' }],
     [1, { from: '9007199254740995', to: '9007199254740996' }],
+    // First delivery still in flight (or failed): an empty window.
+    [2, { from: '5', to: '4' }],
   ]);
   for (const [partition, offset, skip] of [
     [0, '0', false],
@@ -223,4 +226,17 @@ it('M131b 3.14 computes and consumes per-partition skip windows without numeric 
   }
   expect(decision.skipThrough.has(0)).toBe(false);
   expect(decision.skipThrough.has(1)).toBe(true);
+  expect(decision.skipThrough.has(2)).toBe(false);
+});
+
+describe('M131b review extendSkipWindow', () => {
+  it('widens a live window, never narrows one, and never recreates a cleared one', () => {
+    const windows = new Map<number, KafkaSkipWindow>([[0, { from: '2', to: '2' }]]);
+    extendSkipWindow(windows, 0, '3');
+    expect(windows.get(0)).toEqual({ from: '2', to: '3' });
+    extendSkipWindow(windows, 0, '1');
+    expect(windows.get(0)).toEqual({ from: '2', to: '3' });
+    extendSkipWindow(windows, 1, '9');
+    expect(windows.has(1)).toBe(false);
+  });
 });

@@ -57,6 +57,7 @@ export { OptionalDependencyUnavailableError } from './errors/optional-dependency
 // HTTP status hint (M89b, X19-1) — how a package that cannot import
 // `@setu-ts/exceptions` states the status its own error should be answered with
 export {
+  fallbackErrorHint,
   fallbackErrorStatus,
   HTTP_STATUS_HINT,
   httpStatusHintOf,

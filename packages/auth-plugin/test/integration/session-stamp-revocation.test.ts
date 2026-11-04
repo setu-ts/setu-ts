@@ -64,6 +64,27 @@ it('M131b audit F1: a mismatch seen by a throwing request still revokes the stor
   }
 });
 
+it('M131b review: an auth middleware that runs before the session middleware suspends, not 500s', async () => {
+  let stamp = 'v1';
+  const { app } = await buildSignInApp({
+    session: { store: 'memory' },
+    signIn: { providers: [], sessionStamp: () => stamp },
+    authPriority: 200,
+  });
+  const jar = new CookieJar();
+  try {
+    await jar.fetch(app, '/password-login', { method: 'POST' });
+    const before = (await (await jar.fetch(app, '/_session')).json()) as { id: string };
+    stamp = 'v2';
+    expect((await jar.fetch(app, '/me')).status).toBe(401);
+    // Suspension-only: the session the mismatch was seen on is not rotated.
+    const after = (await (await jar.fetch(app, '/_session')).json()) as { id: string };
+    expect(after.id).toBe(before.id);
+  } finally {
+    await app.stop();
+  }
+});
+
 it('M131b 3.13 reader faults suspend one request without deleting or rotating its session', async () => {
   let unavailable = false;
   const { app } = await buildSignInApp({

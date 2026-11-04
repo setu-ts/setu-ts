@@ -843,7 +843,8 @@ to end sessions, set a new value, never an old one. A throwing reader or malform
 only this request and leaves the record and id unchanged, so an identity-store outage does not sign
 everyone out. `verifiedCurrent(ctx)` applies the same mutation for the plugin's own identity reads.
 Read-only `fromHeaders` callers (including WebSocket upgrades) remain suspension-only because they
-cannot commit a session change.
+cannot commit a session change, and so does the auth middleware when a custom `middleware.priority`
+runs it before the session middleware has loaded the session.
 
 ```typescript
 import type { IPrincipal } from '@setu-ts/common';
