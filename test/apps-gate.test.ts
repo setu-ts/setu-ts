@@ -1104,8 +1104,8 @@ describe('M111c declared artifact coverage', () => {
     expect(Object.keys(compat.dependencies).sort()).toEqual(
       [...installable, '@modelcontextprotocol/server'].sort(),
     );
-    expect(expected).toHaveLength(53);
-    expect(pending).toEqual(['@setu-ts/mcp-plugin']);
+    expect(expected).toHaveLength(54);
+    expect(pending).toEqual(['@setu-ts/mcp-plugin', '@setu-ts/vector-store-plugin']);
     expect(installable.every((name) => compat.dependencies[name] === 'latest')).toBe(true);
     expect(compat.dependencies['@modelcontextprotocol/server']).toBe('^2.4.0');
     expect(workspace.scripts['release:publish']).toBe('node scripts/npm-publish.ts');

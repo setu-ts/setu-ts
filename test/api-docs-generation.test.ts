@@ -452,6 +452,7 @@ error[private-type-ref]: public type references private type
         'static-plugin',
         'telemetry-plugin',
         'validation-plugin',
+        'vector-store-plugin',
         'view-plugin',
         'worker-pool-plugin',
       ]);
@@ -623,19 +624,19 @@ error[private-type-ref]: public type references private type
       expect(result.targets).toHaveLength(new Set(result.targets).size);
     });
 
-    it('has the expected authoritative count of 56 targets', async () => {
+    it('has the expected authoritative count of 57 targets', async () => {
       const fs = {
         readTextFile: async (path: string) => await readFile(path, 'utf8'),
         readDir: async (path: string) => await readdir(path, { withFileTypes: true }),
         stat: (path: string) => stat(path),
       };
       const result = await collectApiEntrypoints(fs);
-      // 53 published packages (M109a added idempotency-plugin, M111d added
-      // create), runtime has 2 exports (./src/index.ts + ./worker), cli has 2
-      // exports (./src/index.ts + ./main), localization-plugin has 2
-      // (./src/index.ts + ./format, M103), rest have 1 each
-      // = 53 + 1 (extra runtime) + 1 (extra cli) + 1 (extra localization) = 56
-      expect(result.targets).toHaveLength(56);
+      // 54 published packages (M109a added idempotency-plugin, M111d added
+      // create, M135 vector-store-plugin), runtime has 2 exports (./src/index.ts
+      // + ./worker), cli has 2 exports (./src/index.ts + ./main),
+      // localization-plugin has 2 (./src/index.ts + ./format, M103), rest have 1
+      // each = 54 + 1 (extra runtime) + 1 (extra cli) + 1 (extra localization) = 57
+      expect(result.targets).toHaveLength(57);
     });
 
     it('maps each target to its correct package name', async () => {
