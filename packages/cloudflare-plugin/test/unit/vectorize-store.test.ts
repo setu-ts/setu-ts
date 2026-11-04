@@ -183,6 +183,21 @@ describe('VectorizeVectorStore', () => {
     ]);
   });
 
+  it('maps a match without metadata to its stored id and keeps equal matches stable', async () => {
+    const index = fakeIndex();
+    index.query = async () => ({
+      matches: [
+        { id: 'stored', score: 0.5 },
+        { id: 'stored', score: 0.5 },
+      ],
+    });
+    const { store } = await opened(index);
+    expect(await store.query(spec, 't', { vector: [1, 0], topK: 2 })).toEqual([
+      { id: 'stored', score: 0.5, metadata: {} },
+      { id: 'stored', score: 0.5, metadata: {} },
+    ]);
+  });
+
   it('deletes by scope-hashed ids only', async () => {
     const { store, index } = await opened();
     await store.upsert(spec, 'tenant-a', [{ id: 'doc', vector: [1, 0] }]);
@@ -232,7 +247,7 @@ describe('Vectorize filter translation', () => {
     const big = {
       field: 'tag',
       op: 'in' as const,
-      value: Array.from({ length: 100 }, (_, i) => `value-${i}-padding`),
+      value: Array.from({ length: 100 }, (_, i) => `${'v'.repeat(40)}-${i}`),
     };
     expect(() => translateFilter(big)).toThrow('2 KB or more');
     expect(() => translateFilter({ field: 'tag', op: 'contains', value: 'x' } as never)).toThrow(
