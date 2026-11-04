@@ -411,7 +411,9 @@ const LITERAL_BRACKET_PRECEDERS = '(=:[?|&<>!';
  * property no identifier names — `constructor`, `prototype` — so they are as
  * undecidable as the identifiers they spell (audit rounds 6 and 7). The rule is
  * an allowlist of positions, tracked with a bracket stack: a `[` after `,` counts
- * as a literal only inside `[…]` or `(…)`, never inside `{…}`.
+ * as a literal only inside `[…]` or `(…)`, never inside `{…}`. The one exception
+ * is member access by a single plain string naming a decidable property
+ * ({@linkcode namedMemberAccess}), which reaches no more than dot access does.
  *
  * @param code - The code mask
  * @param kept - The comment-only mask, whose strings show what a bracket holds
@@ -425,13 +427,46 @@ function indexesValue(code: string, kept: string): boolean {
       // Contents read with strings KEPT: in the code mask `['constructor']` is blank.
       let next = i + 1;
       while (next < kept.length && /\s/.test(kept[next]!)) next += 1;
-      if (kept[next] !== ']' && !literalBracket(code, previous, stack.at(-1))) return true;
+      if (
+        kept[next] !== ']' &&
+        !literalBracket(code, previous, stack.at(-1)) &&
+        !namedMemberAccess(code, kept, previous, next)
+      )
+        return true;
     }
     if (c === '(' || c === '[' || c === '{') stack.push(c);
     else if (c === ')' || c === ']' || c === '}') stack.pop();
     if (!/\s/.test(c)) previous = i;
   }
   return false;
+}
+
+/**
+ * Whether a `[` is member access by one plain string naming a decidable property:
+ * `env['JWT_SECRET']`, `x!['k']`, `x?.['k']`. That reaches exactly what `env.JWT_SECRET`
+ * reaches, which the lexer already accepts, so it is refused only when the name is
+ * one {@linkcode UNDECIDABLE_IDENTIFIERS} lists (`x['constructor']`) or is not an
+ * identifier at all. Computed object keys (`{ ['k']: v }`), concatenation, variables
+ * and templates keep the audit round 6 and 7 refusal.
+ *
+ * @param code - The code mask
+ * @param kept - The comment-only mask, whose strings show what the bracket holds
+ * @param previous - Index of the last non-space code character before the `[`
+ * @param start - Index of the first non-space character inside the `[`
+ */
+function namedMemberAccess(code: string, kept: string, previous: number, start: number): boolean {
+  // Reached only after literalBracket, which already accepts a `[` at the start.
+  const before = code[previous]!;
+  const access = /[\w$)\]!]/.test(before) || (before === '.' && code[previous - 1] === '?');
+  if (!access) return false;
+  const quote = kept[start];
+  if (quote !== "'" && quote !== '"') return false;
+  const close = kept.indexOf(quote, start + 1);
+  const name = kept.slice(start + 1, close);
+  if (!/^[A-Za-z_$][\w$]*$/.test(name) || UNDECIDABLE_IDENTIFIERS.has(name)) return false;
+  let end = close + 1;
+  while (end < kept.length && /\s/.test(kept[end]!)) end += 1;
+  return kept[end] === ']';
 }
 
 /** Whether a `[` preceded by `code[previous]`, inside `enclosing`, opens a literal. */

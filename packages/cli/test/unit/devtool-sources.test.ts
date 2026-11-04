@@ -444,6 +444,42 @@ describe('development source policies', () => {
     }
   });
 
+  // `env['X']` reaches exactly what `env.X` reaches, so a single plain string naming
+  // a decidable property is accepted; every shape that could spell or smuggle an
+  // undecidable name keeps the round 6 and 7 refusal.
+  it('accepts member access by one plain decidable name, refuses every other shape', () => {
+    for (const source of [
+      "const s = env['JWT_SECRET'] ?? 'd';",
+      "const s = env['X'];",
+      'const s = env["X"];',
+      "const s = env[ 'X' ];",
+      "const s = o!['k'];",
+      "const s = o?.['k'];",
+      "const s = f()['k'];",
+      "const s = a['b']['c'];",
+    ]) {
+      expect(maskSourceCode(source), source).toBeDefined();
+    }
+    for (const source of [
+      "const o = x['constructor'];",
+      "const o = x['__proto__'];",
+      'const o = x["prototype"];',
+      "const o = x['globalThis'];",
+      "const o = x['k', 'constructor'];",
+      "const o = x['k' + y];",
+      "const o = x['k']['constructor'];",
+      'const o = x[k];',
+      "const o = x['a-b'];",
+      "const o = x[''];",
+      "const o = x['cоnstructor'];",
+      "const o = { ['JWT']: v };",
+      "const o = x.['k'];",
+      "const o = { a: 1, ['JWT']: v };",
+    ]) {
+      expect(maskSourceCode(source), source).toBeUndefined();
+    }
+  });
+
   it('detects an import map that points a framework name elsewhere', async () => {
     const map = (imports: Record<string, string>) => ({ imports });
     for (const same of [
