@@ -29,6 +29,7 @@ import {
   describeStatement,
   extensionVersionStatement,
   queryStatement,
+  sourceLockStatement,
   querySettings,
   tableNames,
   upsertStatement,
@@ -210,6 +211,7 @@ export class PgVectorStore implements IVectorStoreAdapter {
     const sql = this.#tag();
     await this.#run(() =>
       this.#db.transaction(async (tx) => {
+        await tx.execute(sourceLockStatement(sql, spec, scope, sourceId));
         if (records.length > 0) await tx.execute(upsertStatement(sql, spec, scope, records));
         await tx.execute(
           deleteStaleStatement(

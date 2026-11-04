@@ -247,14 +247,18 @@ describe('PgVectorStore', () => {
     ]);
     expect(transactions()).toBe(1);
     expect(statements.every((s) => s.inTransaction)).toBe(true);
-    expect(statements[1]!.text).toBe(
+    // The source lock comes first, so replacements of one source serialise.
+    expect(statements[0]!.text).toBe('SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))');
+    expect(statements[0]!.params).toEqual(['vs_documents|8:tenant-a|s1']);
+    expect(statements[1]!.text.startsWith('INSERT INTO "vs_documents"')).toBe(true);
+    expect(statements[2]!.text).toBe(
       'DELETE FROM "vs_documents" WHERE scope = $1 AND source_id = $2 AND id NOT IN (SELECT jsonb_array_elements_text($3::jsonb))',
     );
-    expect(statements[1]!.params).toEqual(['tenant-a', 's1', '["r1"]']);
+    expect(statements[2]!.params).toEqual(['tenant-a', 's1', '["r1"]']);
     statements.length = 0;
     await store.replaceSource(spec, 'tenant-a', 's1', []);
-    expect(statements).toHaveLength(1);
-    expect(statements[0]!.params).toEqual(['tenant-a', 's1', '[]']);
+    expect(statements).toHaveLength(2);
+    expect(statements[1]!.params).toEqual(['tenant-a', 's1', '[]']);
   });
 
   it('queries inside a transaction with the HNSW settings, an inner scan and an outer order', async () => {
@@ -281,14 +285,13 @@ describe('PgVectorStore', () => {
       { id: 'r2', score: 0.5, metadata: { year: 1 } },
       { id: 'r3', score: 0.1, metadata: {} },
     ]);
-    expect(statements.map((s) => s.text.slice(0, 40))).toEqual([
-      'SET LOCAL hnsw.ef_search = 50',
-      'SET LOCAL hnsw.iterative_scan = strict_or',
-      'SELECT candidates.id, candidates.source_id',
-    ]);
+    expect(statements).toHaveLength(3);
+    expect(statements[0]!.text).toBe('SET LOCAL hnsw.ef_search = 50');
+    expect(statements[1]!.text).toBe('SET LOCAL hnsw.iterative_scan = strict_order');
+    expect(statements[2]!.text.startsWith('SELECT candidates.id, candidates.source_id')).toBe(true);
     expect(statements.every((s) => s.inTransaction)).toBe(true);
     expect(statements[2]!.text).toBe(
-      'SELECT candidates.id, candidates.source_id, candidates.content, candidates.metadata, candidates.score FROM (SELECT id, source_id, content, metadata, 1 - (embedding <=> $1::vector) AS score FROM "vs_documents" WHERE scope = $2 AND (metadata -> $3) = $4::jsonb ORDER BY embedding <=> $5::vector LIMIT $6) AS candidates WHERE candidates.score >= $7 ORDER BY candidates.score DESC, candidates.id ASC',
+      'SELECT candidates.id, candidates.source_id, candidates.content, candidates.metadata, candidates.score FROM (SELECT id, source_id, content, metadata, 1 - (embedding <=> $1::vector) AS score FROM "vs_documents" WHERE scope = $2 AND (metadata -> $3::text) = $4::jsonb ORDER BY embedding <=> $5::vector LIMIT $6) AS candidates WHERE candidates.score >= $7 ORDER BY candidates.score DESC, candidates.id ASC',
     );
     expect(statements[2]!.params).toEqual([
       '[1,0,0]',
@@ -359,10 +362,11 @@ describe('pgvector filter translation', () => {
   const render = (condition: unknown) => dialect.sqlToQuery(condition as SQL);
 
   it('binds keys and values for every operator', () => {
-    expect(render(filterCondition(tag, { field: 'tag', op: 'in', value: ['a', 'b'] }))).toEqual({
-      sql: '(metadata -> $1) IN (SELECT jsonb_array_elements($2::jsonb))',
+    expect(
+      render(filterCondition(tag, { field: 'tag', op: 'in', value: ['a', 'b'] })),
+    ).toMatchObject({
+      sql: '(metadata -> $1::text) IN (SELECT jsonb_array_elements($2::jsonb))',
       params: ['tag', '["a","b"]'],
-      typings: undefined,
     });
     for (const [op, symbol] of [
       ['gt', '>'],
@@ -371,7 +375,7 @@ describe('pgvector filter translation', () => {
       ['lte', '<='],
     ] as const) {
       expect(render(filterCondition(tag, { field: 'year', op, value: 2020 })).sql).toBe(
-        `(CASE WHEN jsonb_typeof(metadata -> $1) = 'number' THEN (metadata ->> $2)::double precision END) ${symbol} $3`,
+        `(CASE WHEN jsonb_typeof(metadata -> $1::text) = 'number' THEN (metadata ->> $2::text)::double precision END) ${symbol} $3`,
       );
     }
     expect(
@@ -384,7 +388,7 @@ describe('pgvector filter translation', () => {
         }),
       ),
     ).toMatchObject({
-      sql: '((metadata -> $1) = $2::jsonb AND (metadata -> $3) = $4::jsonb)',
+      sql: '((metadata -> $1::text) = $2::jsonb AND (metadata -> $3::text) = $4::jsonb)',
       params: ['public', 'true', 'year', '1'],
     });
   });

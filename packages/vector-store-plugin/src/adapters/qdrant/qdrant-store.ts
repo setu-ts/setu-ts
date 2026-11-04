@@ -70,6 +70,7 @@ export interface QdrantVectorStoreOptions {
 }
 
 interface QdrantPoint {
+  readonly id?: string | number;
   readonly score?: number;
   readonly payload?: Record<string, unknown> | null;
 }
@@ -173,7 +174,14 @@ export class QdrantVectorStore implements IVectorStoreAdapter {
     await this.#run(() => this.#client.upsert(collectionName(spec), { wait: true, points }));
   }
 
-  /** @inheritdoc */
+  /**
+   * @inheritdoc
+   *
+   * Qdrant has no transactions: the write and the stale-delete are two calls,
+   * so two replacements of the SAME source must not run at once (one could
+   * delete the other's records). Serialise them per source, e.g. one queue job
+   * per document at a time.
+   */
   async replaceSource(
     spec: VectorCollectionSpec,
     scope: string,
@@ -213,7 +221,7 @@ export class QdrantVectorStore implements IVectorStoreAdapter {
       const source = payload[SOURCE_KEY];
       const content = payload[CONTENT_KEY];
       return {
-        id: String(payload[ID_KEY]),
+        id: typeof payload[ID_KEY] === 'string' ? payload[ID_KEY] : String(point.id),
         score: Number(point.score),
         ...(typeof source === 'string' ? { sourceId: source } : {}),
         ...(typeof content === 'string' ? { content } : {}),

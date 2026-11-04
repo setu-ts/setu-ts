@@ -237,7 +237,7 @@ describe('QdrantVectorStore', () => {
             payload: { id: 'a', source_id: 's1', content: 'text', metadata: { tag: 'x' } },
           },
           { score: 0.9, payload: { id: 'c' } },
-          { score: 0.1, payload: null },
+          { id: 'raw-point', score: 0.1, payload: null },
         ],
       }),
     );
@@ -251,7 +251,7 @@ describe('QdrantVectorStore', () => {
       { id: 'c', score: 0.9, metadata: {} },
       { id: 'a', score: 0.5, sourceId: 's1', content: 'text', metadata: { tag: 'x' } },
       { id: 'b', score: 0.5, metadata: { tag: 'x' } },
-      { id: 'undefined', score: 0.1, metadata: {} },
+      { id: 'raw-point', score: 0.1, metadata: {} },
     ]);
     expect(client.calls[0]!.body).toEqual({
       query: [1, 0, 0],

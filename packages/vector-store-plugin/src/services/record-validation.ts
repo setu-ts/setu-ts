@@ -111,7 +111,17 @@ export function validateRecords(
       `a write takes an array of at most ${MAX_RECORDS_PER_CALL} records`,
     );
   }
-  return (records as unknown[]).map((record) => validateRecord(record, dimensions, fields));
+  const valid = (records as unknown[]).map((record) => validateRecord(record, dimensions, fields));
+  // One write must not name an id twice: adapters disagree on it (PostgreSQL
+  // refuses an upsert that touches a key twice; others keep the last copy).
+  const ids = new Set<string>();
+  for (const record of valid) {
+    if (ids.has(record.id)) {
+      throw new VectorRecordError('a write must not contain the same record id twice');
+    }
+    ids.add(record.id);
+  }
+  return valid;
 }
 
 function validateRecord(

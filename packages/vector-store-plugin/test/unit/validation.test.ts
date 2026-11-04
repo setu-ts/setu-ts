@@ -210,6 +210,14 @@ describe('record validation', () => {
       [{ id: 'r', vector: [1, 0, 0], metadata: { year: Number.NaN } }],
       'finite number',
     ],
+    [
+      'a repeated id',
+      [
+        { id: 'r', vector: [1, 0, 0] },
+        { id: 'r', vector: [0, 1, 0] },
+      ],
+      'same record id twice',
+    ],
     ['a string boolean', [{ id: 'r', vector: [1, 0, 0], metadata: { public: 'yes' } }], 'boolean'],
   ])('refuses %s', (_label, records, message) => {
     expect(() => validateRecords(records, 3, FIELDS)).toThrow(VectorRecordError);

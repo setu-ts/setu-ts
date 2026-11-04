@@ -141,6 +141,27 @@ export function deleteStaleStatement(
 }
 
 /**
+ * Serialises replacements of one source: a transaction-scoped advisory lock
+ * keyed on the table, scope and source, so two `replaceSource` calls for the
+ * same source never interleave their write and stale-delete steps.
+ *
+ * @param sql - The `sql` tag
+ * @param spec - The collection
+ * @param scope - The tenant scope
+ * @param sourceId - The source
+ * @returns The statement
+ */
+export function sourceLockStatement(
+  sql: SqlTag,
+  spec: VectorCollectionSpec,
+  scope: string,
+  sourceId: string,
+): Statement {
+  const key = `${tableNames(spec).table}|${scope.length}:${scope}|${sourceId}`;
+  return sql`SELECT pg_advisory_xact_lock(hashtextextended(${key}::text, 0))`;
+}
+
+/**
  * Deletes records by id in the scope.
  *
  * @param sql - The `sql` tag
@@ -235,15 +256,15 @@ export function filterCondition(sql: SqlTag, filter: VectorFilter): unknown {
   const key = filter.field;
   switch (filter.op) {
     case 'eq':
-      return sql`(metadata -> ${key}) = ${JSON.stringify(filter.value)}::jsonb`;
+      return sql`(metadata -> ${key}::text) = ${JSON.stringify(filter.value)}::jsonb`;
     case 'in':
-      return sql`(metadata -> ${key}) IN (SELECT jsonb_array_elements(${JSON.stringify(filter.value)}::jsonb))`;
+      return sql`(metadata -> ${key}::text) IN (SELECT jsonb_array_elements(${JSON.stringify(filter.value)}::jsonb))`;
     case 'gt':
     case 'gte':
     case 'lt':
     case 'lte': {
       const operator = { gt: '>', gte: '>=', lt: '<', lte: '<=' }[filter.op];
-      return sql`(CASE WHEN jsonb_typeof(metadata -> ${key}) = 'number' THEN (metadata ->> ${key})::double precision END) ${sql.raw(operator)} ${filter.value}`;
+      return sql`(CASE WHEN jsonb_typeof(metadata -> ${key}::text) = 'number' THEN (metadata ->> ${key}::text)::double precision END) ${sql.raw(operator)} ${filter.value}`;
     }
     default:
       throw new TypeError(
