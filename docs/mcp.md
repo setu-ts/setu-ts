@@ -43,12 +43,13 @@ full so the project is reconstructible; `setu sync` owns them.
 ### `setu.config.ts`
 
 The discovery environment remains the first parameter; development diagnostics remain the second.
-The secret comes from `JWT_SECRET` with a clearly named local demo fallback. **That fallback is
-public**: it is printed in this guide and the example, so anyone can mint a token it accepts. The
-application starts without `JWT_SECRET`, including from `npm start` and the Docker image, so a
-deployment must set it to a separately provisioned secret. `MCP_RATE_MAX` is validated at startup
-and defaults to 60 requests per principal, per tool, per minute. `MCP_RESOURCE` identifies this
-resource server.
+The secret comes from `JWT_SECRET` with a clearly named local demo fallback, used only when the
+variable is unset; a set value shorter than 32 characters, including an empty one, refuses startup.
+**That fallback is public**: it is printed in this guide and the example, so anyone can mint a token
+it accepts. The application starts without `JWT_SECRET`, including from `npm start` and the Docker
+image, so a deployment must set it to a separately provisioned secret. `MCP_RATE_MAX` is validated
+at startup and defaults to 60 requests per principal, per tool, per minute. `MCP_RESOURCE`
+identifies this resource server.
 
 ```typescript
 // file: setu.config.ts
@@ -79,6 +80,17 @@ import { CUSTOM_METRICS } from './src/metrics/index.ts';
 
 /** Local demonstration only; deploy with a secret supplied through JWT_SECRET. */
 export const DEMO_JWT_SECRET = 'mcp-tools-demo-only-secret-at-least-32-characters';
+
+/**
+ * Falls back to the public demo secret only when `JWT_SECRET` is unset. A set value,
+ * including an empty one, must be at least 32 characters: an empty value would otherwise
+ * fall through to RS256 with a misleading key error, and a short one is guessable offline.
+ */
+export function resolveJwtSecret(secret: string | undefined): string {
+  const resolved = secret ?? DEMO_JWT_SECRET;
+  if (resolved.length < 32) throw new Error('JWT_SECRET must be at least 32 characters.');
+  return resolved;
+}
 
 /**
  * Builds the application.
@@ -118,7 +130,7 @@ export function createApp(
       MetricsPlugin({ customMetrics: [...CUSTOM_METRICS] }),
       OpenApiPlugin(),
       AuthPlugin({
-        jwt: { secret: createRuntimeServices().env.JWT_SECRET ?? DEMO_JWT_SECRET },
+        jwt: { secret: resolveJwtSecret(createRuntimeServices().env.JWT_SECRET) },
         resourceServer: {
           resource: createRuntimeServices().env.MCP_RESOURCE ?? 'http://localhost:3000',
           scopesSupported: ['items:read', 'items:write'],
@@ -787,7 +799,10 @@ it('creates and reads through MCP', async () => {
 ```
 
 Run it with `node --import tsx --test mcp.test.ts`. The generated project includes module and
-application tests too; keep them and add authentication to their requests.
+application tests too. Keep them, but update them for this composition: add an `Authorization`
+header to every protected request, an `Idempotency-Key` header to each create request, and replace
+the `/greetings` paths in the application e2e test with `/health` and `/ready`, since the greeting
+files were removed.
 
 ## Connect a desktop MCP client
 

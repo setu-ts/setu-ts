@@ -27,6 +27,17 @@ import { CUSTOM_METRICS } from './src/metrics/index.ts';
 export const DEMO_JWT_SECRET = 'mcp-tools-demo-only-secret-at-least-32-characters';
 
 /**
+ * Falls back to the public demo secret only when `JWT_SECRET` is unset. A set value,
+ * including an empty one, must be at least 32 characters: an empty value would otherwise
+ * fall through to RS256 with a misleading key error, and a short one is guessable offline.
+ */
+export function resolveJwtSecret(secret: string | undefined): string {
+  const resolved = secret ?? DEMO_JWT_SECRET;
+  if (resolved.length < 32) throw new Error('JWT_SECRET must be at least 32 characters.');
+  return resolved;
+}
+
+/**
  * Builds the application.
  *
  * `setu` imports this factory to discover plugin-contributed CLI commands, so
@@ -64,7 +75,7 @@ export function createApp(
       MetricsPlugin({ customMetrics: [...CUSTOM_METRICS] }),
       OpenApiPlugin(),
       AuthPlugin({
-        jwt: { secret: createRuntimeServices().env.JWT_SECRET ?? DEMO_JWT_SECRET },
+        jwt: { secret: resolveJwtSecret(createRuntimeServices().env.JWT_SECRET) },
         resourceServer: {
           resource: createRuntimeServices().env.MCP_RESOURCE ?? 'http://localhost:3000',
           scopesSupported: ['items:read', 'items:write'],

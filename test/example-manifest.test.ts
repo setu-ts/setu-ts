@@ -47,10 +47,14 @@ describe('example manifest', () => {
       await writeFile(`${root}/apps/${app}/dist/output.js`, 'ignored');
     }
     await writeFile(`${root}/apps/minimal/logo.bin`, new Uint8Array([0xff, 0xfe, 0x00]));
+    // The CLI writes its own root .gitignore, so only a nested one is listed.
+    await writeFile(`${root}/apps/minimal/.gitignore`, 'dist\n');
+    await mkdir(`${root}/apps/minimal/src`, { recursive: true });
+    await writeFile(`${root}/apps/minimal/src/.gitignore`, 'tmp\n');
     expect((await run('git', ['add', '.'], { cwd: root })).code).toBe(0);
     const manifest = await collectExampleManifest(root);
     expect(manifest['minimal']).toEqual({
-      files: ['logo.bin', 'main.ts', 'package.json'],
+      files: ['logo.bin', 'main.ts', 'package.json', 'src/.gitignore'],
       binary: ['logo.bin'],
       smokeHelper: true,
     });

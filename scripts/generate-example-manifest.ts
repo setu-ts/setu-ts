@@ -22,6 +22,8 @@ export async function collectExampleManifest(
         .filter((file) => file.startsWith(prefix))
         .map((file) => file.slice(prefix.length))
         .filter((file) => !/(^|\/)(node_modules|dist|build|\.tmp)(\/|$)/.test(file))
+        // `setu new --example` always writes its own root .gitignore after the listed files.
+        .filter((file) => file !== '.gitignore')
         .sort();
       const smokeHelper = files
         .filter((file) => /\.[cm]?[jt]sx?$/.test(file))

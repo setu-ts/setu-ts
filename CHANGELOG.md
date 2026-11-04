@@ -253,6 +253,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **`setu new --example` downloads the examples as they now stand (#553, `@setu-ts/cli`).** The
+  repository examples were brought back to the CLI scaffold's structure, with `apps/full-stack` on
+  the M130 module layout, and the offered file lists for `cqrs`, `di-decorators`, `graphql-demo` and
+  `grpc` were regenerated to match.
+
 - **`setu check` reads a configuration that uses `env['KEY']` (`@setu-ts/cli`, #554).** Any computed
   member access made `setu.config.ts` unclassifiable, so `setu check` warned that every barrel was
   unwired even when the configuration wired them all. Member access by one plain string naming an

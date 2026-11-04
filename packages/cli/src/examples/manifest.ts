@@ -39,7 +39,6 @@ export const EXAMPLE_MANIFEST: Readonly<
     files: [
       '.dockerignore',
       '.env.example',
-      '.gitignore',
       '.prettierignore',
       '.prettierrc.json',
       'Dockerfile',
