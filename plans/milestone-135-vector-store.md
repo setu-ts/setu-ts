@@ -180,12 +180,14 @@ Compared with (survey track 03, primary sources cited there):
   or `__proto__` are never read through a prototype), every key declared, every value of its
   declared type, numbers finite, strings at most 64 UTF-8 bytes. Batches: at most 500 records per
   `upsert`/`replaceSource` and 1,000 ids per `delete` (pgvector's 65,535-parameter limit,
-  Vectorize's 1,000-vector upsert; review M5); over-size batches throw `VectorRecordError`. Methods:
-  `upsert`, `replaceSource(collection, scope, sourceId, records)`, `query`,
-  `delete(collection, scope, ids)`, `deleteScope(collection, scope)`. `replaceSource` writes the new
-  records, then deletes the source's records (same scope) whose ids are not in the new set; every
-  record must carry that `sourceId`. A record id already used by another source in the same scope is
-  reassigned to this source (documented; it stays inside one tenant).
+  Vectorize's 1,000-vector upsert; review M5); over-size batches throw `VectorRecordError`, as does
+  a batch naming one id twice (PostgreSQL refuses an upsert that touches a key twice; the other
+  adapters would keep the last copy). Methods: `upsert`,
+  `replaceSource(collection, scope, sourceId, records)`, `query`, `delete(collection, scope, ids)`,
+  `deleteScope(collection, scope)`. `replaceSource` writes the new records, then deletes the
+  source's records (same scope) whose ids are not in the new set; every record must carry that
+  `sourceId`. A record id already used by another source in the same scope is reassigned to this
+  source (documented; it stays inside one tenant).
 - **Why:** gate "a re-run ingestion leaves one copy"; Mastra's `upsert({ deleteFilter })` precedent.
 - **Test home:** `vector-store-service.test.ts`; conformance rows "re-run leaves one copy", "shrink
   removes stale chunks", "reassigned id".
@@ -211,8 +213,9 @@ Compared with (survey track 03, primary sources cited there):
   `SET LOCAL hnsw.iterative_scan = strict_order` (results stay in distance order; review M1), as an
   inner query ordered by distance, with `minScore` and the final `ORDER BY score DESC, id` applied
   in an outer query (so `minScore` does not defeat the index). `replaceSource` runs in one
-  transaction. The guide documents drizzle-kit's `tablesFilter: ['!vs_*']` so `push` never offers to
-  drop these tables.
+  transaction that first takes `pg_advisory_xact_lock` keyed on table, scope and source, so
+  concurrent replacements of one source serialise (code review 2026-11-04). The guide documents
+  drizzle-kit's `tablesFilter: ['!vs_*']` so `push` never offers to drop these tables.
 - **Why:** pgvector through Drizzle is the dominant TS pattern; Drizzle 0.45.2 has the types.
 - **Test home:** `pgvector-store.test.ts` (recording fake: bound parameters only, scope in every
   statement, `SET LOCAL` through `tx`, transaction for `replaceSource`, load error);
@@ -234,7 +237,8 @@ Compared with (survey track 03, primary sources cited there):
   translate to `range` conditions (one `range { gte: v, lte: v }`, or `should` of ranges), never
   `match`, because `match` on floats is not relied on (review M8). Writes pass `wait: true`.
   `replaceSource` upserts, then deletes `must [scope, source_id]`, `must_not [has_id: new ids]`; the
-  two calls are not atomic, which the guide states.
+  two calls are not atomic, so replacements of the same source must not run concurrently (one could
+  delete the other's records); the guide and the adapter's JSDoc say to serialise them per source.
 - **Why:** maintainer decision; Qdrant's documented `is_tenant` design.
 - **Test home:** `qdrant-store.test.ts` (recording fake asserting each request body);
   `qdrant-store.real.test.ts` (guarded by `QDRANT_URL`).
@@ -343,16 +347,18 @@ Compared with (survey track 03, primary sources cited there):
 **Breaking for implementors:** none (new token, new port, new package, one new cloudflare-plugin
 export).
 
-| Exported symbol                                                                                                                                                                                                                      | Kind      | Consumer / real code path that READS it                                                  |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------- | ---------------------------------------------------------------------------------------- |
-| `CAPABILITIES.VECTOR_STORE` (common)                                                                                                                                                                                                 | token     | `VectorStorePlugin` registers under it; the example resolves it.                         |
-| `IVectorStore`, `VectorRecord`, `VectorQuery`, `VectorMatch`, `VectorFilter`, `VectorCollectionSpec` (common)                                                                                                                        | types     | The service implements `IVectorStore`; adapters and the example use the data types.      |
-| `IVectorStoreAdapter` (common)                                                                                                                                                                                                       | interface | Implemented by the four adapters; called by `VectorStoreService`.                        |
-| `vectorRecordKey` (common)                                                                                                                                                                                                           | fn        | Qdrant and Vectorize adapters derive stored ids from it.                                 |
-| `VectorScopeRequiredError`, `VectorScopeInvalidError`, `VectorFilterError`, `VectorDimensionError`, `VectorRecordError`, `VectorCollectionUnknownError`, `VectorCollectionMismatchError`, `VectorOperationUnsupportedError` (common) | classes   | Thrown by the service and all four adapters; the error handler reads their status hints. |
-| `VectorStorePlugin`, `VectorStorePluginOptions`                                                                                                                                                                                      | fn, type  | The example's `setu.config.ts`.                                                          |
-| `MemoryVectorStore`, `PgVectorStore`, `QdrantVectorStore`                                                                                                                                                                            | classes   | The example (memory, pgvector); Qdrant through the guide and its real suite.             |
-| `VectorizeVectorStore` (cloudflare-plugin)                                                                                                                                                                                           | class     | A Worker application; the guide's Workers section.                                       |
+| Exported symbol                                                                                                                                                                                                                      | Kind      | Consumer / real code path that READS it                                                           |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------- | ------------------------------------------------------------------------------------------------- |
+| `CAPABILITIES.VECTOR_STORE` (common)                                                                                                                                                                                                 | token     | `VectorStorePlugin` registers under it; the example resolves it.                                  |
+| `IVectorStore`, `VectorRecord`, `VectorQuery`, `VectorMatch`, `VectorFilter`, `VectorCollectionSpec` (common)                                                                                                                        | types     | The service implements `IVectorStore`; adapters and the example use the data types.               |
+| `IVectorStoreAdapter` (common)                                                                                                                                                                                                       | interface | Implemented by the four adapters; called by `VectorStoreService`.                                 |
+| `vectorRecordKey` (common)                                                                                                                                                                                                           | fn        | Qdrant and Vectorize adapters derive stored ids from it.                                          |
+| `VectorScopeRequiredError`, `VectorScopeInvalidError`, `VectorFilterError`, `VectorDimensionError`, `VectorRecordError`, `VectorCollectionUnknownError`, `VectorCollectionMismatchError`, `VectorOperationUnsupportedError` (common) | classes   | Thrown by the service and all four adapters; the error handler reads their status hints.          |
+| `VectorStorePlugin`, `VectorStorePluginOptions`                                                                                                                                                                                      | fn, type  | The example's `setu.config.ts`.                                                                   |
+| `VectorStoreTenancy`, `MemoryVectorStoreOptions`, `PgVectorStoreOptions`, `PgVectorDatabase`, `PgVectorExecutor`, `QdrantClientLike`, `QdrantVectorStoreOptions`                                                                     | types     | Option and facade types of the plugin and its adapters; the example and the guide construct them. |
+| `MemoryVectorStore`, `PgVectorStore`, `QdrantVectorStore`                                                                                                                                                                            | classes   | The example (memory, pgvector); Qdrant through the guide and its real suite.                      |
+| `VectorizeVectorStore` (cloudflare-plugin)                                                                                                                                                                                           | class     | A Worker application; the guide's Workers section.                                                |
+| `VectorizeIndexLike`, `VectorizeVectorLike`, `VectorizeVectorStoreOptions` (cloudflare-plugin)                                                                                                                                       | types     | The binding facade and options a Worker passes.                                                   |
 
 ### 4.1 Options — every option names its consumer
 
