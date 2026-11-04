@@ -294,6 +294,14 @@ describe.each(ARMS.filter((arm) => arm.enabled).map((arm) => [arm.name, arm] as 
       expect(found.map((m) => m.id)).toEqual(['c1']);
     });
 
+    it('scores a vector with a tiny norm by direction alone (audit R1)', async () => {
+      const scope = 'tenant-tiny';
+      await store.upsert(COLLECTION, scope, [{ id: 't1', vector: [1e-4, 1e-4, 0, 0] }]);
+      const [match] = await store.query(COLLECTION, scope, { vector: [1e-4, 1e-4, 0, 0], topK: 1 });
+      expect(match?.id).toBe('t1');
+      expect(Math.abs(match!.score - 1)).toBeLessThan(1e-4);
+    });
+
     it('breaks score ties by id in code-unit order, punctuation included', async () => {
       const scope = 'tenant-ties';
       const ids = ['ab#0', 'a-b#0', 'a#2', 'a-1', 'B'];

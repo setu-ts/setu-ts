@@ -214,7 +214,7 @@ export class QdrantVectorStore implements IVectorStoreAdapter {
   ): Promise<readonly VectorMatch[]> {
     const response = (await this.#run(() =>
       this.#client.query(collectionName(spec), {
-        query: [...query.vector],
+        query: unitVector(query.vector),
         filter: scopedFilter(scope, query.filter),
         limit: query.topK,
         with_payload: true,
@@ -264,7 +264,7 @@ export class QdrantVectorStore implements IVectorStoreAdapter {
   async #point(scope: string, record: VectorRecord): Promise<Record<string, unknown>> {
     return {
       id: await this.#pointId(scope, record.id),
-      vector: [...record.vector],
+      vector: unitVector(record.vector),
       payload: {
         [SCOPE_KEY]: scope,
         [ID_KEY]: record.id,
@@ -295,4 +295,19 @@ export class QdrantVectorStore implements IVectorStoreAdapter {
 
 function collectionName(spec: VectorCollectionSpec): string {
   return `vs_${spec.name}`;
+}
+
+/**
+ * Scales a vector to unit length. Qdrant normalises cosine vectors itself, but
+ * skips one whose float32 squared norm is below `f32::EPSILON` (a norm below
+ * about 3.45e-4), whose scores then come back scaled by its length (M135 audit
+ * R1). Cosine similarity ignores length, so normalising first changes no score.
+ * The service has already refused zero and non-finite norms.
+ *
+ * @param vector - A validated vector
+ * @returns The same direction at length 1
+ */
+function unitVector(vector: readonly number[]): number[] {
+  const norm = Math.hypot(...vector);
+  return vector.map((component) => component / norm);
 }
