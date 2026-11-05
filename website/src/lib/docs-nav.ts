@@ -45,6 +45,7 @@ export const DOCS_NAV: DocsNavGroup[] = [
       { slug: 'health-indicators', label: 'Health indicators' },
       { slug: 'mcp', label: 'Tools for AI agents (MCP)' },
       { slug: 'ai', label: 'AI calls and budgets' },
+      { slug: 'retrieval', label: 'Retrieval (vector search)' },
     ],
   },
   {

@@ -16636,6 +16636,14 @@ than wrap it, so this plan decides whether decision 4's embedder port is still n
 already ships `embed` and `embedMany`, and the alternative is to accept vectors or an
 application-supplied embed function, and document embedding spend under M134's weighted quota.
 
+**As planned and built (M135, 2026-11-05).** No embedder port: the store takes vectors, and the
+application computes them with the AI SDK's `embed`/`embedMany` (decision 4 dropped; the
+maintainer's choice). Adapters: memory, pgvector through Drizzle, Qdrant (added) and Cloudflare
+Vectorize, which refuses `replaceSource` and `deleteScope` because Vectorize cannot delete by
+namespace or filter. Ingestion (decision 6) is the `apps/semantic-search` example's queue job over
+`replaceSource`, not a framework job. The common port is `IVectorStore` under
+`CAPABILITIES.VECTOR_STORE`.
+
 **Not in this milestone:** a document-loader library, re-ranking, hybrid lexical search.
 
 **Gate:** the filter conformance table on memory and a real PostgreSQL with pgvector; a query under
@@ -17182,7 +17190,7 @@ patch by construction and gains nothing new here.
 | 132       | ✅     | auth-plugin + common — resource-server authentication for agents and tools: scopes, `insufficient_scope` challenges, RFC 9728 metadata, audience binding, the `act` claim                                                                                                                 |
 | 133       | ✅     | mcp-plugin (new) + common + kernel + cli — routes as MCP tools, dispatched in-process through the route's own pipeline                                                                                                                                                                    |
 | 134       | ✅     | auth-plugin + telemetry-plugin, AI SDK guide and example — weighted reserve/settle quotas, usage delivery and content-off library telemetry                                                                                                                                               |
-| 135       | ⬜     | vector-store-plugin (new) + common + cloudflare + cli — tenant-scoped retrieval with refused-not-ignored filters                                                                                                                                                                          |
+| 135       | ✅     | vector-store-plugin (new) + common + cloudflare + cli — tenant-scoped retrieval with refused-not-ignored filters                                                                                                                                                                          |
 | 136       | ⬜     | package decided by its plan + common + sse-plugin + database-plugin — durable agent runs: fenced lease, persisted steps, approvals, SSE replay                                                                                                                                            |
 | 137       | ⬜     | OpenAPI coverage — forms, lifecycle and derived responses (three letters)                                                                                                                                                                                                                 |
 | 137a      | ⬜     | common + openapi-plugin + decorator-plugin + sdk — document metadata, `deprecated`, per-route exclusion                                                                                                                                                                                   |

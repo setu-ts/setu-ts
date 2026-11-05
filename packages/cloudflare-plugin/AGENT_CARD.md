@@ -40,7 +40,7 @@ export function registerCatalogRoutes(router: IRouterApi): void {
 
 ## Behaviour the types do not show
 
-- Missing `requireBindings` entries fail registration; a missing accessor binding throws
+- Missing `requireBindings` entries fail registration; a missing binding throws
   `CloudflareBindingMissingError`.
 - Omitted arms register nothing. Cache supplies `CAPABILITIES.CACHE` (`ICacheStore`); storage
   supplies `CAPABILITIES.STORAGE` (`IStorage`). Named arms derive separate capability tokens.
@@ -52,8 +52,9 @@ export function registerCatalogRoutes(router: IRouterApi): void {
 
 ## Other options
 
-- `queue` supplies `IQueue`; consuming needs the module export made by `createQueueHandler(app)`.
+- `queue` supplies `IQueue`; consuming needs `createQueueHandler(app)`.
 - `messaging` supplies `IMessageBroker`; `rpc` enables replies through a Durable Object binding.
-- `durableObject` supplies `IRealtimeBackplane`; `WorkersCron` and `createScheduledHandler` handle
-  cron.
+- `durableObject` supplies `IRealtimeBackplane`; `WorkersCron`/`createScheduledHandler` handle cron.
+- `VectorizeVectorStore` serves vectors: namespace = scope, hashed ids; refuses `replaceSource` and
+  `deleteScope`.
 - `D1Adapter`, `KvSessionStore` and `DurableObjectIdempotencyStore` adapt other platform services.

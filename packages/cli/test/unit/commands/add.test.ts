@@ -1847,6 +1847,7 @@ describe('runAddCommand', () => {
       ['static', 'StaticPlugin'],
       ['multi-tenancy', 'MultiTenancyPlugin'],
       ['service-discovery', 'ServiceDiscoveryPlugin'],
+      ['vector-store', 'VectorStorePlugin'],
     ]) {
       const h = harness({ '/app/deno.json': DENO_MANIFEST });
       expect(await h.run([pkg!]), h.err.join('\n')).toBe(0);
@@ -1884,6 +1885,7 @@ describe('runAddCommand', () => {
       'static',
       'multi-tenancy',
       'service-discovery',
+      'vector-store',
       'cloudflare',
     ]) {
       const h = harness({

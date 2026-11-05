@@ -82,6 +82,7 @@
     "@setu-ts/static-plugin": "workspace:^",
     "@setu-ts/storage-plugin": "workspace:^",
     "@setu-ts/telemetry-plugin": "workspace:^",
+    "@setu-ts/vector-store-plugin": "workspace:^",
     "@setu-ts/websocket-plugin": "workspace:^",
     "@types/deno": "2.7.0",
     "@types/node": "^24",

@@ -100,11 +100,12 @@ failed download leaves the target untouched and names a template alternative. Dr
 manifest's output paths without fetching anything. Existing file collisions are refused through the
 same writer used by template scaffolds.
 
-Choose `minimal`, `rest-api`, `mcp-tools` (from 0.12.0), `database`, `di-decorators`, `cqrs`,
-`multi-tenant`, `static-site`, `worker-pool`, `graphql-demo`, `grpc`, `microservices` or `realtime`.
-Unknown names list those choices; excluded names explain the repository dependency and an
-alternative. `full-stack` uses `--template full-stack`; `compiled-binary`, `cloudflare`,
-`realtime-clients` and `plugin-development` need repository scripts or source.
+Choose `minimal`, `rest-api`, `mcp-tools` (from 0.12.0), `semantic-search` (from 0.12.0),
+`database`, `di-decorators`, `cqrs`, `multi-tenant`, `static-site`, `worker-pool`, `graphql-demo`,
+`grpc`, `microservices` or `realtime`. Unknown names list those choices; excluded names explain the
+repository dependency and an alternative. `full-stack` uses `--template full-stack`;
+`compiled-binary`, `cloudflare`, `realtime-clients`, `plugin-development` and `ai-chat` need
+repository scripts or source.
 
 Examples keep their own composition: `--template`, `--workspace`, `--style`, `--broker`, `--queue`,
 `--redis-client`, `--devtool`, `--devtool-port`, `--logger`, `--env-file`, `--transport`,
@@ -460,6 +461,11 @@ a handler a later `setu generate` writes is live. Class-based projects keep the 
 handlers arrive through the ingress barrel. Other shapes receive registration guidance. Starter
 compositions receive their named option arm and a link to the starter README; configure that arm
 rather than registering the same plugin twice.
+
+`setu add vector-store` installs `@setu-ts/vector-store-plugin` and prints a registration using the
+memory adapter and one `documents` collection. Collections and backend clients belong to the
+application, so the command does not insert the call. See
+[Retrieval (vector search)](./retrieval.md).
 
 Class-based `generate job` requires queue; functional projects keep the standalone job recipe.
 Generated guards use `requirePermission` from auth-plugin. The permission is evaluated by the

@@ -599,6 +599,45 @@ emitDecoratorMetadata).
 
 ---
 
+### @setu-ts/vector-store-plugin
+
+**Purpose:** Tenant-scoped vector storage and similarity search, with filters that are refused
+rather than ignored.
+
+**Capability Token:** `CAPABILITIES.VECTOR_STORE`
+
+**Runtime Compatibility:**
+
+| Deno | Node | Bun | Workers                   |
+| ---- | ---- | --- | ------------------------- |
+| ✅   | ✅   | ✅  | ✅ (memory, or Vectorize) |
+
+**Adapters:**
+
+- Memory (built-in)
+- pgvector (the PostgreSQL extension, version 0.8 or later, through an injected Drizzle database)
+- Qdrant (an injected official client)
+- Custom (`IVectorStoreAdapter`)
+
+> Cloudflare Vectorize is provided by [`@setu-ts/cloudflare-plugin`](#setu-tscloudflare-plugin) as
+> `VectorizeVectorStore`, which this plugin takes as its adapter. It cannot `replaceSource` or
+> `deleteScope`.
+
+**Features:**
+
+- A required tenant scope on every data method, mapped to each backend's native boundary
+- Cosine similarity search, ordered by score and then record id
+- Declared filterable fields with `eq`, `in`, `gt`, `gte`, `lt`, `lte` and `and`
+- `upsert`, `replaceSource`, `delete`, `deleteScope` and `query`
+
+**Links:**
+
+- [README](../packages/vector-store-plugin/README.md)
+- [Retrieval guide](./retrieval.md)
+- [API Reference](./api/modules/vector-store-plugin_src.html)
+
+---
+
 ## Tier 4: Infrastructure
 
 ### @setu-ts/metrics-plugin
@@ -1033,6 +1072,7 @@ the browser.
 - Durable Objects (backplane, locks)
 - Workers Queues
 - Cron Triggers
+- Vectorize vector store (`VectorizeVectorStore`) for `@setu-ts/vector-store-plugin`
 - Messaging (`CAPABILITIES.MESSAGING`) — publish/subscribe over Workers Queues, and request/reply
   through a Durable Object reply inbox
 - Cache API middleware
