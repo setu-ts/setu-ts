@@ -468,8 +468,10 @@ export interface IWebSocketService {
    * @param publicOrigin - The request's public origin as the browser saw it
    *   (`requestOriginOf(ctx).origin`, which honours an origin a trusted proxy
    *   published), passed by the kernel so an implementation can refuse a
-   *   cross-site handshake. Absent from a caller with no request context; an
-   *   implementation then falls back to the request URL's origin.
+   *   cross-site handshake. Absent when the request is not a WebSocket upgrade
+   *   (`isWebSocketUpgradeRequest`; the kernel skips the URL parse there) and
+   *   from a caller with no request context; an implementation then falls back
+   *   to the request URL's origin.
    * @returns The decision, or `null` to fall through
    * @since 0.3.0
    */
