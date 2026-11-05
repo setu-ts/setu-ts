@@ -87,12 +87,13 @@ describe('generated local start scripts load .env (M131a X88-2)', () => {
   });
 
   it('the full-stack dev entry fails to start with one masked line (X88-8)', async () => {
-    const { FULL_STACK_DEV_ENTRY } = await import('../../src/templates/full-stack-build-files.ts');
-    expect(FULL_STACK_DEV_ENTRY.contents).toContain(
+    const { renderFullStackDevEntry } =
+      await import('../../src/templates/full-stack-build-files.ts');
+    expect(renderFullStackDevEntry().contents).toContain(
       'console.error(`Startup failed: ${describeError(error)}`);',
     );
-    expect(FULL_STACK_DEV_ENTRY.contents).toContain('await viteServer.close();');
-    expect(FULL_STACK_DEV_ENTRY.contents).toContain('return runtime.exit(1);');
+    expect(renderFullStackDevEntry().contents).toContain('await viteServer.close();');
+    expect(renderFullStackDevEntry().contents).toContain('return runtime.exit(1);');
   });
 
   it.each([

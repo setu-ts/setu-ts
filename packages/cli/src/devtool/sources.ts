@@ -8,6 +8,7 @@ import { scanArtifacts } from '../utils/artifact-scanner.ts';
 import { scanSeamSpecs } from '../seams/registry.ts';
 import { generatorMode } from '../utils/generator-mode.ts';
 import { configuredEnvFilePath } from '../templates/env-file.ts';
+import { escapeName } from '../utils/names.ts';
 
 /** CLI-owned policy module, refreshed when a plugin is installed. */
 export const DEVTOOL_SOURCES_MODULE = 'src/devtool/diagnostics.ts';
@@ -425,7 +426,7 @@ const LITERAL_BRACKET_PRECEDERS = '(=:[?|&<>!';
  * @param code - The code mask
  * @param kept - The comment-only mask, whose strings show what a bracket holds
  */
-function indexesValue(code: string, kept: string): boolean {
+function indexesValue(code: string, kept: string): number | undefined {
   const stack: string[] = [];
   let previous = -1;
   for (let i = 0; i < code.length; i++) {
@@ -439,13 +440,13 @@ function indexesValue(code: string, kept: string): boolean {
         !literalBracket(code, previous, stack.at(-1)) &&
         !namedMemberAccess(code, kept, previous, next)
       )
-        return true;
+        return i;
     }
     if (c === '(' || c === '[' || c === '{') stack.push(c);
     else if (c === ')' || c === ']' || c === '}') stack.pop();
     if (!/\s/.test(c)) previous = i;
   }
-  return false;
+  return undefined;
 }
 
 /**
@@ -521,10 +522,18 @@ export function parseImportItem(
   return undefined;
 }
 
+/** The unsupported construct and its zero-based source offset. */
+export interface ISourceStop {
+  /** Construct label, including the name of an unsupported import or identifier. */
+  readonly reason: string;
+  /** Position of that construct in the original source. */
+  readonly offset: number;
+}
+
 /**
  * The one masking state machine; `blankLiterals` selects which mask it emits.
  *
- * Returns undefined — unclassified — for anything outside the restricted language
+ * Returns a stop — unclassified — for anything outside the restricted language
  * in which this lexer is exact and the configuration's meaning is decidable from
  * its text: a template literal, an escape, a backslash, `#` (hashbang, private
  * names), an HTML-like comment, a regex literal or division, a raw line terminator
@@ -532,9 +541,20 @@ export function parseImportItem(
  * but a framework package or a relative file, or an identifier in
  * {@linkcode UNDECIDABLE_IDENTIFIERS}. Comments may contain anything; a `//`
  * comment ends at every JavaScript line terminator, U+2028 and U+2029 included.
+ *
+ * @param source - The configuration source to classify without executing it
+ * @returns Masked code, or the first unsupported construct and its source offset
+ * @since 0.12.0
  */
-function maskSource(source: string, blankLiterals: boolean): string | undefined {
+export function maskSourceDiagnosis(
+  source: string,
+  blankLiterals = true,
+): { readonly code: string } | { readonly stop: ISourceStop } {
   let mode: 'code' | 'line' | 'block' | "'" | '"' = 'code';
+  let opened = 0;
+  const stop = (reason: string, offset: number): { readonly stop: ISourceStop } => ({
+    stop: { reason, offset },
+  });
   const code: string[] = [];
   const comments: string[] = [];
   const blank = (c: string) => (c === '\n' || c === '\r' ? c : ' ');
@@ -547,6 +567,7 @@ function maskSource(source: string, blankLiterals: boolean): string | undefined 
     const next = source[i + 1];
     if (mode === 'code') {
       if (c === '/' && (next === '/' || next === '*')) {
+        opened = i;
         mode = next === '/' ? 'line' : 'block';
         push('  ', '  ');
         i++;
@@ -559,8 +580,22 @@ function maskSource(source: string, blankLiterals: boolean): string | undefined 
         source.startsWith('-->', i) ||
         !isCodeChar(c)
       ) {
-        return undefined;
+        return stop(
+          c === '`'
+            ? 'template literal'
+            : c === '/'
+              ? '/'
+              : c === '\\'
+                ? '\\'
+                : c === '#'
+                  ? '#'
+                  : !isCodeChar(c)
+                    ? 'non-ASCII code'
+                    : 'HTML comment',
+          i,
+        );
       } else if (c === "'" || c === '"') {
+        opened = i;
         mode = c;
         push(' ', c);
       } else push(c, c);
@@ -577,31 +612,41 @@ function maskSource(source: string, blankLiterals: boolean): string | undefined 
         mode = 'code';
       } else push(blank(c), blank(c));
     } else {
-      if (c === '\\' || isLineTerminator(c)) return undefined;
+      if (c === '\\' || isLineTerminator(c))
+        return stop(c === '\\' ? '\\ in string' : 'unterminated string', c === '\\' ? i : opened);
       push(' ', c);
       if (c === mode) mode = 'code';
     }
   }
-  if (mode !== 'code' && mode !== 'line') return undefined;
+  if (mode !== 'code' && mode !== 'line')
+    return stop(mode === 'block' ? 'unterminated comment' : 'unterminated string', opened);
   const masked = code.join('');
   for (const word of masked.matchAll(/[A-Za-z_$][\w$]*/g)) {
-    if (UNDECIDABLE_IDENTIFIERS.has(word[0])) return undefined;
+    if (UNDECIDABLE_IDENTIFIERS.has(word[0])) return stop(word[0], word.index);
   }
   // Specifiers are read from the comment-only mask: comments there are spaces (so
   // `from /* c */ 'x'` is seen) while string quotes survive — in the code mask the
   // literal itself is blank and a whitespace skip would run straight through it.
   const kept = comments.join('');
-  if (indexesValue(masked, kept)) return undefined;
+  const computed = indexesValue(masked, kept);
+  if (computed !== undefined) return stop('computed member access', computed);
   for (const keyword of masked.matchAll(/\b(?:import|from)\b/g)) {
     let at = keyword.index + keyword[0].length;
     while (kept[at] === ' ' || kept[at] === '\t' || kept[at] === '\n' || kept[at] === '\r') at += 1;
-    if (keyword[0] === 'import' && kept[at] === '(') return undefined;
+    if (keyword[0] === 'import' && kept[at] === '(') return stop('dynamic import(', keyword.index);
     const quote = kept[at];
     if (quote !== "'" && quote !== '"') continue;
     const close = kept.indexOf(quote, at + 1);
-    if (!isRecognizedSpecifier(kept.slice(at + 1, close))) return undefined;
+    if (!isRecognizedSpecifier(kept.slice(at + 1, close)))
+      return stop(`import ${escapeName(kept.slice(at + 1, close)).slice(0, 80)}`, at);
   }
-  return blankLiterals ? masked : kept;
+  return { code: blankLiterals ? masked : kept };
+}
+
+/** Compatibility projection of the same audited state machine. */
+function maskSource(source: string, blankLiterals: boolean): string | undefined {
+  const result = maskSourceDiagnosis(source, blankLiterals);
+  return 'code' in result ? result.code : undefined;
 }
 
 /** Returns the executable body of the recognized synchronous createApp factory. */

@@ -165,7 +165,7 @@ describe('M113i review regressions', () => {
   });
 
   for (const [runtime, invocation] of [
-    ['deno', `deno run -A npm:@setu-ts/cli@${VERSION}`],
+    ['deno', `deno run -A --no-lock npm:@setu-ts/cli@${VERSION}`],
     ['node', `npx @setu-ts/cli@${VERSION}`],
     ['bun', `bunx @setu-ts/cli@${VERSION}`],
     ['cloudflare-workers', `npx @setu-ts/cli@${VERSION}`],
@@ -187,7 +187,9 @@ describe('M113i review regressions', () => {
           error: error.sink,
         }),
       ).toBe(2);
-      expect(error.text()).toContain(`\`deno run -A npm:@setu-ts/cli@${VERSION} devtool enable\``);
+      expect(error.text()).toContain(
+        `\`deno run -A --no-lock npm:@setu-ts/cli@${VERSION} devtool enable\``,
+      );
     });
     it(`pins generated middleware guidance for ${runtime}`, () => {
       const files = projectFiles('shop', runtime, resolveHost(getTemplate('full-stack')!, runtime));

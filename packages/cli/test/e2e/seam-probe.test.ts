@@ -832,15 +832,22 @@ await app.stop();
       expect(await run(['g', 'service', 'widget', '--dir', project])).toBe(0);
       expect(await run(['g', 'controller', 'gizmo', '--dir', project])).toBe(0);
 
-      // A module would claim the service's injection token.
+      // A same-named service without its controller cannot be adopted: the
+      // module's generated controller imports its CRUD functions (M131c X91-1).
       err = [];
       expect(await run(['g', 'module', 'widget', '--dir', project, '--adopt-controllers'])).toBe(1);
+      expect(err.join('\n')).toContain('Cannot adopt a same-named service without its controller');
+      await expect(nodeFs.stat(`${project}/src/modules/widget`)).rejects.toThrow();
+
+      // Without adoption the module still refuses to claim the service's token.
+      err = [];
+      expect(await run(['g', 'module', 'widget', '--dir', project])).toBe(1);
       expect(err.join('\n')).toContain("the injection token 'widget-service'");
       await expect(nodeFs.stat(`${project}/src/modules/widget`)).rejects.toThrow();
 
-      // A module would claim the controller's HTTP path.
+      // ...nor the controller's HTTP path.
       err = [];
-      expect(await run(['g', 'module', 'gizmo', '--dir', project, '--adopt-controllers'])).toBe(1);
+      expect(await run(['g', 'module', 'gizmo', '--dir', project])).toBe(1);
       expect(err.join('\n')).toContain('the HTTP path /gizmo');
       await expect(nodeFs.stat(`${project}/src/modules/gizmo`)).rejects.toThrow();
 

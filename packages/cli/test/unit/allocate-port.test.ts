@@ -1,6 +1,31 @@
 import { describe, expect, it } from 'vitest';
 
-import { allocatePort, type WorkspaceManifest } from '../../src/workspace/manifest.ts';
+import {
+  allocatePort,
+  allocateDevPort,
+  allocateDevtoolPort,
+  recordedPorts,
+  type WorkspaceManifest,
+} from '../../src/workspace/manifest.ts';
+
+it('X87-2 X87-6 allocators avoid all four recorded port kinds and exhaust their ranges', () => {
+  expect(allocateDevPort(manifest([]))).toBe(5000);
+  const input = {
+    ...manifest(
+      [{ name: 'web', port: 5000, devtoolPort: 5001, inspectPort: 5002, vitePort: 5003 }],
+      5000,
+    ),
+    devtoolBasePort: 5000,
+    devBasePort: 5000,
+  };
+  expect([...recordedPorts(input)]).toEqual([5000, 5001, 5002, 5003]);
+  for (const allocate of [allocatePort, allocateDevtoolPort, allocateDevPort])
+    expect(allocate(input)).toBe(5004);
+  expect(
+    allocateDevPort({ ...input, devBasePort: 65535, members: [{ name: 'last', port: 65535 }] }),
+  ).toBeUndefined();
+  expect(allocateDevPort(manifest([], 65535))).toBeUndefined();
+});
 
 function manifest(members: WorkspaceManifest['members'], basePort = 3000): WorkspaceManifest {
   return {

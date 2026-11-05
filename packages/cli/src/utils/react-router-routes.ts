@@ -1,6 +1,8 @@
 /** React Router's resolved page tree, read only by generation (never by setu check). @module */
 import type { CommandRunner } from './run-command.ts';
-import { joinPath } from './file-writer.ts';
+import type { IFileSystem } from '@setu-ts/common';
+import { dirName, joinPath } from './file-writer.ts';
+import { findWorkspaceMarker } from './project-detector.ts';
 
 /** The first non-empty stderr line, bounded: a notice names the failure, not its trace. */
 function firstLine(text: string): string {
@@ -70,12 +72,39 @@ export type PagePathsResult =
 export async function readPagePaths(
   dir: string,
   runCommand: CommandRunner,
+  fs: IFileSystem,
 ): Promise<PagePathsResult> {
   const abort = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
+    const ancestors = [dir];
+    let current = dir;
+    let workspace = false;
+    for (;;) {
+      if ((await findWorkspaceMarker(fs, current)) !== undefined) {
+        workspace = true;
+        break;
+      }
+      const parent = dirName(current);
+      if (parent === current || parent === '') break;
+      ancestors.push(parent);
+      current = parent;
+    }
+    let binary: string | undefined;
+    for (const ancestor of workspace ? ancestors : [dir]) {
+      const candidate = joinPath(ancestor, 'node_modules/.bin/react-router');
+      try {
+        if ((await fs.stat(candidate)).isFile) {
+          binary = candidate;
+          break;
+        }
+      } catch {
+        /* No local binary: try the next workspace ancestor. */
+      }
+    }
+    if (binary === undefined) return { ok: false, reason: 'React Router binary is not installed' };
     const result = await Promise.race([
-      runCommand(joinPath(dir, 'node_modules/.bin/react-router'), ['routes', '--json'], {
+      runCommand(binary, ['routes', '--json'], {
         cwd: dir,
         signal: abort.signal,
       }),

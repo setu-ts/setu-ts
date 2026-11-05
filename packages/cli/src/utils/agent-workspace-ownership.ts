@@ -8,20 +8,11 @@ import { isMissingPath } from './filesystem-errors.ts';
  * A symlink inside a workspace and a directory another user owns need opposite
  * advice: telling the developer of a link to "run `setu agents` in a workspace
  * you own" sends them to the workspace they are already in. The symlink remedy
- * names the link's real path when it can be resolved.
+ * asks for the directory itself in place of the link.
  */
-async function remedyFor(
-  fs: ICliFileSystem,
-  directory: string,
-  reason: 'symlink' | 'not a directory' | 'not owned by you',
-): Promise<string> {
+function remedyFor(reason: 'symlink' | 'not a directory' | 'not owned by you'): string {
   if (reason === 'symlink') {
-    const real =
-      fs.realPath === undefined ? undefined : await fs.realPath(directory).catch(() => undefined);
-    return (
-      'replace the link with the directory it points at, or run setu agents from its real path' +
-      (real === undefined ? '' : ` (${real})`)
-    );
+    return 'replace the link with the directory it points at';
   }
   if (reason === 'not a directory')
     return 'fix the workspace layout so every member path is a directory';
@@ -63,8 +54,7 @@ export async function assertAgentWorkspaceOwnership(
           : stat.uid !== fs.invokingUid && stat.uid !== 0
             ? 'not owned by you'
             : undefined;
-      if (reason !== undefined)
-        throw new Error(`${current}: ${reason}; ${await remedyFor(fs, current, reason)}`);
+      if (reason !== undefined) throw new Error(`${current}: ${reason}; ${remedyFor(reason)}`);
       checked.add(current);
       if (dirName(current) === current || dirName(current) === '') break;
     }

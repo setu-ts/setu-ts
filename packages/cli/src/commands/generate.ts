@@ -449,7 +449,18 @@ export async function runGenerateCommand(
     schematicName,
     names.kebab,
     installed,
-    scan.artifacts,
+    schematicName === 'module' && modules.length === 0 && adoptControllers
+      ? // Only the flat file that becomes the module's own is exempt: a nested
+        // controller of the same name still collides with the generated one.
+        Object.fromEntries(
+          Object.entries(scan.artifacts).map(([family, paths]) => [
+            family,
+            ['controller', 'controller-functions', 'service'].includes(family)
+              ? paths.filter((path) => path !== names.kebab)
+              : paths,
+          ]),
+        )
+      : scan.artifacts,
     module === undefined ? modules : [],
     module,
   );
@@ -489,7 +500,7 @@ export async function runGenerateCommand(
       schematicName === 'module'
         ? `/api/${names.kebab}`
         : `/${module === undefined ? '' : `${module}/`}${names.kebab}`;
-    const pages = await readPagePaths(dir, deps.runCommand ?? createCommandRunner());
+    const pages = await readPagePaths(dir, deps.runCommand ?? createCommandRunner(), deps.fs);
     if (!pages.ok) {
       deps.error(
         `Notice: cannot check React Router pages (${escapeName(pages.reason)}); check ${base} and ${base}/:id against app/routes.ts and app/routes/ by hand.`,
@@ -588,6 +599,7 @@ export async function runGenerateCommand(
         module: names.kebab,
         mode,
         adopt: adoptControllers,
+        fullStack: mode === 'functional' && installed.has('react-router-plugin'),
         artifacts: scan.artifacts,
         generated,
         cli: cliInvocation(runtime),
@@ -604,13 +616,9 @@ export async function runGenerateCommand(
       return EXIT_ERROR;
     }
     moduleSwitch = planned.plan;
-    const replaced = new Map(moduleSwitch.writes.map((file) => [file.path, file]));
     for (const file of moduleSwitch.writes)
       if (!generated.some((own) => own.path === file.path)) verbatim.add(joinPath(dir, file.path));
-    generated = [
-      ...generated.map((file) => replaced.get(file.path) ?? file),
-      ...moduleSwitch.writes.filter((file) => !generated.some((own) => own.path === file.path)),
-    ];
+    generated = moduleSwitch.writes;
   } else if (adoptControllers) {
     deps.error(
       '--adopt-controllers applies only to the first module, which switches a flat project to modules.',
@@ -708,7 +716,11 @@ export async function runGenerateCommand(
           ? withoutRegistrationWiring(diagnosis)
           : diagnosis,
         deps.error,
-        { dryRun: true, ...(module === undefined ? {} : { module }) },
+        {
+          dryRun: true,
+          generated: generated.map((file) => file.path),
+          ...(module === undefined ? {} : { module }),
+        },
       );
       return code;
     }

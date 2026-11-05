@@ -728,7 +728,11 @@ connects to Vite's port directly, so an edit updates in place. A second dev serv
  * @param runtime - The project's target runtime
  * @returns The README markdown
  */
-export const FULL_STACK_README_SECTION = (invocation: string, runtime: string): string => {
+export const FULL_STACK_README_SECTION = (
+  invocation: string,
+  runtime: string,
+  member = false,
+): string => {
   const command = `\`${invocation} generate middleware <name>\` (\`src/middleware/\`)`;
   const width = command.length;
   const workers =
@@ -812,5 +816,5 @@ attaches it; export it from a layout module to guard every route in that group.
 Import workspace libraries from \`.server.ts\` modules and \`setu.config.ts\`. The SSR build leaves
 their declared package names external so the server runtime resolves them through the workspace.
 Client modules cannot import a Deno workspace library: the browser bundle has no Deno workspace.
-${workers === '' ? DEVELOPMENT_PORTS : workers}`;
+${workers === '' ? (member ? '\n## Development ports\n\nApplication and Vite ports come from `setu.workspace.json` through the generated discovery module.\n' : DEVELOPMENT_PORTS) : workers}`;
 };

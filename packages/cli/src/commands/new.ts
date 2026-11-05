@@ -824,7 +824,10 @@ export async function runNewCommand(args: ParsedArgs, deps: NewDependencies): Pr
     );
     for (const outcome of outcomes) deps.log(`${outcome.outcome} ${escapeName(outcome.path)}`);
     if (chosen.flags['agents'] === true) {
-      const code = await runAgentsCommand({ positionals: [], flags: {} }, { ...deps, cwd: root });
+      const code = await runAgentsCommand(
+        { positionals: [], flags: {} },
+        { ...deps, cwd: root, installPending: true },
+      );
       if (code !== EXIT_OK) return code;
     }
   } catch (cause) {

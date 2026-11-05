@@ -2,7 +2,21 @@ import { describe, expect, it } from 'vitest';
 import { createFakeFs, createRecorder } from '../fixtures/fake-fs.ts';
 import type { FakeFs, Recorder } from '../fixtures/fake-fs.ts';
 import { runCli } from '../../src/cli.ts';
-import { commandFlagsFor, DOCUMENTED_FLAGS, suggestFlag } from '../../src/flags.ts';
+import {
+  BUILT_IN_COMMANDS,
+  commandFlagsFor,
+  DOCUMENTED_FLAGS,
+  suggestFlag,
+} from '../../src/flags.ts';
+import { readFile } from 'node:fs/promises';
+
+it('V11-15 inventories every dispatched built-in name and its flag spec', async () => {
+  const source = await readFile(new URL('../../src/cli.ts', import.meta.url), 'utf8');
+  const names = [...source.matchAll(/case '([\w-]+)':/g)].map((match) => match[1]);
+  expect([...BUILT_IN_COMMANDS].sort()).toEqual([...new Set(names)].sort());
+  for (const name of BUILT_IN_COMMANDS)
+    expect(commandFlagsFor(name, undefined), name).toBeDefined();
+});
 
 /**
  * The flags `--help` presents, parsed from the RENDERED text — the inventory

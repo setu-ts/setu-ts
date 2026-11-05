@@ -32,7 +32,10 @@ export function registerOrdersRoutes(router: IRouterApi, services?: IServiceRegi
 `;
 
 function harness(seed: Readonly<Record<string, string>>) {
-  const fs = createFakeFs({ '/app/setu.config.ts': 'registerModules;', ...seed });
+  const fs = createFakeFs({
+    '/app/setu.config.ts': 'registerModules(app.router, app.services);',
+    ...seed,
+  });
   const log = createRecorder();
   const err = createRecorder();
   return {

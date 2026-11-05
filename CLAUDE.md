@@ -759,7 +759,12 @@ here.
   argument, filters refused rather than ignored, memory/pgvector/Qdrant adapters plus
   `VectorizeVectorStore`, `setu add vector-store`, the `semantic-search` example; ships in `0.12.0`)
   — complete (PR #558).
-- **Next milestone** — M131c–d are open for `0.12.0`.
+- **Milestone 131c** (`packages/cli` — CLI gates, generators and workspace deploy: `setu check`
+  fails an imported-but-unused registration and names the line of a config it cannot read, W005 for
+  an unlisted service, same-named controller adoption, hoisted `react-router`, per-member Vite and
+  inspector ports, a Deno image without dev tooling, `workspace deploy --pull-secret`, brief and
+  scaffold text; 17 smoke rows) — complete (PR #560).
+- **Next milestone** — M131d is open for `0.12.0`.
 
 ## Verification (run before declaring any work done)
 

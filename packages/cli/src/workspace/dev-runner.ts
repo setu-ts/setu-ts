@@ -40,7 +40,14 @@ export function workspaceDevRunner(profile: WorkspaceRuntimeProfile): {
 
 function denoRunner(): string {
   return `${RUNNER_DOC}
-type Member = { name: string; port: number; dependsOn?: string[]; devtoolPort?: number };
+type Member = {
+  name: string;
+  port: number;
+  dependsOn?: string[];
+  devtoolPort?: number;
+  inspectPort?: number;
+  vitePort?: number;
+};
 
 const manifest = JSON.parse(await Deno.readTextFile('setu.workspace.json')) as {
   members: Member[];

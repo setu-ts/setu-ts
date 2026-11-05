@@ -421,10 +421,23 @@ try {
     };
     // `healthProbes` records what the Kubernetes renderer cannot otherwise know:
     // both were generated with `--template microservice`, which reaches
-    // HealthPlugin, so both get httpGet probes rather than tcpSocket (X2-7).
+    // HealthPlugin, so both get httpGet probes rather than tcpSocket (X2-7). Each member also records
+    // its own inspector port from the development range, basePort + 2000 (M131c X87-6).
     expect(manifest.members).toEqual([
-      { name: 'orders', port: base, healthProbes: true, metricsEndpoint: true },
-      { name: 'billing', port: base + 1, healthProbes: true, metricsEndpoint: true },
+      {
+        name: 'orders',
+        port: base,
+        inspectPort: base + 2000,
+        healthProbes: true,
+        metricsEndpoint: true,
+      },
+      {
+        name: 'billing',
+        port: base + 1,
+        inspectPort: base + 2001,
+        healthProbes: true,
+        metricsEndpoint: true,
+      },
     ]);
   });
 

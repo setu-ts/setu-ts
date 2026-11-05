@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { parseArgs, stringFlag, stringFlags } from '../../src/args.ts';
 
+it('X87-5 keeps every pull-secret occurrence in order', () => {
+  expect(
+    parseArgs(['workspace', 'deploy', '--pull-secret', 'one', '--pull-secret=two']).flags[
+      'pull-secret'
+    ],
+  ).toEqual(['one', 'two']);
+});
+
 describe('parseArgs', () => {
   it('returns empty positionals and flags for empty argv', () => {
     const args = parseArgs([]);
@@ -138,5 +146,8 @@ it('replaces incomplete repeated dependency flags without retaining a boolean in
   expect(parseArgs(['--depends-on=a', '--depends-on=b', '--depends-on']).flags['depends-on']).toBe(
     true,
   );
-  expect(parseArgs(['--depends-on', '--depends-on=c']).flags['depends-on']).toBe('c');
+  // An earlier valueless occurrence is never replaced by a later value: the
+  // command must still refuse it (CodeRabbit #560).
+  expect(parseArgs(['--depends-on', '--depends-on=c']).flags['depends-on']).toBe(true);
+  expect(parseArgs(['--pull-secret', '--pull-secret', 'registry']).flags['pull-secret']).toBe(true);
 });

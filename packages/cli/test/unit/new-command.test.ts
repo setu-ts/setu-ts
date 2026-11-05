@@ -1,3 +1,4 @@
+import { cliInvocation } from '../../src/templates/project-files.ts';
 import { describe, expect, it } from 'vitest';
 import { createFakeFs, createRecorder, type FakeFs } from '../fixtures/fake-fs.ts';
 import { parseArgs } from '../../src/args.ts';
@@ -8,6 +9,14 @@ import { listTemplates } from '../../src/templates/registry.ts';
 import { NODE_START_BUILD_CHECK } from '../../src/templates/project-files.ts';
 import { detectTargetRuntime } from '../../src/utils/runtime-detector.ts';
 import type { PortProbe } from '../../src/workspace/port-probe.ts';
+
+it('X93-8 new defers missing cards until the first install', async () => {
+  const h = harness();
+  expect(await h.run(['fresh', '--template', 'rest', '--runtime', 'node', '--agents'])).toBe(0);
+  expect(h.err.lines).toEqual([
+    `agent cards resolve after \`npm install\`; then run \`${cliInvocation('node')} agents --check --strict\``,
+  ]);
+});
 
 describe('Node standalone devtool scaffold', () => {
   it('writes the development entry, script and development-only pin with exact dry-run parity', async () => {

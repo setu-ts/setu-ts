@@ -74,7 +74,7 @@ describe.skipIf(typeof process.getuid !== 'function' || process.platform === 'wi
           });
         expect(await run()).toBe(1);
         expect(errors).toEqual([
-          `${root}/apps/b: symlink; replace the link with the directory it points at, or run setu agents from its real path (${root}/elsewhere)`,
+          `${root}/apps/b: symlink; replace the link with the directory it points at`,
         ]);
         expect(await readdir(root)).toEqual(['apps', 'elsewhere', 'setu.workspace.json']);
         for (const member of ['a', 'b'])

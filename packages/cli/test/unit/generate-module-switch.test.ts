@@ -42,6 +42,91 @@ function host(style: Style): TemplateHost {
   return style === 'class-based' ? REST_TEMPLATE.classBased! : REST_TEMPLATE;
 }
 
+describe('X91-1 same-named adoption', () => {
+  it('registers an adopted function controller in a class-based module without importing a missing class', async () => {
+    const h = scaffold(host('class-based'));
+    expect(await h.run(['route', 'orders'])).toBe(0);
+    expect(await h.run(['module', 'orders', '--adopt-controllers']), h.err.text()).toBe(0);
+    expect(h.fs.read('/app/src/modules/orders/index.ts')).toContain(
+      'registerOrdersRoutes(router, services)',
+    );
+    expect(h.fs.read('/app/src/modules/orders/orders.module.ts')).not.toContain('OrdersController');
+  });
+  for (const style of ['functional', 'class-based'] as const) {
+    for (const service of [false, true])
+      it(`${style}: adopts the controller, with service=${service}`, async () => {
+        const h = scaffold(host(style));
+        expect(await h.run(['controller', 'orders'])).toBe(0);
+        if (service) expect(await h.run(['service', 'orders'])).toBe(0);
+        const controller = h.fs.read('/app/src/controllers/orders.controller.ts');
+        const adoptedService = service
+          ? h.fs.read('/app/src/services/orders.service.ts')
+          : undefined;
+        expect(await h.run(['module', 'orders', '--adopt-controllers']), h.err.text()).toBe(0);
+        expect(h.fs.read('/app/src/modules/orders/orders.controller.ts')).toBe(controller);
+        if (service)
+          expect(h.fs.read('/app/src/modules/orders/orders.service.ts')).toBe(adoptedService);
+        else expect(h.fs.has('/app/src/modules/orders/orders.service.ts')).toBe(true);
+        expect(h.fs.has('/app/src/modules/orders/orders.test.ts')).toBe(false);
+        expect(h.fs.has('/app/src/modules/orders/orders.e2e.test.ts')).toBe(false);
+        const index = h.fs.read('/app/src/modules/orders/index.ts');
+        if (style === 'functional')
+          expect(index.match(/import \{ registerOrdersRoutes \}/g)).toHaveLength(1);
+      });
+    it(`${style}: refuses a same-named service without its controller`, async () => {
+      const h = scaffold(host(style));
+      expect(await h.run(['service', 'orders'])).toBe(0);
+      const writes = h.fs.writes.length;
+      expect(await h.run(['module', 'orders', '--adopt-controllers'])).toBe(1);
+      expect(h.err.text()).toContain(
+        'adopt it with its controller, or name the module something else',
+      );
+      expect(h.fs.writes).toHaveLength(writes);
+    });
+  }
+  it('refuses a same-named file the scan did not admit (CodeRabbit #560)', async () => {
+    const h = scaffold(host('functional'), {
+      'src/controllers/orders.controller.ts': 'export const work = 1;\n',
+    });
+    expect(await h.run(['module', 'orders', '--adopt-controllers'])).toBe(1);
+    expect(h.err.text()).toContain(
+      "Cannot adopt src/controllers/orders.controller.ts as the module's own: setu check skips it",
+    );
+    expect(h.fs.has('/app/src/modules/orders/index.ts')).toBe(false);
+  });
+  it('keeps a nested same-named controller in the name check (CodeRabbit #560)', async () => {
+    const h = scaffold(host('functional'), {
+      'src/controllers/legacy/orders.controller.ts':
+        "import type { IRouterApi } from '@setu-ts/common';\nexport function registerOrdersRoutes(router: IRouterApi): void {\n  void router;\n}\n",
+    });
+    expect(await h.run(['module', 'orders', '--adopt-controllers'])).toBe(1);
+    expect(h.err.text()).toContain('the HTTP path /orders');
+    expect(h.fs.has('/app/src/modules/orders/index.ts')).toBe(false);
+  });
+  it('adopts into a class-based module even with react-router-plugin installed (CodeRabbit #560)', async () => {
+    const h = scaffold(host('class-based'));
+    const manifest = JSON.parse(h.fs.read('/app/package.json')) as {
+      dependencies: Record<string, string>;
+    };
+    manifest.dependencies['@setu-ts/react-router-plugin'] = '^0.11.0';
+    await h.fs.writeFile('/app/package.json', new TextEncoder().encode(JSON.stringify(manifest)));
+    expect(await h.run(['controller', 'orders'])).toBe(0);
+    expect(await h.run(['module', 'orders', '--adopt-controllers']), h.err.text()).toBe(0);
+    expect(h.err.text()).not.toContain('full-stack module');
+  });
+  it('refuses full-stack same-named adoption before any move', async () => {
+    const h = scaffold(FULL_STACK_TEMPLATE, {
+      'src/controllers/orders.controller.ts': 'export function registerOrdersRoutes() {}',
+    });
+    for (const file of projectFiles('svc', 'node', resolveHost(FULL_STACK_TEMPLATE, 'node')))
+      if (file.path.startsWith('src/modules/')) await h.fs.rm(`/app/${file.path}`);
+    expect(await h.run(['module', 'orders', '--adopt-controllers'])).toBe(1);
+    expect(h.err.text()).toContain('full-stack module');
+    expect(h.err.text()).toContain('generated service factory and token');
+    expect(h.fs.writes).toEqual([]);
+  });
+});
+
 function syntaxErrors(source: string): readonly ts.Diagnostic[] {
   return (
     ts.transpileModule(source, {
@@ -141,7 +226,7 @@ describe('the first setu g module', () => {
         expect(index).not.toContain('Controller');
       }
       // The stale pre-switch wiring is not reported.
-      expect(h.err.text()).not.toContain('does not reference registerModules');
+      expect(h.err.text()).not.toContain('does not call registerModules');
       // From now on the project is modular.
       expect(await h.run(['controller', 'tracking'])).toBe(2);
       expect(h.err.text()).toContain(
@@ -234,7 +319,7 @@ describe('the first setu g module', () => {
       'would move src/controllers/greeting.controller.ts -> src/modules/shipment/greeting.controller.ts',
     );
     expect(h.out.text()).toContain('would remove src/controllers/index.ts');
-    expect(h.err.text()).not.toContain('does not reference registerModules');
+    expect(h.err.text()).not.toContain('does not call registerModules');
   });
 
   it('reports in a dry run a move the real run would refuse', async () => {
@@ -281,7 +366,7 @@ describe('the first setu g module', () => {
             'export function describeShipment(): string {\n  return "s";\n}\n',
         },
         ['module', 'shipment', '--adopt-controllers'],
-        "Cannot adopt into src/modules/shipment/: these would land on the same file as another file or the module's own:",
+        'adopt it with its controller, or name the module something else',
       ],
       [
         'a config it cannot switch',

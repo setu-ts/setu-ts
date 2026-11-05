@@ -1,3 +1,4 @@
+import { cliInvocation } from '../../src/templates/project-files.ts';
 import { readFile } from 'node:fs/promises';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { runCli } from '../../src/cli.ts';
@@ -17,6 +18,14 @@ import {
 import { VERSION } from '../../src/version.ts';
 
 const root = new URL('../../../../', import.meta.url);
+
+it('X93-8 example new defers missing cards until install', async () => {
+  const h = harness();
+  expect(await h.run(['new', 'demo', '--example', 'minimal', '--agents'])).toBe(0);
+  expect(h.err.lines).toEqual([
+    `agent cards resolve after \`npm install\`; then run \`${cliInvocation('node')} agents --check --strict\``,
+  ]);
+});
 const repositoryFetch: typeof fetch = async (input) => {
   const path = String(input).split(`/v${VERSION}/`)[1];
   return new Response(await readFile(new URL(path, root)));

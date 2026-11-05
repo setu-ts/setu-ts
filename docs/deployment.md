@@ -508,6 +508,15 @@ for any other context. It applies the namespace (`--namespace`, default the work
 name), one Secret per member, and `k8s/members.yaml` as it is on disk with the namespace and each
 member's image filled in, then waits for `kubectl rollout status` (`--timeout`, default `120s`).
 
+For an authenticated image registry, pass `--pull-secret <name>` once per existing registry Secret
+in that namespace. Deploy checks the namespace and Secret names before building, including under
+`--dry-run`, and adds their names to each member's pod `imagePullSecrets` in the applied manifest.
+It refuses missing Secrets with the `kubectl create secret docker-registry` recipe, and a Secret
+whose type is not `kubernetes.io/dockerconfigjson` or `kubernetes.io/dockercfg`; it reads only the
+type, and does not create registry Secrets or read their data. Another kubectl failure (credentials,
+access) is quoted, with no recipe. Without the flag, a non-kind context prints a hint. The insertion
+happens at deploy time, so regenerating workspace files does not lose the option.
+
 **Member secrets.** A member's variables are the names its committed `.env.example` declares — a
 full-stack member's `SESSION_SECRET` and `TRUSTED_PROXIES`, for instance — less those the generated
 manifest already sets. Their values go in `k8s/secrets/<member>/.env`, which the root's `.env`

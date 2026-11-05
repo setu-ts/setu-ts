@@ -27,6 +27,8 @@ export interface DeployManifestInputs {
   readonly workspace: string;
   /** Each member's built image reference, keyed by member name, in manifest order. */
   readonly images: ReadonlyMap<string, string>;
+  /** Existing registry Secret names to attach to each member's pod spec. */
+  readonly pullSecrets?: readonly string[];
 }
 
 /** Escapes a member name for use inside a regular expression. */
@@ -48,6 +50,31 @@ export function prepareDeployManifest(
   let filled = text
     .replaceAll('${NAMESPACE}', inputs.namespace)
     .replaceAll('${WORKSPACE}', inputs.workspace);
+  if ((inputs.pullSecrets?.length ?? 0) > 0) {
+    if (/\bimagePullSecrets\b/.test(filled))
+      return {
+        ok: false,
+        message:
+          'k8s/members.yaml already declares imagePullSecrets; remove it before using --pull-secret.',
+      };
+    for (const member of inputs.images.keys()) {
+      const anchor = new RegExp(
+        `^( +)containers:[ \\t]*\\r?\\n[ \\t]*- name: ${literal(member)}[ \\t]*$`,
+        'gm',
+      );
+      const matches = [...filled.matchAll(anchor)];
+      if (matches.length !== 1)
+        return {
+          ok: false,
+          message: `k8s/members.yaml needs exactly one containers / - name: ${member} anchor for --pull-secret; found ${matches.length}.`,
+        };
+      filled = filled.replace(
+        anchor,
+        (whole: string, indent: string) =>
+          `${indent}imagePullSecrets:\n${inputs.pullSecrets!.map((name) => `${indent}  - name: ${name}`).join('\n')}\n${whole}`,
+      );
+    }
+  }
   for (const [member, image] of inputs.images) {
     // The line the generator writes: `image: <member>:dev`, nothing after it.
     // `[ \t]*`, never `\s*`: `\s` spans newlines, and a hostile file of blank lines then

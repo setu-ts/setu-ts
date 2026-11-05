@@ -30,6 +30,26 @@ import { withBrokerArgs, withQueueArgs } from '../../src/templates/broker.ts';
 import { transportSpec } from '../../src/workspace/transport.ts';
 import { workspaceProfile } from '../../src/workspace/runtime-profile.ts';
 
+it('X87-2 renders member app and Vite ports from discovery and preserves standalone defaults', () => {
+  for (const runtime of ['node', 'bun', 'deno'] as const) {
+    const host = resolveHost(FULL_STACK_TEMPLATE, runtime);
+    const member = projectFiles('web', runtime, host, {
+      symbol: 'SERVICE_PORT',
+      from: './src/discovery/services.ts',
+    });
+    const dev = member.find((file) => file.path === 'dev.ts')!.contents;
+    expect(dev).toContain("import { SERVICE_PORT, VITE_PORT } from './src/discovery/services.ts'");
+    expect(dev).toContain('const port = SERVICE_PORT;');
+    expect(dev).toContain('const vitePort = VITE_PORT;');
+    expect(member.find((file) => file.path === 'README.md')!.contents).toContain('ports come from');
+    const standalone = projectFiles('web', runtime, host).find(
+      (file) => file.path === 'dev.ts',
+    )!.contents;
+    expect(standalone).toContain("Number(runtime.env.PORT ?? '3000')");
+    expect(standalone).toContain("Number(runtime.env.VITE_PORT ?? '5173')");
+  }
+});
+
 it('renders both transport options after logger on every starter-composed template', () => {
   for (const template of listTemplates().filter((entry) => entry.appFactory !== undefined)) {
     const host = resolveHost(template, 'deno');

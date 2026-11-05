@@ -141,6 +141,10 @@ export interface WorkspaceMember {
    * Both allocators avoid configured collisions, including stopped members.
    */
   readonly devtoolPort?: number;
+  /** Loopback inspector port allocated for this member's debug script. */
+  readonly inspectPort?: number;
+  /** Vite HMR port, present only for a full-stack member. */
+  readonly vitePort?: number;
   /** Sibling services that must answer `/ready` before this member starts. */
   readonly dependsOn?: readonly string[];
   /**
@@ -182,6 +186,8 @@ export interface WorkspaceManifest {
   readonly basePort: number;
   /** Connector allocation range start; absent derives basePort + 1000, capped at MAX_PORT. */
   readonly devtoolBasePort?: number;
+  /** Development port range start; absent derives basePort + 2000. */
+  readonly devBasePort?: number;
   /**
    * How members talk to each other.
    *
@@ -302,6 +308,13 @@ function toMember(value: unknown): WorkspaceMember | undefined {
   // already exists.
   const devtoolPort = record['devtoolPort'];
   if (devtoolPort !== undefined && typeof devtoolPort !== 'number') return undefined;
+  const inspectPort = record['inspectPort'];
+  const vitePort = record['vitePort'];
+  if (
+    (inspectPort !== undefined && typeof inspectPort !== 'number') ||
+    (vitePort !== undefined && typeof vitePort !== 'number')
+  )
+    return undefined;
   const healthProbes = record['healthProbes'];
   const metricsEndpoint = record['metricsEndpoint'];
   return {
@@ -311,6 +324,8 @@ function toMember(value: unknown): WorkspaceMember | undefined {
     ...(dependsOn === undefined ? {} : { dependsOn }),
     ...(typeof healthProbes === 'boolean' ? { healthProbes } : {}),
     ...(typeof metricsEndpoint === 'boolean' ? { metricsEndpoint } : {}),
+    ...(inspectPort === undefined ? {} : { inspectPort }),
+    ...(vitePort === undefined ? {} : { vitePort }),
   };
 }
 
@@ -365,6 +380,14 @@ export async function readWorkspaceManifest(
       problem: { kind: 'invalid-port', port: devtoolBasePort, field: 'devtoolBasePort' },
     };
   }
+  const devBasePort = record['devBasePort'];
+  if (devBasePort !== undefined && typeof devBasePort !== 'number')
+    return { ok: false, problem: { kind: 'malformed' } };
+  if (devBasePort !== undefined && !isUsablePort(devBasePort))
+    return {
+      ok: false,
+      problem: { kind: 'invalid-port', port: devBasePort, field: 'devBasePort' },
+    };
   const basePort = record['basePort'];
   if (typeof basePort !== 'number') return { ok: false, problem: { kind: 'malformed' } };
   if (!isUsablePort(basePort)) {
@@ -439,6 +462,16 @@ export async function readWorkspaceManifest(
         },
       };
     }
+    for (const field of ['inspectPort', 'vitePort'] as const)
+      if (member[field] !== undefined && !isUsablePort(member[field]))
+        return {
+          ok: false,
+          problem: {
+            kind: 'invalid-port',
+            port: member[field]!,
+            field: `member "${member.name}" ${field}`,
+          },
+        };
     members.push(member);
   }
 
@@ -459,6 +492,7 @@ export async function readWorkspaceManifest(
       version,
       basePort,
       ...(devtoolBasePort === undefined ? {} : { devtoolBasePort }),
+      ...(devBasePort === undefined ? {} : { devBasePort }),
       transport: transport as TransportName,
       ...(redisClient === undefined ? {} : { redisClient }),
       runtime,
@@ -475,9 +509,13 @@ export async function readWorkspaceManifest(
  * @returns The `setu.workspace.json` contents
  */
 export function renderWorkspaceManifest(manifest: WorkspaceManifest): string {
-  const { devtoolBasePort, ...rest } = manifest;
+  const { devtoolBasePort, devBasePort, ...rest } = manifest;
   return `${JSON.stringify(
-    { ...rest, ...(devtoolBasePort === undefined ? {} : { devtoolBasePort }) },
+    {
+      ...rest,
+      ...(devtoolBasePort === undefined ? {} : { devtoolBasePort }),
+      ...(devBasePort === undefined ? {} : { devBasePort }),
+    },
     null,
     2,
   )}\n`;
@@ -510,13 +548,12 @@ export function renderWorkspaceManifest(manifest: WorkspaceManifest): string {
  */
 export function allocatePort(manifest: WorkspaceManifest): number | undefined {
   let highest = manifest.basePort - 1;
-  const connectorPorts = new Set<number>();
   for (const member of manifest.members) {
     if (member.port > highest) highest = member.port;
-    if (member.devtoolPort !== undefined) connectorPorts.add(member.devtoolPort);
   }
   let candidate = highest + 1;
-  while (candidate <= MAX_PORT && connectorPorts.has(candidate)) candidate++;
+  const used = recordedPorts(manifest);
+  while (candidate <= MAX_PORT && used.has(candidate)) candidate++;
   return isUsablePort(candidate) ? candidate : undefined;
 }
 
@@ -532,7 +569,41 @@ export function allocateDevtoolPort(manifest: WorkspaceManifest): number | undef
     if (member.devtoolPort !== undefined) highest = Math.max(highest, member.devtoolPort);
   }
   let candidate = highest + 1;
-  const applicationPorts = new Set(manifest.members.map((member) => member.port));
+  const applicationPorts = recordedPorts(manifest);
   while (candidate <= MAX_PORT && applicationPorts.has(candidate)) candidate++;
+  return isUsablePort(candidate) ? candidate : undefined;
+}
+
+/**
+ * Every recorded app, connector, inspector and Vite port, including stopped members.
+ *
+ * @param manifest - The workspace's recorded assignments
+ * @returns All occupied ports, without duplicates
+ * @since 0.12.0
+ */
+export function recordedPorts(manifest: WorkspaceManifest): ReadonlySet<number> {
+  return new Set(
+    manifest.members.flatMap((member) =>
+      [member.port, member.devtoolPort, member.inspectPort, member.vitePort].filter(
+        (port): port is number => port !== undefined,
+      ),
+    ),
+  );
+}
+
+/**
+ * Chooses a development port from its range, avoiding every recorded port.
+ *
+ * @param manifest - The workspace's port ranges and recorded assignments
+ * @returns The next inspector or Vite port, or undefined when the range is exhausted
+ * @since 0.12.0
+ */
+export function allocateDevPort(manifest: WorkspaceManifest): number | undefined {
+  let candidate = manifest.devBasePort ?? manifest.basePort + 2000;
+  for (const member of manifest.members)
+    for (const port of [member.inspectPort, member.vitePort])
+      if (port !== undefined) candidate = Math.max(candidate, port + 1);
+  const used = recordedPorts(manifest);
+  while (candidate <= MAX_PORT && used.has(candidate)) candidate++;
   return isUsablePort(candidate) ? candidate : undefined;
 }

@@ -334,9 +334,27 @@ describe('a three-service workspace — end to end', () => {
     // `healthProbes: true` — all three are generated with a template, so the
     // Kubernetes renderer gives them httpGet probes rather than tcpSocket (X2-7).
     expect(manifest.members).toEqual([
-      { name: 'orders', port: base, healthProbes: true, metricsEndpoint: true },
-      { name: 'billing', port: base + 1, healthProbes: true, metricsEndpoint: true },
-      { name: 'shipping', port: base + 2, healthProbes: true, metricsEndpoint: true },
+      {
+        name: 'orders',
+        port: base,
+        inspectPort: base + 2000,
+        healthProbes: true,
+        metricsEndpoint: true,
+      },
+      {
+        name: 'billing',
+        port: base + 1,
+        inspectPort: base + 2001,
+        healthProbes: true,
+        metricsEndpoint: true,
+      },
+      {
+        name: 'shipping',
+        port: base + 2,
+        inspectPort: base + 2002,
+        healthProbes: true,
+        metricsEndpoint: true,
+      },
     ]);
 
     // The full mesh: 3 members × 2 peers. A map that was appended to rather than

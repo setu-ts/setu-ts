@@ -159,7 +159,10 @@ export async function runExampleNew(
     });
     for (const outcome of outcomes) deps.log(`${outcome.outcome} ${escapeName(outcome.path)}`);
     if (args.flags['agents'] === true) {
-      const code = await runAgentsCommand({ positionals: [], flags: {} }, { ...deps, cwd: root });
+      const code = await runAgentsCommand(
+        { positionals: [], flags: {} },
+        { ...deps, cwd: root, installPending: true },
+      );
       if (code !== EXIT_OK) return code;
     }
   } catch (cause) {

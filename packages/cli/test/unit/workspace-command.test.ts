@@ -44,7 +44,7 @@ describe('runWorkspaceCommand', () => {
       expect(err.text().split('\n')).toHaveLength(1);
       const escaped = `\\u${control.charCodeAt(0).toString(16).padStart(4, '0')}`;
       expect(err.text()).toBe(
-        `/ws${escaped}FORGED-PATH/apps/orders/main.dev.ts: the devtool launcher accepts only the CLI's rendering of this file, so an edited entry cannot be launched; restore it (delete it and run deno run -A npm:@setu-ts/cli@${VERSION} devtool enable orders) or move the port literal yourself.`,
+        `/ws${escaped}FORGED-PATH/apps/orders/main.dev.ts: the devtool launcher accepts only the CLI's rendering of this file, so an edited entry cannot be launched; restore it (delete it and run deno run -A --no-lock npm:@setu-ts/cli@${VERSION} devtool enable orders) or move the port literal yourself.`,
       );
       expect(fs.writes).toEqual([]);
       await fs.writeFile(entryPath, new TextEncoder().encode(ownedEntry));
