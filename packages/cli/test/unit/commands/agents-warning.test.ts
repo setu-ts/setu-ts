@@ -32,7 +32,7 @@ describe('agent warning output', () => {
         ),
       ).toBe(0);
       expect(error.lines).toEqual([
-        `agent cards resolve after \`${runtime === 'node' ? 'npm' : runtime} install\`; then run \`${cliInvocation(runtime)} agents --check\``,
+        `agent cards resolve after \`${runtime === 'node' ? 'npm' : runtime} install\`; then run \`${cliInvocation(runtime)} agents --check --strict\``,
       ]);
     }
     expect(warnings).not.toHaveBeenCalled();

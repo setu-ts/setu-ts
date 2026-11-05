@@ -62,6 +62,9 @@ export function parseArgs(
     const existing = flags[key];
     if (existing === undefined) {
       flags[key] = value;
+    } else if (existing === true) {
+      // A repeat whose earlier occurrence had no value stays `true`, so the
+      // command still refuses the missing value instead of using a later one.
     } else if (Array.isArray(existing)) {
       flags[key] = typeof value === 'string' ? [...existing, value] : value;
     } else {

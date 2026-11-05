@@ -298,7 +298,7 @@ export async function runAgentsCommand(
         workspace?.runtime ?? briefs.find((brief) => brief.facts !== undefined)?.facts?.runtime;
       const pm = runtime === 'deno' ? 'deno' : runtime === 'bun' ? 'bun' : 'npm';
       deps.error(
-        `agent cards resolve after \`${pm} install\`; then run \`${cliInvocation(runtime ?? 'node')} agents --check\``,
+        `agent cards resolve after \`${pm} install\`; then run \`${cliInvocation(runtime ?? 'node')} agents --check --strict\``,
       );
     } else
       for (const brief of briefs) {

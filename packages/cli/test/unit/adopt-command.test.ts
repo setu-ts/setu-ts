@@ -17,6 +17,21 @@ import { InterruptedError } from '../../src/utils/interruption.ts';
 import { renderFullStackDevEntry } from '../../src/templates/full-stack-build-files.ts';
 import { formatForTarget } from '../../src/utils/prettier-format.ts';
 
+it('prints no dev.ts note for a full-stack project without dev.ts (CodeRabbit #560)', async () => {
+  const h = harness({
+    ...NODE_PROJECT,
+    '/work/svc/package.json': JSON.stringify({
+      dependencies: { '@setu-ts/react-router-plugin': '^0.11.0' },
+      scripts: { start: 'tsx main.ts' },
+    }),
+  });
+  expect(await h.run(['--name', 'web']), h.err.text()).toBe(0);
+  expect(h.out.text()).not.toContain('development port lines');
+  expect(JSON.parse(h.fs.read('/work/svc/setu.workspace.json')).members[0]).toHaveProperty(
+    'vitePort',
+  );
+});
+
 it('L3 adopts Workers projects without inspector or Vite assignments or edit notes', async () => {
   const h = harness({
     ...NODE_PROJECT,

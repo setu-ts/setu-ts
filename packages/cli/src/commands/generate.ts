@@ -450,10 +450,15 @@ export async function runGenerateCommand(
     names.kebab,
     installed,
     schematicName === 'module' && modules.length === 0 && adoptControllers
-      ? Object.fromEntries(
-          Object.entries(scan.artifacts).filter(
-            ([family]) => !['controller', 'controller-functions', 'service'].includes(family),
-          ),
+      ? // Only the flat file that becomes the module's own is exempt: a nested
+        // controller of the same name still collides with the generated one.
+        Object.fromEntries(
+          Object.entries(scan.artifacts).map(([family, paths]) => [
+            family,
+            ['controller', 'controller-functions', 'service'].includes(family)
+              ? paths.filter((path) => path !== names.kebab)
+              : paths,
+          ]),
         )
       : scan.artifacts,
     module === undefined ? modules : [],
@@ -594,7 +599,7 @@ export async function runGenerateCommand(
         module: names.kebab,
         mode,
         adopt: adoptControllers,
-        fullStack: installed.has('react-router-plugin'),
+        fullStack: mode === 'functional' && installed.has('react-router-plugin'),
         artifacts: scan.artifacts,
         generated,
         cli: cliInvocation(runtime),

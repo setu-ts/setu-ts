@@ -687,6 +687,12 @@ function deployOptions(
   };
 }
 
+/** The Secret types Kubernetes reads image-pull credentials from. */
+const PULL_SECRET_TYPES: ReadonlySet<string> = new Set([
+  'kubernetes.io/dockerconfigjson',
+  'kubernetes.io/dockercfg',
+]);
+
 /**
  * Whether kubectl answered that the requested object does not exist — the only
  * failure the pull-secret pre-check answers with a create recipe. Credential
@@ -784,7 +790,19 @@ export async function runWorkspaceDeploy(
     for (const name of deploy.pullSecrets) {
       const secret = await workspace.run(
         'kubectl',
-        ['--context', target.context, 'get', 'secret', name, '-n', deploy.namespace, '-o', 'name'],
+        // The type alone, never the data: an Opaque Secret exists but cannot
+        // authenticate an image pull.
+        [
+          '--context',
+          target.context,
+          'get',
+          'secret',
+          name,
+          '-n',
+          deploy.namespace,
+          '-o',
+          'jsonpath={.type}',
+        ],
         { cwd: workspace.dir },
       );
       if (secret.code !== 0) {
@@ -794,6 +812,13 @@ export async function runWorkspaceDeploy(
         }
         deps.error(
           `Cannot find registry Secret ${name}; create it first:\n  kubectl create secret docker-registry ${name} -n ${deploy.namespace} …`,
+        );
+        return EXIT_ERROR;
+      }
+      const type = secret.stdout.trim();
+      if (!PULL_SECRET_TYPES.has(type)) {
+        deps.error(
+          `Registry Secret ${name} has type ${escapeName(type === '' ? '(none)' : type)}; an image pull needs kubernetes.io/dockerconfigjson or kubernetes.io/dockercfg:\n  kubectl create secret docker-registry ${name} -n ${deploy.namespace} …`,
         );
         return EXIT_ERROR;
       }

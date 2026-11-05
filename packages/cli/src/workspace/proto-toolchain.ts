@@ -15,7 +15,7 @@
  * - `buf generate` with a plugin declared as `local: protoc-gen-es` FAILS —
  *   `exec: "protoc-gen-es": executable file not found in $PATH`, because nothing
  *   installs a PATH binary. Declaring the plugin as a COMMAND
- *   (`local: ['deno', 'run', '-A', '--no-lock', 'npm:@bufbuild/protoc-gen-es@^2']`) works, and
+ *   (`local: ['deno', 'run', '-A', '--no-lock', 'npm:@bufbuild/protoc-gen-es@2.7.0']`) works, and
  *   produced `src/gen/orders/v1/orders_pb.ts` exporting the `GenService`
  *   descriptor `addService` takes.
  *
@@ -73,10 +73,14 @@ export const PROTO_DEV_DEPENDENCIES: Readonly<Record<string, string>> = {
  * BOTH entries are required. A bare specifier mapping does not cover subpaths, so
  * the trailing-slash form is what resolves `/codegenv2`; the bare one is what a
  * hand-written `import { create } from '@bufbuild/protobuf'` needs.
+ *
+ * The floor is the exact generator version `buf.gen.yaml` runs: the generator
+ * runs with `--no-lock` (so it never enters `deno.lock` or the image), and an
+ * exact version keeps it from emitting code newer than the locked runtime.
  */
 export const PROTO_IMPORTS: Readonly<Record<string, string>> = {
-  '@bufbuild/protobuf': 'npm:@bufbuild/protobuf@^2',
-  '@bufbuild/protobuf/': 'npm:/@bufbuild/protobuf@^2/',
+  '@bufbuild/protobuf': 'npm:@bufbuild/protobuf@^2.7.0',
+  '@bufbuild/protobuf/': 'npm:/@bufbuild/protobuf@^2.7.0/',
 };
 
 /**
@@ -131,7 +135,7 @@ version: v2
 inputs:
   - directory: ${PROTO_DIR}
 plugins:
-  - local: ['deno', 'run', '-A', '--no-lock', 'npm:@bufbuild/protoc-gen-es@^2']
+  - local: ['deno', 'run', '-A', '--no-lock', 'npm:@bufbuild/protoc-gen-es@2.7.0']
     out: ${PROTO_OUT_DIR}
     opt: target=ts
 `

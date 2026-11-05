@@ -84,6 +84,36 @@ describe('X91-1 same-named adoption', () => {
       expect(h.fs.writes).toHaveLength(writes);
     });
   }
+  it('refuses a same-named file the scan did not admit (CodeRabbit #560)', async () => {
+    const h = scaffold(host('functional'), {
+      'src/controllers/orders.controller.ts': 'export const work = 1;\n',
+    });
+    expect(await h.run(['module', 'orders', '--adopt-controllers'])).toBe(1);
+    expect(h.err.text()).toContain(
+      "Cannot adopt src/controllers/orders.controller.ts as the module's own: setu check skips it",
+    );
+    expect(h.fs.has('/app/src/modules/orders/index.ts')).toBe(false);
+  });
+  it('keeps a nested same-named controller in the name check (CodeRabbit #560)', async () => {
+    const h = scaffold(host('functional'), {
+      'src/controllers/legacy/orders.controller.ts':
+        "import type { IRouterApi } from '@setu-ts/common';\nexport function registerOrdersRoutes(router: IRouterApi): void {\n  void router;\n}\n",
+    });
+    expect(await h.run(['module', 'orders', '--adopt-controllers'])).toBe(1);
+    expect(h.err.text()).toContain('the HTTP path /orders');
+    expect(h.fs.has('/app/src/modules/orders/index.ts')).toBe(false);
+  });
+  it('adopts into a class-based module even with react-router-plugin installed (CodeRabbit #560)', async () => {
+    const h = scaffold(host('class-based'));
+    const manifest = JSON.parse(h.fs.read('/app/package.json')) as {
+      dependencies: Record<string, string>;
+    };
+    manifest.dependencies['@setu-ts/react-router-plugin'] = '^0.11.0';
+    await h.fs.writeFile('/app/package.json', new TextEncoder().encode(JSON.stringify(manifest)));
+    expect(await h.run(['controller', 'orders'])).toBe(0);
+    expect(await h.run(['module', 'orders', '--adopt-controllers']), h.err.text()).toBe(0);
+    expect(h.err.text()).not.toContain('full-stack module');
+  });
   it('refuses full-stack same-named adoption before any move', async () => {
     const h = scaffold(FULL_STACK_TEMPLATE, {
       'src/controllers/orders.controller.ts': 'export function registerOrdersRoutes() {}',

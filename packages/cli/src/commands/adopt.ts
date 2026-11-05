@@ -509,7 +509,9 @@ export async function runAdoptCommand(args: ParsedArgs, deps: AdoptDependencies)
             memberDir,
             deps.error,
           );
-          if (source === standalone.contents || source === formattedStandalone[0]!.contents)
+          if (source === undefined) {
+            // No dev.ts: nothing reads a Vite port to rewrite or to point at.
+          } else if (source === standalone.contents || source === formattedStandalone[0]!.contents)
             await writeFiles(
               deps.fs,
               await formatForTarget(

@@ -297,6 +297,20 @@ export async function planModuleSwitch(input: IModuleSwitchInput): Promise<Modul
   const ownService = `${prefix}/${module}.service.ts`;
   const adoptedController = moved.get(`src/controllers/${module}.controller.ts`) === ownController;
   const adoptedService = moved.get(`src/services/${module}.service.ts`) === ownService;
+  // A same-named file replaces the module's own only if the scan admitted it:
+  // a skipped one (no registrar, class or describe export) would leave the
+  // generated index importing a symbol it does not export.
+  const admitted = (family: string): boolean => seamNames(input.artifacts, family).includes(module);
+  const controllerAdmitted =
+    admitted('controller') ||
+    (input.mode !== 'functional' && admitted(FUNCTION_CONTROLLER_ARTIFACTS));
+  if ((adoptedController && !controllerAdmitted) || (adoptedService && !admitted('service')))
+    return {
+      kind: 'refused',
+      lines: [
+        `Cannot adopt src/${adoptedController && !controllerAdmitted ? `controllers/${module}.controller.ts` : `services/${module}.service.ts`} as the module's own: setu check skips it, so the module's index would import what it does not export. Fix it (setu check names what is missing), or choose another module name; nothing was moved.`,
+      ],
+    };
   if ((adoptedController || adoptedService) && input.fullStack === true)
     return {
       kind: 'refused',

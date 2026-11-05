@@ -46,14 +46,45 @@ it('X87-5 validates repeated pull Secrets, preflights names only, and lists them
       h.calls.some(
         (call) =>
           call.command === 'kubectl' &&
-          call.args.join(' ').includes(`get secret ${name} -n ws -o name`),
+          call.args.join(' ').includes(`get secret ${name} -n ws -o jsonpath={.type}`),
       ),
     ).toBe(true);
   expect(h.out.join('\n')).toContain('would use imagePullSecrets: registry, backup.example');
+  const valueless = harness();
+  expect(await valueless.run(['deploy', '--pull-secret', '--pull-secret', 'registry'])).toBe(2);
+  expect(valueless.calls).toEqual([]);
   for (const value of ['BAD', 'a..b', '-bad', 'a'.repeat(64), 'a'.repeat(254)]) {
     const invalid = harness();
     expect(await invalid.run(['deploy', '--pull-secret', value])).toBe(2);
     expect(invalid.calls).toEqual([]);
+  }
+});
+
+it('X87-5 refuses a Secret that is not an image-pull type, before building (CodeRabbit #560)', async () => {
+  for (const type of ['Opaque', '']) {
+    const h = harness({
+      respond: (call) =>
+        call.command === 'kubectl' && call.args.includes('jsonpath={.type}')
+          ? { stdout: type }
+          : undefined,
+    });
+    expect(await h.run(['deploy', '--dry-run', '--pull-secret', 'registry'])).toBe(1);
+    expect(h.err.join('\n')).toContain(
+      `Registry Secret registry has type ${type === '' ? '(none)' : type}; an image pull needs kubernetes.io/dockerconfigjson`,
+    );
+    expect(h.calls.some((call) => call.command === 'docker')).toBe(false);
+  }
+  for (const type of ['kubernetes.io/dockerconfigjson', 'kubernetes.io/dockercfg']) {
+    const h = harness({
+      respond: (call) =>
+        call.command === 'kubectl' && call.args.includes('jsonpath={.type}')
+          ? { stdout: type }
+          : undefined,
+    });
+    expect(
+      await h.run(['deploy', '--dry-run', '--pull-secret', 'registry']),
+      h.err.join('\n'),
+    ).toBe(0);
   }
 });
 
@@ -233,6 +264,8 @@ function harness(
       if (line.startsWith('git ls-files')) return { code: 1 };
       if (line === 'kubectl config current-context') return { stdout: 'kind-dev\n' };
       // A first deploy: no Secret yet, the apply creates resourceVersion 1, no Deployments.
+      // An image-pull Secret's type: the pull-secret preflight reads nothing else.
+      if (args.includes('jsonpath={.type}')) return { stdout: 'kubernetes.io/dockerconfigjson' };
       if (args.includes('get') && args.includes('secret')) return { stdout: '' };
       if (args.includes('--server-side')) return { stdout: '1' };
       if (args.includes('deployments')) return { stdout: '' };

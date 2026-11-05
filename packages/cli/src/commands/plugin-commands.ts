@@ -235,6 +235,10 @@ export async function runCommandsListing(
           deps.error(
             `plugin command '${command.name}' is shadowed by the built-in \`setu ${command.name}\`; rename it`,
           );
+      if (visible.length === 0 && commands.length > 0) {
+        deps.log('No plugin commands are available: every registered name is a built-in.');
+        return EXIT_OK;
+      }
       if (visible.length === 0) {
         deps.log('No plugin commands are registered by this application.');
         deps.log(`Plugins publish them with \`ctx.cli.register('plugin:command', handler)\`.`);

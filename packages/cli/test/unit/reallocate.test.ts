@@ -10,7 +10,7 @@ import {
   WORKSPACE_VERSION,
   type WorkspaceMember,
 } from '../../src/workspace/manifest.ts';
-import { DISCOVERY_MODULE } from '../../src/workspace/discovery-module.ts';
+import { DISCOVERY_MODULE, DISCOVERY_SPECIFIER } from '../../src/workspace/discovery-module.ts';
 import type { TargetRuntime } from '../../src/constants.ts';
 
 function harness(members: readonly WorkspaceMember[], runtime: TargetRuntime = 'deno') {
@@ -79,6 +79,17 @@ describe('ports --reallocate', () => {
         expect(debug).toBe(script);
         expect(h.log.text()).toContain('script was left unchanged');
       } else expect(debug).toBe('node --inspect=127.0.0.1:5000 main.ts');
+    }
+  });
+  it('names the dev.ts lines when a full-stack member does not read VITE_PORT (CodeRabbit #560)', async () => {
+    for (const [dev, noted] of [
+      ["const vitePort = Number(process.env.VITE_PORT ?? '5173');\n", true],
+      [`import { SERVICE_PORT, VITE_PORT } from '${DISCOVERY_SPECIFIER}';\n`, false],
+    ] as const) {
+      const h = harness([{ name: 'web', port: 3000, inspectPort: 5900, vitePort: 5901 }], 'node');
+      await h.fs.writeFile('/ws/apps/web/dev.ts', new TextEncoder().encode(dev));
+      expect(await h.run()).toBe(0);
+      expect(h.log.text().includes('Set the two development port lines'), dev).toBe(noted);
     }
   });
   it('X87-6 leaves a bare inspector token unchanged when no old inspector port was recorded', async () => {

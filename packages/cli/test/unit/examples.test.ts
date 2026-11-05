@@ -23,7 +23,7 @@ it('X93-8 example new defers missing cards until install', async () => {
   const h = harness();
   expect(await h.run(['new', 'demo', '--example', 'minimal', '--agents'])).toBe(0);
   expect(h.err.lines).toEqual([
-    `agent cards resolve after \`npm install\`; then run \`${cliInvocation('node')} agents --check\``,
+    `agent cards resolve after \`npm install\`; then run \`${cliInvocation('node')} agents --check --strict\``,
   ]);
 });
 const repositoryFetch: typeof fetch = async (input) => {

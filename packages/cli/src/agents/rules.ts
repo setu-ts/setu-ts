@@ -2,6 +2,24 @@
 import type { ProjectFacts } from './facts.ts';
 import { notInstalledAddables } from './not-installed.ts';
 
+/**
+ * The verification commands a brief may tell an agent to run, in order.
+ *
+ * @param facts - The gathered project facts
+ * @returns Script names (npm) or literal commands (Deno's lint and fmt)
+ */
+export function verificationCommands(facts: ProjectFacts): readonly string[] {
+  const has = (name: string): boolean => facts.commands.includes(name);
+  return facts.runtime === 'deno'
+    ? [
+        ...(has('check') ? ['check'] : []),
+        'deno lint',
+        'deno fmt --check',
+        ...(has('test') ? ['test'] : []),
+      ]
+    : ['check', 'lint', 'format:check', 'test'].filter(has);
+}
+
 /** A rule's applicability and the packages whose exports its prose uses. */
 export interface IRuleBlock {
   readonly id: string;
@@ -15,8 +33,10 @@ export const RULE_BLOCKS: readonly IRuleBlock[] = [
   {
     id: 'verify',
     packages: [],
-    applies: () => true,
-    text: 'Before reporting done, run check, lint, {{formatCheck}} and test.',
+    // Only commands this project has: an existing npm project may define no
+    // lint or format:check script; Deno's own lint and fmt are always there.
+    applies: (f) => verificationCommands(f).length > 0,
+    text: 'Before reporting done, run {{verify}}.',
   },
   {
     id: 'generate',

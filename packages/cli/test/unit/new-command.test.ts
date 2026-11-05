@@ -14,7 +14,7 @@ it('X93-8 new defers missing cards until the first install', async () => {
   const h = harness();
   expect(await h.run(['fresh', '--template', 'rest', '--runtime', 'node', '--agents'])).toBe(0);
   expect(h.err.lines).toEqual([
-    `agent cards resolve after \`npm install\`; then run \`${cliInvocation('node')} agents --check\``,
+    `agent cards resolve after \`npm install\`; then run \`${cliInvocation('node')} agents --check --strict\``,
   ]);
 });
 

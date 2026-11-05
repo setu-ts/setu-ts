@@ -146,5 +146,8 @@ it('replaces incomplete repeated dependency flags without retaining a boolean in
   expect(parseArgs(['--depends-on=a', '--depends-on=b', '--depends-on']).flags['depends-on']).toBe(
     true,
   );
-  expect(parseArgs(['--depends-on', '--depends-on=c']).flags['depends-on']).toBe('c');
+  // An earlier valueless occurrence is never replaced by a later value: the
+  // command must still refuse it (CodeRabbit #560).
+  expect(parseArgs(['--depends-on', '--depends-on=c']).flags['depends-on']).toBe(true);
+  expect(parseArgs(['--pull-secret', '--pull-secret', 'registry']).flags['pull-secret']).toBe(true);
 });

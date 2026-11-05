@@ -9,7 +9,13 @@ import { stringFlag } from '../args.ts';
 import { EXIT_ERROR, EXIT_INTERRUPTED, EXIT_OK, EXIT_USAGE, PROGRAM_NAME } from '../constants.ts';
 import { interruptionMessage } from '../utils/interruption.ts';
 import { escapeName } from '../utils/names.ts';
-import { type GeneratedFile, joinPath, resolveDir, writeFiles } from '../utils/file-writer.ts';
+import {
+  type GeneratedFile,
+  joinPath,
+  readExistingText,
+  resolveDir,
+  writeFiles,
+} from '../utils/file-writer.ts';
 import { workspaceContainerFiles } from '../workspace/compose.ts';
 import {
   DISCOVERY_MODULE,
@@ -246,6 +252,19 @@ export async function runWorkspaceCommand(
   const files = managedFiles(next).map((file) => ({ ...file, path: joinPath(dir, file.path) }));
   for (const member of next.members) {
     const old = read.manifest.members.find((entry) => entry.name === member.name)!;
+    // Discovery now exports the new VITE_PORT, but dev.ts is the developer's file:
+    // one that does not read it keeps its own port, so say which lines to set.
+    if (member.vitePort !== undefined) {
+      const devPath = joinPath(dir, MEMBERS_DIR, member.name, 'dev.ts');
+      const dev = await readExistingText(deps.fs, devPath).catch(() => undefined);
+      if (dev !== undefined && !(dev.includes(DISCOVERY_SPECIFIER) && /\bVITE_PORT\b/.test(dev))) {
+        deps.log(
+          `Set the two development port lines in ${escapeName(devPath)} from the discovery module (Vite port ${member.vitePort}):`,
+        );
+        deps.log(`  import { SERVICE_PORT, VITE_PORT } from '${DISCOVERY_SPECIFIER}';`);
+        deps.log('  const port = SERVICE_PORT; const vitePort = VITE_PORT;');
+      }
+    }
     if (old.inspectPort === undefined) {
       deps.log(
         `Set start:debug in ${escapeName(joinPath(dir, MEMBERS_DIR, member.name))} to use --inspect=127.0.0.1:${member.inspectPort}; no old inspector port was recorded, so the script was left unchanged.`,

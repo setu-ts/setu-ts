@@ -70,7 +70,7 @@ it('M2 X87-4 matches every Deno npm command including arrays and checks emitted 
   expect(PROTO_TASK_COMMAND).toMatch(/deno run .*--no-lock .*npm:@bufbuild\/buf/);
   const buf = protoToolchainFiles('shop').find((file) => file.path === 'buf.gen.yaml')!.contents;
   expect(buf).toContain(
-    "local: ['deno', 'run', '-A', '--no-lock', 'npm:@bufbuild/protoc-gen-es@^2']",
+    "local: ['deno', 'run', '-A', '--no-lock', 'npm:@bufbuild/protoc-gen-es@2.7.0']",
   );
   expect(FULL_STACK_TEMPLATE.manifest!.npmBuild!.denoCommand).toMatch(
     /deno run .*--no-lock .*npm:@react-router\/dev/,

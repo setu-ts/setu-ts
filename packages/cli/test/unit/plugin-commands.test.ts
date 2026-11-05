@@ -71,6 +71,9 @@ it('V11-15 omits shadowed built-ins, keeps siblings and warns only on listing', 
   expect(await only.list()).toBe(0);
   expect(only.out.text()).not.toContain(' help');
   expect(only.err.lines).toHaveLength(1);
+  // Registered but all shadowed is not "none registered" (CodeRabbit #560).
+  expect(only.out.text()).toContain('No plugin commands are available');
+  expect(only.out.text()).not.toContain('ctx.cli.register');
 });
 
 describe('runCommandsListing', () => {

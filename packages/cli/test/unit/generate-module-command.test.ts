@@ -16,6 +16,10 @@ import { projectFiles, resolveHost } from '../../src/templates/project-files.ts'
 import { REST_TEMPLATE } from '../../src/templates/rest.ts';
 import ts from 'typescript';
 import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+/** The repository root, from this file rather than the working directory. */
+const ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
 
 it('X91-1 adopts the requested controller, then the project check and type-check pass', async () => {
   const files = projectFiles('svc', 'node', resolveHost(REST_TEMPLATE, 'node'));
@@ -35,8 +39,8 @@ it('X91-1 adopts the requested controller, then the project check and type-check
     }),
     h.err.text(),
   ).toBe(0);
-  const configured = ts.readConfigFile('tsconfig.check.json', ts.sys.readFile);
-  const parsed = ts.parseJsonConfigFileContent(configured.config, ts.sys, process.cwd());
+  const configured = ts.readConfigFile(resolve(ROOT, 'tsconfig.check.json'), ts.sys.readFile);
+  const parsed = ts.parseJsonConfigFileContent(configured.config, ts.sys, ROOT);
   const options: ts.CompilerOptions = {
     ...parsed.options,
     composite: false,
@@ -50,12 +54,15 @@ it('X91-1 adopts the requested controller, then the project check and type-check
       ...Object.fromEntries(
         Object.entries(parsed.options.paths ?? {}).map(([key, paths]) => [
           key,
-          paths.map((path) => resolve(path)),
+          paths.map((path) => resolve(ROOT, path)),
         ]),
       ),
-      '*': [resolve('node_modules/*')],
+      '*': [resolve(ROOT, 'node_modules/*')],
     },
-    typeRoots: [resolve('node_modules/@types'), resolve('packages/runtime/node_modules/@types')],
+    typeRoots: [
+      resolve(ROOT, 'node_modules/@types'),
+      resolve(ROOT, 'packages/runtime/node_modules/@types'),
+    ],
     types: ['node', 'deno'],
   };
   const host = ts.createCompilerHost(options);

@@ -571,8 +571,11 @@ longer resolve (`setu.E015`).
 With `--adopt-controllers`, a same-named flat controller becomes the module's controller and keeps
 its routes. Its generated controller and CRUD tests are omitted; the service is still generated
 unless a same-named service is also adopted. A same-named service without its controller is refused:
-adopt both, or choose another module name. Full-stack modules refuse same-named adoption because
-their indexes require the generated service factory and token.
+adopt both, or choose another module name. A same-named file that `setu check` skips (one without
+the registrar, class or service export the module needs) is refused too, and a nested controller of
+the same name, such as `src/controllers/legacy/orders.controller.ts`, still counts as a name
+conflict. Full-stack modules refuse same-named adoption because their indexes require the generated
+service factory and token.
 
 ### A generated module
 

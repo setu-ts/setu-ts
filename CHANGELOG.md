@@ -322,8 +322,10 @@ All notable changes to this project are documented here. The format follows
 - **Deno tooling isolation (X87-4, M131c, #560, `@setu-ts/cli`).** Generated and printed npm-tool
   commands use `--no-lock`; runtime images also remove the `@setu-ts/testing` import-map pin.
 - **Authenticated image pulls (X87-5, M131c, #560, `@setu-ts/cli`).** Repeatable
-  `workspace deploy --pull-secret` validates and checks existing registry Secret names before
-  building, then attaches them to each member's pod. Dry runs perform the checks and list the names.
+  `workspace deploy --pull-secret` validates the names and checks, before building, that each Secret
+  exists with an image-pull type (reading only its type), then attaches them to each member's pod.
+  Dry runs perform the checks and list the names. A repeatable flag given once without a value
+  (`--pull-secret`, `--depends-on`, `--build-arg`) is refused, not replaced by a later value.
 - **Workspace OTLP pin coverage (V10-50 remainder, M131c, #560, `@setu-ts/cli`).** A member
   telemetry-add regression test verifies the exporter dependency is recorded at the workspace root.
 - **Workers config guidance (V11-3, M131c, #560, `@setu-ts/cli`).** Generated comments name Node
@@ -345,7 +347,8 @@ All notable changes to this project are documented here. The format follows
   `describe<Name>` convenience export reports W005 instead of a registration error.
 - **Same-named controller adoption (X91-1, M131c, #560, `@setu-ts/cli`).** The first module can
   adopt its own controller and optional service, omitting generated CRUD tests. Service-only and
-  full-stack same-named adoption explain why they are refused.
+  full-stack same-named adoption explain why they are refused, as does a same-named file
+  `setu check` skips; a nested controller of the same name still counts as a name conflict.
 - **Hoisted page checks (X87-1, M131c, #560, `@setu-ts/cli`).** Generation finds React Router's
   binary up to the workspace root while keeping the member as its working directory.
 - **Shadowed plugin commands (V11-15, M131c, #560, `@setu-ts/cli`).** `setu commands` omits plugin
