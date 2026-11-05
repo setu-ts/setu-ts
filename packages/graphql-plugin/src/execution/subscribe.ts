@@ -42,6 +42,11 @@ export interface SubscribeOptions {
   validationRules: unknown[];
   rootValue?: unknown;
   contextValue?: unknown;
+  /**
+   * The HTTP method the operation arrived on, when it arrived over HTTP. `GET`
+   * refuses a mutation `405` (see `checkOperation`); absent on WebSocket.
+   */
+  method?: 'GET' | 'POST';
 }
 
 /**

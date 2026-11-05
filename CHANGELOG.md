@@ -287,6 +287,23 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **Cross-site requests cannot run a GraphQL mutation (PR pending, `@setu-ts/graphql-plugin`).**
+  Security. Both `POST /graphql` and `POST /graphql/stream` now require the `content-type` media
+  type to equal `application/json` (parameters ignored) and answer anything else, a missing header
+  included, `415` without reading the body. The HTTP route had accepted any header merely containing
+  `application/json` (`text/plain; x=application/json`), and the SSE route checked nothing — both
+  CORS simple requests a page on another site can send with no preflight. `GET /graphql/stream` now
+  refuses a mutation `405` with `Allow: POST`, as `GET /graphql` already did: it had run it, and a
+  cross-site top-level navigation is a `GET` that carries `SameSite=Lax` cookies. Both SSE refusals
+  are answered before any stream opens.
+- **Caller errors from a GraphQL resolver keep their meaning (PR pending, `@setu-ts/graphql-plugin`,
+  `@setu-ts/exceptions`).** A resolver that throws a 4xx `HttpError` (`notFound()`, `forbidden()`,
+  …) or an error branded with `withHttpStatusHint` is answered on HTTP, SSE and WebSocket with the
+  hint's `detail` and an `extensions.code` (`NOT_FOUND`, `FORBIDDEN`, `UNAUTHENTICATED`, …) instead
+  of `Internal server error`; a 5xx stays masked. To make that possible a 4xx `HttpError` now
+  carries the `common` status hint, so two other readers see it: an app with no `errorHandler`
+  answers a thrown 4xx `HttpError` with its status instead of an opaque `500`, and the
+  resource-server Bearer challenge adds `WWW-Authenticate` to a thrown `unauthorized()`.
 - **A regenerated session's old row is deleted even when the request throws (M131b, #557,
   `@setu-ts/session-plugin`).** `regenerate()` is a revocation, so the session middleware deletes
   the superseded store row before rethrowing a request's error (a store fault there is logged at

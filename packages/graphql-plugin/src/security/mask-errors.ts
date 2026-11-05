@@ -5,6 +5,28 @@
  */
 
 import type { GraphqlFormattedError } from '@setu-ts/common';
+import { fallbackErrorHint, maskUrlUserinfo } from '@setu-ts/common';
+
+/**
+ * The GraphQL `extensions.code` for each caller-error status a resolver can
+ * throw. The names are Apollo's and `@nestjs/apollo`'s for `400`, `401`, `403`
+ * and `422`; `404`, `409` and `429` get their own names rather than Nest's
+ * `INTERNAL_SERVER_ERROR`. Any other `4xx` maps to {@linkcode DEFAULT_CALLER_ERROR_CODE}.
+ *
+ * Internal: not exported from `src/index.ts`. The tests iterate it as data.
+ */
+export const CALLER_ERROR_CODES: Readonly<Record<number, string>> = {
+  400: 'BAD_REQUEST',
+  401: 'UNAUTHENTICATED',
+  403: 'FORBIDDEN',
+  404: 'NOT_FOUND',
+  409: 'CONFLICT',
+  422: 'BAD_USER_INPUT',
+  429: 'TOO_MANY_REQUESTS',
+};
+
+/** The code for a `4xx` status with no row in {@linkcode CALLER_ERROR_CODES}. */
+export const DEFAULT_CALLER_ERROR_CODE = 'BAD_REQUEST';
 
 /**
  * Check if an error is exposable to clients.
@@ -77,7 +99,27 @@ export function maskErrors(
 
     let formatted: GraphqlFormattedError;
 
-    if (maskInternalErrors && !isExposable(error)) {
+    // A caller error a resolver threw — a 4xx status hint, which a 4xx
+    // `HttpError` from `@setu-ts/exceptions` carries — is shown with a code
+    // whatever `maskInternalErrors` says, as `errorHandler` shows it on REST.
+    // Only the hint's caller-safe `detail` is shown — for an `HttpError` that
+    // is the message it was built with, for any other branded error never its
+    // own message. A 5xx hint is not a caller error and stays masked below.
+    const exposable = isExposable(error);
+    const hint = exposable ? undefined : fallbackErrorHint(err.originalError);
+
+    if (hint !== undefined) {
+      formatted = {
+        message: maskUrlUserinfo(hint.detail),
+        extensions: { code: CALLER_ERROR_CODES[hint.status] ?? DEFAULT_CALLER_ERROR_CODE },
+      };
+      if (err.locations) {
+        formatted.locations = err.locations;
+      }
+      if (err.path) {
+        formatted.path = err.path;
+      }
+    } else if (maskInternalErrors && !exposable) {
       // Mask internal error
       logger?.error('Internal GraphQL error', err);
       formatted = {

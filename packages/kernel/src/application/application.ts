@@ -12,6 +12,7 @@ import {
   isPromiseLike,
   respondWithError,
   fallbackErrorHint,
+  maskUrlUserinfo,
   serializeError,
   setUpgradeIntent,
 } from '@setu-ts/common';
@@ -1720,7 +1721,9 @@ class Application implements IKernelApplication {
           : {
               status: hint.status,
               title: hint.title,
-              detail: hint.detail,
+              // URL userinfo is masked as errorHandler masks every string it
+              // serves: a 4xx HttpError's hint detail is its own message.
+              detail: maskUrlUserinfo(hint.detail),
             },
       );
     } catch (failure) {
