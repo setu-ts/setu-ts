@@ -24,6 +24,7 @@ let session = { input: 0, output: 0 };
 let contextTokens = null;
 let controller;
 
+/** Appends one entry to the log, its text set as text, never as HTML. */
 function line(className, text = '') {
   const div = document.createElement('div');
   div.className = className;
@@ -38,6 +39,7 @@ function trimHistory() {
   while (history.length > MAX_HISTORY_TURNS || chars() > MAX_HISTORY_CHARS) history.splice(0, 2);
 }
 
+/** Shows the session's summed input and output tokens. */
 function showSession() {
   sessionLabel.textContent = `${number.format(session.input)} in · ${number.format(session.output)} out`;
 }
@@ -65,6 +67,10 @@ function showContext(usage) {
   contextMeter.value = Math.min(share, 1);
 }
 
+/**
+ * Renders one UI message stream part into the current turn: reasoning and
+ * answer deltas, tool calls, errors, and the finish event's reason and usage.
+ */
 function render(part, turn) {
   if (part.type === 'reasoning-delta') {
     turn.thinking ??= turn.answer.parentNode.insertBefore(line('thinking'), turn.answer);
@@ -97,6 +103,10 @@ function render(part, turn) {
   }
 }
 
+/**
+ * Sends one question with the conversation so far and streams the answer into
+ * the log. Only a completed, current turn joins the conversation.
+ */
 async function ask(text) {
   line('you', text);
   const turn = { answer: line('answer'), failed: false };

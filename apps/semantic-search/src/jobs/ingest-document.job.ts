@@ -24,6 +24,10 @@ export function createIngestDocumentJobProcessor(
   const logger = services.get<ILogger>(CAPABILITIES.LOGGER);
   return {
     name: INGEST_DOCUMENT_JOB,
+    /**
+     * Indexes one submission under its version. A tenant that no longer exists
+     * gets nothing; a submission superseded by a newer one is logged and dropped.
+     */
     async processor(job): Promise<void> {
       const { tenant, version, ...document } = job.data;
       // A tenant removed after the request was queued gets nothing written.

@@ -31,6 +31,7 @@ const searchQuery = validateQuery(SearchDocumentsQuery);
 export function registerDocumentsRoutes(router: IRouterApi, services?: IServiceRegistry): void {
   if (services === undefined) throw new Error('documents routes need the service registry');
   let lastVersion = 0;
+  /** The next submission version: the time now, or one past the last if the clock did not advance. */
   const nextVersion = (): number => {
     const now = services.get<IRuntimeServices>(CAPABILITIES.RUNTIME).now();
     lastVersion = Math.max(now, lastVersion + 1);
