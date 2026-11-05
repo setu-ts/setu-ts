@@ -8,7 +8,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
-- **Versioned `replaceSource` (`@setu-ts/common`, `@setu-ts/vector-store-plugin`, PR pending).**
+- **Versioned `replaceSource` (`@setu-ts/common`, `@setu-ts/vector-store-plugin`, #561).**
   `replaceSource(collection, scope, sourceId, records, { version })` refuses a write whose version
   is older than the source's stored one with the new `VectorVersionConflictError` (409), so a late
   queue retry of an older submission can no longer replace a newer one; an equal version is written
@@ -20,8 +20,8 @@ All notable changes to this project are documented here. The format follows
   `versionInfo`) honour it; Vectorize already refuses `replaceSource`. `apps/semantic-search`
   versions each submission and drops a superseded job.
 - **The idempotency key in the OpenAPI document (`@setu-ts/common`, `@setu-ts/idempotency-plugin`,
-  `@setu-ts/openapi-plugin`, PR pending).** A route carrying `idempotent()` is documented with its
-  key header as a parameter, so Swagger UI can send it; `RouteIdempotencyMetadata` gains
+  `@setu-ts/openapi-plugin`, #561).** A route carrying `idempotent()` is documented with its key
+  header as a parameter, so Swagger UI can send it; `RouteIdempotencyMetadata` gains
   `required?: boolean` so a route with `required: false` is documented as optional.
 
 - **Tenant-scoped vector retrieval (M135, #558, `@setu-ts/common`, `@setu-ts/vector-store-plugin`,
