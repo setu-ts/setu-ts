@@ -16,6 +16,10 @@ pnpm --dir apps/semantic-search run start
 ```
 
 Build before start: `start` runs `dist/main.js` with `instrumentation.mjs` and reads `.env`.
+In this repository, `build` bundles against the framework packages' compiled output, and the
+`setu` command it calls is itself one of them. In a fresh clone, compile them once from the
+repository root with `pnpm exec tsc -b` before `build`; otherwise `build` cannot find `setu` and
+`start` cannot find the packages. `start:dev` runs the source with tsx and needs no build.
 
 ## What it serves
 

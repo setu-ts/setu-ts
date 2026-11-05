@@ -73,7 +73,12 @@ export function createApp(
       HttpSecurityPlugin(),
       HealthPlugin({ indicators: [...HEALTH_INDICATORS] }),
       MetricsPlugin({ customMetrics: [...CUSTOM_METRICS] }),
-      OpenApiPlugin(),
+      // Each route's requirement is derived from its scope guard, so Swagger UI
+      // shows an Authorize button and the scopes every operation needs.
+      OpenApiPlugin({
+        securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' } },
+        deriveSecurity: { scheme: 'bearerAuth' },
+      }),
       AuthPlugin({
         jwt: { secret: resolveJwtSecret(createRuntimeServices().env.JWT_SECRET) },
         resourceServer: {

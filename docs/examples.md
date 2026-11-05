@@ -210,6 +210,7 @@ starter also brings health, metrics, security headers and the error handler.
 pnpm --dir apps/rest-api run start 3400
 curl localhost:3400/health                                    # 200
 curl -X POST localhost:3400/todos -H 'content-type: application/json' -d '{"title":"x"}'          # 401 Problem Details
+pnpm --dir apps/rest-api run token                            # a five-minute token for Authorize
 # Swagger UI at http://localhost:3400/docs, the document at /openapi.json
 ```
 
@@ -572,6 +573,12 @@ authenticated streams send their credentials, and a WebSocket stays alive across
 keep-alive. Its smoke check needs Bun installed and runs Wrangler through `npx` (downloaded on first
 use); a missing one fails the check rather than skipping it.
 
+```bash
+pnpm --dir apps/realtime-clients run start 3400
+curl -N localhost:3400/events -H 'authorization: Bearer smoke-token'   # score events, then heartbeats
+curl localhost:3400/events                                            # 401 without the demo token
+```
+
 **Read, in order:**
 
 - [`src/modules/index.ts`](../apps/realtime-clients/src/modules/index.ts) and
@@ -638,6 +645,7 @@ it needs HTTP/2 trailers a fetch-based server does not send.
 ```bash
 pnpm --dir apps/grpc run start                  # port 5000
 curl localhost:5000/health                       # {"status":"ok"}
+curl -X POST localhost:5000/example.EchoService/Echo -H 'content-type: application/json' -d '{"message":"hi"}'   # {"response":"echo: hi"}
 ```
 
 **Read, in order:**
