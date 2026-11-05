@@ -1,6 +1,6 @@
 # Milestone 131c — CLI gates, generators and workspace deploy (`@setu-ts/cli`)
 
-> **Status:** Complete (PR pending). Branch: `feat/m131c-cli-gates-generators-deploy`. `develop` and
+> **Status:** Complete (PR #560). Branch: `feat/m131c-cli-gates-generators-deploy`. `develop` and
 > `main` are protected — all work (implementation + fixes) stays on this one branch until it merges
 > via a single PR into `develop`.
 
