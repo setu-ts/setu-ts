@@ -159,6 +159,11 @@ Endpoints default to the GraphQL path plus `/ws` and `/stream`, so `path: '/api/
 `IRuntimeServices`, so `subscriptions` requires `CAPABILITIES.RUNTIME` and throws at registration
 without it.
 
+The SSE route takes the same requests as the HTTP one: a `POST` body must be `application/json`
+(else a buffered `415`), and a mutation over `GET` is a buffered `405` with `Allow: POST`. Both are
+answered before any stream opens; GraphQL request errors (parse, validation) still arrive inside the
+stream, so a native `EventSource` can read them.
+
 A schema-first subscription field takes a `{ subscribe, resolve? }` entry — `subscribe` returns the
 async iterable, and graphql reads the event source from there:
 
@@ -247,6 +252,18 @@ under another client's hash. Hashing uses `IRuntimeServices.subtle`, so `apq` re
   stands in for the other
 - Internal errors are masked by default — including errors raised inside a live subscription, which
   are masked by the same code path the HTTP transport uses
+- Caller errors keep their meaning: a resolver that throws a 4xx `HttpError` (`notFound()`,
+  `forbidden()`, …) or any error branded with `withHttpStatusHint` is answered with the hint's
+  `detail` and an `extensions.code` — `400` `BAD_REQUEST`, `401` `UNAUTHENTICATED`, `403`
+  `FORBIDDEN`, `404` `NOT_FOUND`, `409` `CONFLICT`, `422` `BAD_USER_INPUT`, `429`
+  `TOO_MANY_REQUESTS`, any other 4xx `BAD_REQUEST` — on HTTP, SSE and WebSocket alike. Only the
+  hint's `detail` is shown: for an `HttpError` that is the message it was built with, while any
+  other branded error's own message is never shown. A 5xx stays masked
+- Cross-site requests cannot run a mutation. Both POST routes require the `content-type` media type
+  to equal `application/json` (parameters ignored) and answer anything else, a missing header
+  included, `415` without reading the body — `text/plain; x=application/json` is a CORS simple
+  request a substring test would accept. A mutation over `GET` is `405` on both `/graphql` and
+  `/graphql/stream`, because a top-level navigation is a `GET` that carries `SameSite=Lax` cookies
 - APQ verifies a submitted hash against the submitted document before persisting it
 - Introspection is enabled by default (disable in production if needed)
 - GraphiQL is enabled by default (disable in production with `graphiql: false`)

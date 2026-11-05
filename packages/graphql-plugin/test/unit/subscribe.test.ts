@@ -326,3 +326,54 @@ describe('subscribeGraphql — a throw from graphql is contained', () => {
     expect(outcome.status).toBe(500);
   });
 });
+
+describe('subscribeGraphql — the arriving method', () => {
+  const mutationRuntime = (onExecute: () => void): GraphqlRuntime =>
+    createFakeRuntime({
+      parse: () => ({
+        kind: 'Document',
+        definitions: [
+          {
+            kind: 'OperationDefinition',
+            operation: 'mutation',
+            selectionSet: { kind: 'SelectionSet', selections: [] },
+          },
+        ],
+      }),
+      execute: () => {
+        onExecute();
+        return Promise.resolve({ data: { transfer: 1 } });
+      },
+    });
+
+  it('refuses a mutation that arrived over GET with 405, without executing it', async () => {
+    let executed = 0;
+    const outcome = await subscribeGraphql('mutation { transfer }', {
+      schema: createFakeSchema(),
+      runtime: mutationRuntime(() => executed++),
+      documentCache: new DocumentCache(100),
+      validationRules: [],
+      method: 'GET',
+    });
+
+    expect(outcome.kind).toBe('error');
+    expect(outcome.status).toBe(405);
+    expect(executed).toBe(0);
+  });
+
+  it('runs a mutation that arrived over POST or with no method (WebSocket)', async () => {
+    for (const method of ['POST', undefined] as const) {
+      let executed = 0;
+      const outcome = await subscribeGraphql('mutation { transfer }', {
+        schema: createFakeSchema(),
+        runtime: mutationRuntime(() => executed++),
+        documentCache: new DocumentCache(100),
+        validationRules: [],
+        ...(method !== undefined && { method }),
+      });
+
+      expect(outcome.kind).toBe('single');
+      expect(executed).toBe(1);
+    }
+  });
+});

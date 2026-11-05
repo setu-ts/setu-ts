@@ -321,6 +321,11 @@ export class GraphqlService implements IGraphqlService {
       variableValues: params.variables ?? {},
       contextValue,
       rootValue: this.#rootValue,
+      // Fail closed: only a POST may run a mutation. Any other method that
+      // reaches the SSE GET handler counts as GET, so no verb but POST can.
+      ...(opContext.requestContext !== undefined && {
+        method: opContext.requestContext.request.method === 'POST' ? 'POST' : 'GET',
+      }),
     });
 
     // Apply masking to error/single results

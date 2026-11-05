@@ -8,6 +8,7 @@ import { REQUIRED_SCOPES_STATE_KEY } from '@setu-ts/common';
 import { describe, expect, it } from 'vitest';
 import type { HandlerResult, IRequest, IRequestContext, IResponse } from '@setu-ts/common';
 import { authorizationFailureInit, withHttpStatusHint } from '@setu-ts/common';
+import { unauthorized } from '@setu-ts/exceptions';
 import { bearerChallenge, formatBearerChallenge } from '../../src/resource-server/challenge.ts';
 
 /** A response whose status and headers are live, as the kernel's builder is. */
@@ -169,6 +170,18 @@ describe('bearer-challenge middleware', () => {
     const middleware = bearerChallenge({ header: 'x-access-token', scheme: 'token' });
     await expect(middleware(ctx, next)).rejects.toBe(error);
     expect(headers.get('www-authenticate')).toBe('Bearer error="invalid_token"');
+  });
+
+  // A 4xx HttpError carries the status hint, so a handler's unauthorized()
+  // gets the RFC 6750 challenge exactly as a hinted 401 does.
+  it('challenges an unauthorized() HttpError thrown downstream', async () => {
+    const { ctx, headers } = createContext({});
+    const error = unauthorized('expired');
+    const next = (): Promise<void> => {
+      throw error;
+    };
+    await expect(bearerChallenge()(ctx, next)).rejects.toBe(error);
+    expect(headers.get('www-authenticate')).toBe('Bearer');
   });
 
   it('leaves a non-Bearer 401 bare', async () => {
