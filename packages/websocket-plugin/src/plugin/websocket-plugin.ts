@@ -66,7 +66,9 @@ const PLUGIN_NAME = 'websocket-plugin';
  * ```
  * @param options - Plugin configuration
  * @returns The plugin instance
- * @throws {Error} If `idleTimeoutMs` is set without a `heartbeatMs` to sweep on
+ * @throws {Error} If `idleTimeoutMs` is set without a `heartbeatMs` to sweep on,
+ *   `allowedOrigins` holds an entry that is not an absolute http(s) origin, or
+ *   `checkOrigin` is not a boolean
  * @since 0.1.0
  */
 export function WebSocketPlugin(options?: WebSocketPluginOptions): IPlugin {

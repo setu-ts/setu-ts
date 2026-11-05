@@ -36,7 +36,12 @@ const CASES: ReadonlyArray<readonly [string, string | null, string | undefined, 
   ['the public origin the kernel passed', PUBLIC_ORIGIN, PUBLIC_ORIGIN, 'accept'],
   ['the request URL origin when none was passed', URL_ORIGIN, undefined, 'accept'],
   ['a listed origin', LISTED, PUBLIC_ORIGIN, 'accept'],
-  ['surrounding whitespace on an allowed origin', ` ${PUBLIC_ORIGIN} `, PUBLIC_ORIGIN, 'accept'],
+  [
+    'an allowed origin sent with surrounding whitespace (Headers trims it)',
+    ` ${PUBLIC_ORIGIN} `,
+    PUBLIC_ORIGIN,
+    'accept',
+  ],
   ['another site', 'https://evil.example', PUBLIC_ORIGIN, 403],
   ['the URL origin when the kernel passed a different public one', URL_ORIGIN, PUBLIC_ORIGIN, 403],
   ['an opaque origin', 'null', PUBLIC_ORIGIN, 403],
@@ -176,11 +181,13 @@ describe('allowedOrigins validation', () => {
     ).toThrow('allowedOrigins[1] must be an absolute http(s) origin');
   });
 
-  it('freezes a valid list and keeps checkOrigin on unless explicitly false', () => {
+  it('freezes a valid list, defaults checkOrigin to true and refuses a non-boolean', () => {
     const resolved = resolveOptions({ allowedOrigins: [LISTED, 'http://localhost:5173'] });
     expect(resolved.allowedOrigins).toEqual([LISTED, 'http://localhost:5173']);
     expect(Object.isFrozen(resolved.allowedOrigins)).toBe(true);
     expect(resolved.checkOrigin).toBe(true);
-    expect(resolveOptions({ checkOrigin: 'false' as unknown as boolean }).checkOrigin).toBe(true);
+    expect(() => resolveOptions({ checkOrigin: 'false' as unknown as boolean })).toThrow(
+      'WebSocketPlugin: checkOrigin must be a boolean.',
+    );
   });
 });

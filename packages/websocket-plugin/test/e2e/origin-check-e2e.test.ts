@@ -12,13 +12,18 @@ import { describe, expect, it } from 'vitest';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { REQUEST_ORIGIN_STATE_KEY } from '@setu-ts/common';
+import { HttpSecurityPlugin } from '@setu-ts/http-security-plugin';
 import { WebSocketPlugin } from '../../src/index.ts';
 import type { WebSocketPluginOptions } from '../../src/index.ts';
 
 const LISTED = 'https://app.example.com';
 
 /** Sends one handshake; resolves `'upgraded'` or the refusal status. */
-function handshake(port: number, origin?: string): Promise<'upgraded' | number> {
+function handshake(
+  port: number,
+  origin?: string,
+  extra: Record<string, string> = {},
+): Promise<'upgraded' | number> {
   return new Promise((resolve, reject) => {
     const req = request({
       host: '127.0.0.1',
@@ -30,6 +35,7 @@ function handshake(port: number, origin?: string): Promise<'upgraded' | number> 
         'sec-websocket-version': '13',
         'sec-websocket-key': 'dGhlIHNhbXBsZSBub25jZQ==',
         ...(origin === undefined ? {} : { origin }),
+        ...extra,
       },
     });
     req.on('upgrade', (_res, socket) => {
@@ -115,6 +121,43 @@ describe('WebSocket Origin check on a real listener', () => {
       await server.stop();
     }
   });
+
+  // The real IP security, not a stand-in: a trusted TLS-terminating proxy's
+  // forwarded host and protocol become the public origin, and the same
+  // headers from an untrusted peer change nothing.
+  for (const trusted of [true, false]) {
+    it(`uses a forwarded origin only from a trusted proxy (trusted=${String(trusted)})`, async () => {
+      const app = createApplication({
+        plugins: [
+          RuntimePlugin(),
+          HttpSecurityPlugin({
+            ipSecurity: { trustProxy: true, trustedProxies: [trusted ? '127.0.0.1' : '10.9.9.9'] },
+          }),
+          WebSocketPlugin({
+            routes: [{ path: '/ws', handlers: {} }],
+          }),
+        ],
+      });
+      const port = await unusedPort();
+      await app.start({ port });
+      try {
+        const forwarded = {
+          'x-forwarded-for': '203.0.113.9',
+          'x-forwarded-host': 'public.example',
+          'x-forwarded-proto': 'https',
+        };
+        expect(await handshake(port, 'https://public.example', forwarded)).toBe(
+          trusted ? 'upgraded' : 403,
+        );
+        expect(await handshake(port, `http://127.0.0.1:${port}`, forwarded)).toBe(
+          trusted ? 403 : 'upgraded',
+        );
+        expect(await handshake(port, 'https://evil.example', forwarded)).toBe(403);
+      } finally {
+        await app.stop();
+      }
+    });
+  }
 
   it('upgrades any origin with checkOrigin: false', async () => {
     const server = await serve({ checkOrigin: false });

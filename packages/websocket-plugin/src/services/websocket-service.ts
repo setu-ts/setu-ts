@@ -89,8 +89,9 @@ interface ResolvedOptions {
  *
  * @param options - The caller's options
  * @returns The resolved options
- * @throws {Error} If an idle timeout is set with no heartbeat to sweep on, or
- *   an `allowedOrigins` entry is not an absolute http(s) origin
+ * @throws {Error} If an idle timeout is set with no heartbeat to sweep on, an
+ *   `allowedOrigins` entry is not an absolute http(s) origin, or `checkOrigin`
+ *   is not a boolean
  * @since 0.1.0
  */
 export function resolveOptions(options?: WebSocketPluginOptions): ResolvedOptions {
@@ -110,10 +111,25 @@ export function resolveOptions(options?: WebSocketPluginOptions): ResolvedOption
     heartbeatPayload: options?.heartbeatPayload ?? 'ping',
     idleTimeoutMs,
     maxMessageBytes: options?.maxMessageBytes ?? 0,
-    // Fail closed: only an explicit `false` turns the check off.
-    checkOrigin: options?.checkOrigin !== false,
+    checkOrigin: resolveCheckOrigin(options?.checkOrigin),
     allowedOrigins: resolveAllowedOrigins(options?.allowedOrigins),
   };
+}
+
+/**
+ * Resolves `checkOrigin`, refusing anything but a boolean: a value read raw
+ * from configuration (`'false'`) would otherwise silently keep the check on.
+ *
+ * @param value - The caller's `checkOrigin`
+ * @returns `true` unless explicitly `false`
+ * @throws {Error} If the value is neither absent nor a boolean
+ */
+function resolveCheckOrigin(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (typeof value !== 'boolean') {
+    throw new Error('WebSocketPlugin: checkOrigin must be a boolean.');
+  }
+  return value;
 }
 
 /**
@@ -524,10 +540,11 @@ export class WebSocketService implements IWebSocketService {
       return { accept: false, status: match.status };
     }
 
-    // Origin first, before the context is built, any guard runs or a slot is
-    // claimed: a browser attaches the user's cookies to a cross-site
-    // handshake (the CSRF middleware never sees it — a handshake is a GET),
-    // so a page on another site must not reach application code at all.
+    // Origin first, before the context is built, any route guard runs or a
+    // slot is claimed: a browser attaches the user's cookies to a cross-site
+    // handshake (the CSRF middleware never sees it — a handshake is a GET), so
+    // a page on another site must not open a socket. The app's global
+    // middleware has already run by now, as for any cross-site GET.
     const refusedOrigin = this.#refusedOrigin(request, publicOrigin);
     if (refusedOrigin !== null) {
       this.#reportRefusedOrigin(refusedOrigin, match.route.path);

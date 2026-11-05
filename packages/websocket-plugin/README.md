@@ -206,8 +206,12 @@ ws.route('/ws/chat', {
 handshake from any page, and the handshake is a `GET`, so no CSRF middleware sees it. Every
 handshake whose `Origin` is neither the app's public origin nor listed in `allowedOrigins` is
 answered `403` before route guards run and before a connection slot is claimed. The public origin is
-the one a trusted proxy published (`TRUSTED_PROXIES` in `http-security-plugin`'s IP security), else
-the request URL's. A handshake with no `Origin` header — a non-browser client — is admitted. The
+the one a trusted proxy published —
+`HttpSecurityPlugin({ ipSecurity: { trustProxy: true, trustedProxies } })` reads it from `Forwarded`
+/ `X-Forwarded-Host` and `X-Forwarded-Proto` (the full-stack template sets this from its
+`TRUSTED_PROXIES` env var) — else the request URL's. Behind a TLS-terminating proxy without that,
+the request URL is `http://` and every `https://` page is refused, so either trust the proxy or list
+the public origin. A handshake with no `Origin` header — a non-browser client — is admitted. The
 first refusal of each origin is logged at `warn` with the origin to add, so a legitimate client on
 another origin (a separate SPA host, a dev server on its own port) is easy to list:
 

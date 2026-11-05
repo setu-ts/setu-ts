@@ -34,13 +34,6 @@ interface MaskOptions {
 }
 
 /**
- * Structural guard for a value an `onConnect` hook may have written to
- * `conn.data` under the `'user'` key. The hook's contract is to store an
- * `IPrincipal`; anything else (a string id, a raw token) is dropped rather
- * than placed on a member typed `IPrincipal` — the context must never carry a
- * value that does not satisfy the type it is declared as.
- */
-/**
  * The method that decides whether an operation may be a mutation, derived from
  * the request it arrived on. Fails closed: only a `POST` request counts as
  * `POST`, so a cross-site navigation (a `GET`, sent with `SameSite=Lax`
@@ -53,11 +46,18 @@ interface MaskOptions {
  * @param requestContext - The request the operation arrived on, if any
  * @returns `'POST'`, `'GET'`, or `undefined` without a request
  */
-export function operationMethodOf(requestContext?: IRequestContext): 'GET' | 'POST' | undefined {
+function operationMethodOf(requestContext?: IRequestContext): 'GET' | 'POST' | undefined {
   if (requestContext === undefined) return undefined;
   return requestContext.request.method === 'POST' ? 'POST' : 'GET';
 }
 
+/**
+ * Structural guard for a value an `onConnect` hook may have written to
+ * `conn.data` under the `'user'` key. The hook's contract is to store an
+ * `IPrincipal`; anything else (a string id, a raw token) is dropped rather
+ * than placed on a member typed `IPrincipal` — the context must never carry a
+ * value that does not satisfy the type it is declared as.
+ */
 function isPrincipal(value: unknown): value is IPrincipal {
   return (
     typeof value === 'object' &&

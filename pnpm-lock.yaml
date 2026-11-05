@@ -3060,6 +3060,9 @@ importers:
       '@setu-ts/auth-plugin':
         specifier: workspace:^
         version: link:../auth-plugin
+      '@setu-ts/http-security-plugin':
+        specifier: workspace:^
+        version: link:../http-security-plugin
       '@setu-ts/kernel':
         specifier: workspace:^
         version: link:../kernel

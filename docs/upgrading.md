@@ -20,9 +20,13 @@ cutting a release renames that heading to the version and is a rename, not a rec
   header (Node, mobile, other servers) are unaffected. A browser front end served from another
   origin — a separate SPA host, or a dev server on its own port such as Vite's — must be listed:
   `WebSocketPlugin({ allowedOrigins: ['https://app.example.com', 'http://localhost:5173'] })`. The
-  first refusal of each origin is logged at `warn` with the origin to add. Behind a reverse proxy,
-  set `TRUSTED_PROXIES` so the public origin is the one the browser saw. `checkOrigin: false`
-  restores the old behaviour.
+  first refusal of each origin is logged at `warn` with the origin to add. Behind a reverse proxy —
+  above all a TLS-terminating one, where the request URL is `http://` and every `https://` page
+  would be refused — trust it with
+  `HttpSecurityPlugin({ ipSecurity: { trustProxy: true, trustedProxies: [...] } })` so the public
+  origin is the one the browser saw (the full-stack template sets this from its `TRUSTED_PROXIES`
+  env var), or list the public origin in `allowedOrigins`. `checkOrigin: false` restores the old
+  behaviour.
 - **`IGraphqlService.execute(params, ctx)` without a method runs a mutation only for `POST`.** An
   application route that calls `execute` with a request context and no method from a `GET`, `HEAD`,
   `PUT` or other non-`POST` request now gets a `405` (`METHOD_NOT_ALLOWED`) for a mutation. Pass the
