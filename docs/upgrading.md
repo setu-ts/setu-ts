@@ -12,6 +12,20 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### GraphQL cross-site refusals and caller errors (`@setu-ts/graphql-plugin`, `@setu-ts/exceptions`)
+
+- **A 4xx `HttpError` carries the status hint.** `notFound()`, `forbidden()` and every other 4xx
+  `HttpError` now carry the `common` status hint, so without `errorHandler` the kernel's fallback
+  serves its own status instead of `500`, with URL userinfo in its message masked. Update tests,
+  dashboards and log alerts that expected the `500`.
+- **GraphQL refuses cross-site requests and names caller errors.** A `POST` to `/graphql` or
+  `/graphql/stream` whose `content-type` media type is not exactly `application/json` (parameters
+  ignored) is now `415`, a missing header included; send `application/json`. A mutation over
+  `GET /graphql/stream` is now `405` with `Allow: POST`; send it as a `POST`. A resolver that throws
+  a 4xx `HttpError` or another 4xx-hinted error is answered with its `detail` and a code
+  (`NOT_FOUND`, `FORBIDDEN`, `UNAUTHENTICATED`, …) instead of `Internal server error` /
+  `INTERNAL_SERVER_ERROR`; update clients and dashboards that keyed on that code.
+
 ### Kernel, runtime and plugin contracts (M131b, `@setu-ts/kernel`, `@setu-ts/runtime`, `@setu-ts/auth-plugin`, `@setu-ts/resilience-plugin`, `@setu-ts/openapi-plugin`, `@setu-ts/messaging-plugin`, `@setu-ts/full-stack-starter`, `@setu-ts/cli`)
 
 - **Header batches are atomic.** If `setHeaders` throws, none of its entries was written. Remove

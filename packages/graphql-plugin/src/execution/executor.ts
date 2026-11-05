@@ -95,8 +95,9 @@ export type OperationCheck =
   { refused: ExecutionPhaseOutcome } | { refused: null; operation: GraphqlOperationKind };
 
 /**
- * Guard the resolved operation: refuse an unresolvable operation, and — on the
- * `http` transport only — a subscription and a mutation over `GET`.
+ * Guard the resolved operation: refuse an unresolvable operation, a mutation
+ * over `GET` on every transport, and — on the `http` transport only — a
+ * subscription.
  *
  * Runs against an already-parsed document, so a cache hit costs no parse.
  *
@@ -137,36 +138,37 @@ export function checkOperation(
 
   const operation = (ast.operation ?? 'query') as GraphqlOperationKind;
 
-  // HTTP transport: refuse subscriptions and mutations over GET
-  if (options.transport === 'http') {
-    if (operation === 'subscription') {
-      return {
-        refused: {
-          status: 400,
-          executed: false,
-          result: {
-            errors: [
-              codedError(
-                'Subscriptions are not supported over HTTP',
-                'SUBSCRIPTIONS_NOT_SUPPORTED_OVER_HTTP',
-              ),
-            ],
-          },
+  // HTTP transport: refuse subscriptions
+  if (options.transport === 'http' && operation === 'subscription') {
+    return {
+      refused: {
+        status: 400,
+        executed: false,
+        result: {
+          errors: [
+            codedError(
+              'Subscriptions are not supported over HTTP',
+              'SUBSCRIPTIONS_NOT_SUPPORTED_OVER_HTTP',
+            ),
+          ],
         },
-      };
-    }
+      },
+    };
+  }
 
-    if (operation === 'mutation' && options.method === 'GET') {
-      return {
-        refused: {
-          status: 405,
-          executed: false,
-          result: {
-            errors: [codedError('Mutations are not allowed over GET', 'METHOD_NOT_ALLOWED')],
-          },
+  // Every transport: refuse a mutation over GET. A GET is what a cross-site
+  // top-level navigation sends, with `SameSite=Lax` cookies attached, so the
+  // SSE `GET <path>/stream` ran mutations while this rule sat in the http arm.
+  if (operation === 'mutation' && options.method === 'GET') {
+    return {
+      refused: {
+        status: 405,
+        executed: false,
+        result: {
+          errors: [codedError('Mutations are not allowed over GET', 'METHOD_NOT_ALLOWED')],
         },
-      };
-    }
+      },
+    };
   }
 
   return { refused: null, operation };

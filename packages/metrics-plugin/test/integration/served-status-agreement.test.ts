@@ -59,12 +59,13 @@ describe('metrics label the served status for a thrown error (M131b)', () => {
             new RegExp(`http_requests_total\\{[^}]*status="${status}"[^}]*\\} ${count}\\b`),
           );
         }
-        // Without errorHandler the kernel serves the 409 hint and 500 for the rest.
+        // Without errorHandler the kernel serves a 4xx hint — the 409 hint and a
+        // 4xx HttpError, which carries one — and 500 for the rest.
         if (!handler)
           expect(Object.fromEntries(served)).toEqual({
             '/conflict': 409,
             '/outage': 500,
-            '/missing': 500,
+            '/missing': 404,
             '/fault': 500,
           });
       } finally {

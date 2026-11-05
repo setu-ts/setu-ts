@@ -3174,14 +3174,14 @@ the brand is fixed from the guard's own policy object when the guard is built, w
 scan proves agrees with the registered policy only for routes present at `start()`. The service's
 `can` resolves a boolean and `authorize` rejects a denial with `AuthorizationDeniedError`, which
 carries a `401`/`403` status hint whose title and detail are the guards' own, so under
-`errorHandler` a thrown denial answers the guard's exact body (without `errorHandler` the kernel
-answers `500`). AuthPlugin's `onBootstrap` hook scans every registered route and fails `start()`
-when a `requirePolicy` guard names a policy or ability that is not registered, or one whose
-registered ability disagrees with the guard's policy object on `anonymous` (a different policy
-registered under the same name); it then SEALS the registry, so `define` after `start()` throws. Not
-scanned: a route added after `start()` and a guard added as global middleware — an unknown name
-there rejects per request (fail closed). A policy is identified by its NAME. See
-[Authorization](docs/authorization.md).
+`errorHandler` a thrown denial answers the guard's exact body (without `errorHandler` the kernel's
+fallback answers the hint's `401`/`403` status, title and detail). AuthPlugin's `onBootstrap` hook
+scans every registered route and fails `start()` when a `requirePolicy` guard names a policy or
+ability that is not registered, or one whose registered ability disagrees with the guard's policy
+object on `anonymous` (a different policy registered under the same name); it then SEALS the
+registry, so `define` after `start()` throws. Not scanned: a route added after `start()` and a guard
+added as global middleware — an unknown name there rejects per request (fail closed). A policy is
+identified by its NAME. See [Authorization](docs/authorization.md).
 
 <!-- version:history -->
 
@@ -13488,6 +13488,16 @@ Contract notes:
   in the body for masking to remove. A brand on a deliberately thrown `HttpError` is ignored — that
   error already states its own status.
 
+  A **4xx** `HttpError` is itself branded by its constructor, with
+  `{ status, title: statusTitle(status), detail: message }`, so code that may not import
+  `@setu-ts/exceptions` recognises it as a caller error from its own class's brand rather than a
+  `statusCode` shape an HTTP client's error also has: the GraphQL masker answers it with a code, the
+  kernel's fallback (no `errorHandler` registered) answers its status instead of an opaque `500`,
+  and the resource-server Bearer challenge adds `WWW-Authenticate` to a thrown `unauthorized()`. A
+  5xx or out-of-range `HttpError` is not branded — a hint promises a caller-safe `detail`, and a
+  server fault's message makes no such promise. `errorHandler` still reads the `HttpError` itself,
+  never its brand.
+
   A hint may also carry an optional `problem` (`ProblemTypeInit`): `errorHandler` builds through the
   same `buildErrorFromInit` the responder uses, so both Problem Details formats emit the problem's
   `type` and `title` and merge its `extensions`, while the `default` format stays byte-identical to
@@ -14295,27 +14305,27 @@ middleware via the application's pipeline.
 
 ### Values (exceptions exports)
 
-| Export                | Kind     | Purpose                                                             |
-| --------------------- | -------- | ------------------------------------------------------------------- |
-| `HttpError`           | class    | The single HTTP error type (`extends Error`, carries `statusCode`)  |
-| `badRequest`          | function | Factory → `400` `HttpError`                                         |
-| `unauthorized`        | function | Factory → `401` `HttpError`                                         |
-| `forbidden`           | function | Factory → `403` `HttpError`                                         |
-| `notFound`            | function | Factory → `404` `HttpError`                                         |
-| `conflict`            | function | Factory → `409` `HttpError`                                         |
-| `validationError`     | function | Factory → `422` `HttpError` wrapping `ValidationError[]`            |
-| `tooManyRequests`     | function | Factory → `429` `HttpError`                                         |
-| `internalServerError` | function | Factory → `500` `HttpError` (accepts `cause` for error chaining)    |
-| `notImplemented`      | function | Factory → `501` `HttpError`                                         |
-| `serviceUnavailable`  | function | Factory → `503` `HttpError`                                         |
-| `statusTitle`         | function | Resolves a status code to a human-readable title                    |
-| `STATUS_TITLES`       | const    | Readonly record of well-known status-code → title mappings          |
-| `errorHandler`        | function | Creates the global error-handler `MiddlewareFunction`               |
-| `defaultFormatter`    | const    | Framework-standard error body formatter (`{ statusCode, message }`) |
-| `rfc9457Formatter`    | const    | RFC 9457 Problem Details formatter                                  |
-| `rfc7807Formatter`    | const    | **Deprecated.** RFC 7807 Problem Details formatter                  |
-| `selectFormatter`     | function | Resolves an `ErrorFormat` or custom function to a formatter         |
-| `ERROR_TYPE_BASE`     | const    | Base URI for framework problem types (`https://setu-ts.dev/errors`) |
+| Export                | Kind     | Purpose                                                                                                                                                       |
+| --------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `HttpError`           | class    | The single HTTP error type (`extends Error`, carries `statusCode`); a 4xx instance also carries the `common` status hint `{ status, title, detail: message }` |
+| `badRequest`          | function | Factory → `400` `HttpError`                                                                                                                                   |
+| `unauthorized`        | function | Factory → `401` `HttpError`                                                                                                                                   |
+| `forbidden`           | function | Factory → `403` `HttpError`                                                                                                                                   |
+| `notFound`            | function | Factory → `404` `HttpError`                                                                                                                                   |
+| `conflict`            | function | Factory → `409` `HttpError`                                                                                                                                   |
+| `validationError`     | function | Factory → `422` `HttpError` wrapping `ValidationError[]`                                                                                                      |
+| `tooManyRequests`     | function | Factory → `429` `HttpError`                                                                                                                                   |
+| `internalServerError` | function | Factory → `500` `HttpError` (accepts `cause` for error chaining)                                                                                              |
+| `notImplemented`      | function | Factory → `501` `HttpError`                                                                                                                                   |
+| `serviceUnavailable`  | function | Factory → `503` `HttpError`                                                                                                                                   |
+| `statusTitle`         | function | Resolves a status code to a human-readable title                                                                                                              |
+| `STATUS_TITLES`       | const    | Readonly record of well-known status-code → title mappings                                                                                                    |
+| `errorHandler`        | function | Creates the global error-handler `MiddlewareFunction`                                                                                                         |
+| `defaultFormatter`    | const    | Framework-standard error body formatter (`{ statusCode, message }`)                                                                                           |
+| `rfc9457Formatter`    | const    | RFC 9457 Problem Details formatter                                                                                                                            |
+| `rfc7807Formatter`    | const    | **Deprecated.** RFC 7807 Problem Details formatter                                                                                                            |
+| `selectFormatter`     | function | Resolves an `ErrorFormat` or custom function to a formatter                                                                                                   |
+| `ERROR_TYPE_BASE`     | const    | Base URI for framework problem types (`https://setu-ts.dev/errors`)                                                                                           |
 
 ### Types
 
@@ -16269,13 +16279,33 @@ GraphqlPlugin({ schema });
 - **An executed operation is always `200`.** A field error that nulls `data` is not a request error,
   so it does not become a `400` even under `graphql-response`.
 - **`405` carries `Allow: POST`.** A mutation sent over `GET` is refused with `METHOD_NOT_ALLOWED`
-  and the endpoint advertises the verb that would work.
+  and the endpoint advertises the verb that would work. The SSE route refuses it too:
+  ``GET `${path}/stream`?query=mutation…`` answers the same buffered `405`, before any stream is
+  opened, because a cross-site top-level navigation is a `GET` and carries `SameSite=Lax` cookies.
+  Only a `POST` may run a mutation; a GET query or subscription on the SSE route still streams.
+- **A POST body must be `application/json`.** Both `POST /graphql` and `` POST `${path}/stream` ``
+  require the `content-type` media type — the text before the first `;`, case-insensitive — to equal
+  `application/json`; parameters such as `charset` are ignored. Anything else, a missing header
+  included, is `415 UNSUPPORTED_MEDIA_TYPE` and the body is never read. A substring test is not
+  enough: `text/plain; x=application/json` is a CORS simple request a browser sends cross-site with
+  no preflight. The SSE route answers the `415` buffered as `application/json`, not in-stream.
 - **Ambiguous operations.** A document whose operation cannot be resolved — several operations with
   no `operationName`, or a name absent from the document — is a `400` with code
   `OPERATION_RESOLUTION_FAILED`, decided after parse and before validation.
 - **Error masking.** Internal errors (resolvers throwing without a `code` in extensions) are masked
   by default. The original is logged through the plugin context's `logger` when one is registered,
   so masking never silently discards it.
+- **Caller errors keep their meaning.** A resolver that throws an error carrying a `400`–`499`
+  status hint — a 4xx `HttpError` from `@setu-ts/exceptions` (`notFound()`, `forbidden()`, …) or any
+  error branded with `withHttpStatusHint` — is answered on every transport (HTTP, SSE, WebSocket)
+  with the hint's `detail` as `message` and a code in `extensions.code`: `400` `BAD_REQUEST`, `401`
+  `UNAUTHENTICATED`, `403` `FORBIDDEN`, `404` `NOT_FOUND`, `409` `CONFLICT`, `422` `BAD_USER_INPUT`,
+  `429` `TOO_MANY_REQUESTS`, any other 4xx `BAD_REQUEST`. Only the hint's `detail` is shown — for an
+  `HttpError` that is the message it was built with; any other branded error's own message is never
+  shown. URL userinfo in the detail is masked, and the error is not logged. This applies whatever
+  `maskInternalErrors` says; an error that already carries a string `extensions.code` keeps that
+  code, but its message is still the hint's `detail`, and a 5xx hint stays masked. The field still
+  resolves to `null` inside a `200` result.
 - **Query depth limiting.** Defaults to 10 levels; set to 0 to disable.
 - **Document caching.** Parse and validation results are cached together, keyed on the raw query
   string, and the operation guard reads the cached AST — so a repeated query is neither re-parsed
@@ -16318,6 +16348,10 @@ GraphqlPlugin({ schema });
   `IGraphqlService.subscribe` takes a `GraphqlOperationContext` instead. On that path `services` is
   the plugin-level `IServiceRegistry`, so a subscription resolver reaches every capability an HTTP
   resolver can.
+- **`subscribe` runs a mutation only for a `POST`.** When the context carries a `requestContext`,
+  any method other than `POST` refuses a mutation with a `405` error outcome (`METHOD_NOT_ALLOWED`),
+  which is how the SSE `GET` route refuses one. A context with no `requestContext` — the WebSocket
+  path — is not method-checked.
 - **Errors inside a live subscription are masked.** `maskInternalErrors` applies identically on
   every transport: masking happens once, in the service, and the transports put the already-masked
   payload on the wire.

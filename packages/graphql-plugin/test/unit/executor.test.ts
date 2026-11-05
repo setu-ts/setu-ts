@@ -156,8 +156,31 @@ describe('checkOperation', () => {
     expect(check.refused === null ? check.operation : null).toBe('subscription');
   });
 
-  it('stream arm does not refuse a mutation over GET', () => {
+  // A GET is what a cross-site top-level navigation sends, with SameSite=Lax
+  // cookies, so the SSE `GET <path>/stream` must refuse a mutation too.
+  it('stream arm refuses a mutation over GET with 405', () => {
     const runtime = createRuntime({ operation: { operation: 'mutation' } });
+    const check = checkOperation(runtime, {} as GraphqlDocumentNodeLike, {
+      transport: 'stream',
+      method: 'GET',
+    });
+    expect(check.refused?.status).toBe(405);
+    expect(check.refused?.result.errors?.[0]?.extensions?.code).toBe('METHOD_NOT_ALLOWED');
+  });
+
+  it('stream arm runs a mutation over POST and with no method', () => {
+    const runtime = createRuntime({ operation: { operation: 'mutation' } });
+    for (const method of ['POST', undefined] as const) {
+      const check = checkOperation(runtime, {} as GraphqlDocumentNodeLike, {
+        transport: 'stream',
+        ...(method !== undefined && { method }),
+      });
+      expect(check.refused).toBeNull();
+    }
+  });
+
+  it('stream arm does not refuse a subscription over GET', () => {
+    const runtime = createRuntime({ operation: { operation: 'subscription' } });
     const check = checkOperation(runtime, {} as GraphqlDocumentNodeLike, {
       transport: 'stream',
       method: 'GET',
