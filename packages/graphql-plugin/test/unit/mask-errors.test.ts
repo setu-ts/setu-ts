@@ -242,6 +242,52 @@ describe('maskErrors — caller errors', () => {
     expect(JSON.stringify(masked)).not.toContain('driver says');
   });
 
+  // A 5xx hint marks the message as a server diagnostic, so an explicit code
+  // does not make it exposable.
+  it('masks and logs a 5xx-hinted error even when it carries its own code', () => {
+    const logged: unknown[] = [];
+    const masked = maskErrors(
+      { errors: [located(hinted(503, 'Down'), { code: 'UPSTREAM_DOWN' })] },
+      { maskInternalErrors: true, logger: { error: (m) => logged.push(m) } },
+    );
+    expect(masked.errors?.[0]).toEqual({
+      message: 'Internal server error',
+      extensions: { code: 'INTERNAL_SERVER_ERROR' },
+      path: ['order'],
+    });
+    expect(JSON.stringify(masked)).not.toContain('driver says');
+    expect(logged).toHaveLength(1);
+  });
+
+  it('leaves an unhinted coded error exposed as before', () => {
+    const plain = new Error('Order is archived');
+    const masked = maskErrors(
+      { errors: [located(plain, { code: 'ORDER_ARCHIVED' })] },
+      { maskInternalErrors: true },
+    );
+    expect(masked.errors?.[0]).toMatchObject({
+      message: 'Order is archived',
+      extensions: { code: 'ORDER_ARCHIVED' },
+    });
+  });
+
+  // graphql-js reuses a thrown GraphQLError that already has a path as the
+  // located error, so the brand is on the error itself, with no originalError.
+  it('reads a hint branded on the located error itself', () => {
+    const error = hinted(404, 'No such order') as Error & {
+      path?: Array<string | number>;
+      extensions?: Record<string, unknown>;
+    };
+    error.path = ['order'];
+    error.extensions = { code: 'ORDER_GONE' };
+    const masked = maskErrors({ errors: [error] }, { maskInternalErrors: true });
+    expect(masked.errors?.[0]).toEqual({
+      message: 'No such order',
+      extensions: { code: 'ORDER_GONE' },
+      path: ['order'],
+    });
+  });
+
   it('ignores a non-string extensions.code and uses the table', () => {
     const masked = maskErrors(
       { errors: [located(hinted(403, 'Not your order'), { code: 42 })] },
