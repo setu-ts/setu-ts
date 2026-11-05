@@ -163,9 +163,18 @@ export interface IGraphqlService {
   /**
    * Execute a GraphQL request.
    *
+   * A mutation over `GET` is refused with a `405` outcome
+   * (`METHOD_NOT_ALLOWED`). When `method` is omitted but `requestContext` is
+   * present, the method is derived from the request and fails closed: only a
+   * `POST` request may run a mutation, so an application route that forwards a
+   * `GET` (a cross-site navigation can send one with `SameSite=Lax` cookies)
+   * cannot. With neither argument — a server-side call — nothing is checked.
+   *
    * @param params - The parsed GraphQL request parameters
    * @param requestContext - Optional request context for service resolution
-   * @param method - Optional HTTP method (used for operation-kind guard)
+   * @param method - Optional HTTP method for the operation-kind guard; when
+   *   given it wins over the method derived from `requestContext`, and anything
+   *   but `'POST'` counts as `'GET'`
    * @returns The execution outcome with HTTP status
    */
   execute(

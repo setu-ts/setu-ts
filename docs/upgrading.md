@@ -12,6 +12,28 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### WebSocket Origin check and the GraphQL execute method rule (`@setu-ts/websocket-plugin`, `@setu-ts/graphql-plugin`, `@setu-ts/common`, `@setu-ts/kernel`)
+
+- **Cross-site WebSocket handshakes are refused.** `WebSocketPlugin` now refuses, with `403`, every
+  handshake whose `Origin` is neither the app's public origin nor listed in the new `allowedOrigins`
+  option — on every WebSocket route, GraphQL's `/graphql/ws` included. Clients with no `Origin`
+  header (Node, mobile, other servers) are unaffected. A browser front end served from another
+  origin — a separate SPA host, or a dev server on its own port such as Vite's — must be listed:
+  `WebSocketPlugin({ allowedOrigins: ['https://app.example.com', 'http://localhost:5173'] })`. The
+  first refusal of each origin is logged at `warn` with the origin to add. Behind a reverse proxy —
+  above all a TLS-terminating one, where the request URL is `http://` and every `https://` page
+  would be refused — trust it with
+  `HttpSecurityPlugin({ ipSecurity: { trustProxy: true, trustedProxies: [...] } })` so the public
+  origin is the one the browser saw (the full-stack template sets this from its `TRUSTED_PROXIES`
+  env var), or list the public origin in `allowedOrigins`. `checkOrigin: false` restores the old
+  behaviour.
+- **`IGraphqlService.execute(params, ctx)` without a method runs a mutation only for `POST`.** An
+  application route that calls `execute` with a request context and no method from a `GET`, `HEAD`,
+  `PUT` or other non-`POST` request now gets a `405` (`METHOD_NOT_ALLOWED`) for a mutation. Pass the
+  method explicitly if the route is meant to run mutations.
+- **Custom `IWebSocketService` implementations** may read the new optional third `routeUpgrade`
+  argument, `publicOrigin`; ignoring it remains valid.
+
 ### GraphQL cross-site refusals and caller errors (`@setu-ts/graphql-plugin`, `@setu-ts/exceptions`)
 
 - **A 4xx `HttpError` carries the status hint.** `notFound()`, `forbidden()` and every other 4xx

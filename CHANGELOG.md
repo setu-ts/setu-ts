@@ -327,6 +327,22 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **Cross-site WebSocket handshakes are refused (#562, `@setu-ts/websocket-plugin`,
+  `@setu-ts/kernel`, `@setu-ts/common`).** Security. A page on another site could open any WebSocket
+  route, GraphQL's included, with the user's cookies: a handshake is a `GET`, so the CSRF middleware
+  never saw it. `WebSocketPlugin` now answers `403` to a handshake whose `Origin` is neither the
+  app's public origin nor in the new `allowedOrigins` option, before route guards and before a
+  connection slot; a client with no `Origin` is admitted, and `checkOrigin: false` turns the check
+  off. The kernel passes the proxy-aware public origin as `routeUpgrade`'s new optional third
+  argument. **Migration:** list a browser front end served from another origin (a separate SPA host,
+  a dev server on its own port) in `allowedOrigins`; behind a TLS-terminating proxy, trust it with
+  `HttpSecurityPlugin({ ipSecurity: { trustProxy: true, trustedProxies } })` or list the public
+  origin, since the request URL is otherwise `http://` and every `https://` page is refused. See
+  `docs/upgrading.md`.
+- **`IGraphqlService.execute` with a request context and no method runs a mutation only for `POST`
+  (#562, `@setu-ts/graphql-plugin`).** Security. An application route forwarding a request to
+  `execute(params, ctx)` let a cross-site `GET` run a mutation; the method is now derived from the
+  request and fails closed, the rule `subscribe` already applied. An explicit method still wins.
 - **Workspace development ports (X87-2, M131c, #560, `@setu-ts/cli`).** Full-stack members read
   their application and Vite ports from discovery, with `vitePort` allocated in
   `setu.workspace.json`. Standalone defaults remain unchanged; member READMEs name the manifest as

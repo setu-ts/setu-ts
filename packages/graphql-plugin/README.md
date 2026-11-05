@@ -159,6 +159,11 @@ Endpoints default to the GraphQL path plus `/ws` and `/stream`, so `path: '/api/
 `IRuntimeServices`, so `subscriptions` requires `CAPABILITIES.RUNTIME` and throws at registration
 without it.
 
+The WebSocket route inherits `WebSocketPlugin`'s handshake `Origin` check: a page on another site
+cannot open `/graphql/ws` with the user's cookies (`403`), while the app's own pages and non-browser
+clients connect as before. List a separate front-end origin in
+`WebSocketPlugin({ allowedOrigins })`.
+
 The SSE route takes the same requests as the HTTP one: a `POST` body must be `application/json`
 (else a buffered `415`), and a mutation over `GET` is a buffered `405` with `Allow: POST`. Both are
 answered before any stream opens; GraphQL request errors (parse, validation) still arrive inside the

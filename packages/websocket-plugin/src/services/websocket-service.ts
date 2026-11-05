@@ -51,6 +51,15 @@ import type { WebSocketPluginOptions } from '../interfaces/index.ts';
 
 /** Refused because the server is at its connection limit. */
 const STATUS_AT_CAPACITY = 503;
+/** Refused because the handshake's `Origin` is not allowed. */
+const STATUS_ORIGIN_REFUSED = 403;
+/**
+ * How many distinct refused origins are logged before refusal logging stops,
+ * and how much of each is kept: the header is attacker-chosen, so the set of
+ * logged origins is bounded by count and each entry by length.
+ */
+const MAX_LOGGED_REFUSED_ORIGINS = 256;
+const MAX_LOGGED_ORIGIN_LENGTH = 256;
 /**
  * Refused because route selection itself threw. Matches the status the
  * adapter-side `UpgradeRouterStore` backstop uses, so a router failure looks
@@ -71,6 +80,8 @@ interface ResolvedOptions {
   readonly heartbeatPayload: string;
   readonly idleTimeoutMs: number;
   readonly maxMessageBytes: number;
+  readonly checkOrigin: boolean;
+  readonly allowedOrigins: readonly string[];
 }
 
 /**
@@ -78,7 +89,9 @@ interface ResolvedOptions {
  *
  * @param options - The caller's options
  * @returns The resolved options
- * @throws {Error} If an idle timeout is set with no heartbeat to sweep on
+ * @throws {Error} If an idle timeout is set with no heartbeat to sweep on, an
+ *   `allowedOrigins` entry is not an absolute http(s) origin, or `checkOrigin`
+ *   is not a boolean
  * @since 0.1.0
  */
 export function resolveOptions(options?: WebSocketPluginOptions): ResolvedOptions {
@@ -98,7 +111,73 @@ export function resolveOptions(options?: WebSocketPluginOptions): ResolvedOption
     heartbeatPayload: options?.heartbeatPayload ?? 'ping',
     idleTimeoutMs,
     maxMessageBytes: options?.maxMessageBytes ?? 0,
+    checkOrigin: resolveCheckOrigin(options?.checkOrigin),
+    allowedOrigins: resolveAllowedOrigins(options?.allowedOrigins),
   };
+}
+
+/**
+ * Resolves `checkOrigin`, refusing anything but a boolean: a value read raw
+ * from configuration (`'false'`) would otherwise silently keep the check on.
+ *
+ * @param value - The caller's `checkOrigin`
+ * @returns `true` unless explicitly `false`
+ * @throws {Error} If the value is neither absent nor a boolean
+ */
+function resolveCheckOrigin(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (typeof value !== 'boolean') {
+    throw new Error('WebSocketPlugin: checkOrigin must be a boolean.');
+  }
+  return value;
+}
+
+/**
+ * Validates `allowedOrigins` as mcp-plugin validates its own: every entry an
+ * absolute `http:`/`https:` origin serialized exactly as a browser sends it.
+ * The error names the entry's index, not its value.
+ *
+ * @param value - The caller's `allowedOrigins`
+ * @returns A frozen copy, `[]` when absent
+ * @throws {Error} If the value is not an array of serialized http(s) origins
+ */
+function resolveAllowedOrigins(value: unknown): readonly string[] {
+  if (value === undefined) return Object.freeze([]);
+  if (!Array.isArray(value)) {
+    throw new Error('WebSocketPlugin: allowedOrigins must be an array of origins.');
+  }
+  value.forEach((entry: unknown, index) => {
+    if (!isSerializedHttpOrigin(entry)) {
+      throw new Error(
+        `WebSocketPlugin: allowedOrigins[${index}] must be an absolute http(s) origin ` +
+          'with no path, such as "https://app.example.com".',
+      );
+    }
+  });
+  return Object.freeze([...(value as string[])]);
+}
+
+/**
+ * Whether a value is an `http:`/`https:` origin in its serialized form.
+ *
+ * @param entry - The candidate
+ * @returns `true` when `new URL(entry).origin` reproduces it exactly
+ */
+function isSerializedHttpOrigin(entry: unknown): boolean {
+  if (typeof entry !== 'string') return false;
+  try {
+    const url = new URL(entry);
+    // WHATWG URL accepts `*` in a host, so `https://*.app.example` would be
+    // kept literally and match no browser `Origin`: refuse it rather than let
+    // it read as a wildcard.
+    return (
+      (url.protocol === 'http:' || url.protocol === 'https:') &&
+      url.origin === entry &&
+      !url.hostname.includes('*')
+    );
+  } catch {
+    return false;
+  }
 }
 
 // Hoisted encoder — avoids a per-message allocation on the hot path, matching
@@ -156,6 +235,14 @@ export class WebSocketService implements IWebSocketService {
    * to key on path because `WsRouteTable.add` refuses a duplicate path.
    */
   readonly #routeGuards = new Map<string, readonly WebSocketUpgradeGuard[]>();
+
+  /**
+   * Refused origins already logged, so each distinct origin is reported once.
+   * Bounded by {@linkcode MAX_LOGGED_REFUSED_ORIGINS}: the `Origin` header is
+   * attacker-chosen, so this set cannot be allowed to grow with it.
+   */
+  readonly #loggedRefusedOrigins = new Set<string>();
+  #refusedOriginLoggingStopped = false;
   /**
    * The plugin-level ingress behaviour chain around `onMessage`. Instances
    * arrive at construction; when factories are configured, the plugin's
@@ -294,11 +381,17 @@ export class WebSocketService implements IWebSocketService {
    * @param principal - The authenticated principal, when the middleware
    *   pipeline produced one (`ctx.request.user`). Absent when the upgrade was
    *   not authenticated; treated as an anonymous connection, never a failure.
+   * @param publicOrigin - The request's public origin, passed by the kernel;
+   *   the `Origin` check compares against it, else against the request URL
    * @returns The decision, or `null` when this is not a WebSocket route
    * @since 0.3.0
    */
-  routeUpgrade(request: Request, principal?: IPrincipal): Promise<WebSocketUpgradeDecision | null> {
-    return this.#routeReported(request, principal);
+  routeUpgrade(
+    request: Request,
+    principal?: IPrincipal,
+    publicOrigin?: string,
+  ): Promise<WebSocketUpgradeDecision | null> {
+    return this.#routeReported(request, principal, publicOrigin);
   }
 
   room(name: string): WebSocketRoom {
@@ -395,14 +488,16 @@ export class WebSocketService implements IWebSocketService {
    * @param request - The native upgrade request
    * @param principal - The authenticated principal, when one authenticated the
    *   upgrade; absent for an anonymous upgrade
+   * @param publicOrigin - The request's public origin, when the caller has one
    * @returns The decision, or `null` when this is not a WebSocket route
    */
   async #routeReported(
     request: Request,
     principal?: IPrincipal,
+    publicOrigin?: string,
   ): Promise<WebSocketUpgradeDecision | null> {
     try {
-      return await this.#route(request, principal);
+      return await this.#route(request, principal, publicOrigin);
     } catch (error) {
       this.#logger?.error('WebSocket upgrade routing failed', {
         error,
@@ -425,9 +520,14 @@ export class WebSocketService implements IWebSocketService {
    * @param principal - The authenticated principal, when one authenticated the
    *   upgrade; handed to `buildContext` so `onOpen` can read it as
    *   `context.user`
+   * @param publicOrigin - The request's public origin, when the caller has one
    * @returns The decision, or `null` when this is not a WebSocket route
    */
-  async #route(request: Request, principal?: IPrincipal): Promise<WebSocketUpgradeDecision | null> {
+  async #route(
+    request: Request,
+    principal?: IPrincipal,
+    publicOrigin?: string,
+  ): Promise<WebSocketUpgradeDecision | null> {
     // Upgrade detection lives here rather than in the caller. Before M70a the
     // adapter's `UpgradeRouterStore` filtered non-upgrade requests out before
     // consulting, and `WsRouteTable.match` keys on PATH ALONE — so without this
@@ -445,6 +545,17 @@ export class WebSocketService implements IWebSocketService {
     }
     if (!match.matched) {
       return { accept: false, status: match.status };
+    }
+
+    // Origin first, before the context is built, any route guard runs or a
+    // slot is claimed: a browser attaches the user's cookies to a cross-site
+    // handshake (the CSRF middleware never sees it — a handshake is a GET), so
+    // a page on another site must not open a socket. The app's global
+    // middleware has already run by now, as for any cross-site GET.
+    const refusedOrigin = this.#refusedOrigin(request, publicOrigin);
+    if (refusedOrigin !== null) {
+      this.#reportRefusedOrigin(refusedOrigin, match.route.path);
+      return { accept: false, status: STATUS_ORIGIN_REFUSED };
     }
 
     // Snapshotted here, while the request is still live (the M46 fix), and
@@ -493,6 +604,57 @@ export class WebSocketService implements IWebSocketService {
       this.#pending--;
       throw error;
     }
+  }
+
+  /**
+   * The handshake's `Origin` when it must be refused, else `null`.
+   *
+   * Admitted: the check is off; no `Origin` header (a non-browser client — a
+   * browser always sends one on a handshake); the request's own public origin;
+   * or an `allowedOrigins` entry. Exact comparison of serialized origins, so
+   * `null`, a differing scheme or port, or any other spelling is refused.
+   *
+   * @param request - The native upgrade request
+   * @param publicOrigin - The kernel-supplied public origin, when present
+   * @returns The refused origin, or `null` to admit
+   */
+  #refusedOrigin(request: Request, publicOrigin: string | undefined): string | null {
+    if (!this.#options.checkOrigin) return null;
+    const header = request.headers.get('origin');
+    if (header === null) return null;
+    const origin = header.trim();
+    const own = publicOrigin ?? new URL(request.url).origin;
+    if (origin === own || this.#options.allowedOrigins.includes(origin)) return null;
+    return origin;
+  }
+
+  /**
+   * Logs a refused origin the first time it is refused, so an operator sees
+   * which origin to list. Bounded by count and length, because the value is
+   * attacker-chosen; once the bound is reached one final line says so.
+   *
+   * @param origin - The refused `Origin` value
+   * @param path - The route it tried to open
+   */
+  #reportRefusedOrigin(origin: string, path: string): void {
+    if (this.#logger === undefined) return;
+    const key = origin.slice(0, MAX_LOGGED_ORIGIN_LENGTH);
+    if (this.#loggedRefusedOrigins.has(key)) return;
+    if (this.#loggedRefusedOrigins.size >= MAX_LOGGED_REFUSED_ORIGINS) {
+      if (!this.#refusedOriginLoggingStopped) {
+        this.#refusedOriginLoggingStopped = true;
+        this.#logger.warn('websocket: refused-origin logging stopped', {
+          distinctOrigins: MAX_LOGGED_REFUSED_ORIGINS,
+        });
+      }
+      return;
+    }
+    this.#loggedRefusedOrigins.add(key);
+    this.#logger.warn('websocket: upgrade refused, origin not allowed', {
+      origin: key,
+      path,
+      allowedOrigins: this.#options.allowedOrigins.length,
+    });
   }
 
   /**

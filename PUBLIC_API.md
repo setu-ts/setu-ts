@@ -4749,6 +4749,16 @@ omitted when it did not. An unauthenticated upgrade is anonymous, and a guard in
 band refuses it before the handshake. See the `session` arm of
 [`AuthPlugin`](#authplugin-setu-tsauth-plugin) for the cookie-backed strategy that produces it.
 
+Since 0.12.0 the kernel also passes the request's public origin as `routeUpgrade`'s optional third
+argument, `publicOrigin` (`requestOriginOf(ctx).origin`, honouring an origin a trusted proxy
+published), and the service refuses a **cross-site handshake** with `403`: one whose `Origin` is
+neither that origin nor in `allowedOrigins`. A browser sends the user's cookies with a handshake
+from any page, and a handshake is a `GET` the CSRF middleware never inspects, so this check — before
+route guards and before a connection slot is claimed — is what keeps a page on another site from
+opening an authenticated socket. A missing `Origin` (a non-browser client) is admitted;
+`checkOrigin: false` admits every origin. A caller with no request context passes no `publicOrigin`,
+and the service compares against the request URL's origin.
+
 ### Registration
 
 ```typescript
@@ -4769,6 +4779,8 @@ app.register(
 
 | Option             | Type                                                                 | Default  | Behavior                                                                                                                                                                                                                                                                                                                                                                                                          |
 | ------------------ | -------------------------------------------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `allowedOrigins`   | `readonly string[]`                                                  | `[]`     | Browser origins, besides the app's public origin, allowed to open a WebSocket. Each entry an exact `http:`/`https:` origin (`new URL(o).origin === o`), no `*` wildcard; an invalid entry throws at construction, naming its index. Ships in 0.12.0                                                                                                                                                               |
+| `checkOrigin`      | `boolean`                                                            | `true`   | Whether every handshake's `Origin` is checked: one that is neither the public origin (`requestOriginOf`, honouring a trusted proxy) nor listed is refused `403` before route guards and before a connection slot; a missing `Origin` (non-browser client) is admitted. `false` admits any origin. Ships in 0.12.0                                                                                                 |
 | `maxConnections`   | `number`                                                             | `0`      | Simultaneous open connections across all routes; `0` is unlimited. At the limit, upgrades get HTTP 503.                                                                                                                                                                                                                                                                                                           |
 | `heartbeatMs`      | `number`                                                             | `0`      | Heartbeat interval; `0` disables it and creates no timer.                                                                                                                                                                                                                                                                                                                                                         |
 | `heartbeatPayload` | `string`                                                             | `'ping'` | The text frame sent each tick. Read only when `heartbeatMs > 0`.                                                                                                                                                                                                                                                                                                                                                  |
@@ -16357,10 +16369,13 @@ GraphqlPlugin({ schema });
   `IGraphqlService.subscribe` takes a `GraphqlOperationContext` instead. On that path `services` is
   the plugin-level `IServiceRegistry`, so a subscription resolver reaches every capability an HTTP
   resolver can.
-- **`subscribe` runs a mutation only for a `POST`.** When the context carries a `requestContext`,
-  any method other than `POST` refuses a mutation with a `405` error outcome (`METHOD_NOT_ALLOWED`),
-  which is how the SSE `GET` route refuses one. A context with no `requestContext` — the WebSocket
-  path — is not method-checked.
+- **`subscribe` and `execute` run a mutation only for a `POST`.** When `subscribe`'s context carries
+  a `requestContext`, any method other than `POST` refuses a mutation with a `405` error outcome
+  (`METHOD_NOT_ALLOWED`), which is how the SSE `GET` route refuses one. `execute` applies the same
+  rule when it is given a `requestContext` but no `method` (since 0.12.0), so an application route
+  that forwards a request cannot run a mutation from a cross-site `GET`. An explicit `method`
+  argument wins, and anything but `'POST'` counts as `'GET'`. With no request context and no method
+  — the WebSocket path, or a server-side `execute` call — nothing is method-checked.
 - **Errors inside a live subscription are masked.** `maskInternalErrors` applies identically on
   every transport: masking happens once, in the service, and the transports put the already-masked
   payload on the wire.
