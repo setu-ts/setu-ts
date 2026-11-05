@@ -12,7 +12,12 @@ import type {
   MiddlewareFunction,
   PathPattern,
 } from '@setu-ts/common';
-import { CAPABILITIES, createPathMatcher, ERROR_RESPONDER_STATE_KEY } from '@setu-ts/common';
+import {
+  CAPABILITIES,
+  createPathMatcher,
+  ERROR_RESPONDER_STATE_KEY,
+  fallbackErrorStatus,
+} from '@setu-ts/common';
 
 import { NoopLogger } from '../loggers/noop-logger.ts';
 
@@ -83,7 +88,8 @@ export function createRequestLoggerMiddleware(options?: RequestLoggerOptions): M
     } catch (err) {
       errored = true;
       const responder = ctx.state.get(ERROR_RESPONDER_STATE_KEY) as IErrorResponder | undefined;
-      errorStatus = responder?.statusFor?.(err) ?? 500;
+      // Without a responder the kernel's fallback serves the response (M131b).
+      errorStatus = responder?.statusFor?.(err) ?? fallbackErrorStatus(err);
       throw err;
     } finally {
       const duration = runtime.hrtime() - start;

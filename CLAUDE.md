@@ -748,12 +748,18 @@ here.
   recipes and weighted quotas: `createQuota` with memory and Redis stores, the shared 429
   initializer, `registerGlobal`, a scaffold-shaped example proven against a real model; ships in
   `0.12.0`) — complete (PR #549).
+- **Milestone 131b** (`runtime` + `kernel` + `common` + `di-plugin` + `decorator-plugin` +
+  `auth-plugin` + `session-plugin` + `messaging-plugin` + `openapi-plugin` + `cli` and 8 more —
+  kernel, runtime and plugin contracts: Node bind waits, cancelled uploads as client faults with one
+  served-status rule, atomic `setHeaders`, cleanup after the handler, whole-graph boot validation,
+  `RouteRegistrationError`, session-stamp revocation, Kafka first-join skip window, stable OpenAPI
+  component names; 17 smoke rows) — complete (PR #557).
 - **Milestone 135** (`vector-store-plugin` (new) + `common` + `cloudflare-plugin` + `cli` —
   tenant-scoped retrieval: `IVectorStore` under `CAPABILITIES.VECTOR_STORE`, the scope a required
   argument, filters refused rather than ignored, memory/pgvector/Qdrant adapters plus
   `VectorizeVectorStore`, `setu add vector-store`, the `semantic-search` example; ships in `0.12.0`)
   — complete (PR #558).
-- **Next milestone** — M131b–d are open for `0.12.0`.
+- **Next milestone** — M131c–d are open for `0.12.0`.
 
 ## Verification (run before declaring any work done)
 

@@ -38,12 +38,9 @@ function safeRead(h: ReturnType<typeof harness>, file: string): string {
 
 function readScripts(h: ReturnType<typeof harness>, file: string): Record<string, string> {
   const raw = safeRead(h, file);
-  // The scripts block is a flat `"<name>": "<cmd>"` map; read each line.
-  const scripts: Record<string, string> = {};
-  for (const match of raw.matchAll(/"([a-z:]+)"\s*:\s*"([^"]+)"/g)) {
-    scripts[match[1]!] = match[2]!;
-  }
-  return scripts;
+  // Read escaped quotes in the Node existence check as JSON, rather than
+  // truncating a script at its first embedded quote.
+  return raw === '' ? {} : (JSON.parse(raw) as { scripts: Record<string, string> }).scripts;
 }
 
 describe('generated local start scripts load .env (M131a X88-2)', () => {

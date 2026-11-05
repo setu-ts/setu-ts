@@ -223,6 +223,14 @@ hand. `cloudflare-workers` is the exception: its entry is a `fetch` export rathe
 and its `setu.config.ts` passes the Worker's bindings to `RuntimePlugin({ env })`. Moving to or from
 Workers rewrites those two files. Your routes, middleware and plugins under `src/` stay the same.
 
+**Node start checks for a build first.** The generated `start` script checks for `dist/main.js`
+before launching Node. If it is absent, it exits 1 with
+`dist/main.js is missing; run the build script first`. Run the generated `build` script, then start
+again. The check is in `start`, not a `prestart` hook (package managers do not all run those hooks).
+Bun and Deno starts are unchanged. The devtool entry also catches creation/start failures, prints
+`setu devtool: startup failed: ... The connector did not start.`, and exits 1. Devtool usage names
+`setu devtool enable`.
+
 **Node development runs TypeScript through `tsx`; production runs the bundle.** Node's built-in
 support (`--experimental-strip-types`) erases types without transforming code, so it cannot run a
 decorator — V8 has not shipped them, so even a TC39 standard decorator is a bare `SyntaxError` — or

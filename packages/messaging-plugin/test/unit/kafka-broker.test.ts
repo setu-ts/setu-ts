@@ -2139,3 +2139,74 @@ describe('KafkaBroker — the guarded import (M113d §3.1)', () => {
     }
   });
 });
+
+for (const earlier of [true, false]) {
+  it(`M131b review: a delivery completing after the first-join decision is not replayed (earlier=${earlier})`, async () => {
+    const factory = new FakeKafkaFactory();
+    const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), { client: factory });
+    await broker.connect();
+    const seen: string[] = [];
+    const held = Promise.withResolvers<void>();
+    try {
+      await broker.subscribe(
+        'orders',
+        async (_body, metadata) => {
+          seen.push(metadata.messageId!);
+          if (metadata.messageId === '0:3' && seen.length === (earlier ? 2 : 1)) await held.promise;
+        },
+        { queue: 'workers' },
+      );
+      const consumer = factory.consumer({ groupId: 'workers' });
+      const admin = factory.admins[1]!;
+      const pending = Promise.withResolvers<Awaited<ReturnType<typeof admin.fetchOffsets>>>();
+      vi.spyOn(admin, 'fetchOffsets').mockReturnValueOnce(pending.promise);
+      const join = consumer.join({ orders: [0] });
+      if (earlier) await consumer.deliver('orders', new FakeKafkaMessage('{}', '2', '1000', {}));
+      // Offset 3 is still in its handler when the first-join decision is made.
+      const inFlight = consumer.deliver('orders', new FakeKafkaMessage('{}', '3', '1000', {}));
+      pending.resolve([{ topic: 'orders', partitions: [{ partition: 0, offset: '-1' }] }]);
+      await join;
+      held.resolve();
+      await inFlight;
+      for (const offset of ['0', '1', '2', '3', '4'])
+        await consumer.deliver('orders', new FakeKafkaMessage('{}', offset, '1000', {}));
+      expect(seen).toEqual(
+        earlier ? ['0:2', '0:3', '0:0', '0:1', '0:4'] : ['0:3', '0:0', '0:1', '0:2', '0:4'],
+      );
+    } finally {
+      held.resolve();
+      await broker.disconnect();
+    }
+  });
+}
+
+it('M131b 3.14 delivers each offset once across a first-join rewind', async () => {
+  const factory = new FakeKafkaFactory();
+  const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), { client: factory });
+  await broker.connect();
+  const seen: string[] = [];
+  try {
+    await broker.subscribe(
+      'orders',
+      (body, metadata) => {
+        expect(body).toEqual({});
+        seen.push(metadata.messageId!);
+      },
+      { queue: 'workers' },
+    );
+    const consumer = factory.consumer({ groupId: 'workers' });
+    const admin = factory.admins[1]!;
+    const pending = Promise.withResolvers<Awaited<ReturnType<typeof admin.fetchOffsets>>>();
+    vi.spyOn(admin, 'fetchOffsets').mockReturnValueOnce(pending.promise);
+    const join = consumer.join({ orders: [0] });
+    for (const offset of ['2', '3'])
+      await consumer.deliver('orders', new FakeKafkaMessage('{}', offset, '1000', {}));
+    pending.resolve([{ topic: 'orders', partitions: [{ partition: 0, offset: '-1' }] }]);
+    await join;
+    for (const offset of ['0', '1', '2', '3', '4'])
+      await consumer.deliver('orders', new FakeKafkaMessage('{}', offset, '1000', {}));
+    expect(seen).toEqual(['0:2', '0:3', '0:0', '0:1', '0:4']);
+  } finally {
+    await broker.disconnect();
+  }
+});

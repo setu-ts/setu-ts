@@ -249,6 +249,8 @@ package fits the plugin architecture.
 | `err`                                 | function  |
 | `errorResponderOf`                    | function  |
 | `extractContextFromHeaders`           | function  |
+| `fallbackErrorHint`                   | function  |
+| `fallbackErrorStatus`                 | function  |
 | `formEncodingOf`                      | function  |
 | `fromNodeRedis`                       | function  |
 | `fromNullable`                        | function  |
@@ -338,6 +340,7 @@ package fits the plugin architecture.
 | `PrimaryKeyChangeError`               | class     |
 | `ReconnectSupervisor`                 | class     |
 | `RequestServiceUnavailableError`      | class     |
+| `RouteRegistrationError`              | class     |
 | `UnknownPayloadFieldError`            | class     |
 | `UnsupportedFormEncodingError`        | class     |
 | `VectorCollectionMismatchError`       | class     |

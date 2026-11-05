@@ -171,11 +171,11 @@ describe('auth-session strategy', () => {
       expect(order).toEqual(['refresh', 'stamp']);
       users.set('alice', { version: 'v2', active: true });
       expect((await jar.fetch(harness.app, '/me')).status).toBe(401);
-      // A revoked principal is anonymous before the stamp is ever read.
+      // The definite mismatch removed the record; later requests run neither check.
       users.set('alice', { version: 'v1', active: false });
       order.length = 0;
       expect((await jar.fetch(harness.app, '/me')).status).toBe(401);
-      expect(order).toEqual(['refresh']);
+      expect(order).toEqual([]);
     });
 
     it('keeps the current session through a re-sign-in after a bump', async () => {

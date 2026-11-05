@@ -388,6 +388,14 @@ Two consequences follow from the list being positional:
 - [rest-starter](https://github.com/setu-ts/setu-ts/blob/main/packages/starters/rest-starter/README.md)
 - [microservice-starter](https://github.com/setu-ts/setu-ts/blob/main/packages/starters/microservice-starter/README.md)
 
+## Referrer policy with React Router
+
+When `reactRouter` is configured, `createFullStackApp` and `createFullStackAppFromConfig` default
+`httpSecurity.headers.referrerPolicy` to `same-origin`. This keeps browser form POSTs from carrying
+an opaque `Origin: null` that React Router refuses. An explicit referrer policy,
+`referrerPolicy: false`, or `headers: { enabled: false }` is preserved. Without `reactRouter`, the
+HTTP-security plugin keeps its own `no-referrer` default.
+
 ## Exports
 
 | Export                            | Kind      |

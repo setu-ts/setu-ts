@@ -230,12 +230,13 @@ export interface IResponse {
   /**
    * Sets several response headers at once — the same as calling
    * {@linkcode IResponse.header} for each own enumerable string-keyed entry,
-   * in order, with the same validation and the same errors.
+   * with the same validation and errors. Atomic: when any entry is invalid,
+   * none is set.
    *
    * For a header set a middleware sends on every response, pass the SAME
    * frozen object each time: the kernel validates it once and then copies it
    * into each response in one step (measured at 941 → 358 ns per response on
-   * Bun). Any other object is applied entry by entry. A frozen object is the
+   * Bun). Any other object is staged before applying. A frozen object is the
    * contract for the shortcut because it cannot change after it was checked.
    *
    * @param headers - Header names and values
@@ -360,8 +361,12 @@ export interface IRequestContext {
    */
   slot?<T>(key: object, create: () => T): T;
   /**
-   * Registers cleanup in reverse registration order. Buffered responses wait
-   * for cleanup; streaming responses clean up on end, error, or cancellation.
+   * Registers cleanup in reverse registration order, after the handler settles.
+   * Buffered responses normally wait for cleanup; an early middleware response
+   * is sent immediately and cleanup waits for the running handler — even past
+   * shutdown: a handler still running when `stop()`'s drain bound expires has
+   * its cleanup run when it settles, after `stop()` returned. Streaming
+   * responses also wait for end, error, or cancellation.
    * Calls after completion run immediately. Failures are reported at warn.
    * Each asynchronous cleanup is bounded at 5000 ms; expiry warns once and
    * continues with the next cleanup. Later settlement is ignored. Synchronous

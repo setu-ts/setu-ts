@@ -12,7 +12,7 @@ import type { ConfigPluginOptions } from '@setu-ts/config-plugin';
 import { loadConfig } from '@setu-ts/config-plugin';
 
 import type { FullStackStarterOptions } from './options.ts';
-import { createFullStackApp } from './app.ts';
+import { createFullStackApp, fullStackHttpSecurityOptions } from './app.ts';
 
 const CONFIG_SNAPSHOTS = new WeakMap<IKernelApplication, IConfig>();
 
@@ -175,8 +175,10 @@ export async function createFullStackAppFromConfig(
 
   const built = build(config);
 
+  const httpSecurity = fullStackHttpSecurityOptions(built);
   const app = createFullStackApp({
     ...built,
+    ...(httpSecurity === undefined ? {} : { httpSecurity }),
     // `instance` last so the snapshot always wins: without it the plugin would
     // load configuration a second time, and an application could branch on one
     // snapshot while serving another.

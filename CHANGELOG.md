@@ -37,6 +37,16 @@ All notable changes to this project are documented here. The format follows
   weighted archive quota. The standalone website guide includes the full scaffold-shaped application
   and official-client tests. `setu new --example` now lists `npm run build` in its next steps when
   an example starts from compiled output.
+- **Named route registration refusals (M131b, #557, `@setu-ts/common`, `@setu-ts/kernel`,
+  `@setu-ts/decorator-plugin`).** `RouteRegistrationError` carries reason, method, path and cause;
+  decorated refusals name the controller and method.
+- **Client body-read errors (M131b, #557, `@setu-ts/runtime`, `@setu-ts/common`,
+  `@setu-ts/metrics-plugin`).** `RequestBodyReadError` carries a fixed safe 400 hint and the native
+  cause. Logging keeps only its class and fixed detail; metrics labels the hinted status and counts
+  only 5xx as errors. Bun's native size refusal becomes `RequestBodyTooLargeError`/413, with an
+  optional cap and Infinity/generic detail for an unknown native bound. Bun answers that client
+  itself with an empty 413, so the mapped error reaches the handler, logs and metrics, not the
+  response body.
 
 - **Weighted quotas and AI SDK recipes (M134, #549, `@setu-ts/auth-plugin`,
   `@setu-ts/telemetry-plugin`).** `createQuota`, `IQuota`, `QuotaOptions`, `QuotaReservation`,
@@ -195,6 +205,29 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **Atomic header batches (M131b, #557, `@setu-ts/common`, `@setu-ts/kernel`).** `setHeaders`
+  validates every entry before writing any, preserving prior headers on refusal and caching frozen
+  errors.
+- **Cleanup after the handler (M131b, #557, `@setu-ts/common`, `@setu-ts/kernel`,
+  `@setu-ts/di-plugin`).** An early middleware response returns immediately while request cleanup
+  and shutdown drain retain the running handler; scopes are not disposed under it.
+- **Typed-token documentation (M131b, #557, `@setu-ts/common`, `@setu-ts/di-plugin`).**
+  `createToken<T>` carries compile-time inference only; T is erased and tsx/start:dev does not
+  type-check. Use tsc through generated check/build scripts.
+- **Session-stamp revocation (M131b, #557, `@setu-ts/auth-plugin`).** A definite mismatch deletes
+  the HTTP auth record and regenerates its session; a reader fault suspends one request and
+  preserves the record. Revocation takes effect when the old cookie is next presented, including on
+  a request that throws (the session plugin deletes the superseded store row before rethrowing). A
+  stamp must only move forward: restoring an old value revives cookies not yet presented, and copied
+  encrypted-cookie sessions; read-only fromHeaders callers stay suspension-only, as does an auth
+  middleware given a custom priority that runs before the session middleware.
+- **Model component names (M131b, #557, `@setu-ts/openapi-plugin`, `@setu-ts/sdk`).** Hoisted
+  schemas use their Zod id or their site plus schema path, with roots reserved before descendants;
+  an id is never given a name another operation's root uses, and an id outside the OpenAPI
+  component-name grammar (`[A-Za-z0-9._-]`) is ignored in favour of the site name, with ids
+  containing `/` or `~` now resolving instead of leaving a dangling `$ref`. Nullable primitives stay
+  inline. Regenerated clients can rename component types.
+
 - **BREAKING for implementors: `IMultiTenancyService` gains the required `lookupTenant` (M127, #548,
   `@setu-ts/common`).** Applications that only consume the service are unaffected; an out-of-tree
   implementation must add `lookupTenant(id): Promise<Option<ITenant>>` or delegate to
@@ -278,6 +311,47 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **A regenerated session's old row is deleted even when the request throws (M131b, #557,
+  `@setu-ts/session-plugin`).** `regenerate()` is a revocation, so the session middleware deletes
+  the superseded store row before rethrowing a request's error (a store fault there is logged at
+  `warn`). A sign-in or second-factor step that regenerates and then throws now also loses the
+  pre-login stored session, such as an anonymous cart; the user starts sign-in again.
+- **Node startup bind failures (M131b, #557, `@setu-ts/runtime`, `@setu-ts/common`).** The default
+  Node host waits for binding and rejects with the native error; injected hosts share that
+  obligation.
+- **Devtool startup reporting (M131b, #557, `@setu-ts/cli`).** The generated entry catches
+  creation/start failures, prints connector-start guidance and exits 1.
+- **Node start without a build (M131b, #557, `@setu-ts/cli`).** The start script checks dist/main.js
+  and names the build script before launch; generated fixtures are recaptured.
+- **Unhandled client hints (M131b, #557, `@setu-ts/kernel`, `@setu-ts/common`,
+  `@setu-ts/logger-plugin`, `@setu-ts/metrics-plugin`).** Without `errorHandler`, a 4xx-hinted
+  failure is served with its hinted status, title and detail, as `errorHandler` would, and logged at
+  `warn`; unhinted errors and 5xx hints keep the opaque 500. The new `fallbackErrorStatus` in
+  `@setu-ts/common` is that rule, and request logging and HTTP metrics label a thrown error with the
+  status actually served (`responder?.statusFor?.(error) ?? fallbackErrorStatus(error)`), so metrics
+  also stop counting a thrown `HttpError` under `errorHandler` as 500. `fallbackErrorHint` returns
+  the served hint itself, read once, so the kernel's status, title and detail come from one
+  snapshot.
+- **Trusted diagnostics sockets (M131b, #557, `@setu-ts/runtime`).** At the 32-socket cap, idle
+  untrusted sockets are evicted before trusted ones; only sent authenticated success responses
+  establish trust.
+- **Devtool usage (M131b, #557, `@setu-ts/cli`).** Both usage strings name setu devtool enable.
+- **Whole-graph boot findings (M131b, #557, `@setu-ts/di-plugin`, `@setu-ts/decorator-plugin`).** A
+  controller cannot stop validation at its own subgraph; aliases and repeated findings are
+  deduplicated.
+- **Retry policy validation (M131b, #557, `@setu-ts/resilience-plugin`).** Invalid attempt counts or
+  delays throw RangeError at registration/wrap time, including a delay longer than a runtime timer
+  can wait (2^31 - 1 ms, which Node, Deno and Bun clamp to 1 ms); a computed exponential backoff is
+  capped there. A limit of 1 executes once.
+- **Kafka first-join replay (M131b, #557, `@setu-ts/messaging-plugin`).** The consumer skips its
+  already delivered partition window after a first-join rewind, while delivering earlier historical
+  offsets.
+- **Full-stack form posts (M131b, #557, `@setu-ts/full-stack-starter`,
+  `@setu-ts/react-router-plugin`, `@setu-ts/http-security-plugin`).** With React Router configured,
+  both starter entry points default referrerPolicy to same-origin and preserve explicit or
+  disabled-header choices.
+- **View document doctype (M131b, #557, `@setu-ts/cli`, `@setu-ts/view-plugin`).** The generated
+  layout emits a doctype; renderView and @Render continue sending engine output unchanged.
 - **`setu new --example` downloads the examples as they now stand (#553, `@setu-ts/cli`).** The
   repository examples were brought back to the CLI scaffold's structure, with `apps/full-stack` on
   the M130 module layout, and the offered file lists for `cqrs`, `di-decorators`, `graphql-demo` and

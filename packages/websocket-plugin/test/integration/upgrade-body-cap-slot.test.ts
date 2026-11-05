@@ -103,14 +103,15 @@ describe('upgrade refused by the body cap releases its connection slot', () => {
 
   it('answers the capped refusal 413 through the configured error format', async () => {
     // The slot release must not swallow the refusal: the rejection is rethrown
-    // so its `413` status hint still reaches `errorHandler`. Asserted without
-    // one here — the kernel's opaque 500 — and with one in
+    // so its `413` status hint still reaches the error path. Asserted without
+    // `errorHandler` here — since M131b the kernel's fallback serves a 4xx
+    // hint as hinted — and with one in
     // `packages/runtime/test/integration/max-body-bytes.test.ts`.
     const app = boot(8);
     await app.start();
     try {
       const response = await app.fetch(upgradeWithBody(64));
-      expect(response.status).toBe(500);
+      expect(response.status).toBe(413);
       await response.body?.cancel();
     } finally {
       await app.stop();

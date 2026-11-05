@@ -79,7 +79,13 @@ export type {
 export { OptionalDependencyUnavailableError } from './errors/optional-dependency.ts';
 // HTTP status hint (M89b, X19-1) — how a package that cannot import
 // `@setu-ts/exceptions` states the status its own error should be answered with
-export { HTTP_STATUS_HINT, httpStatusHintOf, withHttpStatusHint } from './errors/status-hint.ts';
+export {
+  fallbackErrorHint,
+  fallbackErrorStatus,
+  HTTP_STATUS_HINT,
+  httpStatusHintOf,
+  withHttpStatusHint,
+} from './errors/status-hint.ts';
 export type { HttpStatusHint } from './errors/status-hint.ts';
 
 // Health probe
@@ -794,3 +800,5 @@ export type {
 } from './redis/node-redis-adapter.ts';
 /** Strict dotenv parser shared by config loading and workspace deploy (M122). */
 export { parseEnv } from './env-file.ts';
+
+export { RouteRegistrationError } from './errors/route-registration.ts';

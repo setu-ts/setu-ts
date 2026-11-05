@@ -14,6 +14,8 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  fallbackErrorHint,
+  fallbackErrorStatus,
   HTTP_STATUS_HINT,
   type HttpStatusHint,
   httpStatusHintOf,
@@ -387,5 +389,35 @@ describe('HTTP status hint', () => {
     const branded = secondCopy.withHttpStatusHint(new Error('boom'), NOT_IMPLEMENTED);
 
     expect(httpStatusHintOf(branded)).toEqual(NOT_IMPLEMENTED);
+  });
+});
+
+describe('fallbackErrorStatus (M131b)', () => {
+  const hinted = (status: number): Error =>
+    withHttpStatusHint(new Error('x'), { status, title: 't', detail: 'd' });
+  it.each([
+    ['a 400 hint', hinted(400), 400],
+    ['a 409 hint', hinted(409), 409],
+    ['a 499 hint', hinted(499), 499],
+    ['a 500 hint', hinted(500), 500],
+    ['a 503 hint', hinted(503), 500],
+    ['an unhinted error', new Error('fault'), 500],
+    ['a thrown string', 'fault', 500],
+    ['null', null, 500],
+  ] as const)('serves %s as %s', (_label, error, expected) => {
+    expect(fallbackErrorStatus(error)).toBe(expected);
+  });
+});
+
+describe('fallbackErrorHint (M131b review)', () => {
+  it('returns the served client hint and undefined for the opaque 500', () => {
+    const conflict = withHttpStatusHint(new Error('x'), { status: 409, title: 't', detail: 'd' });
+    expect(fallbackErrorHint(conflict)).toMatchObject({ status: 409, title: 't', detail: 'd' });
+    expect(
+      fallbackErrorHint(
+        withHttpStatusHint(new Error('x'), { status: 503, title: 't', detail: 'd' }),
+      ),
+    ).toBeUndefined();
+    expect(fallbackErrorHint(new Error('fault'))).toBeUndefined();
   });
 });

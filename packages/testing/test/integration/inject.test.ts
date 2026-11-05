@@ -111,7 +111,7 @@ describe('inject — integration through real started app', () => {
     await app.stop();
   });
 
-  it('POST with empty body does NOT silently become {} — returns 500 with error message (P1-3)', async () => {
+  it('POST with empty body does NOT silently become {} — returns 400 with error message (P1-3)', async () => {
     const app = await createTestApp({ plugins: [fakeRuntime()] });
 
     app.router.post('/parse-json', async (ctx) => {
@@ -123,16 +123,15 @@ describe('inject — integration through real started app', () => {
 
     // Before the P1-3 fix, an empty-string body was dropped from InjectRequest
     // entirely, causing the kernel to default to '{}' and return { ok: true }.
-    // After the fix, '' flows through, JSON.parse('') throws, and the kernel
-    // returns status 500 with the error JSON.
+    // After the fix, '' flows through and JSON.parse('') throws. The parse error
+    // carries a 400 status hint, which the kernel's fallback honours (M131b).
     const res = await inject(
       app,
       new Request('http://localhost/parse-json', { method: 'POST', body: '' }),
     );
     // Should NOT be 200 with a success body
     expect(res.statusCode).not.toBe(200);
-    // The kernel catches the SyntaxError and returns 500 with { error: '...' }
-    expect(res.statusCode).toBe(500);
+    expect(res.statusCode).toBe(400);
 
     await app.stop();
   });

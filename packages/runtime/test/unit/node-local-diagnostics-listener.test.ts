@@ -56,6 +56,12 @@ class FakeServer extends EventEmitter implements NodeListenerServer {
 
 class FakeResponse extends EventEmitter {
   status = 0;
+  get headersSent(): boolean {
+    return this.status !== 0;
+  }
+  get statusCode(): number {
+    return this.status;
+  }
   headers: Record<string, string> = {};
   bytes: Uint8Array = new Uint8Array();
   failAt: 'head' | 'end' | undefined;
@@ -325,16 +331,16 @@ describe('Node local diagnostics listener lifecycle', () => {
   });
 });
 
-describe('Node diagnostics socket admission', () => {
-  /** Drives connection arrival in a defined order, independent of any OS scheduler. */
-  function arrive(server: FakeServer, count = 1): FakeSocket[] {
-    return Array.from({ length: count }, () => {
-      const socket = new FakeSocket();
-      server.emit('connection', socket);
-      return socket;
-    });
-  }
+/** Drives connection arrival in a defined order, independent of any OS scheduler. */
+function arrive(server: FakeServer, count = 1): FakeSocket[] {
+  return Array.from({ length: count }, () => {
+    const socket = new FakeSocket();
+    server.emit('connection', socket);
+    return socket;
+  });
+}
 
+describe('Node diagnostics socket admission', () => {
   it('evicts idle sockets in arrival order and admits each newcomer', async () => {
     const f = fixture();
     await f.factory.listen(options);
@@ -762,5 +768,90 @@ describe('Node parser refusal bytes', () => {
       expect(NODE_LISTENER_SERVER_OPTIONS.insecureHTTPParser).toBe(false);
       await f.factory.closeActive();
     });
+  }
+});
+
+it('M131b 3.5 keeps a trusted idle socket through forty untrusted newcomers', async () => {
+  const f = fixture();
+  await f.factory.listen(options);
+  try {
+    const [trusted] = arrive(f.server);
+    const response = f.dispatch(trusted!);
+    await response.done.promise;
+    response.emit('finish');
+    arrive(f.server, 40);
+    expect(trusted!.destroyed).toBe(false);
+  } finally {
+    await f.factory.closeActive();
+  }
+});
+
+it('M131b 3.5 evicts oldest trusted idle socket if all idle sockets are trusted', async () => {
+  const f = fixture();
+  await f.factory.listen(options);
+  try {
+    const sockets = arrive(f.server, 32);
+    for (const socket of sockets) {
+      const response = f.dispatch(socket);
+      await response.done.promise;
+      response.emit('finish');
+    }
+    arrive(f.server);
+    expect(sockets[0]!.destroyed).toBe(true);
+    expect(sockets.slice(1).every((socket) => !socket.destroyed)).toBe(true);
+  } finally {
+    await f.factory.closeActive();
+  }
+});
+
+it('M131b 3.5 never trusts the default status before a response is sent', async () => {
+  const f = fixture();
+  const gate = Promise.withResolvers<ReturnType<typeof diagnosticsResponse>>();
+  await f.factory.listen({ ...options, handler: () => gate.promise });
+  try {
+    const [socket] = arrive(f.server);
+    const response = f.dispatch(socket!);
+    response.emit('close');
+    arrive(f.server, 32);
+    expect(socket!.destroyed).toBe(true);
+    gate.resolve(diagnosticsResponse());
+    await response.done.promise;
+  } finally {
+    gate.resolve(diagnosticsResponse());
+    await f.factory.closeActive();
+  }
+});
+
+it('M131b 3.5 leaves a sent unauthenticated refusal untrusted', async () => {
+  const f = fixture();
+  let calls = 0;
+  await f.factory.listen({
+    ...options,
+    // The first (oldest) socket gets a sent success and becomes trusted; every
+    // later one gets a sent 401 refusal.
+    handler: () =>
+      calls++ === 0
+        ? diagnosticsResponse()
+        : diagnosticsResponse({
+            streaming: false,
+            status: 401,
+            headers: new Headers(),
+            body: 'refused',
+          }),
+  });
+  try {
+    const sockets = arrive(f.server, 32);
+    for (const socket of sockets) {
+      const response = f.dispatch(socket);
+      await response.done.promise;
+      response.emit('finish');
+    }
+    arrive(f.server);
+    // Were a 401 to establish trust, every socket would be trusted and the
+    // oldest — the success — would be evicted instead.
+    expect(sockets[0]!.destroyed).toBe(false);
+    expect(sockets[1]!.destroyed).toBe(true);
+  } finally {
+    await f.factory.closeActive();
   }
 });
