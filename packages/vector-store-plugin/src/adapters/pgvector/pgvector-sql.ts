@@ -60,11 +60,24 @@ export function createStatements(sql: SqlTag, spec: VectorCollectionSpec): State
   const t = sql.identifier(table);
   return [
     sql`CREATE TABLE IF NOT EXISTS ${t} (scope text NOT NULL, id text NOT NULL, source_id text, content text, metadata jsonb NOT NULL DEFAULT '{}'::jsonb, embedding vector(${sql.raw(String(spec.dimensions))}) NOT NULL, source_version bigint, PRIMARY KEY (scope, id))`,
-    // A table created before versioned replaceSource gains the column in place.
-    sql`ALTER TABLE ${t} ADD COLUMN IF NOT EXISTS source_version bigint`,
     sql`CREATE INDEX IF NOT EXISTS ${sql.identifier(sourceIndex)} ON ${t} (scope, source_id)`,
     sql`CREATE INDEX IF NOT EXISTS ${sql.identifier(vectorIndex)} ON ${t} USING hnsw (embedding vector_cosine_ops)`,
   ];
+}
+
+/**
+ * Adds the `source_version` column to a table created before versioned
+ * `replaceSource`. Run only when {@linkcode describeStatement} reports the
+ * column missing: `ALTER TABLE` takes an ACCESS EXCLUSIVE lock even when
+ * `IF NOT EXISTS` would skip, so running it on every start would queue the
+ * table's traffic behind any long query.
+ *
+ * @param sql - The `sql` tag
+ * @param spec - The collection
+ * @returns The statement
+ */
+export function addVersionColumnStatement(sql: SqlTag, spec: VectorCollectionSpec): Statement {
+  return sql`ALTER TABLE ${sql.identifier(tableNames(spec).table)} ADD COLUMN IF NOT EXISTS source_version bigint`;
 }
 
 /**

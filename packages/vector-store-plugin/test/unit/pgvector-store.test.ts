@@ -184,12 +184,11 @@ describe('PgVectorStore', () => {
     await store.ensureCollection(spec);
     expect(statements.map((s) => s.text)).toEqual([
       'CREATE TABLE IF NOT EXISTS "vs_documents" (scope text NOT NULL, id text NOT NULL, source_id text, content text, metadata jsonb NOT NULL DEFAULT \'{}\'::jsonb, embedding vector(3) NOT NULL, source_version bigint, PRIMARY KEY (scope, id))',
-      'ALTER TABLE "vs_documents" ADD COLUMN IF NOT EXISTS source_version bigint',
       'CREATE INDEX IF NOT EXISTS "vs_documents_src" ON "vs_documents" (scope, source_id)',
       'CREATE INDEX IF NOT EXISTS "vs_documents_hnsw" ON "vs_documents" USING hnsw (embedding vector_cosine_ops)',
       "SELECT a.atttypmod AS dimensions, to_regclass($1) IS NOT NULL AS source_index, to_regclass($2) IS NOT NULL AS vector_index, EXISTS (SELECT 1 FROM pg_attribute v WHERE v.attrelid = a.attrelid AND v.attname = 'source_version' AND NOT v.attisdropped) AS source_version FROM pg_attribute a WHERE a.attrelid = to_regclass($3) AND a.attname = 'embedding' AND NOT a.attisdropped",
     ]);
-    expect(statements[4]!.params).toEqual([
+    expect(statements[3]!.params).toEqual([
       'vs_documents_src',
       'vs_documents_hnsw',
       'vs_documents',
@@ -230,22 +229,36 @@ describe('PgVectorStore', () => {
           : healthy()({ text, params: [], inTransaction: false }),
       'missing its source index',
     ],
-    [
-      'a missing source_version column',
-      ({ text }) =>
-        text.includes('pg_attribute')
-          ? {
-              rows: [
-                { dimensions: 3, source_index: true, vector_index: true, source_version: false },
-              ],
-            }
-          : healthy()({ text, params: [], inTransaction: false }),
-      'ADD COLUMN source_version bigint',
-    ],
   ])('refuses %s', async (_label, respond, message) => {
     const { store } = await opened(respond);
     await expect(store.ensureCollection(spec)).rejects.toThrow(VectorCollectionMismatchError);
     await expect(store.ensureCollection(spec)).rejects.toThrow(message);
+  });
+
+  it('adds a missing source_version column in create mode only, never on every start', async () => {
+    const withoutColumn: Responder = ({ text }) =>
+      text.includes('pg_attribute')
+        ? {
+            rows: [
+              { dimensions: 3, source_index: true, vector_index: true, source_version: false },
+            ],
+          }
+        : healthy()({ text, params: [], inTransaction: false });
+    const alter = 'ALTER TABLE "vs_documents" ADD COLUMN IF NOT EXISTS source_version bigint';
+    const created = await opened(withoutColumn);
+    created.statements.length = 0;
+    await created.store.ensureCollection(spec);
+    expect(created.statements.at(-1)!.text).toBe(alter);
+    // With the column present, the ALTER (an ACCESS EXCLUSIVE lock) is not run.
+    const present = await opened();
+    await present.store.ensureCollection(spec);
+    expect(present.statements.some((s) => s.text.startsWith('ALTER'))).toBe(false);
+    // A migration-owned table is refused, never altered.
+    const verified = await opened(withoutColumn, 'verify');
+    await expect(verified.store.ensureCollection(spec)).rejects.toThrow(
+      'ADD COLUMN source_version bigint',
+    );
+    expect(verified.statements.some((s) => s.text.startsWith('ALTER'))).toBe(false);
   });
 
   it('refuses more dimensions than HNSW indexes', async () => {

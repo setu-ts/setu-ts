@@ -25,6 +25,7 @@ import type {
   VectorRecord,
 } from '@setu-ts/common';
 import {
+  addVersionColumnStatement,
   createExtensionStatement,
   createStatements,
   deleteIdsStatement,
@@ -213,7 +214,10 @@ export class PgVectorStore implements IVectorStoreAdapter {
         `pgvector: '${table}' is missing its ${!row.vector_index ? 'HNSW' : 'source'} index.`,
       );
     }
-    if (!row.source_version) {
+    if (!row.source_version && this.#ensure === 'create') {
+      // A table created before versioned replaceSource gains the column once.
+      await this.#run(() => this.#db.execute(addVersionColumnStatement(sql, spec)));
+    } else if (!row.source_version) {
       throw new VectorCollectionMismatchError(
         `pgvector: '${table}' is missing its source_version column; add it with ALTER TABLE ${table} ADD COLUMN source_version bigint.`,
       );
