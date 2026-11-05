@@ -21,10 +21,12 @@ class LifecycleAdapter extends MemoryVectorStore implements IVectorStoreAdapter 
   readonly events: string[] = [];
   runtime: IRuntimeServices | undefined;
   failEnsure = false;
+  failOpen = false;
 
   override async open(runtime?: IRuntimeServices): Promise<void> {
     this.runtime = runtime;
     this.events.push('open');
+    if (this.failOpen) throw new Error('open failed after connecting');
   }
 
   override async ensureCollection(spec: Parameters<MemoryVectorStore['ensureCollection']>[0]) {
@@ -93,6 +95,16 @@ describe('VectorStorePlugin', () => {
     await expect(app.start()).rejects.toThrow('backend unreachable');
     // A failed start runs only the close hooks; stop() is never reached.
     expect(adapter.events).toEqual(['open', 'ensure:documents', 'close']);
+  });
+
+  it('closes the adapter when open() fails after acquiring a connection', async () => {
+    const adapter = new LifecycleAdapter();
+    adapter.failOpen = true;
+    const app = createApplication({
+      plugins: [RuntimePlugin(), VectorStorePlugin({ adapter, collections })],
+    });
+    await expect(app.start()).rejects.toThrow('open failed after connecting');
+    expect(adapter.events).toEqual(['open', 'close']);
   });
 
   it('refuses a factory that resolves to something other than an adapter', async () => {
