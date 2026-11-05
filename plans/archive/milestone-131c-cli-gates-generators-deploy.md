@@ -1,8 +1,8 @@
 # Milestone 131c — CLI gates, generators and workspace deploy (`@setu-ts/cli`)
 
-> **Status:** Planning. Branch: `feat/m131c-cli-gates-generators-deploy`. `develop` and `main` are
-> protected — all work (implementation + fixes) stays on this one branch until it merges via a
-> single PR into `develop`.
+> **Status:** Complete (PR pending). Branch: `feat/m131c-cli-gates-generators-deploy`. `develop` and
+> `main` are protected — all work (implementation + fixes) stays on this one branch until it merges
+> via a single PR into `develop`.
 
 ## 0. Objective & scope
 
@@ -87,13 +87,17 @@ Maintainer decisions of 2026-11-05: allocated dev-port range (X87-2/X87-6), `--p
   `:257-269` — goes through one `calledOutsideImports(config, 'registerModules')` rule
   (`\bsym\s*\(`, the rule `moduleActive` uses). In barrels, every family whose import symbols are
   route registrars (`routeRegistrarSymbol`) — the flat `src/controllers/index.ts` and every
-  `src/modules/<m>/index.ts`, functional and class-based — must call each registrar it imports; one
-  imported but not called is `barrel-drift` (`setu.E003`) through a new finding field
-  `uncalled: readonly string[]`, rendered "imports <sym> but never calls it; run setu sync" (the
-  existing rewrite repairs it). For an import-only symbol, the E006 text says "imports <sym> but
-  never uses it" instead of "does not reference" (`render.ts:49-54`). The `wiring.ts:8` JSDoc is
-  replaced with the real rule. `generate` shares `wiringSites`/`wiringFinding`, so its notice
-  follows.
+  `src/modules/<m>/index.ts`, functional and class-based — must reference each registrar it imports
+  outside its import line (`referencedOutsideImports`): a module index references it in a direct
+  call (`seams/modules.ts:76`), the flat barrel in the `GENERATED_ROUTE_REGISTRARS` array it loops
+  over (`seams/http.ts:133-148`), so a fresh barrel of both shapes passes and a deleted call or
+  array entry does not. One imported but not referenced is `barrel-drift` (`setu.E003`) through a
+  new finding field `uncalled: readonly string[]`, rendered "imports <sym> but never registers it;
+  run setu sync" (the existing rewrite repairs it). (Amended 2026-11-05 after implementation run 1:
+  the flat barrel never calls a registrar directly, so a direct-call rule would refuse every fresh
+  flat scaffold.) For an import-only symbol, the E006 text says "imports <sym> but never uses it"
+  instead of "does not reference" (`render.ts:49-54`). The `wiring.ts:8` JSDoc is replaced with the
+  real rule. `generate` shares `wiringSites`/`wiringFinding`, so its notice follows.
 - **Why:** the `0.11.0` project lost every route with all four gates green; the rule already exists
   for module activation (E009) and is applied to every site that lacked it.
 - **Test home:** `check-wiring.test.ts` (import-only → `unwired`; a value use outside imports such
@@ -110,15 +114,17 @@ Maintainer decisions of 2026-11-05: allocated dev-port range (X87-2/X87-6), `--p
   `{ code } | { stop: { reason, offset } }`; `maskSource`/`maskSourceCode` become thin wrappers that
   return `undefined` on a stop, so the accept set is the same code, not a copy (no `node:`
   specifiers, no `globalThis`). `diagnose.ts` runs a post-pass: when the config is unclassifiable,
-  every `unwired` finding with outcome `unclassifiable` from the three sites is replaced by ONE
-  finding, kind `unwired`, outcome `unclassifiable`, path `setu.config.ts`, carrying the union of
-  symbols and the stop; it renders "could not classify setu.config.ts at line N (`<construct>`);
-  setu check cannot tell whether it registers <symbols>". Silencing by id keeps working; a
-  path-scoped silence names `setu.config.ts`. `generate` prints the same single line. Every stop
-  reason in `sources.ts:141-163` and `:553-603` (template literals, `/`, `#`, `\`, non-ASCII,
-  unterminated strings, `globalThis`/`self`/`window`, `Object`/`Reflect`/`require`/`eval`, dynamic
-  `import(`, non-relative non-`@setu-ts/*` specifiers, computed member access) maps to a construct
-  label.
+  `check`'s unclassifiable `unwired` findings are replaced by ONE finding, kind `unwired`, outcome
+  `unclassifiable`, path `setu.config.ts`, carrying only `check`'s symbols and the stop; `generate`
+  keeps its per-barrel findings, each stamped with the stop, and prints only those for barrels the
+  run plans or writes (dry-run included) plus the `--module` group, each line once (amended in
+  review fix rounds 1 and 2: a union across consumers named symbols a run never requires). The
+  warning renders "could not classify setu.config.ts at line N (`<construct>`); setu check cannot
+  tell whether it registers <symbols>". Silencing by id keeps working; a path-scoped silence names
+  `setu.config.ts`. Every stop reason in `sources.ts:141-163` and `:553-603` (template literals,
+  `/`, `#`, `\`, non-ASCII, unterminated strings, `globalThis`/`self`/`window`,
+  `Object`/`Reflect`/`require`/`eval`, dynamic `import(`, non-relative non-`@setu-ts/*` specifiers,
+  computed member access) maps to a construct label.
 - **Why:** the false claim is the defect, not the lexer's caution; widening the audited lexer would
   reopen its security review for a Low row; one implementation keeps the audited code single.
 - **Test home:** `devtool-sources.test.ts` (a table over every stop reason: label and offset; the
@@ -129,10 +135,11 @@ Maintainer decisions of 2026-11-05: allocated dev-port range (X87-2/X87-6), `--p
 ### 3.3 X93-10 — an unlisted plain-function service is a warning
 
 - **Decision:** `SkippedArtifact` (`utils/artifact-scanner.ts:86-90`) carries the seam's
-  `exports.length === 0` as `listingOnly: true`; such a skip (the functional services seam) is a new
-  append-only finding `artifact-unlisted` → `setu.W005`: "<file> is not re-exported from
-  src/services/index.ts: it does not export describe<Name>". `generate`'s pre-write list
-  (`render.ts:170-180`) prints the same warning line. Every other skip stays `E001`.
+  `listingOnly: true` marker; a skip in a seam marked `listingOnly` (only the functional services
+  seam; the module service seam's token registers a service and stays E001) is a new append-only
+  finding `artifact-unlisted` → `setu.W005`: "<file> is not re-exported from src/services/index.ts:
+  it does not export describe<Name>". `generate`'s pre-write list (`render.ts:170-180`) prints the
+  same warning line. Every other skip stays `E001`.
 - **Why:** the barrel is a convenience re-export, not a registration; a consumer importing the
   missing name from it still fails type-check. Admitting any export (`export *`) risks `TS2308` when
   two services export the same name.
@@ -209,9 +216,10 @@ Maintainer decisions of 2026-11-05: allocated dev-port range (X87-2/X87-6), `--p
 ### 3.9 X87-2 and X87-6 — every member gets its own development ports
 
 - **Decision:** two optional `WorkspaceMember` fields, `inspectPort` (every member) and `vitePort`
-  (full-stack members), and an optional manifest `devBasePort`. `toMember` parses and range-checks
-  both fields like `devtoolPort`; the serializer writes `devBasePort` like `devtoolBasePort`; the
-  dev runner's `Member` type gains them. `allocateDevPort(manifest)` allocates from
+  (full-stack members) (not for cloudflare-workers, which has no `start:debug` or `dev.ts`), and an
+  optional manifest `devBasePort`. `toMember` parses and range-checks both fields like
+  `devtoolPort`; the serializer writes `devBasePort` like `devtoolBasePort`; the dev runner's
+  `Member` type gains them. `allocateDevPort(manifest)` allocates from
   `devBasePort ?? basePort + 2000`. All three allocators skip every port recorded anywhere in the
   manifest (app, devtool, inspect, vite) through one shared `recordedPorts(manifest)`.
   `generate app` and `adopt` record them; `ports --reallocate` first deletes each member's old dev
@@ -240,8 +248,9 @@ Maintainer decisions of 2026-11-05: allocated dev-port range (X87-2/X87-6), `--p
   `project-files-scripts.test.ts` + `deno-tasks.test.ts` (member `start:debug` per runtime),
   `reallocate.test.ts` (token rewrite; stale dev ports dropped before allocation; note on a
   hand-edited script), `adopt-command.test.ts` (token and `dev.ts` rewrite, note otherwise),
-  `workspace/dev-runner.test.ts`, and the dev-runner e2e boots two full-stack members and gets both
-  `/health` answers (§7).
+  `workspace/dev-runner.test.ts`, and `e2e/full-stack-dev-ports-e2e.test.ts` runs two full-stack
+  members under the root `dev` script (own app and Vite ports) and both `start:debug` inspectors at
+  once (§7).
 
 ### 3.10 X87-4 — the Deno image carries no development tooling
 
