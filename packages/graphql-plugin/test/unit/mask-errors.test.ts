@@ -226,13 +226,28 @@ describe('maskErrors — caller errors', () => {
     expect(logged).toHaveLength(1);
   });
 
-  it('lets an explicit extensions.code win over a hint', () => {
+  // An explicit code is kept, but the message is still the hint's detail: the
+  // error's own message is the operator diagnostic the hint keeps off the wire.
+  it('keeps an explicit extensions.code but shows only the hint detail', () => {
     const masked = maskErrors(
-      { errors: [located(hinted(404, 'No such order'), { code: 'ORDER_GONE' })] },
+      { errors: [located(hinted(404, 'No such order'), { code: 'ORDER_GONE', extra: 'x' })] },
       { maskInternalErrors: true },
     );
-    expect(masked.errors?.[0]?.extensions).toEqual({ code: 'ORDER_GONE' });
-    expect(masked.errors?.[0]?.message).toBe('driver says: relation "orders" leaked');
+    expect(masked.errors?.[0]).toEqual({
+      message: 'No such order',
+      extensions: { code: 'ORDER_GONE' },
+      locations: [{ line: 1, column: 3 }],
+      path: ['order'],
+    });
+    expect(JSON.stringify(masked)).not.toContain('driver says');
+  });
+
+  it('ignores a non-string extensions.code and uses the table', () => {
+    const masked = maskErrors(
+      { errors: [located(hinted(403, 'Not your order'), { code: 42 })] },
+      { maskInternalErrors: true },
+    );
+    expect(masked.errors?.[0]?.extensions).toEqual({ code: 'FORBIDDEN' });
   });
 
   it('masks URL userinfo in the served detail', () => {

@@ -16168,8 +16168,9 @@ GraphqlPlugin({ schema });
   `429` `TOO_MANY_REQUESTS`, any other 4xx `BAD_REQUEST`. Only the hint's `detail` is shown — for an
   `HttpError` that is the message it was built with; any other branded error's own message is never
   shown. URL userinfo in the detail is masked, and the error is not logged. This applies whatever
-  `maskInternalErrors` says; an error that already carries an `extensions.code` keeps it, and a 5xx
-  hint stays masked. The field still resolves to `null` inside a `200` result.
+  `maskInternalErrors` says; an error that already carries a string `extensions.code` keeps that
+  code, but its message is still the hint's `detail`, and a 5xx hint stays masked. The field still
+  resolves to `null` inside a `200` result.
 - **Query depth limiting.** Defaults to 10 levels; set to 0 to disable.
 - **Document caching.** Parse and validation results are cached together, keyed on the raw query
   string, and the operation guard reads the cached AST — so a repeated query is neither re-parsed

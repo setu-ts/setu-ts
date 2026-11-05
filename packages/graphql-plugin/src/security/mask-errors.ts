@@ -105,13 +105,23 @@ export function maskErrors(
     // Only the hint's caller-safe `detail` is shown — for an `HttpError` that
     // is the message it was built with, for any other branded error never its
     // own message. A 5xx hint is not a caller error and stays masked below.
+    //
+    // The hint is read BEFORE the exposable test: an error carrying both a
+    // hint and its own `extensions.code` keeps that code, but its message is
+    // still the operator diagnostic the hint exists to keep off the wire.
     const exposable = isExposable(error);
-    const hint = exposable ? undefined : fallbackErrorHint(err.originalError);
+    const hint = fallbackErrorHint(err.originalError);
 
     if (hint !== undefined) {
+      const explicitCode = err.extensions?.code;
       formatted = {
         message: maskUrlUserinfo(hint.detail),
-        extensions: { code: CALLER_ERROR_CODES[hint.status] ?? DEFAULT_CALLER_ERROR_CODE },
+        extensions: {
+          code:
+            typeof explicitCode === 'string'
+              ? explicitCode
+              : (CALLER_ERROR_CODES[hint.status] ?? DEFAULT_CALLER_ERROR_CODE),
+        },
       };
       if (err.locations) {
         formatted.locations = err.locations;
