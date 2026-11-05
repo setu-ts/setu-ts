@@ -3,8 +3,10 @@
  *
  * @module
  */
-import type { IRequestContext, MiddlewareFunction, NextFunction } from '@setu-ts/common';
+import type { ILogger, IRequestContext, MiddlewareFunction, NextFunction } from '@setu-ts/common';
 import {
+  CAPABILITIES,
+  describeError,
   respondWithError,
   SESSION_STATE_KEY,
   SESSION_TENANT_BINDING_STATE_KEY,
@@ -84,7 +86,28 @@ export function sessionMiddleware(
       ctx.state.set(SESSION_TENANT_BINDING_STATE_KEY, true);
     }
 
-    await next();
+    try {
+      await next();
+    } catch (error) {
+      // A throw skips the commit, but not a revocation: the row a regeneration
+      // superseded is still deleted (M131b, audit F1).
+      // Best effort: a store that cannot delete must not replace the request's
+      // own error with its fault, but the fault is reported, not dropped (audit R1).
+      // A logger that throws while reporting must not replace that error either.
+      await service.revokeSuperseded(session).catch((fault: unknown) => {
+        if (!ctx.services.has(CAPABILITIES.LOGGER)) return;
+        try {
+          ctx.services
+            .get<ILogger>(CAPABILITIES.LOGGER)
+            .warn('Session revocation failed on an errored request', {
+              error: describeError(fault),
+            });
+        } catch {
+          // The request's own error is rethrown below.
+        }
+      });
+      throw error;
+    }
 
     // A request the bearer exemption admitted restored no session; committing
     // whatever its handler wrote would send that session as `Set-Cookie` and, on

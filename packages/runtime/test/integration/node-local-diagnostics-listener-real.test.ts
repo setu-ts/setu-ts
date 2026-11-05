@@ -318,7 +318,7 @@ describe('Node diagnostics listener — real sockets', () => {
     }
   });
 
-  it('serves eight consecutive real-client snapshots through DiagnosticsPlugin while 32 partial requests are held', async () => {
+  it('M131b 3.5 serves paired polls without failure through forty unpaired newcomers', async () => {
     const counted = countedConnections();
     const factory = new NodeLocalDiagnosticsListenerFactory(counted.host);
     const port = await unusedPort();
@@ -352,7 +352,8 @@ describe('Node diagnostics listener — real sockets', () => {
     const held: Socket[] = [];
     try {
       await app.start();
-      for (let index = 0; index < 32; index++) {
+      expect((await client.snapshot()).state).toBe('running');
+      for (let index = 0; index < 40; index++) {
         const socket = await connected(port);
         socket.resume();
         socket.write(`GET /v1/status HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\n`);
@@ -364,7 +365,7 @@ describe('Node diagnostics listener — real sockets', () => {
         expect((await client.snapshot()).state, `snapshot ${index + 1} of 8`).toBe('running');
       }
       expect(counted.arrivals.length).toBeGreaterThan(32);
-      expect(counted.arrivals[0]!.destroyed).toBe(true);
+      expect(counted.arrivals[0]!.destroyed).toBe(false);
       expect(counted.peak()).toBe(32);
       expect(counted.open()).toBeLessThanOrEqual(32);
     } finally {

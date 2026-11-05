@@ -3,14 +3,21 @@ import type { PartitionAssigner } from 'kafkajs';
 /** Internal per-partition high watermarks, encoded as decimal strings. */
 export type KafkaStartOffsets = Readonly<Record<string, string>>;
 
+/** Successfully delivered offset interval to suppress after a first-join rewind. @internal */
+export interface KafkaSkipWindow {
+  readonly from: string;
+  readonly to: string;
+}
+
 /**
- * Chooses first-join seeks without rewinding a partition already delivered
- * from its start. A delivery beyond the minimum still seeks to avoid loss.
+ * Chooses first-join seeks and the already-delivered intervals they would replay.
+ * Decisions are synchronous and offsets retain BigInt precision.
  * @param assigned - This member's assigned partitions
  * @param uncommitted - Partitions without a committed offset
  * @param minimum - Group minimum start offsets
- * @param firstDelivered - First offset observed synchronously per partition
- * @returns Partition offsets to seek, in assignment order
+ * @param firstDelivered - First offset observed per partition
+ * @param lastDelivered - Last successfully delivered offset per partition
+ * @returns Seeks in assignment order and delivered windows to skip after seeking
  * @internal
  */
 export function partitionsToSeek(
@@ -18,13 +25,71 @@ export function partitionsToSeek(
   uncommitted: ReadonlySet<number>,
   minimum: KafkaStartOffsets,
   firstDelivered: ReadonlyMap<number, string>,
-): Array<{ partition: number; offset: string }> {
-  return assigned.flatMap((partition) => {
-    if (!uncommitted.has(partition) || !Object.hasOwn(minimum, partition)) return [];
+  lastDelivered: ReadonlyMap<number, string> = firstDelivered,
+): {
+  seeks: Array<{ partition: number; offset: string }>;
+  skipThrough: Map<number, KafkaSkipWindow>;
+} {
+  const seeks: Array<{ partition: number; offset: string }> = [];
+  const skipThrough = new Map<number, KafkaSkipWindow>();
+  for (const partition of assigned) {
+    if (!uncommitted.has(partition) || !Object.hasOwn(minimum, partition)) continue;
     const offset = minimum[partition]!;
     const first = firstDelivered.get(partition);
-    return first === undefined || BigInt(first) > BigInt(offset) ? [{ partition, offset }] : [];
-  });
+    if (first !== undefined && BigInt(first) <= BigInt(offset)) continue;
+    seeks.push({ partition, offset });
+    // A partition whose first delivery has not completed yet gets an empty
+    // window (`to` one below `from`); `extendSkipWindow` widens it if that
+    // delivery succeeds, and the replay clears it if the delivery failed.
+    if (first !== undefined)
+      skipThrough.set(partition, {
+        from: first,
+        to: lastDelivered.get(partition) ?? String(BigInt(first) - 1n),
+      });
+  }
+  return { seeks, skipThrough };
+}
+
+/**
+ * Suppresses only an already-delivered offset; clears a partition's window past its end.
+ * @param windows - First-join rewind windows owned by this consumer
+ * @param partition - Partition of the delivery
+ * @param offset - Decimal offset of the delivery
+ * @returns Whether the caller should commit without invoking the handler
+ * @internal
+ */
+export function skipDeliveredOffset(
+  windows: Map<number, KafkaSkipWindow>,
+  partition: number,
+  offset: string,
+): boolean {
+  const window = windows.get(partition);
+  if (window === undefined) return false;
+  const current = BigInt(offset);
+  if (current > BigInt(window.to)) {
+    windows.delete(partition);
+    return false;
+  }
+  return current >= BigInt(window.from);
+}
+
+/**
+ * Widens a partition's live first-join window to cover a delivery that
+ * completed after the window was decided. A window already cleared stays
+ * cleared, and a window is never narrowed.
+ * @param windows - First-join rewind windows owned by this consumer
+ * @param partition - Partition of the completed delivery
+ * @param offset - Decimal offset of the completed delivery
+ * @internal
+ */
+export function extendSkipWindow(
+  windows: Map<number, KafkaSkipWindow>,
+  partition: number,
+  offset: string,
+): void {
+  const window = windows.get(partition);
+  if (window !== undefined && BigInt(offset) > BigInt(window.to))
+    windows.set(partition, { from: window.from, to: offset });
 }
 
 /**

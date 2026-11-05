@@ -12,6 +12,67 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### Kernel, runtime and plugin contracts (M131b, `@setu-ts/kernel`, `@setu-ts/runtime`, `@setu-ts/auth-plugin`, `@setu-ts/resilience-plugin`, `@setu-ts/openapi-plugin`, `@setu-ts/messaging-plugin`, `@setu-ts/full-stack-starter`, `@setu-ts/cli`)
+
+- **Header batches are atomic.** If `setHeaders` throws, none of its entries was written. Remove
+  code that relied on partial writes, and make custom IResponse implementations validate the batch
+  before applying it.
+- **Request cleanup waits for the handler.** Buffered responses normally await cleanup. If
+  middleware responds early without awaiting next(), the response returns immediately but scopes and
+  deferred cleanup stay alive until the handler settles. Shutdown drain waits for that work within
+  its existing bound; a handler still running when the bound expires has its cleanup run when it
+  settles, after `stop()` returned and the close hooks ran. ctx.signal still means connection
+  severance.
+- **A definite session-stamp mismatch revokes the HTTP auth record.** It deletes the record and
+  regenerates the session when the old cookie is next presented, even if that request then throws.
+  With a store, an id revoked that way stays revoked if the stamp is later restored; an id never
+  presented while the stamp differed is not revoked, and a copied encrypted-cookie session has no
+  server-side record to revoke. So a stamp must only move forward: to end sessions, set a new value,
+  never restore an old one. A reader fault remains a one-request suspension without mutation;
+  read-only fromHeaders/WebSocket callers remain suspension-only. Sign in again after a definite
+  mismatch.
+- **A throwing request still revokes a regenerated session's old row.** With a session store, a
+  handler that calls `regenerate()` and then throws (a failed sign-in or second-factor step) now
+  loses the pre-login stored session, such as an anonymous cart; previously the old row survived.
+- **Retry options are validated earlier.** `defaultRetry` is checked during registration, and
+  selected policies at wrap time: limit must be a safe integer at least 1, delay finite,
+  non-negative and at most 2147483647 ms (a runtime timer clamps anything longer to 1 ms). Invalid
+  policies throw RangeError. Use limit 1 for one attempt.
+- **OpenAPI component names can change.** A reused node uses its own Zod id, otherwise its site plus
+  schema path (for example PostOrdersBodyLinesItems). Roots keep their own name and nullable
+  primitives stay inline. Regenerate document and SDK together; inspect setu client --check for
+  renamed component types. Explicit ids keep names stable across operation ordering; an id must
+  match `[A-Za-z0-9._-]+` to be used as a name, and an id equal to another operation's root name
+  gets a suffix rather than taking it.
+- **Cancelled/failed body reads are client faults.** RequestBodyReadError carries a fixed 400 detail
+  and retains the native cause. It logs at warn; HTTP metrics labels the hinted status and
+  increments errors only for 5xx. Update tests/dashboards that expected a 500 or error-level upload
+  cancellation. Bun's size message maps to RequestBodyTooLargeError/413; an omitted cap is reported
+  as Infinity with a generic native-limit detail, not an invented configured limit.
+- **The kernel fallback now honors 4xx hints without errorHandler.** It serves the hint's status,
+  title and detail, as `errorHandler` would, and logs at warn. Request logging and HTTP metrics now
+  label such a response with the status actually served (`fallbackErrorStatus`), and metrics count a
+  thrown `HttpError` under `errorHandler` with its served status rather than 500. Unhinted and
+  5xx-hinted errors retain opaque 500/error. Applications using errorHandler keep its configured
+  format. `RouteRegistrationError` now lets startup code branch on regex-parameter,
+  unsupported-pattern or duplicate, and decorated messages identify the controller/method; catch
+  this class instead of matching generic Error strings.
+- **Node start waits for binding.** A taken port rejects startup with its native code. Injected
+  NodeServeHost implementations must also wait until bound. Regenerate the devtool entry to gain its
+  creation/start catch and connector guidance. New Node start scripts check dist/main.js first; run
+  build before start. Devtool help now names setu devtool enable.
+- **Other contract repairs.** Boot validation now reports controller and unrelated findings together
+  once. Diagnostics admission prefers idle untrusted sockets before trusted sockets at its unchanged
+  32-socket cap. Kafka suppresses its already-delivered first-join rewind window; ordinary
+  at-least-once redelivery remains.
+- **Browser documents.** With reactRouter set, both full-stack factories default the HTTP security
+  referrer policy to same-origin unless the application supplied a policy or disabled it/headers.
+  Hand-composed React Router apps should set that policy themselves to avoid Origin: null form
+  refusals. The generated view layout now emits its doctype; update existing full-document layouts
+  with raw('<!DOCTYPE html>') before html. Fragments, renderView and @Render remain unchanged.
+- **Typed DI tokens still have no runtime type guard.** T is erased. Run generated check/build
+  (tsc); start:dev/tsx does not type-check.
+
 ### MCP route tools (M133, `@setu-ts/mcp-plugin`)
 
 Existing applications require no migration. To opt in, run `setu add mcp`, register `McpPlugin({})`

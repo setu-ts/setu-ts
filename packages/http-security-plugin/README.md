@@ -320,6 +320,14 @@ added to the global pipeline via `ctx.middleware.add(...)` and is also available
 factory for per-route use. This follows the same pattern as `rateLimitMiddleware` from the
 auth-plugin.
 
+## React Router form posts
+
+The plugin's standalone referrer default remains `no-referrer`. React Router has its own unsafe
+request check and refuses `Origin: null`; accepting that origin in this plugin's CSRF middleware
+does not change React Router's check. Hand-composed React Router apps should set
+`headers: { referrerPolicy: 'same-origin' }`. The full-stack starter supplies that default only when
+`reactRouter` is configured and no referrer policy or header-disable choice was supplied.
+
 ## Exports
 
 | Export                           | Kind      |

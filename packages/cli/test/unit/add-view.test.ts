@@ -249,3 +249,25 @@ it('prints the exact StaticPlugin registration for an existing conflicting refer
   const notes = plan(existing).notes.join('\n');
   expect(notes).toContain("StaticPlugin({ root: './build/assets', urlPrefix: '/assets' })");
 });
+
+it.each(['node', 'cloudflare-workers'] as const)(
+  'M131b 3.17 emits a document doctype from the generated %s layout',
+  async (runtime) => {
+    const { transform } = await import('esbuild');
+    const { importSource } = await import('../../../../test/node-helpers.ts');
+    const result = plan(fresh(runtime), runtime);
+    const source = result.files.find((file) => file.path === 'src/views/layout.tsx')!.contents;
+    const js = await transform(source, {
+      loader: 'tsx',
+      format: 'esm',
+      jsx: 'automatic',
+      jsxImportSource: 'hono/jsx',
+      target: 'es2022',
+    });
+    const module = await importSource(js.code);
+    const layout = module['Layout'] as (props: { title: string; children: string }) => unknown;
+    expect(String(layout({ title: 'Doctype', children: 'body' }))).toMatch(
+      /^<!DOCTYPE html><html lang="en">/,
+    );
+  },
+);

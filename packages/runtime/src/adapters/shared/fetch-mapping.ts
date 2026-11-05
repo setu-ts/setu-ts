@@ -39,25 +39,31 @@ const MAPPED_IPV4_PEER =
  * Branded with a `413` {@linkcode withHttpStatusHint HTTP status hint}, so an
  * application running `errorHandler` answers `413 Content Too Large` in its
  * configured format rather than the masked `500` an unbranded throw from this
- * depth would produce. The brand's `detail` names the limit and never the
- * observed size: the observed size is only ever a lower bound (the read stops
+ * depth would produce. The brand's `detail` names the configured limit, or a
+ * generic native limit when none is configured, and never the observed size: the observed size is only ever a lower bound (the read stops
  * at the cap), so reporting it would be misleading.
  *
  * @since 0.5.0
  */
 export class RequestBodyTooLargeError extends Error {
-  /** The configured cap, in bytes. */
+  /** The configured cap in bytes, or Infinity when only a native limit is known. */
   readonly maxBodyBytes: number;
 
   /**
    * Builds the refusal for a body that exceeded the configured cap.
    *
-   * @param maxBodyBytes - The configured cap that was exceeded
+   * @param maxBodyBytes - The configured cap, or omitted for an unknown native limit
    */
-  constructor(maxBodyBytes: number) {
+  constructor(maxBodyBytes: number = Infinity) {
+    const detail =
+      maxBodyBytes === Infinity
+        ? 'Request body exceeds the runtime maximum size.'
+        : `Request body exceeds the maximum of ${maxBodyBytes} bytes.`;
     super(
-      `Request body exceeds the configured maximum of ${maxBodyBytes} bytes ` +
-        '(RuntimePlugin({ maxBodyBytes }))',
+      maxBodyBytes === Infinity
+        ? detail
+        : `Request body exceeds the configured maximum of ${maxBodyBytes} bytes ` +
+            '(RuntimePlugin({ maxBodyBytes }))',
     );
     this.name = 'RequestBodyTooLargeError';
     this.maxBodyBytes = maxBodyBytes;
@@ -70,9 +76,42 @@ export class RequestBodyTooLargeError extends Error {
       // anyway, so a different string here would only make the two 413 sites
       // disagree in the `'default'` format.
       title: 'Payload Too Large',
-      detail: `Request body exceeds the maximum of ${maxBodyBytes} bytes.`,
+      detail,
     });
   }
+}
+
+/**
+ * A native body read failed, usually because the peer closed the connection.
+ * Carries a fixed, safe 400 status hint; native detail is retained only as cause.
+ * The shared error serializer logs only the native cause's class and fixed detail.
+ * @example
+ * ```typescript
+ * if (error instanceof RequestBodyReadError) recordClientReadFailure();
+ * ```
+ * @since 0.12.0
+ */
+export class RequestBodyReadError extends Error {
+  /** @param cause - The native read failure, never included in the served detail */
+  constructor(cause: unknown) {
+    const detail = 'The request body could not be read; the client closed the connection.';
+    super(detail, { cause });
+    this.name = 'RequestBodyReadError';
+    // The shared error serializer logs only this cause's class (common's
+    // redact-cause brand); the native message may carry request data.
+    Object.defineProperty(this, Symbol.for('setu.serialize.redact-cause'), { value: true });
+    withHttpStatusHint(this, { status: 400, title: 'Bad Request', detail });
+  }
+}
+
+/** Preserves size refusals and normalizes runtime-specific read failures. */
+function bodyReadFailure(error: unknown, maxBodyBytes?: number): never {
+  if (error instanceof RequestBodyTooLargeError || error instanceof RequestBodyReadError)
+    throw error;
+  if (error instanceof Error && error.message === 'Request body exceeded maxRequestBodySize') {
+    throw new RequestBodyTooLargeError(maxBodyBytes);
+  }
+  throw new RequestBodyReadError(error);
 }
 
 /**
@@ -244,12 +283,16 @@ class FrameworkRequest implements IRequest {
       native.get('transfer-encoding') === null;
     if (bodyless) return Promise.resolve(EMPTY_BODY);
     if (this.#maxBodyBytes === undefined) {
-      // No cap configured — the released path, byte for byte. `arrayBuffer()`
-      // is also the cheapest read on every runtime, so an application that
-      // sets no limit pays nothing for the option's existence.
-      return this.#raw.arrayBuffer().then((buffer) => new Uint8Array(buffer));
+      // Without a cap, arrayBuffer() is the cheapest read on every runtime.
+      // Normalize its rejection without materializing the body stream.
+      return this.#raw.arrayBuffer().then(
+        (buffer) => new Uint8Array(buffer),
+        (error: unknown) => bodyReadFailure(error),
+      );
     }
-    return readBounded(this.#raw, this.#maxBodyBytes);
+    return readBounded(this.#raw, this.#maxBodyBytes).catch((error: unknown) =>
+      bodyReadFailure(error, this.#maxBodyBytes),
+    );
   }
 }
 
@@ -298,6 +341,8 @@ async function readBounded(raw: Request, maxBodyBytes: number): Promise<Uint8Arr
       total += value.byteLength;
       chunks.push(value);
     }
+  } catch (error) {
+    bodyReadFailure(error, maxBodyBytes);
   } finally {
     // Releasing the lock is not enough — the source stays open until the
     // stream is cancelled. `cancel()` rejects on an already-errored stream,

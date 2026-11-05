@@ -11,7 +11,10 @@
  * does not normalize.
  *
  * The `cause` chain is serialized recursively to a bounded depth so a
- * self-referential cause cannot recurse forever.
+ * self-referential cause cannot recurse forever. An error branded with the
+ * redact-cause symbol (the runtime's `RequestBodyReadError`) has its cause
+ * limited to its class and the wrapper's fixed detail, so request data carried
+ * by a native read failure never reaches a log sink.
  *
  * @module
  */
@@ -182,6 +185,42 @@ function serializeValue(
     : { name: 'Error', message: safeString(value) };
 }
 
+/**
+ * The brand an error sets (an own property, value `true`) when its `cause` may
+ * carry request data that must not reach a log: the serialized cause keeps only
+ * the cause's class and the wrapper's own message. Registered with `Symbol.for`
+ * so the runtime's `RequestBodyReadError` can set it without a `common` export;
+ * a name string would let any error named alike hide its real diagnostic
+ * (M131b audit F3).
+ */
+const REDACT_CAUSE = Symbol.for('setu.serialize.redact-cause');
+
+/** Whether an error carries the {@linkcode REDACT_CAUSE} brand; a throwing read is no brand. */
+function redactsCause(error: Error): boolean {
+  try {
+    return (
+      Object.hasOwn(error, REDACT_CAUSE) &&
+      (error as unknown as Record<symbol, unknown>)[REDACT_CAUSE] === true
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Class names a redacted cause may keep. `name` is an ordinary writable
+ * property, so any other value is logged as `Error` rather than copied.
+ */
+const REDACTED_CAUSE_NAMES: ReadonlySet<string> = new Set([
+  'Error',
+  'AbortError',
+  'TimeoutError',
+  'TypeError',
+  'RangeError',
+  'SyntaxError',
+  'DOMException',
+]);
+
 /** Serializes one `Error` after its guarded members have been read. */
 function serializeErrorInstance(
   error: Error,
@@ -221,8 +260,22 @@ function serializeErrorInstance(
     out.classifiers = classifiers;
   }
   if (depth > 0 && cause !== undefined) {
+    // Native body-read messages may contain request data. The runtime retains
+    // the original cause for inspection, but operational logs carry only its
+    // class and the fixed wrapper detail (M131b's body-read disclosure contract).
     const serializedCause = serializeValue(cause, depth - 1, budget);
-    if (serializedCause !== undefined) out.cause = serializedCause;
+    if (serializedCause !== undefined) {
+      out.cause = redactsCause(error)
+        ? {
+            name: isError(cause)
+              ? REDACTED_CAUSE_NAMES.has(serializedCause.name)
+                ? serializedCause.name
+                : 'Error'
+              : typeof cause,
+            message: out.message,
+          }
+        : serializedCause;
+    }
   }
   if (depth > 0 && errors !== undefined) {
     const aggregate = serializeAggregateErrors(errors, depth - 1, budget);

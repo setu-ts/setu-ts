@@ -9,6 +9,7 @@
  *
  * @module
  */
+import { RouteRegistrationError } from '@setu-ts/common';
 import type {
   HttpMethod,
   IRouterApi,
@@ -346,7 +347,10 @@ export class Router implements IRouterApi {
   #registerMethod(method: HttpMethod, path: string, route: RouteHandler | RouteDefinition): void {
     const key = `${method} ${withLeadingSlash(path)}`;
     if (REGEX_PARAMETER.test(path)) {
-      throw new Error(
+      throw new RouteRegistrationError(
+        'regex-parameter',
+        method,
+        path,
         `Route '${key}' uses a regular-expression parameter (':name{…}'), which the router does ` +
           `not support. Use ':name' or '*' and validate the value in the handler or with ` +
           `@setu-ts/validation-plugin.`,
@@ -354,7 +358,10 @@ export class Router implements IRouterApi {
     }
     const unsupported = unsupportedPatternReason(withLeadingSlash(path));
     if (unsupported !== undefined) {
-      throw new Error(
+      throw new RouteRegistrationError(
+        'unsupported-pattern',
+        method,
+        path,
         `Route '${key}' uses ${unsupported}, which the router does not support. Route patterns ` +
           `are static segments, ':name' parameters, a final optional ':name?', '*' segments and ` +
           `a final 'prefix*'.`,
@@ -367,7 +374,12 @@ export class Router implements IRouterApi {
       // half a developer needs is who got there first — `StaticPlugin` at the
       // root collides with the SSR catch-all, and the old message named neither
       // plugin. `owner` has carried this since M68.
-      throw new Error(`Route '${key}' is already registered by ${describeRouteOwner(existing)}.`);
+      throw new RouteRegistrationError(
+        'duplicate',
+        method,
+        path,
+        `Route '${key}' is already registered by ${describeRouteOwner(existing)}.`,
+      );
     }
     const definition: RouteDefinition = typeof route === 'function' ? { handler: route } : route;
     const owner = this.#owner();

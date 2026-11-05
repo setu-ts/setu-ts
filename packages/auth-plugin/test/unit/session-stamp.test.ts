@@ -81,7 +81,7 @@ describe('digestSessionStamp', () => {
   });
 });
 
-describe('sessionStampMatches', () => {
+describe('M131b 3.13 sessionStampMatches', () => {
   it('matches the same stamp through the constant-time compare', async () => {
     compares.calls.length = 0;
     expect(
@@ -90,14 +90,14 @@ describe('sessionStampMatches', () => {
         PRINCIPAL,
         digest('v1'),
       ),
-    ).toBe(true);
+    ).toBe('match');
     expect(
       await sessionStampMatches(
         check(() => 'v2'),
         PRINCIPAL,
         digest('v1'),
       ),
-    ).toBe(false);
+    ).toBe('mismatch');
     expect(compares.calls).toEqual([
       [digest('v1'), digest('v1')],
       [digest('v2'), digest('v1')],
@@ -111,21 +111,21 @@ describe('sessionStampMatches', () => {
         PRINCIPAL,
         null,
       ),
-    ).toBe(true);
+    ).toBe('match');
     expect(
       await sessionStampMatches(
         check(() => null),
         PRINCIPAL,
         digest('v1'),
       ),
-    ).toBe(false);
+    ).toBe('mismatch');
     expect(
       await sessionStampMatches(
         check(() => 'v1'),
         PRINCIPAL,
         null,
       ),
-    ).toBe(false);
+    ).toBe('mismatch');
   });
 
   it('fails closed when the reader throws, rejects or returns a malformed value', async () => {
@@ -137,8 +137,8 @@ describe('sessionStampMatches', () => {
       () => 7 as unknown as string,
     ];
     for (const read of readers) {
-      expect(await sessionStampMatches(check(read), PRINCIPAL, digest('v1'))).toBe(false);
-      expect(await sessionStampMatches(check(read), PRINCIPAL, null)).toBe(false);
+      expect(await sessionStampMatches(check(read), PRINCIPAL, digest('v1'))).toBe('reader-fault');
+      expect(await sessionStampMatches(check(read), PRINCIPAL, null)).toBe('reader-fault');
     }
   });
 

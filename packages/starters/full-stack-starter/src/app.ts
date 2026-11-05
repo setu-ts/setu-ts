@@ -59,6 +59,26 @@ export function fullStackOpenApiOptions(
 }
 
 /**
+ * Keeps same-origin form submissions usable when React Router is enabled.
+ * Explicit policies and disabled headers retain their application-owned values.
+ * @param options - Full-stack options shared by both composition entry points
+ * @returns HTTP security options with a same-origin default when needed
+ * @internal
+ */
+export function fullStackHttpSecurityOptions(
+  options: FullStackStarterOptions,
+): FullStackStarterOptions['httpSecurity'] {
+  const security = options.httpSecurity;
+  if (
+    options.reactRouter === undefined ||
+    security?.headers?.enabled === false ||
+    security?.headers?.referrerPolicy !== undefined
+  )
+    return security;
+  return { ...security, headers: { ...security?.headers, referrerPolicy: 'same-origin' } };
+}
+
+/**
  * Builds the canonical full-stack plugin set. Composes from {@linkcode buildMicroservicePlugins}
  * and appends the full-stack plugins (cache, events, cqrs, scheduler, audit, secrets, storage, mail).
  * On Cloudflare Workers the scheduler is left out unless `options.scheduler` is given (see
@@ -94,9 +114,14 @@ export function composeFullStackPlugins(
     platform === 'cloudflare-workers' && options.scheduler === undefined
       ? []
       : [SchedulerPlugin(options.scheduler)];
+  const httpSecurity = fullStackHttpSecurityOptions(options);
   // Start with the microservice base set
   const plugins: IPlugin[] = [
-    ...buildMicroservicePlugins({ ...options, openapi: fullStackOpenApiOptions(options.openapi) }),
+    ...buildMicroservicePlugins({
+      ...options,
+      ...(httpSecurity === undefined ? {} : { httpSecurity }),
+      openapi: fullStackOpenApiOptions(options.openapi),
+    }),
     // Full-stack always-on additions (all have sensible defaults)
     CachePlugin(options.cache),
     EventsPlugin(options.events),

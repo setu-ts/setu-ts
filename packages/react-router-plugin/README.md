@@ -168,6 +168,24 @@ lexical `..` checking.
 Registers a `react-router` health indicator. There is no `onClose` — the request handler is
 stateless.
 
+## HTML forms and Referrer-Policy
+
+React Router refuses an unsafe document or single-fetch action request carrying `Origin: null`. A
+browser can send that origin on a same-origin HTML form POST under `Referrer-Policy: no-referrer`,
+even though the separate Setu HTTP-security CSRF check accepts a verified same-origin Fetch Metadata
+request.
+
+React Router does not run that origin check for resource routes, so an unsafe request to a resource
+route is not refused for its origin. Setu's CSRF check is opt-in: it runs only when
+`HttpSecurityPlugin({ csrf: { … } })` is configured.
+
+For a hand-composed application, configure
+`HttpSecurityPlugin({ headers: { referrerPolicy: 'same-origin' } })` alongside `ReactRouterPlugin`.
+The plugins do not configure one another. The full-stack starter sets this default when its
+`reactRouter` arm is enabled, through both `createFullStackApp` and `createFullStackAppFromConfig`.
+Explicit policies, `referrerPolicy: false` and `headers: { enabled: false }` retain the
+application's choice.
+
 ## Exports
 
 | Export                            | Kind      |

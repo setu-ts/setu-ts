@@ -3,7 +3,7 @@
 **Add it:** `setu add di` adds it; add `DiPlugin()` to `setu.config.ts` yourself. It provides
 `CAPABILITIES.DI_CONTAINER` (`IContainer`).
 
-## Register dependencies and resolve a scoped service per request
+## Register and resolve a scoped service
 
 ```ts
 import { CAPABILITIES, createToken } from '@setu-ts/common';
@@ -17,7 +17,7 @@ const GREETING = createToken<Greeting>('greeting');
 const container = ctx.services.get<IContainer>(CAPABILITIES.DI_CONTAINER);
 container.register('greeting-text', { useValue: 'hello' });
 container.register(GREETING, { useClass: Greeting, inject: ['greeting-text'] }, { scope: 'scoped' });
-// One Greeting per request, disposed when it finishes.
+// One Greeting per request, disposed after its handler settles.
 function greet(request: IRequestContext): Greeting {
   return container.forRequest(request).resolve(GREETING);
 }
@@ -26,8 +26,8 @@ function greet(request: IRequestContext): Greeting {
 ## Behaviour the types do not show
 
 - `defaultScope` defaults to `'singleton'`; `'transient'` creates a new instance on every resolve.
-- The graph is validated at boot: a missing dependency, a cycle, or a singleton reaching a scoped
-  service (directly or through transients) fails `app.start()` with `ContainerValidationError`.
+- At boot, missing dependencies, cycles and singletons reaching scoped services fail `app.start()`
+  with `ContainerValidationError`.
 - Resolving a `'scoped'` token on the root container throws `ScopeRequiredError`; use `forRequest`
   or `createScope`.
 - `register` after the container closes throws `ContainerClosedError`. A scope may register new
@@ -36,6 +36,10 @@ function greet(request: IRequestContext): Greeting {
   singletons.
 - `useFactory` receives its `inject` dependencies as arguments; a factory without `inject` is not
   checked at boot.
+- `createToken<T>` erases T; no runtime check runs. Type-check with `tsc --noEmit` or `deno check`;
+  `start:dev` / `tsx` does not.
+- Cleanup waits for the handler after early responses; shutdown drain keeps its bound. Boot findings
+  include controllers and aliases without duplicates.
 - `forRequest` needs the kernel's request context; test request scopes with `createTestApp`.
 
 ## Other options
@@ -45,5 +49,4 @@ function greet(request: IRequestContext): Greeting {
   `{ token, optional: true }`.
 - `register`'s third argument takes `scope` and `dispose`; `dispose` releases what the container
   created.
-- `createContainer` builds a standalone container, defaults automatic registration to `false`, and
-  stays open until `close` on the `DiContainer`.
+- `createContainer` defaults automatic registration to `false`; it stays open until `close`.

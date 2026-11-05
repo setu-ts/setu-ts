@@ -5,6 +5,7 @@ import { runNewCommand } from '../../src/commands/new.ts';
 import { VERSION } from '../../src/version.ts';
 import { createTerminalPrompter } from '../../src/prompt.ts';
 import { listTemplates } from '../../src/templates/registry.ts';
+import { NODE_START_BUILD_CHECK } from '../../src/templates/project-files.ts';
 import { detectTargetRuntime } from '../../src/utils/runtime-detector.ts';
 import type { PortProbe } from '../../src/workspace/port-probe.ts';
 
@@ -210,7 +211,7 @@ describe('a template with a frontend build, on an npm target', () => {
     // runtime; Bun loads `.env` itself and takes no preload.
     [
       'node',
-      'node --import ./instrumentation.mjs --env-file-if-exists=.env --enable-source-maps dist/main.js',
+      `${NODE_START_BUILD_CHECK} && node --import ./instrumentation.mjs --env-file-if-exists=.env --enable-source-maps dist/main.js`,
     ],
     ['bun', 'bun run main.ts'],
   ] as const) {
@@ -235,7 +236,7 @@ describe('a template with a frontend build, on an npm target', () => {
       scripts: Record<string, string>;
     };
     expect(manifest.scripts['start']).toBe(
-      'node --import ./instrumentation.mjs --env-file-if-exists=.env --enable-source-maps dist/main.js',
+      `${NODE_START_BUILD_CHECK} && node --import ./instrumentation.mjs --env-file-if-exists=.env --enable-source-maps dist/main.js`,
     );
   });
 });

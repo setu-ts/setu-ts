@@ -5,7 +5,7 @@ config. It provides `CAPABILITIES.RESILIENCE` (`IResilienceService`).
 
 ## Retry and limit an upstream HTTP call
 
-Keep one wrapped callable across requests; initialize it when services become available:
+Keep one wrapped callable across requests:
 
 ```ts
 import { CAPABILITIES } from '@setu-ts/common';
@@ -36,9 +36,10 @@ export function registerBillingRoutes(router: IRouterApi): void {
 ## Behaviour the types do not show
 
 - Layers execute bulkhead, circuit breaker, retry, timeout, then the supplied function.
-- Breaker and bulkhead state live per `wrap` call. Creating a wrapper on every request discards
-  their shared state; retain the callable as above.
-- `retry.limit` counts total attempts; `1` means no retry. Delays, breaker windows, cooldowns and
+- Breaker and bulkhead state live per `wrap` call; retain the callable across requests.
+- `retry.limit` counts total attempts; `1` means one attempt. It must be a safe integer at least 1;
+  retry delay must be finite and non-negative. Invalid defaults throw RangeError at registration; an
+  invalid selected policy throws RangeError at wrap time. Delays, breaker windows, cooldowns and
   timeouts are milliseconds. Timeout applies separately to each attempt.
 - Timeout aborts the attempt's signal. Forward it to the underlying I/O to cancel that work;
   ignoring it only rejects the caller's wait. A caller signal cancels the whole chain.

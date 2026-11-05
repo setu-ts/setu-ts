@@ -587,18 +587,16 @@ describe('the workspace runner must honor the credential contract', () => {
 });
 
 describe('devtool enable branch coverage', () => {
-  it('prints its usage under --help and exits 0', async () => {
+  it('M131b 3.6 prints its usage under --help and exits 0', async () => {
     const h = workspaceHarness({});
     expect(await h.run(['--help'])).toBe(0);
-    expect(h.log.text()).toContain(
-      `Usage: deno run -A npm:@setu-ts/cli@${VERSION} devtool enable [member]`,
-    );
+    expect(h.log.text()).toContain(`Usage: setu devtool enable [member]`);
   });
 
-  it('refuses a subcommand word other than enable', async () => {
+  it('M131b 3.6 refuses a subcommand word other than enable', async () => {
     const h = workspaceHarness({});
     expect(await h.run(['disable'])).toBe(2);
-    expect(h.err.text()).toContain(`Usage: deno run -A npm:@setu-ts/cli@${VERSION} devtool enable`);
+    expect(h.err.text()).toContain(`Usage: setu devtool enable`);
   });
 
   it('reports the exact dry-run plan and writes nothing (standalone)', async () => {

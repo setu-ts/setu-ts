@@ -364,9 +364,26 @@ describe('ResponseBuilder.setHeaders', () => {
       }
       expect(viaSetHeaders).toBeInstanceOf(TypeError);
       expect((viaSetHeaders as Error).message).toBe((viaHeaderCall as Error).message);
-      expect(headerPairs(response)).toEqual(headerPairs(reference));
+      expect(headerPairs(response)).toEqual([]);
       // Refused again on a second use: nothing invalid was cached.
       expect(() => new ResponseBuilder().setHeaders(record)).toThrow(TypeError);
     },
   );
+});
+
+describe('M131b 3.9 atomic setHeaders', () => {
+  for (const frozen of [false, true]) {
+    for (const prior of [false, true]) {
+      it(`refuses all entries atomically frozen=${frozen} prior=${prior}`, () => {
+        const headers = { 'x-before': 'one', 'bad name': 'bad', 'x-after': 'two' };
+        if (frozen) Object.freeze(headers);
+        for (let retry = 0; retry < 2; retry++) {
+          const response = new ResponseBuilder();
+          if (prior) response.header('x-prior', 'keep');
+          expect(() => response.setHeaders(headers)).toThrow(TypeError);
+          expect([...response.snapshot().headers]).toEqual(prior ? [['x-prior', 'keep']] : []);
+        }
+      });
+    }
+  }
 });

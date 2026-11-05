@@ -83,6 +83,8 @@ export interface BuildOptions {
   readonly session?: Partial<SessionPluginOptions>;
   readonly oidc?: Partial<OidcProvider>;
   readonly oauth2?: Partial<OAuth2Provider>;
+  /** A custom `AuthPlugin({ middleware: { priority } })`. */
+  readonly authPriority?: number;
   readonly signIn?: Partial<SignInConfig>;
   readonly plugins?: readonly IPlugin[];
   readonly onTokensThrows?: boolean;
@@ -183,6 +185,9 @@ export async function buildSignInApp(options: BuildOptions = {}): Promise<SignIn
       SessionPlugin({ secret: SESSION_SECRET, ...options.session }),
       AuthPlugin({
         http,
+        ...(options.authPriority === undefined
+          ? {}
+          : { middleware: { priority: options.authPriority } }),
         signIn: { providers: [oidc, oauth2], ...options.signIn },
       }),
       ...(options.plugins ?? []),

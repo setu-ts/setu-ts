@@ -11,6 +11,7 @@ import {
   errorResponderOf,
   isPromiseLike,
   respondWithError,
+  fallbackErrorHint,
   serializeError,
   setUpgradeIntent,
 } from '@setu-ts/common';
@@ -1226,6 +1227,7 @@ class Application implements IKernelApplication {
 
     // Execute pipeline with route dispatch as terminal, observing each global
     // stage's completion when diagnostics are enabled.
+    handle.trackHandler = true;
     await this.#pipeline.execute(
       ctx,
       async () => {
@@ -1490,9 +1492,11 @@ class Application implements IKernelApplication {
         routeMiddleware,
         ctx,
         async () => {
-          await this.#observeHandler(ctx, entry, async () => {
+          const pending = this.#observeHandler(ctx, entry, async () => {
             await definition.handler(ctx);
           });
+          this.#trackHandler(handle, pending);
+          await pending;
         },
         undefined,
         this.#chainObserver('route', this.#collector?.requestOperationIdOf(ctx), entry.index),
@@ -1508,7 +1512,7 @@ class Application implements IKernelApplication {
     if ((ctx.response as ResponseBuilder).ended) {
       return undefined;
     }
-    return this.#invokeHandlerObserved(ctx, entry, definition);
+    return this.#invokeHandlerObserved(ctx, entry, definition, handle);
   }
 
   /**
@@ -1526,6 +1530,7 @@ class Application implements IKernelApplication {
     ctx: IRequestContext,
     entry: RouteEntry,
     definition: RouteDefinition,
+    handle: RequestContextHandle,
   ): undefined | Promise<unknown> {
     const collector = this.#collector;
     if (collector === undefined) {
@@ -1536,7 +1541,10 @@ class Application implements IKernelApplication {
       // response while the handler was still running (M87 review).
       // `Promise.resolve` returns a native promise unchanged, so the ordinary
       // async path allocates nothing extra.
-      return isPromiseLike(result) ? Promise.resolve(result) : undefined;
+      if (!isPromiseLike(result)) return undefined;
+      const pending = Promise.resolve(result);
+      if (handle.trackHandler) this.#trackHandler(handle, pending);
+      return pending;
     }
     const parentOperationId = collector.requestOperationIdOf(ctx) ?? '<unkeyed>';
     const nodeId = collector.routeNodeIdOf(entry.index) ?? null;
@@ -1557,6 +1565,7 @@ class Application implements IKernelApplication {
     }
     if (isPromiseLike(result)) {
       const pending = Promise.resolve(result);
+      if (handle.trackHandler) this.#trackHandler(handle, pending);
       // Observation only: the ORIGINAL promise is returned to the caller and
       // its rejection propagates unchanged — this detached chain never
       // swallows or re-routes it.
@@ -1684,17 +1693,16 @@ class Application implements IKernelApplication {
   }
 
   /**
-   * Reports the unhandled error and writes the opaque 500, closing out the
+   * Reports an unhandled failure, honours client status hints, and closes out the
    * request's in-flight accounting.
    *
-   * X11-2: the unhandled error is visible to the operator. The body stays
-   * opaque — the message is not disclosed to the client (M70b's
-   * `maskInternalErrors` decision applied consistently); only the log carries
-   * it.
+   * X11-2: the unhandled error is visible to the operator. Client status hints
+   * disclose their explicit detail; every other failure keeps the opaque 500
+   * body (M70b's `maskInternalErrors` decision).
    *
    * @param err - The normalized error
    * @param ctx - The live request context
-   * @returns The response builder carrying the 500
+   * @returns The response builder carrying a client refusal or an opaque 500
    */
   #finishFailure(
     err: Error,
@@ -1702,8 +1710,19 @@ class Application implements IKernelApplication {
     handle: RequestContextHandle,
   ): ResponseBuilder | Promise<ResponseBuilder> {
     try {
-      this.#reportUnhandledError(err, ctx);
-      respondWithError(ctx, { status: 500, title: 'Internal Server Error' });
+      // One read of the hint decides both the status and the body.
+      const hint = fallbackErrorHint(err);
+      this.#reportUnhandledError(err, ctx, hint === undefined ? 'error' : 'warn');
+      respondWithError(
+        ctx,
+        hint === undefined
+          ? { status: 500, title: 'Internal Server Error' }
+          : {
+              status: hint.status,
+              title: hint.title,
+              detail: hint.detail,
+            },
+      );
     } catch (failure) {
       // A throwing responder must still release the request — its cleanups
       // and its in-flight count — or the shutdown drain stalls until its
@@ -1714,6 +1733,15 @@ class Application implements IKernelApplication {
     return this.#settleRequest(ctx, handle, 'error');
   }
 
+  /** Retains a running terminal without changing the promise propagated to middleware. */
+  #trackHandler(handle: RequestContextHandle, pending: Promise<unknown>): void {
+    const complete = (): void => {
+      handle.handlerSettled = true;
+    };
+    handle.handlerSettled = false;
+    handle.pendingHandler = pending.then(complete, complete);
+  }
+
   /** Settles generic cleanup before releasing the request from shutdown drain. */
   #settleRequest(
     ctx: IRequestContext,
@@ -1721,6 +1749,37 @@ class Application implements IKernelApplication {
     outcome: DiagnosticsEventOutcome,
   ): ResponseBuilder | Promise<ResponseBuilder> {
     const response = ctx.response as ResponseBuilder;
+    const pendingHandler = handle.pendingHandler;
+    if (pendingHandler !== undefined && !handle.handlerSettled) {
+      // Keep the request in the shutdown drain, and leave defer open for work
+      // registered by the handler after this early response has been sent.
+      const finish = async (): Promise<void> => {
+        const cleanups = handle.takeDeferred();
+        if (cleanups !== undefined) await runDeferred(cleanups, this.#registry);
+        this.#inFlight--;
+        this.#completeRequest(ctx, outcome);
+      };
+      const streamed = response.streamingBody;
+      if (streamed === undefined) {
+        // The buffered response has already been returned. Settle against it:
+        // a stream the handler sets later is never read, so cleanup must not
+        // wait for it to be consumed.
+        void pendingHandler.then(finish);
+      } else {
+        const complete = (): void => {
+          void pendingHandler.then(finish);
+        };
+        response.stream(
+          wrapDeferredStream(
+            guardEmptyChunks(streamed, this.#registry.get<IRuntimeServices>(CAPABILITIES.RUNTIME)),
+            [],
+            this.#registry,
+            complete,
+          ),
+        );
+      }
+      return response;
+    }
     const streamed = response.streamingBody;
     if (streamed !== undefined) {
       // Every streamed body leaves through here (adapters and dispatch alike), so
@@ -2179,13 +2238,17 @@ class Application implements IKernelApplication {
    * @param error - The unhandled error
    * @param ctx - The request context it occurred in
    */
-  #reportUnhandledError(error: Error, ctx: IRequestContext): void {
+  #reportUnhandledError(
+    error: Error,
+    ctx: IRequestContext,
+    level: 'warn' | 'error' = 'error',
+  ): void {
     try {
       if (!this.#registry.has(CAPABILITIES.LOGGER)) {
         // `msg` carries the label and `message` the error's own text, the same
         // two keys the console logger writes for the branch below.
         this.#registry.get<IRuntimeServices>(CAPABILITIES.RUNTIME).reportError?.({
-          level: 'error',
+          level,
           msg: 'Unhandled request error',
           ...serializeError(error),
           requestId: ctx.id,
@@ -2195,7 +2258,7 @@ class Application implements IKernelApplication {
         return;
       }
       const logger = this.#registry.get<ILogger>(CAPABILITIES.LOGGER);
-      logger.error('Unhandled request error', {
+      logger[level]('Unhandled request error', {
         ...serializeError(error),
         requestId: ctx.id,
         method: ctx.request.method,

@@ -14,8 +14,10 @@ describe('request completion status', () => {
       });
       if (handler) app.middleware.add(errorHandler(), { priority: 0 });
       const cases = [
-        ['/missing', notFound('missing'), 404],
-        ['/fault', new Error('fault'), 500],
+        // The last column is the status without errorHandler: the kernel's fallback
+        // honours a 4xx status hint (M131b) and answers 500 for everything else.
+        ['/missing', notFound('missing'), 404, 500],
+        ['/fault', new Error('fault'), 500, 500],
         [
           '/hint',
           withHttpStatusHint(new Error('driver'), {
@@ -24,8 +26,9 @@ describe('request completion status', () => {
             detail: 'retry',
           }),
           409,
+          409,
         ],
-        ['/clamp', new HttpError(4004, 'typo'), 500],
+        ['/clamp', new HttpError(4004, 'typo'), 500, 500],
       ] as const;
       for (const [path, error] of cases)
         app.router.get(path, () => {
@@ -42,10 +45,10 @@ describe('request completion status', () => {
       });
       await app.start();
       try {
-        for (const [path, , expected] of cases) {
+        for (const [path, , expected, bare] of cases) {
           logger.calls.length = 0;
           const res = await app.inject({ method: 'GET', url: path });
-          const status = handler ? expected : 500;
+          const status = handler ? expected : bare;
           expect(res.statusCode).toBe(status);
           expect(logger.calls.filter((c) => c.level === 'info')).toEqual([
             {
@@ -57,8 +60,7 @@ describe('request completion status', () => {
           expect(logger.calls.some((c) => c.message === 'request failed')).toBe(false);
           const faults = logger.calls.filter(
             (c) =>
-              c.level === (handler && status < 500 ? 'warn' : 'error') &&
-              !c.message.includes('unserveable'),
+              c.level === (status < 500 ? 'warn' : 'error') && !c.message.includes('unserveable'),
           );
           expect(faults).toHaveLength(1);
         }

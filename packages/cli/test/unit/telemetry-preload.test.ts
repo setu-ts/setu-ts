@@ -18,6 +18,7 @@ import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
 import { createFakeFs } from '../fixtures/fake-fs.ts';
 import { runCli } from '../../src/cli.ts';
+import { NODE_START_BUILD_CHECK } from '../../src/templates/project-files.ts';
 import {
   TELEMETRY_PRELOAD_CONTENTS,
   TELEMETRY_PRELOAD_FLAG,
@@ -54,7 +55,7 @@ describe('the OpenTelemetry preload (M131a X88-4)', () => {
     expect(h.fs.read(`/work/svc/${TELEMETRY_PRELOAD_PATH}`)).toBe(TELEMETRY_PRELOAD_CONTENTS);
     const s = scripts(h, '/work/svc/package.json');
     expect(s['start']).toBe(
-      `node ${TELEMETRY_PRELOAD_FLAG} --env-file-if-exists=.env --enable-source-maps dist/main.js`,
+      `${NODE_START_BUILD_CHECK} && node ${TELEMETRY_PRELOAD_FLAG} --env-file-if-exists=.env --enable-source-maps dist/main.js`,
     );
     expect(s['start:dev']).toBe(
       `tsx watch ${TELEMETRY_PRELOAD_FLAG} --env-file-if-exists=.env main.ts`,

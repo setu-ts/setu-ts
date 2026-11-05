@@ -556,7 +556,12 @@ still-uncommitted partitions to the minimum start offset advertised by the curre
 message published after `subscribe()` resolves on any member is delivered to the group, including
 when several members first start together; nothing published before the first member’s `subscribe()`
 is replayed. `subscribe()` returns without waiting for the join. A group with any committed offset
-captures nothing; committed partitions and subsequent joins are left untouched.
+captures nothing; committed partitions and subsequent joins are left untouched. If a member has
+already delivered messages before that first join seeks backwards, it records the first/last
+successfully delivered window per partition. Historical offsets before that window still reach the
+handler; offsets inside it resolve for commit without invoking the handler again. The window is
+removed once delivery advances beyond it. This suppresses that first-join replay only; ordinary
+Kafka redelivery after failures or rebalances retains its at-least-once contract.
 
 **Group members are trusted.** The minimum is taken over what every current member advertises, so
 any client able to join the group can move a new group's start earlier, which replays history to it;

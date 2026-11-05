@@ -5,6 +5,7 @@
  */
 import type {
   ICounter,
+  IErrorResponder,
   IGauge,
   IHistogram,
   IRequestContext,
@@ -13,7 +14,7 @@ import type {
   NextFunction,
   PathPattern,
 } from '@setu-ts/common';
-import { createPathMatcher } from '@setu-ts/common';
+import { createPathMatcher, ERROR_RESPONDER_STATE_KEY, fallbackErrorStatus } from '@setu-ts/common';
 import type { MetricsService } from '../services/metrics-service.ts';
 
 /** Case-sensitive known HTTP methods; keep traffic from creating arbitrary series. */
@@ -166,11 +167,14 @@ export class HttpCollector {
       await next();
     } catch (error) {
       errorOccurred = true;
-      // Record error (status 500)
-      const status = '500';
+      // The status the request is actually served with: the error responder's
+      // prediction under errorHandler, else the kernel's fallback rule (M131b).
+      const responder = ctx.state.get(ERROR_RESPONDER_STATE_KEY) as IErrorResponder | undefined;
+      const code = responder?.statusFor?.(error) ?? fallbackErrorStatus(error);
+      const status = String(code);
       const method = methodLabel(ctx.request.method);
 
-      this.#errorsCounter?.inc(1, { method, status });
+      if (code >= 500) this.#errorsCounter?.inc(1, { method, status });
       this.#requestsCounter?.inc(1, { method, status });
 
       const duration = (this.#runtime.hrtime() - start) / 1000;

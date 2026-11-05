@@ -652,3 +652,94 @@ describe('mapWebRequestToFrameworkRequest identity guard', () => {
     expect(Object.keys(request)).not.toContain('user');
   });
 });
+
+describe('M131b 3.4 body read failures', () => {
+  for (const cap of [undefined, 100]) {
+    for (const cause of [
+      new Error('aborted CANARY'),
+      new DOMException('CANARY', 'AbortError'),
+      'CANARY',
+    ]) {
+      it(`brands a failed body read with cap ${cap} and cause ${String(cause)}`, async () => {
+        const { RequestBodyReadError } = await import('../../src/index.ts');
+        const { httpStatusHintOf } = await import('@setu-ts/common');
+        const stream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.error(cause);
+          },
+        });
+        const raw = new Request('http://test/', {
+          method: 'POST',
+          body: stream,
+          duplex: 'half',
+        } as RequestInit);
+        const request = mapWebRequestToFrameworkRequest(raw, cap);
+        const failure = await request.bytes().catch((error: unknown) => error);
+        expect(failure).toBeInstanceOf(RequestBodyReadError);
+        expect((failure as Error).cause).toBe(cause);
+        expect(httpStatusHintOf(failure)).toMatchObject({
+          status: 400,
+          detail: 'The request body could not be read; the client closed the connection.',
+        });
+        expect((failure as Error).message).not.toContain('CANARY');
+        await expect(request.text()).rejects.toBe(failure);
+      });
+    }
+  }
+  it('maps Bun native size rejection to 413', async () => {
+    const { RequestBodyTooLargeError } = await import('../../src/index.ts');
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.error(new Error('Request body exceeded maxRequestBodySize'));
+      },
+    });
+    const raw = new Request('http://test/', {
+      method: 'POST',
+      body: stream,
+      duplex: 'half',
+    } as RequestInit);
+    await expect(mapWebRequestToFrameworkRequest(raw, 100).bytes()).rejects.toBeInstanceOf(
+      RequestBodyTooLargeError,
+    );
+  });
+});
+
+it('M131b 3.4 maps an uncapped Bun native size refusal without inventing a limit', async () => {
+  const { RequestBodyTooLargeError } = await import('../../src/index.ts');
+  const { httpStatusHintOf } = await import('@setu-ts/common');
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.error(new Error('Request body exceeded maxRequestBodySize'));
+    },
+  });
+  const raw = new Request('http://test/', {
+    method: 'POST',
+    body: stream,
+    duplex: 'half',
+  } as RequestInit);
+  const error = await mapWebRequestToFrameworkRequest(raw)
+    .bytes()
+    .catch((cause: unknown) => cause);
+  expect(error).toBeInstanceOf(RequestBodyTooLargeError);
+  expect((error as InstanceType<typeof RequestBodyTooLargeError>).maxBodyBytes).toBe(Infinity);
+  expect(httpStatusHintOf(error)).toMatchObject({
+    status: 413,
+    detail: 'Request body exceeds the runtime maximum size.',
+  });
+});
+
+it.each([undefined, 100])(
+  'M131b 3.4 brands reader acquisition failures with cap %s',
+  async (cap) => {
+    const { RequestBodyReadError } = await import('../../src/index.ts');
+    const raw = new Request('http://test/', { method: 'POST', body: 'locked' });
+    const reader = raw.body!.getReader();
+    try {
+      await expect(mapWebRequestToFrameworkRequest(raw, cap).bytes()).rejects.toBeInstanceOf(
+        RequestBodyReadError,
+      );
+    } finally {
+      reader.releaseLock();
+    }
+  },
+);

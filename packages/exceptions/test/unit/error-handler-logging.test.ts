@@ -118,3 +118,19 @@ describe('errorHandler logging and pure status prediction', () => {
     }
   }
 });
+
+it('M131b 3.4 serves and logs RequestBodyReadError safely at warn', async () => {
+  const { RequestBodyReadError } = await import('@setu-ts/runtime');
+  const logger = new FakeLogger();
+  const { ctx, responseSnapshot } = createFakeContext({
+    services: new Map([[CAPABILITIES.LOGGER, logger]]),
+  });
+  await errorHandler()(ctx, () => {
+    throw new RequestBodyReadError(new Error('CANARY request data'));
+  });
+  expect(responseSnapshot().status).toBe(400);
+  expect(String(responseSnapshot().body)).not.toContain('CANARY');
+  expect(logger.calls).toHaveLength(1);
+  expect(logger.calls[0]?.level).toBe('warn');
+  expect(JSON.stringify(logger.calls)).not.toContain('CANARY');
+});

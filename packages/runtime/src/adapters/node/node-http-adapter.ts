@@ -96,7 +96,9 @@ export interface NodeServeHost {
    * Starts an HTTP server.
    *
    * @param options - Server options including `fetch`, `port`, `hostname`
-   * @returns A promise resolving to a Node.js HTTP server handle
+   * @returns A promise resolving to the server only once its port is bound
+   * @throws The native bind error when the port cannot be bound. Injected hosts
+   * must also wait for binding before resolving.
    */
   serve(options: {
     // Spelled out rather than naming the internal NodeFetchCallback, so this
@@ -162,7 +164,21 @@ const defaultNodeServeHost: NodeServeHost = {
     // internal cache symbol. Opting out therefore forced EVERY response onto
     // the slow path, and made the kernel's synchronous request path
     // unrewarded, since the fast path is gated on both conditions at once.
-    return mod.serve({ ...options });
+    return new Promise<NodeServer>((resolve, reject) => {
+      const server = mod.serve({ ...options }, ready);
+      function ready(): void {
+        server.removeListener('error', failed);
+        resolve(server);
+      }
+      function failed(error: Error): void {
+        // node-server wraps its listening callback. This failed, closing server
+        // has no remaining listening consumers, so remove that wrapper too.
+        server.removeAllListeners('listening');
+        server.close();
+        reject(error);
+      }
+      server.once('error', failed);
+    });
   },
 };
 

@@ -207,3 +207,75 @@ describe('runWithRetry cancellation', () => {
     expect(seen).toEqual([false, false, false]);
   });
 });
+
+describe('M131b 3.12 retry validation', () => {
+  for (const policy of [
+    { limit: 0, delay: 0 },
+    { limit: NaN, delay: 0 },
+    { limit: 1.5, delay: 0 },
+    { limit: -1, delay: 0 },
+    { limit: Infinity, delay: 0 },
+    { limit: Number.MAX_SAFE_INTEGER + 1, delay: 0 },
+    { limit: 1, delay: -1 },
+    { limit: 1, delay: NaN },
+    { limit: 1, delay: Infinity },
+    // M131b audit F4: a runtime timer clamps anything above 2^31 - 1 ms to 1 ms.
+    { limit: 1, delay: 2_147_483_648 },
+    { limit: 1, delay: 1e308 },
+  ]) {
+    it(`refuses invalid policies at wrap: ${JSON.stringify(policy)}`, async () => {
+      const { ResilienceService } = await import('../../src/services/resilience-service.ts');
+      const runtime = new FakeRuntime();
+      const service = new ResilienceService(runtime);
+      const retry = { ...policy, backoff: 'fixed' as const };
+      expect(() => service.wrap(() => Promise.resolve(1), { retry })).toThrow(RangeError);
+      const defaults = new ResilienceService(runtime, { defaultRetry: retry });
+      expect(() => defaults.wrap(() => Promise.resolve(1), { retry: true })).toThrow(RangeError);
+    });
+  }
+});
+
+it('M131b review: an edit to the policy after wrap does not reach the call', async () => {
+  const { ResilienceService } = await import('../../src/services/resilience-service.ts');
+  const runtime = new FakeRuntime();
+  for (const fromDefault of [false, true]) {
+    const policy = { limit: 2, delay: 0, backoff: 'fixed' as const };
+    const service = new ResilienceService(
+      runtime,
+      fromDefault ? { defaultRetry: policy } : undefined,
+    );
+    let calls = 0;
+    const call = service.wrap(
+      () => {
+        calls += 1;
+        return calls < 2 ? Promise.reject(new Error('transient')) : Promise.resolve('ok');
+      },
+      { retry: fromDefault ? true : policy },
+    );
+    // Neither edit passes validation; the wrapped call keeps the validated copy.
+    (policy as { limit: number }).limit = 0;
+    await expect(call()).resolves.toBe('ok');
+    expect(calls).toBe(2);
+  }
+});
+
+describe('M131b audit F4: timer-bounded delays', () => {
+  it('accepts the longest delay a timer honours', async () => {
+    const { validateRetryPolicy } = await import('../../src/patterns/retry.ts');
+    expect(() =>
+      validateRetryPolicy({ limit: 2, delay: 2_147_483_647, backoff: 'fixed' }, 'test'),
+    ).not.toThrow();
+  });
+
+  it('caps a long exponential schedule at the timer maximum', () => {
+    const policy: RetryPolicy = { limit: 40, delay: 1_000_000_000, backoff: 'exponential' };
+    expect(computeBackoffMs(1, policy)).toBe(1_000_000_000);
+    expect(computeBackoffMs(2, policy)).toBe(2_000_000_000);
+    expect(computeBackoffMs(3, policy)).toBe(2_147_483_647);
+    expect(computeBackoffMs(30, policy)).toBe(2_147_483_647);
+  });
+
+  it('keeps a zero exponential delay at zero past 2^1024 (re-audit O-2)', () => {
+    expect(computeBackoffMs(1025, { limit: 2000, delay: 0, backoff: 'exponential' })).toBe(0);
+  });
+});

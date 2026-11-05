@@ -745,7 +745,7 @@ describe('the gate covers the repository it is meant to cover', () => {
     // The probe stubs raw() and cannot deliver a payload through an element
     // spread, so a component using either is UNCHECKED — failing the gate
     // unless its own comment carries the exemption. Every such component in
-    // the corpus must be exempt, and the three known sites are pinned by
+    // the corpus must be exempt, and the four known sites are pinned by
     // name, so dropping a label is a failing test rather than a silent gap.
     const documents = await scanDocuments(['docs', 'packages', '.']);
     const collected: DocComponent[] = [];
@@ -759,7 +759,11 @@ describe('the gate covers the repository it is meant to cover', () => {
       .filter((c) => c.usesRaw || c.spreads)
       .map((c) => `${c.file} ${c.name}${c.exempt ? '' : ' UNEXEMPTED'}`)
       .sort();
-    expect(rawComponents).toEqual(['docs/mvc.md Page', 'packages/view-plugin/README.md Snippet']);
+    expect(rawComponents).toEqual([
+      'docs/mvc.md Layout',
+      'docs/mvc.md Page',
+      'packages/view-plugin/README.md Snippet',
+    ]);
     expect(spots.map((s) => `${s.file} ${s.name}${s.exempt ? '' : ' UNEXEMPTED'}`)).toEqual([
       'packages/session-plugin/README.md LoginForm',
     ]);

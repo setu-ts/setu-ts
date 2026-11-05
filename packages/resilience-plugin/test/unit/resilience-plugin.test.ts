@@ -52,3 +52,14 @@ describe('ResiliencePlugin', () => {
     expect(calls).toBe(2);
   });
 });
+
+it.each([
+  { limit: 0, delay: 0 },
+  { limit: 1, delay: -1 },
+  { limit: NaN, delay: 0 },
+])('M131b 3.12 rejects invalid defaultRetry during registration: %j', (policy) => {
+  const { ctx, registeredServices } = createFakeContext();
+  const plugin = ResiliencePlugin({ defaultRetry: { ...policy, backoff: 'fixed' } });
+  expect(() => plugin.register(ctx)).toThrow(RangeError);
+  expect(registeredServices.size).toBe(0);
+});

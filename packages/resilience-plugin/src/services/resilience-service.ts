@@ -18,13 +18,31 @@ import type { ITimers, ResiliencePluginOptions } from '../interfaces/index.ts';
 import { throwIfAborted } from '../patterns/abort.ts';
 import { CircuitBreaker } from '../patterns/circuit-breaker.ts';
 import { Bulkhead } from '../patterns/bulkhead.ts';
-import { runWithRetry } from '../patterns/retry.ts';
+import { runWithRetry, validateRetryPolicy } from '../patterns/retry.ts';
 import { runWithTimeout } from '../patterns/timeout.ts';
 
 /**
  * The concrete resilience service registered under `CAPABILITIES.RESILIENCE`.
  * Internal to the plugin — not exported from `src/index.ts`.
  */
+/**
+ * Copies a retry policy, then validates the copy. The retry loop reads the
+ * policy on every call, so keeping the caller's object would let an edit made
+ * after `wrap` bypass the validation done here.
+ *
+ * @param policy - The caller's or the plugin's default retry policy
+ * @returns A validated, frozen copy
+ */
+function validatedRetryCopy(policy: RetryPolicy): RetryPolicy {
+  const copy: RetryPolicy = Object.freeze({
+    limit: policy.limit,
+    delay: policy.delay,
+    backoff: policy.backoff,
+  });
+  validateRetryPolicy(copy, 'resilience.wrap retry');
+  return copy;
+}
+
 export class ResilienceService implements IResilienceService {
   readonly #runtime: IRuntimeServices;
   readonly #options: ResiliencePluginOptions;
@@ -56,6 +74,7 @@ export class ResilienceService implements IResilienceService {
    * @param options - Which patterns to apply and their policies
    * @returns A hardened callable reusing one shared pattern chain, accepting an
    * optional caller-owned signal
+   * @throws {RangeError} When the selected retry policy has an invalid limit or delay
    * @throws {Error} When a pattern is requested as `true` with no matching
    * `default*` policy configured on the plugin
    */
@@ -137,9 +156,9 @@ export class ResilienceService implements IResilienceService {
           'resilience.wrap: retry: true requires defaultRetry in ResiliencePlugin options',
         );
       }
-      return this.#options.defaultRetry;
+      return validatedRetryCopy(this.#options.defaultRetry);
     }
-    return value;
+    return validatedRetryCopy(value);
   }
 
   /** Resolves the effective bulkhead policy, or `undefined` for none. */
