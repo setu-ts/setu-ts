@@ -304,6 +304,12 @@ All notable changes to this project are documented here. The format follows
   carries the `common` status hint, so two other readers see it: an app with no `errorHandler`
   answers a thrown 4xx `HttpError` with its status instead of an opaque `500`, and the
   resource-server Bearer challenge adds `WWW-Authenticate` to a thrown `unauthorized()`.
+- **Unhandled errors reported without a logger mask URL userinfo (PR pending, `@setu-ts/kernel`).**
+  With no `CAPABILITIES.LOGGER` registered, the kernel reports an unhandled request error straight
+  to `runtime.reportError` (stderr), where no LoggerPlugin redaction runs, and wrote
+  `scheme://user:password@host` in the message, stack and causes as thrown. That record now gets the
+  same URL-userinfo mask LoggerPlugin and `errorHandler` apply; which fields are logged is
+  unchanged.
 - **A regenerated session's old row is deleted even when the request throws (M131b, #557,
   `@setu-ts/session-plugin`).** `regenerate()` is a revocation, so the session middleware deletes
   the superseded store row before rethrowing a request's error (a store fault there is logged at
