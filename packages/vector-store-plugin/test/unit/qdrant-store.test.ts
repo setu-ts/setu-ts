@@ -272,7 +272,7 @@ describe('QdrantVectorStore', () => {
         points: { payload: Record<string, unknown> }[];
         update_filter: unknown;
       };
-      expect(upsert.update_filter).toEqual({ must_not: [newer] });
+      expect(upsert.update_filter).toEqual({ must_not: [{ must: [source[1], newer] }] });
       expect(upsert.points[0]!.payload['source_version']).toBe(5);
       expect(client.calls[2]!.body).toEqual({ exact: true, filter: { must: [...source, newer] } });
       expect(client.calls[3]!.body).toEqual({

@@ -318,6 +318,15 @@ describe.each(ARMS.filter((arm) => arm.enabled).map((arm) => [arm.name, arm] as 
       await write('plain', 1);
       await write('v3', 1, 3);
       expect(await stored()).toEqual(['d0:v3']);
+      // A newer version of ANOTHER source does not stop an id being reassigned.
+      await store.replaceSource(
+        COLLECTION,
+        scope,
+        'other',
+        [{ id: 'd0', vector: [1, 1, 0, 0], sourceId: 'other', content: 'other' }],
+        { version: 1 },
+      );
+      expect(await stored()).toEqual(['d0:other']);
     });
 
     it('filters on a field named constructor instead of dropping the clause', async () => {

@@ -239,14 +239,20 @@ export class QdrantVectorStore implements IVectorStoreAdapter {
       return;
     }
     await this.#requireConditionalUpdate();
-    // A stored point of a newer version keeps its state; new ids are inserted.
+    // A stored point of this source at a newer version keeps its state; new ids
+    // are inserted, and a point of another source is reassigned as usual.
     const newer = { key: VERSION_KEY, range: { gt: version } };
+    const newerOfSource = { must: [source[1], newer] };
     if (records.length > 0) {
       const points = await Promise.all(
         records.map((record) => this.#point(scope, record, version)),
       );
       await this.#run(() =>
-        this.#client.upsert(name, { wait: true, points, update_filter: { must_not: [newer] } }),
+        this.#client.upsert(name, {
+          wait: true,
+          points,
+          update_filter: { must_not: [newerOfSource] },
+        }),
       );
     }
     // Without transactions, a newer write may already have landed. Then every
