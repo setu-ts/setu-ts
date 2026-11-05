@@ -7,11 +7,13 @@
  */
 import {
   CAPABILITIES,
+  createRedactionService,
   ERROR_RESPONDER_STATE_KEY,
   errorResponderOf,
   isPromiseLike,
   respondWithError,
   fallbackErrorHint,
+  maskUrlUserinfo,
   serializeError,
   setUpgradeIntent,
 } from '@setu-ts/common';
@@ -92,6 +94,13 @@ export type { KernelDiagnosticsLabelOptions, KernelDiagnosticsOptions };
  * @internal
  */
 const COLLECTORS = new WeakMap<IApplication, DiagnosticsCollector>();
+
+/**
+ * Masks URL userinfo (`scheme://user:password@host`) in every string of a
+ * record and nothing else: an empty field policy classifies no path, so only
+ * the redaction service's default userinfo mask applies. Compiled once.
+ */
+const URL_USERINFO_MASK = createRedactionService({ fields: {} });
 
 /**
  * Returns an application's diagnostics collector, or `undefined` when
@@ -1720,7 +1729,9 @@ class Application implements IKernelApplication {
           : {
               status: hint.status,
               title: hint.title,
-              detail: hint.detail,
+              // URL userinfo is masked as errorHandler masks every string it
+              // serves: a 4xx HttpError's hint detail is its own message.
+              detail: maskUrlUserinfo(hint.detail),
             },
       );
     } catch (failure) {
@@ -2247,14 +2258,21 @@ class Application implements IKernelApplication {
       if (!this.#registry.has(CAPABILITIES.LOGGER)) {
         // `msg` carries the label and `message` the error's own text, the same
         // two keys the console logger writes for the branch below.
-        this.#registry.get<IRuntimeServices>(CAPABILITIES.RUNTIME).reportError?.({
-          level,
-          msg: 'Unhandled request error',
-          ...serializeError(error),
-          requestId: ctx.id,
-          method: ctx.request.method,
-          path: ctx.request.path,
-        });
+        //
+        // With no logger there is no LoggerPlugin redaction either, so the
+        // record is masked here: URL userinfo in the message, the stack and
+        // every serialized cause, as LoggerPlugin's default mask and
+        // `errorHandler` treat each string they emit.
+        this.#registry.get<IRuntimeServices>(CAPABILITIES.RUNTIME).reportError?.(
+          URL_USERINFO_MASK.redactRecord({
+            level,
+            msg: 'Unhandled request error',
+            ...serializeError(error),
+            requestId: ctx.id,
+            method: ctx.request.method,
+            path: ctx.request.path,
+          }),
+        );
         return;
       }
       const logger = this.#registry.get<ILogger>(CAPABILITIES.LOGGER);

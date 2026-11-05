@@ -15,8 +15,9 @@ describe('request completion status', () => {
       if (handler) app.middleware.add(errorHandler(), { priority: 0 });
       const cases = [
         // The last column is the status without errorHandler: the kernel's fallback
-        // honours a 4xx status hint (M131b) and answers 500 for everything else.
-        ['/missing', notFound('missing'), 404, 500],
+        // honours a 4xx status hint (M131b), which a 4xx HttpError carries, and
+        // answers 500 for everything else.
+        ['/missing', notFound('missing'), 404, 404],
         ['/fault', new Error('fault'), 500, 500],
         [
           '/hint',

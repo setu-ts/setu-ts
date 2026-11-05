@@ -13,6 +13,9 @@
  *
  * @module
  */
+import { withHttpStatusHint } from '@setu-ts/common';
+
+import { statusTitle } from './exceptions.ts';
 
 /**
  * A single validation failure carried by a `422` error.
@@ -66,6 +69,17 @@ export interface HttpErrorInit {
  * The error handler middleware inspects the `statusCode` to set the response
  * status, and serializes `message` and `details` into the error body.
  *
+ * A `4xx` error is also branded with the `@setu-ts/common` status hint
+ * (`{ status, title, detail: message }`), so code that may not import this
+ * package — the GraphQL masker, the kernel's fallback when no `errorHandler`
+ * is registered — recognises it as a caller error by its own constructor's
+ * brand rather than by a `statusCode` shape an HTTP client's error also has.
+ * A `5xx` (or out-of-range) status is not branded: a hint promises a
+ * caller-safe `detail`, and a server fault's message makes no such promise.
+ * The hint is taken when the error is constructed, so assigning to `message`
+ * afterwards changes what `errorHandler` serves but not what those readers do —
+ * build a new error instead of rewriting one.
+ *
  * @since 0.1.0
  */
 export class HttpError extends Error {
@@ -113,6 +127,13 @@ export class HttpError extends Error {
     this.statusCode = statusCode;
     if (details !== undefined) {
       this.details = details;
+    }
+    if (Number.isInteger(statusCode) && statusCode >= 400 && statusCode <= 499) {
+      withHttpStatusHint(this, {
+        status: statusCode,
+        title: statusTitle(statusCode),
+        detail: message,
+      });
     }
   }
 

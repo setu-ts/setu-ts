@@ -180,6 +180,11 @@ export interface IGraphqlService {
    * Accepts every operation kind and returns the matching discriminated outcome.
    * The transports narrow on the `kind` field to emit conformant frames.
    *
+   * When `context.requestContext` is present, a mutation runs only if the
+   * request method is `POST`; any other method answers a `405` error outcome
+   * (`METHOD_NOT_ALLOWED`). A context without one — the WebSocket path — is
+   * not method-checked.
+   *
    * @param params - The parsed GraphQL request parameters
    * @param context - Optional operation context (request or connection)
    * @returns The discriminated subscription outcome

@@ -3,7 +3,13 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { isExposable, maskErrors } from '../../src/security/mask-errors.ts';
+import { withHttpStatusHint } from '@setu-ts/common';
+import {
+  CALLER_ERROR_CODES,
+  DEFAULT_CALLER_ERROR_CODE,
+  isExposable,
+  maskErrors,
+} from '../../src/security/mask-errors.ts';
 
 describe('mask-errors', () => {
   describe('isExposable', () => {
@@ -152,6 +158,188 @@ describe('mask-errors', () => {
       const masked = maskErrors(result, { maskInternalErrors: false });
 
       expect(masked.errors?.[0].message).toBe('Internal');
+    });
+  });
+});
+
+/** A graphql-js located error wrapping what a resolver threw. */
+function located(thrown: unknown, extensions?: Record<string, unknown>) {
+  const error = new Error(thrown instanceof Error ? thrown.message : 'x') as Error & {
+    originalError?: unknown;
+    path?: Array<string | number>;
+    locations?: Array<{ line: number; column: number }>;
+    extensions?: Record<string, unknown>;
+  };
+  error.originalError = thrown;
+  error.path = ['order'];
+  error.locations = [{ line: 1, column: 3 }];
+  if (extensions !== undefined) error.extensions = extensions;
+  return error;
+}
+
+function hinted(status: number, detail: string): Error {
+  return withHttpStatusHint(new Error('driver says: relation "orders" leaked'), {
+    status,
+    title: 'Caller Error',
+    detail,
+  });
+}
+
+describe('maskErrors — caller errors', () => {
+  // The table is the contract: every listed status, plus one unlisted 4xx.
+  const CASES: ReadonlyArray<[number, string]> = [
+    ...Object.entries(CALLER_ERROR_CODES).map(([s, c]): [number, string] => [Number(s), c]),
+    [410, DEFAULT_CALLER_ERROR_CODE],
+  ];
+
+  for (const [status, code] of CASES) {
+    it(`shows a ${status} hint as ${code} with the hint's detail only`, () => {
+      const logged: unknown[] = [];
+      const masked = maskErrors(
+        { data: { order: null }, errors: [located(hinted(status, 'No such order'))] },
+        { maskInternalErrors: true, logger: { error: (m) => logged.push(m) } },
+      );
+      expect(masked.errors).toEqual([
+        {
+          message: 'No such order',
+          extensions: { code },
+          locations: [{ line: 1, column: 3 }],
+          path: ['order'],
+        },
+      ]);
+      expect(JSON.stringify(masked)).not.toContain('driver says');
+      expect(logged).toEqual([]);
+    });
+  }
+
+  it('keeps a 5xx hint masked and logged', () => {
+    const logged: unknown[] = [];
+    const masked = maskErrors(
+      { errors: [located(hinted(503, 'Down for maintenance'))] },
+      { maskInternalErrors: true, logger: { error: (m) => logged.push(m) } },
+    );
+    expect(masked.errors?.[0]).toEqual({
+      message: 'Internal server error',
+      extensions: { code: 'INTERNAL_SERVER_ERROR' },
+      path: ['order'],
+    });
+    expect(logged).toHaveLength(1);
+  });
+
+  // An explicit code is kept, but the message is still the hint's detail: the
+  // error's own message is the operator diagnostic the hint keeps off the wire.
+  it('keeps an explicit extensions.code but shows only the hint detail', () => {
+    const masked = maskErrors(
+      { errors: [located(hinted(404, 'No such order'), { code: 'ORDER_GONE', extra: 'x' })] },
+      { maskInternalErrors: true },
+    );
+    expect(masked.errors?.[0]).toEqual({
+      message: 'No such order',
+      extensions: { code: 'ORDER_GONE' },
+      locations: [{ line: 1, column: 3 }],
+      path: ['order'],
+    });
+    expect(JSON.stringify(masked)).not.toContain('driver says');
+  });
+
+  // A 5xx hint marks the message as a server diagnostic, so an explicit code
+  // does not make it exposable.
+  it('masks and logs a 5xx-hinted error even when it carries its own code', () => {
+    const logged: unknown[] = [];
+    const masked = maskErrors(
+      { errors: [located(hinted(503, 'Down'), { code: 'UPSTREAM_DOWN' })] },
+      { maskInternalErrors: true, logger: { error: (m) => logged.push(m) } },
+    );
+    expect(masked.errors?.[0]).toEqual({
+      message: 'Internal server error',
+      extensions: { code: 'INTERNAL_SERVER_ERROR' },
+      path: ['order'],
+    });
+    expect(JSON.stringify(masked)).not.toContain('driver says');
+    expect(logged).toHaveLength(1);
+  });
+
+  it('leaves an unhinted coded error exposed as before', () => {
+    const plain = new Error('Order is archived');
+    const masked = maskErrors(
+      { errors: [located(plain, { code: 'ORDER_ARCHIVED' })] },
+      { maskInternalErrors: true },
+    );
+    expect(masked.errors?.[0]).toMatchObject({
+      message: 'Order is archived',
+      extensions: { code: 'ORDER_ARCHIVED' },
+    });
+  });
+
+  // graphql-js reuses a thrown GraphQLError that already has a path as the
+  // located error, so the brand is on the error itself, with no originalError.
+  it('reads a hint branded on the located error itself', () => {
+    const error = hinted(404, 'No such order') as Error & {
+      path?: Array<string | number>;
+      extensions?: Record<string, unknown>;
+    };
+    error.path = ['order'];
+    error.extensions = { code: 'ORDER_GONE' };
+    const masked = maskErrors({ errors: [error] }, { maskInternalErrors: true });
+    expect(masked.errors?.[0]).toEqual({
+      message: 'No such order',
+      extensions: { code: 'ORDER_GONE' },
+      path: ['order'],
+    });
+  });
+
+  it('ignores a non-string extensions.code and uses the table', () => {
+    const masked = maskErrors(
+      { errors: [located(hinted(403, 'Not your order'), { code: 42 })] },
+      { maskInternalErrors: true },
+    );
+    expect(masked.errors?.[0]?.extensions).toEqual({ code: 'FORBIDDEN' });
+  });
+
+  it('masks URL userinfo in the served detail', () => {
+    const masked = maskErrors(
+      { errors: [located(hinted(400, 'Bad callback https://user:secret@hooks.example/x'))] },
+      { maskInternalErrors: true },
+    );
+    expect(masked.errors?.[0]?.message).not.toContain('secret');
+    expect(masked.errors?.[0]?.message).toContain('hooks.example/x');
+  });
+
+  it('maps a caller error with maskInternalErrors off too', () => {
+    const masked = maskErrors(
+      { errors: [located(hinted(403, 'Not your order'))] },
+      { maskInternalErrors: false },
+    );
+    expect(masked.errors?.[0]).toMatchObject({
+      message: 'Not your order',
+      extensions: { code: 'FORBIDDEN' },
+    });
+  });
+
+  it('hands the mapped error to formatError', () => {
+    const seen: unknown[] = [];
+    maskErrors(
+      { errors: [located(hinted(404, 'No such order'))] },
+      {
+        maskInternalErrors: true,
+        formatError: (e) => {
+          seen.push(e);
+          return e;
+        },
+      },
+    );
+    expect(seen).toEqual([
+      expect.objectContaining({ message: 'No such order', extensions: { code: 'NOT_FOUND' } }),
+    ]);
+  });
+
+  it('omits locations and path when graphql supplied none', () => {
+    const error = new Error('x') as Error & { originalError?: unknown };
+    error.originalError = hinted(404, 'No such order');
+    const masked = maskErrors({ errors: [error] }, { maskInternalErrors: true });
+    expect(masked.errors?.[0]).toEqual({
+      message: 'No such order',
+      extensions: { code: 'NOT_FOUND' },
     });
   });
 });

@@ -377,7 +377,7 @@ describe('GraphqlService', () => {
   describe('subscribe', () => {
     /** Fake runtime whose operation kind and parse behavior are controllable. */
     function createSubscribeRuntime(opts: {
-      operation?: 'query' | 'subscription';
+      operation?: 'query' | 'mutation' | 'subscription';
       parseThrows?: boolean;
       subscribeStream?: AsyncIterable<unknown>;
     }): GraphqlRuntime {
@@ -471,6 +471,42 @@ describe('GraphqlService', () => {
       expect(outcome.kind).toBe('error');
       if (outcome.kind === 'error') {
         expect(outcome.result.errors).toBeDefined();
+      }
+    });
+
+    // Only a POST may run a mutation on the SSE path: GET is what a cross-site
+    // navigation sends, and the rule fails closed for any other verb.
+    for (const method of ['GET', 'HEAD'] as const) {
+      it(`refuses a mutation whose request context arrived over ${method} (405)`, async () => {
+        const service = makeService(createSubscribeRuntime({ operation: 'mutation' }));
+        const requestContext = {
+          services: mockServiceRegistry,
+          request: { method },
+        } as unknown as IRequestContext;
+        const outcome = await service.subscribe(
+          { query: 'mutation { transfer }' },
+          { requestContext },
+        );
+        expect(outcome.kind).toBe('error');
+        expect(outcome.status).toBe(405);
+      });
+    }
+
+    it('runs a mutation over POST, and on WebSocket where no request context exists', async () => {
+      const service = makeService(createSubscribeRuntime({ operation: 'mutation' }));
+      const requestContext = {
+        services: mockServiceRegistry,
+        request: { method: 'POST' },
+      } as unknown as IRequestContext;
+      const connection: GraphqlConnectionInfo = {
+        id: 'c1',
+        headers: new Headers(),
+        query: {},
+        data: new Map(),
+      };
+      for (const context of [{ requestContext }, { connection }]) {
+        const outcome = await service.subscribe({ query: 'mutation { transfer }' }, context);
+        expect(outcome.kind).toBe('single');
       }
     });
 

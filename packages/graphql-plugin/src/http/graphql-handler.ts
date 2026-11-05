@@ -15,6 +15,7 @@ import type {
 import type { ApqResolver, ApqResolveResult } from '../apq/apq-resolver.ts';
 import type { GraphqlService } from '../services/graphql-service.ts';
 import { bodyRefusalOf } from './body-refusal.ts';
+import { isJsonContentType } from './json-content-type.ts';
 import { CONTENT_TYPE_GRAPHQL, CONTENT_TYPE_JSON, negotiateMediaType } from './media-type.ts';
 import type { ParseError } from './request-parser.ts';
 import { parseGetQuery } from './request-parser.ts';
@@ -93,9 +94,10 @@ async function handleGraphqlPost(
   // in the media type the client asked for, transport failures included.
   const mediaType = negotiateMediaType(ctx.request.headers.get('accept'));
 
-  // Check content-type for POST
-  const contentType = ctx.request.headers.get('content-type') ?? '';
-  if (!contentType.includes('application/json')) {
+  // Check content-type for POST. The media type must EQUAL application/json:
+  // a substring test accepted `text/plain; x=application/json`, a CORS simple
+  // request, so a cross-site page could run a mutation with no preflight.
+  if (!isJsonContentType(ctx.request.headers.get('content-type'))) {
     return sendGraphqlError(
       response,
       415,

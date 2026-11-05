@@ -3,6 +3,7 @@ import { CAPABILITIES, HTTP_STATUS_HINT, withHttpStatusHint } from '@setu-ts/com
 import type { ILogger } from '@setu-ts/common';
 import { createApplication } from '../../src/application/application.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
+import { internalServerError, notFound } from '@setu-ts/exceptions';
 
 for (const status of [400, 499, 503, undefined]) {
   for (const logger of [false, true]) {
@@ -96,3 +97,48 @@ it('M131b review: a hint that changes between reads still serves one consistent 
     await app.stop();
   }
 });
+
+// A 4xx HttpError carries the status hint, so the fallback answers it as the
+// caller error it is — not as an opaque 500 — when no errorHandler is
+// registered. A 5xx HttpError carries none and stays opaque.
+for (const [thrown, status, body] of [
+  [() => notFound('gone'), 404, { error: 'Not Found', detail: 'gone' }],
+  [
+    () => notFound('no row at postgres://app:s3cret@db.internal/orders'),
+    404,
+    { error: 'Not Found', detail: 'no row at postgres://***@db.internal/orders' },
+  ],
+  [() => internalServerError('db password=x'), 500, { error: 'Internal Server Error' }],
+] as const) {
+  it(`answers a thrown HttpError ${status} without errorHandler (${JSON.stringify(body)})`, async () => {
+    const fake = createFakeRuntime();
+    const report = vi.fn();
+    fake.runtime.reportError = report;
+    const app = createApplication({
+      plugins: [
+        {
+          name: 'runtime',
+          version: '1.0.0',
+          provides: [CAPABILITIES.RUNTIME],
+          register(ctx) {
+            ctx.services.register(CAPABILITIES.RUNTIME, fake.runtime);
+          },
+        },
+      ],
+    });
+    app.router.get('/', () => {
+      throw thrown();
+    });
+    await app.start();
+    try {
+      const response = await app.inject({ method: 'GET', url: '/' });
+      expect(response.statusCode).toBe(status);
+      expect(response.json()).toEqual(body);
+      expect(report).toHaveBeenCalledWith(
+        expect.objectContaining({ level: status < 500 ? 'warn' : 'error' }),
+      );
+    } finally {
+      await app.stop();
+    }
+  });
+}

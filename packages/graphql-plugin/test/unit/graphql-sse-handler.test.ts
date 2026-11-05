@@ -114,6 +114,10 @@ interface MockRequestOpts {
    */
   jsonRejectsWith?: unknown;
   signal?: AbortSignal;
+  /** The `content-type` header; `null` omits it. Defaults to JSON. */
+  contentType?: string | null;
+  /** The request method the context reports. Defaults to `POST`. */
+  method?: string;
 }
 
 function createMockRequest(opts: MockRequestOpts = {}) {
@@ -126,7 +130,10 @@ function createMockRequest(opts: MockRequestOpts = {}) {
           : opts.jsonThrows
             ? () => Promise.reject(new Error('bad json'))
             : () => Promise.resolve(opts.body),
-      headers: new Headers({ 'content-type': 'application/json' }),
+      headers: new Headers(
+        opts.contentType === null ? {} : { 'content-type': opts.contentType ?? 'application/json' },
+      ),
+      method: opts.method ?? 'POST',
     } as unknown as IRequest,
     query: q,
     response: opts.response ?? ({} as IResponse),
@@ -771,4 +778,103 @@ describe('createSseHandler — a consumer that goes away', () => {
     // Bounded: the pump noticed the cancel rather than running forever.
     expect(produced).toBeLessThan(10);
   });
+});
+
+describe('cross-site request refusals', () => {
+  const single = (): GraphqlSubscriptionOutcome => ({
+    kind: 'single',
+    status: 200,
+    result: { data: { transfer: 1 } },
+  });
+
+  // Every CORS-safelisted (no-preflight) type an attacker page can send, plus
+  // a missing header. None may reach the body read, let alone the service.
+  const REFUSED: ReadonlyArray<string | null> = [
+    null,
+    'text/plain',
+    'text/plain; x=application/json',
+    'application/x-www-form-urlencoded',
+    'application/x-www-form-urlencoded; a=application/json',
+    'multipart/form-data; boundary=x; a=application/json',
+  ];
+
+  for (const contentType of REFUSED) {
+    it(`POST with content-type ${String(contentType)} → buffered 415, body never read`, async () => {
+      let subscribed = 0;
+      const service = createMockService(() => {
+        subscribed++;
+        return single();
+      });
+      const { mock, captures } = createMockResponse();
+      const ctx = createMockRequest({ response: mock, contentType, body: { query: '{ a }' } });
+      let read = 0;
+      (ctx.request as unknown as { json: () => Promise<unknown> }).json = () => {
+        read++;
+        return Promise.resolve({ query: 'mutation { transfer }' });
+      };
+
+      const { post } = createSseHandler(service, createFakeRuntime().runtime);
+      await post(ctx);
+
+      expect(captures.status).toBe(415);
+      expect(captures.headers.get('Content-Type')).toBe('application/json');
+      expect(JSON.parse(decoder.decode(captures.body!))).toEqual({
+        errors: [
+          {
+            message: 'Unsupported media type. Expected application/json',
+            extensions: { code: 'UNSUPPORTED_MEDIA_TYPE' },
+          },
+        ],
+      });
+      expect(captures.stream).toBeUndefined();
+      expect(read).toBe(0);
+      expect(subscribed).toBe(0);
+    });
+  }
+
+  it('a 405 outcome is answered buffered with Allow: POST, never as a stream', async () => {
+    const refusal = {
+      errors: [
+        {
+          message: 'Mutations are not allowed over GET',
+          extensions: { code: 'METHOD_NOT_ALLOWED' },
+        },
+      ],
+    };
+    const service = createMockService(() => ({ kind: 'error', status: 405, result: refusal }));
+    const { mock, captures } = createMockResponse();
+    const ctx = createMockRequest({
+      response: mock,
+      method: 'GET',
+      query: { query: 'mutation { transfer }' },
+    });
+
+    const { get } = createSseHandler(service, createFakeRuntime().runtime);
+    await get(ctx);
+
+    expect(captures.status).toBe(405);
+    expect(captures.headers.get('Allow')).toBe('POST');
+    expect(captures.headers.get('Content-Type')).toBe('application/json');
+    expect(JSON.parse(decoder.decode(captures.body!))).toEqual(refusal);
+    expect(captures.stream).toBeUndefined();
+  });
+
+  for (const status of [400, 200]) {
+    it(`an error outcome with status ${status} stays in-stream (C4)`, async () => {
+      const service = createMockService(() => ({
+        kind: 'error',
+        status,
+        result: { errors: [{ message: 'bad', extensions: { code: 'GRAPHQL_VALIDATION_FAILED' } }] },
+      }));
+      const { mock, captures } = createMockResponse();
+      const ctx = createMockRequest({ response: mock, body: { query: '{ nope }' } });
+
+      const { post } = createSseHandler(service, createFakeRuntime().runtime);
+      await post(ctx);
+
+      expect(captures.status).toBe(200);
+      expect(captures.headers.get('Allow')).toBeUndefined();
+      expect(await drain(captures.stream!)).toContain('GRAPHQL_VALIDATION_FAILED');
+    });
+  }
 });
