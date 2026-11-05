@@ -664,6 +664,12 @@ function deployOptions(
     );
     return false;
   }
+  // A repeated name would be written twice into imagePullSecrets, a list keyed
+  // by name, and refused only at apply time — after the build and push.
+  if (new Set(pullSecrets).size !== pullSecrets.length) {
+    deps.error('Each --pull-secret name may be given only once.');
+    return false;
+  }
   if (timeout !== undefined && !TIMEOUT_PATTERN.test(timeout)) {
     deps.error(
       `--timeout ${escapeName(timeout)} is not a duration: use seconds, minutes or hours, such as 300s or 5m.`,

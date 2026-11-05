@@ -50,6 +50,10 @@ it('X87-5 validates repeated pull Secrets, preflights names only, and lists them
       ),
     ).toBe(true);
   expect(h.out.join('\n')).toContain('would use imagePullSecrets: registry, backup.example');
+  const repeated = harness();
+  expect(await repeated.run(['deploy', '--pull-secret', 'a', '--pull-secret', 'a'])).toBe(2);
+  expect(repeated.err.join('\n')).toContain('Each --pull-secret name may be given only once.');
+  expect(repeated.calls).toEqual([]);
   const valueless = harness();
   expect(await valueless.run(['deploy', '--pull-secret', '--pull-secret', 'registry'])).toBe(2);
   expect(valueless.calls).toEqual([]);
