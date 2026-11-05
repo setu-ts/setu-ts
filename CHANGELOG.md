@@ -327,7 +327,6 @@ All notable changes to this project are documented here. The format follows
   only to replace the link with its directory.
 - **Page shadowing documentation (X91-4, M131c, `@setu-ts/cli`).** The CLI guide explains that a
   kernel route answers document requests when it shares a page's path.
-
 - **A regenerated session's old row is deleted even when the request throws (M131b, #557,
   `@setu-ts/session-plugin`).** `regenerate()` is a revocation, so the session middleware deletes
   the superseded store row before rethrowing a request's error (a store fault there is logged at

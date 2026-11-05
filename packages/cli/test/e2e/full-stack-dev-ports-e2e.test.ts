@@ -24,7 +24,12 @@ beforeEach(async () => {
   root = await tempDir({ prefix: 'm131c-dev-ports-' });
 });
 afterEach(async () => {
-  for (const child of children.splice(0)) stop(child);
+  // SIGTERM first: the dev runner starts each member in its own process group and
+  // only stops them on a signal it can handle, so a failed run leaks nothing.
+  const running = children.splice(0);
+  for (const child of running) stop(child, 'SIGTERM');
+  await new Promise((resolve) => setTimeout(resolve, 5_000));
+  for (const child of running) stop(child);
   await nodeFs.rm(root, { recursive: true, force: true });
 });
 
@@ -144,6 +149,12 @@ it(
     }
     // The runner forwards SIGTERM to each member's process group, so both exit.
     stop(dev.child, 'SIGTERM');
+    for (const member of [web!, shop!])
+      await until(
+        async () => !(await listening(member.vitePort)),
+        `${member.name} Vite shutdown`,
+        dev.output,
+      );
     for (const member of [web!, shop!])
       await until(
         async () => !(await listening(member.port)),

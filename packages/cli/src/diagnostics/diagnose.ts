@@ -322,9 +322,6 @@ export async function diagnoseProject(
     // per-barrel findings, each stamped with the stop: it prints only the barrels
     // the run generated (or the --module group), so the warning never names a
     // site the run does not touch (review fix round 2, M-a).
-    // One warning per consumer: check's names only what check requires;
-    // generate's two groups (both printed by generate) share one warning, so a
-    // `g module` run neither repeats it nor drops the module group's symbols.
     const collapse = (sources: readonly Finding[][], target: Finding[]): void => {
       const uncertain = sources.flat().filter(isUncertain);
       if (uncertain.length === 0) return;

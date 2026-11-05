@@ -72,3 +72,32 @@ describe('module activation', () => {
     expect(withoutImports(undefined)).toBeUndefined();
   });
 });
+
+describe('withoutImports without semicolons (M131c review)', () => {
+  it.each([
+    [
+      "import './polyfill'\nregisterModules(app.router)\nconst b = Array.from(c)",
+      'side-effect import',
+    ],
+    [
+      'const u = import.meta.url\nregisterModules(app.router)\nconst b = Array.from(c)',
+      'import.meta',
+    ],
+    [
+      "const m = import('./m')\nregisterModules(app.router)\nconst b = Array.from(c)",
+      'dynamic import',
+    ],
+  ])('keeps the code after a %s that has no from', (code) => {
+    expect(withoutImports(code)).toContain('registerModules(app.router)');
+  });
+
+  it('still drops declarations without semicolons', () => {
+    const code =
+      "import { registerModules } from './src/modules/index.ts'\nimport type { X } from './x'\nimport * as y from './y'\nconst z = 1";
+    const kept = withoutImports(code)!;
+    expect(kept).not.toContain('registerModules');
+    expect(kept).not.toContain('X');
+    expect(kept).not.toContain('* as y');
+    expect(kept).toContain('const z = 1');
+  });
+});

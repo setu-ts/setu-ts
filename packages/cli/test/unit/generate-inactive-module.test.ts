@@ -396,7 +396,10 @@ describe('setu generate --module reports an inactive module', () => {
 
     expect(step.code).toBe(0);
     expect(step.err).toContain('could not classify setu.config.ts at line 1 (`template literal`)');
-    expect(step.err).toContain('MODULES');
+    // One line names both sites a class-based module needs (M131c review).
+    const warnings = step.err.split('\n').filter((line) => line.includes('could not classify'));
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('MODULES, registerModules');
     expect(step.err).not.toContain(INACTIVE_HEADER);
   });
 

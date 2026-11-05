@@ -202,13 +202,7 @@ export function renderGenerateFindings(
     }
     return;
   }
-  // generate and --module can report the same config site; print each line once.
-  const printed = new Set<string>();
-  const print = (line: string): void => {
-    if (printed.has(line)) return;
-    printed.add(line);
-    error(line);
-  };
+  const selected: Finding[] = [];
   {
     // Functional module wiring has always preceded the decorator/jobs sites. A dry
     // run reports only a config it could not read; its wiring notices wait for the
@@ -219,18 +213,38 @@ export function renderGenerateFindings(
         options.generated?.includes(f.barrel) === true &&
         (options.dryRun !== true || (f.kind === 'unwired' && f.stop !== undefined)),
     );
-    for (const finding of [
+    selected.push(
       ...findings.filter((f) => f.kind === 'unwired' && f.site === 'registerModules'),
       ...findings.filter((f) => f.kind !== 'unwired' || f.site !== 'registerModules'),
-    ])
-      for (const line of lines(finding)) print(line);
+    );
   }
   if (options.module !== undefined) {
     const inactive = diagnosis.findings.find(
       (f) => f.kind === 'module-inactive' && f.module === options.module,
     );
-    for (const finding of inactive === undefined ? diagnosis.moduleWiring : [inactive])
-      for (const line of lines(finding)) print(line);
+    selected.push(...(inactive === undefined ? diagnosis.moduleWiring : [inactive]));
+  }
+  // An unreadable config is one fact: every site this run touches shares one line
+  // naming all their symbols, where the first of them stood.
+  const stops = selected.filter(
+    (f): f is Extract<Finding, { kind: 'unwired' }> => f.kind === 'unwired' && f.stop !== undefined,
+  );
+  const first = stops[0];
+  const merged: Finding | undefined =
+    first === undefined
+      ? undefined
+      : { ...first, symbols: [...new Set(stops.flatMap((f) => f.symbols))].sort() };
+  // generate and --module can report the same site; print each finding once.
+  const printed = new Set<string>();
+  for (const finding of selected) {
+    const shown =
+      finding === first ? merged : stops.includes(finding as never) ? undefined : finding;
+    if (shown === undefined) continue;
+    const block = lines(shown);
+    const key = block.join('\n');
+    if (printed.has(key)) continue;
+    printed.add(key);
+    for (const line of block) error(line);
   }
 }
 
