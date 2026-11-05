@@ -465,10 +465,19 @@ export interface IWebSocketService {
    *   produced one (`ctx.request.user`). Absent when the upgrade was not
    *   authenticated; implementations must treat a missing principal as
    *   anonymous and must not throw on its absence.
+   * @param publicOrigin - The request's public origin as the browser saw it
+   *   (`requestOriginOf(ctx).origin`, which honours an origin a trusted proxy
+   *   published), passed by the kernel so an implementation can refuse a
+   *   cross-site handshake. Absent from a caller with no request context; an
+   *   implementation then falls back to the request URL's origin.
    * @returns The decision, or `null` to fall through
    * @since 0.3.0
    */
-  routeUpgrade?(request: Request, principal?: IPrincipal): Promise<WebSocketUpgradeDecision | null>;
+  routeUpgrade?(
+    request: Request,
+    principal?: IPrincipal,
+    publicOrigin?: string,
+  ): Promise<WebSocketUpgradeDecision | null>;
   /** Whether the underlying HTTP adapter can perform WebSocket upgrades. */
   readonly available: boolean;
   /** Current number of open connections across all routes. */

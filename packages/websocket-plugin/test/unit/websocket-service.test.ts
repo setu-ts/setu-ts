@@ -49,6 +49,9 @@ describe('resolveOptions', () => {
       heartbeatPayload: 'ping',
       idleTimeoutMs: 0,
       maxMessageBytes: 0,
+      // The Origin check is on by default, with no extra origins allowed.
+      checkOrigin: true,
+      allowedOrigins: [],
     });
   });
 
@@ -60,6 +63,8 @@ describe('resolveOptions', () => {
         heartbeatPayload: 'beat',
         idleTimeoutMs: 5000,
         maxMessageBytes: 64,
+        checkOrigin: false,
+        allowedOrigins: ['https://app.example.com'],
       }),
     ).toEqual({
       maxConnections: 10,
@@ -67,6 +72,8 @@ describe('resolveOptions', () => {
       heartbeatPayload: 'beat',
       idleTimeoutMs: 5000,
       maxMessageBytes: 64,
+      checkOrigin: false,
+      allowedOrigins: ['https://app.example.com'],
     });
   });
 

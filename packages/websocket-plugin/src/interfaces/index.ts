@@ -23,6 +23,29 @@ import type {
  */
 export interface WebSocketPluginOptions {
   /**
+   * Browser origins, besides the app's own, allowed to open a WebSocket. Each
+   * entry is an absolute `http:`/`https:` origin exactly as a browser sends it
+   * (`'https://app.example.com'`, no path or trailing slash); an invalid entry
+   * throws when the plugin is constructed.
+   *
+   * Every handshake whose `Origin` header is neither the request's public origin
+   * nor in this list is refused with `403`, before route guards run and before
+   * a connection slot is claimed: a page on another site cannot open a socket
+   * that carries the user's cookies. A handshake with no `Origin` header — a
+   * non-browser client — is admitted. Defaults to `[]`.
+   *
+   * @since 0.12.0
+   */
+  readonly allowedOrigins?: readonly string[];
+  /**
+   * Whether to check the `Origin` header of every handshake (see
+   * {@linkcode WebSocketPluginOptions.allowedOrigins}). Default `true`; `false`
+   * admits every origin, for a deployment that must accept any page.
+   *
+   * @since 0.12.0
+   */
+  readonly checkOrigin?: boolean;
+  /**
    * Maximum number of simultaneously open connections across all routes.
    * `0` (the default) means unlimited. At the limit, further upgrade requests
    * are refused with HTTP 503 before any socket is created.

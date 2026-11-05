@@ -510,6 +510,37 @@ describe('GraphqlService', () => {
       }
     });
 
+    // execute() applies the same rule when a caller passes a request context but
+    // no method: an app route forwarding a GET cannot run a mutation.
+    for (const method of ['GET', 'HEAD', 'PUT'] as const) {
+      it(`execute refuses a mutation whose request context arrived over ${method} (405)`, async () => {
+        const service = makeService(createSubscribeRuntime({ operation: 'mutation' }));
+        const requestContext = {
+          services: mockServiceRegistry,
+          request: { method },
+        } as unknown as IRequestContext;
+        const outcome = await service.execute({ query: 'mutation { transfer }' }, requestContext);
+        expect(outcome.status).toBe(405);
+        expect(outcome.result.errors?.[0]?.extensions?.code).toBe('METHOD_NOT_ALLOWED');
+      });
+    }
+
+    it('execute runs a mutation over POST, with an explicit method, or with no request', async () => {
+      const service = makeService(createSubscribeRuntime({ operation: 'mutation' }));
+      const context = (method: string) =>
+        ({ services: mockServiceRegistry, request: { method } }) as unknown as IRequestContext;
+      for (const outcome of [
+        await service.execute({ query: 'mutation { transfer }' }, context('POST')),
+        // An explicit method wins over the one derived from the request.
+        await service.execute({ query: 'mutation { transfer }' }, context('GET'), 'POST'),
+        // A server-side call with no request is not method-checked.
+        await service.execute({ query: 'mutation { transfer }' }),
+      ]) {
+        expect(outcome.status).toBe(200);
+        expect(outcome.result.errors).toBeUndefined();
+      }
+    });
+
     it('builds WS-shaped context: services from the registry, user/tenant from conn.data', async () => {
       let captured: { services?: unknown; user?: unknown; tenant?: unknown } = {};
       const service = makeService(createSubscribeRuntime({ operation: 'subscription' }), {

@@ -11,6 +11,7 @@ import {
   ERROR_RESPONDER_STATE_KEY,
   errorResponderOf,
   isPromiseLike,
+  requestOriginOf,
   respondWithError,
   fallbackErrorHint,
   maskUrlUserinfo,
@@ -1879,7 +1880,12 @@ class Application implements IKernelApplication {
       // carries whatever the authentication band produced. The parameter is
       // optional on the contract (M73 §3.7): a service written before the
       // widening simply never receives it.
-      decision = await wsService.routeUpgrade(raw, ctx.request.user);
+      //
+      // The public origin (honouring one a trusted proxy published) lets the
+      // router refuse a cross-site handshake: only the kernel holds `ctx`.
+      // `requestOriginOf` can throw on an invalid URL; it is inside this `try`,
+      // so that case is reported like any other router failure.
+      decision = await wsService.routeUpgrade(raw, ctx.request.user, requestOriginOf(ctx).origin);
     } catch (cause) {
       // Reported, not swallowed. The pre-M70a backstop in the adapter's
       // `UpgradeRouterStore` discarded the cause because the adapter holds no

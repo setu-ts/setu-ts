@@ -311,6 +311,19 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **Cross-site WebSocket handshakes are refused (PR pending, `@setu-ts/websocket-plugin`,
+  `@setu-ts/kernel`, `@setu-ts/common`).** Security. A page on another site could open any WebSocket
+  route, GraphQL's included, with the user's cookies: a handshake is a `GET`, so the CSRF middleware
+  never saw it. `WebSocketPlugin` now answers `403` to a handshake whose `Origin` is neither the
+  app's public origin nor in the new `allowedOrigins` option, before route guards and before a
+  connection slot; a client with no `Origin` is admitted, and `checkOrigin: false` turns the check
+  off. The kernel passes the proxy-aware public origin as `routeUpgrade`'s new optional third
+  argument.
+- **`IGraphqlService.execute` with a request context and no method runs a mutation only for `POST`
+  (PR pending, `@setu-ts/graphql-plugin`).** Security. An application route forwarding a request to
+  `execute(params, ctx)` let a cross-site `GET` run a mutation; the method is now derived from the
+  request and fails closed, the rule `subscribe` already applied. An explicit method still wins.
+
 - **Cross-site requests cannot run a GraphQL mutation (#559, `@setu-ts/graphql-plugin`).** Security.
   Both `POST /graphql` and `POST /graphql/stream` now require the `content-type` media type to equal
   `application/json` (parameters ignored) and answer anything else, a missing header included, `415`
