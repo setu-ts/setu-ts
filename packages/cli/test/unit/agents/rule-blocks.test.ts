@@ -9,7 +9,16 @@ import {
 } from '../../../../../test/fixtures/snippets/agent-card-checks.ts';
 
 describe('composition-specific rule blocks', () => {
-  const always = ['generate', 'services', 'add-first', 'time', 'errors', 'config', 'imports'];
+  const always = [
+    'verify',
+    'generate',
+    'services',
+    'add-first',
+    'time',
+    'errors',
+    'config',
+    'imports',
+  ];
   for (const [runtime, style, plugins, expected] of [
     ['node', 'functional', [], ['functional', 'node-tests']],
     ['bun', 'class-based', ['decorator-plugin', 'di-plugin'], ['class-based', 'bun-tests']],

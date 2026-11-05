@@ -12,6 +12,15 @@ const DENO_MANIFEST = (...packages: readonly string[]) =>
     ),
   });
 
+it('X93-10 reports a listing-only service in the pre-write warning', async () => {
+  const h = harness({ '/app/src/services/plain.service.ts': 'export function work() {}' });
+  expect(await h.run(['service', 'other'])).toBe(0);
+  expect(h.err.text()).toContain(
+    'src/services/plain.service.ts is not re-exported from src/services/index.ts: it does not export describePlain',
+  );
+  expect(h.err.text()).not.toContain('nothing registers it');
+});
+
 it('dry-run collision refuses without writing', async () => {
   const h = harness({ '/app/src/services/widget.service.ts': 'mine' });
   expect(await h.run(['service', 'widget', '--dry-run'])).toBe(1);
@@ -77,7 +86,7 @@ describe('runGenerateCommand', () => {
   it('refuses a class-based job without queue before writing and marks help unavailable', async () => {
     const h = harness({ '/app/deno.json': DENO_MANIFEST('decorator-plugin') });
     expect(await h.run(['job', 'nightly'])).toBe(1);
-    expect(h.err.text()).toContain(`deno run -A npm:@setu-ts/cli@${VERSION} add queue`);
+    expect(h.err.text()).toContain(`deno run -A --no-lock npm:@setu-ts/cli@${VERSION} add queue`);
     expect(h.fs.writes).toEqual([]);
     expect(await h.run(['--help'])).toBe(0);
     expect(h.out.text()).toContain('job  (unavailable — run `setu add queue`)');

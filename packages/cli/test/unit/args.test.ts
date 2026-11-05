@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { parseArgs, stringFlag, stringFlags } from '../../src/args.ts';
 
+it('X87-5 keeps every pull-secret occurrence in order', () => {
+  expect(
+    parseArgs(['workspace', 'deploy', '--pull-secret', 'one', '--pull-secret=two']).flags[
+      'pull-secret'
+    ],
+  ).toEqual(['one', 'two']);
+});
+
 describe('parseArgs', () => {
   it('returns empty positionals and flags for empty argv', () => {
     const args = parseArgs([]);

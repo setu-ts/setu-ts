@@ -30,6 +30,11 @@ function dockerfile(): string {
 }
 
 describe('generated Dockerfile chown fold (X10-5)', () => {
+  it('X87-4 removes testing and diagnostics from the Deno runtime import map', () => {
+    const source = dockerfile();
+    expect(source).toContain('delete manifest.imports["@setu-ts/testing"]');
+    expect(source).toContain('delete manifest.imports["@setu-ts/diagnostics-plugin"]');
+  });
   it('one RUN carries both the cache and the ownership fixup', () => {
     const contents = dockerfile();
     const runLines = contents.split('\n').filter((line) => line.startsWith('RUN '));

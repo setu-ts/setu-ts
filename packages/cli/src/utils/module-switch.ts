@@ -148,6 +148,8 @@ export interface IModuleSwitchInput {
   readonly mode: GeneratorMode;
   /** `--adopt-controllers` was passed. */
   readonly adopt: boolean;
+  /** Full-stack indexes require their generated service factory and token. */
+  readonly fullStack?: boolean;
   /** The flat scan: `controller`, its function shapes, and `service`. */
   readonly artifacts: SeamArtifacts;
   /** The module schematic's files, project-relative. */
@@ -291,6 +293,26 @@ export async function planModuleSwitch(input: IModuleSwitchInput): Promise<Modul
     flat.map((path) => [path, `${prefix}/${path.slice(path.indexOf('/', 4) + 1)}`]),
   );
   const generatedPaths = new Set(input.generated.map((file) => file.path));
+  const ownController = `${prefix}/${module}.controller.ts`;
+  const ownService = `${prefix}/${module}.service.ts`;
+  const adoptedController = moved.get(`src/controllers/${module}.controller.ts`) === ownController;
+  const adoptedService = moved.get(`src/services/${module}.service.ts`) === ownService;
+  if ((adoptedController || adoptedService) && input.fullStack === true)
+    return {
+      kind: 'refused',
+      lines: [
+        'Cannot adopt same-named files into a full-stack module: its index imports the generated service factory and token by name. Choose another module name; nothing was moved.',
+      ],
+    };
+  if (adoptedService && !adoptedController)
+    return {
+      kind: 'refused',
+      lines: [
+        'Cannot adopt a same-named service without its controller: the generated controller imports list/get/create/update functions from it; adopt it with its controller, or name the module something else. Nothing was moved.',
+      ],
+    };
+  if (adoptedController) generatedPaths.delete(ownController);
+  if (adoptedService) generatedPaths.delete(ownService);
   const seen = new Map<string, string>();
   const clashes: string[] = [];
   for (const [from, to] of moved) {
@@ -449,13 +471,25 @@ function adoptedRegistration(
   const services = input.mode === 'functional' ? [] : within('service', 'src/services');
   const files: GeneratedFile[] = [];
   for (const file of input.generated) {
+    const ownController = moved.has(`src/controllers/${input.module}.controller.ts`);
+    if (
+      (moved.has(`src/controllers/${input.module}.controller.ts`) &&
+        file.path === `${prefix}/${input.module}.controller.ts`) ||
+      (moved.has(`src/services/${input.module}.service.ts`) &&
+        file.path === `${prefix}/${input.module}.service.ts`) ||
+      (ownController &&
+        [`${prefix}/${input.module}.test.ts`, `${prefix}/${input.module}.e2e.test.ts`].includes(
+          file.path,
+        ))
+    )
+      continue;
     if (file.path === `${prefix}/index.ts`) {
       files.push({
         ...file,
         contents:
           input.mode === 'functional'
             ? renderFunctionalModuleIndex(names, {
-                controller: [input.module, ...controllers],
+                controller: [...new Set([input.module, ...controllers])],
                 // Keep the module's request-bound service (M130 §3.4): the
                 // switch must not erase a registration the schematic rendered.
                 ...(registersService(file.contents, names.screaming)
@@ -463,12 +497,21 @@ function adoptedRegistration(
                   : {}),
               })
             : renderClassModuleIndex(names, {
-                controller: [input.module, ...controllers],
+                controller: [...new Set([input.module, ...controllers])],
                 [FUNCTION_CONTROLLER_ARTIFACTS]: functions,
               }),
       });
     } else if (file.path === `${prefix}/${input.module}.module.ts`) {
       let source = file.contents;
+      // The adopted function controller is registered by the index, so the
+      // declaration must drop the generated class that was not written.
+      if (functions.includes(input.module))
+        source = source
+          .replace(
+            `import { ${names.pascal}Controller } from './${input.module}.controller.ts';\n`,
+            '',
+          )
+          .replace(`controllers: [${names.pascal}Controller]`, 'controllers: []');
       const entries = [
         ...controllers
           .filter((name) => !functions.includes(name))
@@ -490,8 +533,13 @@ function adoptedRegistration(
           entry.symbol,
           entry.specifier,
         );
-        // `present` means the module's own class has this name: the adopted one
-        // would never be registered.
+        // A same-named adopted class replaces the generated class at that path.
+        if (
+          edit.kind === 'present' &&
+          (entry.specifier === `./${input.module}.controller.ts` ||
+            entry.specifier === `./${input.module}.service.ts`)
+        )
+          continue;
         if (edit.kind !== 'edited')
           return {
             kind: 'refused',

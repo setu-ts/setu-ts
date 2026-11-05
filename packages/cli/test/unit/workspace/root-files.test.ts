@@ -50,8 +50,8 @@ describe('workspaceRootFiles', () => {
         file: 'deno.json',
         key: 'tasks',
         test: undefined,
-        build: `deno run -A ${frameworkSpecifier('cli', 'deno')} workspace build`,
-        deploy: `deno run -A ${frameworkSpecifier('cli', 'deno')} workspace deploy`,
+        build: `deno run -A --no-lock ${frameworkSpecifier('cli', 'deno')} workspace build`,
+        deploy: `deno run -A --no-lock ${frameworkSpecifier('cli', 'deno')} workspace deploy`,
       },
       node: {
         file: 'package.json',
@@ -92,7 +92,7 @@ describe('workspaceRootFiles', () => {
 
   it('wraps port-repair guidance around the pinned command on every workspace runtime', () => {
     for (const [runtime, invocation] of [
-      ['deno', `deno run -A npm:@setu-ts/cli@${VERSION}`],
+      ['deno', `deno run -A --no-lock npm:@setu-ts/cli@${VERSION}`],
       ['node', `npx @setu-ts/cli@${VERSION}`],
       ['bun', `bunx @setu-ts/cli@${VERSION}`],
     ] as const) {
@@ -192,7 +192,9 @@ describe('workspaceRootFiles', () => {
   it('names the workspace and the add-a-service command in its README', () => {
     const readme = contentsOf('README.md');
     expect(readme).toContain('# acme');
-    expect(readme).toContain(`deno run -A npm:@setu-ts/cli@${VERSION} generate app orders`);
+    expect(readme).toContain(
+      `deno run -A --no-lock npm:@setu-ts/cli@${VERSION} generate app orders`,
+    );
     expect(readme).toContain(WORKSPACE_MANIFEST);
   });
 });

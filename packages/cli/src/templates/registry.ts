@@ -236,7 +236,8 @@ export interface TemplateManifest {
    * Must already be formatted exactly as `deno fmt` would format it, since the
    * scaffold is gated on passing its own `fmt --check`.
    */
-  readonly readmeSection?: string | ((invocation: string, runtime: TargetRuntime) => string);
+  readonly readmeSection?:
+    string | ((invocation: string, runtime: TargetRuntime, member?: boolean) => string);
   /**
    * npm packages the running application needs, merged into `dependencies`
    * on npm targets and into the Deno target's import map.

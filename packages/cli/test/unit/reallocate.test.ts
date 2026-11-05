@@ -49,6 +49,51 @@ function harness(members: readonly WorkspaceMember[], runtime: TargetRuntime = '
 }
 
 describe('ports --reallocate', () => {
+  it('L4 reports an unreadable inspector script without throwing out of reallocation', async () => {
+    const h = harness([{ name: 'web', port: 3000, inspectPort: 5900 }], 'node');
+    await h.fs.writeFile('/ws/apps/web/package.json', new TextEncoder().encode('{}'));
+    const read = h.fs.readFile.bind(h.fs);
+    h.fs.readFile = (path) =>
+      path === '/ws/apps/web/package.json'
+        ? Promise.reject(new Error('permission denied'))
+        : read(path);
+    expect(await h.run()).toBe(0);
+    expect(h.log.text()).toContain('manifest could not be read');
+    expect(h.log.text()).toContain('--inspect=127.0.0.1:5000');
+  });
+  it('X87-6 drops stale dev ports, rewrites exact tokens and leaves edited scripts with a note', async () => {
+    for (const script of [
+      'node --inspect=127.0.0.1:5900 main.ts',
+      'node --inspect=127.0.0.1:5900 --inspect=127.0.0.1:5900 main.ts',
+    ]) {
+      const h = harness([{ name: 'web', port: 3000, inspectPort: 5900, vitePort: 5901 }], 'node');
+      await h.fs.writeFile(
+        '/ws/apps/web/package.json',
+        new TextEncoder().encode(JSON.stringify({ scripts: { 'start:debug': script } })),
+      );
+      expect(await h.run()).toBe(0);
+      const manifest = JSON.parse(h.fs.read('/ws/setu.workspace.json'));
+      expect(manifest.members[0]).toMatchObject({ inspectPort: 5000, vitePort: 5001 });
+      const debug = JSON.parse(h.fs.read('/ws/apps/web/package.json')).scripts['start:debug'];
+      if (script.includes('--inspect=127.0.0.1:5900 --inspect')) {
+        expect(debug).toBe(script);
+        expect(h.log.text()).toContain('script was left unchanged');
+      } else expect(debug).toBe('node --inspect=127.0.0.1:5000 main.ts');
+    }
+  });
+  it('X87-6 leaves a bare inspector token unchanged when no old inspector port was recorded', async () => {
+    const h = harness([{ name: 'web', port: 3000 }], 'node');
+    const script = 'node --inspect main.ts';
+    await h.fs.writeFile(
+      '/ws/apps/web/package.json',
+      new TextEncoder().encode(JSON.stringify({ scripts: { 'start:debug': script } })),
+    );
+    expect(await h.run()).toBe(0);
+    expect(JSON.parse(h.fs.read('/ws/apps/web/package.json')).scripts['start:debug']).toBe(script);
+    expect(JSON.parse(h.fs.read('/ws/setu.workspace.json')).members[0].inspectPort).toBe(5000);
+    expect(h.log.text()).toContain('no old inspector port was recorded');
+    expect(h.log.text()).toContain('--inspect=127.0.0.1:5000');
+  });
   it('rewrites a Node member at its new connector port with Node CLI guidance', async () => {
     const h = harness([{ name: 'a', port: 3000, devtoolPort: 4919 }], 'node');
     expect(await h.run()).toBe(0);

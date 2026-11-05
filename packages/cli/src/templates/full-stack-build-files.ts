@@ -10,6 +10,7 @@
  * @module
  */
 
+import type { EntryPort } from './project-files.ts';
 import type { GeneratedFile } from '../utils/file-writer.ts';
 import { TAILWIND_RANGE } from './ui-tokens.ts';
 import { NPM_TOOLING_DEV_DEPENDENCIES } from './npm-tooling.ts';
@@ -344,16 +345,24 @@ export const FULL_STACK_CHECK_TASK: Readonly<Record<string, string>> = {
  * package and workspace library external, resolved by the server runtime, so a
  * route module and this entry share one module instance. Context keys from
  * `contextKeyFor()` match by identity; a second copy would read different keys.
+ *
+ * @param port - The member's discovery import; omitted for standalone environment defaults
+ * @returns The full-stack development entry file
+ * @since 0.12.0
  */
-export const FULL_STACK_DEV_ENTRY: { readonly path: string; readonly contents: string } = {
-  path: 'dev.ts',
-  contents: `import * as vite from 'vite';
+export function renderFullStackDevEntry(port?: EntryPort): {
+  readonly path: string;
+  readonly contents: string;
+} {
+  return {
+    path: 'dev.ts',
+    contents: `import * as vite from 'vite';
 import { createRequestHandler, RouterContextProvider, type ServerBuild } from 'react-router';
 import { CAPABILITIES, describeError, type ILogger } from '@setu-ts/common';
 import { viteDevExternals } from '@setu-ts/react-router-plugin';
 import { createRuntimeServices } from '@setu-ts/runtime';
 import { createApp } from './setu.config.ts';
-import { frameworkPackages, workspaceLibraries } from './vite.config.ts';
+import { frameworkPackages, workspaceLibraries } from './vite.config.ts';${port === undefined ? '' : `\nimport { ${port.symbol}, VITE_PORT } from '${port.from}';`}
 
 /**
  * Development server: React Router with hot module replacement.
@@ -366,8 +375,8 @@ import { frameworkPackages, workspaceLibraries } from './vite.config.ts';
  */
 const BASE = '/__vite/';
 const runtime = createRuntimeServices();
-const port = Number(runtime.env.PORT ?? '3000');
-const vitePort = Number(runtime.env.VITE_PORT ?? '5173');
+const port = ${port === undefined ? `Number(runtime.env.PORT ?? '3000')` : port.symbol};
+const vitePort = ${port === undefined ? `Number(runtime.env.VITE_PORT ?? '5173')` : 'VITE_PORT'};
 
 // A file module always has a directory; the fallback only satisfies the type.
 const root = import.meta.dirname ?? '.';
@@ -457,4 +466,5 @@ for (const signal of ['SIGTERM', 'SIGINT'] as const) {
   });
 }
 `,
-};
+  };
+}

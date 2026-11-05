@@ -10,12 +10,12 @@
  * What closes it is emitting the toolchain rather than being it — and the reason
  * that works at all was **measured**, not assumed:
  *
- * - `deno run -A npm:@bufbuild/buf --version` → `1.72.0`. The buf CLI runs under
+ * - `deno run -A --no-lock npm:@bufbuild/buf --version` → `1.72.0`. The buf CLI runs under
  *   Deno's npm compatibility.
  * - `buf generate` with a plugin declared as `local: protoc-gen-es` FAILS —
  *   `exec: "protoc-gen-es": executable file not found in $PATH`, because nothing
  *   installs a PATH binary. Declaring the plugin as a COMMAND
- *   (`local: ['deno', 'run', '-A', 'npm:@bufbuild/protoc-gen-es@^2']`) works, and
+ *   (`local: ['deno', 'run', '-A', '--no-lock', 'npm:@bufbuild/protoc-gen-es@^2']`) works, and
  *   produced `src/gen/orders/v1/orders_pb.ts` exporting the `GenService`
  *   descriptor `addService` takes.
  *
@@ -46,7 +46,7 @@ export const PROTO_DIR = 'proto';
  * notes. `-A` because buf reads and writes the project tree and fetches its own
  * platform binary on first use.
  */
-export const PROTO_TASK_COMMAND = 'deno run -A npm:@bufbuild/buf@^1.57 generate';
+export const PROTO_TASK_COMMAND = 'deno run -A --no-lock npm:@bufbuild/buf@^1.57 generate';
 
 /**
  * The npm script an npm-target member runs `proto:gen` with. `npm run` puts the
@@ -131,7 +131,7 @@ version: v2
 inputs:
   - directory: ${PROTO_DIR}
 plugins:
-  - local: ['deno', 'run', '-A', 'npm:@bufbuild/protoc-gen-es@^2']
+  - local: ['deno', 'run', '-A', '--no-lock', 'npm:@bufbuild/protoc-gen-es@^2']
     out: ${PROTO_OUT_DIR}
     opt: target=ts
 `

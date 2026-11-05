@@ -15,6 +15,30 @@ import { workspaceProfile } from '../../../src/workspace/runtime-profile.ts';
 import { withPluginOptionSeams } from '../../../src/templates/seam.ts';
 import { JOBS_SEAM } from '../../../src/seams/jobs.ts';
 
+it('V11-3 names Node through tsx as the config loader on Workers', () => {
+  const files = projectFiles(
+    'worker',
+    'cloudflare-workers',
+    resolveHost(getTemplate('rest')!, 'cloudflare-workers'),
+  );
+  expect(contentsOf(files, 'setu.config.ts')).toContain('loads this module on Node through tsx');
+  expect(contentsOf(files, 'setu.config.ts')).not.toContain('loads this module under Deno');
+});
+
+it('V11-4 always ignores Workers local variables while keeping variable files conditional', () => {
+  for (const name of ['rest', 'microservice', 'full-stack']) {
+    const host = resolveHost(getTemplate(name)!, 'cloudflare-workers');
+    const files = projectFiles('worker', 'cloudflare-workers', {
+      ...host,
+      manifest: { ...host.manifest, envVariables: [] },
+    });
+    expect(contentsOf(files, '.gitignore')).toContain('.dev.vars\n');
+    expect(
+      files.some((file) => file.path === '.dev.vars' || file.path === '.dev.vars.example'),
+    ).toBe(false);
+  }
+});
+
 describe('functional hosts and generated test tasks', () => {
   it('emits the TLS proxy setting and warns about universal trust (M119c)', () => {
     const files = [
@@ -130,7 +154,7 @@ describe('guidance and queue seam composition', () => {
     ['node', 'npx @setu-ts/cli@'],
     ['cloudflare-workers', 'npx @setu-ts/cli@'],
     ['bun', 'bunx @setu-ts/cli@'],
-    ['deno', 'deno run -A npm:@setu-ts/cli@'],
+    ['deno', 'deno run -A --no-lock npm:@setu-ts/cli@'],
   ] as const) {
     it(`README command resolves through the pinned CLI on ${runtime}`, () => {
       const readme = contentsOf(
@@ -550,7 +574,7 @@ describe('the Cloudflare Workers target', () => {
   });
 
   it('keeps the platform specifier OUT of setu.config.ts', () => {
-    // `setu commands` loads that module under Deno, which cannot resolve
+    // `setu commands` loads that module on Node through tsx, which cannot resolve
     // `cloudflare:workers` at all — putting the import there, which is what the
     // plugin README's only usage example shows, breaks the CLI outright.
     const config = contentsOf(filesOf(micro), 'setu.config.ts');

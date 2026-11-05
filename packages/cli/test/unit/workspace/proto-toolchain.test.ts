@@ -42,7 +42,9 @@ describe('protoToolchainFiles', () => {
   // command it runs through Deno with no install at all.
   it('declares the codegen plugin as a command, not as a PATH name', () => {
     const config = contentsOf('buf.gen.yaml');
-    expect(config).toContain(`local: ['deno', 'run', '-A', 'npm:@bufbuild/protoc-gen-es@^2']`);
+    expect(config).toContain(
+      `local: ['deno', 'run', '-A', '--no-lock', 'npm:@bufbuild/protoc-gen-es@^2']`,
+    );
     expect(config).not.toMatch(/^\s+- local: protoc-gen-es$/m);
   });
 

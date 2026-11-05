@@ -61,6 +61,22 @@ function harness(
 }
 
 describe('agents workspace ownership', () => {
+  it('V10-27 gives only the replacement remedy and never resolves the link target', async () => {
+    let lookedUp = false;
+    const fs: ICliFileSystem = {
+      ...createFakeFs(),
+      invokingUid: 123,
+      directoryOwnership: () => Promise.resolve({ ...owned, isSymbolicLink: true }),
+      realPath: () => {
+        lookedUp = true;
+        return Promise.resolve('/elsewhere');
+      },
+    };
+    await expect(assertAgentWorkspaceOwnership(fs, ['/work/link'])).rejects.toEqual(
+      new Error('/work/link: symlink; replace the link with the directory it points at'),
+    );
+    expect(lookedUp).toBe(false);
+  });
   it('adopts an owned chain, checking every parent to / once', async () => {
     const h = harness();
     expect(await h.run()).toBe(0);
@@ -81,7 +97,7 @@ describe('agents workspace ownership', () => {
       '/work/apps/b',
       { isSymbolicLink: true },
       'symlink',
-      'replace the link with the directory it points at, or run setu agents from its real path (/work/apps/b)',
+      'replace the link with the directory it points at',
     ],
     [
       '/work/apps/b',
@@ -317,22 +333,5 @@ describe('agents workspace ownership', () => {
     ).toBe(0);
     expect(seen).toEqual([]);
     expect(base.writes).toEqual(['/project/AGENTS.md']);
-  });
-
-  it('names a symlink remedy without a path when its real path cannot be resolved', async () => {
-    const base = createFakeFs({});
-    const fs: ICliFileSystem = {
-      ...base,
-      invokingUid: 123,
-      directoryOwnership: (path) =>
-        Promise.resolve(
-          path === '/work/apps/b' ? { uid: 123, isSymbolicLink: true, isDirectory: false } : owned,
-        ),
-      realPath: () => Promise.reject(new Error('ENOENT')),
-    };
-    await expect(assertAgentWorkspaceOwnership(fs, ['/work/apps/b'])).rejects.toThrow(
-      '/work/apps/b: symlink; replace the link with the directory it points at, ' +
-        'or run setu agents from its real path',
-    );
   });
 });

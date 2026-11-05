@@ -206,7 +206,7 @@ export function devEntryVariants(devtoolPort: number, member = true): readonly s
       " devtool enable`, which names the two lines to add.'",
     "'the connector is not running. Re-run `setu devtool enable`, which names the two lines to add.'",
   );
-  return [
+  const variants = [
     renderDevEntry(input, 'deno'),
     renderDevEntry(input, 'node'),
     current,
@@ -214,6 +214,10 @@ export function devEntryVariants(devtoolPort: number, member = true): readonly s
     renderEntry(input, false, 'deno', true),
     renderEntry(input, true, 'deno', false, false),
     renderEntry(input, true, 'node', false, false),
+  ];
+  return [
+    ...variants,
+    ...variants.map((entry) => entry.replace(/--no-lock (?=npm:@setu-ts\/cli@)/g, '')),
   ];
 }
 
@@ -231,10 +235,12 @@ export function devEntryVariants(devtoolPort: number, member = true): readonly s
  * @returns `true` when the source is one of the CLI's renderings
  */
 export function isDevEntry(source: string, devtoolPort: number, member = true): boolean {
-  const normalized = source.replace(
-    PINNED_CLI,
-    (_match, npm: string | undefined) => `${npm ?? ''}@setu-ts/cli@${VERSION}`,
-  );
+  const normalized = source
+    .replace(/deno run -A (?=npm:@setu-ts\/cli@)/g, 'deno run -A --no-lock ')
+    .replace(
+      PINNED_CLI,
+      (_match, npm: string | undefined) => `${npm ?? ''}@setu-ts/cli@${VERSION}`,
+    );
   return devEntryVariants(devtoolPort, member).includes(normalized);
 }
 

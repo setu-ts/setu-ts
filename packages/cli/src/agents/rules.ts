@@ -13,6 +13,12 @@ export interface IRuleBlock {
 /** Fixed order is the priority order in the generated brief. */
 export const RULE_BLOCKS: readonly IRuleBlock[] = [
   {
+    id: 'verify',
+    packages: [],
+    applies: () => true,
+    text: 'Before reporting done, run check, lint, {{formatCheck}} and test.',
+  },
+  {
     id: 'generate',
     packages: [],
     applies: () => true,

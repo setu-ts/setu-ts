@@ -32,6 +32,12 @@ export function renderMemberPointer(): string {
 
 function commandGloss(name: string, facts: ProjectFacts): string {
   switch (name) {
+    case 'lint':
+      return 'check code style';
+    case 'format':
+      return 'format project files';
+    case 'format:check':
+      return 'check formatting without writing';
     case 'start':
       return facts.runtime === 'node'
         ? 'production entry; on Node, run build first'
@@ -67,6 +73,12 @@ export function renderBrief(facts: ProjectFacts, member = false): string {
   if (member) sections.push(renderMemberPointer());
   sections.push(
     '## Commands\n',
+    ...(facts.runtime === 'deno'
+      ? [
+          '- `deno lint` — check code style',
+          '- `deno fmt --check` — check formatting without writing',
+        ]
+      : []),
     ...facts.commands.map((name) => {
       const gloss = commandGloss(name, facts);
       return `- \`${profile.runScript(name)}\`${gloss === '' ? '' : ` — ${gloss}`}`;
@@ -77,7 +89,8 @@ export function renderBrief(facts: ProjectFacts, member = false): string {
     facts.schematics.map((name) => `\`${name}\``).join(', '),
     '\n## Rules\n',
     ...RULE_BLOCKS.filter((rule) => rule.applies(facts)).map(
-      (rule, index) => `${index + 1}. ${rule.text}`,
+      (rule, index) =>
+        `${index + 1}. ${rule.text.replace('{{formatCheck}}', facts.runtime === 'deno' ? 'deno fmt --check' : 'format:check')}`,
     ),
     '\n## Project map\n',
     '| Path | Purpose |',

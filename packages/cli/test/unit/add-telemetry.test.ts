@@ -43,6 +43,18 @@ const HOOK = '@opentelemetry/instrumentation';
 const IOREDIS = '@opentelemetry/instrumentation-ioredis';
 const REDIS = '@opentelemetry/instrumentation-redis';
 
+it('V10-50 records the OTLP exporter in a workspace root when telemetry is added to a member', async () => {
+  const h = harness();
+  expect(await h.run(['new', 'ws', '--workspace', '--runtime', 'node'])).toBe(0);
+  expect(await h.run(['g', 'app', 'api', '--template', 'rest', '--dir', '/work/ws'])).toBe(0);
+  expect(await h.run(['add', 'telemetry', '--dir', '/work/ws/apps/api']), h.errors.join('\n')).toBe(
+    0,
+  );
+  expect(JSON.parse(h.fs.read('/work/ws/package.json')).dependencies[EXPORTER]).toBe(
+    CLIENT_RANGES[EXPORTER],
+  );
+});
+
 /** Project → the packages `add telemetry` must record, and the option it names. */
 const TABLE: ReadonlyArray<{
   readonly label: string;

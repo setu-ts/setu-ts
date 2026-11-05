@@ -20,6 +20,7 @@ import {
 } from '../utils/file-writer.ts';
 import { interruptionMessage } from '../utils/interruption.ts';
 import { escapeName } from '../utils/names.ts';
+import { cliInvocation } from '../templates/project-files.ts';
 import { memberPath } from '../utils/member-path.ts';
 import { assertAgentWorkspaceOwnership } from '../utils/agent-workspace-ownership.ts';
 import {
@@ -31,6 +32,8 @@ import {
 
 /** The same dependencies used when new invokes this writer after scaffolding. */
 export interface IAgentsDependencies {
+  /** New scaffolds have not installed their agent cards yet. */
+  readonly installPending?: true;
   readonly fs: ICliFileSystem;
   readonly cwd: string;
   readonly log: (message: string) => void;
@@ -290,16 +293,24 @@ export async function runAgentsCommand(
     const outcomeFor = new Map(outcomes.map((result) => [result.path, result.outcome]));
     for (const file of files)
       deps.log(`${outcomeFor.get(file.path) ?? 'unchanged'} ${escapeName(file.path)}`);
-    for (const brief of briefs) {
-      if (brief.facts === undefined) continue;
-      for (const warning of await cardWarnings(
-        deps.fs,
-        brief.dir,
-        brief.facts.installed,
-        workspaceRoot,
-      ))
-        deps.error(escapeName(warning));
-    }
+    if (deps.installPending === true) {
+      const runtime =
+        workspace?.runtime ?? briefs.find((brief) => brief.facts !== undefined)?.facts?.runtime;
+      const pm = runtime === 'deno' ? 'deno' : runtime === 'bun' ? 'bun' : 'npm';
+      deps.error(
+        `agent cards resolve after \`${pm} install\`; then run \`${cliInvocation(runtime ?? 'node')} agents --check\``,
+      );
+    } else
+      for (const brief of briefs) {
+        if (brief.facts === undefined) continue;
+        for (const warning of await cardWarnings(
+          deps.fs,
+          brief.dir,
+          brief.facts.installed,
+          workspaceRoot,
+        ))
+          deps.error(escapeName(warning));
+      }
     return EXIT_OK;
   } catch (cause) {
     const interrupted = interruptionMessage(cause);

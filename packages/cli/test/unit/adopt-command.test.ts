@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import * as runtimeDetector from '../../src/utils/runtime-detector.ts';
 import type { IFileSystem } from '@setu-ts/common';
 import { createFakeFs, createRecorder, type FakeFs } from '../fixtures/fake-fs.ts';
 import { parseArgs } from '../../src/args.ts';
@@ -13,6 +14,130 @@ import { WORKSPACE_MANIFEST } from '../../src/workspace/manifest.ts';
 import { DISCOVERY_MODULE } from '../../src/workspace/discovery-module.ts';
 import { COMPOSE_FILE, DOCKERFILE } from '../../src/workspace/compose.ts';
 import { InterruptedError } from '../../src/utils/interruption.ts';
+import { renderFullStackDevEntry } from '../../src/templates/full-stack-build-files.ts';
+import { formatForTarget } from '../../src/utils/prettier-format.ts';
+
+it('L3 adopts Workers projects without inspector or Vite assignments or edit notes', async () => {
+  const h = harness({
+    ...NODE_PROJECT,
+    '/work/svc/wrangler.toml': 'name = "worker"',
+    '/work/svc/package.json': JSON.stringify({
+      dependencies: { '@setu-ts/react-router-plugin': '^0.11.0' },
+      scripts: { dev: 'wrangler dev' },
+    }),
+  });
+  expect(await h.run(['--name', 'worker']), h.err.text()).toBe(0);
+  const member = JSON.parse(h.fs.read('/work/svc/setu.workspace.json')).members[0];
+  expect(member).not.toHaveProperty('inspectPort');
+  expect(member).not.toHaveProperty('vitePort');
+  expect(h.out.text()).not.toContain('start:debug');
+  expect(h.out.text()).not.toContain('development port lines');
+  expect(h.out.text()).not.toContain('two lines in');
+});
+
+it.each(['package.json', 'dev.ts'])(
+  'L4 aborts adoption and rolls back when rewriting %s fails',
+  async (file) => {
+    for (const failure of [
+      new Error('development write refused'),
+      'development scalar refused',
+      new InterruptedError(),
+    ]) {
+      const standalone = renderFullStackDevEntry().contents;
+      const manifest = JSON.stringify({
+        dependencies: { '@setu-ts/react-router-plugin': '^0.11.0' },
+        scripts: { 'start:debug': 'node --inspect dev.ts' },
+      });
+      const fs = createFakeFs({
+        ...NODE_PROJECT,
+        '/work/svc/package.json': manifest,
+        '/work/svc/dev.ts': standalone,
+      });
+      const err = createRecorder();
+      const failing = {
+        ...fs,
+        writeFile: (path: string, data: Uint8Array) => {
+          const source = new TextDecoder().decode(data);
+          const rewritten =
+            file === 'package.json'
+              ? source.includes('--inspect=127.0.0.1:')
+              : source.includes('const vitePort = VITE_PORT;');
+          return path === '/work/svc/apps/web/' + file && rewritten
+            ? Promise.reject(failure)
+            : fs.writeFile(path, data);
+        },
+      };
+      expect(
+        await runAdoptCommand(parseArgs(['--name', 'web']), {
+          fs: failing,
+          cwd: '/work/svc',
+          log: () => {},
+          error: err.sink,
+        }),
+      ).toBe(failure instanceof InterruptedError ? 130 : 1);
+      if (failure instanceof InterruptedError) expect(err.text()).toContain('Interrupted');
+      else {
+        expect(err.text()).toContain(failure instanceof Error ? failure.message : failure);
+        expect(err.text()).toContain('Nothing was changed: every move was undone.');
+      }
+      expect(fs.read('/work/svc/package.json')).toBe(manifest);
+      expect(fs.read('/work/svc/dev.ts')).toBe(standalone);
+    }
+  },
+);
+
+it('L3 refuses an unknown target runtime before allocating development ports', async () => {
+  for (const failure of [new Error('runtime probe refused'), 'runtime probe refused']) {
+    const probe = vi.spyOn(runtimeDetector, 'detectTargetRuntime').mockRejectedValue(failure);
+    try {
+      const h = harness(NODE_PROJECT);
+      expect(await h.run(['--name', 'worker'])).toBe(1);
+      expect(h.err.text()).toContain('runtime probe refused');
+      expect(h.fs.writes).toEqual([]);
+    } finally {
+      probe.mockRestore();
+    }
+  }
+});
+
+it('X87-2 X87-6 adoption records dev ports and rewrites only canonical entries and inspector tokens', async () => {
+  for (const variant of ['raw', 'formatted', 'edited']) {
+    const edited = variant === 'edited';
+    const standalone = renderFullStackDevEntry();
+    const h = harness({
+      ...NODE_PROJECT,
+      '/work/svc/package.json': JSON.stringify({
+        dependencies: { '@setu-ts/react-router-plugin': '^0.11.0' },
+        scripts: {
+          'start:debug': edited ? 'node --inspect --inspect dev.ts' : 'node --inspect dev.ts',
+        },
+      }),
+      '/work/svc/dev.ts':
+        variant === 'formatted'
+          ? (await formatForTarget([standalone], 'node', '/work/svc', () => {}))[0]!.contents
+          : standalone.contents + (edited ? '\n// hand edit\n' : ''),
+    });
+    expect(await h.run(['--name', 'web'], new AbortController().signal), h.err.text()).toBe(0);
+    const manifest = JSON.parse(h.fs.read('/work/svc/setu.workspace.json'));
+    expect(manifest.members[0]).toMatchObject({ inspectPort: 5000, vitePort: 5001 });
+    const debug = JSON.parse(h.fs.read('/work/svc/apps/web/package.json')).scripts['start:debug'];
+    if (edited) {
+      expect(debug).toBe('node --inspect --inspect dev.ts');
+      expect(h.out.text()).toContain('Set the two development port lines');
+    } else {
+      expect(debug).toBe('node --inspect=127.0.0.1:5000 dev.ts');
+      expect(h.fs.read('/work/svc/apps/web/dev.ts')).toContain('const vitePort = VITE_PORT;');
+    }
+  }
+});
+
+it('X87-2 refuses an exhausted development range before moving any project files', async () => {
+  const h = harness(NODE_PROJECT);
+  expect(await h.run(['--name', 'web', '--port', '65535'])).toBe(1);
+  expect(h.err.text()).toContain('No development ports remain');
+  expect(h.fs.writes).toEqual([]);
+  expect(h.fs.read('/work/svc/main.ts')).toBe(NODE_PROJECT['/work/svc/main.ts']);
+});
 
 /** A scaffolded project, plus the repository files that must NOT move. */
 const PROJECT: Readonly<Record<string, string>> = {
@@ -57,7 +182,7 @@ interface Harness {
   readonly fs: FakeFs;
   readonly out: ReturnType<typeof createRecorder>;
   readonly err: ReturnType<typeof createRecorder>;
-  run(argv: readonly string[]): Promise<number>;
+  run(argv: readonly string[], interrupt?: AbortSignal): Promise<number>;
 }
 
 /**
@@ -74,12 +199,13 @@ function harness(seed: Readonly<Record<string, string>> = PROJECT): Harness {
     fs,
     out,
     err,
-    run: (argv) =>
+    run: (argv, interrupt) =>
       runAdoptCommand(parseArgs(argv), {
         fs,
         cwd: '/work/svc',
         log: out.sink,
         error: err.sink,
+        ...(interrupt === undefined ? {} : { interrupt }),
       }),
   };
 }
@@ -791,7 +917,7 @@ describe('runAdoptCommand', () => {
       members: { name: string; port: number }[];
     };
     expect(manifest.members).toEqual([
-      { name: 'svc', port: 4000, healthProbes: false, metricsEndpoint: false },
+      { name: 'svc', port: 4000, inspectPort: 6000, healthProbes: false, metricsEndpoint: false },
     ]);
     expect(h.fs.read(`/work/svc/apps/svc/${DISCOVERY_MODULE}`)).toContain(
       'export const SERVICE_PORT = 4000;',

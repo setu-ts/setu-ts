@@ -28,6 +28,114 @@ type Responder = (call: ICall) => Partial<RunCommandResult> | undefined;
 
 const SECRET = 'not-a-real-secret-4f9a';
 
+it('X87-5 validates repeated pull Secrets, preflights names only, and lists them in dry run', async () => {
+  const h = harness();
+  expect(
+    await h.run([
+      'deploy',
+      '--dry-run',
+      '--pull-secret',
+      'registry',
+      '--pull-secret',
+      'backup.example',
+    ]),
+    h.err.join('\n'),
+  ).toBe(0);
+  for (const name of ['registry', 'backup.example'])
+    expect(
+      h.calls.some(
+        (call) =>
+          call.command === 'kubectl' &&
+          call.args.join(' ').includes(`get secret ${name} -n ws -o name`),
+      ),
+    ).toBe(true);
+  expect(h.out.join('\n')).toContain('would use imagePullSecrets: registry, backup.example');
+  for (const value of ['BAD', 'a..b', '-bad', 'a'.repeat(64), 'a'.repeat(254)]) {
+    const invalid = harness();
+    expect(await invalid.run(['deploy', '--pull-secret', value])).toBe(2);
+    expect(invalid.calls).toEqual([]);
+  }
+});
+
+it('X87-5 refuses missing namespace or registry Secret before building, with creation recipes', async () => {
+  for (const missing of ['namespace', 'secret']) {
+    const h = harness({
+      respond: (call) =>
+        call.command === 'kubectl' && call.args.includes('get') && call.args.includes(missing)
+          ? { code: 1, stderr: 'Error from server (NotFound): resource not found' }
+          : undefined,
+    });
+    expect(await h.run(['deploy', '--dry-run', '--pull-secret', 'registry'])).toBe(1);
+    expect(h.err.join('\n')).toContain('kubectl create secret docker-registry registry -n ws');
+    if (missing === 'namespace') expect(h.err.join('\n')).toContain('kubectl create namespace ws');
+    expect(h.calls.some((call) => call.command === 'docker')).toBe(false);
+  }
+  const hint = harness();
+  expect(
+    await hint.run(['deploy', '--context', 'remote', '--registry', 'r.io/acme', '--dry-run']),
+  ).toBe(0);
+  expect(hint.out.join('\n')).toContain('pass --pull-secret <name>');
+});
+
+it.each(['namespace', 'secret'])(
+  'M3 refuses non-NotFound kubectl %s failures with an escaped first line and no creation recipe',
+  async (resource) => {
+    for (const message of [
+      'Error from server (Forbidden): forbidden\u001b[31m\nsecond line',
+      'connection refused\u001b[31m\nsecond line',
+    ]) {
+      const h = harness({
+        respond: (call) =>
+          call.command === 'kubectl' && call.args.includes('get') && call.args.includes(resource)
+            ? { code: 1, stderr: message }
+            : undefined,
+      });
+      expect(await h.run(['deploy', '--dry-run', '--pull-secret', 'registry'])).toBe(1);
+      const output = h.err.join('\n');
+      expect(output).toContain(message.split('\u001b')[0]);
+      expect(output).toContain('\\u001b[31m');
+      expect(output).not.toContain('\u001b');
+      expect(output).not.toContain('second line');
+      expect(output).not.toContain('kubectl create');
+      expect(h.calls.some((call) => call.command === 'docker')).toBe(false);
+    }
+  },
+);
+
+it.each(['namespace', 'secret'])(
+  'M-b L-a quotes the real kubectl %s failure: credential plugins, warnings and empty output',
+  async (resource) => {
+    for (const [message, shown, hidden] of [
+      [
+        'getting credentials: exec: executable gke-gcloud-auth-plugin not found',
+        'gke-gcloud-auth-plugin not found',
+        'kubectl create',
+      ],
+      [
+        'Warning: v1 Endpoints is deprecated\nerror: You must be logged in',
+        'You must be logged in',
+        'Warning:',
+      ],
+      ['', 'kubectl exited with code 1', 'kubectl create'],
+    ] as const) {
+      const h = harness({
+        respond: (call) =>
+          call.command === 'kubectl' && call.args.includes('get') && call.args.includes(resource)
+            ? { code: 1, stderr: message }
+            : undefined,
+      });
+      expect(await h.run(['deploy', '--dry-run', '--pull-secret', 'registry'])).toBe(1);
+      const output = h.err.join('\n');
+      expect(output).toContain(
+        `Cannot check ${resource === 'namespace' ? 'namespace ws' : 'Secret registry'}: `,
+      );
+      expect(output).toContain(shown);
+      expect(output).not.toContain(hidden);
+      expect(output).not.toContain('kubectl create');
+    }
+  },
+);
+
 function manifestOf(
   members: readonly WorkspaceMember[],
   runtime: WorkspaceManifest['runtime'] = 'node',

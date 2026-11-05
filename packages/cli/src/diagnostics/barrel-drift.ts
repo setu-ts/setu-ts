@@ -5,6 +5,10 @@ import { maskComments, maskSourceCode } from '../devtool/sources.ts';
 import { joinPath, MAX_EXISTING_FILE_BYTES } from '../utils/file-writer.ts';
 import { isMissingPath } from '../utils/filesystem-errors.ts';
 import type { Finding } from './diagnose.ts';
+import { routeRegistrarSymbol } from '../seams/http.ts';
+import { artifactNames } from '../utils/artifact-path.ts';
+import { referencedOutsideImports } from './wiring.ts';
+import { isIdentifierSafe } from '../utils/names.ts';
 
 /** Reads only regular, bounded files; absence and unsafe evidence stay distinct. */
 export async function readBarrel(
@@ -169,6 +173,7 @@ export async function diagnoseBarrels(
     const imports = declarationSpecifiers(source, code);
     const unlisted = new Set<string>();
     const stale = new Set<string>();
+    const uncalled = new Set<string>();
     for (const family of families) {
       const admitted = new Set(artifacts[family.schematic] ?? []);
       const listed = new Set(
@@ -185,13 +190,29 @@ export async function diagnoseBarrels(
         if (!listed.has(name)) unlisted.add(joinPath(family.dir, `${name}${family.suffix}`));
       for (const name of listed)
         if (!admitted.has(name)) stale.add(joinPath(family.dir, `${name}${family.suffix}`));
+      for (const name of listed) {
+        const names = artifactNames(name);
+        if (!isIdentifierSafe(names)) continue;
+        const symbol = routeRegistrarSymbol(names);
+        const symbols = [
+          ...family.importSymbols(names),
+          ...(family.alternative?.importSymbols(names) ?? []),
+        ];
+        if (
+          symbols.includes(symbol) &&
+          new RegExp(`\\b${symbol}\\b`).test(code) &&
+          referencedOutsideImports(source, symbol) === false
+        )
+          uncalled.add(symbol);
+      }
     }
-    if (unlisted.size > 0 || stale.size > 0)
+    if (unlisted.size > 0 || stale.size > 0 || uncalled.size > 0)
       findings.push({
         kind: 'barrel-drift',
         barrel,
         unlisted: [...unlisted].sort(),
         stale: [...stale].sort(),
+        uncalled: [...uncalled].sort(),
       });
   }
   return findings;

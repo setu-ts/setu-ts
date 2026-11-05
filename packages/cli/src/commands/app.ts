@@ -43,7 +43,7 @@ import {
   resolveHost,
   withEnvFile,
 } from '../templates/project-files.ts';
-import { resolveTemplateChoice } from '../templates/choice.ts';
+import { resolveTemplateChoice, type TemplateChoice } from '../templates/choice.ts';
 import { resolveLoggerChoice, withLogger } from '../templates/logger.ts';
 import { isCoveredDotenvName, readEnvFilePath } from '../templates/env-file.ts';
 import { listTemplates } from '../templates/registry.ts';
@@ -72,6 +72,7 @@ import { planRootNodeModulesDir, ROOT_MANIFEST } from '../workspace/root-manifes
 import { TRANSPORTS, type TransportSpec, transportSpec } from '../workspace/transport.ts';
 import {
   allocateDevtoolPort,
+  allocateDevPort,
   allocatePort,
   devtoolRangeStart,
   MAX_PORT,
@@ -221,13 +222,15 @@ function reportNoWorkspace(
  *
  * @param name - The member's kebab-case name
  * @param next - The manifest as it will be after this member is added
- * @param args - The parsed arguments, read for `--template`
+ * @param args - The parsed environment and logger options
+ * @param choice - The already resolved template and style choice
  * @returns The planned files, or the usage refusal to print
  */
 function planMember(
   name: string,
   next: WorkspaceManifest,
   args: ParsedArgs,
+  choice: Extract<TemplateChoice, { readonly ok: true }>,
   transport: TransportSpec,
   profile: WorkspaceRuntimeProfile,
   rootManifest: string,
@@ -244,8 +247,6 @@ function planMember(
       readonly ok: false;
       readonly message: string;
     } {
-  const choice = resolveTemplateChoice(args);
-  if (!choice.ok) return { ok: false, message: choice.message };
   const envFile = readEnvFilePath(args.flags);
   if (!envFile.ok) return { ok: false, message: envFile.message };
 
@@ -324,6 +325,9 @@ function planMember(
   const files: GeneratedFile[] = projectFiles(name, profile.runtime, devHost, {
     symbol: SERVICE_PORT_EXPORT,
     from: DISCOVERY_SPECIFIER,
+    ...(next.members.find((member) => member.name === name)?.inspectPort === undefined
+      ? {}
+      : { inspectPort: next.members.find((member) => member.name === name)!.inspectPort! }),
   }).map((file) => ({ ...file, path: joinPath(memberRoot, file.path) }));
 
   if (devtoolPort !== undefined && profile.runtime === 'node') {
@@ -538,7 +542,8 @@ export async function runAppCommand(args: ParsedArgs, deps: AppDependencies): Pr
   const taken = read.manifest.members.find(
     (member) =>
       member.port === requested.port ||
-      (requested.port !== undefined && member.devtoolPort === requested.port),
+      (requested.port !== undefined &&
+        [member.devtoolPort, member.inspectPort, member.vitePort].includes(requested.port)),
   );
   if (taken !== undefined) {
     const devtoolHeld = taken.devtoolPort === requested.port && taken.port !== requested.port;
@@ -612,7 +617,10 @@ export async function runAppCommand(args: ParsedArgs, deps: AppDependencies): Pr
       const devtoolTaken = read.manifest.members.find(
         (member) =>
           member.port === devtoolPortFlag.port ||
-          (devtoolPortFlag.port !== undefined && member.devtoolPort === devtoolPortFlag.port),
+          (devtoolPortFlag.port !== undefined &&
+            [member.devtoolPort, member.inspectPort, member.vitePort].includes(
+              devtoolPortFlag.port,
+            )),
       );
       if (devtoolTaken !== undefined) {
         const devtoolHeld =
@@ -672,7 +680,14 @@ export async function runAppCommand(args: ParsedArgs, deps: AppDependencies): Pr
     return EXIT_ERROR;
   }
 
-  const next: WorkspaceManifest = {
+  const choice = resolveTemplateChoice(args);
+  if (!choice.ok) {
+    deps.error(choice.message);
+    return EXIT_USAGE;
+  }
+  const portHost = resolveHost(choice.host ?? MINIMAL_HOST, read.manifest.runtime);
+
+  let next: WorkspaceManifest = {
     ...read.manifest,
     ...(devtoolPort === undefined
       ? {}
@@ -704,6 +719,37 @@ export async function runAppCommand(args: ParsedArgs, deps: AppDependencies): Pr
     ],
   };
 
+  for (const field of (portHost.manifest?.npmBuild?.devEntry !== undefined
+    ? ['inspectPort', 'vitePort']
+    : ['inspectPort']) as readonly ('inspectPort' | 'vitePort')[]) {
+    let candidate = allocateDevPort(next);
+    while (
+      candidate !== undefined &&
+      deps.portAvailable !== undefined &&
+      !(await deps.portAvailable(candidate))
+    )
+      candidate = allocateDevPort({
+        ...next,
+        members: [
+          ...next.members,
+          { name: '__occupied__', port: candidate, inspectPort: candidate },
+        ],
+      });
+    if (candidate === undefined) {
+      deps.error(
+        'No development ports remain in this workspace; set devBasePort in setu.workspace.json.',
+      );
+      return EXIT_ERROR;
+    }
+    const assigned = candidate;
+    next = {
+      ...next,
+      members: next.members.map((member) =>
+        member.name === name ? { ...member, [field]: assigned } : member,
+      ),
+    };
+  }
+
   // Read unconditionally, because whether it is NEEDED depends on the template,
   // which `planMember` resolves. An unreadable root is not an error by itself —
   // only a frontend member has to edit it — so the failure is carried as an empty
@@ -733,6 +779,7 @@ export async function runAppCommand(args: ParsedArgs, deps: AppDependencies): Pr
     name,
     next,
     args,
+    choice,
     transportSpec(next.transport, next.redisClient),
     profile,
     rootManifest,

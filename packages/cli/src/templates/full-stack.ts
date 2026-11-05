@@ -31,7 +31,7 @@ import {
   FULL_STACK_CHECK_TASK,
   FULL_STACK_DENO_COMPILER_OPTIONS,
   FULL_STACK_DENO_IMPORTS,
-  FULL_STACK_DEV_ENTRY,
+  renderFullStackDevEntry,
   FULL_STACK_NPM_DEPENDENCIES,
   FULL_STACK_NPM_DEV_DEPENDENCIES,
   FULL_STACK_TSCONFIG_OPTIONS,
@@ -281,8 +281,8 @@ export const FULL_STACK_TEMPLATE: TemplateDefinition = {
   ],
   extraTasks: FULL_STACK_CHECK_TASK,
   manifest: {
-    readmeSection: (cli, runtime) =>
-      FULL_STACK_README_SECTION(cli, runtime) +
+    readmeSection: (cli, runtime, member) =>
+      FULL_STACK_README_SECTION(cli, runtime, member) +
       `
 ## Behind a TLS proxy
 
@@ -315,13 +315,13 @@ headers, so any client can choose its own address and origin.
       script: 'react-router build',
       // The npm specifier, not the bin shim: a Deno task resolves the package,
       // while `package.json` resolves the shim from `node_modules`.
-      denoCommand: 'deno run -A npm:@react-router/dev build',
+      denoCommand: 'deno run -A --no-lock npm:@react-router/dev build',
       outputDir: 'build',
       // React Router's typegen writes here (`react-router typegen`, and the Vite
       // plugin during dev/build). It is generated source, not the project's, so
       // it is ignored and excluded exactly like the build.
       generatedDirs: ['.react-router'],
-      devEntry: FULL_STACK_DEV_ENTRY,
+      devEntry: renderFullStackDevEntry(),
     },
     npmDependencies: {
       ...FULL_STACK_NPM_DEPENDENCIES,

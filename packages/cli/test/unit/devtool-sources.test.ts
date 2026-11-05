@@ -14,6 +14,7 @@ import {
   maskComments,
   maskImportDeclarations,
   maskSourceCode,
+  maskSourceDiagnosis,
   packageSpecifierCount,
   parseImportItem,
   readDevtoolSourceNames,
@@ -22,6 +23,70 @@ import {
   withDevtoolSourceWiring,
   withSourceArgs,
 } from '../../src/devtool/sources.ts';
+
+describe('V11-8 source stop locations preserve the audited accept set', () => {
+  it('V11-8 escapes terminal controls and bounds unsupported import labels', () => {
+    const result = maskSourceDiagnosis("import x from '\u001b[31m" + 'x'.repeat(100) + "';");
+    expect(result).toMatchObject({ stop: { reason: expect.stringContaining('\\u001b[31m') } });
+    if ('stop' in result) {
+      expect(result.stop.reason).not.toContain('\u001b');
+      expect(result.stop.reason.length).toBeLessThanOrEqual(87);
+    }
+  });
+  const prefix = '// safe comment\n';
+  const cases: readonly (readonly [string, string, number])[] = [
+    ['`text`', 'template literal', 0],
+    ['a / b', '/', 2],
+    ['#private', '#', 0],
+    ['\\u0061', '\\', 0],
+    ['café', 'non-ASCII code', 3],
+    ["'open", 'unterminated string', 0],
+    ["'open\n", 'unterminated string', 0],
+    ["'a\\n'", '\\ in string', 2],
+    ['/* open', 'unterminated comment', 0],
+    ['<!-- comment', 'HTML comment', 0],
+    ['--> comment', 'HTML comment', 0],
+    ["import('x')", 'dynamic import(', 0],
+    ["import process from 'node:process'", 'import node:process', 20],
+    ["import 'foreign'", 'import foreign', 7],
+    ['env[key]', 'computed member access', 3],
+    ...[
+      'Object',
+      'Reflect',
+      'Proxy',
+      'constructor',
+      'prototype',
+      '__proto__',
+      'setPrototypeOf',
+      'defineProperty',
+      'defineProperties',
+      '__defineGetter__',
+      '__defineSetter__',
+      '__lookupGetter__',
+      '__lookupSetter__',
+      'globalThis',
+      'self',
+      'window',
+      'eval',
+      'Function',
+      'require',
+    ].map((word): readonly [string, string, number] => [`const x = ${word};`, word, 10]),
+  ];
+  for (const [source, reason, offset] of cases)
+    it(`locates ${reason}: ${source}`, () => {
+      expect(maskSourceDiagnosis(prefix + source)).toEqual({
+        stop: { reason, offset: prefix.length + offset },
+      });
+      expect(maskSourceCode(prefix + source)).toBeUndefined();
+      expect(maskComments(prefix + source)).toBeUndefined();
+    });
+  it('keeps the two mask projections on accepted source', () => {
+    const source =
+      "import { RuntimePlugin } from '@setu-ts/runtime';\nconst key = env['PORT']; // comment";
+    expect(maskSourceDiagnosis(source)).toEqual({ code: maskSourceCode(source) });
+    expect(maskSourceDiagnosis(source, false)).toEqual({ code: maskComments(source) });
+  });
+});
 
 const packages = new Set([
   'cache-plugin',

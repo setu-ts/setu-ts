@@ -129,7 +129,7 @@ export function planViewSetup(input: IViewSetupInput): IViewSetupPlan {
       if (scripts === undefined) note(`${path} ${scriptKey}`);
       else {
         const css = deno
-          ? `deno install && deno run -A npm:@tailwindcss/cli@${TAILWIND_RANGE} ${CSS_ARGS}`
+          ? `deno install && deno run -A --no-lock npm:@tailwindcss/cli@${TAILWIND_RANGE} ${CSS_ARGS}`
           : `tailwindcss ${CSS_ARGS}`;
         for (const [name, value] of [
           ['css', css],

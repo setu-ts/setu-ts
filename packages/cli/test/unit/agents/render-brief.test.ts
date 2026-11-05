@@ -6,6 +6,22 @@ import { runCli } from '../../../src/cli.ts';
 import { createFakeFs } from '../../fixtures/fake-fs.ts';
 
 describe('project brief rendering', () => {
+  it('V11-9 renders lint/format glosses and runtime-specific verification instructions', () => {
+    for (const runtime of ['node', 'bun', 'deno'] as const) {
+      const text = renderBrief(
+        agentFacts({ runtime, commands: ['check', 'lint', 'format', 'format:check', 'test'] }),
+      );
+      expect(text).toContain('check code style');
+      expect(text).toContain('check formatting without writing');
+      expect(text).toContain(
+        `Before reporting done, run check, lint, ${runtime === 'deno' ? 'deno fmt --check' : 'format:check'} and test.`,
+      );
+      if (runtime === 'deno') {
+        expect(text).toContain('`deno lint`');
+        expect(text).toContain('`deno fmt --check`');
+      }
+    }
+  });
   it('describes generation and its opt-in CI drift check', () => {
     const text = renderBrief(agentFacts({ commands: ['client', 'client:check'] }));
     expect(text).toContain(

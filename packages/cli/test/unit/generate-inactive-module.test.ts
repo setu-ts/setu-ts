@@ -204,7 +204,7 @@ describe('setu generate --module reports an inactive module', () => {
     const step = await runStep(h, ['service', 'pricing', '--module', 'orders']);
 
     expect(step.code).toBe(0);
-    expect(step.err).not.toContain('does not reference registerModules');
+    expect(step.err).not.toContain('does not call registerModules');
     expect(step.err).not.toContain(INACTIVE_HEADER);
   });
 
@@ -247,7 +247,7 @@ describe('setu generate --module reports an inactive module', () => {
     const step = await runStep(h, ['service', 'pricing', '--module', 'orders']);
 
     expect(step.code).toBe(0);
-    expect(step.err).toContain('setu.config.ts does not reference registerModules; add:');
+    expect(step.err).toContain('setu.config.ts does not call registerModules; add:');
     expect(step.err).toContain("  import { registerModules } from './src/modules/index.ts';");
     expect(step.err).toContain('  registerModules(app.router, app.services);');
     expect(step.err).not.toContain(INACTIVE_HEADER);
@@ -260,8 +260,25 @@ describe('setu generate --module reports an inactive module', () => {
     const step = await runStep(h, ['service', 'pricing', '--module', 'orders']);
 
     expect(step.code).toBe(0);
-    expect(step.err).toContain('setu.config.ts does not reference registerModules; add:');
+    expect(step.err).toContain('could not classify setu.config.ts at line 1 (`template literal`)');
+    expect(step.err).toContain('registerModules');
     expect(step.err).not.toContain(INACTIVE_HEADER);
+  });
+
+  it('prints the unclassifiable config warning once, dry-run included', async () => {
+    const h = functionalHarness(CONFIG_UNCLASSIFIABLE);
+    expect((await runStep(h, ['module', 'orders'])).code).toBe(0);
+    for (const extra of [[], ['--dry-run']]) {
+      const step = await runStep(h, [
+        'service',
+        `pricing${extra.length}`,
+        '--module',
+        'orders',
+        ...extra,
+      ]);
+      expect(step.code).toBe(0);
+      expect(step.err.split('could not classify setu.config.ts').length - 1).toBe(1);
+    }
   });
 
   it('stays silent when the config file is absent', async () => {
@@ -378,9 +395,8 @@ describe('setu generate --module reports an inactive module', () => {
     const step = await runStep(h, ['service', 'pricing', '--module', 'orders']);
 
     expect(step.code).toBe(0);
-    expect(step.err).toContain(
-      'setu.config.ts does not reference MODULES; add it to DecoratorPlugin:',
-    );
+    expect(step.err).toContain('could not classify setu.config.ts at line 1 (`template literal`)');
+    expect(step.err).toContain('MODULES');
     expect(step.err).not.toContain(INACTIVE_HEADER);
   });
 
@@ -393,7 +409,7 @@ describe('setu generate --module reports an inactive module', () => {
     const step = await runStep(h, ['route', 'audit', '--module', 'orders']);
 
     expect(step.code).toBe(0);
-    expect(step.err).toContain('setu.config.ts does not reference registerModules; add:');
+    expect(step.err).toContain('setu.config.ts does not call registerModules; add:');
     expect(step.err).not.toContain('does not reference MODULES');
   });
 

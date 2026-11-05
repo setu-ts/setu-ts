@@ -20,7 +20,7 @@ export interface ParsedArgs {
 }
 
 /** Flags whose every occurrence is kept, in order. */
-const REPEATABLE_FLAGS: ReadonlySet<string> = new Set(['depends-on', 'build-arg']);
+const REPEATABLE_FLAGS: ReadonlySet<string> = new Set(['depends-on', 'build-arg', 'pull-secret']);
 
 /**
  * Parse a command-line argument array into positionals and flags.

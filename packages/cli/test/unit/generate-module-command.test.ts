@@ -11,6 +11,75 @@ import { describe, expect, it } from 'vitest';
 import { createFakeFs, createRecorder, type FakeFs } from '../fixtures/fake-fs.ts';
 import { parseArgs } from '../../src/args.ts';
 import { runGenerateCommand } from '../../src/commands/generate.ts';
+import { runCli } from '../../src/cli.ts';
+import { projectFiles, resolveHost } from '../../src/templates/project-files.ts';
+import { REST_TEMPLATE } from '../../src/templates/rest.ts';
+import ts from 'typescript';
+import { resolve } from 'node:path';
+
+it('X91-1 adopts the requested controller, then the project check and type-check pass', async () => {
+  const files = projectFiles('svc', 'node', resolveHost(REST_TEMPLATE, 'node'));
+  const h = harness(Object.fromEntries(files.map((file) => [`/app/${file.path}`, file.contents])));
+  await h.fs.rm('/app/deno.json');
+  expect(await h.run(['controller', 'orders'])).toBe(0);
+  const original = h.fs.read('/app/src/controllers/orders.controller.ts');
+  expect(await h.run(['module', 'orders', '--adopt-controllers']), h.err.text()).toBe(0);
+  expect(h.fs.read('/app/src/modules/orders/orders.controller.ts')).toBe(original);
+  expect(
+    await runCli(['check'], {
+      fs: h.fs,
+      cwd: '/app',
+      now: () => 0,
+      log: () => {},
+      error: h.err.sink,
+    }),
+    h.err.text(),
+  ).toBe(0);
+  const configured = ts.readConfigFile('tsconfig.check.json', ts.sys.readFile);
+  const parsed = ts.parseJsonConfigFileContent(configured.config, ts.sys, process.cwd());
+  const options: ts.CompilerOptions = {
+    ...parsed.options,
+    composite: false,
+    isolatedDeclarations: false,
+    declaration: false,
+    declarationMap: false,
+    noEmit: true,
+    module: ts.ModuleKind.ESNext,
+    moduleResolution: ts.ModuleResolutionKind.Bundler,
+    paths: {
+      ...Object.fromEntries(
+        Object.entries(parsed.options.paths ?? {}).map(([key, paths]) => [
+          key,
+          paths.map((path) => resolve(path)),
+        ]),
+      ),
+      '*': [resolve('node_modules/*')],
+    },
+    typeRoots: [resolve('node_modules/@types'), resolve('packages/runtime/node_modules/@types')],
+    types: ['node', 'deno'],
+  };
+  const host = ts.createCompilerHost(options);
+  const readFile = host.readFile.bind(host);
+  const fileExists = host.fileExists.bind(host);
+  host.readFile = (path) => (h.fs.has(path) ? h.fs.read(path) : readFile(path));
+  host.fileExists = (path) => h.fs.has(path) || fileExists(path);
+  host.directoryExists = (path) =>
+    path === '/app' || path.startsWith('/app/') || ts.sys.directoryExists(path);
+  host.getSourceFile = (path, languageVersion) => {
+    const source = host.readFile(path);
+    return source === undefined
+      ? undefined
+      : ts.createSourceFile(path, source, languageVersion, true);
+  };
+  const roots = [...new Set([...files.map((file) => `/app/${file.path}`), ...h.fs.writes])].filter(
+    (path) => /\.tsx?$/.test(path) && h.fs.has(path),
+  );
+  const program = ts.createProgram(roots, options, host);
+  const errors = ts
+    .getPreEmitDiagnostics(program)
+    .map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n'));
+  expect(errors).toEqual([]);
+});
 
 /** A Deno manifest declaring the given `@setu-ts` packages as installed. */
 const manifest = (...packages: readonly string[]) =>

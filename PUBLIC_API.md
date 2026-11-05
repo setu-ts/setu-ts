@@ -11081,6 +11081,15 @@ is `setu.workspace.json` at the root, which records each member's name, port, an
 `setu workspace ports --reallocate` instead assigns currently bindable ports and rewrites all
 managed maps and deployment artifacts in one operation.
 
+Each member can also record `inspectPort` and, for full-stack members, `vitePort`. Their allocation
+starts at the optional root `devBasePort`, defaulting to `basePort + 2000`; all allocators avoid
+every recorded app, devtool, inspector and Vite port. These fields accept integers from 1 to 65535.
+A member's debug script uses `--inspect=127.0.0.1:<inspectPort>`, and its full-stack development
+entry imports `SERVICE_PORT` and `VITE_PORT` from discovery. Reallocation drops old dev ports before
+assigning new ones, replacing exactly one matching inspector token in each script; an edited script
+is left unchanged with the line to set printed. Adoption replaces exactly one bare `--inspect` token
+and rewrites a full-stack `dev.ts` only when it matches the standalone rendering.
+
 `deno task dev` (or the Node/Bun equivalent) reads that dependency metadata at runtime. It starts a
 prerequisite first, waits until `http://127.0.0.1:<port>/ready` succeeds, then starts each
 dependent; it names a cycle or readiness timeout and terminates children on failure or shutdown. A

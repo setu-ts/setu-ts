@@ -173,6 +173,7 @@ function renderFunctionalServicesBarrel(artifacts: SeamArtifacts): string {
  * looped: regenerating produced the identical file.
  */
 export const FUNCTIONAL_SERVICES_SEAM: SeamSpec = {
+  listingOnly: true,
   schematic: 'service',
   dir: 'src/services',
   suffix: '.service.ts',
