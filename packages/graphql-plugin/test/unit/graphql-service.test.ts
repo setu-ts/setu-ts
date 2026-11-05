@@ -525,6 +525,24 @@ describe('GraphqlService', () => {
       });
     }
 
+    // An explicit method is normalized the same fail-closed way: a JavaScript
+    // caller forwarding a raw method string cannot slip a mutation past it.
+    for (const explicit of ['', 'get', 'HEAD', 'post']) {
+      it(`execute refuses a mutation for an explicit malformed method ${JSON.stringify(explicit)}`, async () => {
+        const service = makeService(createSubscribeRuntime({ operation: 'mutation' }));
+        const requestContext = {
+          services: mockServiceRegistry,
+          request: { method: 'GET' },
+        } as unknown as IRequestContext;
+        const outcome = await service.execute(
+          { query: 'mutation { transfer }' },
+          requestContext,
+          explicit as 'GET' | 'POST',
+        );
+        expect(outcome.status).toBe(405);
+      });
+    }
+
     it('execute runs a mutation over POST, with an explicit method, or with no request', async () => {
       const service = makeService(createSubscribeRuntime({ operation: 'mutation' }));
       const context = (method: string) =>

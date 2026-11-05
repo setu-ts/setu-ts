@@ -173,7 +173,8 @@ export interface IGraphqlService {
    * @param params - The parsed GraphQL request parameters
    * @param requestContext - Optional request context for service resolution
    * @param method - Optional HTTP method for the operation-kind guard; when
-   *   given it wins over the method derived from `requestContext`
+   *   given it wins over the method derived from `requestContext`, and anything
+   *   but `'POST'` counts as `'GET'`
    * @returns The execution outcome with HTTP status
    */
   execute(

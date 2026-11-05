@@ -11,6 +11,7 @@ import {
   ERROR_RESPONDER_STATE_KEY,
   errorResponderOf,
   isPromiseLike,
+  isWebSocketUpgradeRequest,
   requestOriginOf,
   respondWithError,
   fallbackErrorHint,
@@ -1883,9 +1884,14 @@ class Application implements IKernelApplication {
       //
       // The public origin (honouring one a trusted proxy published) lets the
       // router refuse a cross-site handshake: only the kernel holds `ctx`.
-      // `requestOriginOf` can throw on an invalid URL; it is inside this `try`,
-      // so that case is reported like any other router failure.
-      decision = await wsService.routeUpgrade(raw, ctx.request.user, requestOriginOf(ctx).origin);
+      // It is computed only for an upgrade, because this runs on EVERY request
+      // of an app with WebSockets and `requestOriginOf` parses a URL (§14);
+      // the router still makes the upgrade decision itself. Both calls are
+      // inside this `try`, so a throw is reported like any router failure.
+      const publicOrigin = isWebSocketUpgradeRequest(raw.headers)
+        ? requestOriginOf(ctx).origin
+        : undefined;
+      decision = await wsService.routeUpgrade(raw, ctx.request.user, publicOrigin);
     } catch (cause) {
       // Reported, not swallowed. The pre-M70a backstop in the adapter's
       // `UpgradeRouterStore` discarded the cause because the adapter holds no

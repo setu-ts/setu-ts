@@ -255,9 +255,12 @@ export class GraphqlService implements IGraphqlService {
       contextValue = defaultContext;
     }
 
-    // An explicit method wins; otherwise it is derived from the request and
-    // fails closed, so an app route forwarding a GET cannot run a mutation.
-    const operationMethod = method ?? operationMethodOf(requestContext);
+    // An explicit method wins, normalized to fail closed like the derived one
+    // (a JavaScript caller can pass `'get'`, `'HEAD'` or `''`); otherwise it is
+    // derived from the request, so an app route forwarding a GET cannot run a
+    // mutation.
+    const operationMethod =
+      method === undefined ? operationMethodOf(requestContext) : method === 'POST' ? 'POST' : 'GET';
 
     // Parse → operation guard → validate → execute. The executor owns the
     // status, so `execute()` and the HTTP route can never disagree about it.

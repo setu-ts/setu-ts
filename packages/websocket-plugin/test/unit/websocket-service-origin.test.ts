@@ -165,6 +165,7 @@ describe('allowedOrigins validation', () => {
     ['the opaque origin', ['null']],
     ['an unparseable value', ['not a url']],
     ['an upper-case host', ['https://App.example.com']],
+    ['a wildcard host, which matches no browser Origin', ['https://*.app.example.com']],
   ];
 
   for (const [label, value] of INVALID) {

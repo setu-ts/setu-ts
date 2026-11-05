@@ -38,8 +38,8 @@ function recordingWsPlugin(seen: (string | undefined)[]): IPlugin {
       _principal?: unknown,
       publicOrigin?: string,
     ): Promise<WebSocketUpgradeDecision | null> => {
-      if (!isWebSocketUpgradeRequest(request.headers)) return Promise.resolve(null);
       seen.push(publicOrigin);
+      if (!isWebSocketUpgradeRequest(request.headers)) return Promise.resolve(null);
       return Promise.resolve({ accept: false, status: 403 });
     },
     available: true,
@@ -87,6 +87,22 @@ describe('Kernel passes the public origin to routeUpgrade', () => {
     try {
       await app.inject({ method: 'GET', url: 'http://10.0.0.5/ws', headers: UPGRADE_HEADERS });
       expect(seen).toEqual(['https://public.example']);
+    } finally {
+      await app.stop();
+    }
+  });
+
+  // The router is consulted on every request; the origin is a URL parse, so
+  // the kernel computes it only for an upgrade (AI_GUIDELINES §14).
+  it('passes no origin for a request that is not an upgrade', async () => {
+    const seen: (string | undefined)[] = [];
+    const app = createApplication({ plugins: [runtimePlugin(), recordingWsPlugin(seen)] });
+    app.router.get('/plain', (ctx) => ctx.response.text('ok'));
+    await app.start();
+    try {
+      const res = await app.inject({ method: 'GET', url: 'http://localhost/plain' });
+      expect(res.statusCode).toBe(200);
+      expect(seen).toEqual([undefined]);
     } finally {
       await app.stop();
     }

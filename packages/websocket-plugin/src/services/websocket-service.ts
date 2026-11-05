@@ -167,7 +167,14 @@ function isSerializedHttpOrigin(entry: unknown): boolean {
   if (typeof entry !== 'string') return false;
   try {
     const url = new URL(entry);
-    return (url.protocol === 'http:' || url.protocol === 'https:') && url.origin === entry;
+    // WHATWG URL accepts `*` in a host, so `https://*.app.example` would be
+    // kept literally and match no browser `Origin`: refuse it rather than let
+    // it read as a wildcard.
+    return (
+      (url.protocol === 'http:' || url.protocol === 'https:') &&
+      url.origin === entry &&
+      !url.hostname.includes('*')
+    );
   } catch {
     return false;
   }

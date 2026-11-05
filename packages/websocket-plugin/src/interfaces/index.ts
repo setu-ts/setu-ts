@@ -25,8 +25,8 @@ export interface WebSocketPluginOptions {
   /**
    * Browser origins, besides the app's own, allowed to open a WebSocket. Each
    * entry is an absolute `http:`/`https:` origin exactly as a browser sends it
-   * (`'https://app.example.com'`, no path or trailing slash); an invalid entry
-   * throws when the plugin is constructed.
+   * (`'https://app.example.com'`, no path, trailing slash or `*` wildcard); an
+   * invalid entry throws when the plugin is constructed.
    *
    * Every handshake whose `Origin` header is neither the request's public origin
    * nor in this list is refused with `403`, before route guards run and before
