@@ -26,6 +26,8 @@ export const ID_KEY = 'id';
 export const CONTENT_KEY = 'content';
 /** Payload key holding the record's metadata object. */
 export const METADATA_KEY = 'metadata';
+/** The payload key holding a versioned `replaceSource`'s version. */
+export const VERSION_KEY = 'source_version';
 
 /**
  * The condition that pins a request to one scope.

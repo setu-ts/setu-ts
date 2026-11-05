@@ -15,6 +15,7 @@ import {
   OptionalDependencyUnavailableError,
   VectorCollectionMismatchError,
   VectorOperationUnsupportedError,
+  VectorVersionConflictError,
 } from '@setu-ts/common';
 import type { VectorCollectionSpec } from '@setu-ts/common';
 import { PgVectorStore } from '../../src/adapters/pgvector/pgvector-store.ts';
@@ -69,7 +70,14 @@ function healthy(overrides: Partial<Record<'version' | 'dimensions', unknown>> =
     }
     if (text.includes('FROM pg_attribute')) {
       return {
-        rows: [{ dimensions: overrides.dimensions ?? 3, source_index: true, vector_index: true }],
+        rows: [
+          {
+            dimensions: overrides.dimensions ?? 3,
+            source_index: true,
+            vector_index: true,
+            source_version: true,
+          },
+        ],
       };
     }
     return { rows: [] };
@@ -175,12 +183,13 @@ describe('PgVectorStore', () => {
     statements.length = 0;
     await store.ensureCollection(spec);
     expect(statements.map((s) => s.text)).toEqual([
-      'CREATE TABLE IF NOT EXISTS "vs_documents" (scope text NOT NULL, id text NOT NULL, source_id text, content text, metadata jsonb NOT NULL DEFAULT \'{}\'::jsonb, embedding vector(3) NOT NULL, PRIMARY KEY (scope, id))',
+      'CREATE TABLE IF NOT EXISTS "vs_documents" (scope text NOT NULL, id text NOT NULL, source_id text, content text, metadata jsonb NOT NULL DEFAULT \'{}\'::jsonb, embedding vector(3) NOT NULL, source_version bigint, PRIMARY KEY (scope, id))',
+      'ALTER TABLE "vs_documents" ADD COLUMN IF NOT EXISTS source_version bigint',
       'CREATE INDEX IF NOT EXISTS "vs_documents_src" ON "vs_documents" (scope, source_id)',
       'CREATE INDEX IF NOT EXISTS "vs_documents_hnsw" ON "vs_documents" USING hnsw (embedding vector_cosine_ops)',
-      "SELECT a.atttypmod AS dimensions, to_regclass($1) IS NOT NULL AS source_index, to_regclass($2) IS NOT NULL AS vector_index FROM pg_attribute a WHERE a.attrelid = to_regclass($3) AND a.attname = 'embedding' AND NOT a.attisdropped",
+      "SELECT a.atttypmod AS dimensions, to_regclass($1) IS NOT NULL AS source_index, to_regclass($2) IS NOT NULL AS vector_index, EXISTS (SELECT 1 FROM pg_attribute v WHERE v.attrelid = a.attrelid AND v.attname = 'source_version' AND NOT v.attisdropped) AS source_version FROM pg_attribute a WHERE a.attrelid = to_regclass($3) AND a.attname = 'embedding' AND NOT a.attisdropped",
     ]);
-    expect(statements[3]!.params).toEqual([
+    expect(statements[4]!.params).toEqual([
       'vs_documents_src',
       'vs_documents_hnsw',
       'vs_documents',
@@ -221,6 +230,18 @@ describe('PgVectorStore', () => {
           : healthy()({ text, params: [], inTransaction: false }),
       'missing its source index',
     ],
+    [
+      'a missing source_version column',
+      ({ text }) =>
+        text.includes('pg_attribute')
+          ? {
+              rows: [
+                { dimensions: 3, source_index: true, vector_index: true, source_version: false },
+              ],
+            }
+          : healthy()({ text, params: [], inTransaction: false }),
+      'ADD COLUMN source_version bigint',
+    ],
   ])('refuses %s', async (_label, respond, message) => {
     const { store } = await opened(respond);
     await expect(store.ensureCollection(spec)).rejects.toThrow(VectorCollectionMismatchError);
@@ -249,7 +270,7 @@ describe('PgVectorStore', () => {
     ]);
     const [insert] = statements;
     expect(insert!.text).toBe(
-      'INSERT INTO "vs_documents" (scope, id, source_id, content, metadata, embedding) VALUES ($1, $2, $3, $4, $5::jsonb, $6::vector), ($7, $8, $9, $10, $11::jsonb, $12::vector) ON CONFLICT (scope, id) DO UPDATE SET source_id = excluded.source_id, content = excluded.content, metadata = excluded.metadata, embedding = excluded.embedding',
+      'INSERT INTO "vs_documents" (scope, id, source_id, content, metadata, embedding, source_version) VALUES ($1, $2, $3, $4, $5::jsonb, $6::vector, $7::bigint), ($8, $9, $10, $11, $12::jsonb, $13::vector, $14::bigint) ON CONFLICT (scope, id) DO UPDATE SET source_id = excluded.source_id, content = excluded.content, metadata = excluded.metadata, embedding = excluded.embedding, source_version = excluded.source_version',
     );
     expect(insert!.params).toEqual([
       'tenant-a',
@@ -258,12 +279,14 @@ describe('PgVectorStore', () => {
       "it's",
       '{"tag":"x\'); DROP TABLE t;--"}',
       '[1,0,0]',
+      null,
       'tenant-a',
       'r2',
       null,
       null,
       '{}',
       '[0,1,0.5]',
+      null,
     ]);
   });
 
@@ -287,6 +310,61 @@ describe('PgVectorStore', () => {
     await store.replaceSource(spec, 'tenant-a', 's1', []);
     expect(statements).toHaveLength(2);
     expect(statements[1]!.params).toEqual(['tenant-a', 's1', '[]']);
+  });
+
+  it('reads the stored version under the source lock and writes the new one', async () => {
+    const { store, statements } = await opened();
+    statements.length = 0;
+    await store.replaceSource(
+      spec,
+      'tenant-a',
+      's1',
+      [{ id: 'r1', vector: [1, 0, 0], sourceId: 's1' }],
+      7,
+    );
+    expect(statements.map((s) => s.text.slice(0, 40))).toEqual([
+      'SELECT pg_advisory_xact_lock(hashtextext',
+      'SELECT max(source_version) AS version FR',
+      'INSERT INTO "vs_documents" (scope, id, s',
+      'DELETE FROM "vs_documents" WHERE scope =',
+    ]);
+    expect(statements[1]!.params).toEqual(['tenant-a', 's1']);
+    expect(statements[2]!.params.at(-1)).toBe(7);
+  });
+
+  it.each<[string, unknown, number, boolean]>([
+    ['an unversioned source', null, 0, false],
+    ['an equal version', '5', 5, false],
+    ['an older stored version', 4, 5, false],
+    ['a newer stored version (node-postgres bigint string)', '6', 5, true],
+    ['a newer stored version (number)', 9, 5, true],
+  ])('with %s, refuses only a newer stored version', async (_label, stored, version, refused) => {
+    const respond: Responder = (rendered) =>
+      rendered.text.startsWith('SELECT max(source_version)')
+        ? { rows: [{ version: stored }] }
+        : healthy()(rendered);
+    const { store, statements } = await opened(respond);
+    statements.length = 0;
+    const write = store.replaceSource(
+      spec,
+      'tenant-a',
+      's1',
+      [{ id: 'r1', vector: [1, 0, 0], sourceId: 's1' }],
+      version,
+    );
+    if (refused) {
+      await expect(write).rejects.toThrow(VectorVersionConflictError);
+      // Nothing is written after the refusal: the transaction rolls back at the read.
+      expect(statements.map((s) => s.text.slice(0, 6))).toEqual(['SELECT', 'SELECT']);
+    } else {
+      await write;
+      expect(statements).toHaveLength(4);
+    }
+  });
+
+  it('treats a source with no rows as unversioned', async () => {
+    const { store } = await opened();
+    await expect(store.replaceSource(spec, 'tenant-a', 's1', [], 3)).resolves.toBeUndefined();
   });
 
   it('queries inside a transaction with the HNSW settings, an inner scan and an outer order', async () => {

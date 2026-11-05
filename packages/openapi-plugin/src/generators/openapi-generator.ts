@@ -4,7 +4,12 @@ import type {
   RouteValidationMetadata,
   SecurityRequirement,
 } from '@setu-ts/common';
-import { responseMetadataOf, securityMetadataOf, validationMetadataOf } from '@setu-ts/common';
+import {
+  idempotencyMetadataOf,
+  responseMetadataOf,
+  securityMetadataOf,
+  validationMetadataOf,
+} from '@setu-ts/common';
 
 import type { OpenApiSchemaObject } from '../transformers/zod-to-openapi.ts';
 import { ZodToOpenApi } from '../transformers/zod-to-openapi.ts';
@@ -1102,7 +1107,45 @@ export class OpenApiGenerator {
       }
     }
 
+    const idempotencyKey = this.#deriveIdempotencyKeyHeader(route, parameters);
+    if (idempotencyKey !== undefined) parameters.push(idempotencyKey);
+
     return parameters;
+  }
+
+  /**
+   * The key header an `idempotent()` brand on the route reads, as a header
+   * parameter, so a client (and Swagger UI) knows to send it. Nothing is
+   * derived for a safe method, which the middleware passes through; for a key
+   * read from a body field or a function, which has no header; or when the
+   * route already declares a header of that name, which wins.
+   *
+   * @param route - The route being documented
+   * @param declared - The parameters built from the route's own schemas
+   * @returns The parameter, or `undefined` when none applies
+   */
+  #deriveIdempotencyKeyHeader(
+    route: RouteInfo,
+    declared: readonly OpenApiParameter[],
+  ): OpenApiParameter | undefined {
+    const method = route.method.toUpperCase();
+    if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return undefined;
+    for (const middleware of route.definition.middleware ?? []) {
+      const metadata = idempotencyMetadataOf(middleware);
+      const header = metadata?.keyHeader;
+      if (header === undefined) continue;
+      const name = header.toLowerCase();
+      if (declared.some((p) => p.in === 'header' && p.name.toLowerCase() === name))
+        return undefined;
+      return {
+        name: header,
+        in: 'header',
+        required: metadata?.required !== false,
+        description: 'A unique key per operation; send the same key when retrying it.',
+        schema: { type: 'string', minLength: 1, maxLength: 255 },
+      };
+    }
+    return undefined;
   }
 
   /**

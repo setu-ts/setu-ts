@@ -63,6 +63,7 @@ export {
   VectorRecordError,
   VectorScopeInvalidError,
   VectorScopeRequiredError,
+  VectorVersionConflictError,
 } from './errors/vector-store.ts';
 export { vectorRecordKey } from './vector-record-key.ts';
 export type {
@@ -75,6 +76,7 @@ export type {
   VectorMetadataValue,
   VectorQuery,
   VectorRecord,
+  VectorReplaceOptions,
 } from './services/vector-store.ts';
 export { OptionalDependencyUnavailableError } from './errors/optional-dependency.ts';
 // HTTP status hint (M89b, X19-1) — how a package that cannot import

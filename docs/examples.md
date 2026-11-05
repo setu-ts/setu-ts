@@ -402,10 +402,11 @@ outlives the request.
 
 `POST /documents` validates `{ id, text, tag? }` and queues `ingest-document` with the tenant the
 request resolved. The job drops the write if that tenant no longer exists, splits the text into
-800-character chunks, embeds them with the AI SDK, and calls `replaceSource`, so re-ingesting a
-shorter document leaves exactly its new chunks. `GET /documents/search?q=&tag=&limit=` embeds the
-query and returns the closest chunks; `limit` is 1–20 and defaults to 5. Both routes read the scope
-from `x-tenant-id`, so a request without one answers `400` and an unknown tenant `404`.
+800-character chunks, embeds them with the AI SDK, and calls `replaceSource` with the submission's
+version, so re-ingesting a shorter document leaves exactly its new chunks and a late retry of an
+older submission is dropped instead of replacing a newer one. `GET /documents/search?q=&tag=&limit=`
+embeds the query and returns the closest chunks; `limit` is 1–20 and defaults to 5. Both routes read
+the scope from `x-tenant-id`, so a request without one answers `400` and an unknown tenant `404`.
 
 The store is process memory by default. Set `PGVECTOR_URL` to run the same code on PostgreSQL with
 pgvector 0.8+; set `EMBED_BASE_URL`, `EMBED_MODEL`, `EMBED_DIMENSIONS` and, when the server needs

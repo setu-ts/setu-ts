@@ -60,14 +60,18 @@ export function splitText(text: string): string[] {
 
 /**
  * Embeds a document's chunks and replaces every chunk it had before, so a
- * re-ingested or shortened document leaves no stale chunk behind.
+ * re-ingested or shortened document leaves no stale chunk behind. The write
+ * is refused with `VectorVersionConflictError` when a newer version of the
+ * document is already stored.
  *
+ * @param version - The submission's version
  * @returns The number of chunks stored
  */
 export async function indexDocument(
   deps: DocumentsDependencies,
   scope: string,
   document: IngestDocumentsBody,
+  version: number,
 ): Promise<number> {
   const chunks = splitText(document.text);
   const { embeddings } = await embedMany({ model: deps.embeddings.model, values: chunks });
@@ -78,7 +82,7 @@ export async function indexDocument(
     content: chunk,
     ...(document.tag === undefined ? {} : { metadata: { tag: document.tag } }),
   }));
-  await deps.store.replaceSource(DOCUMENTS_COLLECTION, scope, document.id, records);
+  await deps.store.replaceSource(DOCUMENTS_COLLECTION, scope, document.id, records, { version });
   return records.length;
 }
 

@@ -23,6 +23,7 @@ it('brands both entry points and shares non-default configuration behavior', asy
     expect(idempotencyMetadataOf(middleware)).toEqual({
       idempotent: true,
       keyHeader: 'Idempotency-Key',
+      required: false,
     });
     let calls = 0;
     const ctx = createTestContext({ runtime, services, request: { method: 'POST' } });
@@ -43,12 +44,22 @@ it('brands both entry points and shares non-default configuration behavior', asy
   expect(control.response.snapshot().status).toBe(401);
 });
 
-it('records the key source in the brand: a header name, or none for body fields and functions', () => {
+it('records the key source and whether a key is required in the brand', () => {
   const cases = [
-    [undefined, { idempotent: true, keyHeader: 'Idempotency-Key' }],
-    [{ key: { header: 'X-Request-Key' } }, { idempotent: true, keyHeader: 'X-Request-Key' }],
-    [{ key: { bodyField: 'requestId' } }, { idempotent: true }],
-    [{ key: () => 'k' }, { idempotent: true }],
+    [undefined, { idempotent: true, keyHeader: 'Idempotency-Key', required: true }],
+    [
+      { key: { header: 'X-Request-Key' } },
+      { idempotent: true, keyHeader: 'X-Request-Key', required: true },
+    ],
+    [
+      { key: { header: 'X-Request-Key' }, required: false },
+      { idempotent: true, keyHeader: 'X-Request-Key', required: false },
+    ],
+    [{ key: { bodyField: 'requestId' } }, { idempotent: true, required: true }],
+    [
+      { key: () => 'k', required: false },
+      { idempotent: true, required: false },
+    ],
   ] as const;
   for (const [options, expected] of cases) {
     expect(idempotencyMetadataOf(idempotent(options))).toEqual(expected);

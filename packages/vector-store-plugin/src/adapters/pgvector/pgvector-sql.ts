@@ -59,7 +59,9 @@ export function createStatements(sql: SqlTag, spec: VectorCollectionSpec): State
   const { table, sourceIndex, vectorIndex } = tableNames(spec);
   const t = sql.identifier(table);
   return [
-    sql`CREATE TABLE IF NOT EXISTS ${t} (scope text NOT NULL, id text NOT NULL, source_id text, content text, metadata jsonb NOT NULL DEFAULT '{}'::jsonb, embedding vector(${sql.raw(String(spec.dimensions))}) NOT NULL, PRIMARY KEY (scope, id))`,
+    sql`CREATE TABLE IF NOT EXISTS ${t} (scope text NOT NULL, id text NOT NULL, source_id text, content text, metadata jsonb NOT NULL DEFAULT '{}'::jsonb, embedding vector(${sql.raw(String(spec.dimensions))}) NOT NULL, source_version bigint, PRIMARY KEY (scope, id))`,
+    // A table created before versioned replaceSource gains the column in place.
+    sql`ALTER TABLE ${t} ADD COLUMN IF NOT EXISTS source_version bigint`,
     sql`CREATE INDEX IF NOT EXISTS ${sql.identifier(sourceIndex)} ON ${t} (scope, source_id)`,
     sql`CREATE INDEX IF NOT EXISTS ${sql.identifier(vectorIndex)} ON ${t} USING hnsw (embedding vector_cosine_ops)`,
   ];
@@ -86,25 +88,27 @@ export function createExtensionStatement(sql: SqlTag): Statement {
 }
 
 /**
- * Describes an existing collection: the embedding column's declared length and
- * whether both indexes exist.
+ * Describes an existing collection: the embedding column's declared length,
+ * whether both indexes exist and whether the `source_version` column does.
  *
  * @param sql - The `sql` tag
  * @param spec - The collection
- * @returns The statement; one row `{ dimensions, source_index, vector_index }` or none
+ * @returns The statement; one row `{ dimensions, source_index, vector_index, source_version }` or none
  */
 export function describeStatement(sql: SqlTag, spec: VectorCollectionSpec): Statement {
   const { table, sourceIndex, vectorIndex } = tableNames(spec);
-  return sql`SELECT a.atttypmod AS dimensions, to_regclass(${sourceIndex}) IS NOT NULL AS source_index, to_regclass(${vectorIndex}) IS NOT NULL AS vector_index FROM pg_attribute a WHERE a.attrelid = to_regclass(${table}) AND a.attname = 'embedding' AND NOT a.attisdropped`;
+  return sql`SELECT a.atttypmod AS dimensions, to_regclass(${sourceIndex}) IS NOT NULL AS source_index, to_regclass(${vectorIndex}) IS NOT NULL AS vector_index, EXISTS (SELECT 1 FROM pg_attribute v WHERE v.attrelid = a.attrelid AND v.attname = 'source_version' AND NOT v.attisdropped) AS source_version FROM pg_attribute a WHERE a.attrelid = to_regclass(${table}) AND a.attname = 'embedding' AND NOT a.attisdropped`;
 }
 
 /**
- * Inserts or replaces records by `(scope, id)`.
+ * Inserts or replaces records by `(scope, id)`. A replaced row takes the new
+ * version, so a record written without one is unversioned again.
  *
  * @param sql - The `sql` tag
  * @param spec - The collection
  * @param scope - The tenant scope
  * @param records - At least one validated record
+ * @param version - The `replaceSource` version the records carry, if any
  * @returns The statement
  */
 export function upsertStatement(
@@ -112,12 +116,33 @@ export function upsertStatement(
   spec: VectorCollectionSpec,
   scope: string,
   records: readonly VectorRecord[],
+  version?: number,
 ): Statement {
   const rows = records.map(
     (record) =>
-      sql`(${scope}, ${record.id}, ${record.sourceId ?? null}, ${record.content ?? null}, ${JSON.stringify(record.metadata ?? {})}::jsonb, ${vectorLiteral(record.vector)}::vector)`,
+      sql`(${scope}, ${record.id}, ${record.sourceId ?? null}, ${record.content ?? null}, ${JSON.stringify(record.metadata ?? {})}::jsonb, ${vectorLiteral(record.vector)}::vector, ${version ?? null}::bigint)`,
   );
-  return sql`INSERT INTO ${sql.identifier(tableNames(spec).table)} (scope, id, source_id, content, metadata, embedding) VALUES ${sql.join(rows, sql`, `)} ON CONFLICT (scope, id) DO UPDATE SET source_id = excluded.source_id, content = excluded.content, metadata = excluded.metadata, embedding = excluded.embedding`;
+  return sql`INSERT INTO ${sql.identifier(tableNames(spec).table)} (scope, id, source_id, content, metadata, embedding, source_version) VALUES ${sql.join(rows, sql`, `)} ON CONFLICT (scope, id) DO UPDATE SET source_id = excluded.source_id, content = excluded.content, metadata = excluded.metadata, embedding = excluded.embedding, source_version = excluded.source_version`;
+}
+
+/**
+ * Reads the highest version among a source's records in the scope. Run under
+ * {@linkcode sourceLockStatement}, so no other replacement of the source can
+ * change it before this transaction writes.
+ *
+ * @param sql - The `sql` tag
+ * @param spec - The collection
+ * @param scope - The tenant scope
+ * @param sourceId - The source
+ * @returns The statement; one row `{ version }`, `null` when unversioned
+ */
+export function sourceVersionStatement(
+  sql: SqlTag,
+  spec: VectorCollectionSpec,
+  scope: string,
+  sourceId: string,
+): Statement {
+  return sql`SELECT max(source_version) AS version FROM ${sql.identifier(tableNames(spec).table)} WHERE scope = ${scope} AND source_id = ${sourceId}`;
 }
 
 /**

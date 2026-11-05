@@ -7,6 +7,7 @@
  */
 import {
   VectorCollectionUnknownError,
+  VectorOperationUnsupportedError,
   VectorRecordError,
   VectorScopeRequiredError,
 } from '@setu-ts/common';
@@ -17,6 +18,7 @@ import type {
   VectorMatch,
   VectorQuery,
   VectorRecord,
+  VectorReplaceOptions,
 } from '@setu-ts/common';
 import type { ResolvedCollection } from './collection-spec.ts';
 import { validateFilter } from './filter-validation.ts';
@@ -88,6 +90,7 @@ export class VectorStoreService implements IVectorStore {
     scope: string,
     sourceId: string,
     records: readonly VectorRecord[],
+    options?: VectorReplaceOptions,
   ): Promise<void> {
     const resolved = this.#collection(collection);
     const validScope = validateScope(scope);
@@ -98,7 +101,17 @@ export class VectorStoreService implements IVectorStore {
         throw new VectorRecordError('every record passed to replaceSource must carry its sourceId');
       }
     }
-    await this.#adapter.replaceSource(resolved.spec, validScope, validSource, valid);
+    const version = validateVersion(options);
+    if (version === undefined) {
+      await this.#adapter.replaceSource(resolved.spec, validScope, validSource, valid);
+      return;
+    }
+    if (this.#adapter.versionedReplace !== true) {
+      throw new VectorOperationUnsupportedError(
+        `${this.#adapter.name}: replaceSource cannot write a version on this backend`,
+      );
+    }
+    await this.#adapter.replaceSource(resolved.spec, validScope, validSource, valid, version);
   }
 
   /** @inheritdoc */
@@ -151,4 +164,22 @@ export class VectorStoreService implements IVectorStore {
     if (resolved === undefined) throw new VectorCollectionUnknownError(shownName(name));
     return resolved;
   }
+}
+
+/**
+ * The version of a `replaceSource` call: absent, or a non-negative safe
+ * integer. `NaN`, an infinity, a fraction or a negative number would make the
+ * stored-version comparison accept or refuse everything, so each is refused.
+ */
+function validateVersion(options: VectorReplaceOptions | undefined): number | undefined {
+  if (options === undefined) return undefined;
+  if (options === null || typeof options !== 'object') {
+    throw new VectorRecordError('replaceSource options must be an object');
+  }
+  const { version } = options;
+  if (version === undefined) return undefined;
+  if (typeof version !== 'number' || !Number.isSafeInteger(version) || version < 0) {
+    throw new VectorRecordError('a replaceSource version must be a non-negative safe integer');
+  }
+  return version;
 }

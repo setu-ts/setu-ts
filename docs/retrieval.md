@@ -77,6 +77,16 @@ carry the same `sourceId`. Re-running an ingestion with the same chunk ids leave
 document that shrank leaves no stale chunk behind. A record id already used by another source in the
 scope is reassigned to this source; it never leaves the tenant.
 
+Pass `{ version }` as a fifth argument when submissions of one source can be processed out of order,
+as queue retries can be. The version is a non-negative safe integer that grows with each newer
+submission, such as the time the submission was accepted. The write is refused with
+`VectorVersionConflictError` (409) when the source's stored records carry a higher version, so a
+late retry of an older submission cannot replace a newer one; an equal version is written again, so
+a retry of the same submission succeeds. A write without a version leaves the source unversioned,
+and a source with no records keeps no version. memory, pgvector and Qdrant (1.16 or later) honour
+versions; an adapter that does not declare `versionedReplace` refuses a versioned call with
+`VectorOperationUnsupportedError`.
+
 `delete(collection, scope, ids)` takes at most 1,000 ids. `deleteScope(collection, scope)` removes
 every record of one tenant in the collection, for offboarding.
 
@@ -282,7 +292,9 @@ the extension version and the column's dimensions.
 Queries run in a transaction with `hnsw.ef_search` raised to at least 40 and
 `hnsw.iterative_scan = strict_order`, so filtered searches keep recall and results stay in distance
 order. `replaceSource` runs in one transaction and serialises concurrent replacements of the same
-source with an advisory lock.
+source with an advisory lock; a version is read and checked under that lock, from the
+`source_version bigint` column (`ensure: 'create'` adds it to an existing table, and
+`ensure: 'verify'` refuses a table without it).
 
 All tenants share one HNSW index per collection, and the scope is applied while the index is
 scanned. The iterative scan stops after `hnsw.max_scan_tuples` index tuples (20,000 by default), so
@@ -326,8 +338,10 @@ declared field. An existing collection is verified by size and distance. Point i
 `vectorRecordKey(subtle, scope, id)`, and the original id is stored in the payload.
 
 `replaceSource` upserts the new points and then deletes the source's stale ones. The two calls are
-not atomic, so two replacements of the same source must not run concurrently; serialise them per
-source.
+not atomic, so two unversioned replacements of the same source must not run concurrently; serialise
+them per source, or pass a version. A versioned write needs Qdrant 1.16 or later (checked once): a
+conditional upsert keeps a newer version's points, and concurrent writes settle on the highest
+version, though a reader can briefly see chunks of both.
 
 ### Cloudflare Vectorize
 
@@ -453,6 +467,7 @@ pgvector and Qdrant when those URLs are set.
 - The pgvector and Qdrant adapters classify transport failures: an unreachable backend answers 503,
   an unanswered request answers 504, and the served detail carries no connection string.
 - Concurrent writes to one source are the application's concern. `replaceSource` serialises them on
-  pgvector and not on Qdrant, which uses two calls.
+  pgvector and not on Qdrant, which uses two calls. Pass a `version` when they can arrive out of
+  order: memory, pgvector and Qdrant then refuse an older one.
 - A filter on a Vectorize field written before its metadata index existed may match nothing. Create
   the indexes before the first write.

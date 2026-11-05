@@ -51,10 +51,12 @@ removes the document's other chunks, so re-ingesting a shorter text leaves no st
 The queue is the plugin's in-process default. A queued job runs in the same process and is lost on
 restart, like the memory vector store.
 
-Jobs for the same document are not ordered against each other. If the first attempt of an older
-submission fails and its retry runs after a newer submission was indexed, the retry's chunks replace
-the newer ones until the document is submitted again. An application that accepts concurrent edits
-of one document carries a version in the job and skips a job older than the stored one.
+Jobs for the same document are not ordered against each other, so each submission carries a
+version: the time `POST /documents` accepted it, bumped past the previous one so two submissions in
+one millisecond still order. The job passes it to `replaceSource`, which refuses an older version
+than the one stored. A late retry of an older submission is then logged as superseded and dropped
+instead of replacing the newer text. Versions come from each process's clock, so replicas need
+synchronised clocks.
 
 ## Configuration
 

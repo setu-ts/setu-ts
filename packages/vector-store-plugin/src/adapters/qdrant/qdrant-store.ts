@@ -5,7 +5,13 @@
  *
  * @module
  */
-import { VectorCollectionMismatchError, toBackendFault, vectorRecordKey } from '@setu-ts/common';
+import {
+  VectorCollectionMismatchError,
+  VectorOperationUnsupportedError,
+  VectorVersionConflictError,
+  toBackendFault,
+  vectorRecordKey,
+} from '@setu-ts/common';
 import type {
   IRuntimeServices,
   IVectorStoreAdapter,
@@ -21,6 +27,7 @@ import {
   METADATA_KEY,
   SCOPE_KEY,
   SOURCE_KEY,
+  VERSION_KEY,
   scopeCondition,
   scopedFilter,
 } from './qdrant-filter.ts';
@@ -33,7 +40,12 @@ const CLIENT_METHODS = [
   'upsert',
   'query',
   'delete',
+  'count',
+  'versionInfo',
 ] as const;
+
+/** The first Qdrant release whose upsert takes `update_filter` (conditional update). */
+const MIN_VERSIONED: readonly [number, number] = [1, 16];
 
 /**
  * The parts of `QdrantClient` (`@qdrant/js-client-rest`) this adapter calls.
@@ -58,6 +70,19 @@ export interface QdrantClientLike {
   query(name: string, body: Record<string, unknown>): Promise<unknown>;
   /** `POST /collections/{name}/points/delete`. */
   delete(name: string, body: Record<string, unknown>): Promise<unknown>;
+  /** `POST /collections/{name}/points/count`. */
+  count(
+    name: string,
+    body: Record<string, unknown>,
+  ): Promise<{
+    /** Points matching the filter. */
+    count: number;
+  }>;
+  /** `GET /`: the server's version, checked before the first versioned write. */
+  versionInfo(): Promise<{
+    /** The server version, e.g. `1.20.0`. */
+    version: string;
+  }>;
 }
 
 /**
@@ -97,7 +122,11 @@ interface QdrantPoint {
 export class QdrantVectorStore implements IVectorStoreAdapter {
   /** @inheritdoc */
   readonly name = 'qdrant';
+  /** @inheritdoc */
+  readonly versionedReplace = true;
   readonly #client: QdrantClientLike;
+  /** Settles once the server is known to take `update_filter`; reset after a failed probe. */
+  #versionChecked: Promise<void> | undefined;
   readonly #onClose: (() => void | Promise<void>) | undefined;
   #subtle: SubtleCrypto | undefined;
 
@@ -153,6 +182,7 @@ export class QdrantVectorStore implements IVectorStoreAdapter {
     const indexes: [string, Record<string, unknown> | string][] = [
       [SCOPE_KEY, { type: 'keyword', is_tenant: true }],
       [SOURCE_KEY, 'keyword'],
+      [VERSION_KEY, 'integer'],
       ...Object.entries(spec.filterable ?? {}).map(([field, type]): [string, string] => [
         `${METADATA_KEY}.${field}`,
         type === 'string' ? 'keyword' : type === 'number' ? 'float' : 'bool',
@@ -185,25 +215,57 @@ export class QdrantVectorStore implements IVectorStoreAdapter {
    * Qdrant has no transactions: the write and the stale-delete are two calls,
    * so two replacements of the SAME source must not run at once (one could
    * delete the other's records). Serialise them per source, e.g. one queue job
-   * per document at a time.
+   * per document at a time, or pass a `version`.
+   *
+   * With a `version` (Qdrant 1.16+), the upsert's `update_filter` keeps any
+   * point a newer version wrote, a count afterwards finds a newer version that
+   * landed first, and the stale-delete never touches a newer point. Concurrent
+   * writes of one source then settle on the highest version's records, though
+   * a reader can briefly see both versions' chunks.
    */
   async replaceSource(
     spec: VectorCollectionSpec,
     scope: string,
     sourceId: string,
     records: readonly VectorRecord[],
+    version?: number,
   ): Promise<void> {
-    if (records.length > 0) await this.upsert(spec, scope, records);
+    const name = collectionName(spec);
+    const source = [scopeCondition(scope), { key: SOURCE_KEY, match: { value: sourceId } }];
     const kept = await Promise.all(records.map((record) => this.#pointId(scope, record.id)));
-    await this.#run(() =>
-      this.#client.delete(collectionName(spec), {
-        wait: true,
-        filter: {
-          must: [scopeCondition(scope), { key: SOURCE_KEY, match: { value: sourceId } }],
-          ...(kept.length === 0 ? {} : { must_not: [{ has_id: kept }] }),
-        },
-      }),
+    if (version === undefined) {
+      if (records.length > 0) await this.upsert(spec, scope, records);
+      await this.#deleteSource(name, { must: source, ...notKept(kept) });
+      return;
+    }
+    await this.#requireConditionalUpdate();
+    // A stored point of a newer version keeps its state; new ids are inserted.
+    const newer = { key: VERSION_KEY, range: { gt: version } };
+    if (records.length > 0) {
+      const points = await Promise.all(
+        records.map((record) => this.#point(scope, record, version)),
+      );
+      await this.#run(() =>
+        this.#client.upsert(name, { wait: true, points, update_filter: { must_not: [newer] } }),
+      );
+    }
+    // Without transactions, a newer write may already have landed. Then every
+    // point at or below this version, including ids this call just inserted,
+    // is stale: remove them and report the conflict.
+    const { count } = await this.#run(() =>
+      this.#client.count(name, { exact: true, filter: { must: [...source, newer] } }),
     );
+    if (count > 0) {
+      await this.#deleteSource(name, { must: source, must_not: [newer] });
+      throw new VectorVersionConflictError(
+        `qdrant: replaceSource version ${version} is older than a stored version`,
+      );
+    }
+    // Never delete a newer write that lands after the check.
+    await this.#deleteSource(name, {
+      must: source,
+      must_not: [newer, ...(kept.length === 0 ? [] : [{ has_id: kept }])],
+    });
   }
 
   /** @inheritdoc */
@@ -261,7 +323,38 @@ export class QdrantVectorStore implements IVectorStoreAdapter {
     await this.#onClose?.();
   }
 
-  async #point(scope: string, record: VectorRecord): Promise<Record<string, unknown>> {
+  async #deleteSource(name: string, filter: Record<string, unknown>): Promise<void> {
+    await this.#run(() => this.#client.delete(name, { wait: true, filter }));
+  }
+
+  /**
+   * Refuses a versioned write on a server older than 1.16, which predates
+   * `update_filter`: whether it would reject the field or ignore it is not
+   * documented, and ignoring it would let an older write replace a newer one.
+   */
+  #requireConditionalUpdate(): Promise<void> {
+    this.#versionChecked ??= this.#run(() => this.#client.versionInfo()).then(
+      ({ version }) => {
+        if (!atLeast(version, MIN_VERSIONED)) {
+          throw new VectorOperationUnsupportedError(
+            `qdrant: a versioned replaceSource needs Qdrant ${MIN_VERSIONED.join('.')} or later; the server is ${version}.`,
+          );
+        }
+      },
+      (error: unknown) => {
+        // A failed probe is retried on the next call rather than remembered.
+        this.#versionChecked = undefined;
+        throw error;
+      },
+    );
+    return this.#versionChecked;
+  }
+
+  async #point(
+    scope: string,
+    record: VectorRecord,
+    version?: number,
+  ): Promise<Record<string, unknown>> {
     return {
       id: await this.#pointId(scope, record.id),
       vector: unitVector(record.vector),
@@ -271,6 +364,7 @@ export class QdrantVectorStore implements IVectorStoreAdapter {
         ...(record.sourceId === undefined ? {} : { [SOURCE_KEY]: record.sourceId }),
         ...(record.content === undefined ? {} : { [CONTENT_KEY]: record.content }),
         [METADATA_KEY]: { ...record.metadata },
+        ...(version === undefined ? {} : { [VERSION_KEY]: version }),
       },
     };
   }
@@ -291,6 +385,15 @@ export class QdrantVectorStore implements IVectorStoreAdapter {
       throw toBackendFault(error, 'vector-store-plugin: qdrant') ?? error;
     }
   }
+}
+
+function notKept(kept: readonly string[]): { must_not?: unknown[] } {
+  return kept.length === 0 ? {} : { must_not: [{ has_id: kept }] };
+}
+
+function atLeast(version: string, [major, minor]: readonly [number, number]): boolean {
+  const [a, b] = version.split('.').map((part) => Number.parseInt(part, 10));
+  return a !== undefined && b !== undefined && (a > major || (a === major && b >= minor));
 }
 
 function collectionName(spec: VectorCollectionSpec): string {
