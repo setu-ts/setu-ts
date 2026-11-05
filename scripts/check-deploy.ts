@@ -97,6 +97,12 @@ export const EXCLUDED_EXAMPLES: readonly ExcludedExample[] = [
     reason: 'Same build shape as rest-api; proves MCP tools through an official-client smoke.',
   },
   {
+    app: 'semantic-search',
+    kind: 'redundant',
+    reason:
+      'Same build shape as rest-api; proves tenant-scoped retrieval through a mock-model smoke.',
+  },
+  {
     app: 'cqrs',
     kind: 'redundant',
     reason: 'Same build shape as rest-api; differs only in the plugins it imports.',

@@ -72,6 +72,11 @@ building production-ready applications with our plugin-first, runtime-independen
   - Runtime compatibility matrix
   - Package links and API references
 
+- [Retrieval (vector search)](./retrieval.md)
+  - Tenant-scoped embedding storage and similarity search
+  - pgvector, Qdrant, memory and Cloudflare Vectorize adapters
+  - Filters, limits and re-ingestion
+
 - [Custom Plugin Development](./custom-plugins.md)
   - Building your own plugins
   - Service registration patterns

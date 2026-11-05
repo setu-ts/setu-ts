@@ -26,6 +26,7 @@ describe('cloudflare-plugin barrel', () => {
     expect(typeof barrel.isR2Bucket).toBe('function');
     expect(typeof barrel.isD1Database).toBe('function');
     expect(typeof barrel.D1Adapter).toBe('function');
+    expect(typeof barrel.VectorizeVectorStore).toBe('function');
     expect(typeof barrel.WorkersQueue).toBe('function');
     expect(typeof barrel.createQueueHandler).toBe('function');
     expect(typeof barrel.WorkersCron).toBe('function');

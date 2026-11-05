@@ -754,6 +754,11 @@ here.
   served-status rule, atomic `setHeaders`, cleanup after the handler, whole-graph boot validation,
   `RouteRegistrationError`, session-stamp revocation, Kafka first-join skip window, stable OpenAPI
   component names; 17 smoke rows) — complete (PR #557).
+- **Milestone 135** (`vector-store-plugin` (new) + `common` + `cloudflare-plugin` + `cli` —
+  tenant-scoped retrieval: `IVectorStore` under `CAPABILITIES.VECTOR_STORE`, the scope a required
+  argument, filters refused rather than ignored, memory/pgvector/Qdrant adapters plus
+  `VectorizeVectorStore`, `setu add vector-store`, the `semantic-search` example; ships in `0.12.0`)
+  — complete (PR #558).
 - **Milestone 131c** (`packages/cli` — CLI gates, generators and workspace deploy: `setu check`
   fails an imported-but-unused registration and names the line of a config it cannot read, W005 for
   an unlisted service, same-named controller adoption, hoisted `react-router`, per-member Vite and

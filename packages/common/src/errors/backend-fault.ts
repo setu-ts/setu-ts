@@ -37,6 +37,11 @@
  * window where a "not sent" decision built on driver events was false (M131a),
  * so a lost connection or an expired bound is never claimed to be "not applied".
  *
+ * node-postgres's lost-connection and timeout messages, and undici's socket and
+ * timeout codes under `fetch failed`, joined the table in M135 (security audit
+ * F2): a pgvector or Qdrant outage otherwise answered its first request with a
+ * masked `500`.
+ *
  * Only those measured shapes enter the table; anything unrecognised passes
  * through unchanged (the masked `500`), because an unrecognised fault is not
  * proven to be either safe.
@@ -147,8 +152,33 @@ const MAX_CAUSE_DEPTH = 5;
 /** What one object in the cause chain says: refused before any send, or not. */
 type BackendFaultKind = 'unavailable' | 'outcome-unknown';
 
-/** Network codes a command already on the socket can also fail with. */
-const IN_FLIGHT_CODES: ReadonlySet<string> = new Set(['ECONNRESET', 'EPIPE', 'ETIMEDOUT']);
+/**
+ * Network codes a command already on the socket can also fail with. The
+ * `UND_ERR_*` codes are undici's, under a `fetch failed` TypeError (an HTTP
+ * client such as Qdrant's): the socket closed, or the response did not arrive.
+ */
+const IN_FLIGHT_CODES: ReadonlySet<string> = new Set([
+  'ECONNRESET',
+  'EPIPE',
+  'ETIMEDOUT',
+  'UND_ERR_SOCKET',
+  'UND_ERR_HEADERS_TIMEOUT',
+  'UND_ERR_BODY_TIMEOUT',
+]);
+
+/**
+ * node-postgres messages for a lost or timed-out connection (the anchors
+ * database-plugin's classifier measured in M128). The first two may follow a
+ * statement already sent; the last two come before any statement is sent.
+ */
+const PG_OUTCOME_UNKNOWN_MESSAGES: ReadonlySet<string> = new Set([
+  'Connection terminated unexpectedly',
+  'Query read timeout',
+]);
+const PG_UNAVAILABLE_MESSAGES: ReadonlySet<string> = new Set([
+  'timeout exceeded when trying to connect',
+  'Connection terminated due to connection timeout',
+]);
 
 /**
  * Classifies one object in a thrown error's cause chain.
@@ -180,6 +210,10 @@ function classify(entry: Record<string, unknown>): BackendFaultKind | undefined 
   const code = typeof entry.code === 'string' ? entry.code : entry.errno;
   if (typeof code === 'string' && IN_FLIGHT_CODES.has(code)) return 'outcome-unknown';
   if (name === 'MaxRetriesPerRequestError') return 'outcome-unknown';
+  // @qdrant/js-client-rest 1.20.0 with its `timeout` option set, against a
+  // server that never answers (measured, M135).
+  if (name === 'QdrantClientTimeoutError') return 'outcome-unknown';
+  if (name === 'Error' && PG_OUTCOME_UNKNOWN_MESSAGES.has(message)) return 'outcome-unknown';
   if (
     name === 'Error' &&
     (message === 'Connection is closed.' || message === 'Socket closed unexpectedly')
@@ -188,6 +222,8 @@ function classify(entry: Record<string, unknown>): BackendFaultKind | undefined 
   }
   // 503: refused before sending — the connection never reached the backend.
   if (isConnectionFaultCode(entry.code) || isConnectionFaultCode(entry.errno)) return 'unavailable';
+  if (code === 'UND_ERR_CONNECT_TIMEOUT') return 'unavailable';
+  if (name === 'Error' && PG_UNAVAILABLE_MESSAGES.has(message)) return 'unavailable';
   if (
     name === 'Error' &&
     (message === "Stream isn't writeable and enableOfflineQueue options is false" ||

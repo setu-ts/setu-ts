@@ -97,6 +97,7 @@ export const GUIDES = [
   'docs/webhooks.md',
   'docs/ai.md',
   'docs/mcp.md',
+  'docs/retrieval.md',
 ] as const;
 
 /** The committed snippet compiler configuration used for all fence compilation. */

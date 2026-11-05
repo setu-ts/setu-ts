@@ -3891,6 +3891,14 @@
           "npm:zod@^4.6.6"
         ]
       },
+      "jsr:@setu-ts/vector-store-plugin@0.11.0": {
+        "dependencies": [
+          "npm:@qdrant/js-client-rest@1.20.0",
+          "npm:drizzle-orm@0.45.2",
+          "npm:pg@8",
+          "npm:vitest@5.0.3"
+        ]
+      },
       "jsr:@setu-ts/view-plugin@0.11.0": {
         "dependencies": [
           "npm:hono@^4.12.30",

@@ -681,7 +681,7 @@ describe('real-backend CI wiring', () => {
       expect(text).toContain(
         'MONGODB_RS_URI: mongodb://127.0.0.1:27018/?replicaSet=rs0&directConnection=true',
       );
-      expect(text).toMatch(/\n {6}postgres:\n {8}image: postgres:16\n/);
+      expect(text).toMatch(/\n {6}postgres:\n {8}image: pgvector\/pgvector:0\.8\.1-pg16\n/);
       expect(text).toContain('POSTGRES_PASSWORD: postgres');
       expect(text).toContain('- 127.0.0.1:5433:5432');
       expect(text).toContain('--health-cmd "pg_isready -U postgres"');
@@ -1104,8 +1104,8 @@ describe('M111c declared artifact coverage', () => {
     expect(Object.keys(compat.dependencies).sort()).toEqual(
       [...installable, '@modelcontextprotocol/server'].sort(),
     );
-    expect(expected).toHaveLength(53);
-    expect(pending).toEqual(['@setu-ts/mcp-plugin']);
+    expect(expected).toHaveLength(54);
+    expect(pending).toEqual(['@setu-ts/mcp-plugin', '@setu-ts/vector-store-plugin']);
     expect(installable.every((name) => compat.dependencies[name] === 'latest')).toBe(true);
     expect(compat.dependencies['@modelcontextprotocol/server']).toBe('^2.4.0');
     expect(workspace.scripts['release:publish']).toBe('node scripts/npm-publish.ts');

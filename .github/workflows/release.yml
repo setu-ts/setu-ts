@@ -92,17 +92,32 @@ jobs:
       # refuses transactions, which the outbox needs.
       OUTBOX_POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5433/postgres
       MONGODB_RS_URI: mongodb://127.0.0.1:27018/?replicaSet=rs0&directConnection=true
+      # M135 §3.15: the vector-store conformance table runs its pgvector and
+      # Qdrant arms against these; pgvector shares the postgres service.
+      PGVECTOR_URL: postgres://postgres:postgres@127.0.0.1:5433/postgres
+      QDRANT_URL: http://127.0.0.1:6333
     services:
       # M107 §6 (C8): PostgreSQL for the outbox real-backend suites, on host port
       # 5433 (see OUTBOX_POSTGRES_URL above).
+      # M135 §3.15: pgvector's image is postgres:16 plus the extension.
       postgres:
-        image: postgres:16
+        image: pgvector/pgvector:0.8.1-pg16
         env:
           POSTGRES_PASSWORD: postgres
         ports:
           - 127.0.0.1:5433:5432
         options: >-
           --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      # The image ships neither curl, wget nor nc; bash's /dev/tcp checks the port.
+      qdrant:
+        image: qdrant/qdrant:v1.20.0
+        ports:
+          - 127.0.0.1:6333:6333
+        options: >-
+          --health-cmd "bash -c 'echo > /dev/tcp/127.0.0.1/6333'"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 10

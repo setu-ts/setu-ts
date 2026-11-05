@@ -220,6 +220,7 @@ package fits the plugin architecture.
 | `assertPrimaryKeyUnchanged`           | function  |
 | `assertRealPathContained`             | function  |
 | `attachConnectionErrorReporter`       | function  |
+| `attachPoolErrorListener`             | function  |
 | `authorizationFailureInit`            | function  |
 | `brandErrorResponder`                 | function  |
 | `causeMessage`                        | function  |
@@ -320,6 +321,7 @@ package fits the plugin architecture.
 | `upgradeIntentOf`                     | function  |
 | `validatedStateKey`                   | function  |
 | `validationMetadataOf`                | function  |
+| `vectorRecordKey`                     | function  |
 | `watchConnection`                     | function  |
 | `withDeadline`                        | function  |
 | `withHttpStatusHint`                  | function  |
@@ -341,6 +343,14 @@ package fits the plugin architecture.
 | `RouteRegistrationError`              | class     |
 | `UnknownPayloadFieldError`            | class     |
 | `UnsupportedFormEncodingError`        | class     |
+| `VectorCollectionMismatchError`       | class     |
+| `VectorCollectionUnknownError`        | class     |
+| `VectorDimensionError`                | class     |
+| `VectorFilterError`                   | class     |
+| `VectorOperationUnsupportedError`     | class     |
+| `VectorRecordError`                   | class     |
+| `VectorScopeInvalidError`             | class     |
+| `VectorScopeRequiredError`            | class     |
 | `CAPABILITIES`                        | const     |
 | `CLIENT_IP_STATE_KEY`                 | const     |
 | `CREDENTIAL_SOURCE_STATE_KEY`         | const     |
@@ -562,6 +572,8 @@ package fits the plugin architecture.
 | `ITransactionalIdempotencyStore`      | interface |
 | `ITransactionIsolationSupport`        | interface |
 | `IValidationService`                  | interface |
+| `IVectorStore`                        | interface |
+| `IVectorStoreAdapter`                 | interface |
 | `IViewEngine`                         | interface |
 | `IWebSocketConnection`                | interface |
 | `IWebSocketService`                   | interface |
@@ -675,6 +687,10 @@ package fits the plugin architecture.
 | `ValidationIssue`                     | interface |
 | `ValidationMiddlewareOptions`         | interface |
 | `ValueProvider`                       | interface |
+| `VectorCollectionSpec`                | interface |
+| `VectorMatch`                         | interface |
+| `VectorQuery`                         | interface |
+| `VectorRecord`                        | interface |
 | `WebSocketCloseEvent`                 | interface |
 | `WebSocketConnectionContext`          | interface |
 | `WebSocketEventSink`                  | interface |
@@ -830,6 +846,9 @@ package fits the plugin architecture.
 | `TransactionIsolationLevel`           | type      |
 | `Unsubscribe`                         | type      |
 | `ValidationTarget`                    | type      |
+| `VectorFieldType`                     | type      |
+| `VectorFilter`                        | type      |
+| `VectorMetadataValue`                 | type      |
 | `WebSocketGuardDecision`              | type      |
 | `WebSocketReadyState`                 | type      |
 | `WebSocketUpgradeDecision`            | type      |

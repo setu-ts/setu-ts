@@ -3,6 +3,7 @@ export const EXAMPLES = [
   'minimal',
   'rest-api',
   'mcp-tools',
+  'semantic-search',
   'database',
   'di-decorators',
   'cqrs',

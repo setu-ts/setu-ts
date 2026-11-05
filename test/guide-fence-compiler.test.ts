@@ -128,13 +128,14 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
     // every example shares, taken from apps/minimal. Two more skipped blocks:
     // the layout tree and the worker-pool commands.
     // M119i: repository setup adds one shell fence.
-    // site/--example adds one shell fence.
-    total: 23,
+    // site/--example adds one shell fence. M135: the semantic-search section
+    // adds one shell fence.
+    total: 24,
     ts: 1,
     compile: 1,
     external: 0,
     pseudocode: 0,
-    skipped: 22,
+    skipped: 23,
   },
   'docs/decorators.md': {
     // 28 at M76. Two blocks left the guide there: the `deno.json` "Enable
@@ -235,6 +236,8 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
   },
   'docs/ai.md': { total: 10, ts: 9, compile: 9, external: 0, pseudocode: 0, skipped: 1 },
   'docs/mcp.md': { total: 19, ts: 16, compile: 16, external: 0, pseudocode: 0, skipped: 3 },
+  // M135: the retrieval guide; every TypeScript fence compiles.
+  'docs/retrieval.md': { total: 10, ts: 8, compile: 8, external: 0, pseudocode: 0, skipped: 2 },
 };
 
 const EXPECTED_AGGREGATE: FenceCounts = {
@@ -274,12 +277,13 @@ const EXPECTED_AGGREGATE: FenceCounts = {
   // M131a: +1 skipped shell fence in docs/cli.md (Redis arms); the telemetry README
   // preload fence is a package README, outside this corpus.
   // M129: +1 skipped shell fence in docs/cli.md (`setu client`).
-  total: 342,
-  ts: 254,
-  compile: 221,
+  // M135: docs/retrieval.md joins (+10: 8 compiling, 2 skipped); +1 skipped in examples.md.
+  total: 353,
+  ts: 262,
+  compile: 229,
   external: 33,
   pseudocode: 0,
-  skipped: 88,
+  skipped: 91,
 };
 
 describe('actual-fence compiler — every curated guide (shared engine)', () => {

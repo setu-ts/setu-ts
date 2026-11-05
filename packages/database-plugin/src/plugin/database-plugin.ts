@@ -15,6 +15,7 @@ import type {
   TimerHandle,
 } from '@setu-ts/common';
 import {
+  attachPoolErrorListener,
   CAPABILITIES,
   createCachedProbe,
   createCapabilityToken,
@@ -35,7 +36,6 @@ import type {
 import { DatabaseService } from '../services/database-service.ts';
 import { MemoryAdapter } from '../adapters/memory/memory-adapter.ts';
 import { PrismaAdapter } from '../adapters/prisma/prisma-adapter.ts';
-import { attachPoolErrorListener } from '../adapters/drizzle/pool-error-listener.ts';
 import { readDrizzleDatabase } from '../query/drizzle-database.ts';
 import type { DrizzleAdapterOptions } from '../interfaces/index.ts';
 import { DrizzleAdapter } from '../adapters/drizzle/drizzle-adapter.ts';

@@ -220,6 +220,7 @@ export const FRAMEWORK_PACKAGES: ReadonlySet<string> = new Set([
   'telemetry-plugin',
   'testing',
   'validation-plugin',
+  'vector-store-plugin',
   'view-plugin',
   'websocket-plugin',
   'worker-pool-plugin',
