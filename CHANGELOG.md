@@ -334,7 +334,11 @@ All notable changes to this project are documented here. The format follows
   app's public origin nor in the new `allowedOrigins` option, before route guards and before a
   connection slot; a client with no `Origin` is admitted, and `checkOrigin: false` turns the check
   off. The kernel passes the proxy-aware public origin as `routeUpgrade`'s new optional third
-  argument.
+  argument. **Migration:** list a browser front end served from another origin (a separate SPA host,
+  a dev server on its own port) in `allowedOrigins`; behind a TLS-terminating proxy, trust it with
+  `HttpSecurityPlugin({ ipSecurity: { trustProxy: true, trustedProxies } })` or list the public
+  origin, since the request URL is otherwise `http://` and every `https://` page is refused. See
+  `docs/upgrading.md`.
 - **`IGraphqlService.execute` with a request context and no method runs a mutation only for `POST`
   (#562, `@setu-ts/graphql-plugin`).** Security. An application route forwarding a request to
   `execute(params, ctx)` let a cross-site `GET` run a mutation; the method is now derived from the
