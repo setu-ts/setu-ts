@@ -314,6 +314,9 @@ importers:
       '@setu-ts/scheduler-plugin':
         specifier: workspace:^
         version: link:../../packages/scheduler-plugin
+      '@setu-ts/static-plugin':
+        specifier: workspace:^
+        version: link:../../packages/static-plugin
       '@setu-ts/telemetry-plugin':
         specifier: workspace:^
         version: link:../../packages/telemetry-plugin

@@ -17,6 +17,27 @@ let sdkTelemetryRegistered = false;
 export interface IChatModelsService {
   /** Fallback order: each model is budgeted at its own prices. */
   readonly models: readonly PricedModel[];
+  /**
+   * The primary model's context window in tokens, from `AI_COMPAT_CONTEXT_TOKENS`.
+   * Absent when unset: an OpenAI-compatible API does not report it.
+   */
+  readonly contextTokens?: number;
+}
+
+/**
+ * Reads `AI_COMPAT_CONTEXT_TOKENS`: absent, or a positive whole number of tokens.
+ *
+ * @param value - The environment value
+ * @returns The window size, or `undefined` when unset
+ * @throws {Error} When the value is set but is not a positive whole number
+ */
+export function parseContextTokens(value: string | undefined): number | undefined {
+  if (value === undefined || value === '') return undefined;
+  const tokens = Number(value);
+  if (!/^[0-9]+$/.test(value) || !Number.isSafeInteger(tokens) || tokens < 1) {
+    throw new Error('AI_COMPAT_CONTEXT_TOKENS must be a positive whole number of tokens');
+  }
+  return tokens;
 }
 
 /**
@@ -29,6 +50,7 @@ export interface IChatModelsService {
  *
  * The provider URL, model and key come from the server environment
  * (`AI_COMPAT_BASE_URL`, `AI_COMPAT_MODEL`, `AI_COMPAT_API_KEY`), never from a request.
+ * `AI_COMPAT_CONTEXT_TOKENS` states the model's context window for the chat page.
  * `includeUsage` asks OpenAI-compatible servers for streamed token usage; without it
  * every streamed call settles at its reservation.
  *
@@ -41,6 +63,7 @@ export function ChatModelsPlugin(): IPlugin {
     provides: [CHAT_MODELS],
     register(ctx: IPluginContext): void {
       const env = ctx.runtime.env;
+      const contextTokens = parseContextTokens(env['AI_COMPAT_CONTEXT_TOKENS']);
       const provider = createOpenAICompatible({
         name: 'compatible',
         baseURL: env['AI_COMPAT_BASE_URL'] ?? 'http://localhost:8080/v1',
@@ -59,6 +82,7 @@ export function ChatModelsPlugin(): IPlugin {
             prices: { inputPrice: 1, outputPrice: 1, perMessage: 64, perFile: 8192 },
           },
         ],
+        ...(contextTokens === undefined ? {} : { contextTokens }),
       };
       ctx.services.register(CHAT_MODELS, service);
     },

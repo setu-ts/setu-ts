@@ -12,6 +12,7 @@ import { ValidationPlugin } from '@setu-ts/validation-plugin';
 import { HttpSecurityPlugin } from '@setu-ts/http-security-plugin';
 import { HealthPlugin } from '@setu-ts/health-plugin';
 import { MetricsPlugin } from '@setu-ts/metrics-plugin';
+import { StaticPlugin } from '@setu-ts/static-plugin';
 import { OpenApiPlugin } from '@setu-ts/openapi-plugin';
 import { errorHandler } from '@setu-ts/exceptions';
 import {
@@ -62,7 +63,10 @@ export function createApp(
       HttpSecurityPlugin(),
       HealthPlugin({ indicators: [...HEALTH_INDICATORS] }),
       MetricsPlugin({ customMetrics: [...CUSTOM_METRICS] }),
-      OpenApiPlugin(),
+      // The chat page is a browser page, not part of the API.
+      OpenApiPlugin({ exclude: ['/ui/*'] }),
+      // The chat page in public/: index.html at /ui, its script at /ui/chat.js.
+      StaticPlugin({ root: './public', urlPrefix: '/ui' }),
       SchedulerPlugin(),
       DatabasePlugin({ type: 'memory' }),
       // A production resolver binds this identity to the authenticated principal.
