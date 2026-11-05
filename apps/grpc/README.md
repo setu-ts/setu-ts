@@ -8,6 +8,15 @@ descriptor set in `echo.descriptor.ts`; no code-generation step is required.
 pnpm --dir apps/grpc run start
 ```
 
+The server keeps running; send the requests from another terminal:
+
+```bash
+curl localhost:5000/health
+curl -X POST localhost:5000/example.EchoService/Echo -H 'content-type: application/json' -d '{"message":"hi"}'
+```
+
+The second request is a Connect unary call with a JSON body; it answers `{"response":"echo: hi"}`.
+
 Its smoke check sends a real Connect JSON RPC through the plugin's interception seam and verifies
 the decoded Echo response alongside the ordinary HTTP route.
 

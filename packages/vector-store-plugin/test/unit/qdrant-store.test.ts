@@ -9,6 +9,8 @@ import { describe, expect, it } from 'vitest';
 import {
   BackendUnavailableError,
   VectorCollectionMismatchError,
+  VectorOperationUnsupportedError,
+  VectorVersionConflictError,
   vectorRecordKey,
 } from '@setu-ts/common';
 import type { IRuntimeServices, VectorCollectionSpec } from '@setu-ts/common';
@@ -35,6 +37,12 @@ function recordingClient(
     vectors?: unknown;
     points?: unknown;
     fail?: Error;
+    /** Points `count` reports, e.g. a newer version already stored. */
+    count?: number;
+    /** The server version `versionInfo` reports. */
+    serverVersion?: string;
+    /** Rejections for `versionInfo`, consumed one per call. */
+    versionFailures?: Error[];
   } = {},
 ): QdrantClientLike & { readonly calls: Call[] } {
   const calls: Call[] = [];
@@ -71,6 +79,16 @@ function recordingClient(
     async delete(name: string, body: Record<string, unknown>) {
       record('delete', name, body);
       return {};
+    },
+    async count(name: string, body: Record<string, unknown>) {
+      record('count', name, body);
+      return { count: options.count ?? 0 };
+    },
+    async versionInfo() {
+      record('versionInfo', '');
+      const failure = options.versionFailures?.shift();
+      if (failure !== undefined) throw failure;
+      return { version: options.serverVersion ?? '1.20.0' };
     },
   };
 }
@@ -126,6 +144,11 @@ describe('QdrantVectorStore', () => {
       {
         method: 'createPayloadIndex',
         name: 'vs_documents',
+        body: { field_name: 'source_version', field_schema: 'integer', wait: true },
+      },
+      {
+        method: 'createPayloadIndex',
+        name: 'vs_documents',
         body: { field_name: 'metadata.tag', field_schema: 'keyword', wait: true },
       },
       {
@@ -149,6 +172,7 @@ describe('QdrantVectorStore', () => {
     expect(good.client.calls.map((c) => c.method)).toEqual([
       'collectionExists',
       'getCollection',
+      'createPayloadIndex',
       'createPayloadIndex',
       'createPayloadIndex',
     ]);
@@ -224,6 +248,90 @@ describe('QdrantVectorStore', () => {
           { key: 'source_id', match: { value: 's1' } },
         ],
       },
+    });
+  });
+
+  describe('versioned replaceSource', () => {
+    const source = [
+      { key: 'scope', match: { value: 'tenant-a' } },
+      { key: 'source_id', match: { value: 's1' } },
+    ];
+    const newer = { key: 'source_version', range: { gt: 5 } };
+    const record = { id: 'r1', vector: [1, 0, 0], sourceId: 's1' } as const;
+
+    it('upserts under a filter that keeps newer points, checks, then deletes only older stale ids', async () => {
+      const { store, client } = await opened();
+      await store.replaceSource(spec, 'tenant-a', 's1', [record], 5);
+      expect(client.calls.map((c) => c.method)).toEqual([
+        'versionInfo',
+        'upsert',
+        'count',
+        'delete',
+      ]);
+      const upsert = client.calls[1]!.body as {
+        points: { payload: Record<string, unknown> }[];
+        update_filter: unknown;
+      };
+      expect(upsert.update_filter).toEqual({ must_not: [{ must: [source[1], newer] }] });
+      expect(upsert.points[0]!.payload['source_version']).toBe(5);
+      expect(client.calls[2]!.body).toEqual({ exact: true, filter: { must: [...source, newer] } });
+      expect(client.calls[3]!.body).toEqual({
+        wait: true,
+        filter: { must: source, must_not: [newer, { has_id: [await uuidFor('tenant-a', 'r1')] }] },
+      });
+      // The server version is probed once.
+      client.calls.length = 0;
+      await store.replaceSource(spec, 'tenant-a', 's1', [], 5);
+      expect(client.calls.map((c) => c.method)).toEqual(['count', 'delete']);
+      expect(client.calls[1]!.body).toEqual({
+        wait: true,
+        filter: { must: source, must_not: [newer] },
+      });
+    });
+
+    it('removes its own older points and refuses when a newer version is already stored', async () => {
+      const { store, client } = await opened(recordingClient({ count: 2 }));
+      await expect(store.replaceSource(spec, 'tenant-a', 's1', [record], 5)).rejects.toThrow(
+        VectorVersionConflictError,
+      );
+      expect(client.calls.map((c) => c.method)).toEqual([
+        'versionInfo',
+        'upsert',
+        'count',
+        'delete',
+      ]);
+      expect(client.calls[3]!.body).toEqual({
+        wait: true,
+        filter: { must: source, must_not: [newer] },
+      });
+    });
+
+    it('refuses a versioned write on a server older than 1.16, before writing anything', async () => {
+      for (const serverVersion of ['1.15.4', '0.11.0', 'dev']) {
+        const { store, client } = await opened(recordingClient({ serverVersion }));
+        await expect(store.replaceSource(spec, 'tenant-a', 's1', [record], 5)).rejects.toThrow(
+          VectorOperationUnsupportedError,
+        );
+        expect(client.calls.map((c) => c.method)).toEqual(['versionInfo']);
+      }
+      for (const serverVersion of ['1.16.0', '2.0.0']) {
+        const { store } = await opened(recordingClient({ serverVersion }));
+        await expect(
+          store.replaceSource(spec, 'tenant-a', 's1', [record], 5),
+        ).resolves.toBeUndefined();
+      }
+    });
+
+    it('probes the server version again after a failed probe', async () => {
+      const unreachable = Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:6333'), {
+        code: 'ECONNREFUSED',
+      });
+      const { store, client } = await opened(recordingClient({ versionFailures: [unreachable] }));
+      await expect(store.replaceSource(spec, 'tenant-a', 's1', [record], 5)).rejects.toThrow(
+        BackendUnavailableError,
+      );
+      await store.replaceSource(spec, 'tenant-a', 's1', [record], 5);
+      expect(client.calls.filter((c) => c.method === 'versionInfo')).toHaveLength(2);
     });
   });
 

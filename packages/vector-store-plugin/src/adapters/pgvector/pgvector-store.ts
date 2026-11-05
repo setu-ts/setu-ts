@@ -11,6 +11,7 @@ import {
   OptionalDependencyUnavailableError,
   VectorCollectionMismatchError,
   VectorOperationUnsupportedError,
+  VectorVersionConflictError,
   toBackendFault,
 } from '@setu-ts/common';
 import type {
@@ -24,6 +25,7 @@ import type {
   VectorRecord,
 } from '@setu-ts/common';
 import {
+  addVersionColumnStatement,
   createExtensionStatement,
   createStatements,
   deleteIdsStatement,
@@ -33,6 +35,7 @@ import {
   extensionVersionStatement,
   queryStatement,
   sourceLockStatement,
+  sourceVersionStatement,
   querySettings,
   tableNames,
   upsertStatement,
@@ -115,6 +118,8 @@ async function loadDrizzleSql(): Promise<SqlTag> {
 export class PgVectorStore implements IVectorStoreAdapter {
   /** @inheritdoc */
   readonly name = 'pgvector';
+  /** @inheritdoc */
+  readonly versionedReplace = true;
   readonly #db: PgVectorDatabase;
   readonly #ensure: 'create' | 'verify';
   readonly #onClose: (() => void | Promise<void>) | undefined;
@@ -191,6 +196,7 @@ export class PgVectorStore implements IVectorStoreAdapter {
       dimensions: number;
       source_index: boolean;
       vector_index: boolean;
+      source_version: boolean;
     }>(this.#db, describeStatement(sql, spec));
     const { table } = tableNames(spec);
     if (row === undefined) {
@@ -206,6 +212,14 @@ export class PgVectorStore implements IVectorStoreAdapter {
     if (!row.source_index || !row.vector_index) {
       throw new VectorCollectionMismatchError(
         `pgvector: '${table}' is missing its ${!row.vector_index ? 'HNSW' : 'source'} index.`,
+      );
+    }
+    if (!row.source_version && this.#ensure === 'create') {
+      // A table created before versioned replaceSource gains the column once.
+      await this.#run(() => this.#db.execute(addVersionColumnStatement(sql, spec)));
+    } else if (!row.source_version) {
+      throw new VectorCollectionMismatchError(
+        `pgvector: '${table}' is missing its source_version column; add it with ALTER TABLE ${table} ADD COLUMN source_version bigint.`,
       );
     }
   }
@@ -225,12 +239,28 @@ export class PgVectorStore implements IVectorStoreAdapter {
     scope: string,
     sourceId: string,
     records: readonly VectorRecord[],
+    version?: number,
   ): Promise<void> {
     const sql = this.#tag();
     await this.#run(() =>
       this.#db.transaction(async (tx) => {
         await tx.execute(sourceLockStatement(sql, spec, scope, sourceId));
-        if (records.length > 0) await tx.execute(upsertStatement(sql, spec, scope, records));
+        if (version !== undefined) {
+          const [row] = await this.#rows<{ version: number | string | null }>(
+            tx,
+            sourceVersionStatement(sql, spec, scope, sourceId),
+          );
+          const stored = row?.version ?? null;
+          // bigint arrives as a string from node-postgres; a version is a safe integer.
+          if (stored !== null && Number(stored) > version) {
+            throw new VectorVersionConflictError(
+              `pgvector: replaceSource version ${version} is older than the stored version ${stored}`,
+            );
+          }
+        }
+        if (records.length > 0) {
+          await tx.execute(upsertStatement(sql, spec, scope, records, version));
+        }
         await tx.execute(
           deleteStaleStatement(
             sql,

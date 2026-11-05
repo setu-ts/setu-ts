@@ -168,3 +168,26 @@ export class VectorOperationUnsupportedError extends Error {
     });
   }
 }
+
+/**
+ * A versioned `replaceSource` lost to a newer write: the store already holds a
+ * higher version of that source, so the older records were not written. A
+ * background job treats it as "superseded" and stops; a request that meets it
+ * answers 409.
+ *
+ * @since 0.12.0
+ */
+export class VectorVersionConflictError extends Error {
+  /** Stable error discriminant. */
+  override readonly name = 'VectorVersionConflictError';
+
+  /** @param message - The backend and the version refused */
+  constructor(message: string) {
+    super(message);
+    withHttpStatusHint(this, {
+      status: 409,
+      title: 'Conflict',
+      detail: 'A newer version of this source is already stored.',
+    });
+  }
+}

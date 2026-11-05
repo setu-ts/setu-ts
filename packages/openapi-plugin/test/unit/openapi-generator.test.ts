@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod-v4';
 import type { MiddlewareFunction, RouteInfo } from '@setu-ts/common';
-import { withSecurityMetadata } from '@setu-ts/common';
+import { withIdempotencyMetadata, withSecurityMetadata } from '@setu-ts/common';
 import { OpenApiGenerator } from '../../src/generators/openapi-generator.ts';
 
 describe('OpenApiGenerator', () => {
@@ -745,6 +745,81 @@ describe('OpenApiGenerator', () => {
       const result = generator.generate([route('GET', '/users'), route('GET', '/docs')]);
 
       expect(Object.keys(result.paths).sort()).toEqual(['/docs', '/users']);
+    });
+  });
+
+  describe('derived idempotency key header', () => {
+    const generator = new OpenApiGenerator({ title: 'T', version: '1' });
+    const keyed = (keyHeader?: string, required?: boolean) =>
+      withIdempotencyMetadata(passthrough(), {
+        idempotent: true,
+        ...(keyHeader === undefined ? {} : { keyHeader }),
+        ...(required === undefined ? {} : { required }),
+      });
+    const headers = (
+      method: RouteInfo['method'],
+      middleware: MiddlewareFunction[],
+      schema?: RouteInfo['definition']['schema'],
+    ) =>
+      (
+        generator.generate([route(method, '/items', schema, middleware)]).paths['/items']?.[
+          method.toLowerCase() as 'post'
+        ]?.parameters ?? []
+      ).filter((p) => p.in === 'header');
+
+    it('should document the brand key header on an unsafe method', () => {
+      expect(headers('POST', [keyed('Idempotency-Key', true)])).toEqual([
+        {
+          name: 'Idempotency-Key',
+          in: 'header',
+          required: true,
+          description: 'A unique key per operation; send the same key when retrying it.',
+          schema: { type: 'string', minLength: 1, maxLength: 255, pattern: '^[!#-~]+$' },
+        },
+      ]);
+    });
+
+    it('should mark the header optional only when the brand says required: false', () => {
+      expect(headers('PATCH', [keyed('X-Request-Key', false)])).toMatchObject([
+        { name: 'X-Request-Key', required: false },
+      ]);
+      // An older brand without `required` means the middleware default: required.
+      expect(headers('PUT', [keyed('Idempotency-Key')])).toMatchObject([{ required: true }]);
+    });
+
+    it('should derive nothing for safe methods, unbranded routes or a non-header key', () => {
+      for (const method of ['GET', 'HEAD', 'OPTIONS'] as const)
+        expect(headers(method, [keyed('Idempotency-Key')])).toEqual([]);
+      expect(headers('POST', [passthrough()])).toEqual([]);
+      expect(headers('POST', [keyed()])).toEqual([]);
+      expect(headers('POST', [])).toEqual([]);
+    });
+
+    it('should document every distinct key header once, required if any brand requires it', () => {
+      const derived = headers('POST', [
+        keyed('Idempotency-Key', false),
+        keyed('X-Request-Key', false),
+        keyed('idempotency-key', true),
+      ]);
+      expect(derived.map((p) => [p.name, p.required])).toEqual([
+        ['Idempotency-Key', true],
+        ['X-Request-Key', false],
+      ]);
+    });
+
+    it('should describe exactly the key characters the middleware accepts', () => {
+      const [parameter] = headers('POST', [keyed('Idempotency-Key')]);
+      const pattern = new RegExp((parameter!.schema as { pattern: string }).pattern);
+      for (const ok of ['abc-123', '!#$%&~', 'x'.repeat(255)]) expect(pattern.test(ok)).toBe(true);
+      for (const bad of ['a b', 'say"hi"', 'café', '']) expect(pattern.test(bad)).toBe(false);
+    });
+
+    it('should let a header the route declares win, whatever its case', () => {
+      const declared = headers('POST', [keyed('Idempotency-Key')], {
+        headers: z.object({ 'idempotency-key': z.string().uuid() }),
+      });
+      expect(declared).toHaveLength(1);
+      expect(declared[0]).toMatchObject({ name: 'idempotency-key', schema: { format: 'uuid' } });
     });
   });
 

@@ -65,6 +65,22 @@ export interface VectorRecord {
 }
 
 /**
+ * Options for {@linkcode IVectorStore.replaceSource}.
+ *
+ * @since 0.12.0
+ */
+export interface VectorReplaceOptions {
+  /**
+   * The submission's version, a non-negative safe integer that grows with each
+   * newer submission of the source (a counter, or a millisecond timestamp
+   * taken when the submission was accepted). Records written without one
+   * leave the source unversioned, and a source with no records keeps no
+   * version, so a versioned write after either is accepted.
+   */
+  readonly version?: number;
+}
+
+/**
  * A filter over declared fields. Ranges apply to `number` fields only; `in`
  * takes 1 to 100 strings or numbers; `and` nests at most 4 deep. There is no
  * `or`, substring match or negation: three of the four backends cannot honour
@@ -171,17 +187,27 @@ export interface IVectorStore {
    * Writes a source's new records, then deletes that source's other records in
    * the scope, so a re-run with the same ids leaves one copy.
    *
+   * With `options.version`, the write is conditional: it is refused when the
+   * source's stored records carry a higher version, so a late retry of an
+   * older submission cannot replace a newer one. An equal version is written
+   * again, so a retry of the same submission succeeds.
+   *
    * @param collection - A declared collection
    * @param scope - The tenant scope
    * @param sourceId - The source every record carries
    * @param records - The source's complete new set (at most 500)
+   * @param options - The version to write under
    * @returns Once both steps finish
+   * @throws {VectorVersionConflictError} When a newer version is stored
+   * @throws {VectorOperationUnsupportedError} When a version is given and the
+   *   adapter cannot write conditionally
    */
   replaceSource(
     collection: string,
     scope: string,
     sourceId: string,
     records: readonly VectorRecord[],
+    options?: VectorReplaceOptions,
   ): Promise<void>;
   /**
    * Returns the closest records within the scope.
@@ -249,17 +275,30 @@ export interface IVectorStoreAdapter {
     records: readonly VectorRecord[],
   ): Promise<void>;
   /**
+   * Set by an adapter that honours a `version`: it stores the version with the
+   * source's records and refuses an older one atomically against concurrent
+   * writes of that source. The service refuses a versioned call to an adapter
+   * without it, so an adapter written before versions cannot ignore one.
+   */
+  readonly versionedReplace?: boolean;
+  /**
    * @param spec - The declared collection
    * @param scope - The tenant scope
    * @param sourceId - The source
    * @param records - Validated records, each carrying `sourceId`
+   * @param version - A validated version (a non-negative safe integer), only
+   *   when the adapter sets `versionedReplace`; absent writes unconditionally
+   *   and leaves the source unversioned
    * @returns Once both steps finish
+   * @throws {VectorVersionConflictError} When the stored records carry a
+   *   higher version
    */
   replaceSource(
     spec: VectorCollectionSpec,
     scope: string,
     sourceId: string,
     records: readonly VectorRecord[],
+    version?: number,
   ): Promise<void>;
   /**
    * @param spec - The declared collection

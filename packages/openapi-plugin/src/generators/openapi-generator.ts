@@ -4,7 +4,12 @@ import type {
   RouteValidationMetadata,
   SecurityRequirement,
 } from '@setu-ts/common';
-import { responseMetadataOf, securityMetadataOf, validationMetadataOf } from '@setu-ts/common';
+import {
+  idempotencyMetadataOf,
+  responseMetadataOf,
+  securityMetadataOf,
+  validationMetadataOf,
+} from '@setu-ts/common';
 
 import type { OpenApiSchemaObject } from '../transformers/zod-to-openapi.ts';
 import { ZodToOpenApi } from '../transformers/zod-to-openapi.ts';
@@ -1102,7 +1107,50 @@ export class OpenApiGenerator {
       }
     }
 
+    parameters.push(...this.#deriveIdempotencyKeyHeaders(route, parameters));
+
     return parameters;
+  }
+
+  /**
+   * The key headers the route's `idempotent()` brands read, as header
+   * parameters, so a client (and Swagger UI) knows to send them. One parameter
+   * per distinct header (names compare case-insensitively), required when any
+   * brand naming it requires a key. Nothing is derived for a safe method, which
+   * the middleware passes through; for a key read from a body field or a
+   * function, which has no header; or for a header the route already declares,
+   * which wins. The schema is the unquoted form the middleware accepts: 1–255
+   * characters from `0x21`–`0x7E`, not `"`.
+   *
+   * @param route - The route being documented
+   * @param declared - The parameters built from the route's own schemas
+   * @returns The parameters, possibly none
+   */
+  #deriveIdempotencyKeyHeaders(
+    route: RouteInfo,
+    declared: readonly OpenApiParameter[],
+  ): OpenApiParameter[] {
+    const method = route.method.toUpperCase();
+    if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return [];
+    const taken = new Set(
+      declared.filter((p) => p.in === 'header').map((p) => p.name.toLowerCase()),
+    );
+    const derived = new Map<string, OpenApiParameter>();
+    for (const middleware of route.definition.middleware ?? []) {
+      const metadata = idempotencyMetadataOf(middleware);
+      if (metadata?.keyHeader === undefined) continue;
+      const key = metadata.keyHeader.toLowerCase();
+      if (taken.has(key)) continue;
+      const required = metadata.required !== false || derived.get(key)?.required === true;
+      derived.set(key, {
+        name: derived.get(key)?.name ?? metadata.keyHeader,
+        in: 'header',
+        required,
+        description: 'A unique key per operation; send the same key when retrying it.',
+        schema: { type: 'string', minLength: 1, maxLength: 255, pattern: '^[!#-~]+$' },
+      });
+    }
+    return [...derived.values()];
   }
 
   /**

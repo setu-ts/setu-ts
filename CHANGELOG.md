@@ -8,6 +8,22 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Versioned `replaceSource` (`@setu-ts/common`, `@setu-ts/vector-store-plugin`, #561).**
+  `replaceSource(collection, scope, sourceId, records, { version })` refuses a write whose version
+  is older than the source's stored one with the new `VectorVersionConflictError` (409), so a late
+  queue retry of an older submission can no longer replace a newer one; an equal version is written
+  again. `VectorReplaceOptions` is the options type and `IVectorStoreAdapter.versionedReplace` the
+  opt-in an adapter declares to receive the version; the service refuses a version for any other
+  adapter with `VectorOperationUnsupportedError`. memory, pgvector (a `source_version` column read
+  under the source lock, added by `ensure: 'create'` and required by `ensure: 'verify'`) and Qdrant
+  1.16+ (a conditional `update_filter` upsert, so `QdrantClientLike` also requires `count` and
+  `versionInfo`) honour it; Vectorize already refuses `replaceSource`. `apps/semantic-search`
+  versions each submission and drops a superseded job.
+- **The idempotency key in the OpenAPI document (`@setu-ts/common`, `@setu-ts/idempotency-plugin`,
+  `@setu-ts/openapi-plugin`, #561).** A route carrying `idempotent()` is documented with its key
+  header as a parameter, so Swagger UI can send it; `RouteIdempotencyMetadata` gains
+  `required?: boolean` so a route with `required: false` is documented as optional.
+
 - **Tenant-scoped vector retrieval (M135, #558, `@setu-ts/common`, `@setu-ts/vector-store-plugin`,
   `@setu-ts/cloudflare-plugin`, `@setu-ts/cli`).** `CAPABILITIES.VECTOR_STORE` and `IVectorStore`
   add similarity search whose tenant scope is a required argument of every data method, never a

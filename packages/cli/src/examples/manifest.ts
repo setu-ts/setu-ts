@@ -30,6 +30,7 @@ export const EXAMPLE_MANIFEST: Readonly<
       'src/modules/todos/todos.schemas.ts',
       'src/modules/todos/todos.service.ts',
       'src/shared/schemas/problem-details.schemas.ts',
+      'token.ts',
       'tsconfig.json',
     ],
     binary: [],

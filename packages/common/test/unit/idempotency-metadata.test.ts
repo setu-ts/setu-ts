@@ -19,12 +19,25 @@ describe('idempotency metadata', () => {
     await fn({} as Parameters<MiddlewareFunction>[0], () => Promise.resolve());
     expect(called).toBe(true);
   });
-  it.each([undefined, null, 1, 'yes', true, {}, { idempotent: false }])(
-    'ignores forged metadata %j',
-    (value) => {
-      const fn: MiddlewareFunction = () => {};
-      Object.defineProperty(fn, IDEMPOTENCY_METADATA, { value });
-      expect(idempotencyMetadataOf(fn)).toBeUndefined();
-    },
-  );
+  it('reads a brand carrying its key header and whether the key is required', () => {
+    const fn: MiddlewareFunction = () => {};
+    const brand = { idempotent: true, keyHeader: 'Idempotency-Key', required: false } as const;
+    withIdempotencyMetadata(fn, brand);
+    expect(idempotencyMetadataOf(fn)).toEqual(brand);
+  });
+  it.each([
+    undefined,
+    null,
+    1,
+    'yes',
+    true,
+    {},
+    { idempotent: false },
+    { idempotent: true, keyHeader: 1 },
+    { idempotent: true, required: 'no' },
+  ])('ignores forged metadata %j', (value) => {
+    const fn: MiddlewareFunction = () => {};
+    Object.defineProperty(fn, IDEMPOTENCY_METADATA, { value });
+    expect(idempotencyMetadataOf(fn)).toBeUndefined();
+  });
 });

@@ -16787,6 +16787,13 @@ document, although the middleware is already branded for three of them:
 
 Every generated error response is also a bare `{ description }`, with no body schema.
 
+**Already shipped (the examples walk-through fix, PR #561).** openapi-plugin documents the
+idempotency brand's `keyHeader` as a request header parameter, and the brand gained
+`required?: boolean`, because `apps/mcp-tools` was unusable from Swagger UI without it. That
+derivation is unconditional today; this milestone decides whether it moves under
+`deriveErrorResponses`, and still owns the `Idempotent-Replayed` response header and the idempotency
+refusal statuses.
+
 **Decisions:**
 
 1. **Derive from the brands, one option to turn it off.** A new `deriveErrorResponses?: boolean`

@@ -1171,6 +1171,11 @@ export interface RouteIdempotencyMetadata {
    * or a function, which an in-process caller such as mcp-plugin cannot supply.
    */
   readonly keyHeader?: string;
+  /**
+   * Whether a request without a key is refused (`true`) or passed through
+   * unprotected (`false`). Absent means required, the middleware default.
+   */
+  readonly required?: boolean;
 }
 
 /** Brands a middleware in place, preserving its behavior and identity.
@@ -1209,7 +1214,8 @@ export function idempotencyMetadataOf(
     value !== null &&
     'idempotent' in value &&
     value.idempotent === true &&
-    (!('keyHeader' in value) || typeof value.keyHeader === 'string')
+    (!('keyHeader' in value) || typeof value.keyHeader === 'string') &&
+    (!('required' in value) || typeof value.required === 'boolean')
     ? (value as RouteIdempotencyMetadata)
     : undefined;
 }

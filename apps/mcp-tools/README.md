@@ -20,6 +20,10 @@ pnpm --dir apps/mcp-tools run start
 The repository scripts run source through the app tsconfig. A downloaded example installs published
 packages; its `check` script is rewritten to `tsc --noEmit`. Build before start: the generated
 start command runs `dist/main.js` with `instrumentation.mjs`.
+In this repository, `build` bundles against the framework packages' compiled output, and the
+`setu` command it calls is itself one of them. In a fresh clone, compile them once from the
+repository root with `pnpm exec tsc -b` before `build`; otherwise `build` cannot find `setu` and
+`start` cannot find the packages. `start:dev` runs the source with tsx and needs no build.
 
 Use `JWT_SECRET` to replace the clearly named local demo default. **The default is public**: anyone
 can mint a token it accepts. The app still starts without `JWT_SECRET`, including from `npm start`
@@ -28,6 +32,10 @@ and the Docker image, so every deployment must set it. `MCP_RESOURCE` defaults t
 After starting with the chosen secret, run `npm run token -- "items:read items:write"` in this
 directory with the same environment to print a five-minute operator credential. Like `start`, it
 reads `.env`, so a secret kept there signs tokens the server accepts. Never log it.
+To try the HTTP routes from Swagger UI, open `http://localhost:3000/docs`, click **Authorize** and
+paste the token. Reads need `items:read` and writes need `items:write`; the OpenAPI document records
+each operation's scope, though Swagger UI does not display scopes for a bearer scheme. Also, `POST /items` and
+`POST /items/{id}/archive` take an `Idempotency-Key` header: any new value per create or archive.
 Configure a desktop client's Streamable HTTP URL as `http://localhost:3000/mcp` with a Bearer header.
 The default empty `allowedOrigins` list accepts non-browser requests with no Origin; browser UIs
 need an explicitly listed exact origin.

@@ -436,6 +436,7 @@ interface IVectorStore {
     scope: string,
     sourceId: string,
     records: readonly VectorRecord[],
+    options?: VectorReplaceOptions, // { version?: number }
   ): Promise<void>;
   query(collection: string, scope: string, query: VectorQuery): Promise<readonly VectorMatch[]>;
   delete(collection: string, scope: string, ids: readonly string[]): Promise<void>;
@@ -446,23 +447,33 @@ interface IVectorStore {
 `scopeFor` returns the request's tenant id, or the configured fixed scope for every request. Results
 are ordered by cosine similarity descending, then id ascending; `score` is in `[-1, 1]`.
 
+`replaceSource`'s `options.version` (a non-negative safe integer) makes the write conditional: it is
+refused with `VectorVersionConflictError` when the source's stored records carry a higher version,
+and an equal version is written again. A write without a version leaves the source unversioned, and
+a source with no records keeps no version. An adapter opts in with
+`readonly versionedReplace?: boolean` and then receives the version as `replaceSource`'s fifth
+argument; the service refuses a versioned call to any other adapter with
+`VectorOperationUnsupportedError`, so an adapter written before versions can never ignore one.
+
 | Export                                       | Kind       | Purpose                                                                                                                                                                                                                                                                                                                                                   |
 | -------------------------------------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `IVectorStore`                               | interface  | The registered service                                                                                                                                                                                                                                                                                                                                    |
 | `IVectorStoreAdapter`                        | interface  | A backend: `open(runtime, logger?)`, `ensureCollection`, the five data methods, `close?()`                                                                                                                                                                                                                                                                |
 | `attachPoolErrorListener(database, warn)`    | function   | Gives a Drizzle database's node-postgres (or mysql2) pool an `'error'` listener once, keeping the application's own: an idle error reaches the pool listener and a checked-out client gets one per checkout, so a dropped connection is reported through `warn` instead of exiting the process. Used by database-plugin's Drizzle arm and `PgVectorStore` |
 | `VectorCollectionSpec`                       | interface  | `name`, `dimensions`, `filterable?`                                                                                                                                                                                                                                                                                                                       |
+| `VectorReplaceOptions`                       | interface  | `replaceSource` options: `version?`, the submission's version                                                                                                                                                                                                                                                                                             |
 | `VectorRecord`, `VectorQuery`, `VectorMatch` | interfaces | One stored vector, one query, one result                                                                                                                                                                                                                                                                                                                  |
 | `VectorFilter`                               | type       | `eq`/`in`/`gt`/`gte`/`lt`/`lte` comparisons and `and`                                                                                                                                                                                                                                                                                                     |
 | `VectorFieldType`, `VectorMetadataValue`     | types      | `'string' \| 'number' \| 'boolean'`; the matching metadata values                                                                                                                                                                                                                                                                                         |
 | `vectorRecordKey(subtle, scope, id)`         | function   | SHA-256 over a length-prefixed scope and id, as 64 lowercase hex characters                                                                                                                                                                                                                                                                               |
 
 `VectorScopeRequiredError`, `VectorScopeInvalidError`, `VectorFilterError`, `VectorDimensionError`,
-`VectorRecordError`, `VectorCollectionUnknownError`, `VectorCollectionMismatchError` and
-`VectorOperationUnsupportedError` are exported from common so the service and all four adapters
-throw the same classes. The first five carry a 400 status hint; `VectorCollectionUnknownError`
-carries 500 (a programming error) and `VectorOperationUnsupportedError` 501.
-`VectorCollectionMismatchError` has no hint because it fails registration.
+`VectorRecordError`, `VectorCollectionUnknownError`, `VectorCollectionMismatchError`,
+`VectorOperationUnsupportedError` and `VectorVersionConflictError` are exported from common so the
+service and all four adapters throw the same classes. The first five carry a 400 status hint;
+`VectorCollectionUnknownError` carries 500 (a programming error), `VectorOperationUnsupportedError`
+501 and `VectorVersionConflictError` 409. `VectorCollectionMismatchError` has no hint because it
+fails registration.
 
 ### Plugin and adapters (`@setu-ts/vector-store-plugin`)
 
@@ -493,7 +504,12 @@ is an optional peer, loaded lazily only by `PgVectorStore`.
 Limits, enforced by the service before any adapter call: `topK` 1–50, 500 records per write, 1,000
 ids per delete, 64-byte scope, 256-byte record or source id, 8 KiB content, 64-byte string metadata
 or filter value, 100 values per `in`, `and` depth 4 and 32 clauses per filter. `replaceSource`
-writes the source's new records and then deletes its stale records in the same scope.
+writes the source's new records and then deletes its stale records in the same scope. memory,
+pgvector and Qdrant set `versionedReplace`: pgvector keeps the version in a `source_version bigint`
+column (added by `ensure: 'create'`, required by `ensure: 'verify'`) and checks it under the
+source's advisory lock; Qdrant needs server 1.16 or later, checked once through the facade's
+`versionInfo()`, and writes with a conditional `update_filter` upsert and a `count` check, so
+`QdrantClientLike` also requires `count` and `versionInfo`.
 
 `VectorizeVectorStore` (in `@setu-ts/cloudflare-plugin`) serves one collection, the first it is
 ensured for: Vectorize record ids are unique per index, so a second collection on the same adapter
@@ -10356,6 +10372,11 @@ app.router.delete('/todos/:id', {
 
 ### Deriving Request Schemas From Validation Middleware
 
+A route carrying `idempotent()` is also documented with its key header (`Idempotency-Key` unless
+configured) as a header parameter on every operation except GET, HEAD and OPTIONS: `required` unless
+the route set `required: false`, a string of 1–255 characters, and never when the route declares a
+header of that name itself.
+
 A route carrying `validateBody(schema)` already states its request shape, from a first-party plugin,
 on the route. `deriveRequestSchemas` (default `true`) reads that schema and fills the operation's
 `requestBody` and `parameters`, so the shape is not written twice:
@@ -13925,12 +13946,16 @@ its handshake and the first refusal wins.
 ### Route idempotency metadata and scope state
 
 `IDEMPOTENCY_METADATA` is `Symbol.for('setu.idempotency.metadata')`. `RouteIdempotencyMetadata`
-contains `readonly idempotent: true`.
+contains `readonly idempotent: true`, optional `keyHeader: string` (the request header the key is
+read from; absent for a body-field or function key) and optional `required: boolean` (whether a
+request without a key is refused; absent means required).
 `withIdempotencyMetadata<T extends MiddlewareFunction>(middleware: T, metadata: RouteIdempotencyMetadata): T`
 brands and returns the same closure, non-enumerably. `idempotencyMetadataOf(middleware)` returns
 valid metadata or `undefined` for foreign values. Both `idempotent()` and
 `IdempotencyService.middleware()` write the brand; the MCP compiler reads it for retry safety,
-derived keys and annotations.
+derived keys and annotations, and openapi-plugin documents `keyHeader` as a header parameter on
+every non-GET/HEAD/OPTIONS operation that carries it, `required` from the brand, unless the route
+declares a header of that name itself.
 
 ### Route MCP tool metadata
 

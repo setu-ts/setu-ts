@@ -210,6 +210,7 @@ starter also brings health, metrics, security headers and the error handler.
 pnpm --dir apps/rest-api run start 3400
 curl localhost:3400/health                                    # 200
 curl -X POST localhost:3400/todos -H 'content-type: application/json' -d '{"title":"x"}'          # 401 Problem Details
+pnpm --dir apps/rest-api run token                            # a five-minute token for Authorize
 # Swagger UI at http://localhost:3400/docs, the document at /openapi.json
 ```
 
@@ -391,7 +392,10 @@ The [AI chat example](../apps/ai-chat) follows the [AI guide](./ai.md): the SDK 
 structured output, UI streams and model fallback; Setu owns request identity, cancellation, quotas
 and outbox/inbox usage delivery. Run `pnpm --dir apps/ai-chat run smoke` for its Node-only proofs,
 including an in-process OTLP receiver and a content-capture positive control. A real endpoint is
-optional through `AI_COMPAT_BASE_URL`.
+optional through `AI_COMPAT_BASE_URL`. With a model configured, `pnpm --dir apps/ai-chat run start`
+serves a minimal chat page at `/ui` that keeps the conversation, renders the streamed answer as it
+arrives, counts tokens per turn and per session, shows how much of the context window the last
+request filled, and stops the model call with **Stop**.
 
 ### semantic-search
 
@@ -402,10 +406,11 @@ outlives the request.
 
 `POST /documents` validates `{ id, text, tag? }` and queues `ingest-document` with the tenant the
 request resolved. The job drops the write if that tenant no longer exists, splits the text into
-800-character chunks, embeds them with the AI SDK, and calls `replaceSource`, so re-ingesting a
-shorter document leaves exactly its new chunks. `GET /documents/search?q=&tag=&limit=` embeds the
-query and returns the closest chunks; `limit` is 1–20 and defaults to 5. Both routes read the scope
-from `x-tenant-id`, so a request without one answers `400` and an unknown tenant `404`.
+800-character chunks, embeds them with the AI SDK, and calls `replaceSource` with the submission's
+version, so re-ingesting a shorter document leaves exactly its new chunks and a late retry of an
+older submission is dropped instead of replacing a newer one. `GET /documents/search?q=&tag=&limit=`
+embeds the query and returns the closest chunks; `limit` is 1–20 and defaults to 5. Both routes read
+the scope from `x-tenant-id`, so a request without one answers `400` and an unknown tenant `404`.
 
 The store is process memory by default. Set `PGVECTOR_URL` to run the same code on PostgreSQL with
 pgvector 0.8+; set `EMBED_BASE_URL`, `EMBED_MODEL`, `EMBED_DIMENSIONS` and, when the server needs
@@ -571,6 +576,12 @@ authenticated streams send their credentials, and a WebSocket stays alive across
 keep-alive. Its smoke check needs Bun installed and runs Wrangler through `npx` (downloaded on first
 use); a missing one fails the check rather than skipping it.
 
+```bash
+pnpm --dir apps/realtime-clients run start 3400
+curl -N localhost:3400/events -H 'authorization: Bearer smoke-token'   # score events, then heartbeats
+curl localhost:3400/events                                            # 401 without the demo token
+```
+
 **Read, in order:**
 
 - [`src/modules/index.ts`](../apps/realtime-clients/src/modules/index.ts) and
@@ -637,6 +648,7 @@ it needs HTTP/2 trailers a fetch-based server does not send.
 ```bash
 pnpm --dir apps/grpc run start                  # port 5000
 curl localhost:5000/health                       # {"status":"ok"}
+curl -X POST localhost:5000/example.EchoService/Echo -H 'content-type: application/json' -d '{"message":"hi"}'   # {"response":"echo: hi"}
 ```
 
 **Read, in order:**

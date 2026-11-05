@@ -129,13 +129,13 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
     // the layout tree and the worker-pool commands.
     // M119i: repository setup adds one shell fence.
     // site/--example adds one shell fence. M135: the semantic-search section
-    // adds one shell fence.
-    total: 24,
+    // adds one shell fence. The realtime-clients section adds one.
+    total: 25,
     ts: 1,
     compile: 1,
     external: 0,
     pseudocode: 0,
-    skipped: 23,
+    skipped: 24,
   },
   'docs/decorators.md': {
     // 28 at M76. Two blocks left the guide there: the `deno.json` "Enable
@@ -278,12 +278,13 @@ const EXPECTED_AGGREGATE: FenceCounts = {
   // preload fence is a package README, outside this corpus.
   // M129: +1 skipped shell fence in docs/cli.md (`setu client`).
   // M135: docs/retrieval.md joins (+10: 8 compiling, 2 skipped); +1 skipped in examples.md.
-  total: 353,
+  // Examples walk-through: +1 skipped shell fence in examples.md (realtime-clients).
+  total: 354,
   ts: 262,
   compile: 229,
   external: 33,
   pseudocode: 0,
-  skipped: 91,
+  skipped: 92,
 };
 
 describe('actual-fence compiler — every curated guide (shared engine)', () => {
