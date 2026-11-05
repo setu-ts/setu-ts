@@ -1107,45 +1107,50 @@ export class OpenApiGenerator {
       }
     }
 
-    const idempotencyKey = this.#deriveIdempotencyKeyHeader(route, parameters);
-    if (idempotencyKey !== undefined) parameters.push(idempotencyKey);
+    parameters.push(...this.#deriveIdempotencyKeyHeaders(route, parameters));
 
     return parameters;
   }
 
   /**
-   * The key header an `idempotent()` brand on the route reads, as a header
-   * parameter, so a client (and Swagger UI) knows to send it. Nothing is
-   * derived for a safe method, which the middleware passes through; for a key
-   * read from a body field or a function, which has no header; or when the
-   * route already declares a header of that name, which wins.
+   * The key headers the route's `idempotent()` brands read, as header
+   * parameters, so a client (and Swagger UI) knows to send them. One parameter
+   * per distinct header (names compare case-insensitively), required when any
+   * brand naming it requires a key. Nothing is derived for a safe method, which
+   * the middleware passes through; for a key read from a body field or a
+   * function, which has no header; or for a header the route already declares,
+   * which wins. The schema is the unquoted form the middleware accepts: 1–255
+   * characters from `0x21`–`0x7E`, not `"`.
    *
    * @param route - The route being documented
    * @param declared - The parameters built from the route's own schemas
-   * @returns The parameter, or `undefined` when none applies
+   * @returns The parameters, possibly none
    */
-  #deriveIdempotencyKeyHeader(
+  #deriveIdempotencyKeyHeaders(
     route: RouteInfo,
     declared: readonly OpenApiParameter[],
-  ): OpenApiParameter | undefined {
+  ): OpenApiParameter[] {
     const method = route.method.toUpperCase();
-    if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return undefined;
+    if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return [];
+    const taken = new Set(
+      declared.filter((p) => p.in === 'header').map((p) => p.name.toLowerCase()),
+    );
+    const derived = new Map<string, OpenApiParameter>();
     for (const middleware of route.definition.middleware ?? []) {
       const metadata = idempotencyMetadataOf(middleware);
-      const header = metadata?.keyHeader;
-      if (header === undefined) continue;
-      const name = header.toLowerCase();
-      if (declared.some((p) => p.in === 'header' && p.name.toLowerCase() === name))
-        return undefined;
-      return {
-        name: header,
+      if (metadata?.keyHeader === undefined) continue;
+      const key = metadata.keyHeader.toLowerCase();
+      if (taken.has(key)) continue;
+      const required = metadata.required !== false || derived.get(key)?.required === true;
+      derived.set(key, {
+        name: derived.get(key)?.name ?? metadata.keyHeader,
         in: 'header',
-        required: metadata?.required !== false,
+        required,
         description: 'A unique key per operation; send the same key when retrying it.',
-        schema: { type: 'string', minLength: 1, maxLength: 255 },
-      };
+        schema: { type: 'string', minLength: 1, maxLength: 255, pattern: '^[!#-~]+$' },
+      });
     }
-    return undefined;
+    return [...derived.values()];
   }
 
   /**

@@ -73,8 +73,9 @@ export function createApp(
       HttpSecurityPlugin(),
       HealthPlugin({ indicators: [...HEALTH_INDICATORS] }),
       MetricsPlugin({ customMetrics: [...CUSTOM_METRICS] }),
-      // Each route's requirement is derived from its scope guard, so Swagger UI
-      // shows an Authorize button and the scopes every operation needs.
+      // Each route's requirement is derived from its scope guard. Swagger UI shows
+      // an Authorize button; the document also records each operation's scope,
+      // which Swagger UI does not display for a bearer scheme.
       OpenApiPlugin({
         securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' } },
         deriveSecurity: { scheme: 'bearerAuth' },

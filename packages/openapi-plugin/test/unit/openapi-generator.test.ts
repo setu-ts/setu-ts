@@ -774,7 +774,7 @@ describe('OpenApiGenerator', () => {
           in: 'header',
           required: true,
           description: 'A unique key per operation; send the same key when retrying it.',
-          schema: { type: 'string', minLength: 1, maxLength: 255 },
+          schema: { type: 'string', minLength: 1, maxLength: 255, pattern: '^[!#-~]+$' },
         },
       ]);
     });
@@ -793,6 +793,25 @@ describe('OpenApiGenerator', () => {
       expect(headers('POST', [passthrough()])).toEqual([]);
       expect(headers('POST', [keyed()])).toEqual([]);
       expect(headers('POST', [])).toEqual([]);
+    });
+
+    it('should document every distinct key header once, required if any brand requires it', () => {
+      const derived = headers('POST', [
+        keyed('Idempotency-Key', false),
+        keyed('X-Request-Key', false),
+        keyed('idempotency-key', true),
+      ]);
+      expect(derived.map((p) => [p.name, p.required])).toEqual([
+        ['Idempotency-Key', true],
+        ['X-Request-Key', false],
+      ]);
+    });
+
+    it('should describe exactly the key characters the middleware accepts', () => {
+      const [parameter] = headers('POST', [keyed('Idempotency-Key')]);
+      const pattern = new RegExp((parameter!.schema as { pattern: string }).pattern);
+      for (const ok of ['abc-123', '!#$%&~', 'x'.repeat(255)]) expect(pattern.test(ok)).toBe(true);
+      for (const bad of ['a b', 'say"hi"', 'café', '']) expect(pattern.test(bad)).toBe(false);
     });
 
     it('should let a header the route declares win, whatever its case', () => {

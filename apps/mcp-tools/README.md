@@ -33,7 +33,8 @@ After starting with the chosen secret, run `npm run token -- "items:read items:w
 directory with the same environment to print a five-minute operator credential. Like `start`, it
 reads `.env`, so a secret kept there signs tokens the server accepts. Never log it.
 To try the HTTP routes from Swagger UI, open `http://localhost:3000/docs`, click **Authorize** and
-paste the token. Each operation lists the scope it needs, and `POST /items` and
+paste the token. Reads need `items:read` and writes need `items:write`; the OpenAPI document records
+each operation's scope, though Swagger UI does not display scopes for a bearer scheme. Also, `POST /items` and
 `POST /items/{id}/archive` take an `Idempotency-Key` header: any new value per create or archive.
 Configure a desktop client's Streamable HTTP URL as `http://localhost:3000/mcp` with a Bearer header.
 The default empty `allowedOrigins` list accepts non-browser requests with no Origin; browser UIs

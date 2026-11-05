@@ -6,6 +6,11 @@ descriptor set in `echo.descriptor.ts`; no code-generation step is required.
 
 ```bash
 pnpm --dir apps/grpc run start
+```
+
+The server keeps running; send the requests from another terminal:
+
+```bash
 curl localhost:5000/health
 curl -X POST localhost:5000/example.EchoService/Echo -H 'content-type: application/json' -d '{"message":"hi"}'
 ```

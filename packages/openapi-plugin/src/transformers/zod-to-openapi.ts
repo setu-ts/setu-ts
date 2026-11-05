@@ -31,6 +31,8 @@ export interface OpenApiSchemaObject {
   minLength?: number;
   /** For strings: maximum length. */
   maxLength?: number;
+  /** For strings: an ECMA-262 regular expression the value must match. */
+  pattern?: string;
   /** For numbers: minimum value. */
   minimum?: number;
   /** For numbers: maximum value. */

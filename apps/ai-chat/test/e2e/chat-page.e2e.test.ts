@@ -21,8 +21,16 @@ describe('chat page e2e', () => {
       assert.match(source, /getReader\(\)/);
       assert.match(source, /prompt: text, history/);
 
-      const model = await fetch(server.baseUrl + '/chat/model');
-      assert.deepStrictEqual(await model.json(), { contextTokens: null, maxOutputTokens: 1024 });
+      // The real app reads AI_COMPAT_CONTEXT_TOKENS, which this run may set.
+      const model = (await (await fetch(server.baseUrl + '/chat/model')).json()) as {
+        contextTokens: number | null;
+        maxOutputTokens: number;
+      };
+      assert.deepStrictEqual(model.maxOutputTokens, 1024);
+      assert.ok(
+        model.contextTokens === null ||
+          (Number.isSafeInteger(model.contextTokens) && model.contextTokens > 0),
+      );
 
       const spec = (await (await fetch(server.baseUrl + '/openapi.json')).json()) as {
         paths: Record<string, unknown>;

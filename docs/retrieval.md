@@ -317,8 +317,9 @@ export default {
 
 `QdrantVectorStore` takes the application's official client and never imports it. The client is
 checked structurally at construction for `collectionExists`, `getCollection`, `createCollection`,
-`createPayloadIndex`, `upsert`, `query` and `delete`. Build it with a `timeout` in milliseconds
-(`new QdrantClient({ url, timeout: 15_000 })`); without one a hung server holds the request.
+`createPayloadIndex`, `upsert`, `query`, `delete`, `count` and `versionInfo`. Build it with a
+`timeout` in milliseconds (`new QdrantClient({ url, timeout: 15_000 })`); without one a hung server
+holds the request.
 
 ```typescript
 import { QdrantVectorStore, VectorStorePlugin } from '@setu-ts/vector-store-plugin';

@@ -325,8 +325,8 @@ created for the store.
 `new QdrantVectorStore({ client, onClose? })` takes the application's `QdrantClient`, built with a
 `timeout` (for example `new QdrantClient({ url, timeout: 15_000 })`). The client is typed by a
 structural facade (`collectionExists`, `getCollection`, `createCollection`, `createPayloadIndex`,
-`upsert`, `query`, `delete`) that is checked at construction; the package never imports
-`@qdrant/js-client-rest`.
+`upsert`, `query`, `delete`, `count`, `versionInfo`) that is checked at construction; the package
+never imports `@qdrant/js-client-rest`.
 
 ```typescript
 import { QdrantVectorStore, VectorStorePlugin } from '@setu-ts/vector-store-plugin';
@@ -352,7 +352,7 @@ per source, or pass a version. A versioned write needs Qdrant 1.16 or later, whi
 checks once with `versionInfo()`: the upsert's `update_filter` keeps points a newer version wrote, a
 `count` afterwards finds a newer version that landed first, and the stale-delete never removes a
 newer point. Concurrent versioned writes settle on the highest version, though a reader can briefly
-see chunks of both. The facade therefore also needs `count` and `versionInfo`.
+see chunks of both.
 
 ### Cloudflare Vectorize
 

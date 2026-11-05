@@ -6,6 +6,7 @@
 // `history`, within the limits POST /chat accepts.
 const MAX_HISTORY_TURNS = 40;
 const MAX_HISTORY_CHARS = 50_000;
+const MAX_TURN_CHARS = 10_000;
 
 const form = document.getElementById('ask');
 const prompt = document.getElementById('prompt');
@@ -41,9 +42,19 @@ function showSession() {
   sessionLabel.textContent = `${number.format(session.input)} in · ${number.format(session.output)} out`;
 }
 
+/** A count the provider did not report shows as unknown, never as zero. */
+function count(tokens) {
+  return tokens === undefined ? '?' : number.format(tokens);
+}
+
 /** The last request's input plus output is what it occupied of the context window. */
 function showContext(usage) {
-  const used = (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
+  if (usage.inputTokens === undefined || usage.outputTokens === undefined) {
+    contextLabel.textContent = "unknown: the model did not report the last request's tokens";
+    contextMeter.value = 0;
+    return;
+  }
+  const used = usage.inputTokens + usage.outputTokens;
   if (contextTokens === null) {
     contextLabel.textContent = `${number.format(used)} tokens in the last request (window size unknown: set AI_COMPAT_CONTEXT_TOKENS)`;
     contextMeter.value = 0;
@@ -76,7 +87,7 @@ function render(part, turn) {
           : ` (${number.format(usage.reasoningTokens)} reasoning)`;
       line(
         'usage',
-        `${number.format(usage.inputTokens ?? 0)} in · ${number.format(usage.outputTokens ?? 0)} out${reasoning}`,
+        `${count(usage.inputTokens)} in · ${count(usage.outputTokens)} out${reasoning}`,
       );
       session.input += usage.inputTokens ?? 0;
       session.output += usage.outputTokens ?? 0;
@@ -90,6 +101,9 @@ async function ask(text) {
   line('you', text);
   const turn = { answer: line('answer'), failed: false };
   controller = new AbortController();
+  const own = controller;
+  // New chat replaces the controller; a turn it aborted must not write into the new log.
+  const current = () => controller === own;
   send.disabled = true;
   stop.disabled = false;
   try {
@@ -101,6 +115,7 @@ async function ask(text) {
     });
     if (!response.ok) {
       const problem = await response.json().catch(() => ({}));
+      if (!current()) return;
       line('error', `${response.status} ${problem.detail ?? problem.title ?? response.statusText}`);
       return;
     }
@@ -121,17 +136,24 @@ async function ask(text) {
         }
       }
     }
-    // Only a turn that produced an answer joins the conversation.
+    // Only a turn that produced an answer joins the conversation, and only when
+    // each side fits the per-turn limit POST /chat accepts in history.
     const answer = turn.answer.textContent;
-    if (!turn.failed && answer !== '') {
+    if (!current() || turn.failed || answer === '') return;
+    if (text.length > MAX_TURN_CHARS || answer.length > MAX_TURN_CHARS) {
+      line('note', 'This exchange is too long to keep in the conversation.');
+    } else {
       history.push({ role: 'user', content: text }, { role: 'assistant', content: answer });
       trimHistory();
     }
   } catch (error) {
+    if (!current()) return;
     line('error', error.name === 'AbortError' ? 'Stopped.' : String(error));
   } finally {
-    send.disabled = false;
-    stop.disabled = true;
+    if (current()) {
+      send.disabled = false;
+      stop.disabled = true;
+    }
   }
 }
 
@@ -154,7 +176,10 @@ stop.addEventListener('click', () => controller?.abort());
 
 reset.addEventListener('click', () => {
   controller?.abort();
+  controller = undefined;
   history = [];
+  send.disabled = false;
+  stop.disabled = true;
   session = { input: 0, output: 0 };
   log.replaceChildren();
   contextLabel.textContent = 'no request yet';
