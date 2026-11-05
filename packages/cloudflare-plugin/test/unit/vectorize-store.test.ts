@@ -116,6 +116,24 @@ describe('VectorizeVectorStore', () => {
     await expect(unopened.delete(spec, 't', ['r'])).rejects.toThrow('open() must run');
   });
 
+  it('refuses a record whose metadata exceeds 10 KiB as JSON, before anything is written', async () => {
+    const { store, index } = await opened();
+    // 8,192 bytes of content is within the service's limit; escaping each
+    // newline as \\n doubles it past Vectorize's.
+    const content = '\n'.repeat(8192);
+    await expect(
+      store.upsert(spec, 't', [
+        { id: 'ok', vector: [1, 0], metadata: {} },
+        { id: 'big', vector: [1, 0], content, metadata: {} },
+      ]),
+    ).rejects.toThrow("record 'big' has more than 10240 bytes of metadata");
+    expect(index.vectors.size).toBe(0);
+    await store.upsert(spec, 't', [
+      { id: 'fits', vector: [1, 0], content: 'x'.repeat(8192), metadata: {} },
+    ]);
+    expect(index.vectors.size).toBe(1);
+  });
+
   it('serves one collection: a second name is refused at ensure and on every data call', async () => {
     const { store, index } = await opened();
     const notes: VectorCollectionSpec = { ...spec, name: 'notes' };

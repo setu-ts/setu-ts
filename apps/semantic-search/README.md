@@ -51,6 +51,11 @@ removes the document's other chunks, so re-ingesting a shorter text leaves no st
 The queue is the plugin's in-process default. A queued job runs in the same process and is lost on
 restart, like the memory vector store.
 
+Jobs for the same document are not ordered against each other. If the first attempt of an older
+submission fails and its retry runs after a newer submission was indexed, the retry's chunks replace
+the newer ones until the document is submitted again. An application that accepts concurrent edits
+of one document carries a version in the job and skips a job older than the stored one.
+
 ## Configuration
 
 `.env.example` lists the defaults; copy it to `.env`, which `start` reads.

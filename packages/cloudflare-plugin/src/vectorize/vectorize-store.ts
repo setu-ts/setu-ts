@@ -15,6 +15,7 @@ import {
   VectorCollectionMismatchError,
   VectorFilterError,
   VectorOperationUnsupportedError,
+  VectorRecordError,
   vectorRecordKey,
 } from '@setu-ts/common';
 import type {
@@ -32,6 +33,8 @@ import type {
 const MAX_DIMENSIONS = 1536;
 /** Vectorize refuses a filter whose compact JSON is 2048 bytes or more. */
 const MAX_FILTER_BYTES = 2047;
+/** Vectorize stores at most 10 KiB of metadata per vector, measured as JSON. */
+const MAX_METADATA_BYTES = 10 * 1024;
 /** Metadata keys the adapter owns; declared fields start with a letter, so they never collide. */
 const ID_KEY = '_id';
 const SOURCE_KEY = '_source';
@@ -177,17 +180,28 @@ export class VectorizeVectorStore implements IVectorStoreAdapter {
   ): Promise<void> {
     this.#served(spec);
     const vectors = await Promise.all(
-      records.map(async (record) => ({
-        id: await this.#key(scope, record.id),
-        values: [...record.vector],
-        namespace: scope,
-        metadata: {
+      records.map(async (record) => {
+        const metadata = {
           ...record.metadata,
           [ID_KEY]: record.id,
           ...(record.sourceId === undefined ? {} : { [SOURCE_KEY]: record.sourceId }),
           ...(record.content === undefined ? {} : { [CONTENT_KEY]: record.content }),
-        },
-      })),
+        };
+        // Content travels in metadata, so 8 KiB of content plus ids and fields
+        // can pass the service's limits and still exceed Vectorize's. Refused
+        // here, before any record of the batch is sent, rather than truncated.
+        if (new TextEncoder().encode(JSON.stringify(metadata)).length > MAX_METADATA_BYTES) {
+          throw new VectorRecordError(
+            `vectorize: record '${record.id}' has more than ${MAX_METADATA_BYTES} bytes of metadata, content included`,
+          );
+        }
+        return {
+          id: await this.#key(scope, record.id),
+          values: [...record.vector],
+          namespace: scope,
+          metadata,
+        };
+      }),
     );
     await this.#index.upsert(vectors);
   }

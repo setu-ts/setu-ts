@@ -84,14 +84,15 @@ describe('VectorStorePlugin', () => {
     }
   });
 
-  it('fails startup when a collection cannot be ensured', async () => {
+  it('fails startup when a collection cannot be ensured, and closes the opened adapter', async () => {
     const adapter = new LifecycleAdapter();
     adapter.failEnsure = true;
     const app = createApplication({
       plugins: [RuntimePlugin(), VectorStorePlugin({ adapter, collections })],
     });
     await expect(app.start()).rejects.toThrow('backend unreachable');
-    await app.stop().catch(() => undefined);
+    // A failed start runs only the close hooks; stop() is never reached.
+    expect(adapter.events).toEqual(['open', 'ensure:documents', 'close']);
   });
 
   it('refuses a factory that resolves to something other than an adapter', async () => {

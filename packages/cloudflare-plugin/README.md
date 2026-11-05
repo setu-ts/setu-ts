@@ -325,7 +325,9 @@ Vectorize cannot delete by namespace or by filter. `replaceSource` and `deleteSc
 `VectorOperationUnsupportedError` rather than being emulated: upsert deterministic ids and delete
 the stale ones yourself, or give each tenant group its own index. Writes are applied asynchronously,
 so a read may not see a write yet. One index holds 50,000 namespaces on Workers Paid (1,000 on
-Free), which caps the tenants a single index can serve.
+Free), which caps the tenants a single index can serve. Vectorize stores at most 10 KiB of metadata
+per vector, and the record's content travels in it, so a record whose metadata, content included,
+exceeds 10 KiB as JSON throws `VectorRecordError` before any record of the write is sent.
 
 ## Durable Objects — realtime backplane and distributed lock
 

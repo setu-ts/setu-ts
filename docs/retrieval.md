@@ -357,7 +357,10 @@ npx wrangler vectorize create-metadata-index documents --property-name=tag --typ
 
 The binding reports dimensions but not the metric, so registration can check only the dimensions. A
 filter on a field without a metadata index is not refused by the binding; the query may return
-nothing. Writes are applied asynchronously, so a read may not see a write yet.
+nothing. Writes are applied asynchronously, so a read may not see a write yet. Vectorize stores at
+most 10 KiB of metadata per vector, and the record's content travels in it, so a record whose
+metadata, content included, exceeds 10 KiB as JSON throws `VectorRecordError` before any record of
+the write is sent.
 
 One adapter serves one index, so it serves one collection: declaring a second collection on the same
 `VectorizeVectorStore` fails registration with `VectorOperationUnsupportedError`, because record ids

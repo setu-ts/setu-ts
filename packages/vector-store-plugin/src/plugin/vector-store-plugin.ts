@@ -100,9 +100,10 @@ export function VectorStorePlugin(options: VectorStorePluginOptions): IPlugin {
     async register(ctx: IPluginContext): Promise<void> {
       const adapter = typeof source === 'function' ? await source(ctx.runtime) : source;
       assertAdapter(adapter);
-      // Registered before the backend is touched, so an adapter that opened a
-      // connection and then failed to ensure a collection is still closed.
-      ctx.lifecycle.onShutdown(async () => {
+      // Registered before the backend is touched, and on close rather than
+      // shutdown: a failed start runs only the close hooks, so an adapter that
+      // opened a connection and then failed to ensure a collection is closed.
+      ctx.lifecycle.onClose(async () => {
         await adapter.close?.();
       });
       // Optional: an adapter reports faults outside a call (a dropped pooled
