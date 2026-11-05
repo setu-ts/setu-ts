@@ -47,6 +47,9 @@ export const app = createApplication({
 });
 ```
 
+The routes that use the store go in a plugin registered after it; [Search](#search) shows the
+complete application.
+
 ## Declare collections
 
 | Property      | Rule                                                                      |
@@ -86,11 +89,25 @@ may keep either record. `score` is in `[-1, 1]`; `minScore` drops lower matches 
 An adapter may return fewer than `topK`, including under a selective filter.
 
 A tenant's route takes its scope from `scopeFor`, which reads the tenant resolved by the
-multi-tenancy middleware:
+multi-tenancy middleware. This application registers its routes plugin after `VectorStorePlugin` and
+validates each body, so a vector of the wrong length is a `400` before the store sees it. The
+vectors come from the embedding model; the `semantic-search` example embeds text with the AI SDK.
 
 ```typescript
 import { CAPABILITIES } from '@setu-ts/common';
-import type { IPlugin, IPluginContext, IRequestContext, IVectorStore } from '@setu-ts/common';
+import type { IPlugin, IPluginContext, IVectorStore } from '@setu-ts/common';
+import { createApplication } from '@setu-ts/kernel';
+import { MultiTenancyPlugin } from '@setu-ts/multi-tenancy-plugin';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { validateBody, ValidationPlugin } from '@setu-ts/validation-plugin';
+import { MemoryVectorStore, VectorStorePlugin } from '@setu-ts/vector-store-plugin';
+import { z } from 'zod';
+
+// Every vector has the collection's declared length, from the same embedding model.
+const Embedding = z.array(z.number()).length(1024);
+const Tag = z.string().min(1).max(64);
+const upsertBody = validateBody(z.object({ id: z.string().min(1).max(256), vector: Embedding, tag: Tag }));
+const searchBody = validateBody(z.object({ vector: Embedding, tag: Tag }));
 
 export function documentsPlugin(): IPlugin {
   return {
@@ -99,27 +116,54 @@ export function documentsPlugin(): IPlugin {
     dependencies: [CAPABILITIES.VECTOR_STORE],
     register(ctx: IPluginContext): void {
       const store = ctx.services.get<IVectorStore>(CAPABILITIES.VECTOR_STORE);
-      ctx.router.post('/documents', async (c: IRequestContext) => {
-        const body = await c.request.json<{ id: string; vector: number[]; tag: string }>();
-        await store.upsert('documents', store.scopeFor(c), [
-          { id: body.id, vector: body.vector, metadata: { tag: body.tag } },
-        ]);
-        return c.response.status(204).send();
+      ctx.router.post('/documents', {
+        middleware: [upsertBody],
+        handler: async (c) => {
+          const body = upsertBody.value(c);
+          await store.upsert('documents', store.scopeFor(c), [
+            { id: body.id, vector: body.vector, metadata: { tag: body.tag } },
+          ]);
+          return c.response.status(204).send();
+        },
       });
-      ctx.router.get('/documents/search', async (c: IRequestContext) => {
-        const matches = await store.query('documents', store.scopeFor(c), {
-          vector: [0.1, 0.2],
-          topK: 5,
-          filter: { field: 'tag', op: 'eq', value: 'release' },
-        });
-        return c.response.json(matches);
+      ctx.router.post('/documents/search', {
+        middleware: [searchBody],
+        handler: async (c) => {
+          const { vector, tag } = searchBody.value(c);
+          const matches = await store.query('documents', store.scopeFor(c), {
+            vector,
+            topK: 5,
+            filter: { field: 'tag', op: 'eq', value: tag },
+          });
+          return c.response.json(matches);
+        },
       });
     },
   };
 }
+
+export const app = createApplication({
+  plugins: [
+    RuntimePlugin(),
+    ValidationPlugin(),
+    MultiTenancyPlugin({ resolver: 'header', tenants: ['acme', 'globex'] }),
+    VectorStorePlugin({
+      adapter: new MemoryVectorStore(),
+      collections: [{ name: 'documents', dimensions: 1024, filterable: { tag: 'string' } }],
+    }),
+    documentsPlugin(),
+  ],
+});
 ```
 
 A request with no tenant answers 400 (`VectorScopeRequiredError`) before the adapter is called.
+
+The `header` resolver selects the tenant the caller names; it does not authenticate the caller, so
+any client can send `x-tenant-id: globex` and read or overwrite that tenant's records. Use it for
+local development and for trusted internal callers only. In production, resolve the tenant from the
+signed-in principal, as
+[the multi-tenancy plugin shows](../packages/multi-tenancy-plugin/README.md#tenant-from-the-signed-in-principal),
+or authenticate the request and check that the principal belongs to the tenant before `scopeFor`.
 
 ## Tenancy
 
@@ -240,6 +284,12 @@ Queries run in a transaction with `hnsw.ef_search` raised to at least 40 and
 order. `replaceSource` runs in one transaction and serialises concurrent replacements of the same
 source with an advisory lock.
 
+All tenants share one HNSW index per collection, and the scope is applied while the index is
+scanned. The iterative scan stops after `hnsw.max_scan_tuples` index tuples (20,000 by default), so
+a tenant that owns a small share of a large table can get fewer than `topK` matches. Raise the limit
+for the application's role (`ALTER ROLE app SET hnsw.max_scan_tuples = 100000`), or give large
+tenants their own collection.
+
 Exclude the adapter's tables from `drizzle-kit push`, or it may offer to drop them:
 
 ```typescript
@@ -308,6 +358,10 @@ npx wrangler vectorize create-metadata-index documents --property-name=tag --typ
 The binding reports dimensions but not the metric, so registration can check only the dimensions. A
 filter on a field without a metadata index is not refused by the binding; the query may return
 nothing. Writes are applied asynchronously, so a read may not see a write yet.
+
+One adapter serves one index, so it serves one collection: declaring a second collection on the same
+`VectorizeVectorStore` fails registration with `VectorOperationUnsupportedError`, because record ids
+are unique per index and the two would overwrite each other.
 
 Vectorize cannot delete by namespace or by filter, so `replaceSource` and `deleteScope` throw
 `VectorOperationUnsupportedError`. Upsert deterministic ids and delete stale ids yourself, or give

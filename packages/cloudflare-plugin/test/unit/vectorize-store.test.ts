@@ -100,6 +100,7 @@ function fakeIndex(
 async function opened(index = fakeIndex()) {
   const store = new VectorizeVectorStore({ index });
   await store.open(runtime);
+  await store.ensureCollection(spec);
   return { store, index };
 }
 
@@ -107,9 +108,29 @@ describe('VectorizeVectorStore', () => {
   it('refuses a binding missing a method, and calls before open()', async () => {
     expect(() => new VectorizeVectorStore({ index: {} as never })).toThrow('missing describe');
     expect(() => new VectorizeVectorStore(undefined as never)).toThrow('missing index');
-    await expect(
-      new VectorizeVectorStore({ index: fakeIndex() }).delete(spec, 't', ['r']),
-    ).rejects.toThrow('open() must run');
+    const unopened = new VectorizeVectorStore({ index: fakeIndex() });
+    await expect(unopened.query(spec, 't', { vector: [1, 0], topK: 1 })).rejects.toThrow(
+      'ensureCollection() must run',
+    );
+    await unopened.ensureCollection(spec);
+    await expect(unopened.delete(spec, 't', ['r'])).rejects.toThrow('open() must run');
+  });
+
+  it('serves one collection: a second name is refused at ensure and on every data call', async () => {
+    const { store, index } = await opened();
+    const notes: VectorCollectionSpec = { ...spec, name: 'notes' };
+    await expect(store.ensureCollection(notes)).rejects.toThrow(
+      "collection 'notes' needs its own index (this one serves 'documents')",
+    );
+    await store.ensureCollection(spec);
+    for (const call of [
+      () => store.upsert(notes, 't', [{ id: 'r1', vector: [1, 0], metadata: {} }]),
+      () => store.query(notes, 't', { vector: [1, 0], topK: 1 }),
+      () => store.delete(notes, 't', ['r1']),
+    ]) {
+      await expect(call()).rejects.toThrow(VectorOperationUnsupportedError);
+    }
+    expect(index.vectors.size).toBe(0);
   });
 
   it('verifies dimensions through describe() and refuses more than 1,536', async () => {

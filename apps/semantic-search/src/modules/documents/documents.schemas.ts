@@ -10,7 +10,12 @@ export type DocumentsTenantHeaders = z.infer<typeof DocumentsTenantHeaders>;
 /** A document to index; the id is the caller's and re-ingesting it replaces its chunks. */
 export const IngestDocumentsBody = z.object({
   id: z.string().regex(/^[A-Za-z0-9._-]{1,128}$/),
-  text: z.string().min(1).max(65_536),
+  // Whitespace-only text has no chunk to embed, so it is refused here rather
+  // than after the 202.
+  text: z
+    .string()
+    .max(65_536)
+    .refine((value) => value.trim() !== '', 'text must contain a non-whitespace character'),
   tag: z.string().min(1).max(64).optional(),
 });
 export type IngestDocumentsBody = z.infer<typeof IngestDocumentsBody>;

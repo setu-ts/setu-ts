@@ -30,6 +30,15 @@ describe('documents e2e', () => {
       });
       assert.deepStrictEqual(invalid.status, 400);
       await invalid.text();
+      // Whitespace-only text has no chunk to index; replacing the source with
+      // none would delete the document's earlier chunks after a 202.
+      const blank = await fetch(server.baseUrl + '/documents', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-tenant-id': 'acme' },
+        body: JSON.stringify({ id: 'readme', text: ' \n\t ' }),
+      });
+      assert.deepStrictEqual(blank.status, 400);
+      await blank.text();
       const spec = await fetch(server.baseUrl + '/openapi.json');
       type Operation = { parameters?: { name: string; in: string; required?: boolean }[] };
       const document: { paths: Record<string, Record<string, Operation>> } = await spec.json();

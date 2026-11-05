@@ -311,6 +311,9 @@ npx wrangler vectorize create documents --dimensions=768 --metric=cosine
 npx wrangler vectorize create-metadata-index documents --property-name=tag --type=string
 ```
 
+One adapter serves one index, so it serves one collection: declaring a second collection on the same
+`VectorizeVectorStore` fails registration with `VectorOperationUnsupportedError`.
+
 The scope is the namespace. Vector ids are global to an index, so the stored id is
 `vectorRecordKey(subtle, scope, id)` and the caller's id travels in metadata: two tenants writing
 the same id do not overwrite each other. `ensureCollection` checks only the binding's reported

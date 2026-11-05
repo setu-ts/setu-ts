@@ -102,7 +102,8 @@ export interface VectorizeVectorStoreOptions {
 
 /**
  * Stores vectors in a Cloudflare Vectorize index: one index per collection,
- * one namespace per scope. Create the index with `--metric cosine` and a
+ * one namespace per scope. Record ids are unique per index, so one adapter
+ * serves the first collection it is ensured for and refuses any other. Create the index with `--metric cosine` and a
  * metadata index for every declared filterable field before the first write.
  * Writes are applied asynchronously, so a query may not see one yet.
  *
@@ -121,6 +122,7 @@ export class VectorizeVectorStore implements IVectorStoreAdapter {
   readonly #index: VectorizeIndexLike;
   readonly #onClose: (() => void | Promise<void>) | undefined;
   #subtle: SubtleCrypto | undefined;
+  #collection: string | undefined;
 
   /**
    * @param options - The binding and shutdown callback
@@ -152,6 +154,7 @@ export class VectorizeVectorStore implements IVectorStoreAdapter {
 
   /** @inheritdoc */
   async ensureCollection(spec: VectorCollectionSpec): Promise<void> {
+    if (this.#collection !== undefined && this.#collection !== spec.name) this.#refuse(spec);
     if (spec.dimensions > MAX_DIMENSIONS) {
       throw new VectorOperationUnsupportedError(
         `vectorize: collection '${spec.name}' has ${spec.dimensions} dimensions; Vectorize indexes at most ${MAX_DIMENSIONS}.`,
@@ -163,14 +166,16 @@ export class VectorizeVectorStore implements IVectorStoreAdapter {
         `vectorize: the index for '${spec.name}' has ${dimensions} dimensions; declared ${spec.dimensions}.`,
       );
     }
+    this.#collection = spec.name;
   }
 
   /** @inheritdoc */
   async upsert(
-    _spec: VectorCollectionSpec,
+    spec: VectorCollectionSpec,
     scope: string,
     records: readonly VectorRecord[],
   ): Promise<void> {
+    this.#served(spec);
     const vectors = await Promise.all(
       records.map(async (record) => ({
         id: await this.#key(scope, record.id),
@@ -198,10 +203,11 @@ export class VectorizeVectorStore implements IVectorStoreAdapter {
 
   /** @inheritdoc */
   async query(
-    _spec: VectorCollectionSpec,
+    spec: VectorCollectionSpec,
     scope: string,
     query: VectorQuery,
   ): Promise<readonly VectorMatch[]> {
+    this.#served(spec);
     const filter = query.filter === undefined ? undefined : translateFilter(query.filter);
     const { matches } = await this.#index.query([...query.vector], {
       topK: query.topK,
@@ -231,7 +237,8 @@ export class VectorizeVectorStore implements IVectorStoreAdapter {
   }
 
   /** @inheritdoc */
-  async delete(_spec: VectorCollectionSpec, scope: string, ids: readonly string[]): Promise<void> {
+  async delete(spec: VectorCollectionSpec, scope: string, ids: readonly string[]): Promise<void> {
+    this.#served(spec);
     await this.#index.deleteByIds(await Promise.all(ids.map((id) => this.#key(scope, id))));
   }
 
@@ -247,6 +254,20 @@ export class VectorizeVectorStore implements IVectorStoreAdapter {
   /** @inheritdoc */
   async close(): Promise<void> {
     await this.#onClose?.();
+  }
+
+  /** Refuses a collection this adapter's index was not ensured for. */
+  #served(spec: VectorCollectionSpec): void {
+    if (this.#collection === undefined) {
+      throw new Error('VectorizeVectorStore: ensureCollection() must run before any other call.');
+    }
+    if (this.#collection !== spec.name) this.#refuse(spec);
+  }
+
+  #refuse(spec: VectorCollectionSpec): never {
+    throw new VectorOperationUnsupportedError(
+      `vectorize: one VectorizeVectorStore serves one index; collection '${spec.name}' needs its own index (this one serves '${this.#collection}').`,
+    );
   }
 
   async #key(scope: string, id: string): Promise<string> {

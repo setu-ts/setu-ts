@@ -480,6 +480,7 @@ in any step fails application startup.
 | `QdrantVectorStore`                                                                                                                                                    | class    | Qdrant, over an application-supplied client                             |
 | `VectorStoreTenancy`                                                                                                                                                   | type     | `'required'` (default) or `{ fixed: string }`                           |
 | `VectorStorePluginOptions`, `MemoryVectorStoreOptions`, `PgVectorDatabase`, `PgVectorExecutor`, `PgVectorStoreOptions`, `QdrantClientLike`, `QdrantVectorStoreOptions` | types    | Option and facade types                                                 |
+| `VERSION`                                                                                                                                                              | const    | The package version                                                     |
 
 `collections` is required and non-empty. A name matches `^[a-z][a-z0-9_]{0,39}$`, dimensions are an
 integer 1–4,096, and `filterable` declares at most 10 fields matching `^[a-z][a-z0-9_]{0,63}$` and
@@ -493,6 +494,10 @@ Limits, enforced by the service before any adapter call: `topK` 1–50, 500 reco
 ids per delete, 64-byte scope, 256-byte record or source id, 8 KiB content, 64-byte string metadata
 or filter value, 100 values per `in`, `and` depth 4 and 32 clauses per filter. `replaceSource`
 writes the source's new records and then deletes its stale records in the same scope.
+
+`VectorizeVectorStore` (in `@setu-ts/cloudflare-plugin`) serves one collection, the first it is
+ensured for: Vectorize record ids are unique per index, so a second collection on the same adapter
+is refused with `VectorOperationUnsupportedError` at registration and on every data call.
 
 | Operation       | memory | pgvector | Qdrant | Vectorize |
 | --------------- | ------ | -------- | ------ | --------- |

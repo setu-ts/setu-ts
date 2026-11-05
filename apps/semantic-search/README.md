@@ -36,6 +36,10 @@ Each tenant has its own vector scope, so a search never returns another tenant's
 is declared with `validateHeaders`, so Swagger UI at `/docs` shows an `x-tenant-id` field for
 "Try it out".
 
+The header resolver trusts the caller: any client can name either tenant. That keeps the example
+runnable without sign-in. A deployed application resolves the tenant from the signed-in principal
+instead; [Retrieval](../../docs/retrieval.md#search) shows where that check goes.
+
 ## How ingestion works
 
 `POST /documents` queues the `ingest-document` job and returns before embedding starts. The job looks
