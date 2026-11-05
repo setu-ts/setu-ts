@@ -13,6 +13,13 @@ const ORDERS: WorkspaceMember = { name: 'orders', port: 3000 };
 const BILLING: WorkspaceMember = { name: 'billing', port: 3001 };
 const SHIPPING: WorkspaceMember = { name: 'shipping', port: 3002 };
 
+it('X87-2 exports VITE_PORT only for a member that records one', () => {
+  expect(renderDiscoveryModule({ ...ORDERS, vitePort: 5101 }, [ORDERS])).toContain(
+    'export const VITE_PORT = 5101;',
+  );
+  expect(renderDiscoveryModule(ORDERS, [ORDERS])).not.toContain('export const VITE_PORT');
+});
+
 describe('renderDiscoveryModule', () => {
   it('exports the member own port', () => {
     const source = renderDiscoveryModule(ORDERS, [ORDERS]);

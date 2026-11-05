@@ -9,7 +9,13 @@ import { stringFlag } from '../args.ts';
 import { EXIT_ERROR, EXIT_INTERRUPTED, EXIT_OK, EXIT_USAGE, PROGRAM_NAME } from '../constants.ts';
 import { interruptionMessage } from '../utils/interruption.ts';
 import { escapeName } from '../utils/names.ts';
-import { type GeneratedFile, joinPath, resolveDir, writeFiles } from '../utils/file-writer.ts';
+import {
+  type GeneratedFile,
+  joinPath,
+  readExistingText,
+  resolveDir,
+  writeFiles,
+} from '../utils/file-writer.ts';
 import { workspaceContainerFiles } from '../workspace/compose.ts';
 import {
   DISCOVERY_MODULE,
@@ -35,6 +41,9 @@ import { transportSpec } from '../workspace/transport.ts';
 import { describeReconcileFailure, reconcileMembers } from '../workspace/reconcile.ts';
 import type { CommandRunner } from '../utils/run-command.ts';
 import { runWorkspaceBuild, runWorkspaceDeploy } from './workspace-ops.ts';
+import { planInspectorRewrite } from '../workspace/development-ports.ts';
+import { detectPlugins } from '../utils/plugin-detector.ts';
+import { allocateDevPort } from '../workspace/manifest.ts';
 
 /** Dependencies reached by workspace maintenance commands. */
 export interface WorkspaceCommandDependencies {
@@ -63,6 +72,7 @@ export interface WorkspaceCommandDependencies {
 async function reallocate(
   manifest: WorkspaceManifest,
   probe: PortProbe,
+  fullStack: ReadonlySet<string>,
 ): Promise<WorkspaceManifest | undefined> {
   const members = [];
   let candidate = manifest.basePort;
@@ -71,6 +81,8 @@ async function reallocate(
     if (candidate > MAX_PORT) return undefined;
     const nextMember = { ...member, port: candidate };
     delete nextMember.devtoolPort;
+    delete nextMember.inspectPort;
+    delete nextMember.vitePort;
     members.push(nextMember);
     candidate++;
   }
@@ -92,6 +104,26 @@ async function reallocate(
         member.name === old.name ? { ...member, devtoolPort: port } : member,
       ),
     };
+  }
+  for (const old of manifest.members) {
+    for (const field of (old.vitePort !== undefined || fullStack.has(old.name)
+      ? ['inspectPort', 'vitePort']
+      : ['inspectPort']) as readonly ('inspectPort' | 'vitePort')[]) {
+      let port = allocateDevPort(next);
+      while (port !== undefined && !(await probe(port)))
+        port = allocateDevPort({
+          ...next,
+          members: [...next.members, { name: '__occupied__', port, inspectPort: port }],
+        });
+      if (port === undefined) return undefined;
+      const assigned = port;
+      next = {
+        ...next,
+        members: next.members.map((member) =>
+          member.name === old.name ? { ...member, [field]: assigned } : member,
+        ),
+      };
+    }
   }
   return next;
 }
@@ -200,12 +232,56 @@ export async function runWorkspaceCommand(
       return EXIT_ERROR;
     }
   }
-  const next = await reallocate(read.manifest, deps.portAvailable ?? assumePortAvailable);
+  const fullStack = new Set<string>();
+  for (const member of read.manifest.members)
+    if (
+      (await detectPlugins(deps.fs, joinPath(dir, MEMBERS_DIR, member.name))).has(
+        'react-router-plugin',
+      )
+    )
+      fullStack.add(member.name);
+  const next = await reallocate(
+    read.manifest,
+    deps.portAvailable ?? assumePortAvailable,
+    fullStack,
+  );
   if (next === undefined) {
     deps.error(`No bindable ports remain between ${read.manifest.basePort} and ${MAX_PORT}.`);
     return EXIT_ERROR;
   }
   const files = managedFiles(next).map((file) => ({ ...file, path: joinPath(dir, file.path) }));
+  for (const member of next.members) {
+    const old = read.manifest.members.find((entry) => entry.name === member.name)!;
+    // Discovery now exports the new VITE_PORT, but dev.ts is the developer's file:
+    // one that does not read it keeps its own port, so say which lines to set.
+    if (member.vitePort !== undefined) {
+      const devPath = joinPath(dir, MEMBERS_DIR, member.name, 'dev.ts');
+      const dev = await readExistingText(deps.fs, devPath).catch(() => undefined);
+      if (dev !== undefined && !(dev.includes(DISCOVERY_SPECIFIER) && /\bVITE_PORT\b/.test(dev))) {
+        deps.log(
+          `Set the two development port lines in ${escapeName(devPath)} from the discovery module (Vite port ${member.vitePort}):`,
+        );
+        deps.log(`  import { SERVICE_PORT, VITE_PORT } from '${DISCOVERY_SPECIFIER}';`);
+        deps.log('  const port = SERVICE_PORT; const vitePort = VITE_PORT;');
+      }
+    }
+    if (old.inspectPort === undefined) {
+      deps.log(
+        `Set start:debug in ${escapeName(joinPath(dir, MEMBERS_DIR, member.name))} to use --inspect=127.0.0.1:${member.inspectPort}; no old inspector port was recorded, so the script was left unchanged.`,
+      );
+      continue;
+    }
+    files.push(
+      ...(await planInspectorRewrite(
+        deps.fs,
+        joinPath(dir, MEMBERS_DIR, member.name),
+        next.runtime,
+        member.inspectPort!,
+        deps.log,
+        old.inspectPort,
+      )),
+    );
+  }
   if (args.flags['dry-run'] === true) {
     for (const file of files) deps.log(`would update ${escapeName(file.path)}`);
     return EXIT_OK;

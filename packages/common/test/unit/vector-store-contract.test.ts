@@ -16,6 +16,7 @@ import {
   VectorRecordError,
   VectorScopeInvalidError,
   VectorScopeRequiredError,
+  VectorVersionConflictError,
 } from '../../src/index.ts';
 import type {
   IVectorStore,
@@ -59,6 +60,14 @@ describe('vector-store contract', () => {
     const unsupported = new VectorOperationUnsupportedError('vectorize cannot delete a scope');
     expect(unsupported.name).toBe('VectorOperationUnsupportedError');
     expect(httpStatusHintOf(unsupported)?.status).toBe(501);
+
+    const conflict = new VectorVersionConflictError('memory: version 1 is older than 2');
+    expect(conflict.name).toBe('VectorVersionConflictError');
+    expect(httpStatusHintOf(conflict)).toMatchObject({ status: 409, title: 'Conflict' });
+    // The served detail never echoes the versions or the source.
+    expect(httpStatusHintOf(conflict)?.detail).toBe(
+      'A newer version of this source is already stored.',
+    );
 
     const mismatch = new VectorCollectionMismatchError(
       'documents has 768 dimensions, declared 1024',

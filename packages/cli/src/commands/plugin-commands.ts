@@ -14,7 +14,12 @@ import type { CliCommandHandler, IApplication, IFileSystem } from '@setu-ts/comm
 import { CAPABILITIES } from '@setu-ts/common';
 import type { ParsedArgs } from '../args.ts';
 import { stringFlag } from '../args.ts';
-import { firstUnknownFlag, PLUGIN_COMMAND_FLAGS, unknownOptionMessage } from '../flags.ts';
+import {
+  BUILT_IN_COMMANDS,
+  firstUnknownFlag,
+  PLUGIN_COMMAND_FLAGS,
+  unknownOptionMessage,
+} from '../flags.ts';
 import {
   CONFIG_EXPORT,
   CONFIG_MODULE,
@@ -224,14 +229,24 @@ export async function runCommandsListing(
   try {
     const runtime = await detectTargetRuntime(deps.fs, dir);
     return await withPluginCommands(deps, dir, config, (commands) => {
-      if (commands.length === 0) {
+      const visible = commands.filter((command) => !BUILT_IN_COMMANDS.has(command.name));
+      for (const command of commands)
+        if (BUILT_IN_COMMANDS.has(command.name))
+          deps.error(
+            `plugin command '${command.name}' is shadowed by the built-in \`setu ${command.name}\`; rename it`,
+          );
+      if (visible.length === 0 && commands.length > 0) {
+        deps.log('No plugin commands are available: every registered name is a built-in.');
+        return EXIT_OK;
+      }
+      if (visible.length === 0) {
         deps.log('No plugin commands are registered by this application.');
         deps.log(`Plugins publish them with \`ctx.cli.register('plugin:command', handler)\`.`);
         return EXIT_OK;
       }
 
       deps.log(`Commands provided by this application's plugins:`);
-      for (const command of [...commands].sort((a, b) => a.name.localeCompare(b.name))) {
+      for (const command of [...visible].sort((a, b) => a.name.localeCompare(b.name))) {
         deps.log(`  ${cliInvocation(runtime)} ${command.name}`);
       }
       return EXIT_OK;

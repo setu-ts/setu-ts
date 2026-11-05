@@ -17,6 +17,7 @@ function harness(
     Promise.resolve({ code: 0, stdout: JSON.stringify(tree), stderr: '' }),
 ) {
   const fs = createFakeFs({
+    '/app/node_modules/.bin/react-router': '',
     '/app/package.json': JSON.stringify({
       dependencies: Object.fromEntries(plugins.map((p) => [`@setu-ts/${p}`, '^0.10.0'])),
     }),
@@ -42,6 +43,30 @@ function harness(
 }
 
 describe('generation refuses kernel routes that shadow React Router pages', () => {
+  it('X87-1 refuses a shadowing route in an npm member using the hoisted binary', async () => {
+    const fs = createFakeFs({
+      '/work/package.json': '{"workspaces":["apps/*"]}',
+      '/work/apps/api/package.json': '{"dependencies":{"@setu-ts/react-router-plugin":"^0.11.0"}}',
+      '/work/node_modules/.bin/react-router': '',
+    });
+    const err = createRecorder();
+    const runner = vi.fn<CommandRunner>(() =>
+      Promise.resolve({ code: 0, stdout: JSON.stringify(tree), stderr: '' }),
+    );
+    expect(
+      await runCli(['g', 'route', 'products'], {
+        fs,
+        cwd: '/work/apps/api',
+        now: () => 0,
+        log: () => {},
+        error: err.sink,
+        runCommand: runner,
+      }),
+    ).toBe(1);
+    expect(err.text()).toContain('would take precedence');
+    expect(fs.writes).toEqual([]);
+    expect(runner.mock.calls[0]?.[0]).toBe('/work/node_modules/.bin/react-router');
+  });
   it('lets a full-stack module share its page name: its routes mount at /api (M130 §3.6)', async () => {
     const h = harness();
     expect(await h.run(['g', 'module', 'products']), h.err.text()).toBe(0);

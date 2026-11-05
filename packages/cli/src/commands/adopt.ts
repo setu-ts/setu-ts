@@ -30,6 +30,7 @@ import { deriveNames, escapeName, IDENTIFIER_NAME_RULE, isIdentifierSafe } from 
 import {
   assertInsideProject,
   findExisting,
+  readExistingText,
   type GeneratedFile,
   joinPath,
   resolveDir,
@@ -45,6 +46,7 @@ import {
   rewriteEntryPort,
 } from '../workspace/adopt.ts';
 import { detectPlugins } from '../utils/plugin-detector.ts';
+import { detectTargetRuntime } from '../utils/runtime-detector.ts';
 import { workspaceContainerFiles } from '../workspace/compose.ts';
 import { workspaceK8sFiles } from '../workspace/k8s.ts';
 import {
@@ -55,6 +57,8 @@ import {
 } from '../workspace/discovery-module.ts';
 import {
   DEFAULT_BASE_PORT,
+  allocateDevPort,
+  type WorkspaceManifest,
   MEMBERS_DIR,
   readPortFlag,
   readWorkspaceManifest,
@@ -67,6 +71,8 @@ import { detectProjectRuntime, workspaceProfile } from '../workspace/runtime-pro
 import { DEFAULT_TRANSPORT, transportSpec } from '../workspace/transport.ts';
 
 import { cliInvocation } from '../templates/project-files.ts';
+import { renderFullStackDevEntry } from '../templates/full-stack-build-files.ts';
+import { planInspectorRewrite } from '../workspace/development-ports.ts';
 
 /**
  * Raised inside the conversion transaction when the conversion cannot finish.
@@ -248,8 +254,18 @@ export async function runAdoptCommand(args: ParsedArgs, deps: AdoptDependencies)
   // package.json is a Node or Bun one, and converting it into a Deno workspace
   // would leave a root whose members its toolchain cannot install.
   const profile = workspaceProfile(await detectProjectRuntime(deps.fs, project, memberDir));
+  let workersProject: boolean;
+  try {
+    workersProject =
+      (await detectTargetRuntime(deps.fs, project)) === 'cloudflare-workers' ||
+      (memberDir !== undefined &&
+        (await detectTargetRuntime(deps.fs, memberDir)) === 'cloudflare-workers');
+  } catch (cause) {
+    deps.error(cause instanceof Error ? cause.message : String(cause));
+    return EXIT_ERROR;
+  }
 
-  const manifest = {
+  let manifest: WorkspaceManifest = {
     version: WORKSPACE_VERSION,
     runtime: profile.runtime,
     basePort,
@@ -260,6 +276,21 @@ export async function runAdoptCommand(args: ParsedArgs, deps: AdoptDependencies)
     transport: DEFAULT_TRANSPORT,
     members: [{ name: names.kebab, port: basePort, ...support }],
   };
+  for (const field of (workersProject
+    ? []
+    : plugins.has('react-router-plugin')
+      ? ['inspectPort', 'vitePort']
+      : ['inspectPort']) as readonly ('inspectPort' | 'vitePort')[]) {
+    const port = allocateDevPort(manifest);
+    if (port === undefined) {
+      deps.error('No development ports remain; choose a lower --port.');
+      return EXIT_ERROR;
+    }
+    manifest = {
+      ...manifest,
+      members: manifest.members.map((member) => ({ ...member, [field]: port })),
+    };
+  }
   const transport = transportSpec(DEFAULT_TRANSPORT);
 
   // The root's own files, minus the one the project keeps at this level.
@@ -450,6 +481,74 @@ export async function runAdoptCommand(args: ParsedArgs, deps: AdoptDependencies)
       }
     }
 
+    if (!workersProject) {
+      try {
+        const memberDir = joinPath(project, memberRoot);
+        const inspector = await planInspectorRewrite(
+          deps.fs,
+          memberDir,
+          profile.runtime,
+          manifest.members[0]!.inspectPort!,
+          deps.log,
+        );
+        if (inspector.length > 0)
+          await writeFiles(
+            deps.fs,
+            inspector,
+            deps.interrupt === undefined
+              ? { root: project }
+              : { root: project, signal: deps.interrupt },
+          );
+        if (plugins.has('react-router-plugin')) {
+          const devPath = joinPath(memberDir, 'dev.ts');
+          const source = await readExistingText(deps.fs, devPath);
+          const standalone = renderFullStackDevEntry();
+          const formattedStandalone = await formatForTarget(
+            [standalone],
+            profile.runtime,
+            memberDir,
+            deps.error,
+          );
+          if (source === undefined) {
+            // No dev.ts: nothing reads a Vite port to rewrite or to point at.
+          } else if (source === standalone.contents || source === formattedStandalone[0]!.contents)
+            await writeFiles(
+              deps.fs,
+              await formatForTarget(
+                [
+                  {
+                    path: devPath,
+                    contents: renderFullStackDevEntry({
+                      symbol: SERVICE_PORT_EXPORT,
+                      from: DISCOVERY_SPECIFIER,
+                    }).contents,
+                    managed: true,
+                  },
+                ],
+                profile.runtime,
+                memberDir,
+                deps.error,
+              ),
+              deps.interrupt === undefined
+                ? { root: project }
+                : { root: project, signal: deps.interrupt },
+            );
+          else {
+            deps.log(
+              `Set the two development port lines in ${escapeName(devPath)} from the discovery module:`,
+            );
+            deps.log(`  import { SERVICE_PORT, VITE_PORT } from '${DISCOVERY_SPECIFIER}';`);
+            deps.log('  const port = SERVICE_PORT; const vitePort = VITE_PORT;');
+          }
+        }
+      } catch (cause) {
+        if (interruptionMessage(cause) !== undefined) throw cause;
+        throw new AdoptAbortedError([
+          `Failed to rewrite member development entries: ${escapeName(cause instanceof Error ? cause.message : String(cause))}`,
+        ]);
+      }
+    }
+
     // A pre-0.9 project pins the framework through JSR or its npm alias, which
     // the workspace root no longer maps. Its manifest moves onto the npm names.
     const manifestKind = profile.manifestKind;
@@ -509,7 +608,7 @@ export async function runAdoptCommand(args: ParsedArgs, deps: AdoptDependencies)
     // beside a conversion that was refused or rolled back would describe work
     // the developer never has to do.
     for (const note of plan.notes ?? []) deps.log(note);
-    if (rewritten === undefined) {
+    if (rewritten === undefined && !workersProject) {
       deps.log('');
       deps.log(`Its entry does not carry the start line this rewrites, so bind the allocated`);
       deps.log(`port yourself — two lines in ${joinPath(memberRoot, 'main.ts')}:`);

@@ -27,6 +27,8 @@ startup rather than the first request.
   `VectorScopeRequiredError` before any adapter call.
 - Methods: `upsert`, `replaceSource`, `query`, `delete`, `deleteScope`. `replaceSource` writes the
   source's new records, then deletes its stale ones in the same scope, so a re-run leaves one copy.
+  Pass `{ version }` when retries can arrive out of order: an older version is refused with
+  `VectorVersionConflictError` (409); an equal one is rewritten. Vectorize refuses versions.
 - Cosine similarity only, in `[-1, 1]`. Results are ordered by score descending, then id ascending.
   `topK` is 1–50 and an adapter may return fewer.
 - Filters use `eq`, `in`, `gt`, `gte`, `lt`, `lte` and `and` over declared `filterable` fields.

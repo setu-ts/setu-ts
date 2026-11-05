@@ -17,7 +17,9 @@ describe('renderDevEntry', () => {
       expect(entry).toContain("runtime.env['SETU_DEVTOOL_SESSION_ID']");
       expect(entry).toContain("runtime.env['SETU_DEVTOOL_SESSION_KEY']");
       expect(entry.match(/runtime.exit\(1\)/g)).toHaveLength(5);
-      expect(entry).toContain(runtime === 'deno' ? 'deno run -A npm:' : 'npx @setu-ts/cli@');
+      expect(entry).toContain(
+        runtime === 'deno' ? 'deno run -A --no-lock npm:' : 'npx @setu-ts/cli@',
+      );
       expect(isDevEntry(entry, 4919, false)).toBe(true);
     });
   }
@@ -51,7 +53,9 @@ describe('renderDevEntry', () => {
     }
     expect(devEntryPort('handwritten entry')).toBeUndefined();
     const variants = devEntryVariants(4920);
-    expect(variants[0]).toContain(`deno run -A npm:@setu-ts/cli@${VERSION} devtool enable`);
+    expect(variants[0]).toContain(
+      `deno run -A --no-lock npm:@setu-ts/cli@${VERSION} devtool enable`,
+    );
     expect(variants[3]).toContain('Re-run `setu devtool enable`');
     expect(variants[4]).not.toContain('Re-run');
   });

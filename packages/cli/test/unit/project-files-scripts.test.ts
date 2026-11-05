@@ -10,6 +10,24 @@ import { CLASS_BASED_TEMPLATE } from '../../src/templates/class-based.ts';
 import { MICROSERVICE_TEMPLATE } from '../../src/templates/microservice.ts';
 import { FULL_STACK_TEMPLATE } from '../../src/templates/full-stack.ts';
 
+it('X87-6 gives member debug scripts their own loopback inspector port on every runtime', () => {
+  for (const runtime of ['node', 'bun', 'deno'] as const)
+    for (const host of [REST_TEMPLATE, FULL_STACK_TEMPLATE]) {
+      const files = projectFiles('web', runtime, resolveHost(host, runtime), {
+        symbol: 'SERVICE_PORT',
+        from: './src/discovery/services.ts',
+        inspectPort: 5100,
+      });
+      const manifest = JSON.parse(
+        files.find((file) => file.path === (runtime === 'deno' ? 'deno.json' : 'package.json'))!
+          .contents,
+      );
+      expect((manifest.tasks ?? manifest.scripts)['start:debug']).toContain(
+        '--inspect=127.0.0.1:5100',
+      );
+    }
+});
+
 for (const host of [
   MINIMAL_HOST,
   REST_TEMPLATE,

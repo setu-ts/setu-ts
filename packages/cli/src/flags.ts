@@ -35,6 +35,25 @@
 import { EXIT_USAGE, PROGRAM_NAME } from './constants.ts';
 import { escapeName } from './utils/names.ts';
 
+/** Every top-level built-in dispatched by cli.ts, including its aliases. */
+export const BUILT_IN_COMMANDS: ReadonlySet<string> = new Set([
+  'new',
+  'n',
+  'generate',
+  'g',
+  'add',
+  'build',
+  'check',
+  'client',
+  'sync',
+  'agents',
+  'devtool',
+  'adopt',
+  'workspace',
+  'commands',
+  'help',
+]);
+
 /**
  * The flags every built-in command answers to, each handled inside the command
  * itself (`--help` is never an error in any of them).
@@ -285,7 +304,18 @@ const WORKSPACE_BUILD: ICommandFlagSpec = spec(
 /** `setu workspace deploy` (M122): build, ship, apply and roll out every member. */
 const WORKSPACE_DEPLOY: ICommandFlagSpec = spec(
   'workspace deploy',
-  ['dir', 'context', 'namespace', 'registry', 'tag', 'timeout', 'build-arg', 'network', 'dry-run'],
+  [
+    'dir',
+    'context',
+    'namespace',
+    'registry',
+    'tag',
+    'timeout',
+    'build-arg',
+    'network',
+    'pull-secret',
+    'dry-run',
+  ],
   [],
   { fixed: 2, taken: 0, noun: 'no arguments beyond deploy' },
 );

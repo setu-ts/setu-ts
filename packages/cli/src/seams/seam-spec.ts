@@ -47,6 +47,8 @@ export interface SeamSpec {
    * guarantee that the file exports what the barrel is about to name.
    */
   readonly suffix: string;
+  /** Only a convenience re-export: missing exports are warnings, not registration errors. */
+  readonly listingOnly?: true;
   /**
    * The symbols the barrel imports from the default shape of one artifact.
    *

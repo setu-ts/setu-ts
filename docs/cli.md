@@ -417,9 +417,11 @@ In projects with `react-router-plugin`, `g route`, `g controller` and `g module`
 routes that would shadow an existing page, with its file named. To put an API at `/api/products`
 while keeping the `/products` page, run `setu g module api`, then
 `setu g route products --module api`. The check runs the installed `react-router routes --json` in
-the project with a 15-second deadline; if it cannot run, generation continues with a notice and the
-paths to check manually. `setu check` does not run React Router, so a page added after the route is
-not detected.
+the project with a 15-second deadline. In a workspace it searches from the member up to the
+workspace root for the first installed binary; outside a workspace it searches only the project
+directory; if it cannot run, generation continues with a notice and the paths to check manually.
+`setu check` does not run React Router, so a page added after the route is not detected. On a shared
+path, the kernel route answers document requests.
 
 `guard`, `migration` and `schema` are unwired deliberately, not by omission. A `guard` answers `401`
 when `ctx.request.user` is absent, so registering it globally would 401 `/health`, `/metrics` and
@@ -565,6 +567,15 @@ a flat barrel) refuses the whole switch. A config whose registration lines are n
 ones is left alone, with the lines to change printed. `setu check` reports controllers or services
 left outside modules once modules exist (`setu.E014`), and imports in CLI-written files that no
 longer resolve (`setu.E015`).
+
+With `--adopt-controllers`, a same-named flat controller becomes the module's controller and keeps
+its routes. Its generated controller and CRUD tests are omitted; the service is still generated
+unless a same-named service is also adopted. A same-named service without its controller is refused:
+adopt both, or choose another module name. A same-named file that `setu check` skips (one without
+the registrar, class or service export the module needs) is refused too, and a nested controller of
+the same name, such as `src/controllers/legacy/orders.controller.ts`, still counts as a name
+conflict. Full-stack modules refuse same-named adoption because their indexes require the generated
+service factory and token.
 
 ### A generated module
 
@@ -748,6 +759,19 @@ name that sorts earlier cannot move a running service's port. `--transport` pick
 each other (`http`, `grpc`, `memory`, `redis`, `rabbitmq`, `nats`, `kafka`); it is recorded once and
 every member added later inherits it, because services can only meet on a bus they share.
 
+Each member also records `inspectPort`, and a full-stack member records `vitePort`. Development
+ports are allocated from `devBasePort`, or `basePort + 2000` when it is absent. Application,
+devtool, inspector and Vite allocation all skip every port recorded in the manifest. All port fields
+must be integers from 1 through 65535; set a lower `devBasePort` if the default range would exceed
+that limit.
+
+A member's `start:debug` binds its inspector at `127.0.0.1:<inspectPort>`. Full-stack `dev.ts`
+imports `SERVICE_PORT` and `VITE_PORT` from discovery; standalone projects retain their environment
+defaults. `ports --reallocate` discards old development ports before assigning new ones and updates
+a debug script only when its old inspector token occurs exactly once. Otherwise it prints the token
+to set and leaves that script unchanged. Adoption similarly replaces one bare `--inspect` token, and
+rewrites a full-stack `dev.ts` only when it matches the standalone rendering.
+
 ### The discovery map
 
 Every member carries a CLI-owned `src/discovery/services.ts`, regenerated for **all** members on
@@ -896,8 +920,7 @@ Writing a workspace on POSIX, from its root or a member, checks every target's d
 ownership rule as git's `safe.directory`. Permission bits are not checked, so a directory you own
 but others can write is trusted. `--check` writes nothing and skips the check; `--dry-run` applies
 it. A failure exits `1`, names the directory and reason, writes nothing, and names a remedy for that
-reason: `replace the link with the directory it points at, or run setu agents from its real path`
-(with the real path in parentheses when it can be resolved) for a symlink,
+reason: `replace the link with the directory it points at` for a symlink,
 `fix the workspace layout so every member path is a directory` for a non-directory, and
 `run setu agents in a workspace you own` for a directory owned by another user or one whose
 ownership cannot be checked. It never falls back to standalone. This check is skipped when ownership
@@ -988,12 +1011,12 @@ anything) prints `No CLI-owned seams in <dir>; nothing to check.` and exits `0`.
 
 | Id          | Severity | Finding                                                                                                                                                                                                                                           |
 | ----------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `setu.E001` | error    | An artifact does not export what its barrel imports, so it is skipped                                                                                                                                                                             |
+| `setu.E001` | error    | An artifact in a registering seam does not export what its barrel imports, so it is skipped                                                                                                                                                       |
 | `setu.E002` | error    | An artifact's file name is not a kebab-case identifier, so it is skipped                                                                                                                                                                          |
 | `setu.E003` | error    | A barrel does not list an artifact in its directory, or lists one that is not there                                                                                                                                                               |
 | `setu.E004` | error    | A barrel is not a regular file, is over 1 MiB, or cannot be classified                                                                                                                                                                            |
 | `setu.E005` | error    | An artifact is registered both by its barrel and by hand in `setu.config.ts`                                                                                                                                                                      |
-| `setu.E006` | error    | `setu.config.ts` does not reference a barrel on disk                                                                                                                                                                                              |
+| `setu.E006` | error    | `setu.config.ts` does not use a barrel outside imports; `registerModules` must be called                                                                                                                                                          |
 | `setu.E007` | error    | A feature module is missing its activation export or `@Module` declaration                                                                                                                                                                        |
 | `setu.E008` | error    | A feature module's directory name is not a kebab-case identifier                                                                                                                                                                                  |
 | `setu.E009` | error    | A feature module is not activated in `src/modules/index.ts`                                                                                                                                                                                       |
@@ -1003,14 +1026,23 @@ anything) prints `No CLI-owned seams in <dir>; nothing to check.` and exits `0`.
 | `setu.E013` | error    | An artifact in a seam directory cannot be read (a special file, over 1 MiB, or no permission), so its wiring is unknown                                                                                                                           |
 | `setu.E017` | error    | A page under `app/` imports `~kernel/*` or `src/` code by value (only `import type` and `*.token.ts` modules are allowed; `x.token` and `x.token.js` count only when they resolve to `x.token.ts`), so kernel code would reach the browser bundle |
 | `setu.E018` | error    | A page under `app/` cannot be parsed or read safely (over 1 MiB, too deep, or a symlink leaving `app/`), so its kernel imports cannot be checked                                                                                                  |
-| `setu.W001` | warning  | `setu.config.ts` uses a construct the check cannot classify, so a barrel's wiring is unknown                                                                                                                                                      |
+| `setu.W001` | warning  | `setu.config.ts` could not be classified: one warning names the construct, line and affected symbols                                                                                                                                              |
 | `setu.W002` | warning  | There is no `setu.config.ts`, so nothing can be checked for wiring                                                                                                                                                                                |
 | `setu.W003` | warning  | `setu.config.ts` calls `registerGeneratedRoutes(app.router)` without `app.services`                                                                                                                                                               |
 | `setu.W004` | warning  | A `.setu-ts/check.json` entry matched no finding                                                                                                                                                                                                  |
+| `setu.W005` | warning  | A plain-function service is not re-exported from `src/services/index.ts` because it lacks `describe<Name>`                                                                                                                                        |
 
 Barrels are compared as **sets of names**, read from their import and export declarations, so a
 barrel your formatter rewrote, reordered or re-quoted still passes. Ids are never reused: a retired
-check keeps its number.
+check keeps its number. Imported route registrars must also be referenced outside their import line:
+in a module call or the flat barrel's registrar array. An imported registrar with no such reference
+is E003; run `setu sync` to restore its registration.
+
+Config wiring requires a value use outside import declarations; importing a barrel alone is `E006`,
+and `registerModules` must be called. An unclassifiable config produces one `W001` on
+`setu.config.ts`, naming the construct, line and affected symbols; the check cannot tell whether it
+registers them. A plain-function service missing `describe<Name>` receives `W005`: it is not
+re-exported from `src/services/index.ts`, which is a convenience listing rather than a registration.
 
 `setu sync` rewrites the managed barrels — each seam family's `index.ts`, `src/modules/index.ts`,
 and each functional module's `index.ts` — with the same renderer `setu generate` uses, so a synced
@@ -1056,10 +1088,11 @@ A finding you accept can be silenced in `.setu-ts/check.json`, beside `.setu-ts/
 
 A bare id silences every instance. The object form silences that id only for one project-relative
 path: the artifact for `E001`, `E002` and `E005`, the barrel for `E003`, `E004` and `E006`, and
-`src/modules/<name>` for `E009`. Silenced findings do not print or fail the run; the summary counts
-them. If the file is invalid — bad JSON, a key other than `silence`, an unknown id, a malformed path
-— the run reports `setu.E011` and silences nothing, so a typo cannot switch the gate off. `E011` and
-`W004` cannot be silenced. In a workspace, each member reads its own file.
+`src/modules/<name>` for `E009`, `setu.config.ts` for `W001`, and the service file for `W005`.
+Silenced findings do not print or fail the run; the summary counts them. If the file is invalid —
+bad JSON, a key other than `silence`, an unknown id, a malformed path — the run reports `setu.E011`
+and silences nothing, so a typo cannot switch the gate off. `E011` and `W004` cannot be silenced. In
+a workspace, each member reads its own file.
 
 ### Generated projects run it
 

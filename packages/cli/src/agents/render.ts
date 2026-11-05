@@ -4,7 +4,7 @@ import type { WorkspaceManifest } from '../workspace/manifest.ts';
 import { cliInvocation } from '../templates/project-files.ts';
 import { notInstalledAddables } from './not-installed.ts';
 import { PACKAGE_DATA, TOOLING_PACKAGES } from './package-data.ts';
-import { RULE_BLOCKS } from './rules.ts';
+import { RULE_BLOCKS, verificationCommands } from './rules.ts';
 import { BRIEF_BEGIN, BRIEF_END, briefSection } from './brief-file.ts';
 import { isAgentPackageName } from './package-name.ts';
 import { hasControlCharacter } from '../utils/names.ts';
@@ -32,6 +32,12 @@ export function renderMemberPointer(): string {
 
 function commandGloss(name: string, facts: ProjectFacts): string {
   switch (name) {
+    case 'lint':
+      return 'check code style';
+    case 'format':
+      return 'format project files';
+    case 'format:check':
+      return 'check formatting without writing';
     case 'start':
       return facts.runtime === 'node'
         ? 'production entry; on Node, run build first'
@@ -58,6 +64,13 @@ function commandGloss(name: string, facts: ProjectFacts): string {
   }
 }
 
+/** `a`, `a and b`, `a, b and c`. */
+function joinCommands(commands: readonly string[]): string {
+  return commands.length < 2
+    ? commands.join('')
+    : `${commands.slice(0, -1).join(', ')} and ${commands.at(-1)}`;
+}
+
 /** Render one project deterministically from its gathered facts. */
 export function renderBrief(facts: ProjectFacts, member = false): string {
   const modules = member ? '../../node_modules' : 'node_modules';
@@ -67,6 +80,12 @@ export function renderBrief(facts: ProjectFacts, member = false): string {
   if (member) sections.push(renderMemberPointer());
   sections.push(
     '## Commands\n',
+    ...(facts.runtime === 'deno'
+      ? [
+          '- `deno lint` — check code style',
+          '- `deno fmt --check` — check formatting without writing',
+        ]
+      : []),
     ...facts.commands.map((name) => {
       const gloss = commandGloss(name, facts);
       return `- \`${profile.runScript(name)}\`${gloss === '' ? '' : ` — ${gloss}`}`;
@@ -77,7 +96,8 @@ export function renderBrief(facts: ProjectFacts, member = false): string {
     facts.schematics.map((name) => `\`${name}\``).join(', '),
     '\n## Rules\n',
     ...RULE_BLOCKS.filter((rule) => rule.applies(facts)).map(
-      (rule, index) => `${index + 1}. ${rule.text}`,
+      (rule, index) =>
+        `${index + 1}. ${rule.text.replace('{{verify}}', joinCommands(verificationCommands(facts)))}`,
     ),
     '\n## Project map\n',
     '| Path | Purpose |',

@@ -24,6 +24,44 @@ spec:
       image: orders-api:dev
 `;
 
+it('X87-5 inserts pull Secrets once per member before filling images and refuses ambiguous anchors', () => {
+  const text = ['api', 'api-gateway']
+    .map(
+      (name) =>
+        `spec:\n  template:\n    spec:\n      containers:\n        - name: ${name}\n          image: ${name}:dev\n`,
+    )
+    .join('---\n');
+  const inputs = {
+    namespace: 'shop',
+    workspace: 'shop',
+    images: new Map([
+      ['api', 'r.io/api:v'],
+      ['api-gateway', 'r.io/api-gateway:v'],
+    ]),
+    pullSecrets: ['registry', 'backup.example'],
+  };
+  const result = prepareDeployManifest(text, inputs);
+  expect(result.ok).toBe(true);
+  if (result.ok) {
+    expect(result.text.match(/imagePullSecrets:/g)).toHaveLength(2);
+    expect(result.text.match(/- name: registry/g)).toHaveLength(2);
+    const documents = result.text.split('---\n');
+    expect(documents).toHaveLength(2);
+    for (const [index, name] of ['api', 'api-gateway'].entries()) {
+      const pod = documents[index]!.split('  template:\n    spec:\n')[1]!;
+      expect(pod).toBe(
+        `      imagePullSecrets:\n        - name: registry\n        - name: backup.example\n      containers:\n        - name: ${name}\n          image: r.io/${name}:v\n`,
+      );
+    }
+  }
+  for (const invalid of [
+    text + 'imagePullSecrets: []',
+    text.replace('containers:', 'missing:'),
+    text + '\n      containers:\n        - name: api\n',
+  ])
+    expect(prepareDeployManifest(invalid, inputs).ok).toBe(false);
+});
+
 describe('prepareDeployManifest', () => {
   it('fills both placeholders and points each member at its image', () => {
     const result = prepareDeployManifest(MANIFEST, {

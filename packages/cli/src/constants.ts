@@ -98,6 +98,7 @@ export const VALUE_FLAGS: ReadonlySet<string> = new Set([
   // `setu workspace build|deploy` (M122).
   'tag',
   'registry',
+  'pull-secret',
   'context',
   'namespace',
   'timeout',

@@ -15,7 +15,9 @@ requirement, it does **not** list `/openapi.json` and `/docs` as API operations,
 parameter is typed as a string rather than rendering as `any`.
 
 Open http://localhost:3000/docs after `pnpm --dir apps/rest-api run start` to exercise the API from
-the browser: click **Authorize**, paste a token, and call `GET /todos/{id}`.
+the browser. In another terminal, run `pnpm --dir apps/rest-api run token` to print a five-minute
+token signed with the example's demo secret. Click **Authorize**, paste the token, call
+`POST /todos` with `{ "title": "Try Swagger" }`, then call `GET /todos/{id}` with the returned id.
 
 Read the [example deep dive](../../docs/examples.md#rest-api) for the concept and source
 walkthrough.

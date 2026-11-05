@@ -42,7 +42,9 @@ describe('protoToolchainFiles', () => {
   // command it runs through Deno with no install at all.
   it('declares the codegen plugin as a command, not as a PATH name', () => {
     const config = contentsOf('buf.gen.yaml');
-    expect(config).toContain(`local: ['deno', 'run', '-A', 'npm:@bufbuild/protoc-gen-es@^2']`);
+    expect(config).toContain(
+      `local: ['deno', 'run', '-A', '--no-lock', 'npm:@bufbuild/protoc-gen-es@2.7.0']`,
+    );
     expect(config).not.toMatch(/^\s+- local: protoc-gen-es$/m);
   });
 
@@ -74,6 +76,10 @@ describe('protoToolchainFiles', () => {
   it('maps both the bare specifier and its subpaths', () => {
     expect(PROTO_IMPORTS['@bufbuild/protobuf']).toBeDefined();
     expect(PROTO_IMPORTS['@bufbuild/protobuf/']).toBeDefined();
+    // The runtime is never older than the exact generator that writes the code
+    // (the generator runs with --no-lock, so it cannot float past it).
+    expect(PROTO_IMPORTS['@bufbuild/protobuf']).toBe('npm:@bufbuild/protobuf@^2.7.0');
+    expect(PROTO_IMPORTS['@bufbuild/protobuf/']).toBe('npm:/@bufbuild/protobuf@^2.7.0/');
     expect(PROTO_IMPORTS['@bufbuild/protobuf/']).toContain('npm:/@bufbuild/protobuf');
   });
 

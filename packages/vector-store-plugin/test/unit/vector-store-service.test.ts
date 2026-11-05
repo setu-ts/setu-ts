@@ -10,6 +10,7 @@ import {
   VectorCollectionUnknownError,
   VectorDimensionError,
   VectorFilterError,
+  VectorOperationUnsupportedError,
   VectorRecordError,
   VectorScopeInvalidError,
   VectorScopeRequiredError,
@@ -27,10 +28,13 @@ import { VectorStoreService } from '../../src/services/vector-store-service.ts';
 
 type Call = { readonly method: string; readonly args: readonly unknown[] };
 
-function recordingAdapter(): IVectorStoreAdapter & { readonly calls: Call[] } {
+function recordingAdapter(versionedReplace?: boolean): IVectorStoreAdapter & {
+  readonly calls: Call[];
+} {
   const calls: Call[] = [];
   return {
     name: 'recording',
+    ...(versionedReplace === undefined ? {} : { versionedReplace }),
     calls,
     async open(...args) {
       calls.push({ method: 'open', args });
@@ -41,7 +45,9 @@ function recordingAdapter(): IVectorStoreAdapter & { readonly calls: Call[] } {
     async upsert(...args: [VectorCollectionSpec, string, readonly VectorRecord[]]) {
       calls.push({ method: 'upsert', args });
     },
-    async replaceSource(...args: [VectorCollectionSpec, string, string, readonly VectorRecord[]]) {
+    async replaceSource(
+      ...args: [VectorCollectionSpec, string, string, readonly VectorRecord[], number?]
+    ) {
       calls.push({ method: 'replaceSource', args });
     },
     async query(
@@ -217,6 +223,62 @@ describe('VectorStoreService', () => {
     const service = new VectorStoreService(adapter, collections, 'required');
     await expect(call(service)).rejects.toThrow(error);
     expect(adapter.calls).toEqual([]);
+  });
+});
+
+describe('VectorStoreService.replaceSource versions', () => {
+  const record = { id: 'r1', vector: [1, 0, 0], sourceId: 's1' } as const;
+
+  it('passes a valid version to an adapter that writes versions, and none otherwise', async () => {
+    const adapter = recordingAdapter(true);
+    const service = new VectorStoreService(adapter, collections, 'required');
+    for (const version of [0, 7, Number.MAX_SAFE_INTEGER]) {
+      await service.replaceSource('documents', 't', 's1', [record], { version });
+    }
+    await service.replaceSource('documents', 't', 's1', [record], {});
+    await service.replaceSource('documents', 't', 's1', [record]);
+    expect(adapter.calls.map((call) => call.args[4])).toEqual([
+      0,
+      7,
+      Number.MAX_SAFE_INTEGER,
+      undefined,
+      undefined,
+    ]);
+    // An unversioned call passes four arguments, exactly as before versions.
+    expect(adapter.calls.at(-1)!.args).toHaveLength(4);
+  });
+
+  it.each([
+    ['NaN', { version: Number.NaN }],
+    ['Infinity', { version: Number.POSITIVE_INFINITY }],
+    ['-Infinity', { version: Number.NEGATIVE_INFINITY }],
+    ['a negative', { version: -1 }],
+    ['a fraction', { version: 1.5 }],
+    ['an unsafe integer', { version: 2 ** 53 }],
+    ['a string', { version: '3' }],
+    ['null options', null],
+    ['string options', 'v1'],
+  ])('refuses %s before calling the adapter', async (_label, options) => {
+    const adapter = recordingAdapter(true);
+    const service = new VectorStoreService(adapter, collections, 'required');
+    await expect(
+      service.replaceSource('documents', 't', 's1', [record], options as never),
+    ).rejects.toThrow(VectorRecordError);
+    expect(adapter.calls).toEqual([]);
+  });
+
+  it('refuses a version for an adapter that does not declare versionedReplace', async () => {
+    for (const flag of [undefined, false]) {
+      const adapter = recordingAdapter(flag);
+      const service = new VectorStoreService(adapter, collections, 'required');
+      await expect(
+        service.replaceSource('documents', 't', 's1', [record], { version: 1 }),
+      ).rejects.toThrow(VectorOperationUnsupportedError);
+      expect(adapter.calls).toEqual([]);
+      // Without a version the same adapter is used as before.
+      await service.replaceSource('documents', 't', 's1', [record]);
+      expect(adapter.calls).toHaveLength(1);
+    }
   });
 });
 

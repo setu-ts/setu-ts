@@ -8,6 +8,22 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Versioned `replaceSource` (`@setu-ts/common`, `@setu-ts/vector-store-plugin`, #561).**
+  `replaceSource(collection, scope, sourceId, records, { version })` refuses a write whose version
+  is older than the source's stored one with the new `VectorVersionConflictError` (409), so a late
+  queue retry of an older submission can no longer replace a newer one; an equal version is written
+  again. `VectorReplaceOptions` is the options type and `IVectorStoreAdapter.versionedReplace` the
+  opt-in an adapter declares to receive the version; the service refuses a version for any other
+  adapter with `VectorOperationUnsupportedError`. memory, pgvector (a `source_version` column read
+  under the source lock, added by `ensure: 'create'` and required by `ensure: 'verify'`) and Qdrant
+  1.16+ (a conditional `update_filter` upsert, so `QdrantClientLike` also requires `count` and
+  `versionInfo`) honour it; Vectorize already refuses `replaceSource`. `apps/semantic-search`
+  versions each submission and drops a superseded job.
+- **The idempotency key in the OpenAPI document (`@setu-ts/common`, `@setu-ts/idempotency-plugin`,
+  `@setu-ts/openapi-plugin`, #561).** A route carrying `idempotent()` is documented with its key
+  header as a parameter, so Swagger UI can send it; `RouteIdempotencyMetadata` gains
+  `required?: boolean` so a route with `required: false` is documented as optional.
+
 - **Tenant-scoped vector retrieval (M135, #558, `@setu-ts/common`, `@setu-ts/vector-store-plugin`,
   `@setu-ts/cloudflare-plugin`, `@setu-ts/cli`).** `CAPABILITIES.VECTOR_STORE` and `IVectorStore`
   add similarity search whose tenant scope is a required argument of every data method, never a
@@ -323,7 +339,52 @@ All notable changes to this project are documented here. The format follows
   (PR pending, `@setu-ts/graphql-plugin`).** Security. An application route forwarding a request to
   `execute(params, ctx)` let a cross-site `GET` run a mutation; the method is now derived from the
   request and fails closed, the rule `subscribe` already applied. An explicit method still wins.
-
+- **Workspace development ports (X87-2, M131c, #560, `@setu-ts/cli`).** Full-stack members read
+  their application and Vite ports from discovery, with `vitePort` allocated in
+  `setu.workspace.json`. Standalone defaults remain unchanged; member READMEs name the manifest as
+  the port source.
+- **Member inspector ports (X87-6, M131c, #560, `@setu-ts/cli`).** Members record `inspectPort`;
+  optional `devBasePort` controls the development range. All allocators skip every recorded port.
+  Adoption and reallocation rewrite one exact inspector token and explain scripts they leave
+  unchanged.
+- **Deno tooling isolation (X87-4, M131c, #560, `@setu-ts/cli`).** Generated and printed npm-tool
+  commands use `--no-lock`; runtime images also remove the `@setu-ts/testing` import-map pin.
+- **Authenticated image pulls (X87-5, M131c, #560, `@setu-ts/cli`).** Repeatable
+  `workspace deploy --pull-secret` validates the names and checks, before building, that each Secret
+  exists with an image-pull type (reading only its type), then attaches them to each member's pod.
+  Dry runs perform the checks and list the names. A repeatable flag given once without a value
+  (`--pull-secret`, `--depends-on`, `--build-arg`) is refused, not replaced by a later value.
+- **Workspace OTLP pin coverage (V10-50 remainder, M131c, #560, `@setu-ts/cli`).** A member
+  telemetry-add regression test verifies the exporter dependency is recorded at the workspace root.
+- **Workers config guidance (V11-3, M131c, #560, `@setu-ts/cli`).** Generated comments name Node
+  through tsx as the CLI config loader, whose import handling refuses `cloudflare:workers`.
+- **Workers local-variable ignore (V11-4, M131c, #560, `@setu-ts/cli`).** Every Workers project
+  ignores `.dev.vars`, including projects that do not emit a local variables file.
+- **Agent verification commands (V11-9, M131c, #560, `@setu-ts/cli`).** Briefs include available
+  lint and formatting scripts, Deno's native checks, and a rule to run the verification commands
+  before done.
+- **Fresh-scaffold card guidance (X93-8, M131c, #560, `@setu-ts/cli`).** `new --agents`, including
+  examples, prints one install-and-check hint in place of per-card warnings before the first
+  installation.
+- **Config wiring uses (X91-3, M131c, #560, `@setu-ts/cli`).** Imports alone no longer satisfy
+  config wiring; `registerModules` must be called. Barrels report E003 when an imported route
+  registrar is absent from their registration code.
+- **Located config warnings (V11-8, M131c, #560, `@setu-ts/cli`).** One W001 names the unsupported
+  construct, line and affected symbols, and can be silenced at `setu.config.ts`.
+- **Plain service listings (X93-10, M131c, #560, `@setu-ts/cli`).** A service missing its
+  `describe<Name>` convenience export reports W005 instead of a registration error.
+- **Same-named controller adoption (X91-1, M131c, #560, `@setu-ts/cli`).** The first module can
+  adopt its own controller and optional service, omitting generated CRUD tests. Service-only and
+  full-stack same-named adoption explain why they are refused, as does a same-named file
+  `setu check` skips; a nested controller of the same name still counts as a name conflict.
+- **Hoisted page checks (X87-1, M131c, #560, `@setu-ts/cli`).** Generation finds React Router's
+  binary up to the workspace root while keeping the member as its working directory.
+- **Shadowed plugin commands (V11-15, M131c, #560, `@setu-ts/cli`).** `setu commands` omits plugin
+  names reserved by built-ins and warns once per name.
+- **Symlink remedy (V10-27 remainder, M131c, #560, `@setu-ts/cli`).** A symlinked member's refusal
+  asks only to replace the link with its directory.
+- **Page shadowing documentation (X91-4, M131c, #560, `@setu-ts/cli`).** The CLI guide explains that
+  a kernel route answers document requests when it shares a page's path.
 - **Cross-site requests cannot run a GraphQL mutation (#559, `@setu-ts/graphql-plugin`).** Security.
   Both `POST /graphql` and `POST /graphql/stream` now require the `content-type` media type to equal
   `application/json` (parameters ignored) and answer anything else, a missing header included, `415`

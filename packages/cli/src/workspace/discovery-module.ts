@@ -160,7 +160,7 @@ export function renderDiscoveryModule(
 // backend (\`provider: 'consul'\`, \`'kubernetes'\`, \`'dns'\`), not from this file.
 
 /** The port this workspace member binds. */
-export const ${SERVICE_PORT_EXPORT} = ${member.port};
+export const ${SERVICE_PORT_EXPORT} = ${member.port};${member.vitePort === undefined ? '' : `\n\n/** Vite's HMR port for this workspace member. */\nexport const VITE_PORT = ${member.vitePort};`}
 
 /** Every OTHER member of this workspace, by service name. */
 export const ${SERVICE_ENDPOINTS_EXPORT} = ${endpoints};

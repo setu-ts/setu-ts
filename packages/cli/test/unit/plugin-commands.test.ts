@@ -50,6 +50,32 @@ function harness(
 
 const noop: FakeCommand['handler'] = () => {};
 
+it('V11-15 omits shadowed built-ins, keeps siblings and warns only on listing', async () => {
+  const commands = [
+    { name: 'agents', handler: noop },
+    { name: 'g', handler: noop },
+    { name: 'db:migrate', handler: noop },
+  ];
+  const listing = harness(createFakeApp(commands));
+  expect(await listing.list()).toBe(0);
+  expect(listing.out.text()).toContain('db:migrate');
+  expect(listing.out.text()).not.toMatch(/ agents| g\n/);
+  expect(listing.err.lines).toEqual([
+    "plugin command 'agents' is shadowed by the built-in `setu agents`; rename it",
+    "plugin command 'g' is shadowed by the built-in `setu g`; rename it",
+  ]);
+  const dispatch = harness(createFakeApp(commands));
+  expect(await dispatch.dispatch('db:migrate')).toBe(0);
+  expect(dispatch.err.lines).toEqual([]);
+  const only = harness(createFakeApp([{ name: 'help', handler: noop }]));
+  expect(await only.list()).toBe(0);
+  expect(only.out.text()).not.toContain(' help');
+  expect(only.err.lines).toHaveLength(1);
+  // Registered but all shadowed is not "none registered" (CodeRabbit #560).
+  expect(only.out.text()).toContain('No plugin commands are available');
+  expect(only.out.text()).not.toContain('ctx.cli.register');
+});
+
 describe('runCommandsListing', () => {
   it('retains plugin-command purpose wording when the application factory throws', async () => {
     const h = harness();

@@ -6,6 +6,37 @@ import { runCli } from '../../../src/cli.ts';
 import { createFakeFs } from '../../fixtures/fake-fs.ts';
 
 describe('project brief rendering', () => {
+  it('V11-9 renders lint/format glosses and runtime-specific verification instructions', () => {
+    for (const runtime of ['node', 'bun', 'deno'] as const) {
+      const text = renderBrief(
+        agentFacts({ runtime, commands: ['check', 'lint', 'format', 'format:check', 'test'] }),
+      );
+      expect(text).toContain('check code style');
+      expect(text).toContain('check formatting without writing');
+      expect(text).toContain(
+        runtime === 'deno'
+          ? 'Before reporting done, run check, deno lint, deno fmt --check and test.'
+          : 'Before reporting done, run check, lint, format:check and test.',
+      );
+      if (runtime === 'deno') {
+        expect(text).toContain('`deno lint`');
+        expect(text).toContain('`deno fmt --check`');
+      }
+    }
+  });
+  it('names only the verification commands a project has (CodeRabbit #560)', () => {
+    // An existing npm project may define neither lint nor format:check.
+    expect(renderBrief(agentFacts({ runtime: 'node', commands: ['check', 'test'] }))).toContain(
+      'Before reporting done, run check and test.',
+    );
+    // Deno's own lint and fmt are always available.
+    expect(renderBrief(agentFacts({ runtime: 'deno', commands: [] }))).toContain(
+      'Before reporting done, run deno lint and deno fmt --check.',
+    );
+    expect(renderBrief(agentFacts({ runtime: 'node', commands: [] }))).not.toContain(
+      'Before reporting done',
+    );
+  });
   it('describes generation and its opt-in CI drift check', () => {
     const text = renderBrief(agentFacts({ commands: ['client', 'client:check'] }));
     expect(text).toContain(

@@ -103,4 +103,9 @@ export default tseslint.config(
     },
     rules: { '@typescript-eslint/consistent-type-imports': 'off' },
   },
+  {
+    // An example's static files run in the browser, not on Node.
+    files: ['apps/*/public/**/*.js'],
+    languageOptions: { globals: { ...globals.browser } },
+  },
 );

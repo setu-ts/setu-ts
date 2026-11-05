@@ -12,6 +12,7 @@ import { withClientDependencies, CLIENT_RANGES } from '../../src/templates/clien
 import { resolveHost } from '../../src/templates/project-files.ts';
 import { MINIMAL_HOST } from '../../src/templates/minimal.ts';
 import { nodeRedisClientCall } from '../../src/templates/node-redis.ts';
+import { formatForTarget } from '../../src/utils/prettier-format.ts';
 
 function harness() {
   const fs = createFakeFs();
@@ -243,6 +244,53 @@ describe('node-redis CLI', () => {
           expected[path] = `${expected[path]}\n${description}\nREDIS_URL=${value}\n`;
         }
       }
+    }
+    // M131c changes only tooling lock writes, the production strip list, and
+    // member development-port metadata/scripts. Preserve this historical capture
+    // and transform those specified differences before comparing every byte.
+    for (const [path, original] of Object.entries(expected)) {
+      const runtime = path.split('/')[0] as 'deno' | 'node' | 'bun';
+      let contents = original
+        .replaceAll('deno run -A npm:', 'deno run -A --no-lock npm:')
+        .replace(
+          'if (manifest.imports) delete manifest.imports["@setu-ts/diagnostics-plugin"];',
+          'if (manifest.imports) { delete manifest.imports["@setu-ts/diagnostics-plugin"]; delete manifest.imports["@setu-ts/testing"]; }',
+        )
+        .replace(
+          'type Member = { name: string; port: number; dependsOn?: string[]; devtoolPort?: number };',
+          'type Member = {\n  name: string;\n  port: number;\n  dependsOn?: string[];\n  devtoolPort?: number;\n  inspectPort?: number;\n  vitePort?: number;\n};',
+        );
+      if (path.endsWith('/setu.workspace.json')) {
+        const manifest = JSON.parse(contents);
+        manifest.members = manifest.members.map((member: { name: string; port: number }) => ({
+          ...member,
+          inspectPort: manifest.basePort + 2000,
+        }));
+        contents = JSON.stringify(manifest, null, 2) + '\n';
+      }
+      if (runtime === 'deno' && path.endsWith('/README.md')) {
+        contents = contents.replace(
+          '`deno run -A --no-lock npm:@setu-ts/cli@' +
+            VERSION +
+            ' workspace ports --reallocate`; it rewrites the manifest, maps,\nand deployment artifacts together. It assigns from the base port upward, so a service still running\nholds its own port and is moved off it.',
+          '`deno run -A --no-lock npm:@setu-ts/cli@' +
+            VERSION +
+            ' workspace ports --reallocate`; it rewrites the\nmanifest, maps, and deployment artifacts together. It assigns from the base port upward, so a\nservice still running holds its own port and is moved off it.',
+        );
+      }
+      if (path.includes('/apps/svc/') && /\/(package|deno)\.json$/.test(path)) {
+        const manifest = JSON.parse(contents);
+        const scripts = manifest.scripts ?? manifest.tasks;
+        scripts['start:debug'] = scripts['start:debug'].replace(
+          '--inspect ',
+          '--inspect=127.0.0.1:5000 ',
+        );
+        contents = JSON.stringify(manifest, null, 2) + '\n';
+      }
+      const file = path.slice(path.indexOf('/work/') + '/work/app/'.length);
+      expected[path] = (
+        await formatForTarget([{ path: file, contents }], runtime, '/work/app', () => {})
+      )[0]!.contents;
     }
     expect(await redisDefaultOutputs()).toEqual(expected);
   });

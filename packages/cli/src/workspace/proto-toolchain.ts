@@ -10,12 +10,12 @@
  * What closes it is emitting the toolchain rather than being it — and the reason
  * that works at all was **measured**, not assumed:
  *
- * - `deno run -A npm:@bufbuild/buf --version` → `1.72.0`. The buf CLI runs under
+ * - `deno run -A --no-lock npm:@bufbuild/buf --version` → `1.72.0`. The buf CLI runs under
  *   Deno's npm compatibility.
  * - `buf generate` with a plugin declared as `local: protoc-gen-es` FAILS —
  *   `exec: "protoc-gen-es": executable file not found in $PATH`, because nothing
  *   installs a PATH binary. Declaring the plugin as a COMMAND
- *   (`local: ['deno', 'run', '-A', 'npm:@bufbuild/protoc-gen-es@^2']`) works, and
+ *   (`local: ['deno', 'run', '-A', '--no-lock', 'npm:@bufbuild/protoc-gen-es@2.7.0']`) works, and
  *   produced `src/gen/orders/v1/orders_pb.ts` exporting the `GenService`
  *   descriptor `addService` takes.
  *
@@ -46,7 +46,7 @@ export const PROTO_DIR = 'proto';
  * notes. `-A` because buf reads and writes the project tree and fetches its own
  * platform binary on first use.
  */
-export const PROTO_TASK_COMMAND = 'deno run -A npm:@bufbuild/buf@^1.57 generate';
+export const PROTO_TASK_COMMAND = 'deno run -A --no-lock npm:@bufbuild/buf@^1.57 generate';
 
 /**
  * The npm script an npm-target member runs `proto:gen` with. `npm run` puts the
@@ -73,10 +73,14 @@ export const PROTO_DEV_DEPENDENCIES: Readonly<Record<string, string>> = {
  * BOTH entries are required. A bare specifier mapping does not cover subpaths, so
  * the trailing-slash form is what resolves `/codegenv2`; the bare one is what a
  * hand-written `import { create } from '@bufbuild/protobuf'` needs.
+ *
+ * The floor is the exact generator version `buf.gen.yaml` runs: the generator
+ * runs with `--no-lock` (so it never enters `deno.lock` or the image), and an
+ * exact version keeps it from emitting code newer than the locked runtime.
  */
 export const PROTO_IMPORTS: Readonly<Record<string, string>> = {
-  '@bufbuild/protobuf': 'npm:@bufbuild/protobuf@^2',
-  '@bufbuild/protobuf/': 'npm:/@bufbuild/protobuf@^2/',
+  '@bufbuild/protobuf': 'npm:@bufbuild/protobuf@^2.7.0',
+  '@bufbuild/protobuf/': 'npm:/@bufbuild/protobuf@^2.7.0/',
 };
 
 /**
@@ -131,7 +135,7 @@ version: v2
 inputs:
   - directory: ${PROTO_DIR}
 plugins:
-  - local: ['deno', 'run', '-A', 'npm:@bufbuild/protoc-gen-es@^2']
+  - local: ['deno', 'run', '-A', '--no-lock', 'npm:@bufbuild/protoc-gen-es@2.7.0']
     out: ${PROTO_OUT_DIR}
     opt: target=ts
 `

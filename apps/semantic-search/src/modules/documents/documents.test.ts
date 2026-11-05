@@ -5,6 +5,8 @@ import { createTestApp, overrideCapability } from '@setu-ts/testing';
 import { createApp } from '../../../setu.config.ts';
 import { EMBEDDINGS } from '../../plugins/embeddings.plugin.ts';
 import type { IEmbeddingsService } from '../../plugins/embeddings.plugin.ts';
+import { createIngestDocumentJobProcessor } from '../../jobs/ingest-document.job.ts';
+import type { IngestDocumentJobData } from '../../jobs/ingest-document.job.ts';
 import { splitText } from './documents.service.ts';
 
 // These tests use the memory store; `npm run smoke` covers pgvector.
@@ -70,6 +72,32 @@ describe('documents module', () => {
       assert.deepStrictEqual(await searchUntil(app, 'globex', 'cats', 1), []);
       const tenantless = await app.inject({ method: 'GET', url: '/documents/search?q=cats' });
       assert.deepStrictEqual(tenantless.statusCode, 400);
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('drops a late retry of an older submission instead of replacing the newer one', async () => {
+    const app = await createTestApp({
+      app: await createApp(),
+      overrides: [
+        overrideCapability(EMBEDDINGS, { model: axisModel() } satisfies IEmbeddingsService),
+      ],
+    });
+    try {
+      const { processor } = createIngestDocumentJobProcessor(app.services);
+      const run = (text: string, version: number) =>
+        processor({
+          data: { id: 'pets', text, tenant: 'acme', version },
+        } as Parameters<typeof processor>[0] & { data: IngestDocumentJobData });
+      await run('dogs bark at night', 2);
+      // The older submission's retry arrives last; it must not win.
+      await run('cats sleep all day', 1);
+      const matches = await searchUntil(app, 'acme', 'dogs', 1);
+      assert.deepStrictEqual(
+        matches.map((m) => m.chunk),
+        ['dogs bark at night'],
+      );
     } finally {
       await app.stop();
     }

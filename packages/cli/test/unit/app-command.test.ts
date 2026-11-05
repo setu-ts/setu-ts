@@ -1,4 +1,36 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import * as templates from '../../src/templates/registry.ts';
+import { FULL_STACK_TEMPLATE } from '../../src/templates/full-stack.ts';
+
+it('L3 refuses Workers workspace members without allocating ports or printing edit notes', async () => {
+  const h = harness([], 3000, 'http', undefined, 'cloudflare-workers');
+  const before = h.fs.read('/ws/setu.workspace.json');
+  const writes = h.fs.writes.length;
+  expect(await h.run(['app', 'worker', '--template', 'full-stack'])).toBe(1);
+  expect(h.fs.read('/ws/setu.workspace.json')).toBe(before);
+  expect(h.fs.writes).toHaveLength(writes);
+  expect(h.out.text() + h.err.text()).not.toMatch(/start:debug|development port lines/);
+});
+
+it('L5 allocates Vite from the resolved template dev entry rather than its flag spelling', async () => {
+  const original = templates.getTemplate;
+  const mock = vi
+    .spyOn(templates, 'getTemplate')
+    .mockImplementation((name) => (name === 'web-alias' ? FULL_STACK_TEMPLATE : original(name)));
+  try {
+    const h = harness([], 3000, 'http', undefined, 'node');
+    expect(await h.run(['app', 'web', '--template', 'web-alias']), h.err.text()).toBe(0);
+    expect(JSON.parse(h.fs.read('/ws/setu.workspace.json')).members[0]).toMatchObject({
+      inspectPort: 5000,
+      vitePort: 5001,
+    });
+    expect(h.fs.read('/ws/apps/web/src/discovery/services.ts')).toContain(
+      'export const VITE_PORT = 5001;',
+    );
+  } finally {
+    mock.mockRestore();
+  }
+});
 import { createFakeFs, createRecorder, type FakeFs } from '../fixtures/fake-fs.ts';
 import { parseArgs } from '../../src/args.ts';
 import { runAppCommand } from '../../src/commands/app.ts';
@@ -17,6 +49,29 @@ import {
 import type { TransportName } from '../../src/workspace/transport.ts';
 import type { TargetRuntime } from '../../src/constants.ts';
 import type { PortProbe } from '../../src/workspace/port-probe.ts';
+
+it('X87-2 X87-6 allocates distinct inspector and Vite ports for generated members', async () => {
+  const h = harness([], 3000, 'http', undefined, 'node');
+  expect(await h.run(['app', 'one', '--template', 'full-stack']), h.err.text()).toBe(0);
+  expect(await h.run(['app', 'two', '--template', 'full-stack']), h.err.text()).toBe(0);
+  const manifest = JSON.parse(h.fs.read('/ws/setu.workspace.json'));
+  expect(
+    manifest.members.map((member: { inspectPort: number; vitePort: number }) => [
+      member.inspectPort,
+      member.vitePort,
+    ]),
+  ).toEqual([
+    [5000, 5001],
+    [5002, 5003],
+  ]);
+  expect(h.fs.read('/ws/apps/two/dev.ts')).toContain('const port = SERVICE_PORT;');
+  expect(h.fs.read('/ws/apps/two/src/discovery/services.ts')).toContain(
+    'export const VITE_PORT = 5003;',
+  );
+  expect(JSON.parse(h.fs.read('/ws/apps/two/package.json')).scripts['start:debug']).toContain(
+    '--inspect=127.0.0.1:5002',
+  );
+});
 
 describe('Node workspace devtool scaffold', () => {
   it('writes only the member npm manifest and uses the Node runner and dev script', async () => {
@@ -425,7 +480,13 @@ describe('runAppCommand', () => {
       };
       expect(manifest.members).toEqual([
         { name: 'orders', port: 3000 },
-        { name: 'billing', port: 4444, healthProbes: false, metricsEndpoint: false },
+        {
+          name: 'billing',
+          port: 4444,
+          inspectPort: 5000,
+          healthProbes: false,
+          metricsEndpoint: false,
+        },
       ]);
       // The chosen port has to reach BOTH sides of the one datum: what this
       // member binds, and what its sibling dials.
@@ -462,6 +523,7 @@ describe('runAppCommand', () => {
       expect(manifest.members.at(-1)).toEqual({
         name: 'shipping',
         port: 4445,
+        inspectPort: 5001,
         healthProbes: false,
         metricsEndpoint: false,
       });
@@ -489,6 +551,11 @@ describe('runAppCommand', () => {
     // top of the range can still take a member.
     it('takes a member even when allocation has no port left', async () => {
       const h = harness([{ name: 'orders', port: 65535 }], 65535);
+      const source = JSON.parse(h.fs.read('/ws/setu.workspace.json'));
+      await h.fs.writeFile(
+        '/ws/setu.workspace.json',
+        new TextEncoder().encode(JSON.stringify({ ...source, devBasePort: 5000 })),
+      );
       expect(await h.run(['app', 'billing', '--port', '3000'])).toBe(0);
       expect(h.fs.read(`/ws/apps/billing/${DISCOVERY_MODULE}`)).toContain(
         'export const SERVICE_PORT = 3000;',
@@ -656,6 +723,7 @@ describe('runAppCommand', () => {
           {
             name: 'orders',
             port: 3000,
+            inspectPort: 5000,
             healthProbes: false,
             metricsEndpoint: false,
           },
@@ -700,6 +768,7 @@ describe('runAppCommand', () => {
       expect(manifest.members.at(-1)).toEqual({
         name: 'shipping',
         port: 3002,
+        inspectPort: 5000,
         dependsOn: ['orders', 'billing'],
         healthProbes: false,
         metricsEndpoint: false,

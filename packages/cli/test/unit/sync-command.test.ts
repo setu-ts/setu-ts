@@ -82,7 +82,7 @@ it('renders both activation modes and functional internal barrels while preservi
       '/app/package.json': JSON.stringify({
         dependencies: mode === 'class-based' ? { '@setu-ts/decorator-plugin': '^0.10.0' } : {},
       }),
-      '/app/setu.config.ts': 'registerModules; MODULES;',
+      '/app/setu.config.ts': 'registerModules(app.router, app.services); MODULES;',
     });
     expect(await h.run(['generate', 'module', 'orders'])).toBe(0);
     const index = h.fs.read('/app/src/modules/orders/index.ts');

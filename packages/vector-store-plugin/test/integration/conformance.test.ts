@@ -13,7 +13,7 @@ import pg from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { QdrantClient } from '@qdrant/js-client-rest';
 import { VectorizeVectorStore } from '@setu-ts/cloudflare-plugin';
-import { VectorOperationUnsupportedError } from '@setu-ts/common';
+import { VectorOperationUnsupportedError, VectorVersionConflictError } from '@setu-ts/common';
 import type {
   IRuntimeServices,
   IVectorStoreAdapter,
@@ -276,6 +276,57 @@ describe.each(ARMS.filter((arm) => arm.enabled).map((arm) => [arm.name, arm] as 
         'a1',
         'b2',
       ]);
+    });
+
+    it('versioned replaceSource refuses an older version and settles on the newest', async () => {
+      const scope = 'tenant-versions';
+      const chunks = (label: string, count: number): VectorRecord[] =>
+        Array.from({ length: count }, (_, i) => ({
+          id: `d${i}`,
+          vector: [1, i + 1, 0, 0],
+          sourceId: 'doc',
+          content: label,
+        }));
+      const stored = async () =>
+        (await read(store, { label: '', scope, expected: [] }))
+          .map((m) => `${m.id}:${m.content}`)
+          .sort();
+      const write = (label: string, count: number, version?: number) =>
+        store.replaceSource(
+          COLLECTION,
+          scope,
+          'doc',
+          chunks(label, count),
+          version === undefined ? undefined : { version },
+        );
+      if (arm.refuses.has('replaceSource')) {
+        await expect(write('v2', 3, 2)).rejects.toThrow(VectorOperationUnsupportedError);
+        return;
+      }
+      await write('v2', 3, 2);
+      // An older retry with MORE chunks writes nothing: no overwrite and no extra id.
+      await expect(write('v1', 4, 1)).rejects.toThrow(VectorVersionConflictError);
+      expect(await stored()).toEqual(['d0:v2', 'd1:v2', 'd2:v2']);
+      // The same version again is a retry of the same submission and succeeds.
+      await write('v2', 2, 2);
+      expect(await stored()).toEqual(['d0:v2', 'd1:v2']);
+      // Racing writes settle on the higher version, whichever lands first.
+      const raced = await Promise.allSettled([write('v5', 2, 5), write('v4', 4, 4)]);
+      expect(raced[0].status).toBe('fulfilled');
+      expect(await stored()).toEqual(['d0:v5', 'd1:v5']);
+      // An unversioned write leaves the source unversioned, so any version is accepted after it.
+      await write('plain', 1);
+      await write('v3', 1, 3);
+      expect(await stored()).toEqual(['d0:v3']);
+      // A newer version of ANOTHER source does not stop an id being reassigned.
+      await store.replaceSource(
+        COLLECTION,
+        scope,
+        'other',
+        [{ id: 'd0', vector: [1, 1, 0, 0], sourceId: 'other', content: 'other' }],
+        { version: 1 },
+      );
+      expect(await stored()).toEqual(['d0:other']);
     });
 
     it('filters on a field named constructor instead of dropping the clause', async () => {

@@ -39,6 +39,7 @@
     "@setu-ts/health-plugin": "workspace:^",
     "@setu-ts/metrics-plugin": "workspace:^",
     "@setu-ts/openapi-plugin": "workspace:^",
+    "@setu-ts/static-plugin": "workspace:^",
     "pino": "10.x",
     "swagger-ui-dist": "5.33.3"
   },

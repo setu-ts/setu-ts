@@ -3,6 +3,7 @@
  * broken by id, filters evaluated by declared type, scopes kept apart.
  */
 import { describe, expect, it } from 'vitest';
+import { VectorVersionConflictError } from '@setu-ts/common';
 import type { VectorCollectionSpec } from '@setu-ts/common';
 import { MemoryVectorStore } from '../../src/adapters/memory/memory-vector-store.ts';
 
@@ -119,6 +120,22 @@ describe('MemoryVectorStore', () => {
       .sort();
     expect(ids).toEqual(['a0', 'a1', 'a3']);
     await store.replaceSource(spec, 'tenant-new', 's9', []);
+  });
+
+  it('versions a source on its own, never leaks the version, and refuses an older one', async () => {
+    const store = new MemoryVectorStore();
+    await store.ensureCollection(spec);
+    await store.replaceSource(spec, 't', 's1', [{ id: 'a', vector: [1, 0], sourceId: 's1' }], 9);
+    // Another source's newer version does not block this one.
+    await store.replaceSource(spec, 't', 's2', [{ id: 'b', vector: [0, 1], sourceId: 's2' }], 1);
+    await expect(
+      store.replaceSource(spec, 't', 's1', [{ id: 'a', vector: [0, 1], sourceId: 's1' }], 8),
+    ).rejects.toThrow(VectorVersionConflictError);
+    const matches = await store.query(spec, 't', { vector: [1, 0], topK: 10 });
+    expect(matches).toEqual([
+      { id: 'a', score: 1, sourceId: 's1', metadata: {} },
+      { id: 'b', score: 0, sourceId: 's2', metadata: {} },
+    ]);
   });
 
   it('copies stored values so callers cannot change them later', async () => {

@@ -5,6 +5,7 @@ import {
   tool,
   toUIMessageStream,
 } from 'ai';
+import type { TextStreamPart, ToolSet } from 'ai';
 import { z } from 'zod';
 import type { HandlerResult, IRequestContext, IRouterApi, IServiceRegistry } from '@setu-ts/common';
 import { QuotaExceededError, respondQuotaExceeded } from '@setu-ts/auth-plugin';
@@ -12,7 +13,8 @@ import { validateBody } from '@setu-ts/validation-plugin';
 import { CHAT_MODELS } from '../../plugins/chat-models.plugin.ts';
 import type { IChatModelsService } from '../../plugins/chat-models.plugin.ts';
 import { budgetedModel } from './chat.budget.ts';
-import { ChatBody } from './chat.schemas.ts';
+import { ChatBody, ChatModelInfo } from './chat.schemas.ts';
+import type { ChatUsageMetadata } from './chat.schemas.ts';
 import { chatQuota } from './chat.service.ts';
 
 const chatBody = validateBody(ChatBody);
@@ -35,6 +37,34 @@ export const tenantTool = tool({
 
 const tools = { tenant: tenantTool };
 
+/** The output-token limit every turn is called with. */
+export const MAX_OUTPUT_TOKENS = 1024;
+
+/**
+ * The usage of a finished turn, as message metadata on the stream's `finish`
+ * event, so a client can count tokens and context. Other parts carry none.
+ *
+ * @param options - The stream part the SDK is converting
+ * @returns The metadata for a `finish` part, otherwise `undefined`
+ */
+export function usageMetadata({
+  part,
+}: {
+  part: TextStreamPart<ToolSet>;
+}): ChatUsageMetadata | undefined {
+  if (part.type !== 'finish') return undefined;
+  const { inputTokens, outputTokens, outputTokenDetails } = part.totalUsage;
+  return {
+    usage: {
+      ...(inputTokens === undefined ? {} : { inputTokens }),
+      ...(outputTokens === undefined ? {} : { outputTokens }),
+      ...(outputTokenDetails.reasoningTokens === undefined
+        ? {}
+        : { reasoningTokens: outputTokenDetails.reasoningTokens }),
+    },
+  };
+}
+
 /** Answers initial quota refusals before a UI stream has been sent. */
 async function quotaRefusal(ctx: IRequestContext, next: () => Promise<void>): Promise<void> {
   try {
@@ -52,18 +82,31 @@ async function quotaRefusal(ctx: IRequestContext, next: () => Promise<void>): Pr
 export function registerChatRoutes(router: IRouterApi, services?: IServiceRegistry): void {
   void services;
   const quota = chatQuota();
+  router.get('/chat/model', {
+    schema: { response: { 200: ChatModelInfo } },
+    handler: (ctx) => {
+      const { contextTokens } = ctx.services.get<IChatModelsService>(CHAT_MODELS);
+      return ctx.response.json({
+        contextTokens: contextTokens ?? null,
+        maxOutputTokens: MAX_OUTPUT_TOKENS,
+      } satisfies ChatModelInfo);
+    },
+  });
   router.post('/chat', {
     middleware: [quotaRefusal, chatBody],
     handler: async (ctx) => {
-      const { prompt } = chatBody.value(ctx);
+      const { prompt, history = [] } = chatBody.value(ctx);
       const tenantId = ctx.request.tenant?.id;
       if (!tenantId) throw new TypeError('A server-resolved tenant is required');
       const { models } = ctx.services.get<IChatModelsService>(CHAT_MODELS);
       const { model, ready } = budgetedModel(ctx, models, quota(ctx));
       const result = streamText({
         model,
-        prompt,
-        maxOutputTokens: 1024,
+        // The client resends the conversation; the server keeps none.
+        ...(history.length === 0
+          ? { prompt }
+          : { messages: [...history, { role: 'user' as const, content: prompt }] }),
+        maxOutputTokens: MAX_OUTPUT_TOKENS,
         // The SDK would retry after the error response has gone out; ai-fallback fails over instead.
         maxRetries: 0,
         stopWhen: isStepCount(3),
@@ -89,7 +132,11 @@ export function registerChatRoutes(router: IRouterApi, services?: IServiceRegist
       return sendUIResponse(
         ctx,
         createUIMessageStreamResponse({
-          stream: toUIMessageStream({ stream: result.stream, tools }),
+          stream: toUIMessageStream({
+            stream: result.stream,
+            tools,
+            messageMetadata: usageMetadata,
+          }),
         }),
       );
     },

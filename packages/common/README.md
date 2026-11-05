@@ -351,6 +351,7 @@ package fits the plugin architecture.
 | `VectorRecordError`                   | class     |
 | `VectorScopeInvalidError`             | class     |
 | `VectorScopeRequiredError`            | class     |
+| `VectorVersionConflictError`          | class     |
 | `CAPABILITIES`                        | const     |
 | `CLIENT_IP_STATE_KEY`                 | const     |
 | `CREDENTIAL_SOURCE_STATE_KEY`         | const     |
@@ -691,6 +692,7 @@ package fits the plugin architecture.
 | `VectorMatch`                         | interface |
 | `VectorQuery`                         | interface |
 | `VectorRecord`                        | interface |
+| `VectorReplaceOptions`                | interface |
 | `WebSocketCloseEvent`                 | interface |
 | `WebSocketConnectionContext`          | interface |
 | `WebSocketEventSink`                  | interface |

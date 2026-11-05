@@ -210,6 +210,18 @@ Rules and limits:
   pre-derivation document: owner exclusion, the `operationId` format and schema deduplication are
   unconditional. To document the operational routes again, pass `excludeOwners: []`.
 
+### The idempotency key header
+
+A route carrying `idempotent()` (or `IdempotencyService.middleware()`) from
+`@setu-ts/idempotency-plugin` is documented with the header its key is read from — `Idempotency-Key`
+unless configured otherwise — as a header parameter on every method except GET, HEAD and OPTIONS,
+which the middleware passes through. It is `required` unless the route set `required: false`, and
+its schema is a string of 1–255 characters. A key read from a body field or a function has no
+header, so nothing is added, and a header the route declares in its own `headers` schema wins.
+Swagger UI therefore shows a field for the key, and a request sent from it is not refused for
+lacking one. This is not governed by `deriveRequestSchemas`: the middleware refuses the request
+either way.
+
 ## Operation ids
 
 When no id is declared, an id is derived from the method and the path with placeholders unwrapped:

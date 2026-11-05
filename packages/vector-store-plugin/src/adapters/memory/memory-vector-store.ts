@@ -5,6 +5,7 @@
  *
  * @module
  */
+import { VectorVersionConflictError } from '@setu-ts/common';
 import type {
   IVectorStoreAdapter,
   VectorCollectionSpec,
@@ -22,6 +23,8 @@ interface StoredRecord {
   readonly sourceId?: string;
   readonly content?: string;
   readonly metadata: Readonly<Record<string, VectorMetadataValue>>;
+  /** The `replaceSource` version this record was written under. */
+  readonly version?: number;
 }
 
 /** Options for {@linkcode MemoryVectorStore}. */
@@ -46,6 +49,8 @@ export interface MemoryVectorStoreOptions {
 export class MemoryVectorStore implements IVectorStoreAdapter {
   /** @inheritdoc */
   readonly name = 'memory';
+  /** @inheritdoc */
+  readonly versionedReplace = true;
   readonly #collections = new Map<string, Map<string, Map<string, StoredRecord>>>();
   readonly #onClose: (() => void | Promise<void>) | undefined;
 
@@ -82,11 +87,23 @@ export class MemoryVectorStore implements IVectorStoreAdapter {
     scope: string,
     sourceId: string,
     records: readonly VectorRecord[],
+    version?: number,
   ): Promise<void> {
     const rows = this.#scope(spec, scope, true)!;
+    if (version !== undefined) {
+      for (const row of rows.values()) {
+        if (row.sourceId === sourceId && row.version !== undefined && row.version > version) {
+          return Promise.reject(
+            new VectorVersionConflictError(
+              `memory: replaceSource version ${version} is older than the stored version ${row.version}`,
+            ),
+          );
+        }
+      }
+    }
     const kept = new Set<string>();
     for (const record of records) {
-      rows.set(record.id, stored(record));
+      rows.set(record.id, stored(record, version));
       kept.add(record.id);
     }
     for (const [id, row] of rows) {
@@ -159,7 +176,7 @@ export class MemoryVectorStore implements IVectorStoreAdapter {
   }
 }
 
-function stored(record: VectorRecord): StoredRecord {
+function stored(record: VectorRecord, version?: number): StoredRecord {
   return {
     id: record.id,
     vector: [...record.vector],
@@ -167,6 +184,7 @@ function stored(record: VectorRecord): StoredRecord {
     ...(record.sourceId === undefined ? {} : { sourceId: record.sourceId }),
     ...(record.content === undefined ? {} : { content: record.content }),
     metadata: { ...record.metadata },
+    ...(version === undefined ? {} : { version }),
   };
 }
 

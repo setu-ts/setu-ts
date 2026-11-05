@@ -82,7 +82,7 @@ interface Frame {
  * @param sections - The top-level keys whose entries are wanted
  * @returns Every string entry of those sections, in source order
  */
-function sectionEntries(source: string, sections: readonly string[]): SectionEntry[] {
+export function sectionEntries(source: string, sections: readonly string[]): SectionEntry[] {
   const entries: SectionEntry[] = [];
   const stack: Frame[] = [];
   let index = 0;

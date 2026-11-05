@@ -1,5 +1,5 @@
 import { CAPABILITIES } from '@setu-ts/common';
-import type { IQueue, IRouterApi, IServiceRegistry } from '@setu-ts/common';
+import type { IQueue, IRouterApi, IRuntimeServices, IServiceRegistry } from '@setu-ts/common';
 import { validateBody, validateHeaders, validateQuery } from '@setu-ts/validation-plugin';
 import { INGEST_DOCUMENT_JOB } from '../../jobs/ingest-document.job.ts';
 import type { IngestDocumentJobData } from '../../jobs/ingest-document.job.ts';
@@ -23,9 +23,20 @@ const searchQuery = validateQuery(SearchDocumentsQuery);
  * indexes and searches its own documents; a request without one is a 400.
  * The header is declared with `validateHeaders`, so it appears in the OpenAPI
  * document and Swagger UI.
+ *
+ * Each submission carries a version — the time it was accepted, bumped past
+ * the previous one so two in one millisecond still order — and the job writes
+ * under it, so a late retry of an older submission cannot replace a newer one.
  */
 export function registerDocumentsRoutes(router: IRouterApi, services?: IServiceRegistry): void {
   if (services === undefined) throw new Error('documents routes need the service registry');
+  let lastVersion = 0;
+  /** The next submission version: the time now, or one past the last if the clock did not advance. */
+  const nextVersion = (): number => {
+    const now = services.get<IRuntimeServices>(CAPABILITIES.RUNTIME).now();
+    lastVersion = Math.max(now, lastVersion + 1);
+    return lastVersion;
+  };
   router.group('/documents', (routes) => {
     routes.post('/', {
       middleware: [tenantHeaders, ingestBody],
@@ -35,7 +46,11 @@ export function registerDocumentsRoutes(router: IRouterApi, services?: IServiceR
         const tenant = documentsDependencies(services).store.scopeFor(ctx);
         await services
           .get<IQueue>(CAPABILITIES.QUEUE)
-          .add<IngestDocumentJobData>(INGEST_DOCUMENT_JOB, { ...body, tenant });
+          .add<IngestDocumentJobData>(INGEST_DOCUMENT_JOB, {
+            ...body,
+            tenant,
+            version: nextVersion(),
+          });
         return ctx.response.status(202).json({ id: body.id, status: 'queued' });
       },
     });

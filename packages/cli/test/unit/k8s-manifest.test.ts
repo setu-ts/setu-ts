@@ -19,6 +19,29 @@ import {
 } from '../../src/workspace/manifest.ts';
 import { transportSpec } from '../../src/workspace/transport.ts';
 
+it('L2 renders exactly one containers/name anchor per member including shared prefixes', () => {
+  const manifest: WorkspaceManifest = {
+    version: WORKSPACE_VERSION,
+    runtime: 'node',
+    basePort: 3000,
+    transport: 'http',
+    members: [
+      { name: 'api', port: 3000 },
+      { name: 'api-gateway', port: 3001 },
+    ],
+  };
+  const text = workspaceK8sFiles(manifest, transportSpec('http')).find(
+    (file) => file.path === 'k8s/members.yaml',
+  )!.contents;
+  for (const name of ['api', 'api-gateway']) {
+    expect([
+      ...text.matchAll(
+        new RegExp(`^ +containers:[ \\t]*\\r?\\n[ \\t]*- name: ${name}[ \\t]*$`, 'gm'),
+      ),
+    ]).toHaveLength(1);
+  }
+});
+
 /** Renders members.yaml for one member with the given record. */
 function render(member: WorkspaceMember): string {
   const manifest: WorkspaceManifest = {

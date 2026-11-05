@@ -140,7 +140,7 @@ describe('the devtool manifest merge', () => {
                 start: 'deno run --allow-net --allow-env main.ts',
                 check: foreign
                   ? 'my-check'
-                  : `deno check main.ts setu.config.ts && deno run -A npm:@setu-ts/cli@^${VERSION} check`,
+                  : `deno check main.ts setu.config.ts && deno run -A --no-lock npm:@setu-ts/cli@^${VERSION} check`,
               },
               imports: { '@setu-ts/common': `npm:@setu-ts/common@^${VERSION}` },
             }),
@@ -155,7 +155,7 @@ describe('the devtool manifest merge', () => {
           expect(h.fs.writes).toHaveLength(writes);
         } else
           expect(JSON.parse(h.fs.read(path)).tasks.check).toBe(
-            `deno check main.ts setu.config.ts main.dev.ts && deno run -A npm:@setu-ts/cli@^${VERSION} check`,
+            `deno check main.ts setu.config.ts main.dev.ts && deno run -A --no-lock npm:@setu-ts/cli@^${VERSION} check`,
           );
       }
     });
@@ -235,7 +235,7 @@ describe('the devtool manifest merge', () => {
         tasks: {
           start: 'deno run --allow-net --allow-env main.ts',
           dev: 'deno run --allow-net --allow-env main.dev.ts',
-          check: `deno check main.ts setu.config.ts main.dev.ts && deno run -A npm:@setu-ts/cli@^${VERSION} check`,
+          check: `deno check main.ts setu.config.ts main.dev.ts && deno run -A --no-lock npm:@setu-ts/cli@^${VERSION} check`,
         },
         imports: { '@setu-ts/diagnostics-plugin': `npm:@setu-ts/diagnostics-plugin@^${VERSION}` },
       }) + '\n';
