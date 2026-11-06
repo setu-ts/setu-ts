@@ -444,11 +444,46 @@ describe('database agent run store', () => {
       });
       refuse.mockRestore();
     }
-    // A run that cannot be decoded keeps its own reason.
-    vi.spyOn(store, 'resumable').mockRejectedValueOnce(
+    // The terminal query is the last one run against runs: the earlier ones
+    // succeed and only it is refused.
+    const runs = db.getRepository<Record<string, unknown>>('AgentRun');
+    const findAll = runs.findAll.bind(runs);
+    let calls = 0;
+    const terminal = vi
+      .spyOn(runs, 'findAll')
+      .mockImplementation((query) =>
+        ++calls === 4
+          ? Promise.reject(new UnsupportedQueryFeatureError('orderBy', 'dynamodb', 'refused'))
+          : findAll(query),
+      );
+    await expect(store.verify()).rejects.toMatchObject({ reason: 'query-unsupported' });
+    expect(calls).toBe(4);
+    terminal.mockRestore();
+    // Any store error of its own keeps its reason.
+    vi.spyOn(runs, 'findAll').mockRejectedValueOnce(
       new AgentRunStoreUnavailableError('invalid-row'),
     );
     await expect(store.verify()).rejects.toMatchObject({ reason: 'invalid-row' });
+    await db.close();
+  });
+  it('verifies without changing anything: no quarantine, purge or cursor movement', async () => {
+    const db = await memoryService();
+    const store = new DatabaseAgentRunStore(db);
+    const runs = db.getRepository<Record<string, unknown>>('AgentRun');
+    await runs.create({ ...row(), id: 'bad-ready', status: 'ready', entryCount: 0.5 });
+    await runs.create({
+      ...row(),
+      id: 'bad-done',
+      status: 'completed',
+      entryCount: 0.5,
+      updatedAt: 0,
+    });
+    await store.verify();
+    expect((await runs.findById('bad-ready'))?.status).toBe('ready');
+    expect(await runs.findById('bad-done')).not.toBeNull();
+    // The sweep itself still takes them out of its queries.
+    await store.resumable(100, 5);
+    expect((await runs.findById('bad-ready'))?.status).toBe('failed');
     await db.close();
   });
 });

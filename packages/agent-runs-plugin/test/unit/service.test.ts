@@ -327,6 +327,50 @@ describe('AgentRunService', () => {
     const ai = fakeAi();
     let releaseRun!: () => void;
     const runGate = new Promise<void>((resolve) => (releaseRun = resolve));
+    let modelStarted!: () => void;
+    const modelCalled = new Promise<void>((resolve) => (modelStarted = resolve));
+    ai.model.mockImplementation(() => ({
+      chunks: new ReadableStream({ start: (c) => c.close() }),
+      result: async () => {
+        modelStarted();
+        await runGate;
+        return { messages: [{ role: 'assistant', content: 'x' }], finishReason: 'stop', usage: {} };
+      },
+    }));
+    const h = await harness(definition(), ai);
+    try {
+      await h.store.create(row({ id: 'long', status: 'ready' }));
+      // Sweep A recovers `long`; once its model call starts, A is waiting on it.
+      const a = h.service.sweep();
+      await modelCalled;
+      // Sweep B starts and is held inside its scan.
+      let releaseScan!: () => void;
+      const scanGate = new Promise<void>((resolve) => (releaseScan = resolve));
+      let scanEntered!: () => void;
+      const inScan = new Promise<void>((resolve) => (scanEntered = resolve));
+      const expired = h.store.expired.bind(h.store);
+      const scans = vi.spyOn(h.store, 'expired').mockImplementation(async (now, limit) => {
+        scanEntered();
+        await scanGate;
+        return expired(now, limit);
+      });
+      const b = h.service.sweep();
+      await inScan;
+      // A finishes waiting while B still scans; a third sweep must not start.
+      releaseRun();
+      await a;
+      expect(await h.service.sweep()).toEqual({ expired: 0, resumed: 0, purged: 0 });
+      expect(scans).toHaveBeenCalledTimes(1);
+      releaseScan();
+      await b;
+    } finally {
+      await h.close();
+    }
+  });
+  it('waits for recovered work even when a later step of the sweep fails (review)', async () => {
+    const ai = fakeAi();
+    let releaseRun!: () => void;
+    const runGate = new Promise<void>((resolve) => (releaseRun = resolve));
     ai.model.mockImplementation(() => ({
       chunks: new ReadableStream({ start: (c) => c.close() }),
       result: async () => {
@@ -337,26 +381,19 @@ describe('AgentRunService', () => {
     const h = await harness(definition(), ai);
     try {
       await h.store.create(row({ id: 'long', status: 'ready' }));
-      // Sweep A recovers `long` and waits on it.
-      const a = h.service.sweep();
+      vi.spyOn(h.store, 'terminal').mockRejectedValueOnce(new Error('store down'));
+      let settled = false;
+      const sweeping = h.service.sweep().then(
+        () => (settled = true),
+        () => (settled = true),
+      );
       for (let n = 0; n < 200; n++) await Promise.resolve();
-      // Sweep B starts and is held inside its scan.
-      let releaseScan!: () => void;
-      const scanGate = new Promise<void>((resolve) => (releaseScan = resolve));
-      const expired = h.store.expired.bind(h.store);
-      const scans = vi.spyOn(h.store, 'expired').mockImplementation(async (now, limit) => {
-        await scanGate;
-        return expired(now, limit);
-      });
-      const b = h.service.sweep();
-      for (let n = 0; n < 50; n++) await Promise.resolve();
-      // A finishes waiting while B still scans; a third sweep must not start.
+      // The purge step failed, but the recovered run is still being awaited.
+      expect(settled).toBe(false);
       releaseRun();
-      await a;
-      expect(await h.service.sweep()).toEqual({ expired: 0, resumed: 0, purged: 0 });
-      expect(scans).toHaveBeenCalledTimes(1);
-      releaseScan();
-      await b;
+      await sweeping;
+      await expect(Promise.resolve(settled)).resolves.toBe(true);
+      expect((await h.store.get('long'))?.status).toBe('completed');
     } finally {
       await h.close();
     }

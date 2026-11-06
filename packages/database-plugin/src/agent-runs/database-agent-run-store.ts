@@ -35,6 +35,8 @@ export interface DatabaseAgentRunStoreOptions {
   readonly database?: string;
 }
 type Row = Record<string, unknown>;
+/** The query a sweep method passes to `findAll`. */
+type Query = NonNullable<Parameters<IRepository<Row>['findAll']>[0]>;
 const DEFAULTS = {
   run: 'AgentRun',
   entry: 'AgentRunEntry',
@@ -129,12 +131,18 @@ export class DatabaseAgentRunStore implements IAgentRunStore {
     // Run each sweep query once, so an adapter that cannot serve one (an
     // `or` filter, or an order on more than one field, which DynamoDB and
     // Bigtable refuse) fails registration instead of every scheduled sweep.
-    // The bounds match nothing overdue or past retention; the resumable
-    // query reads at most one run of each kind.
+    // Read-only: the same query shapes, cursor variants included, but no
+    // decoding, quarantine, purge or cursor movement.
     try {
-      await this.expired(0, 1);
-      await this.resumable(0, 1);
-      await this.terminal(0, 1);
+      const probes: [keyof typeof DEFAULTS, Query][] = [
+        ['approval', this.#overdueQuery(0, 1, undefined)],
+        ['approval', this.#overdueQuery(0, 1, { deadline: 0, id: '' })],
+        ['run', this.#readyQuery(0, 1)],
+        ['run', this.#waitingQuery(1, undefined)],
+        ['run', this.#waitingQuery(1, '')],
+        ['run', this.#terminalQuery(0, 1)],
+      ];
+      for (const [kind, query] of probes) await this.#repo(kind).findAll(query);
     } catch (cause) {
       if (cause instanceof AgentRunStoreUnavailableError) throw cause;
       throw new AgentRunStoreUnavailableError('query-unsupported', { cause });
@@ -285,44 +293,9 @@ export class DatabaseAgentRunStore implements IAgentRunStore {
     let after = this.#expiryAfter;
     let exhausted = false;
     for (let page = 0; page < EXPIRY_PAGES && committed.length < limit; page++) {
-      const overdue = comparison('deadline', 'lt', now);
-      const candidates = await this.#repo('approval').findAll({
-        where: { status: 'pending' },
-        filter:
-          after === undefined
-            ? overdue
-            : {
-                type: 'and',
-                filters: [
-                  overdue,
-                  {
-                    type: 'or',
-                    filters: [
-                      {
-                        type: 'comparison',
-                        field: 'deadline',
-                        operator: 'gt',
-                        value: after.deadline,
-                      },
-                      {
-                        type: 'and',
-                        filters: [
-                          {
-                            type: 'comparison',
-                            field: 'deadline',
-                            operator: 'eq',
-                            value: after.deadline,
-                          },
-                          { type: 'comparison', field: 'id', operator: 'gt', value: after.id },
-                        ],
-                      },
-                    ],
-                  },
-                ],
-              },
-        orderBy: { deadline: 'asc', id: 'asc' },
-        limit,
-      });
+      const candidates = await this.#repo('approval').findAll(
+        this.#overdueQuery(now, limit, after),
+      );
       for (const raw of candidates) {
         if (committed.length === limit) break;
         const row = decode<AgentRunApprovalRow>(raw);
@@ -348,7 +321,66 @@ export class DatabaseAgentRunStore implements IAgentRunStore {
   }
   /** @inheritdoc */
   async resumable(now: number, limit: number): Promise<readonly AgentRunRow[]> {
-    const rows = await this.#repo('run').findAll({
+    const rows = await this.#repo('run').findAll(this.#readyQuery(now, limit));
+    // Decisions and waking a run span two entities. Rotate a bounded waiting
+    // scan so a crash between those writes cannot strand an accepted decision.
+    const waiting = await this.#repo('run').findAll(this.#waitingQuery(limit, this.#waitingAfter));
+    this.#waitingAfter = waiting.length < limit ? undefined : (waiting.at(-1)!.id as string);
+    return await this.#valid([...rows, ...waiting], 'quarantine');
+  }
+  /** @inheritdoc */
+  async terminal(before: number, limit: number): Promise<readonly AgentRunRow[]> {
+    const rows = await this.#repo('run').findAll(this.#terminalQuery(before, limit));
+    return await this.#valid(rows, 'purge');
+  }
+  /** Pending approvals past their deadline, after a `(deadline, id)` cursor. */
+  #overdueQuery(
+    now: number,
+    limit: number,
+    after: { readonly deadline: number; readonly id: string } | undefined,
+  ): Query {
+    const overdue = comparison('deadline', 'lt', now);
+    return {
+      where: { status: 'pending' },
+      filter:
+        after === undefined
+          ? overdue
+          : {
+              type: 'and',
+              filters: [
+                overdue,
+                {
+                  type: 'or',
+                  filters: [
+                    {
+                      type: 'comparison',
+                      field: 'deadline',
+                      operator: 'gt',
+                      value: after.deadline,
+                    },
+                    {
+                      type: 'and',
+                      filters: [
+                        {
+                          type: 'comparison',
+                          field: 'deadline',
+                          operator: 'eq',
+                          value: after.deadline,
+                        },
+                        { type: 'comparison', field: 'id', operator: 'gt', value: after.id },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+      orderBy: { deadline: 'asc', id: 'asc' },
+      limit,
+    };
+  }
+  /** Ready runs, and running ones whose lease ran out before `now`. */
+  #readyQuery(now: number, limit: number): Query {
+    return {
       filter: {
         type: 'or',
         filters: [
@@ -364,30 +396,22 @@ export class DatabaseAgentRunStore implements IAgentRunStore {
       },
       orderBy: { updatedAt: 'asc' },
       limit,
-    });
-    // Decisions and waking a run span two entities. Rotate a bounded waiting
-    // scan so a crash between those writes cannot strand an accepted decision.
-    const waiting = await this.#repo('run').findAll({
+    };
+  }
+  /** Waiting runs, after an id cursor. */
+  #waitingQuery(limit: number, after: string | undefined): Query {
+    return {
       where: { status: 'waiting' },
-      ...(this.#waitingAfter === undefined
+      ...(after === undefined
         ? {}
-        : {
-            filter: {
-              type: 'comparison' as const,
-              field: 'id',
-              operator: 'gt' as const,
-              value: this.#waitingAfter,
-            },
-          }),
+        : { filter: { type: 'comparison', field: 'id', operator: 'gt', value: after } }),
       orderBy: { id: 'asc' },
       limit,
-    });
-    this.#waitingAfter = waiting.length < limit ? undefined : (waiting.at(-1)!.id as string);
-    return await this.#valid([...rows, ...waiting], 'quarantine');
+    };
   }
-  /** @inheritdoc */
-  async terminal(before: number, limit: number): Promise<readonly AgentRunRow[]> {
-    const rows = await this.#repo('run').findAll({
+  /** Terminal runs last changed before `before`. */
+  #terminalQuery(before: number, limit: number): Query {
+    return {
       filter: {
         type: 'and',
         filters: [
@@ -397,8 +421,7 @@ export class DatabaseAgentRunStore implements IAgentRunStore {
       },
       orderBy: { updatedAt: 'asc' },
       limit,
-    });
-    return await this.#valid(rows, 'purge');
+    };
   }
   /**
    * Drop ill-formed rows from a bounded sweep query, and take each out of the

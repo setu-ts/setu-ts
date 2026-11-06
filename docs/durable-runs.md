@@ -121,8 +121,11 @@ Tool database writes through the supplied unit of work commit with their idempot
 replay returns that result without executing the tool. An outside API call can repeat if a process
 dies before that transaction commits: pass the stable `call.idempotencyKey` to the outside API's own
 idempotency mechanism. Tool exceptions leave `within`, roll back database writes and become safe
-tool-error entries. Idempotency conflicts defer recovery; configuration, store and oversized-result
-errors fail the run. Configure a transactional idempotency store as above.
+tool-error entries. A tool timeout (`timeouts.toolMs`) is different: it fails the run at once but
+cannot stop a transaction the tool has already started, so an effect can commit after the run is
+marked `failed`. Use `toolMs` only for tools whose effects are safe to keep. Idempotency conflicts
+defer recovery; configuration, store and oversized-result errors fail the run. Configure a
+transactional idempotency store as above.
 
 ## Workers, bounds and storage
 

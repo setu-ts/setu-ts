@@ -345,11 +345,12 @@ export class AgentRunService implements IAgentRunService {
       // Cleared once the scan ends and never again: clearing it later would
       // drop the guard of a sweep that started while this one waited.
       this.#sweeping = false;
+      // A cron invocation must stay alive for the work it recovered, also
+      // when a later step of the scan failed; the whole batch and the purge
+      // are claimed before waiting on any of it. The next tick may sweep
+      // again meanwhile.
+      await Promise.allSettled(recovered);
     }
-    // The next tick may sweep again while this one waits on recovered work.
-    // A cron invocation must stay alive for the work it recovered; the whole
-    // batch and the purge are claimed before waiting on any of it.
-    await Promise.allSettled(recovered);
     return report;
   }
   close(): void {

@@ -53,7 +53,10 @@ before this plugin. Scheduled idempotency purging instead needs a scheduler. The
 Definitions require `name`, `version`, `model(run)` and `maxOutputTokens`; `maxSteps` defaults to 20
 (1–1000). Optional `system`, `tools`, `toolsContext`, `compatibleVersions`, `approval`,
 `canAccess(principal, run)` and `timeouts: { modelMs?, toolMs? }` are consumed on the execution and
-access paths. `canAccess` governs `get`, `respond` and `cancel`; by default only the starting
+access paths. A timed-out tool call fails the run at once, but cannot stop work the tool has already
+started: a transaction that commits after the deadline leaves its effect with the run marked
+`failed`. Set `toolMs` only for tools whose effects are safe to keep, and bound outside calls inside
+the tool itself. `canAccess` governs `get`, `respond` and `cancel`; by default only the starting
 principal (or, for a run started without one, anyone in the tenant) passes, and a refusal is a 404.
 Models are supplied per call, so tenant quotas and budget middleware can wrap them using the
 persisted run identity. Approval policies map tool names to `true` or an async predicate, with
