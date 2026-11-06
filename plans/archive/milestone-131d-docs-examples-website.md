@@ -1,9 +1,11 @@
 # Milestone 131d — Documentation, Examples and the Website (docs, `apps/`, READMEs, website, `cli` text)
 
-> **Status:** Planning. Branch: `docs/m131d-docs-examples-website` (a **docs** letter of M131, so
-> one `docs/…` branch, as M119i, which also carried `packages/cli/src` and `scripts/` changes; a
-> `docs/` PR gets no CodeRabbit review, so §7 adds a fresh-agent code review). `develop` and `main`
-> are protected — all work stays on this branch until it merges via a single PR.
+> **Status:** Complete (PR pending). Implemented by opencode (DeepSeek) and Claude after the
+> maintainer ruled out Codex; reviewed by a fresh-agent code review and doc fact-check. Branch:
+> `docs/m131d-docs-examples-website` (a **docs** letter of M131, so one `docs/…` branch, as M119i,
+> which also carried `packages/cli/src` and `scripts/` changes; a `docs/` PR gets no CodeRabbit
+> review, so §7 adds a fresh-agent code review). `develop` and `main` are protected — all work stays
+> on this branch until it merges via a single PR.
 
 ## 0. Objective & scope
 
