@@ -29,6 +29,11 @@ const TOOL_LABELS = { lookupOrder: 'Look up order', issueRefund: 'Issue refund' 
 let runId = null;
 let status = null;
 let question = '';
+// Earlier turns of this conversation, oldest first: each finished request's
+// question and answer, sent with the next message so the model has context.
+let earlier = [];
+const MAX_TURNS = 20;
+const MAX_TURN_CHARS = 4000;
 // The message being rebuilt from the stream: an ordered list of parts.
 let parts = [];
 let lastEventId = null;
@@ -52,7 +57,6 @@ function setStatus(next) {
   cancel.disabled = !runId || !live;
   send.disabled = live;
   message.disabled = live;
-  send.textContent = runId && !live ? 'New request' : 'Send';
   runLabel.textContent = runId ? `Run ${runId}` : 'Start a conversation below.';
 }
 
@@ -74,7 +78,8 @@ function describeInput(name, input) {
 function describeOutput(name, output) {
   if (!output || typeof output !== 'object') return '';
   if ('error' in output) return output.error;
-  if (name === 'issueRefund') return `Refunded ${dollars(output.amountCents)}.`;
+  if (name === 'issueRefund')
+    return `Refunded ${dollars(output.amountCents)}; ${dollars(output.remainingCents)} left to refund.`;
   if (name === 'lookupOrder')
     return `${output.customer}: ${output.item}, ${dollars(output.amountCents)}, ${dollars(output.refundedCents)} refunded so far.`;
   return JSON.stringify(output);
@@ -87,6 +92,8 @@ function render() {
     log.append(empty);
     return;
   }
+  for (const turn of earlier)
+    log.append(element('div', `msg ${turn.role === 'user' ? 'user' : 'agent'}`, turn.content));
   if (question) log.append(element('div', 'msg user', question));
   for (const part of parts) {
     if (part.type === 'text') {
@@ -168,6 +175,29 @@ function decisionControls(part) {
   deny.addEventListener('click', () => void decide(false));
   row.append(reason, approve, deny);
   return row;
+}
+
+/** This conversation as text turns, for the next request: earlier turns, then this run's. */
+function conversation() {
+  const answer = parts
+    .filter((p) => p.type === 'text' && p.text)
+    .map((p) => p.text)
+    .join('\n\n');
+  const turns = [...earlier];
+  if (question) turns.push({ role: 'user', content: question });
+  if (answer) turns.push({ role: 'assistant', content: answer });
+  return turns
+    .slice(-MAX_TURNS)
+    .map((t) => ({ ...t, content: t.content.slice(0, MAX_TURN_CHARS) }));
+}
+
+/** The text of a stored message's content, or '' when it holds none. */
+function textOf(content) {
+  if (typeof content === 'string') return content;
+  return (content ?? [])
+    .filter((c) => c.type === 'text')
+    .map((c) => c.text)
+    .join('\n');
 }
 
 function tool(toolCallId) {
@@ -323,6 +353,7 @@ async function load() {
     notice = { text: 'This run does not exist, or belongs to another user.', bad: true };
     parts = [];
     question = '';
+    earlier = [];
     setStatus(null);
     render();
     return;
@@ -331,16 +362,18 @@ async function load() {
   parts = [];
   question = '';
   notice = null;
-  for (const msg of view.messages) {
+  // The run's input is the conversation so far plus this request: the last
+  // user message is the question, anything before it is earlier turns.
+  const asked = view.messages.map((m) => m.role).lastIndexOf('user');
+  earlier = view.messages
+    .slice(0, Math.max(asked, 0))
+    .filter((m) => m.role === 'user' || m.role === 'assistant')
+    .map((m) => ({ role: m.role, content: textOf(m.content) }))
+    .filter((t) => t.content);
+  if (asked !== -1) question = textOf(view.messages[asked].content);
+  for (const msg of view.messages.slice(asked + 1)) {
     const content =
       typeof msg.content === 'string' ? [{ type: 'text', text: msg.content }] : msg.content;
-    if (msg.role === 'user') {
-      question = content
-        .filter((c) => c.type === 'text')
-        .map((c) => c.text)
-        .join('\n');
-      continue;
-    }
     for (const c of content ?? []) {
       if (c.type === 'text') parts.push({ type: 'text', id: String(parts.length), text: c.text });
       if (c.type === 'tool-call')
@@ -386,11 +419,12 @@ async function loadOrders() {
   );
 }
 
-function openRun(id) {
+function openRun(id, turns = []) {
   streaming?.abort();
   runId = id;
   parts = [];
   question = '';
+  earlier = turns;
   lastEventId = null;
   notice = null;
   if (id) history.replaceState(null, '', `#run=${encodeURIComponent(id)}`);
@@ -400,10 +434,12 @@ function openRun(id) {
 }
 
 async function start(text) {
+  // A finished run continues as a conversation: the next request carries it.
+  const turns = runId && status !== null ? conversation() : [];
   const res = await fetch('/runs', {
     method: 'POST',
     headers: headers({ 'content-type': 'application/json' }),
-    body: JSON.stringify({ message: text }),
+    body: JSON.stringify({ message: text, history: turns }),
   });
   if (!res.ok) {
     notice = { text: `The request was refused (${res.status}).`, bad: true };
@@ -411,7 +447,7 @@ async function start(text) {
     return;
   }
   const { runId: id } = await res.json();
-  openRun(id);
+  openRun(id, turns);
   question = text;
   render();
   void follow();

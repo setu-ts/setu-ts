@@ -49,6 +49,10 @@ order A-1001 rattle, please refund $45." The agent looks the order up, then show
 refund** card with **Approve** and **Deny** and an optional reason. Nothing is refunded until you
 decide. Approve, and the refund appears on the order in the right-hand panel.
 
+Keep talking after an answer: "Can you check order A-1002?", then "Refund $20 of it." Each message
+starts a new run, and the page sends the conversation so far with it, so the agent knows which order
+"it" is. **New conversation** starts over.
+
 Then try what the example is for:
 
 - **Reload the page** at any point. The run id is in the URL, so the page finds the run again: a run
@@ -72,7 +76,7 @@ A React front end would use the AI SDK's `useChat` with `resume: true` against `
 
 | Route                                                              | Meaning                                                                                 |
 | ------------------------------------------------------------------ | --------------------------------------------------------------------------------------- |
-| `POST /runs`                                                       | `{ "message": "..." }` (1–2,000 characters) starts a run and answers `202 { runId }`.   |
+| `POST /runs`                                                       | `{ "message": "...", "history": [...] }` starts a run and answers `202 { runId }`.      |
 | `GET /runs/:id/stream`                                             | The run's AI SDK UI message stream. `204` when a finished run has nothing left to send. |
 | `GET /runs/:id`                                                    | Status, the stored messages and the pending approvals, for a page reload.               |
 | `POST /runs/:id/approvals/:approvalId`                             | `{ "approved": true, "reason": "..." }` decides one approval, once. Answers `202`.      |
@@ -80,6 +84,11 @@ A React front end would use the AI SDK's `useChat` with `resume: true` against `
 | `GET /orders`                                                      | The orders, with what has been refunded on each.                                        |
 | `GET /`                                                            | Redirects to the page.                                                                  |
 | `/health`, `/live`, `/ready`, `/metrics`, `/docs`, `/openapi.json` | As in every scaffolded project.                                                         |
+
+`message` is 1–2,000 characters. `history` is optional: up to 20 earlier turns, each
+`{ "role": "user" | "assistant", "content": "..." }` of at most 4,000 characters, which the run
+passes to the model before `message`. They are the client's own text; tool calls and approvals
+never travel that way, and the plugin strips any that try.
 
 A run executes detached from the request that started it, so `POST /runs` returns at once. The
 stream replays what is stored and then follows the live run. Event ids are

@@ -9,8 +9,22 @@ export const DemoUserHeaders = z.object({
     .describe('Demonstration identity (lowercase letters, digits, dashes). Defaults to "demo".'),
 });
 
-/** A customer message that starts a run. */
-export const StartRunBody = z.object({ message: z.string().trim().min(1).max(2000) });
+/** One earlier turn of the conversation, as the page saw it. */
+export const ConversationTurn = z.object({
+  role: z.enum(['user', 'assistant']),
+  content: z.string().min(1).max(4000),
+});
+
+/**
+ * A customer message that starts a run, with the conversation so far. Each
+ * run is one request; a follow-up starts a new run carrying the earlier turns
+ * as text, so the model has the context. They are the client's own text:
+ * tool calls and approvals never travel this way.
+ */
+export const StartRunBody = z.object({
+  message: z.string().trim().min(1).max(2000),
+  history: z.array(ConversationTurn).max(20).default([]),
+});
 export type StartRunBody = z.infer<typeof StartRunBody>;
 
 /** The started run. */

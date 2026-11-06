@@ -42,9 +42,9 @@ export function registerSupportRoutes(router: IRouterApi, services?: IServiceReg
       middleware: [demoUser, startBody],
       schema: { response: { 202: StartRunResponse } },
       handler: async (ctx) => {
-        const { message } = startBody.value(ctx);
+        const { message, history } = startBody.value(ctx);
         const started = await runs().start(ctx, SUPPORT_AGENT, {
-          messages: [{ role: 'user', content: message }],
+          messages: [...history, { role: 'user', content: message }],
         });
         return ctx.response.status(202).json(started);
       },

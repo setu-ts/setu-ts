@@ -40,11 +40,15 @@ function repositories(context: ToolContext): OrderRepositories {
 
 /** Reads an order and what has already been refunded. Runs without approval. */
 export const lookupOrder = tool({
-  description: 'Look up an order by id, with the amount already refunded. Amounts are in cents.',
+  description:
+    'Look up an order by id, with the amount already refunded and what is left to refund. Amounts are in cents.',
   inputSchema: z.object({ orderId: z.string().min(1).max(32) }),
   contextSchema: toolContext,
-  execute: async ({ orderId }, { context }) =>
-    (await orderSummary(repositories(context), orderId)) ?? { error: 'No such order.' },
+  execute: async ({ orderId }, { context }) => {
+    const order = await orderSummary(repositories(context), orderId);
+    if (!order) return { error: 'No such order.' };
+    return { ...order, remainingCents: order.amountCents - order.refundedCents };
+  },
 });
 
 /**
@@ -76,7 +80,16 @@ export const issueRefund = tool({
       createdAt: context.now,
     };
     await repos.refunds.create(refund);
-    return { refundId: refund.id, orderId, amountCents };
+    // The order's new totals, so the model reports them instead of working
+    // them out (a model's arithmetic is not to be trusted with money).
+    const refundedCents = order.refundedCents + amountCents;
+    return {
+      refundId: refund.id,
+      orderId,
+      amountCents,
+      refundedCents,
+      remainingCents: order.amountCents - refundedCents,
+    };
   },
 });
 
@@ -91,7 +104,8 @@ export function supportAgent(): AgentRunDefinition {
     system:
       'You are a support agent for an online shop. Look an order up before refunding it. ' +
       'Refund only what the customer asks for, and never more than is left on the order. ' +
-      'Amounts are in cents; show them to the customer in dollars. Be brief.',
+      'Amounts are in cents; show them to the customer in dollars. Be brief. ' +
+      'Answer in plain text: no Markdown, no asterisks or headings.',
     tools: { lookupOrder, issueRefund },
     toolsContext: (run, call) => {
       const context: ToolContext = {

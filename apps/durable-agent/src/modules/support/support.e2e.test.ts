@@ -83,9 +83,15 @@ describe('support e2e', () => {
       // A finished run with nothing to resume answers 204, the SDK's signal.
       const idle = await fetch(`${server.baseUrl}/runs/${runId}/stream`);
       assert.deepStrictEqual(idle.status, 204);
-      const page = await fetch(`${server.baseUrl}/ui/`);
-      assert.deepStrictEqual(page.status, 200);
-      assert.match(await page.text(), /Durable support agent/);
+      // `/ui` and `/ui/` both serve the page, whose script path does not
+      // depend on the trailing slash.
+      for (const path of ['/ui', '/ui/']) {
+        const page = await fetch(`${server.baseUrl}${path}`);
+        assert.deepStrictEqual(page.status, 200);
+        const html = await page.text();
+        assert.match(html, /Durable support agent/);
+        assert.match(html, /<script src="\/ui\/run\.js"><\/script>/);
+      }
       const script = await fetch(`${server.baseUrl}/ui/run.js`);
       assert.deepStrictEqual(script.status, 200);
       await script.text();
