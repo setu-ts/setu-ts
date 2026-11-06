@@ -18,9 +18,12 @@ import type {
 type Equals<A, B> =
   (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
 
+// The optional `publicOrigin` lets the kernel hand the router the origin the
+// browser saw, so a cross-site handshake can be refused.
 type ExpectedRouteUpgrade = (
   request: Request,
   principal?: IPrincipal,
+  publicOrigin?: string,
 ) => Promise<WebSocketUpgradeDecision | null>;
 
 const routeUpgradeSignaturePinned: Equals<

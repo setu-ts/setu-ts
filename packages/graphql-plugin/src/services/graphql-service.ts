@@ -34,6 +34,24 @@ interface MaskOptions {
 }
 
 /**
+ * The method that decides whether an operation may be a mutation, derived from
+ * the request it arrived on. Fails closed: only a `POST` request counts as
+ * `POST`, so a cross-site navigation (a `GET`, sent with `SameSite=Lax`
+ * cookies) or any other verb cannot run a mutation. `undefined` with no
+ * request context — a server-side call, which is not method-checked.
+ *
+ * One rule for both {@linkcode GraphqlService.execute} and
+ * {@linkcode GraphqlService.subscribe}.
+ *
+ * @param requestContext - The request the operation arrived on, if any
+ * @returns `'POST'`, `'GET'`, or `undefined` without a request
+ */
+function operationMethodOf(requestContext?: IRequestContext): 'GET' | 'POST' | undefined {
+  if (requestContext === undefined) return undefined;
+  return requestContext.request.method === 'POST' ? 'POST' : 'GET';
+}
+
+/**
  * Structural guard for a value an `onConnect` hook may have written to
  * `conn.data` under the `'user'` key. The hook's contract is to store an
  * `IPrincipal`; anything else (a string id, a raw token) is dropped rather
@@ -237,6 +255,13 @@ export class GraphqlService implements IGraphqlService {
       contextValue = defaultContext;
     }
 
+    // An explicit method wins, normalized to fail closed like the derived one
+    // (a JavaScript caller can pass `'get'`, `'HEAD'` or `''`); otherwise it is
+    // derived from the request, so an app route forwarding a GET cannot run a
+    // mutation.
+    const operationMethod =
+      method === undefined ? operationMethodOf(requestContext) : method === 'POST' ? 'POST' : 'GET';
+
     // Parse → operation guard → validate → execute. The executor owns the
     // status, so `execute()` and the HTTP route can never disagree about it.
     const outcome = await executeGraphql(params.query, {
@@ -248,7 +273,7 @@ export class GraphqlService implements IGraphqlService {
       variableValues: params.variables ?? {},
       contextValue,
       rootValue: this.#rootValue,
-      ...(method && { method }),
+      ...(operationMethod !== undefined && { method: operationMethod }),
     });
 
     const maskErrorsOptions = {
@@ -312,6 +337,7 @@ export class GraphqlService implements IGraphqlService {
       contextValue = defaultContext;
     }
 
+    const subscribeMethod = operationMethodOf(opContext.requestContext);
     const outcome = await subscribeGraphql(params.query, {
       schema: this.#schema,
       runtime: this.#runtime,
@@ -321,11 +347,8 @@ export class GraphqlService implements IGraphqlService {
       variableValues: params.variables ?? {},
       contextValue,
       rootValue: this.#rootValue,
-      // Fail closed: only a POST may run a mutation. Any other method that
-      // reaches the SSE GET handler counts as GET, so no verb but POST can.
-      ...(opContext.requestContext !== undefined && {
-        method: opContext.requestContext.request.method === 'POST' ? 'POST' : 'GET',
-      }),
+      // Fail closed: only a POST may run a mutation (`operationMethodOf`).
+      ...(subscribeMethod !== undefined && { method: subscribeMethod }),
     });
 
     // Apply masking to error/single results
