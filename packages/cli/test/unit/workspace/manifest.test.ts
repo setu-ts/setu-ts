@@ -203,6 +203,21 @@ describe('readWorkspaceManifest', () => {
     });
   }
 
+  // A stored URL only where `--broker-url` would accept one: the cloud brokers'
+  // values are a project id and a secret, and memory has no endpoint.
+  for (const broker of ['memory', 'pubsub', 'service-bus']) {
+    for (const version of [1, 2]) {
+      it(`refuses a stored URL for ${broker} in a version-${version} manifest`, async () => {
+        const fields =
+          version === 1
+            ? `"transport":"${broker}","transportUrl":"redis://x:1"`
+            : `"broker":"${broker}","brokerUrl":"redis://x:1"`;
+        const result = await read(`{"version":${version},"basePort":3000,${fields},"members":[]}`);
+        expect(result).toEqual({ ok: false, problem: { kind: 'malformed' } });
+      });
+    }
+  }
+
   // A version-2 file still carrying a version-1 field is half-migrated: which
   // field wins is a guess, so neither does.
   for (const field of ['"transport":"redis"', '"transportUrl":"redis://x"']) {

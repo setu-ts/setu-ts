@@ -496,6 +496,24 @@ describe('every entry point renders the same module', () => {
     expect(ws.read('apps/api/src/transport/index.ts')).toBe(withBus);
   });
 
+  // `setu add grpc` in a member runs every flag refusal `setu add` runs before it
+  // hands off, so a transport flag is refused rather than silently ignored.
+  for (const extra of [
+    ['--broker', 'redis'],
+    ['--queue', 'redis'],
+    ['--redis-client', 'node-redis'],
+    ['--store', 'redis'],
+  ]) {
+    it(`refuses setu add grpc ${extra.join(' ')} in a member, writing nothing`, async () => {
+      const ws = await workspace();
+      const before = ws.fs.writes.length;
+      const result = await ws.run(['add', 'grpc', ...extra], `${ROOT}/apps/orders`);
+      expect(result.code).toBe(2);
+      expect(ws.fs.writes.length).toBe(before);
+      expect(JSON.parse(ws.read('setu.workspace.json')).members[0].rpc).toBeUndefined();
+    });
+  }
+
   it('plans without a command, returning the manifest it would write', async () => {
     const ws = await workspace();
     const read = await readWorkspaceManifest(ws.fs, ROOT);

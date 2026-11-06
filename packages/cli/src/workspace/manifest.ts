@@ -354,6 +354,22 @@ function toMember(value: unknown): WorkspaceMember | undefined {
   };
 }
 
+/**
+ * Whether a broker's connection value is an endpoint a stored URL may replace.
+ *
+ * The same rule `--broker-url` applies: `memory` has no endpoint, and the
+ * `pubsub` / `service-bus` values are a project id and a secret read from the
+ * environment. A hand-edited URL on one of those would otherwise be rendered as
+ * that value's fallback — a URL passed as a GCP project id or an Azure
+ * connection string.
+ *
+ * @param broker - A known broker name
+ * @returns `true` when a URL may be recorded for it
+ */
+function addressable(broker: string): boolean {
+  return getBroker(broker)?.connection?.urlOverridable === true;
+}
+
 /** The bus a manifest records, read from either manifest version. */
 type BusRead =
   | {
@@ -398,6 +414,7 @@ function readBus(record: Record<string, unknown>, version: number): BusRead {
     if (getBroker(transport) === undefined) {
       return { ok: false, problem: { kind: 'unknown-broker', broker: transport } };
     }
+    if (url !== undefined && !addressable(transport)) return malformed;
     return {
       ok: true,
       broker: transport as BrokerName,
@@ -411,7 +428,7 @@ function readBus(record: Record<string, unknown>, version: number): BusRead {
     return { ok: false, problem: { kind: 'unknown-broker', broker: String(broker) } };
   }
   const url = record['brokerUrl'];
-  if (url !== undefined && typeof url !== 'string') return malformed;
+  if (url !== undefined && (typeof url !== 'string' || !addressable(broker))) return malformed;
   return {
     ok: true,
     broker: broker as BrokerName,

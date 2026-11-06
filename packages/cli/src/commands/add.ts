@@ -1716,29 +1716,6 @@ export async function runAddCommand(
     );
     return EXIT_ERROR;
   }
-  // Inside a workspace member, gRPC is the member's RPC style: the same change as
-  // `setu workspace rpc <member> grpc`, through the same planner (M138 §3.7).
-  if (bare === 'grpc-plugin' && searchDirs.length > 1) {
-    const found = await workspaceMemberOf(deps.fs, dir);
-    if (found !== undefined) {
-      return await runWorkspaceCommand(
-        {
-          positionals: ['rpc', found.member.name, 'grpc'],
-          flags: {
-            dir: found.root,
-            ...(args.flags['dry-run'] === true ? { 'dry-run': true } : {}),
-          },
-        },
-        {
-          fs: deps.fs,
-          cwd: deps.cwd,
-          log: deps.log,
-          error: deps.error,
-          ...(deps.interrupt === undefined ? {} : { interrupt: deps.interrupt }),
-        },
-      );
-    }
-  }
   let selected: BrokerSpec | undefined;
   let selectedArm: ArmSelector | undefined;
   if (args.flags['redis-client'] !== undefined && searchDirs.length > 1) {
@@ -1832,6 +1809,31 @@ export async function runAddCommand(
               : plugin === 'scheduler'
                 ? 'schedulerArgs'
                 : 'backplaneArgs';
+  }
+  // Inside a workspace member, gRPC is the member's RPC style: the same change as
+  // `setu workspace rpc <member> grpc`, through the same planner (M138 §3.7). Placed
+  // after every flag refusal above, so `--broker`, `--queue`, `--redis-client` and the
+  // Redis arm flags are refused here as for any other plugin rather than ignored.
+  if (bare === 'grpc-plugin' && searchDirs.length > 1) {
+    const found = await workspaceMemberOf(deps.fs, dir);
+    if (found !== undefined) {
+      return await runWorkspaceCommand(
+        {
+          positionals: ['rpc', found.member.name, 'grpc'],
+          flags: {
+            dir: found.root,
+            ...(args.flags['dry-run'] === true ? { 'dry-run': true } : {}),
+          },
+        },
+        {
+          fs: deps.fs,
+          cwd: deps.cwd,
+          log: deps.log,
+          error: deps.error,
+          ...(deps.interrupt === undefined ? {} : { interrupt: deps.interrupt }),
+        },
+      );
+    }
   }
   const starter =
     initialConfig !== undefined &&
