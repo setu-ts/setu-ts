@@ -345,4 +345,45 @@ describe('database agent run store', () => {
     await expect(store.expired(10, 5)).rejects.toThrow('store down');
     await db.close();
   });
+  it('resumes the expiry scan across calls so skipped approvals cannot starve a later one', async () => {
+    const db = await memoryService();
+    const store = new DatabaseAgentRunStore(db);
+    const approvals = db.getRepository<Record<string, unknown>>('AgentRunApproval');
+    // Five uncommitted approvals ahead of a committed one: more than the four
+    // pages one call reads at a limit of 1.
+    await store.create({ ...row(), id: 'loose' });
+    for (let i = 1; i <= 5; i++)
+      await approvals.create({
+        ...approval(),
+        id: `s${i}`,
+        runId: 'loose',
+        deadline: i,
+        leaseVersion: 0,
+      });
+    await store.create({ ...row(), id: 'good', approvalIds: ['late', 'later'] });
+    await approvals.create({
+      ...approval(),
+      id: 'late',
+      runId: 'good',
+      deadline: 6,
+      leaseVersion: 0,
+    });
+    await approvals.create({
+      ...approval(),
+      id: 'later',
+      runId: 'good',
+      deadline: 7,
+      leaseVersion: 0,
+    });
+    expect(await store.expired(10, 1)).toEqual([]);
+    const second = await store.expired(10, 1);
+    expect(second.map((a) => a.id)).toEqual(['late']);
+    // Unexpired here (no sweep runs), `late` is still pending: the next call
+    // returns it with `later`, once each, never twice across its pages.
+    expect((await store.expired(10, 2)).map((a) => a.id)).toEqual(['late', 'later']);
+    // That call reached the end of the pending set, so the next one starts
+    // over from the first approval.
+    expect((await store.expired(10, 5)).map((a) => a.id)).toEqual(['late', 'later']);
+    await db.close();
+  });
 });

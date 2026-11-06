@@ -94,6 +94,7 @@ function valid(run: AgentRunRow): boolean {
  */
 export class DatabaseAgentRunStore implements IAgentRunStore {
   #waitingAfter: string | undefined;
+  #expiryOffset = 0;
   readonly #service: IDatabaseService;
   readonly #entities: Readonly<Record<keyof typeof DEFAULTS, string>>;
   /** @param service - Database capability @param options - Entity mapping */
@@ -262,17 +263,23 @@ export class DatabaseAgentRunStore implements IAgentRunStore {
   }
   /** @inheritdoc */
   async expired(now: number, limit: number): Promise<readonly AgentRunApprovalRow[]> {
-    // Uncommitted approvals and ones whose run cannot be read are skipped, so
-    // page past them (a bounded number of pages) rather than let a batch of
-    // them hide every later overdue approval.
+    // Uncommitted approvals and ones whose run cannot be read are skipped and
+    // stay pending, so a run of them could fill every page a call reads. The
+    // scan therefore resumes across calls: it starts where the last one left
+    // off, past the rows that call skipped (the approvals it returned leave
+    // the pending set once expired), and wraps to the start at the end.
     const committed: AgentRunApprovalRow[] = [];
+    const offset = this.#expiryOffset;
+    let skipped = 0;
+    let exhausted = false;
     for (let page = 0; page < EXPIRY_PAGES && committed.length < limit; page++) {
       const candidates = await this.#repo('approval').findAll({
         where: { status: 'pending' },
         filter: comparison('deadline', 'lt', now),
         orderBy: { deadline: 'asc' },
         limit,
-        offset: page * limit,
+        // Collected approvals stay pending until the sweep expires them.
+        offset: offset + skipped + committed.length,
       });
       for (const row of candidates) {
         if (committed.length === limit) break;
@@ -280,15 +287,23 @@ export class DatabaseAgentRunStore implements IAgentRunStore {
         try {
           run = await this.get(row.runId as string);
         } catch (error) {
-          if (error instanceof AgentRunStoreUnavailableError && error.reason === 'invalid-row')
+          if (error instanceof AgentRunStoreUnavailableError && error.reason === 'invalid-row') {
+            skipped++;
             continue;
+          }
           throw error;
         }
         if (run?.approvalIds.includes(row.id as string))
           committed.push(decode<AgentRunApprovalRow>(row));
+        else skipped++;
       }
-      if (candidates.length < limit) break;
+      if (candidates.length < limit) {
+        exhausted = true;
+        break;
+      }
     }
+    // At the end of the pending set, start over next time.
+    this.#expiryOffset = exhausted ? 0 : offset + skipped;
     return committed;
   }
   /** @inheritdoc */
