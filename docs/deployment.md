@@ -25,7 +25,7 @@ A project `setu new` generated is ready to containerise without editing. For a s
 Deno project:
 
 ```bash
-npm install                         # writes package-lock.json, which the image's `npm ci` needs
+npm install                         # Bun: bun install; Deno: deno install — writes the lockfile
 docker build -t my-app .            # the generated Dockerfile at the project root
 docker run --rm -p 3000:3000 my-app # PORT still selects the port at run time
 ```

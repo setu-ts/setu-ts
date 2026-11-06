@@ -887,17 +887,10 @@ export function registerAccount(services: IServiceRegistry): void {
 }
 ```
 
-Call it in `setu.config.ts`'s `createApp`, after the starter returns and next to the existing module
-registration, so the action can resolve `ACCOUNT`:
-
-```typescript
-import type { IServiceRegistry } from '@setu-ts/common';
-
-declare const app: { readonly services: IServiceRegistry };
-declare function registerAccount(services: IServiceRegistry): void;
-
-registerAccount(app.services); // beside registerModules(app.router, app.services)
-```
+Save it as `src/account.ts`, then register it in `setu.config.ts`'s `createApp`, after the starter
+returns and beside the existing module registration, so the action can resolve `ACCOUNT`: add
+`import { registerAccount } from './src/account.ts';` and call `registerAccount(app.services)` next
+to `registerModules(app.router, app.services)`.
 
 The login page's action (`app/routes/_auth/login.tsx`) calls it and keeps the template's hidden
 `_csrf` field, so the session plugin's form CSRF check still runs before the action. The template's
@@ -912,7 +905,7 @@ import type { ServiceToken } from '@setu-ts/common';
 import { getService, userContext } from '@setu-ts/react-router-plugin';
 import type { RouterContextKey } from '@setu-ts/react-router-plugin';
 
-// The token from the file above, and the template's key in app/server/context-keys.server.ts.
+// ACCOUNT from src/account.ts, and the template's key in app/server/context-keys.server.ts.
 declare const ACCOUNT: ServiceToken<{ signIn(email: string, password: string): Promise<boolean> }>;
 declare const currentUserContext: RouterContextKey<{ readonly email: string } | null>;
 
