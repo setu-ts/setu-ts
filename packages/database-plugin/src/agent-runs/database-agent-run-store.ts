@@ -94,7 +94,7 @@ function valid(run: AgentRunRow): boolean {
  */
 export class DatabaseAgentRunStore implements IAgentRunStore {
   #waitingAfter: string | undefined;
-  #expiryOffset = 0;
+  #expiryAfter: { readonly deadline: number; readonly id: string } | undefined;
   readonly #service: IDatabaseService;
   readonly #entities: Readonly<Record<keyof typeof DEFAULTS, string>>;
   /** @param service - Database capability @param options - Entity mapping */
@@ -265,37 +265,64 @@ export class DatabaseAgentRunStore implements IAgentRunStore {
   async expired(now: number, limit: number): Promise<readonly AgentRunApprovalRow[]> {
     // Uncommitted approvals and ones whose run cannot be read are skipped and
     // stay pending, so a run of them could fill every page a call reads. The
-    // scan therefore resumes across calls: it starts where the last one left
-    // off, past the rows that call skipped (the approvals it returned leave
-    // the pending set once expired), and wraps to the start at the end.
+    // scan therefore resumes across calls from a keyset cursor on
+    // (deadline, id), which approvals leaving the pending set cannot shift,
+    // and wraps to the start once it reaches the end.
     const committed: AgentRunApprovalRow[] = [];
-    const offset = this.#expiryOffset;
-    let skipped = 0;
+    let after = this.#expiryAfter;
     let exhausted = false;
     for (let page = 0; page < EXPIRY_PAGES && committed.length < limit; page++) {
+      const overdue = comparison('deadline', 'lt', now);
       const candidates = await this.#repo('approval').findAll({
         where: { status: 'pending' },
-        filter: comparison('deadline', 'lt', now),
-        orderBy: { deadline: 'asc' },
+        filter:
+          after === undefined
+            ? overdue
+            : {
+                type: 'and',
+                filters: [
+                  overdue,
+                  {
+                    type: 'or',
+                    filters: [
+                      {
+                        type: 'comparison',
+                        field: 'deadline',
+                        operator: 'gt',
+                        value: after.deadline,
+                      },
+                      {
+                        type: 'and',
+                        filters: [
+                          {
+                            type: 'comparison',
+                            field: 'deadline',
+                            operator: 'eq',
+                            value: after.deadline,
+                          },
+                          { type: 'comparison', field: 'id', operator: 'gt', value: after.id },
+                        ],
+                      },
+                    ],
+                  },
+                ],
+              },
+        orderBy: { deadline: 'asc', id: 'asc' },
         limit,
-        // Collected approvals stay pending until the sweep expires them.
-        offset: offset + skipped + committed.length,
       });
-      for (const row of candidates) {
+      for (const raw of candidates) {
         if (committed.length === limit) break;
+        const row = decode<AgentRunApprovalRow>(raw);
+        after = { deadline: row.deadline, id: row.id };
         let run: AgentRunRow | null;
         try {
-          run = await this.get(row.runId as string);
+          run = await this.get(row.runId);
         } catch (error) {
-          if (error instanceof AgentRunStoreUnavailableError && error.reason === 'invalid-row') {
-            skipped++;
+          if (error instanceof AgentRunStoreUnavailableError && error.reason === 'invalid-row')
             continue;
-          }
           throw error;
         }
-        if (run?.approvalIds.includes(row.id as string))
-          committed.push(decode<AgentRunApprovalRow>(row));
-        else skipped++;
+        if (run?.approvalIds.includes(row.id)) committed.push(row);
       }
       if (candidates.length < limit) {
         exhausted = true;
@@ -303,7 +330,7 @@ export class DatabaseAgentRunStore implements IAgentRunStore {
       }
     }
     // At the end of the pending set, start over next time.
-    this.#expiryOffset = exhausted ? 0 : offset + skipped;
+    this.#expiryAfter = exhausted ? undefined : after;
     return committed;
   }
   /** @inheritdoc */

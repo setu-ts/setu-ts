@@ -339,6 +339,9 @@ describe('database agent run store', () => {
       leaseVersion: 0,
     });
     expect((await store.expired(10, 1)).map((a) => a.id)).toEqual(['a3']);
+    // The cursor sits on a3 (unexpired here, no sweep runs): the next call
+    // reaches the end and the one after wraps to the start.
+    expect(await store.expired(10, 5)).toEqual([]);
     expect((await store.expired(10, 5)).map((a) => a.id)).toEqual(['a3']);
     // Any other store fault still reaches the sweep.
     vi.spyOn(store, 'get').mockRejectedValueOnce(new Error('store down'));
@@ -376,14 +379,45 @@ describe('database agent run store', () => {
       leaseVersion: 0,
     });
     expect(await store.expired(10, 1)).toEqual([]);
-    const second = await store.expired(10, 1);
-    expect(second.map((a) => a.id)).toEqual(['late']);
-    // Unexpired here (no sweep runs), `late` is still pending: the next call
-    // returns it with `later`, once each, never twice across its pages.
-    expect((await store.expired(10, 2)).map((a) => a.id)).toEqual(['late', 'later']);
-    // That call reached the end of the pending set, so the next one starts
-    // over from the first approval.
-    expect((await store.expired(10, 5)).map((a) => a.id)).toEqual(['late', 'later']);
+    expect((await store.expired(10, 1)).map((a) => a.id)).toEqual(['late']);
+    // The sweep expires what a call returned, so that approval leaves the
+    // pending set; the cursor is keyed on (deadline, id), so nothing shifts
+    // and the next call still finds the one after it.
+    await store.decide('late', { status: 'expired' });
+    expect((await store.expired(10, 1)).map((a) => a.id)).toEqual(['later']);
+    // The next call finds the end of the pending set and resets; the one
+    // after starts over from the first approval.
+    expect(await store.expired(10, 5)).toEqual([]);
+    expect((await store.expired(10, 5)).map((a) => a.id)).toEqual(['later']);
+    await db.close();
+  });
+  it('does not skip an approval when one before the scan position leaves the pending set', async () => {
+    const db = await memoryService();
+    const store = new DatabaseAgentRunStore(db);
+    const approvals = db.getRepository<Record<string, unknown>>('AgentRunApproval');
+    await store.create({ ...row(), id: 'loose' });
+    for (let i = 1; i <= 4; i++)
+      await approvals.create({
+        ...approval(),
+        id: `x${i}`,
+        runId: 'loose',
+        deadline: i,
+        leaseVersion: 0,
+      });
+    await store.create({ ...row(), id: 'good', approvalIds: ['c5'] });
+    await approvals.create({
+      ...approval(),
+      id: 'c5',
+      runId: 'good',
+      deadline: 5,
+      leaseVersion: 0,
+    });
+    // One call reads four pages of skipped approvals and stops before c5.
+    expect(await store.expired(10, 1)).toEqual([]);
+    // An approval the scan already passed leaves the pending set; a position
+    // counted from the start would now step over c5.
+    await store.decide('x1', { status: 'denied' });
+    expect((await store.expired(10, 1)).map((a) => a.id)).toEqual(['c5']);
     await db.close();
   });
 });
