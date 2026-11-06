@@ -31,6 +31,7 @@ Copy `.env.example` to `.env`.
 | `AI_COMPAT_API_KEY`  | unset                      | Only for a hosted API.                                                            |
 | `DATABASE_URL`       | unset                      | PostgreSQL. Unset keeps everything in process memory, lost when the process ends. |
 | `PORT`               | `3000`                     | The listening port.                                                               |
+| `HOST`               | `127.0.0.1`                | The listening address. Loopback only by default; see the identity note below.     |
 
 To see a run survive a restart you need PostgreSQL: set `DATABASE_URL`, then create the tables and
 the three demonstration orders once:
@@ -44,12 +45,15 @@ agent-run tables. Running it again changes nothing.
 
 ## Try it
 
-Open `http://localhost:3000/ui` after `start:dev`. Ask for a refund, for example "My headphones on
-order A-1001 rattle, please refund $45." The agent looks the order up, then shows an **Issue
-refund** card with **Approve** and **Deny** and an optional reason. Nothing is refunded until you
-decide. Approve, and the refund appears on the order in the right-hand panel.
+Open `http://localhost:3000/ui` after `start:dev`. You start as **priya**, the customer who owns
+order A-1001; **tomas** owns A-1002 and **amara** A-1003. Ask for a refund, for example "My
+headphones on order A-1001 rattle, please refund $45." The agent looks the order up and asks to
+refund it. The **Issue refund** card then waits for a support lead: a customer can ask for a refund
+but never approve one, their own included. Switch **Acting as** to **lead**: the lead sees every
+order and the run, and gets **Approve** and **Deny** with an optional reason. Nothing is refunded
+until the lead decides. Approve, and the refund appears on the order in the right-hand panel.
 
-Keep talking after an answer: "Can you check order A-1002?", then "Refund $20 of it." Each message
+Keep talking after an answer: "Can you check my order?", then "Refund $20 of it." Each message
 starts a new run, and the page sends the conversation so far with it, so the agent knows which order
 "it" is. **New conversation** starts over.
 
@@ -65,8 +69,10 @@ Then try what the example is for:
   from its last committed step: the restarted server takes it over once the old process's lease
   has expired (about 35 seconds with the defaults). A refund that had already been written is not
   written again.
-- **Change "Acting as"** to another name. Runs belong to the user who started them, so another user
-  gets "does not exist" for the same run id.
+- **Change "Acting as"** to another customer. Runs belong to the customer who started them (and the
+  leads who review them), so another customer gets "does not exist" for the same run id. Ask the
+  agent about someone else's order and it finds nothing: the tools only see the run's own
+  customer's orders.
 
 The page has no build step: `public/index.html` and `public/run.js`, served by `StaticPlugin` at
 `/ui`. It reads the AI SDK UI message stream itself and inserts everything as text, never as HTML.
@@ -74,16 +80,17 @@ A React front end would use the AI SDK's `useChat` with `resume: true` against `
 
 ## What it serves
 
-| Route                                                              | Meaning                                                                                 |
-| ------------------------------------------------------------------ | --------------------------------------------------------------------------------------- |
-| `POST /runs`                                                       | `{ "message": "...", "history": [...] }` starts a run and answers `202 { runId }`.      |
-| `GET /runs/:id/stream`                                             | The run's AI SDK UI message stream. `204` when a finished run has nothing left to send. |
-| `GET /runs/:id`                                                    | Status, the stored messages and the pending approvals, for a page reload.               |
-| `POST /runs/:id/approvals/:approvalId`                             | `{ "approved": true, "reason": "..." }` decides one approval, once. Answers `202`.      |
-| `POST /runs/:id/cancel`                                            | Cancels the run. Answers `202`.                                                         |
-| `GET /orders`                                                      | The orders, with what has been refunded on each.                                        |
-| `GET /`                                                            | Redirects to the page.                                                                  |
-| `/health`, `/live`, `/ready`, `/metrics`, `/docs`, `/openapi.json` | As in every scaffolded project.                                                         |
+| Route                                                              | Meaning                                                                                     |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
+| `POST /runs`                                                       | `{ "message": "...", "history": [...] }` starts a run and answers `202 { runId }`.          |
+| `GET /runs/:id/stream`                                             | The run's AI SDK UI message stream. `204` when a finished run has nothing left to send.     |
+| `GET /runs/:id`                                                    | Status, the stored messages and the pending approvals, for a page reload.                   |
+| `POST /runs/:id/approvals/:approvalId`                             | `{ "approved": true, "reason": "..." }` decides one approval, once. Answers `202`.          |
+| `POST /runs/:id/cancel`                                            | Cancels the run. Answers `202`.                                                             |
+| `GET /orders`                                                      | The caller's orders (every order for a lead), with what has been refunded and what is left. |
+| `GET /me`                                                          | `{ id, approver }`: who the caller acts as, and whether they approve refunds.               |
+| `GET /`                                                            | Redirects to the page.                                                                      |
+| `/health`, `/live`, `/ready`, `/metrics`, `/docs`, `/openapi.json` | As in every scaffolded project.                                                             |
 
 `message` is 1–2,000 characters. `history` is optional: up to 20 earlier turns, each
 `{ "role": "user" | "assistant", "content": "..." }` of at most 4,000 characters, which the run
@@ -98,9 +105,12 @@ the stream sends a `data-setu-replay` chunk and the whole run again; `run.js` ha
 discarding what it had.
 
 **Identity is a demonstration.** `src/middleware/demo-user.middleware.ts` trusts the `x-demo-user`
-header (default `demo`) as the caller, so anyone can act as anyone. It exists so the example can show
-that runs belong to the person who started them without an identity provider. Replace it with
-`AuthPlugin` before the application serves anyone but you.
+header (default `priya`; `lead` approves) as the caller, so anyone can act as anyone, the lead
+included. It exists so the example can show who may ask for, see and approve a refund without an
+identity provider; a malformed header is refused with `400` on every route. The server therefore
+listens on `127.0.0.1` only unless you set `HOST`. Replace the middleware with `AuthPlugin` before
+the application serves anyone but you, and keep the rules it feeds: orders belong to a customer,
+and `canDecide` names who approves.
 
 ## How it works
 
@@ -110,11 +120,17 @@ The project is what `setu new --template rest`, `setu generate module support`,
 
 - `src/modules/support/support.agent.ts` defines the agent with `defineAgentRun`: the model,
   resolved for every step from the `support-model` capability; the `lookupOrder` and `issueRefund`
-  tools; and an approval policy that always asks before `issueRefund`.
+  tools, which only see orders owned by the customer who started the run; an approval policy that
+  always asks before `issueRefund` and lets only a lead decide (`canDecide`); and `canAccess`, so a
+  run is visible to its customer and the leads.
 - Each tool call runs inside `IIdempotencyService.within`. Its writes go through the unit of work
   the run supplies (`toolsContext`), so the refund row commits in the same transaction as the call's
   recorded result. A run that resumes after a crash finds that result and does not call the tool
-  again. The refund's id is the call's idempotency key, so one call can only ever write one row.
+  again.
+- A refund's id is its number on the order (`A-1001#1`, `A-1001#2`). Two refunds racing on one
+  order read the same count and try the same key, so on PostgreSQL the second waits for the first
+  and fails instead of both passing the "not more than is left" check. Each row also stores the
+  call's idempotency key (`callKey`).
 - `src/modules/support/support.controller.ts` maps the routes onto `IAgentRunService`: `start`,
   `respond`, `get`, `decide` and `cancel`.
 - `src/modules/support/support.database.ts` picks PostgreSQL through Drizzle when `DATABASE_URL` is

@@ -7,7 +7,7 @@ import type { AgentRunDefinition } from '@setu-ts/agent-runs-plugin';
 import type { IUnitOfWork } from '@setu-ts/database-plugin';
 import { SUPPORT_MODEL } from '../../plugins/support-model.plugin.ts';
 import type { ISupportModelService } from '../../plugins/support-model.plugin.ts';
-import { orderSummary } from './support.orders.ts';
+import { APPROVERS, ownOrder, refundOrder, summarize } from './support.orders.ts';
 import type { Order, OrderRepositories, Refund } from './support.orders.ts';
 
 /** The definition name runs are started with and stored under. */
@@ -20,8 +20,10 @@ export const MAX_STEPS = 8;
 export const MAX_OUTPUT_TOKENS = 1024;
 
 // Server-owned context, never model-settable input: the transaction the tool's
-// writes commit in, the call's idempotency key and the run it belongs to.
+// writes commit in, the call's idempotency key, the run it belongs to and the
+// customer who started it. The tools act only on that customer's orders.
 const toolContext = z.object({
+  ownerId: z.string().nullable(),
   unitOfWork: z.custom<IUnitOfWork>(
     (value) => typeof value === 'object' && value !== null && 'getRepository' in value,
   ),
@@ -45,9 +47,11 @@ export const lookupOrder = tool({
   inputSchema: z.object({ orderId: z.string().min(1).max(32) }),
   contextSchema: toolContext,
   execute: async ({ orderId }, { context }) => {
-    const order = await orderSummary(repositories(context), orderId);
-    if (!order) return { error: 'No such order.' };
-    return { ...order, remainingCents: order.amountCents - order.refundedCents };
+    const repos = repositories(context);
+    const order = await ownOrder(repos, context.ownerId, orderId);
+    return order
+      ? (await summarize(repos, order)).summary
+      : { error: 'No such order on your account.' };
   },
 });
 
@@ -58,7 +62,7 @@ export const lookupOrder = tool({
  */
 export const issueRefund = tool({
   description:
-    'Refund an order. Needs a person to approve it. amountCents must not exceed what is left to refund.',
+    'Refund an order. A support lead must approve it. amountCents must not exceed what is left to refund.',
   inputSchema: z.object({
     orderId: z.string().min(1).max(32),
     amountCents: z.number().int().positive(),
@@ -66,34 +70,24 @@ export const issueRefund = tool({
   }),
   contextSchema: toolContext,
   execute: async ({ orderId, amountCents, reason }, { context }) => {
-    const repos = repositories(context);
-    const order = await orderSummary(repos, orderId);
-    if (!order) return { error: 'No such order.' };
-    if (amountCents > order.amountCents - order.refundedCents)
-      return { error: 'That is more than is left to refund on this order.' };
-    const refund: Refund = {
-      id: context.idempotencyKey,
+    const result = await refundOrder(repositories(context), context.ownerId, {
       orderId,
       amountCents,
       reason,
       runId: context.runId,
+      callKey: context.idempotencyKey,
       createdAt: context.now,
-    };
-    await repos.refunds.create(refund);
+    });
+    if (result === 'no-such-order') return { error: 'No such order on your account.' };
+    if (result === 'too-much')
+      return { error: 'That is more than is left to refund on this order.' };
     // The order's new totals, so the model reports them instead of working
     // them out (a model's arithmetic is not to be trusted with money).
-    const refundedCents = order.refundedCents + amountCents;
-    return {
-      refundId: refund.id,
-      orderId,
-      amountCents,
-      refundedCents,
-      remainingCents: order.amountCents - refundedCents,
-    };
+    return { refundCents: amountCents, ...result };
   },
 });
 
-/** The support agent: look an order up, then refund it once a person approves. */
+/** The support agent: look a customer's order up, then refund it once a support lead approves. */
 export function supportAgent(): AgentRunDefinition {
   return defineAgentRun({
     name: SUPPORT_AGENT,
@@ -102,7 +96,8 @@ export function supportAgent(): AgentRunDefinition {
     // serving process has, and tests can replace the capability.
     model: (run) => run.services.get<ISupportModelService>(SUPPORT_MODEL).model,
     system:
-      'You are a support agent for an online shop. Look an order up before refunding it. ' +
+      'You are a support agent for an online shop, talking to a signed-in customer. ' +
+      'You can only see and refund orders on their account. Look an order up before refunding it. ' +
       'Refund only what the customer asks for, and never more than is left on the order. ' +
       'Amounts are in cents; show them to the customer in dollars. Be brief. ' +
       'Answer in plain text: no Markdown, no asterisks or headings.',
@@ -112,12 +107,22 @@ export function supportAgent(): AgentRunDefinition {
         unitOfWork: call.unitOfWork as IUnitOfWork,
         idempotencyKey: call.idempotencyKey,
         runId: run.runId,
+        ownerId: run.principalId,
         // Time comes from the runtime services, like every other clock read.
         now: run.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME).now(),
       };
       return { lookupOrder: context, issueRefund: context };
     },
-    approval: { tools: { issueRefund: true } },
+    // A customer asks; a support lead decides. The default would let the
+    // customer who started the run approve their own refund.
+    approval: {
+      tools: { issueRefund: true },
+      canDecide: (principal) => principal !== undefined && APPROVERS.includes(principal.id),
+    },
+    // The customer who started the run, and the leads who must review it.
+    canAccess: (principal, run) =>
+      principal !== undefined &&
+      (principal.id === run.principalId || APPROVERS.includes(principal.id)),
     maxSteps: MAX_STEPS,
     maxOutputTokens: MAX_OUTPUT_TOKENS,
   });

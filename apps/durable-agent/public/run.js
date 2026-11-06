@@ -39,6 +39,8 @@ let parts = [];
 let lastEventId = null;
 let streaming = null;
 let notice = null;
+// Whether the user acting now approves refunds (GET /me).
+let approver = false;
 
 function user() {
   return userInput.value.trim() || 'demo';
@@ -79,7 +81,7 @@ function describeOutput(name, output) {
   if (!output || typeof output !== 'object') return '';
   if ('error' in output) return output.error;
   if (name === 'issueRefund')
-    return `Refunded ${dollars(output.amountCents)}; ${dollars(output.remainingCents)} left to refund.`;
+    return `Refunded ${dollars(output.refundCents)}; ${dollars(output.remainingCents)} left to refund.`;
   if (name === 'lookupOrder')
     return `${output.customer}: ${output.item}, ${dollars(output.amountCents)}, ${dollars(output.refundedCents)} refunded so far.`;
   return JSON.stringify(output);
@@ -106,8 +108,17 @@ function render() {
     card.append(element('div', 'name', label));
     card.append(element('div', 'detail', describeInput(part.toolName, part.input)));
     if (part.state === 'pending') {
-      card.append(element('div', 'detail', 'Waiting for your approval.'));
-      card.append(decisionControls(part));
+      if (approver) {
+        card.append(element('div', 'detail', 'Waiting for your approval.'));
+        card.append(decisionControls(part));
+      } else
+        card.append(
+          element(
+            'div',
+            'detail',
+            'Waiting for a support lead to approve. In this demo, switch “Acting as” to lead to decide.',
+          ),
+        );
     } else if (part.state === 'running') {
       card.append(element('div', 'detail', 'Running…'));
     } else if (part.state === 'done') {
@@ -301,8 +312,14 @@ async function follow() {
       await load();
       return;
     }
+    if (res.status >= 400 && res.status < 500) {
+      // Not this user's run, or gone: retrying cannot help.
+      await load();
+      return;
+    }
     if (!res.ok || !res.body) throw new Error(`stream ${res.status}`);
     notice = null;
+    retryDelay = MIN_RETRY_MS;
     const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
     let buffer = '';
     while (true) {
@@ -328,13 +345,24 @@ async function follow() {
     void loadOrders();
   } catch {
     if (controller.signal.aborted || id !== runId) return;
-    // The server went away mid-run. Retry; the run itself is not lost.
+    // The server went away mid-run. Retry, waiting longer each time; the run
+    // itself is not lost.
     notice = { text: 'Connection lost. Reconnecting…' };
     render();
-    setTimeout(() => {
-      if (id === runId) void follow();
-    }, 1500);
+    later(id, retryDelay);
+    retryDelay = Math.min(retryDelay * 2, MAX_RETRY_MS);
   }
+}
+
+const MIN_RETRY_MS = 1000;
+const MAX_RETRY_MS = 15000;
+let retryDelay = MIN_RETRY_MS;
+
+/** Follows the run again after a pause, unless the page has moved on. */
+function later(id, ms) {
+  setTimeout(() => {
+    if (id === runId) void follow();
+  }, ms);
 }
 
 async function refreshStatus() {
@@ -342,7 +370,9 @@ async function refreshStatus() {
   if (!res.ok) return;
   const view = await res.json();
   setStatus(view.status);
-  if (view.status === 'running' || view.status === 'ready') void follow();
+  // The stream ended while the run is still going (another server holds it,
+  // or it is about to be resumed): look again shortly, not straight away.
+  if (view.status === 'running' || view.status === 'ready') later(runId, MIN_RETRY_MS);
   render();
 }
 
@@ -403,8 +433,13 @@ async function load() {
   render();
 }
 
+async function loadMe() {
+  const res = await fetch('/me', { headers: headers() });
+  approver = res.ok ? (await res.json()).approver : false;
+}
+
 async function loadOrders() {
-  const res = await fetch('/orders');
+  const res = await fetch('/orders', { headers: headers() });
   if (!res.ok) return;
   const { orders } = await res.json();
   ordersList.replaceChildren(
@@ -498,12 +533,17 @@ globalThis.addEventListener('hashchange', () => {
   }
 });
 
-userInput.addEventListener('change', () => {
-  // Runs belong to the user who started them; another user sees a 404.
+userInput.addEventListener('change', async () => {
+  // Runs belong to the customer who started them (and the leads who review
+  // them); anyone else sees a 404. Orders are each customer's own.
+  await loadMe();
+  void loadOrders();
   if (runId) void resume();
+  else render();
 });
 
 const fromHash = new URLSearchParams(location.hash.slice(1)).get('run');
+await loadMe();
 void loadOrders();
 if (fromHash) {
   openRun(fromHash);

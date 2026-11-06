@@ -47,15 +47,23 @@ async function appWith(databaseUrl: string | undefined, overrides: IPlugin[]): P
   }
 }
 
-async function start(app: App, message: string): Promise<string> {
-  const res = await app.inject({ method: 'POST', url: '/runs', body: { message } });
+async function start(app: App, message: string, user = 'priya'): Promise<string> {
+  const res = await app.inject({
+    method: 'POST',
+    url: '/runs',
+    headers: { 'x-demo-user': user },
+    body: { message },
+  });
   assert.equal(res.statusCode, 202);
   return res.json<{ runId: string }>().runId;
 }
 
 async function until(app: App, runId: string, statuses: string[], tries = 300): Promise<View> {
   for (let i = 0; i < tries; i++) {
-    const view = (await app.inject({ method: 'GET', url: `/runs/${runId}` })).json<View>();
+    // The lead may read every run it reviews.
+    const view = (
+      await app.inject({ method: 'GET', url: `/runs/${runId}`, headers: { 'x-demo-user': 'lead' } })
+    ).json<View>();
     if (statuses.includes(view.status)) return view;
     await sleep(tries > 300 ? 500 : 10);
   }
@@ -66,6 +74,7 @@ async function decide(app: App, runId: string, approvalId: string, approved: boo
   const res = await app.inject({
     method: 'POST',
     url: `/runs/${runId}/approvals/${encodeURIComponent(approvalId)}`,
+    headers: { 'x-demo-user': 'lead' },
     body: { approved },
   });
   assert.equal(res.statusCode, 202);
@@ -126,11 +135,37 @@ describe('durable agent smoke', () => {
           await decide(second, runId, approvalId, true);
           assert.equal((await until(second, runId, ['completed', 'failed'])).status, 'completed');
           const rows = await admin.query(
-            `SELECT order_id, amount_cents FROM ${schema}.support_refunds`,
+            `SELECT id, order_id, amount_cents FROM ${schema}.support_refunds`,
           );
-          assert.deepEqual(rows.rows, [{ order_id: 'A-1001', amount_cents: 4500 }]);
+          assert.deepEqual(rows.rows, [{ id: 'A-1001#1', order_id: 'A-1001', amount_cents: 4500 }]);
         } finally {
           await second.stop();
+        }
+
+        // Two runs refund all of A-1003 at once. Only PostgreSQL interleaves
+        // them; between them they must never refund more than the order.
+        const racing = await appWith(databaseUrl, [
+          withSupportModel(supportScript({ orderId: 'A-1003', amountCents: 8999 }).model),
+        ]);
+        try {
+          for (let round = 0; round < 3; round++) {
+            await admin.query(`DELETE FROM ${schema}.support_refunds WHERE order_id = 'A-1003'`);
+            const ids = await Promise.all([
+              start(racing, 'Refund the dock in full.', 'amara'),
+              start(racing, 'Refund the dock in full.', 'amara'),
+            ]);
+            const approvals = await Promise.all(
+              ids.map(async (id) => (await until(racing, id, ['waiting'])).pendingApprovals[0]!.id),
+            );
+            await Promise.all(ids.map((id, i) => decide(racing, id, approvals[i]!, true)));
+            for (const id of ids) await until(racing, id, ['completed', 'failed']);
+            const total = await admin.query(
+              `SELECT COALESCE(SUM(amount_cents), 0)::int AS cents FROM ${schema}.support_refunds WHERE order_id = 'A-1003'`,
+            );
+            assert.equal(total.rows[0].cents, 8999, `round ${round}`);
+          }
+        } finally {
+          await racing.stop();
         }
       } finally {
         await admin.query(`DROP SCHEMA ${schema} CASCADE`);

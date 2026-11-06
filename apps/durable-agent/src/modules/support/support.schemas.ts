@@ -6,7 +6,9 @@ export const DemoUserHeaders = z.object({
     .string()
     .regex(/^[a-z0-9-]{1,32}$/)
     .optional()
-    .describe('Demonstration identity (lowercase letters, digits, dashes). Defaults to "demo".'),
+    .describe(
+      'Demonstration identity (lowercase letters, digits, dashes). Defaults to "priya"; "lead" approves refunds.',
+    ),
 });
 
 /** One earlier turn of the conversation, as the page saw it. */
@@ -74,7 +76,11 @@ export const OrderResponse = z.object({
   item: z.string(),
   amountCents: z.number().int(),
   refundedCents: z.number().int(),
+  remainingCents: z.number().int(),
 });
+
+/** `GET /me`: who the caller is acting as, and whether they approve refunds. */
+export const MeResponse = z.object({ id: z.string(), approver: z.boolean() });
 
 /** `GET /orders`. */
 export const OrdersResponse = z.object({ orders: z.array(OrderResponse) });

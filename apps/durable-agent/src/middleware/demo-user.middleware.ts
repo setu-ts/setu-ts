@@ -1,4 +1,5 @@
 import type { MiddlewareFunction } from '@setu-ts/common';
+import { badRequest } from '@setu-ts/exceptions';
 
 /**
  * Where this middleware sits in the pipeline. Lower runs earlier, so lower is
@@ -15,8 +16,8 @@ import type { MiddlewareFunction } from '@setu-ts/common';
  */
 export const DEMO_USER_MIDDLEWARE_PRIORITY = 500;
 
-/** The identity a request without an `x-demo-user` header acts as. */
-export const DEFAULT_DEMO_USER = 'demo';
+/** The identity a request without an `x-demo-user` header acts as: the customer who owns order A-1001. */
+export const DEFAULT_DEMO_USER = 'priya';
 
 const DEMO_USER = /^[a-z0-9-]{1,32}$/;
 
@@ -28,8 +29,7 @@ const DEMO_USER = /^[a-z0-9-]{1,32}$/;
  * Replace it with `AuthPlugin` (or your own authentication) before the
  * application serves anyone but you.
  *
- * A malformed header installs no principal; the route's header validation
- * then answers `400`.
+ * A malformed header is refused with `400` before any route runs.
  *
  * Added for you through the `GENERATED_MIDDLEWARE` barrel in
  * `src/middleware/index.ts`, which `setu.config.ts` walks — so this module needs no
@@ -39,9 +39,12 @@ const DEMO_USER = /^[a-z0-9-]{1,32}$/;
  */
 export function demoUserMiddleware(): MiddlewareFunction {
   return async (ctx, next) => {
-    const header = ctx.request.headers.get('x-demo-user');
-    const id = header ?? DEFAULT_DEMO_USER;
-    if (DEMO_USER.test(id)) ctx.request.user = { id };
+    const id = ctx.request.headers.get('x-demo-user') ?? DEFAULT_DEMO_USER;
+    // Refused here, for every route: a request must never reach a handler
+    // without the identity it claimed.
+    if (!DEMO_USER.test(id))
+      throw badRequest('x-demo-user must be 1-32 lowercase letters, digits or dashes.');
+    ctx.request.user = { id };
     await next();
   };
 }

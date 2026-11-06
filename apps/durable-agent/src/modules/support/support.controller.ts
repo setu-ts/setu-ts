@@ -3,13 +3,14 @@ import type { IAgentRunService, IRouterApi, IServiceRegistry } from '@setu-ts/co
 import type { IDatabaseService } from '@setu-ts/database-plugin';
 import { validateBody, validateHeaders, validateParams } from '@setu-ts/validation-plugin';
 import { SUPPORT_AGENT } from './support.agent.ts';
-import { orderSummary } from './support.orders.ts';
-import type { Order, OrderSummary, Refund } from './support.orders.ts';
+import { APPROVERS, summarize } from './support.orders.ts';
+import type { Order, Refund } from './support.orders.ts';
 import {
   AcceptedResponse,
   ApprovalParams,
   DecisionBody,
   DemoUserHeaders,
+  MeResponse,
   OrdersResponse,
   RunParams,
   RunViewResponse,
@@ -95,20 +96,37 @@ export function registerSupportRoutes(router: IRouterApi, services?: IServiceReg
     });
   });
 
+  router.get('/me', {
+    middleware: [demoUser],
+    schema: { response: { 200: MeResponse } },
+    handler: (ctx) => {
+      const id = ctx.request.user?.id ?? '';
+      return ctx.response.json({ id, approver: APPROVERS.includes(id) });
+    },
+  });
+
+  // The caller's own orders; a support lead sees every order.
   router.get('/orders', {
+    middleware: [demoUser],
     schema: { response: { 200: OrdersResponse } },
     handler: async (ctx) => {
-      const database = services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+      const user = ctx.request.user?.id;
+      const orders = services
+        .get<IDatabaseService>(CAPABILITIES.DATABASE)
+        .getRepository<Order>('Order');
+      const rows =
+        user !== undefined && APPROVERS.includes(user)
+          ? await orders.findAll({ orderBy: { id: 'asc' } })
+          : await orders.findAll({ where: { ownerId: user ?? '' }, orderBy: { id: 'asc' } });
       const repos = {
-        orders: database.getRepository<Order>('Order'),
-        refunds: database.getRepository<Refund>('Refund'),
+        orders,
+        refunds: services
+          .get<IDatabaseService>(CAPABILITIES.DATABASE)
+          .getRepository<Refund>('Refund'),
       };
-      const orders: OrderSummary[] = [];
-      for (const { id } of await repos.orders.findAll({ orderBy: { id: 'asc' } })) {
-        const summary = await orderSummary(repos, id);
-        if (summary) orders.push(summary);
-      }
-      return ctx.response.json({ orders });
+      const summaries = [];
+      for (const order of rows) summaries.push((await summarize(repos, order)).summary);
+      return ctx.response.json({ orders: summaries });
     },
   });
 }

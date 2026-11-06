@@ -64,7 +64,7 @@ describe('support e2e', () => {
         `${server.baseUrl}/runs/${runId}/approvals/${encodeURIComponent(view.pendingApprovals[0]!.id)}`,
         {
           method: 'POST',
-          headers: { 'content-type': 'application/json' },
+          headers: { 'content-type': 'application/json', 'x-demo-user': 'lead' },
           body: JSON.stringify({ approved: true }),
         },
       );
@@ -90,7 +90,7 @@ describe('support e2e', () => {
         assert.deepStrictEqual(page.status, 200);
         const html = await page.text();
         assert.match(html, /Durable support agent/);
-        assert.match(html, /<script src="\/ui\/run\.js"><\/script>/);
+        assert.match(html, /<script type="module" src="\/ui\/run\.js"><\/script>/);
       }
       const script = await fetch(`${server.baseUrl}/ui/run.js`);
       assert.deepStrictEqual(script.status, 200);

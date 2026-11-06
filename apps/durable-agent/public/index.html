@@ -309,7 +309,7 @@
     <header>
       <h1>Durable support agent</h1>
       <label for="user">Acting as</label>
-      <input id="user" value="demo" maxlength="32" autocomplete="off" />
+      <input id="user" value="priya" maxlength="32" autocomplete="off" />
     </header>
     <main>
       <section>
@@ -321,8 +321,9 @@
         </div>
         <div id="log">
           <div class="empty" id="empty">
-            Ask for a refund, for example: “My headphones on order A-1001 rattle, please refund
-            $45.” The agent looks the order up, then asks you to approve the refund. Reload the page
+            You are Priya, the customer on order A-1001. Ask for a refund, for example: “My
+            headphones rattle, please refund $45.” The agent looks the order up and asks a support
+            lead to approve: switch “Acting as” to <strong>lead</strong> to decide. Reload the page
             or restart the server at any point: the run carries on where it was.
           </div>
         </div>
@@ -341,6 +342,6 @@
         <p>Refunds appear here once they are issued. Each one is written exactly once.</p>
       </aside>
     </main>
-    <script src="/ui/run.js"></script>
+    <script type="module" src="/ui/run.js"></script>
   </body>
 </html>

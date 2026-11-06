@@ -46,15 +46,18 @@ function results(prompt: readonly Part[]): Part[] {
 }
 
 /**
- * A model that plays a fixed support conversation for order A-1001: look the
- * order up, ask to refund `amountCents`, then answer with the outcome. Each
+ * A model that plays a fixed support conversation for one order (default
+ * A-1001): look it up, ask to refund `amountCents`, then answer with the outcome. Each
  * step is chosen from the tool results in the prompt, so the model carries no
  * state and behaves the same after the process serving the run restarts.
  *
  * @param options - The refund amount, and an optional gate the model waits on before every call
  * @returns The model, and every prompt it was called with
  */
-export function supportScript(options: { amountCents?: number; gate?: () => Promise<void> } = {}) {
+export function supportScript(
+  options: { orderId?: string; amountCents?: number; gate?: () => Promise<void> } = {},
+) {
+  const orderId = options.orderId ?? 'A-1001';
   const prompts: Part[][] = [];
   const model = new MockLanguageModelV4({
     doStream: async ({ prompt }) => {
@@ -63,12 +66,12 @@ export function supportScript(options: { amountCents?: number; gate?: () => Prom
       const done = results(prompt as unknown as Part[]);
       const last = done.at(-1);
       if (done.length === 0)
-        return { stream: stream(call('lookup-1', 'lookupOrder', { orderId: 'A-1001' })) };
+        return { stream: stream(call('lookup-1', 'lookupOrder', { orderId })) };
       if (last?.['toolName'] === 'lookupOrder')
         return {
           stream: stream(
             call('refund-1', 'issueRefund', {
-              orderId: 'A-1001',
+              orderId,
               amountCents: options.amountCents ?? 4500,
               reason: 'Left ear cup rattles',
             }),

@@ -455,7 +455,9 @@ instead of calling the tool again.
 
 The page at `/ui` keeps the run id in the URL. With `DATABASE_URL` set (after `db:setup`), stop the
 server while the refund waits, start it again and approve from the new process. The identity is a
-demonstration header, `x-demo-user`; runs belong to the user who started them.
+demonstration header, `x-demo-user`: customers (`priya`, `tomas`, `amara`) own one order each and
+can only ask about their own, and only `lead` approves a refund (`canDecide`), so nobody approves
+their own. Each refund's key is its number on the order, so two racing refunds cannot overspend it.
 
 ```bash
 pnpm --dir apps/durable-agent run smoke

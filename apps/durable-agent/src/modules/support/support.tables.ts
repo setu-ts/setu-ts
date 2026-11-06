@@ -8,18 +8,20 @@ const num = (name: string) => bigint(name, { mode: 'number' });
 /** The seeded orders the agent looks up. */
 export const orders = pgTable('support_orders', {
   id: text('id').primaryKey(),
+  ownerId: text('owner_id').notNull(),
   customer: text('customer').notNull(),
   item: text('item').notNull(),
   amountCents: integer('amount_cents').notNull(),
 });
 
-/** One row per refund the agent issued; the id is the tool call's idempotency key. */
+/** One row per refund the agent issued; the id is the order id and the refund's number on it. */
 export const refunds = pgTable('support_refunds', {
   id: text('id').primaryKey(),
   orderId: text('order_id').notNull(),
   amountCents: integer('amount_cents').notNull(),
   reason: text('reason').notNull(),
   runId: text('run_id').notNull(),
+  callKey: text('call_key').notNull(),
   createdAt: num('created_at').notNull(),
 });
 

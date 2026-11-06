@@ -3,18 +3,24 @@
 -- ON CONFLICT DO NOTHING. The memory database needs none of it.
 
 CREATE TABLE IF NOT EXISTS support_orders (
-  id           text    PRIMARY KEY,
-  customer     text    NOT NULL,
-  item         text    NOT NULL,
-  amount_cents integer NOT NULL
+  id             text    PRIMARY KEY,
+  owner_id       text    NOT NULL,
+  customer       text    NOT NULL,
+  item           text    NOT NULL,
+  amount_cents   integer NOT NULL
 );
+CREATE INDEX IF NOT EXISTS support_orders_owner ON support_orders (owner_id);
 
+-- The id is the order id and the refund's number on it (A-1001#1, A-1001#2):
+-- two refunds racing on one order try the same key, so the second fails
+-- instead of both passing the "not more than is left" check.
 CREATE TABLE IF NOT EXISTS support_refunds (
   id           text    PRIMARY KEY,
   order_id     text    NOT NULL,
   amount_cents integer NOT NULL,
   reason       text    NOT NULL,
   run_id       text    NOT NULL,
+  call_key     text    NOT NULL,
   created_at   bigint  NOT NULL
 );
 CREATE INDEX IF NOT EXISTS support_refunds_order ON support_refunds (order_id);
@@ -95,8 +101,8 @@ CREATE TABLE IF NOT EXISTS agent_run_approvals (
 CREATE INDEX IF NOT EXISTS agent_run_approvals_status ON agent_run_approvals (status, deadline);
 CREATE INDEX IF NOT EXISTS agent_run_approvals_run ON agent_run_approvals (run_id, seq);
 
-INSERT INTO support_orders (id, customer, item, amount_cents) VALUES
-  ('A-1001', 'Priya Natarajan', 'Noise-cancelling headphones', 18900),
-  ('A-1002', 'Tomás Ferreira', 'Mechanical keyboard', 12450),
-  ('A-1003', 'Amara Okafor', 'USB-C dock', 8999)
+INSERT INTO support_orders (id, owner_id, customer, item, amount_cents) VALUES
+  ('A-1001', 'priya', 'Priya Natarajan', 'Noise-cancelling headphones', 18900),
+  ('A-1002', 'tomas', 'Tomás Ferreira', 'Mechanical keyboard', 12450),
+  ('A-1003', 'amara', 'Amara Okafor', 'USB-C dock', 8999)
 ON CONFLICT (id) DO NOTHING;

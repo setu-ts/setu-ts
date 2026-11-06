@@ -14,7 +14,12 @@ const runtime = createRuntimeServices();
 // REDIS_URL's TypeError carries the URL, password included, as `input`.
 async function boot() {
   const app = await createApp();
-  await app.start({ port: Number(runtime.env.PORT ?? '3000') });
+  // Loopback only by default: the example trusts a demonstration identity
+  // header, so it must not be reachable from the network unless you say so.
+  await app.start({
+    port: Number(runtime.env.PORT ?? '3000'),
+    hostname: runtime.env.HOST ?? '127.0.0.1',
+  });
   return app;
 }
 
