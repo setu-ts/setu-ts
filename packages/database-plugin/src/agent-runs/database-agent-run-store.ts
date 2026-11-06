@@ -325,8 +325,11 @@ export class DatabaseAgentRunStore implements IAgentRunStore {
     // Decisions and waking a run span two entities. Rotate a bounded waiting
     // scan so a crash between those writes cannot strand an accepted decision.
     const waiting = await this.#repo('run').findAll(this.#waitingQuery(limit, this.#waitingAfter));
+    const result = await this.#valid([...rows, ...waiting], 'quarantine');
+    // Advanced only once the page is handled: a failed quarantine write
+    // leaves the cursor, so the next sweep reads the same page again.
     this.#waitingAfter = waiting.length < limit ? undefined : (waiting.at(-1)!.id as string);
-    return await this.#valid([...rows, ...waiting], 'quarantine');
+    return result;
   }
   /** @inheritdoc */
   async terminal(before: number, limit: number): Promise<readonly AgentRunRow[]> {

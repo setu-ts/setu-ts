@@ -471,19 +471,41 @@ describe('database agent run store', () => {
     const store = new DatabaseAgentRunStore(db);
     const runs = db.getRepository<Record<string, unknown>>('AgentRun');
     await runs.create({ ...row(), id: 'bad-ready', status: 'ready', entryCount: 0.5 });
+    // Below the probe's retention bound, so the old probe would have purged it.
     await runs.create({
       ...row(),
       id: 'bad-done',
       status: 'completed',
       entryCount: 0.5,
-      updatedAt: 0,
+      updatedAt: -1,
     });
+    await runs.create({ ...row(), id: 'wait-1', status: 'waiting' });
+    await runs.create({ ...row(), id: 'wait-2', status: 'waiting' });
     await store.verify();
     expect((await runs.findById('bad-ready'))?.status).toBe('ready');
     expect(await runs.findById('bad-done')).not.toBeNull();
-    // The sweep itself still takes them out of its queries.
-    await store.resumable(100, 5);
+    // The waiting scan still starts at its first page.
+    const waitingIds = async () =>
+      (await store.resumable(100, 1)).map((r) => r.id).filter((id) => id.startsWith('wait'));
+    expect(await waitingIds()).toEqual(['wait-1']);
+    expect(await waitingIds()).toEqual(['wait-2']);
+    // The sweep itself still takes the malformed ready run out of its queries.
     expect((await runs.findById('bad-ready'))?.status).toBe('failed');
+    await db.close();
+  });
+  it('keeps the waiting cursor when a quarantine write fails', async () => {
+    const db = await memoryService();
+    const store = new DatabaseAgentRunStore(db);
+    const runs = db.getRepository<Record<string, unknown>>('AgentRun');
+    await runs.create({ ...row(), id: 'w1', status: 'waiting', entryCount: 0.5 });
+    await runs.create({ ...row(), id: 'w2', status: 'waiting' });
+    await runs.create({ ...row(), id: 'w3', status: 'waiting' });
+    const write = vi.spyOn(runs, 'updateWhere').mockRejectedValueOnce(new Error('store down'));
+    await expect(store.resumable(100, 2)).rejects.toThrow('store down');
+    write.mockRestore();
+    // The same page again: w1 is quarantined now, w2 is returned.
+    expect((await store.resumable(100, 2)).map((r) => r.id)).toEqual(['w2']);
+    expect((await runs.findById('w1'))?.status).toBe('failed');
     await db.close();
   });
 });

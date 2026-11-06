@@ -381,18 +381,24 @@ describe('AgentRunService', () => {
     const h = await harness(definition(), ai);
     try {
       await h.store.create(row({ id: 'long', status: 'ready' }));
-      vi.spyOn(h.store, 'terminal').mockRejectedValueOnce(new Error('store down'));
+      let terminalEntered!: () => void;
+      const terminalCalled = new Promise<void>((resolve) => (terminalEntered = resolve));
+      vi.spyOn(h.store, 'terminal').mockImplementationOnce(() => {
+        terminalEntered();
+        return Promise.reject(new Error('store down'));
+      });
       let settled = false;
-      const sweeping = h.service.sweep().then(
+      const sweeping = h.service.sweep();
+      void sweeping.then(
         () => (settled = true),
         () => (settled = true),
       );
-      for (let n = 0; n < 200; n++) await Promise.resolve();
+      await terminalCalled;
+      await new Promise((resolve) => setTimeout(resolve, 0));
       // The purge step failed, but the recovered run is still being awaited.
       expect(settled).toBe(false);
       releaseRun();
-      await sweeping;
-      await expect(Promise.resolve(settled)).resolves.toBe(true);
+      await expect(sweeping).rejects.toThrow('store down');
       expect((await h.store.get('long'))?.status).toBe('completed');
     } finally {
       await h.close();
