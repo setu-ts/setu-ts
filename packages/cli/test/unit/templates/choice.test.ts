@@ -88,6 +88,8 @@ describe('resolveTemplateChoice', () => {
     expect(choice.ok).toBe(false);
     if (choice.ok) return;
     expect(choice.message).toContain('cannot apply to --template full-stack');
+    expect(choice.message).toContain('functional-only');
+    expect(choice.message).toContain('no seam for decorated classes');
   });
 
   // The plan (§3.3) and the CHANGELOG both say `--style` is refused on

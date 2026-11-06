@@ -14,9 +14,13 @@ unregister the global provider. Use one global provider per process.
 
 Install peers within the ranges declared by this package's `peerDependencies`, where this package is
 installed — usually the root in an npm/Yarn/Bun workspace. A peer nested only under a member cannot
-be loaded by a root-hoisted plugin. `setu add telemetry` records the four console-exporter peers in
-both manifests in a Node or Bun Setu workspace. See
-[Optional peers in a workspace](https://github.com/setu-ts/setu-ts/blob/main/docs/plugins.md#optional-peers-in-a-workspace).
+be loaded by a root-hoisted plugin. `setu add telemetry` records `@opentelemetry/api`,
+`@opentelemetry/sdk-trace-base`, `@opentelemetry/resources` and
+`@opentelemetry/context-async-hooks`, plus `@opentelemetry/exporter-trace-otlp-http` everywhere but
+Cloudflare Workers; on Node it also records `@opentelemetry/instrumentation` and, when the project
+has a Redis client, its instrumentation (`@opentelemetry/instrumentation-ioredis` or
+`@opentelemetry/instrumentation-redis`). See
+[Optional peers in a workspace](https://setu-ts.dev/docs/plugins/#optional-peers-in-a-workspace).
 
 ## Installation
 
@@ -194,9 +198,7 @@ at registration and continues to omit the query string.
 
 The plugin exports to **one** endpoint. To fan a single trace stream out to several vendors, point
 it at an OpenTelemetry Collector — see
-[docs/telemetry-collector-fanout.md](https://github.com/setu-ts/setu-ts/blob/main/docs/telemetry-collector-fanout.md)
-and the reference config in
-[docker/otel-collector/](https://github.com/setu-ts/setu-ts/tree/main/docker/otel-collector).
+[the telemetry fan-out guide](https://setu-ts.dev/docs/telemetry-collector-fanout/).
 
 ## Trace diagnostics (M98g)
 

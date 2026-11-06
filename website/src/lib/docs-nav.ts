@@ -54,6 +54,7 @@ export const DOCS_NAV: DocsNavGroup[] = [
       { slug: 'migration-nestjs', label: 'From NestJS' },
       { slug: 'migration-fastify', label: 'From Fastify' },
       { slug: 'upgrading', label: 'Upgrading Setu-TS' },
+      { slug: 'versioning', label: 'Versioning policy' },
     ],
   },
   {

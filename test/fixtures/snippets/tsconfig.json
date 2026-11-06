@@ -15,6 +15,8 @@
     "skipLibCheck": true,
     "types": ["node", "deno"],
     "paths": {
+      "~kernel/*": ["../../../.tmp/fence-aliases/kernel/*"],
+      "~/*": ["../../../.tmp/fence-aliases/app/*"],
       "@modelcontextprotocol/client": [
         "../../../node_modules/@modelcontextprotocol/client/dist/index.d.mts"
       ],

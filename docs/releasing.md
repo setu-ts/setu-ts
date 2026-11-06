@@ -222,14 +222,16 @@ holds, stale internal ranges, missing metadata and missing `dist` or `src` file 
 retries resume. A prerelease uses tag `next`; an ordinary release uses `latest`.
 
 `release:verify` checks version sites, source `workspace:^` ranges, release-list coverage, non-stub
-exports, non-empty READMEs, manifest metadata, release assets, changelog PRs and release shape. The
-changelog PR check exempts the release PR for the version being verified (`release/v<version>`): its
-source changes are the version bump, and the section it would have to name is the release itself.
-Without the exemption the check passes on the release PR, which is not merged yet, and fails on the
-tag (#452). JSR's slow-type dry run is replaced by `tsc -b` with `isolatedDeclarations`; the
-`@module`-first rule is retired because npm renders README.md. The `@since` gate reads JSR through
-0.8.x and later claims from npm tarball `package/src/` sources. `check:versions` still catches stale
-specifiers outside manifests; fixtures remain data.
+exports, non-empty READMEs, manifest metadata, release assets, changelog PRs, changelog link
+definitions and release shape. The changelog link check requires a `[x]: …` definition for every
+released heading and an `[unreleased]` that compares from the newest release, so a cut cannot leave
+either to a hand edit. The changelog PR check exempts the release PR for the version being verified
+(`release/v<version>`): its source changes are the version bump, and the section it would have to
+name is the release itself. Without the exemption the check passes on the release PR, which is not
+merged yet, and fails on the tag (#452). JSR's slow-type dry run is replaced by `tsc -b` with
+`isolatedDeclarations`; the `@module`-first rule is retired because npm renders README.md. The
+`@since` gate reads JSR through 0.8.x and later claims from npm tarball `package/src/` sources.
+`check:versions` still catches stale specifiers outside manifests; fixtures remain data.
 
 ### 3. Merge, tag, and let CI publish
 

@@ -43,7 +43,10 @@ it('checks emitted routes and rejects missing routes and rendered reading left o
   await mkdir(scratch, { recursive: true });
   const dist = await mkdtemp(`${scratch}/dist-`);
   await mkdir(`${dist}/packages/kernel`, { recursive: true });
-  await writeFile(`${dist}/packages/kernel/index.html`, '<a href="/">Home</a>');
+  await writeFile(
+    `${dist}/packages/kernel/index.html`,
+    '<h2 id="heading">Kernel</h2><a href="/">Home</a>',
+  );
   await writeFile(
     `${dist}/index.html`,
     '<a href="/packages/kernel/?q=1#heading">Kernel</a><a href="https://example.com">Outside</a>',
@@ -65,4 +68,42 @@ it('checks emitted routes and rejects missing routes and rendered reading left o
     '<a href="https://github.com/setu-ts/setu-ts/tree/main/apps/minimal/setu.config.ts">Example source</a>',
   );
   await expect(checkBuiltLinks(dist)).rejects.toThrow('reading target left on GitHub');
+});
+it('checks a cross-page fragment against the target page, and same-page behaviour is unchanged', async () => {
+  await mkdir(scratch, { recursive: true });
+  const dist = await mkdtemp(`${scratch}/dist-`);
+  await mkdir(`${dist}/packages/kernel`, { recursive: true });
+  await writeFile(
+    `${dist}/packages/kernel/index.html`,
+    '<h2 id="heading">Kernel</h2><a href="#heading">Same page</a>',
+  );
+  await writeFile(`${dist}/index.html`, '<a href="/packages/kernel/#heading">Kernel</a>');
+  expect(await checkBuiltLinks(dist)).toBe(2);
+  await writeFile(`${dist}/index.html`, '<a href="/packages/kernel/#nowhere">Kernel</a>');
+  await expect(checkBuiltLinks(dist)).rejects.toThrow(
+    'missing cross-page fragment /packages/kernel/#nowhere',
+  );
+  await writeFile(`${dist}/packages/kernel/index.html`, '<h2>Kernel</h2>');
+  await expect(checkBuiltLinks(dist)).rejects.toThrow('missing cross-page fragment');
+});
+
+it('checks fragments on direct .html targets, exempts /api/, and reports a malformed escape', async () => {
+  await mkdir(scratch, { recursive: true });
+  const dist = await mkdtemp(`${scratch}/dist-`);
+  await mkdir(`${dist}/api`, { recursive: true });
+  await writeFile(`${dist}/page.html`, '<h2 id="here">Page</h2>');
+  await writeFile(`${dist}/api/index.html`, '<h2>API</h2>');
+  await writeFile(
+    `${dist}/index.html`,
+    '<a href="/page.html#here">Page</a><a href="/api/#any-member">API</a>',
+  );
+  expect(await checkBuiltLinks(dist)).toBe(3);
+  await writeFile(`${dist}/index.html`, '<a href="/page.html#gone">Page</a>');
+  await expect(checkBuiltLinks(dist)).rejects.toThrow(
+    'missing cross-page fragment /page.html#gone',
+  );
+  await writeFile(`${dist}/index.html`, '<a href="/page.html#%E0%A4%A">Page</a>');
+  await expect(checkBuiltLinks(dist)).rejects.toThrow('missing cross-page fragment');
+  await writeFile(`${dist}/index.html`, '<a href="/bad%E0%A4%A/">Bad</a>');
+  await expect(checkBuiltLinks(dist)).rejects.toThrow('malformed internal link /bad%E0%A4%A/');
 });

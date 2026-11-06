@@ -9,6 +9,7 @@
  */
 
 import { cliCommand, cliInvocation } from '../templates/project-files.ts';
+import { siteUrl } from '../utils/repository-links.ts';
 import type { GeneratedFile } from '../utils/file-writer.ts';
 import {
   MEMBERS_DIR,
@@ -126,7 +127,7 @@ export function workspaceRootFiles(
 
   const readme = `# ${name}
 
-A [Setu-TS](https://github.com/setu-ts/setu-ts) workspace: one repository, many deployable services.
+A [Setu-TS](${siteUrl('')}) workspace: one repository, many deployable services.
 
 ## Add a service
 

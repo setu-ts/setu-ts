@@ -159,15 +159,16 @@ export function resolveTemplateChoice(args: ParsedArgs): TemplateChoice {
   }
 
   // A template that is neither styleable nor an alias (full-stack) composes
-  // through a starter and has no controller or ingress seam for decorated
-  // classes. Either style is refused there — `functional` would be a flag with no
-  // effect, which is refused wherever it would be a no-op (M72).
+  // through a starter and is functional-only: it has no seam for decorated
+  // classes to register through. Either style is refused there — `functional`
+  // would be a flag with no effect, which is refused wherever it would be a
+  // no-op (M72).
   if (template.classBased === undefined && template.aliasOf === undefined) {
     return {
       ok: false,
       message:
-        `--style ${styleFlag} cannot apply to --template ${template.name}: it composes through a ` +
-        `starter and has no controller or ingress seam for decorated classes to register through.`,
+        `--style ${styleFlag} cannot apply to --template ${template.name}: it is functional-only ` +
+        `and has no seam for decorated classes to register through.`,
     };
   }
 
