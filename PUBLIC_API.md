@@ -7,6 +7,8 @@
 
 ## Table of Contents
 
+- [Durable agent runs (`@setu-ts/common` + `@setu-ts/agent-runs-plugin` + `@setu-ts/database-plugin`)](#durable-agent-runs-setu-tscommon--setu-tsagent-runs-plugin--setu-tsdatabase-plugin)
+
 - [Shared reconnect supervisor (`@setu-ts/common`)](#shared-reconnect-supervisor-setu-tscommon)
 - [Request-bound services (`@setu-ts/common`)](#request-bound-services-setu-tscommon)
 - [Dotenv parser (`@setu-ts/common`)](#dotenv-parser-setu-tscommon)
@@ -414,6 +416,49 @@ import { parseEnv } from '@setu-ts/common';
 parseEnv('export A="x y"\nB=plain # note\nEMPTY=\n');
 // { A: 'x y', B: 'plain', EMPTY: '' }
 ```
+
+## Durable agent runs (`@setu-ts/common` + `@setu-ts/agent-runs-plugin` + `@setu-ts/database-plugin`)
+
+Since 0.12.0, `CAPABILITIES.AGENT_RUNS` (`'agent-runs'`) binds `IAgentRunService`. `AgentRunsPlugin`
+persists SDK calls, leases, approvals and replay; applications supply models. The required SDK peer
+is `ai@^7.0.159`, loaded once at registration by guarded dynamic import.
+
+| Export                                                                                 | Package           | Contract                                                                                                                                                                                                                                                                                                  |
+| -------------------------------------------------------------------------------------- | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `IAgentRunService`                                                                     | common            | `start(ctx, definition, { messages }): Promise<{ runId }>`; `respond(ctx, runId): Promise<HandlerResult>`; `decide(ctx, runId, approvalId, { approved, reason? }): Promise<void>`; `cancel(ctx, runId): Promise<void>`; `get(ctx, runId): Promise<AgentRunView>`; `sweep(): Promise<AgentRunSweepReport>` |
+| `IAgentRunStore`                                                                       | common            | `verify`, `create`, `get`, CAS `update`, fenced `appendEntry`/`appendChunks`, counter-bounded `entries`/`chunks`, `createApproval`, `approvals`, single-use `decide`, bounded `expired`/`resumable`/`terminal`, conditional `purge`                                                                       |
+| `AgentRunJson`, `AgentRunStatus`                                                       | common            | Recursive JSON; `running`, `waiting`, `ready`, `completed`, `failed`, `cancelled`                                                                                                                                                                                                                         |
+| `AgentRunRow`                                                                          | common            | Identity, definition/version, status/input, lease owner/version/deadline, committed entry/chunk counters and approval ids, step boundary, cancellation, error and timestamps                                                                                                                              |
+| `AgentRunEntryRow`                                                                     | common            | Ordered model/tool messages, finish reason, usage, call id and model-call chunk boundary                                                                                                                                                                                                                  |
+| `AgentRunChunkBatch`                                                                   | common            | Ordered JSON UI chunks with run/tenant identity                                                                                                                                                                                                                                                           |
+| `AgentRunApprovalRow`                                                                  | common            | Call/tool ids and input, pending/approved/denied/expired state, deadline and decision identity/time/reason                                                                                                                                                                                                |
+| `AgentRunView`                                                                         | common            | `{ id, status, definition, version, messages, pendingApprovals, error? }`                                                                                                                                                                                                                                 |
+| `AgentRunSweepReport`                                                                  | common            | `{ expired, resumed, purged }`                                                                                                                                                                                                                                                                            |
+| `AgentRunNotFoundError`                                                                | common            | Same 404 for missing and another tenant's run                                                                                                                                                                                                                                                             |
+| `AgentRunStateError`                                                                   | common            | 409, or 413 for oversized input                                                                                                                                                                                                                                                                           |
+| `AgentRunApprovalError`                                                                | common            | 409 for decided/expired approval; 403 when forbidden                                                                                                                                                                                                                                                      |
+| `AgentRunDefinitionError`, `AgentRunLeaseLostError`                                    | common            | Unhinted configuration and internal fencing failures                                                                                                                                                                                                                                                      |
+| `AgentRunStoreUnavailableError`                                                        | common            | 503 with value-free detail, `reason` and optional cause                                                                                                                                                                                                                                                   |
+| `AgentRunsPlugin`, `AgentRunsPluginOptions`                                            | agent-runs-plugin | Single-instance plugin; required `store` (port or registry factory), nonempty `definitions`, bounds below                                                                                                                                                                                                 |
+| `defineAgentRun`, `AgentRunDefinition`                                                 | agent-runs-plugin | Frozen definition: required `name`, `version`, `model(run)`, `maxOutputTokens`; optional `compatibleVersions`, `system`, SDK `tools`, `toolsContext(run, call)`, `maxSteps` (20), `approval`, `timeouts: { modelMs?, toolMs? }`                                                                           |
+| `AgentRunContext`                                                                      | agent-runs-plugin | `{ runId, tenantId, principalId, services, signal }`, from the stored row                                                                                                                                                                                                                                 |
+| `AgentRunToolCall`                                                                     | agent-runs-plugin | `{ toolCallId, toolName, idempotencyKey, unitOfWork }` for the context builder                                                                                                                                                                                                                            |
+| `AgentRunApprovalOptions`                                                              | agent-runs-plugin | `tools` true/predicate map, `timeoutMs` (86400000, max 2592000000), `canDecide?`                                                                                                                                                                                                                          |
+| `VERSION`                                                                              | agent-runs-plugin | Package version constant                                                                                                                                                                                                                                                                                  |
+| `createDatabaseAgentRunStore`, `DatabaseAgentRunStore`, `DatabaseAgentRunStoreOptions` | database-plugin   | Factory returning `RegistryFactory<IAgentRunStore>`; class accepts database service and options. `entities: { run?, entry?, chunks?, approval? }`, `database?`; defaults `AgentRun`, `AgentRunEntry`, `AgentRunChunks`, `AgentRunApproval`                                                                |
+
+Plugin defaults: `leaseMs` 30000 (renew every third; greater than three skew margins),
+`maxClockSkewMs` 5000 (max 60000), `sweepIntervalMs` 5000 (0 disables), `sweepBatch` 25,
+`retentionMs` 86400000, `flushIntervalMs` 100, `flushChunks` 64, `maxLogBytes` 8388608,
+`pollIntervalMs` 250, `maxInputBytes` 262144; all integers. `background(ctx, work)?` receives
+detached execution promises. Model/tool timeouts use runtime timers; `maxSteps` is 1–1000.
+
+SDK tools reach the model without execution hooks. Model output commits before transactional
+`IIdempotencyService.within` tool execution. Outside effects need the supplied stable key at the
+outside API. Tool context is schema-validated. Default approval authorization requires matching,
+defined principals. Every request method enforces tenant identity. SDK UI-message SSE headers and
+`x-setu-run-id` accompany replay, with batch.index event ids. Terminal reconnect without an id is
+204; an explicit id serves the retained remainder. See [durable runs](docs/durable-runs.md).
 
 ## Vector store (`@setu-ts/common` + `@setu-ts/vector-store-plugin`)
 

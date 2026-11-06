@@ -33,6 +33,7 @@ it('lists 49 exact sunset descriptions without a token or network use', async ()
       'idempotency-plugin',
       'mcp-plugin',
       'vector-store-plugin',
+      'agent-runs-plugin',
       'create',
     ])
       expect(result.stdout).not.toContain(`would set @setu-ts/${name}\n`);

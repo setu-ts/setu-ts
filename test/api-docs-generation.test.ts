@@ -422,6 +422,7 @@ error[private-type-ref]: public type references private type
   describe('CLEAN_PACKAGES constant', () => {
     it('contains exactly the thirty-two re-measured clean packages', () => {
       expect([...CLEAN_PACKAGES].sort()).toEqual([
+        'agent-runs-plugin',
         'auth-plugin',
         'common',
         'config-plugin',
@@ -636,7 +637,7 @@ error[private-type-ref]: public type references private type
       // + ./worker), cli has 2 exports (./src/index.ts + ./main),
       // localization-plugin has 2 (./src/index.ts + ./format, M103), rest have 1
       // each = 54 + 1 (extra runtime) + 1 (extra cli) + 1 (extra localization) = 57
-      expect(result.targets).toHaveLength(57);
+      expect(result.targets).toHaveLength(58);
     });
 
     it('maps each target to its correct package name', async () => {

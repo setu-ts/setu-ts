@@ -234,6 +234,7 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
     pseudocode: 0,
     skipped: 0,
   },
+  'docs/durable-runs.md': { total: 2, ts: 1, compile: 1, external: 0, pseudocode: 0, skipped: 1 },
   'docs/ai.md': { total: 10, ts: 9, compile: 9, external: 0, pseudocode: 0, skipped: 1 },
   'docs/mcp.md': { total: 19, ts: 16, compile: 16, external: 0, pseudocode: 0, skipped: 3 },
   // M135: the retrieval guide; every TypeScript fence compiles.
@@ -279,12 +280,12 @@ const EXPECTED_AGGREGATE: FenceCounts = {
   // M129: +1 skipped shell fence in docs/cli.md (`setu client`).
   // M135: docs/retrieval.md joins (+10: 8 compiling, 2 skipped); +1 skipped in examples.md.
   // Examples walk-through: +1 skipped shell fence in examples.md (realtime-clients).
-  total: 354,
-  ts: 262,
-  compile: 229,
+  total: 356,
+  ts: 263,
+  compile: 230,
   external: 33,
   pseudocode: 0,
-  skipped: 92,
+  skipped: 93,
 };
 
 describe('actual-fence compiler — every curated guide (shared engine)', () => {

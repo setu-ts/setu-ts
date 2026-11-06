@@ -599,6 +599,24 @@ emitDecoratorMetadata).
 
 ---
 
+### @setu-ts/agent-runs-plugin
+
+**Purpose:** Durable model/tool runs with recovery, approvals and stream replay.
+
+**Runtime Compatibility:**
+
+| Deno | Node | Bun | Workers                                         |
+| ---- | ---- | --- | ----------------------------------------------- |
+| ✅   | ✅   | ✅  | ✅ (host background lifetime and cron required) |
+
+Persists model/tool runs with fenced leases, transactional idempotency, timed approvals and
+UI-message SSE replay. Provides `CAPABILITIES.AGENT_RUNS` (`IAgentRunService`); requires runtime,
+idempotency, a supplied run store and the `ai@^7.0.159` peer. Install manually and register
+`AgentRunsPlugin({ store, definitions })`. See [durable runs](./durable-runs.md), the
+[README](../packages/agent-runs-plugin/README.md),
+[agent card](../packages/agent-runs-plugin/AGENT_CARD.md) and
+[API Reference](./api/modules/agent-runs-plugin_src.html).
+
 ### @setu-ts/vector-store-plugin
 
 **Purpose:** Tenant-scoped vector storage and similarity search, with filters that are refused

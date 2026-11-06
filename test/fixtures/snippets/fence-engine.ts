@@ -95,6 +95,7 @@ export const GUIDES = [
   'docs/runtime-deployment.md',
   'docs/authorization.md',
   'docs/webhooks.md',
+  'docs/durable-runs.md',
   'docs/ai.md',
   'docs/mcp.md',
   'docs/retrieval.md',

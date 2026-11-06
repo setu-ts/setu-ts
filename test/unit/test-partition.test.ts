@@ -68,6 +68,7 @@ describe('test partition', () => {
       'SMTP_URL',
       'MONGODB_URI',
       'DYNAMODB_ENDPOINT',
+      'AGENT_RUNS_PG_URL',
       'BIGTABLE_EMULATOR_ENDPOINT',
       'NATS_URL',
       'KAFKA_BROKERS',

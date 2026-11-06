@@ -64,7 +64,8 @@
     "packages/create/src/index.ts",
     "packages/starters/rest-starter/src/index.ts",
     "packages/starters/microservice-starter/src/index.ts",
-    "packages/starters/full-stack-starter/src/index.ts"
+    "packages/starters/full-stack-starter/src/index.ts",
+    "packages/agent-runs-plugin/src/index.ts"
   ],
   "packagesRequiringDocumentation": [
     "@setu-ts/common",
@@ -113,6 +114,7 @@
     "@setu-ts/telemetry-plugin",
     "@setu-ts/validation-plugin",
     "@setu-ts/vector-store-plugin",
+    "@setu-ts/agent-runs-plugin",
     "@setu-ts/view-plugin",
     "@setu-ts/websocket-plugin",
     "@setu-ts/worker-pool-plugin",

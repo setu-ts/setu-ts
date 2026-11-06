@@ -954,6 +954,46 @@ importers:
         specifier: ^4.20.6
         version: 4.23.15
 
+  packages/agent-runs-plugin:
+    dependencies:
+      '@setu-ts/common':
+        specifier: workspace:^
+        version: link:../common
+    devDependencies:
+      '@setu-ts/database-plugin':
+        specifier: workspace:^
+        version: link:../database-plugin
+      '@setu-ts/idempotency-plugin':
+        specifier: workspace:^
+        version: link:../idempotency-plugin
+      '@setu-ts/kernel':
+        specifier: workspace:^
+        version: link:../kernel
+      '@setu-ts/runtime':
+        specifier: workspace:^
+        version: link:../runtime
+      '@setu-ts/testing':
+        specifier: workspace:^
+        version: link:../testing
+      '@types/node':
+        specifier: ^24
+        version: 24.19.2
+      ai:
+        specifier: ^7.0.159
+        version: 7.0.159(zod@4.6.7)
+      esbuild:
+        specifier: ~0.28.0
+        version: 0.28.2
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: 5.0.3
+        version: 5.0.3(@opentelemetry/api@1.10.0)(@types/node@24.19.2)(@vitest/coverage-v8@5.0.3)(vite@8.3.5(@types/node@24.19.2)(esbuild@0.28.2)(tsx@4.23.15)(yaml@2.9.1))
+      zod:
+        specifier: ^4.6.6
+        version: 4.6.7
+
   packages/audit-plugin:
     dependencies:
       '@setu-ts/common':
@@ -1355,6 +1395,9 @@ importers:
       '@setu-ts/runtime':
         specifier: workspace:^
         version: link:../runtime
+      '@setu-ts/testing':
+        specifier: workspace:^
+        version: link:../testing
       '@types/node':
         specifier: ^24
         version: 24.19.2

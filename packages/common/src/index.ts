@@ -804,3 +804,26 @@ export type {
 export { parseEnv } from './env-file.ts';
 
 export { RouteRegistrationError } from './errors/route-registration.ts';
+
+/** Durable run contracts and persisted JSON rows. */
+export type {
+  IAgentRunService,
+  IAgentRunStore,
+  AgentRunRow,
+  AgentRunEntryRow,
+  AgentRunChunkBatch,
+  AgentRunApprovalRow,
+  AgentRunStatus,
+  AgentRunJson,
+  AgentRunView,
+  AgentRunSweepReport,
+} from './services/agent-runs.ts';
+/** Durable run errors and their value-free HTTP hints. */
+export {
+  AgentRunNotFoundError,
+  AgentRunStateError,
+  AgentRunApprovalError,
+  AgentRunDefinitionError,
+  AgentRunLeaseLostError,
+  AgentRunStoreUnavailableError,
+} from './errors/agent-runs.ts';
