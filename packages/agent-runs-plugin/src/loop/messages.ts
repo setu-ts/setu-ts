@@ -92,7 +92,9 @@ export function calls(
         typeof p.toolCallId === 'string' &&
         typeof p.toolName === 'string' &&
         p.providerExecuted !== true &&
-        !settled.has(p.toolCallId)
+        !settled.has(p.toolCallId) &&
+        // A repeated call id would share the first call's approval row.
+        !result.some((call) => call.toolCallId === p.toolCallId)
       )
         result.push({ toolCallId: p.toolCallId, toolName: p.toolName, input: p.input ?? null });
     }

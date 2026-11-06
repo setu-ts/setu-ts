@@ -306,25 +306,56 @@ export class DatabaseAgentRunStore implements IAgentRunStore {
       limit,
     });
     this.#waitingAfter = waiting.length < limit ? undefined : (waiting.at(-1)!.id as string);
-    return [...rows, ...waiting].map((row) => decode<AgentRunRow>(row)).filter(valid);
+    return await this.#valid([...rows, ...waiting], 'quarantine');
   }
   /** @inheritdoc */
   async terminal(before: number, limit: number): Promise<readonly AgentRunRow[]> {
-    return (
-      await this.#repo('run').findAll({
-        filter: {
-          type: 'and',
-          filters: [
-            { type: 'comparison', field: 'status', operator: 'in', value: TERMINAL },
-            comparison('updatedAt', 'lt', before),
-          ],
-        },
-        orderBy: { updatedAt: 'asc' },
-        limit,
-      })
-    )
-      .map((row) => decode<AgentRunRow>(row))
-      .filter(valid);
+    const rows = await this.#repo('run').findAll({
+      filter: {
+        type: 'and',
+        filters: [
+          { type: 'comparison', field: 'status', operator: 'in', value: TERMINAL },
+          comparison('updatedAt', 'lt', before),
+        ],
+      },
+      orderBy: { updatedAt: 'asc' },
+      limit,
+    });
+    return await this.#valid(rows, 'purge');
+  }
+  /**
+   * Drop ill-formed rows from a bounded sweep query, and take each out of the
+   * query it matched, so a full batch of them cannot starve later sweeps: a
+   * resumable one is marked `failed` (`invalid-row`), a terminal one past
+   * retention is deleted with its children. Both writes are conditional.
+   */
+  async #valid(rows: readonly Row[], invalid: 'quarantine' | 'purge'): Promise<AgentRunRow[]> {
+    const result: AgentRunRow[] = [];
+    const repo = this.#repo('run');
+    for (const raw of rows) {
+      const row = decode<AgentRunRow>(raw);
+      if (valid(row)) {
+        result.push(row);
+        continue;
+      }
+      if (typeof raw.id !== 'string' || typeof raw.status !== 'string' || !repo.deleteWhere)
+        continue;
+      if (invalid === 'quarantine') {
+        await repo.updateWhere?.(
+          raw.id,
+          { status: raw.status },
+          { status: 'failed', error: 'invalid-row', leaseOwner: '' },
+        );
+        continue;
+      }
+      for (const kind of ['entry', 'chunks', 'approval'] as const) {
+        const children = this.#repo(kind);
+        for (const child of await children.findAll({ where: { runId: raw.id }, limit: 1000 }))
+          await children.deleteWhere?.(child.id as string, { runId: raw.id });
+      }
+      await repo.deleteWhere(raw.id, { status: raw.status });
+    }
+    return result;
   }
   /** @inheritdoc */
   async purge(run: AgentRunRow, limit = 25): Promise<boolean> {

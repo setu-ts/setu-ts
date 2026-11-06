@@ -228,4 +228,40 @@ describe('database agent run store', () => {
     await expect(store.appendEntry(row(), entry())).rejects.toBeInstanceOf(AgentRunLeaseLostError);
     await db.close();
   });
+  it('takes ill-formed rows out of the sweep queries so a full batch cannot starve them (audit F3)', async () => {
+    const db = await memoryService();
+    const store = new DatabaseAgentRunStore(db);
+    const runs = db.getRepository<Record<string, unknown>>('AgentRun');
+    for (let i = 0; i < 3; i++)
+      await runs.create({
+        ...row(),
+        id: `bad${i}`,
+        status: 'ready',
+        entryCount: 0.5,
+        updatedAt: 0,
+      });
+    await store.create({ ...row(), id: 'good', status: 'ready', updatedAt: 5 });
+    // A batch filled by ill-formed rows yields nothing this sweep...
+    expect(await store.resumable(100, 3)).toEqual([]);
+    expect((await runs.findById('bad0'))?.status).toBe('failed');
+    expect((await runs.findById('bad0'))?.error).toBe('invalid-row');
+    // ...and the next sweep reaches the valid run.
+    expect((await store.resumable(100, 3)).map((r) => r.id)).toEqual(['good']);
+    // Past retention, the quarantined rows are deleted with their children.
+    await db.getRepository('AgentRunEntry').create({ ...entry(), runId: 'bad0', leaseVersion: 0 });
+    expect(await store.terminal(10 ** 15, 3)).toEqual([]);
+    expect(await runs.findById('bad0')).toBeNull();
+    expect(await db.getRepository('AgentRunEntry').findAll({ where: { runId: 'bad0' } })).toEqual(
+      [],
+    );
+    // A row without a string id or status is skipped, not written.
+    await runs.create({ ...row(), id: 'odd', status: 'ready', entryCount: 0.5 });
+    const read = vi
+      .spyOn(runs, 'findAll')
+      .mockResolvedValueOnce([{ id: 7, status: 'ready' }])
+      .mockResolvedValueOnce([]);
+    expect(await store.resumable(100, 3)).toEqual([]);
+    read.mockRestore();
+    await db.close();
+  });
 });

@@ -157,6 +157,14 @@ describe('durable approvals', () => {
           h.service.decide(h.ctx('tenant', 'other'), runId, approval.id, { approved }),
         ).rejects.toMatchObject({ name: 'AgentRunNotFoundError' });
         await expect(h.service.decide(h.ctx(), runId, 'missing', { approved })).rejects.toThrow();
+        // A reason that is not a bounded string is refused before it is stored (audit F4).
+        for (const reason of [{ big: 'x' }, 'x'.repeat(1025)])
+          await expect(
+            h.service.decide(h.ctx(), runId, approval.id, {
+              approved,
+              reason: reason as unknown as string,
+            }),
+          ).rejects.toMatchObject({ name: 'AgentRunApprovalError' });
         await h.service.decide(h.ctx(), runId, approval.id, { approved, reason: 'reviewed' });
         await h.settle();
         expect((await h.service.get(h.ctx(), runId)).status).toBe('completed');

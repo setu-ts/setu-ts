@@ -77,7 +77,9 @@ export async function runTool(
       },
       async (unitOfWork: unknown) => {
         try {
-          const tool: ToolSet[string] | undefined = definition.tools?.[call.toolName];
+          const tools = definition.tools;
+          const tool: ToolSet[string] | undefined =
+            tools && Object.hasOwn(tools, call.toolName) ? tools[call.toolName] : undefined;
           if (!tool?.execute) throw new Error('Tool unavailable.');
           const context = definition.toolsContext?.(run, {
             toolCallId: call.toolCallId,

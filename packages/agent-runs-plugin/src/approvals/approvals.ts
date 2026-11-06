@@ -22,7 +22,10 @@ export async function prepareApprovals(
   let rows = await lease.store.approvals(lease.row.id);
   for (const call of calls(entry)) {
     if (rows.some((row) => row.toolCallId === call.toolCallId && row.seq === entry.seq)) continue;
-    const policy = definition.approval?.tools[call.toolName];
+    // Own properties only: a model-chosen name like `constructor` is no policy.
+    const policies = definition.approval?.tools;
+    const policy =
+      policies && Object.hasOwn(policies, call.toolName) ? policies[call.toolName] : undefined;
     const needsApproval =
       policy === true || (typeof policy === 'function' && (await policy(call.input, context)));
     const row: AgentRunApprovalRow = {
@@ -50,6 +53,8 @@ export async function prepareApprovals(
   }
   return rows.filter((row) => row.seq === entry.seq);
 }
+/** Longest decision reason accepted; it is stored, streamed and shown to the model. @internal */
+export const MAX_REASON_LENGTH = 1024;
 /** Whether the request's principal may decide this run's approvals. @internal */
 export function mayDecide(
   definition: AgentRunDefinition,
@@ -78,7 +83,9 @@ export async function decideApproval(
     !row ||
     row.status !== 'pending' ||
     row.deadline < now ||
-    typeof decision.approved !== 'boolean'
+    typeof decision.approved !== 'boolean' ||
+    (decision.reason !== undefined &&
+      (typeof decision.reason !== 'string' || decision.reason.length > MAX_REASON_LENGTH))
   )
     throw new AgentRunApprovalError();
   const decided = await store.decide(id, {

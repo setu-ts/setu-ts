@@ -319,4 +319,53 @@ describe('step loop: settled and void tool calls', () => {
       }
     }
   });
+  it('settles a repeated call id once and ignores inherited tool names (audit F1, F2)', async () => {
+    const ran: string[] = [];
+    const tool = (name: string) => ({
+      inputSchema: jsonSchema({}),
+      execute: async () => {
+        ran.push(name);
+        return name;
+      },
+    });
+    const ai = fakeAi([
+      {
+        messages: [
+          {
+            role: 'assistant',
+            content: [
+              { type: 'tool-call', toolCallId: 'c1', toolName: 'look', input: {} },
+              { type: 'tool-call', toolCallId: 'c1', toolName: 'pay', input: {} },
+              { type: 'tool-call', toolCallId: 'c2', toolName: 'constructor', input: {} },
+              { type: 'tool-call', toolCallId: 'c3', toolName: 'hasOwnProperty', input: {} },
+            ],
+          },
+        ],
+        finishReason: 'tool-calls',
+        usage: {},
+      },
+      { messages: [{ role: 'assistant', content: 'done' }], finishReason: 'stop', usage: {} },
+    ]);
+    const h = await harness(
+      definition({
+        tools: { look: tool('look'), pay: tool('pay') },
+        approval: { tools: { pay: true } },
+      }),
+      ai,
+    );
+    try {
+      const { runId } = await h.service.start(h.ctx(), 'demo', { messages: [] });
+      await h.settle();
+      expect(ran).toEqual(['look']);
+      const run = (await h.store.get(runId))!;
+      expect(run.status).toBe('completed');
+      expect((await h.store.approvals(runId)).every((a) => a.status !== 'pending')).toBe(true);
+      const outputs = (await h.store.entries(run))
+        .filter((e) => e.kind === 'tool')
+        .map((e) => e.toolCallId);
+      expect(outputs).toEqual(['c1', 'c2', 'c3']);
+    } finally {
+      await h.close();
+    }
+  });
 });
