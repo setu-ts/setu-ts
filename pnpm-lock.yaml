@@ -452,7 +452,7 @@ importers:
   apps/durable-agent:
     dependencies:
       '@ai-sdk/openai-compatible':
-        specifier: ^3
+        specifier: 3.0.84
         version: 3.0.84(zod@4.6.7)
       '@setu-ts/agent-runs-plugin':
         specifier: workspace:^
