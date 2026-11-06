@@ -132,9 +132,12 @@ another timed-out attempt, so a transaction that never settles still reaches the
 with `toolMs`); reaching the limit fails the run with `tool-timeout`. A timed-out transaction that
 is still open can commit after the run fails, and because a conflict can use up the last attempt
 without running the tool, it may belong to an earlier attempt. An abandoned-call marker that refuses
-such a commit is not implemented. Model deadlines (`timeouts.modelMs`) still fail with
-`execution-failed`. Configuration, store and oversized-result errors fail the run. Configure a
-transactional idempotency store as above.
+such a commit is not implemented. Each timed-out transaction that is still open keeps a database
+connection, and a resumed call waiting on its claim keeps another, so recovery needs connections to
+be free: set a server-side bound such as PostgreSQL's `idle_in_transaction_session_timeout` or
+`statement_timeout` so a stuck transaction is ended and releases its connection. Model deadlines
+(`timeouts.modelMs`) still fail with `execution-failed`. Configuration, store and oversized-result
+errors fail the run. Configure a transactional idempotency store as above.
 
 ## Workers, bounds and storage
 

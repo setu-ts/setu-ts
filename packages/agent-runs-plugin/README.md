@@ -62,13 +62,17 @@ either counts as another attempt. After `toolAttempts` timed-out attempts of the
 3, positive integer, used only with `toolMs`), the run fails with `tool-timeout`. A timed-out
 transaction that is still open can commit after the run fails, and it may belong to an earlier
 attempt, since a conflict can use up the last one without running the tool; there is no
-abandoned-call commit marker. Bound outside calls inside the tool itself. `canAccess` governs `get`,
-`respond` and `cancel`; by default only the starting principal (or, for a run started without one,
-anyone in the tenant) passes, and a refusal is a 404. Models are supplied per call, so tenant quotas
-and budget middleware can wrap them using the persisted run identity. Approval policies map tool
-names to `true` or an async predicate, with `timeoutMs` default 86400000, maximum 2592000000, and
-optional `canDecide(principal, run)`. The default requires matching, defined principal ids. Custom
-tool context comes only from that tool's entry in `toolsContext(run, call)`.
+abandoned-call commit marker. Each timed-out transaction that is still open keeps a database
+connection, and a resumed call waiting on its claim keeps another, so recovery needs connections to
+be free: set a server-side bound such as PostgreSQL's `idle_in_transaction_session_timeout` or
+`statement_timeout` so a stuck transaction is ended and releases its connection. Bound outside calls
+inside the tool itself. `canAccess` governs `get`, `respond` and `cancel`; by default only the
+starting principal (or, for a run started without one, anyone in the tenant) passes, and a refusal
+is a 404. Models are supplied per call, so tenant quotas and budget middleware can wrap them using
+the persisted run identity. Approval policies map tool names to `true` or an async predicate, with
+`timeoutMs` default 86400000, maximum 2592000000, and optional `canDecide(principal, run)`. The
+default requires matching, defined principal ids. Custom tool context comes only from that tool's
+entry in `toolsContext(run, call)`.
 
 ## Storage and guarantees
 
