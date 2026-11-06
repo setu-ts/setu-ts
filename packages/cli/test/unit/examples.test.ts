@@ -220,11 +220,65 @@ describe('example scaffolding', () => {
       expect(h.err.text()).toContain(
         `https://raw.githubusercontent.com/setu-ts/setu-ts/v${VERSION}/apps/minimal/package.json`,
       );
-      expect(h.err.text()).toContain('setu new demo --template rest');
+      expect(h.err.text()).toContain('npx @setu-ts/cli new demo --template rest');
       expect(h.fs.writes).toEqual([]);
       expect(h.fs.mkdirs).toEqual([]);
     }
     expect(exampleTemplate('microservices')).toBe('microservice');
+  });
+  it('appends a nested fetch cause and its code, escaped (X93-3)', async () => {
+    const nested = Object.assign(new Error('getaddrinfo ENOTFOUND raw.githubusercontent.com'), {
+      code: 'ENOTFOUND',
+    });
+    let calls = 0;
+    const fetchFile: typeof fetch = (input, options) => {
+      calls++;
+      if (calls < 3) return repositoryFetch(input, options);
+      return Promise.reject(new Error('fetch failed', { cause: nested }));
+    };
+    const h = harness({}, fetchFile);
+    expect(await h.run(['new', 'demo', '--example', 'minimal'])).toBe(1);
+    expect(h.err.text()).toContain(
+      'Cause: getaddrinfo ENOTFOUND raw.githubusercontent.com (code ENOTFOUND).',
+    );
+    expect(h.err.text()).toContain('npx @setu-ts/cli new demo --template rest');
+    expect(h.fs.writes).toEqual([]);
+  });
+  it('names a refused connection from its first attempt, and a nested cause with no code', async () => {
+    const refused = Object.assign(
+      new AggregateError([new Error('connect ECONNREFUSED 127.0.0.1:443')], ''),
+      { code: 'ECONNREFUSED' },
+    );
+    for (const [nested, expected] of [
+      [refused, 'Cause: connect ECONNREFUSED 127.0.0.1:443 (code ECONNREFUSED).'],
+      [new Error('socket hang up'), 'Cause: socket hang up.'],
+      [
+        Object.assign(new AggregateError([], ''), { code: 'ETIMEDOUT' }),
+        'Cause: (code ETIMEDOUT).',
+      ],
+    ] as const) {
+      let calls = 0;
+      const fetchFile: typeof fetch = (input, options) => {
+        calls++;
+        if (calls < 3) return repositoryFetch(input, options);
+        return Promise.reject(new Error('fetch failed', { cause: nested }));
+      };
+      const h = harness({}, fetchFile);
+      expect(await h.run(['new', 'demo', '--example', 'minimal'])).toBe(1);
+      expect(h.err.text()).toContain(expected);
+      expect(h.err.text()).not.toContain('Cause:  ');
+    }
+  });
+  it('prints no cause line for an empty nested error', async () => {
+    let calls = 0;
+    const fetchFile: typeof fetch = (input, options) => {
+      calls++;
+      if (calls < 3) return repositoryFetch(input, options);
+      return Promise.reject(new Error('fetch failed', { cause: new AggregateError([], '') }));
+    };
+    const h = harness({}, fetchFile);
+    expect(await h.run(['new', 'demo', '--example', 'minimal'])).toBe(1);
+    expect(h.err.text()).not.toContain('Cause:');
   });
   it('refuses unsafe names and collisions, including dry-run collisions', async () => {
     for (const name of ['../escape', '.', 'bad\nname']) {

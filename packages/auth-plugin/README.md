@@ -12,8 +12,8 @@ The package declares two optional drivers, which npm therefore installs alongsid
 `RedisRateLimitStore` lazy-loads `ioredis`, and a `saml` sign-in provider lazy-loads
 `@node-saml/node-saml` (which needs the `nodejs_compat` flag on Cloudflare Workers). Nothing imports
 either unless you construct that store or configure that provider — the defaults need no driver. See
-[Optional npm drivers](https://github.com/setu-ts/setu-ts/blob/main/docs/plugins.md#optional-npm-drivers)
-for what that means on npm versus Deno.
+[Optional npm drivers](https://setu-ts.dev/docs/plugins/#optional-npm-drivers) for what that means
+on npm versus Deno.
 
 The plugin always registers JWT and authentication services. It registers authorization only when
 the optional `rbac` configuration is supplied:
@@ -788,6 +788,10 @@ app.router.post('/login', async (ctx) => {
 });
 ```
 
+This route reads a JSON body. Under `SessionPlugin({ csrf })` an unsafe request without a valid
+token answers `403`, so a JSON client sends the token in the `x-csrf-token` header, and a form posts
+it in the `_csrf` field.
+
 **Logging out.** `POST /auth/logout` ends the local session and redirects to `/` — or, for the one
 `oidc` provider that sets `rpInitiatedLogout`, when the session signed in through that provider, to
 its advertised end-session endpoint with `client_id` and `post_logout_redirect_uri`. A password
@@ -824,6 +828,112 @@ app.router.get('/account', (ctx) =>
   snapshot present while this request is anonymous; a definite stamp mismatch deletes the auth
   record, so subsequent snapshot reads return null. The plugin's passkey registration uses the
   verified read and applies the same mismatch revocation.
+
+### In the full-stack template
+
+The generated `/login` page is a placeholder: it stores the typed email in the session and checks no
+password. To sign in for real, give the starter's `auth` arm a password-only `signIn` and a
+`local.verify` — `signIn` alone satisfies the plugin's passive-strategy rule, and without
+`local.verify` the `verifyCredentials` call below always answers `null`:
+
+```typescript
+import type { IPrincipal } from '@setu-ts/common';
+import type { AuthPluginOptions } from '@setu-ts/auth-plugin';
+
+declare function findUser(email: string, password: string): Promise<IPrincipal | null>;
+
+// The `auth` arm of the options `createFullStackAppFromConfig` reads.
+export const auth: AuthPluginOptions = {
+  signIn: { providers: [] },
+  local: { verify: (email, password) => findUser(email, password) },
+};
+```
+
+A React Router action never receives the kernel request, and `IAuthSessionService.signIn` needs it.
+Wrap the sign-in in a request-bound service, whose factory receives the request, and register it in
+`setu.config.ts` beside `registerModules`; the action reaches it with `getService`:
+
+```typescript
+import { CAPABILITIES, requestService, serviceToken } from '@setu-ts/common';
+import type {
+  IAuthService,
+  IAuthSessionService,
+  IRequestContext,
+  IServiceRegistry,
+} from '@setu-ts/common';
+
+/** What the sign-in page calls. Built once per request, so it can write the session. */
+export interface Account {
+  signIn(email: string, password: string): Promise<boolean>;
+}
+
+export const ACCOUNT = serviceToken<Account>('app.account');
+
+export function account(ctx: IRequestContext): Account {
+  return {
+    async signIn(email, password) {
+      const auth = ctx.services.get<IAuthService>(CAPABILITIES.AUTH);
+      const principal = await auth.verifyCredentials({ identifier: email, secret: password });
+      if (!principal) return false;
+      const authSession = ctx.services.get<IAuthSessionService>(CAPABILITIES.AUTH_SESSION);
+      await authSession.signIn(ctx, principal, { methods: ['pwd'] });
+      return true;
+    },
+  };
+}
+
+// In setu.config.ts, next to registerModules(app.router, app.services):
+export function registerAccount(services: IServiceRegistry): void {
+  services.register(ACCOUNT, requestService(account));
+}
+```
+
+The login page's action (`app/routes/_auth/login.tsx`) calls it and keeps the template's hidden
+`_csrf` field, so the session plugin's form CSRF check still runs before the action. The template's
+`requireUser` (`app/server/require-user.server.ts`) reads the `userEmail` the placeholder wrote,
+which a real sign-in never writes: read the signed-in principal from `userContext` instead, which
+the plugin sets on every authenticated request, and keep setting `currentUserContext`, which the
+products loader reads through `getCurrentUser`. The session cookie reaches the browser on the
+action's redirect, because the session plugin commits the session after the page has rendered:
+
+```typescript
+import type { ServiceToken } from '@setu-ts/common';
+import { getService, userContext } from '@setu-ts/react-router-plugin';
+import type { RouterContextKey } from '@setu-ts/react-router-plugin';
+
+// The token from the file above, and the template's key in app/server/context-keys.server.ts.
+declare const ACCOUNT: ServiceToken<{ signIn(email: string, password: string): Promise<boolean> }>;
+declare const currentUserContext: RouterContextKey<{ readonly email: string } | null>;
+
+interface Context {
+  get<V>(key: RouterContextKey<V>): V;
+  set<V>(key: RouterContextKey<V>, value: V): void;
+}
+
+// app/routes/_auth/login.tsx
+export async function action({ request, context }: { request: Request; context: Context }) {
+  const form = await request.formData();
+  const signedIn = await getService(context, ACCOUNT).signIn(
+    String(form.get('email') ?? ''),
+    String(form.get('password') ?? ''),
+  );
+  if (!signedIn) return { error: 'Invalid email or password.' };
+  return new Response(null, { status: 303, headers: { location: '/products' } });
+}
+
+// app/server/require-user.server.ts — the body of requireUser
+export function requireUser({ context }: { context: Context }, next: () => Promise<Response>) {
+  const principal = context.get(userContext);
+  // The template throws redirect('/login') here; the thrown Response ends the chain.
+  if (principal === null) throw new Response(null, { status: 302, headers: { location: '/login' } });
+  context.set(currentUserContext, { email: principal.id });
+  return next();
+}
+```
+
+`principal.id` is the id your `local.verify` returned. Once the action no longer writes the session,
+remove `getSession` from the login route's imports: React Router refuses to build a route that keeps
+an import from a `.server.ts` module no loader or action uses.
 
 ### Ending every session of a user
 

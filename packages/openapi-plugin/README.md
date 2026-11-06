@@ -97,11 +97,13 @@ and client together and review the `setu client --check` diff.
 Swagger defaults to self-hosting. Install `swagger-ui-dist` (supported range `^5`) in the
 application and grant filesystem read access on Deno. On Deno, add
 `"swagger-ui-dist": "npm:swagger-ui-dist@5.33.3"` to the `imports` of the app's `deno.json` (in a
-workspace, the member's — as generated members do — or the root's), run `deno install` from the
-workspace root, and keep `--allow-read` on the start task: the optional import resolves from the
-installed `node_modules`, so an entry with no install still fails at startup. Registration awaits
-the tiny `swagger-ui-dist/absolute-path.js` helper and reads only the three fixed distribution files
-once. The routes `/docs/swagger-ui.css`, `/docs/swagger-ui-bundle.js`, and
+workspace, the member's — as generated members do — or the root's), and keep `--allow-read` on the
+start task. With `nodeModulesDir: "auto"` — every generated Deno project, and in a workspace the
+root — Deno installs the entry on first run; with `"manual"` (Deno's default when the project also
+has a `package.json`), an entry that was never installed fails at startup with
+`OptionalDependencyUnavailableError`, so run `deno install` from the workspace root first.
+Registration awaits the tiny `swagger-ui-dist/absolute-path.js` helper and reads only the three
+fixed distribution files once. The routes `/docs/swagger-ui.css`, `/docs/swagger-ui-bundle.js`, and
 `/docs/swagger-ui-standalone-preset.js` serve the package bytes with CSS/JavaScript content types
 and `Cache-Control: public, max-age=3600`; changing `endpoint` moves all four UI routes. Delivery
 routes are excluded from the generated spec; in the external modes no asset route exists, so only

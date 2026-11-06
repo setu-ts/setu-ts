@@ -4,8 +4,8 @@ An in-memory todo API built with the REST starter. It enables the starter's auth
 and adds `POST /todos` and `GET /todos/:id`.
 
 ```bash
-pnpm --dir apps/rest-api run start
-pnpm --dir apps/rest-api run smoke
+npm start -- <port>   # default 3000
+npm run smoke
 ```
 
 The smoke check writes a todo, reads it back through the same API, and then verifies the OpenAPI

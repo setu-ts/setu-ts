@@ -130,8 +130,11 @@ application, or pass `openapi: { swagger: { assets: 'cdn' } }`. Without either, 
 from, the starter selects the CDN itself when no Swagger asset mode is chosen.
 
 The inherited `auth` arm accepts any `AuthPluginOptions` with at least one passive strategy (`jwt`,
-`apiKey`, `session`, or `strategies`). When present, `AuthPlugin` installs authentication middleware
-globally at priority 300 unless `auth.middleware` disables or moves it.
+`apiKey`, `session`, or `strategies`); a `signIn` block counts as one, so a password-only
+`signIn: { providers: [] }` with `local.verify` is a complete arm — see
+[the full-stack sign-in recipe](https://setu-ts.dev/packages/auth-plugin/#in-the-full-stack-template).
+When present, `AuthPlugin` installs authentication middleware globally at priority 300 unless
+`auth.middleware` disables or moves it.
 
 Gated plugins (`featureFlags`, `notifications`, `multiTenancy`, `reactRouter`, `static`) are only
 registered when explicitly provided in options. The `static` arm exists because this is the one tier

@@ -18,6 +18,7 @@ import {
 } from './telemetry-preload.ts';
 import { renderFullStackDevEntry } from './full-stack-build-files.ts';
 import { CONFIG_EXPORT, CONFIG_MODULE, VERSION, type TargetRuntime } from '../constants.ts';
+import { siteUrl } from '../utils/repository-links.ts';
 import type { GeneratedFile } from '../utils/file-writer.ts';
 import { renderDockerfile, renderDockerignore } from '../workspace/compose.ts';
 import { workspaceProfile } from '../workspace/runtime-profile.ts';
@@ -2032,7 +2033,7 @@ export function projectFiles(
       : `\n${(host.transportNotes ?? []).map((note) => wrapProse(note)).join('\n\n')}\n`;
   const readme = `# ${projectName}
 
-A [Setu-TS](https://github.com/setu-ts/setu-ts) project targeting \`${runtime}\`.
+A [Setu-TS](${siteUrl('')}) project targeting \`${runtime}\`.
 ${
   hasBrokerServices
     ? // Wrapped exactly as `deno fmt` reflows markdown at the emitted

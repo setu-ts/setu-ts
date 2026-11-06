@@ -196,6 +196,10 @@ describe('workspaceRootFiles', () => {
       `deno run -A --no-lock npm:@setu-ts/cli@${VERSION} generate app orders`,
     );
     expect(readme).toContain(WORKSPACE_MANIFEST);
+    // X93-7: the workspace README links the rendered site, not GitHub.
+    expect(readme).toContain(
+      'A [Setu-TS](https://setu-ts.dev/) workspace: one repository, many deployable services.',
+    );
   });
 });
 

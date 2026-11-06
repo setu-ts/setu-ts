@@ -54,7 +54,8 @@ of a peer, including incompatible versions.
 
 The startup symptom is `Optional dependency '<d>' could not be loaded by '<package>'`, followed by
 the instruction to install it where that package is installed. Check the installed framework
-package's `package.json` for its peer ranges rather than installing the latest upstream major.
+package's `package.json` for its peer ranges rather than installing the latest upstream major. No
+framework option changes this: the peer belongs in the root however the plugin is configured.
 
 Since 0.11.0, `setu add <plugin> --dir apps/<member>` in a listed Node or Bun Setu workspace records
 the peers it supplies in the member's `package.json` `dependencies` and, when the root has a

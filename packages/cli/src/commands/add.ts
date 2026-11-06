@@ -75,7 +75,7 @@ import { readJsonManifest } from '../utils/manifest-reader.ts';
 import { interruptionMessage } from '../utils/interruption.ts';
 import { detectPlugins } from '../utils/plugin-detector.ts';
 import { composingStarter } from '../utils/starter-arms.ts';
-import { repositoryFileUrl } from '../utils/repository-links.ts';
+import { repositoryFileUrl, siteUrl } from '../utils/repository-links.ts';
 import { hostSeamSpecs } from '../seams/registry.ts';
 import {
   seamFiles,
@@ -569,6 +569,15 @@ function printWiringNote(
         }
       }
       log(`  See ${repositoryFileUrl(`packages/starters/${starter.pkg}/README.md`)}`);
+      // X89-3: the full-stack template's own login writes `userEmail`, so a
+      // password-only sign-in needs the recipe, not the starter README.
+      if (bare === 'auth-plugin' && starter.pkg === 'full-stack-starter') {
+        log(
+          `  The full-stack password sign-in recipe: ${siteUrl(
+            'packages/auth-plugin/#in-the-full-stack-template',
+          )}`,
+        );
+      }
       log(
         '  Once that arm is configured, registering a second instance with app.register fails' +
           ' with a duplicate plugin name.',

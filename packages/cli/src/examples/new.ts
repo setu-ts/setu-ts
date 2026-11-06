@@ -27,6 +27,29 @@ import { runAgentsCommand } from '../commands/agents.ts';
 /** How long one example file may take to download, body included, before the run gives up. */
 export const FETCH_TIMEOUT_MS = 30_000;
 
+/**
+ * The nested cause a failed fetch can carry — undici puts the socket error
+ * there and stamps a `code` such as `ENOTFOUND` — escaped for a terminal.
+ *
+ * @param cause - The value the download threw
+ * @returns A leading-space sentence, or an empty string when there is no nested Error
+ */
+function nestedCause(cause: unknown): string {
+  if (!(cause instanceof Error) || !(cause.cause instanceof Error)) return '';
+  const nested = cause.cause;
+  // A refused dual-stack connect is an AggregateError with an empty message;
+  // its first attempt carries the text.
+  const first = nested instanceof AggregateError ? (nested.errors[0] as unknown) : undefined;
+  const message =
+    nested.message !== '' ? nested.message : first instanceof Error ? first.message : '';
+  const code = (nested as { readonly code?: unknown }).code;
+  const parts = [
+    ...(message === '' ? [] : [escapeName(message)]),
+    ...(typeof code === 'string' ? [`(code ${escapeName(code)})`] : []),
+  ];
+  return parts.length === 0 ? '' : ` Cause: ${parts.join(' ')}.`;
+}
+
 /** Flags that cannot alter an example's fixed composition. */
 const CONFLICTS = [
   'template',
@@ -148,7 +171,7 @@ export async function runExampleNew(
       return EXIT_INTERRUPTED;
     }
     deps.error(
-      `Failed to fetch ${currentUrl}: ${escapeName(cause instanceof Error ? cause.message : String(cause))}. Nothing was written. Try setu new ${names.kebab} --template ${exampleTemplate(example)}.`,
+      `Failed to fetch ${currentUrl}: ${escapeName(cause instanceof Error ? cause.message : String(cause))}. Nothing was written. Try npx @setu-ts/cli new ${names.kebab} --template ${exampleTemplate(example)}.${nestedCause(cause)}`,
     );
     return EXIT_ERROR;
   }

@@ -1,5 +1,6 @@
 import { FRAMEWORK_RANGE } from '../templates/framework-specifier.ts';
 import { NPM_TOOLING_DEV_DEPENDENCIES } from '../templates/npm-tooling.ts';
+import { siteUrl } from '../utils/repository-links.ts';
 
 /**
  * Rewrites an example manifest without retaining workspace dependency ranges.
@@ -117,7 +118,9 @@ export function rewriteExampleReadme(source: string, example: string): string {
     .replace(
       /\]\(\.\.\/\.\.\/docs\/([\w-]+)\.md(#[^)]*)?\)/g,
       (_match, page: string, anchor: string | undefined) =>
-        `](https://setu-ts.dev/docs/${page}/${anchor ?? ''})`,
+        `](${siteUrl(`docs/${page}/${anchor ?? ''}`)})`,
     );
-  return `${rewritten.trimEnd()}\n\nCreated from the Setu-TS \`${example}\` example. Walkthrough: https://setu-ts.dev/examples/${example}/\n`;
+  return `${rewritten.trimEnd()}\n\nCreated from the Setu-TS \`${example}\` example. Walkthrough: ${siteUrl(
+    `examples/${example}/`,
+  )}\n`;
 }
