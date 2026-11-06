@@ -371,7 +371,22 @@ function later(id, ms) {
 async function refreshStatus(id, signal) {
   if (signal.aborted || id !== runId) return;
   const res = await fetch(`/runs/${encodeURIComponent(id)}`, { headers: headers() });
-  if (!res.ok) return;
+  if (signal.aborted || id !== runId) return;
+  if (res.status >= 500) {
+    // A server fault: try again through the usual backoff.
+    notice = { text: 'The server had a problem. Reconnecting…' };
+    render();
+    later(id, retryDelay);
+    retryDelay = Math.min(retryDelay * 2, MAX_RETRY_MS);
+    return;
+  }
+  if (!res.ok) {
+    // Not this user's run any more, or gone: retrying cannot help.
+    notice = { text: `The run could not be loaded (${res.status}).`, bad: true };
+    setStatus(null);
+    render();
+    return;
+  }
   const view = await res.json();
   if (signal.aborted || id !== runId) return;
   setStatus(view.status);

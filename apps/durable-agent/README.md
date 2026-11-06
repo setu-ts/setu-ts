@@ -131,6 +131,8 @@ The project is what `setu new --template rest`, `setu generate module support`,
   order read the same count and try the same key, so on PostgreSQL the second waits for the first
   and fails instead of both passing the "not more than is left" check. Each row also stores the
   call's idempotency key (`callKey`).
+- The definition bounds every call with `timeouts: { modelMs: 120000, toolMs: 30000 }`, so a model
+  server that stops answering fails the run with `execution-failed` instead of holding it.
 - `src/modules/support/support.controller.ts` maps the routes onto `IAgentRunService`: `start`,
   `respond`, `get`, `decide` and `cancel`.
 - `src/modules/support/support.database.ts` picks PostgreSQL through Drizzle when `DATABASE_URL` is

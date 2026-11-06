@@ -125,5 +125,8 @@ export function supportAgent(): AgentRunDefinition {
       (principal.id === run.principalId || APPROVERS.includes(principal.id)),
     maxSteps: MAX_STEPS,
     maxOutputTokens: MAX_OUTPUT_TOKENS,
+    // A provider that stops answering would otherwise hold the run (renewing
+    // its lease) until someone cancels it; a timed-out call fails the run.
+    timeouts: { modelMs: 120_000, toolMs: 30_000 },
   });
 }
