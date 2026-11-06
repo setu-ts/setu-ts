@@ -52,42 +52,56 @@ before this plugin. Scheduled idempotency purging instead needs a scheduler. The
 
 Definitions require `name`, `version`, `model(run)` and `maxOutputTokens`; `maxSteps` defaults to 20
 (1–1000). Optional `system`, `tools`, `toolsContext`, `compatibleVersions`, `approval`,
-`canAccess(principal, run)` and `timeouts: { modelMs?, toolMs? }` are consumed on the execution and
-access paths. A timed-out tool call fails the run at once, but cannot stop work the tool has already
-started: a transaction that commits after the deadline leaves its effect with the run marked
-`failed`. Set `toolMs` only for tools whose effects are safe to keep, and bound outside calls inside
-the tool itself. `canAccess` governs `get`, `respond` and `cancel`; by default only the starting
-principal (or, for a run started without one, anyone in the tenant) passes, and a refusal is a 404.
-Models are supplied per call, so tenant quotas and budget middleware can wrap them using the
-persisted run identity. Approval policies map tool names to `true` or an async predicate, with
-`timeoutMs` default 86400000, maximum 2592000000, and optional `canDecide(principal, run)`. The
-default requires matching, defined principal ids. Custom tool context comes only from that tool's
-entry in `toolsContext(run, call)`.
+`canAccess(principal, run)` and `timeouts: { modelMs?, toolMs?, toolAttempts? }` are consumed on the
+execution and access paths. Model timeouts fail with `execution-failed`. A timed-out tool call stays
+`running` and stops renewing its lease; after lease expiry plus `maxClockSkewMs`, the sweep resumes
+it. Transactional idempotency replays a committed result or re-runs a rolled-back call; if the
+timed-out transaction is still open, the resumed call gets a 409 and defers to a later sweep (on
+PostgreSQL it may instead wait on the open claim until `toolMs`, holding a second connection), and
+either counts as another attempt. After `toolAttempts` timed-out attempts of the same call (default
+3, positive integer, used only with `toolMs`), the run fails with `tool-timeout`. A timed-out
+transaction that is still open can commit after the run fails, and it may belong to an earlier
+attempt, since a conflict can use up the last one without running the tool; there is no
+abandoned-call commit marker. Each timed-out transaction that is still open keeps a database
+connection, and a resumed call waiting on its claim keeps another, so recovery needs connections to
+be free: set a server-side bound so a stuck transaction is ended and releases its connection. On
+PostgreSQL, `idle_in_transaction_session_timeout` ends a transaction left idle while the tool waits
+on something else, and `statement_timeout` bounds a single SQL statement that is still running; the
+first covers a hung tool, the second only a slow query. Bound outside calls inside the tool itself.
+`canAccess` governs `get`, `respond` and `cancel`; by default only the starting principal (or, for a
+run started without one, anyone in the tenant) passes, and a refusal is a 404. Models are supplied
+per call, so tenant quotas and budget middleware can wrap them using the persisted run identity.
+Approval policies map tool names to `true` or an async predicate, with `timeoutMs` default 86400000,
+maximum 2592000000, and optional `canDecide(principal, run)`. The default requires matching, defined
+principal ids. Custom tool context comes only from that tool's entry in `toolsContext(run, call)`.
 
 ## Storage and guarantees
 
 `createDatabaseAgentRunStore({ entities?, database? })` defaults to entities `AgentRun`,
 `AgentRunEntry`, `AgentRunChunks`, `AgentRunApproval`. The run row contains identity, input,
-version, lease, committed counters, approval ids and status; child rows contain `runId`, `tenantId`
-and `seq`. Provision tables/models before starting SQL adapters. Drizzle needs all four in
-`drizzleTables`; Prisma needs corresponding models. Use JSON columns for input, messages, chunks and
-tool input, a JSON approvalIds column on runs, a numeric stepChunkStart column on entries, 64-bit
-numeric timestamps, primary keys on `id`, and indexes on run status/leaseUntil/updatedAt, approval
-status/deadline and child runId/seq. Child rows also store the writer's `leaseVersion`; a custom
-`IAgentRunStore` must return it on each `AgentRunChunkBatch`, since it is the event-id epoch. A run
-row the store cannot decode is marked `failed` (`invalid-row`) by the sweep, and deleted with its
-children once past retention, so ill-formed rows cannot fill a sweep batch. `verify()` refuses
-missing native conditional update/delete support, and runs each sweep query once: an adapter that
-cannot serve one is refused at startup with `query-unsupported`. DynamoDB and Bigtable are refused
-that way, since they order by one sort key only and the sweep orders overdue approvals by deadline,
-then id. Backend query support and the idempotency transactional store's requirements both apply;
-this is not a claim that every backend can execute every query.
+version, lease, committed counters, approval ids, tool timeout key/count and status; child rows
+contain `runId`, `tenantId` and `seq`. Provision tables/models before starting SQL adapters. Drizzle
+needs all four in `drizzleTables`; Prisma needs corresponding models. Use JSON columns for input,
+messages, chunks and tool input, a JSON approvalIds column on runs, string toolTimeoutKey and
+integer toolTimeouts columns on runs (initially empty and zero), a numeric stepChunkStart column on
+entries, 64-bit numeric timestamps, primary keys on `id`, and indexes on run
+status/leaseUntil/updatedAt, approval status/deadline and child runId/seq. Child rows also store the
+writer's `leaseVersion`; a custom `IAgentRunStore` must return it on each `AgentRunChunkBatch`,
+since it is the event-id epoch. A run row the store cannot decode is marked `failed` (`invalid-row`)
+by the sweep, and deleted with its children once past retention, so ill-formed rows cannot fill a
+sweep batch. `verify()` refuses missing native conditional update/delete support, and runs each
+sweep query once: an adapter that cannot serve one is refused at startup with `query-unsupported`.
+DynamoDB and Bigtable are refused that way, since they order by one sort key only and the sweep
+orders overdue approvals by deadline, then id. Backend query support and the idempotency
+transactional store's requirements both apply; this is not a claim that every backend can execute
+every query.
 
 Tool database writes through `call.unitOfWork` commit with their idempotency result. Outside API
-effects may repeat after a crash before commit: pass `call.idempotencyKey` to the outside API.
-`within` conflicts leave the run for recovery; other idempotency failures fail it. A tool exception
-rolls back and becomes a value-free tool error. SDK tool input deltas are not retained. Truncated
-logs retain one `data-setu-log-truncated` marker, while connected clients still receive deltas.
+effects may repeat after a crash or a tool timeout before commit: pass `call.idempotencyKey` to the
+outside API. `within` conflicts leave the run for recovery; other idempotency failures fail it. A
+tool exception rolls back and becomes a value-free tool error. SDK tool input deltas are not
+retained. Truncated logs retain one `data-setu-log-truncated` marker, while connected clients still
+receive deltas.
 
 Errors are shared from common: missing/cross-tenant 404, conflicting state 409, forbidden approval
 403, repeated decision 409, input bound 413 and unavailable store 503. Served details contain no

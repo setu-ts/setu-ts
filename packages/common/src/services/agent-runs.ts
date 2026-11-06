@@ -42,6 +42,10 @@ export interface AgentRunRow {
   readonly chunkCount: number;
   /** Chunk-batch boundary of the model attempt. */
   readonly stepChunkStart: number;
+  /** Hash of the tool call whose last attempt timed out, or empty when none. @since 0.12.0 */
+  readonly toolTimeoutKey: string;
+  /** Consecutive timed-out attempts of that tool call. @since 0.12.0 */
+  readonly toolTimeouts: number;
   /** Whether cancellation has been requested. */
   readonly cancelRequested: boolean;
   /** Value-free terminal failure code, or null. */

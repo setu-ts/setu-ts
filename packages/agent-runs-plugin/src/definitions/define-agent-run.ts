@@ -65,8 +65,15 @@ export interface AgentRunDefinition {
    * A refusal is the same 404 as a missing run.
    */
   readonly canAccess?: (principal: IPrincipal | undefined, run: AgentRunContext) => boolean;
-  /** Per-call model and tool deadlines, in milliseconds. */
-  readonly timeouts?: { readonly modelMs?: number; readonly toolMs?: number };
+  /** Per-call deadlines and tool timeout recovery bounds. */
+  readonly timeouts?: {
+    /** Model deadline in milliseconds; a timeout fails the run. */
+    readonly modelMs?: number;
+    /** Tool deadline in milliseconds; a timeout defers to sweep recovery. */
+    readonly toolMs?: number;
+    /** Timed-out attempts per call before failure; defaults to 3, used only with toolMs. @since 0.12.0 */
+    readonly toolAttempts?: number;
+  };
 }
 /** Validate a finite positive integer bound. @internal */
 export function integer(value: number, name: string, min = 1, max = 2_147_483_647): number {
@@ -96,7 +103,8 @@ export function defineAgentRun(definition: AgentRunDefinition): AgentRunDefiniti
       throw new TypeError();
     if (definition.system !== undefined && typeof definition.system !== 'string')
       throw new TypeError();
-    for (const value of Object.values(definition.timeouts ?? {})) integer(value, 'timeout');
+    for (const [name, value] of Object.entries(definition.timeouts ?? {}))
+      integer(value, `timeouts.${name}`);
     if (definition.toolsContext !== undefined && typeof definition.toolsContext !== 'function')
       throw new TypeError();
     if (definition.canAccess !== undefined && typeof definition.canAccess !== 'function')

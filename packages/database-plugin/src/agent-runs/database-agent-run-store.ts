@@ -57,6 +57,7 @@ function decode<T>(row: Row): T {
     'entryCount',
     'chunkCount',
     'stepChunkStart',
+    'toolTimeouts',
     'createdAt',
     'updatedAt',
     'seq',
@@ -71,6 +72,7 @@ function valid(run: AgentRunRow): boolean {
     typeof run.id === 'string' &&
     typeof run.tenantId === 'string' &&
     typeof run.leaseOwner === 'string' &&
+    typeof run.toolTimeoutKey === 'string' &&
     ['running', 'waiting', 'ready', ...TERMINAL].includes(run.status) &&
     Array.isArray(run.input) &&
     Array.isArray(run.approvalIds) &&
@@ -81,6 +83,7 @@ function valid(run: AgentRunRow): boolean {
       'entryCount',
       'chunkCount',
       'stepChunkStart',
+      'toolTimeouts',
       'createdAt',
       'updatedAt',
     ].every(

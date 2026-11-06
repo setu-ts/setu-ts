@@ -11,7 +11,7 @@ export async function agentRunPostgres(url: string, schema?: string) {
   if (!schema) {
     await pool.query(`CREATE SCHEMA ${namespace}`);
     await pool.query(
-      'CREATE TABLE run (id text PRIMARY KEY, "tenantId" text, "principalId" text, definition text, version text, status text, input jsonb, "leaseOwner" text, "leaseVersion" bigint, "leaseUntil" bigint, "entryCount" integer, "approvalIds" jsonb, "chunkCount" integer, "stepChunkStart" integer, "cancelRequested" boolean, error text, "createdAt" bigint, "updatedAt" bigint)',
+      'CREATE TABLE run (id text PRIMARY KEY, "tenantId" text, "principalId" text, definition text, version text, status text, input jsonb, "leaseOwner" text, "leaseVersion" bigint, "leaseUntil" bigint, "entryCount" integer, "approvalIds" jsonb, "chunkCount" integer, "stepChunkStart" integer, "toolTimeoutKey" text, "toolTimeouts" integer, "cancelRequested" boolean, error text, "createdAt" bigint, "updatedAt" bigint)',
     );
     await pool.query(
       'CREATE TABLE entry (id text PRIMARY KEY, "runId" text, "tenantId" text, seq integer, kind text, messages jsonb, "finishReason" text, usage jsonb, "toolCallId" text, "stepChunkStart" integer, "leaseVersion" bigint)',
@@ -44,6 +44,8 @@ export async function agentRunPostgres(url: string, schema?: string) {
     approvalIds: jsonb('approvalIds'),
     chunkCount: integer('chunkCount'),
     stepChunkStart: integer('stepChunkStart'),
+    toolTimeoutKey: text('toolTimeoutKey'),
+    toolTimeouts: integer('toolTimeouts'),
     cancelRequested: boolean('cancelRequested'),
     error: text('error'),
     createdAt: num('createdAt'),

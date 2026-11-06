@@ -51,6 +51,8 @@ CREATE TABLE IF NOT EXISTS agent_runs (
   approval_ids     jsonb   NOT NULL,
   chunk_count      integer NOT NULL,
   step_chunk_start integer NOT NULL,
+  tool_timeout_key text NOT NULL,
+  tool_timeouts integer NOT NULL,
   cancel_requested boolean NOT NULL,
   error            text,
   created_at       bigint  NOT NULL,
