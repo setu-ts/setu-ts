@@ -211,6 +211,7 @@ describe('step loop', () => {
       h.fire(10);
       await h.settle();
       expect((await h.store.get(runId))?.status).toBe('failed');
+      expect((await h.store.get(runId))?.error).toBe('execution-failed');
     } finally {
       await h.close();
     }

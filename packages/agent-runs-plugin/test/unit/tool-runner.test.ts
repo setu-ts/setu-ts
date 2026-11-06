@@ -47,11 +47,27 @@ describe('transactional tool runner', () => {
           return { act: { key: info.idempotencyKey }, other: 'secret' };
         },
       });
-      expect(await runTool(h.deps, d, context, 0, call, [])).toEqual({
+      expect(
+        await runTool(
+          h.deps,
+          d,
+          context,
+          await toolKey(h.runtime, context.runId, 0, call.toolCallId),
+          call,
+          [],
+        ),
+      ).toEqual({
         output: 'ok',
         error: false,
       });
-      await runTool(h.deps, d, context, 0, call, []);
+      await runTool(
+        h.deps,
+        d,
+        context,
+        await toolKey(h.runtime, context.runId, 0, call.toolCallId),
+        call,
+        [],
+      );
       expect(execute).toHaveBeenCalledTimes(1);
       expect(await toolKey(h.runtime, 'run', 1, 'c')).not.toBe(
         await toolKey(h.runtime, 'run', 0, 'c'),
@@ -82,7 +98,7 @@ describe('transactional tool runner', () => {
           h.deps,
           definition({ tools: { act: tool } }),
           context,
-          0,
+          await toolKey(h.runtime, context.runId, 0, 'stream'),
           { toolCallId: 'stream', toolName: 'act', input: {} },
           [],
         ),
@@ -104,7 +120,7 @@ describe('transactional tool runner', () => {
           h.deps,
           d,
           context,
-          0,
+          await toolKey(h.runtime, context.runId, 0, 'throw'),
           { toolCallId: 'throw', toolName: 'act', input: {} },
           [],
         ),
@@ -116,7 +132,7 @@ describe('transactional tool runner', () => {
             h.deps,
             definition(),
             context,
-            0,
+            await toolKey(h.runtime, context.runId, 0, 'absent'),
             { toolCallId: 'absent', toolName: 'absent', input: {} },
             [],
           )
@@ -146,10 +162,26 @@ describe('transactional tool runner', () => {
         .spyOn(h.deps.idempotency, 'within')
         .mockRejectedValueOnce(conflict)
         .mockRejectedValueOnce(new Error('store'));
-      await expect(runTool(h.deps, definition(), context, 0, call, [])).rejects.toBeInstanceOf(
-        ToolConflict,
-      );
-      await expect(runTool(h.deps, definition(), context, 0, call, [])).rejects.toThrow('store');
+      await expect(
+        runTool(
+          h.deps,
+          definition(),
+          context,
+          await toolKey(h.runtime, context.runId, 0, call.toolCallId),
+          call,
+          [],
+        ),
+      ).rejects.toBeInstanceOf(ToolConflict);
+      await expect(
+        runTool(
+          h.deps,
+          definition(),
+          context,
+          await toolKey(h.runtime, context.runId, 0, call.toolCallId),
+          call,
+          [],
+        ),
+      ).rejects.toThrow('store');
       spy.mockRestore();
       const schemas: unknown[] = [
         () => jsonSchema({}, { validate: (value) => ({ success: true, value }) }),
@@ -172,7 +204,14 @@ describe('transactional tool runner', () => {
             },
           },
         });
-        const result = await runTool(h.deps, d, context, i, call, []);
+        const result = await runTool(
+          h.deps,
+          d,
+          context,
+          await toolKey(h.runtime, context.runId, i, call.toolCallId),
+          call,
+          [],
+        );
         expect(result.error).toBe(![0, 4, 6, 7].includes(i));
       }
     } finally {

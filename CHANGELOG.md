@@ -24,7 +24,9 @@ All notable changes to this project are documented here. The format follows
   ids are `<batch>.<index>.<epoch>`; a `Last-Event-ID` the stored log cannot honour gets a
   `data-setu-replay` chunk and a full replay. A failed run is logged at `warn` with its error class
   only. CLI agent briefs recognize the package and capability; manual installation only. Ships in
-  0.12.0.
+  0.12.0. Tool timeouts recover through the sweep after lease expiry and fail with `tool-timeout`
+  after `toolAttempts` (default 3), replaying committed results or re-running rolled-back calls
+  (#566, #567).
 
 - **Versioned `replaceSource` (`@setu-ts/common`, `@setu-ts/vector-store-plugin`, #561).**
   `replaceSource(collection, scope, sourceId, records, { version })` refuses a write whose version

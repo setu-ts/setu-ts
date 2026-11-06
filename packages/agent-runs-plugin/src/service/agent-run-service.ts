@@ -161,6 +161,8 @@ export class AgentRunService implements IAgentRunService {
       approvalIds: [],
       chunkCount: 0,
       stepChunkStart: 0,
+      toolTimeoutKey: '',
+      toolTimeouts: 0,
       cancelRequested: false,
       error: null,
       createdAt: now,
