@@ -129,13 +129,14 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
     // the layout tree and the worker-pool commands.
     // M119i: repository setup adds one shell fence.
     // site/--example adds one shell fence. M135: the semantic-search section
-    // adds one shell fence. The realtime-clients section adds one.
-    total: 25,
+    // adds one shell fence. The realtime-clients section adds one. M136: the
+    // durable-agent section adds one.
+    total: 26,
     ts: 1,
     compile: 1,
     external: 0,
     pseudocode: 0,
-    skipped: 24,
+    skipped: 25,
   },
   'docs/decorators.md': {
     // 28 at M76. Two blocks left the guide there: the `deno.json` "Enable
@@ -280,12 +281,13 @@ const EXPECTED_AGGREGATE: FenceCounts = {
   // M129: +1 skipped shell fence in docs/cli.md (`setu client`).
   // M135: docs/retrieval.md joins (+10: 8 compiling, 2 skipped); +1 skipped in examples.md.
   // Examples walk-through: +1 skipped shell fence in examples.md (realtime-clients).
-  total: 356,
+  // M136: +1 skipped shell fence in examples.md (durable-agent).
+  total: 357,
   ts: 263,
   compile: 230,
   external: 33,
   pseudocode: 0,
-  skipped: 93,
+  skipped: 94,
 };
 
 describe('actual-fence compiler — every curated guide (shared engine)', () => {

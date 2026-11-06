@@ -504,7 +504,59 @@ fresh agent: the milestone crosses a trust boundary (approvals, tenancy, backgro
 
 ## 9. Out of scope
 
-- `setu add agent-runs` and an example app — after the API has been used once (follow-on).
+- `setu add agent-runs` — after the API has been used once (follow-on). The example app moved into
+  this milestone (§10).
 - General workflows, sub-agents, parallel runs, and an engine adapter (decided against; the guide).
 - Storing tool input deltas in the log (final input is stored in the tool part).
 - The `ISseConnection.send` JSDoc mismatch (C5) — a separate `fix/` change.
+
+## 10. Example app (added by the maintainer, 2026-11-06)
+
+The maintainer moved the example into this milestone after the plugin, its review and its audit had
+landed. It is `apps/durable-agent`, a support-desk agent whose point is that a run outlives the
+process serving it.
+
+- **Shape.** What `setu new --template rest` and `setu generate module support` produce, plus the
+  feature's edits, like `apps/semantic-search`: `setu.config.ts` adds `DatabasePlugin`,
+  `IdempotencyPlugin` (transactional, `createDatabaseIdempotencyStore()`), `AgentRunsPlugin` with
+  `createDatabaseAgentRunStore()`, and `StaticPlugin` serving `public/` at `/ui`. CLI-owned indexes
+  stay as the CLI writes them.
+- **Storage.** `DATABASE_URL` set: Drizzle on PostgreSQL. The tables come from a committed
+  `schema.sql` that `npm run db:setup` applies (`CREATE TABLE IF NOT EXISTS`, no `ALTER`, per the
+  M135 lock lesson), as the database plugin's own docs prescribe, rather than DDL at boot, which the
+  agent-run store's startup probe would race. Unset: the memory adapter, and the README says a
+  restart then loses runs.
+- **Model.** The OpenAI-compatible provider from `apps/ai-chat` (`AI_COMPAT_*`). Tests and the smoke
+  use `MockLanguageModelV4` scripted to call the tools.
+- **Tools.** `lookupOrder` reads the seeded `Order` rows (no approval). `issueRefund` writes a
+  `Refund` row through the supplied unit of work and always needs approval, so the run parks. A
+  refund appears once however often the run is resumed.
+- **Identity.** A demo middleware sets the principal from an `x-demo-user` header (default `demo`),
+  marked in code and README as demonstration only; the default `canDecide` then lets the starter
+  decide. No tenancy.
+- **Routes** (`src/modules/support/`): `POST /runs` `{ message }` → `202 { runId }`;
+  `GET /runs/:id/stream` (the AI SDK resume shape); `GET /runs/:id`;
+  `POST /runs/:id/approvals/:approvalId` `{ approved, reason? }` → `202` (the page re-attaches
+  `GET /runs/:id/stream` with its last event id); `POST /runs/:id/cancel`; `GET /orders` for the
+  page.
+- **Page** (`public/index.html`, `public/run.js`, no build step, output as text only): the message
+  box, the streamed answer, tool calls as cards, an approval card with Approve and Deny and an
+  optional reason, a status badge and Cancel. The run id lives in the URL, so a reload resumes the
+  stream with the last event id, and `data-setu-replay` rebuilds the message. The maintainer reviews
+  the page visually before anything is recorded.
+- **Tests.** Boot (`test/app.test.ts`); module unit tests over the memory database; an e2e that runs
+  to the approval, approves and reads the refund back once; a restart e2e (stop the app mid-run,
+  start a new one on the same `DATABASE_URL`, the run completes with one refund), guarded by
+  `DATABASE_URL`; `smoke.ts` over HTTP with the mock model.
+- **Registries.** `apps/README.md`, `packages/cli/src/examples/catalog.ts` and its test (offered
+  from 0.12.0), `scripts/check-deploy.ts` (redundant with `rest-api`), the local-CI and CI env for
+  the guarded e2e, `docs/examples.md` (a walkthrough, which the website renders), and a link from
+  `docs/durable-runs.md`.
+
+**Found by walking the example (2026-11-06).** Stopping the server straight after an approval left
+the refund card at "Running…" on every replay, although the refund had committed once. The step loop
+committed an entry before flushing the chunks that entry produced, and no holder emits a committed
+entry's chunks again, so a crash between the two lost them for good. The loop now flushes a step's
+chunks before committing its entry; a crash between the flush and the commit retries the step
+(`reset-step` for a model call, the recorded result for a tool), so the stored log can repeat a
+tool's output chunk but never lose it. `recovery.test.ts` crashes in both windows.

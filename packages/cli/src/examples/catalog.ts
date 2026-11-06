@@ -4,6 +4,7 @@ export const EXAMPLES = [
   'rest-api',
   'mcp-tools',
   'semantic-search',
+  'durable-agent',
   'database',
   'di-decorators',
   'cqrs',

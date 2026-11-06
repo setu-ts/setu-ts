@@ -81,6 +81,20 @@ describe('example scaffolding', () => {
       [...examplePaths('mcp-tools')].sort(),
     );
   });
+  it('downloads the durable-agent example with the agent-runs and AI SDK ranges', async () => {
+    const h = harness();
+    expect(await h.run(['new', 'demo', '--example', 'durable-agent']), h.err.text()).toBe(0);
+    const prefix = '/work/demo/';
+    const manifest = JSON.parse(h.fs.read(`${prefix}package.json`));
+    expect(manifest.dependencies['@setu-ts/agent-runs-plugin']).toBe(`^${VERSION}`);
+    expect(manifest.dependencies['@setu-ts/idempotency-plugin']).toBe(`^${VERSION}`);
+    expect(manifest.dependencies['ai']).toBe('7.0.159');
+    expect(manifest.scripts['db:setup']).toBe('tsx --env-file-if-exists=.env db-setup.ts');
+    expect(h.fs.read(`${prefix}.env.example`)).toContain('AI_COMPAT_BASE_URL=');
+    expect(h.fs.writes.map((path) => path.slice(prefix.length)).sort()).toEqual(
+      [...examplePaths('durable-agent')].sort(),
+    );
+  });
   it('downloads the semantic-search example with the vector store and AI SDK ranges', async () => {
     const h = harness();
     expect(await h.run(['new', 'demo', '--example', 'semantic-search']), h.err.text()).toBe(0);

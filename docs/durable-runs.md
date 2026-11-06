@@ -5,6 +5,10 @@ browser reconnect. Setu persists one SDK model call at a time and executes tools
 entry commits. Applications continue to choose their own model providers and budget middleware. For
 model access and tenant quota recipes, see [AI SDK recipes](./ai.md).
 
+The [durable agent example](../apps/durable-agent) runs all of it: a support agent whose refund
+waits for a person's approval, a page that resumes the stream after a reload, and a run that a
+restarted server finishes. [Examples](./examples.md#durable-agent) walks through it.
+
 ## Install and register
 
 ```sh
