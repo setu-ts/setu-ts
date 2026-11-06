@@ -237,6 +237,12 @@ describe.each(REDIS_CLIENTS)('%s', (redisVariant) => {
           CAPABILITIES.REALTIME_DIAGNOSTICS,
         );
         const frame = { kind: 'ws-room' as const, origin: 'x', name: 'lobby', data: 'hi' };
+        // Frames from another origin come back through this backplane's own
+        // subscription, which shows the subscriber connection is live.
+        let received = 0;
+        await backplane.subscribe(() => {
+          received++;
+        });
         let paused = false;
         let failure: unknown;
         try {
@@ -292,11 +298,23 @@ describe.each(REDIS_CLIENTS)('%s', (redisVariant) => {
           );
           expect(publishRecord(source!)).toMatchObject({ failed: before.failed + 1 });
 
-          // Restarted, the same connections carry the next publish.
+          // Restarted, the same connections carry the next publish. Wait until one
+          // is also delivered: each node-redis connection backs off on its own
+          // schedule (up to about 2.2 s), so the subscriber can still be
+          // reconnecting when the publisher is back. Stopping then queues
+          // UNSUBSCRIBE and QUIT behind that reconnect, past the 1.5 s command
+          // bound, and the stop fails with a bare `Command timed out`.
           await docker(['start', containerId]);
           await waitTrue(
-            () => settleWithin(backplane.publish(frame), 3_000).then((r) => r === 'resolved'),
-            'publish after restart',
+            async () => {
+              const before = received;
+              if ((await settleWithin(backplane.publish(frame), 3_000)) !== 'resolved')
+                return false;
+              const deadline = performance.now() + 1_000;
+              while (received === before && performance.now() < deadline) await wait(20);
+              return received > before;
+            },
+            'publish after restart, delivered',
             30_000,
           );
           expect(publishRecord(source!)!.succeeded).toBeGreaterThan(before.succeeded);
