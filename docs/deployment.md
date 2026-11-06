@@ -25,16 +25,22 @@ A project `setu new` generated is ready to containerise without editing. For a s
 Deno project:
 
 ```bash
+npm install                         # writes package-lock.json, which the image's `npm ci` needs
 docker build -t my-app .            # the generated Dockerfile at the project root
 docker run --rm -p 3000:3000 my-app # PORT still selects the port at run time
 ```
 
+The image installs from the project's lockfile, which `setu new` does not write: install once first
+(`npm install`, `bun install` or `deno install`, which write `package-lock.json`, `bun.lock` or
+`deno.lock`) and commit it.
+
 The generated `Dockerfile` installs and builds inside the image, so no host build is needed: on Node
 its build stage runs `npm ci` and `npm run build` (which type-checks, then `setu build` bundles the
 service into `dist/`) and the image runs `dist/main.js`; a Bun image runs `bun run main.ts` and a
-Deno image `deno run … main.ts`. The entry reads `PORT` (default `3000`). Run `npm test` before
-building an image: DI graph validation happens at boot. A Workers project is not a container at all
-— deploy it with `wrangler deploy` (see [Cloudflare Workers](#cloudflare-workers)).
+Deno image `deno run … main.ts`. The entry reads `PORT` (default `3000`). Run the tests before
+building an image (`npm test`, `bun run test`, or `deno task test` in a Deno project): DI graph
+validation happens at boot. A Workers project is not a container at all — deploy it with
+`wrangler deploy` (see [Cloudflare Workers](#cloudflare-workers)).
 
 In a workspace, `setu generate app` (and `setu adopt`) writes one parameterized image, a Compose
 stack and Kubernetes objects for its members; see
@@ -585,21 +591,27 @@ token in the `NPMRC` build secret rather than in a build argument.
 
 A non-kind context pushes every image, so it needs a registry and, for a private one, a pull Secret
 in the target namespace. Create the namespace deploy uses — the workspace directory name unless
-`--namespace` says otherwise — and a `docker-registry` Secret in it:
+`--namespace` says otherwise; the commands below pass `--namespace acme` — and a
+`kubernetes.io/dockerconfigjson` Secret in it:
 
 ```bash
 kubectl create namespace acme
-kubectl create secret docker-registry registry-auth -n acme \
-  --docker-server registry.example.com \
-  --docker-username <user> \
-  --docker-password <token>
+kubectl create secret generic registry-auth -n acme \
+  --type kubernetes.io/dockerconfigjson \
+  --from-file .dockerconfigjson=registry-auth.json
 ```
 
-`setu workspace deploy` reads only the Secret's type, never its data. Ask it to check everything and
-print the plan first:
+`registry-auth.json` is a Docker config file holding the registry's credentials inline (an `auths`
+entry, not a `credsStore` or `credHelpers` reference, which the cluster cannot call). Keep it out of
+the repository and readable only by you; passing `--docker-password` on the command line instead
+leaves the token in your shell history and process list.
+
+The CLI receives only each Secret's type, on `kubectl`'s output: it runs `kubectl get secret` with a
+`jsonpath` filter, so `kubectl` itself fetches the Secret, and the deploy identity needs permission
+to read Secrets in that namespace. Ask it to check everything and print the plan first:
 
 ```bash
-setu workspace deploy --registry registry.example.com/acme \
+setu workspace deploy --registry registry.example.com/acme --namespace acme \
   --pull-secret registry-auth --dry-run
 ```
 
@@ -607,8 +619,15 @@ Before building, it confirms the namespace exists (`kubectl get namespace … -o
 Secret exists with type `kubernetes.io/dockerconfigjson` or `kubernetes.io/dockercfg`
 (`kubectl get secret … -o jsonpath={.type}`); an Opaque Secret is refused, because it cannot
 authenticate a pull. A missing namespace or Secret is refused with the `kubectl create` command to
-run. The plan then includes `would use imagePullSecrets: registry-auth`. Run the same command
-without `--dry-run` to build, push and apply.
+run. The plan then includes `would use imagePullSecrets: registry-auth`. The pull Secret
+authenticates the cluster's image pulls, not your Docker client, so log in with credentials that can
+push before the real run, then run the same command without `--dry-run` to build, push and apply:
+
+```bash
+docker login registry.example.com
+setu workspace deploy --registry registry.example.com/acme --namespace acme \
+  --pull-secret registry-auth
+```
 
 - A name is a DNS-1123 subdomain (lowercase labels, at most 253 characters) and may be given once;
   pass `--pull-secret` once per Secret when a registry needs several.

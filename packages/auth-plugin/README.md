@@ -882,10 +882,21 @@ export function account(ctx: IRequestContext): Account {
   };
 }
 
-// In setu.config.ts, next to registerModules(app.router, app.services):
 export function registerAccount(services: IServiceRegistry): void {
   services.register(ACCOUNT, requestService(account));
 }
+```
+
+Call it in `setu.config.ts`'s `createApp`, after the starter returns and next to the existing module
+registration, so the action can resolve `ACCOUNT`:
+
+```typescript
+import type { IServiceRegistry } from '@setu-ts/common';
+
+declare const app: { readonly services: IServiceRegistry };
+declare function registerAccount(services: IServiceRegistry): void;
+
+registerAccount(app.services); // beside registerModules(app.router, app.services)
 ```
 
 The login page's action (`app/routes/_auth/login.tsx`) calls it and keeps the template's hidden
