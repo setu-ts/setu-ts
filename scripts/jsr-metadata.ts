@@ -166,6 +166,10 @@ export const PACKAGE_METADATA: Readonly<Record<string, PackageMetadata>> = {
     description: 'Tenant-scoped vector retrieval with filters that are refused, never ignored',
     runtimeCompat: PORTABLE,
   },
+  'agent-runs-plugin': {
+    description: 'Durable agent runs with fenced leases, approvals and stream replay',
+    runtimeCompat: PORTABLE,
+  },
   'idempotency-plugin': {
     description: 'A repeated request, queue job or broker message does its work once per key',
     runtimeCompat: PORTABLE,

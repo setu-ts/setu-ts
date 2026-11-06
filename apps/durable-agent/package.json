@@ -1,0 +1,59 @@
+{
+  "name": "setu-ts-example-durable-agent",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "check": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint --config lint.config.js .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "build": "tsc --noEmit && setu build",
+    "start": "node --import ./instrumentation.mjs --env-file-if-exists=.env --enable-source-maps dist/main.js",
+    "start:dev": "tsx watch --import ./instrumentation.mjs --env-file-if-exists=.env main.ts",
+    "start:debug": "node --import ./instrumentation.mjs --env-file-if-exists=.env --inspect --import tsx main.ts",
+    "test": "tsx --test --test-force-exit '**/!(*.e2e).test.ts'",
+    "test:e2e": "tsx --test --test-force-exit '**/*.e2e.test.ts'",
+    "smoke": "tsx smoke.ts",
+    "db:setup": "tsx --env-file-if-exists=.env db-setup.ts"
+  },
+  "dependencies": {
+    "@setu-ts/common": "workspace:^",
+    "@setu-ts/kernel": "workspace:^",
+    "@setu-ts/runtime": "workspace:^",
+    "@setu-ts/config-plugin": "workspace:^",
+    "@setu-ts/logger-plugin": "workspace:^",
+    "@setu-ts/validation-plugin": "workspace:^",
+    "@setu-ts/http-security-plugin": "workspace:^",
+    "@setu-ts/health-plugin": "workspace:^",
+    "@setu-ts/metrics-plugin": "workspace:^",
+    "@setu-ts/openapi-plugin": "workspace:^",
+    "@setu-ts/exceptions": "workspace:^",
+    "pino": "10.x",
+    "swagger-ui-dist": "5.33.3",
+    "zod": "^4.6.6",
+    "@setu-ts/database-plugin": "workspace:^",
+    "@setu-ts/idempotency-plugin": "workspace:^",
+    "@setu-ts/agent-runs-plugin": "workspace:^",
+    "@setu-ts/static-plugin": "workspace:^",
+    "ai": "7.0.159",
+    "@ai-sdk/openai-compatible": "3.0.84",
+    "drizzle-orm": "0.45.2",
+    "pg": "^8.0.0",
+    "tsx": "^4.20.0"
+  },
+  "scarfSettings": {
+    "enabled": false
+  },
+  "devDependencies": {
+    "@setu-ts/testing": "workspace:^",
+    "@types/node": "^24.0.0",
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.12.0",
+    "prettier": "^3.9.10",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.71.1",
+    "@setu-ts/cli": "workspace:^",
+    "@types/pg": "^8.23.1"
+  },
+  "private": true
+}

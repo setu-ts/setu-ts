@@ -330,6 +330,12 @@ package fits the plugin architecture.
 | `withResponseMetadata`                | function  |
 | `withSecurityMetadata`                | function  |
 | `withValidationMetadata`              | function  |
+| `AgentRunApprovalError`               | class     |
+| `AgentRunDefinitionError`             | class     |
+| `AgentRunLeaseLostError`              | class     |
+| `AgentRunNotFoundError`               | class     |
+| `AgentRunStateError`                  | class     |
+| `AgentRunStoreUnavailableError`       | class     |
 | `BackendOutcomeUnknownError`          | class     |
 | `BackendUnavailableError`             | class     |
 | `DuplicateKeyError`                   | class     |
@@ -389,6 +395,12 @@ package fits the plugin architecture.
 | `UPGRADE_INTENT`                      | const     |
 | `VALIDATION_METADATA`                 | const     |
 | `AddJobOptions`                       | interface |
+| `AgentRunApprovalRow`                 | interface |
+| `AgentRunChunkBatch`                  | interface |
+| `AgentRunEntryRow`                    | interface |
+| `AgentRunRow`                         | interface |
+| `AgentRunSweepReport`                 | interface |
+| `AgentRunView`                        | interface |
 | `AuditEntry`                          | interface |
 | `AuthorizationDecisionObservation`    | interface |
 | `AuthorizationDecisionStep`           | interface |
@@ -446,6 +458,8 @@ package fits the plugin architecture.
 | `HealthReport`                        | interface |
 | `HttpStatusHint`                      | interface |
 | `IAdapterTransaction`                 | interface |
+| `IAgentRunService`                    | interface |
+| `IAgentRunStore`                      | interface |
 | `IApplication`                        | interface |
 | `IAuditLogger`                        | interface |
 | `IAuthorizationDiagnosticsSource`     | interface |
@@ -706,6 +720,8 @@ package fits the plugin architecture.
 | `WorkerTaskReply`                     | interface |
 | `WorkerTaskRequest`                   | interface |
 | `WrapOptions`                         | interface |
+| `AgentRunJson`                        | type      |
+| `AgentRunStatus`                      | type      |
 | `AnonymousPolicyCheck`                | type      |
 | `AuthMethod`                          | type      |
 | `AuthorizationCoverage`               | type      |

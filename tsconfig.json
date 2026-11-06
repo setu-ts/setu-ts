@@ -5,6 +5,9 @@
       "path": "./packages/common"
     },
     {
+      "path": "./packages/agent-runs-plugin"
+    },
+    {
       "path": "./packages/kernel"
     },
     {

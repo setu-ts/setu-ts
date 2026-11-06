@@ -144,6 +144,7 @@ const READMES: Readonly<Record<string, number>> = {
   'packages/idempotency-plugin/README.md': 3,
   'packages/mcp-plugin/README.md': 2,
   'packages/vector-store-plugin/README.md': 8,
+  'packages/agent-runs-plugin/README.md': 1,
   // M98a: +1 for the kernel-diagnostics polling example.
   'packages/kernel/README.md': 3,
   'packages/logger-plugin/README.md': 4,
@@ -211,7 +212,7 @@ describe('package README fences compile (X8-8, X6-2/X7-1)', () => {
     // Pin the SIZE of the target list too: without this, deleting an entry
     // shrinks both sides of the equality below and the gate passes vacuously
     // (negative control §6.7 of the M70n plan).
-    expect(Object.keys(READMES)).toHaveLength(54);
+    expect(Object.keys(READMES)).toHaveLength(55);
 
     // And pin the COVERAGE: the gated set is every package README on disk —
     // M119i deleted the known-gap list, so a new package cannot ship an

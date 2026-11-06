@@ -8,6 +8,23 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Durable agent runs (M136, #565, `@setu-ts/agent-runs-plugin`, `@setu-ts/common`,
+  `@setu-ts/database-plugin`, `@setu-ts/cli`).** `AgentRunsPlugin`, `AgentRunsPluginOptions`,
+  `defineAgentRun`, `AgentRunDefinition`, `AgentRunContext`, `AgentRunToolCall`,
+  `AgentRunApprovalOptions` and `VERSION` add model-at-a-time persistence, fenced leases,
+  transactional tool idempotency, stored approval deadlines and UI-message replay. Common exports
+  `CAPABILITIES.AGENT_RUNS`, `IAgentRunService`, `IAgentRunStore`, `AgentRunRow`,
+  `AgentRunEntryRow`, `AgentRunChunkBatch`, `AgentRunApprovalRow`, `AgentRunStatus`, `AgentRunJson`,
+  `AgentRunView`, `AgentRunSweepReport`, `AgentRunNotFoundError`, `AgentRunStateError`,
+  `AgentRunApprovalError`, `AgentRunDefinitionError`, `AgentRunLeaseLostError` and
+  `AgentRunStoreUnavailableError`. `createDatabaseAgentRunStore`, `DatabaseAgentRunStore` and
+  `DatabaseAgentRunStoreOptions` bridge the application database. `docs/durable-runs.md` covers
+  recovery, Workers, outside-effect idempotency and workflow engines. Reading, streaming and
+  cancelling a run default to the principal that started it (`canAccess` replaces the rule). Event
+  ids are `<batch>.<index>.<epoch>`; a `Last-Event-ID` the stored log cannot honour gets a
+  `data-setu-replay` chunk and a full replay. A failed run is logged at `warn` with its error class
+  only. CLI agent briefs recognize the package and capability; manual installation only. Ships in
+  0.12.0.
 - **Changing a workspace's transport after scaffolding (M138, #568, `@setu-ts/cli`).**
   `setu workspace broker <name>` changes the broker every member shares and
   `setu workspace rpc <member> <http|grpc>` changes how one member is called. Each member now

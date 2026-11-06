@@ -45,6 +45,7 @@ const BACKEND_VARIABLES = [
   'PUBSUB_EMULATOR',
   'SERVICEBUS_',
   'POSTGRES',
+  'AGENT_RUNS_PG_URL',
 ] as const;
 
 /** Signals that a suite binds a real socket. */

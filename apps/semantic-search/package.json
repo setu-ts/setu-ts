@@ -34,7 +34,7 @@
     "swagger-ui-dist": "5.33.3",
     "zod": "^4.6.6",
     "ai": "7.0.159",
-    "@ai-sdk/openai-compatible": "^3",
+    "@ai-sdk/openai-compatible": "3.0.84",
     "drizzle-orm": "0.45.2",
     "pg": "^8.0.0",
     "tsx": "^4.20.0"

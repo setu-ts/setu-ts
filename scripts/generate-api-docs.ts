@@ -49,6 +49,7 @@ export const CLEAN_PACKAGES = new Set([
   'telemetry-plugin',
   'validation-plugin',
   'vector-store-plugin',
+  'agent-runs-plugin',
   'view-plugin',
   'worker-pool-plugin',
 ]);

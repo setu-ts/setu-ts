@@ -50,6 +50,7 @@ const FENCE_COUNTS: Readonly<Record<string, number>> = {
   'packages/idempotency-plugin': 1,
   'packages/mcp-plugin': 1,
   'packages/vector-store-plugin': 1,
+  'packages/agent-runs-plugin': 1,
   'packages/localization-plugin': 2,
   'packages/multi-tenancy-plugin': 2,
   'packages/secrets-plugin': 2,

@@ -37,6 +37,8 @@ export type CapabilityToken = string;
  * @since 0.1.0
  */
 export const CAPABILITIES = {
+  /** Durable agent-run service (IAgentRunService). */
+  AGENT_RUNS: 'agent-runs',
   /** Runtime services provided by the RuntimePlugin. Mandatory in every application. */
   RUNTIME: 'runtime',
   /** Structured logger. */

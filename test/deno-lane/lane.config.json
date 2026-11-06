@@ -103,6 +103,7 @@
     "@modelcontextprotocol/server": "npm:@modelcontextprotocol/server@^2.4.0",
     "@modelcontextprotocol/client": "npm:@modelcontextprotocol/client@^2.4.0",
     "@setu-ts/common": "./../../packages/common/src/index.ts",
+    "@setu-ts/agent-runs-plugin": "./../../packages/agent-runs-plugin/src/index.ts",
     "@setu-ts/kernel": "./../../packages/kernel/src/index.ts",
     "@setu-ts/runtime": "./../../packages/runtime/src/index.ts",
     "@setu-ts/runtime/worker": "./../../packages/runtime/src/worker/define-worker-task.ts",

@@ -72,6 +72,7 @@ building production-ready applications with our plugin-first, runtime-independen
   - Runtime compatibility matrix
   - Package links and API references
 
+- [Durable agent runs](./durable-runs.md)
 - [Retrieval (vector search)](./retrieval.md)
   - Tenant-scoped embedding storage and similarity search
   - pgvector, Qdrant, memory and Cloudflare Vectorize adapters
