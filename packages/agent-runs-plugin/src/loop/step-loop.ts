@@ -17,6 +17,7 @@ import { runTool, ToolConflict } from './tool-runner.ts';
 /** Internal crash seam; never exported from the package barrel. @internal */
 export interface LoopHooks {
   readonly afterModelEntry?: (entry: AgentRunEntryRow) => Promise<void>;
+  readonly afterToolEntry?: (entry: AgentRunEntryRow) => Promise<void>;
 }
 /** Bound a call with runtime timers, linked to holder cancellation. @internal */
 async function timed<T>(
@@ -184,10 +185,16 @@ export async function stepLoop(
 
               stepChunkStart: null,
             };
+            // Store the call's chunks before committing its entry: once the
+            // entry commits, no holder emits them again, so a crash in between
+            // must find them already in the log. The reverse crash replays the
+            // call's stored result and emits its output a second time.
+            await log.flush();
             await lease.serial(async () => {
               lease.row = await lease.store.appendEntry(lease.row, entry);
             });
             entries.push(entry);
+            await deps.hooks?.afterToolEntry?.(entry);
           }
           await log.flush();
           if (approvals.some((row) => row.status === 'pending')) {
@@ -253,11 +260,14 @@ export async function stepLoop(
 
         stepChunkStart: lease.row.stepChunkStart,
       };
+      // The step's chunks first, then its entry (see the tool entry above): a
+      // crash before the entry commits retries the model call behind a
+      // `reset-step`, which discards the stored partial step.
+      await log.flush();
       await lease.serial(async () => {
         lease.row = await lease.store.appendEntry(lease.row, entry);
       });
       entries.push(entry);
-      await log.flush();
       await deps.hooks?.afterModelEntry?.(entry);
     }
   } catch (error) {
