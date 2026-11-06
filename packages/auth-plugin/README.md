@@ -850,35 +850,30 @@ export const auth: AuthPluginOptions = {
 ```
 
 A React Router action never receives the kernel request, and `IAuthSessionService.signIn` needs it.
-Wrap the sign-in in a request-bound service, whose factory receives the request, and register it in
-`setu.config.ts` beside `registerModules`; the action reaches it with `getService`. A page may
-import only a `*.token.ts` module by value (`setu check` refuses anything else as `setu.E017`), so
-the token gets a file of its own, `src/account.token.ts`:
+Wrap the sign-in in a request-bound module service, whose factory receives the request; the action
+reaches it with `getService`. Generate the module, then keep only its token, its service and its
+index:
+
+```bash
+setu g module account
+rm src/modules/account/account.{controller,types,test,e2e.test}.ts
+```
+
+Replace `src/modules/account/account.service.ts` with the sign-in service, then run `setu sync`,
+which rewrites the module's index to register only the service. `account.token.ts` keeps exporting
+`ACCOUNT`, typed by this interface, and the module index already registers
+`requestService(accountService)` under it:
 
 ```typescript
-import { serviceToken } from '@setu-ts/common';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IAuthService, IAuthSessionService, IRequestContext } from '@setu-ts/common';
 
 /** What the sign-in page calls. Built once per request, so it can write the session. */
-export interface Account {
+export interface AccountService {
   signIn(email: string, password: string): Promise<boolean>;
 }
 
-export const ACCOUNT = serviceToken<Account>('app.account');
-```
-
-The service, `src/account.ts`:
-
-```typescript
-import { CAPABILITIES, requestService } from '@setu-ts/common';
-import type {
-  IAuthService,
-  IAuthSessionService,
-  IRequestContext,
-  IServiceRegistry,
-} from '@setu-ts/common';
-import { ACCOUNT, type Account } from './account.token.ts';
-
-export function account(ctx: IRequestContext): Account {
+export function accountService(ctx: IRequestContext): AccountService {
   return {
     async signIn(email, password) {
       const auth = ctx.services.get<IAuthService>(CAPABILITIES.AUTH);
@@ -890,16 +885,7 @@ export function account(ctx: IRequestContext): Account {
     },
   };
 }
-
-export function registerAccount(services: IServiceRegistry): void {
-  services.register(ACCOUNT, requestService(account));
-}
 ```
-
-Register it in `setu.config.ts`'s `createApp`, after the starter returns and beside the existing
-module registration, so the action can resolve `ACCOUNT`: add
-`import { registerAccount } from './src/account.ts';` and call `registerAccount(app.services)` next
-to `registerModules(app.router, app.services)`.
 
 The login page's action (`app/routes/_auth/login.tsx`) calls it and keeps the template's hidden
 `_csrf` field, so the session plugin's form CSRF check still runs before the action. The template's
@@ -907,22 +893,24 @@ The login page's action (`app/routes/_auth/login.tsx`) calls it and keeps the te
 which a real sign-in never writes: read the signed-in principal from `userContext` instead, which
 the plugin sets on every authenticated request, and keep setting `currentUserContext`, which the
 products loader reads through `getCurrentUser`. The session cookie reaches the browser on the
-action's redirect, because the session plugin commits the session after the page has rendered. Pages
-import through the template's aliases, `~kernel/*` for `src/` and `~/*` for `app/`:
+action's redirect, because the session plugin commits the session after the page has rendered. A
+page may import only a module's `*.token.ts` by value (`setu check` refuses anything else as
+`setu.E017`), through the template's aliases, `~kernel/*` for `src/` and `~/*` for `app/`:
+
+`app/routes/_auth/login.tsx` — the action:
 
 ```typescript
-import { getService, userContext } from '@setu-ts/react-router-plugin';
+import { getService } from '@setu-ts/react-router-plugin';
 import type { RouterContextKey } from '@setu-ts/react-router-plugin';
-import { ACCOUNT } from '~kernel/account.token.ts';
-import { currentUserContext } from '~/server/context-keys.server.ts';
+import { ACCOUNT } from '~kernel/modules/account/account.token.ts';
 
-interface Context {
-  get<V>(key: RouterContextKey<V>): V;
-  set<V>(key: RouterContextKey<V>, value: V): void;
-}
-
-// app/routes/_auth/login.tsx
-export async function action({ request, context }: { request: Request; context: Context }) {
+export async function action({
+  request,
+  context,
+}: {
+  request: Request;
+  context: { get<V>(key: RouterContextKey<V>): V };
+}) {
   const form = await request.formData();
   const signedIn = await getService(context, ACCOUNT).signIn(
     String(form.get('email') ?? ''),
@@ -931,8 +919,20 @@ export async function action({ request, context }: { request: Request; context: 
   if (!signedIn) return { error: 'Invalid email or password.' };
   return new Response(null, { status: 303, headers: { location: '/products' } });
 }
+```
 
-// app/server/require-user.server.ts — the body of requireUser
+`app/server/require-user.server.ts` — the guard, with the imports it now needs:
+
+```typescript
+import { userContext } from '@setu-ts/react-router-plugin';
+import type { RouterContextKey } from '@setu-ts/react-router-plugin';
+import { currentUserContext } from '~/server/context-keys.server.ts';
+
+interface Context {
+  get<V>(key: RouterContextKey<V>): V;
+  set<V>(key: RouterContextKey<V>, value: V): void;
+}
+
 export function requireUser({ context }: { context: Context }, next: () => Promise<Response>) {
   const principal = context.get(userContext);
   // The template throws redirect('/login') here; the thrown Response ends the chain.

@@ -88,8 +88,8 @@ const READMES: Readonly<Record<string, number>> = {
   // M110a: +1 for the Authorization Policies example.
   // M110b: +1 for the Scoped Roles example.
   // M101h: +1 for the authorization-diagnostics registration example.
-  // M131d: +4 for the full-stack password sign-in recipe (the arm, the token module,
-  // the request-bound service in src/account.ts, and the page action with its guard).
+  // M131d: +4 for the full-stack password sign-in recipe (the arm, the account module's
+  // request-bound service, the login action, and the requireUser guard).
   'packages/auth-plugin/README.md': 29,
   'packages/static-plugin/README.md': 3,
   // M94c: +1 for the escaping Hono-template `raw(csrfTokenField(ctx))` example.
