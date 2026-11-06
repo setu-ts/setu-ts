@@ -26,7 +26,7 @@ All notable changes to this project are documented here. The format follows
   only. CLI agent briefs recognize the package and capability; manual installation only. Ships in
   0.12.0. Tool timeouts recover through the sweep after lease expiry and fail with `tool-timeout`
   after `toolAttempts` (default 3), replaying committed results or re-running rolled-back calls
-  (#566).
+  (#566, #567).
 
 - **Versioned `replaceSource` (`@setu-ts/common`, `@setu-ts/vector-store-plugin`, #561).**
   `replaceSource(collection, scope, sourceId, records, { version })` refuses a write whose version
