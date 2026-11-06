@@ -134,10 +134,12 @@ is still open can commit after the run fails, and because a conflict can use up 
 without running the tool, it may belong to an earlier attempt. An abandoned-call marker that refuses
 such a commit is not implemented. Each timed-out transaction that is still open keeps a database
 connection, and a resumed call waiting on its claim keeps another, so recovery needs connections to
-be free: set a server-side bound such as PostgreSQL's `idle_in_transaction_session_timeout` or
-`statement_timeout` so a stuck transaction is ended and releases its connection. Model deadlines
-(`timeouts.modelMs`) still fail with `execution-failed`. Configuration, store and oversized-result
-errors fail the run. Configure a transactional idempotency store as above.
+be free: set a server-side bound so a stuck transaction is ended and releases its connection. On
+PostgreSQL, `idle_in_transaction_session_timeout` ends a transaction left idle while the tool waits
+on something else, and `statement_timeout` bounds a single SQL statement that is still running; the
+first covers a hung tool, the second only a slow query. Model deadlines (`timeouts.modelMs`) still
+fail with `execution-failed`. Configuration, store and oversized-result errors fail the run.
+Configure a transactional idempotency store as above.
 
 ## Workers, bounds and storage
 
