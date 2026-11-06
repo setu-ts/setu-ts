@@ -531,16 +531,24 @@ message.addEventListener('keydown', (event) => {
 
 cancel.addEventListener('click', async () => {
   cancel.disabled = true;
+  let failure = null;
   try {
     const res = await fetch(`/runs/${encodeURIComponent(runId)}/cancel`, {
       method: 'POST',
       headers: headers(),
     });
-    if (!res.ok) notice = { text: `The run could not be cancelled (${res.status}).`, bad: true };
+    if (!res.ok) failure = `The run could not be cancelled (${res.status}).`;
   } catch {
-    notice = { text: 'The server could not be reached to cancel the run.', bad: true };
+    failure = 'The server could not be reached to cancel the run.';
   }
-  // Either way, read the run's real state: it restores the controls.
+  if (failure) {
+    // The run goes on: give Cancel back, show why, and leave any open stream
+    // alone (reconnecting would clear the notice).
+    notice = { text: failure, bad: true };
+    setStatus(status);
+    render();
+    return;
+  }
   void follow();
 });
 
