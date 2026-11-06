@@ -247,8 +247,9 @@ describe.each(REDIS_CLIENTS)('%s', (redisVariant) => {
         let failure: unknown;
         try {
           // The first command on a loaded runner can outlast the short command
-          // bound before anything is paused (seen once on CI as an unattributed
-          // `Command timed out`), so the baseline waits for one publish to land.
+          // bound before anything is paused, so the baseline waits for one
+          // publish to land. (The bare `Command timed out` CI reported came from
+          // the stop after the restart, below; a publish failure is wrapped.)
           await waitTrue(
             () => settleWithin(backplane.publish(frame), 3_000).then((r) => r === 'resolved'),
             'baseline publish',

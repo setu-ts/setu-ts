@@ -856,5 +856,5 @@ await app.stop();
     });
   });
   // Several tests scaffold, install, type-check and boot a Deno project: about 45 s
-  // cold on a developer machine, beyond the runner's 30 s default.
+  // cold on a developer machine, beyond the repository's 30 s Vitest default.
 }, 180_000);
