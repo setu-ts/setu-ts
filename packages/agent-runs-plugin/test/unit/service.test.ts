@@ -323,4 +323,42 @@ describe('AgentRunService', () => {
       await h.close();
     }
   });
+  it('keeps a later sweep guard when an earlier sweep finishes waiting (review)', async () => {
+    const ai = fakeAi();
+    let releaseRun!: () => void;
+    const runGate = new Promise<void>((resolve) => (releaseRun = resolve));
+    ai.model.mockImplementation(() => ({
+      chunks: new ReadableStream({ start: (c) => c.close() }),
+      result: async () => {
+        await runGate;
+        return { messages: [{ role: 'assistant', content: 'x' }], finishReason: 'stop', usage: {} };
+      },
+    }));
+    const h = await harness(definition(), ai);
+    try {
+      await h.store.create(row({ id: 'long', status: 'ready' }));
+      // Sweep A recovers `long` and waits on it.
+      const a = h.service.sweep();
+      for (let n = 0; n < 200; n++) await Promise.resolve();
+      // Sweep B starts and is held inside its scan.
+      let releaseScan!: () => void;
+      const scanGate = new Promise<void>((resolve) => (releaseScan = resolve));
+      const expired = h.store.expired.bind(h.store);
+      const scans = vi.spyOn(h.store, 'expired').mockImplementation(async (now, limit) => {
+        await scanGate;
+        return expired(now, limit);
+      });
+      const b = h.service.sweep();
+      for (let n = 0; n < 50; n++) await Promise.resolve();
+      // A finishes waiting while B still scans; a third sweep must not start.
+      releaseRun();
+      await a;
+      expect(await h.service.sweep()).toEqual({ expired: 0, resumed: 0, purged: 0 });
+      expect(scans).toHaveBeenCalledTimes(1);
+      releaseScan();
+      await b;
+    } finally {
+      await h.close();
+    }
+  });
 });

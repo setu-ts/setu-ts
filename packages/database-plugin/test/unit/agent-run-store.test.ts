@@ -1,7 +1,15 @@
 import { describe, it, expect, vi } from 'vitest';
-import { CAPABILITIES, AgentRunLeaseLostError } from '@setu-ts/common';
+import {
+  CAPABILITIES,
+  AgentRunLeaseLostError,
+  AgentRunStoreUnavailableError,
+} from '@setu-ts/common';
 import { MockServiceRegistry } from '@setu-ts/testing';
-import { DatabaseAgentRunStore, createDatabaseAgentRunStore } from '../../src/index.ts';
+import {
+  DatabaseAgentRunStore,
+  UnsupportedQueryFeatureError,
+  createDatabaseAgentRunStore,
+} from '../../src/index.ts';
 import { memoryService } from '../fixtures/outbox-store.ts';
 import type { AgentRunRow, AgentRunEntryRow, AgentRunApprovalRow } from '@setu-ts/common';
 function row(): AgentRunRow {
@@ -418,6 +426,29 @@ describe('database agent run store', () => {
     // counted from the start would now step over c5.
     await store.decide('x1', { status: 'denied' });
     expect((await store.expired(10, 1)).map((a) => a.id)).toEqual(['c5']);
+    await db.close();
+  });
+  it('refuses at startup an adapter that cannot serve the sweep queries', async () => {
+    const db = await memoryService();
+    const store = new DatabaseAgentRunStore(db);
+    await store.verify();
+    for (const entity of ['AgentRunApproval', 'AgentRun']) {
+      const repo = db.getRepository<Record<string, unknown>>(entity);
+      // As DynamoDB answers an order on more than its one sort key.
+      const refuse = vi
+        .spyOn(repo, 'findAll')
+        .mockRejectedValueOnce(new UnsupportedQueryFeatureError('orderBy', 'dynamodb', 'refused'));
+      await expect(store.verify()).rejects.toMatchObject({
+        name: 'AgentRunStoreUnavailableError',
+        reason: 'query-unsupported',
+      });
+      refuse.mockRestore();
+    }
+    // A run that cannot be decoded keeps its own reason.
+    vi.spyOn(store, 'resumable').mockRejectedValueOnce(
+      new AgentRunStoreUnavailableError('invalid-row'),
+    );
+    await expect(store.verify()).rejects.toMatchObject({ reason: 'invalid-row' });
     await db.close();
   });
 });

@@ -126,6 +126,19 @@ export class DatabaseAgentRunStore implements IAgentRunStore {
       if (cause instanceof AgentRunStoreUnavailableError) throw cause;
       throw new AgentRunStoreUnavailableError('conditional-writes-unsupported', { cause });
     }
+    // Run each sweep query once, so an adapter that cannot serve one (an
+    // `or` filter, or an order on more than one field, which DynamoDB and
+    // Bigtable refuse) fails registration instead of every scheduled sweep.
+    // The bounds match nothing overdue or past retention; the resumable
+    // query reads at most one run of each kind.
+    try {
+      await this.expired(0, 1);
+      await this.resumable(0, 1);
+      await this.terminal(0, 1);
+    } catch (cause) {
+      if (cause instanceof AgentRunStoreUnavailableError) throw cause;
+      throw new AgentRunStoreUnavailableError('query-unsupported', { cause });
+    }
   }
   /** @inheritdoc */
   async create(row: AgentRunRow): Promise<void> {

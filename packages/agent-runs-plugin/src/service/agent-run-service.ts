@@ -329,8 +329,9 @@ export class AgentRunService implements IAgentRunService {
     if (this.#sweeping) return { expired: 0, resumed: 0, purged: 0 };
     this.#sweeping = true;
     const recovered: Promise<void>[] = [];
+    let report: AgentRunSweepReport;
     try {
-      const report = await sweep(
+      report = await sweep(
         this.deps.store,
         { ...this.deps.options, now: this.deps.runtime.now() },
         async (row) => {
@@ -340,15 +341,16 @@ export class AgentRunService implements IAgentRunService {
           return resumed;
         },
       );
-      // The next tick may sweep again while this one waits on recovered work.
-      this.#sweeping = false;
-      // A cron invocation must stay alive for the work it recovered; the
-      // whole batch and the purge are claimed before waiting on any of it.
-      await Promise.allSettled(recovered);
-      return report;
     } finally {
+      // Cleared once the scan ends and never again: clearing it later would
+      // drop the guard of a sweep that started while this one waited.
       this.#sweeping = false;
     }
+    // The next tick may sweep again while this one waits on recovered work.
+    // A cron invocation must stay alive for the work it recovered; the whole
+    // batch and the purge are claimed before waiting on any of it.
+    await Promise.allSettled(recovered);
+    return report;
   }
   close(): void {
     this.#closed = true;
