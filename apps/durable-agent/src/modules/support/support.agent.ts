@@ -126,7 +126,9 @@ export function supportAgent(): AgentRunDefinition {
     maxSteps: MAX_STEPS,
     maxOutputTokens: MAX_OUTPUT_TOKENS,
     // A provider that stops answering would otherwise hold the run (renewing
-    // its lease) until someone cancels it; a timed-out call fails the run.
-    timeouts: { modelMs: 120_000, toolMs: 30_000 },
+    // its lease) until someone cancels it; a timed-out model call fails the
+    // run. No `toolMs`: a tool timeout can fail the run while the refund's
+    // transaction still commits, and these tools are short database writes.
+    timeouts: { modelMs: 120_000 },
   });
 }
