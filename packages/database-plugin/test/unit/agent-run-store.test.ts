@@ -254,6 +254,39 @@ describe('database agent run store', () => {
     expect(await db.getRepository('AgentRunEntry').findAll({ where: { runId: 'bad0' } })).toEqual(
       [],
     );
+    // More children than one page are all removed before the parent (audit F5).
+    await runs.create({ ...row(), id: 'many', status: 'completed', entryCount: 0.5, updatedAt: 0 });
+    const entries = db.getRepository<Record<string, unknown>>('AgentRunEntry');
+    for (let i = 0; i < 205; i++)
+      await entries.create({ ...entry(), id: `many.${i}`, runId: 'many', leaseVersion: 0 });
+    expect(await store.terminal(10 ** 15, 3)).toEqual([]);
+    expect(await entries.findAll({ where: { runId: 'many' } })).toEqual([]);
+    expect(await runs.findById('many')).toBeNull();
+    // A page that deletes nothing keeps the parent for the next sweep.
+    await runs.create({
+      ...row(),
+      id: 'stuck',
+      status: 'completed',
+      entryCount: 0.5,
+      updatedAt: 0,
+    });
+    for (let i = 0; i < 100; i++)
+      await entries.create({ ...entry(), id: `stuck.${i}`, runId: 'stuck', leaseVersion: 0 });
+    const refuse = vi.spyOn(entries, 'deleteWhere').mockResolvedValue(false);
+    expect(await store.terminal(10 ** 15, 3)).toEqual([]);
+    expect(await runs.findById('stuck')).not.toBeNull();
+    refuse.mockRestore();
+    const missing = entries.deleteWhere;
+    Object.defineProperty(entries, 'deleteWhere', {
+      value: undefined,
+      configurable: true,
+      writable: true,
+    });
+    expect(await store.terminal(10 ** 15, 3)).toEqual([]);
+    expect(await runs.findById('stuck')).not.toBeNull();
+    entries.deleteWhere = missing!;
+    expect(await store.terminal(10 ** 15, 3)).toEqual([]);
+    expect(await runs.findById('stuck')).toBeNull();
     // A row without a string id or status is skipped, not written.
     await runs.create({ ...row(), id: 'odd', status: 'ready', entryCount: 0.5 });
     const read = vi

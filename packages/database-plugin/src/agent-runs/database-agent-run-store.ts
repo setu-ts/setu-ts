@@ -348,14 +348,27 @@ export class DatabaseAgentRunStore implements IAgentRunStore {
         );
         continue;
       }
-      for (const kind of ['entry', 'chunks', 'approval'] as const) {
-        const children = this.#repo(kind);
-        for (const child of await children.findAll({ where: { runId: raw.id }, limit: 1000 }))
-          await children.deleteWhere?.(child.id as string, { runId: raw.id });
-      }
-      await repo.deleteWhere(raw.id, { status: raw.status });
+      // Page through every child, as purge() does; the parent goes last and
+      // only once no child is left, so a failed page is retried next sweep.
+      if (await this.#deleteChildren(raw.id))
+        await repo.deleteWhere(raw.id, { status: raw.status });
     }
     return result;
+  }
+  async #deleteChildren(runId: string, page = 100): Promise<boolean> {
+    for (const kind of ['entry', 'chunks', 'approval'] as const) {
+      const children = this.#repo(kind);
+      if (!children.deleteWhere) return false;
+      while (true) {
+        const rows = await children.findAll({ where: { runId }, limit: page });
+        let removed = 0;
+        for (const child of rows)
+          if (await children.deleteWhere(child.id as string, { runId })) removed++;
+        if (rows.length < page) break;
+        if (removed === 0) return false;
+      }
+    }
+    return true;
   }
   /** @inheritdoc */
   async purge(run: AgentRunRow, limit = 25): Promise<boolean> {
