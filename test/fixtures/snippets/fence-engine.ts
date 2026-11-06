@@ -910,6 +910,33 @@ export async function writeProjectStubs(scratchDir: string): Promise<void> {
     '}\n';
   await mkdir(`${scratchDir}/generated/prisma`, { recursive: true });
   await writeFile(`${scratchDir}/generated/prisma/client.ts`, prisma);
+  // The auth-plugin README's full-stack sign-in recipe splits its token into
+  // `src/account.token.ts` (a page may import only token modules by value) and
+  // imports it relatively from the service and through the template's
+  // `~kernel/*` alias from a page, which also reads the template's
+  // `currentUserContext` through `~/*`. These mirror the README's token fence
+  // and the generated `app/server/context-keys.server.ts`; the snippet
+  // tsconfig maps both aliases to `.tmp/fence-aliases`.
+  const accountToken =
+    "import { serviceToken } from '@setu-ts/common';\n" +
+    'export interface Account {\n' +
+    '  signIn(email: string, password: string): Promise<boolean>;\n' +
+    '}\n' +
+    "export const ACCOUNT = serviceToken<Account>('app.account');\n";
+  const contextKeys =
+    "import { contextKeyFor } from '@setu-ts/react-router-plugin';\n" +
+    'export interface CurrentUser {\n' +
+    '  readonly email: string;\n' +
+    '}\n' +
+    'export const currentUserContext = contextKeyFor<CurrentUser | null>(\n' +
+    "  'app.current-user',\n" +
+    '  null,\n' +
+    ');\n';
+  await writeFile(`${scratchDir}/account.token.ts`, accountToken);
+  await mkdir(`${parent}/fence-aliases/kernel`, { recursive: true });
+  await mkdir(`${parent}/fence-aliases/app/server`, { recursive: true });
+  await writeFile(`${parent}/fence-aliases/kernel/account.token.ts`, accountToken);
+  await writeFile(`${parent}/fence-aliases/app/server/context-keys.server.ts`, contextKeys);
 }
 
 /**
