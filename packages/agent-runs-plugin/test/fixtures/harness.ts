@@ -75,6 +75,8 @@ export function row(overrides: Partial<AgentRunRow> = {}): AgentRunRow {
     approvalIds: [],
     chunkCount: 0,
     stepChunkStart: 0,
+    toolTimeoutKey: '',
+    toolTimeouts: 0,
     cancelRequested: false,
     error: null,
     createdAt: 1,

@@ -28,6 +28,8 @@ function row(): AgentRunRow {
     approvalIds: [],
     chunkCount: 0,
     stepChunkStart: 0,
+    toolTimeoutKey: '',
+    toolTimeouts: 0,
     cancelRequested: false,
     error: null,
     createdAt: 1,
@@ -66,6 +68,30 @@ function approval(): AgentRunApprovalRow {
   };
 }
 describe('database agent run store', () => {
+  it('round-trips timeout keys and counts through the factory and rejects malformed fields', async () => {
+    const db = await memoryService();
+    const registry = new MockServiceRegistry();
+    registry.register(CAPABILITIES.DATABASE, db);
+    const store = await createDatabaseAgentRunStore()(registry);
+    try {
+      await store.create(row());
+      expect(await store.get('run')).toMatchObject({ toolTimeoutKey: '', toolTimeouts: 0 });
+      await store.update('run', { leaseVersion: 1 }, { toolTimeoutKey: 'hash', toolTimeouts: 2 });
+      expect(await store.get('run')).toMatchObject({ toolTimeoutKey: 'hash', toolTimeouts: 2 });
+      const repo = db.getRepository('AgentRun');
+      await repo.update('run', { toolTimeoutKey: 5 });
+      await expect(store.get('run')).rejects.toThrow();
+      await repo.update('run', { toolTimeoutKey: 'hash', toolTimeouts: -1 });
+      await expect(store.get('run')).rejects.toThrow();
+      const read = vi
+        .spyOn(repo, 'findById')
+        .mockResolvedValue({ ...row(), toolTimeouts: 2n } as never);
+      expect((await store.get('run'))?.toolTimeouts).toBe(2);
+      read.mockRestore();
+    } finally {
+      await db.close();
+    }
+  });
   it('purges in bounded batches and retains the parent when child cleanup fails', async () => {
     const db = await memoryService();
     const store = new DatabaseAgentRunStore(db);

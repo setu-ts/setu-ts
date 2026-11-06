@@ -119,13 +119,18 @@ next renewal. Client disconnection ends its tail, leaving the detached run avail
 
 Tool database writes through the supplied unit of work commit with their idempotency result. A
 replay returns that result without executing the tool. An outside API call can repeat if a process
-dies before that transaction commits: pass the stable `call.idempotencyKey` to the outside API's own
-idempotency mechanism. Tool exceptions leave `within`, roll back database writes and become safe
-tool-error entries. A tool timeout (`timeouts.toolMs`) is different: it fails the run at once but
-cannot stop a transaction the tool has already started, so an effect can commit after the run is
-marked `failed`. Use `toolMs` only for tools whose effects are safe to keep. Idempotency conflicts
-defer recovery; configuration, store and oversized-result errors fail the run. Configure a
-transactional idempotency store as above.
+dies, or the call times out, before that transaction commits: pass the stable `call.idempotencyKey`
+to the outside API's own idempotency mechanism. Tool exceptions leave `within`, roll back database
+writes and become safe tool-error entries. A tool timeout (`timeouts.toolMs`) leaves the run
+`running` and stops lease renewal without releasing the lease. After lease expiry plus
+`maxClockSkewMs`, the sweep resumes the call: `within` replays its recorded result if the
+transaction committed, or re-runs it if it rolled back. An in-flight 409 conflict stops the holder
+for a later sweep without counting another timeout. `timeouts.toolAttempts` bounds timed-out
+attempts per call (positive integer, default 3, used only with `toolMs`); reaching the limit fails
+the run with `tool-timeout`. The final attempt's transaction can still commit after the run fails:
+an abandoned-call marker that refuses that commit is not implemented. Model deadlines
+(`timeouts.modelMs`) still fail with `execution-failed`. Configuration, store and oversized-result
+errors fail the run. Configure a transactional idempotency store as above.
 
 ## Workers, bounds and storage
 

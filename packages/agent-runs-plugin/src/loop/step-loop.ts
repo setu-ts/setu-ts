@@ -12,7 +12,10 @@ import type { Lease } from '../lease/lease.ts';
 import type { ChunkLog } from '../log/chunk-log.ts';
 import { prepareApprovals } from '../approvals/approvals.ts';
 import { calls, childId, json, messages, schemaOnly } from './messages.ts';
-import { runTool, ToolConflict } from './tool-runner.ts';
+import { runTool, toolKey, ToolConflict } from './tool-runner.ts';
+
+/** Private deadline marker; model timeouts still follow the ordinary failure path. */
+class CallTimeout extends Error {}
 
 /** Internal crash seam; never exported from the package barrel. @internal */
 export interface LoopHooks {
@@ -32,7 +35,7 @@ async function timed<T>(
   let timer: TimerHandle | undefined;
   if (ms !== undefined)
     timer = lease.runtime.setTimeout(
-      () => controller.abort(new Error('Agent call timed out.')),
+      () => controller.abort(new CallTimeout('Agent call timed out.')),
       ms,
     );
   try {
@@ -69,6 +72,7 @@ export async function stepLoop(
     services: deps.services,
     signal: lease.controller.signal,
   };
+  let activeToolKey: string | undefined;
   try {
     await log.restore();
     if (
@@ -133,16 +137,24 @@ export async function stepLoop(
               };
               await log.emit({ type: 'tool-output-denied', toolCallId: call.toolCallId });
             } else {
+              const key = await toolKey(
+                lease.runtime,
+                context.runId,
+                modelEntry.seq,
+                call.toolCallId,
+              );
+              activeToolKey = key;
               const result = await timed(lease, definition.timeouts?.toolMs, (signal) =>
                 runTool(
-                  { runtime: lease.runtime, idempotency: deps.idempotency },
+                  { idempotency: deps.idempotency },
                   definition,
                   { ...context, signal },
-                  modelEntry.seq,
+                  key,
                   call,
                   messages(lease.row, entries),
                 ),
               );
+              activeToolKey = undefined;
               output = result.error
                 ? { type: 'error-text', value: result.output }
                 : { type: 'json', value: result.output };
@@ -275,7 +287,30 @@ export async function stepLoop(
     if (error instanceof AgentRunLeaseLostError || lease.lost || error instanceof ToolConflict)
       return;
     const cancelled = lease.controller.signal.aborted;
-    if (!cancelled) {
+    const key = activeToolKey;
+    const toolTimeout = !cancelled && error instanceof CallTimeout && key !== undefined;
+    const attempts = lease.row.toolTimeoutKey === key ? lease.row.toolTimeouts + 1 : 1;
+    const timeoutData = toolTimeout
+      ? {
+          toolTimeoutKey: key,
+          toolTimeouts: attempts,
+        }
+      : {};
+    if (toolTimeout) {
+      const limit = definition?.timeouts?.toolAttempts ?? 3;
+      deps.logger?.warn('Agent tool timed out.', {
+        definition: definition?.name ?? '',
+        attempt: attempts,
+        limit,
+      });
+      if (attempts < limit) {
+        await lease.write(timeoutData);
+        await log.flush();
+        // Retain the lease: stop renewal like a crash, allowing the transaction
+        // to settle before the sweep claims the run after expiry plus skew.
+        return;
+      }
+    } else if (!cancelled) {
       // Value-free: the error class and status hint, never its message, inputs
       // or ids (plan §8a O6); the SDK's own onError log is suppressed.
       const status = httpStatusHintOf(error)?.status;
@@ -291,7 +326,8 @@ export async function stepLoop(
     await log.flush();
     await lease.write({
       status: cancelled ? 'cancelled' : 'failed',
-      error: cancelled ? null : 'execution-failed',
+      error: cancelled ? null : toolTimeout ? 'tool-timeout' : 'execution-failed',
+      ...timeoutData,
       leaseOwner: '',
       leaseUntil: 0,
     });

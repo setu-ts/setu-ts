@@ -2,6 +2,9 @@ import { describe, it, expect } from 'vitest';
 import { definition } from '../fixtures/harness.ts';
 import { defineAgentRun } from '../../src/index.ts';
 describe('defineAgentRun', () => {
+  it.each([0, -1, 1.5, NaN, Infinity])('rejects toolAttempts %s', (toolAttempts) => {
+    expect(() => definition({ timeouts: { toolMs: 10, toolAttempts } })).toThrow();
+  });
   it('freezes snapshots and supplies a step bound', () => {
     const d = definition({ compatibleVersions: ['0'], timeouts: { modelMs: 10, toolMs: 20 } });
     expect(d.maxSteps).toBe(20);

@@ -52,6 +52,8 @@ export const agentRuns = pgTable('agent_runs', {
   approvalIds: jsonb('approval_ids').notNull(),
   chunkCount: integer('chunk_count').notNull(),
   stepChunkStart: integer('step_chunk_start').notNull(),
+  toolTimeoutKey: text('tool_timeout_key').notNull(),
+  toolTimeouts: integer('tool_timeouts').notNull(),
   cancelRequested: boolean('cancel_requested').notNull(),
   error: text('error'),
   createdAt: num('created_at').notNull(),

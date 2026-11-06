@@ -133,8 +133,8 @@ The project is what `setu new --template rest`, `setu generate module support`,
   call's idempotency key (`callKey`).
 - The definition bounds each model call with `timeouts: { modelMs: 120000 }`, so a model server that
   stops answering fails the run with `execution-failed` instead of holding it. It sets no `toolMs`:
-  a tool that times out fails the run even if its transaction then commits, and the refund is a short
-  database write.
+  tool timeouts recover through the sweep, but the final timed-out attempt can still commit after
+  failure, and the refund is a short database write.
 - `src/modules/support/support.controller.ts` maps the routes onto `IAgentRunService`: `start`,
   `respond`, `get`, `decide` and `cancel`.
 - `src/modules/support/support.database.ts` picks PostgreSQL through Drizzle when `DATABASE_URL` is

@@ -59,14 +59,13 @@ async function contextFor(schema: unknown, value: unknown): Promise<unknown> {
 }
 /** Execute inside within; only tool exceptions become model-visible error results. @internal */
 export async function runTool(
-  deps: { runtime: IRuntimeServices; idempotency: IIdempotencyService },
+  deps: { idempotency: IIdempotencyService },
   definition: AgentRunDefinition,
   run: AgentRunContext,
-  entryIndex: number,
+  key: string,
   call: { toolCallId: string; toolName: string; input: AgentRunJson },
   history: ModelMessage[],
 ): Promise<{ output: AgentRunJson; error: boolean }> {
-  const key = await toolKey(deps.runtime, run.runId, entryIndex, call.toolCallId);
   try {
     const result = await deps.idempotency.within(
       {
