@@ -562,9 +562,21 @@ export async function planTransportChange(
       managed: true,
     });
 
-    const manifestFile = profile.manifestKind === 'deno' ? 'deno.json' : 'package.json';
-    const manifestPath = joinPath(context.root, manifestFile);
-    const text = await readText(fs, joinPath(dir, manifestPath));
+    // A Deno member's manifest is `deno.json`, else `deno.jsonc` — the order Deno and
+    // `detectPlugins` read them in. A JSONC file that is not plain JSON is refused by
+    // `mergeManifest`, which prints the lines to add by hand.
+    const candidates =
+      profile.manifestKind === 'deno' ? ['deno.json', 'deno.jsonc'] : ['package.json'];
+    let manifestPath = joinPath(context.root, candidates[0] ?? 'package.json');
+    let text: string | undefined;
+    for (const candidate of candidates) {
+      const path = joinPath(context.root, candidate);
+      text = await readText(fs, joinPath(dir, path));
+      if (text !== undefined) {
+        manifestPath = path;
+        break;
+      }
+    }
     if (text === undefined) {
       refusals.push(
         `${escapeName(manifestPath)} cannot be read, so the packages this change needs cannot be declared.`,

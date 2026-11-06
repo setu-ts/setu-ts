@@ -373,6 +373,31 @@ describe('refusing a member that does not read the module', () => {
     expect(result.err).toContain('"imports": { "ioredis":');
     expect(JSON.parse(ws.read('setu.workspace.json')).broker).toBe('memory');
   });
+
+  it('merges into a Deno member whose manifest is deno.jsonc', async () => {
+    const ws = await workspace();
+    const manifest = ws.read('apps/orders/deno.json');
+    await ws.fs.rm(`${ROOT}/apps/orders/deno.json`);
+    await ws.write('apps/orders/deno.jsonc', manifest);
+    const result = await ws.run(['workspace', 'broker', 'redis']);
+    expect(result.code, result.err).toBe(0);
+    expect(JSON.parse(ws.read('apps/orders/deno.jsonc')).imports).toMatchObject({
+      ioredis: expect.stringContaining('npm:ioredis@'),
+    });
+    expect(ws.fs.has(`${ROOT}/apps/orders/deno.json`)).toBe(false);
+  });
+
+  it('refuses a deno.jsonc manifest with comments, naming that file', async () => {
+    const ws = await workspace();
+    const manifest = ws.read('apps/orders/deno.json');
+    await ws.fs.rm(`${ROOT}/apps/orders/deno.json`);
+    await ws.write('apps/orders/deno.jsonc', `// mine\n${manifest}`);
+    const result = await ws.run(['workspace', 'broker', 'redis']);
+    expect(result.code).toBe(1);
+    expect(result.err).toContain('apps/orders/deno.jsonc is not plain JSON');
+    expect(result.err).not.toContain('cannot be read');
+    expect(JSON.parse(ws.read('setu.workspace.json')).broker).toBe('memory');
+  });
 });
 
 describe('refusing a switch that would orphan wiring', () => {
