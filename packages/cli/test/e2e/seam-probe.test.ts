@@ -855,4 +855,6 @@ await app.stop();
       expect(await run(['g', 'service', 'unrelated', '--dir', project])).toBe(0);
     });
   });
-});
+  // Several tests scaffold, install, type-check and boot a Deno project: about 45 s
+  // cold on a developer machine, beyond the runner's 30 s default.
+}, 180_000);
