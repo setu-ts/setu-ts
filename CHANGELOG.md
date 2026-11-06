@@ -8,7 +8,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
-- **Durable agent runs (M136, PR pending, `@setu-ts/agent-runs-plugin`, `@setu-ts/common`,
+- **Durable agent runs (M136, #565, `@setu-ts/agent-runs-plugin`, `@setu-ts/common`,
   `@setu-ts/database-plugin`, `@setu-ts/cli`).** `AgentRunsPlugin`, `AgentRunsPluginOptions`,
   `defineAgentRun`, `AgentRunDefinition`, `AgentRunContext`, `AgentRunToolCall`,
   `AgentRunApprovalOptions` and `VERSION` add model-at-a-time persistence, fenced leases,

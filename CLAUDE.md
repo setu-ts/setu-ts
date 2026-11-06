@@ -766,7 +766,7 @@ here.
   scaffold text; 17 smoke rows) — complete (PR #560).
 - **Milestone 136** (`agent-runs-plugin` + `common` + `database-plugin` + `apps/durable-agent` —
   durable model/tool runs, fenced leases, timed approvals and UI-message replay, with a
-  support-agent example that survives restarts) — complete (PR pending).
+  support-agent example that survives restarts) — complete (PR #565).
 - **Next milestone** — M131d is open for `0.12.0`.
 
 ## Verification (run before declaring any work done)
