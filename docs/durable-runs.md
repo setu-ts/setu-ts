@@ -56,9 +56,13 @@ export function createRunsApp(model: LanguageModel) {
 }
 ```
 
-The run service installs no routes. Your authorization middleware controls which users can start,
-read and cancel runs within a tenant. All methods conceal other tenants' runs with the same 404 as a
-missing id. `get` supplies status, rebuilt messages and pending approvals for a page reload.
+The run service installs no routes; your middleware decides who may start runs. Reading, streaming
+and cancelling a run is limited to the principal that started it, or to anyone in the tenant for a
+run started without a principal. A definition's `canAccess(principal, run)` replaces that rule, for
+example to let a support role read every run in the tenant. Every refusal, like another tenant's
+run, is the same 404 as a missing id. `get` supplies status, rebuilt messages and pending approvals
+for a page reload. Input messages may be `user` or `assistant`; the system prompt belongs to the
+definition's `system`, and a `system` message is refused at `start`.
 
 ## Tools and approvals
 
@@ -85,12 +89,21 @@ match, or be explicitly listed in `compatibleVersions`; otherwise the run fails 
 `version-incompatible` before model/tool execution.
 
 The UI message id is the run id. Responses carry the SDK UI-message SSE headers and `x-setu-run-id`.
-`Last-Event-ID: <batch>.<index>` resumes after that exact chunk. Without a header, the SDK replays
-from the start; its transport's default `resumeStreamIsReplay` applies that replay to the same
-message. A waiting response ends after the approval request without a finish chunk; the decide route
-returns another `respond` stream. A terminal run without an event id returns 204, the SDK's
-nothing-to-resume signal. A terminal run with an event id serves the retained remainder. An id
-beyond the committed log produces `reset-step` and replay from the current step boundary.
+Event ids are `<batch>.<index>.<epoch>`, the epoch being the lease version of the instance that
+wrote the chunk. `Last-Event-ID` resumes after that exact chunk while the log agrees with it.
+Without a header, the SDK replays from the start; its transport's default `resumeStreamIsReplay`
+applies that replay to the same message. A waiting response ends after the approval request without
+a finish chunk; the decide route returns another `respond` stream. A terminal run without an event
+id returns 204, the SDK's nothing-to-resume signal. A terminal run with an event id serves the
+retained remainder.
+
+An id the log cannot honour means the client's view has diverged: it names a position past the
+committed log, or one a different instance wrote, which happens when an instance dies with chunks it
+had streamed but not yet stored and another takes the run over. The stream then sends a
+`data-setu-replay` chunk followed by the whole stored log from the start. A client that handles the
+stream itself must discard the message it has built when it sees that chunk and rebuild it from what
+follows. AI SDK clients replay from the start by default and are unaffected. An id that does not
+parse is ignored, and the stream replays from the start without the marker.
 
 Same-instance clients subscribe before replay and receive unflushed chunks. Other instances poll
 committed batches. Cancellation aborts a local in-flight call immediately, or a remote holder on its
@@ -113,8 +126,14 @@ in application code, importing that interface from the Cloudflare plugin. A host
 after its background lifetime; the sweep resumes from stored state. Runs do not execute in
 `ctx.defer`. Node, Deno and Bun keep the detached promise in process.
 
-Await `sweep()` or pass its promise to the Cron Trigger's execution context. It waits for the work
-it recovers to finish or park, keeping that invocation's lifetime attached to its recovered runs.
+Await `sweep()` or pass its promise to the Cron Trigger's execution context. It claims its whole
+batch and purges retention first, then waits for the work it recovered to finish or park, keeping
+that invocation's lifetime attached to its recovered runs. A sweep started while another is still
+running on the same instance returns at once with zero counts.
+
+A run that fails is logged at `warn` (`Agent run failed.`) with its definition name, the error's
+class name and any HTTP status hint, never its message, inputs or ids. Supply a logger plugin to see
+it; the SDK's own provider-error log is switched off.
 
 Defaults: 30-second lease, 5-second skew and sweep, 25 rows per sweep query, one-day retention,
 100-ms/64-chunk flushes, 250-ms polling, 256-KiB input and 8-MiB retained deltas. All numeric bounds

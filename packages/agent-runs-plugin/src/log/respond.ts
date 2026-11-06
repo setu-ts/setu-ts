@@ -1,4 +1,5 @@
 import type {
+  AgentRunChunkBatch,
   AgentRunRow,
   HandlerResult,
   IAgentRunStore,
@@ -11,7 +12,19 @@ import type { ChunkLog, PositionedChunk } from './chunk-log.ts';
 export function terminal(run: AgentRunRow): boolean {
   return run.status === 'completed' || run.status === 'failed' || run.status === 'cancelled';
 }
-/** Subscribe before reading committed batches, then poll as a cross-instance fallback. @internal */
+/** The marker telling a client to discard its message and rebuild it from the replay. @internal */
+export const REPLAY_CHUNK = { type: 'data-setu-replay', data: true } as const;
+/**
+ * Replay and tail a run's UI stream. Event ids are `<batch>.<index>.<epoch>`,
+ * the epoch being the writer's lease version. `Last-Event-ID` resumes after
+ * that exact chunk while the log agrees with it; when it names a position the
+ * committed log does not hold, or one a different holder wrote (a takeover
+ * rewrote unflushed positions), the client's view has diverged, so the stream
+ * sends a `data-setu-replay` chunk and replays the whole log from the start.
+ * Subscription happens before any read, and the committed read uses a row
+ * read after subscribing, so no chunk falls between the three sources.
+ * @internal
+ */
 export async function respond(
   ctx: IRequestContext,
   row: AgentRunRow,
@@ -23,16 +36,16 @@ export async function respond(
     local?: ChunkLog;
   },
 ): Promise<HandlerResult> {
+  // Asynchronous by contract; subscription and snapshot below stay one synchronous step.
   await Promise.resolve();
   const lastId = ctx.request.headers.get('last-event-id');
   if (!lastId && terminal(row)) return ctx.response.status(204).send();
-  const match = lastId?.match(/^(\d+)\.(\d+)$/);
-  let batch = match ? Number(match[1]) : -1;
-  let index = match ? Number(match[2]) : -1;
-  if (!Number.isSafeInteger(batch) || !Number.isSafeInteger(index)) {
-    batch = -1;
-    index = -1;
-  }
+  const match = lastId?.match(/^(\d+)\.(\d+)\.(\d+)$/);
+  const parsed = match ? match.slice(1).map(Number) : [];
+  const resume = parsed.length === 3 && parsed.every((n) => Number.isSafeInteger(n));
+  let batch = resume ? parsed[0]! : -1;
+  let index = resume ? parsed[1]! : -1;
+  const epoch = resume ? parsed[2]! : -1;
   let closed = false;
   const wake = new Set<() => void>();
   const queued: PositionedChunk[] = [];
@@ -40,8 +53,15 @@ export async function respond(
     queued.push(value);
     for (const resolve of wake) resolve();
   };
+  // Subscribe and snapshot the unflushed buffer in one synchronous step: a
+  // chunk is then either in this snapshot, in the queue, or flushed later.
   deps.local?.listeners.add(listener);
-  let cleanup = (): void => {};
+  const early = deps.local?.snapshot() ?? [];
+  const abort = (): void => {
+    closed = true;
+    deps.local?.listeners.delete(listener);
+    for (const resolve of wake) resolve();
+  };
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       const encoder = new TextEncoder();
@@ -54,7 +74,7 @@ export async function respond(
           return;
         controller.enqueue(
           encoder.encode(
-            `${value.batch < 0 ? '' : `id: ${value.batch}.${value.index}\n`}data: ${JSON.stringify(value.chunk)}\n\n`,
+            `${value.batch < 0 ? '' : `id: ${value.batch}.${value.index}.${value.epoch}\n`}data: ${JSON.stringify(value.chunk)}\n\n`,
           ),
         );
         if (value.batch >= 0) {
@@ -62,12 +82,16 @@ export async function respond(
           index = value.index;
         }
       };
-      const abort = (): void => {
-        closed = true;
-        deps.local?.listeners.delete(listener);
-        for (const resolve of wake) resolve();
+      const sendBatches = (batches: readonly AgentRunChunkBatch[]): void => {
+        for (const value of batches)
+          for (let i = 0; i < value.chunks.length; i++)
+            send({
+              batch: value.seq,
+              index: i,
+              epoch: value.leaseVersion,
+              chunk: value.chunks[i]!,
+            });
       };
-      cleanup = abort;
       const disconnected = (): void => {
         if (closed) return;
         controller.close();
@@ -77,24 +101,24 @@ export async function respond(
       if (ctx.signal?.aborted) disconnected();
       void (async () => {
         try {
-          let current = row;
+          let current = (await deps.store.get(row.id)) ?? row;
           const initial = await deps.store.chunks(current, 0);
-          const final = initial.at(-1);
-          const localLast = deps.local?.snapshot().at(-1);
-          const maxBatch = localLast?.batch ?? final?.seq ?? -1;
-          const maxIndex = localLast?.index ?? (final ? final.chunks.length - 1 : -1);
-          if (batch > maxBatch || (batch === maxBatch && index > maxIndex)) {
-            send({ batch: -1, index: -1, chunk: { type: 'reset-step' } });
-            batch = current.stepChunkStart;
-            index = -1;
+          if (resume) {
+            const committed = initial.find((value) => value.seq === batch);
+            const buffered = early.filter((value) => value.batch === batch);
+            const agrees = committed
+              ? committed.leaseVersion === epoch && index < committed.chunks.length
+              : buffered.length > 0 && buffered[0]!.epoch === epoch && index < buffered.length;
+            if (!agrees) {
+              send({ batch: -1, index: -1, epoch: -1, chunk: REPLAY_CHUNK });
+              batch = -1;
+              index = -1;
+            }
           }
-          for (const value of initial)
-            for (let i = 0; i < value.chunks.length; i++)
-              send({ batch: value.seq, index: i, chunk: value.chunks[i]! });
+          sendBatches(initial);
+          for (const value of early) send(value);
           while (!closed) {
-            for (const value of await deps.store.chunks(current, Math.max(batch, 0)))
-              for (let i = 0; i < value.chunks.length; i++)
-                send({ batch: value.seq, index: i, chunk: value.chunks[i]! });
+            sendBatches(await deps.store.chunks(current, Math.max(batch, 0)));
             for (const value of deps.local?.snapshot() ?? []) send(value);
             for (const value of queued.splice(0)) send(value);
             if (terminal(current) || current.status === 'waiting') break;
@@ -125,7 +149,7 @@ export async function respond(
       })();
     },
     cancel() {
-      cleanup();
+      abort();
     },
   });
   for (const [key, value] of Object.entries(deps.headers)) ctx.response.header(key, value);

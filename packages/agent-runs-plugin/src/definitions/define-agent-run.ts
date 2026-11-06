@@ -28,7 +28,7 @@ export interface AgentRunToolCall {
 }
 /** Durable server-side approval policy. @since 0.12.0 */
 export interface AgentRunApprovalOptions {
-  /** SDK tool definitions or tool-name approval policies. */
+  /** Approval policy per tool name: always, or a predicate over the call input. */
   readonly tools: Readonly<
     Record<string, true | ((input: unknown, run: AgentRunContext) => boolean | Promise<boolean>)>
   >;
@@ -39,7 +39,7 @@ export interface AgentRunApprovalOptions {
 }
 /** Immutable application definition for new and recovered runs. @since 0.12.0 */
 export interface AgentRunDefinition {
-  /** Stable error discriminant or application definition name. */
+  /** Unique definition name, stored on each run to find its definition on resume. */
   readonly name: string;
   /** Definition version stamped at creation. */
   readonly version: string;
@@ -49,7 +49,7 @@ export interface AgentRunDefinition {
   readonly model: (run: AgentRunContext) => LanguageModel;
   /** Optional system prompt supplied on each model call. */
   readonly system?: string;
-  /** SDK tool definitions or tool-name approval policies. */
+  /** SDK tool definitions, each with an `execute`. */
   readonly tools?: ToolSet;
   /** Builds context keyed by tool name from server identity and transaction scope. */
   readonly toolsContext?: (run: AgentRunContext, call: AgentRunToolCall) => Record<string, unknown>;
@@ -59,6 +59,12 @@ export interface AgentRunDefinition {
   readonly maxOutputTokens: number;
   /** Durable approval configuration. */
   readonly approval?: AgentRunApprovalOptions;
+  /**
+   * Who may read, stream or cancel a run. Defaults to the principal that
+   * started it; a run started without a principal is open to its tenant.
+   * A refusal is the same 404 as a missing run.
+   */
+  readonly canAccess?: (principal: IPrincipal | undefined, run: AgentRunContext) => boolean;
   /** Per-call model and tool deadlines, in milliseconds. */
   readonly timeouts?: { readonly modelMs?: number; readonly toolMs?: number };
 }
@@ -92,6 +98,8 @@ export function defineAgentRun(definition: AgentRunDefinition): AgentRunDefiniti
       throw new TypeError();
     for (const value of Object.values(definition.timeouts ?? {})) integer(value, 'timeout');
     if (definition.toolsContext !== undefined && typeof definition.toolsContext !== 'function')
+      throw new TypeError();
+    if (definition.canAccess !== undefined && typeof definition.canAccess !== 'function')
       throw new TypeError();
     for (const tool of Object.values(definition.tools ?? {}))
       if (!tool || !tool.inputSchema || typeof tool.execute !== 'function') throw new TypeError();

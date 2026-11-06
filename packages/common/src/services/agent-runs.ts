@@ -84,6 +84,8 @@ export interface AgentRunChunkBatch {
   readonly tenantId: string;
   /** Ordered sequence within the run. */
   readonly seq: number;
+  /** Lease version of the holder that wrote the batch; part of each event id. */
+  readonly leaseVersion: number;
   /** Ordered JSON UI-message chunks. */
   readonly chunks: readonly AgentRunJson[];
 }
@@ -174,7 +176,7 @@ export interface IAgentRunStore {
   resumable(now: number, limit: number): Promise<readonly AgentRunRow[]>;
   /** Bounded query of old terminal runs. */
   terminal(before: number, limit: number): Promise<readonly AgentRunRow[]>;
-  /** Delete a terminal run conditionally, then its children. */
+  /** Delete a terminal run's children, then the run itself conditionally. */
   purge(run: AgentRunRow, limit?: number): Promise<boolean>;
 }
 /** Durable run API registered under CAPABILITIES.AGENT_RUNS. @since 0.12.0 */

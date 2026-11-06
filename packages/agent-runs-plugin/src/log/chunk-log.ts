@@ -7,6 +7,8 @@ import type { Lease } from '../lease/lease.ts';
 export interface PositionedChunk {
   readonly batch: number;
   readonly index: number;
+  /** Lease version of the writer; a new holder reuses positions under a new epoch. */
+  readonly epoch: number;
   readonly chunk: AgentRunJson;
 }
 /** Buffered durable log with same-instance subscribers. @internal */
@@ -39,7 +41,12 @@ export class ChunkLog {
       }
   }
   snapshot(): PositionedChunk[] {
-    return this.buffer.map((chunk, index) => ({ batch: this.lease.row.chunkCount, index, chunk }));
+    return this.buffer.map((chunk, index) => ({
+      batch: this.lease.row.chunkCount,
+      index,
+      epoch: this.lease.row.leaseVersion,
+      chunk,
+    }));
   }
   async emit(chunk: UIMessageChunk): Promise<void> {
     await this.lease.serial(async () => {
@@ -48,7 +55,8 @@ export class ChunkLog {
       const size = new TextEncoder().encode(JSON.stringify(value)).length;
       if (delta && this.bytes + size > this.options.maxLogBytes) {
         // Live consumers still see omitted deltas, without a durable position.
-        for (const listener of this.listeners) listener({ batch: -1, index: -1, chunk: value });
+        for (const listener of this.listeners)
+          listener({ batch: -1, index: -1, epoch: -1, chunk: value });
         if (this.truncated) return;
         this.truncated = true;
         this.#push(json({ type: 'data-setu-log-truncated', data: true }));
@@ -65,7 +73,12 @@ export class ChunkLog {
     });
   }
   #push(chunk: AgentRunJson): void {
-    const position = { batch: this.lease.row.chunkCount, index: this.buffer.length, chunk };
+    const position = {
+      batch: this.lease.row.chunkCount,
+      index: this.buffer.length,
+      epoch: this.lease.row.leaseVersion,
+      chunk,
+    };
     this.buffer.push(chunk);
     for (const listener of this.listeners) listener(position);
   }
@@ -77,6 +90,7 @@ export class ChunkLog {
       runId: run.id,
       tenantId: run.tenantId,
       seq: run.chunkCount,
+      leaseVersion: run.leaseVersion,
       chunks: this.buffer,
     });
     this.buffer = [];

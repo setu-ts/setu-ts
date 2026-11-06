@@ -27,8 +27,9 @@ handlers: `start`, `respond`, `decide`, `cancel`, `get`; call `sweep` from cron 
 - Approval rows have deadlines and single-use decisions. Default decision authorization requires the
   original, defined principal. Tenant mismatch returns the same 404 as a missing run.
 - Definitions are frozen and versioned. Supply `compatibleVersions` for deliberate migrations.
-- The UI-message log supports replay from the Last-Event-ID header; idle terminal reconnect
-  returns 204.
+- Reading, streaming and cancelling default to the starting principal; `canAccess` widens it.
+- The UI-message log resumes from a `<batch>.<index>.<epoch>` Last-Event-ID; a diverged id gets a
+  `data-setu-replay` chunk and a full replay. Idle terminal reconnect returns 204.
 - `background(ctx, work)` integrates with host lifetime. `ctx.defer` does not run the agent.
 
 See README for limits, database schema requirements, options and errors. Edit loop:

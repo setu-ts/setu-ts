@@ -4,7 +4,9 @@ import type { ModelMessage, ToolSet } from 'ai';
 
 /** JSON round trip prevents mutable SDK objects escaping into persistence. @internal */
 export function json(value: unknown): AgentRunJson {
-  return JSON.parse(JSON.stringify(value)) as AgentRunJson;
+  // A tool returning nothing records null; JSON.stringify(undefined) is not JSON.
+  const text = JSON.stringify(value);
+  return text === undefined ? null : (JSON.parse(text) as AgentRunJson);
 }
 /** Strip caller-owned tool/approval history; only persisted server entries execute. @internal */
 export function inputMessages(input: readonly AgentRunJson[]): readonly AgentRunJson[] {
@@ -13,8 +15,8 @@ export function inputMessages(input: readonly AgentRunJson[]): readonly AgentRun
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new AgentRunStateError();
     const message = value as Record<string, AgentRunJson>;
     if (message.role === 'tool') continue;
-    if (message.role !== 'user' && message.role !== 'assistant' && message.role !== 'system')
-      throw new AgentRunStateError();
+    // The SDK refuses system messages in `messages`; the definition owns the system prompt.
+    if (message.role !== 'user' && message.role !== 'assistant') throw new AgentRunStateError();
     const content = Array.isArray(message.content)
       ? message.content.filter((part) => {
           if (!part || typeof part !== 'object' || Array.isArray(part)) return true;
@@ -54,11 +56,30 @@ export function schemaOnly(tools: ToolSet): ToolSet {
     ]),
   );
 }
-/** Extract final tool calls from persisted assistant messages. @internal */
+/**
+ * Extract the tool calls this plugin must settle from a model entry. A call the
+ * SDK already answered in the same response (invalid input, unknown tool) or a
+ * provider-executed call is excluded. @internal
+ */
 export function calls(
   entry: AgentRunEntryRow,
 ): { toolCallId: string; toolName: string; input: AgentRunJson }[] {
   const result: { toolCallId: string; toolName: string; input: AgentRunJson }[] = [];
+  const settled = new Set<string>();
+  for (const message of entry.messages) {
+    if (!message || typeof message !== 'object' || Array.isArray(message)) continue;
+    const content = (message as Record<string, AgentRunJson>).content;
+    if (!Array.isArray(content)) continue;
+    for (const part of content)
+      if (
+        part &&
+        typeof part === 'object' &&
+        !Array.isArray(part) &&
+        (part as Record<string, AgentRunJson>).type === 'tool-result' &&
+        typeof (part as Record<string, AgentRunJson>).toolCallId === 'string'
+      )
+        settled.add((part as Record<string, AgentRunJson>).toolCallId as string);
+  }
   for (const message of entry.messages) {
     if (!message || typeof message !== 'object' || Array.isArray(message)) continue;
     const content = (message as Record<string, AgentRunJson>).content;
@@ -69,7 +90,9 @@ export function calls(
       if (
         p.type === 'tool-call' &&
         typeof p.toolCallId === 'string' &&
-        typeof p.toolName === 'string'
+        typeof p.toolName === 'string' &&
+        p.providerExecuted !== true &&
+        !settled.has(p.toolCallId)
       )
         result.push({ toolCallId: p.toolCallId, toolName: p.toolName, input: p.input ?? null });
     }

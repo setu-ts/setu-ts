@@ -116,6 +116,9 @@ export function AgentRunsPlugin(options: AgentRunsPluginOptions): IPlugin {
         typeof options.store === 'function' ? await options.store(ctx.services) : options.store;
       await store.verify();
       const ai = await loadAi();
+      const logger = ctx.services.has(CAPABILITIES.LOGGER)
+        ? ctx.services.get<ILogger>(CAPABILITIES.LOGGER)
+        : undefined;
       service = new AgentRunService({
         store,
         runtime: ctx.runtime,
@@ -125,14 +128,16 @@ export function AgentRunsPlugin(options: AgentRunsPluginOptions): IPlugin {
         definitions,
         options: bounds,
         ...(options.background === undefined ? {} : { background: options.background }),
+        ...(logger === undefined ? {} : { logger }),
       });
       const registered = service;
       ctx.services.register(CAPABILITIES.AGENT_RUNS, registered);
       if (bounds.sweepIntervalMs > 0)
         timer = ctx.runtime.setInterval(() => {
-          void registered.sweep().catch(() => {
-            if (ctx.services.has(CAPABILITIES.LOGGER))
-              ctx.services.get<ILogger>(CAPABILITIES.LOGGER).warn('Agent run sweep failed.');
+          void registered.sweep().catch((error: unknown) => {
+            logger?.warn('Agent run sweep failed.', {
+              error: error instanceof Error ? error.name : typeof error,
+            });
           });
         }, bounds.sweepIntervalMs);
     },

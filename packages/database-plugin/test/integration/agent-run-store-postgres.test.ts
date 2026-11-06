@@ -34,9 +34,11 @@ describe.skipIf(!process.env['AGENT_RUNS_PG_URL'])('agent run PostgreSQL store',
         runId: 'run',
         tenantId: '',
         seq: 0,
+        leaseVersion: row.leaseVersion,
         chunks: [{ type: 'start' }],
       });
-      expect(await store.chunks(updated, 0)).toHaveLength(1);
+      // The writer's epoch round-trips through the bigint column as a number.
+      expect(await store.chunks(updated, 0)).toMatchObject([{ leaseVersion: row.leaseVersion }]);
       expect(await store.chunks(row, 0)).toEqual([]);
       await store.update('run', { leaseVersion: 1 }, { leaseVersion: 2, status: 'completed' });
       await expect(
@@ -45,6 +47,7 @@ describe.skipIf(!process.env['AGENT_RUNS_PG_URL'])('agent run PostgreSQL store',
           runId: 'run',
           tenantId: '',
           seq: 1,
+          leaseVersion: 1,
           chunks: [],
         }),
       ).rejects.toThrow();

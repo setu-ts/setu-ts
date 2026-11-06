@@ -22,13 +22,13 @@ import type { IDatabaseService, IRepository } from '../interfaces/index.ts';
 export interface DatabaseAgentRunStoreOptions {
   /** Optional mapping of the four run entities. */
   readonly entities?: {
-    /** run configuration value. */
+    /** Run entity name; defaults to `AgentRun`. */
     readonly run?: string;
-    /** entry configuration value. */
+    /** Entry entity name; defaults to `AgentRunEntry`. */
     readonly entry?: string;
-    /** Ordered JSON UI-message chunks. */
+    /** Chunk-batch entity name; defaults to `AgentRunChunks`. */
     readonly chunks?: string;
-    /** Durable approval configuration. */
+    /** Approval entity name; defaults to `AgentRunApproval`. */
     readonly approval?: string;
   };
   /** Named database capability; omitted selects the default. */
@@ -105,11 +105,20 @@ export class DatabaseAgentRunStore implements IAgentRunStore {
   /** @inheritdoc */
   async verify(): Promise<void> {
     try {
-      const repo = this.#repo('run');
-      if (!repo.updateWhere || !repo.deleteWhere)
-        throw new AgentRunStoreUnavailableError('conditional-writes-unsupported');
-      await repo.updateWhere('setu-agent-runs-probe', { leaseVersion: -1 }, { leaseVersion: 0 });
-      await repo.deleteWhere('setu-agent-runs-probe', { leaseVersion: -1 });
+      // Probe every entity: a missing child table or an adapter without
+      // conditional deletes would otherwise fail the first run or every purge.
+      for (const kind of ['run', 'entry', 'chunks', 'approval'] as const) {
+        const repo = this.#repo(kind);
+        if (!repo.deleteWhere || ((kind === 'run' || kind === 'approval') && !repo.updateWhere))
+          throw new AgentRunStoreUnavailableError('conditional-writes-unsupported');
+        if (repo.updateWhere)
+          await repo.updateWhere(
+            'setu-agent-runs-probe',
+            { leaseVersion: -1 },
+            { leaseVersion: 0 },
+          );
+        await repo.deleteWhere('setu-agent-runs-probe', { leaseVersion: -1 });
+      }
     } catch (cause) {
       if (cause instanceof AgentRunStoreUnavailableError) throw cause;
       throw new AgentRunStoreUnavailableError('conditional-writes-unsupported', { cause });

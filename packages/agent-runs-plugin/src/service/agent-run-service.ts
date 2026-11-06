@@ -1,5 +1,6 @@
 import {
   AgentRunDefinitionError,
+  AgentRunLeaseLostError,
   AgentRunNotFoundError,
   AgentRunStateError,
 } from '@setu-ts/common';
@@ -12,6 +13,7 @@ import type {
   IAgentRunStore,
   IAgentRunService,
   IIdempotencyService,
+  ILogger,
   IRequestContext,
   IRuntimeServices,
   IServiceRegistry,
@@ -25,7 +27,7 @@ import { claim, Lease } from '../lease/lease.ts';
 import { ChunkLog } from '../log/chunk-log.ts';
 import { respond, terminal } from '../log/respond.ts';
 import { messages, json, inputMessages } from '../loop/messages.ts';
-import { changeRun, decideApproval } from '../approvals/approvals.ts';
+import { changeRun, decideApproval, live, parked } from '../approvals/approvals.ts';
 import { sweep } from '../sweep/sweep.ts';
 
 /** Internal dependencies; hooks exist solely for deterministic crash tests. @internal */
@@ -38,6 +40,7 @@ export interface ServiceDeps {
   readonly definitions: ReadonlyMap<string, AgentRunDefinition>;
   readonly options: ResolvedOptions;
   readonly background?: (ctx: IRequestContext, work: Promise<void>) => void;
+  readonly logger?: ILogger;
   readonly hooks?: LoopHooks;
 }
 /** Durable run coordinator; only public through IAgentRunService. @internal */
@@ -48,13 +51,26 @@ export class AgentRunService implements IAgentRunService {
   readonly #running = new Map<string, Promise<void>>();
   readonly owner: string;
   #closed = false;
+  #sweeping = false;
   constructor(deps: ServiceDeps) {
     this.deps = deps;
     this.owner = deps.runtime.uuid();
   }
-  async #row(ctx: IRequestContext, id: string): Promise<AgentRunRow> {
+  /**
+   * Read a run the request may see: same tenant, and allowed by the
+   * definition's `canAccess` (default: the starting principal, or anyone in
+   * the tenant for a run started without one). Every refusal is the same 404.
+   */
+  async #row(ctx: IRequestContext, id: string, access = true): Promise<AgentRunRow> {
     const run = await this.deps.store.get(id);
     if (!run || run.tenantId !== (ctx.request.tenant?.id ?? '')) throw new AgentRunNotFoundError();
+    if (access) {
+      const canAccess = this.deps.definitions.get(run.definition)?.canAccess;
+      const allowed = canAccess
+        ? canAccess(ctx.request.user, this.#context(run))
+        : run.principalId === null || ctx.request.user?.id === run.principalId;
+      if (!allowed) throw new AgentRunNotFoundError();
+    }
     return run;
   }
   #context(run: AgentRunRow): AgentRunContext {
@@ -185,7 +201,8 @@ export class AgentRunService implements IAgentRunService {
     approvalId: string,
     decision: { approved: boolean; reason?: string },
   ): Promise<void> {
-    let row = await this.#row(ctx, runId);
+    // canDecide, not canAccess, governs a decision.
+    const row = await this.#row(ctx, runId, false);
     if (terminal(row)) throw new AgentRunStateError();
     const definition = this.deps.definitions.get(row.definition);
     if (!definition) throw new AgentRunDefinitionError();
@@ -199,19 +216,34 @@ export class AgentRunService implements IAgentRunService {
       decision,
       this.deps.runtime.now(),
     );
+    // The decision is committed. Persisting its chunk and waking the run are
+    // best effort from here: a lost race means another instance (or the
+    // sweep's waiting scan) carries the run on, so the caller still succeeds.
+    try {
+      await this.#afterDecision(ctx, runId, approvalId, approval);
+    } catch (error) {
+      if (!(error instanceof AgentRunLeaseLostError)) throw error;
+    }
+  }
+  async #afterDecision(
+    ctx: IRequestContext,
+    runId: string,
+    approvalId: string,
+    approval: { status: string; reason: string | null },
+  ): Promise<void> {
+    const chunk = {
+      type: 'tool-approval-response' as const,
+      approvalId,
+      approved: approval.status === 'approved',
+      ...(approval.reason === null ? {} : { reason: approval.reason }),
+    };
     const local = this.active.get(runId);
-    if (local)
-      await local.emit({
-        type: 'tool-approval-response',
-        approvalId,
-        approved: approval.status === 'approved',
-        ...(approval.reason === null ? {} : { reason: approval.reason }),
-      });
-    row = await this.#row(ctx, runId);
+    if (local) await local.emit(chunk);
+    let row = await this.#row(ctx, runId, false);
     // A parked run has no runner. Briefly acquire its lease to persist the
     // decision chunk before releasing it; a concurrent decider's winner also
     // checks all pending rows before waking execution.
-    if (!local && row.status === 'waiting' && row.leaseOwner === '') {
+    if (!local && parked(row)) {
       const held = await this.deps.store.update(
         row.id,
         { status: 'waiting', leaseVersion: row.leaseVersion, leaseOwner: '' },
@@ -231,12 +263,7 @@ export class AgentRunService implements IAgentRunService {
         const log = new ChunkLog(lease, this.deps.options);
         try {
           await log.restore();
-          await log.emit({
-            type: 'tool-approval-response',
-            approvalId,
-            approved: approval.status === 'approved',
-            ...(approval.reason === null ? {} : { reason: approval.reason }),
-          });
+          await log.emit(chunk);
           await log.flush();
           await lease.write({ leaseOwner: '', leaseUntil: 0 });
           row = lease.row;
@@ -247,43 +274,62 @@ export class AgentRunService implements IAgentRunService {
       }
     }
     if (
-      row.status === 'waiting' &&
-      row.leaseOwner === '' &&
+      parked(row) &&
       !(await this.deps.store.approvals(runId)).some((a) => a.status === 'pending')
     ) {
-      row = await changeRun(this.deps.store, row, {
-        status: 'ready',
-        updatedAt: this.deps.runtime.now(),
-      });
-      await this.resume(row, ctx);
+      const ready = await changeRun(
+        this.deps.store,
+        row,
+        { status: 'ready', updatedAt: this.deps.runtime.now() },
+        parked,
+      );
+      if (ready) await this.resume(ready, ctx);
     }
   }
   async cancel(ctx: IRequestContext, runId: string): Promise<void> {
     const row = await this.#row(ctx, runId);
     if (terminal(row)) throw new AgentRunStateError();
     const local = this.active.get(runId);
-    await changeRun(this.deps.store, row, {
-      cancelRequested: true,
-      updatedAt: this.deps.runtime.now(),
-    });
-    if (local) local.lease.controller.abort();
-    else if (row.status === 'waiting' || row.status === 'ready') {
-      const ready = await this.#row(ctx, runId);
-      const updated = await changeRun(this.deps.store, ready, { status: 'ready' });
-      await this.resume(updated, ctx);
+    const flagged = await changeRun(
+      this.deps.store,
+      row,
+      { cancelRequested: true, updatedAt: this.deps.runtime.now() },
+      live,
+    );
+    if (!flagged) return;
+    if (local) {
+      local.lease.controller.abort();
+      return;
     }
+    // A holder observes the flag at its next renewal. Only a parked run is
+    // woken here, so a run another instance holds is never claimed twice.
+    const ready = parked(flagged)
+      ? await changeRun(this.deps.store, flagged, { status: 'ready' }, parked)
+      : flagged;
+    if (ready?.status === 'ready') await this.resume(ready, ctx);
   }
   async sweep(): Promise<AgentRunSweepReport> {
-    return await sweep(
-      this.deps.store,
-      { ...this.deps.options, now: this.deps.runtime.now() },
-      async (row) => {
-        const resumed = await this.resume(row);
-        // A cron invocation must remain alive for the work it recovered.
-        while (this.#running.has(row.id)) await this.#running.get(row.id);
-        return resumed;
-      },
-    );
+    if (this.#sweeping) return { expired: 0, resumed: 0, purged: 0 };
+    this.#sweeping = true;
+    const recovered: Promise<void>[] = [];
+    try {
+      const report = await sweep(
+        this.deps.store,
+        { ...this.deps.options, now: this.deps.runtime.now() },
+        async (row) => {
+          const resumed = await this.resume(row);
+          const work = this.#running.get(row.id);
+          if (resumed && work) recovered.push(work);
+          return resumed;
+        },
+      );
+      // A cron invocation must stay alive for the work it recovered; the
+      // whole batch and the purge are claimed before waiting on any of it.
+      await Promise.allSettled(recovered);
+      return report;
+    } finally {
+      this.#sweeping = false;
+    }
   }
   close(): void {
     this.#closed = true;

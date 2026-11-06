@@ -180,4 +180,92 @@ describe('AgentRunService', () => {
       await h.close();
     }
   });
+  it('reports success for a committed decision whose wake loses to another instance (review M2)', async () => {
+    const h = await harness(definition({ approval: { tools: {}, canDecide: () => true } }));
+    try {
+      await h.store.create(row({ status: 'waiting', approvalIds: ['a'] }));
+      vi.spyOn(h.store, 'approvals')
+        .mockResolvedValueOnce([
+          { id: 'a', runId: 'run', status: 'pending', deadline: 10 ** 15 } as never,
+        ])
+        .mockResolvedValue([{ id: 'a', runId: 'run', status: 'approved' } as never]);
+      vi.spyOn(h.store, 'decide').mockResolvedValue({
+        id: 'a',
+        status: 'approved',
+        reason: null,
+      } as never);
+      // Every later run write loses its compare-and-set.
+      vi.spyOn(h.store, 'update').mockResolvedValue(null);
+      await expect(
+        h.service.decide(h.ctx(), 'run', 'a', { approved: true }),
+      ).resolves.toBeUndefined();
+      // Any other failure after the decision still reaches the caller.
+      vi.spyOn(h.store, 'approvals').mockResolvedValue([
+        { id: 'a', runId: 'run', status: 'pending', deadline: 10 ** 15 } as never,
+      ]);
+      vi.spyOn(h.store, 'get')
+        .mockResolvedValueOnce((await h.store.get('run'))!)
+        .mockRejectedValueOnce(new Error('store down'));
+      await expect(h.service.decide(h.ctx(), 'run', 'a', { approved: true })).rejects.toThrow(
+        'store down',
+      );
+    } finally {
+      await h.close();
+    }
+  });
+  it('claims the whole sweep batch and purges before awaiting recovered work (review M3)', async () => {
+    const ai = fakeAi();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    ai.model.mockImplementation(() => ({
+      chunks: new ReadableStream({ start: (c) => c.close() }),
+      result: async () => {
+        await gate;
+        return { messages: [{ role: 'assistant', content: 'x' }], finishReason: 'stop', usage: {} };
+      },
+    }));
+    const h = await harness(definition(), ai);
+    try {
+      await h.store.create(row({ id: 'a', status: 'ready' }));
+      await h.store.create(row({ id: 'b', status: 'ready' }));
+      await h.store.create(row({ id: 'old', status: 'completed', updatedAt: 0 }));
+      h.advance(100_000_000);
+      const sweeping = h.service.sweep();
+      // A second tick while the first is still waiting is a no-op.
+      expect(await h.service.sweep()).toEqual({ expired: 0, resumed: 0, purged: 0 });
+      for (let n = 0; n < 200; n++) await Promise.resolve();
+      expect(await h.store.get('old')).toBeNull();
+      expect((await h.store.get('a'))?.status).toBe('running');
+      expect((await h.store.get('b'))?.status).toBe('running');
+      release();
+      expect(await sweeping).toEqual({ expired: 0, resumed: 2, purged: 1 });
+      expect((await h.store.get('a'))?.status).toBe('completed');
+    } finally {
+      await h.close();
+    }
+  });
+  it('cancel never re-wakes a run another instance holds (review H3)', async () => {
+    const h = await harness();
+    try {
+      await h.store.create(
+        row({ status: 'running', leaseOwner: 'I2', leaseVersion: 4, leaseUntil: 10 ** 15 }),
+      );
+      await h.service.cancel(h.ctx(), 'run');
+      expect(await h.store.get('run')).toMatchObject({
+        status: 'running',
+        leaseOwner: 'I2',
+        leaseVersion: 4,
+        cancelRequested: true,
+      });
+      // The flag write keeps losing while the run goes terminal underneath.
+      const flagged = (await h.store.get('run'))!;
+      vi.spyOn(h.store, 'update').mockResolvedValue(null);
+      vi.spyOn(h.store, 'get')
+        .mockResolvedValueOnce(flagged)
+        .mockResolvedValue({ ...flagged, status: 'completed' });
+      await expect(h.service.cancel(h.ctx(), 'run')).resolves.toBeUndefined();
+    } finally {
+      await h.close();
+    }
+  });
 });

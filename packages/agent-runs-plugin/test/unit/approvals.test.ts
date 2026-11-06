@@ -2,7 +2,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { jsonSchema } from 'ai';
 import { harness, definition, fakeAi, row } from '../fixtures/harness.ts';
-import { changeRun } from '../../src/approvals/approvals.ts';
+import { changeRun, live, parked } from '../../src/approvals/approvals.ts';
 import { prepareApprovals, decideApproval } from '../../src/approvals/approvals.ts';
 import { claim } from '../../src/lease/lease.ts';
 import { ChunkLog } from '../../src/log/chunk-log.ts';
@@ -191,17 +191,45 @@ describe('durable approvals', () => {
       await h.close();
     }
   });
-  it('retries one lost run-state CAS and refuses terminal races', async () => {
+  it('retries a lost run-state CAS only while the expected state holds', async () => {
     const h = await harness();
     try {
-      await h.store.create(row());
+      const waiting = { ...row(), status: 'waiting' as const };
+      await h.store.create(waiting);
       const update = vi.spyOn(h.store, 'update').mockResolvedValueOnce(null);
-      expect((await changeRun(h.store, row(), { status: 'ready' })).status).toBe('ready');
+      expect((await changeRun(h.store, waiting, { status: 'ready' }, parked))?.status).toBe(
+        'ready',
+      );
       update.mockRestore();
+      // Never matching from the start: no write at all.
+      const writes = vi.spyOn(h.store, 'update');
+      expect(await changeRun(h.store, row(), { status: 'ready' }, parked)).toBeNull();
+      expect(writes).not.toHaveBeenCalled();
+      writes.mockRestore();
       vi.spyOn(h.store, 'update').mockResolvedValue(null);
-      await expect(changeRun(h.store, row(), { status: 'ready' })).rejects.toThrow();
-      vi.spyOn(h.store, 'get').mockResolvedValue({ ...row(), status: 'completed' });
-      await expect(changeRun(h.store, row(), { status: 'ready' })).rejects.toThrow();
+      await expect(changeRun(h.store, waiting, { status: 'ready' }, () => true)).rejects.toThrow();
+      vi.spyOn(h.store, 'get').mockResolvedValue(null);
+      expect(await changeRun(h.store, waiting, { status: 'ready' }, parked)).toBeNull();
+    } finally {
+      await h.close();
+    }
+  });
+  it('never wakes a run another instance claimed after the stale read (review H3)', async () => {
+    const h = await harness();
+    try {
+      const waiting = { ...row(), status: 'waiting' as const, leaseVersion: 3 };
+      await h.store.create(waiting);
+      // Another instance claims the run between this caller's read and its write.
+      await h.store.update(
+        waiting.id,
+        { leaseVersion: 3 },
+        { status: 'running', leaseVersion: 4, leaseOwner: 'I2', leaseUntil: 10 ** 12 },
+      );
+      expect(await changeRun(h.store, waiting, { status: 'ready' }, parked)).toBeNull();
+      const current = await h.store.get(waiting.id);
+      expect(current).toMatchObject({ status: 'running', leaseVersion: 4, leaseOwner: 'I2' });
+      expect(live(current!)).toBe(true);
+      expect(live({ ...current!, status: 'cancelled' })).toBe(false);
     } finally {
       await h.close();
     }

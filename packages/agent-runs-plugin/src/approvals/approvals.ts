@@ -82,14 +82,22 @@ export async function decideApproval(
   if (!decided) throw new AgentRunApprovalError();
   return decided;
 }
-/** Retry an unfenced status/flag write once against a fresh status and version. @internal */
+/**
+ * Apply an unheld status/flag write by compare-and-set, re-reading after a lost
+ * race. The write is re-applied only while `expect` still holds for the fresh
+ * row, so a wake never lands on a run another instance has claimed since.
+ * @returns The updated row, or null when the run no longer matches `expect`
+ * @internal
+ */
 export async function changeRun(
   store: IAgentRunStore,
   run: AgentRunRow,
   data: Partial<AgentRunRow>,
-): Promise<AgentRunRow> {
+  expect: (row: AgentRunRow) => boolean,
+): Promise<AgentRunRow | null> {
   let current = run;
-  for (let attempt = 0; attempt < 2; attempt++) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (!expect(current)) return null;
     const updated = await store.update(
       current.id,
       { status: current.status, leaseVersion: current.leaseVersion },
@@ -97,8 +105,16 @@ export async function changeRun(
     );
     if (updated) return updated;
     const fresh = await store.get(current.id);
-    if (!fresh || ['completed', 'failed', 'cancelled'].includes(fresh.status)) break;
+    if (!fresh) return null;
     current = fresh;
   }
   throw new AgentRunLeaseLostError();
+}
+/** A parked run that nobody holds; the only state a decision or expiry may wake. @internal */
+export function parked(row: AgentRunRow): boolean {
+  return row.status === 'waiting' && row.leaseOwner === '';
+}
+/** A run that has not reached a terminal state. @internal */
+export function live(row: AgentRunRow): boolean {
+  return row.status !== 'completed' && row.status !== 'failed' && row.status !== 'cancelled';
 }

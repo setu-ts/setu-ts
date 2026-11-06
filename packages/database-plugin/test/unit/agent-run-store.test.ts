@@ -132,9 +132,10 @@ describe('database agent run store', () => {
       runId: 'run',
       tenantId: 'tenant',
       seq: 0,
+      leaseVersion: current.leaseVersion,
       chunks: [{ type: 'start' }],
     });
-    expect(await store.chunks(current, 0)).toHaveLength(1);
+    expect(await store.chunks(current, 0)).toMatchObject([{ leaseVersion: current.leaseVersion }]);
     expect(await store.chunks(current, 1)).toEqual([]);
     await store.createApproval(current, approval());
     expect(await store.expired(6, 1)).toHaveLength(1);
@@ -200,6 +201,28 @@ describe('database agent run store', () => {
     await expect(store.verify()).rejects.toThrow();
     await expect(store.update('x', { leaseVersion: 0 }, { error: 'x' })).rejects.toThrow();
     repo.updateWhere = original!;
+    // Every child entity is probed too, not only the run (review L4).
+    for (const child of ['AgentRunEntry', 'AgentRunChunks', 'AgentRunApproval']) {
+      const childRepo = db.getRepository<Record<string, unknown>>(child);
+      const probe = vi
+        .spyOn(childRepo, 'deleteWhere')
+        .mockRejectedValueOnce(new Error('no such table'));
+      await expect(store.verify()).rejects.toMatchObject({
+        reason: 'conditional-writes-unsupported',
+      });
+      probe.mockRestore();
+      const remove = childRepo.deleteWhere;
+      Object.defineProperty(childRepo, 'deleteWhere', {
+        value: undefined,
+        configurable: true,
+        writable: true,
+      });
+      await expect(store.verify()).rejects.toMatchObject({
+        reason: 'conditional-writes-unsupported',
+      });
+      childRepo.deleteWhere = remove!;
+    }
+    await store.verify();
     await store.create(row());
     vi.spyOn(store, 'update').mockResolvedValue(null);
     await expect(store.appendEntry(row(), entry())).rejects.toBeInstanceOf(AgentRunLeaseLostError);

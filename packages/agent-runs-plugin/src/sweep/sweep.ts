@@ -1,6 +1,6 @@
 import { AgentRunLeaseLostError } from '@setu-ts/common';
 import type { AgentRunRow, AgentRunSweepReport, IAgentRunStore } from '@setu-ts/common';
-import { changeRun } from '../approvals/approvals.ts';
+import { changeRun, parked } from '../approvals/approvals.ts';
 
 /** One bounded sweep; all mutations are CAS and losing a race is harmless. @internal */
 export async function sweep(
@@ -26,7 +26,7 @@ export async function sweep(
       !(await store.approvals(run.id)).some((row) => row.status === 'pending')
     ) {
       try {
-        await changeRun(store, run, { status: 'ready', updatedAt: options.now });
+        await changeRun(store, run, { status: 'ready', updatedAt: options.now }, parked);
       } catch (error) {
         if (!(error instanceof AgentRunLeaseLostError)) throw error;
       }

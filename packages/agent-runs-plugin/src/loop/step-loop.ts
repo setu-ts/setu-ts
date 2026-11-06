@@ -1,10 +1,11 @@
 import type {
   AgentRunEntryRow,
   IIdempotencyService,
+  ILogger,
   IServiceRegistry,
   TimerHandle,
 } from '@setu-ts/common';
-import { AgentRunLeaseLostError } from '@setu-ts/common';
+import { AgentRunLeaseLostError, httpStatusHintOf } from '@setu-ts/common';
 import type { AgentRunContext, AgentRunDefinition } from '../definitions/define-agent-run.ts';
 import type { AiRuntime } from '../runtime/ai-runtime.ts';
 import type { Lease } from '../lease/lease.ts';
@@ -56,6 +57,7 @@ export async function stepLoop(
     ai: AiRuntime;
     idempotency: IIdempotencyService;
     services: IServiceRegistry;
+    logger?: ILogger;
     hooks?: LoopHooks;
   },
 ): Promise<void> {
@@ -258,6 +260,16 @@ export async function stepLoop(
     if (error instanceof AgentRunLeaseLostError || lease.lost || error instanceof ToolConflict)
       return;
     const cancelled = lease.controller.signal.aborted;
+    if (!cancelled) {
+      // Value-free: the error class and status hint, never its message, inputs
+      // or ids (plan §8a O6); the SDK's own onError log is suppressed.
+      const status = httpStatusHintOf(error)?.status;
+      deps.logger?.warn('Agent run failed.', {
+        definition: definition?.name ?? '',
+        error: error instanceof Error ? error.name : typeof error,
+        ...(status === undefined ? {} : { status }),
+      });
+    }
     await log.emit(
       cancelled ? { type: 'abort' } : { type: 'error', errorText: 'Agent run failed.' },
     );

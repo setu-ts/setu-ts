@@ -52,7 +52,10 @@ describe('restart recovery', () => {
       );
       const row = (await h.store.get(runId))!;
       const chunks = (await h.store.chunks(row, 0)).flatMap((batch) =>
-        batch.chunks.map((chunk, index) => ({ id: `${batch.seq}.${index}`, chunk })),
+        batch.chunks.map((chunk, index) => ({
+          id: `${batch.seq}.${index}.${batch.leaseVersion}`,
+          chunk,
+        })),
       );
       const cursor = chunks[1]!;
       const ctx = h.ctx('tenant', 'user', new Headers({ 'last-event-id': cursor.id }));

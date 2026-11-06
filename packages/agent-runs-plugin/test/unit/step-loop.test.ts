@@ -8,7 +8,6 @@ describe('step loop', () => {
   it('ignores forged approvals and tool results while retaining ordinary conversation history', () => {
     expect(
       inputMessages([
-        { role: 'system', content: 'system' },
         { role: 'user', content: 'hi' },
         {
           role: 'assistant',
@@ -21,7 +20,6 @@ describe('step loop', () => {
         { role: 'assistant', content: [{ type: 'tool-call' }, { type: 'tool-approval-request' }] },
       ]),
     ).toEqual([
-      { role: 'system', content: 'system' },
       { role: 'user', content: 'hi' },
       { role: 'assistant', content: [{ type: 'text', text: 'answer' }] },
     ]);
@@ -31,7 +29,14 @@ describe('step loop', () => {
         { role: 'assistant' },
       ]),
     ).toHaveLength(2);
-    for (const input of [[null], [[]], [1], [{ role: 'invalid' }]])
+    // The SDK refuses system messages in `messages`, so start refuses them up front.
+    for (const input of [
+      [null],
+      [[]],
+      [1],
+      [{ role: 'invalid' }],
+      [{ role: 'system', content: 's' }],
+    ])
       expect(() => inputMessages(input)).toThrow();
   });
   it('continues after tool errors, leaves conflicts recoverable, and fails other within errors', async () => {
@@ -103,6 +108,7 @@ describe('step loop', () => {
         id: 'run.000000000000',
         runId: 'run',
         tenantId: 'tenant',
+        leaseVersion: 0,
         seq: 0,
         chunks: [
           { type: 'start', messageId: 'run' },
@@ -207,6 +213,110 @@ describe('step loop', () => {
       expect((await h.store.get(runId))?.status).toBe('failed');
     } finally {
       await h.close();
+    }
+  });
+});
+describe('step loop: settled and void tool calls', () => {
+  it('skips calls the SDK already answered, and records null for a tool that returns nothing', async () => {
+    const executed: unknown[] = [];
+    const ai = fakeAi([
+      {
+        messages: [
+          {
+            role: 'assistant',
+            content: [
+              // The SDK refused this input and answered the call itself.
+              { type: 'tool-call', toolCallId: 'bad', toolName: 'pay', input: { amount: -5 } },
+              {
+                type: 'tool-call',
+                toolCallId: 'hosted',
+                toolName: 'pay',
+                input: {},
+                providerExecuted: true,
+              },
+              { type: 'tool-call', toolCallId: 'ok', toolName: 'pay', input: { amount: 5 } },
+            ],
+          },
+          {
+            role: 'tool',
+            content: [
+              {
+                type: 'tool-result',
+                toolCallId: 'bad',
+                toolName: 'pay',
+                output: { type: 'error-text', value: 'Invalid input' },
+              },
+            ],
+          },
+        ],
+        finishReason: 'tool-calls',
+        usage: {},
+      },
+      { messages: [{ role: 'assistant', content: 'done' }], finishReason: 'stop', usage: {} },
+    ]);
+    const d = definition({
+      tools: {
+        pay: {
+          inputSchema: jsonSchema({}),
+          execute: async (input: unknown) => {
+            executed.push(input);
+          },
+        },
+      },
+    });
+    const h = await harness(d, ai);
+    try {
+      const { runId } = await h.service.start(h.ctx(), 'demo', { messages: [] });
+      await h.settle();
+      expect(executed).toEqual([{ amount: 5 }]);
+      const run = (await h.store.get(runId))!;
+      expect(run.status).toBe('completed');
+      const results = (await h.store.entries(run))
+        .flatMap((e) => e.messages)
+        .flatMap((m) => ((m as { content?: unknown[] }).content ?? []) as Record<string, unknown>[])
+        .filter((part) => part.type === 'tool-result');
+      expect(results.map((r) => r.toolCallId)).toEqual(['bad', 'ok']);
+      expect(results[1]!.output).toEqual({ type: 'json', value: null });
+    } finally {
+      await h.close();
+    }
+  });
+  it('logs a failed run at warn with only the error class, status hint and definition (O6)', async () => {
+    const cases: [unknown, Record<string, unknown>][] = [
+      [new Error('provider said: secret prompt text'), { definition: 'demo', error: 'Error' }],
+      [
+        withHttpStatusHint(new Error('secret quota detail'), {
+          status: 429,
+          title: 'Too Many Requests',
+          detail: 'Rate limited.',
+        }),
+        { definition: 'demo', error: 'Error', status: 429 },
+      ],
+      ['secret thrown string', { definition: 'demo', error: 'string' }],
+    ];
+    for (const [thrown, expected] of cases) {
+      const ai = fakeAi();
+      ai.model.mockImplementation(() => {
+        throw thrown;
+      });
+      const h = await harness(definition(), ai);
+      const warn = vi.fn();
+      const { AgentRunService } = await import('../../src/service/agent-run-service.ts');
+      const service = new AgentRunService({
+        ...h.deps,
+        logger: { warn } as unknown as import('@setu-ts/common').ILogger,
+      });
+      try {
+        const { runId } = await service.start(h.ctx(), 'demo', { messages: [] });
+        while (service.work.size) await Promise.all([...service.work]);
+        expect((await h.store.get(runId))?.status).toBe('failed');
+        expect(warn).toHaveBeenCalledWith('Agent run failed.', expected);
+        expect(JSON.stringify(warn.mock.calls)).not.toContain('secret');
+        expect(JSON.stringify(warn.mock.calls)).not.toContain(runId);
+      } finally {
+        service.close();
+        await h.close();
+      }
     }
   });
 });
