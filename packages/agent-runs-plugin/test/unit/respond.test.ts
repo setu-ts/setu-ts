@@ -233,4 +233,99 @@ describe('stream replay', () => {
       await h.close();
     }
   });
+  it('never drops a queued batch when a flush lands after the row read (fix review F1)', async () => {
+    const h = await harness();
+    try {
+      await h.store.create(row());
+      const lease = (await claim(h.store, h.runtime, row(), 'A', 30000, 0))!;
+      const log = new ChunkLog(lease, {
+        flushChunks: 64,
+        flushIntervalMs: 100,
+        maxLogBytes: 10000,
+      });
+      await log.emit({ type: 'start', messageId: 'run' });
+      await log.flush();
+      const original = h.store.chunks.bind(h.store);
+      vi.spyOn(h.store, 'chunks').mockImplementationOnce(async (run, from) => {
+        // The holder streams on while the first committed read is in flight.
+        await log.emit({ type: 'text-start', id: 't' });
+        await log.flush();
+        await log.emit({ type: 'text-delta', id: 't', delta: 'x' });
+        return original(run, from);
+      });
+      const ctx = h.ctx();
+      await respond(ctx, lease.row, {
+        store: h.store,
+        runtime: h.runtime,
+        headers: {},
+        pollIntervalMs: 1,
+        local: log,
+      });
+      for (let i = 0; i < 30; i++) await Promise.resolve();
+      await log.emit({ type: 'text-end', id: 't' });
+      await log.flush();
+      await lease.write({ status: 'waiting' });
+      for (let i = 0; i < 30; i++) await Promise.resolve();
+      h.fire(1);
+      const text = await read(ctx);
+      for (const type of ['start', 'text-start', 'text-delta', 'text-end'])
+        expect(text.match(new RegExp(`"type":"${type}"`, 'g'))).toHaveLength(1);
+      expect(text.indexOf('text-start')).toBeLessThan(text.indexOf('text-delta'));
+      lease.stop();
+    } finally {
+      await h.close();
+    }
+  });
+  it('replays in-stream when a connected client sees a takeover rewrite its positions (fix review F3)', async () => {
+    const h = await harness();
+    const options = { flushChunks: 64, flushIntervalMs: 100, maxLogBytes: 10000 };
+    try {
+      await h.store.create(row());
+      const a = (await claim(h.store, h.runtime, row(), 'A', 30000, 0))!;
+      const logA = new ChunkLog(a, options);
+      await logA.emit({ type: 'start', messageId: 'run' });
+      await logA.flush();
+      const ctx = h.ctx();
+      await respond(ctx, a.row, {
+        store: h.store,
+        runtime: h.runtime,
+        headers: {},
+        pollIntervalMs: 1,
+        local: logA,
+      });
+      await logA.emit({ type: 'text-start', id: 'a' });
+      await logA.emit({ type: 'text-delta', id: 'a', delta: 'from-A' });
+      for (let i = 0; i < 30; i++) await Promise.resolve();
+      // A dies before flushing; B takes over and writes the same positions.
+      const expired = (await h.store.update(
+        'run',
+        { leaseVersion: a.row.leaseVersion },
+        { leaseUntil: 1 },
+      ))!;
+      a.stop(true);
+      logA.closeTimer();
+      const b = (await claim(h.store, h.runtime, expired, 'B', 30000, 0))!;
+      const logB = new ChunkLog(b, options);
+      await logB.restore();
+      await logB.emit({ type: 'text-start', id: 'b' });
+      await logB.emit({ type: 'text-delta', id: 'b', delta: 'from-B' });
+      await logB.flush();
+      await b.write({ status: 'waiting' });
+      b.stop();
+      for (let n = 0; n < 5; n++) {
+        for (let i = 0; i < 30; i++) await Promise.resolve();
+        h.fire(1);
+      }
+      const text = await read(ctx);
+      const marker = text.indexOf('data-setu-replay');
+      expect(marker).toBeGreaterThan(text.indexOf('from-A'));
+      // After the marker: the whole stored log, B's chunks included, A's unflushed ones not.
+      const after = text.slice(marker);
+      expect(after).toContain('"type":"start"');
+      expect(after).toContain('from-B');
+      expect(after).not.toContain('from-A');
+    } finally {
+      await h.close();
+    }
+  });
 });

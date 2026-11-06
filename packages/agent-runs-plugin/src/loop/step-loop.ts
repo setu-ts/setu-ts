@@ -75,6 +75,10 @@ export async function stepLoop(
       (definition.version !== lease.row.version &&
         !definition.compatibleVersions?.includes(lease.row.version))
     ) {
+      deps.logger?.warn('Agent run failed.', {
+        definition: lease.row.definition,
+        error: 'version-incompatible',
+      });
       await log.emit({ type: 'error', errorText: 'Agent run definition is incompatible.' });
       await log.flush();
       await lease.write({

@@ -47,6 +47,8 @@ export async function respond(
   let index = resume ? parsed[1]! : -1;
   const epoch = resume ? parsed[2]! : -1;
   let closed = false;
+  let diverged = false;
+  let sentEpoch = -1;
   const wake = new Set<() => void>();
   const queued: PositionedChunk[] = [];
   const listener = (value: PositionedChunk): void => {
@@ -66,8 +68,18 @@ export async function respond(
     start(controller) {
       const encoder = new TextEncoder();
       const send = (value: PositionedChunk): void => {
+        // The cursor's batch reappearing under another writer's epoch means a
+        // takeover rewrote positions this client already holds.
+        if (
+          value.batch >= 0 &&
+          value.batch === batch &&
+          sentEpoch >= 0 &&
+          value.epoch !== sentEpoch
+        )
+          diverged = true;
         if (
           closed ||
+          diverged ||
           (value.batch >= 0 &&
             (value.batch < batch || (value.batch === batch && value.index <= index)))
         )
@@ -80,7 +92,15 @@ export async function respond(
         if (value.batch >= 0) {
           batch = value.batch;
           index = value.index;
+          sentEpoch = value.epoch;
         }
+      };
+      const replay = (): void => {
+        diverged = false;
+        send({ batch: -1, index: -1, epoch: -1, chunk: REPLAY_CHUNK });
+        batch = -1;
+        index = -1;
+        sentEpoch = -1;
       };
       const sendBatches = (batches: readonly AgentRunChunkBatch[]): void => {
         for (const value of batches)
@@ -109,18 +129,20 @@ export async function respond(
             const agrees = committed
               ? committed.leaseVersion === epoch && index < committed.chunks.length
               : buffered.length > 0 && buffered[0]!.epoch === epoch && index < buffered.length;
-            if (!agrees) {
-              send({ batch: -1, index: -1, epoch: -1, chunk: REPLAY_CHUNK });
-              batch = -1;
-              index = -1;
-            }
+            if (agrees) sentEpoch = epoch;
+            else replay();
           }
           sendBatches(initial);
           for (const value of early) send(value);
           while (!closed) {
+            // Committed batches, then chunks queued since subscribing. The
+            // subscribe-time snapshot already covered the buffer before that.
             sendBatches(await deps.store.chunks(current, Math.max(batch, 0)));
-            for (const value of deps.local?.snapshot() ?? []) send(value);
             for (const value of queued.splice(0)) send(value);
+            if (diverged) {
+              replay();
+              continue;
+            }
             if (terminal(current) || current.status === 'waiting') break;
             await new Promise<void>((resolve) => {
               const done = (): void => {

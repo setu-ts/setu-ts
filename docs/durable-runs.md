@@ -76,8 +76,9 @@ Set `approval.tools` to a map of tool names to `true` or
 `(input, run) => boolean | Promise<boolean>`. The policy outcome is stored before execution.
 Approval deadlines default to a day, with a 30-day maximum. Default authorization requires a defined
 original principal equal to the decider; `canDecide(principal, run)` can apply your reviewer policy.
-A second decision receives 409, a forbidden decider 403. Expired calls produce an SDK
-`execution-denied` result with `timed out`.
+A second decision receives 409. A decider who may see the run (`canAccess`) but not decide it
+receives 403; anyone who may neither see nor decide it receives the same 404 as a missing run.
+Expired calls produce an SDK `execution-denied` result with `timed out`.
 
 ## Recovery and stream resume
 

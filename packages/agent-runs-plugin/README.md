@@ -70,11 +70,12 @@ and `seq`. Provision tables/models before starting SQL adapters. Drizzle needs a
 `drizzleTables`; Prisma needs corresponding models. Use JSON columns for input, messages, chunks and
 tool input, a JSON approvalIds column on runs, a numeric stepChunkStart column on entries, 64-bit
 numeric timestamps, primary keys on `id`, and indexes on run status/leaseUntil/updatedAt, approval
-status/deadline and child runId/seq. Child rows also store an internal `leaseVersion`. DynamoDB
-needs GSIs on status for runs/approvals and runId for children, with the queried sort fields; the
-run queries require portable filter/order support. `verify()` refuses missing native conditional
-update/delete support. Backend query support and the idempotency transactional store's requirements
-both apply; this is not a claim that every backend can execute every query.
+status/deadline and child runId/seq. Child rows also store the writer's `leaseVersion`; a custom
+`IAgentRunStore` must return it on each `AgentRunChunkBatch`, since it is the event-id epoch.
+DynamoDB needs GSIs on status for runs/approvals and runId for children, with the queried sort
+fields; the run queries require portable filter/order support. `verify()` refuses missing native
+conditional update/delete support. Backend query support and the idempotency transactional store's
+requirements both apply; this is not a claim that every backend can execute every query.
 
 Tool database writes through `call.unitOfWork` commit with their idempotency result. Outside API
 effects may repeat after a crash before commit: pass `call.idempotencyKey` to the outside API.

@@ -50,6 +50,17 @@ export async function prepareApprovals(
   }
   return rows.filter((row) => row.seq === entry.seq);
 }
+/** Whether the request's principal may decide this run's approvals. @internal */
+export function mayDecide(
+  definition: AgentRunDefinition,
+  run: AgentRunRow,
+  context: AgentRunContext,
+  ctx: IRequestContext,
+): boolean {
+  return definition.approval?.canDecide
+    ? definition.approval.canDecide(ctx.request.user, context)
+    : run.principalId !== null && ctx.request.user?.id === run.principalId;
+}
 /** Authorize using server identity, then single-use CAS. @internal */
 export async function decideApproval(
   store: IAgentRunStore,
@@ -61,10 +72,7 @@ export async function decideApproval(
   decision: { approved: boolean; reason?: string },
   now: number,
 ): Promise<AgentRunApprovalRow> {
-  const allowed = definition.approval?.canDecide
-    ? definition.approval.canDecide(ctx.request.user, context)
-    : run.principalId !== null && ctx.request.user?.id === run.principalId;
-  if (!allowed) throw new AgentRunApprovalError(403);
+  if (!mayDecide(definition, run, context, ctx)) throw new AgentRunApprovalError(403);
   const row = (await store.approvals(run.id)).find((row) => row.id === id);
   if (
     !row ||

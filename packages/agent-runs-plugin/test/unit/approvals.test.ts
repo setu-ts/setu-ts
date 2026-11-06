@@ -155,7 +155,7 @@ describe('durable approvals', () => {
         const approval = view.pendingApprovals[0]!;
         await expect(
           h.service.decide(h.ctx('tenant', 'other'), runId, approval.id, { approved }),
-        ).rejects.toMatchObject({ name: 'AgentRunApprovalError' });
+        ).rejects.toMatchObject({ name: 'AgentRunNotFoundError' });
         await expect(h.service.decide(h.ctx(), runId, 'missing', { approved })).rejects.toThrow();
         await h.service.decide(h.ctx(), runId, approval.id, { approved, reason: 'reviewed' });
         await h.settle();
@@ -180,6 +180,11 @@ describe('durable approvals', () => {
       const { runId } = await h.service.start(h.ctx('tenant', ''), 'demo', { messages: [] });
       await h.settle();
       const approval = (await h.service.get(h.ctx(), runId)).pendingApprovals[0]!;
+      // The principal-less run is visible to the tenant, so a non-reviewer
+      // learns only that it may not decide: 403, not 404.
+      await expect(
+        h.service.decide(h.ctx('tenant', 'user'), runId, approval.id, { approved: true }),
+      ).rejects.toMatchObject({ name: 'AgentRunApprovalError', message: expect.any(String) });
       h.advance(11);
       await expect(
         h.service.decide(h.ctx('tenant', 'reviewer'), runId, approval.id, { approved: true }),

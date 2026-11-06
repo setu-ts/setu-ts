@@ -27,7 +27,7 @@ import { claim, Lease } from '../lease/lease.ts';
 import { ChunkLog } from '../log/chunk-log.ts';
 import { respond, terminal } from '../log/respond.ts';
 import { messages, json, inputMessages } from '../loop/messages.ts';
-import { changeRun, decideApproval, live, parked } from '../approvals/approvals.ts';
+import { changeRun, decideApproval, live, mayDecide, parked } from '../approvals/approvals.ts';
 import { sweep } from '../sweep/sweep.ts';
 
 /** Internal dependencies; hooks exist solely for deterministic crash tests. @internal */
@@ -64,14 +64,14 @@ export class AgentRunService implements IAgentRunService {
   async #row(ctx: IRequestContext, id: string, access = true): Promise<AgentRunRow> {
     const run = await this.deps.store.get(id);
     if (!run || run.tenantId !== (ctx.request.tenant?.id ?? '')) throw new AgentRunNotFoundError();
-    if (access) {
-      const canAccess = this.deps.definitions.get(run.definition)?.canAccess;
-      const allowed = canAccess
-        ? canAccess(ctx.request.user, this.#context(run))
-        : run.principalId === null || ctx.request.user?.id === run.principalId;
-      if (!allowed) throw new AgentRunNotFoundError();
-    }
+    if (access && !this.#mayAccess(ctx, run)) throw new AgentRunNotFoundError();
     return run;
+  }
+  #mayAccess(ctx: IRequestContext, run: AgentRunRow): boolean {
+    const canAccess = this.deps.definitions.get(run.definition)?.canAccess;
+    return canAccess
+      ? canAccess(ctx.request.user, this.#context(run))
+      : run.principalId === null || ctx.request.user?.id === run.principalId;
   }
   #context(run: AgentRunRow): AgentRunContext {
     return {
@@ -201,10 +201,16 @@ export class AgentRunService implements IAgentRunService {
     approvalId: string,
     decision: { approved: boolean; reason?: string },
   ): Promise<void> {
-    // canDecide, not canAccess, governs a decision.
+    // A decider passes canAccess or canDecide; anyone else sees the same 404
+    // as a missing run, before any state- or permission-specific answer.
     const row = await this.#row(ctx, runId, false);
-    if (terminal(row)) throw new AgentRunStateError();
     const definition = this.deps.definitions.get(row.definition);
+    if (
+      !this.#mayAccess(ctx, row) &&
+      !(definition && mayDecide(definition, row, this.#context(row), ctx))
+    )
+      throw new AgentRunNotFoundError();
+    if (terminal(row)) throw new AgentRunStateError();
     if (!definition) throw new AgentRunDefinitionError();
     const approval = await decideApproval(
       this.deps.store,
@@ -238,12 +244,22 @@ export class AgentRunService implements IAgentRunService {
       ...(approval.reason === null ? {} : { reason: approval.reason }),
     };
     const local = this.active.get(runId);
-    if (local) await local.emit(chunk);
+    // A holder that is finishing has lost its lease; fall through and treat
+    // the run as unheld rather than leave the wake to the sweep.
+    const emitted = local
+      ? await local.emit(chunk).then(
+          () => true,
+          (error: unknown) => {
+            if (error instanceof AgentRunLeaseLostError) return false;
+            throw error;
+          },
+        )
+      : false;
     let row = await this.#row(ctx, runId, false);
     // A parked run has no runner. Briefly acquire its lease to persist the
     // decision chunk before releasing it; a concurrent decider's winner also
     // checks all pending rows before waking execution.
-    if (!local && parked(row)) {
+    if (!emitted && parked(row)) {
       const held = await this.deps.store.update(
         row.id,
         { status: 'waiting', leaseVersion: row.leaseVersion, leaseOwner: '' },
@@ -323,6 +339,8 @@ export class AgentRunService implements IAgentRunService {
           return resumed;
         },
       );
+      // The next tick may sweep again while this one waits on recovered work.
+      this.#sweeping = false;
       // A cron invocation must stay alive for the work it recovered; the
       // whole batch and the purge are claimed before waiting on any of it.
       await Promise.allSettled(recovered);

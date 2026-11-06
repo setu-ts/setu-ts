@@ -1,4 +1,5 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import { AgentRunService } from '../../src/service/agent-run-service.ts';
 import { harness, row, definition, fakeAi } from '../fixtures/harness.ts';
 describe('definition versions', () => {
   for (const [version, name, compatible] of [
@@ -19,4 +20,25 @@ describe('definition versions', () => {
         await h.close();
       }
     });
+  it('logs a version-incompatible failure at warn (fix review F6)', async () => {
+    const h = await harness();
+    const warn = vi.fn();
+    const service = new AgentRunService({
+      ...h.deps,
+      logger: { warn } as unknown as import('@setu-ts/common').ILogger,
+    });
+    try {
+      await h.store.create(row({ version: 'old' }));
+      await service.resume((await h.store.get('run'))!);
+      while (service.work.size) await Promise.all([...service.work]);
+      expect((await h.store.get('run'))?.error).toBe('version-incompatible');
+      expect(warn).toHaveBeenCalledWith('Agent run failed.', {
+        definition: 'demo',
+        error: 'version-incompatible',
+      });
+    } finally {
+      service.close();
+      await h.close();
+    }
+  });
 });

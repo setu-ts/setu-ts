@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { harness, definition, fakeAi } from '../fixtures/harness.ts';
 import { AgentRunService } from '../../src/service/agent-run-service.ts';
 import { row } from '../fixtures/harness.ts';
-import { claim } from '../../src/lease/lease.ts';
+import { claim, Lease } from '../../src/lease/lease.ts';
 import { ChunkLog } from '../../src/log/chunk-log.ts';
 describe('AgentRunService', () => {
   it('repairs a decision whose process died before waking the waiting run', async () => {
@@ -265,6 +265,61 @@ describe('AgentRunService', () => {
         .mockResolvedValue({ ...flagged, status: 'completed' });
       await expect(h.service.cancel(h.ctx(), 'run')).resolves.toBeUndefined();
     } finally {
+      await h.close();
+    }
+  });
+  it('lets the next tick sweep while an earlier sweep waits on recovered work (fix review F2)', async () => {
+    const ai = fakeAi();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    ai.model.mockImplementation(() => ({
+      chunks: new ReadableStream({ start: (c) => c.close() }),
+      result: async () => {
+        await gate;
+        return { messages: [{ role: 'assistant', content: 'x' }], finishReason: 'stop', usage: {} };
+      },
+    }));
+    const h = await harness(definition(), ai);
+    try {
+      await h.store.create(row({ id: 'long', status: 'ready' }));
+      const first = h.service.sweep();
+      for (let n = 0; n < 200; n++) await Promise.resolve();
+      await h.store.create(row({ id: 'other', status: 'ready' }));
+      const second = h.service.sweep();
+      for (let n = 0; n < 200; n++) await Promise.resolve();
+      expect((await h.store.get('other'))?.status).toBe('running');
+      release();
+      expect((await first).resumed).toBe(1);
+      expect((await second).resumed).toBe(1);
+    } finally {
+      await h.close();
+    }
+  });
+  it('wakes a parked run when the local holder lost its lease mid-decision (fix review F4)', async () => {
+    const h = await harness(definition({ approval: { tools: {}, canDecide: () => true } }));
+    try {
+      await h.store.create(row({ status: 'waiting', approvalIds: ['a'] }));
+      vi.spyOn(h.store, 'approvals')
+        .mockResolvedValueOnce([
+          { id: 'a', runId: 'run', status: 'pending', deadline: 10 ** 15 } as never,
+        ])
+        .mockResolvedValue([{ id: 'a', runId: 'run', status: 'approved' } as never]);
+      vi.spyOn(h.store, 'decide').mockResolvedValue({
+        id: 'a',
+        status: 'approved',
+        reason: null,
+      } as never);
+      const stale = new Lease((await h.store.get('run'))!, h.store, h.runtime, 30000);
+      stale.stop(true);
+      h.service.active.set('run', new ChunkLog(stale, h.deps.options));
+      const resume = vi.spyOn(h.service, 'resume').mockResolvedValue(true);
+      await h.service.decide(h.ctx(), 'run', 'a', { approved: true });
+      expect(resume).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'ready' }),
+        expect.anything(),
+      );
+    } finally {
+      h.service.active.clear();
       await h.close();
     }
   });
