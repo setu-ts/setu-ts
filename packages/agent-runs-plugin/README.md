@@ -73,10 +73,11 @@ numeric timestamps, primary keys on `id`, and indexes on run status/leaseUntil/u
 status/deadline and child runId/seq. Child rows also store the writer's `leaseVersion`; a custom
 `IAgentRunStore` must return it on each `AgentRunChunkBatch`, since it is the event-id epoch. A run
 row the store cannot decode is marked `failed` (`invalid-row`) by the sweep, and deleted with its
-children once past retention, so ill-formed rows cannot fill a sweep batch. DynamoDB needs GSIs on
-status for runs/approvals and runId for children, with the queried sort fields; the run queries
-require portable filter/order support. `verify()` refuses missing native conditional update/delete
-support. Backend query support and the idempotency transactional store's requirements both apply;
+children once past retention, so ill-formed rows cannot fill a sweep batch. `verify()` refuses
+missing native conditional update/delete support, and runs each sweep query once: an adapter that
+cannot serve one is refused at startup with `query-unsupported`. DynamoDB and Bigtable are refused
+that way, since they order by one sort key only and the sweep orders overdue approvals by deadline,
+then id. Backend query support and the idempotency transactional store's requirements both apply;
 this is not a claim that every backend can execute every query.
 
 Tool database writes through `call.unitOfWork` commit with their idempotency result. Outside API
