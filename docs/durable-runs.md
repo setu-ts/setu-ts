@@ -124,11 +124,12 @@ to the outside API's own idempotency mechanism. Tool exceptions leave `within`, 
 writes and become safe tool-error entries. A tool timeout (`timeouts.toolMs`) leaves the run
 `running` and stops lease renewal without releasing the lease. After lease expiry plus
 `maxClockSkewMs`, the sweep resumes the call: `within` replays its recorded result if the
-transaction committed, or re-runs it if it rolled back. An in-flight 409 conflict stops the holder
-for a later sweep without counting another timeout. `timeouts.toolAttempts` bounds timed-out
-attempts per call (positive integer, default 3, used only with `toolMs`); reaching the limit fails
-the run with `tool-timeout`. The final attempt's transaction can still commit after the run fails:
-an abandoned-call marker that refuses that commit is not implemented. Model deadlines
+transaction committed, or re-runs it if it rolled back. If the timed-out transaction is still open,
+the resumed call gets a 409: the holder stops for a later sweep and counts it as another timed-out
+attempt, so a transaction that never settles still reaches the limit. `timeouts.toolAttempts` bounds
+timed-out attempts per call (positive integer, default 3, used only with `toolMs`); reaching the
+limit fails the run with `tool-timeout`. The final attempt's transaction can still commit after the
+run fails: an abandoned-call marker that refuses that commit is not implemented. Model deadlines
 (`timeouts.modelMs`) still fail with `execution-failed`. Configuration, store and oversized-result
 errors fail the run. Configure a transactional idempotency store as above.
 

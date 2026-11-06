@@ -275,7 +275,53 @@ describe('tool timeout sweep recovery', () => {
     }
   });
 
-  it('stops on a still-in-flight claim conflict without spending another timeout attempt', async () => {
+  it('fails with tool-timeout when the timed-out transaction never settles', async () => {
+    const beforeCommit = gate();
+    const execute = vi.fn(() => 'ok');
+    const h = await harness(
+      definition({
+        tools: { act: { inputSchema: jsonSchema({}), execute } },
+        timeouts: { toolMs: 10, toolAttempts: 2 },
+        maxSteps: 1,
+      }),
+      replies(),
+    );
+    const transaction = h.db.transaction.bind(h.db);
+    const tx = vi
+      .spyOn(h.db, 'transaction')
+      .mockImplementationOnce((work, options) =>
+        transaction(async (uow) => {
+          const value = await work(uow);
+          beforeCommit.open();
+          // Never settles: the holder's transaction stays open.
+          return new Promise<never>(() => value);
+        }, options),
+      )
+      .mockRejectedValue(new DuplicateKeyError('claim held'));
+    try {
+      const { runId } = await h.service.start(h.ctx(), 'demo', { messages: [] });
+      await beforeCommit.promise;
+      h.fire(10);
+      await h.settle();
+      expect(await h.store.get(runId)).toMatchObject({ status: 'running', toolTimeouts: 1 });
+      await expire(h, runId);
+      expect((await h.service.sweep()).resumed).toBe(1);
+      expect(await h.store.get(runId)).toMatchObject({
+        status: 'failed',
+        error: 'tool-timeout',
+        toolTimeouts: 2,
+        leaseOwner: '',
+      });
+      expect(execute).toHaveBeenCalledTimes(1);
+      await expire(h, runId);
+      expect((await h.service.sweep()).resumed).toBe(0);
+    } finally {
+      tx.mockRestore();
+      await h.close();
+    }
+  });
+
+  it('counts a still-in-flight claim conflict as an attempt and replays once it commits', async () => {
     const beforeCommit = gate();
     const commit = gate();
     const execute = vi.fn(() => 'ok');
@@ -312,7 +358,7 @@ describe('tool timeout sweep recovery', () => {
       expect(await h.store.get(runId)).toMatchObject({
         status: 'running',
         error: null,
-        toolTimeouts: 1,
+        toolTimeouts: 2,
         leaseVersion: 2,
       });
       expect(execute).toHaveBeenCalledTimes(1);

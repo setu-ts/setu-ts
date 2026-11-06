@@ -284,11 +284,21 @@ export async function stepLoop(
       await deps.hooks?.afterModelEntry?.(entry);
     }
   } catch (error) {
-    if (error instanceof AgentRunLeaseLostError || lease.lost || error instanceof ToolConflict)
+    const key = activeToolKey;
+    // A conflict on a call that already timed out means its transaction is
+    // still open: count it as another attempt, or a transaction that never
+    // settles would keep the run running forever.
+    const stillOpen =
+      error instanceof ToolConflict && key !== undefined && lease.row.toolTimeoutKey === key;
+    if (
+      error instanceof AgentRunLeaseLostError ||
+      lease.lost ||
+      (error instanceof ToolConflict && !stillOpen)
+    )
       return;
     const cancelled = lease.controller.signal.aborted;
-    const key = activeToolKey;
-    const toolTimeout = !cancelled && error instanceof CallTimeout && key !== undefined;
+    const toolTimeout =
+      !cancelled && key !== undefined && (error instanceof CallTimeout || stillOpen);
     const attempts = lease.row.toolTimeoutKey === key ? lease.row.toolTimeouts + 1 : 1;
     const timeoutData = toolTimeout
       ? {

@@ -454,9 +454,10 @@ detached execution promises. Model/tool timeouts use runtime timers; `maxSteps` 
 
 Model timeouts fail with `execution-failed`. Tool timeouts keep the run `running` and retain its
 lease without renewal. After expiry plus skew, the sweep resumes: `within` replays a committed
-result or re-runs a rolled-back call; a 409 conflict stops the holder for a later sweep. On the
-`toolAttempts` limit the run fails with `tool-timeout`. The final transaction may still commit after
-failure; no abandoned-call commit marker is implemented.
+result or re-runs a rolled-back call; a 409 while the timed-out transaction is still open stops the
+holder for a later sweep and counts as another attempt. On the `toolAttempts` limit the run fails
+with `tool-timeout`. The final transaction may still commit after failure; no abandoned-call commit
+marker is implemented.
 
 SDK tools reach the model without execution hooks. Model output commits before transactional
 `IIdempotencyService.within` tool execution. Outside effects need the supplied stable key at the
