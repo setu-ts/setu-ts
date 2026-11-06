@@ -279,6 +279,7 @@ describe('repository scan', () => {
     await expect(runToolchainProseCheck(resolve(root, '.tmp/absent-m111f'))).rejects.toThrow();
   });
   it('reads manifest scripts, ignores non-text files, and refuses a failed git inventory', async () => {
+    await mkdir(resolve(root, '.tmp'), { recursive: true });
     const directory = await mkdtemp(resolve(root, '.tmp/prose-'));
     try {
       await mkdir(`${directory}/apps`, { recursive: true });
