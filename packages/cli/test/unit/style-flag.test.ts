@@ -125,7 +125,7 @@ describe('style refusals', () => {
     const h = harness();
     expect(await h.run(['svc', '--template', 'full-stack', '--style', 'class-based'])).toBe(2);
     expect(h.errText()).toContain('cannot apply to --template full-stack');
-    expect(h.errText()).toContain('starter');
+    expect(h.errText()).toContain('functional-only');
   });
 
   it('refuses functional on the class-based alias', async () => {

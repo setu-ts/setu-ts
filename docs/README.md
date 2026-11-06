@@ -85,6 +85,10 @@ building production-ready applications with our plugin-first, runtime-independen
 
 ## Version Upgrades
 
+- [Versioning policy](./versioning.md)
+  - Minor bumps carry breaking changes; patches carry fixes and additions
+  - How breaking changes are batched
+
 - [Upgrading Setu-TS](./upgrading.md)
   - Reader-side steps, version by version
   - Removing `experimentalDecorators` from your own manifest

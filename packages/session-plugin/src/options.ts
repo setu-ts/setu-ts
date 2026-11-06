@@ -61,9 +61,12 @@ export interface CsrfFormOptions {
   readonly fieldName?: string;
   /**
    * Header that may carry the token instead of a form field, for `fetch`-based
-   * posts and for `multipart/form-data` bodies this package does not parse.
-   * Default `'x-csrf-token'`; header reading cannot be disabled — a synchroniser
-   * token that cannot be presented is not a security control.
+   * posts and for bodies that are not a form. It is read before the body: a
+   * non-empty header is the token checked, and the body is then not read. URL-encoded and
+   * `multipart/form-data` bodies (with a `boundary`) are also parsed for a
+   * string field named `fieldName`. Default `'x-csrf-token'`; header reading
+   * cannot be disabled — a synchroniser token that cannot be presented is not a
+   * security control.
    */
   readonly headerName?: string;
   /** Methods that skip verification. Default `['GET', 'HEAD', 'OPTIONS']`. */

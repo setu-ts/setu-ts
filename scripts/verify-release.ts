@@ -27,7 +27,9 @@
  *    workflow builds the GitHub Release body from it AFTER publishing, and a
  *    npm version cannot be republished — so a missing section must fail here,
  *    before anything is uploaded, rather than leaving a red job over packages
- *    that are already live.
+ *    that are already live. Its link definitions are checked too: every
+ *    released heading needs `[x]: …`, and `[unreleased]` compares from the
+ *    newest release (`scripts/lib/changelog-links.ts`).
  * 8. The release workflow generates and attaches `resolved-set.json`. That
  *    artifact preserves the complete lockfile resolved set for the published
  *    version; a workflow edit that silently drops it must fail before release.
@@ -58,6 +60,7 @@ import { activeHolds } from './publication-hold.ts';
 import { auditPackageSources } from './npm-specifier-audit.ts';
 import { versionSiteProblems } from './version-sites.ts';
 import { extractReleaseNotes } from './release-notes.ts';
+import { changelogLinkProblems } from './lib/changelog-links.ts';
 import {
   checkChangelogPrs,
   describeFindings,
@@ -220,6 +223,13 @@ async function main(): Promise<void> {
         `Release body is built from it, and that step runs after the publish, ` +
         `which cannot be repeated.`,
     );
+  }
+
+  // §3.6: a `## [x]` heading with no `[x]:` definition renders as plain text,
+  // and an `[unreleased]` compare base left on the previous release sends a
+  // reader to the wrong diff. Both were hand edits; the check is the backstop.
+  if (changelog !== null) {
+    problems.push(...changelogLinkProblems(changelog));
   }
 
   // ── 9: every PR merged since the previous tag has an entry, in the right place ─

@@ -1,8 +1,9 @@
 # Worker pool example
 
-Run `pnpm --dir apps/worker-pool run start` here, then request `GET /health` on port 3000 (pass
-another port as the first argument). Run `pnpm --dir apps/worker-pool run smoke` to exercise the
-unstarted factory in `setu.config.ts`.
+Run `pnpm --dir apps/worker-pool run start`, then request `GET /health` on port 3000 (pass another
+port as the first argument). Run `pnpm --dir apps/worker-pool run smoke` to exercise the unstarted
+factory in `setu.config.ts`. A downloaded copy runs the same scripts with `npm run start` and
+`npm run smoke` in its own directory.
 
 The app registers RuntimePlugin, HealthPlugin with `details: true` (so `/health` shows the pool's
 budget, which is hidden by default) and WorkerPoolPlugin with `maxWorkers: 1`. Its two task modules

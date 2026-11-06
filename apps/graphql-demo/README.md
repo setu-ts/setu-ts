@@ -3,9 +3,9 @@
 A runnable application exercising `@setu-ts/graphql-plugin` end to end, and an interop suite that
 drives it with **real third-party GraphQL clients**.
 
-> **Scope.** This is a private pnpm workspace app, not a published package. Its generated TypeScript
-> paths resolve framework source from this checkout. Third-party GraphQL clients live in this app’s
-> dependencies and never enter a framework package’s dependency graph.
+> **Scope.** This is a runnable example, not a published package. Third-party GraphQL clients live
+> in this app’s dependencies and never enter a framework package’s dependency graph. In this
+> repository, its generated TypeScript paths resolve framework source from this checkout.
 
 ## Running it
 
@@ -71,10 +71,10 @@ with third-party clients, which is the part that cannot move in-repo.
 
 ## Relationship to the gates
 
-The app is a private pnpm workspace member. `pnpm run check:apps` runs its `check` and `smoke`
-scripts; the root formatter and linter also cover it. The interop suite remains a separate manual
-check: run `pnpm --dir apps/graphql-demo run interop` when changing the GraphQL transports. Release
-scripts publish framework packages, not this app.
+In this repository, the app is a private pnpm workspace member: `pnpm run check:apps` runs its
+`check` and `smoke` scripts, and the root formatter and linter cover it. The interop suite remains a
+separate manual check: run `pnpm --dir apps/graphql-demo run interop` when changing the GraphQL
+transports. Release scripts publish framework packages, not this app.
 
 `src/modules/index.ts` and `src/modules/books/index.ts` are CLI-owned module indexes, called through
 `registerModules(app.router, app.services)`. The CLI has no GraphQL-resolver schematic:

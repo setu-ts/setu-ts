@@ -878,6 +878,9 @@ describe('the routes a generated README lists', () => {
         (f) => f.path === 'README.md',
       )?.contents ?? '';
     expect(readme('deno')).toContain('## What it serves\n\nAt `http://localhost:3000`');
+    // X93-7: the generated README links the rendered site, not GitHub.
+    expect(readme('deno')).toContain('A [Setu-TS](https://setu-ts.dev/) project targeting `deno`.');
+    expect(readme('deno')).not.toContain('A [Setu-TS](https://github.com/setu-ts/setu-ts)');
     expect(readme('node')).toContain('- `/docs` — Swagger UI for the API');
     expect(readme('cloudflare-workers')).toContain(
       'Under `npx wrangler dev`, at `http://localhost:8787`',

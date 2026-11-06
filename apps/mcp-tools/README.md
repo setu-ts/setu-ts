@@ -17,9 +17,9 @@ pnpm --dir apps/mcp-tools run build
 pnpm --dir apps/mcp-tools run start
 ```
 
-The repository scripts run source through the app tsconfig. A downloaded example installs published
-packages; its `check` script is rewritten to `tsc --noEmit`. Build before start: the generated
-start command runs `dist/main.js` with `instrumentation.mjs`.
+`check` runs source through the app tsconfig. A downloaded copy installs published packages; its
+`check` script is rewritten to `tsc --noEmit`. Build before start: the generated start command runs
+`dist/main.js` with `instrumentation.mjs`.
 In this repository, `build` bundles against the framework packages' compiled output, and the
 `setu` command it calls is itself one of them. In a fresh clone, compile them once from the
 repository root with `pnpm exec tsc -b` before `build`; otherwise `build` cannot find `setu` and

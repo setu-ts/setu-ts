@@ -53,6 +53,7 @@ import { run as runProcess } from './lib/run.ts';
 import { writeFile, readFile } from 'node:fs/promises';
 
 import { workspaceMembers } from './lib/workspace.ts';
+import { recordReleaseDefinition } from './lib/changelog-links.ts';
 import { findStaleReferences, isSweptPath } from './version-sweep.ts';
 
 /** One file the bump rewrites. */
@@ -431,11 +432,11 @@ export function planBump(files: ReadonlyMap<string, string>, options: BumpOption
             'not a release (verify-release check 7 refuses it too).',
         );
       } else {
-        stage(
-          CHANGELOG_FILE,
-          changelog.replace(heading, `## [Unreleased]\n\n## [${to}] — ${date}`),
-          1,
-        );
+        // §3.6: the heading rename is only half a release. `[unreleased]` must
+        // compare from the new tag, and that tag needs its own definition line
+        // — both hand edits an `[0.11.0]` cut missed.
+        const renamed = changelog.replace(heading, `## [Unreleased]\n\n## [${to}] — ${date}`);
+        stage(CHANGELOG_FILE, recordReleaseDefinition(renamed, to).content, 1);
       }
     }
   }

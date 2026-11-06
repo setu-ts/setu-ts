@@ -648,6 +648,9 @@ importers:
       tsx:
         specifier: ^4.20.6
         version: 4.23.15
+      ws:
+        specifier: ^8.18.0
+        version: 8.22.1
 
   apps/grpc:
     dependencies:

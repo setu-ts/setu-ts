@@ -95,12 +95,13 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
     // controllers redesign: one module tree serves both styles. site/--example adds one.
     // One more since M131a: the Redis-arm `setu add` shell fence.
     // One more since M129: the `setu client` shell fence.
-    total: 24,
+    // Two more since M131d: the `setu workspace build` and `deploy` shell fences.
+    total: 26,
     ts: 1,
     compile: 1,
     external: 0,
     pseudocode: 0,
-    skipped: 23,
+    skipped: 25,
   },
   'docs/plugin-architecture.md': {
     total: 17,
@@ -281,13 +282,14 @@ const EXPECTED_AGGREGATE: FenceCounts = {
   // M129: +1 skipped shell fence in docs/cli.md (`setu client`).
   // M135: docs/retrieval.md joins (+10: 8 compiling, 2 skipped); +1 skipped in examples.md.
   // Examples walk-through: +1 skipped shell fence in examples.md (realtime-clients).
+  // M131d: +2 skipped shell fences in docs/cli.md (`setu workspace build` and `deploy`).
   // M136: +1 skipped shell fence in examples.md (durable-agent).
-  total: 357,
+  total: 359,
   ts: 263,
   compile: 230,
   external: 33,
   pseudocode: 0,
-  skipped: 94,
+  skipped: 96,
 };
 
 describe('actual-fence compiler — every curated guide (shared engine)', () => {

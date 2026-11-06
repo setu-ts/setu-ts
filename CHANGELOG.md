@@ -345,6 +345,41 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **Generated READMEs link the site, and the example-download refusal works from `npm create`
+  (X93-7, X93-3, M131d, #564, `@setu-ts/cli`).** A scaffolded project's and a workspace's README
+  link `https://setu-ts.dev/` instead of GitHub, which some readers cannot reach. When
+  `setu new --example` cannot download a file, the refusal suggests
+  `npx @setu-ts/cli new <name> --template <t>`, which works from both `setu` and
+  `npm create @setu-ts`, and names the nested socket error and its `code` (`ENOTFOUND`,
+  `ECONNREFUSED`) instead of only "fetch failed".
+- **`setu add auth` on a full-stack project links the password sign-in recipe (X89-3, M131d, #564,
+  `@setu-ts/cli`).** The starter-arm note also prints the auth-plugin README's full-stack recipe,
+  since the template's own login is a placeholder. `--style` on the full-stack template is refused
+  as functional-only rather than as having no controller seam, which it has (X91-8).
+- **`graphql-demo` works outside the repository (X93-1, M131d, #564).** The example declares `ws`,
+  the runtime's optional WebSocket peer, so a downloaded copy's WebSocket transport no longer closes
+  with 1006; its smoke now completes a `graphql-transport-ws` handshake.
+- **Release link definitions (X93-4, M131d, #564).** CHANGELOG gains its missing `[0.11.0]`
+  definition and compares `[unreleased]` from `v0.11.0`. `release:bump` now writes the new version's
+  definition and moves the `[unreleased]` base, and `release:verify` refuses a version heading
+  without a definition or a stale `[unreleased]` base. The website's link check also checks a
+  fragment on another page, which is how the changelog's `/#versioning` links shipped broken
+  (X93-5); the versioning policy is now the `docs/versioning.md` page.
+- **Documentation that did not match the code (M131d, #564).** The upgrade guide covers the #526
+  controllers break for 0.11.0 (X90-1), re-running `setu agents` after an upgrade (V11-18), the
+  Workers full-stack repair's `@types/node` and `waitUntil` steps (V10-16), when a missing Deno
+  import-map entry fails (V11-16, also in the openapi README) and what an existing project does for
+  M131c. `docs/deployment.md` leads with deploying a scaffolded project through `setu build`,
+  corrects "a standalone project emits no Dockerfile", and walks through an authenticated registry
+  with `setu workspace deploy --pull-secret` (X93-2, X87-5); `docs/cli.md` documents
+  `setu workspace build` and `deploy` and the E014–E016 findings (X91-8); the collector fan-out page
+  carries its config inline (X93-2). The auth-plugin README shows password sign-in in the full-stack
+  template and the CSRF token for its JSON login (X89-3); the logger README lists every request
+  record (V11-17); `CsrfFormOptions.headerName` no longer says multipart bodies go unparsed (V11-2);
+  optional peers in a workspace and the telemetry README's peer list are corrected (V10-50); Getting
+  Started names `setu add` (X93-9); example READMEs drop repository-only text and the rest-api
+  README says how to change the port (X93-6).
+
 - **Cross-site WebSocket handshakes are refused (#562, `@setu-ts/websocket-plugin`,
   `@setu-ts/kernel`, `@setu-ts/common`).** Security. A page on another site could open any WebSocket
   route, GraphQL's included, with the user's cookies: a handshake is a `GET`, so the CSRF middleware
@@ -384,7 +419,8 @@ All notable changes to this project are documented here. The format follows
   ignores `.dev.vars`, including projects that do not emit a local variables file.
 - **Agent verification commands (V11-9, M131c, #560, `@setu-ts/cli`).** Briefs include available
   lint and formatting scripts, Deno's native checks, and a rule to run the verification commands
-  before done.
+  before done. After upgrading, run `setu agents` and commit the rewritten briefs:
+  `setu agents --check` reports every brief written by an older CLI as stale.
 - **Fresh-scaffold card guidance (X93-8, M131c, #560, `@setu-ts/cli`).** `new --agents`, including
   examples, prints one install-and-check hint in place of per-card warnings before the first
   installation.
@@ -6216,7 +6252,7 @@ behavioural: two refusals move from a masked `500` to `501`, a restricted route 
 asserting the old status, or one that awaited `publish` and then read a handler side-effect, needs
 updating. Two are API changes, reaching implementors of `IMultiTenancyService` and callers
 constructing `UnsupportedRawQueryError` directly. Under `0.x` a minor bump is where breaking changes
-live — see [Versioning](README.md#versioning).
+live — see [Versioning](docs/versioning.md).
 
 ### Added
 
@@ -6460,8 +6496,8 @@ ingress kind instead of hand-rolled inside every handler.
 `IHttpAdapter` signatures widen to sync-or-async, which reaches out-of-repo adapter implementors and
 no ordinary caller, and the Node adapter now lets `@hono/node-server` install its own
 `Request`/`Response` globals. Deno, Bun and Workers are untouched by the second. Under this
-project's [versioning](README.md#versioning) a `0.x` minor is what carries breaking changes, which
-is why this is `0.3.0` rather than a patch.
+project's [versioning](docs/versioning.md) a `0.x` minor is what carries breaking changes, which is
+why this is `0.3.0` rather than a patch.
 
 ### Changed
 
@@ -6623,7 +6659,7 @@ So the label is gone and the promise is unchanged. The public API is still not s
 changes still ship in minor bumps, and 1.0 remains gated on Milestone 40 — benchmarks, a security
 audit, and the Node/Bun compatibility suites as release gates. What changes is that a caret range
 now works the way readers expect: `^0.2.0` resolves, absorbs patches, and stops before the next
-breaking release. See [Versioning](README.md#versioning).
+breaking release. See [Versioning](docs/versioning.md).
 
 **This release is not a no-op.** It carries every change listed below, including breaking ones —
 read the Changed section before upgrading.
@@ -10440,7 +10476,8 @@ are never hard dependencies. Each is injected through plugin options or imported
 Milestones 0–33 and 41–46. See [ROADMAP.md](ROADMAP.md) for scope per milestone and
 [PUBLIC_API.md](PUBLIC_API.md) for the full exported surface.
 
-[unreleased]: https://github.com/setu-ts/setu-ts/compare/v0.10.0...HEAD
+[unreleased]: https://github.com/setu-ts/setu-ts/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.11.0
 [0.10.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.10.0
 [0.9.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.9.0
 [0.8.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.8.0

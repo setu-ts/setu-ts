@@ -1815,11 +1815,24 @@ describe('runAddCommand', () => {
         `https://github.com/setu-ts/setu-ts/blob/v${VERSION}/packages/starters/${pkg}/README.md`,
       );
       expect(h.out.join('\n')).not.toContain('/blob/develop/');
+      // X89-3: the recipe URL is printed only for auth on the full-stack starter.
+      const recipe = 'https://setu-ts.dev/packages/auth-plugin/#in-the-full-stack-template';
+      if (pkg === 'full-stack-starter') {
+        expect(h.out.join('\n')).toContain(recipe);
+      } else {
+        expect(h.out.join('\n')).not.toContain(recipe);
+      }
       const grpc = harness({ '/app/deno.json': DENO_MANIFEST, '/app/setu.config.ts': config });
       expect(await grpc.run(['grpc'])).toBe(0);
       expect(grpc.out.join('\n')).toContain(
         'Register it after the factory returns: app.register(GrpcPlugin(',
       );
+      expect(grpc.out.join('\n')).not.toContain(recipe);
+      // Another starter-owned arm on the same starter prints no recipe either.
+      const session = harness({ '/app/deno.json': DENO_MANIFEST, '/app/setu.config.ts': config });
+      expect(await session.run(['session'])).toBe(0);
+      expect(session.out.join('\n')).toContain('configure its session arm');
+      expect(session.out.join('\n')).not.toContain(recipe);
     }
   });
 

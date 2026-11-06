@@ -259,6 +259,12 @@ Everything beyond routing is a plugin you register. A plugin publishes a service
 token, and code anywhere in the application resolves it by that token. Here are the most common
 ones.
 
+In a scaffolded project, `npx @setu-ts/cli add <name>` records the package in the manifest, adds its
+registration call to `setu.config.ts` (or, for a plugin the starter composes, prints the option to
+set), and prints the install command to run; see
+[Scaffolding and `setu add`](./cli.md#scaffolding-and-setu-add). The examples below show the
+registrations with their common options, as you write them by hand.
+
 ### Logger Plugin
 
 ```typescript

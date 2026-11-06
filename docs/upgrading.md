@@ -12,6 +12,39 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### CLI gates, generators and workspace deploy (M131c, `@setu-ts/cli`)
+
+- **Briefs.** Run `setu agents` and commit the rewritten briefs: `setu agents --check` reports every
+  brief written by an older CLI as stale, so a CI job running it fails on the version bump.
+- **Development ports.** Members now record `inspectPort`, and a full-stack member `vitePort`, from
+  `devBasePort` (default `basePort + 2000`). `setu workspace ports --reallocate` adds them, but it
+  also reassigns every member's application port from `basePort` and regenerates the discovery
+  modules, container and Kubernetes files. For a member that never recorded an inspector port it
+  prints the `--inspect=127.0.0.1:<port>` to set in `start:debug` and leaves the script unchanged,
+  and it prints the lines a full-stack `dev.ts` that does not read `VITE_PORT` must set.
+- **Deno tooling.** The runtime image no longer pins `@setu-ts/testing`: regenerate the container
+  files with `setu workspace ports --reallocate`, which rewrites the devtool entries, discovery
+  modules, manifest, container and Kubernetes files (and reassigns ports, above). Generated
+  `deno run npm:` commands carry `--no-lock` in new projects only; in an existing member, add
+  `--no-lock` to each such task by hand so it stops writing `deno.lock`.
+- **Config wiring.** Imports alone no longer satisfy `setu check`: `registerModules` must be called
+  (E006), and an imported registrar absent from a barrel's registration code reports E003. Add the
+  call `setu check` names; `setu sync` restores a drifted barrel.
+- **Unlisted services.** A service missing its `describe<Name>` export now reports W005 instead of
+  E001, so the run still passes. A silence entry for E001 on that service matches nothing and now
+  reports W004; replace it with W005.
+- **Workers local variables.** Add `.dev.vars` to `.gitignore` by hand in an existing Workers
+  project; every new one ignores it, including projects that emit no variables file.
+- **Shadowed plugin commands.** `setu commands` omits a plugin command whose name a built-in verb
+  reserves and warns once. Rename the plugin's command; built-in verbs always match first.
+- **W001 silences.** The located W001 names the construct, line and symbols, and its path is now
+  `setu.config.ts` rather than the barrel it used to name. A bare `"setu.W001"` entry still silences
+  it; an entry naming a barrel path (`src/controllers/index.ts`, `src/modules/index.ts`) matches
+  nothing and reports W004, so change its path to `setu.config.ts`.
+
+New projects get all of this from `setu new`; V11-3's config comments and X93-8's card hint apply to
+new scaffolds only.
+
 ### WebSocket Origin check and the GraphQL execute method rule (`@setu-ts/websocket-plugin`, `@setu-ts/graphql-plugin`, `@setu-ts/common`, `@setu-ts/kernel`)
 
 - **Cross-site WebSocket handshakes are refused.** `WebSocketPlugin` now refuses, with `403`, every
@@ -282,6 +315,34 @@ policy. The `default` format is unchanged. If you build error responses yourself
 both Problem Details formatters and by status hints.
 
 ## 0.11.0
+
+### One place for routes: controllers (#526, `@setu-ts/cli`, breaking)
+
+<!-- version:history -->
+
+A project that followed the guide without this change fails `setu check` with E014 (controllers or
+services outside modules), E006 (a barrel not referenced from `setu.config.ts`, including a missing
+`registerModules` call) and E003 (a barrel that no longer lists its artifacts). The layout is in
+[the CLI guide](cli.md#controllers-and-domain-modules).
+
+A flat project switches once:
+
+```bash
+setu g module orders --adopt-controllers
+```
+
+`--adopt-controllers` applies only to the first module, while `src/modules/` is empty. It moves
+every file under `src/controllers/` and `src/services/` into `src/modules/orders/`, rewrites imports
+and keeps their URLs; the scaffold's untouched greeting example moves without the flag.
+
+A project that already has modules moves by hand: `git mv` the files into `src/modules/<name>/`, add
+the module declaration, import and call `registerModules(app.router, app.services)` in
+`setu.config.ts` (a class-based config also lists the module in `MODULES`), then run `setu sync`.
+
+`.routes.ts` is now `<name>.controller.ts`. Once modules exist, `controller`, `route`, `service`,
+`sse` and `setu add view` require `--module`; `schema` accepts it too.
+
+<!-- version:history -->
 
 ### node-redis as a supported Redis client (M117, 0.11.0, `@setu-ts/common`, `@setu-ts/telemetry-plugin`, `@setu-ts/cli`)
 
@@ -649,10 +710,12 @@ health bridge.
 - **Swagger UI `{ baseUrl }`:** install `swagger-ui-dist` at exactly `5.33.3`
   (`npm install swagger-ui-dist@5.33.3 --save-exact`); a newer release fails the integrity hashes.
   On Deno, add `"swagger-ui-dist": "npm:swagger-ui-dist@5.33.3"` to the `imports` of the app's
-  `deno.json` (in a workspace, the member's — as generated members do — or the root's), run
-  `deno install` from the workspace root, and keep `--allow-read` on the start task. The plugin's
-  optional import resolves from the installed `node_modules`, so an entry with no install still
-  fails at startup.
+  `deno.json` (in a workspace, the member's — as generated members do — or the root's), and keep
+  `--allow-read` on the start task. With `nodeModulesDir: "auto"` — every generated Deno project,
+  and in a workspace the root — Deno installs the entry on first run; with `"manual"` (Deno's
+  default when the project also has a `package.json`), an entry that was never installed fails at
+  startup with `OptionalDependencyUnavailableError`, so run `deno install` from the workspace root
+  first.
 - **Telemetry peers:** install
   `@opentelemetry/api@~1.9.0 @opentelemetry/sdk-trace-base@^2.9.0 @opentelemetry/resources@^2.9.0 @opentelemetry/context-async-hooks@^2.0.0`;
   unpinned names fail with ERESOLVE today.
@@ -711,6 +774,9 @@ health bridge.
   `<Pascal> not found.`; an existing module keeps its text until you edit the detail in its
   controller or routes. A test that asserted the old `<Pascal> <id> was not found.` must assert the
   fixed detail instead, and should not assert that the id is echoed.
+- **Re-run `setu agents` after upgrading.** `setu agents --check` reports every brief written by an
+  older CLI as stale, so a CI job running it fails on the version bump; run `setu agents` and commit
+  the rewritten briefs.
 
 ### DI lifetimes are enforced, and every request has a scope (M125, 0.11.0, `@setu-ts/di-plugin`, `@setu-ts/common`, `@setu-ts/decorator-plugin`, breaking)
 
@@ -1087,12 +1153,13 @@ indicator `data` and are unaffected.
 **V9-49:** Swagger UI now self-hosts its assets. Install `swagger-ui-dist` (`^5`) in applications
 that use `OpenApiPlugin` or a starter with Swagger enabled. On Deno, add
 `"swagger-ui-dist": "npm:swagger-ui-dist@5.33.3"` to the `imports` of the app's `deno.json` (in a
-workspace, the member's — as generated members do — or the root's), run `deno install` from the
-workspace root, and keep `--allow-read` on the start task: the plugin's optional import resolves
-from the installed `node_modules`, so an entry with no install still fails at startup. Otherwise
-startup fails with `OptionalDependencyUnavailableError`. To use the pinned external assets instead,
-set `OpenApiPlugin({ swagger: { assets: 'cdn' } })`, or a starter's
-`openapi: { swagger: { assets: 'cdn' } }`. Workers needs that external mode or
+workspace, the member's — as generated members do — or the root's), and keep `--allow-read` on the
+start task. With `nodeModulesDir: "auto"` — every generated Deno project, and in a workspace the
+root — Deno installs the entry on first run; with `"manual"` (Deno's default when the project also
+has a `package.json`), an entry that was never installed fails at startup with
+`OptionalDependencyUnavailableError`, so run `deno install` from the workspace root first. To use
+the pinned external assets instead, set `OpenApiPlugin({ swagger: { assets: 'cdn' } })`, or a
+starter's `openapi: { swagger: { assets: 'cdn' } }`. Workers needs that external mode or
 `assets: { baseUrl: '/assets' }`; the starters select the CDN there when no Swagger asset mode is
 chosen; a custom base must serve the exact 5.33.3 files for SRI to pass. Fresh CLI projects declare
 the dependency and select CDN mode for Workers automatically. If you add `swagger-ui-dist` to an
@@ -1238,12 +1305,21 @@ A `full-stack` Workers project scaffolded by 0.9.0 builds but cannot start: its 
 locates the server build with `new URL('./build/server/index.js', import.meta.url)`, which a bundled
 Worker cannot resolve. Scaffolding a new project is simplest. To repair an existing one:
 
-- In `src/index.ts`, add `import * as serverBuild from '../build/server/index.js';` and call
-  `createApp(env, waitUntil, undefined, { serverBuild })`.
-- In `tsconfig.json`, add `"allowJs": true` to `compilerOptions`. The entry now imports the compiled
-  server build, which has no declarations, so `tsc --noEmit` reports TS7016 on it without the flag;
-  fresh scaffolds set it for this reason. Verify with the project's `check` script,
-  `npm run build && tsc --noEmit`.
+- In `src/index.ts`, import the sink and the server build, then call
+  `createApp(env, waitUntil, undefined, { serverBuild })`:
+
+  ```typescript
+  import { waitUntil } from 'cloudflare:workers';
+  import * as serverBuild from '../build/server/index.js';
+  // …
+  return createApp(env, waitUntil, undefined, { serverBuild });
+  ```
+
+- In `tsconfig.json`, add `"allowJs": true` and `"node"` to `compilerOptions.types`, and add
+  `@types/node` `^24.0.0` to devDependencies. The entry now imports the compiled server build, which
+  has no declarations, so `tsc --noEmit` reports TS7016 on it without `allowJs`; fresh scaffolds set
+  both, and name `"node"` because the tests use `node:test`. Verify with the project's `check`
+  script, `npm run build && tsc --noEmit`.
 - In `setu.config.ts`, give `createApp` a second `_waitUntil` parameter and widen the `ssr`
   parameter to
   `{ serverBuild: unknown } | Pick<ReactRouterPluginOptions, 'loadRequestHandler' | 'mode'>`. In the

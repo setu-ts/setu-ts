@@ -18,7 +18,8 @@ import * as nodeFs from 'node:fs/promises';
  * `--env-file=.env`, the `.env` comment), and its Node OpenTelemetry preload
  * (`instrumentation.mjs`, `--import` in the Node scripts and image) and masked
  * one-line start failure in `main.ts` — which change exactly `package.json`,
- * `deno.json`, `.env`, `main.ts`, `Dockerfile` and the new `instrumentation.mjs`:
+ * `deno.json`, `.env`, `main.ts`, `Dockerfile` and the new `instrumentation.mjs`; and
+ * M131d's README link to the site instead of GitHub (X93-7), which changes only `README.md`:
  *
  *   node packages/cli/test/fixtures/capture-template-baseline.ts
  *

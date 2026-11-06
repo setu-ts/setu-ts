@@ -764,10 +764,16 @@ here.
   an unlisted service, same-named controller adoption, hoisted `react-router`, per-member Vite and
   inspector ports, a Deno image without dev tooling, `workspace deploy --pull-secret`, brief and
   scaffold text; 17 smoke rows) — complete (PR #560).
+- **Milestone 131d** (docs + `apps/` + READMEs + website + `cli` text — documentation, examples and
+  the website: the #526 and agent-brief upgrade notes, M131c's upgrade subsection, the scaffolded
+  deployment path and `--pull-secret` walkthrough, the full-stack password sign-in recipe,
+  graphql-demo's `ws`, generated READMEs linking the site, CHANGELOG link definitions with a bump
+  step and release check, `docs/versioning.md` and cross-page anchor checks; 18 smoke rows) —
+  complete (PR #564).
 - **Milestone 136** (`agent-runs-plugin` + `common` + `database-plugin` + `apps/durable-agent` —
   durable model/tool runs, fenced leases, timed approvals and UI-message replay, with a
   support-agent example that survives restarts) — complete (PR #565).
-- **Next milestone** — M131d is open for `0.12.0`.
+- **Next milestone** — the `0.12.0` release.
 
 ## Verification (run before declaring any work done)
 

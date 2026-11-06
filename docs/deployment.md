@@ -9,6 +9,7 @@ re-renders the Kubernetes manifests from the chart, and — with `--cluster` —
 
 ## Contents
 
+- [Deploy a scaffolded project](#deploy-a-scaffolded-project)
 - [Container images](#container-images)
 - [Local development with Compose](#local-development-with-compose)
 - [Kubernetes](#kubernetes)
@@ -17,6 +18,33 @@ re-renders the Kubernetes manifests from the chart, and — with `--cluster` —
 - [Service discovery and RBAC](#service-discovery-and-rbac)
 - [Cloudflare Workers](#cloudflare-workers)
 - [The deployment gate](#the-deployment-gate)
+
+## Deploy a scaffolded project
+
+A project `setu new` generated is ready to containerise without editing. For a single Node, Bun or
+Deno project:
+
+```bash
+npm install                         # Bun: bun install; Deno: deno install — writes the lockfile
+docker build -t my-app .            # the generated Dockerfile at the project root
+docker run --rm -p 3000:3000 my-app # PORT still selects the port at run time
+```
+
+The image installs from the project's lockfile, which `setu new` does not write: install once first
+(`npm install`, `bun install` or `deno install`, which write `package-lock.json`, `bun.lock` or
+`deno.lock`) and commit it.
+
+The generated `Dockerfile` installs and builds inside the image, so no host build is needed: on Node
+its build stage runs `npm ci` and `npm run build` (which type-checks, then `setu build` bundles the
+service into `dist/`) and the image runs `dist/main.js`; a Bun image runs `bun run main.ts` and a
+Deno image `deno run … main.ts`. The entry reads `PORT` (default `3000`). Run the tests before
+building an image (`npm test`, `bun run test`, or `deno task test` in a Deno project): DI graph
+validation happens at boot. A Workers project is not a container at all — deploy it with
+`wrangler deploy` (see [Cloudflare Workers](#cloudflare-workers)).
+
+In a workspace, `setu generate app` (and `setu adopt`) writes one parameterized image, a Compose
+stack and Kubernetes objects for its members; see
+[Deploying a project the CLI scaffolded](#deploying-a-project-the-cli-scaffolded).
 
 ## Behind a reverse proxy
 
@@ -94,6 +122,8 @@ security-sensitive links, including password resets, from a configured base URL,
 request-derived host.
 
 ## Container images
+
+This section describes the images that build the examples in this repository.
 
 Two Dockerfiles cover every example, selected with `--build-arg APP=<name>`:
 
@@ -184,6 +214,8 @@ before the port. There is no `PORT` environment variable.
 
 ## Local development with Compose
 
+This section describes the Compose stack in this repository.
+
 [`docker/compose.yaml`](../docker/compose.yaml) brings up an example with Redis:
 
 ```bash
@@ -206,6 +238,8 @@ It runs the **contrib** distribution; the `datadog` and `azuremonitor` exporters
 collector build. See [the fan-out guide](./telemetry-collector-fanout.md).
 
 ## Kubernetes
+
+This section describes the chart and rendered manifests in this repository.
 
 **Requires Kubernetes 1.30 or newer**, declared as `kubeVersion` in the chart so `helm install`
 refuses an older cluster with a clear message rather than failing obscurely. The constraint comes
@@ -553,6 +587,58 @@ A registry other than npm pins its tarball URLs in the lockfile: pass
 `--build-arg NPM_CONFIG_REGISTRY=<url>` (and `--network host` for one on `localhost`), with its
 token in the `NPMRC` build secret rather than in a build argument.
 
+#### An authenticated registry
+
+A non-kind context pushes every image, so it needs a registry and, for a private one, a pull Secret
+in the target namespace. Create the namespace deploy uses — the workspace directory name unless
+`--namespace` says otherwise; the commands below pass `--namespace acme` — and a
+`kubernetes.io/dockerconfigjson` Secret in it:
+
+```bash
+kubectl create namespace acme
+kubectl create secret generic registry-auth -n acme \
+  --type kubernetes.io/dockerconfigjson \
+  --from-file .dockerconfigjson=registry-auth.json
+```
+
+`registry-auth.json` is a Docker config file holding the registry's credentials inline (an `auths`
+entry, not a `credsStore` or `credHelpers` reference, which the cluster cannot call). Keep it out of
+the repository and readable only by you; passing `--docker-password` on the command line instead
+leaves the token in your shell history and process list.
+
+The CLI receives only each Secret's type, on `kubectl`'s output: it runs `kubectl get secret` with a
+`jsonpath` filter, so `kubectl` itself fetches the Secret, and the deploy identity needs permission
+to read Secrets in that namespace. Ask it to check everything and print the plan first:
+
+```bash
+setu workspace deploy --registry registry.example.com/acme --namespace acme \
+  --pull-secret registry-auth --dry-run
+```
+
+Before building, it confirms the namespace exists (`kubectl get namespace … -o name`) and each named
+Secret exists with type `kubernetes.io/dockerconfigjson` or `kubernetes.io/dockercfg`
+(`kubectl get secret … -o jsonpath={.type}`); an Opaque Secret is refused, because it cannot
+authenticate a pull. A missing namespace or Secret is refused with the `kubectl create` command to
+run. The plan then includes `would use imagePullSecrets: registry-auth`. The pull Secret
+authenticates the cluster's image pulls, not your Docker client, so log in with credentials that can
+push before the real run, then run the same command without `--dry-run` to build, push and apply:
+
+```bash
+docker login registry.example.com
+setu workspace deploy --registry registry.example.com/acme --namespace acme \
+  --pull-secret registry-auth
+```
+
+- A name is a DNS-1123 subdomain (lowercase labels, at most 253 characters) and may be given once;
+  pass `--pull-secret` once per Secret when a registry needs several.
+- `k8s/members.yaml` must not already declare `imagePullSecrets`; deploy refuses it rather than
+  merge. The names are inserted into each member's pod spec at deploy time, so regenerating the
+  workspace files does not lose them.
+- On a non-kind context without `--pull-secret`, deploy prints a hint; a public registry needs none.
+
+For the full set of flags see
+[`setu workspace build` and `setu workspace deploy`](./cli.md#workspace-images-setu-workspace-build-and-setu-workspace-deploy).
+
 ### The default Node workspace image
 
 `build` type-checks DI tokens; graph validation happens at boot, so run `npm test` before building
@@ -684,13 +770,15 @@ address as the fallback.
 
 ### A standalone project
 
-The default standalone `setu new` emits no Dockerfile, Compose file or Kubernetes manifest. A
-standalone template with `--broker` or `--queue` can additionally emit `docker/compose.yaml` for the
-selected backing services; that does not supply an application image or Kubernetes manifest. Use
-`setu new --workspace` for generated deployment artifacts, or `setu adopt` to bring an existing
-project into a workspace. For an independently maintained image, use this repository's
-[`docker/Dockerfile`](../docker/Dockerfile) pattern as a starting point and adapt its entrypoint and
-dependency installation to your runtime.
+A standalone non-Workers `setu new` emits a `Dockerfile` and `.dockerignore` beside the project, so
+`docker build -t app .` and `docker run --rm -p 3000:3000 app` work without adding anything; the
+image installs and builds inside its own build stage. A Workers project emits neither, because it is
+not a container. A standalone template with `--broker` or `--queue` can additionally emit
+`docker/compose.yaml` for the selected backing services; that does not supply a Kubernetes manifest.
+Use a workspace (`setu new --workspace`, then `setu generate app`) for generated per-member
+deployment artifacts, or `setu adopt` to bring an existing project into a workspace. For an
+independently maintained image, adapt the generated `Dockerfile`'s entrypoint and dependency
+installation to your runtime.
 
 ## Backup and restore
 
