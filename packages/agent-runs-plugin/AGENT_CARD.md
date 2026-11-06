@@ -28,9 +28,13 @@ handlers: `start`, `respond`, `decide`, `cancel`, `get`; call `sweep` from cron 
   original, defined principal. Tenant mismatch returns the same 404 as a missing run.
 - Definitions are frozen and versioned. Supply `compatibleVersions` for deliberate migrations.
 - Reading, streaming and cancelling default to the starting principal; `canAccess` widens it.
+- `decide`: 404 unless `canAccess` or `canDecide` passes, 403 when visible but not decidable;
+  `reason` is a string of at most 1,024 characters.
+- Input messages are `user`/`assistant` text; `system` is refused, tool and approval parts stripped.
 - The UI-message log resumes from a `<batch>.<index>.<epoch>` Last-Event-ID; a diverged id gets a
   `data-setu-replay` chunk and a full replay. Idle terminal reconnect returns 204.
 - `background(ctx, work)` integrates with host lifetime. `ctx.defer` does not run the agent.
 
-See README for limits, database schema requirements, options and errors. Edit loop:
+Runnable example: `setu new my-agent --example durable-agent` (approval, restart, PostgreSQL). See
+README for limits, database schema requirements, options and errors. Edit loop:
 `pnpm test:coverage agent-runs-plugin --no-tooling`.
