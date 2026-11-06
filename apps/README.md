@@ -34,6 +34,7 @@ does not have.
 | [`multi-tenant`](./multi-tenant)             | A write under one tenant is invisible to another tenant.                                            |
 | [`mcp-tools`](./mcp-tools)                   | MCP scopes, schemas, idempotent retries, validation, rate limits, Origin checks and archive quotas. |
 | [`semantic-search`](./semantic-search)       | Background indexing, tenant-scoped search, re-ingest replacement and refused filters.               |
+| [`durable-agent`](./durable-agent)           | An agent run that survives reloads and restarts, a refund approval, and a refund written once.      |
 | [`ai-chat`](./ai-chat)                       | AI SDK streams, trusted tools, quotas, usage delivery, fallback and OTLP content controls.          |
 | [`microservices`](./microservices)           | Service A discovers and calls B, plus brokered request/reply.                                       |
 | [`di-decorators`](./di-decorators)           | A decorated route uses `@Inject`; manual scopes distinguish lifetimes.                              |

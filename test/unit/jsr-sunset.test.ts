@@ -20,6 +20,7 @@ describe('JSR sunset descriptions', () => {
       'idempotency-plugin',
       'mcp-plugin',
       'vector-store-plugin',
+      'agent-runs-plugin',
       'create',
     ])
       expect(JSR_PACKAGES).not.toContain(name);

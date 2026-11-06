@@ -249,7 +249,7 @@ importers:
   apps/ai-chat:
     dependencies:
       '@ai-sdk/openai-compatible':
-        specifier: ^3
+        specifier: 3.0.84
         version: 3.0.84(zod@4.6.7)
       '@ai-sdk/otel':
         specifier: 1.0.159
@@ -448,6 +448,106 @@ importers:
       tsx:
         specifier: ^4.20.6
         version: 4.23.15
+
+  apps/durable-agent:
+    dependencies:
+      '@ai-sdk/openai-compatible':
+        specifier: 3.0.84
+        version: 3.0.84(zod@4.6.7)
+      '@setu-ts/agent-runs-plugin':
+        specifier: workspace:^
+        version: link:../../packages/agent-runs-plugin
+      '@setu-ts/common':
+        specifier: workspace:^
+        version: link:../../packages/common
+      '@setu-ts/config-plugin':
+        specifier: workspace:^
+        version: link:../../packages/config-plugin
+      '@setu-ts/database-plugin':
+        specifier: workspace:^
+        version: link:../../packages/database-plugin
+      '@setu-ts/exceptions':
+        specifier: workspace:^
+        version: link:../../packages/exceptions
+      '@setu-ts/health-plugin':
+        specifier: workspace:^
+        version: link:../../packages/health-plugin
+      '@setu-ts/http-security-plugin':
+        specifier: workspace:^
+        version: link:../../packages/http-security-plugin
+      '@setu-ts/idempotency-plugin':
+        specifier: workspace:^
+        version: link:../../packages/idempotency-plugin
+      '@setu-ts/kernel':
+        specifier: workspace:^
+        version: link:../../packages/kernel
+      '@setu-ts/logger-plugin':
+        specifier: workspace:^
+        version: link:../../packages/logger-plugin
+      '@setu-ts/metrics-plugin':
+        specifier: workspace:^
+        version: link:../../packages/metrics-plugin
+      '@setu-ts/openapi-plugin':
+        specifier: workspace:^
+        version: link:../../packages/openapi-plugin
+      '@setu-ts/runtime':
+        specifier: workspace:^
+        version: link:../../packages/runtime
+      '@setu-ts/static-plugin':
+        specifier: workspace:^
+        version: link:../../packages/static-plugin
+      '@setu-ts/validation-plugin':
+        specifier: workspace:^
+        version: link:../../packages/validation-plugin
+      ai:
+        specifier: 7.0.159
+        version: 7.0.159(zod@4.6.7)
+      drizzle-orm:
+        specifier: 0.45.2
+        version: 0.45.2(@opentelemetry/api@1.10.0)(@prisma/client@7.10.1(typescript@6.0.3))(@types/pg@8.23.1)(pg@8.23.1)
+      pg:
+        specifier: ^8.0.0
+        version: 8.23.1
+      pino:
+        specifier: 10.x
+        version: 10.4.0
+      swagger-ui-dist:
+        specifier: 5.33.3
+        version: 5.33.3
+      tsx:
+        specifier: ^4.20.0
+        version: 4.23.15
+      zod:
+        specifier: ^4.6.6
+        version: 4.6.7
+    devDependencies:
+      '@eslint/js':
+        specifier: ^10.0.1
+        version: 10.0.1(eslint@10.12.0)
+      '@setu-ts/cli':
+        specifier: workspace:^
+        version: link:../../packages/cli
+      '@setu-ts/testing':
+        specifier: workspace:^
+        version: link:../../packages/testing
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.19.2
+      '@types/pg':
+        specifier: ^8.23.1
+        version: 8.23.1
+      eslint:
+        specifier: ^10.12.0
+        version: 10.12.0
+      prettier:
+        specifier: ^3.9.10
+        version: 3.9.10
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+      typescript-eslint:
+        specifier: ^8.71.1
+        version: 8.71.2(eslint@10.12.0)(typescript@6.0.3)
 
   apps/full-stack:
     dependencies:
@@ -824,7 +924,7 @@ importers:
   apps/semantic-search:
     dependencies:
       '@ai-sdk/openai-compatible':
-        specifier: ^3
+        specifier: 3.0.84
         version: 3.0.84(zod@4.6.7)
       '@setu-ts/common':
         specifier: workspace:^
@@ -956,6 +1056,46 @@ importers:
       tsx:
         specifier: ^4.20.6
         version: 4.23.15
+
+  packages/agent-runs-plugin:
+    dependencies:
+      '@setu-ts/common':
+        specifier: workspace:^
+        version: link:../common
+    devDependencies:
+      '@setu-ts/database-plugin':
+        specifier: workspace:^
+        version: link:../database-plugin
+      '@setu-ts/idempotency-plugin':
+        specifier: workspace:^
+        version: link:../idempotency-plugin
+      '@setu-ts/kernel':
+        specifier: workspace:^
+        version: link:../kernel
+      '@setu-ts/runtime':
+        specifier: workspace:^
+        version: link:../runtime
+      '@setu-ts/testing':
+        specifier: workspace:^
+        version: link:../testing
+      '@types/node':
+        specifier: ^24
+        version: 24.19.2
+      ai:
+        specifier: ^7.0.159
+        version: 7.0.159(zod@4.6.7)
+      esbuild:
+        specifier: ~0.28.0
+        version: 0.28.2
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: 5.0.3
+        version: 5.0.3(@opentelemetry/api@1.10.0)(@types/node@24.19.2)(@vitest/coverage-v8@5.0.3)(vite@8.3.5(@types/node@24.19.2)(esbuild@0.28.2)(tsx@4.23.15)(yaml@2.9.1))
+      zod:
+        specifier: ^4.6.6
+        version: 4.6.7
 
   packages/audit-plugin:
     dependencies:
@@ -1358,6 +1498,9 @@ importers:
       '@setu-ts/runtime':
         specifier: workspace:^
         version: link:../runtime
+      '@setu-ts/testing':
+        specifier: workspace:^
+        version: link:../testing
       '@types/node':
         specifier: ^24
         version: 24.19.2

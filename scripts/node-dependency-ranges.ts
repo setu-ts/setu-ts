@@ -24,6 +24,7 @@
 
 /** The range a scanned external specifier is listed at. */
 export const EXTERNAL_RANGES: Readonly<Record<string, string>> = {
+  ai: '^7.0.159',
   '@modelcontextprotocol/server': '^2.4.0',
   '@modelcontextprotocol/client': '^2.4.0',
   esbuild: '~0.28.0',

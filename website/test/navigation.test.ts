@@ -4,6 +4,24 @@ import { exampleStart, insertAfterTitle, tryItHtml } from '../src/lib/example-st
 import { APPS, EXAMPLE_NAVIGATION, PACKAGES, PACKAGE_NAVIGATION } from '../src/lib/repository.ts';
 import { EXAMPLES_REPOSITORY_ROUTE } from '../src/lib/docs-links.ts';
 import { EXAMPLES, EXCLUDED_EXAMPLES } from '../../packages/cli/src/examples/catalog.ts';
+import { DOCS_NAV, NAV_SLUGS } from '../src/lib/docs-nav.ts';
+import { readSource } from '../src/lib/repository.ts';
+
+describe('guide navigation', () => {
+  it('points each unique slug at an existing guide and exposes durable runs beside the AI guides', () => {
+    const items = DOCS_NAV.flatMap((group) => group.items);
+    expect(NAV_SLUGS.size).toBe(items.length);
+    for (const item of items) {
+      expect(item.slug).toMatch(/^[a-z0-9-]+$/);
+      expect(item.label.trim()).not.toBe('');
+      expect(readSource(`docs/${item.slug}.md`)).toMatch(/^# /);
+      expect(NAV_SLUGS.has(item.slug)).toBe(true);
+    }
+    expect(
+      DOCS_NAV.find((group) => group.items.some((item) => item.slug === 'ai'))?.items,
+    ).toContainEqual({ slug: 'durable-runs', label: 'Durable agent runs' });
+  });
+});
 
 describe('siteSection', () => {
   it.each([

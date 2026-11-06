@@ -263,6 +263,7 @@ describe('local CI plan', () => {
       NATS_URL: 'nats://127.0.0.1:4222',
       KAFKA_BROKERS: '127.0.0.1:9092',
       OUTBOX_POSTGRES_URL: 'postgres://postgres:postgres@127.0.0.1:5433/postgres',
+      AGENT_RUNS_PG_URL: 'postgres://postgres:postgres@127.0.0.1:5433/postgres',
       PGVECTOR_URL: 'postgres://postgres:postgres@127.0.0.1:5433/postgres',
       QDRANT_URL: 'http://127.0.0.1:6333',
       MONGODB_RS_URI: 'mongodb://127.0.0.1:27018/?replicaSet=rs0&directConnection=true',

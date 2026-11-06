@@ -18,11 +18,11 @@ npm start       # serves until stopped
 `--example` creates a standalone Node project, fetching the example from the GitHub release tag
 matching the CLI version. GitHub must be reachable when scaffolding; `--dry-run` only lists paths
 and fetches nothing. Offered examples are `minimal`, `rest-api`, `mcp-tools` (from 0.12.0),
-`semantic-search` (from 0.12.0), `database`, `di-decorators`, `cqrs`, `multi-tenant`, `static-site`,
-`worker-pool`, `graphql-demo`, `grpc`, `microservices` and `realtime`. The Redis-backed smoke checks
-can exit `77` when Redis is unavailable. For `full-stack`, use `--template full-stack`; the other
-excluded examples, including `ai-chat`, need repository scripts or source. See
-[the CLI guide](./cli.md#start-from-an-example) for the flag restrictions.
+`semantic-search` (from 0.12.0), `durable-agent` (from 0.12.0), `database`, `di-decorators`, `cqrs`,
+`multi-tenant`, `static-site`, `worker-pool`, `graphql-demo`, `grpc`, `microservices` and
+`realtime`. The Redis-backed smoke checks can exit `77` when Redis is unavailable. For `full-stack`,
+use `--template full-stack`; the other excluded examples, including `ai-chat`, need repository
+scripts or source. See [the CLI guide](./cli.md#start-from-an-example) for the flag restrictions.
 
 An example is a teaching project, not a production starting point. Some carry fixed demonstration
 values: `rest-api` signs and verifies its tokens with the fixed `DEMO_JWT_SECRET` in
@@ -437,6 +437,48 @@ EMBED_BASE_URL=http://localhost:8081/v1 pnpm --dir apps/semantic-search run smok
   and a reachable embedding server add the backend and live-model cases.
 
 See [Retrieval (vector search)](./retrieval.md) for the plugin, its adapters and its limits.
+
+### durable-agent
+
+**Concept.** The [durable agent example](../apps/durable-agent) runs a support agent whose run
+outlives the request and the process. The agent looks an order up and asks a person to approve a
+refund before it issues one; reloading the page or restarting the server leaves the run where it
+was, and the refund is written exactly once.
+
+`POST /runs` starts a run and answers `202` at once; the run executes detached.
+`GET /runs/:id/stream` replays the stored AI SDK UI message stream and follows the live run,
+resuming after `Last-Event-ID` on a reconnect. When the agent wants to call `issueRefund`, the run
+parks and the stream ends without `finish`. `POST /runs/:id/approvals/:approvalId` decides, once;
+the run continues on whichever process takes it. Each tool call runs inside tier C idempotency,
+writing through the unit of work the run supplies, so a resumed run replays the recorded result
+instead of calling the tool again.
+
+The page at `/ui` keeps the run id in the URL. With `DATABASE_URL` set (after `db:setup`), stop the
+server while the refund waits, start it again and approve from the new process. The identity is a
+demonstration header, `x-demo-user`: customers (`priya`, `tomas`, `amara`) own one order each and
+can only ask about their own, and only `lead` approves a refund (`canDecide`), so nobody approves
+their own. Each refund's key is its number on the order, so two racing refunds cannot overspend it.
+
+```bash
+pnpm --dir apps/durable-agent run smoke
+AGENT_RUNS_PG_URL=postgres://postgres:postgres@localhost:5432/postgres pnpm --dir apps/durable-agent run smoke   # adds the restart case
+```
+
+**Read, in order:**
+
+- [`support.agent.ts`](../apps/durable-agent/src/modules/support/support.agent.ts) — the definition:
+  the model per step, the two tools, `toolsContext` handing each tool the unit of work, and the
+  approval policy.
+- [`support.controller.ts`](../apps/durable-agent/src/modules/support/support.controller.ts) — the
+  routes over `IAgentRunService`.
+- [`setu.config.ts`](../apps/durable-agent/setu.config.ts) — the database, `IdempotencyPlugin` and
+  `AgentRunsPlugin` added to the generated composition.
+- [`public/run.js`](../apps/durable-agent/public/run.js) — reading the stream, reconnecting with
+  `Last-Event-ID`, and handling `reset-step` and `data-setu-replay`.
+- [`smoke.ts`](../apps/durable-agent/smoke.ts) — approved and denied refunds, and a parked run
+  finished by a new application on the same PostgreSQL database.
+
+See [Durable agent runs](./durable-runs.md) for the plugin and its guarantees.
 
 ### multi-tenant
 

@@ -24,6 +24,13 @@ export const PACKAGE_DATA: ReadonlyMap<string, IPackageData> = new Map<string, I
     },
   ],
   [
+    'agent-runs-plugin',
+    {
+      description: 'Durable agent runs with fenced leases, approvals and stream replay',
+      tokens: ['AGENT_RUNS'],
+    },
+  ],
+  [
     'vector-store-plugin',
     {
       description: 'Tenant-scoped vector retrieval with filters that are refused, never ignored',

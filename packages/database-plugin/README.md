@@ -1565,6 +1565,7 @@ imperative begin/commit.
 
 | Export                                    | Kind      |
 | ----------------------------------------- | --------- |
+| `createDatabaseAgentRunStore`             | function  |
 | `createDatabaseGrantSource`               | function  |
 | `createDatabaseIdempotencyStore`          | function  |
 | `createDatabaseInboxStore`                | function  |
@@ -1595,6 +1596,7 @@ imperative begin/commit.
 | `CosmosAdapter`                           | class     |
 | `CosmosConcurrentModificationError`       | class     |
 | `CosmosTransactionScopeError`             | class     |
+| `DatabaseAgentRunStore`                   | class     |
 | `DatabaseService`                         | class     |
 | `DatabaseTenantDataStore`                 | class     |
 | `DatabaseTimeoutError`                    | class     |
@@ -1657,6 +1659,7 @@ imperative begin/commit.
 | `CursorPayload`                           | interface |
 | `CustomDatabaseOptions`                   | interface |
 | `DatabaseAdapterOptions`                  | interface |
+| `DatabaseAgentRunStoreOptions`            | interface |
 | `DatabaseConnectionOptions`               | interface |
 | `DatabaseGrantSourceOptions`              | interface |
 | `DatabaseIdempotencyStoreOptions`         | interface |

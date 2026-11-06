@@ -14,6 +14,7 @@ describe('agent brief byte budgets', () => {
     for (const runtime of TARGET_RUNTIMES) {
       const compositions: ReadonlySet<string>[] = [
         new Set(),
+        new Set(['@setu-ts/agent-runs-plugin']),
         new Set([...ADDABLE.values()].map((p) => p.pkg)),
       ];
       for (const template of ['rest', 'class-based', 'microservice', 'full-stack']) {

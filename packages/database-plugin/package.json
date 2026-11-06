@@ -75,6 +75,7 @@
     "@setu-ts/kernel": "workspace:^",
     "@setu-ts/logger-plugin": "workspace:^",
     "@setu-ts/runtime": "workspace:^",
+    "@setu-ts/testing": "workspace:^",
     "@types/node": "^24",
     "@types/pg": "^8.23.1",
     "drizzle-orm": "0.45.2",

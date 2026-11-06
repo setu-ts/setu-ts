@@ -770,7 +770,10 @@ here.
   graphql-demo's `ws`, generated READMEs linking the site, CHANGELOG link definitions with a bump
   step and release check, `docs/versioning.md` and cross-page anchor checks; 18 smoke rows) —
   complete (PR #564).
-- **Next milestone** — the `0.12.0` release; M136 is open.
+- **Milestone 136** (`agent-runs-plugin` + `common` + `database-plugin` + `apps/durable-agent` —
+  durable model/tool runs, fenced leases, timed approvals and UI-message replay, with a
+  support-agent example that survives restarts) — complete (PR #565).
+- **Next milestone** — the `0.12.0` release.
 
 ## Verification (run before declaring any work done)
 

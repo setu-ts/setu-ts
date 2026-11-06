@@ -103,6 +103,12 @@ export const EXCLUDED_EXAMPLES: readonly ExcludedExample[] = [
       'Same build shape as rest-api; proves tenant-scoped retrieval through a mock-model smoke.',
   },
   {
+    app: 'durable-agent',
+    kind: 'redundant',
+    reason:
+      'Same build shape as rest-api; proves durable runs through a scripted-model smoke and a PostgreSQL restart case.',
+  },
+  {
     app: 'cqrs',
     kind: 'redundant',
     reason: 'Same build shape as rest-api; differs only in the plugins it imports.',

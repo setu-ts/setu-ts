@@ -16655,8 +16655,9 @@ merges.
 
 ## Milestone 136: Durable Agent Runs
 
-**Package(s):** a run primitive over the AI SDK and M134 quota, `packages/common` (run contracts),
-`packages/sse-plugin` (a bounded replay log), `packages/database-plugin` (run storage); docs.
+**Package(s):** `packages/agent-runs-plugin`, a run primitive over the AI SDK and M134 quota,
+`packages/common` (run contracts), `packages/database-plugin` (run storage and bounded chunk log);
+docs. The SSE plugin is unchanged: its in-process channels cannot retain a cross-process log.
 
 **Source:** the AI-layer survey, track 04.
 
@@ -16692,7 +16693,9 @@ M134 instead uses the AI SDK's loop, which executes tools inside a step, so deci
 reply before any tool runs) needs a step-at-a-time design over the SDK. The AI SDK 7.x also ships
 tool approval requests and a client stream resume, which overlap decisions 4 and 5. Before the plan
 is written, a fresh survey compares those, and existing durable-agent tooling, with what this
-milestone would build. The plan also names the package.
+milestone would build. The reviewed plan chooses schema-only SDK tools, persists the model entry,
+then executes calls through transactional idempotency. Approval rows and the chunk log belong to the
+run store. It ships a workflow-engine guide, without an engine adapter.
 
 **Gate:** kill the process between the model reply and the tool call — the run resumes with one
 model call and one side effect; a stale lease holder's write refused; an approval timing out on
@@ -17198,7 +17201,7 @@ patch by construction and gains nothing new here.
 | 133       | ✅     | mcp-plugin (new) + common + kernel + cli — routes as MCP tools, dispatched in-process through the route's own pipeline                                                                                                                                                                    |
 | 134       | ✅     | auth-plugin + telemetry-plugin, AI SDK guide and example — weighted reserve/settle quotas, usage delivery and content-off library telemetry                                                                                                                                               |
 | 135       | ✅     | vector-store-plugin (new) + common + cloudflare + cli — tenant-scoped retrieval with refused-not-ignored filters                                                                                                                                                                          |
-| 136       | ⬜     | package decided by its plan + common + sse-plugin + database-plugin — durable agent runs: fenced lease, persisted steps, approvals, SSE replay                                                                                                                                            |
+| 136       | ✅     | agent-runs-plugin + common + database-plugin — durable agent runs: fenced leases, persisted model/tool entries, timed approvals and UI-message replay (PR #565)                                                                                                                           |
 | 137       | ⬜     | OpenAPI coverage — forms, lifecycle and derived responses (three letters)                                                                                                                                                                                                                 |
 | 137a      | ⬜     | common + openapi-plugin + decorator-plugin + sdk — document metadata, `deprecated`, per-route exclusion                                                                                                                                                                                   |
 | 137b      | ⬜     | common + openapi-plugin + auth-plugin + decorator-plugin — derived 401/403/415/429 and idempotency headers, declared response headers, opt-in Problem Details schema                                                                                                                      |

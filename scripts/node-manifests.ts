@@ -466,7 +466,9 @@ export function renderPackageJson(member: MemberInput, classified: ClassifiedMem
     const peers = sortedRecord(classified.peerDependencies);
     pkg.peerDependencies = peers;
     pkg.peerDependenciesMeta = Object.fromEntries(
-      Object.keys(peers).map((name) => [name, { optional: true }]),
+      Object.keys(peers)
+        .filter((name) => !(member.name === '@setu-ts/agent-runs-plugin' && name === 'ai'))
+        .map((name) => [name, { optional: true }]),
     );
   }
   if (classified.devDependencies.size > 0) {

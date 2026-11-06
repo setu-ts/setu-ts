@@ -91,6 +91,7 @@ jobs:
       # port — the `mongo` service below is standalone, and a standalone server
       # refuses transactions, which the outbox needs.
       OUTBOX_POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5433/postgres
+      AGENT_RUNS_PG_URL: postgres://postgres:postgres@127.0.0.1:5433/postgres
       MONGODB_RS_URI: mongodb://127.0.0.1:27018/?replicaSet=rs0&directConnection=true
       # M135 §3.15: the vector-store conformance table runs its pgvector and
       # Qdrant arms against these; pgvector shares the postgres service.

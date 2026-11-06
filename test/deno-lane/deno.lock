@@ -3543,6 +3543,14 @@
       "npm:zod@^4.6.6"
     ],
     "links": {
+      "jsr:@setu-ts/agent-runs-plugin@0.11.0": {
+        "dependencies": [
+          "npm:ai@^7.0.159",
+          "npm:esbuild@0.28",
+          "npm:vitest@5.0.3",
+          "npm:zod@^4.6.6"
+        ]
+      },
       "jsr:@setu-ts/audit-plugin@0.11.0": {
         "dependencies": [
           "npm:vitest@5.0.3"

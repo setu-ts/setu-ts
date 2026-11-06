@@ -221,6 +221,7 @@ export const FRAMEWORK_PACKAGES: ReadonlySet<string> = new Set([
   'testing',
   'validation-plugin',
   'vector-store-plugin',
+  'agent-runs-plugin',
   'view-plugin',
   'websocket-plugin',
   'worker-pool-plugin',

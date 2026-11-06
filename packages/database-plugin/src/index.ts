@@ -328,3 +328,10 @@ export type {
   BigtableRowKeyMapping,
   BigtableValueEncoding,
 } from './adapters/bigtable/bigtable-mapping.ts';
+/** Database-backed durable agent run store and factory. @since 0.12.0 */
+export {
+  createDatabaseAgentRunStore,
+  DatabaseAgentRunStore,
+} from './agent-runs/database-agent-run-store.ts';
+/** Entity and named-connection mapping for durable agent run storage. @since 0.12.0 */
+export type { DatabaseAgentRunStoreOptions } from './agent-runs/database-agent-run-store.ts';

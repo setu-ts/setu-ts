@@ -3,7 +3,8 @@
 Use the Vercel AI SDK for providers, tool loops, structured output, UI streams and test models,
 `ai-fallback` for provider fallback, and `@ai-sdk/otel` for GenAI spans. Setu supplies request
 identity, cancellation, weighted quotas and transactional usage delivery. There is no Setu AI plugin
-or AI capability token. No published Setu package depends on the AI SDK.
+for model access; [durable agent runs](./durable-runs.md) add persistence, approvals and recovery
+through `@setu-ts/agent-runs-plugin`, whose required peer is the AI SDK.
 
 The [runnable example](../apps/ai-chat) proves these recipes on **Node 24**. The AI SDK integration
 has not been verified on Deno, Bun or Workers. The quota itself uses runtime services and web APIs.
