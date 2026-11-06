@@ -92,6 +92,7 @@ function render() {
   log.replaceChildren();
   if (!runId) {
     log.append(empty);
+    if (notice) log.append(element('div', `notice ${notice.bad ? 'bad' : ''}`, notice.text));
     return;
   }
   for (const turn of earlier)
@@ -356,6 +357,7 @@ async function follow() {
 
 const MIN_RETRY_MS = 1000;
 const MAX_RETRY_MS = 15000;
+const WAITING_RETRY_MS = 3000;
 let retryDelay = MIN_RETRY_MS;
 
 /** Follows the run again after a pause, unless the page has moved on. */
@@ -373,6 +375,9 @@ async function refreshStatus() {
   // The stream ended while the run is still going (another server holds it,
   // or it is about to be resumed): look again shortly, not straight away.
   if (view.status === 'running' || view.status === 'ready') later(runId, MIN_RETRY_MS);
+  // Parked for an approval that someone else (a lead, in another browser)
+  // may give at any time: keep checking, more gently.
+  else if (view.status === 'waiting') later(runId, WAITING_RETRY_MS);
   render();
 }
 
@@ -481,14 +486,25 @@ function openRun(id, turns = []) {
 async function start(text) {
   // A finished run continues as a conversation: the next request carries it.
   const turns = runId && status !== null ? conversation() : [];
-  const res = await fetch('/runs', {
-    method: 'POST',
-    headers: headers({ 'content-type': 'application/json' }),
-    body: JSON.stringify({ message: text, history: turns }),
-  });
-  if (!res.ok) {
-    notice = { text: `The request was refused (${res.status}).`, bad: true };
+  // On any failure the message goes back into the box, so it can be resent.
+  const refused = (why) => {
+    message.value = text;
+    notice = { text: why, bad: true };
     render();
+  };
+  let res;
+  try {
+    res = await fetch('/runs', {
+      method: 'POST',
+      headers: headers({ 'content-type': 'application/json' }),
+      body: JSON.stringify({ message: text, history: turns }),
+    });
+  } catch {
+    refused('The server could not be reached. Your message is still in the box; send it again.');
+    return;
+  }
+  if (!res.ok) {
+    refused(`The request was refused (${res.status}).`);
     return;
   }
   const { runId: id } = await res.json();
@@ -515,7 +531,16 @@ message.addEventListener('keydown', (event) => {
 
 cancel.addEventListener('click', async () => {
   cancel.disabled = true;
-  await fetch(`/runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST', headers: headers() });
+  try {
+    const res = await fetch(`/runs/${encodeURIComponent(runId)}/cancel`, {
+      method: 'POST',
+      headers: headers(),
+    });
+    if (!res.ok) notice = { text: `The run could not be cancelled (${res.status}).`, bad: true };
+  } catch {
+    notice = { text: 'The server could not be reached to cancel the run.', bad: true };
+  }
+  // Either way, read the run's real state: it restores the controls.
   void follow();
 });
 
