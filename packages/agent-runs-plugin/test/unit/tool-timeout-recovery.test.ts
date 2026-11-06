@@ -321,6 +321,66 @@ describe('tool timeout sweep recovery', () => {
     }
   });
 
+  it('counts conflicts when the first timeout write failed and left no key', async () => {
+    const beforeCommit = gate();
+    const execute = vi.fn(() => 'ok');
+    const h = await harness(
+      definition({
+        tools: { act: { inputSchema: jsonSchema({}), execute } },
+        timeouts: { toolMs: 10, toolAttempts: 2 },
+        maxSteps: 1,
+      }),
+      replies(),
+    );
+    const transaction = h.db.transaction.bind(h.db);
+    const tx = vi
+      .spyOn(h.db, 'transaction')
+      .mockImplementationOnce((work, options) =>
+        transaction(async (uow) => {
+          const value = await work(uow);
+          beforeCommit.open();
+          return new Promise<never>(() => value);
+        }, options),
+      )
+      .mockRejectedValue(new DuplicateKeyError('claim held'));
+    // The first holder's timeout write fails, so the row never records the key.
+    const update = h.store.update.bind(h.store);
+    let failed = false;
+    const write = vi.spyOn(h.store, 'update').mockImplementation((id, where, data) => {
+      if ('toolTimeoutKey' in data && !failed) {
+        failed = true;
+        return Promise.reject(new Error('store unavailable'));
+      }
+      return update(id, where, data);
+    });
+    try {
+      const { runId } = await h.service.start(h.ctx(), 'demo', { messages: [] });
+      await beforeCommit.promise;
+      h.fire(10);
+      await h.settle();
+      expect(await h.store.get(runId)).toMatchObject({
+        status: 'running',
+        toolTimeoutKey: '',
+        toolTimeouts: 0,
+      });
+      await expire(h, runId);
+      await h.service.sweep();
+      expect(await h.store.get(runId)).toMatchObject({ status: 'running', toolTimeouts: 1 });
+      await expire(h, runId);
+      await h.service.sweep();
+      expect(await h.store.get(runId)).toMatchObject({
+        status: 'failed',
+        error: 'tool-timeout',
+        toolTimeouts: 2,
+      });
+      expect(execute).toHaveBeenCalledTimes(1);
+    } finally {
+      write.mockRestore();
+      tx.mockRestore();
+      await h.close();
+    }
+  });
+
   it('counts a still-in-flight claim conflict as an attempt and replays once it commits', async () => {
     const beforeCommit = gate();
     const commit = gate();

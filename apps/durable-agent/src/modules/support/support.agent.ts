@@ -127,8 +127,8 @@ export function supportAgent(): AgentRunDefinition {
     maxOutputTokens: MAX_OUTPUT_TOKENS,
     // A provider that stops answering would otherwise hold the run (renewing
     // its lease) until someone cancels it; a timed-out model call fails the
-    // run. Tool timeouts now recover through the sweep, but the final timed-out
-    // attempt can still commit after failure. These short database writes
+    // run. Tool timeouts now recover through the sweep, but a timed-out
+    // transaction still open when the run fails can commit afterwards. These short database writes
     // therefore keep no `toolMs` and only bound the model call.
     timeouts: { modelMs: 120_000 },
   });

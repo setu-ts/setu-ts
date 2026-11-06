@@ -55,18 +55,20 @@ Definitions require `name`, `version`, `model(run)` and `maxOutputTokens`; `maxS
 `canAccess(principal, run)` and `timeouts: { modelMs?, toolMs?, toolAttempts? }` are consumed on the
 execution and access paths. Model timeouts fail with `execution-failed`. A timed-out tool call stays
 `running` and stops renewing its lease; after lease expiry plus `maxClockSkewMs`, the sweep resumes
-it. Transactional idempotency replays a committed result or re-runs a rolled-back call; a 409
-because the timed-out transaction is still open defers to a later sweep and counts as another
-attempt. After `toolAttempts` timed-out attempts of the same call (default 3, positive integer, used
-only with `toolMs`), the run fails with `tool-timeout`. The final attempt's transaction can still
-commit after the run fails; there is no abandoned-call commit marker. Bound outside calls inside the
-tool itself. `canAccess` governs `get`, `respond` and `cancel`; by default only the starting
-principal (or, for a run started without one, anyone in the tenant) passes, and a refusal is a 404.
-Models are supplied per call, so tenant quotas and budget middleware can wrap them using the
-persisted run identity. Approval policies map tool names to `true` or an async predicate, with
-`timeoutMs` default 86400000, maximum 2592000000, and optional `canDecide(principal, run)`. The
-default requires matching, defined principal ids. Custom tool context comes only from that tool's
-entry in `toolsContext(run, call)`.
+it. Transactional idempotency replays a committed result or re-runs a rolled-back call; if the
+timed-out transaction is still open, the resumed call gets a 409 and defers to a later sweep (on
+PostgreSQL it may instead wait on the open claim until `toolMs`, holding a second connection), and
+either counts as another attempt. After `toolAttempts` timed-out attempts of the same call (default
+3, positive integer, used only with `toolMs`), the run fails with `tool-timeout`. A timed-out
+transaction that is still open can commit after the run fails, and it may belong to an earlier
+attempt, since a conflict can use up the last one without running the tool; there is no
+abandoned-call commit marker. Bound outside calls inside the tool itself. `canAccess` governs `get`,
+`respond` and `cancel`; by default only the starting principal (or, for a run started without one,
+anyone in the tenant) passes, and a refusal is a 404. Models are supplied per call, so tenant quotas
+and budget middleware can wrap them using the persisted run identity. Approval policies map tool
+names to `true` or an async predicate, with `timeoutMs` default 86400000, maximum 2592000000, and
+optional `canDecide(principal, run)`. The default requires matching, defined principal ids. Custom
+tool context comes only from that tool's entry in `toolsContext(run, call)`.
 
 ## Storage and guarantees
 

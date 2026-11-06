@@ -285,11 +285,14 @@ export async function stepLoop(
     }
   } catch (error) {
     const key = activeToolKey;
-    // A conflict on a call that already timed out means its transaction is
-    // still open: count it as another attempt, or a transaction that never
-    // settles would keep the run running forever.
+    // With a tool deadline, a conflict means another transaction still holds
+    // this call (usually a timed-out attempt): count it as an attempt, or one
+    // that never settles would keep the run running forever. Not keyed on the
+    // stored timeout key, which a failed timeout write leaves unset.
     const stillOpen =
-      error instanceof ToolConflict && key !== undefined && lease.row.toolTimeoutKey === key;
+      error instanceof ToolConflict &&
+      key !== undefined &&
+      definition?.timeouts?.toolMs !== undefined;
     if (
       error instanceof AgentRunLeaseLostError ||
       lease.lost ||

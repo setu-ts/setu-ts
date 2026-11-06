@@ -125,13 +125,16 @@ writes and become safe tool-error entries. A tool timeout (`timeouts.toolMs`) le
 `running` and stops lease renewal without releasing the lease. After lease expiry plus
 `maxClockSkewMs`, the sweep resumes the call: `within` replays its recorded result if the
 transaction committed, or re-runs it if it rolled back. If the timed-out transaction is still open,
-the resumed call gets a 409: the holder stops for a later sweep and counts it as another timed-out
-attempt, so a transaction that never settles still reaches the limit. `timeouts.toolAttempts` bounds
-timed-out attempts per call (positive integer, default 3, used only with `toolMs`); reaching the
-limit fails the run with `tool-timeout`. The final attempt's transaction can still commit after the
-run fails: an abandoned-call marker that refuses that commit is not implemented. Model deadlines
-(`timeouts.modelMs`) still fail with `execution-failed`. Configuration, store and oversized-result
-errors fail the run. Configure a transactional idempotency store as above.
+the resumed call either gets a 409 (the holder stops for a later sweep) or, on PostgreSQL, waits on
+the open claim until `toolMs` passes, holding a second connection meanwhile. Either way it counts as
+another timed-out attempt, so a transaction that never settles still reaches the limit.
+`timeouts.toolAttempts` bounds timed-out attempts per call (positive integer, default 3, used only
+with `toolMs`); reaching the limit fails the run with `tool-timeout`. A timed-out transaction that
+is still open can commit after the run fails, and because a conflict can use up the last attempt
+without running the tool, it may belong to an earlier attempt. An abandoned-call marker that refuses
+such a commit is not implemented. Model deadlines (`timeouts.modelMs`) still fail with
+`execution-failed`. Configuration, store and oversized-result errors fail the run. Configure a
+transactional idempotency store as above.
 
 ## Workers, bounds and storage
 
