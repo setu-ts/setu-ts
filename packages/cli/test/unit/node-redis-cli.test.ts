@@ -7,7 +7,7 @@ import { runCli } from '../../src/cli.ts';
 import { parseArgs } from '../../src/args.ts';
 import { resolveNewChoices } from '../../src/commands/new-interactive.ts';
 import { readWorkspaceManifest, WORKSPACE_MANIFEST } from '../../src/workspace/manifest.ts';
-import { transportSpec } from '../../src/workspace/transport.ts';
+import { brokerSpec } from '../../src/workspace/transport.ts';
 import { withClientDependencies, CLIENT_RANGES } from '../../src/templates/client-dependencies.ts';
 import { resolveHost } from '../../src/templates/project-files.ts';
 import { MINIMAL_HOST } from '../../src/templates/minimal.ts';
@@ -98,15 +98,7 @@ describe('node-redis CLI', () => {
   it('omits redisClient for an explicit ioredis workspace', async () => {
     const h = harness();
     expect(
-      await h.run([
-        'new',
-        'ws',
-        '--workspace',
-        '--transport',
-        'redis',
-        '--redis-client',
-        'ioredis',
-      ]),
+      await h.run(['new', 'ws', '--workspace', '--broker', 'redis', '--redis-client', 'ioredis']),
     ).toBe(0);
     expect(JSON.parse(h.fs.read(`/work/ws/${WORKSPACE_MANIFEST}`))).not.toHaveProperty(
       'redisClient',
@@ -308,7 +300,7 @@ describe('node-redis CLI', () => {
       "{ transport: 'redis', client: nodeRedisClient(endpoint), subscriber: nodeRedisClient(endpoint) }",
     ],
   ] as const)('renders the node-redis %s literal', (arm, expected) => {
-    const spec = transportSpec('redis', 'node-redis');
+    const spec = brokerSpec('redis', 'node-redis');
     expect(spec[arm]!('endpoint')).toBe(expected);
     expect(spec.messagingClients).toEqual(['redis']);
     expect(spec.queueClients).toEqual(['redis']);
@@ -357,7 +349,7 @@ describe('node-redis CLI', () => {
           '--workspace',
           '--runtime',
           runtime,
-          '--transport',
+          '--broker',
           'redis',
           '--redis-client',
           'node-redis',
@@ -375,8 +367,13 @@ describe('node-redis CLI', () => {
           h.errors.join('\n'),
         ).toBe(0);
       }
+      // Messaging and the queue read the member's transport module (M138), which
+      // builds their two clients; the four Redis-only arms keep theirs in the config.
       const config = h.fs.read('/work/ws/apps/svc/setu.config.ts');
-      expect(config.match(/nodeRedisClient\(/g)).toHaveLength(6);
+      expect(config.match(/nodeRedisClient\(/g)).toHaveLength(4);
+      const module = h.fs.read('/work/ws/apps/svc/src/transport/index.ts');
+      expect(module.match(/nodeRedisClient\(/g)).toHaveLength(2);
+      expect(module).toContain("from '../node-redis.ts'");
       expect(config).not.toMatch(/from ['"]redis['"]/);
       expect(config.match(/from ['"]\.\/src\/node-redis\.ts['"]/g)).toHaveLength(1);
       expect(h.fs.read('/work/ws/apps/svc/src/node-redis.ts')).toContain("import('redis')");
@@ -465,7 +462,7 @@ describe('node-redis CLI', () => {
 
   it('refuses an unknown stored redisClient by name', async () => {
     const h = harness();
-    await h.run(['new', 'ws', '--workspace', '--transport', 'redis']);
+    await h.run(['new', 'ws', '--workspace', '--broker', 'redis']);
     expect(await h.run(['generate', 'app', 'existing', '--dir', '/work/ws'])).toBe(0);
     const path = `/work/ws/${WORKSPACE_MANIFEST}`;
     await h.fs.writeFile(

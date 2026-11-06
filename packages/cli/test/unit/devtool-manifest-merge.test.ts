@@ -36,7 +36,7 @@ function harness(rootDev: string) {
       version: WORKSPACE_VERSION,
       runtime: 'deno',
       basePort: 3000,
-      transport: 'http',
+      broker: 'memory',
       members: [{ name: 'orders', port: 3000 }],
     }),
     '/ws/deno.json': `${JSON.stringify(
@@ -77,10 +77,10 @@ describe('the devtool manifest merge', () => {
               '/ws/package.json': root,
               '/ws/apps/a/.setu-member': '',
               '/ws/setu.workspace.json': renderWorkspaceManifest({
-                version: 1,
+                version: 2,
                 runtime: 'node',
                 basePort: 3000,
-                transport: 'http',
+                broker: 'memory',
                 members: [{ name: 'a', port: 3000 }],
               }),
             }

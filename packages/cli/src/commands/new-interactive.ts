@@ -26,7 +26,7 @@ import { resolveHost } from '../templates/project-files.ts';
 import { resolveTemplateChoice } from '../templates/choice.ts';
 import { defaultLogger, hasLogger } from '../templates/logger.ts';
 import { getTemplate, listTemplates } from '../templates/registry.ts';
-import { getTransport, listBrokers, listQueues, listTransports } from '../workspace/transport.ts';
+import { BROKERS, brokerSpec, getBroker, listBrokers, listQueues } from '../workspace/transport.ts';
 
 /**
  * The interactive template prompt's default arm.
@@ -114,9 +114,9 @@ export async function resolveNewChoices(
   if (workspace) {
     if (
       !(await ask(
-        'transport',
-        'How should the workspace members reach each other?',
-        listTransports().map((spec) => ({ value: spec.name, label: spec.description })),
+        'broker',
+        'Which broker should the workspace members share?',
+        BROKERS.map((name) => ({ value: name, label: brokerSpec(name).description })),
       ))
     )
       return { kind: 'cancelled' };
@@ -192,7 +192,7 @@ export async function resolveNewChoices(
           'Message broker?',
           listBrokers().map((name) => ({
             value: name,
-            label: getTransport(name)?.description ?? name,
+            label: getBroker(name)?.description ?? name,
           })),
         ))
       )
@@ -205,7 +205,7 @@ export async function resolveNewChoices(
           'Job queue?',
           listQueues().map((name) => ({
             value: name,
-            label: getTransport(name)?.description ?? name,
+            label: getBroker(name)?.description ?? name,
           })),
         ))
       )

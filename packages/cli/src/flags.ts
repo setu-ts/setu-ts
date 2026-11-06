@@ -148,8 +148,7 @@ const NEW: ICommandFlagSpec = spec(
     'port',
     'devtool',
     'devtool-port',
-    'transport',
-    'transport-url',
+    'broker-url',
     'redis-client',
     'broker',
     'queue',
@@ -161,8 +160,9 @@ const NEW: ICommandFlagSpec = spec(
     'agents',
   ],
   // Read ONLY to be refused with their own guidance: `--di` points at
-  // `--template class-based` (M65), `--depends-on` points at `generate app`.
-  ['di', 'depends-on'],
+  // `--template class-based` (M65), `--depends-on` and `--rpc` point at
+  // `generate app`, and `--transport`/`--transport-url` name what replaced them (M138).
+  ['di', 'depends-on', 'rpc', 'transport', 'transport-url'],
   // `new <project-name>`: one name, exactly. Extras used to be dropped.
   { fixed: 1, taken: 1, noun: 'one project name' },
 );
@@ -199,13 +199,14 @@ const GENERATE_APP: ICommandFlagSpec = spec(
     'devtool-port',
     'env-file',
     'depends-on',
+    'rpc',
     'dir',
     'dry-run',
   ],
-  // Read ONLY to be refused with their own guidance: the transport/client flags
+  // Read ONLY to be refused with their own guidance: the broker/client flags
   // name the workspace-wide alternative, `--runtime` names the workspace's own
   // toolchain when it disagrees, and `--di` goes through `resolveTemplateChoice`.
-  ['transport', 'transport-url', 'broker', 'queue', 'redis-client', 'runtime', 'di'],
+  ['transport', 'transport-url', 'broker', 'broker-url', 'queue', 'redis-client', 'runtime', 'di'],
   { fixed: 2, taken: 1, noun: 'one member name' },
 );
 
@@ -320,6 +321,21 @@ const WORKSPACE_DEPLOY: ICommandFlagSpec = spec(
   { fixed: 2, taken: 0, noun: 'no arguments beyond deploy' },
 );
 
+/** `setu workspace broker <name>` (M138): change the broker every member shares. */
+const WORKSPACE_BROKER: ICommandFlagSpec = spec(
+  'workspace broker',
+  ['dir', 'broker-url', 'redis-client', 'force', 'dry-run'],
+  [],
+  { fixed: 2, taken: 1, noun: 'one broker name' },
+);
+
+/** `setu workspace rpc <member> <style>` (M138): change how one member is called. */
+const WORKSPACE_RPC: ICommandFlagSpec = spec('workspace rpc', ['dir', 'force', 'dry-run'], [], {
+  fixed: 2,
+  taken: 2,
+  noun: 'a member name and an RPC style',
+});
+
 /**
  * `setu workspace` with a subcommand other than `ports`: the command itself
  * refuses every subcommand but `ports` with its usage line, so there is no
@@ -395,6 +411,8 @@ export function commandFlagsFor(
       if (subcommand === 'ports') return WORKSPACE_PORTS;
       if (subcommand === 'build') return WORKSPACE_BUILD;
       if (subcommand === 'deploy') return WORKSPACE_DEPLOY;
+      if (subcommand === 'broker') return WORKSPACE_BROKER;
+      if (subcommand === 'rpc') return WORKSPACE_RPC;
       return WORKSPACE;
     case 'commands':
       return COMMANDS;
@@ -429,6 +447,8 @@ export const DOCUMENTED_FLAGS: ReadonlyMap<string, readonly string[]> = new Map(
   [WORKSPACE_PORTS.label, WORKSPACE_PORTS.documented],
   [WORKSPACE_BUILD.label, WORKSPACE_BUILD.documented],
   [WORKSPACE_DEPLOY.label, WORKSPACE_DEPLOY.documented],
+  [WORKSPACE_BROKER.label, WORKSPACE_BROKER.documented],
+  [WORKSPACE_RPC.label, WORKSPACE_RPC.documented],
 ]);
 
 /**

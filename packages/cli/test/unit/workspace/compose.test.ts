@@ -12,7 +12,7 @@ import {
   type WorkspaceManifest,
 } from '../../../src/workspace/manifest.ts';
 import { workspaceProfile } from '../../../src/workspace/runtime-profile.ts';
-import { type TransportName, transportSpec } from '../../../src/workspace/transport.ts';
+import { type BrokerName, brokerSpec } from '../../../src/workspace/transport.ts';
 
 /**
  * Builds a manifest holding the given members.
@@ -23,9 +23,15 @@ import { type TransportName, transportSpec } from '../../../src/workspace/transp
  */
 function manifestOf(
   members: readonly { name: string; port: number }[],
-  transport: TransportName = 'http',
+  transport: BrokerName = 'memory',
 ): WorkspaceManifest {
-  return { version: WORKSPACE_VERSION, runtime: 'deno', basePort: 3000, transport, members };
+  return {
+    version: WORKSPACE_VERSION,
+    runtime: 'deno',
+    basePort: 3000,
+    broker: transport,
+    members,
+  };
 }
 
 /**
@@ -54,11 +60,7 @@ describe('workspaceContainerFiles', () => {
       runtime: 'node',
       members: [{ name: 'a', port: 3000, devtoolPort: 4919 }],
     };
-    const files = workspaceContainerFiles(
-      manifest,
-      transportSpec('http'),
-      workspaceProfile('node'),
-    );
+    const files = workspaceContainerFiles(manifest, brokerSpec('memory'), workspaceProfile('node'));
     const dockerfile = contentsOf(files, DOCKERFILE);
     const runtimeStage = dockerfile.slice(dockerfile.indexOf(' AS runtime'));
     expect(runtimeStage).toContain('npm ci --omit=dev');
@@ -74,7 +76,7 @@ describe('workspaceContainerFiles', () => {
   it('emits a Dockerfile, an ignore file and a Compose file, all managed', () => {
     const files = workspaceContainerFiles(
       manifestOf([{ name: 'orders', port: 3000 }]),
-      transportSpec('http'),
+      brokerSpec('memory'),
     );
     expect(files.map((f) => f.path)).toEqual([DOCKERFILE, DOCKERIGNORE, COMPOSE_FILE]);
     // Managed, because both are regenerated on every `generate app`: without it
@@ -85,10 +87,7 @@ describe('workspaceContainerFiles', () => {
   describe('the Dockerfile', () => {
     const dockerfile = () =>
       contentsOf(
-        workspaceContainerFiles(
-          manifestOf([{ name: 'orders', port: 3000 }]),
-          transportSpec('http'),
-        ),
+        workspaceContainerFiles(manifestOf([{ name: 'orders', port: 3000 }]), brokerSpec('memory')),
         DOCKERFILE,
       );
 
@@ -192,10 +191,7 @@ describe('workspaceContainerFiles', () => {
   describe('the ignore file', () => {
     const ignore = () =>
       contentsOf(
-        workspaceContainerFiles(
-          manifestOf([{ name: 'orders', port: 3000 }]),
-          transportSpec('http'),
-        ),
+        workspaceContainerFiles(manifestOf([{ name: 'orders', port: 3000 }]), brokerSpec('memory')),
         DOCKERIGNORE,
       );
 
@@ -243,7 +239,7 @@ describe('workspaceContainerFiles', () => {
             { name: 'orders', port: 3000 },
             { name: 'billing', port: 3001 },
           ]),
-          transportSpec('http'),
+          brokerSpec('memory'),
         ),
         COMPOSE_FILE,
       );
@@ -267,7 +263,7 @@ describe('workspaceContainerFiles', () => {
             { name: 'billing', port: 3001 },
             { name: 'shipping', port: 3002 },
           ]),
-          transportSpec('http'),
+          brokerSpec('memory'),
         ),
         COMPOSE_FILE,
       );
@@ -287,7 +283,7 @@ describe('workspaceContainerFiles', () => {
             { name: 'orders', port: 3000 },
             { name: 'billing', port: 3001 },
           ]),
-          transportSpec('http'),
+          brokerSpec('memory'),
         ),
         COMPOSE_FILE,
       );
@@ -300,7 +296,7 @@ describe('workspaceContainerFiles', () => {
       const compose = contentsOf(
         workspaceContainerFiles(
           manifestOf([{ name: 'portal', port: 3001 }], 'redis'),
-          transportSpec('redis'),
+          brokerSpec('redis'),
         ),
         COMPOSE_FILE,
       );
@@ -310,12 +306,12 @@ describe('workspaceContainerFiles', () => {
       );
     });
 
-    it('adds no backing service for a transport that needs none', () => {
-      for (const name of ['http', 'grpc', 'memory'] as const) {
+    it('adds no backing service for a broker that needs none', () => {
+      for (const name of ['memory'] as const) {
         const compose = contentsOf(
           workspaceContainerFiles(
             manifestOf([{ name: 'orders', port: 3000 }], name),
-            transportSpec(name),
+            brokerSpec(name),
           ),
           COMPOSE_FILE,
         );
@@ -331,7 +327,7 @@ describe('workspaceContainerFiles', () => {
       const compose = contentsOf(
         workspaceContainerFiles(
           manifestOf([{ name: 'orders', port: 3000 }], 'redis'),
-          transportSpec('redis'),
+          brokerSpec('redis'),
         ),
         COMPOSE_FILE,
       );
@@ -350,7 +346,7 @@ describe('workspaceContainerFiles', () => {
       const compose = contentsOf(
         workspaceContainerFiles(
           manifestOf([{ name: 'orders', port: 3000 }], 'nats'),
-          transportSpec('nats'),
+          brokerSpec('nats'),
         ),
         COMPOSE_FILE,
       );
@@ -365,7 +361,7 @@ describe('workspaceContainerFiles', () => {
     it('ships the Service Bus emulator entity config beside the stack', () => {
       const files = workspaceContainerFiles(
         manifestOf([{ name: 'orders', port: 3000 }], 'service-bus'),
-        transportSpec('service-bus'),
+        brokerSpec('service-bus'),
       );
       expect(files.map((f) => f.path)).toContain('docker/servicebus-config.json');
       // Managed like the rest: regenerated on every member, never refused.
@@ -380,7 +376,7 @@ describe('workspaceContainerFiles', () => {
     it('renders no environment key for a member with nothing to set (M120b §3.6)', () => {
       // A bare `environment:` is YAML null, which Compose refuses for the whole file.
       const one = contentsOf(
-        workspaceContainerFiles(manifestOf([{ name: 'api', port: 3000 }]), transportSpec('http')),
+        workspaceContainerFiles(manifestOf([{ name: 'api', port: 3000 }]), brokerSpec('memory')),
         COMPOSE_FILE,
       );
       // A member's block (the top-level secrets block's `environment: NPMRC` is not one).
@@ -391,7 +387,7 @@ describe('workspaceContainerFiles', () => {
             { name: 'api', port: 3000 },
             { name: 'web', port: 3001 },
           ]),
-          transportSpec('http'),
+          brokerSpec('memory'),
         ),
         COMPOSE_FILE,
       );
@@ -400,7 +396,7 @@ describe('workspaceContainerFiles', () => {
 
     it('is empty of members before the first one is added', () => {
       const compose = contentsOf(
-        workspaceContainerFiles(manifestOf([]), transportSpec('http')),
+        workspaceContainerFiles(manifestOf([]), brokerSpec('memory')),
         COMPOSE_FILE,
       );
       expect(compose).toContain('services:');
@@ -418,7 +414,7 @@ describe('workspaceContainerFiles', () => {
       contentsOf(
         workspaceContainerFiles(
           manifestOf([{ name: 'orders', port: 3000 }]),
-          transportSpec('http'),
+          brokerSpec('memory'),
           workspaceProfile(runtime),
         ),
         DOCKERFILE,
@@ -502,7 +498,7 @@ describe('the npmrc build secret (M120b)', () => {
           { name: 'api', port: 3000 },
           { name: 'web', port: 3001 },
         ]),
-        transportSpec('http'),
+        brokerSpec('memory'),
       ),
       COMPOSE_FILE,
     );

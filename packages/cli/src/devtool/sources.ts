@@ -1317,9 +1317,14 @@ function wireSources(
     const updatedCode = currentScope.code.slice(currentScope.start, currentScope.end);
     if (updatedCode.includes(`...sources.${row.key}`)) continue;
     const escapedSymbol = symbol.replaceAll('$', '\\$');
-    const call = new RegExp(`^[ \\t]*${escapedSymbol}\\((\\{[^()]*?\\}|)\\),[ \\t]*$`, 'm').exec(
-      updatedCode,
-    );
+    // One more shape than a plain literal (M138 §3.4): an object literal spreading
+    // exactly ONE zero-argument call, which is how a workspace member's
+    // `QueuePlugin({ processors: [...QUEUE_PROCESSORS], ...queueOptions() })` reads its
+    // CLI-owned transport module. Anything else with parentheses still falls back.
+    const call = new RegExp(
+      `^[ \\t]*${escapedSymbol}\\((\\{[^()]*?\\}|\\{[^()]*?\\.\\.\\.[A-Za-z_$][\\w$]*\\(\\)[^()]*?\\}|)\\),[ \\t]*$`,
+      'm',
+    ).exec(updatedCode);
     if (call === null) {
       manual.push(`${symbol}({ ...options, ...sources.${row.key} })`);
       continue;

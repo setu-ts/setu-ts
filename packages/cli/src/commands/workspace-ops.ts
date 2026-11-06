@@ -50,7 +50,7 @@ import {
   renderMemberSecret,
   secretValuesPath,
 } from '../workspace/secrets.ts';
-import { transportSpec } from '../workspace/transport.ts';
+import { brokerSpec } from '../workspace/transport.ts';
 
 /** Dependencies of the two operations. */
 export interface WorkspaceOpsDependencies {
@@ -466,7 +466,7 @@ async function collectSecrets(
   membersYaml: string,
   deps: WorkspaceOpsDependencies,
 ): Promise<IMemberSecret[] | undefined> {
-  const transport = transportSpec(workspace.manifest.transport);
+  const transport = brokerSpec(workspace.manifest.broker, workspace.manifest.redisClient);
   const problems: string[] = [];
   const secrets: IMemberSecret[] = [];
   for (const member of workspace.manifest.members) {

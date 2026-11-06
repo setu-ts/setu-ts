@@ -68,7 +68,7 @@ import {
 } from '../workspace/manifest.ts';
 import { workspaceRootFiles } from '../workspace/root-files.ts';
 import { detectProjectRuntime, workspaceProfile } from '../workspace/runtime-profile.ts';
-import { DEFAULT_TRANSPORT, transportSpec } from '../workspace/transport.ts';
+import { DEFAULT_BROKER, brokerSpec } from '../workspace/transport.ts';
 
 import { cliInvocation } from '../templates/project-files.ts';
 import { renderFullStackDevEntry } from '../templates/full-stack-build-files.ts';
@@ -271,9 +271,9 @@ export async function runAdoptCommand(args: ParsedArgs, deps: AdoptDependencies)
     basePort,
     // The default, deliberately: a project being converted has whatever broker its
     // own config already names, and rewriting that here would change how a running
-    // service talks without being asked to. `--transport` belongs to a workspace
+    // service talks without being asked to. `--broker` belongs to a workspace
     // created fresh.
-    transport: DEFAULT_TRANSPORT,
+    broker: DEFAULT_BROKER,
     members: [{ name: names.kebab, port: basePort, ...support }],
   };
   for (const field of (workersProject
@@ -291,7 +291,7 @@ export async function runAdoptCommand(args: ParsedArgs, deps: AdoptDependencies)
       members: manifest.members.map((member) => ({ ...member, [field]: port })),
     };
   }
-  const transport = transportSpec(DEFAULT_TRANSPORT);
+  const transport = brokerSpec(DEFAULT_BROKER);
 
   // The root's own files, minus the one the project keeps at this level.
   // `.gitignore` is NOT adopted, so a project that has one keeps it exactly where

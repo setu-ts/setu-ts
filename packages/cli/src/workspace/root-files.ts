@@ -21,7 +21,7 @@ import { rootManifestSettings } from '../templates/root-settings.ts';
 import { LIBS_GLOB, BUNFIG_FILE, BUN_WORKSPACE_CONFIG } from './library.ts';
 import { workspaceProfile, type WorkspaceRuntimeProfile } from './runtime-profile.ts';
 import { workspaceDevRunner } from './dev-runner.ts';
-import type { TransportSpec } from './transport.ts';
+import type { BrokerSpec } from './transport.ts';
 import { wrapProse } from '../utils/wrap-prose.ts';
 
 /**
@@ -34,6 +34,71 @@ import { wrapProse } from '../utils/wrap-prose.ts';
  * that no file the developer owns is ever edited.
  */
 const MEMBER_GLOB = `./${MEMBERS_DIR}/*`;
+
+/** The comments a workspace README's transport section sits between (M138). */
+export const TRANSPORT_README_MARKERS = {
+  start: '<!-- setu:transport -->',
+  end: '<!-- /setu:transport -->',
+} as const;
+
+/**
+ * Renders the workspace README's transport section, between its markers.
+ *
+ * One renderer for `setu new --workspace` and `setu workspace broker`, which
+ * replaces exactly the text between the markers when it changes the broker —
+ * the rest of the README is the developer's.
+ *
+ * @param broker - The workspace broker
+ * @param profile - The workspace's runtime, which names its commands
+ * @param brokerUrl - The workspace's endpoint override, when it set one
+ * @returns The section, markers included
+ */
+export function renderTransportSection(
+  broker: BrokerSpec,
+  profile: WorkspaceRuntimeProfile,
+  brokerUrl?: string,
+): string {
+  // Blank lines around each marker: Markdown ends an HTML block at the first
+  // blank line, and `deno fmt` inserts them otherwise.
+  return `${TRANSPORT_README_MARKERS.start}
+
+## Transport
+
+${wrapProse(`Members share the **${broker.name}** broker — ${broker.description}.`)}${
+    broker.connection === undefined
+      ? ''
+      : `
+
+${wrapProse(
+  `Every member reads its connection value from \`${broker.connection.variable}\`, ` +
+    `falling back to \`${brokerUrl ?? broker.connection.localDefault}\` when that ` +
+    `is unset. Both halves matter: \`${profile.runScript('dev')}\` on this machine needs ` +
+    `the local address, and the generated Compose stack overrides the variable with the ` +
+    `broker's service name, because two containers do not share a loopback interface.`,
+)}${broker.connection.note === undefined ? '' : `\n\n${wrapProse(broker.connection.note)}`}`
+  }${
+    broker.compose === undefined
+      ? ''
+      : `
+
+## Run the stack
+
+\`\`\`bash
+docker compose -f docker/compose.yaml up --build
+\`\`\`
+
+That builds every member and starts the ${broker.name} service they share.`
+  }
+
+${wrapProse(
+  `The broker is a property of the whole workspace, recorded in \`${WORKSPACE_MANIFEST}\`, because ` +
+    'members can only meet on a bus they share. Every service added later inherits it. How a ' +
+    `service is called is its own choice: \`${cliInvocation(profile.runtime)} generate app <name> ` +
+    '--rpc grpc` adds Connect/gRPC beside its HTTP routes.',
+)}
+
+${TRANSPORT_README_MARKERS.end}`;
+}
 
 /**
  * Builds the workspace root's file set.
@@ -48,17 +113,17 @@ const MEMBER_GLOB = `./${MEMBERS_DIR}/*`;
  *
  * @param name - The workspace directory name, used in the README
  * @param basePort - The port the first member will bind
- * @param transport - The bus every member will meet on
+ * @param broker - The bus every member will meet on
  * @param profile - The workspace's runtime, which decides the root's shape
- * @param transportUrl - An override for the transport's local address
+ * @param brokerUrl - An override for the broker's local address
  * @returns The files to create, relative to the workspace root
  */
 export function workspaceRootFiles(
   name: string,
   basePort: number,
-  transport: TransportSpec,
+  broker: BrokerSpec,
   profile: WorkspaceRuntimeProfile = workspaceProfile('node'),
-  transportUrl?: string,
+  brokerUrl?: string,
 ): readonly GeneratedFile[] {
   // BOTH globs at creation, so neither adding a service nor adding a library ever
   // rewrites this file: a glob matching nothing is valid under both toolchains
@@ -167,36 +232,7 @@ assignments, stop the services and run \`${cliInvocation(profile.runtime)} works
 manifest, maps, and deployment artifacts together. It assigns from the base port upward, so a
 service still running holds its own port and is moved off it.`)}
 
-## Transport
-
-Services talk over **${transport.name}** — ${transport.description}.${
-    transport.connection === undefined
-      ? ''
-      : `
-
-${wrapProse(
-  `Every member reads its connection value from \`${transport.connection.variable}\`, ` +
-    `falling back to \`${transportUrl ?? transport.connection.localDefault}\` when that ` +
-    `is unset. Both halves matter: \`${profile.runScript('dev')}\` on this machine needs ` +
-    `the local address, and the generated Compose stack overrides the variable with the ` +
-    `broker's service name, because two containers do not share a loopback interface.`,
-)}${transport.connection.note === undefined ? '' : `\n\n${wrapProse(transport.connection.note)}`}`
-  }${
-    transport.compose === undefined
-      ? ''
-      : `
-
-## Run the stack
-
-\`\`\`bash
-docker compose -f docker/compose.yaml up --build
-\`\`\`
-
-That builds every member and starts the ${transport.name} service they share.`
-  }
-
-The transport is a property of the whole workspace, recorded in \`${WORKSPACE_MANIFEST}\`, because
-members can only meet on a bus they share. Every service added later inherits it.
+${renderTransportSection(broker, profile, brokerUrl)}
 
 ## Test, build and deploy
 
@@ -232,12 +268,12 @@ ${wrapProse('Full-stack Bun members also run `bun run build` before starting. No
         version: WORKSPACE_VERSION,
         runtime: profile.runtime,
         basePort,
-        transport: transport.name,
-        ...(transport.redisClient === undefined ? {} : { redisClient: transport.redisClient }),
-        // Recorded only when it differs from the transport's own default, so
-        // the manifest states a choice rather than restating a constant that
-        // already lives in the CLI.
-        ...(transportUrl === undefined ? {} : { transportUrl }),
+        broker: broker.name,
+        ...(broker.redisClient === undefined ? {} : { redisClient: broker.redisClient }),
+        // Recorded only when it differs from the broker's own default, so the
+        // manifest states a choice rather than restating a constant that already
+        // lives in the CLI.
+        ...(brokerUrl === undefined ? {} : { brokerUrl }),
         members: [],
       }),
     },

@@ -3,7 +3,7 @@ import * as templates from '../../src/templates/registry.ts';
 import { FULL_STACK_TEMPLATE } from '../../src/templates/full-stack.ts';
 
 it('L3 refuses Workers workspace members without allocating ports or printing edit notes', async () => {
-  const h = harness([], 3000, 'http', undefined, 'cloudflare-workers');
+  const h = harness([], 3000, 'memory', undefined, 'cloudflare-workers');
   const before = h.fs.read('/ws/setu.workspace.json');
   const writes = h.fs.writes.length;
   expect(await h.run(['app', 'worker', '--template', 'full-stack'])).toBe(1);
@@ -18,7 +18,7 @@ it('L5 allocates Vite from the resolved template dev entry rather than its flag 
     .spyOn(templates, 'getTemplate')
     .mockImplementation((name) => (name === 'web-alias' ? FULL_STACK_TEMPLATE : original(name)));
   try {
-    const h = harness([], 3000, 'http', undefined, 'node');
+    const h = harness([], 3000, 'memory', undefined, 'node');
     expect(await h.run(['app', 'web', '--template', 'web-alias']), h.err.text()).toBe(0);
     expect(JSON.parse(h.fs.read('/ws/setu.workspace.json')).members[0]).toMatchObject({
       inspectPort: 5000,
@@ -46,12 +46,12 @@ import {
   workspaceProfile,
   type WorkspaceRuntimeProfile,
 } from '../../src/workspace/runtime-profile.ts';
-import type { TransportName } from '../../src/workspace/transport.ts';
+import type { BrokerName } from '../../src/workspace/transport.ts';
 import type { TargetRuntime } from '../../src/constants.ts';
 import type { PortProbe } from '../../src/workspace/port-probe.ts';
 
 it('X87-2 X87-6 allocates distinct inspector and Vite ports for generated members', async () => {
-  const h = harness([], 3000, 'http', undefined, 'node');
+  const h = harness([], 3000, 'memory', undefined, 'node');
   expect(await h.run(['app', 'one', '--template', 'full-stack']), h.err.text()).toBe(0);
   expect(await h.run(['app', 'two', '--template', 'full-stack']), h.err.text()).toBe(0);
   const manifest = JSON.parse(h.fs.read('/ws/setu.workspace.json'));
@@ -75,7 +75,7 @@ it('X87-2 X87-6 allocates distinct inspector and Vite ports for generated member
 
 describe('Node workspace devtool scaffold', () => {
   it('writes only the member npm manifest and uses the Node runner and dev script', async () => {
-    const h = harness([], 3000, 'http', undefined, 'node');
+    const h = harness([], 3000, 'memory', undefined, 'node');
     const rootBefore = h.fs.read('/ws/package.json');
     expect(await h.run(['app', 'a', '--devtool']), h.err.text()).toBe(0);
     const member = JSON.parse(h.fs.read('/ws/apps/a/package.json'));
@@ -131,7 +131,7 @@ function tasksFor(profile: WorkspaceRuntimeProfile): Record<string, unknown> {
 function harness(
   members?: readonly WorkspaceMember[],
   basePort = 3000,
-  transport: TransportName = 'http',
+  transport: BrokerName = 'memory',
   root?: string,
   runtime: TargetRuntime = 'deno',
   portAvailable?: PortProbe,
@@ -142,7 +142,7 @@ function harness(
       version: WORKSPACE_VERSION,
       runtime,
       basePort,
-      transport,
+      broker: transport,
       members,
     });
     // A real workspace root has this, and leaving it out made a refusal pass for
@@ -267,59 +267,101 @@ describe('runAppCommand', () => {
       it(`renders a full-stack member on ${transport}`, async () => {
         const h = harness([], 3000, transport);
         expect(await h.run(['app', 'shop', '--template', 'full-stack'])).toBe(0);
+        // The config calls the CLI-owned module; the module carries the options.
         const config = h.fs.read('/ws/apps/shop/setu.config.ts');
-        expect(config).toContain('messaging: {');
-        expect(config).toContain('config.get<string>(');
-        expect(config.includes('queue: {')).toBe(['redis', 'rabbitmq'].includes(transport));
+        expect(config).toContain('messaging: messagingOptions(config),');
+        expect(config).toContain('queue: { ...queueOptions(config) },');
+        const module = h.fs.read('/ws/apps/shop/src/transport/index.ts');
+        expect(module).toContain('config.get<string>(');
+        expect(module.includes('adapter:')).toBe(['redis', 'rabbitmq'].includes(transport));
         expect(h.err.text()).not.toContain('talking to nobody');
       });
     }
 
-    it('accepts a starter-composed template on the grpc transport', async () => {
-      const h = harness([], 3000, 'grpc');
-      expect(await h.run(['app', 'web', '--template', 'full-stack'])).toBe(0);
+    it('accepts a starter-composed template on a grpc member', async () => {
+      const h = harness([], 3000, 'memory');
+      expect(await h.run(['app', 'web', '--template', 'full-stack', '--rpc', 'grpc'])).toBe(0);
 
       const config = h.fs.read('/ws/apps/web/setu.config.ts');
-      expect(config).toContain("import { GrpcPlugin } from '@setu-ts/grpc-plugin';");
       expect(config).toContain('const app = await createFullStackAppFromConfig(');
-      expect(config).toContain("app.register(GrpcPlugin({ basePath: '/grpc' }));");
-      expect(config).toContain("csrf: { exclude: [new RegExp('^/grpc(?:/|$)')] },");
+      expect(config).toContain('for (const plugin of transportPlugins()) app.register(plugin);');
+      expect(config).toContain('csrf: { exclude: [...csrfExclusions()] },');
+      const module = h.fs.read('/ws/apps/web/src/transport/index.ts');
+      expect(module).toContain("import { GrpcPlugin } from '@setu-ts/grpc-plugin';");
+      expect(module).toContain("new RegExp('^/grpc(?:/|$)')");
       expect(h.fs.writes).toContain('/ws/apps/web/setu.config.ts');
     });
 
-    // The transport is a workspace-wide choice: members can only talk over a bus
-    // they share, so a per-member flag would make a workspace whose services
-    // cannot reach each other expressible in one flag.
+    // `--transport` is the pre-M138 flag: refused with the two that replaced it.
     for (const flag of ['--transport', '--transport-url']) {
-      it(`refuses ${flag}, naming the workspace-level flag`, async () => {
+      it(`refuses ${flag}, naming --rpc and the workspace broker command`, async () => {
         const h = harness([]);
         expect(await h.run(['app', 'orders', flag, 'redis'])).toBe(2);
-        expect(h.err.text()).toContain('workspace-wide choice');
-        expect(h.err.text()).toContain('new <name> --workspace');
+        expect(h.err.text()).toContain(`${flag} no longer exists`);
+        expect(h.err.text()).toContain('--rpc (http | grpc)');
+        expect(h.err.text()).toContain('workspace broker <name>');
         expect(h.fs.writes).toEqual([]);
       });
     }
 
+    // The broker is a workspace-wide choice: members can only talk over a bus
+    // they share, so a per-member flag would make a workspace whose services
+    // cannot reach each other expressible in one flag.
+    it('refuses --broker-url, naming the workspace broker command', async () => {
+      const h = harness([]);
+      expect(await h.run(['app', 'orders', '--broker-url', 'redis://x'])).toBe(2);
+      expect(h.err.text()).toContain('workspace-wide choice');
+      expect(h.err.text()).toContain('workspace broker <name> --broker-url <value>');
+      expect(h.fs.writes).toEqual([]);
+    });
+
     // The standalone broker flags configure ONE project; a member inherits
     // whatever the workspace already recorded.
     for (const flag of ['--broker', '--queue']) {
-      it(`refuses ${flag} on a member, naming the workspace's --transport`, async () => {
+      it(`refuses ${flag} on a member, naming the workspace broker command`, async () => {
         const h = harness([]);
         expect(await h.run(['app', 'orders', flag, 'redis'])).toBe(2);
-        expect(h.err.text()).toContain('--transport');
+        expect(h.err.text()).toContain("inherits the workspace's broker");
+        expect(h.err.text()).toContain('workspace broker <name>');
         expect(h.fs.writes).toEqual([]);
       });
     }
 
     // Its suggestion must be a command the CLI accepts: --redis-client needs a Redis arm.
-    it('refuses --redis-client on a member, suggesting a workspace with a Redis transport', async () => {
+    it('refuses --redis-client on a member, suggesting the Redis broker command', async () => {
       const h = harness([]);
       expect(await h.run(['app', 'orders', '--redis-client', 'node-redis'])).toBe(2);
       expect(h.err.text()).toContain('workspace-wide choice');
-      expect(h.err.text()).toContain(
-        'new <name> --workspace --transport redis --redis-client <value>',
-      );
+      expect(h.err.text()).toContain('workspace broker redis --redis-client <value>');
       expect(h.fs.writes).toEqual([]);
+    });
+
+    it('records --rpc grpc on the member and leaves an http member unmarked', async () => {
+      const h = harness([]);
+      expect(await h.run(['app', 'orders', '--rpc', 'grpc'])).toBe(0);
+      expect(await h.run(['app', 'billing', '--rpc', 'http'])).toBe(0);
+      const members = JSON.parse(h.fs.read(`/ws/${WORKSPACE_MANIFEST}`)).members;
+      expect(members[0].rpc).toBe('grpc');
+      expect('rpc' in members[1]).toBe(false);
+      expect(h.fs.read('/ws/apps/billing/setu.config.ts')).not.toContain('GrpcPlugin');
+    });
+
+    for (const [value, expected] of [
+      ['tcp', 'There is no raw tcp transport'],
+      ['rest', 'Unknown --rpc "rest". Expected one of: http, grpc.'],
+    ] as const) {
+      it(`refuses --rpc ${value}`, async () => {
+        const h = harness([]);
+        expect(await h.run(['app', 'orders', '--rpc', value])).toBe(2);
+        expect(h.err.text()).toContain(expected);
+        expect(h.fs.writes).toEqual([]);
+      });
+    }
+
+    it('refuses a bare --rpc', async () => {
+      const h = harness([]);
+      expect(await h.run(['app', 'orders', '--rpc'])).toBe(2);
+      expect(h.err.text()).toContain('--rpc needs a value: http | grpc.');
     });
 
     it('refuses an unknown template through the shared selector', async () => {
@@ -370,7 +412,7 @@ describe('runAppCommand', () => {
     } as const;
 
     for (const [runtime, line] of Object.entries(expected)) {
-      const h = harness([], 3000, 'http', undefined, runtime as TargetRuntime);
+      const h = harness([], 3000, 'memory', undefined, runtime as TargetRuntime);
       expect(await h.run(['app', 'orders'])).toBe(0);
       expect(h.out.text()).toContain(line);
     }
@@ -424,7 +466,7 @@ describe('runAppCommand', () => {
       const second = harness(
         JSON.parse(first.fs.read(`/ws/${WORKSPACE_MANIFEST}`)).members as WorkspaceMember[],
         3000,
-        'http',
+        'memory',
         updated,
       );
       expect(await second.run(['app', 'admin', '--template', 'full-stack'])).toBe(0);
@@ -437,7 +479,7 @@ describe('runAppCommand', () => {
       const h = harness(
         [],
         3000,
-        'http',
+        'memory',
         `${JSON.stringify({ workspace: ['./apps/*'], nodeModulesDir: 'none' })}\n`,
       );
       expect(await h.run(['app', 'web', '--template', 'full-stack'])).toBe(2);
@@ -446,7 +488,7 @@ describe('runAppCommand', () => {
     });
 
     it('refuses a root it cannot parse rather than rewriting it', async () => {
-      const h = harness([], 3000, 'http', '{ "workspace": ["./apps/*"], // a comment\n}');
+      const h = harness([], 3000, 'memory', '{ "workspace": ["./apps/*"], // a comment\n}');
       expect(await h.run(['app', 'web', '--template', 'full-stack'])).toBe(2);
       expect(h.err.text()).toContain('Add that field by hand');
       expect(h.fs.writes).toEqual([]);
@@ -459,7 +501,7 @@ describe('runAppCommand', () => {
     // changed nothing if followed.
     it('needs no root edit on npm, where node_modules already exists', async () => {
       for (const runtime of ['node', 'bun'] as const) {
-        const h = harness([], 3000, 'http', undefined, runtime);
+        const h = harness([], 3000, 'memory', undefined, runtime);
         expect(await h.run(['app', 'web', '--template', 'full-stack'])).toBe(0);
         expect(h.err.text()).toBe('');
         expect(h.fs.has('/ws/apps/web/setu.config.ts')).toBe(true);
@@ -530,7 +572,7 @@ describe('runAppCommand', () => {
     });
 
     it('skips ports another local process already holds', async () => {
-      const h = harness([], 3000, 'http', undefined, 'deno', (port) =>
+      const h = harness([], 3000, 'memory', undefined, 'deno', (port) =>
         Promise.resolve(port !== 3000),
       );
       expect(await h.run(['app', 'billing'])).toBe(0);
@@ -540,7 +582,7 @@ describe('runAppCommand', () => {
     });
 
     it('refuses an explicitly requested port another local process holds', async () => {
-      const h = harness([], 3000, 'http', undefined, 'deno', () => Promise.resolve(false));
+      const h = harness([], 3000, 'memory', undefined, 'deno', () => Promise.resolve(false));
       expect(await h.run(['app', 'billing', '--port', '3000'])).toBe(1);
       expect(h.err.text()).toContain('already in use');
       expect(h.fs.writes).toEqual([]);
@@ -659,20 +701,24 @@ describe('runAppCommand', () => {
     it('inherits the workspace transport for every member it adds', async () => {
       const h = harness([], 3000, 'redis');
       expect(await h.run(['app', 'orders', '--template', 'microservice'])).toBe(0);
-      const config = h.fs.read('/ws/apps/orders/setu.config.ts');
-      expect(config).toContain("broker: 'redis-streams'");
+      expect(h.fs.read('/ws/apps/orders/setu.config.ts')).toContain(
+        'MessagingPlugin(messagingOptions()),',
+      );
+      const module = h.fs.read('/ws/apps/orders/src/transport/index.ts');
+      expect(module).toContain("broker: 'redis-streams'");
       // Read from the environment with the local address as the fallback, so the
-      // same generated config works on the host and inside the Compose stack.
-      expect(config).toContain(`Deno.env.get('REDIS_URL')`);
-      expect(config).toContain('redis://127.0.0.1:6379');
+      // same generated module works on the host and inside the Compose stack.
+      expect(module).toContain(`Deno.env.get('REDIS_URL')`);
+      expect(module).toContain('redis://127.0.0.1:6379');
     });
 
-    it('registers the gRPC plugin in every member of a grpc workspace', async () => {
-      const h = harness([], 3000, 'grpc');
-      expect(await h.run(['app', 'orders', '--template', 'microservice'])).toBe(0);
-      const config = h.fs.read('/ws/apps/orders/setu.config.ts');
-      expect(config).toContain("import { GrpcPlugin } from '@setu-ts/grpc-plugin';");
-      expect(config).toContain("GrpcPlugin({ basePath: '/grpc' }),");
+    it('registers the gRPC plugin in a member generated with --rpc grpc', async () => {
+      const h = harness([], 3000, 'memory');
+      expect(await h.run(['app', 'orders', '--template', 'microservice', '--rpc', 'grpc'])).toBe(0);
+      expect(h.fs.read('/ws/apps/orders/setu.config.ts')).toContain('...transportPlugins(),');
+      const module = h.fs.read('/ws/apps/orders/src/transport/index.ts');
+      expect(module).toContain("import { GrpcPlugin } from '@setu-ts/grpc-plugin';");
+      expect(module).toContain("GrpcPlugin({ basePath: '/grpc' })");
       // …and declares it, or the member imports a package it does not have.
       expect(h.fs.read('/ws/apps/orders/deno.json')).toContain('@setu-ts/grpc-plugin');
     });
@@ -714,7 +760,7 @@ describe('runAppCommand', () => {
         // member must never rewrite it.
         runtime: 'deno',
         basePort: 3000,
-        transport: 'http',
+        broker: 'memory',
         // `healthProbes`/`metricsEndpoint` record whether this member serves
         // /live, /ready and /metrics, which the Kubernetes renderer has no
         // other way to know (X2-7, X10-6). False here: no `--template`, so no

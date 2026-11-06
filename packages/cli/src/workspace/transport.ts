@@ -1,50 +1,40 @@
 /**
- * How a workspace's members talk to each other.
+ * The bus a workspace's members publish to and consume from.
  *
  * Every member already reaches its siblings over HTTP through the generated
- * discovery map. That is one mechanism, and it is not the one a service mesh
- * usually wants: the microservice template registers `MessagingPlugin()`, whose
- * default broker is IN-MEMORY and therefore process-local, so two generated
- * members publishing and subscribing on the same topic exchange nothing while
- * both report success. Choosing the transport at workspace creation is what
- * closes that.
+ * discovery map, and a member may also co-serve gRPC (`rpc.ts`). That is how a
+ * service is CALLED. A broker is something else: the microservice template
+ * registers `MessagingPlugin()`, whose default broker is IN-MEMORY and therefore
+ * process-local, so two generated members publishing and subscribing on the
+ * same topic exchange nothing while both report success. Choosing the broker at
+ * workspace creation is what closes that.
  *
- * The choice belongs to the WORKSPACE rather than to a member, because members
- * can only meet on a bus they share. A per-member flag would make a workspace
- * whose services silently cannot reach each other trivially expressible — the
- * exact failure this milestone exists to remove.
+ * The broker belongs to the WORKSPACE rather than to a member, because members
+ * can only meet on a bus they share. A per-member broker would make a workspace
+ * whose services silently cannot reach each other trivially expressible. The
+ * RPC style carries no such risk — an HTTP member and a gRPC member still reach
+ * each other over HTTP — so it is chosen per member (M138).
  *
  * @module
  */
 
-import type { Wiring } from '../templates/registry.ts';
 import type { GeneratedFile } from '../utils/file-writer.ts';
 import type { WorkspaceRuntimeProfile } from './runtime-profile.ts';
 import { nodeRedisClientCall } from '../templates/node-redis.ts';
-import {
-  PROTO_DEV_DEPENDENCIES,
-  PROTO_IMPORTS,
-  PROTO_SCRIPT_COMMAND,
-  PROTO_TASK,
-  PROTO_TASK_COMMAND,
-  protoToolchainFiles,
-} from './proto-toolchain.ts';
 
 /**
- * The inter-service transports `setu new --workspace --transport` accepts.
+ * The brokers `setu new --workspace --broker` accepts.
  *
  * `pubsub` and `service-bus` were originally left out because each needs a value
  * no scaffold can invent — a GCP project id, an Azure connection string — and a
  * generated empty string is a dead option that fails at the first call rather
  * than at scaffold time. What closes that is not inventing the value:
- * {@linkcode TransportSpec.connection} reads it from the ENVIRONMENT and falls
+ * {@linkcode BrokerSpec.connection} reads it from the ENVIRONMENT and falls
  * back to the vendor's own local-emulator setting, so a scaffolded workspace runs
  * against an emulator with no configuration and against the real service with one
  * variable set.
  */
-export const TRANSPORTS = [
-  'http',
-  'grpc',
+export const BROKERS = [
   'memory',
   'redis',
   'rabbitmq',
@@ -54,14 +44,14 @@ export const TRANSPORTS = [
   'service-bus',
 ] as const;
 
-/** An inter-service transport accepted by `--transport`. */
-export type TransportName = (typeof TRANSPORTS)[number];
+/** A broker accepted by `--broker`. */
+export type BrokerName = (typeof BROKERS)[number];
 
 /** Redis client selected by a scaffold; ioredis remains the default. @since 0.11.0 */
 export type RedisClient = 'ioredis' | 'node-redis';
 
-/** The transport a workspace uses when `--transport` is not given. */
-export const DEFAULT_TRANSPORT: TransportName = 'http';
+/** The broker a workspace uses when `--broker` is not given: the plugin's own in-process default. */
+export const DEFAULT_BROKER: BrokerName = 'memory';
 
 /**
  * How a transport's connection value reaches the running member.
@@ -85,11 +75,11 @@ export interface TransportConnection {
    */
   readonly localDefault: string;
   /**
-   * Whether `--transport-url` may replace {@linkcode localDefault}.
+   * Whether `--broker-url` may replace {@linkcode localDefault}.
    *
    * False for the two arms whose connection value is not an endpoint: a GCP
    * **project id** is a name, and an Azure **connection string** carries a
-   * shared-access key. `--transport-url` is refused for those with a message
+   * shared-access key. `--broker-url` is refused for those with a message
    * naming the variable, rather than silently storing a URL nothing addresses.
    */
   readonly urlOverridable: boolean;
@@ -133,24 +123,15 @@ export interface ComposeBacking {
 }
 
 /**
- * What a transport contributes to every member of the workspace.
+ * What a broker contributes to every member of the workspace.
  */
-export interface TransportSpec {
+export interface BrokerSpec {
   /** Explicit node-redis selection, omitted for the default ioredis arm. */
   readonly redisClient?: 'node-redis';
-  /** The `--transport` value that selects it. */
-  readonly name: TransportName;
+  /** The `--broker` value that selects it. */
+  readonly name: BrokerName;
   /** One line for `--help` and the workspace README. */
   readonly description: string;
-  /**
-   * Plugins every member registers on top of its template's set.
-   *
-   * Empty for the broker arms: the microservice template ALREADY registers
-   * `MessagingPlugin`, so a broker rewrites that wiring's arguments rather than
-   * appending a second registration — the kernel refuses a duplicate plugin
-   * name at `start()`.
-   */
-  readonly plugins: readonly Wiring[];
   /**
    * The `MessagingPlugin` argument literal this transport needs, rendered as
    * source. Omitted → the template's own wiring is left exactly as it is.
@@ -199,11 +180,9 @@ export interface TransportSpec {
   readonly messagingClients?: readonly string[];
   /** Client packages the project needs once {@linkcode queueArgs} selects this queue. */
   readonly queueClients?: readonly string[];
-  /** Client packages every member of a workspace on this transport needs. */
-  readonly clients?: readonly string[];
   /**
    * Where the connection value comes from. Omitted → the transport has none
-   * (`http`, `grpc`, `memory`).
+   * (`memory`).
    */
   readonly connection?: TransportConnection;
   /**
@@ -220,35 +199,6 @@ export interface TransportSpec {
    * Omitted → the transport needs no backing service.
    */
   readonly compose?: ComposeBacking;
-  /**
-   * Extra source files every member of this workspace gets.
-   *
-   * A function of the member's name, because the files it produces are named
-   * after the service: a proto package is `<member>.v1`, and a fixed one would
-   * put two members' messages in the same namespace.
-   *
-   * @param member - The member's kebab-case name
-   * @param onDeno - Whether the member is a Deno project; the files differ
-   * @returns Files relative to the member root
-   */
-  readonly memberFiles?: (member: string, onDeno: boolean) => readonly GeneratedFile[];
-  /** Tasks merged into every member's `deno.json`, for what those files need. */
-  readonly memberTasks?: Readonly<Record<string, string>>;
-  /**
-   * Import-map entries merged into every member's `deno.json`.
-   *
-   * Needed because {@linkcode TransportSpec.memberFiles} can produce source that
-   * imports something the framework does not: the Protobuf-ES descriptors the gRPC
-   * toolchain generates import `@bufbuild/protobuf/codegenv2`, and without the
-   * mapping the member cannot compile the file its own task just wrote — measured,
-   * as `Import "@bufbuild/protobuf/codegenv2" not a dependency and not in import
-   * map`.
-   */
-  readonly memberImports?: Readonly<Record<string, string>>;
-  /** Scripts merged into every npm-target member's `package.json`. */
-  readonly memberScripts?: Readonly<Record<string, string>>;
-  /** devDependencies merged into every npm-target member's `package.json`. */
-  readonly memberDevDependencies?: Readonly<Record<string, string>>;
 }
 
 /**
@@ -298,7 +248,7 @@ const NATS_STREAM_SUBJECTS = ['app.>', 'rr.req.app.>', 'rr.inbox.>'] as const;
  * eight spaces. Kafka is the one arm that nests the connection inside a bracket
  * — `brokers: [...]` — where the element sits two columns deeper and the
  * formatter therefore wants its continuation two columns deeper too. Emitting
- * the unshifted form made a fresh `--broker kafka` (and `--transport kafka`)
+ * the unshifted form made a fresh `--broker kafka` (standalone or workspace)
  * scaffold fail its OWN `deno fmt --check`, which is the bar M63 set.
  *
  * Adds two spaces to every line after the first rather than rewriting a known
@@ -311,46 +261,16 @@ function nestConnection(connection: string): string {
   return connection.replaceAll('\n', '\n  ');
 }
 
-const TRANSPORT_SPECS: Readonly<Record<TransportName, TransportSpec>> = {
-  ['http']: {
-    name: 'http',
-    description: 'Members call each other over HTTP, resolved through the discovery map',
-    plugins: [],
-  },
-  ['grpc']: {
-    name: 'grpc',
-    clients: ['@connectrpc/connect', '@bufbuild/protobuf'],
-    // Mounted rather than root-owned: the stable prefix lets a full-stack
-    // member exempt RPCs from form CSRF without exempting its own POST routes.
-    // Verified by probe, not assumed: this `GrpcPlugin()` answers
-    // `POST /grpc/grpc.health.v1.Health/Check` with `200 {"status":"SERVING"}`,
-    // so a member is callable over Connect the moment it boots — no proto
-    // toolchain, no generated descriptors. Serving YOUR OWN protos still needs
-    // descriptors from buf/protoc handed to `grpc.addService`, which the CLI
-    // emits a toolchain for rather than generating itself.
-    description: 'Members co-serve Connect/gRPC on their own port, alongside HTTP',
-    plugins: [{ pkg: 'grpc-plugin', symbol: 'GrpcPlugin', args: "{ basePath: '/grpc' }" }],
-    // The health service needs none of this — the plugin carries that descriptor
-    // itself. Serving the member's OWN protos needs a compiler, so the toolchain
-    // ships instead of the descriptors.
-    memberFiles: (member, onDeno) =>
-      protoToolchainFiles(`${member.replaceAll('-', '_')}.v1`, onDeno),
-    memberTasks: { [PROTO_TASK]: PROTO_TASK_COMMAND },
-    memberImports: PROTO_IMPORTS,
-    memberScripts: { [PROTO_TASK]: PROTO_SCRIPT_COMMAND },
-    memberDevDependencies: PROTO_DEV_DEPENDENCIES,
-  },
+const BROKER_SPECS: Readonly<Record<BrokerName, BrokerSpec>> = {
   ['memory']: {
     name: 'memory',
     description: 'In-process broker — messages never leave one service (single-service testing)',
-    plugins: [],
   },
   ['redis']: {
     name: 'redis',
     messagingClients: ['ioredis'],
     queueClients: ['ioredis'],
     description: 'Redis Streams broker shared by every member',
-    plugins: [],
     messagingArgs: (connection) => `{ broker: 'redis-streams', url: ${connection} }`,
     queueArgs: (connection) => `{ adapter: 'redis', url: ${connection} }`,
     cacheArgs: (connection) => `{ store: 'redis', options: { url: ${connection} } }`,
@@ -387,7 +307,6 @@ const TRANSPORT_SPECS: Readonly<Record<TransportName, TransportSpec>> = {
     messagingClients: ['amqplib'],
     queueClients: ['amqplib'],
     description: 'RabbitMQ broker shared by every member',
-    plugins: [],
     messagingArgs: (connection) => `{ broker: 'rabbitmq', url: ${connection} }`,
     queueArgs: (connection) => `{ adapter: 'rabbitmq', url: ${connection} }`,
     connection: {
@@ -416,7 +335,6 @@ const TRANSPORT_SPECS: Readonly<Record<TransportName, TransportSpec>> = {
     name: 'nats',
     messagingClients: ['nats'],
     description: 'NATS broker shared by every member',
-    plugins: [],
     // The stream subject set is mandatory on this arm: `NatsMessagingOptions`
     // has no default, and the broker creates the stream ONLY from the subjects
     // it is given — a NATS server with `-js` alone does not create anything.
@@ -464,7 +382,6 @@ const TRANSPORT_SPECS: Readonly<Record<TransportName, TransportSpec>> = {
     // shape differs, which is why each spec renders its own literal instead of a
     // shared `{ broker, url }` template.
     description: 'Kafka broker shared by every member',
-    plugins: [],
     messagingArgs: (connection) =>
       `{\n        broker: 'kafka',\n        brokers: [\n          ${nestConnection(
         connection,
@@ -511,7 +428,6 @@ const TRANSPORT_SPECS: Readonly<Record<TransportName, TransportSpec>> = {
     name: 'pubsub',
     messagingClients: ['@google-cloud/pubsub'],
     description: 'GCP Pub/Sub shared by every member (emulator by default)',
-    plugins: [],
     // The project id, not an endpoint: the SDK takes the EMULATOR host from
     // `PUBSUB_EMULATOR_HOST` itself and skips authentication entirely when it is
     // set, so there is nothing for the plugin options to address. Verified
@@ -557,7 +473,6 @@ const TRANSPORT_SPECS: Readonly<Record<TransportName, TransportSpec>> = {
     name: 'service-bus',
     messagingClients: ['@azure/service-bus'],
     description: 'Azure Service Bus shared by every member (emulator by default)',
-    plugins: [],
     // Read from the environment rather than interpolated: a Service Bus
     // connection string carries `SharedAccessKey=…`, so a generated literal would
     // be a secret committed to the repository. The fallback is Microsoft's
@@ -700,40 +615,36 @@ export function renderConfigConnection(
 }
 
 /**
- * Looks up a transport by an UNTRUSTED string — a flag value, or a manifest
- * field.
+ * Looks up a broker by an UNTRUSTED string — a flag value, or a manifest field.
  *
- * @param name - The `--transport` value
+ * @param name - The `--broker` value
  * @param redisClient - Which Redis driver to render, defaulting to ioredis
- * @returns Its spec, or undefined when no such transport exists
+ * @returns Its spec, or undefined when no such broker exists
  */
-export function getTransport(
+export function getBroker(
   name: string,
   redisClient: RedisClient = 'ioredis',
-): TransportSpec | undefined {
+): BrokerSpec | undefined {
   // `Object.hasOwn` rather than a bare index, so an inherited property name
   // (`constructor`, `__proto__`, `toString`) misses cleanly instead of
   // returning something off `Object.prototype`.
-  return Object.hasOwn(TRANSPORT_SPECS, name)
-    ? transportSpec(name as TransportName, redisClient)
+  return Object.hasOwn(BROKER_SPECS, name)
+    ? brokerSpec(name as BrokerName, redisClient)
     : undefined;
 }
 
 /**
- * Resolves an already-validated transport name to its spec.
+ * Resolves an already-validated broker name to its spec.
  *
  * Total by construction: the record covers the whole union, so a manifest whose
- * transport the reader has accepted needs no "cannot happen" branch here.
+ * broker the reader has accepted needs no "cannot happen" branch here.
  *
- * @param name - A validated transport name
+ * @param name - A validated broker name
  * @param redisClient - Which Redis driver to render, defaulting to ioredis
  * @returns Its spec
  */
-export function transportSpec(
-  name: TransportName,
-  redisClient: RedisClient = 'ioredis',
-): TransportSpec {
-  const spec = TRANSPORT_SPECS[name];
+export function brokerSpec(name: BrokerName, redisClient: RedisClient = 'ioredis'): BrokerSpec {
+  const spec = BROKER_SPECS[name];
   if (name !== 'redis' || redisClient === 'ioredis') return spec;
   const client = nodeRedisClientCall;
   return {
@@ -754,21 +665,9 @@ export function transportSpec(
 }
 
 /**
- * Lists every transport in registration order.
- *
- * Consumed by the help text, so the documented list cannot drift from the
- * transports that exist.
- *
- * @returns Each transport spec
- */
-export function listTransports(): readonly TransportSpec[] {
-  return TRANSPORTS.map((name) => TRANSPORT_SPECS[name]);
-}
-
-/**
  * Lists every name `setu new --broker` accepts, derived from the registry.
  *
- * Every arm declaring a {@linkcode TransportSpec.messagingArgs} renderer, plus
+ * Every arm declaring a {@linkcode BrokerSpec.messagingArgs} renderer, plus
  * `memory` — the default the plugin already takes, which is accepted everywhere
  * the flag is accepted and rewrites nothing. Derived rather than hand-written
  * so help text, refusal text and validation cannot drift from the arms that
@@ -776,33 +675,21 @@ export function listTransports(): readonly TransportSpec[] {
  *
  * @returns Each accepted broker name, in registry order
  */
-export function listBrokers(): readonly TransportName[] {
-  return TRANSPORTS.filter(
-    (name) => name === 'memory' || TRANSPORT_SPECS[name].messagingArgs !== undefined,
+export function listBrokers(): readonly BrokerName[] {
+  return BROKERS.filter(
+    (name) => name === 'memory' || BROKER_SPECS[name].messagingArgs !== undefined,
   );
 }
 
 /**
  * Lists every name `setu new --queue` accepts, derived from the registry.
  *
- * Every arm declaring a {@linkcode TransportSpec.queueArgs} renderer, plus
+ * Every arm declaring a {@linkcode BrokerSpec.queueArgs} renderer, plus
  * `memory`. A smaller set than {@linkcode listBrokers}: the queue supports
  * fewer backends than the brokers.
  *
  * @returns Each accepted queue backend name, in registry order
  */
-export function listQueues(): readonly TransportName[] {
-  return TRANSPORTS.filter(
-    (name) => name === 'memory' || TRANSPORT_SPECS[name].queueArgs !== undefined,
-  );
+export function listQueues(): readonly BrokerName[] {
+  return BROKERS.filter((name) => name === 'memory' || BROKER_SPECS[name].queueArgs !== undefined);
 }
-
-/**
- * The name a user is most likely to reach for that this framework does not
- * have, mapped to what they actually want.
- *
- * There is no raw-TCP transport here: every inter-service path is HTTP over TCP
- * or a broker client over TCP. Refusing with this explanation beats accepting
- * `tcp` and quietly giving them HTTP under another name.
- */
-export const TRANSPORT_ALIASES: Readonly<Record<string, TransportName>> = { tcp: 'http' };

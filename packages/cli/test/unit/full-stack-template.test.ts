@@ -27,7 +27,7 @@ import {
 import { FULL_STACK_APP_FRAMEWORK_PACKAGES } from '../../src/templates/full-stack.ts';
 import { getTemplate, listTemplates } from '../../src/templates/registry.ts';
 import { withBrokerArgs, withQueueArgs } from '../../src/templates/broker.ts';
-import { transportSpec } from '../../src/workspace/transport.ts';
+import { brokerSpec } from '../../src/workspace/transport.ts';
 import { workspaceProfile } from '../../src/workspace/runtime-profile.ts';
 
 it('X87-2 renders member app and Vite ports from discovery and preserves standalone defaults', () => {
@@ -58,7 +58,7 @@ it('renders both transport options after logger on every starter-composed templa
         .contents;
     expect(args(host)).not.toContain('messaging:');
     expect(args(host)).not.toContain('queue:');
-    const spec = transportSpec('redis');
+    const spec = brokerSpec('redis');
     const connected = args(
       withQueueArgs(
         withBrokerArgs(host, spec, workspaceProfile('deno')),
@@ -710,23 +710,21 @@ describe('full-stack app files | module-level shape', () => {
   });
 });
 
-describe('full-stack gRPC csrf exclusion', () => {
-  // Audit round 5 (C-R5): the generated configuration must stay inside the language
-  // the CLI's own config reader classifies, so the exclusion is `new RegExp('…')`
-  // rather than a regex literal, and a base path that would need escaping is refused.
-  it('emits a RegExp constructor with no regex literal and no backslash', () => {
-    const args = FULL_STACK_TEMPLATE.appFactory!.args!({ runtime: 'deno', grpcBasePath: '/grpc' });
-    expect(args).toContain("csrf: { exclude: [new RegExp('^/grpc(?:/|$)')] },");
+describe('full-stack csrf exclusions', () => {
+  // M138: a workspace member's exclusions come from its CLI-owned transport
+  // module, so the config holds only a call — which also keeps it inside the
+  // language the CLI's own config reader classifies (audit round 5, C-R5).
+  it('spreads the supplied exclusion call into csrf.exclude', () => {
+    const args = FULL_STACK_TEMPLATE.appFactory!.args!({
+      runtime: 'deno',
+      csrfExclude: 'csrfExclusions()',
+    });
+    expect(args).toContain('csrf: { exclude: [...csrfExclusions()] },');
     expect(args).not.toContain('\\');
-    expect(args).not.toMatch(/\[\//);
   });
 
-  it('refuses a base path that is not a single plain segment', () => {
-    for (const grpcBasePath of ['/a.b', '/a/b', 'grpc', '/']) {
-      expect(() =>
-        FULL_STACK_TEMPLATE.appFactory!.args!({ runtime: 'deno', grpcBasePath }),
-      ).toThrow('must be a single plain path segment');
-    }
+  it('excludes nothing when no exclusion is supplied', () => {
+    expect(FULL_STACK_TEMPLATE.appFactory!.args!({ runtime: 'deno' })).toContain('csrf: {},');
   });
 });
 

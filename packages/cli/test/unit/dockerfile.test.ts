@@ -12,7 +12,7 @@
 import { describe, expect, it } from 'vitest';
 import { DOCKERFILE, workspaceContainerFiles } from '../../src/workspace/compose.ts';
 import { WORKSPACE_VERSION, type WorkspaceManifest } from '../../src/workspace/manifest.ts';
-import { transportSpec } from '../../src/workspace/transport.ts';
+import { brokerSpec } from '../../src/workspace/transport.ts';
 
 /** The Deno-profile Dockerfile for a one-member workspace. */
 function dockerfile(): string {
@@ -20,10 +20,10 @@ function dockerfile(): string {
     version: WORKSPACE_VERSION,
     runtime: 'deno',
     basePort: 3000,
-    transport: 'http',
+    broker: 'memory',
     members: [{ name: 'orders', port: 3000 }],
   };
-  const files = workspaceContainerFiles(manifest, transportSpec('http'));
+  const files = workspaceContainerFiles(manifest, brokerSpec('memory'));
   const file = files.find((candidate) => candidate.path === DOCKERFILE);
   expect(file).toBeDefined();
   return file?.contents ?? '';

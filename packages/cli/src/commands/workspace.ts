@@ -37,7 +37,9 @@ import {
 import { assumePortAvailable, type PortProbe } from '../workspace/port-probe.ts';
 import { workspaceProfile } from '../workspace/runtime-profile.ts';
 import { cliInvocation } from '../templates/project-files.ts';
-import { transportSpec } from '../workspace/transport.ts';
+import { BROKERS, brokerSpec, getBroker } from '../workspace/transport.ts';
+import { getRpc, RPC_STYLES } from '../workspace/rpc.ts';
+import { planTransportChange, type TransportChange } from '../workspace/rewire.ts';
 import { describeReconcileFailure, reconcileMembers } from '../workspace/reconcile.ts';
 import type { CommandRunner } from '../utils/run-command.ts';
 import { runWorkspaceBuild, runWorkspaceDeploy } from './workspace-ops.ts';
@@ -131,7 +133,7 @@ async function reallocate(
 /** Plans every managed file whose content contains a workspace port. */
 function managedFiles(manifest: WorkspaceManifest): readonly GeneratedFile[] {
   const profile = workspaceProfile(manifest.runtime);
-  const transport = transportSpec(manifest.transport);
+  const transport = brokerSpec(manifest.broker, manifest.redisClient);
   return [
     ...manifest.members
       .filter((member) => member.devtoolPort !== undefined)
@@ -155,6 +157,193 @@ function managedFiles(manifest: WorkspaceManifest): readonly GeneratedFile[] {
   ];
 }
 
+/** The usage lines of the two transport operations. */
+const BROKER_USAGE = `Usage: ${PROGRAM_NAME} workspace broker <name> [--broker-url <url>] [--redis-client <ioredis|node-redis>] [--force] [--dir <path>] [--dry-run]`;
+const RPC_USAGE = `Usage: ${PROGRAM_NAME} workspace rpc <member> <${RPC_STYLES.join('|')}> [--force] [--dir <path>] [--dry-run]`;
+
+/**
+ * Reads `workspace broker <name>` or `workspace rpc <member> <style>` into a change.
+ *
+ * The broker's endpoint follows the same rules `setu new --workspace` applies:
+ * refused for the in-process broker, which has nothing to address, and for the
+ * two cloud brokers, whose connection value is a project id or a secret read
+ * from the environment. `--redis-client` applies only to the Redis broker.
+ *
+ * @param args - The parsed arguments, the operation first
+ * @returns The change, or the usage refusal
+ */
+function readTransportChange(
+  args: ParsedArgs,
+):
+  | { readonly ok: true; readonly change: TransportChange }
+  | { readonly ok: false; readonly message: string } {
+  const [operation, first, second] = args.positionals;
+  if (operation === 'rpc') {
+    if (first === undefined || second === undefined) return { ok: false, message: RPC_USAGE };
+    const style = getRpc(second);
+    if (style === undefined) {
+      return {
+        ok: false,
+        message: `Unknown RPC style "${escapeName(second)}". Expected one of: ${RPC_STYLES.join(', ')}.`,
+      };
+    }
+    return { ok: true, change: { kind: 'rpc', member: first, rpc: style.name } };
+  }
+  if (first === undefined) return { ok: false, message: BROKER_USAGE };
+  const client = args.flags['redis-client'];
+  if (client !== undefined && client !== 'ioredis' && client !== 'node-redis') {
+    return {
+      ok: false,
+      message: `Unknown --redis-client "${escapeName(String(client))}". Expected ioredis | node-redis.`,
+    };
+  }
+  const spec = getBroker(first);
+  if (spec === undefined) {
+    return {
+      ok: false,
+      message:
+        getRpc(first) === undefined
+          ? `Unknown broker "${escapeName(first)}". Expected one of: ${BROKERS.join(', ')}.`
+          : `"${first}" is how a service is called, not a broker: change it per member with \`${PROGRAM_NAME} workspace rpc <member> ${first}\`.`,
+    };
+  }
+  if (client !== undefined && spec.name !== 'redis') {
+    return { ok: false, message: '--redis-client applies only to `workspace broker redis`.' };
+  }
+  const url = args.flags['broker-url'];
+  if (url !== undefined) {
+    if (typeof url !== 'string') return { ok: false, message: '--broker-url needs a value.' };
+    if (spec.connection === undefined) {
+      return {
+        ok: false,
+        message: `--broker ${spec.name} runs inside each member, so --broker-url has nothing to address.`,
+      };
+    }
+    if (!spec.connection.urlOverridable) {
+      return {
+        ok: false,
+        message: `--broker ${spec.name} is not configured by URL: its connection value is read from ${spec.connection.variable} at run time.`,
+      };
+    }
+  }
+  return {
+    ok: true,
+    change: {
+      kind: 'broker',
+      broker: spec.name,
+      ...(typeof url === 'string' ? { brokerUrl: url } : {}),
+      ...(client === 'node-redis' ? { redisClient: 'node-redis' as const } : {}),
+    },
+  };
+}
+
+/**
+ * Runs `setu workspace broker` or `setu workspace rpc` (M138).
+ *
+ * Plans the whole change with `planTransportChange`, then writes it in one
+ * transaction — or writes nothing, when any member's config does not read its
+ * transport module, a member manifest cannot be merged, or code still uses what
+ * the change removes (unless `--force`).
+ *
+ * @param args - The parsed arguments, the operation first
+ * @param deps - Filesystem and output sinks
+ * @returns `0` on success or a no-op, `1` on a refusal, `2` on a usage error
+ */
+async function runTransportOperation(
+  args: ParsedArgs,
+  deps: WorkspaceCommandDependencies,
+): Promise<number> {
+  if (args.flags['help'] === true || args.flags['h'] === true) {
+    deps.log(args.positionals[0] === 'rpc' ? RPC_USAGE : BROKER_USAGE);
+    return EXIT_OK;
+  }
+  if (args.flags['dir'] !== undefined && stringFlag(args.flags, 'dir') === undefined) {
+    deps.error('--dir needs a path.');
+    return EXIT_USAGE;
+  }
+  const read = readTransportChange(args);
+  if (!read.ok) {
+    deps.error(read.message);
+    return EXIT_USAGE;
+  }
+  const dir = resolveDir(deps.cwd, stringFlag(args.flags, 'dir'));
+  const manifest = await readWorkspaceManifest(deps.fs, dir);
+  if (!manifest.ok) {
+    deps.error(
+      `No usable ${WORKSPACE_MANIFEST} in ${escapeName(dir)}, so this is not a Setu workspace.`,
+    );
+    return EXIT_ERROR;
+  }
+  const { change } = read;
+  if (change.kind === 'rpc' && !manifest.manifest.members.some((m) => m.name === change.member)) {
+    deps.error(
+      `No workspace member "${escapeName(change.member)}". Members: ${
+        manifest.manifest.members.map((m) => escapeName(m.name)).join(', ') || 'none'
+      }.`,
+    );
+    return EXIT_USAGE;
+  }
+  const reconciliation = await reconcileMembers(deps.fs, dir, manifest.manifest);
+  if (!reconciliation.ok) {
+    deps.error(describeReconcileFailure(reconciliation));
+    return EXIT_ERROR;
+  }
+  const plan = await planTransportChange(deps.fs, dir, manifest.manifest, change, {
+    force: args.flags['force'] === true,
+  });
+  if (!plan.ok) {
+    for (const message of plan.messages) deps.error(message);
+    deps.error('Nothing was written.');
+    return EXIT_ERROR;
+  }
+  if (plan.unchanged) {
+    deps.log(
+      change.kind === 'broker'
+        ? `The workspace already uses the ${change.broker} broker; nothing changed.`
+        : `${escapeName(change.member)} is already ${change.rpc}; nothing changed.`,
+    );
+    return EXIT_OK;
+  }
+  for (const warning of plan.warnings) deps.error(`warning: ${warning}`);
+  const files = plan.files.map((file) => ({ ...file, path: joinPath(dir, file.path) }));
+  if (args.flags['dry-run'] === true) {
+    for (const file of files) deps.log(`would write ${escapeName(file.path)}`);
+    for (const note of plan.notes) deps.log(note);
+    return EXIT_OK;
+  }
+  try {
+    const outcomes = await writeFiles(
+      deps.fs,
+      await formatForTarget(files, plan.manifest.runtime, dir, deps.error),
+      deps.interrupt === undefined ? { root: dir } : { root: dir, signal: deps.interrupt },
+    );
+    for (const outcome of outcomes) deps.log(`${outcome.outcome} ${escapeName(outcome.path)}`);
+  } catch (cause) {
+    const interrupted = interruptionMessage(cause);
+    if (interrupted !== undefined) {
+      deps.error(interrupted);
+      return EXIT_INTERRUPTED;
+    }
+    deps.error(
+      `Failed to change the workspace transport: ${escapeName(
+        cause instanceof Error ? cause.message : String(cause),
+      )}`,
+    );
+    return EXIT_ERROR;
+  }
+  for (const note of plan.notes) deps.log(note);
+  const install =
+    workspaceProfile(plan.manifest.runtime).manifestKind === 'deno'
+      ? 'deno install'
+      : `${plan.manifest.runtime === 'bun' ? 'bun' : 'npm'} install`;
+  deps.log(
+    change.kind === 'broker'
+      ? `Switched every member to the ${change.broker} broker. Run \`${install}\` at the workspace root.`
+      : `Switched ${escapeName(change.member)} to ${change.rpc}. Run \`${install}\` at the workspace root.`,
+  );
+  return EXIT_OK;
+}
+
 /** Runs `setu workspace ports --reallocate`, `setu workspace build` or `setu workspace deploy`. */
 export async function runWorkspaceCommand(
   args: ParsedArgs,
@@ -175,8 +364,10 @@ export async function runWorkspaceCommand(
       ? await runWorkspaceBuild(rest, opsDeps)
       : await runWorkspaceDeploy(rest, opsDeps);
   }
+  if (operation === 'broker' || operation === 'rpc') return await runTransportOperation(args, deps);
   if (args.flags['help'] === true || args.flags['h'] === true) {
     deps.log(`Usage: ${PROGRAM_NAME} workspace ports --reallocate [--dir <path>] [--dry-run]`);
+    deps.log(`       ${PROGRAM_NAME} workspace broker <name> | rpc <member> <style> --help`);
     deps.log(`       ${PROGRAM_NAME} workspace build|deploy --help`);
     return EXIT_OK;
   }

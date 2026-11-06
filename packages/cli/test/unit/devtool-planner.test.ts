@@ -87,7 +87,7 @@ function workspaceHarness(members: readonly WorkspaceMember[], withMemberFiles =
       version: WORKSPACE_VERSION,
       runtime: 'deno',
       basePort: 3000,
-      transport: 'http',
+      broker: 'memory',
       members,
     }),
     '/ws/deno.json': `${JSON.stringify(
@@ -152,6 +152,28 @@ describe('the one devtool planner', () => {
       members: WorkspaceMember[];
     };
     expect(manifest.members[0].devtoolPort).toBe(4000);
+  });
+
+  // M138 §3.1: `devtool enable` re-serializes the manifest it read, so a
+  // version-1 file must be written back as version 2 with its broker kept.
+  it('writes a version-1 manifest back as version 2 when enabling', async () => {
+    const h = workspaceHarness([{ name: 'orders', port: 3000 }]);
+    await h.fs.writeFile(
+      `/ws/${WORKSPACE_MANIFEST}`,
+      new TextEncoder().encode(
+        JSON.stringify({
+          version: 1,
+          runtime: 'deno',
+          basePort: 3000,
+          transport: 'rabbitmq',
+          members: [{ name: 'orders', port: 3000 }],
+        }),
+      ),
+    );
+    expect(await h.runDevtool(['enable', 'orders']), h.err.text()).toBe(0);
+    const written = JSON.parse(h.fs.read(`/ws/${WORKSPACE_MANIFEST}`)) as Record<string, unknown>;
+    expect(written).toMatchObject({ version: 2, broker: 'rabbitmq' });
+    expect('transport' in written).toBe(false);
   });
 
   it('emits byte-identical files from `new --devtool` and `devtool enable` standalone', async () => {

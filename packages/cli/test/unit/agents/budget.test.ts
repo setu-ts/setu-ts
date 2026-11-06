@@ -75,7 +75,7 @@ describe('agent brief byte budgets', () => {
               runtime,
               version: 1,
               basePort: 3000,
-              transport: 'http',
+              broker: 'memory',
               members: [
                 { name: 'orders', port: 3000 },
                 { name: 'billing', port: 3001 },

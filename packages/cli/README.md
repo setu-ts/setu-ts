@@ -169,6 +169,25 @@ Rollback covers SIGINT (Ctrl+C) and caught errors only. SIGTERM, SIGKILL (`kill 
 end the command without rollback. Re-running `setu adopt` converges; an interrupted `new` or
 `generate` can leave the files it wrote, which the next run lists in its overwrite refusal.
 
+## Broker and RPC style
+
+A workspace records its **broker** once — `setu new acme --workspace --broker redis` — because
+members can only meet on a bus they share, and each member's **RPC style** on its own —
+`setu generate app orders --rpc grpc` co-serves Connect/gRPC under `/grpc` beside HTTP. Both are
+rendered into a CLI-owned `src/transport/index.ts` per member, which the member's `setu.config.ts`
+calls, so either can change later without touching the config:
+
+```bash
+setu workspace broker nats          # every member, Compose, k8s and the README section
+setu workspace rpc orders http      # one member
+```
+
+A change writes only CLI-owned files and merges the packages it needs; it never removes one, and it
+refuses — writing nothing — when a member's config does not call the module (the lines to add are
+printed) or when source still uses what it removes (`--force` goes ahead). `--transport` from 0.11.0
+is refused with a pointer to `--broker` and `--rpc`. See the
+[CLI guide](https://setu-ts.dev/docs/cli/#broker-and-rpc-style).
+
 ## Workspace operations
 
 Since 0.11.0, a workspace root builds, tests and deploys every member from one place. The commands
@@ -413,13 +432,13 @@ install, and `setu generate --help` lists only what is available here.
 | `--version`, `-v`       | Prints the version.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 
 Every command refuses an option outside its own set — subcommand-aware for `generate app`,
-`generate library`, `workspace ports`, `workspace build` and `workspace deploy` — with exit `2` and
-nothing written, suggesting the nearest known name when one is within a small edit distance
-(`--templat` suggests `--template`; `--base-port` suggests `--port`). A flag kept deliberately
-recognized for a named refusal (`--di` and `--depends-on` on `new`, the transport flags and
-`--runtime` on `generate app`) still reaches that specific message. Plugin-registered commands
-accept only `--dir` and `--config`: a handler receives positionals only, so no plugin command can
-read any other flag.
+`generate library`, `workspace ports`, `workspace broker`, `workspace rpc`, `workspace build` and
+`workspace deploy` — with exit `2` and nothing written, suggesting the nearest known name when one
+is within a small edit distance (`--templat` suggests `--template`; `--base-port` suggests
+`--port`). A flag kept deliberately recognized for a named refusal (`--di`, `--depends-on`, `--rpc`
+and the removed `--transport` flags on `new`, the broker flags and `--runtime` on `generate app`)
+still reaches that specific message. Plugin-registered commands accept only `--dir` and `--config`:
+a handler receives positionals only, so no plugin command can read any other flag.
 
 Exit codes: `0` success, `1` runtime error (plugin missing, file exists, write failed), `2` usage
 error (unknown command or schematic, missing argument, unknown `--runtime`, an option the command
@@ -706,7 +725,7 @@ stays testable.
 ## Interactive scaffolding
 
 When run at an interactive terminal, `setu new` asks for the choices it already accepts as flags —
-runtime and template on a standalone project, runtime and transport on a workspace. The broker and
+runtime and template on a standalone project, runtime and broker on a workspace. The broker and
 queue questions follow only when the answers already given can actually take them: they are skipped
 for a template registering no messaging (the minimal default, `rest`, `class-based`) and on
 Cloudflare Workers; full-stack offers both, which are the same cases the flags themselves refuse. A
@@ -780,19 +799,19 @@ factory receives its devtool argument; production keeps disabled defaults. Unkno
 receive manual guidance, including the `DEVTOOL_SOURCES` import and the `sources` declaration those
 lines read. The module is regenerated, so preserve application-specific policy outside that file.
 
-Full-stack accepts `new --broker redis --queue redis`, and workspace full-stack members receive
-`messaging` / `queue` options from their workspace transport. Standalone projects can use
-`setu add messaging --broker redis` or `setu add queue --queue redis`; members use the workspace
-transport and refuse per-member flags. The selected client is recorded in runtime dependencies or
-Deno imports (run the printed install command). An absent generated full-stack option is inserted;
-missing queue transport properties can merge with its processors. Existing values and unfamiliar
-configs receive the exact property to configure manually. With no transport the starter uses memory.
-`add` appends the connection variable to the project's existing dotenv file (local default) and its
-`.example` (empty) only where neither assigns it — the file is the `envFilePath` in `setu.config.ts`
-(an array's last entry), and nothing is guessed when that declaration is absent or not a literal
-path — preserves existing Compose files, and creates broker Compose files only when the project has
-none. When `docker/compose.yaml` exists without the selected broker's service, it prints the service
-block to add.
+Full-stack accepts `new --broker redis --queue redis`, and workspace full-stack members pass their
+transport module's `messagingOptions(config)` / `queueOptions(config)` to the starter. Standalone
+projects can use `setu add messaging --broker redis` or `setu add queue --queue redis`; a member's
+`setu add messaging|queue` calls its transport module instead and refuses per-member flags. The
+selected client is recorded in runtime dependencies or Deno imports (run the printed install
+command). An absent generated full-stack option is inserted; missing queue transport properties can
+merge with its processors. Existing values and unfamiliar configs receive the exact property to
+configure manually. With no broker the starter uses memory. `add` appends the connection variable to
+the project's existing dotenv file (local default) and its `.example` (empty) only where neither
+assigns it — the file is the `envFilePath` in `setu.config.ts` (an array's last entry), and nothing
+is guessed when that declaration is absent or not a literal path — preserves existing Compose files,
+and creates broker Compose files only when the project has none. When `docker/compose.yaml` exists
+without the selected broker's service, it prints the service block to add.
 
 `setu add react-router` refuses projects without a full-stack factory or existing ReactRouterPlugin.
 Use `setu new <name> --template full-stack` or `setu generate app <name> --template full-stack` in a

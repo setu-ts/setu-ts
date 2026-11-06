@@ -171,6 +171,33 @@ describe('development source policies', () => {
     ).toBe(wired.source);
   });
 
+  // M138 §3.4: a workspace member's QueuePlugin spreads its transport module's
+  // options; exactly one zero-argument call spread is still auto-wired.
+  it('wires a queue call that spreads one transport-module call', () => {
+    const imports = "import { QueuePlugin } from '@setu-ts/queue-plugin';\n";
+    const wired = withDevtoolSourceWiring(
+      imports +
+        signature +
+        '\n return createApplication({ plugins: [\n  QueuePlugin({ processors: [...QUEUE_PROCESSORS], ...queueOptions() }),\n] });\n}',
+      new Set(['queue-plugin']),
+    );
+    expect(wired.manual).toEqual([]);
+    expect(wired.source).toContain(
+      'QueuePlugin({ ...{ processors: [...QUEUE_PROCESSORS], ...queueOptions() }, ...sources.queue })',
+    );
+    for (const call of [
+      'QueuePlugin({ ...queueOptions(), ...other() }),',
+      'QueuePlugin({ ...queueOptions(config) }),',
+      'QueuePlugin(queueOptions()),',
+    ]) {
+      const source =
+        imports + signature + `\n return createApplication({ plugins: [\n  ${call}\n] });\n}`;
+      const result = withDevtoolSourceWiring(source, new Set(['queue-plugin']));
+      expect(result.source).toBe(source);
+      expect(result.manual).toEqual(['QueuePlugin({ ...options, ...sources.queue })']);
+    }
+  });
+
   it('never rewrites plugin examples inside comments, literals or unfamiliar calls', () => {
     const imports = "import { CachePlugin as $Cache } from '@setu-ts/cache-plugin';\n";
     for (const fake of ['// $Cache(),', '/*\n$Cache(),\n*/', "const text = '$Cache(),';"]) {

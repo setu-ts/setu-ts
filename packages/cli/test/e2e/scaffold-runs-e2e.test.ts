@@ -35,7 +35,7 @@ import { createNodeRuntimeServices } from '@setu-ts/runtime';
 import type { IFileSystem } from '@setu-ts/common';
 import { runCli } from '../../src/cli.ts';
 import type { Prompter } from '../../src/prompt.ts';
-import { listTransports } from '../../src/workspace/transport.ts';
+import { BROKERS, brokerSpec } from '../../src/workspace/transport.ts';
 import {
   bootAndProbe,
   bootWithGeneratedPermissions,
@@ -273,7 +273,7 @@ async function run(args: readonly string[]): Promise<number> {
   });
 }
 
-for (const spec of listTransports()) {
+for (const spec of BROKERS.map((name) => brokerSpec(name))) {
   for (const flag of ['broker', 'queue'] as const) {
     if ((flag === 'broker' ? spec.messagingArgs : spec.queueArgs) === undefined) continue;
     for (const target of ['deno', 'node'] as const) {

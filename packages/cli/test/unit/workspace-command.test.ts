@@ -25,7 +25,7 @@ describe('runWorkspaceCommand', () => {
           runtime: 'deno',
           basePort: 3000,
           devtoolBasePort: 6000,
-          transport: 'http',
+          broker: 'memory',
           members: [{ name: 'orders', port: 3000, devtoolPort: 6000 }],
         }),
         [`${cwd}/apps/orders/.setu-member`]: '',
@@ -60,7 +60,7 @@ describe('runWorkspaceCommand', () => {
         version: WORKSPACE_VERSION,
         runtime: 'deno',
         basePort: 3000,
-        transport: 'http',
+        broker: 'memory',
         members: [
           { name: 'orders', port: 3000 },
           { name: 'billing', port: 3001 },
@@ -88,6 +88,36 @@ describe('runWorkspaceCommand', () => {
     expect(err.text()).toBe('');
   });
 
+  // M138 §3.1: a re-serialized version-1 manifest must come back as version 2
+  // with the mapped fields, or the next read falls back to the in-memory broker.
+  it('rewrites a version-1 manifest as version 2, keeping its broker and grpc members', async () => {
+    const fs = createFakeFs({
+      [`/ws/${WORKSPACE_MANIFEST}`]: JSON.stringify({
+        version: 1,
+        runtime: 'deno',
+        basePort: 3000,
+        transport: 'grpc',
+        members: [{ name: 'orders', port: 3000 }],
+      }),
+      '/ws/apps/orders/.setu-member': '',
+    });
+    const code = await runWorkspaceCommand(parseArgs(['ports', '--reallocate']), {
+      fs,
+      cwd: '/ws',
+      log: () => {},
+      error: () => {},
+      portAvailable: (port) => Promise.resolve(port !== 3000),
+    });
+    expect(code).toBe(0);
+    const written = JSON.parse(fs.read(`/ws/${WORKSPACE_MANIFEST}`)) as Record<string, unknown>;
+    expect(written).toMatchObject({
+      version: 2,
+      broker: 'memory',
+      members: [{ name: 'orders', port: 3001, rpc: 'grpc' }],
+    });
+    expect('transport' in written).toBe(false);
+  });
+
   it('requires the explicit maintenance action and leaves files untouched otherwise', async () => {
     const fs = createFakeFs();
     const err = createRecorder();
@@ -108,7 +138,7 @@ describe('runWorkspaceCommand', () => {
         version: WORKSPACE_VERSION,
         runtime: 'deno',
         basePort: 3000,
-        transport: 'http',
+        broker: 'memory',
         members: [{ name: 'orders', port: 3000 }],
       }),
       '/ws/apps/orders/.setu-member': '',
@@ -161,7 +191,7 @@ describe('runWorkspaceCommand', () => {
         version: WORKSPACE_VERSION,
         runtime: 'deno',
         basePort: 65535,
-        transport: 'http',
+        broker: 'memory',
         members: [{ name: 'orders', port: 65535 }],
       }),
       '/ws/apps/orders/.setu-member': '',
@@ -186,7 +216,7 @@ describe('runWorkspaceCommand', () => {
         version: WORKSPACE_VERSION,
         runtime: 'deno',
         basePort: 3000,
-        transport: 'http',
+        broker: 'memory',
         members: [{ name: 'orders', port: 3000 }],
       }),
       '/ws/apps/orders/.setu-member': '',
@@ -211,7 +241,7 @@ describe('runWorkspaceCommand', () => {
         version: WORKSPACE_VERSION,
         runtime: 'deno',
         basePort: 3000,
-        transport: 'http',
+        broker: 'memory',
         members: [{ name: 'orders', port: 3000 }],
       }),
       '/ws/apps/orders/.setu-member': '',
@@ -236,7 +266,7 @@ describe('runWorkspaceCommand', () => {
         version: WORKSPACE_VERSION,
         runtime: 'deno',
         basePort: 3000,
-        transport: 'http',
+        broker: 'memory',
         members: [{ name: 'orders', port: 3000 }],
       }),
     });
@@ -261,7 +291,7 @@ describe('runWorkspaceCommand', () => {
         version: WORKSPACE_VERSION,
         runtime: 'deno',
         basePort: 3000,
-        transport: 'http',
+        broker: 'memory',
         members: [{ name: 'orders', port: 3000 }],
       }),
     });
@@ -291,7 +321,7 @@ describe('runWorkspaceCommand', () => {
         version: WORKSPACE_VERSION,
         runtime: 'deno',
         basePort: 3000,
-        transport: 'http',
+        broker: 'memory',
         members: [{ name: 'orders', port: 3000 }],
       }),
       '/ws/apps/orders/.setu-member': '',
@@ -316,7 +346,7 @@ describe('runWorkspaceCommand', () => {
       version: WORKSPACE_VERSION,
       runtime: 'deno' as const,
       basePort: 3000,
-      transport: 'http' as const,
+      broker: 'memory' as const,
       members: [{ name: 'orders', port: 3000 }],
     };
     const base = createFakeFs();

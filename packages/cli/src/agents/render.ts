@@ -8,7 +8,7 @@ import { RULE_BLOCKS, verificationCommands } from './rules.ts';
 import { BRIEF_BEGIN, BRIEF_END, briefSection } from './brief-file.ts';
 import { isAgentPackageName } from './package-name.ts';
 import { hasControlCharacter } from '../utils/names.ts';
-import { getTransport } from '../workspace/transport.ts';
+import { getBroker } from '../workspace/transport.ts';
 import { workspaceProfile } from '../workspace/runtime-profile.ts';
 
 function displayValue(value: string | number): string {
@@ -156,7 +156,12 @@ export function renderWorkspaceRoot(workspace: WorkspaceManifest, version: strin
         (m) =>
           `| ${displayValue(m.name)} | ${displayValue(m.port)} | ${m.dependsOn?.map(displayValue).join(', ') || '—'} | ${displayValue(m.devtoolPort ?? '—')} | apps/${displayValue(m.name)}/AGENTS.md |`,
       ),
-      `\nTransport: ${workspace.transport}; URL variable: ${getTransport(workspace.transport)?.connection?.variable ?? 'none'}. Endpoint override: ${displayValue(workspace.transportUrl ?? 'transport default')}.`,
+      `\nBroker: ${workspace.broker}; URL variable: ${getBroker(workspace.broker)?.connection?.variable ?? 'none'}. Endpoint override: ${displayValue(workspace.brokerUrl ?? 'broker default')}. gRPC members: ${
+        workspace.members
+          .filter((m) => m.rpc === 'grpc')
+          .map((m) => displayValue(m.name))
+          .join(', ') || 'none'
+      }.`,
       'Read the member’s own AGENTS.md before working in it.',
       BRIEF_END,
     ].join('\n'),

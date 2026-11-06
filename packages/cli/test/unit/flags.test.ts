@@ -254,9 +254,9 @@ describe('every documented flag is accepted', () => {
         '--workspace',
         '--port',
         '4100',
-        '--transport',
+        '--broker',
         'redis',
-        '--transport-url',
+        '--broker-url',
         'redis://localhost:6379',
       ]),
       h.err.text(),
@@ -426,6 +426,9 @@ describe('help text agrees with the inventory', () => {
     expect(newFlags?.allowed).toContain('depends-on');
     const appFlags = commandFlagsFor('generate', 'app');
     expect(appFlags?.allowed).toContain('transport');
+    expect(appFlags?.allowed).toContain('broker-url');
+    expect(newFlags?.allowed).toContain('transport');
+    expect(newFlags?.allowed).toContain('rpc');
     expect(appFlags?.allowed).toContain('runtime');
     expect(appFlags?.allowed).toContain('di');
   });
@@ -473,10 +476,10 @@ describe('named refusals keep precedence over the generic check', () => {
     expect(h.err.text()).not.toContain('Unknown option');
   });
 
-  it('generate app --transport keeps its workspace-wide guidance', async () => {
+  it('generate app --transport keeps its named guidance', async () => {
     const h = harness(WORKSPACE_SEED);
     expect(await h.run(['generate', 'app', 'billing', '--transport', 'http'])).toBe(2);
-    expect(h.err.text()).toContain('workspace-wide choice');
+    expect(h.err.text()).toContain('--transport no longer exists');
     expect(h.err.text()).not.toContain('Unknown option');
   });
 

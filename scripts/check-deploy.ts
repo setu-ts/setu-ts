@@ -996,7 +996,7 @@ async function checkGenerated(): Promise<CheckOutcome> {
       '--workspace',
       '--runtime',
       'deno',
-      '--transport',
+      '--broker',
       'redis',
       '--port',
       String(GENERATED_PORT),
@@ -1308,8 +1308,6 @@ async function checkWorkspace(clusterModeFollows: boolean): Promise<CheckOutcome
         '--workspace',
         '--runtime',
         'node',
-        '--transport',
-        'http',
         '--port',
         String(WORKSPACE_GATE.port),
       ],
@@ -1594,7 +1592,7 @@ async function checkDenoWorkspaceTest(directory: string, registry: string): Prom
   const cli = (args: readonly string[]) =>
     run([...CLI_COMMAND, ...args], { quiet: true, cwd: directory });
   for (const args of [
-    ['new', 'denows', '--workspace', '--runtime', 'deno', '--transport', 'http'],
+    ['new', 'denows', '--workspace', '--runtime', 'deno'],
     ['generate', 'app', 'api', '--template', 'rest', '--dir', root],
   ]) {
     const step = await cli(args);

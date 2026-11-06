@@ -770,6 +770,10 @@ here.
   graphql-demo's `ws`, generated READMEs linking the site, CHANGELOG link definitions with a bump
   step and release check, `docs/versioning.md` and cross-page anchor checks; 18 smoke rows) —
   complete (PR #564).
+- **Milestone 138** (`packages/cli` — workspace broker and per-member RPC style: a version-2
+  `setu.workspace.json` with `broker` and per-member `rpc`, a CLI-owned `src/transport/index.ts` per
+  member that its config calls, `setu workspace broker` and `setu workspace rpc`, and one planner
+  behind them, `generate app`, `setu sync` and a member's `setu add`) — complete (PR pending).
 - **Next milestone** — the `0.12.0` release; M136 is open.
 
 ## Verification (run before declaring any work done)

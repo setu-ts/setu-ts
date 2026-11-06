@@ -14,7 +14,13 @@ import { CONFIG_EXPORT, CONFIG_MODULE } from './constants.ts';
 import { joinPath, toFileUrl } from './utils/file-writer.ts';
 import { escapeName } from './utils/names.ts';
 import { memberPath } from './utils/member-path.ts';
-import { MEMBERS_DIR, readWorkspaceManifest, WORKSPACE_MANIFEST } from './workspace/manifest.ts';
+import {
+  MEMBERS_DIR,
+  readWorkspaceManifest,
+  WORKSPACE_MANIFEST,
+  type WorkspaceManifest,
+  type WorkspaceMember,
+} from './workspace/manifest.ts';
 import { importModule, type ModuleLoader } from './schematics/custom.ts';
 import type { IFileSystem } from '@setu-ts/common';
 
@@ -199,22 +205,52 @@ export function parentDir(path: string): string | undefined {
  * @returns The directories, nearest first
  */
 export async function installSearchDirs(fs: IFileSystem, dir: string): Promise<string[]> {
-  // Compared with one separator: `joinPath` joins with `/` while a native Windows path keeps
-  // `\`, so `C:\ws/apps/api` and `C:\ws\apps\api` must read as the same member.
-  const project = memberPath(dir);
+  const found = await workspaceMemberOf(fs, dir);
+  if (found === undefined) return [dir];
   const chain: string[] = [];
   for (let current: string | undefined = dir; current !== undefined; current = parentDir(current)) {
     chain.push(current);
+    if (current === found.root) break;
+  }
+  return chain;
+}
+
+/**
+ * The workspace a project is a member of, by the rule {@linkcode installSearchDirs} states.
+ *
+ * One lookup for every caller that needs the member itself, not only its
+ * directories — `setu sync` renders the member's transport module from it (M138)
+ * — so no two callers can disagree about whether a directory is a member.
+ *
+ * @param fs - The CLI's filesystem
+ * @param dir - The project root (absolute)
+ * @returns The workspace root, its manifest and the member, or `undefined` outside one
+ */
+export async function workspaceMemberOf(
+  fs: IFileSystem,
+  dir: string,
+): Promise<
+  | {
+      readonly root: string;
+      readonly manifest: WorkspaceManifest;
+      readonly member: WorkspaceMember;
+    }
+  | undefined
+> {
+  // Compared with one separator: `joinPath` joins with `/` while a native Windows path keeps
+  // `\`, so `C:\ws/apps/api` and `C:\ws\apps\api` must read as the same member.
+  const project = memberPath(dir);
+  for (let current: string | undefined = dir; current !== undefined; current = parentDir(current)) {
     if (!(await exists(fs, joinPath(current, WORKSPACE_MANIFEST)))) continue;
     const read = await readWorkspaceManifest(fs, current);
-    const listed =
-      read.ok &&
-      read.manifest.members.some(
-        (member) => memberPath(joinPath(current!, joinPath(MEMBERS_DIR, member.name))) === project,
-      );
-    return listed ? chain : [dir];
+    if (!read.ok) return undefined;
+    const root = current;
+    const member = read.manifest.members.find(
+      (entry) => memberPath(joinPath(root, joinPath(MEMBERS_DIR, entry.name))) === project,
+    );
+    return member === undefined ? undefined : { root, manifest: read.manifest, member };
   }
-  return [dir];
+  return undefined;
 }
 
 /**

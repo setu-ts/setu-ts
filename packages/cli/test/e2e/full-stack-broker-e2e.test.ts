@@ -45,9 +45,9 @@ describe.skipIf(process.env['REDIS_URL'] === undefined).each(['ioredis', 'node-r
             '--workspace',
             '--runtime',
             'node',
-            '--transport',
+            '--broker',
             'redis',
-            '--transport-url',
+            '--broker-url',
             'redis://127.0.0.1:1',
           ]),
         ).toBe(0);

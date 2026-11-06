@@ -8,6 +8,18 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Changing a workspace's transport after scaffolding (M138, `@setu-ts/cli`).**
+  `setu workspace broker <name>` changes the broker every member shares and
+  `setu workspace rpc <member> <http|grpc>` changes how one member is called. Each member now
+  carries a CLI-owned `src/transport/index.ts` (`messagingOptions()`, `queueOptions()`,
+  `transportPlugins()`, and `csrfExclusions()` on a full-stack member) that its `setu.config.ts`
+  calls, so a change regenerates that module, the manifest, Compose, Kubernetes and the README's
+  `<!-- setu:transport -->` section, merges the packages it needs into each member, and never writes
+  the config. It refuses, writing nothing, when a config does not call the module (printing the
+  lines to add) or when source still uses what the change removes (`--force` goes ahead).
+  `generate app`, `setu sync` and, inside a member, `setu add messaging|queue|grpc` render the
+  module through the same planner.
+
 - **Versioned `replaceSource` (`@setu-ts/common`, `@setu-ts/vector-store-plugin`, #561).**
   `replaceSource(collection, scope, sourceId, records, { version })` refuses a write whose version
   is older than the source's stored one with the new `VectorVersionConflictError` (409), so a late
@@ -220,6 +232,16 @@ All notable changes to this project are documented here. The format follows
   fallback), `MemoryTenantDataStore` and the multi-tenancy plugin's repository.
 
 ### Changed
+
+- **BREAKING — the workspace transport is split into a broker and a per-member RPC style (M138,
+  `@setu-ts/cli`).** `setu new --workspace --transport` and `--transport-url` are removed and
+  refused with a pointer to their replacements: `--broker <name>` and `--broker-url <url>` on the
+  workspace (`memory` is the default; `http`/`grpc` are not brokers), and
+  `setu generate app <name> --rpc grpc` per member. A gRPC member can now sit in a workspace with a
+  real broker, which one `transport` field could not express. `setu.workspace.json` is version 2
+  (`broker`, `brokerUrl`, per-member `rpc`); a version-1 manifest is still read and is written back
+  as version 2, and a 0.11.0 CLI refuses a version-2 file rather than misreading it. A gRPC member's
+  `proto/README.md` is now wrapped the way `deno fmt` wants.
 
 - **Atomic header batches (M131b, #557, `@setu-ts/common`, `@setu-ts/kernel`).** `setHeaders`
   validates every entry before writing any, preserving prior headers on refusal and caching frozen

@@ -24,7 +24,7 @@ import { FRAMEWORK_RANGE, frameworkSpecifier } from '../templates/framework-spec
 import type { IFileSystem } from '@setu-ts/common';
 import { isMissingPath } from '../utils/filesystem-errors.ts';
 import { DOCKERFILE, DOCKERIGNORE, workspaceContainerFiles } from '../workspace/compose.ts';
-import { transportSpec } from '../workspace/transport.ts';
+import { brokerSpec } from '../workspace/transport.ts';
 import { detectTargetRuntime } from '../utils/runtime-detector.ts';
 import { escapeName } from '../utils/names.ts';
 
@@ -680,7 +680,7 @@ async function enableInWorkspace(
 
   for (const file of workspaceContainerFiles(
     nextManifest,
-    transportSpec(manifest.transport),
+    brokerSpec(manifest.broker, manifest.redisClient),
     workspaceProfile(manifest.runtime),
   )) {
     if (file.path !== DOCKERFILE && file.path !== DOCKERIGNORE) continue;

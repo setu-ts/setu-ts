@@ -129,7 +129,7 @@ describe('workspace scaffolding — end to end', () => {
     'adds Redis cache, scheduler and backplane to a real workspace member, then exits a failed e2e (M119c)',
     async () => {
       expect(
-        await run(['new', 'redis-ws', '--workspace', '--runtime', 'node', '--transport', 'redis']),
+        await run(['new', 'redis-ws', '--workspace', '--runtime', 'node', '--broker', 'redis']),
       ).toBe(0);
       const ws = `${root}/redis-ws`;
       expect(await run(['g', 'app', 'orders', '--template', 'microservice', '--dir', ws])).toBe(0);
@@ -302,7 +302,7 @@ try {
   // default. `setu generate command-handler` had the same defect independently.
   it('is formatted and lints clean with a BROKER transport, and after generating', async () => {
     expect(
-      await run(['new', '--runtime', 'deno', 'acme', '--workspace', '--transport', 'rabbitmq']),
+      await run(['new', '--runtime', 'deno', 'acme', '--workspace', '--broker', 'rabbitmq']),
     ).toBe(0);
     const ws = `${root}/acme`;
     expect(await run(['g', 'app', 'orders', '--template', 'microservice', '--dir', ws])).toBe(0);
@@ -332,6 +332,94 @@ try {
     const linted = await check(['lint']);
     expect(linted.code, linted.output).toBe(0);
   });
+
+  // M138: a switch regenerates CLI-owned files only, so a workspace that was
+  // formatted, linted and type-checked before `setu workspace broker` and
+  // `setu workspace rpc` must still be after both — on the module, the configs
+  // and the merged member manifests alike.
+  it(
+    'stays formatted, linted and type-checked across a broker and RPC switch',
+    { timeout: 600_000 },
+    async () => {
+      expect(
+        await run([
+          'new',
+          '--runtime',
+          'deno',
+          'acme',
+          '--workspace',
+          '--broker',
+          'rabbitmq',
+          '--port',
+          String(base),
+        ]),
+      ).toBe(0);
+      const ws = `${root}/acme`;
+      expect(
+        await run([
+          'g',
+          'app',
+          'orders',
+          '--template',
+          'microservice',
+          '--rpc',
+          'grpc',
+          '--dir',
+          ws,
+        ]),
+      ).toBe(0);
+      expect(await run(['g', 'app', 'api', '--template', 'rest', '--dir', ws])).toBe(0);
+
+      const deno = async (argv: readonly string[]) => {
+        const { code, stdout, stderr } = await runProcess(denoBinary(), {
+          args: [...argv],
+          cwd: ws,
+          stdout: 'piped',
+          stderr: 'piped',
+        });
+        const decoder = new TextDecoder();
+        return { code, output: `${decoder.decode(stdout)}${decoder.decode(stderr)}` };
+      };
+      for (const argv of [['fmt', '--check'], ['lint']]) {
+        const result = await deno(argv);
+        expect(result.code, result.output).toBe(0);
+      }
+
+      expect(await run(['workspace', 'broker', 'redis', '--dir', ws]), err.join('\n')).toBe(0);
+      expect(await run(['workspace', 'rpc', 'orders', 'http', '--dir', ws]), err.join('\n')).toBe(
+        0,
+      );
+      expect(await run(['workspace', 'rpc', 'api', 'grpc', '--dir', ws]), err.join('\n')).toBe(0);
+
+      for (const argv of [['fmt', '--check'], ['lint']]) {
+        const result = await deno(argv);
+        expect(result.code, result.output).toBe(0);
+      }
+      expect(await nodeFs.readFile(`${ws}/docker/compose.yaml`, 'utf8')).toContain(
+        'image: redis:7',
+      );
+      const orders = await nodeFs.readFile(`${ws}/apps/orders/src/transport/index.ts`, 'utf8');
+      expect(orders).toContain("broker: 'redis-streams'");
+      expect(orders).not.toContain('GrpcPlugin');
+      expect(await nodeFs.readFile(`${ws}/apps/api/src/transport/index.ts`, 'utf8')).toContain(
+        "GrpcPlugin({ basePath: '/grpc' })",
+      );
+
+      const sources: string[] = [];
+      for (const member of ['orders', 'api']) {
+        const project = `${ws}/apps/${member}`;
+        await useWorkspacePackages(project);
+        sources.push(
+          `${project}/main.ts`,
+          `${project}/setu.config.ts`,
+          `${project}/src/transport/index.ts`,
+        );
+      }
+      const checked = await deno(['check', '--node-modules-dir=none', ...sources]);
+      expect(checked.output).not.toContain('SyntaxError');
+      expect(checked.code, checked.output).toBe(0);
+    },
+  );
 
   // The gate the one above could not be. It generated exactly ONE artifact, of the
   // one family that had been fixed — and a barrel only overflows once it lists
@@ -663,7 +751,7 @@ try {
         'deno',
         'acme',
         '--workspace',
-        '--transport',
+        '--broker',
         'rabbitmq',
         '--port',
         String(base),
@@ -691,8 +779,11 @@ try {
     const config = await nodeFs.readFile(`${project}/setu.config.ts`, 'utf8');
     expect(config).toContain('DecoratorPlugin');
     expect(config).toContain('DiPlugin');
-    // The transport overlay reached the styled member's wirings.
-    expect(config).toContain('rabbitmq');
+    // The broker reached the styled member through its transport module (M138).
+    expect(config).toContain('MessagingPlugin(messagingOptions())');
+    expect(await nodeFs.readFile(`${project}/src/transport/index.ts`, 'utf8')).toContain(
+      'rabbitmq',
+    );
 
     const sources = [
       `${project}/main.ts`,
@@ -798,18 +889,20 @@ try {
     },
   );
 
-  it('type-checks a full-stack member in a grpc workspace', { timeout: 900_000 }, async () => {
-    expect(
-      await run(['new', '--runtime', 'deno', 'shop', '--workspace', '--transport', 'grpc']),
-    ).toBe(0);
+  it('type-checks a full-stack grpc member', { timeout: 900_000 }, async () => {
+    expect(await run(['new', '--runtime', 'deno', 'shop', '--workspace'])).toBe(0);
     const ws = `${root}/shop`;
-    expect(await run(['g', 'app', 'web', '--template', 'full-stack', '--dir', ws])).toBe(0);
+    expect(
+      await run(['g', 'app', 'web', '--template', 'full-stack', '--rpc', 'grpc', '--dir', ws]),
+    ).toBe(0);
 
     const project = `${ws}/apps/web`;
     const config = await nodeFs.readFile(`${project}/setu.config.ts`, 'utf8');
-    expect(config).toContain("import { GrpcPlugin } from '@setu-ts/grpc-plugin';");
-    expect(config).toContain("app.register(GrpcPlugin({ basePath: '/grpc' }));");
-    expect(config).toContain("csrf: { exclude: [new RegExp('^/grpc(?:/|$)')] },");
+    expect(config).toContain('for (const plugin of transportPlugins()) app.register(plugin);');
+    expect(config).toContain('csrf: { exclude: [...csrfExclusions()] },');
+    const module = await nodeFs.readFile(`${project}/src/transport/index.ts`, 'utf8');
+    expect(module).toContain("import { GrpcPlugin } from '@setu-ts/grpc-plugin';");
+    expect(module).toContain("new RegExp('^/grpc(?:/|$)')");
 
     await useWorkspacePackages(project);
     const { code, stderr } = await denoCheck(project, [
@@ -819,6 +912,19 @@ try {
     ]);
     expect(stderr).not.toContain('SyntaxError');
     expect(code, stderr).toBe(0);
+
+    // M138: switching the member to HTTP and the workspace to Redis regenerates
+    // its module, and the starter-composed config still type-checks against it.
+    expect(await run(['workspace', 'rpc', 'web', 'http', '--dir', ws]), err.join('\n')).toBe(0);
+    expect(await run(['workspace', 'broker', 'redis', '--dir', ws]), err.join('\n')).toBe(0);
+    await useWorkspacePackages(project);
+    const switched = await denoCheck(project, [
+      `${project}/main.ts`,
+      `${project}/setu.config.ts`,
+      `${project}/app/lib/load-context.ts`,
+    ]);
+    expect(switched.stderr).not.toContain('SyntaxError');
+    expect(switched.code, switched.stderr).toBe(0);
   });
 
   // The whole claim of a library member is that it needs NO wiring: a Deno

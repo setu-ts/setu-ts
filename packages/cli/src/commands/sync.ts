@@ -23,6 +23,29 @@ import {
 import { formatForTarget } from '../utils/prettier-format.ts';
 import { interruptionMessage } from '../utils/interruption.ts';
 import { EXIT_ERROR, EXIT_INTERRUPTED, EXIT_OK } from '../constants.ts';
+import type { IFileSystem } from '@setu-ts/common';
+import { workspaceMemberOf } from '../app-loader.ts';
+import { memberTransportModule } from '../workspace/rewire.ts';
+import { TRANSPORT_MODULE } from '../workspace/transport-module.ts';
+
+/**
+ * The transport module a workspace member's sync rewrites, if `dir` is a member.
+ *
+ * Found by walking up to `setu.workspace.json`, so `setu sync` run inside a
+ * member regenerates it as well as one run at the root. The module depends on the
+ * manifest and the member's packages, never on `setu.config.ts`, so it is
+ * regenerated even when the config cannot be read (M138 §3.7).
+ *
+ * @param fs - The filesystem
+ * @param dir - The project directory
+ * @returns The module's contents, or `undefined` outside a workspace
+ */
+async function workspaceTransportModule(fs: IFileSystem, dir: string): Promise<string | undefined> {
+  const found = await workspaceMemberOf(fs, dir);
+  return found === undefined
+    ? undefined
+    : (await memberTransportModule(fs, found.root, found.manifest, found.member)).contents;
+}
 
 /** Plans, formats and transactionally writes the same barrels as generate. */
 export async function runSyncCommand(args: ParsedArgs, deps: ICheckDependencies): Promise<number> {
@@ -38,6 +61,7 @@ export async function runSyncCommand(args: ParsedArgs, deps: ICheckDependencies)
     async (dir, deps) => {
       try {
         const installed = await detectPlugins(deps.fs, dir);
+        const transportModule = await workspaceTransportModule(deps.fs, dir);
         const diagnosis = await diagnoseProject(deps.fs, dir, installed);
         if (refuseDuplicateNames(diagnosis, deps.error)) return EXIT_ERROR;
         // Hand registrations are read from `setu.config.ts`; without it the scan cannot
@@ -46,8 +70,30 @@ export async function runSyncCommand(args: ParsedArgs, deps: ICheckDependencies)
         if (diagnosis.findings.some((finding) => finding.kind === 'config-unreadable')) {
           const result = await readSilence(deps.fs, dir, diagnosis.findings);
           renderCheckFindings(result.findings, deps.error);
+          // The transport module does not depend on the config, so it is still
+          // regenerated: it is what a member migrating to it needs first.
+          if (transportModule !== undefined && args.flags['dry-run'] !== true) {
+            const outcomes = await writeFiles(
+              deps.fs,
+              await formatForTarget(
+                [
+                  {
+                    path: joinPath(dir, TRANSPORT_MODULE),
+                    contents: transportModule,
+                    managed: true,
+                  },
+                ],
+                await detectTargetRuntime(deps.fs, dir),
+                dir,
+                deps.error,
+              ),
+              { root: dir, ...(deps.interrupt === undefined ? {} : { signal: deps.interrupt }) },
+            );
+            for (const outcome of outcomes)
+              deps.log(`${outcome.outcome} ${escapeName(outcome.path)}`);
+          }
           deps.error(
-            'setu sync wrote nothing: setu.config.ts cannot be read, so hand registrations cannot be checked.',
+            `setu sync wrote ${transportModule === undefined ? 'nothing' : 'no barrels'}: setu.config.ts cannot be read, so hand registrations cannot be checked.`,
           );
           return EXIT_ERROR;
         }
@@ -55,6 +101,7 @@ export async function runSyncCommand(args: ParsedArgs, deps: ICheckDependencies)
         const plan = (path: string, contents: string): void => {
           files.set(path, { path: joinPath(dir, path), contents, managed: true });
         };
+        if (transportModule !== undefined) plan(TRANSPORT_MODULE, transportModule);
         // A barrel whose family holds an artifact that could not be read is left as
         // it is: rewriting it from the scan would drop an import nobody can verify
         // (M118 audit F7). The E013 finding printed below names the file.

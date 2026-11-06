@@ -181,8 +181,11 @@ export interface AppFactoryRenderContext {
   readonly serviceEndpoints?: string;
   /** Dotenv file passed through a config-driven starter factory. */
   readonly envFilePath?: string;
-  /** Mounted RPC prefix supplied by a workspace transport, when any. */
-  readonly grpcBasePath?: string;
+  /**
+   * An expression yielding the paths form CSRF must not guard, supplied by a
+   * workspace member's transport module (M138). Absent → no exclusions.
+   */
+  readonly csrfExclude?: string;
   /** Rendered messaging options supplied by a transport. @since 0.11.0 */
   readonly messaging?: string;
   /** Rendered queue options supplied by a transport. @since 0.11.0 */

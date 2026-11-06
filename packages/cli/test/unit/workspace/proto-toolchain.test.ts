@@ -6,7 +6,7 @@ import {
   PROTO_TASK_COMMAND,
   protoToolchainFiles,
 } from '../../../src/workspace/proto-toolchain.ts';
-import { transportSpec } from '../../../src/workspace/transport.ts';
+import { rpcSpec } from '../../../src/workspace/rpc.ts';
 
 describe('protoToolchainFiles', () => {
   const files = protoToolchainFiles('orders.v1');
@@ -91,9 +91,9 @@ describe('protoToolchainFiles', () => {
   });
 });
 
-describe('the grpc transport arm', () => {
+describe('the grpc RPC style', () => {
   it('contributes the toolchain, its task, and its imports', () => {
-    const grpc = transportSpec('grpc');
+    const grpc = rpcSpec('grpc');
     expect(grpc.memberFiles?.('orders', true).map((f) => f.path)).toContain('buf.gen.yaml');
     expect(grpc.memberTasks?.['proto:gen']).toBe(PROTO_TASK_COMMAND);
     expect(grpc.memberImports?.['@bufbuild/protobuf']).toBeDefined();
@@ -102,18 +102,17 @@ describe('the grpc transport arm', () => {
   // The package must differ per member, or two services' messages land in one
   // namespace. A hyphenated member name is not a legal proto package component.
   it('derives a distinct, legal proto package per member', () => {
-    const grpc = transportSpec('grpc');
+    const grpc = rpcSpec('grpc');
     const first = grpc.memberFiles?.('orders', true) ?? [];
     const second = grpc.memberFiles?.('order-items', true) ?? [];
     expect(first.some((f) => f.contents.includes('package orders.v1;'))).toBe(true);
     expect(second.some((f) => f.contents.includes('package order_items.v1;'))).toBe(true);
   });
 
-  it('is the only transport that contributes member files', () => {
-    for (const name of ['http', 'memory', 'redis', 'pubsub', 'service-bus'] as const) {
-      expect(transportSpec(name).memberFiles).toBeUndefined();
-      expect(transportSpec(name).memberTasks).toBeUndefined();
-      expect(transportSpec(name).memberImports).toBeUndefined();
-    }
+  it('is the only RPC style that contributes member files', () => {
+    const http = rpcSpec('http');
+    expect(http.memberFiles).toBeUndefined();
+    expect(http.memberTasks).toBeUndefined();
+    expect(http.memberImports).toBeUndefined();
   });
 });
