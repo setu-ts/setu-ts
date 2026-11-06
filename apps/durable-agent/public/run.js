@@ -342,7 +342,7 @@ async function follow() {
       render();
     }
     // The stream ended: either the run finished, or it parked for an approval.
-    await refreshStatus();
+    await refreshStatus(id, controller.signal);
     void loadOrders();
   } catch {
     if (controller.signal.aborted || id !== runId) return;
@@ -367,10 +367,13 @@ function later(id, ms) {
   }, ms);
 }
 
-async function refreshStatus() {
-  const res = await fetch(`/runs/${encodeURIComponent(runId)}`, { headers: headers() });
+/** Applies a run's current status, unless the page has moved to another run meanwhile. */
+async function refreshStatus(id, signal) {
+  if (signal.aborted || id !== runId) return;
+  const res = await fetch(`/runs/${encodeURIComponent(id)}`, { headers: headers() });
   if (!res.ok) return;
   const view = await res.json();
+  if (signal.aborted || id !== runId) return;
   setStatus(view.status);
   // The stream ended while the run is still going (another server holds it,
   // or it is about to be resumed): look again shortly, not straight away.
@@ -383,7 +386,10 @@ async function refreshStatus() {
 
 /** Rebuilds a finished run from GET /runs/:id: its stored model messages. */
 async function load() {
-  const res = await fetch(`/runs/${encodeURIComponent(runId)}`, { headers: headers() });
+  const id = runId;
+  const res = await fetch(`/runs/${encodeURIComponent(id)}`, { headers: headers() });
+  // The page moved to another run (or a new conversation) while this answered.
+  if (id !== runId) return;
   if (res.status === 404) {
     notice = { text: 'This run does not exist, or belongs to another user.', bad: true };
     parts = [];
@@ -404,6 +410,7 @@ async function load() {
     return;
   }
   const view = await res.json();
+  if (id !== runId) return;
   parts = [];
   question = '';
   notice = null;
