@@ -328,26 +328,26 @@ All notable changes to this project are documented here. The format follows
 ### Fixed
 
 - **Generated READMEs link the site, and the example-download refusal works from `npm create`
-  (X93-7, X93-3, M131d, `@setu-ts/cli`).** A scaffolded project's and a workspace's README link
-  `https://setu-ts.dev/` instead of GitHub, which some readers cannot reach. When
+  (X93-7, X93-3, M131d, #564, `@setu-ts/cli`).** A scaffolded project's and a workspace's README
+  link `https://setu-ts.dev/` instead of GitHub, which some readers cannot reach. When
   `setu new --example` cannot download a file, the refusal suggests
   `npx @setu-ts/cli new <name> --template <t>`, which works from both `setu` and
   `npm create @setu-ts`, and names the nested socket error and its `code` (`ENOTFOUND`,
   `ECONNREFUSED`) instead of only "fetch failed".
-- **`setu add auth` on a full-stack project links the password sign-in recipe (X89-3, M131d,
+- **`setu add auth` on a full-stack project links the password sign-in recipe (X89-3, M131d, #564,
   `@setu-ts/cli`).** The starter-arm note also prints the auth-plugin README's full-stack recipe,
   since the template's own login is a placeholder. `--style` on the full-stack template is refused
   as functional-only rather than as having no controller seam, which it has (X91-8).
-- **`graphql-demo` works outside the repository (X93-1, M131d).** The example declares `ws`, the
-  runtime's optional WebSocket peer, so a downloaded copy's WebSocket transport no longer closes
+- **`graphql-demo` works outside the repository (X93-1, M131d, #564).** The example declares `ws`,
+  the runtime's optional WebSocket peer, so a downloaded copy's WebSocket transport no longer closes
   with 1006; its smoke now completes a `graphql-transport-ws` handshake.
-- **Release link definitions (X93-4, M131d).** CHANGELOG gains its missing `[0.11.0]` definition and
-  compares `[unreleased]` from `v0.11.0`. `release:bump` now writes the new version's definition and
-  moves the `[unreleased]` base, and `release:verify` refuses a version heading without a definition
-  or a stale `[unreleased]` base. The website's link check also checks a fragment on another page,
-  which is how the changelog's `/#versioning` links shipped broken (X93-5); the versioning policy is
-  now the `docs/versioning.md` page.
-- **Documentation that did not match the code (M131d).** The upgrade guide covers the #526
+- **Release link definitions (X93-4, M131d, #564).** CHANGELOG gains its missing `[0.11.0]`
+  definition and compares `[unreleased]` from `v0.11.0`. `release:bump` now writes the new version's
+  definition and moves the `[unreleased]` base, and `release:verify` refuses a version heading
+  without a definition or a stale `[unreleased]` base. The website's link check also checks a
+  fragment on another page, which is how the changelog's `/#versioning` links shipped broken
+  (X93-5); the versioning policy is now the `docs/versioning.md` page.
+- **Documentation that did not match the code (M131d, #564).** The upgrade guide covers the #526
   controllers break for 0.11.0 (X90-1), re-running `setu agents` after an upgrade (V11-18), the
   Workers full-stack repair's `@types/node` and `waitUntil` steps (V10-16), when a missing Deno
   import-map entry fails (V11-16, also in the openapi README) and what an existing project does for

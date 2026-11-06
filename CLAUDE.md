@@ -769,7 +769,7 @@ here.
   deployment path and `--pull-secret` walkthrough, the full-stack password sign-in recipe,
   graphql-demo's `ws`, generated READMEs linking the site, CHANGELOG link definitions with a bump
   step and release check, `docs/versioning.md` and cross-page anchor checks; 18 smoke rows) —
-  complete (PR pending).
+  complete (PR #564).
 - **Next milestone** — the `0.12.0` release; M136 is open.
 
 ## Verification (run before declaring any work done)
