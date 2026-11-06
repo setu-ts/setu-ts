@@ -110,7 +110,7 @@ included. It exists so the example can show who may ask for, see and approve a r
 identity provider; a malformed header is refused with `400` on every route. The server therefore
 listens on `127.0.0.1` only unless you set `HOST`. Replace the middleware with `AuthPlugin` before
 the application serves anyone but you, and keep the rules it feeds: orders belong to a customer,
-and `canDecide` names who approves.
+and `canDecide` names who approves. `canAccess` lets a lead read and cancel any customer's run.
 
 ## How it works
 
