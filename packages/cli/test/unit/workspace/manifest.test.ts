@@ -192,6 +192,17 @@ describe('readWorkspaceManifest', () => {
     });
   }
 
+  // Only an absent field takes the default; an explicit null is refused by name.
+  for (const version of [1, 2]) {
+    const field = version === 1 ? 'transport' : 'broker';
+    it(`refuses an explicit null ${field} in a version-${version} manifest`, async () => {
+      const result = await read(
+        `{"version":${version},"basePort":3000,"${field}":null,"members":[]}`,
+      );
+      expect(result).toEqual({ ok: false, problem: { kind: 'unknown-broker', broker: 'null' } });
+    });
+  }
+
   // A version-2 file still carrying a version-1 field is half-migrated: which
   // field wins is a guess, so neither does.
   for (const field of ['"transport":"redis"', '"transportUrl":"redis://x"']) {

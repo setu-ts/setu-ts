@@ -167,13 +167,15 @@ const app = await createApp();
 await app.start();
 const broker = app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
 const seen: unknown[] = [];
-await broker.subscribe('orders.created', (message) => { seen.push(message); });
+let delivered: () => void = () => {};
+const arrived = new Promise<void>((resolve) => { delivered = resolve; });
+await broker.subscribe('orders.created', (message) => { seen.push(message); delivered(); });
 console.log('SUBSCRIBER_READY');
-setTimeout(async () => {
-  console.log('__PROBE_RESULT__' + JSON.stringify({ received: seen }));
-  await app.stop();
-  Deno.exit(0);
-}, 6000);
+// Up until delivery, bounded: a fixed window raced a publisher still booting.
+await Promise.race([arrived, new Promise((resolve) => setTimeout(resolve, 30_000))]);
+console.log('__PROBE_RESULT__' + JSON.stringify({ received: seen }));
+await app.stop();
+Deno.exit(0);
 `;
 
 /** A spawned peer, as {@linkcode spawnProcess} returns it. */
@@ -608,27 +610,41 @@ if (health.status !== 200 || (await health.json()).checks.messaging.status !== '
 
       // The subscriber runs first and stays up while the publisher fires.
       await nodeFs.writeFile(`${ws}/apps/billing/subscriber.ts`, BROKER_SUBSCRIBE_PROBE);
-      const subscriber = spawnProcess(denoBinary(), {
-        args: [
-          'run',
-          '-A',
-          '--node-modules-dir=none',
-          '--config',
-          `${ws}/apps/billing/deno.json`,
-          `${ws}/apps/billing/subscriber.ts`,
-        ],
-        cwd: `${ws}/apps/billing`,
-        stdout: 'piped',
-        stderr: 'piped',
-      });
+      const subscriber = watchPeer(
+        spawnProcess(denoBinary(), {
+          args: [
+            'run',
+            '-A',
+            '--node-modules-dir=none',
+            '--config',
+            `${ws}/apps/billing/deno.json`,
+            `${ws}/apps/billing/subscriber.ts`,
+          ],
+          cwd: `${ws}/apps/billing`,
+          stdout: 'piped',
+          stderr: 'piped',
+        }),
+      );
 
       try {
-        await new Promise((resolve) => setTimeout(resolve, 3000));
+        // Publish only once the subscription exists: a fixed delay raced it.
+        const deadline = performance.now() + 30_000;
+        while (
+          !subscriber.output().includes('SUBSCRIBER_READY') &&
+          subscriber.exited() === undefined &&
+          performance.now() < deadline
+        )
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        expect(subscriber.output()).toContain('SUBSCRIBER_READY');
         const published = await bootAndProbe(`${ws}/apps/orders`, BROKER_PUBLISH_PROBE);
         expect(published['published']).toBe(true);
 
-        const out = new TextDecoder().decode((await subscriber.output()).stdout);
-        const line = out.split('\n').find((l) => l.startsWith('__PROBE_RESULT__'));
+        await subscriber.server.status;
+        await subscriber.drained;
+        const line = subscriber
+          .output()
+          .split('\n')
+          .find((l) => l.startsWith('__PROBE_RESULT__'));
         expect(line).toBeDefined();
         const received = JSON.parse(line?.slice('__PROBE_RESULT__'.length) ?? '{}') as {
           received: { id: number; from: string }[];
@@ -638,11 +654,11 @@ if (health.status !== 200 || (await health.json()).checks.messaging.status !== '
         expect(received.received).toContainEqual({ id: 42, from: 'orders' });
       } finally {
         try {
-          subscriber.kill();
+          subscriber.server.kill();
         } catch {
-          // Already exited on its own timer.
+          // Already exited on delivery or its own bound.
         }
-        await subscriber.status;
+        await subscriber.server.status;
       }
     });
   }

@@ -383,7 +383,9 @@ function readBus(record: Record<string, unknown>, version: number): BusRead {
   const malformed: BusRead = { ok: false, problem: { kind: 'malformed' } };
   if (version === LEGACY_TRANSPORT_VERSION) {
     if (record['broker'] !== undefined || record['brokerUrl'] !== undefined) return malformed;
-    const transport = record['transport'] ?? 'http';
+    // Only an ABSENT field takes the default: an explicit `null` is a value this
+    // CLI does not know, refused like any other, never read as the default.
+    const transport = record['transport'] === undefined ? 'http' : record['transport'];
     const url = record['transportUrl'];
     if (typeof transport !== 'string') {
       return { ok: false, problem: { kind: 'unknown-broker', broker: String(transport) } };
@@ -404,7 +406,7 @@ function readBus(record: Record<string, unknown>, version: number): BusRead {
     };
   }
   if (record['transport'] !== undefined || record['transportUrl'] !== undefined) return malformed;
-  const broker = record['broker'] ?? DEFAULT_BROKER;
+  const broker = record['broker'] === undefined ? DEFAULT_BROKER : record['broker'];
   if (typeof broker !== 'string' || getBroker(broker) === undefined) {
     return { ok: false, problem: { kind: 'unknown-broker', broker: String(broker) } };
   }

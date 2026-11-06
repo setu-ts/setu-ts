@@ -85,7 +85,11 @@ import {
   starterSeamLiteral,
 } from '../templates/seam.ts';
 import { renderPluginCall } from '../utils/render-call.ts';
-import { installSearchDirs, unknownWorkspaceRedisClient } from '../app-loader.ts';
+import {
+  installSearchDirs,
+  unknownWorkspaceRedisClient,
+  workspaceMemberOf,
+} from '../app-loader.ts';
 import {
   MEMBERS_DIR,
   readWorkspaceManifest,
@@ -1422,15 +1426,14 @@ async function workspaceAddArgs(
   arm?: ArmSelector,
 ): Promise<WorkspaceAddArgs | undefined> {
   if (dirs.length === 1) return undefined;
-  const root = dirs[dirs.length - 1]!;
-  const read = await readWorkspaceManifest(deps.fs, root);
-  if (!read.ok) return undefined;
-  const transport = brokerSpec(read.manifest.broker, read.manifest.redisClient);
+  // The lookup `installSearchDirs` itself uses, so a native Windows path names the
+  // same member it does (one separator comparison, `utils/member-path.ts`).
+  const found = await workspaceMemberOf(deps.fs, dirs[0]!);
+  if (found === undefined) return undefined;
+  const { root, manifest, member } = found;
+  const transport = brokerSpec(manifest.broker, manifest.redisClient);
   const selector = arm ?? defaultArm(bare);
-  const member = read.manifest.members.find(
-    (entry) => joinPath(root, MEMBERS_DIR, entry.name) === dirs[0],
-  );
-  if (member !== undefined && (selector === 'messagingArgs' || selector === 'queueArgs')) {
+  if (selector === 'messagingArgs' || selector === 'queueArgs') {
     const messaging = selector === 'messagingArgs';
     const symbol = messaging ? TRANSPORT_EXPORTS.messaging : TRANSPORT_EXPORTS.queue;
     const call = `${symbol}(${starter ? 'config' : ''})`;
@@ -1441,10 +1444,10 @@ async function workspaceAddArgs(
         builder === undefined
           ? []
           : ((messaging ? transport.messagingClients : transport.queueClients) ?? []),
-      module: { root, manifest: read.manifest, member, symbol },
+      module: { root, manifest, member, symbol },
     };
   }
-  return transportAddArgs(transport, bare, runtime, starter, read.manifest.brokerUrl, arm);
+  return transportAddArgs(transport, bare, runtime, starter, manifest.brokerUrl, arm);
 }
 
 /**
@@ -1716,16 +1719,15 @@ export async function runAddCommand(
   // Inside a workspace member, gRPC is the member's RPC style: the same change as
   // `setu workspace rpc <member> grpc`, through the same planner (M138 §3.7).
   if (bare === 'grpc-plugin' && searchDirs.length > 1) {
-    const root = searchDirs[searchDirs.length - 1]!;
-    const read = await readWorkspaceManifest(deps.fs, root);
-    const member = read.ok
-      ? read.manifest.members.find((entry) => joinPath(root, MEMBERS_DIR, entry.name) === dir)
-      : undefined;
-    if (member !== undefined) {
+    const found = await workspaceMemberOf(deps.fs, dir);
+    if (found !== undefined) {
       return await runWorkspaceCommand(
         {
-          positionals: ['rpc', member.name, 'grpc'],
-          flags: { dir: root, ...(args.flags['dry-run'] === true ? { 'dry-run': true } : {}) },
+          positionals: ['rpc', found.member.name, 'grpc'],
+          flags: {
+            dir: found.root,
+            ...(args.flags['dry-run'] === true ? { 'dry-run': true } : {}),
+          },
         },
         {
           fs: deps.fs,
