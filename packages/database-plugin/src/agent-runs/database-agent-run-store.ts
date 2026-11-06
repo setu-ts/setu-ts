@@ -42,6 +42,8 @@ const DEFAULTS = {
   approval: 'AgentRunApproval',
 } as const;
 const TERMINAL = ['completed', 'failed', 'cancelled'];
+/** How many pages of overdue approvals one `expired()` call reads at most. */
+const EXPIRY_PAGES = 4;
 function comparison(field: string, operator: 'lt' | 'gte', value: number): FilterExpression {
   return { type: 'comparison', field, operator, value };
 }
@@ -164,7 +166,10 @@ export class DatabaseAgentRunStore implements IAgentRunStore {
     } catch (error) {
       if (!(error instanceof DuplicateKeyError)) throw error;
       await this.#held(run);
-      const orphan = await repo.findById(value.id as string);
+      // Decoded like every other read: some drivers return a bigint column as
+      // a bigint, which the number check below would otherwise refuse.
+      const raw = await repo.findById(value.id as string);
+      const orphan = raw ? decode<{ leaseVersion?: unknown }>(raw) : null;
       if (
         !orphan ||
         typeof orphan.leaseVersion !== 'number' ||
@@ -257,16 +262,33 @@ export class DatabaseAgentRunStore implements IAgentRunStore {
   }
   /** @inheritdoc */
   async expired(now: number, limit: number): Promise<readonly AgentRunApprovalRow[]> {
-    const candidates = await this.#repo('approval').findAll({
-      where: { status: 'pending' },
-      filter: comparison('deadline', 'lt', now),
-      orderBy: { deadline: 'asc' },
-      limit,
-    });
+    // Uncommitted approvals and ones whose run cannot be read are skipped, so
+    // page past them (a bounded number of pages) rather than let a batch of
+    // them hide every later overdue approval.
     const committed: AgentRunApprovalRow[] = [];
-    for (const row of candidates)
-      if ((await this.get(row.runId as string))?.approvalIds.includes(row.id as string))
-        committed.push(decode<AgentRunApprovalRow>(row));
+    for (let page = 0; page < EXPIRY_PAGES && committed.length < limit; page++) {
+      const candidates = await this.#repo('approval').findAll({
+        where: { status: 'pending' },
+        filter: comparison('deadline', 'lt', now),
+        orderBy: { deadline: 'asc' },
+        limit,
+        offset: page * limit,
+      });
+      for (const row of candidates) {
+        if (committed.length === limit) break;
+        let run: AgentRunRow | null;
+        try {
+          run = await this.get(row.runId as string);
+        } catch (error) {
+          if (error instanceof AgentRunStoreUnavailableError && error.reason === 'invalid-row')
+            continue;
+          throw error;
+        }
+        if (run?.approvalIds.includes(row.id as string))
+          committed.push(decode<AgentRunApprovalRow>(row));
+      }
+      if (candidates.length < limit) break;
+    }
     return committed;
   }
   /** @inheritdoc */

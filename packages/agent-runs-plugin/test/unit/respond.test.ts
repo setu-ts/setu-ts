@@ -75,13 +75,15 @@ describe('stream replay', () => {
           expect(text).not.toContain(`id: ${chunks[0]!.id}\n`);
           expect(text).toContain(`id: ${chunks[1]!.id}\n`);
           expect(text).not.toContain('data-setu-replay');
-        } else if (last === 'broken' || last === '0.0') {
-          // An unparseable id is no resume point: plain replay, no marker.
+        } else if (last === 'broken' || last === '0.0' || last === '9999999999999999999999.0.1') {
+          // An id that does not parse to safe integers is no resume point:
+          // plain replay, no marker.
           expect(text).toContain(`id: ${chunks[0]!.id}\n`);
           expect(text).not.toContain('data-setu-replay');
         } else {
           // A position the log does not hold, or one another holder wrote:
           // the marker, then the whole log from the start.
+          expect(text).toContain('data-setu-replay');
           expect(text.indexOf('data-setu-replay')).toBeLessThan(
             text.indexOf(`id: ${chunks[0]!.id}\n`),
           );

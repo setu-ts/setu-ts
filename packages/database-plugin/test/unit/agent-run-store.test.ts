@@ -297,4 +297,52 @@ describe('database agent run store', () => {
     read.mockRestore();
     await db.close();
   });
+  it('replaces an orphan whose lease version a driver returns as a bigint', async () => {
+    const db = await memoryService();
+    const store = new DatabaseAgentRunStore(db);
+    await store.create(row());
+    const entries = db.getRepository<Record<string, unknown>>('AgentRunEntry');
+    await entries.create({ ...entry(), leaseVersion: 0 });
+    // Holder 1 meets holder 0's orphan, read back the way a bigint driver returns it.
+    await store.update('run', { leaseVersion: 0 }, { leaseVersion: 1 });
+    const read = vi
+      .spyOn(entries, 'findById')
+      .mockResolvedValueOnce({ ...entry(), leaseVersion: 0n } as never);
+    const held = await store.appendEntry({ ...row(), leaseVersion: 1 }, entry());
+    expect(held.entryCount).toBe(1);
+    expect(read).toHaveBeenCalled();
+    await db.close();
+  });
+  it('skips approvals whose run is unreadable or uncommitted and pages past them', async () => {
+    const db = await memoryService();
+    const store = new DatabaseAgentRunStore(db);
+    const approvals = db.getRepository<Record<string, unknown>>('AgentRunApproval');
+    const runs = db.getRepository<Record<string, unknown>>('AgentRun');
+    // An approval whose run row is malformed, one that was never committed,
+    // and one that is: with a limit of 1 the committed one is still found.
+    await runs.create({ ...row(), id: 'bad', entryCount: 0.5 });
+    await approvals.create({ ...approval(), id: 'a1', runId: 'bad', deadline: 1, leaseVersion: 0 });
+    await store.create({ ...row(), id: 'loose' });
+    await approvals.create({
+      ...approval(),
+      id: 'a2',
+      runId: 'loose',
+      deadline: 2,
+      leaseVersion: 0,
+    });
+    await store.create({ ...row(), id: 'good', approvalIds: ['a3'] });
+    await approvals.create({
+      ...approval(),
+      id: 'a3',
+      runId: 'good',
+      deadline: 3,
+      leaseVersion: 0,
+    });
+    expect((await store.expired(10, 1)).map((a) => a.id)).toEqual(['a3']);
+    expect((await store.expired(10, 5)).map((a) => a.id)).toEqual(['a3']);
+    // Any other store fault still reaches the sweep.
+    vi.spyOn(store, 'get').mockRejectedValueOnce(new Error('store down'));
+    await expect(store.expired(10, 5)).rejects.toThrow('store down');
+    await db.close();
+  });
 });

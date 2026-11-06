@@ -313,10 +313,11 @@ export class AgentRunService implements IAgentRunService {
       live,
     );
     if (!flagged) return;
-    if (local) {
-      local.lease.controller.abort();
-      return;
-    }
+    // A local holder that is still running observes the abort at once. One
+    // that parked before the flag landed has released the run, so it is woken
+    // below like any other parked run.
+    local?.lease.controller.abort();
+    if (local && !parked(flagged)) return;
     // A holder observes the flag at its next renewal. Only a parked run is
     // woken here, so a run another instance holds is never claimed twice.
     const ready = parked(flagged)

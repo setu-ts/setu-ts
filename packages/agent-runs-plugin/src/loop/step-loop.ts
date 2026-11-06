@@ -199,10 +199,11 @@ export async function stepLoop(
           await log.flush();
           if (approvals.some((row) => row.status === 'pending')) {
             await lease.write({ status: 'waiting', leaseOwner: '', leaseUntil: 0 });
-            // A decision may have raced the pending snapshot. Check after
-            // publishing waiting, so either this holder continues or the
-            // decider can acquire the released run.
+            // A decision or a cancel may have raced the pending snapshot. Check
+            // after publishing waiting, so either this holder's run is woken
+            // here or the decider (or canceller) finds it released and parked.
             if (
+              lease.row.cancelRequested ||
               !(await lease.store.approvals(lease.row.id)).some((row) => row.status === 'pending')
             ) {
               await lease.write({ status: 'ready' });

@@ -388,6 +388,16 @@ async function load() {
     render();
     return;
   }
+  if (!res.ok) {
+    // A server fault, not an answer: say so instead of reading the error as a run.
+    notice = {
+      text: `The run could not be loaded (${res.status}). Reload to try again.`,
+      bad: true,
+    };
+    setStatus(null);
+    render();
+    return;
+  }
   const view = await res.json();
   parts = [];
   question = '';

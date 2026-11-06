@@ -247,4 +247,46 @@ describe('durable approvals', () => {
       await h.close();
     }
   });
+  it('cancels a run whose cancel request races its park, in either order', async () => {
+    for (const order of ['flag-before-park', 'park-before-flag'] as const) {
+      const execute = vi.fn(() => 'effect');
+      const h = await harness(
+        definition({
+          maxSteps: 1,
+          tools: { act: { inputSchema: jsonSchema({}), execute } },
+          approval: { tools: { act: true } },
+        }),
+        fakeAi([reply]),
+      );
+      try {
+        const original = h.store.update.bind(h.store);
+        let cancel: Promise<void> | undefined;
+        let raced = false;
+        vi.spyOn(h.store, 'update').mockImplementation(async (id, where, data) => {
+          if (data.status === 'waiting' && !raced) {
+            raced = true;
+            if (order === 'flag-before-park') {
+              // The cancel flag lands just before the holder parks.
+              const current = (await h.store.get(id))!;
+              await original(id, { leaseVersion: current.leaseVersion }, { cancelRequested: true });
+              return original(id, where, data);
+            }
+            // The holder parks, then the cancel arrives while it is still local.
+            const parkedRow = await original(id, where, data);
+            cancel = h.service.cancel(h.ctx(), id);
+            return parkedRow;
+          }
+          return original(id, where, data);
+        });
+        const { runId } = await h.service.start(h.ctx(), 'demo', { messages: [] });
+        await h.settle();
+        await cancel;
+        await h.settle();
+        expect((await h.store.get(runId))?.status, order).toBe('cancelled');
+        expect(execute).not.toHaveBeenCalled();
+      } finally {
+        await h.close();
+      }
+    }
+  });
 });

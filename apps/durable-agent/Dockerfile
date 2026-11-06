@@ -17,6 +17,8 @@ RUN --mount=type=secret,id=npmrc,target=/root/.npmrc if [ -z "$NPM_CONFIG_REGIST
 WORKDIR /srv
 COPY --from=build /srv/dist ./dist
 COPY --from=build /srv/instrumentation.mjs ./
+# The page StaticPlugin serves at /ui.
+COPY --from=build /srv/public ./public
 COPY --from=build /srv/buil[d] ./build/
 # NUMERIC, not a name: Kubernetes can verify this user is non-root.
 USER 1000:1000
