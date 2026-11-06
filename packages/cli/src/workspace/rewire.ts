@@ -28,6 +28,7 @@ import { frameworkSpecifier } from '../templates/framework-specifier.ts';
 import { NODE_REDIS_MODULE_PATH, nodeRedisModuleFile } from '../templates/node-redis.ts';
 import { type GeneratedFile, joinPath } from '../utils/file-writer.ts';
 import { escapeName } from '../utils/names.ts';
+import { isMissingPath } from '../utils/filesystem-errors.ts';
 import { detectPlugins } from '../utils/plugin-detector.ts';
 import { walkProjectFiles } from './adopt.ts';
 import { workspaceContainerFiles } from './compose.ts';
@@ -71,6 +72,13 @@ export type TransportChange =
 export interface TransportChangeOptions {
   /** Turn orphan refusals (§3.8) into warnings. Never bypasses a missing-call refusal. */
   readonly force?: boolean;
+  /**
+   * Plan even when the manifest already records the change, so a member's module,
+   * packages and create-only files are brought back to what its choice needs.
+   * `setu add grpc` on a member already on gRPC uses it: adding a package is a
+   * request for that package, whatever the manifest says.
+   */
+  readonly reconcile?: boolean;
 }
 
 /** What planning a change produced. Paths are relative to the workspace root. */
@@ -276,18 +284,31 @@ async function orphans(
 ): Promise<readonly string[]> {
   if (patterns.length === 0) return [];
   const memberDir = joinPath(dir, context.root);
-  // A member with no `src/` (or one the walk refuses, a link) has nothing there to scan.
-  const sources = await walkProjectFiles(fs, memberDir, 'src').catch(() => [] as readonly string[]);
+  const hits: string[] = [];
+  // Only an ABSENT `src/` is an empty scan. Any other failure — a link the walk
+  // refuses, an unreadable directory — leaves the scan incomplete, and an
+  // incomplete scan is reported like a hit: it is refused unless `--force`.
+  const unscanned = (path: string): string =>
+    `${escapeName(path)} — could not be scanned, so what it uses is unknown`;
+  let sources: readonly string[] = [];
+  try {
+    sources = await walkProjectFiles(fs, memberDir, 'src');
+  } catch (cause) {
+    if (!isMissingPath(cause)) hits.push(unscanned(joinPath(context.root, 'src')));
+  }
   const files = [CONFIG_FILE, ...sources].filter(
     (path) =>
       /\.(?:[cm]?[jt]sx?)$/.test(path) &&
       path !== TRANSPORT_MODULE &&
       !path.startsWith(`${PROTO_OUT_DIR}/`),
   );
-  const hits: string[] = [];
   for (const path of files) {
     const text = await readText(fs, joinPath(memberDir, path));
-    if (text === undefined) continue;
+    if (text === undefined) {
+      // The config is checked (and refused when unreadable) before this scan runs.
+      if (path !== CONFIG_FILE) hits.push(unscanned(joinPath(context.root, path)));
+      continue;
+    }
     const scanned = maskComments(text) ?? text;
     const lines = scanned.split('\n');
     for (const [pattern, reason] of patterns) {
@@ -473,7 +494,7 @@ export async function planTransportChange(
   options: TransportChangeOptions = {},
 ): Promise<TransportChangePlan> {
   const next = applyChange(manifest, change);
-  if (sameManifest(next, manifest)) {
+  if (options.reconcile !== true && sameManifest(next, manifest)) {
     return { ok: true, manifest: next, unchanged: true, files: [], notes: [], warnings: [] };
   }
   const profile = workspaceProfile(next.runtime);
@@ -598,7 +619,7 @@ export async function planTransportChange(
     return {
       ok: false,
       messages: [
-        'Refusing the change: code still uses what it removes. Fix these, or pass --force to go ahead anyway:',
+        'Refusing the change: code still uses what it removes, or could not be checked. Fix these, or pass --force to go ahead anyway:',
         ...orphaned.map((hit) => `  ${hit}`),
       ],
     };

@@ -389,6 +389,58 @@ describe('refusing a switch that would orphan wiring', () => {
     expect(JSON.parse(ws.read('setu.workspace.json')).broker).toBe('nats');
   });
 
+  // Only an absent `src/` is an empty scan: a walk or read that fails leaves the
+  // scan incomplete, which is refused like a hit unless `--force`.
+  for (const [label, broken] of [
+    [
+      'src/ cannot be walked',
+      (fs: FakeFs, path: string) => path.endsWith('/apps/orders/src') && fs,
+    ],
+    [
+      'a source file cannot be read',
+      (fs: FakeFs, path: string) => path.endsWith('/apps/orders/src/cache.ts') && fs,
+    ],
+  ] as const) {
+    it(`refuses an incomplete scan when ${label}, and --force goes ahead`, async () => {
+      const ws = await workspace({ broker: 'redis' });
+      await ws.write('apps/orders/src/cache.ts', 'export {};\n');
+      const read = await readWorkspaceManifest(ws.fs, ROOT);
+      if (!read.ok) throw new Error('expected a manifest');
+      const denied = Object.assign(new Error('EACCES'), { code: 'EACCES' });
+      const fs: FakeFs = {
+        ...ws.fs,
+        readdir: (path) => (broken(ws.fs, path) ? Promise.reject(denied) : ws.fs.readdir(path)),
+        readFile: (path) =>
+          label.startsWith('a source') && broken(ws.fs, path)
+            ? Promise.reject(denied)
+            : ws.fs.readFile(path),
+      };
+      const change = { kind: 'broker', broker: 'nats' } as const;
+      const refused = await planTransportChange(fs, ROOT, read.manifest, change);
+      expect(refused.ok).toBe(false);
+      expect(!refused.ok && refused.messages.join('\n')).toContain(
+        'could not be scanned, so what it uses is unknown',
+      );
+      const forced = await planTransportChange(fs, ROOT, read.manifest, change, { force: true });
+      expect(forced.ok && forced.warnings.join('\n')).toContain('could not be scanned');
+    });
+  }
+
+  it('treats a member with no src/ as an empty scan', async () => {
+    const ws = await workspace({ broker: 'redis' });
+    const read = await readWorkspaceManifest(ws.fs, ROOT);
+    if (!read.ok) throw new Error('expected a manifest');
+    const missing = Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    const fs: FakeFs = {
+      ...ws.fs,
+      readdir: (path) =>
+        path.endsWith('/apps/orders/src') ? Promise.reject(missing) : ws.fs.readdir(path),
+    };
+    expect(
+      (await planTransportChange(fs, ROOT, read.manifest, { kind: 'broker', broker: 'nats' })).ok,
+    ).toBe(true);
+  });
+
   it('ignores the pattern in a comment of a file it can read', async () => {
     const ws = await workspace({ broker: 'redis' });
     await ws.write('apps/orders/src/notes.ts', '// we used to read REDIS_URL here\nexport {};\n');
@@ -513,6 +565,27 @@ describe('every entry point renders the same module', () => {
       expect(JSON.parse(ws.read('setu.workspace.json')).members[0].rpc).toBeUndefined();
     });
   }
+
+  // Adding the plugin is a request for it: on a member already on gRPC, `setu add
+  // grpc` restores what that choice needs rather than stopping as a no-op.
+  it("restores a gRPC member's plugin and toolchain on setu add grpc", async () => {
+    const ws = await workspace({ members: [['orders', 'microservice', 'grpc']] });
+    const manifest = JSON.parse(ws.read('apps/orders/deno.json'));
+    delete manifest.imports['@setu-ts/grpc-plugin'];
+    await ws.write('apps/orders/deno.json', JSON.stringify(manifest, null, 2));
+    await ws.fs.rm(`${ROOT}/apps/orders/buf.gen.yaml`);
+    const result = await ws.run(['add', 'grpc'], `${ROOT}/apps/orders`);
+    expect(result.code, result.err).toBe(0);
+    expect(result.out).toContain(
+      'orders already serves grpc; its transport module and packages are up to date',
+    );
+    expect(
+      JSON.parse(ws.read('apps/orders/deno.json')).imports['@setu-ts/grpc-plugin'],
+    ).toBeDefined();
+    expect(ws.read('apps/orders/buf.gen.yaml')).toBeDefined();
+    // `setu workspace rpc` keeps the no-op: it changes a choice, it does not repair one.
+    expect((await ws.run(['workspace', 'rpc', 'orders', 'grpc'])).out).toContain('nothing changed');
+  });
 
   it('plans without a command, returning the manifest it would write', async () => {
     const ws = await workspace();

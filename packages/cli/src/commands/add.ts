@@ -97,7 +97,7 @@ import {
   type WorkspaceMember,
 } from '../workspace/manifest.ts';
 import { memberTransportModule } from '../workspace/rewire.ts';
-import { runWorkspaceCommand } from './workspace.ts';
+import { applyTransportChange } from './workspace.ts';
 import { TRANSPORT_EXPORTS, TRANSPORT_SPECIFIER } from '../workspace/transport-module.ts';
 import {
   brokerSpec,
@@ -1817,14 +1817,9 @@ export async function runAddCommand(
   if (bare === 'grpc-plugin' && searchDirs.length > 1) {
     const found = await workspaceMemberOf(deps.fs, dir);
     if (found !== undefined) {
-      return await runWorkspaceCommand(
-        {
-          positionals: ['rpc', found.member.name, 'grpc'],
-          flags: {
-            dir: found.root,
-            ...(args.flags['dry-run'] === true ? { 'dry-run': true } : {}),
-          },
-        },
+      // `reconcile`: on a member already serving gRPC, adding the plugin still
+      // restores its module, its packages and its toolchain files.
+      return await applyTransportChange(
         {
           fs: deps.fs,
           cwd: deps.cwd,
@@ -1832,6 +1827,9 @@ export async function runAddCommand(
           error: deps.error,
           ...(deps.interrupt === undefined ? {} : { interrupt: deps.interrupt }),
         },
+        found.root,
+        { kind: 'rpc', member: found.member.name, rpc: 'grpc' },
+        { dryRun: args.flags['dry-run'] === true, force: false, reconcile: true },
       );
     }
   }

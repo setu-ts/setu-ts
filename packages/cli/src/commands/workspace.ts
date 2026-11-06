@@ -266,7 +266,40 @@ async function runTransportOperation(
     deps.error(read.message);
     return EXIT_USAGE;
   }
-  const dir = resolveDir(deps.cwd, stringFlag(args.flags, 'dir'));
+  return await applyTransportChange(
+    deps,
+    resolveDir(deps.cwd, stringFlag(args.flags, 'dir')),
+    read.change,
+    {
+      dryRun: args.flags['dry-run'] === true,
+      force: args.flags['force'] === true,
+      reconcile: false,
+    },
+  );
+}
+
+/**
+ * Plans and writes one transport change in a workspace (M138).
+ *
+ * The one apply step behind `setu workspace broker|rpc` and a member's
+ * `setu add grpc`: it reads and reconciles the manifest, plans the whole change,
+ * then writes it in one transaction — or writes nothing, when any member's config
+ * does not read its transport module, a member manifest cannot be merged, or code
+ * still uses what the change removes (unless `force`).
+ *
+ * @param deps - Filesystem and output sinks
+ * @param dir - The workspace root (absolute)
+ * @param change - The validated change
+ * @param options - `dryRun` prints the plan; `force` passes orphan refusals;
+ * `reconcile` plans even when the manifest already records the change
+ * @returns `0` on success or a no-op, `1` on a refusal, `2` for an unknown member
+ */
+export async function applyTransportChange(
+  deps: WorkspaceCommandDependencies,
+  dir: string,
+  change: TransportChange,
+  options: { readonly dryRun: boolean; readonly force: boolean; readonly reconcile: boolean },
+): Promise<number> {
   const manifest = await readWorkspaceManifest(deps.fs, dir);
   if (!manifest.ok) {
     deps.error(
@@ -274,7 +307,6 @@ async function runTransportOperation(
     );
     return EXIT_ERROR;
   }
-  const { change } = read;
   if (change.kind === 'rpc' && !manifest.manifest.members.some((m) => m.name === change.member)) {
     deps.error(
       `No workspace member "${escapeName(change.member)}". Members: ${
@@ -288,8 +320,12 @@ async function runTransportOperation(
     deps.error(describeReconcileFailure(reconciliation));
     return EXIT_ERROR;
   }
+  const already =
+    change.kind === 'rpc' &&
+    (manifest.manifest.members.find((m) => m.name === change.member)?.rpc ?? 'http') === change.rpc;
   const plan = await planTransportChange(deps.fs, dir, manifest.manifest, change, {
-    force: args.flags['force'] === true,
+    force: options.force,
+    reconcile: options.reconcile,
   });
   if (!plan.ok) {
     for (const message of plan.messages) deps.error(message);
@@ -306,7 +342,7 @@ async function runTransportOperation(
   }
   for (const warning of plan.warnings) deps.error(`warning: ${warning}`);
   const files = plan.files.map((file) => ({ ...file, path: joinPath(dir, file.path) }));
-  if (args.flags['dry-run'] === true) {
+  if (options.dryRun) {
     for (const file of files) deps.log(`would write ${escapeName(file.path)}`);
     for (const note of plan.notes) deps.log(note);
     return EXIT_OK;
@@ -339,7 +375,9 @@ async function runTransportOperation(
   deps.log(
     change.kind === 'broker'
       ? `Switched every member to the ${change.broker} broker. Run \`${install}\` at the workspace root.`
-      : `Switched ${escapeName(change.member)} to ${change.rpc}. Run \`${install}\` at the workspace root.`,
+      : already
+        ? `${escapeName(change.member)} already serves ${change.rpc}; its transport module and packages are up to date. Run \`${install}\` at the workspace root.`
+        : `Switched ${escapeName(change.member)} to ${change.rpc}. Run \`${install}\` at the workspace root.`,
   );
   return EXIT_OK;
 }
