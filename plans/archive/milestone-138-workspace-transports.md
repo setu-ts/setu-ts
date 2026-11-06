@@ -1,7 +1,7 @@
 # Milestone 138 — Workspace transports (`@setu-ts/cli`)
 
-> **Status:** Complete (PR pending). Branch: `feat/m138-workspace-transports`. `develop` and `main`
-> are protected — all work (implementation + fixes) stays on this one branch until it merges via a
+> **Status:** Complete (PR #568). Branch: `feat/m138-workspace-transports`. `develop` and `main` are
+> protected — all work (implementation + fixes) stays on this one branch until it merges via a
 > single PR.
 
 ## 0. Objective & scope

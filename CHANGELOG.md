@@ -8,7 +8,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
-- **Changing a workspace's transport after scaffolding (M138, `@setu-ts/cli`).**
+- **Changing a workspace's transport after scaffolding (M138, #568, `@setu-ts/cli`).**
   `setu workspace broker <name>` changes the broker every member shares and
   `setu workspace rpc <member> <http|grpc>` changes how one member is called. Each member now
   carries a CLI-owned `src/transport/index.ts` (`messagingOptions()`, `queueOptions()`,
@@ -234,7 +234,7 @@ All notable changes to this project are documented here. The format follows
 ### Changed
 
 - **BREAKING — the workspace transport is split into a broker and a per-member RPC style (M138,
-  `@setu-ts/cli`).** `setu new --workspace --transport` and `--transport-url` are removed and
+  #568, `@setu-ts/cli`).** `setu new --workspace --transport` and `--transport-url` are removed and
   refused with a pointer to their replacements: `--broker <name>` and `--broker-url <url>` on the
   workspace (`memory` is the default; `http`/`grpc` are not brokers), and
   `setu generate app <name> --rpc grpc` per member. A gRPC member can now sit in a workspace with a

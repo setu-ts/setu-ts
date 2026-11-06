@@ -773,7 +773,7 @@ here.
 - **Milestone 138** (`packages/cli` — workspace broker and per-member RPC style: a version-2
   `setu.workspace.json` with `broker` and per-member `rpc`, a CLI-owned `src/transport/index.ts` per
   member that its config calls, `setu workspace broker` and `setu workspace rpc`, and one planner
-  behind them, `generate app`, `setu sync` and a member's `setu add`) — complete (PR pending).
+  behind them, `generate app`, `setu sync` and a member's `setu add`) — complete (PR #568).
 - **Next milestone** — the `0.12.0` release; M136 is open.
 
 ## Verification (run before declaring any work done)
