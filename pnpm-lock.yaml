@@ -249,7 +249,7 @@ importers:
   apps/ai-chat:
     dependencies:
       '@ai-sdk/openai-compatible':
-        specifier: ^3
+        specifier: 3.0.84
         version: 3.0.84(zod@4.6.7)
       '@ai-sdk/otel':
         specifier: 1.0.159
@@ -921,7 +921,7 @@ importers:
   apps/semantic-search:
     dependencies:
       '@ai-sdk/openai-compatible':
-        specifier: ^3
+        specifier: 3.0.84
         version: 3.0.84(zod@4.6.7)
       '@setu-ts/common':
         specifier: workspace:^

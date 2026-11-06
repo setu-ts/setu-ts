@@ -21,7 +21,7 @@
     "@setu-ts/multi-tenancy-plugin": "workspace:^",
     "@setu-ts/scheduler-plugin": "workspace:^",
     "@setu-ts/telemetry-plugin": "workspace:^",
-    "@ai-sdk/openai-compatible": "^3",
+    "@ai-sdk/openai-compatible": "3.0.84",
     "@ai-sdk/otel": "1.0.159",
     "ai": "7.0.159",
     "ai-fallback": "3.0.0",
