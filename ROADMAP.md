@@ -16971,6 +16971,169 @@ real Redis delivery after switching from memory; every changed file at the 90% p
 
 ---
 
+## Milestone 139: The `v0.12.0` Smoke Closeout
+
+**Source:** the `0.12.0` CLI review and the Mohor e-sign build on published `0.12.0`
+(`smoke/V0120-REVIEW.md`, rows V12-1 … V12-38), the first gRPC load benchmark and its probes
+(2026-11-07, rows V12-39 and V12-40), plus five older rows no milestone named. Grouped in
+`smoke/OPEN-AFTER-0120.md`. Of the register's 131 rows not closed, 87 were claimed by M128–M131d and
+older fixes that are all in `0.12.0`, so the `0.12.0` regression run closes or reopens them; it runs
+first, and any regression it finds is sequenced before every letter below, as V11-10 led M131.
+V10-33 and V10-45 stay documented contracts. The remaining 44 rows (8 Medium, 36 Low, no High) are
+five letters. The gRPC letter, M139b, is a minor (`0.13.0`) because its request-body and trailer
+seams touch committed contracts; the plan names each break, per the versioning policy above.
+
+| Letter    | Kind   | Shape                                                               | Rows                                                                                                                                          | Packages                                                                                                   |
+| --------- | ------ | ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| **M139a** | design | identity and authorization a token or a tenant can escape           | V12-37, V12-18, V12-19, V12-11, V12-35, V12-34                                                                                                | `auth-plugin`, `multi-tenancy-plugin`, `session-plugin`, `mcp-plugin`, `cli`                               |
+| **M139b** | design | gRPC over HTTP/2: streamed bodies, an HTTP/2 listener, trailers     | V12-39, V12-40                                                                                                                                | `common`, `kernel`, `runtime`, `grpc-plugin`, `apps/grpc-workspace`                                        |
+| **M139c** | fix    | AI-layer and data contracts with a missing half                     | V12-4, V12-9, V12-10, V12-36, V12-20, V12-21                                                                                                  | `agent-runs-plugin`, `vector-store-plugin`, `auth-plugin`, `multi-tenancy-plugin`, `mail-plugin`, `common` |
+| **M139d** | fix    | the CLI on a full-stack project: `add`, `build`, `check`, the brief | V12-1, V12-12, V12-2, V12-3, V12-25, V12-26, V12-27, V12-28, V12-30, V12-33, X91-9, V12-22, V12-23, V12-16 (CLI half), V12-31, V12-32, V12-24 | `cli`                                                                                                      |
+| **M139e** | docs   | documentation                                                       | V12-5, V12-6, V12-7, V12-8, V12-13, V12-14 (= V12-29), V12-15, V12-16 (card half), V12-17, V12-38, X93-4, X93-5, V9-29 remainder              | READMEs, agent cards, `docs/`, CHANGELOG, website                                                          |
+
+**Sequence.** The regression run first. M139a next: it is the only letter that crosses a trust
+boundary, and it is **security-audited** before it merges. M139b, M139c and M139d can start beside
+it; M139b's gate includes a paired benchmark rerun, which never runs beside a suite. M139e batches
+the documentation last, after the code letters change what the docs must say.
+
+### Milestone 139a: Identity and Authorization a Token or a Tenant Can Escape
+
+**Package(s):** `auth-plugin`, `multi-tenancy-plugin`, `session-plugin`, `mcp-plugin`, `cli`
+
+- **V12-37** — with `auth.jwt` set, a bearer JWT authenticates on every route and `requireRole` /
+  `requireScopedPermission` authorize by the subject's roles without reading the token's `scope`, so
+  a narrow agent token acts with its user's whole role. Filed Low because `requireScopes` exists;
+  the plan decides whether a scoped token must be confined by default, and the register is re-ranked
+  to match.
+- **V12-18** — a verified JWT with no string `sub` authenticates as the shared principal
+  `'unknown'`.
+- **V12-19** — identity is not bound to the tenant on the documented paths: `local.verify` gets no
+  tenant, and the JWT strategy reads no tenant claim.
+- **V12-11** — the full-stack template's login action never calls `regenerate()`.
+- **V12-35** — full-stack form CSRF answers an anonymous `POST /mcp` with `403` before auth can send
+  the `401 Bearer resource_metadata=…` challenge.
+- **V12-34** — `resourceServer.resource` and trusted issuers refuse `http://<name>.localhost`.
+
+### Milestone 139b: gRPC Over HTTP/2 — Streaming, Listeners and Trailers
+
+**Package(s):** `packages/common`, `packages/kernel`, `packages/runtime`, `packages/grpc-plugin`;
+the `apps/grpc-workspace` example; docs. Targets `0.13.0`: the letter is a minor because the
+request-body and trailer seams touch committed contracts (the plan names each break and the minor
+that carries it, per the versioning policy above).
+
+**Source:** the first gRPC load benchmark (2026-11-07, `~/setu-benchmarks/2026-11-07-grpc/`) and the
+probes that followed it. `GrpcPlugin` served unary Connect calls at 76% of plain
+`@connectrpc/connect-node` on the same transport. The workspace example's cross-member call ran at
+73% of a NestJS pair that used grpc-js over one HTTP/2 connection. ghz could not reach Setu at all,
+because Setu serves no native gRPC.
+
+**The problem.** Four separate layers, and only the last needs HTTP/2:
+
+1. **Every gRPC response is buffered.** The kernel's `#sendRpcResponse` reads the whole Connect
+   `Response` with `arrayBuffer()` before writing it. A server stream that sends five messages 500
+   ms apart reached the client as one chunk at 2.5 s, on HTTP/1.1 and on HTTP/2 alike; connect-node
+   delivered each message as it was sent. A stream that never ends, such as a watch, delivers
+   nothing and holds memory. The grpc-plugin README says server streaming is "unaffected on every
+   runtime", which is true of the result and false of its delivery. This is a defect in released
+   code (V12-39), fixed here rather than on its own branch, because the streaming path it opens is
+   the one the other three layers build on.
+2. **Every gRPC request is buffered.** The kernel reads `ctx.request.bytes()` before dispatch,
+   because it cannot tell whether middleware has already read the body. That is documented, and it
+   is why bidirectional streaming — including the plugin's own server reflection — cannot work on
+   any transport.
+3. **No first-class HTTP/2 listener.** The Node adapter calls `@hono/node-server`'s `serve()` with
+   `fetch`, `port` and `hostname` only, although node-server accepts `http2.createServer` and
+   `createSecureServer`. An application can inject such a host through
+   `RuntimePlugin({ httpAdapters })` today (probed: Setu answers routes and Connect calls over h2c),
+   but nothing documents it. A cleartext Node HTTP/2 port also refuses every HTTP/1.1 client —
+   `allowHTTP1` applies only over TLS — so the injected form silently drops browsers, plain `fetch`
+   and WebSocket upgrades. `Deno.serve` already answers HTTP/2 with prior knowledge on the same port
+   as HTTP/1.1. `Bun.serve` serves no HTTP/2; Bun's `node:http2` does, trailers included. Workers
+   terminate HTTP/2 at the edge.
+4. **No response trailers.** Native `application/grpc` carries the call's status in HTTP/2 trailers.
+   Connect's universal response has a `trailer` field; Connect's `createFetchHandler` and the web
+   `Response` both drop it, which is why the plugin refuses native gRPC by design. A probe on
+   node-server over `node:http2` wrote the trailer out of band — the body stream's final pull calls
+   `addTrailers` on node-server's `Http2ServerResponse` before closing — and ghz reported 2000/2000
+   OK unary calls and 500/500 OK server streams. Error statuses and the path through Setu's kernel
+   were not probed.
+
+**What ships.**
+
+1. **Streamed gRPC responses.** The kernel writes the Connect response body through
+   `IResponse.stream()` instead of buffering it, on every runtime and both HTTP versions; the
+   Trailers-Only refusal keeps its single shared write path.
+2. **Streamed gRPC request bodies where it is safe.** The request records whether its body has been
+   consumed, and the kernel passes the unread stream straight to the RPC handler; a body some
+   middleware already read keeps today's buffered path. Bidi calls and server reflection then work
+   wherever the transport is full-duplex.
+3. **An HTTP/2 listener option on the Node adapter,** that keeps HTTP/1.1 working on the same port:
+   TLS with ALPN and `allowHTTP1`, and a cleartext mode that reads the connection preface and hands
+   the socket to the HTTP/2 or the HTTP/1.1 server, as `Deno.serve` behaves. WebSocket upgrades keep
+   working on the HTTP/1.1 side. Bun moves to `node:http2` when the option is set. The plan settles
+   which of these the CLI scaffolds expose.
+4. **A response-trailers seam.** An optional trailers member on `IResponse` in `common`, written as
+   real HTTP/2 trailers by the adapters that can (Node, and Bun on `node:http2`), and an adapter
+   capability the grpc-plugin reads. Native `application/grpc` is served where the adapter reports
+   trailer support and keeps today's Trailers-Only `UNIMPLEMENTED` refusal everywhere else (Deno,
+   Workers, HTTP/1.1). `grpcurl`, ghz and grpc-go clients then reach Setu directly.
+5. **The example and the docs.** `apps/grpc-workspace`'s orders member calls billing over HTTP/2
+   with connect-node's transport and one reused session instead of `connect-web`'s fetch transport.
+   The grpc-plugin README's Limitations section is rewritten to match: which runtimes serve native
+   gRPC, bidi and reflection, and the README's claim that Connect and gRPC-Web work "over both
+   HTTP/1.1 and HTTP/2" made true on Node rather than only behind a proxy (V12-40).
+
+**Gate:** a server stream whose messages arrive at the client as they are sent, through the kernel,
+on HTTP/1.1 and HTTP/2; a bidi call and a reflection request answered over HTTP/2; ghz and `grpcurl`
+reaching unary and streaming procedures with `OK`, plus a non-zero `grpc-status` delivered in the
+trailers; HTTP/1.1, plain `fetch` and a WebSocket upgrade still served on the HTTP/2 port; the
+native refusal unchanged on Deno and Workers; a paired benchmark rerun of the unary pair and the
+cross-member pair against the 2026-11-07 numbers; every changed file at the 90% per-file bar.
+
+### Milestone 139c: AI-Layer and Data Contracts With a Missing Half
+
+**Package(s):** `agent-runs-plugin`, `vector-store-plugin`, `auth-plugin`, `multi-tenancy-plugin`,
+`mail-plugin`, `common`
+
+- **V12-4** — agent-runs boots without a transactional idempotency store, and every tool-calling run
+  then fails at its first tool call; the plugin should refuse at boot.
+- **V12-9** — `replaceSource` takes at most 500 records and deletes the rest of the source, so a
+  long document written in two calls keeps only its second batch.
+- **V12-10** — pgvector `ensure: 'verify'` checks index names, never the operator class.
+- **V12-36** — `createQuota` and `IQuotaStore` have no read of a key's usage or limit.
+- **V12-20** — tenant repositories take no unit of work.
+- **V12-21** — `MailMessage` has no attachments field.
+
+### Milestone 139d: The CLI on a Full-Stack Project
+
+**Package(s):** `cli`
+
+- **V12-1** — a fresh `setu new --agents` fails its own `format:check`.
+- **V12-12** — `setu build` cannot ship a worker-pool task module.
+- **`setu add`:** V12-2 (`mcp` neither registers nor prints the line), V12-3 (full-stack never
+  inserts a zero-config plugin), V12-25 (one package per run), V12-26 (`view` has no capability-only
+  path), V12-27 (no backend peer for `mail`, `database`, `vector-store`), V12-28 (`database` writes
+  no migration scripts), V12-30 (`exceptions` not a direct dependency), V12-33 (`g job` refuses on a
+  `--queue redis` full-stack project), X91-9 (`messaging`/`queue` write no `REDIS_URL`).
+- **Generated text and gates:** V12-22, V12-23 (the full-stack brief), V12-16 (barrel comments),
+  V12-31 (`g middleware` JSDoc), V12-32 (W001 on the scaffold's own config), V12-24 (no plain
+  startup line).
+
+### Milestone 139e: Documentation
+
+**Package(s):** READMEs and agent cards of `agent-runs-plugin`, `auth-plugin`, `full-stack-starter`,
+`multi-tenancy-plugin`, `database-plugin`, `mail-plugin`, `vector-store-plugin`,
+`worker-pool-plugin`; `docs/`; `CHANGELOG.md`; the website.
+
+- **AI docs:** V12-5 (agent-runs media), V12-6 (the decide route), V12-7 (`ai.md`'s "whole
+  controller"), V12-8 (a run-budget recipe).
+- **READMEs and cards:** V12-13, V12-14 (= V12-29), V12-15, V12-16 (card half), V12-17, V12-38,
+  V9-29 remainder.
+- **Changelog and site:** X93-4, X93-5; check first whether M131d's release check already fixed
+  X93-4.
+
+---
+
 ## Progress Tracking
 
 | Milestone | Status | Package                                                                                                                                                                                                                                                                                   |
@@ -17242,3 +17405,9 @@ real Redis delivery after switching from memory; every changed file at the 90% p
 | 137b      | ⬜     | common + openapi-plugin + auth-plugin + decorator-plugin — derived 401/403/415/429 and idempotency headers, declared response headers, opt-in Problem Details schema                                                                                                                      |
 | 137c      | ⬜     | common + validation-plugin + openapi-plugin + sdk — form bodies and file uploads in the document and the generated client                                                                                                                                                                 |
 | 138       | ✅     | cli — workspace broker and per-member RPC style: a CLI-owned transport module per member, `setu workspace broker` and `setu workspace rpc`; PR #568                                                                                                                                       |
+| 139       | ⬜     | the `v0.12.0` smoke closeout — the `0.12.0` regression run first, then five letters (0.13.0)                                                                                                                                                                                              |
+| 139a      | ⬜     | auth-plugin + multi-tenancy + session + mcp + cli — identity and authorization a token or a tenant can escape                                                                                                                                                                             |
+| 139b      | ⬜     | common + kernel + runtime + grpc-plugin — gRPC over HTTP/2: streamed RPC bodies, an HTTP/2 listener that keeps HTTP/1.1, response trailers and native gRPC on Node and Bun                                                                                                                |
+| 139c      | ⬜     | agent-runs + vector-store + auth + multi-tenancy + mail + common — AI-layer and data contracts with a missing half                                                                                                                                                                        |
+| 139d      | ⬜     | cli — the CLI on a full-stack project: `add`, `build`, `check`, the brief                                                                                                                                                                                                                 |
+| 139e      | ⬜     | docs — documentation                                                                                                                                                                                                                                                                      |
