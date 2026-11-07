@@ -777,7 +777,7 @@ here.
   `setu.workspace.json` with `broker` and per-member `rpc`, a CLI-owned `src/transport/index.ts` per
   member that its config calls, `setu workspace broker` and `setu workspace rpc`, and one planner
   behind them, `generate app`, `setu sync` and a member's `setu add`) — complete (PR #568).
-- **Release `v0.12.0`** — cut 2026-11-07 (PR pending); 55 packages.
+- **Release `v0.12.0`** — cut 2026-11-07 (PR #571); 55 packages.
 - **Next milestone** — to be chosen after the `0.12.0` release.
 
 ## Verification (run before declaring any work done)
