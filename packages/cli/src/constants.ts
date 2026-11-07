@@ -83,6 +83,8 @@ export const VALUE_FLAGS: ReadonlySet<string> = new Set([
   'devtool-port',
   'transport',
   'transport-url',
+  'broker-url',
+  'rpc',
   'redis-client',
   'broker',
   'queue',

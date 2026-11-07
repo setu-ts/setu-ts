@@ -311,8 +311,9 @@ await app.start({ port: 3000 });
 
 The Redis options above require `ioredis` installed in the application. The CLI supplies that client
 and these options with `setu new portal --template full-stack --broker redis --queue redis`, or from
-a workspace's `--transport redis` when generating a full-stack member. The same config read sees
-dotenv and deployment environment values; omitting the options keeps the starter's memory defaults.
+a workspace's `--broker redis`, through the member's CLI-owned `src/transport/index.ts`. The same
+config read sees dotenv and deployment environment values; omitting the options keeps the starter's
+memory defaults.
 
 Configuration is loaded once and the **same snapshot** is registered under `CAPABILITIES.CONFIG`, so
 the values the composition branched on are the values handlers read — not a second snapshot taken a

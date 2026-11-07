@@ -29,7 +29,7 @@ import { COMMAND_HANDLER_SEAM } from '../../../src/seams/cqrs.ts';
 import { runCli } from '../../../src/cli.ts';
 import { CLIENT_RANGES } from '../../../src/templates/client-dependencies.ts';
 import { SWAGGER_UI_DIST_VERSION } from '../../../src/templates/swagger-version.ts';
-import { listTransports } from '../../../src/workspace/transport.ts';
+import { BROKERS, brokerSpec } from '../../../src/workspace/transport.ts';
 
 describe('setu add openapi Swagger UI dependency (M129)', () => {
   for (const runtime of ['node', 'deno', 'bun', 'cloudflare-workers'] as const) {
@@ -255,7 +255,7 @@ export function createApp(): IKernelApplication {
               error: (m) => h.err.push(m),
             });
           expect(
-            await cli(['new', 'ws', '--workspace', '--runtime', runtime, '--transport', transport]),
+            await cli(['new', 'ws', '--workspace', '--runtime', runtime, '--broker', transport]),
           ).toBe(0);
           if (runtime === 'deno') {
             const path = '/app/ws/deno.json';
@@ -277,18 +277,27 @@ export function createApp(): IKernelApplication {
           const manifest = h.read(`${dir}/${runtime === 'deno' ? 'deno.json' : 'package.json'}`);
           expect(manifest).toContain(client);
           if (runtime === 'node') expect(h.read('/app/ws/package.json')).toContain(client);
+          // M138: the options live in the member's CLI-owned transport module, so the
+          // config calls it whatever the broker and the module carries the broker.
+          const module = h.read(`${dir}/src/transport/index.ts`);
           if (template === 'rest') {
-            // Existing calls are preserved. REST has neither provider originally.
-            expect(config).toContain(
+            // REST has neither provider originally: both are inserted calling the module.
+            expect(config).toContain('MessagingPlugin(messagingOptions())');
+            expect(config).toContain('...queueOptions()');
+            expect(config).toMatch(
+              /import \{[^}]*messagingOptions[^}]*\} from '\.\/src\/transport\/index\.ts';/,
+            );
+            expect(module).toContain(
               `broker: '${transport === 'redis' ? 'redis-streams' : 'nats'}'`,
             );
           } else if (template === 'full-stack') {
-            expect(config).toContain('messaging: {');
-            expect(config).toContain('config.get<string>(');
+            expect(config).toContain('messaging: messagingOptions(config),');
+            expect(module).toContain('config.get<string>(');
             // `add queue` wires the starter's queue arm with the job barrel on every
-            // transport; only Redis also selects a queue backend there.
+            // broker; only Redis also selects a queue backend, in the module.
             expect(config).toContain('processors: [...QUEUE_PROCESSORS]');
-            expect(config.includes("adapter: 'redis'")).toBe(transport === 'redis');
+            expect(config).toContain('...queueOptions(config),');
+            expect(module.includes("adapter: 'redis'")).toBe(transport === 'redis');
           } else {
             // Generated with the workspace transport, so a re-add finds it already set.
             expect(h.out.join('\n')).toContain('already passes these options to MessagingPlugin');
@@ -298,7 +307,9 @@ export function createApp(): IKernelApplication {
         });
       }
     }
-    for (const spec of listTransports().filter((arm) => arm.connection !== undefined)) {
+    for (const spec of BROKERS.map((name) => brokerSpec(name)).filter(
+      (arm) => arm.connection !== undefined,
+    )) {
       for (const flag of ['broker', 'queue'] as const) {
         if ((flag === 'broker' ? spec.messagingArgs : spec.queueArgs) === undefined) continue;
         it(`adds standalone ${runtime} ${flag} ${spec.name}, appends its dotenv rows once, and preserves both on re-add`, async () => {
@@ -402,7 +413,7 @@ export function createApp(): IKernelApplication {
           '/app/ws/apps/api',
         ]),
       ).toBe(2);
-      expect(h.err.join('\n')).toContain('workspace --transport');
+      expect(h.err.join('\n')).toContain('members share the workspace broker');
       expect(h.fs.writes.length).toBe(before);
     });
   }
@@ -747,9 +758,9 @@ describe('safe-default additions (M119c)', () => {
     ).toBe('1.9.1');
   });
 
-  for (const transport of ['redis', 'nats', 'http']) {
+  for (const transport of ['redis', 'nats', 'memory']) {
     for (const runtime of ['node', 'deno']) {
-      it(`uses the ${transport} workspace transport on ${runtime} and configures scheduler locks`, async () => {
+      it(`uses the ${transport} workspace broker on ${runtime} and configures scheduler locks`, async () => {
         const h = harness();
         const cli = (args: readonly string[]) =>
           runCli(args, {
@@ -760,7 +771,7 @@ describe('safe-default additions (M119c)', () => {
             error: (m) => h.err.push(m),
           });
         expect(
-          await cli(['new', 'ws', '--workspace', '--runtime', runtime, '--transport', transport]),
+          await cli(['new', 'ws', '--workspace', '--runtime', runtime, '--broker', transport]),
         ).toBe(0);
         expect(await cli(['g', 'app', 'api', '--dir', '/app/ws'])).toBe(0);
         for (const plugin of ['cache', 'scheduler', 'realtime-backplane']) {
@@ -1132,11 +1143,7 @@ describe('setu add — optional peers in a Setu workspace (M119f)', () => {
   it('places transport-selected ioredis in root dependencies too', async () => {
     const h = await workspace();
     const manifest = JSON.parse(h.read('/app/ws/setu.workspace.json')) as Record<string, unknown>;
-    await put(
-      h,
-      '/app/ws/setu.workspace.json',
-      JSON.stringify({ ...manifest, transport: 'redis' }),
-    );
+    await put(h, '/app/ws/setu.workspace.json', JSON.stringify({ ...manifest, broker: 'redis' }));
     expect(await h.run(['cache', '--dir', '/app/ws/apps/api'])).toBe(0);
     expect(dependencies(h, '/app/ws/package.json')['ioredis']).toBe(CLIENT_RANGES['ioredis']);
   });
@@ -1147,7 +1154,7 @@ describe('setu add — optional peers in a Setu workspace (M119f)', () => {
     await put(
       h,
       '/app/ws/setu.workspace.json',
-      JSON.stringify({ ...manifest, transport: 'redis', redisClient: 'node-redis' }),
+      JSON.stringify({ ...manifest, broker: 'redis', redisClient: 'node-redis' }),
     );
     expect(await h.run(['cache', '--dir', '/app/ws/apps/api'])).toBe(0);
     for (const path of ['/app/ws/package.json', '/app/ws/apps/api/package.json']) {

@@ -12,6 +12,26 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### Workspace broker and RPC style (M138, `@setu-ts/cli`)
+
+- **Flags.** Replace `setu new --workspace --transport <broker>` with `--broker <broker>`, and
+  `--transport-url` with `--broker-url`. Replace `--transport grpc` with `--rpc grpc` on each
+  `setu generate app` that should serve gRPC. Scripts and CI calling the old flags now exit `2`.
+- **Manifest.** Nothing to do: a version-1 `setu.workspace.json` is read as before and written back
+  as version 2 by the next command that writes it. A `0.11.0` CLI refuses a version-2 file, so
+  upgrade every machine that runs `setu` in the workspace together.
+- **Existing members.** Run `setu sync` in the workspace to write each member's
+  `src/transport/index.ts`. Then make each `setu.config.ts` call it — `setu workspace broker` and
+  `setu workspace rpc` refuse until it does, and print exactly these lines:
+  - `import { messagingOptions, queueOptions, transportPlugins } from './src/transport/index.ts';`
+    (a full-stack member also imports `csrfExclusions`);
+  - `MessagingPlugin(messagingOptions())` and `...queueOptions()` inside `QueuePlugin`, in place of
+    the literal broker options (`messaging: messagingOptions(config)` and
+    `queue: { ...queueOptions(config) }` on a full-stack member);
+  - `...transportPlugins(),` in the plugin list, in place of a `GrpcPlugin(...)` call
+    (`for (const plugin of transportPlugins()) app.register(plugin);` on a full-stack member, and
+    `csrf: { exclude: [...csrfExclusions()] }` in its session options).
+
 ### CLI gates, generators and workspace deploy (M131c, `@setu-ts/cli`)
 
 - **Briefs.** Run `setu agents` and commit the rewritten briefs: `setu agents --check` reports every

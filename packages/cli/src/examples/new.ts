@@ -64,6 +64,8 @@ const CONFLICTS = [
   'env-file',
   'transport',
   'transport-url',
+  'broker-url',
+  'rpc',
   'port',
   'depends-on',
   'di',

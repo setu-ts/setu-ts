@@ -8,7 +8,7 @@ export async function redisDefaultOutputs(): Promise<Record<string, string>> {
     for (const flags of [
       ['--broker', 'redis'],
       ['--queue', 'redis'],
-      ['--workspace', '--transport', 'redis'],
+      ['--workspace', '--broker', 'redis'],
     ]) {
       const fs = createFakeFs();
       const run = (args: readonly string[]) =>

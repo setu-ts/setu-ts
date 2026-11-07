@@ -95,7 +95,7 @@ function workspaceSeed(
       version: WORKSPACE_VERSION,
       runtime: 'deno',
       basePort: 3000,
-      transport: 'http',
+      broker: 'memory',
       members,
     }),
     '/ws/deno.json': `${JSON.stringify(
@@ -146,9 +146,9 @@ describe('devtool enable refuses by name and writes nothing', () => {
           ...(member
             ? {
                 '/ws/setu.workspace.json': renderWorkspaceManifest({
-                  version: 1,
+                  version: 2,
                   runtime: 'node',
-                  transport: 'http',
+                  broker: 'memory',
                   basePort: 3000,
                   members: [{ name: 'a', port: 3000 }],
                 }),
@@ -172,9 +172,9 @@ describe('devtool enable refuses by name and writes nothing', () => {
   it('refuses a stale Node workspace runner with the delete-and-rerun remedy', async () => {
     const h = workspaceHarness({
       '/ws/setu.workspace.json': renderWorkspaceManifest({
-        version: 1,
+        version: 2,
         runtime: 'node',
-        transport: 'http',
+        broker: 'memory',
         basePort: 3000,
         members: [{ name: 'a', port: 3000 }],
       }),
@@ -218,7 +218,7 @@ describe('devtool enable refuses by name and writes nothing', () => {
         version: WORKSPACE_VERSION,
         runtime: 'bun',
         basePort: 3000,
-        transport: 'http',
+        broker: 'memory',
         members: [{ name: 'orders', port: 3000 }],
       }),
       '/ws/package.json': '{}',
@@ -900,7 +900,7 @@ describe('generate app --devtool branch coverage', () => {
         version: WORKSPACE_VERSION,
         runtime: 'bun',
         basePort: 3000,
-        transport: 'http',
+        broker: 'memory',
         members: [{ name: 'orders', port: 3000 }],
       }),
       '/ws/package.json': '{}',

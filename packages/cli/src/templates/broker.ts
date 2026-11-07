@@ -14,14 +14,15 @@
 import type { TargetRuntime } from '../constants.ts';
 import type { WorkspaceRuntimeProfile } from '../workspace/runtime-profile.ts';
 import {
-  getTransport,
+  getBroker,
   listBrokers,
   listQueues,
   renderConfigConnection,
   renderConnection,
   type RedisClient,
-  type TransportSpec,
+  type BrokerSpec,
 } from '../workspace/transport.ts';
+import { getRpc } from '../workspace/rpc.ts';
 import type { ParsedArgs } from '../args.ts';
 import { escapeName } from '../utils/names.ts';
 import type { GeneratedFile } from '../utils/file-writer.ts';
@@ -48,7 +49,7 @@ const QUEUE_PACKAGE = 'queue-plugin';
  * @param spec - The selected transport
  * @returns The host with the imports and note needed by its transport
  */
-function withTransportNote(host: ResolvedHost, spec: TransportSpec): ResolvedHost {
+function withTransportNote(host: ResolvedHost, spec: BrokerSpec): ResolvedHost {
   if (spec.redisClient === 'node-redis') {
     // The client module, not a `redis` import here: see templates/node-redis.ts.
     host = {
@@ -84,7 +85,7 @@ function withTransportNote(host: ResolvedHost, spec: TransportSpec): ResolvedHos
  */
 export function starterOptionLiteral(
   builder: (connection: string) => string,
-  spec: TransportSpec,
+  spec: BrokerSpec,
   override?: string,
 ): string {
   const connection = spec.connection!;
@@ -114,7 +115,7 @@ export function starterOptionLiteral(
  */
 export function withBrokerArgs(
   host: ResolvedHost,
-  spec: TransportSpec,
+  spec: BrokerSpec,
   profile: WorkspaceRuntimeProfile,
   override?: string,
 ): ResolvedHost {
@@ -165,7 +166,7 @@ export function withBrokerArgs(
  */
 export function withQueueArgs(
   host: ResolvedHost,
-  spec: TransportSpec,
+  spec: BrokerSpec,
   profile: WorkspaceRuntimeProfile,
   override?: string,
 ): ResolvedHost {
@@ -210,7 +211,7 @@ export function withQueueArgs(
  * @param spec - The selected transport
  * @returns The variable row, empty when the transport has no connection
  */
-export function brokerEnvVariables(spec: TransportSpec): readonly EnvVariable[] {
+export function brokerEnvVariables(spec: BrokerSpec): readonly EnvVariable[] {
   const connection = spec.connection;
   if (connection === undefined) return [];
   return [
@@ -236,7 +237,7 @@ export function brokerEnvVariables(spec: TransportSpec): readonly EnvVariable[] 
  * @param spec - The selected transport
  * @returns The block to add under `services:`, or undefined when nothing is missing
  */
-export function missingComposeServices(existing: string, spec: TransportSpec): string | undefined {
+export function missingComposeServices(existing: string, spec: BrokerSpec): string | undefined {
   const block = spec.compose?.services;
   if (block === undefined) return undefined;
   // One entry per service the block declares (a two-space key), so only the absent ones
@@ -279,7 +280,7 @@ export function missingComposeServices(existing: string, spec: TransportSpec): s
  * @param specs - The selected transports, in flag order
  * @returns The compose file plus any backing-service config files
  */
-export function brokerComposeFiles(specs: readonly TransportSpec[]): readonly GeneratedFile[] {
+export function brokerComposeFiles(specs: readonly BrokerSpec[]): readonly GeneratedFile[] {
   // One arm can serve both flags (`--broker redis --queue redis`); its service
   // block must appear once, not twice.
   const backing = [
@@ -439,7 +440,7 @@ function acceptedFor(flag: string): readonly string[] {
  * @param spec - The transport spec
  * @returns `true` when the spec declares the arm the flag selects
  */
-function specHasArm(plugin: string, spec: TransportSpec): boolean {
+function specHasArm(plugin: string, spec: BrokerSpec): boolean {
   return spec[armFor(plugin)] !== undefined;
 }
 
@@ -461,7 +462,7 @@ export function readArmFlag(
   plugin: string,
   client: RedisClient,
 ):
-  | { readonly ok: true; readonly spec?: TransportSpec }
+  | { readonly ok: true; readonly spec?: BrokerSpec }
   | {
       readonly ok: false;
       readonly message: string;
@@ -474,19 +475,24 @@ export function readArmFlag(
     return { ok: false, message: `--${flag} needs a value: ${accepted.join(' | ')}.` };
   }
 
-  const spec = getTransport(raw, client);
+  const spec = getBroker(raw, client);
   const hasArm = spec !== undefined && specHasArm(plugin, spec);
   if (spec === undefined || (raw !== 'memory' && !hasArm)) {
     // The two failures are told apart, because "no such transport" and "this
     // transport has no arm for this flag" are different mistakes.
     const prefix =
-      spec === undefined
-        ? `Unknown ${flag} "${escapeName(raw)}".`
-        : flag === 'broker'
-          ? `"${raw}" declares no message-broker wiring.`
-          : flag === 'queue'
-            ? `"${raw}" declares no queue wiring.`
-            : `"${raw}" declares no ${plugin} wiring.`;
+      spec === undefined && getRpc(raw) !== undefined
+        ? // `http` and `grpc` were `--transport` values before M138; they say how a
+          // service is called, which no broker or queue flag selects.
+          `"${raw}" is how a service is called, not a backend: a workspace member takes ` +
+          `\`generate app <name> --rpc ${raw}\`.`
+        : spec === undefined
+          ? `Unknown ${flag} "${escapeName(raw)}".`
+          : flag === 'broker'
+            ? `"${raw}" declares no message-broker wiring.`
+            : flag === 'queue'
+              ? `"${raw}" declares no queue wiring.`
+              : `"${raw}" declares no ${plugin} wiring.`;
     return {
       ok: false,
       message: `${prefix} --${flag} accepts: ${accepted.join(', ')}.`,
@@ -500,7 +506,8 @@ export function readArmFlag(
  *
  * `redisSelected` names whether a Redis arm was chosen. For `setu add` it is
  * computed from the arm flags (M131a X88-1); `setu new` passes its own check
- * because `--transport redis` is also a Redis arm there.
+ * over `--broker` and `--queue`, because `--workspace --broker redis` is a Redis
+ * arm there too.
  *
  * @since 0.11.0
  */

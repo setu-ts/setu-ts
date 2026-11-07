@@ -53,11 +53,11 @@ function expectNoForgedLine(recorder: Recorder): void {
 
 function workspace(member: string, extra: Partial<WorkspaceManifest['members'][number]> = {}) {
   const manifest: WorkspaceManifest = {
-    version: 1,
+    version: 2,
     basePort: 5869,
     devtoolBasePort: 6000,
     runtime: 'deno',
-    transport: 'http',
+    broker: 'memory',
     members: [{ name: member, port: 5869, ...extra }],
   };
   return createFakeFs({
@@ -442,10 +442,10 @@ describe('project-controlled text stays on one output line', () => {
 function workspaceAt(dir: string) {
   return createFakeFs({
     [`${dir}/setu.workspace.json`]: renderWorkspaceManifest({
-      version: 1,
+      version: 2,
       basePort: 5869,
       runtime: 'deno',
-      transport: 'http',
+      broker: 'memory',
       members: [],
     }),
     [`${dir}/deno.json`]: JSON.stringify({ workspace: ['./apps/*'] }),

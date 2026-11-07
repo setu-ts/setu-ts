@@ -129,6 +129,8 @@ function printHelp(log: (message: string) => void): void {
   log(`  workspace ports --reallocate    Reassign workspace ports that are currently bindable`);
   log(`  workspace build                 Build every member's container image`);
   log(`  workspace deploy                Build, ship and roll out every member to Kubernetes`);
+  log(`  workspace broker <name>         Change the broker every member shares`);
+  log(`  workspace rpc <member> <style>  Change how one member is called: http | grpc`);
   log(`  commands                       List commands this app's plugins provide`);
   log('');
   log('Options:');

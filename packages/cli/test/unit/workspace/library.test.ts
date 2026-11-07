@@ -2,16 +2,11 @@ import { expect, it } from 'vitest';
 import { BUN_WORKSPACE_CONFIG, planBunWorkspaceLinker } from '../../../src/workspace/library.ts';
 import { workspaceRootFiles } from '../../../src/workspace/root-files.ts';
 import { workspaceProfile } from '../../../src/workspace/runtime-profile.ts';
-import { transportSpec } from '../../../src/workspace/transport.ts';
+import { brokerSpec } from '../../../src/workspace/transport.ts';
 
 it('creates hoisted Bun roots and no configuration for npm or Deno', () => {
   for (const runtime of ['bun', 'node', 'deno'] as const) {
-    const files = workspaceRootFiles(
-      'acme',
-      3000,
-      transportSpec('http'),
-      workspaceProfile(runtime),
-    );
+    const files = workspaceRootFiles('acme', 3000, brokerSpec('memory'), workspaceProfile(runtime));
     expect(files.find((file) => file.path === 'bunfig.toml')?.contents).toBe(
       runtime === 'bun' ? BUN_WORKSPACE_CONFIG : undefined,
     );

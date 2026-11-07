@@ -160,9 +160,9 @@ workflow.
 
 ## A scaffolded workspace on an emulator
 
-`setu new acme --workspace --transport pubsub` (or `--transport service-bus`) wires every member to
-the transport and emits a Compose stack that starts the emulator beside them, so this needs no
-`docker run` of its own:
+`setu new acme --workspace --broker pubsub` (or `--broker service-bus`) wires every member to the
+broker and emits a Compose stack that starts the emulator beside them, so this needs no `docker run`
+of its own:
 
 ```bash
 docker compose -f docker/compose.yaml up -d          # emulator + every member

@@ -14,7 +14,7 @@
 import { describe, expect, it } from 'vitest';
 import { createFakeFs } from '../fixtures/fake-fs.ts';
 import { runCli } from '../../src/cli.ts';
-import { getTransport } from '../../src/workspace/transport.ts';
+import { getBroker } from '../../src/workspace/transport.ts';
 
 function harness() {
   const fs = createFakeFs();
@@ -35,7 +35,7 @@ function harness() {
 
 describe('setu add Redis arm flags (M131a X88-1)', () => {
   it('renders each arm through the inferred node-redis client, with no ioredis', () => {
-    const spec = getTransport('redis', 'node-redis')!;
+    const spec = getBroker('redis', 'node-redis')!;
     // The node-redis arm renders `nodeRedisClient(<read>)` for every arm.
     const read = 'process.env.REDIS_URL ?? "redis://127.0.0.1:6379"';
     expect(spec.cacheArgs!(read)).toBe(
@@ -57,7 +57,7 @@ describe('setu add Redis arm flags (M131a X88-1)', () => {
   });
 
   it('renders each arm through ioredis as a url, with the ioredis dependency', () => {
-    const spec = getTransport('redis', 'ioredis')!;
+    const spec = getBroker('redis', 'ioredis')!;
     const read = 'process.env.REDIS_URL ?? "redis://127.0.0.1:6379"';
     expect(spec.cacheArgs!(read)).toBe(`{ store: 'redis', options: { url: ${read} } }`);
     expect(spec.idempotencyArgs!(read)).toBe(

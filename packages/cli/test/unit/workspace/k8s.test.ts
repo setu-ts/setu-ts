@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { K8S_DIR, workspaceK8sFiles } from '../../../src/workspace/k8s.ts';
 import { WORKSPACE_VERSION, type WorkspaceManifest } from '../../../src/workspace/manifest.ts';
-import { type TransportName, transportSpec } from '../../../src/workspace/transport.ts';
+import { type BrokerName, brokerSpec } from '../../../src/workspace/transport.ts';
 
 /**
  * Builds a manifest holding the given members.
@@ -12,9 +12,15 @@ import { type TransportName, transportSpec } from '../../../src/workspace/transp
  */
 function manifestOf(
   members: readonly { name: string; port: number }[],
-  transport: TransportName = 'http',
+  transport: BrokerName = 'memory',
 ): WorkspaceManifest {
-  return { version: WORKSPACE_VERSION, runtime: 'deno', basePort: 3000, transport, members };
+  return {
+    version: WORKSPACE_VERSION,
+    runtime: 'deno',
+    basePort: 3000,
+    broker: transport,
+    members,
+  };
 }
 
 /**
@@ -26,9 +32,9 @@ function manifestOf(
  */
 function objectsFor(
   members: readonly { name: string; port: number }[],
-  transport: TransportName = 'http',
+  transport: BrokerName = 'memory',
 ): string {
-  const files = workspaceK8sFiles(manifestOf(members, transport), transportSpec(transport));
+  const files = workspaceK8sFiles(manifestOf(members, transport), brokerSpec(transport));
   const file = files.find((candidate) => candidate.path === `${K8S_DIR}/members.yaml`);
   expect(file).toBeDefined();
   return file?.contents ?? '';
@@ -38,7 +44,7 @@ describe('workspaceK8sFiles', () => {
   it('emits the objects and a README, both managed', () => {
     const files = workspaceK8sFiles(
       manifestOf([{ name: 'orders', port: 3000 }]),
-      transportSpec('http'),
+      brokerSpec('memory'),
     );
     expect(files.map((f) => f.path)).toEqual([`${K8S_DIR}/members.yaml`, `${K8S_DIR}/README.md`]);
     for (const file of files) expect(file.managed).toBe(true);
@@ -47,7 +53,7 @@ describe('workspaceK8sFiles', () => {
   // A memberless workspace has nothing to deploy, and an empty document that
   // `kubectl apply` accepts silently is worse than no file.
   it('emits nothing for a workspace with no members', () => {
-    expect(workspaceK8sFiles(manifestOf([]), transportSpec('http'))).toEqual([]);
+    expect(workspaceK8sFiles(manifestOf([]), brokerSpec('memory'))).toEqual([]);
   });
 
   it('gives every member a Deployment and a Service on its allocated port', () => {
@@ -167,7 +173,7 @@ describe('workspaceK8sFiles', () => {
   it('says what it deliberately leaves out', () => {
     const files = workspaceK8sFiles(
       manifestOf([{ name: 'orders', port: 3000 }], 'redis'),
-      transportSpec('redis'),
+      brokerSpec('redis'),
     );
     const readme = files.find((f) => f.path === `${K8S_DIR}/README.md`)?.contents ?? '';
     expect(readme).toContain('An Ingress');
@@ -180,8 +186,8 @@ describe('workspaceK8sFiles', () => {
 
   it('names both commands that record probe support, and its limit', () => {
     const files = workspaceK8sFiles(
-      manifestOf([{ name: 'orders', port: 3000 }], 'http'),
-      transportSpec('http'),
+      manifestOf([{ name: 'orders', port: 3000 }], 'memory'),
+      brokerSpec('memory'),
     );
     const readme = files.find((f) => f.path === `${K8S_DIR}/README.md`)?.contents ?? '';
     expect(readme).toContain('`setu generate app` or `setu adopt`');
@@ -210,10 +216,10 @@ describe('probe selection', () => {
         version: 1,
         runtime: 'deno',
         basePort: 3000,
-        transport: 'http',
+        broker: 'memory',
         members: [member],
       },
-      transportSpec('http'),
+      brokerSpec('memory'),
     );
     return files.find((file) => file.path.endsWith('members.yaml'))?.contents ?? '';
   };

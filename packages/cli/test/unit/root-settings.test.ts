@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { rootManifestSettings } from '../../src/templates/root-settings.ts';
 import { projectFiles, resolveHost } from '../../src/templates/project-files.ts';
 import { workspaceRootFiles } from '../../src/workspace/root-files.ts';
-import { transportSpec } from '../../src/workspace/transport.ts';
+import { brokerSpec } from '../../src/workspace/transport.ts';
 import { getTemplate } from '../../src/templates/registry.ts';
 
 /** Parses one emitted file's JSON, so an assertion reads keys rather than text. */
@@ -103,7 +103,7 @@ describe('generated imports match the formatter the project ships with', () => {
 describe('where the root settings are emitted', () => {
   it('puts them in a workspace root', () => {
     const manifest = manifestOf(
-      workspaceRootFiles('shop', 3000, transportSpec('http'), workspaceProfile('deno')),
+      workspaceRootFiles('shop', 3000, brokerSpec('memory'), workspaceProfile('deno')),
       'deno.json',
     );
 

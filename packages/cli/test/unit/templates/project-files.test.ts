@@ -10,7 +10,7 @@ import { getTemplate } from '../../../src/templates/registry.ts';
 import { MINIMAL_HOST } from '../../../src/templates/minimal.ts';
 import { VERSION } from '../../../src/version.ts';
 import { withQueueArgs } from '../../../src/templates/broker.ts';
-import { getTransport } from '../../../src/workspace/transport.ts';
+import { getBroker } from '../../../src/workspace/transport.ts';
 import { workspaceProfile } from '../../../src/workspace/runtime-profile.ts';
 import { withPluginOptionSeams } from '../../../src/templates/seam.ts';
 import { JOBS_SEAM } from '../../../src/seams/jobs.ts';
@@ -178,10 +178,10 @@ describe('guidance and queue seam composition', () => {
     const host = resolveHost(getTemplate('microservice')!, 'deno');
     const config = contentsOf([...projectFiles('svc', 'deno', host)], 'setu.config.ts');
     expect(config).toContain('QueuePlugin({ processors: [...QUEUE_PROCESSORS] })');
-    const redis = withQueueArgs(host, getTransport('redis')!, workspaceProfile('deno'));
+    const redis = withQueueArgs(host, getBroker('redis')!, workspaceProfile('deno'));
     const transportFirst = withQueueArgs(
       { ...host, plugins: getTemplate('microservice')!.plugins },
-      getTransport('redis')!,
+      getBroker('redis')!,
       workspaceProfile('deno'),
     );
     for (const plugins of [
@@ -805,7 +805,7 @@ describe('the Cloudflare Workers target', () => {
 
 describe('a standalone README transport note', () => {
   it('renders a transport note and re-wraps it to the emitted width (V9-17)', () => {
-    // The text comes from `TransportSpec.connection.note`, carried onto the host
+    // The text comes from `BrokerSpec.connection.note`, carried onto the host
     // by the broker overlay. A standalone project has no spec at render time, so
     // the host is the only source. The note is LONGER than one line so the
     // programmatic re-wrap is what makes the project pass its own fmt --check.

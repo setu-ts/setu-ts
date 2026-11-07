@@ -18,7 +18,7 @@ import { isTargetRuntime, type TargetRuntime } from '../constants.ts';
 
 import { joinPath } from '../utils/file-writer.ts';
 import { isWorkspaceRuntime } from './runtime-profile.ts';
-import { DEFAULT_TRANSPORT, getTransport, type TransportName } from './transport.ts';
+import { DEFAULT_BROKER, getBroker, type BrokerName } from './transport.ts';
 
 /** The workspace manifest's filename, at the workspace root. */
 export const WORKSPACE_MANIFEST = 'setu.workspace.json';
@@ -32,8 +32,17 @@ export const MEMBERS_DIR = 'apps';
  * Bumped only for a change a previous CLI could not read correctly;
  * {@linkcode readWorkspaceManifest} refuses anything else rather than guessing
  * at a shape it does not know.
+ *
+ * Version 2 (M138) split the one `transport` field into a workspace `broker` and
+ * a per-member `rpc`. A version-1 CLI reading a version-2 file would find no
+ * `transport`, fall back to `http` and drop the broker without a word, so the
+ * bump is what makes it refuse instead. Version 1 is still READ, and mapped
+ * (see {@linkcode readWorkspaceManifest}); every write is version 2.
  */
-export const WORKSPACE_VERSION = 1;
+export const WORKSPACE_VERSION = 2;
+
+/** The last manifest version that recorded one `transport` field. */
+const LEGACY_TRANSPORT_VERSION = 1;
 
 /** The port the first member of a workspace binds, unless `--port` says otherwise. */
 export const DEFAULT_BASE_PORT = 3000;
@@ -176,6 +185,15 @@ export interface WorkspaceMember {
    * for another is how these drift.
    */
   readonly metricsEndpoint?: boolean;
+  /**
+   * How this member is called, when it co-serves gRPC.
+   *
+   * ABSENT means `http`, the convention {@linkcode WorkspaceManifest.redisClient}
+   * uses: every member serves HTTP, so only the addition is recorded. Per member
+   * rather than per workspace, because an HTTP member and a gRPC member still
+   * reach each other over HTTP — unlike two members on different brokers.
+   */
+  readonly rpc?: 'grpc';
 }
 
 /** A workspace's CLI-owned record of itself. */
@@ -189,22 +207,23 @@ export interface WorkspaceManifest {
   /** Development port range start; absent derives basePort + 2000. */
   readonly devBasePort?: number;
   /**
-   * How members talk to each other.
+   * The bus every member publishes to and consumes from.
    *
    * Recorded at the WORKSPACE level, and read by every `generate app` after it,
-   * because members can only meet on a bus they share — a per-member transport
+   * because members can only meet on a bus they share — a per-member broker
    * would make a workspace whose services silently cannot reach each other
-   * trivially expressible.
+   * trivially expressible. How a member is CALLED is per member instead
+   * ({@linkcode WorkspaceMember.rpc}).
    */
-  readonly transport: TransportName;
+  readonly broker: BrokerName;
   /** Redis driver; omitted means ioredis. @since 0.11.0 */
   readonly redisClient?: 'node-redis';
   /**
-   * Where the transport's broker listens, when it has one.
+   * Where the broker listens, overriding its local default.
    *
-   * Omitted for `http`, `grpc` and `memory`, which have no endpoint to name.
+   * Omitted for `memory`, which has no endpoint, and whenever the default holds.
    */
-  readonly transportUrl?: string;
+  readonly brokerUrl?: string;
   /**
    * Which toolchain the workspace is built and run with.
    *
@@ -213,7 +232,7 @@ export interface WorkspaceManifest {
    * per-member runtime would make an unbuildable workspace expressible in a flag.
    *
    * **Absent means `deno`**, so every workspace created before this field existed
-   * keeps its shape and its behaviour — the same compatibility trick `transport`
+   * keeps its shape and its behaviour — the same compatibility trick `broker`
    * uses.
    */
   readonly runtime: TargetRuntime;
@@ -245,13 +264,14 @@ export type WorkspaceManifestProblem =
       readonly field: string;
     }
   /**
-   * Well-formed, but naming a transport this CLI does not know.
+   * Well-formed, but naming a broker this CLI does not know.
    *
-   * Refused rather than defaulted to `http`: quietly moving every member off
+   * Refused rather than defaulted to `memory`: quietly moving every member off
    * the bus the manifest asked for would leave services that cannot reach each
-   * other and no diagnostic saying why.
+   * other and no diagnostic saying why. A version-1 `transport` naming neither a
+   * broker nor `http`/`grpc` is reported here too.
    */
-  | { readonly kind: 'unknown-transport'; readonly transport: string }
+  | { readonly kind: 'unknown-broker'; readonly broker: string }
   | { readonly kind: 'unknown-redis-client'; readonly redisClient: string }
   /**
    * Well-formed, but naming a runtime no workspace can be built with.
@@ -315,6 +335,10 @@ function toMember(value: unknown): WorkspaceMember | undefined {
     (vitePort !== undefined && typeof vitePort !== 'number')
   )
     return undefined;
+  // `'http'` is the default spelled out, so it is accepted and dropped; any other
+  // value is a style this CLI does not know, and guessing would serve the wrong one.
+  const rpc = record['rpc'];
+  if (rpc !== undefined && rpc !== 'http' && rpc !== 'grpc') return undefined;
   const healthProbes = record['healthProbes'];
   const metricsEndpoint = record['metricsEndpoint'];
   return {
@@ -326,6 +350,90 @@ function toMember(value: unknown): WorkspaceMember | undefined {
     ...(typeof metricsEndpoint === 'boolean' ? { metricsEndpoint } : {}),
     ...(inspectPort === undefined ? {} : { inspectPort }),
     ...(vitePort === undefined ? {} : { vitePort }),
+    ...(rpc === 'grpc' ? { rpc } : {}),
+  };
+}
+
+/**
+ * Whether a broker's connection value is an endpoint a stored URL may replace.
+ *
+ * The same rule `--broker-url` applies: `memory` has no endpoint, and the
+ * `pubsub` / `service-bus` values are a project id and a secret read from the
+ * environment. A hand-edited URL on one of those would otherwise be rendered as
+ * that value's fallback — a URL passed as a GCP project id or an Azure
+ * connection string.
+ *
+ * @param broker - A known broker name
+ * @returns `true` when a URL may be recorded for it
+ */
+function addressable(broker: string): boolean {
+  return getBroker(broker)?.connection?.urlOverridable === true;
+}
+
+/** The bus a manifest records, read from either manifest version. */
+type BusRead =
+  | {
+      readonly ok: true;
+      readonly broker: BrokerName;
+      readonly brokerUrl?: string;
+      /** A version-1 `grpc` transport: every member co-serves gRPC. */
+      readonly everyMemberGrpc: boolean;
+    }
+  | { readonly ok: false; readonly problem: WorkspaceManifestProblem };
+
+/**
+ * Reads the broker, and the version-1 transport it replaced.
+ *
+ * Version 1 recorded ONE `transport` that was either a broker or a call style.
+ * It maps as M138 §3.1 tabulates: a broker name is the broker; `grpc` is the
+ * in-memory broker with every member on gRPC; `http` or absent is the in-memory
+ * broker. A `transportUrl` beside a call style addressed nothing and is refused.
+ * A version-2 file still carrying either version-1 field is refused, so a file
+ * cannot be half-migrated.
+ *
+ * @param record - The parsed manifest
+ * @param version - Its declared version, already known to be 1 or 2
+ * @returns The bus, or why the manifest cannot be used
+ */
+function readBus(record: Record<string, unknown>, version: number): BusRead {
+  const malformed: BusRead = { ok: false, problem: { kind: 'malformed' } };
+  if (version === LEGACY_TRANSPORT_VERSION) {
+    if (record['broker'] !== undefined || record['brokerUrl'] !== undefined) return malformed;
+    // Only an ABSENT field takes the default: an explicit `null` is a value this
+    // CLI does not know, refused like any other, never read as the default.
+    const transport = record['transport'] === undefined ? 'http' : record['transport'];
+    const url = record['transportUrl'];
+    if (typeof transport !== 'string') {
+      return { ok: false, problem: { kind: 'unknown-broker', broker: String(transport) } };
+    }
+    if (url !== undefined && typeof url !== 'string') return malformed;
+    if (transport === 'http' || transport === 'grpc') {
+      if (url !== undefined) return malformed;
+      return { ok: true, broker: DEFAULT_BROKER, everyMemberGrpc: transport === 'grpc' };
+    }
+    if (getBroker(transport) === undefined) {
+      return { ok: false, problem: { kind: 'unknown-broker', broker: transport } };
+    }
+    if (url !== undefined && !addressable(transport)) return malformed;
+    return {
+      ok: true,
+      broker: transport as BrokerName,
+      ...(url === undefined ? {} : { brokerUrl: url }),
+      everyMemberGrpc: false,
+    };
+  }
+  if (record['transport'] !== undefined || record['transportUrl'] !== undefined) return malformed;
+  const broker = record['broker'] === undefined ? DEFAULT_BROKER : record['broker'];
+  if (typeof broker !== 'string' || getBroker(broker) === undefined) {
+    return { ok: false, problem: { kind: 'unknown-broker', broker: String(broker) } };
+  }
+  const url = record['brokerUrl'];
+  if (url !== undefined && (typeof url !== 'string' || !addressable(broker))) return malformed;
+  return {
+    ok: true,
+    broker: broker as BrokerName,
+    ...(url === undefined ? {} : { brokerUrl: url }),
+    everyMemberGrpc: false,
   };
 }
 
@@ -366,7 +474,7 @@ export async function readWorkspaceManifest(
 
   const version = record['version'];
   if (typeof version !== 'number') return { ok: false, problem: { kind: 'malformed' } };
-  if (version !== WORKSPACE_VERSION) {
+  if (version !== WORKSPACE_VERSION && version !== LEGACY_TRANSPORT_VERSION) {
     return { ok: false, problem: { kind: 'unsupported-version', version } };
   }
 
@@ -394,18 +502,8 @@ export async function readWorkspaceManifest(
     return { ok: false, problem: { kind: 'invalid-port', port: basePort, field: 'basePort' } };
   }
 
-  // Absent → `http`, so a workspace created before the transport choice existed
-  // keeps working and keeps its behaviour. An unrecognised value is refused
-  // rather than defaulted: silently downgrading a member to HTTP because the
-  // manifest names a broker this CLI does not know is the "flag vanished" class
-  // one level up.
-  const rawTransport = record['transport'];
-  const transport = rawTransport === undefined ? DEFAULT_TRANSPORT : rawTransport;
-  if (typeof transport !== 'string' || getTransport(transport) === undefined) {
-    return { ok: false, problem: { kind: 'unknown-transport', transport: String(transport) } };
-  }
-
-  const rawUrl = record['transportUrl'];
+  const bus = readBus(record, version);
+  if (!bus.ok) return bus;
   const redisClient = record['redisClient'];
   if (redisClient !== undefined && redisClient !== 'node-redis') {
     return {
@@ -413,10 +511,6 @@ export async function readWorkspaceManifest(
       problem: { kind: 'unknown-redis-client', redisClient: String(redisClient) },
     };
   }
-  if (rawUrl !== undefined && typeof rawUrl !== 'string') {
-    return { ok: false, problem: { kind: 'malformed' } };
-  }
-
   // Absent → `deno`, so a workspace created before this field existed keeps its
   // shape. An unrecognised value is refused rather than defaulted, exactly as an
   // unknown transport is: silently rebuilding a workspace with the wrong
@@ -432,7 +526,13 @@ export async function readWorkspaceManifest(
 
   const members: WorkspaceMember[] = [];
   for (const entry of rawMembers) {
-    const member = toMember(entry);
+    const parsedMember = toMember(entry);
+    // A version-1 `grpc` transport meant every member co-served gRPC; version 2
+    // records that on each member, so the mapping happens here, once.
+    const member =
+      parsedMember !== undefined && bus.everyMemberGrpc
+        ? { ...parsedMember, rpc: 'grpc' as const }
+        : parsedMember;
     // One bad entry invalidates the manifest rather than being dropped: a
     // silently omitted member is a member every sibling's map stops naming, and
     // the CLI would then reallocate its port to someone else.
@@ -489,14 +589,18 @@ export async function readWorkspaceManifest(
   return {
     ok: true,
     manifest: {
-      version,
+      // The CURRENT version, never the parsed one: four commands re-serialize a
+      // read manifest, and writing `version: 1` back with a `broker` in it would
+      // send the next read down the version-1 path, where an absent `transport`
+      // maps to `memory` — the silent fallback the bump exists to prevent.
+      version: WORKSPACE_VERSION,
       basePort,
       ...(devtoolBasePort === undefined ? {} : { devtoolBasePort }),
       ...(devBasePort === undefined ? {} : { devBasePort }),
-      transport: transport as TransportName,
+      broker: bus.broker,
       ...(redisClient === undefined ? {} : { redisClient }),
       runtime,
-      ...(rawUrl === undefined ? {} : { transportUrl: rawUrl }),
+      ...(bus.brokerUrl === undefined ? {} : { brokerUrl: bus.brokerUrl }),
       members,
     },
   };

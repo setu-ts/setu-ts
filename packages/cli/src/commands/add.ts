@@ -85,13 +85,25 @@ import {
   starterSeamLiteral,
 } from '../templates/seam.ts';
 import { renderPluginCall } from '../utils/render-call.ts';
-import { installSearchDirs, unknownWorkspaceRedisClient } from '../app-loader.ts';
-import { MEMBERS_DIR, readWorkspaceManifest, type WorkspaceMember } from '../workspace/manifest.ts';
 import {
-  transportSpec,
+  installSearchDirs,
+  unknownWorkspaceRedisClient,
+  workspaceMemberOf,
+} from '../app-loader.ts';
+import {
+  MEMBERS_DIR,
+  readWorkspaceManifest,
+  type WorkspaceManifest,
+  type WorkspaceMember,
+} from '../workspace/manifest.ts';
+import { memberTransportModule } from '../workspace/rewire.ts';
+import { applyTransportChange } from './workspace.ts';
+import { TRANSPORT_EXPORTS, TRANSPORT_SPECIFIER } from '../workspace/transport-module.ts';
+import {
+  brokerSpec,
   renderConnection,
   type RedisClient,
-  type TransportSpec,
+  type BrokerSpec,
 } from '../workspace/transport.ts';
 import { workspaceProfile } from '../workspace/runtime-profile.ts';
 import { CLIENT_RANGES } from '../templates/client-dependencies.ts';
@@ -1321,7 +1333,12 @@ function withStarterWiring(
       const edited = withStarterOption(result, key, transportArgs);
       if (edited === undefined) return undefined;
       result = edited;
-    } else if (!carriesStarterOptions(existing, transportArgs)) {
+    } else if (
+      !carriesStarterOptions(existing, transportArgs) &&
+      // A member's arm already spreading its transport module's options (M138):
+      // the call is the whole option, so it is present or it is not.
+      !sameOptions(existing, transportArgs)
+    ) {
       const entries = starterLiteralEntries(transportArgs);
       if (entries === undefined) return undefined;
       for (const [property, value] of entries) {
@@ -1374,7 +1391,32 @@ function withNodeRedisImport(original: string, wired: string): string | undefine
   return `${NODE_REDIS_IMPORT_LINE}\n${wired}`;
 }
 
-/** Reads transport options only for a listed workspace member. */
+/** Where a member's options come from when they are its CLI-owned transport module's. */
+interface MemberModuleSource {
+  /** The workspace root. */
+  readonly root: string;
+  readonly manifest: WorkspaceManifest;
+  readonly member: WorkspaceMember;
+  /** The module export the config calls for this plugin. */
+  readonly symbol: string;
+}
+
+/** What a workspace member's transport-backed `setu add` passes the plugin. */
+type WorkspaceAddArgs = {
+  readonly args: string;
+  readonly clients: readonly string[];
+  /** Present for messaging and queue: the options are the transport module's (M138 §3.7). */
+  readonly module?: MemberModuleSource;
+};
+
+/**
+ * Reads transport options only for a listed workspace member.
+ *
+ * Messaging and the queue follow the workspace broker, so a member's config calls
+ * its CLI-owned transport module for them rather than holding a literal — the
+ * call is the same on every broker, and `setu workspace broker` regenerates only
+ * the module. The Redis-only arms keep their literals (M138 §3.9).
+ */
 async function workspaceAddArgs(
   deps: AddCommandDependencies,
   dirs: readonly string[],
@@ -1382,12 +1424,70 @@ async function workspaceAddArgs(
   runtime: TargetRuntime,
   starter: boolean,
   arm?: ArmSelector,
-): Promise<{ readonly args: string; readonly clients: readonly string[] } | undefined> {
+): Promise<WorkspaceAddArgs | undefined> {
   if (dirs.length === 1) return undefined;
-  const read = await readWorkspaceManifest(deps.fs, dirs[dirs.length - 1]!);
-  if (!read.ok) return undefined;
-  const transport = transportSpec(read.manifest.transport, read.manifest.redisClient);
-  return transportAddArgs(transport, bare, runtime, starter, read.manifest.transportUrl, arm);
+  // The lookup `installSearchDirs` itself uses, so a native Windows path names the
+  // same member it does (one separator comparison, `utils/member-path.ts`).
+  const found = await workspaceMemberOf(deps.fs, dirs[0]!);
+  if (found === undefined) return undefined;
+  const { root, manifest, member } = found;
+  const transport = brokerSpec(manifest.broker, manifest.redisClient);
+  const selector = arm ?? defaultArm(bare);
+  if (selector === 'messagingArgs' || selector === 'queueArgs') {
+    const messaging = selector === 'messagingArgs';
+    const symbol = messaging ? TRANSPORT_EXPORTS.messaging : TRANSPORT_EXPORTS.queue;
+    const call = `${symbol}(${starter ? 'config' : ''})`;
+    const builder = transport[selector];
+    return {
+      args: messaging ? call : `{ ...${call} }`,
+      clients:
+        builder === undefined
+          ? []
+          : ((messaging ? transport.messagingClients : transport.queueClients) ?? []),
+      module: { root, manifest, member, symbol },
+    };
+  }
+  return transportAddArgs(transport, bare, runtime, starter, manifest.brokerUrl, arm);
+}
+
+/**
+ * Adds one export to a config's import of its transport module.
+ *
+ * Exactly one recognised `import { … } from './src/transport/index.ts';` is
+ * extended; with none, one is added after the last import. Anything else (two
+ * declarations, a namespace import, an unclassifiable file) returns `undefined`,
+ * and the caller prints guidance instead of editing.
+ *
+ * @param source - The member's `setu.config.ts`
+ * @param symbol - The export the config will call
+ * @returns The config importing it, or `undefined` when it cannot be shown safe
+ */
+function withTransportModuleImport(source: string, symbol: string): string | undefined {
+  const visible = maskComments(source);
+  if (visible === undefined) return undefined;
+  const declarations = [
+    ...visible.matchAll(/\bimport\s*\{([^}]*)\}\s*from\s*(['"])([^'"]+)\2\s*;?/g),
+  ].filter((match) => match[3] === TRANSPORT_SPECIFIER);
+  const mentions =
+    visible.split(`'${TRANSPORT_SPECIFIER}'`).length +
+    visible.split(`"${TRANSPORT_SPECIFIER}"`).length -
+    2;
+  if (declarations.length > 1 || mentions !== declarations.length) return undefined;
+  if (declarations.length === 1) {
+    const match = declarations[0]!;
+    const names = match[1]!
+      .split(',')
+      .map((name) => name.trim())
+      .filter((name) => name !== '');
+    if (names.includes(symbol)) return source;
+    const start = match.index!;
+    const end = start + match[0].length;
+    return `${source.slice(0, start)}import { ${[...names, symbol].join(', ')} } from '${TRANSPORT_SPECIFIER}';${source.slice(end)}`;
+  }
+  if (referencesIdentifier(visible, symbol)) return undefined;
+  const at = afterLastImport(source, visible);
+  if (at === undefined) return undefined;
+  return `${source.slice(0, at)}\nimport { ${symbol} } from '${TRANSPORT_SPECIFIER}';${source.slice(at)}`;
 }
 
 /** The transport-spec arm a plugin's Redis arm flag selects. */
@@ -1418,13 +1518,13 @@ function defaultArm(bare: string): ArmSelector | undefined {
 
 /** Shares arm selection and literal rendering between workspace and standalone adds. */
 function transportAddArgs(
-  transport: TransportSpec,
+  transport: BrokerSpec,
   bare: string,
   runtime: TargetRuntime,
   starter: boolean,
   override?: string,
   arm?: ArmSelector,
-): { readonly args: string; readonly clients: readonly string[] } | undefined {
+): WorkspaceAddArgs | undefined {
   const selector = arm ?? defaultArm(bare);
   const builder = selector === undefined ? undefined : transport[selector];
   if (builder === undefined || transport.connection === undefined) return undefined;
@@ -1616,11 +1716,11 @@ export async function runAddCommand(
     );
     return EXIT_ERROR;
   }
-  let selected: TransportSpec | undefined;
+  let selected: BrokerSpec | undefined;
   let selectedArm: ArmSelector | undefined;
   if (args.flags['redis-client'] !== undefined && searchDirs.length > 1) {
     deps.error(
-      '--redis-client cannot apply inside a workspace member: members share the workspace --transport and redisClient.',
+      '--redis-client cannot apply inside a workspace member: members share the workspace broker and redisClient.',
     );
     return EXIT_USAGE;
   }
@@ -1679,7 +1779,7 @@ export async function runAddCommand(
     }
     if (searchDirs.length > 1) {
       deps.error(
-        `--${flag} cannot apply inside a workspace member: members share the workspace --transport.`,
+        `--${flag} cannot apply inside a workspace member: members share the workspace broker (setu workspace broker changes it).`,
       );
       return EXIT_USAGE;
     }
@@ -1709,6 +1809,29 @@ export async function runAddCommand(
               : plugin === 'scheduler'
                 ? 'schedulerArgs'
                 : 'backplaneArgs';
+  }
+  // Inside a workspace member, gRPC is the member's RPC style: the same change as
+  // `setu workspace rpc <member> grpc`, through the same planner (M138 §3.7). Placed
+  // after every flag refusal above, so `--broker`, `--queue`, `--redis-client` and the
+  // Redis arm flags are refused here as for any other plugin rather than ignored.
+  if (bare === 'grpc-plugin' && searchDirs.length > 1) {
+    const found = await workspaceMemberOf(deps.fs, dir);
+    if (found !== undefined) {
+      // `reconcile`: on a member already serving gRPC, adding the plugin still
+      // restores its module, its packages and its toolchain files.
+      return await applyTransportChange(
+        {
+          fs: deps.fs,
+          cwd: deps.cwd,
+          log: deps.log,
+          error: deps.error,
+          ...(deps.interrupt === undefined ? {} : { interrupt: deps.interrupt }),
+        },
+        found.root,
+        { kind: 'rpc', member: found.member.name, rpc: 'grpc' },
+        { dryRun: args.flags['dry-run'] === true, force: false, reconcile: true },
+      );
+    }
   }
   const starter =
     initialConfig !== undefined &&
@@ -1916,16 +2039,32 @@ export async function runAddCommand(
             seam,
             transportArgs === undefined ? undefined : seam?.args,
           );
+    // A member's options come from its transport module, which imports the
+    // node-redis helper itself; the config only needs the module's export.
+    const viaModule =
+      wired === undefined || transport?.module === undefined
+        ? wired
+        : withTransportModuleImport(wired, transport.module.symbol);
     const imported =
-      wired !== undefined && transport?.clients.includes('redis')
-        ? withNodeRedisImport(config, wired)
-        : wired;
+      viaModule !== undefined &&
+      transport?.module === undefined &&
+      transport?.clients.includes('redis')
+        ? withNodeRedisImport(config, viaModule)
+        : viaModule;
     if (imported !== undefined) edits.push({ path: configPath, contents: imported });
     configSource = imported ?? config;
   } catch (cause) {
     // `setu add` remains useful for non-scaffolded projects. A missing config
     // simply has no generated ingress composition to activate.
     configUnreadable = configText === undefined && !isMissingPath(cause);
+  }
+
+  // The member's transport module, regenerated for the packages it now has, so the
+  // export the config calls (or the printed guidance names) exists (M138 §3.7).
+  if (transport?.module !== undefined) {
+    const { root, manifest, member } = transport.module;
+    const file = await memberTransportModule(deps.fs, root, manifest, member, installedAfter);
+    edits.push({ path: joinPath(root, file.path), contents: file.contents });
   }
 
   // The barrels exist whether or not the config could be rewritten: the printed
@@ -2467,7 +2606,7 @@ function printAddHelp(log: (message: string) => void): void {
   log('The client is inferred from the project (node-redis when it imports the');
   log('generated helper, otherwise ioredis); --redis-client <ioredis|node-redis> is');
   log('accepted only with a Redis arm and must agree with the inference.');
-  log('Workspace members use their workspace transport; existing configuration is preserved.');
+  log('Workspace members use their workspace broker; existing configuration is preserved.');
   log('add view writes its page controller to src/controllers/, or with --module <name> into');
   log('that module; a project with modules requires --module.');
   log('');

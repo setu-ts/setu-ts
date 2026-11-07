@@ -91,7 +91,7 @@ describe('resolveNewChoices', () => {
   // invariant is that a question whose answer would be refused is never asked;
   // it held for broker and queue and not for the very first question.
   it('never offers a runtime a workspace cannot be hosted on', async () => {
-    const menus = await offered(['acme', '--workspace'], ['deno', 'http']);
+    const menus = await offered(['acme', '--workspace'], ['deno', 'memory']);
     expect(menus.get('Runtime?')).toEqual(['node', 'deno', 'bun']);
   });
 
@@ -100,11 +100,11 @@ describe('resolveNewChoices', () => {
     expect(menus.get('Runtime?')).toEqual(['node', 'deno', 'bun', 'cloudflare-workers']);
   });
 
-  it('asks runtime and transport only for a workspace', async () => {
+  it('asks runtime and broker only for a workspace', async () => {
     const { args, questions } = await resolve(['mono', '--workspace'], ['deno', 'rabbitmq']);
-    expect(questions).toEqual(['Runtime?', 'How should the workspace members reach each other?']);
-    expect(args.flags['transport']).toBe('rabbitmq');
-    expect(args.flags['broker']).toBeUndefined();
+    expect(questions).toEqual(['Runtime?', 'Which broker should the workspace members share?']);
+    expect(args.flags['broker']).toBe('rabbitmq');
+    expect(args.flags['queue']).toBeUndefined();
   });
 
   it('asks nothing when every flag is already supplied', async () => {
@@ -222,11 +222,8 @@ describe('resolveNewChoices', () => {
     expect(args.flags['broker']).toBeUndefined();
   });
 
-  it('skips an already-supplied workspace transport', async () => {
-    const { questions } = await resolve(
-      ['mono', '--workspace', '--transport', 'rabbitmq'],
-      ['bun'],
-    );
+  it('skips an already-supplied workspace broker', async () => {
+    const { questions } = await resolve(['mono', '--workspace', '--broker', 'rabbitmq'], ['bun']);
     expect(questions).toEqual(['Runtime?']);
   });
 
@@ -290,7 +287,7 @@ for (const question of [
   'Message broker?',
   'Job queue?',
   'Logger?',
-  'How should the workspace members reach each other?',
+  'Which broker should the workspace members share?',
 ]) {
   it(`stops at a cancelled ${question} prompt`, async () => {
     const asked: string[] = [];

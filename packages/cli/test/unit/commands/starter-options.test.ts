@@ -210,6 +210,37 @@ describe('withStarterArmEntry', () => {
       ).toBeUndefined();
     });
   }
+  // M138 §3.4: a workspace member's starter arm reads its transport module with
+  // one keyless spread, and `setu add queue` must still merge its seam into it.
+  it('appends after a single transport-module spread in the arm', () => {
+    const source = config.replace(
+      'return {',
+      'return {\n        queue: { ...queueOptions(config) },',
+    );
+    expect(withStarterArmEntry(source, 'queue', 'processors', '[...QUEUE_PROCESSORS]')).toBe(
+      config.replace(
+        'return {',
+        'return {\n        queue: {\n          ...queueOptions(config),\n          processors: [...QUEUE_PROCESSORS],\n        },',
+      ),
+    );
+  });
+  for (const arm of [
+    '{ ...queueOptions(config), ...other(config) }',
+    '{ ...queueOptions(config, extra) }',
+    '{ ...queueOptions() }',
+    '{ ...queueOptions(config).value }',
+  ]) {
+    it(`still fails closed for ${arm}`, () => {
+      const source = config.replace('return {', `return {\n        queue: ${arm},`);
+      expect(
+        withStarterArmEntry(source, 'queue', 'processors', '[...QUEUE_PROCESSORS]'),
+      ).toBeUndefined();
+    });
+  }
+  it('does not accept a transport-module spread at the top of the returned object', () => {
+    const source = config.replace('return {', 'return { ...queueOptions(config),');
+    expect(withStarterArmEntry(source, 'events', 'handlers', 'EVENT_HANDLERS')).toBeUndefined();
+  });
   it('refuses spreads, uncertain callbacks, duplicate arms and nested mentions of an absent arm', () => {
     for (const source of [
       'broken',

@@ -253,10 +253,10 @@ describe('loadApp — discovery-time platform bindings', () => {
 /** A workspace manifest this CLI can read, listing the named members. */
 const workspace = (...members: string[]) =>
   renderWorkspaceManifest({
-    version: 1,
+    version: 2,
     basePort: 3000,
     runtime: 'deno',
-    transport: 'http',
+    broker: 'memory',
     members: members.map((name, index) => ({ name, port: 3000 + index })),
   });
 

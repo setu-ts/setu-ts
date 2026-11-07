@@ -31,7 +31,7 @@ function manifest(members: WorkspaceManifest['members'], basePort = 3000): Works
   return {
     version: 1,
     basePort,
-    transport: 'http',
+    broker: 'memory',
     runtime: 'deno',
     members,
   };
@@ -80,7 +80,7 @@ describe('allocatePort', () => {
     const pending: WorkspaceManifest = {
       version: 1,
       basePort: 3000,
-      transport: 'http',
+      broker: 'memory',
       runtime: 'deno',
       members: [
         { name: 'a', port: 3000 },

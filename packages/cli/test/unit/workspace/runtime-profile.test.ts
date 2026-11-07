@@ -14,7 +14,7 @@ import { workspaceRootFiles } from '../../../src/workspace/root-files.ts';
 import { libraryFiles } from '../../../src/workspace/library.ts';
 import { renderDiscoveryModule } from '../../../src/workspace/discovery-module.ts';
 import { DOCKERFILE, workspaceContainerFiles } from '../../../src/workspace/compose.ts';
-import { renderConnection, transportSpec } from '../../../src/workspace/transport.ts';
+import { renderConnection, brokerSpec } from '../../../src/workspace/transport.ts';
 import { WORKSPACE_VERSION } from '../../../src/workspace/manifest.ts';
 import { deriveNames } from '../../../src/utils/names.ts';
 
@@ -99,7 +99,7 @@ describe('detectProjectRuntime', () => {
 
 describe('what an npm workspace renders', () => {
   const NODE = workspaceProfile('node');
-  const HTTP = transportSpec('http');
+  const HTTP = brokerSpec('memory');
 
   /**
    * Reads one generated root file.
@@ -171,7 +171,7 @@ describe('what an npm workspace renders', () => {
   });
 
   it('reads a transport connection through process.env too', () => {
-    const redis = transportSpec('redis').connection;
+    const redis = brokerSpec('redis').connection;
     expect(renderConnection(redis!, NODE)).toContain('process.env.REDIS_URL');
     expect(renderConnection(redis!, NODE)).not.toContain('Deno.env');
   });
@@ -210,7 +210,7 @@ describe('what an npm workspace renders', () => {
           version: WORKSPACE_VERSION,
           runtime: 'node',
           basePort: 3000,
-          transport: 'http',
+          broker: 'memory',
           members: [{ name: 'orders', port: 3000 }],
         },
         HTTP,
@@ -241,7 +241,7 @@ describe('what an npm workspace renders', () => {
 // here rather than assumed to follow from the shared manifest kind.
 describe('what a Bun workspace renders differently', () => {
   const BUN = workspaceProfile('bun');
-  const HTTP = transportSpec('http');
+  const HTTP = brokerSpec('memory');
 
   it('keeps npm root shape while changing every command', () => {
     const root =
@@ -263,7 +263,7 @@ describe('what a Bun workspace renders differently', () => {
           version: WORKSPACE_VERSION,
           runtime: 'bun',
           basePort: 3000,
-          transport: 'http',
+          broker: 'memory',
           members: [{ name: 'orders', port: 3000 }],
         },
         HTTP,

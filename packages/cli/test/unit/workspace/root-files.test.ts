@@ -4,11 +4,11 @@ import { firstDuplicatePath } from '../../../src/utils/file-writer.ts';
 import { workspaceRootFiles } from '../../../src/workspace/root-files.ts';
 import { frameworkSpecifier } from '../../../src/templates/framework-specifier.ts';
 import { WORKSPACE_MANIFEST, WORKSPACE_VERSION } from '../../../src/workspace/manifest.ts';
-import { transportSpec } from '../../../src/workspace/transport.ts';
+import { brokerSpec } from '../../../src/workspace/transport.ts';
 import { workspaceProfile } from '../../../src/workspace/runtime-profile.ts';
 
 /** The default transport every existing assertion was written against. */
-const HTTP = transportSpec('http');
+const HTTP = brokerSpec('memory');
 
 /**
  * The Deno profile these assertions describe. Node is the default since 0.9;
@@ -177,7 +177,7 @@ describe('workspaceRootFiles', () => {
       version: WORKSPACE_VERSION,
       runtime: 'deno',
       basePort: 3000,
-      transport: 'http',
+      broker: 'memory',
       members: [],
     });
   });
@@ -214,20 +214,16 @@ describe('the workspace README transport section', () => {
    * @param url - A `--transport-url` override, when one applies
    * @returns The README contents
    */
-  function readmeFor(name: Parameters<typeof transportSpec>[0], url?: string): string {
-    const files = workspaceRootFiles(
-      'acme',
-      3000,
-      transportSpec(name),
-      workspaceProfile('deno'),
-      url,
-    );
+  function readmeFor(name: Parameters<typeof brokerSpec>[0], url?: string): string {
+    const files = workspaceRootFiles('acme', 3000, brokerSpec(name), workspaceProfile('deno'), url);
     return files.find((file) => file.path === 'README.md')?.contents ?? '';
   }
 
-  it('says nothing about a connection for a transport that has none', () => {
-    const readme = readmeFor('http');
-    expect(readme).toContain('Services talk over **http**');
+  it('says nothing about a connection for a broker that has none', () => {
+    const readme = readmeFor('memory');
+    expect(readme).toContain('Members share the **memory** broker');
+    // The call style is each member's own choice, and the README says how to make it.
+    expect(readme).toContain('generate app <name> --rpc grpc');
     expect(readme).not.toContain('reads its connection value');
     // …and offers no stack, because there is no broker to run.
     expect(readme).not.toContain('Run the stack');

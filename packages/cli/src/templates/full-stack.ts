@@ -65,7 +65,7 @@ export const FULL_STACK_APP_FRAMEWORK_PACKAGES = ['react-router-plugin', 'common
  * @returns Source for the call's arguments, without the enclosing parentheses
  */
 function fullStackArgs(context: AppFactoryRenderContext): string {
-  const { runtime, serviceEndpoints, grpcBasePath } = context;
+  const { runtime, serviceEndpoints, csrfExclude } = context;
 
   // Indented to sit inside `const app = await …(` at two spaces, so the
   // generated file reads as hand-written source rather than as output.
@@ -82,16 +82,11 @@ function fullStackArgs(context: AppFactoryRenderContext): string {
     runtime === 'cloudflare-workers'
       ? ''
       : `, config: ${renderConfigOptions(context.envFilePath ?? '.env')}`;
-  // `new RegExp('…')` rather than a regex literal: a generated configuration must
-  // stay inside the language the CLI's own config reader classifies (no regex
-  // literal, no backslash), or `setu add` and `setu devtool enable` would treat
-  // the CLI's own output as unfamiliar (audit round 5, C-R5). The base path is a
-  // fixed literal path segment, so it needs no escaping inside the pattern.
-  if (grpcBasePath !== undefined && !/^\/[A-Za-z0-9_-]+$/.test(grpcBasePath)) {
-    throw new Error(`gRPC base path ${grpcBasePath} must be a single plain path segment.`);
-  }
-  const csrf =
-    grpcBasePath === undefined ? '{}' : `{ exclude: [new RegExp('^${grpcBasePath}(?:/|$)')] }`;
+  // A workspace member's exclusions come from its CLI-owned transport module
+  // (M138), so a later change to its RPC style regenerates that module and leaves
+  // this config alone. The call keeps the config inside the language the CLI's
+  // own config reader classifies: no regex literal, no backslash.
+  const csrf = csrfExclude === undefined ? '{}' : `{ exclude: [...${csrfExclude}] }`;
 
   // The RETURN TYPE annotation is X5-2's whole fix, and it is load-bearing
   // rather than decorative. TypeScript does NOT apply excess-property checking

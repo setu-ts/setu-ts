@@ -112,11 +112,11 @@ describe('commands refuse to follow a link inside a project', () => {
     await nodeFs.writeFile(
       `${ws}/setu.workspace.json`,
       renderWorkspaceManifest({
-        version: 1,
+        version: 2,
         basePort: 8600,
         devtoolBasePort: 8700,
         runtime: 'deno',
-        transport: 'http',
+        broker: 'memory',
         members: [{ name: 'orders', port: 8600, devtoolPort: 8700 }],
       }),
     );

@@ -773,6 +773,10 @@ here.
 - **Milestone 136** (`agent-runs-plugin` + `common` + `database-plugin` + `apps/durable-agent` —
   durable model/tool runs, fenced leases, timed approvals and UI-message replay, with a
   support-agent example that survives restarts) — complete (PR #565).
+- **Milestone 138** (`packages/cli` — workspace broker and per-member RPC style: a version-2
+  `setu.workspace.json` with `broker` and per-member `rpc`, a CLI-owned `src/transport/index.ts` per
+  member that its config calls, `setu workspace broker` and `setu workspace rpc`, and one planner
+  behind them, `generate app`, `setu sync` and a member's `setu add`) — complete (PR #568).
 - **Next milestone** — the `0.12.0` release.
 
 ## Verification (run before declaring any work done)

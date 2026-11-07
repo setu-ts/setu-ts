@@ -8,7 +8,7 @@ import {
 } from '../../../src/workspace/deploy-manifest.ts';
 import { workspaceK8sFiles } from '../../../src/workspace/k8s.ts';
 import { WORKSPACE_VERSION } from '../../../src/workspace/manifest.ts';
-import { transportSpec } from '../../../src/workspace/transport.ts';
+import { brokerSpec } from '../../../src/workspace/transport.ts';
 import { envFromBlock } from '../../../src/workspace/secrets.ts';
 
 const MANIFEST = `metadata:
@@ -134,13 +134,13 @@ describe('stampSecretVersion (re-audit N2)', () => {
       version: WORKSPACE_VERSION,
       runtime: 'node',
       basePort: 3000,
-      transport: 'http',
+      broker: 'memory',
       members: [
         { name: 'portal', port: 3000 },
         { name: 'portal-admin', port: 3001 },
       ],
     },
-    transportSpec('http'),
+    brokerSpec('memory'),
   ).find((file) => file.path === 'k8s/members.yaml')!.contents;
 
   it("fills only the member's own Deployment slot", () => {

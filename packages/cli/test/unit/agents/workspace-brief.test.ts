@@ -9,11 +9,11 @@ import { agentFacts } from '../../fixtures/agent-facts.ts';
 
 describe('workspace briefs', () => {
   const manifest: WorkspaceManifest = {
-    version: 1,
+    version: 2,
     basePort: 3000,
     runtime: 'node',
-    transport: 'redis',
-    transportUrl: 'redis://localhost:6379',
+    broker: 'redis',
+    brokerUrl: 'redis://localhost:6379',
     members: [
       { name: 'orders', port: 3000, devtoolPort: 4919 },
       { name: 'billing', port: 3001, dependsOn: ['orders'] },
@@ -26,7 +26,7 @@ describe('workspace briefs', () => {
       const text = renderWorkspaceRoot(
         {
           ...manifest,
-          transportUrl: value,
+          brokerUrl: value,
           members: [{ name: value, port: 3000, dependsOn: ['orders', value] }],
         },
         '1',
@@ -68,13 +68,13 @@ describe('workspace briefs', () => {
       ['deno', 'deno task'],
       ['bun', 'bun run'],
     ] as const)
-      expect(renderWorkspaceRoot({ ...manifest, runtime, transport: 'http' }, '1')).toContain(
+      expect(renderWorkspaceRoot({ ...manifest, runtime, broker: 'memory' }, '1')).toContain(
         `${runner} dev`,
       );
-    const { transportUrl: removed, ...withoutUrl } = manifest;
+    const { brokerUrl: removed, ...withoutUrl } = manifest;
     expect(removed).toBeDefined();
-    expect(renderWorkspaceRoot({ ...withoutUrl, transport: 'http' }, '1')).toContain(
-      'URL variable: none. Endpoint override: transport default',
+    expect(renderWorkspaceRoot({ ...withoutUrl, broker: 'memory' }, '1')).toContain(
+      'URL variable: none. Endpoint override: broker default',
     );
   });
   it.each(['node', 'deno'] as const)(

@@ -17,20 +17,20 @@ import {
   type WorkspaceManifest,
   type WorkspaceMember,
 } from '../../src/workspace/manifest.ts';
-import { transportSpec } from '../../src/workspace/transport.ts';
+import { brokerSpec } from '../../src/workspace/transport.ts';
 
 it('L2 renders exactly one containers/name anchor per member including shared prefixes', () => {
   const manifest: WorkspaceManifest = {
     version: WORKSPACE_VERSION,
     runtime: 'node',
     basePort: 3000,
-    transport: 'http',
+    broker: 'memory',
     members: [
       { name: 'api', port: 3000 },
       { name: 'api-gateway', port: 3001 },
     ],
   };
-  const text = workspaceK8sFiles(manifest, transportSpec('http')).find(
+  const text = workspaceK8sFiles(manifest, brokerSpec('memory')).find(
     (file) => file.path === 'k8s/members.yaml',
   )!.contents;
   for (const name of ['api', 'api-gateway']) {
@@ -48,10 +48,10 @@ function render(member: WorkspaceMember): string {
     version: WORKSPACE_VERSION,
     runtime: 'deno',
     basePort: 3000,
-    transport: 'http',
+    broker: 'memory',
     members: [member],
   };
-  const files = workspaceK8sFiles(manifest, transportSpec('http'));
+  const files = workspaceK8sFiles(manifest, brokerSpec('memory'));
   return (
     files.find((f: { path: string; contents: string }) => f.path === `${K8S_DIR}/members.yaml`)
       ?.contents ?? ''
@@ -110,10 +110,10 @@ describe('generated Kubernetes manifests', () => {
       version: WORKSPACE_VERSION,
       runtime: 'deno',
       basePort: 3000,
-      transport: 'http',
+      broker: 'memory',
       members: [{ name: 'orders', port: 3000, metricsEndpoint: true }],
     };
-    const files = workspaceK8sFiles(manifest, transportSpec('http'));
+    const files = workspaceK8sFiles(manifest, brokerSpec('memory'));
     const readme =
       files.find((f: { path: string; contents: string }) => f.path === `${K8S_DIR}/README.md`)
         ?.contents ?? '';

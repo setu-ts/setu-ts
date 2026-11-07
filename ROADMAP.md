@@ -16936,6 +16936,41 @@ patch by construction and gains nothing new here.
 
 ---
 
+## Milestone 138: Workspace Broker and RPC Style
+
+**Package(s):** `packages/cli`; docs.
+
+**Source:** planning the gRPC workspace example (2026-11-06), which found that one workspace
+`transport` field could not describe a gRPC workspace with a real broker.
+
+**The problem.** `setu new --workspace --transport` recorded ONE value covering two different
+choices: how a service is called (`http`, `grpc`) and the bus members publish to (`memory`, `redis`,
+`rabbitmq`, `nats`, `kafka`, `pubsub`, `service-bus`). A `--transport grpc` workspace therefore kept
+every member on the in-memory broker. Nothing could change the choice after scaffolding, and
+`generate app` told a user who wanted a different backend to scaffold the service outside the
+workspace.
+
+**What ships.** Compared first with Dapr (per-app protocol, shared pub/sub component), NestJS
+(per-service transport, hybrid apps), Moleculer (one shared transporter), MassTransit (one bus,
+MultiBus for more), Spring Cloud Stream and Quarkus (binders and connectors set in configuration):
+
+1. **A workspace broker and a per-member RPC style,** recorded separately in a version-2
+   `setu.workspace.json` (`broker`, `brokerUrl`, per-member `rpc`); version 1 is still read.
+   `--broker`/`--broker-url` on the workspace, `--rpc http|grpc` on `generate app`.
+2. **A CLI-owned `src/transport/index.ts` per member** that its `setu.config.ts` calls, so the
+   config reads the same on every broker and style — the configuration-not-code change every
+   compared framework uses, on the discovery map's own pattern.
+3. **`setu workspace broker <name>` and `setu workspace rpc <member> <style>`,** one planner behind
+   them and behind `generate app`, `setu sync` and a member's `setu add messaging|queue|grpc`. It
+   rewrites only CLI-owned files, merges packages additively, never writes `setu.config.ts` (it
+   refuses with the lines to add), and refuses a change that would orphan source, unless `--force`.
+
+**Gate:** a Deno workspace formatted, linted and type-checked across a broker switch and two RPC
+switches; a mesh member answering gRPC health `200`, then `404` after `workspace rpc <m> http`; a
+real Redis delivery after switching from memory; every changed file at the 90% per-file bar.
+
+---
+
 ## Progress Tracking
 
 | Milestone | Status | Package                                                                                                                                                                                                                                                                                   |
@@ -17206,3 +17241,4 @@ patch by construction and gains nothing new here.
 | 137a      | ⬜     | common + openapi-plugin + decorator-plugin + sdk — document metadata, `deprecated`, per-route exclusion                                                                                                                                                                                   |
 | 137b      | ⬜     | common + openapi-plugin + auth-plugin + decorator-plugin — derived 401/403/415/429 and idempotency headers, declared response headers, opt-in Problem Details schema                                                                                                                      |
 | 137c      | ⬜     | common + validation-plugin + openapi-plugin + sdk — form bodies and file uploads in the document and the generated client                                                                                                                                                                 |
+| 138       | ✅     | cli — workspace broker and per-member RPC style: a CLI-owned transport module per member, `setu workspace broker` and `setu workspace rpc`; PR #568                                                                                                                                       |

@@ -93,9 +93,9 @@ describe('M113i review regressions', () => {
           '--workspace',
           '--runtime',
           'deno',
-          '--transport',
+          '--broker',
           'redis',
-          '--transport-url',
+          '--broker-url',
           url,
         ]),
         deps,
@@ -107,10 +107,12 @@ describe('M113i review regressions', () => {
         cwd: '/work/acme',
       }),
     ).toBe(0);
-    const config = fs.read('/work/acme/apps/orders/setu.config.ts');
-    expect(config).toContain(url);
-    expect(config).toContain("adapter: 'redis'");
-    expect(config).toContain('processors: [...QUEUE_PROCESSORS]');
+    const module = fs.read('/work/acme/apps/orders/src/transport/index.ts');
+    expect(module).toContain(url);
+    expect(module).toContain("adapter: 'redis'");
+    expect(fs.read('/work/acme/apps/orders/setu.config.ts')).toContain(
+      'processors: [...QUEUE_PROCESSORS], ...queueOptions()',
+    );
   });
 
   it('refuses a directory at new main.ts without reading it in a dry run', async () => {

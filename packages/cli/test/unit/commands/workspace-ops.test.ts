@@ -12,7 +12,7 @@ import {
   type WorkspaceManifest,
   type WorkspaceMember,
 } from '../../../src/workspace/manifest.ts';
-import { transportSpec } from '../../../src/workspace/transport.ts';
+import { brokerSpec } from '../../../src/workspace/transport.ts';
 
 /** One recorded external command. */
 interface ICall {
@@ -175,7 +175,7 @@ function manifestOf(
   members: readonly WorkspaceMember[],
   runtime: WorkspaceManifest['runtime'] = 'node',
 ): WorkspaceManifest {
-  return { version: WORKSPACE_VERSION, runtime, basePort: 3000, transport: 'redis', members };
+  return { version: WORKSPACE_VERSION, runtime, basePort: 3000, broker: 'redis', members };
 }
 
 /**
@@ -200,7 +200,7 @@ function harness(
     { name: 'portal', port: 3001 },
   ];
   const manifest = manifestOf(members, options.runtime);
-  const k8s = workspaceK8sFiles(manifest, transportSpec('redis'));
+  const k8s = workspaceK8sFiles(manifest, brokerSpec('redis'));
   const lockfile =
     options.runtime === 'deno'
       ? 'deno.lock'

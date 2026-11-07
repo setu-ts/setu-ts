@@ -4,14 +4,17 @@ import { resolveHost } from '../../../src/templates/project-files.ts';
 import { getTemplate } from '../../../src/templates/registry.ts';
 import { MINIMAL_HOST } from '../../../src/templates/minimal.ts';
 import { withWorkspaceMember } from '../../../src/workspace/member-host.ts';
-import { transportSpec } from '../../../src/workspace/transport.ts';
+import { BROKERS, brokerSpec } from '../../../src/workspace/transport.ts';
+import { TRANSPORT_MODULE, TRANSPORT_SPECIFIER } from '../../../src/workspace/transport-module.ts';
+import { rpcSpec } from '../../../src/workspace/rpc.ts';
 import {
   DISCOVERY_SPECIFIER,
   SERVICE_ENDPOINTS_EXPORT,
 } from '../../../src/workspace/discovery-module.ts';
 
 /** The default transport, which contributes nothing — so those assertions stay about discovery. */
-const HTTP = transportSpec('http');
+const HTTP = brokerSpec('memory');
+const HTTP_RPC = rpcSpec('http');
 
 /**
  * Resolves a template by name, failing the test when it is missing.
@@ -27,20 +30,20 @@ function hostOf(name: string) {
 
 describe('withWorkspaceMember', () => {
   it('points the discovery wiring at the generated map', () => {
-    const member = withWorkspaceMember(hostOf('microservice'), HTTP, 'orders');
+    const member = withWorkspaceMember(hostOf('microservice'), HTTP, HTTP_RPC, 'orders');
     const wiring = member.plugins.find((p) => p.pkg === 'service-discovery-plugin');
     expect(wiring?.args).toBe(`{ provider: 'static', services: ${SERVICE_ENDPOINTS_EXPORT} }`);
   });
 
   it('brings the map identifier into scope exactly once', () => {
-    const member = withWorkspaceMember(hostOf('microservice'), HTTP, 'orders');
+    const member = withWorkspaceMember(hostOf('microservice'), HTTP, HTTP_RPC, 'orders');
     const imports = member.localImports.filter((entry) => entry.from === DISCOVERY_SPECIFIER);
     expect(imports).toEqual([{ symbols: [SERVICE_ENDPOINTS_EXPORT], from: DISCOVERY_SPECIFIER }]);
   });
 
   it('keeps the template own local imports', () => {
     const base = hostOf('microservice');
-    const member = withWorkspaceMember(base, HTTP, 'orders');
+    const member = withWorkspaceMember(base, HTTP, HTTP_RPC, 'orders');
     for (const entry of base.localImports) {
       expect(member.localImports).toContainEqual(entry);
     }
@@ -48,27 +51,27 @@ describe('withWorkspaceMember', () => {
 
   it('leaves every other wiring untouched', () => {
     const base = hostOf('microservice');
-    const member = withWorkspaceMember(base, HTTP, 'orders');
-    const others = member.plugins.filter((p) => p.pkg !== 'service-discovery-plugin');
-    expect(others).toEqual(base.plugins.filter((p) => p.pkg !== 'service-discovery-plugin'));
+    const member = withWorkspaceMember(base, HTTP, HTTP_RPC, 'orders');
+    // The discovery, messaging and queue wirings are the only ones the overlay reads.
+    const owned = new Set(['service-discovery-plugin', 'messaging-plugin', 'queue-plugin']);
+    const others = member.plugins.filter((p) => !owned.has(p.pkg));
+    expect(others).toEqual(base.plugins.filter((p) => !owned.has(p.pkg)));
   });
 
   // Being REACHABLE by siblings and CONSUMING their map are separate
   // properties. A member without the plugin still appears in every other
   // member's map; adding the import here would put an identifier in its config
   // that no wiring reads.
-  it('changes nothing for a member without the discovery plugin', () => {
-    const base = hostOf('rest');
-    expect(withWorkspaceMember(base, HTTP, 'orders')).toEqual(base);
-  });
-
-  it('changes nothing for a member scaffolded with no template', () => {
-    const base = resolveHost(MINIMAL_HOST, 'deno');
-    expect(withWorkspaceMember(base, HTTP, 'orders')).toEqual(base);
+  it('adds no discovery wiring to a member without the discovery plugin', () => {
+    for (const base of [hostOf('rest'), resolveHost(MINIMAL_HOST, 'deno')]) {
+      const member = withWorkspaceMember(base, HTTP, HTTP_RPC, 'orders');
+      expect(member.plugins).toEqual(base.plugins);
+      expect(member.localImports.some((entry) => entry.from === DISCOVERY_SPECIFIER)).toBe(false);
+    }
   });
 
   it('passes the generated map through the full-stack starter factory', () => {
-    const member = withWorkspaceMember(hostOf('full-stack'), HTTP, 'storefront');
+    const member = withWorkspaceMember(hostOf('full-stack'), HTTP, HTTP_RPC, 'storefront');
 
     expect(member.plugins).toEqual([]);
     expect(member.appFactoryContext.serviceEndpoints).toBe(SERVICE_ENDPOINTS_EXPORT);
@@ -85,171 +88,192 @@ describe('withWorkspaceMember', () => {
   });
 });
 
-describe('withWorkspaceMember — the transport overlay', () => {
+describe('withWorkspaceMember — the transport module', () => {
   /**
-   * Reads the messaging wiring of a microservice member under one transport.
+   * Applies a broker and RPC style to a template's member.
    *
-   * @param name - The transport to apply
-   * @param url - The workspace's endpoint override, when it set one
-   * @returns The member's `MessagingPlugin` wiring
+   * @param template - The template name
+   * @param broker - The workspace broker
+   * @param rpc - The member's RPC style
+   * @returns The member host and its rendered module
    */
-  function messagingOf(name: Parameters<typeof transportSpec>[0], url?: string) {
+  function memberOf(
+    template: string,
+    broker: Parameters<typeof brokerSpec>[0] = 'memory',
+    rpc: 'http' | 'grpc' = 'http',
+  ) {
     const member = withWorkspaceMember(
-      hostOf('microservice'),
-      transportSpec(name),
+      hostOf(template),
+      brokerSpec(broker),
+      rpcSpec(rpc),
       'orders',
       workspaceProfile('deno'),
-      url,
     );
-    return member.plugins.find((p) => p.pkg === 'messaging-plugin');
+    const module = member.files.find((file) => file.path === TRANSPORT_MODULE);
+    return { member, module };
   }
 
-  // The template already registers MessagingPlugin, and the kernel refuses a
-  // duplicate plugin name at start() — so a broker REWRITES that wiring. A
-  // second registration would scaffold a member that type-checks and cannot boot.
-  it('rewrites the template messaging wiring rather than adding a second one', () => {
-    const member = withWorkspaceMember(
-      hostOf('microservice'),
-      transportSpec('redis'),
-      'orders',
-      workspaceProfile('deno'),
-    );
-    const messaging = member.plugins.filter((p) => p.pkg === 'messaging-plugin');
-    expect(messaging).toHaveLength(1);
-    // An environment read with the local address as its FALLBACK, not a literal:
-    // inside a container 127.0.0.1 is the container itself, so the Compose stack
-    // has to be able to override it.
-    // Pre-wrapped one member per line, which is what `deno fmt` produces for a
-    // call this long — a fresh `--transport` scaffold used to fail its own
-    // formatter on it (X2-4).
-    expect(messaging[0]?.args).toBe(
-      "{\n        broker: 'redis-streams',\n" +
-        "        url: Deno.env.get('REDIS_URL') ??\n          'redis://127.0.0.1:6379',\n      }",
-    );
-  });
-
-  it('rewrites the QUEUE wiring from the same connection value', () => {
-    // X2-3: `--transport rabbitmq` rewrote the broker and left `QueuePlugin()`
-    // on memory, so background jobs in the one template built for distributed
-    // work were process-local — lost on restart and invisible to a replica.
-    const member = withWorkspaceMember(
-      hostOf('microservice'),
-      transportSpec('redis'),
-      'orders',
-      workspaceProfile('deno'),
-    );
-    const queue = member.plugins.filter((p) => p.pkg === 'queue-plugin');
-
-    expect(queue).toHaveLength(1);
-    expect(queue[0]?.args).toContain("adapter: 'redis'");
-    expect(queue[0]?.args).toContain("Deno.env.get('REDIS_URL')");
-  });
-
-  it('keeps queue processors for a transport the queue cannot serve', () => {
-    const member = withWorkspaceMember(hostOf('microservice'), transportSpec('nats'), 'orders');
-    const queue = member.plugins.filter((p) => p.pkg === 'queue-plugin');
-
-    expect(queue).toHaveLength(1);
-    expect(queue[0]?.args).toBe('{ processors: [...QUEUE_PROCESSORS] }');
-  });
-
-  it('uses the transport default endpoint when the workspace names none', () => {
-    expect(messagingOf('nats')?.args).toContain('nats://127.0.0.1:4222');
-  });
-
-  it('honors the workspace endpoint override', () => {
-    // The override replaces the FALLBACK, not the environment read: a deployed
-    // stack still has to be able to point a member elsewhere.
-    const args = messagingOf('redis', 'redis://shared:6379')?.args ?? '';
-    expect(args).toContain("Deno.env.get('REDIS_URL')");
-    expect(args).toContain('redis://shared:6379');
-    expect(args).not.toContain('127.0.0.1');
-  });
-
-  it('leaves the messaging wiring alone for http, grpc and memory', () => {
-    const base = hostOf('microservice');
-    const untouched = base.plugins.find((p) => p.pkg === 'messaging-plugin');
-    for (const name of ['http', 'grpc', 'memory'] as const) {
-      expect(messagingOf(name)).toEqual(untouched);
+  it('writes a CLI-owned module into every member', () => {
+    for (const template of ['rest', 'microservice', 'class-based', 'full-stack']) {
+      const { module } = memberOf(template);
+      expect(module?.managed).toBe(true);
+      expect(module?.contents).toContain('export function transportPlugins()');
     }
   });
 
-  it('registers the gRPC plugin for the grpc transport', () => {
-    const member = withWorkspaceMember(hostOf('microservice'), transportSpec('grpc'), 'orders');
-    expect(member.plugins.filter((p) => p.pkg === 'grpc-plugin')).toHaveLength(1);
+  // The template already registers MessagingPlugin, and the kernel refuses a
+  // duplicate plugin name at start() — so the config passes the module's options
+  // to that one wiring rather than registering a second.
+  it('points the template messaging and queue wirings at the module', () => {
+    const { member } = memberOf('microservice', 'redis');
+    const messaging = member.plugins.filter((p) => p.pkg === 'messaging-plugin');
+    expect(messaging).toEqual([expect.objectContaining({ args: 'messagingOptions()' })]);
+    // The jobs seam stays in front of the spread, so `setu check` sees it wired.
+    expect(member.plugins.find((p) => p.pkg === 'queue-plugin')?.args).toBe(
+      '{ processors: [...QUEUE_PROCESSORS], ...queueOptions() }',
+    );
+    expect(member.pluginSpreads[0]).toBe('...transportPlugins()');
+    expect(member.localImports).toContainEqual({
+      symbols: ['messagingOptions', 'queueOptions', 'transportPlugins'],
+      from: TRANSPORT_SPECIFIER,
+    });
+  });
+
+  // The config reads the module whatever the broker, so a later broker change
+  // regenerates the module and leaves the config alone.
+  it('renders the same config calls on every broker', () => {
+    const configs = BROKERS.map((broker) => memberOf('microservice', broker).member.plugins);
+    for (const plugins of configs) expect(plugins).toEqual(configs[0]);
+  });
+
+  it('declares the broker clients the module needs, and none for memory', () => {
+    expect(memberOf('microservice', 'redis').member.extraDependencies).toMatchObject({
+      ioredis: expect.any(String),
+    });
+    expect(memberOf('microservice', 'nats').member.extraDependencies).toMatchObject({
+      nats: expect.any(String),
+    });
+    const base = hostOf('microservice').extraDependencies;
+    expect(memberOf('microservice', 'memory').member.extraDependencies).toEqual(base);
+    // A member with no messaging gets no broker client: nothing would load it.
+    expect(memberOf('rest', 'redis').member.extraDependencies).toEqual(
+      hostOf('rest').extraDependencies,
+    );
+  });
+
+  it('carries the broker operational note into the member README', () => {
+    expect(memberOf('microservice', 'nats').member.transportNotes?.[0]).toContain('app.');
+    expect(memberOf('rest', 'nats').member.transportNotes).toBeUndefined();
+  });
+
+  it('writes the node-redis helper the module imports', () => {
+    const member = withWorkspaceMember(
+      hostOf('microservice'),
+      brokerSpec('redis', 'node-redis'),
+      HTTP_RPC,
+      'orders',
+      workspaceProfile('deno'),
+    );
+    expect(member.files.some((file) => file.path === 'src/node-redis.ts')).toBe(true);
+    expect(member.extraDependencies).toMatchObject({ redis: expect.any(String) });
+    expect(member.localImports.some((entry) => entry.from === './src/node-redis.ts')).toBe(false);
   });
 
   // A member whose template registers no messaging must not acquire a bus it
-  // never asked for — there is no wiring to rewrite, so a broker is inert.
+  // never asked for.
   it('adds no messaging wiring to a member whose template has none', () => {
     const base = hostOf('rest');
-    const member = withWorkspaceMember(base, transportSpec('redis'), 'orders');
-    expect(member.plugins.some((p) => p.pkg === 'messaging-plugin')).toBe(false);
+    const { member, module } = memberOf('rest', 'redis');
     expect(member.plugins).toEqual(base.plugins);
+    expect(module?.contents).not.toContain('messagingOptions');
   });
 
-  // Appending a transport plugin a template already registers would trip the
-  // kernel's duplicate-name check, so no transport may collide with any template.
+  it('registers the gRPC plugin, clients and toolchain for a grpc member only', () => {
+    const grpc = memberOf('microservice', 'redis', 'grpc');
+    expect(grpc.module?.contents).toContain("return [GrpcPlugin({ basePath: '/grpc' })];");
+    expect(grpc.member.extraFrameworkPackages).toEqual(['grpc-plugin']);
+    expect(grpc.member.extraDependencies).toMatchObject({ '@connectrpc/connect': '^2.1.2' });
+    expect(grpc.member.files.some((file) => file.path === 'buf.gen.yaml')).toBe(true);
+    expect(grpc.member.extraTasks['proto:gen']).toBeDefined();
+    // The config does not import the plugin: the module does.
+    expect(grpc.member.plugins.some((p) => p.pkg === 'grpc-plugin')).toBe(false);
+
+    const http = memberOf('microservice', 'redis');
+    expect(http.member.extraFrameworkPackages).toEqual([]);
+    expect(http.member.files.some((file) => file.path === 'buf.gen.yaml')).toBe(false);
+  });
+
+  it('gives an npm member the scripts and devDependencies half of the toolchain', () => {
+    const member = withWorkspaceMember(
+      resolveHost(getTemplate('microservice') ?? MINIMAL_HOST, 'node'),
+      HTTP,
+      rpcSpec('grpc'),
+      'orders',
+      workspaceProfile('node'),
+    );
+    expect(member.extraScripts['proto:gen']).toBeDefined();
+    expect(Object.keys(member.extraDevDependencies).length).toBeGreaterThan(0);
+    expect(member.extraTasks['proto:gen']).toBeUndefined();
+  });
+
+  it('passes the module calls through the full-stack starter factory', () => {
+    const { member } = memberOf('full-stack', 'redis', 'grpc');
+    expect(member.plugins).toEqual([]);
+    expect(member.appFactoryContext).toMatchObject({
+      messaging: 'messagingOptions(config)',
+      queue: '{ ...queueOptions(config) }',
+      csrfExclude: 'csrfExclusions()',
+    });
+    expect(member.setupCalls[0]).toBe(
+      'for (const plugin of transportPlugins()) app.register(plugin);',
+    );
+    const args = member.appFactory?.args?.({ runtime: 'deno', ...member.appFactoryContext }) ?? '';
+    expect(args).toContain('messaging: messagingOptions(config),');
+    expect(args).toContain('csrf: { exclude: [...csrfExclusions()] },');
+  });
+
+  it('keeps the template own options when the queue has none', () => {
+    const base = hostOf('microservice');
+    const queue = base.plugins.find((p) => p.pkg === 'queue-plugin')!;
+    const bare = withWorkspaceMember(
+      { ...base, plugins: base.plugins.map((p) => (p === queue ? { ...p, args: '' } : p)) },
+      HTTP,
+      HTTP_RPC,
+      'orders',
+    );
+    expect(bare.plugins.find((p) => p.pkg === 'queue-plugin')?.args).toBe('queueOptions()');
+    const unset = withWorkspaceMember(
+      {
+        ...base,
+        plugins: base.plugins.map((p) => {
+          if (p !== queue) return p;
+          const { args: _args, ...rest } = p;
+          return rest;
+        }),
+      },
+      HTTP,
+      HTTP_RPC,
+      'orders',
+    );
+    expect(unset.plugins.find((p) => p.pkg === 'queue-plugin')?.args).toBe('queueOptions()');
+  });
+
+  it('replaces a module the host already carried rather than writing it twice', () => {
+    const first = memberOf('microservice').member;
+    const again = withWorkspaceMember(first, HTTP, HTTP_RPC, 'orders', workspaceProfile('deno'));
+    expect(again.files.filter((file) => file.path === TRANSPORT_MODULE)).toHaveLength(1);
+  });
+
+  // Appending a plugin a template already registers would trip the kernel's
+  // duplicate-name check, so no combination may collide with any template.
   it('contributes no plugin any template already registers', () => {
     for (const template of ['rest', 'microservice', 'class-based']) {
-      const base = hostOf(template);
-      for (const name of [
-        'http',
-        'grpc',
-        'memory',
-        'redis',
-        'rabbitmq',
-        'nats',
-        'kafka',
-      ] as const) {
-        const member = withWorkspaceMember(base, transportSpec(name), 'orders');
-        const packages = member.plugins.map((p) => p.pkg);
-        expect(new Set(packages).size).toBe(packages.length);
+      for (const broker of BROKERS) {
+        for (const rpc of ['http', 'grpc'] as const) {
+          const packages = memberOf(template, broker, rpc).member.plugins.map((p) => p.pkg);
+          expect(new Set(packages).size).toBe(packages.length);
+        }
       }
-    }
-  });
-
-  // Kafka is DELIBERATELY not byte-identical to the pre-refactor form: it is
-  // the one arm nesting the connection inside a bracket, and the unshifted
-  // continuation indent made a `--transport kafka` workspace fail its own
-  // `deno fmt --check`. This pins the shifted form fmt actually accepts.
-  it('nests a --transport kafka connection one level deeper, as deno fmt wants', () => {
-    const member = withWorkspaceMember(
-      hostOf('microservice'),
-      transportSpec('kafka'),
-      'orders',
-      workspaceProfile('deno'),
-    );
-    expect(member.plugins.find((p) => p.pkg === 'messaging-plugin')?.args).toBe(
-      "{\n        broker: 'kafka',\n" +
-        '        brokers: [\n' +
-        "          Deno.env.get('KAFKA_BROKERS') ??\n" +
-        "            '127.0.0.1:9092',\n" +
-        '        ],\n      }',
-    );
-  });
-
-  // M72 §3.3 moved the rewrite into `templates/plugin-args.ts` + `broker.ts`.
-  // The broker arguments stay unchanged; the queue also keeps its jobs seam.
-  it('renders a --transport rabbitmq member with its generated queue processors', () => {
-    for (const url of [undefined, 'amqp://shared:5672']) {
-      const member = withWorkspaceMember(
-        hostOf('microservice'),
-        transportSpec('rabbitmq'),
-        'orders',
-        workspaceProfile('deno'),
-        url,
-      );
-      expect(member.plugins.find((p) => p.pkg === 'messaging-plugin')?.args).toBe(
-        "{\n        broker: 'rabbitmq',\n" +
-          "        url: Deno.env.get('RABBITMQ_URL') ??\n" +
-          `          '${url ?? 'amqp://127.0.0.1:5672'}',\n      }`,
-      );
-      expect(member.plugins.find((p) => p.pkg === 'queue-plugin')?.args).toBe(
-        "{\n        processors: [...QUEUE_PROCESSORS],\n        adapter: 'rabbitmq',\n" +
-          "        url: Deno.env.get('RABBITMQ_URL') ??\n" +
-          `          '${url ?? 'amqp://127.0.0.1:5672'}',\n      }`,
-      );
     }
   });
 });

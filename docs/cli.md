@@ -109,9 +109,9 @@ repository scripts or source.
 
 Examples keep their own composition: `--template`, `--workspace`, `--style`, `--broker`, `--queue`,
 `--redis-client`, `--devtool`, `--devtool-port`, `--logger`, `--env-file`, `--transport`,
-`--transport-url`, `--port`, `--depends-on` and `--di` are refused with `--example`.
-`--runtime node` is accepted; other runtimes are refused. `--dir`, `--agents` and `--dry-run` remain
-available. See [Examples](./examples.md) for the learning path and prerequisites.
+`--transport-url`, `--broker-url`, `--rpc`, `--port`, `--depends-on` and `--di` are refused with
+`--example`. `--runtime node` is accepted; other runtimes are refused. `--dir`, `--agents` and
+`--dry-run` remain available. See [Examples](./examples.md) for the learning path and prerequisites.
 
 ### Templates
 
@@ -254,7 +254,7 @@ emits the `queue` module handlers the platform invokes (`createMessagingHandler`
 
 A standalone project can select its own message broker and job queue at scaffold time instead of
 getting the in-memory defaults and hand-editing `setu.config.ts`. The accepted values are derived
-from the same transport registry the workspace `--transport` flag reads, so the two can never drift:
+from the same broker registry a workspace's `--broker` reads, so the two can never drift:
 
 ```bash
 setu new svc --template microservice --broker redis --queue redis
@@ -300,7 +300,7 @@ Without a selection the full-stack starter uses memory. Changing an existing val
 #### Choosing the Redis client
 
 Redis arms use ioredis by default. `--redis-client node-redis` (on `setu new` with `--broker redis`,
-`--queue redis` or `--transport redis`, and on `setu add` with a Redis selection) scaffolds
+`--queue redis` or `--workspace --broker redis`, and on `setu add` with a Redis selection) scaffolds
 [node-redis](https://www.npmjs.com/package/redis) instead: the project depends on `redis` rather
 than `ioredis`, and a generated `src/node-redis.ts` exports `nodeRedisClient(url)`, which passes
 `fromNodeRedis` from `@setu-ts/common` a factory that imports `redis` and calls
@@ -311,7 +311,7 @@ than `redis` itself, so `setu check` and later `setu add` runs keep reading the 
 
 ```bash
 setu new svc --template microservice --broker redis --queue redis --redis-client node-redis
-setu new acme --workspace --transport redis --redis-client node-redis
+setu new acme --workspace --broker redis --redis-client node-redis
 ```
 
 A standalone project keeps one Redis client. `setu add` reads it from what the project already uses:
@@ -340,9 +340,9 @@ ReactRouterPlugin: create one with `setu new <name> --template full-stack`, or i
 ## Interactive scaffolding
 
 At an interactive terminal, `setu new` asks for the choices it already accepts as flags — runtime,
-template and style on a standalone project, runtime and transport on a workspace. The style question
-is asked only for the styleable templates (`rest` and `microservice`), and the `class-based` alias
-is omitted from the template choices because two names for one project would tell a user nothing.
+template and style on a standalone project, runtime and broker on a workspace. The style question is
+asked only for the styleable templates (`rest` and `microservice`), and the `class-based` alias is
+omitted from the template choices because two names for one project would tell a user nothing.
 Broker and queue are asked only when the answers already given can take them, which is the same test
 the flags apply: a template registering no messaging (the minimal default, `rest`) and Cloudflare
 Workers skip them; full-stack offers both. A host with logging also asks for its logger. It never
@@ -724,7 +724,7 @@ own manifest and its own port.
 ```bash
 setu new acme --workspace                          # the root, no member yet
 setu new acme --workspace --port 4100              # base port for its members
-setu new acme --workspace --transport redis        # how members talk to each other
+setu new acme --workspace --broker redis           # the bus every member shares
 setu new acme --workspace --runtime deno           # a Deno workspace instead of npm workspaces
 cd acme
 setu generate app orders --template microservice    # apps/orders
@@ -734,7 +734,7 @@ setu generate app billing --template microservice   # apps/billing
 ```
 acme/
 ├── package.json            # "workspaces": ["apps/*"]   (deno.json on the Deno arm)
-├── setu.workspace.json     # members, their ports, the transport, the runtime
+├── setu.workspace.json     # members, their ports and RPC styles, the broker, the runtime
 ├── scripts/dev.mjs         # the root `dev` runner: starts every member (dev.ts on Deno)
 ├── docker/                 # a Compose stack for the members
 ├── k8s/                    # members.yaml: a Deployment and Service per member
@@ -754,9 +754,57 @@ The run-all command is `npm run dev` (`bun run dev`, or `deno task dev` on a Den
 a workspace is the same. See [Node and Bun workspaces](../PUBLIC_API.md#node-and-bun-workspaces).
 
 Ports come from `setu.workspace.json` and are allocated above the highest one in use, so adding a
-name that sorts earlier cannot move a running service's port. `--transport` picks how members reach
-each other (`http`, `grpc`, `memory`, `redis`, `rabbitmq`, `nats`, `kafka`); it is recorded once and
-every member added later inherits it, because services can only meet on a bus they share.
+name that sorts earlier cannot move a running service's port.
+
+### Broker and RPC style
+
+Two choices decide how members talk, and they are recorded in different places:
+
+- **The broker** is the bus every member publishes to and consumes from: `memory` (the default,
+  which never leaves one process), `redis`, `rabbitmq`, `nats`, `kafka`, `pubsub` or `service-bus`.
+  It is the workspace's, chosen with `setu new --workspace --broker <name>` (and
+  `--broker-url <url>` for an endpoint other than the local default), because members can only meet
+  on a bus they share. The job queue follows it wherever the queue supports that backend (`redis`,
+  `rabbitmq`).
+- **The RPC style** is how a member is called: `http`, or `grpc`, which co-serves Connect/gRPC under
+  `/grpc` on the same port. It is the member's own, chosen with
+  `setu generate app <name> --rpc grpc`, because an HTTP member and a gRPC member still reach each
+  other over HTTP through the discovery map.
+
+`--transport` and `--transport-url` no longer exist; both are refused with a pointer to these flags.
+
+Each member carries a CLI-owned `src/transport/index.ts`, regenerated from `setu.workspace.json`.
+Its `setu.config.ts` calls it instead of holding literal options:
+`MessagingPlugin(messagingOptions())`, `...queueOptions()` inside `QueuePlugin`, and
+`...transportPlugins()` in the plugin list (a full-stack member passes `messagingOptions(config)`
+and `queueOptions(config)` to its starter and registers `transportPlugins()` after it). The config's
+calls are the same on every broker and style, so changing either regenerates the module and leaves
+the config alone.
+
+```bash
+setu workspace broker redis                     # every member, Compose, k8s, README section
+setu workspace broker redis --broker-url redis://cache:6379
+setu workspace broker redis --redis-client node-redis
+setu workspace rpc orders grpc                  # one member
+setu workspace rpc orders http --dry-run        # print the plan, write nothing
+```
+
+A change rewrites the files the CLI owns — each affected member's module, the manifest, the Compose
+stack, the Kubernetes objects, and the README section between `<!-- setu:transport -->` markers —
+and merges the packages the new choice loads into each member's manifest. It never removes a package
+or a file: packages a member's transport module no longer uses, and files the old choice needed, are
+listed. The proto toolchain and the node-redis helper are written only when absent. It never writes
+`setu.config.ts`: a config that does not call the module (one written before 0.12.0, or edited by
+hand) is refused, nothing is written, and the lines to add are printed. `setu sync` writes the
+module itself, so run it first.
+
+A change that would leave code depending on what it removes is refused, naming each `file:line`:
+leaving a broker while source still reads its variable (`REDIS_URL` for a cache added with
+`setu add cache`, whose Compose service would disappear), or leaving gRPC while source still
+resolves `CAPABILITIES.GRPC`, imports `@setu-ts/grpc-plugin`, or imports from `src/gen/`. `--force`
+goes ahead and prints them as warnings. Inside a member, `setu add grpc` is the same operation as
+`setu workspace rpc <member> grpc`, and `setu add messaging` / `setu add queue` call the module
+rather than writing a literal.
 
 Each member also records `inspectPort`, and a full-stack member records `vitePort`. Development
 ports are allocated from `devBasePort`, or `basePort + 2000` when it is absent. Application,
@@ -806,9 +854,9 @@ This is the **local development** topology. A deployed one comes from a real pro
 `generate app` outside a workspace names `setu new <name> --workspace`. A duplicate member names the
 directory it already has. A member's runtime is the workspace's, so `generate app --runtime` is
 refused when it **disagrees** with the root rather than when it is not Deno — members share one
-manifest and one lockfile, and the root is what installs them. `--template full-stack` accepts
-broker transports through its starter's `messaging` and `queue` options. A transport with no queue
-arm leaves the queue in memory. Deno roots need `nodeModulesDir: "auto"` for the frontend build; the
+manifest and one lockfile, and the root is what installs them. `--template full-stack` takes the
+workspace broker through its starter's `messaging` and `queue` options. A broker with no queue arm
+leaves the queue in memory. Deno roots need `nodeModulesDir: "auto"` for the frontend build; the
 command plans that setting when absent and refuses a conflicting existing value.
 
 `new --workspace` refuses `--template` rather than ignoring it, and refuses
@@ -910,9 +958,10 @@ placement, peer ranges and conflicting pins.
 In a workspace, `setu agents` may be run from the root or from any member directory: it finds the
 workspace root and writes the root's `AGENTS.md` **and** every member's `apps/<name>/AGENTS.md`.
 `--check` checks all of them. The root brief covers the workspace commands, a member table (name,
-port, `dependsOn`, devtool port), the transport and its URL variable, and tells an agent to read the
-member's own `AGENTS.md` before working in it. Each member's brief is the standalone brief for that
-member plus a pointer at the root file for workspace layout, ports and transport.
+port, `dependsOn`, devtool port), the broker and its URL variable, the members that serve gRPC, and
+tells an agent to read the member's own `AGENTS.md` before working in it. Each member's brief is the
+standalone brief for that member plus a pointer at the root file for workspace layout, ports and
+transport.
 
 Writing a workspace on POSIX, from its root or a member, checks every target's directory chain up to
 `/`: each directory must belong to the invoking user or root and must not be a symlink, the same

@@ -21,7 +21,7 @@ function fsWith(files: Record<string, string>): IFileSystem {
 }
 
 function baseManifest(members: WorkspaceManifest['members']): WorkspaceManifest {
-  return { version: 1, basePort: 3000, transport: 'http', runtime: 'deno', members };
+  return { version: 2, basePort: 3000, broker: 'memory', runtime: 'deno', members };
 }
 
 it('X87-2 X87-6 round-trips and validates development ports without dropping fields', async () => {

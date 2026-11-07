@@ -40,7 +40,7 @@ import { hostVariable } from './discovery-module.ts';
 import { LIBS_DIR } from './library.ts';
 import { MEMBERS_DIR, type WorkspaceManifest } from './manifest.ts';
 import { workspaceProfile, type WorkspaceRuntimeProfile } from './runtime-profile.ts';
-import type { TransportSpec } from './transport.ts';
+import type { BrokerSpec } from './transport.ts';
 
 /** Where the workspace's container artifacts live, relative to its root. */
 export const DOCKER_DIR = 'docker';
@@ -393,7 +393,7 @@ CMD ${bun ? '["bun", "run", "main.ts"]' : `["node", "--import", "./${TELEMETRY_P
  */
 export function memberEnvironment(
   siblings: readonly WorkspaceManifest['members'][number][],
-  transport: TransportSpec,
+  transport: BrokerSpec,
 ): Readonly<Record<string, string>> {
   return {
     ...Object.fromEntries(siblings.map((sibling) => [hostVariable(sibling.name), sibling.name])),
@@ -420,7 +420,7 @@ function memberService(
   name: string,
   port: number,
   siblings: readonly WorkspaceManifest['members'][number][],
-  transport: TransportSpec,
+  transport: BrokerSpec,
 ): string {
   const backing = transport.compose;
 
@@ -497,7 +497,7 @@ ${dependsOn
  */
 export function workspaceContainerFiles(
   manifest: WorkspaceManifest,
-  transport: TransportSpec,
+  transport: BrokerSpec,
   profile: WorkspaceRuntimeProfile = workspaceProfile(manifest.runtime),
 ): readonly GeneratedFile[] {
   const backing = transport.compose;

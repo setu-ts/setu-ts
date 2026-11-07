@@ -6,7 +6,7 @@
  * scaffolded standalone project already runs on both, and only the MONOREPO was
  * Deno-only — which is precisely where the NestJS equivalent (`nest g app`) lives.
  *
- * Declared as one record per runtime, the way {@linkcode TransportSpec} is, so a
+ * Declared as one record per runtime, the way {@linkcode BrokerSpec} is, so a
  * runtime difference is stated once rather than switched on at each of a dozen
  * render sites. Everything here was measured against real toolchains rather than
  * inferred:
@@ -145,7 +145,7 @@ function nodeEnvRead(variable: string, fallback: string): string {
  * Renders a value as a TypeScript string literal that evaluates to exactly that
  * value.
  *
- * The fallback reaches generated source from `--transport-url` and from a
+ * The fallback reaches generated source from `--broker-url` and from a
  * workspace manifest a developer may have edited, so it is never interpolated
  * raw: a quote in it would close the literal and the rest would run as code in
  * every member. Single-quoted as the generated files are, byte-identical for

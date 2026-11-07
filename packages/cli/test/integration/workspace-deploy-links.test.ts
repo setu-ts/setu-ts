@@ -25,7 +25,7 @@ import {
   WORKSPACE_VERSION,
   type WorkspaceManifest,
 } from '../../src/workspace/manifest.ts';
-import { transportSpec } from '../../src/workspace/transport.ts';
+import { brokerSpec } from '../../src/workspace/transport.ts';
 
 const fs = createNodeRuntimeServices().fs!;
 const CANARY = 'canary-outside-host-file';
@@ -37,7 +37,7 @@ const manifest: WorkspaceManifest = {
   version: WORKSPACE_VERSION,
   runtime: 'node',
   basePort: 3000,
-  transport: 'http',
+  broker: 'memory',
   members: [{ name: 'portal', port: 3000 }],
 };
 
@@ -50,7 +50,7 @@ beforeEach(async () => {
   await nodeFs.mkdir(outside);
   await nodeFs.writeFile(`${root}/setu.workspace.json`, renderWorkspaceManifest(manifest));
   await nodeFs.writeFile(`${root}/package-lock.json`, '{}');
-  for (const file of workspaceK8sFiles(manifest, transportSpec('http'))) {
+  for (const file of workspaceK8sFiles(manifest, brokerSpec('memory'))) {
     await nodeFs.writeFile(`${root}/${file.path}`, file.contents);
   }
   await nodeFs.writeFile(`${root}/apps/portal/.env.example`, 'SESSION_SECRET=\n');

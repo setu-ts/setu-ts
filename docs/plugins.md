@@ -39,8 +39,8 @@ npm install @setu-ts/messaging-plugin kafkajs
 # Deno: deno add npm:@setu-ts/messaging-plugin npm:kafkajs
 ```
 
-`setu new --broker`/`--queue` and a workspace's `--transport` already add the client for the arm
-they wire. `setu add` records peers for the default arm it wires (for example the console telemetry
+`setu new --broker`/`--queue` and a workspace's `--broker` already add the client for the arm they
+wire. `setu add` records peers for the default arm it wires (for example the console telemetry
 exporter); any other arm you select by hand needs its driver installed as above.
 
 ### Optional peers in a workspace
@@ -1442,7 +1442,8 @@ default.
   `--style class-based` opts into decorators and dependency injection together on `rest` and
   `microservice`, and `--template class-based` is a byte-identical alias of
   `--template rest --style class-based`
-- `setu new <name> --workspace` - Create a monorepo root (`--port`, `--transport`)
+- `setu new <name> --workspace` - Create a monorepo root (`--port`, `--broker`);
+  `setu workspace broker|rpc` changes it later
 - `setu generate <type> <name>` - Generate code; 16 schematics, every one except `guard`,
   `migration` and (in a functional project) `service` and `job` wired into a registration site with
   no edit to a file you own

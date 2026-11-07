@@ -190,6 +190,7 @@ export function withStarterOption(
 /** Splits a located literal with the existing masked top-level walker. */
 function literalEntries(
   object: IReturnedObject,
+  callSpread = false,
 ): readonly { key: string; start: number; end: number }[] | undefined {
   const boundaries = [object.start];
   walkTopLevel(object, (at, depth) => {
@@ -202,6 +203,14 @@ function literalEntries(
     const end = boundaries[i + 1]! - 1;
     const text = object.visible.slice(start, end);
     if (text.trim() === '') continue;
+    // M138 §3.4: one keyless spread of a one-argument call, `...queueOptions(config)`,
+    // is how a workspace member's starter arm reads its CLI-owned transport module.
+    // Kept as an opaque entry; anything else that is not `key: value` still fails.
+    if (callSpread && /^\s*\.\.\.[A-Za-z_$][\w$]*\(\s*[A-Za-z_$][\w$]*\s*\)\s*$/.test(text)) {
+      if (entries.some((entry) => entry.key === '...')) return undefined;
+      entries.push({ key: '...', start, end });
+      continue;
+    }
     const match = /^\s*(?:([A-Za-z_$][\w$]*)|'([^']+)'|"([^"]+)")\s*:\s*/.exec(text);
     if (match === null) return undefined;
     const key = match[1] ?? match[2] ?? match[3]!;
@@ -252,7 +261,7 @@ export function withStarterArmEntry(
   const end = closingBrace(object.code, arm.start + 1);
   if (end === undefined || source.slice(end + 1, arm.end).trim() !== '') return undefined;
   const inner = { ...object, start: arm.start + 1, end };
-  const properties = literalEntries(inner);
+  const properties = literalEntries(inner, true);
   if (properties === undefined || properties.some((entry) => entry.key === property))
     return undefined;
   const lineStart = source.lastIndexOf('\n', arm.start) + 1;

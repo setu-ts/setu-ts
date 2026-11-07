@@ -1,5 +1,5 @@
 /**
- * The proto toolchain a `--transport grpc` member needs to serve its OWN service.
+ * The proto toolchain a `--rpc grpc` member needs to serve its OWN service.
  *
  * A bare `GrpcPlugin()` already answers `grpc.health.v1.Health/Check` with no
  * configuration, because the plugin carries that descriptor itself. Serving an
@@ -28,6 +28,7 @@
  * @module
  */
 
+import { wrapProse } from '../utils/wrap-prose.ts';
 import type { GeneratedFile } from '../utils/file-writer.ts';
 
 /** The task that regenerates descriptors from the project's protos. */
@@ -174,14 +175,18 @@ grpc.addService(PingService, {
 });
 \`\`\`
 
-\`${PROTO_OUT_DIR}/\` is generated: commit it or add it to \`.gitignore\`, but do not
-edit it — the next \`${run}\` overwrites it.
+${wrapProse(
+  `\`${PROTO_OUT_DIR}/\` is generated: commit it or add it to \`.gitignore\`, but do not edit it — ` +
+    `the next \`${run}\` overwrites it.`,
+)}
 
-Nothing needs \`buf\` or \`protoc\` on your PATH: ${
+${wrapProse(
+  `Nothing needs \`buf\` or \`protoc\` on your PATH: ${
     onDeno
-      ? "both the compiler and the\nTypeScript plugin run through Deno's npm compatibility."
-      : 'both are devDependencies, and\n`npm run` puts them on the PATH.'
-  }
+      ? "both the compiler and the TypeScript plugin run through Deno's npm compatibility."
+      : 'both are devDependencies, and `npm run` puts them on the PATH.'
+  }`,
+)}
 `;
 
   return [

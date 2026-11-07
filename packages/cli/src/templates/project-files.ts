@@ -190,6 +190,12 @@ export interface ResolvedHost {
   readonly extraScripts: Readonly<Record<string, string>>;
   /** npm `devDependencies` merged into a generated `package.json` (the proto toolchain). */
   readonly extraDevDependencies: Readonly<Record<string, string>>;
+  /**
+   * Framework packages the project declares without the config importing them —
+   * what a workspace member's transport module imports (`@setu-ts/grpc-plugin`
+   * for a gRPC member).
+   */
+  readonly extraFrameworkPackages: readonly string[];
   readonly appFactory?: AppFactoryWiring | undefined;
   readonly appFactoryContext: Omit<AppFactoryRenderContext, 'runtime'>;
   /** Routes the template's own source serves, for the README. */
@@ -247,6 +253,7 @@ export function resolveHost(host: TemplateHost, runtime: TargetRuntime): Resolve
       extraDependencies: {},
       extraScripts: {},
       extraDevDependencies: {},
+      extraFrameworkPackages: [],
       appFactory: host.appFactory,
       routes: host.routes ?? [],
       appFactoryContext: {
@@ -1144,6 +1151,7 @@ function frameworkPackages(host: ResolvedHost, runtime: TargetRuntime): readonly
   }
   if (host.appFactory !== undefined) packages.add(host.appFactory.pkg);
   for (const entry of host.packageImports) packages.add(entry.pkg);
+  for (const pkg of host.extraFrameworkPackages) packages.add(pkg);
   // Reads the SAME resolved plugin list the renderer emits, so a project never
   // imports a framework package without declaring it.
   for (const pkg of packagesOf(host.plugins, host.middleware)) packages.add(pkg);
