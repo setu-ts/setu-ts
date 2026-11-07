@@ -1,5 +1,6 @@
 import { Code, ConnectError, type ServiceImpl } from '@connectrpc/connect';
-import { CAPABILITIES, type IGrpcService, type IPlugin } from '@setu-ts/common';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IGrpcService, IPlugin, IPluginContext } from '@setu-ts/common';
 import { BillingService } from '@grpc-workspace/contracts';
 
 /** Fixed in-memory price table, in cents per unit. */
@@ -31,19 +32,24 @@ const implementation = {
 } satisfies Partial<ServiceImpl<typeof BillingService>>;
 
 /**
- * Registers `BillingService` with the member's gRPC service. The CLI owns the
- * `GrpcPlugin` itself (`src/transport/index.ts`), so the service is added from
- * a plugin that depends on the capability rather than through
- * `GrpcPlugin({ services })`.
+ * Serves `billing.v1.BillingService`. The CLI owns `GrpcPlugin` (in
+ * `src/transport/index.ts`), so the service is added through
+ * {@linkcode IGrpcService.addService} once that plugin has registered, rather
+ * than through `GrpcPlugin({ services })`.
  *
- * @returns The plugin `setu.config.ts` registers after `transportPlugins()`
+ * Registered for you through the `GENERATED_PLUGINS` barrel in
+ * `src/plugins/index.ts`, which `setu.config.ts` spreads into
+ * `createApplication({ plugins })` — so this module needs no further wiring. Delete
+ * this file to stop registering it; the barrel is regenerated from the directory.
+ *
+ * @returns The plugin to pass to `createApplication({ plugins: [...] })`
  */
-export function BillingGrpcPlugin(): IPlugin {
+export function BillingPlugin(): IPlugin {
   return {
-    name: 'billing-grpc',
-    version: '0.0.0',
+    name: 'billing',
+    version: '0.1.0',
     dependencies: [CAPABILITIES.GRPC],
-    register(ctx) {
+    register(ctx: IPluginContext): void {
       ctx.services.get<IGrpcService>(CAPABILITIES.GRPC).addService(BillingService, implementation);
     },
   };

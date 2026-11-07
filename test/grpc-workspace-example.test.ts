@@ -44,8 +44,8 @@ const MAY_DIFFER: Readonly<Record<string, string>> = {
     'the repository lint forbids console outside the CLI; one eslint-disable line',
   'apps/orders/main.ts':
     'the repository lint forbids console outside the CLI; one eslint-disable line',
-  'apps/billing/setu.config.ts':
-    'billing adds BillingGrpcPlugin after the CLI-owned transportPlugins() and calls registerModules',
+  'apps/billing/src/plugins/billing.plugin.ts':
+    'the generated plugin stub becomes BillingService.Quote, added through IGrpcService.addService',
   'apps/orders/src/controllers/orders.controller.ts':
     'GET lists and reads orders; POST /orders validates line items and quotes them through billing',
   'apps/orders/src/services/orders.service.ts':
@@ -83,9 +83,6 @@ const ADDED: Readonly<Record<string, string>> = {
   'libs/contracts/buf.gen.yaml': 'the protoc-gen-es output, moved from a member',
   'libs/contracts/proto/billing/v1/billing.proto': 'the shared contract',
   'libs/contracts/src/gen/billing/v1/billing_pb.ts': 'protoc-gen-es output, committed',
-  'apps/billing/src/modules/index.ts': 'the module barrel setu sync writes for the billing module',
-  'apps/billing/src/modules/billing/index.ts': 'the module index setu sync writes',
-  'apps/billing/src/modules/billing/billing.grpc.ts': 'the BillingService implementation',
   'apps/orders/src/clients/billing.client.ts': 'the Connect client for billing',
   'apps/orders/test/orders.test.ts': 'tests the orders service and routes against a fake billing',
   'apps/orders/test/e2e/orders.e2e.test.ts':
@@ -185,7 +182,9 @@ describe('apps/grpc-workspace is the scaffold plus the gRPC feature', () => {
       '--dir',
       generated,
     ]);
-    // orders has one feature, so it stays flat: a controller, a service and a schema.
+    // Both members have one feature, so both stay flat: billing serves it from a
+    // generated plugin, orders from a controller, a service and a schema.
+    await cli(['generate', 'plugin', 'billing', '--dir', join(generated, 'apps/billing')]);
     for (const artifact of ['controller', 'service', 'schema']) {
       await cli(['generate', artifact, 'orders', '--dir', join(generated, 'apps/orders')]);
     }

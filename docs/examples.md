@@ -96,7 +96,8 @@ artifact.
 The smallest examples (`minimal`, `static-site`, `compiled-binary`) register their single route
 directly in the factory, as the scaffold does for its root route. GraphQL resolvers and gRPC
 services have no dedicated schematic: their existing files stay inside standard modules with
-CLI-owned indexes, while GraphqlPlugin and GrpcPlugin still own transport registration. The
+CLI-owned indexes, while GraphqlPlugin and GrpcPlugin still own transport registration
+(`grpc-workspace`'s billing, which has no module, adds its service from a generated plugin). The
 CLI-owned registrars in those two modules have no HTTP controllers to register. Worker-pool task
 modules stay in `src/tasks/`; `setu g job` generates queue/scheduler jobs, a different artifact. The
 `microservices` layout is a deliberate exception: two services have separate factories under
@@ -598,19 +599,21 @@ cd grpc-workspace
 setu generate library contracts
 setu generate app billing --template microservice --rpc grpc
 setu generate app orders --template microservice --depends-on billing
+setu generate plugin billing --dir apps/billing
 cd apps/orders
 setu generate controller orders
 setu generate service orders
 setu generate schema orders
 ```
 
-orders has a single feature, so it stays flat: a controller, a service and a schema rather than a
-module, as any service does until its first `setu generate module`. Billing is generated first so
-that orders can record it with `--depends-on`: the root `dev` script then starts orders only after
-billing answers `/ready`. Billing listens on 3410 and orders on 3411, the ports the workspace
-manifest and each member's `src/discovery/services.ts` record. The contract lives in
-`libs/contracts`, whose `proto:gen` script runs buf through `npx`; its output under `src/gen/` is
-committed, so nothing else needs buf.
+Each member has a single feature, so both stay flat, as any service does until its first
+`setu generate module`: billing serves `Quote` from the plugin `setu generate plugin` wrote, and
+orders has a controller, a service and a schema. Billing is generated first so that orders can
+record it with `--depends-on`: the root `dev` script then starts orders only after billing answers
+`/ready`. Billing listens on 3410 and orders on 3411, the ports the workspace manifest and each
+member's `src/discovery/services.ts` record. The contract lives in `libs/contracts`, whose
+`proto:gen` script runs buf through `npx`; its output under `src/gen/` is committed, so nothing else
+needs buf.
 
 ```bash
 pnpm --dir apps/grpc-workspace run smoke      # starts both members, makes the cross-member calls
@@ -628,10 +631,11 @@ An unknown SKU, or a quantity below one, answers `400`. With billing stopped, `P
 - [`libs/contracts/proto/billing/v1/billing.proto`](../apps/grpc-workspace/libs/contracts/proto/billing/v1/billing.proto)
   and [`libs/contracts/src/index.ts`](../apps/grpc-workspace/libs/contracts/src/index.ts) — the
   shared contract and the generated `BillingService` both members import.
-- [`apps/billing/src/modules/billing/billing.grpc.ts`](../apps/grpc-workspace/apps/billing/src/modules/billing/billing.grpc.ts)
-  and [`apps/billing/setu.config.ts`](../apps/grpc-workspace/apps/billing/setu.config.ts) — the
-  `Quote` implementation, added by `BillingGrpcPlugin` through `IGrpcService.addService` after the
-  CLI-owned `transportPlugins()` (from `src/transport/index.ts`) has registered `GrpcPlugin`.
+- [`apps/billing/src/plugins/billing.plugin.ts`](../apps/grpc-workspace/apps/billing/src/plugins/billing.plugin.ts)
+  — the `Quote` implementation and the generated plugin that adds it through
+  `IGrpcService.addService`. It depends on the gRPC capability, which the CLI-owned
+  `transportPlugins()` (from `src/transport/index.ts`) provides, and the plugins barrel registers
+  it, so billing's `setu.config.ts` is unchanged.
 - [`apps/orders/src/clients/billing.client.ts`](../apps/grpc-workspace/apps/orders/src/clients/billing.client.ts)
   and
   [`apps/orders/src/services/orders.service.ts`](../apps/grpc-workspace/apps/orders/src/services/orders.service.ts)

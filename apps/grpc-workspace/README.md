@@ -22,6 +22,7 @@ cd grpc-workspace
 setu generate library contracts
 setu generate app billing --template microservice --rpc grpc
 setu generate app orders --template microservice --depends-on billing
+setu generate plugin billing --dir apps/billing
 cd apps/orders
 setu generate controller orders
 setu generate service orders
@@ -40,11 +41,11 @@ reason). In short:
   `proto:gen` script runs buf through `npx`, with protoc-gen-es pinned to the locked
   `@bufbuild/protobuf`, so no install fetches buf. billing's stub proto, `proto/README.md`, buf
   files and `proto:gen` script are removed.
-- **billing**, the one member generated with `--rpc grpc`, implements `Quote` in
-  `src/modules/billing/billing.grpc.ts`, in a module whose `index.ts` and barrel are what
-  `setu sync` writes. The CLI owns `GrpcPlugin` (in `src/transport/index.ts`), so the same file
-  exports `BillingGrpcPlugin`, which adds the service through `IGrpcService.addService`;
-  `setu.config.ts` registers it after `transportPlugins()` and calls `registerModules`.
+- **billing**, the one member generated with `--rpc grpc`, has one feature, so it stays flat too.
+  `setu generate plugin billing` wrote `src/plugins/billing.plugin.ts`, which now implements `Quote`
+  and adds it through `IGrpcService.addService`, depending on the gRPC capability: the CLI owns
+  `GrpcPlugin` itself, in `src/transport/index.ts`. The plugins barrel registers it, so billing's
+  `setu.config.ts` is the generated one, unchanged.
 - **orders** is an HTTP member: it adds `@connectrpc/connect` and `@connectrpc/connect-web`, which
   an HTTP member does not ship, and a client in `src/clients/billing.client.ts`. It has one feature,
   so it stays flat, as a new service does until its first `setu generate module`: the generated

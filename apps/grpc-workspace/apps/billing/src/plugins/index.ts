@@ -11,6 +11,8 @@
 
 import type { IPlugin } from '@setu-ts/common';
 
+import { BillingPlugin } from './billing.plugin.ts';
+
 /**
  * Every generated plugin, spread into `createApplication({ plugins })`.
  *
@@ -19,4 +21,4 @@ import type { IPlugin } from '@setu-ts/common';
  * plugin's file to stop registering it — this barrel is regenerated from the
  * directory, so removing the entry here alone would not survive.
  */
-export const GENERATED_PLUGINS: readonly IPlugin[] = [];
+export const GENERATED_PLUGINS: readonly IPlugin[] = [BillingPlugin()];

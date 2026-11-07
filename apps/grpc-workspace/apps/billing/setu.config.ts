@@ -29,8 +29,6 @@ import { COMMAND_HANDLERS, QUERY_HANDLERS } from './src/cqrs/index.ts';
 import { EVENT_HANDLERS } from './src/events/index.ts';
 import { QUEUE_PROCESSORS } from './src/jobs/index.ts';
 import { SERVICE_ENDPOINTS } from './src/discovery/services.ts';
-import { BillingGrpcPlugin } from './src/modules/billing/billing.grpc.ts';
-import { registerModules } from './src/modules/index.ts';
 import { messagingOptions, queueOptions, transportPlugins } from './src/transport/index.ts';
 
 /**
@@ -74,7 +72,6 @@ export function createApp(
       EventsPlugin({ handlers: EVENT_HANDLERS }),
       ServiceDiscoveryPlugin({ provider: 'static', services: SERVICE_ENDPOINTS }),
       ...transportPlugins(),
-      BillingGrpcPlugin(),
       ...GENERATED_PLUGINS,
       ...(devtool?.plugins ?? []),
     ],
@@ -87,7 +84,6 @@ export function createApp(
   app.middleware.add(errorHandler({ format: 'rfc9457' }), { priority: 0, name: 'error-handler' });
 
   registerGeneratedRoutes(app.router, app.services);
-  registerModules(app.router, app.services);
   for (const generated of GENERATED_MIDDLEWARE) {
     app.middleware.add(generated.middleware, {
       priority: generated.priority,
