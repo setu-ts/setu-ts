@@ -23,6 +23,13 @@ describe('workspaceDevRunner', () => {
     expect(bun.contents).toContain('Dependency cycle includes');
   });
 
+  it('bounds every readiness probe, so an unanswered /ready cannot outlast the deadline', () => {
+    for (const runtime of ['node', 'bun', 'deno'] as const) {
+      const { contents } = workspaceDevRunner(workspaceProfile(runtime));
+      expect(contents, runtime).toContain('signal: AbortSignal.timeout(1_000)');
+    }
+  });
+
   // PR #450 CI: a member's server must not outlive the runner when the script
   // shell (Ubuntu's dash) does not forward the signal, so the npm and Bun
   // runners start each member in its own group and signal the group.

@@ -674,6 +674,32 @@ describe('runNodeManifests — the I/O seam, against a throwaway workspace', () 
     }
   });
 
+  it('writes no tsconfig.json for a Setu workspace container', async () => {
+    const root = await workspace();
+    try {
+      await mkdir(`${root}/apps/container`, { recursive: true });
+      await writeFile(`${root}/apps/container/package.json`, '{}');
+      await writeFile(`${root}/apps/container/setu.workspace.json`, '{}');
+      expect(await runNodeManifests(['--write'], root)).toBe(0);
+      await expect(stat(`${root}/apps/container/tsconfig.json`)).rejects.toThrow();
+      await expect(stat(`${root}/apps/minimal/tsconfig.json`)).resolves.toBeDefined();
+    } finally {
+      await rm(root, { recursive: true });
+    }
+  });
+
+  it('rethrows a container manifest it cannot read, rather than treating it as absent', async () => {
+    const root = await workspace();
+    try {
+      // A directory where the manifest belongs: reading it fails with EISDIR, not ENOENT.
+      await mkdir(`${root}/apps/minimal/setu.workspace.json`);
+      await expect(runNodeManifests(['--write'], root)).rejects.toThrow(/EISDIR/);
+      await expect(stat(`${root}/apps/minimal/tsconfig.json`)).rejects.toThrow();
+    } finally {
+      await rm(root, { recursive: true });
+    }
+  });
+
   it('reports removed exports as lane config drift', async () => {
     const root = await workspace();
     try {

@@ -83,6 +83,8 @@ const ADDED: Readonly<Record<string, string>> = {
   'libs/contracts/buf.gen.yaml': 'the protoc-gen-es output, moved from a member',
   'libs/contracts/proto/billing/v1/billing.proto': 'the shared contract',
   'libs/contracts/src/gen/billing/v1/billing_pb.ts': 'protoc-gen-es output, committed',
+  'apps/billing/test/billing.test.ts':
+    'Quote over Connect: a priced SKU, and unknown ones including inherited object names',
   'apps/orders/src/clients/billing.client.ts': 'the Connect client for billing',
   'apps/orders/test/orders.test.ts': 'tests the orders service and routes against a fake billing',
   'apps/orders/test/e2e/orders.e2e.test.ts':

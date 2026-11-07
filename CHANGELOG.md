@@ -377,6 +377,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **A workspace's dev runner gives up on a prerequisite that never answers `/ready` (#570,
+  `@setu-ts/cli`).** The generated `scripts/dev.mjs` and `scripts/dev.ts` probed `/ready` with no
+  bound, so a prerequisite that accepted the connection and never responded held the runner for
+  fetch's own 300-second header timeout instead of its 30-second deadline. Each probe now times out
+  after one second, and the runner names the stalled service at the deadline.
+
 - **Generated READMEs link the site, and the example-download refusal works from `npm create`
   (X93-7, X93-3, M131d, #564, `@setu-ts/cli`).** A scaffolded project's and a workspace's README
   link `https://setu-ts.dev/` instead of GitHub, which some readers cannot reach. When

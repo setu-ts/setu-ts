@@ -3,11 +3,14 @@ import { CAPABILITIES } from '@setu-ts/common';
 import type { IGrpcService, IPlugin, IPluginContext } from '@setu-ts/common';
 import { BillingService } from '@grpc-workspace/contracts';
 
-/** Fixed in-memory price table, in cents per unit. */
-const PRICE_CENTS: Readonly<Record<string, number>> = {
-  widget: 999,
-  gadget: 1499,
-};
+/**
+ * Fixed in-memory price table, in cents per unit. A `Map`, not an object literal,
+ * so a SKU such as `constructor` or `__proto__` finds no inherited entry.
+ */
+const PRICE_CENTS: ReadonlyMap<string, number> = new Map([
+  ['widget', 999],
+  ['gadget', 1499],
+]);
 
 /**
  * The server-side implementation of `billing.v1.BillingService`. `satisfies` checks
@@ -18,7 +21,7 @@ const implementation = {
   quote(request) {
     let totalCents = 0n;
     for (const item of request.items) {
-      const priceCents = PRICE_CENTS[item.sku];
+      const priceCents = PRICE_CENTS.get(item.sku);
       if (priceCents === undefined) {
         throw new ConnectError(`unknown SKU '${item.sku}'`, Code.InvalidArgument);
       }

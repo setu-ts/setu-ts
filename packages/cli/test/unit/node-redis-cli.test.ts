@@ -248,6 +248,20 @@ describe('node-redis CLI', () => {
           'if (manifest.imports) delete manifest.imports["@setu-ts/diagnostics-plugin"];',
           'if (manifest.imports) { delete manifest.imports["@setu-ts/diagnostics-plugin"]; delete manifest.imports["@setu-ts/testing"]; }',
         )
+        // PR #570: each workspace dev runner's /ready probe is bounded.
+        .replace(
+          '      if ((await fetch(`http://127.0.0.1:${member.port}/ready`)).ok) return;\n' +
+            '    } catch {\n' +
+            '      // Not listening yet: keep polling until the deadline.\n',
+          '      // Bounded, so a prerequisite that accepts the connection but never answers\n' +
+            '      // cannot hold one probe past the deadline below.\n' +
+            '      const probe = await fetch(`http://127.0.0.1:${member.port}/ready`, {\n' +
+            '        signal: AbortSignal.timeout(1_000),\n' +
+            '      });\n' +
+            '      if (probe.ok) return;\n' +
+            '    } catch {\n' +
+            '      // Not listening, or not answering within the probe bound: keep polling until the deadline.\n',
+        )
         .replace(
           'type Member = { name: string; port: number; dependsOn?: string[]; devtoolPort?: number };',
           'type Member = {\n  name: string;\n  port: number;\n  dependsOn?: string[];\n  devtoolPort?: number;\n  inspectPort?: number;\n  vitePort?: number;\n};',

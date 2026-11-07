@@ -104,9 +104,14 @@ async function waitForReady(member: Member): Promise<void> {
   const deadline = performance.now() + 30_000;
   while (performance.now() < deadline) {
     try {
-      if ((await fetch(\`http://127.0.0.1:\${member.port}/ready\`)).ok) return;
+      // Bounded, so a prerequisite that accepts the connection but never answers
+      // cannot hold one probe past the deadline below.
+      const probe = await fetch(\`http://127.0.0.1:\${member.port}/ready\`, {
+        signal: AbortSignal.timeout(1_000),
+      });
+      if (probe.ok) return;
     } catch {
-      // Not listening yet: keep polling until the deadline.
+      // Not listening, or not answering within the probe bound: keep polling until the deadline.
     }
     await pause(100);
   }
@@ -260,9 +265,14 @@ async function waitForReady(member) {
   const deadline = performance.now() + 30_000;
   while (performance.now() < deadline) {
     try {
-      if ((await fetch(\`http://127.0.0.1:\${member.port}/ready\`)).ok) return;
+      // Bounded, so a prerequisite that accepts the connection but never answers
+      // cannot hold one probe past the deadline below.
+      const probe = await fetch(\`http://127.0.0.1:\${member.port}/ready\`, {
+        signal: AbortSignal.timeout(1_000),
+      });
+      if (probe.ok) return;
     } catch {
-      // Not listening yet: keep polling until the deadline.
+      // Not listening, or not answering within the probe bound: keep polling until the deadline.
     }
     await pause(100);
   }
