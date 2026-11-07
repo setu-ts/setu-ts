@@ -55,6 +55,8 @@ packages:
   - packages/mcp-plugin
   - packages/vector-store-plugin
   - apps/*
+  - apps/grpc-workspace/apps/*
+  - apps/grpc-workspace/libs/*
 
 # Dev-only workspace edges are cyclic (test-only imports, plan §3.1); each
 # member's build is `tsc -b`, which orders its own references.

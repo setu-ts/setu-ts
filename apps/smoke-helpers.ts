@@ -50,9 +50,24 @@ export async function freePort(): Promise<number> {
   return address.port;
 }
 
+/** Options for {@link startHost}. */
+export interface StartHostOptions {
+  /** The working directory the child starts in. Defaults to the caller's own cwd. */
+  readonly cwd?: string;
+}
+
 /** Starts a child process whose exit is observable even if it fails before the caller awaits. */
-export function startHost(command: string, args: readonly string[], env = process.env): Host {
-  const child = spawn(command, [...args], { env, stdio: ['ignore', 'ignore', 'inherit'] });
+export function startHost(
+  command: string,
+  args: readonly string[],
+  env = process.env,
+  options: StartHostOptions = {},
+): Host {
+  const child = spawn(command, [...args], {
+    env,
+    stdio: ['ignore', 'ignore', 'inherit'],
+    cwd: options.cwd,
+  });
   const status = new Promise<number>((resolve, reject) => {
     child.once('error', reject);
     child.once('close', (code) => resolve(code ?? 1));

@@ -1,0 +1,239 @@
+# billing
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: billing
+  # Pinned, never implicit: an object whose namespace is left to the caller applies
+  # cleanly into whichever one happens to be current.
+  namespace: ${NAMESPACE}
+  labels:
+    app.kubernetes.io/name: billing
+    app.kubernetes.io/part-of: ${WORKSPACE}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: billing
+  template:
+    metadata:
+      annotations:
+        # Set by `setu workspace deploy` to the billing-env Secret's resourceVersion.
+        setu-ts.dev/secret-version: ''
+        prometheus.io/scrape: 'true'
+        prometheus.io/port: '3410'
+        prometheus.io/path: '/metrics'
+      labels:
+        app.kubernetes.io/name: billing
+        app.kubernetes.io/part-of: ${WORKSPACE}
+    spec:
+      # Only real because the generated entry installs a SIGTERM handler; without
+      # one the container dies from the signal in milliseconds.
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        # NUMERIC. runAsNonRoot refuses an image whose user is a name —
+        # "cannot verify user is non-root" — and that fails only here, never in
+        # Docker.
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+        - name: billing
+          # `setu workspace deploy` builds this member and replaces this line with
+          # the image it built. By hand instead:
+          #   docker build -f docker/Dockerfile --build-arg MEMBER=billing -t billing:dev .
+          # then push it to a registry this cluster can pull from and put that
+          # reference here.
+          image: billing:dev
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 3410
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ['ALL']
+          env:
+            - name: ORDERS_HOST
+              value: 'orders'
+          # The member's own variables (SESSION_SECRET, …): `setu workspace deploy`
+          # applies this Secret from k8s/secrets/billing/.env. The env: entries above
+          # still win over it, so it cannot redirect a sibling host.
+          envFrom:
+            - secretRef:
+                name: billing-env
+                optional: true
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /live
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          lifecycle:
+            # Covers the gap between this pod leaving the Service endpoints and every
+            # node's kube-proxy noticing. SIGTERM is not sent until this returns.
+            preStop:
+              sleep:
+                # Requires Kubernetes 1.30+ (native sleep action).
+                seconds: 5
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          volumeMounts:
+            # Only /tmp. An emptyDir over the module-cache directory would MASK the
+            # cache baked in at build time, and every pod would then re-resolve its
+            # dependencies from the network at startup.
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: billing
+  namespace: ${NAMESPACE}
+  labels:
+    app.kubernetes.io/name: billing
+    app.kubernetes.io/part-of: ${WORKSPACE}
+spec:
+  # The name every sibling dials: the generated discovery map reads
+  # `BILLING_HOST`, and in a cluster
+  # that value is this Service's name.
+  selector:
+    app.kubernetes.io/name: billing
+  ports:
+    - name: http
+      port: 3410
+      targetPort: http
+---
+# orders
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orders
+  # Pinned, never implicit: an object whose namespace is left to the caller applies
+  # cleanly into whichever one happens to be current.
+  namespace: ${NAMESPACE}
+  labels:
+    app.kubernetes.io/name: orders
+    app.kubernetes.io/part-of: ${WORKSPACE}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: orders
+  template:
+    metadata:
+      annotations:
+        # Set by `setu workspace deploy` to the orders-env Secret's resourceVersion.
+        setu-ts.dev/secret-version: ''
+        prometheus.io/scrape: 'true'
+        prometheus.io/port: '3411'
+        prometheus.io/path: '/metrics'
+      labels:
+        app.kubernetes.io/name: orders
+        app.kubernetes.io/part-of: ${WORKSPACE}
+    spec:
+      # Only real because the generated entry installs a SIGTERM handler; without
+      # one the container dies from the signal in milliseconds.
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        # NUMERIC. runAsNonRoot refuses an image whose user is a name —
+        # "cannot verify user is non-root" — and that fails only here, never in
+        # Docker.
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+        - name: orders
+          # `setu workspace deploy` builds this member and replaces this line with
+          # the image it built. By hand instead:
+          #   docker build -f docker/Dockerfile --build-arg MEMBER=orders -t orders:dev .
+          # then push it to a registry this cluster can pull from and put that
+          # reference here.
+          image: orders:dev
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 3411
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ['ALL']
+          env:
+            - name: BILLING_HOST
+              value: 'billing'
+          # The member's own variables (SESSION_SECRET, …): `setu workspace deploy`
+          # applies this Secret from k8s/secrets/orders/.env. The env: entries above
+          # still win over it, so it cannot redirect a sibling host.
+          envFrom:
+            - secretRef:
+                name: orders-env
+                optional: true
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /live
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          lifecycle:
+            # Covers the gap between this pod leaving the Service endpoints and every
+            # node's kube-proxy noticing. SIGTERM is not sent until this returns.
+            preStop:
+              sleep:
+                # Requires Kubernetes 1.30+ (native sleep action).
+                seconds: 5
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          volumeMounts:
+            # Only /tmp. An emptyDir over the module-cache directory would MASK the
+            # cache baked in at build time, and every pod would then re-resolve its
+            # dependencies from the network at startup.
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: orders
+  namespace: ${NAMESPACE}
+  labels:
+    app.kubernetes.io/name: orders
+    app.kubernetes.io/part-of: ${WORKSPACE}
+spec:
+  # The name every sibling dials: the generated discovery map reads
+  # `ORDERS_HOST`, and in a cluster
+  # that value is this Service's name.
+  selector:
+    app.kubernetes.io/name: orders
+  ports:
+    - name: http
+      port: 3411
+      targetPort: http
