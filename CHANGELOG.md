@@ -8,7 +8,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
-- **gRPC workspace example (`@setu-ts/cli`, #PR).** `apps/grpc-workspace` is what
+- **gRPC workspace example (`@setu-ts/cli`, #570).** `apps/grpc-workspace` is what
   `setu new --workspace` and `setu generate app` write, plus one gRPC call between members:
   `billing`, generated with `--rpc grpc`, serves `billing.v1.BillingService/Quote` from a `.proto`
   in a workspace library, and `orders` calls it with a Connect client at the address its generated
