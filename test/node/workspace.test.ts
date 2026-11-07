@@ -56,6 +56,20 @@ describe('workspace inventory', () => {
     );
   });
 
+  it('keeps a nested workspace container a single app unit', async () => {
+    // The container's root manifest is what makes it a unit; its nested
+    // members are workspace members, never app units themselves.
+    const root = await fixture(
+      'packages:\n  - packages/z\n  - apps/*\n  - apps/outer/apps/*\n  - apps/outer/libs/*\n',
+    );
+    await mkdir(`${root}/apps/outer/apps/member`, { recursive: true });
+    await mkdir(`${root}/apps/outer/libs/library`, { recursive: true });
+    await writeFile(`${root}/apps/outer/package.json`, '{}');
+    await writeFile(`${root}/apps/outer/apps/member/package.json`, '{}');
+    await writeFile(`${root}/apps/outer/libs/library/package.json`, '{}');
+    expect(await workspaceApps(root)).toEqual(['apps/outer']);
+  });
+
   it('defaults to the real workspace and accepts injected reads', async () => {
     expect(await workspaceMembers()).toContain('packages/common');
     expect(await workspaceMembers('.', () => Promise.resolve('packages: [packages/only]'))).toEqual(

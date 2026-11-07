@@ -6,7 +6,7 @@
  * its layout, this test fails and names what moved, and the examples are
  * brought along instead of drifting.
  */
-import { mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -91,6 +91,53 @@ function match(source: string, pattern: RegExp, what: string): string {
   const found = pattern.exec(source)?.[1];
   if (found === undefined) throw new Error(`could not read ${what} from the generated project`);
   return found;
+}
+
+/** A Setu workspace container holds `setu.workspace.json` at its root. */
+async function isWorkspaceContainer(directory: string): Promise<boolean> {
+  try {
+    return (await stat(join(directory, 'setu.workspace.json'))).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * One snapshot per app under `appsRoot`, in directory order.
+ *
+ * A directory holding `setu.workspace.json` is a Setu workspace container
+ * rather than an app: its root has no composition file or entry of its own,
+ * so it is not snapshotted. Each of its `apps/*` members is snapshotted as
+ * its own app, keyed `<container>/<member>`; its `libs/*` are not apps at
+ * all. The caller checks each container for its root `smoke.ts`.
+ */
+async function collectApps(appsRoot: string): Promise<{
+  readonly apps: Map<string, Snapshot>;
+  readonly containers: string[];
+}> {
+  const found = new Map<string, Snapshot>();
+  const containers: string[] = [];
+  for (const entry of await readdir(appsRoot, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const directory = join(appsRoot, entry.name);
+    if ((await stat(join(directory, 'package.json')).catch(() => null)) === null) continue;
+    if (await isWorkspaceContainer(directory)) {
+      containers.push(entry.name);
+      const members = await readdir(join(directory, 'apps'), { withFileTypes: true }).catch(
+        () => [],
+      );
+      for (const member of members) {
+        if (!member.isDirectory()) continue;
+        const memberDirectory = join(directory, 'apps', member.name);
+        if ((await stat(join(memberDirectory, 'package.json')).catch(() => null)) === null)
+          continue;
+        found.set(`${entry.name}/${member.name}`, await snapshot(memberDirectory));
+      }
+      continue;
+    }
+    found.set(entry.name, await snapshot(directory));
+  }
+  return { apps: found, containers };
 }
 
 /** The exported declaration of `symbol`, up to the next blank line. */
@@ -350,6 +397,7 @@ describe('example applications follow the generated layout', () => {
   let scratch: string;
   let layout: Layout;
   const apps = new Map<string, Snapshot>();
+  const containers: string[] = [];
 
   beforeAll(async () => {
     scratch = await mkdtemp(join(tmpdir(), 'setu-apps-layout-'));
@@ -359,12 +407,9 @@ describe('example applications follow the generated layout', () => {
     ]);
     layout = readLayout(functional, classBased);
 
-    for (const entry of await readdir(APPS, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue;
-      const directory = join(APPS, entry.name);
-      if ((await stat(join(directory, 'package.json')).catch(() => null)) === null) continue;
-      apps.set(entry.name, await snapshot(directory));
-    }
+    const collected = await collectApps(APPS);
+    for (const [name, app] of collected.apps) apps.set(name, app);
+    containers.push(...collected.containers);
   }, 300_000);
 
   afterAll(async () => {
@@ -392,10 +437,59 @@ describe('example applications follow the generated layout', () => {
     for (const name of Object.keys(EXCEPTIONS)) expect(apps.has(name), name).toBe(true);
   });
 
+  it('treats a setu.workspace.json directory as a workspace container, not an app', () => {
+    // The container's root has no composition file or entry of its own: its
+    // apps/* members are the apps, snapshotted under `<container>/<member>`.
+    for (const container of containers) {
+      expect(apps.has(container), container).toBe(false);
+    }
+    expect(apps.has('grpc-workspace/billing')).toBe(true);
+    expect(apps.has('grpc-workspace/orders')).toBe(true);
+  });
+
+  it('requires every workspace container to carry a root smoke.ts on the test runner', async () => {
+    // The generator writes no smoke for a member, so the container's root smoke
+    // is the members' proof: it stands in for the smoke rule they skip.
+    const problems: string[] = [];
+    for (const container of containers) {
+      const smoke = await readFile(join(APPS, container, 'smoke.ts'), 'utf8').catch(() => null);
+      problems.push(
+        ...RULES.smoke(new Map(smoke === null ? [] : [['smoke.ts', smoke]]), layout).map(
+          (problem) => `apps/${container}: ${problem}`,
+        ),
+      );
+    }
+    expect(problems).toEqual([]);
+  });
+
+  it('collects a container member as an app and not the container itself', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'setu-apps-layout-collect-'));
+    try {
+      await mkdir(join(root, 'apps', 'plain'), { recursive: true });
+      await writeFile(join(root, 'apps', 'plain', 'package.json'), '{}');
+      await mkdir(join(root, 'apps', 'outer', 'apps', 'member'), { recursive: true });
+      await mkdir(join(root, 'apps', 'outer', 'libs', 'library'), { recursive: true });
+      await writeFile(join(root, 'apps', 'outer', 'package.json'), '{}');
+      await writeFile(join(root, 'apps', 'outer', 'setu.workspace.json'), '{}');
+      await writeFile(join(root, 'apps', 'outer', 'apps', 'member', 'package.json'), '{}');
+      await writeFile(join(root, 'apps', 'outer', 'libs', 'library', 'package.json'), '{}');
+      const { apps: collected } = await collectApps(join(root, 'apps'));
+      // `plain` has no setu.workspace.json, so it is an app as before; the
+      // container's member is an app, the container is not, and the library
+      // is not an app at all.
+      expect([...collected.keys()].sort()).toEqual(['outer/member', 'plain']);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   for (const rule of Object.keys(RULES) as RuleName[]) {
     it(`every example follows the ${rule} rule, or is excepted with a reason`, () => {
       const violations: string[] = [];
       for (const [name, app] of apps) {
+        // A workspace member has no smoke of its own: the generator writes none,
+        // and its container's cross-process smoke is the proof (checked above).
+        if (rule === 'smoke' && name.includes('/')) continue;
         const problems = RULES[rule](app, layout);
         const exception = EXCEPTIONS[name]?.[rule];
         if (exception === undefined) {

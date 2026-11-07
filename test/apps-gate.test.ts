@@ -1217,4 +1217,47 @@ describe('Node app gate execution', () => {
       await rm(root, { recursive: true });
     }
   });
+
+  it('keeps a nested workspace container a single app unit', async () => {
+    // The container's root manifest is what makes it a unit: check and smoke
+    // run once each, in the container's directory — never inside a nested
+    // member or library.
+    const root = await tempDir({ prefix: 'app-gate-nested-' });
+    const diagnostics = [
+      vi.spyOn(console, 'log').mockImplementation(() => {}),
+      vi.spyOn(console, 'warn').mockImplementation(() => {}),
+      vi.spyOn(console, 'error').mockImplementation(() => {}),
+    ];
+    try {
+      await writeFile(
+        `${root}/pnpm-workspace.yaml`,
+        'packages: [apps/*, apps/outer/apps/*, apps/outer/libs/*]',
+      );
+      await mkdir(`${root}/apps/outer/apps/member`, { recursive: true });
+      await mkdir(`${root}/apps/outer/libs/library`, { recursive: true });
+      for (const path of [
+        `${root}/apps/outer/package.json`,
+        `${root}/apps/outer/apps/member/package.json`,
+        `${root}/apps/outer/libs/library/package.json`,
+      ]) {
+        await writeFile(path, JSON.stringify({ scripts: { start: 'x', smoke: 'y' } }));
+      }
+      const runs: string[][] = [];
+      const directories: string[] = [];
+      const runner = (args: readonly string[], cwd: string) => {
+        runs.push([...args]);
+        directories.push(cwd);
+        return Promise.resolve({ code: 0, success: true });
+      };
+      expect(await checkApps(root, runner)).toBe(false);
+      expect(runs).toEqual([
+        ['pnpm', 'run', 'check'],
+        ['pnpm', 'run', 'smoke'],
+      ]);
+      expect(directories).toEqual([`${root}/apps/outer`, `${root}/apps/outer`]);
+    } finally {
+      diagnostics.forEach((spy) => spy.mockRestore());
+      await rm(root, { recursive: true });
+    }
+  });
 });

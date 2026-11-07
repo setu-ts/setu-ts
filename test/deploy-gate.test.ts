@@ -218,6 +218,14 @@ describe('build matrix', () => {
     expect(cloudflare?.kind).toBe('unsupported');
   });
 
+  it('keeps the workspace example excluded as UNSUPPORTED, not merely redundant', () => {
+    // grpc-workspace deploys through `setu workspace build/deploy`, which builds one image per
+    // member from the generated docker/ — a shape the single-APP build matrix cannot cover, so
+    // the example must stay out of it rather than drift into it.
+    const workspace = EXCLUDED_EXAMPLES.find((excluded) => excluded.app === 'grpc-workspace');
+    expect(workspace?.kind).toBe('unsupported');
+  });
+
   it('accounts for every example directory as either built or excluded', () => {
     // The real guard against an example silently falling out of coverage: a new apps/ directory
     // must be classified deliberately.

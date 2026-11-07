@@ -965,7 +965,13 @@ export async function runNodeManifests(args: readonly string[], root = '.'): Pro
     files.set('test/deno-lane/lane.config.json', renderLaneConfig(members, lane));
     files.set('tsconfig.apps.json', renderAppsTsconfig());
     for (const app of await workspaceApps(root)) {
-      files.set(`${app}/tsconfig.json`, renderAppTsconfig(app));
+      // A Setu workspace container (apps/grpc-workspace) is the scaffold's own
+      // layout: its members keep the tsconfig the CLI generated, so it gets none.
+      const container = await readFile(`${root}/${app}/setu.workspace.json`, 'utf8').then(
+        () => true,
+        () => false,
+      );
+      if (!container) files.set(`${app}/tsconfig.json`, renderAppTsconfig(app));
     }
   }
   if (refusals.length > 0) {
