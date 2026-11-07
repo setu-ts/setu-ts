@@ -90,7 +90,7 @@ const cases = [
     seed: { '/app/deno.json': manifest(), '/app/setu.config.ts': 'export const config = {};' },
     argv: ['generate', 'module', 'orders'],
     expected: [
-      'setu.config.ts does not reference registerModules; add:',
+      'setu.config.ts does not call registerModules; add:',
       "  import { registerModules } from './src/modules/index.ts';",
       '  registerModules(app.router, app.services);',
     ],

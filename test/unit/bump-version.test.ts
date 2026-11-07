@@ -327,6 +327,10 @@ describe('planBump', () => {
     expect(content('CHANGELOG.md')).toContain(
       '## [Unreleased]\n\n## [0.9.0] — 2026-10-05\n\n### Added',
     );
+    // §3.6: the cut record is completed with its link definition.
+    expect(content('CHANGELOG.md')).toContain(
+      '[0.9.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.9.0',
+    );
     expect(content('docs/upgrading.md')).toContain('## 0.9.0\n\nDo the thing.');
     // The new minor line is named in check-docs, and the residual step says what to assert.
     expect(content('scripts/check-docs.ts')).toContain("  '0.8',\n  '0.9',\n];");
@@ -422,6 +426,58 @@ describe('planBump', () => {
     expect(planBump(tree({ 'CHANGELOG.md': undefined }), OPTIONS).refusals).toEqual([
       'CHANGELOG.md is not a tracked file.',
     ]);
+  });
+
+  it('records the release in the CHANGELOG link definitions (§3.6)', () => {
+    const files = tree({
+      'CHANGELOG.md': [
+        '# Changelog',
+        '',
+        '## [Unreleased]',
+        '',
+        '### Added',
+        '',
+        '- A thing.',
+        '',
+        '## [0.8.0] — 2026-10-03',
+        '',
+        '- Older.',
+        '',
+        '[unreleased]: https://github.com/setu-ts/setu-ts/compare/v0.8.0...HEAD',
+        '[0.8.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.8.0',
+        '',
+      ].join('\n'),
+    });
+    const { content } = edited(files);
+    expect(content('CHANGELOG.md')).toContain('compare/v0.9.0...HEAD');
+    expect(content('CHANGELOG.md')).toContain(
+      '[0.9.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.9.0\n' +
+        '[0.8.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.8.0',
+    );
+  });
+
+  it('does not duplicate a link definition the cut already had', () => {
+    const files = tree({
+      'CHANGELOG.md': [
+        '# Changelog',
+        '',
+        '## [Unreleased]',
+        '',
+        '- A thing.',
+        '',
+        '## [0.8.0] — 2026-10-03',
+        '',
+        '- Older.',
+        '',
+        '[unreleased]: https://github.com/setu-ts/setu-ts/compare/v0.8.0...HEAD',
+        '[0.9.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.9.0',
+        '[0.8.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.8.0',
+        '',
+      ].join('\n'),
+    });
+    const { content } = edited(files);
+    expect(content('CHANGELOG.md')?.match(/^\[0\.9\.0\]:/gm)).toHaveLength(1);
+    expect(content('CHANGELOG.md')).toContain('compare/v0.9.0...HEAD');
   });
 
   it('leaves an empty upgrading Unreleased heading and says what would belong under it', () => {

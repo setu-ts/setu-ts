@@ -24,7 +24,7 @@ Enterprise architecture without the weight. Runtime freedom without the chaos.
 
 ---
 
-> [!IMPORTANT] **Status: `v0.11.0` publishes 52 packages to npm under `@setu-ts`.** Versions
+> [!IMPORTANT] **Status: `v0.12.0` publishes 55 packages to npm under `@setu-ts`.** Versions
 > published before the move to npm remain on JSR, and nothing new is published there.
 >
 > <!-- version:history -->
@@ -197,16 +197,16 @@ Every ✅ row is a package in this repository with 90%+ test coverage on branch,
 
 ```bash
 # Node (pnpm add / yarn add work the same way)
-npm install @setu-ts/kernel@^0.11.0 @setu-ts/runtime@^0.11.0
+npm install @setu-ts/kernel@^0.12.0 @setu-ts/runtime@^0.12.0
 
 # Bun
-bun add @setu-ts/kernel@^0.11.0 @setu-ts/runtime@^0.11.0
+bun add @setu-ts/kernel@^0.12.0 @setu-ts/runtime@^0.12.0
 
 # Deno
-deno add npm:@setu-ts/kernel@^0.11.0 npm:@setu-ts/runtime@^0.11.0
+deno add npm:@setu-ts/kernel@^0.12.0 npm:@setu-ts/runtime@^0.12.0
 ```
 
-**The `@^0.11.0` is recommended, not required.** npm points `latest` at the current release, so a
+**The `@^0.12.0` is recommended, not required.** npm points `latest` at the current release, so a
 bare `npm install @setu-ts/kernel` resolves without a version. Pin anyway if you would rather meet
 the next breaking release as a deliberate upgrade than as a surprise — see
 [Versioning](#versioning). Earlier releases are on JSR only; see the
@@ -233,7 +233,7 @@ installing the framework from npm with its own package manager.
 
 <!-- version:history -->
 
-All 52 workspace members ship as one release train: the core (`common`, `kernel`, `runtime`,
+All 55 workspace members ship as one release train: the core (`common`, `kernel`, `runtime`,
 `exceptions`, `testing`), every plugin in the tables above, the three starters, the `sdk`, the `cli`
 and `create` — on npm from `v0.9.0`, which publishes `localization-plugin`, `idempotency-plugin` and
 `create` for the first time. Earlier releases were published on JSR.
@@ -246,37 +246,14 @@ options or imported lazily, so an application pays only for the capabilities it 
 
 ## Versioning
 
-Setu-TS is pre-1.0, and the version number says exactly what that means:
-
-| Bump                         | What it carries                                                                            |
-| ---------------------------- | ------------------------------------------------------------------------------------------ |
-| **Minor** — `0.5` → `0.6`    | Breaking changes. Every one is listed in [CHANGELOG.md](CHANGELOG.md) with migration text. |
-| **Patch** — the third number | Fixes and additions only. Safe to take without reading anything.                           |
-
-Under semver a `^0.11.0` range means `>=0.11.0 <0.12.0`, so a caret pin absorbs patches and stops at
-the next breaking release. That is the intended way to depend on this project today.
-
-<!-- version:history -->
-
-From `0.9.0` the **patch is the normal release** and breaking changes are batched into an occasional
-minor: a change that would break a caller or an implementor ships behind its old behaviour first (a
-flag, an optional member, a deprecation) and the removal waits for the next minor. Two gates hold
-the line — a milestone plan must state what it breaks and which minor carries it, and
-`release:verify` refuses a patch whose changelog carries a `BREAKING` entry.
-
-<!-- version:history -->
-
-Releases up to `v0.1.0-alpha.10` used a prerelease suffix instead. Dropping it is a change of label,
-not of policy — `0.x` already grants exactly the same licence to break, and it drops the JSR
-prerelease penalty that forced every install line to be pinned by hand.
-
-**1.0 is the API freeze**, and it is gated on Milestone 40: benchmarks, a security audit, and the
-Node/Bun compatibility suites as release gates. Until then, read the CHANGELOG before a minor bump.
+Setu-TS is pre-1.0: a **minor** (`0.5` → `0.6`) carries breaking changes, and a **patch** carries
+fixes and additions only. The full policy — including how breaking changes are batched and the 1.0
+freeze — is [docs/versioning.md](docs/versioning.md).
 
 ## Quick Example
 
 A small application — the kernel, a runtime, and a logger. Add the logger to the two packages
-installed above (`npm install @setu-ts/logger-plugin@^0.11.0`), save this as `main.ts`:
+installed above (`npm install @setu-ts/logger-plugin@^0.12.0`), save this as `main.ts`:
 
 ```typescript
 import { createApplication } from '@setu-ts/kernel';
@@ -380,7 +357,7 @@ published to JSR.
 
 ```
 setu-ts/
-├── packages/              # 52 workspace members, published on npm (JSR before v0.9.0)
+├── packages/              # 55 workspace members, published on npm (JSR before v0.9.0)
 │   ├── common/            # Shared contracts, capability tokens (no dependencies)
 │   ├── kernel/            # Plugin kernel, middleware pipeline, router
 │   ├── runtime/           # Runtime services and HTTP adapters (Node, Deno, Bun, Workers)

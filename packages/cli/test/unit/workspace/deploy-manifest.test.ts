@@ -8,7 +8,7 @@ import {
 } from '../../../src/workspace/deploy-manifest.ts';
 import { workspaceK8sFiles } from '../../../src/workspace/k8s.ts';
 import { WORKSPACE_VERSION } from '../../../src/workspace/manifest.ts';
-import { transportSpec } from '../../../src/workspace/transport.ts';
+import { brokerSpec } from '../../../src/workspace/transport.ts';
 import { envFromBlock } from '../../../src/workspace/secrets.ts';
 
 const MANIFEST = `metadata:
@@ -23,6 +23,44 @@ spec:
     - name: orders-api
       image: orders-api:dev
 `;
+
+it('X87-5 inserts pull Secrets once per member before filling images and refuses ambiguous anchors', () => {
+  const text = ['api', 'api-gateway']
+    .map(
+      (name) =>
+        `spec:\n  template:\n    spec:\n      containers:\n        - name: ${name}\n          image: ${name}:dev\n`,
+    )
+    .join('---\n');
+  const inputs = {
+    namespace: 'shop',
+    workspace: 'shop',
+    images: new Map([
+      ['api', 'r.io/api:v'],
+      ['api-gateway', 'r.io/api-gateway:v'],
+    ]),
+    pullSecrets: ['registry', 'backup.example'],
+  };
+  const result = prepareDeployManifest(text, inputs);
+  expect(result.ok).toBe(true);
+  if (result.ok) {
+    expect(result.text.match(/imagePullSecrets:/g)).toHaveLength(2);
+    expect(result.text.match(/- name: registry/g)).toHaveLength(2);
+    const documents = result.text.split('---\n');
+    expect(documents).toHaveLength(2);
+    for (const [index, name] of ['api', 'api-gateway'].entries()) {
+      const pod = documents[index]!.split('  template:\n    spec:\n')[1]!;
+      expect(pod).toBe(
+        `      imagePullSecrets:\n        - name: registry\n        - name: backup.example\n      containers:\n        - name: ${name}\n          image: r.io/${name}:v\n`,
+      );
+    }
+  }
+  for (const invalid of [
+    text + 'imagePullSecrets: []',
+    text.replace('containers:', 'missing:'),
+    text + '\n      containers:\n        - name: api\n',
+  ])
+    expect(prepareDeployManifest(invalid, inputs).ok).toBe(false);
+});
 
 describe('prepareDeployManifest', () => {
   it('fills both placeholders and points each member at its image', () => {
@@ -96,13 +134,13 @@ describe('stampSecretVersion (re-audit N2)', () => {
       version: WORKSPACE_VERSION,
       runtime: 'node',
       basePort: 3000,
-      transport: 'http',
+      broker: 'memory',
       members: [
         { name: 'portal', port: 3000 },
         { name: 'portal-admin', port: 3001 },
       ],
     },
-    transportSpec('http'),
+    brokerSpec('memory'),
   ).find((file) => file.path === 'k8s/members.yaml')!.contents;
 
   it("fills only the member's own Deployment slot", () => {

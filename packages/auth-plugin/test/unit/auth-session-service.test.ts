@@ -582,12 +582,13 @@ describe('AuthSessionService — session stamp (M124 §3.3)', () => {
     });
     stamp = 'v2';
     expect(await impl.verifiedCurrent(CTX)).toBeNull();
-    // `current` is the snapshot, by contract: it still answers.
-    expect(impl.current(CTX)).toEqual(PRINCIPAL);
+    // A definite mismatch removed even the stored snapshot.
+    expect(impl.current(CTX)).toBeNull();
     stamp = 'v1';
     active = false;
     expect(await impl.verifiedCurrent(CTX)).toBeNull();
-    // A service built with neither re-check reads the snapshot with amr.
+    // A new sign-in is needed before a service without re-checks can read it.
+    await impl.signIn(CTX, PRINCIPAL, { methods: ['pwd'] });
     const plain = new AuthSessionService({
       sessionService: createFakeSessionService(session),
       now: () => NOW,
@@ -652,4 +653,32 @@ describe('signOut revocation depends on the session strategy', () => {
     // when sign-out has to mean revocation.
     expect(await whoAmI(cookieApp, copied)).toBe(200);
   });
+});
+
+it('M131b 3.13 verifiedCurrent revokes mismatch but retains a reader-fault record', async () => {
+  let mode: 'match' | 'mismatch' | 'reader-fault' = 'match';
+  const session = createFakeSession();
+  const service = new AuthSessionService({
+    sessionService: createFakeSessionService(session),
+    now: () => NOW,
+    sessionStamp: {
+      subtle: crypto.subtle,
+      read: () => {
+        if (mode === 'reader-fault') throw new Error('offline');
+        return mode === 'match' ? 'v1' : 'v2';
+      },
+    },
+  });
+  await service.signIn(CTX, PRINCIPAL, { methods: ['pwd'] });
+  const stored = session.get(AUTH_SESSION_KEY);
+  const id = session.id;
+  mode = 'reader-fault';
+  expect(await service.verifiedCurrent(CTX)).toBeNull();
+  expect(session.get(AUTH_SESSION_KEY)).toEqual(stored);
+  expect(session.id).toBe(id);
+  mode = 'mismatch';
+  expect(await service.verifiedCurrent(CTX)).toBeNull();
+  expect(session.get(AUTH_SESSION_KEY)).toBeUndefined();
+  expect(session.id).not.toBe(id);
+  expect(session.mutations.slice(-2)).toEqual([`delete:${AUTH_SESSION_KEY}`, 'regenerate']);
 });

@@ -6,10 +6,11 @@
  * its layout, this test fails and names what moved, and the examples are
  * brought along instead of drifting.
  */
-import { mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import ts from 'typescript';
 import { run } from '../scripts/lib/run.ts';
 
 const ROOT = resolve(import.meta.dirname, '..');
@@ -92,6 +93,53 @@ function match(source: string, pattern: RegExp, what: string): string {
   return found;
 }
 
+/** A Setu workspace container holds `setu.workspace.json` at its root. */
+async function isWorkspaceContainer(directory: string): Promise<boolean> {
+  try {
+    return (await stat(join(directory, 'setu.workspace.json'))).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * One snapshot per app under `appsRoot`, in directory order.
+ *
+ * A directory holding `setu.workspace.json` is a Setu workspace container
+ * rather than an app: its root has no composition file or entry of its own,
+ * so it is not snapshotted. Each of its `apps/*` members is snapshotted as
+ * its own app, keyed `<container>/<member>`; its `libs/*` are not apps at
+ * all. The caller checks each container for its root `smoke.ts`.
+ */
+async function collectApps(appsRoot: string): Promise<{
+  readonly apps: Map<string, Snapshot>;
+  readonly containers: string[];
+}> {
+  const found = new Map<string, Snapshot>();
+  const containers: string[] = [];
+  for (const entry of await readdir(appsRoot, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const directory = join(appsRoot, entry.name);
+    if ((await stat(join(directory, 'package.json')).catch(() => null)) === null) continue;
+    if (await isWorkspaceContainer(directory)) {
+      containers.push(entry.name);
+      const members = await readdir(join(directory, 'apps'), { withFileTypes: true }).catch(
+        () => [],
+      );
+      for (const member of members) {
+        if (!member.isDirectory()) continue;
+        const memberDirectory = join(directory, 'apps', member.name);
+        if ((await stat(join(memberDirectory, 'package.json')).catch(() => null)) === null)
+          continue;
+        found.set(`${entry.name}/${member.name}`, await snapshot(memberDirectory));
+      }
+      continue;
+    }
+    found.set(entry.name, await snapshot(directory));
+  }
+  return { apps: found, containers };
+}
+
 /** The exported declaration of `symbol`, up to the next blank line. */
 function declarationOf(source: string, symbol: string): string {
   const start = source.search(new RegExp(`export (?:function|const) ${symbol}\\b`));
@@ -171,6 +219,43 @@ function readLayout(functional: Snapshot, classBased: Snapshot): Layout {
 /** A layout rule: an empty list means the app follows it. */
 type Rule = (app: Snapshot, layout: Layout) => string[];
 
+/** Finds router verbs without treating cache/map operations or quoted examples as routes. */
+function registersRoutes(source: string): boolean {
+  const file = ts.createSourceFile('routes.ts', source, ts.ScriptTarget.Latest, true);
+  const routers = new Set(['router', 'routes']);
+  const verbs = new Set(['get', 'post', 'put', 'patch', 'delete']);
+  const isRouter = (node: ts.Expression): boolean =>
+    (ts.isIdentifier(node) && routers.has(node.text)) ||
+    (ts.isPropertyAccessExpression(node) && node.name.text === 'router');
+  const bindings = (node: ts.Node): void => {
+    if ((ts.isParameter(node) || ts.isVariableDeclaration(node)) && ts.isIdentifier(node.name)) {
+      if (node.type !== undefined) {
+        if (/\bIRouterApi\b/.test(node.type.getText(file))) routers.add(node.name.text);
+        else routers.delete(node.name.text);
+      }
+      if (ts.isVariableDeclaration(node) && node.initializer !== undefined) {
+        if (isRouter(node.initializer)) routers.add(node.name.text);
+        else if (ts.isNewExpression(node.initializer)) routers.delete(node.name.text);
+      }
+    }
+    ts.forEachChild(node, bindings);
+  };
+  bindings(file);
+  let found = false;
+  const calls = (node: ts.Node): void => {
+    if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      verbs.has(node.expression.name.text) &&
+      isRouter(node.expression.expression)
+    )
+      found = true;
+    ts.forEachChild(node, calls);
+  };
+  calls(file);
+  return found;
+}
+
 const RULES = {
   /** The application is composed in the generated composition file, by the generated factory. */
   composition(app, layout) {
@@ -213,15 +298,32 @@ const RULES = {
       .map((path) => `${path} registers routes outside a controller (name it *.controller.ts)`);
   },
 
-  /** Every file in a feature folder is its index or is named after the feature. */
+  /** Generated flat projects use src/controllers; feature projects use src/modules. */
+  routeLocation(app) {
+    return [...app.entries()]
+      .filter(
+        ([path, source]) =>
+          path.startsWith('src/') &&
+          !path.startsWith('src/modules/') &&
+          !path.startsWith('src/controllers/') &&
+          /\.[cm]?[jt]sx?$/.test(path) &&
+          registersRoutes(source),
+      )
+      .map(([path]) => `${path} registers routes outside src/modules/ or src/controllers/`);
+  },
+
+  /** Feature helpers use the feature name; generated artifacts may have their own names. */
   featureFiles(app) {
     const problems: string[] = [];
     for (const path of app.keys()) {
       const parts = /^src\/modules\/([^/]+)\/([^/]+)$/.exec(path);
       if (parts === null) continue;
       const [, feature, file] = parts as unknown as [string, string, string];
-      if (file !== 'index.ts' && !file.startsWith(`${feature}.`)) {
-        problems.push(`${path} is not named after its feature (${feature}.*)`);
+      // `setu g service report --module notes` writes report.service.ts,
+      // just as g controller and g schema can add independently named files.
+      const generatedArtifact = /^[a-z][a-z0-9-]*\.(?:controller|service|schemas)\.ts$/.test(file);
+      if (file !== 'index.ts' && !file.startsWith(`${feature}.`) && !generatedArtifact) {
+        problems.push(`${path} is neither a generated artifact nor a feature-named helper`);
       }
     }
     return problems;
@@ -275,19 +377,17 @@ const EXCEPTIONS: Readonly<Record<string, Partial<Record<RuleName, string>>>> = 
   },
   cqrs: {
     entry: 'main.ts is a run-and-exit demonstration, not a server.',
-    moduleIndex: 'Its feature registers CQRS handlers through CqrsPlugin options, not routes.',
-  },
-  'graphql-demo': {
-    moduleIndex:
-      'Its feature is a schema and resolvers passed to GraphqlPlugin options, not routes.',
-  },
-  grpc: {
-    moduleIndex: 'Its feature is an RPC service registered through GrpcPlugin options, not routes.',
   },
   microservices: {
     composition:
       'It composes two services, one factory each under src/service-a/ and src/service-b/.',
     entry: 'main.ts is a run-and-exit demonstration of two services, not a server.',
+    routeLocation:
+      'Each independently composed service keeps its route in src/service-a/ or src/service-b/.',
+  },
+  'plugin-development': {
+    routeLocation:
+      'The greeting plugin demonstrates registering its contributed route in src/plugins/.',
   },
 };
 
@@ -297,6 +397,7 @@ describe('example applications follow the generated layout', () => {
   let scratch: string;
   let layout: Layout;
   const apps = new Map<string, Snapshot>();
+  const containers: string[] = [];
 
   beforeAll(async () => {
     scratch = await mkdtemp(join(tmpdir(), 'setu-apps-layout-'));
@@ -306,12 +407,9 @@ describe('example applications follow the generated layout', () => {
     ]);
     layout = readLayout(functional, classBased);
 
-    for (const entry of await readdir(APPS, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue;
-      const directory = join(APPS, entry.name);
-      if ((await stat(join(directory, 'package.json')).catch(() => null)) === null) continue;
-      apps.set(entry.name, await snapshot(directory));
-    }
+    const collected = await collectApps(APPS);
+    for (const [name, app] of collected.apps) apps.set(name, app);
+    containers.push(...collected.containers);
   }, 300_000);
 
   afterAll(async () => {
@@ -339,10 +437,59 @@ describe('example applications follow the generated layout', () => {
     for (const name of Object.keys(EXCEPTIONS)) expect(apps.has(name), name).toBe(true);
   });
 
+  it('treats a setu.workspace.json directory as a workspace container, not an app', () => {
+    // The container's root has no composition file or entry of its own: its
+    // apps/* members are the apps, snapshotted under `<container>/<member>`.
+    for (const container of containers) {
+      expect(apps.has(container), container).toBe(false);
+    }
+    expect(apps.has('grpc-workspace/billing')).toBe(true);
+    expect(apps.has('grpc-workspace/orders')).toBe(true);
+  });
+
+  it('requires every workspace container to carry a root smoke.ts on the test runner', async () => {
+    // The generator writes no smoke for a member, so the container's root smoke
+    // is the members' proof: it stands in for the smoke rule they skip.
+    const problems: string[] = [];
+    for (const container of containers) {
+      const smoke = await readFile(join(APPS, container, 'smoke.ts'), 'utf8').catch(() => null);
+      problems.push(
+        ...RULES.smoke(new Map(smoke === null ? [] : [['smoke.ts', smoke]]), layout).map(
+          (problem) => `apps/${container}: ${problem}`,
+        ),
+      );
+    }
+    expect(problems).toEqual([]);
+  });
+
+  it('collects a container member as an app and not the container itself', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'setu-apps-layout-collect-'));
+    try {
+      await mkdir(join(root, 'apps', 'plain'), { recursive: true });
+      await writeFile(join(root, 'apps', 'plain', 'package.json'), '{}');
+      await mkdir(join(root, 'apps', 'outer', 'apps', 'member'), { recursive: true });
+      await mkdir(join(root, 'apps', 'outer', 'libs', 'library'), { recursive: true });
+      await writeFile(join(root, 'apps', 'outer', 'package.json'), '{}');
+      await writeFile(join(root, 'apps', 'outer', 'setu.workspace.json'), '{}');
+      await writeFile(join(root, 'apps', 'outer', 'apps', 'member', 'package.json'), '{}');
+      await writeFile(join(root, 'apps', 'outer', 'libs', 'library', 'package.json'), '{}');
+      const { apps: collected } = await collectApps(join(root, 'apps'));
+      // `plain` has no setu.workspace.json, so it is an app as before; the
+      // container's member is an app, the container is not, and the library
+      // is not an app at all.
+      expect([...collected.keys()].sort()).toEqual(['outer/member', 'plain']);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   for (const rule of Object.keys(RULES) as RuleName[]) {
     it(`every example follows the ${rule} rule, or is excepted with a reason`, () => {
       const violations: string[] = [];
       for (const [name, app] of apps) {
+        // A workspace member has no smoke of its own: the generator writes none,
+        // and its container's cross-process smoke is the proof (checked above).
+        if (rule === 'smoke' && name.includes('/')) continue;
         const problems = RULES[rule](app, layout);
         const exception = EXCEPTIONS[name]?.[rule];
         if (exception === undefined) {
@@ -397,15 +544,73 @@ describe('each layout rule can fail', () => {
     ]);
   });
 
+  it.each(['get', 'post', 'put', 'patch', 'delete'])(
+    'routeLocation: refuses a flat router.%s call',
+    (verb) => {
+      expect(
+        RULES.routeLocation(app({ 'src/chat.ts': `router.${verb}('/chat', handler);` })),
+      ).toEqual(['src/chat.ts registers routes outside src/modules/ or src/controllers/']);
+    },
+  );
+
+  it('routeLocation: finds nested, property and typed/aliased router calls', () => {
+    for (const source of [
+      "app.router.post('/chat', handler);",
+      "plugin.router.get('/chat', handler);",
+      "function register(api: IRouterApi) { api.patch('/chat', handler); }",
+      "const endpoints = app.router; endpoints.delete('/chat', handler);",
+    ]) {
+      expect(RULES.routeLocation(app({ 'src/features/chat.ts': source }))).toHaveLength(1);
+    }
+  });
+
+  it('routeLocation: accepts generated controllers and feature modules', () => {
+    expect(
+      RULES.routeLocation(
+        app({
+          'src/controllers/chat.controller.ts': "router.get('/chat', handler);",
+          'src/modules/chat/chat.controller.ts': "router.post('/chat', handler);",
+          'setu.config.ts': "app.router.get('/health', handler);",
+        }),
+      ),
+    ).toEqual([]);
+  });
+
+  it('routeLocation: ignores maps, headers, cache calls, comments and strings', () => {
+    expect(
+      RULES.routeLocation(
+        app({
+          'src/store.ts': `
+      const router = new Map(); router.get('key');
+      const headers = new Headers(); headers.delete('key');
+      cache.get('key'); bindings.kv('x').put('key', value);
+      // router.post('/quoted', handler);
+      const text = "app.router.get('/quoted', handler)";
+    `,
+        }),
+      ),
+    ).toEqual([]);
+  });
+
   it('featureFiles: refuses a file not named after its feature', () => {
-    expect(RULES.featureFiles(app({ 'src/modules/news/platform.controller.ts': '' }))).toHaveLength(
-      1,
-    );
+    expect(RULES.featureFiles(app({ 'src/modules/news/platform.ts': '' }))).toHaveLength(1);
+  });
+
+  it('featureFiles: accepts independently named generated artifacts inside a module', () => {
+    expect(
+      RULES.featureFiles(
+        app({
+          'src/modules/lifetimes/scoped-report.service.ts': '',
+          'src/modules/news/platform.controller.ts': '',
+          'src/modules/news/create.schemas.ts': '',
+        }),
+      ),
+    ).toEqual([]);
   });
 
   it('moduleIndex: refuses a feature the index does not import the generated way', () => {
     const files = {
-      'setu.config.ts': 'registerModules(app.router);',
+      'setu.config.ts': 'registerModules(app.router, app.services);',
       'src/modules/index.ts':
         "import { registerNewsRoutes } from './news/news.controller.ts';\nexport function registerModules() {}",
       'src/modules/news/news.controller.ts': '',

@@ -230,12 +230,13 @@ export interface IResponse {
   /**
    * Sets several response headers at once — the same as calling
    * {@linkcode IResponse.header} for each own enumerable string-keyed entry,
-   * in order, with the same validation and the same errors.
+   * with the same validation and errors. Atomic: when any entry is invalid,
+   * none is set.
    *
    * For a header set a middleware sends on every response, pass the SAME
    * frozen object each time: the kernel validates it once and then copies it
    * into each response in one step (measured at 941 → 358 ns per response on
-   * Bun). Any other object is applied entry by entry. A frozen object is the
+   * Bun). Any other object is staged before applying. A frozen object is the
    * contract for the shortcut because it cannot change after it was checked.
    *
    * @param headers - Header names and values
@@ -360,8 +361,12 @@ export interface IRequestContext {
    */
   slot?<T>(key: object, create: () => T): T;
   /**
-   * Registers cleanup in reverse registration order. Buffered responses wait
-   * for cleanup; streaming responses clean up on end, error, or cancellation.
+   * Registers cleanup in reverse registration order, after the handler settles.
+   * Buffered responses normally wait for cleanup; an early middleware response
+   * is sent immediately and cleanup waits for the running handler — even past
+   * shutdown: a handler still running when `stop()`'s drain bound expires has
+   * its cleanup run when it settles, after `stop()` returned. Streaming
+   * responses also wait for end, error, or cancellation.
    * Calls after completion run immediately. Failures are reported at warn.
    * Each asynchronous cleanup is bounded at 5000 ms; expiry warns once and
    * continues with the next cleanup. Later settlement is ignored. Synchronous
@@ -726,9 +731,10 @@ export function isWebSocketUpgradeRequest(headers: Headers): boolean {
  * This is a **description**, not a mechanism: the middleware still performs
  * the enforcement, and removing the metadata changes no runtime behaviour.
  *
- * It deliberately carries authentication PRESENCE only. An OpenAPI security
- * requirement names a scheme, and no declared scheme can be inferred from a
- * role name, so roles and permissions are not represented here — see
+ * It carries authentication presence and, when the middleware enforces OAuth
+ * scopes, the scopes it requires. Scopes are part of an OAuth security
+ * requirement, which an OpenAPI document can name; roles and permissions are
+ * not, because no declared scheme can be inferred from a role name — see
  * `@setu-ts/openapi-plugin` for what a generated document can and cannot say.
  *
  * @since 0.2.0
@@ -739,6 +745,13 @@ export interface RouteSecurityMetadata {
    * when it explicitly marks the route public.
    */
   readonly authenticated: boolean;
+  /**
+   * OAuth 2.0 scopes the middleware requires (RFC 6749 §3.3). Present only on
+   * a middleware that enforces scopes; `authenticated` is `true` on such a
+   * guard. Not the tenant grants `@setu-ts/auth-plugin`'s scoped RBAC calls
+   * "scopes".
+   */
+  readonly scopes?: readonly string[];
 }
 
 /**
@@ -810,11 +823,18 @@ export function securityMetadataOf(
  * symbol is treated as absent rather than trusted.
  */
 function isRouteSecurityMetadata(value: unknown): value is RouteSecurityMetadata {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    typeof (value as { authenticated?: unknown }).authenticated === 'boolean'
-  );
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+  const candidate = value as { authenticated?: unknown; scopes?: unknown };
+  if (typeof candidate.authenticated !== 'boolean') {
+    return false;
+  }
+  const scopes = candidate.scopes;
+  if (scopes === undefined) {
+    return true;
+  }
+  return Array.isArray(scopes) && scopes.every((scope) => typeof scope === 'string');
 }
 
 /**
@@ -1133,3 +1153,128 @@ export type ResponseSnapshotInit = {
   /** Header input accepted directly by the web-standard `Response` constructor. */
   readonly headers: HeadersInit;
 };
+
+/** Route idempotency marker shared by producers and tool compilers.
+ * @since 0.12.0
+ */
+export const IDEMPOTENCY_METADATA: unique symbol = Symbol.for('setu.idempotency.metadata');
+
+/** Describes a route protected by idempotency middleware.
+ * @since 0.12.0
+ */
+export interface RouteIdempotencyMetadata {
+  /** The middleware deduplicates repeated calls. */
+  readonly idempotent: true;
+  /**
+   * The request header the middleware reads its key from (`Idempotency-Key`
+   * unless configured otherwise). Absent when the key comes from a body field
+   * or a function, which an in-process caller such as mcp-plugin cannot supply.
+   */
+  readonly keyHeader?: string;
+  /**
+   * Whether a request without a key is refused (`true`) or passed through
+   * unprotected (`false`). Absent means required, the middleware default.
+   */
+  readonly required?: boolean;
+}
+
+/** Brands a middleware in place, preserving its behavior and identity.
+ * @param middleware - Middleware to brand
+ * @param metadata - Idempotency description
+ * @returns The same middleware
+ * @since 0.12.0
+ */
+export function withIdempotencyMetadata<T extends MiddlewareFunction>(
+  middleware: T,
+  metadata: RouteIdempotencyMetadata,
+): T {
+  Object.defineProperty(middleware, IDEMPOTENCY_METADATA, {
+    value: metadata,
+    enumerable: false,
+    configurable: true,
+    writable: false,
+  });
+  return middleware;
+}
+
+/** Reads a valid idempotency brand; foreign values are treated as absent.
+ * @param middleware - Middleware to inspect
+ * @returns Its metadata, when valid
+ * @since 0.12.0
+ */
+export function idempotencyMetadataOf(
+  middleware: MiddlewareFunction,
+): RouteIdempotencyMetadata | undefined {
+  const value: unknown = (
+    middleware as MiddlewareFunction & {
+      readonly [IDEMPOTENCY_METADATA]?: unknown;
+    }
+  )[IDEMPOTENCY_METADATA];
+  return typeof value === 'object' &&
+    value !== null &&
+    'idempotent' in value &&
+    value.idempotent === true &&
+    (!('keyHeader' in value) || typeof value.keyHeader === 'string') &&
+    (!('required' in value) || typeof value.required === 'boolean')
+    ? (value as RouteIdempotencyMetadata)
+    : undefined;
+}
+
+/** Route tool marker shared by functional and decorated routes.
+ * @since 0.12.0
+ */
+export const MCP_TOOL_METADATA: unique symbol = Symbol.for('setu.mcp-tool.metadata');
+
+/** Describes an explicitly exposed MCP tool; missing identity comes from the route schema.
+ * @since 0.12.0
+ */
+export interface RouteMcpToolMetadata {
+  /** Case-sensitive tool name (1–64 ASCII letters, digits, underscores, dots or hyphens). */
+  readonly name?: string;
+  /** Model-facing description. */
+  readonly description?: string;
+  /** Optional display title. */
+  readonly title?: string;
+  /** Declares the operation safe to repeat without idempotency middleware. */
+  readonly repeatable?: true;
+}
+
+/** Brands a middleware in place, preserving its behavior and identity.
+ * @param middleware - Middleware to brand
+ * @param metadata - Tool description
+ * @returns The same middleware
+ * @since 0.12.0
+ */
+export function withMcpToolMetadata<T extends MiddlewareFunction>(
+  middleware: T,
+  metadata: RouteMcpToolMetadata,
+): T {
+  Object.defineProperty(middleware, MCP_TOOL_METADATA, {
+    value: metadata,
+    enumerable: false,
+    configurable: true,
+    writable: false,
+  });
+  return middleware;
+}
+
+/** Reads a valid tool brand; foreign or ill-typed values are treated as absent.
+ * @param middleware - Middleware to inspect
+ * @returns Its metadata, when valid
+ * @since 0.12.0
+ */
+export function mcpToolMetadataOf(
+  middleware: MiddlewareFunction,
+): RouteMcpToolMetadata | undefined {
+  const value: unknown = (
+    middleware as MiddlewareFunction & { readonly [MCP_TOOL_METADATA]?: unknown }
+  )[MCP_TOOL_METADATA];
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+  const meta = value as Record<string, unknown>;
+  return (meta.name === undefined || typeof meta.name === 'string') &&
+    (meta.description === undefined || typeof meta.description === 'string') &&
+    (meta.title === undefined || typeof meta.title === 'string') &&
+    (meta.repeatable === undefined || meta.repeatable === true)
+    ? (value as RouteMcpToolMetadata)
+    : undefined;
+}

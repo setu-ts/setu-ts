@@ -36,7 +36,7 @@ function harness(root?: string, workspace = true, runtime: TargetRuntime = 'deno
       version: WORKSPACE_VERSION,
       runtime,
       basePort: 3000,
-      transport: 'http',
+      broker: 'memory',
       members: [],
     });
     const profile = workspaceProfile(runtime);

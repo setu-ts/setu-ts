@@ -4,8 +4,8 @@ An in-memory todo API built with the REST starter. It enables the starter's auth
 and adds `POST /todos` and `GET /todos/:id`.
 
 ```bash
-pnpm --dir apps/rest-api run start
 pnpm --dir apps/rest-api run smoke
+pnpm --dir apps/rest-api run start   # port 3000; pass another as `run start 4000`
 ```
 
 The smoke check writes a todo, reads it back through the same API, and then verifies the OpenAPI
@@ -15,7 +15,9 @@ requirement, it does **not** list `/openapi.json` and `/docs` as API operations,
 parameter is typed as a string rather than rendering as `any`.
 
 Open http://localhost:3000/docs after `pnpm --dir apps/rest-api run start` to exercise the API from
-the browser: click **Authorize**, paste a token, and call `GET /todos/{id}`.
+the browser. In another terminal, run `pnpm --dir apps/rest-api run token` to print a five-minute
+token signed with the example's demo secret. Click **Authorize**, paste the token, call
+`POST /todos` with `{ "title": "Try Swagger" }`, then call `GET /todos/{id}` with the returned id.
 
 Read the [example deep dive](../../docs/examples.md#rest-api) for the concept and source
 walkthrough.

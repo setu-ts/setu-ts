@@ -221,6 +221,84 @@ describe('createGraphqlHandler', () => {
     expect(captureStatus()).toBe(415);
   });
 
+  // A substring test accepted these CORS-simple types, so a cross-site page
+  // could run a mutation with no preflight. Each is refused with the same 415
+  // body, in whichever media type the client negotiated.
+  for (const [accept, contentType] of [
+    [null, 'application/json; charset=utf-8'],
+    ['application/graphql-response+json', 'application/graphql-response+json; charset=utf-8'],
+  ] as const) {
+    for (const smuggled of [
+      'text/plain; x=application/json',
+      'application/x-www-form-urlencoded; a=application/json',
+      'multipart/form-data; boundary=x; a=application/json',
+    ]) {
+      it(`refuses ${smuggled} with 415 as ${contentType}`, async () => {
+        const service = new GraphqlService(createFakeRuntime(), createFakeSchema(), {
+          serviceRegistry: mockServiceRegistry,
+          endpoint: '/graphql',
+          documentCacheSize: 100,
+          maxDepth: 10,
+          introspection: true,
+          maskInternalErrors: true,
+        });
+        const { post } = createGraphqlHandler(service, '/graphql', {
+          graphiql: true,
+          maxBatchSize: 0,
+          apqResolver: null,
+        });
+        const captured: { status?: number; headers: Map<string, string>; body?: Uint8Array } = {
+          headers: new Map(),
+        };
+        const mock = {
+          status: (code: number) => {
+            captured.status = code;
+            return mock;
+          },
+          header: (name: string, value: string) => {
+            captured.headers.set(name.toLowerCase(), value);
+            return mock;
+          },
+          send: (body?: Uint8Array): HandlerResult => {
+            if (body) captured.body = body;
+            return { __handlerResult: true } as unknown as HandlerResult;
+          },
+        } as unknown as IResponse;
+        let read = 0;
+        const headers = new Map<string, string>([['content-type', smuggled]]);
+        if (accept !== null) headers.set('accept', accept);
+        const ctx = {
+          request: {
+            method: 'POST',
+            json: () => {
+              read++;
+              return Promise.resolve({ query: 'mutation { transfer }' });
+            },
+            headers: headers as unknown as Headers,
+          } as unknown as Request,
+          response: mock,
+          query: {},
+          params: {},
+          get: () => undefined,
+        } as unknown as IRequestContext;
+
+        await post(ctx);
+
+        expect(captured.status).toBe(415);
+        expect(captured.headers.get('content-type')).toBe(contentType);
+        expect(JSON.parse(new TextDecoder().decode(captured.body))).toEqual({
+          errors: [
+            {
+              message: 'Unsupported media type. Expected application/json',
+              extensions: { code: 'UNSUPPORTED_MEDIA_TYPE' },
+            },
+          ],
+        });
+        expect(read).toBe(0);
+      });
+    }
+  }
+
   it('returns 400 for POST with invalid JSON', async () => {
     const runtime = createFakeRuntime();
     const schema = createFakeSchema();

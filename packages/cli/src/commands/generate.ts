@@ -148,6 +148,8 @@ function printSchematics(installed: ReadonlySet<string>, log: (message: string) 
   log('                      required for the first four once the project has modules');
   log('  --adopt-controllers The first module only: move src/controllers/ and src/services/');
   log('                      into it, rewriting imports and keeping their URLs');
+  log('  --page             g module in a full-stack project: also write its page route,');
+  log('                      reading the module service with getService');
 }
 
 /**
@@ -239,6 +241,11 @@ export async function runGenerateCommand(
 
   const schematicName = args.positionals[0];
   const adoptControllers = args.flags['adopt-controllers'] === true;
+  const page = args.flags['page'] === true;
+  if (page && schematicName !== 'module') {
+    deps.error('--page applies only to `g module` in a full-stack project, which adds its page.');
+    return EXIT_USAGE;
+  }
   if (adoptControllers && schematicName !== 'module') {
     deps.error(
       '--adopt-controllers applies only to `g module`, which moves the flat controllers and services into the new module.',
@@ -442,7 +449,18 @@ export async function runGenerateCommand(
     schematicName,
     names.kebab,
     installed,
-    scan.artifacts,
+    schematicName === 'module' && modules.length === 0 && adoptControllers
+      ? // Only the flat file that becomes the module's own is exempt: a nested
+        // controller of the same name still collides with the generated one.
+        Object.fromEntries(
+          Object.entries(scan.artifacts).map(([family, paths]) => [
+            family,
+            ['controller', 'controller-functions', 'service'].includes(family)
+              ? paths.filter((path) => path !== names.kebab)
+              : paths,
+          ]),
+        )
+      : scan.artifacts,
     module === undefined ? modules : [],
     module,
   );
@@ -457,27 +475,60 @@ export async function runGenerateCommand(
     return EXIT_ERROR;
   }
 
+  if (page && !installed.has('react-router-plugin')) {
+    deps.error(
+      '--page needs the full-stack template (react-router-plugin): this project has no React Router pages.',
+    );
+    return EXIT_USAGE;
+  }
+  // A class-based project generates the class module shape, which has no page
+  // (`generateModule` writes the full-stack shape only in functional mode).
+  if (page && mode === 'class-based') {
+    deps.error(
+      '--page needs functional generation: decorator-plugin makes this project class-based, and the class-based module has no page.',
+    );
+    return EXIT_USAGE;
+  }
+
   if (
     installed.has('react-router-plugin') &&
     ['route', 'controller', 'module'].includes(schematicName)
   ) {
-    const base = `/${module === undefined ? '' : `${module}/`}${names.kebab}`;
-    const pages = await readPagePaths(dir, deps.runCommand ?? createCommandRunner());
+    // A full-stack module mounts its routes under /api (M130 §3.6), so a module
+    // and its page of the same name never collide.
+    const base =
+      schematicName === 'module'
+        ? `/api/${names.kebab}`
+        : `/${module === undefined ? '' : `${module}/`}${names.kebab}`;
+    const pages = await readPagePaths(dir, deps.runCommand ?? createCommandRunner(), deps.fs);
     if (!pages.ok) {
       deps.error(
         `Notice: cannot check React Router pages (${escapeName(pages.reason)}); check ${base} and ${base}/:id against app/routes.ts and app/routes/ by hand.`,
       );
     } else {
-      const page = pages.paths.find((path) => kernelShadows(base, path));
-      if (page !== undefined) {
+      const shadowed = pages.paths.find((path) => kernelShadows(base, path));
+      if (shadowed !== undefined) {
         deps.error(
-          `Cannot generate ${schematicName} "${names.kebab}": its kernel routes ${base} and ${base}/:id would take precedence over the React Router page ${escapeName(page)} (${escapeName(pages.files.get(page)!)}).`,
+          `Cannot generate ${schematicName} "${names.kebab}": its kernel routes ${base} and ${base}/:id would take precedence over the React Router page ${escapeName(shadowed)} (${escapeName(pages.files.get(shadowed)!)}).`,
         );
         deps.error(
           schematicName === 'module'
-            ? `Choose another module name: a module's routes are mounted at /<module name>.`
+            ? `Choose another module name: a full-stack module's routes are mounted at /api/<module name>.`
             : `Choose another name, or place the ${schematicName} in a module: setu g module api (with --adopt-controllers if the project has controllers), then setu g ${schematicName} ${names.kebab} --module api (which yields /api/${names.kebab}).`,
         );
+        return EXIT_ERROR;
+      }
+      // `--page` adds a page at /<name>: an existing page there would be
+      // shadowed or, for /login, the guarded page would redirect to itself.
+      const pagePath = `/${names.kebab}`;
+      const existing = page
+        ? pages.paths.find((path) => path.replace(/\/+$/, '') === pagePath)
+        : undefined;
+      if (existing !== undefined) {
+        deps.error(
+          `Cannot generate module "${names.kebab}" with --page: the page ${pagePath} already exists (${escapeName(pages.files.get(existing)!)}).`,
+        );
+        deps.error('Choose another module name, or generate the module without --page.');
         return EXIT_ERROR;
       }
     }
@@ -492,6 +543,7 @@ export async function runGenerateCommand(
     migrations,
     artifacts: scan.artifacts,
     ...(module === undefined ? {} : { targetModule: module, moduleArtifacts: scan.artifacts }),
+    ...(page ? { page: true } : {}),
   };
 
   let generated: readonly GeneratedFile[];
@@ -547,6 +599,7 @@ export async function runGenerateCommand(
         module: names.kebab,
         mode,
         adopt: adoptControllers,
+        fullStack: mode === 'functional' && installed.has('react-router-plugin'),
         artifacts: scan.artifacts,
         generated,
         cli: cliInvocation(runtime),
@@ -563,13 +616,9 @@ export async function runGenerateCommand(
       return EXIT_ERROR;
     }
     moduleSwitch = planned.plan;
-    const replaced = new Map(moduleSwitch.writes.map((file) => [file.path, file]));
     for (const file of moduleSwitch.writes)
       if (!generated.some((own) => own.path === file.path)) verbatim.add(joinPath(dir, file.path));
-    generated = [
-      ...generated.map((file) => replaced.get(file.path) ?? file),
-      ...moduleSwitch.writes.filter((file) => !generated.some((own) => own.path === file.path)),
-    ];
+    generated = moduleSwitch.writes;
   } else if (adoptControllers) {
     deps.error(
       '--adopt-controllers applies only to the first module, which switches a flat project to modules.',
@@ -667,7 +716,11 @@ export async function runGenerateCommand(
           ? withoutRegistrationWiring(diagnosis)
           : diagnosis,
         deps.error,
-        { dryRun: true, ...(module === undefined ? {} : { module }) },
+        {
+          dryRun: true,
+          generated: generated.map((file) => file.path),
+          ...(module === undefined ? {} : { module }),
+        },
       );
       return code;
     }

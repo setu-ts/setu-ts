@@ -17,7 +17,7 @@ export function createApp(): IKernelApplication {
   });
 
   app.middleware.add(errorHandler({ format: 'rfc9457' }), { priority: 0, name: 'error-handler' });
-  registerModules(app.router);
+  registerModules(app.router, app.services);
 
   return app;
 }

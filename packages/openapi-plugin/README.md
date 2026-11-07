@@ -45,9 +45,10 @@ by `$ref` from each of those sites.
 
 Reuse means the **same schema object**, not an equal one: two separately constructed but
 structurally identical schemas are two schemas and each stays where it is. Only object, array,
-composition and enum shapes are hoisted — a reused primitive is smaller inline than as a `$ref`.
-Parameter schemas are never hoisted, because a parameter list is built by destructuring the
-transformed object's `properties`, and a `$ref` has none.
+composition and enum shapes are hoisted; nullable primitives stay inline, like other primitives,
+because a reused primitive is smaller inline than as a `$ref`. Parameter schemas are never hoisted,
+because a parameter list is built by destructuring the transformed object's `properties`, and a
+`$ref` has none.
 
 A route's schemas come from its declared `schema` field **or** are derived from the validation
 middleware guarding it, so a route already carrying `validateBody(...)` does not repeat itself.
@@ -82,16 +83,29 @@ await app.start({ port: 3000 });
 // GET /docs         → Swagger UI
 ```
 
+## Component names when regenerating a client
+
+<!-- version:history -->
+
+A hoisted node uses its own Zod `.meta({ id })` / registry id when it has one; otherwise its name
+uses the first operation's body/response hint plus the node's schema path, such as
+`PostOrdersBodyLinesItems`. Roots reserve their own name before descending. Nullable primitives stay
+inline. Explicit ids keep names independent of operation order; anonymous nodes still depend on
+their first use site. This changes some component/type names from 0.11.0: regenerate the document
+and client together and review the `setu client --check` diff.
+
 ## Options
 
 Swagger defaults to self-hosting. Install `swagger-ui-dist` (supported range `^5`) in the
 application and grant filesystem read access on Deno. On Deno, add
 `"swagger-ui-dist": "npm:swagger-ui-dist@5.33.3"` to the `imports` of the app's `deno.json` (in a
-workspace, the member's — as generated members do — or the root's), run `deno install` from the
-workspace root, and keep `--allow-read` on the start task: the optional import resolves from the
-installed `node_modules`, so an entry with no install still fails at startup. Registration awaits
-the tiny `swagger-ui-dist/absolute-path.js` helper and reads only the three fixed distribution files
-once. The routes `/docs/swagger-ui.css`, `/docs/swagger-ui-bundle.js`, and
+workspace, the member's — as generated members do — or the root's), and keep `--allow-read` on the
+start task. With `nodeModulesDir: "auto"` — every generated Deno project, and in a workspace the
+root — Deno installs the entry on first run; with `"manual"` (Deno's default when the project also
+has a `package.json`), an entry that was never installed fails at startup with
+`OptionalDependencyUnavailableError`, so run `deno install` from the workspace root first.
+Registration awaits the tiny `swagger-ui-dist/absolute-path.js` helper and reads only the three
+fixed distribution files once. The routes `/docs/swagger-ui.css`, `/docs/swagger-ui-bundle.js`, and
 `/docs/swagger-ui-standalone-preset.js` serve the package bytes with CSS/JavaScript content types
 and `Cache-Control: public, max-age=3600`; changing `endpoint` moves all four UI routes. Delivery
 routes are excluded from the generated spec; in the external modes no asset route exists, so only
@@ -200,6 +214,18 @@ Rules and limits:
   pre-derivation document: owner exclusion, the `operationId` format and schema deduplication are
   unconditional. To document the operational routes again, pass `excludeOwners: []`.
 
+### The idempotency key header
+
+A route carrying `idempotent()` (or `IdempotencyService.middleware()`) from
+`@setu-ts/idempotency-plugin` is documented with the header its key is read from — `Idempotency-Key`
+unless configured otherwise — as a header parameter on every method except GET, HEAD and OPTIONS,
+which the middleware passes through. It is `required` unless the route set `required: false`, and
+its schema is a string of 1–255 characters. A key read from a body field or a function has no
+header, so nothing is added, and a header the route declares in its own `headers` schema wins.
+Swagger UI therefore shows a field for the key, and a request sent from it is not refused for
+lacking one. This is not governed by `deriveRequestSchemas`: the middleware refuses the request
+either way.
+
 ## Operation ids
 
 When no id is declared, an id is derived from the method and the path with placeholders unwrapped:
@@ -266,12 +292,14 @@ app.router.get('/todos/:id', { middleware: [requireAuth()], handler }); // → r
 app.router.post('/login', { middleware: [publicRoute()], handler }); // → public
 ```
 
-A declared `schema.security` always wins, so this changes no document that already declares. Three
-limits: only route-level middleware is inspected (`app.middleware.add()` is invisible to a route,
-which is correct for `authMiddleware()` — it populates rather than enforces); roles and permissions
-cannot be expressed, since a requirement names a scheme and none can be inferred from `'admin'`; and
-the scheme name is configured rather than inferred, because a guard cannot know what your document
-calls it.
+A declared `schema.security` always wins, so this changes no document that already declares. Scopes
+from `requireScopes` guards are merged, sorted and de-duplicated into the derived requirement's
+scope list; an authenticated route with no scope guard keeps the empty list. Three limits: only
+route-level middleware is inspected (`app.middleware.add()` is invisible to a route, which is
+correct for `authMiddleware()` — it populates rather than enforces); roles and permissions cannot be
+expressed, since a requirement names a scheme and none can be inferred from `'admin'`; and the
+scheme name is configured rather than inferred, because a guard cannot know what your document calls
+it.
 
 On a decorated controller, `@Public` produces the same empty `security` array, so the opt-out is
 available without writing a schema:

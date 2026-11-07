@@ -116,3 +116,24 @@ describe('graph validation', () => {
     expect(() => cycle.close()).toThrow(/cycle: same → same → same/);
   });
 });
+
+it('M131b 3.8 dedupes a missing edge reached through roots and an alias', () => {
+  const c = createContainer();
+  class Leaf {}
+  const provider = { useClass: Leaf, inject: ['missing'] };
+  c.register('leaf', provider);
+  c.register(Leaf, provider);
+  c.register('one', { useFactory: () => ({}), inject: ['leaf'] });
+  c.register('two', { useFactory: () => ({}), inject: [Leaf] });
+  try {
+    c.close();
+    throw new Error('expected refusal');
+  } catch (error) {
+    expect(error).toBeInstanceOf(ContainerValidationError);
+    expect((error as ContainerValidationError).findings).toHaveLength(1);
+    expect((error as ContainerValidationError).findings[0]).toMatchObject({
+      kind: 'missing',
+      token: 'missing',
+    });
+  }
+});

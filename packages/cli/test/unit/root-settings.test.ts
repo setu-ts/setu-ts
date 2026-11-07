@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { rootManifestSettings } from '../../src/templates/root-settings.ts';
 import { projectFiles, resolveHost } from '../../src/templates/project-files.ts';
 import { workspaceRootFiles } from '../../src/workspace/root-files.ts';
-import { transportSpec } from '../../src/workspace/transport.ts';
+import { brokerSpec } from '../../src/workspace/transport.ts';
 import { getTemplate } from '../../src/templates/registry.ts';
 
 /** Parses one emitted file's JSON, so an assertion reads keys rather than text. */
@@ -56,7 +56,18 @@ describe('generated imports match the formatter the project ships with', () => {
    * @returns The emitted statement, whitespace-collapsed
    */
   function commonImportOf(): string {
-    const host = resolveHost(getTemplate('full-stack')!, 'deno');
+    // No shipped template merges extra symbols into this import since M130
+    // dropped the full-stack logger/secrets bridge, so the sort is pinned on a
+    // host that still names several.
+    const host = resolveHost(
+      {
+        ...getTemplate('full-stack')!,
+        packageImports: [
+          { pkg: 'common', symbols: ['CAPABILITIES', 'type ILogger', 'type ISecretManager'] },
+        ],
+      },
+      'deno',
+    );
     const files = projectFiles('shop', 'deno', host);
     const config = files.find((f) => f.path === 'setu.config.ts')!;
     const match = config.contents.match(/import \{[^}]*\} from '@setu-ts\/common';/s);
@@ -92,7 +103,7 @@ describe('generated imports match the formatter the project ships with', () => {
 describe('where the root settings are emitted', () => {
   it('puts them in a workspace root', () => {
     const manifest = manifestOf(
-      workspaceRootFiles('shop', 3000, transportSpec('http'), workspaceProfile('deno')),
+      workspaceRootFiles('shop', 3000, brokerSpec('memory'), workspaceProfile('deno')),
       'deno.json',
     );
 

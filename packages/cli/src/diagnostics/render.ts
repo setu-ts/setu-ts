@@ -27,6 +27,10 @@ function lines(finding: Finding): readonly string[] {
         `Skipped ${escapeName(f.path)}: it does not export ${escapeName(f.missing.join(', '))}, so it cannot be listed in the generated barrel and nothing registers it.`,
         '  Add that export to the file — or rename an existing one — or delete the file and run this schematic again.',
       ];
+    case 'artifact-unlisted':
+      return [
+        `${escapeName(f.path)} is not re-exported from src/services/index.ts: it does not export ${escapeName(f.missing.join(', '))}.`,
+      ];
     case 'manual-registration':
       return [
         `Skipped ${escapeName(f.path)}: ${escapeName(f.symbol)} is already registered by hand in ${escapeName(f.wiredIn)}, so listing it in the generated barrel would register it twice.`,
@@ -46,9 +50,20 @@ function lines(finding: Finding): readonly string[] {
       ];
     case 'unwired': {
       const symbol = f.symbols.join(', ');
+      if (f.stop !== undefined)
+        return [
+          `could not classify setu.config.ts at line ${f.stop.line} (\`${escapeName(f.stop.reason)}\`); setu check cannot tell whether it registers ${escapeName(symbol)}`,
+        ];
+      if (f.unusedImports !== undefined) {
+        const unused = f.unusedImports;
+        const other = f.symbols.filter((name) => !unused.includes(name));
+        return [
+          `setu.config.ts imports ${escapeName(unused.join(', '))} but never uses it${other.length === 0 ? '' : `; it does not use ${escapeName(other.join(', '))} outside imports`}; ${f.site === 'registerModules' ? 'call registerModules(app.router, app.services)' : 'consume the barrel exports'}.`,
+        ];
+      }
       if (f.site === 'registerModules')
         return [
-          'setu.config.ts does not reference registerModules; add:',
+          'setu.config.ts does not call registerModules; add:',
           "  import { registerModules } from './src/modules/index.ts';",
           '  registerModules(app.router, app.services);',
         ];
@@ -81,6 +96,9 @@ function lines(finding: Finding): readonly string[] {
     case 'barrel-drift':
       return [
         `${escapeName(f.barrel)} has barrel drift: unlisted ${escapeName(f.unlisted.join(', ')) || '(none)'}; stale ${escapeName(f.stale.join(', ')) || '(none)'}.`,
+        ...f.uncalled.map(
+          (symbol) => `  imports ${escapeName(symbol)} but never registers it; run setu sync`,
+        ),
         `  Run \`setu sync\` to rewrite ${escapeName(f.barrel)} from ${escapeName(f.barrel.slice(0, f.barrel.lastIndexOf('/')))}.`,
       ];
     case 'barrel-unreadable':
@@ -115,6 +133,18 @@ function lines(finding: Finding): readonly string[] {
         `This project has modules and also keeps controllers or services outside them: ${escapeName(f.files.join(', '))}.`,
         '  A project keeps them in one place: move them into a module, then run `setu sync`.',
       ];
+    case 'page-kernel-value-import':
+      return [
+        `${escapeName(f.path)}:${f.line} imports ${escapeName(f.specifier)} ${PAGE_IMPORT_REASONS[f.reason]}, which would carry kernel code into the browser bundle.`,
+        f.reason === 'inline-type-only'
+          ? '  Write `import type { … }`: braces of `type` bindings still leave a side-effect import.'
+          : '  A page imports kernel code only as `import type`, or a `*.token.ts` module; reach the service with getService(context, TOKEN).',
+      ];
+    case 'page-unreadable':
+      return [
+        `Cannot read the imports of ${escapeName(f.path)}, so whether it imports kernel code by value cannot be checked.`,
+        '  It is over 1 MiB, cannot be parsed or read, sits past 32 directory levels or 4096 directories, or is reached through a symlink leaving app/. Fix that, or silence this finding in .setu-ts/check.json.',
+      ];
     case 'unresolved-import':
       return [
         `${escapeName(f.path)} imports ${escapeName(f.specifier)}, which does not exist.`,
@@ -132,6 +162,15 @@ function lines(finding: Finding): readonly string[] {
       ];
   }
 }
+
+/** How each refused page import is described. */
+const PAGE_IMPORT_REASONS = {
+  'value-import': 'by value',
+  'inline-type-only': 'with inline `type` bindings only',
+  'export-star': 'with `export *`',
+  dynamic: 'with a dynamic import()',
+  glob: 'through an import.meta.glob pattern',
+} as const;
 
 /** Renders the generator's pre-write reports or its planned-barrel/module notices. */
 export function renderGenerateFindings(
@@ -151,6 +190,7 @@ export function renderGenerateFindings(
           'module-skipped',
           'artifact-invalid',
           'artifact-skipped',
+          'artifact-unlisted',
           'artifact-unreadable',
           'manual-registration',
           'legacy-layout',
@@ -162,23 +202,49 @@ export function renderGenerateFindings(
     }
     return;
   }
-  if (options.dryRun !== true) {
-    // Functional module wiring has always preceded the decorator/jobs sites.
+  const selected: Finding[] = [];
+  {
+    // Functional module wiring has always preceded the decorator/jobs sites. A dry
+    // run reports only a config it could not read; its wiring notices wait for the
+    // write, as before.
     const findings = diagnosis.generateWiring.filter(
-      (f) => 'barrel' in f && options.generated?.includes(f.barrel),
+      (f) =>
+        'barrel' in f &&
+        options.generated?.includes(f.barrel) === true &&
+        (options.dryRun !== true || (f.kind === 'unwired' && f.stop !== undefined)),
     );
-    for (const finding of [
+    selected.push(
       ...findings.filter((f) => f.kind === 'unwired' && f.site === 'registerModules'),
       ...findings.filter((f) => f.kind !== 'unwired' || f.site !== 'registerModules'),
-    ])
-      for (const line of lines(finding)) error(line);
+    );
   }
   if (options.module !== undefined) {
     const inactive = diagnosis.findings.find(
       (f) => f.kind === 'module-inactive' && f.module === options.module,
     );
-    for (const finding of inactive === undefined ? diagnosis.moduleWiring : [inactive])
-      for (const line of lines(finding)) error(line);
+    selected.push(...(inactive === undefined ? diagnosis.moduleWiring : [inactive]));
+  }
+  // An unreadable config is one fact: every site this run touches shares one line
+  // naming all their symbols, where the first of them stood.
+  const stops = selected.filter(
+    (f): f is Extract<Finding, { kind: 'unwired' }> => f.kind === 'unwired' && f.stop !== undefined,
+  );
+  const first = stops[0];
+  const merged: Finding | undefined =
+    first === undefined
+      ? undefined
+      : { ...first, symbols: [...new Set(stops.flatMap((f) => f.symbols))].sort() };
+  // generate and --module can report the same site; print each finding once.
+  const printed = new Set<string>();
+  for (const finding of selected) {
+    const shown =
+      finding === first ? merged : stops.includes(finding as never) ? undefined : finding;
+    if (shown === undefined) continue;
+    const block = lines(shown);
+    const key = block.join('\n');
+    if (printed.has(key)) continue;
+    printed.add(key);
+    for (const line of block) error(line);
   }
 }
 
@@ -199,7 +265,7 @@ export function renderCheckFindings(
     else warnings++;
     const rendered = lines(finding);
     error(
-      `${severity} ${id}: ${rendered[0]}${finding.kind === 'unwired' ? ` (${finding.barrel}${finding.outcome === 'unclassifiable' ? '; config is unclassifiable' : ''})` : ''}`,
+      `${severity} ${id}: ${rendered[0]}${finding.kind === 'unwired' && finding.stop === undefined ? ` (${finding.barrel})` : ''}`,
     );
     for (const line of rendered.slice(1)) error(line);
   }

@@ -16,8 +16,10 @@ describe('renderDevEntry', () => {
       expect(entry).not.toMatch(/Deno\.|process\./);
       expect(entry).toContain("runtime.env['SETU_DEVTOOL_SESSION_ID']");
       expect(entry).toContain("runtime.env['SETU_DEVTOOL_SESSION_KEY']");
-      expect(entry.match(/runtime.exit\(1\)/g)).toHaveLength(4);
-      expect(entry).toContain(runtime === 'deno' ? 'deno run -A npm:' : 'npx @setu-ts/cli@');
+      expect(entry.match(/runtime.exit\(1\)/g)).toHaveLength(5);
+      expect(entry).toContain(
+        runtime === 'deno' ? 'deno run -A --no-lock npm:' : 'npx @setu-ts/cli@',
+      );
       expect(isDevEntry(entry, 4919, false)).toBe(true);
     });
   }
@@ -51,7 +53,9 @@ describe('renderDevEntry', () => {
     }
     expect(devEntryPort('handwritten entry')).toBeUndefined();
     const variants = devEntryVariants(4920);
-    expect(variants[0]).toContain(`deno run -A npm:@setu-ts/cli@${VERSION} devtool enable`);
+    expect(variants[0]).toContain(
+      `deno run -A --no-lock npm:@setu-ts/cli@${VERSION} devtool enable`,
+    );
     expect(variants[3]).toContain('Re-run `setu devtool enable`');
     expect(variants[4]).not.toContain('Re-run');
   });
@@ -157,4 +161,16 @@ describe('isDevEntry', () => {
       expect(isDevEntry(current, 4921, member)).toBe(false);
     }
   });
+});
+
+it('M131b 3.2 catches creation and startup failures', () => {
+  const entry = renderDevEntry({ devtoolPort: 4919 }, 'node');
+  expect(entry).toContain('async function boot()');
+  expect(entry).toContain('const app = await boot().catch((error: unknown) => {');
+  expect(entry).toContain(
+    'setu devtool: startup failed: ${describeError(error)}. The connector did not start.',
+  );
+  expect(entry.indexOf('async function boot()')).toBeLessThan(
+    entry.indexOf('const app = await createApp'),
+  );
 });

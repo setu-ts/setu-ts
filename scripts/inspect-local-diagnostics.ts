@@ -75,8 +75,12 @@ async function main(): Promise<void> {
     port,
     sessionId,
     sessionKey,
-    ttlMs: 5_000,
-    maxSessionLifetimeMs: 15_000,
+    // The TTL is armed while app.start() bootstraps the connector, and expiry
+    // closes the listener. A 5 s window expired under CPU contention before
+    // the first read (the Deno lane under ci:local), so the window is wide.
+    // The demo revokes explicitly; it never relies on expiry.
+    ttlMs: 60_000,
+    maxSessionLifetimeMs: 300_000,
   });
 
   const app = createApplication({

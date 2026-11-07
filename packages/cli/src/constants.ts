@@ -68,6 +68,10 @@ export type TemplateName = (typeof TEMPLATES)[number];
  * which flags take a value.
  */
 export const VALUE_FLAGS: ReadonlySet<string> = new Set([
+  'output',
+  'input',
+  'factory',
+  'type-name',
   'dir',
   'runtime',
   'module',
@@ -79,9 +83,15 @@ export const VALUE_FLAGS: ReadonlySet<string> = new Set([
   'devtool-port',
   'transport',
   'transport-url',
+  'broker-url',
+  'rpc',
   'redis-client',
   'broker',
   'queue',
+  // Redis arm flags (M131a X88-1), named after each plugin's own option.
+  'store',
+  'lock',
+  'backplane',
   'logger',
   'env-file',
   'depends-on',
@@ -90,6 +100,7 @@ export const VALUE_FLAGS: ReadonlySet<string> = new Set([
   // `setu workspace build|deploy` (M122).
   'tag',
   'registry',
+  'pull-secret',
   'context',
   'namespace',
   'timeout',

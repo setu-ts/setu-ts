@@ -26,6 +26,7 @@
 // Plugin factory
 export { AuthPlugin } from './plugin/auth-plugin.ts';
 export type { AuthMiddlewareOption, AuthPluginOptions } from './interfaces/index.ts';
+export type { ResourceServerOptions } from './interfaces/index.ts';
 export { AuthPluginConfigurationError, SamlRuntimeLoadError } from './errors.ts';
 
 // Option types
@@ -72,6 +73,7 @@ export type { RateLimitOptions } from './middleware/rate-limit-middleware.ts';
 export { requireAuth } from './guards/index.ts';
 export type { RequireAuthOptions } from './interfaces/index.ts';
 export { safeReturnTo } from './sign-in/return-to.ts';
+export { requireScopes } from './guards/index.ts';
 export { requireRole } from './guards/index.ts';
 export { requirePermission } from './guards/index.ts';
 export { requireAnyRole } from './guards/index.ts';
@@ -176,3 +178,12 @@ export type {
 
 /** Redis rate-limit connection outage with a value-free HTTP 503 hint. */
 export { RateLimitStoreUnavailableError } from './errors.ts';
+
+// Weighted reserve-then-settle quotas (M134)
+export { createQuota } from './quota/quota.ts';
+export type { IQuota, IQuotaStore, QuotaOptions, QuotaReservation } from './quota/quota.ts';
+export { MemoryQuotaStore } from './quota/memory-quota-store.ts';
+export { RedisQuotaStore } from './quota/redis-quota-store.ts';
+export type { IQuotaRedisClient } from './quota/redis-quota-store.ts';
+export { QuotaExceededError, respondQuotaExceeded } from './quota/refusal.ts';
+export { QuotaStoreUnavailableError } from './errors.ts';

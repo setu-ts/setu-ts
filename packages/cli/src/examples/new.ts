@@ -27,6 +27,29 @@ import { runAgentsCommand } from '../commands/agents.ts';
 /** How long one example file may take to download, body included, before the run gives up. */
 export const FETCH_TIMEOUT_MS = 30_000;
 
+/**
+ * The nested cause a failed fetch can carry — undici puts the socket error
+ * there and stamps a `code` such as `ENOTFOUND` — escaped for a terminal.
+ *
+ * @param cause - The value the download threw
+ * @returns A leading-space sentence, or an empty string when there is no nested Error
+ */
+function nestedCause(cause: unknown): string {
+  if (!(cause instanceof Error) || !(cause.cause instanceof Error)) return '';
+  const nested = cause.cause;
+  // A refused dual-stack connect is an AggregateError with an empty message;
+  // its first attempt carries the text.
+  const first = nested instanceof AggregateError ? (nested.errors[0] as unknown) : undefined;
+  const message =
+    nested.message !== '' ? nested.message : first instanceof Error ? first.message : '';
+  const code = (nested as { readonly code?: unknown }).code;
+  const parts = [
+    ...(message === '' ? [] : [escapeName(message)]),
+    ...(typeof code === 'string' ? [`(code ${escapeName(code)})`] : []),
+  ];
+  return parts.length === 0 ? '' : ` Cause: ${parts.join(' ')}.`;
+}
+
 /** Flags that cannot alter an example's fixed composition. */
 const CONFLICTS = [
   'template',
@@ -41,6 +64,8 @@ const CONFLICTS = [
   'env-file',
   'transport',
   'transport-url',
+  'broker-url',
+  'rpc',
   'port',
   'depends-on',
   'di',
@@ -148,7 +173,7 @@ export async function runExampleNew(
       return EXIT_INTERRUPTED;
     }
     deps.error(
-      `Failed to fetch ${currentUrl}: ${escapeName(cause instanceof Error ? cause.message : String(cause))}. Nothing was written. Try setu new ${names.kebab} --template ${exampleTemplate(example)}.`,
+      `Failed to fetch ${currentUrl}: ${escapeName(cause instanceof Error ? cause.message : String(cause))}. Nothing was written. Try npx @setu-ts/cli new ${names.kebab} --template ${exampleTemplate(example)}.${nestedCause(cause)}`,
     );
     return EXIT_ERROR;
   }
@@ -159,7 +184,10 @@ export async function runExampleNew(
     });
     for (const outcome of outcomes) deps.log(`${outcome.outcome} ${escapeName(outcome.path)}`);
     if (args.flags['agents'] === true) {
-      const code = await runAgentsCommand({ positionals: [], flags: {} }, { ...deps, cwd: root });
+      const code = await runAgentsCommand(
+        { positionals: [], flags: {} },
+        { ...deps, cwd: root, installPending: true },
+      );
       if (code !== EXIT_OK) return code;
     }
   } catch (cause) {
@@ -173,6 +201,18 @@ export async function runExampleNew(
   deps.log(`Created ${names.kebab} from ${example}. Next:`);
   deps.log(`  cd ${names.kebab} && npm install`);
   deps.log("  npm run smoke   # the example's own proof; exits when done");
+  if (
+    startsFromBuild(files.find((file) => file.path === joinPath(root, 'package.json'))?.contents)
+  ) {
+    deps.log('  npm run build   # start runs the compiled output');
+  }
   deps.log('  npm start       # serves until stopped');
   return EXIT_OK;
+}
+
+/** Whether the downloaded manifest's `start` runs compiled `dist/` output its `build` writes. */
+function startsFromBuild(manifest: string | undefined): boolean {
+  if (manifest === undefined) return false;
+  const scripts = (JSON.parse(manifest) as { scripts?: Record<string, string> }).scripts ?? {};
+  return scripts['build'] !== undefined && /\bdist\//.test(scripts['start'] ?? '');
 }

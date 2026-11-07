@@ -231,6 +231,25 @@ being explicit about:
 - If the browser cannot reach Vite's port directly (containers, remote dev), set `server.hmr.port` /
   `server.hmr.clientPort` in the Vite config rather than trying to route the socket through the app.
 
+Leaving `hmr` unset is not enough on every runtime: on Node and Deno the client first tried the
+app's port, failed the upgrade and fell back, and on Bun the app-port socket reloaded the page
+instead of updating it in place. The `dev.ts` that `setu new --template full-stack` generates
+therefore pins the socket to Vite's port explicitly (since 0.12.0):
+
+```typescript
+const vitePort = Number(runtime.env.VITE_PORT ?? '5173');
+
+server: {
+  host: '127.0.0.1',
+  port: vitePort,
+  strictPort: true,
+  hmr: { host: 'localhost', port: vitePort, clientPort: vitePort },
+},
+```
+
+Set `VITE_PORT` to move it. The explicit `host` also makes `strictPort` refuse a second development
+server on the same port: without it, one server bound IPv4 and the other IPv6, and both started.
+
 ### Production
 
 Nothing changes: build with `react-router build`, then register the plugin with the compiled build

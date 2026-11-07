@@ -188,9 +188,13 @@ of the rendered tree.
 
 ## Layouts are components
 
-A layout is an ordinary component taking `children`. There is deliberately no plugin-level `layout`
-option: it would wrap every render, including the HTMX-style fragments and partial responses
-`IResponse.html` already serves, where a full document is the wrong answer.
+A full-document layout is an ordinary component taking `children` and emits its own
+`<!DOCTYPE html>` before `<html>`. In TSX, wrap them in a fragment:
+`<>{raw('<!DOCTYPE html>')}<html>...</html></>`, importing `raw` from `@setu-ts/view-plugin`.
+`setu add view` emits that prefix. `renderView` and `@Render` pass the engine's output unchanged, so
+partials and mail rendering remain free of a forced doctype. There is deliberately no plugin-level
+`layout` option: it would wrap every render, including the HTMX-style fragments and partial
+responses `IResponse.html` already serves, where a full document is the wrong answer.
 
 ## Health Indicator
 

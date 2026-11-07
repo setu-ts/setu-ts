@@ -4,18 +4,30 @@ import { hostSeamSpecs, scanSeamSpecs } from '../seams/registry.ts';
 import { decoratorKeyFor, decoratorExportFor } from '../templates/seam.ts';
 import { composingStarter } from '../utils/starter-arms.ts';
 import type { Finding } from './diagnose.ts';
+import { withoutImports } from './modules.ts';
 
-/** Imported bindings count, matching generate; the project's lint checks their use. */
+/** Tests a value reference in code outside import declarations. */
+export function referencedOutsideImports(config: string, symbol: string): boolean | undefined {
+  const code = withoutImports(maskSourceCode(config));
+  return code === undefined ? undefined : new RegExp(`\\b${symbol}\\b`).test(code);
+}
+
+/** Tests a call in code outside import declarations, matching module activation. */
+export function calledOutsideImports(config: string, symbol: string): boolean | undefined {
+  const code = withoutImports(maskSourceCode(config));
+  return code === undefined ? undefined : new RegExp(`\\b${symbol}\\s*\\(`).test(code);
+}
+
+/** Wiring requires a value use outside imports; registerModules requires a call. */
 export function classifyWiring(
   config: string,
   symbol: string,
 ): 'wired' | 'unwired' | 'unclassifiable' {
-  const code = maskSourceCode(config);
-  return code === undefined
-    ? 'unclassifiable'
-    : new RegExp(`\\b${symbol}\\b`).test(code)
-      ? 'wired'
-      : 'unwired';
+  const used =
+    symbol === 'registerModules'
+      ? calledOutsideImports(config, symbol)
+      : referencedOutsideImports(config, symbol);
+  return used === undefined ? 'unclassifiable' : used ? 'wired' : 'unwired';
 }
 
 /** Builds the host's consumable barrel inventory, or generate's narrower legacy sites. */
@@ -52,12 +64,18 @@ export function wiringFinding(
   const missing = symbols.filter((symbol) => classifyWiring(config, symbol) !== 'wired');
   if (missing.length === 0) return undefined;
   const starter = composingStarter(config)?.symbol;
+  const unusedImports = missing.filter(
+    (symbol) =>
+      referencedOutsideImports(config, symbol) === false &&
+      new RegExp(`\\b${symbol}\\b`).test(maskSourceCode(config) ?? ''),
+  );
   return {
     kind: 'unwired',
     barrel,
     symbols: missing,
     site,
     outcome: classifyWiring(config, missing[0]) === 'unclassifiable' ? 'unclassifiable' : 'unwired',
+    ...(unusedImports.length === 0 ? {} : { unusedImports }),
     ...(starter === undefined ? {} : { starter }),
   };
 }

@@ -40,6 +40,13 @@ building production-ready applications with our plugin-first, runtime-independen
   - Route guards, `@RequirePolicy`, and checks inside a handler
   - The fixed evaluation rules
 
+- [Tools for AI agents (MCP)](./mcp.md)
+  - Scoped route tools, retries, rate limits and per-principal archive quotas
+
+- [AI calls with Setu-TS](./ai.md)
+  - AI SDK streaming, tools, fallback and telemetry
+  - Weighted quotas and transactional usage records
+
 - [Localization](./localization.md)
   - Choosing how users pick a language
   - Catalogues and plural forms
@@ -65,12 +72,22 @@ building production-ready applications with our plugin-first, runtime-independen
   - Runtime compatibility matrix
   - Package links and API references
 
+- [Durable agent runs](./durable-runs.md)
+- [Retrieval (vector search)](./retrieval.md)
+  - Tenant-scoped embedding storage and similarity search
+  - pgvector, Qdrant, memory and Cloudflare Vectorize adapters
+  - Filters, limits and re-ingestion
+
 - [Custom Plugin Development](./custom-plugins.md)
   - Building your own plugins
   - Service registration patterns
   - Testing custom plugins
 
 ## Version Upgrades
+
+- [Versioning policy](./versioning.md)
+  - Minor bumps carry breaking changes; patches carry fixes and additions
+  - How breaking changes are batched
 
 - [Upgrading Setu-TS](./upgrading.md)
   - Reader-side steps, version by version

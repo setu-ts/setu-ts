@@ -10,7 +10,9 @@ import {
   attachConnectionErrorReporter,
   isConnectionFault,
   OptionalDependencyUnavailableError,
+  watchConnection,
 } from '@setu-ts/common';
+import type { ConnectionWatch } from '@setu-ts/common';
 import type { ConnectionErrorReporter } from '@setu-ts/common';
 import { CacheStoreUnavailableError } from '../errors.ts';
 import type { CacheStore } from './cache-store.ts';
@@ -133,10 +135,13 @@ export function validateClient(client: unknown): client is IRedisClient {
  *
  * @param url - Redis connection URL
  * @param injectedClient - Optionally injected ioredis-compatible client
- * @param reporter - Receives the BUILT client's connection errors; never
- *   attached to an injected client, which belongs to the caller
+ * @param reporter - Receives the connection errors of BOTH the built and an
+ *   injected client (M131a X88-3): an injected node-redis client's outages must
+ *   be as visible as a built ioredis client's. The attach is structural, so a
+ *   client without `on` is left alone.
  * @param commandTimeoutMs - Bound applied to the BUILT client only; an
  *   injected client is the caller's and keeps its own configuration
+ * @param onWatch - Receives the watch on an injected client, to detach on disconnect
  * @returns The resolved client instance
  * @throws {Error} If no client injected and ioredis cannot be loaded
  */
@@ -145,6 +150,7 @@ async function resolveClient(
   injectedClient: IRedisClient | undefined,
   reporter: ConnectionErrorReporter | undefined,
   commandTimeoutMs: number,
+  onWatch: (watch: ConnectionWatch) => void,
 ): Promise<IRedisClient> {
   if (injectedClient !== undefined) {
     if (!validateClient(injectedClient)) {
@@ -153,6 +159,8 @@ async function resolveClient(
           '(needs: get, set, del, exists, scan, quit, ping)',
       );
     }
+    // Detached on disconnect: an injected client outlives this plugin.
+    onWatch(watchConnection(injectedClient, reporter));
     return injectedClient;
   }
   const RedisCtor = await loadIoredis();
@@ -172,6 +180,8 @@ async function resolveClient(
  */
 export class RedisStore implements CacheStore {
   #client: IRedisClient | null = null;
+  /** The reporter on an injected client; detached on disconnect. */
+  #watch: ConnectionWatch | undefined;
   #url: string;
   #injectedClient: IRedisClient | undefined;
   #prefix: string;
@@ -187,9 +197,10 @@ export class RedisStore implements CacheStore {
    * @param options.url - Redis connection URL (default `redis://localhost:6379`)
    * @param options.client - Injected ioredis-compatible client (bypasses lazy import)
    * @param options.connectionErrorReporter - Receives the connection errors
-   *   (`ioredis` `'error'` events) of the client this store BUILDS, instead of
-   *   `ioredis` printing each one to the console. Never attached to an
-   *   injected `client`. `CachePlugin` supplies one backed by its logger.
+   *   (`'error'` events) of the client this store uses, instead of `ioredis`
+   *   printing each one to the console. Since 0.12.0 it is attached to an
+   *   injected `client` too, and detached again on `disconnect()`.
+   *   `CachePlugin` supplies one backed by its logger.
    * @param options.commandTimeoutMs - Bound on one Redis command of the client
    *   this store BUILDS (default {@link DEFAULT_REDIS_COMMAND_TIMEOUT_MS};
    *   `0` disables it). Never applied to an injected `client`.
@@ -213,22 +224,48 @@ export class RedisStore implements CacheStore {
   }
 
   async connect(): Promise<void> {
-    this.#client = await resolveClient(
+    let own: ConnectionWatch | undefined;
+    const client = await resolveClient(
       this.#url,
       this.#injectedClient,
       this.#reporter,
       this.#commandTimeoutMs,
+      (watch) => {
+        // A watch left by an earlier or concurrent attempt is replaced, not
+        // stacked: each attempt would otherwise add a listener pair (N-3).
+        this.#watch?.detach();
+        this.#watch = own = watch;
+      },
     );
+    this.#client = client;
     // Only call connect() if the client exposes it (lazy ioredis clients do).
-    if (typeof this.#client.connect === 'function') {
-      await this.#client.connect();
+    if (typeof client.connect === 'function') {
+      try {
+        await client.connect();
+      } catch (error) {
+        // Only this attempt's watch: a concurrent attempt may have replaced it
+        // with its own, which must stay attached (audit R3-2).
+        own?.detach();
+        if (own !== undefined && this.#watch === own) this.#watch = undefined;
+        throw error;
+      }
     }
     this.#ready = true;
   }
 
   async disconnect(): Promise<void> {
-    if (this.#client) {
-      await this.#client.quit();
+    // Detached only after QUIT, in a finally: an ioredis client with no
+    // 'error' listener prints QUIT's EPIPE on an unreachable server to the
+    // console (M131a re-audit N-4), and a shared injected client must not report
+    // into this stopped component afterwards.
+    const watch = this.#watch;
+    this.#watch = undefined;
+    try {
+      if (this.#client) {
+        await this.#client.quit();
+      }
+    } finally {
+      watch?.detach();
     }
     this.#client = null;
     this.#ready = false;

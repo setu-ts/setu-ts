@@ -6,7 +6,20 @@
  */
 import { describe, expect, it } from 'vitest';
 
+import { HTTP_STATUS_HINT, httpStatusHintOf } from '@setu-ts/common';
 import { HttpError } from '../../src/errors/http-error.ts';
+import {
+  badRequest,
+  conflict,
+  forbidden,
+  internalServerError,
+  notFound,
+  notImplemented,
+  serviceUnavailable,
+  tooManyRequests,
+  unauthorized,
+  validationError,
+} from '../../src/errors/exceptions.ts';
 
 describe('HttpError', () => {
   describe('construction', () => {
@@ -83,5 +96,51 @@ describe('HttpError', () => {
       expect(err.details).toBeUndefined();
       expect(err.cause).toBeUndefined();
     });
+  });
+});
+
+describe('HttpError status hint', () => {
+  // Each 4xx factory → the hint a package that cannot import this one reads.
+  const BRANDED: ReadonlyArray<[HttpError, number, string]> = [
+    [badRequest('bad'), 400, 'Bad Request'],
+    [unauthorized('who'), 401, 'Unauthorized'],
+    [forbidden('no'), 403, 'Forbidden'],
+    [notFound('gone'), 404, 'Not Found'],
+    [conflict('clash'), 409, 'Conflict'],
+    [
+      validationError([{ field: 'a', message: 'required' }], 'invalid'),
+      422,
+      'Unprocessable Entity',
+    ],
+    [tooManyRequests('slow down'), 429, 'Too Many Requests'],
+    [new HttpError(418, 'teapot'), 418, 'Error'],
+  ];
+
+  for (const [error, status, title] of BRANDED) {
+    it(`brands a ${status} with its status, title and message`, () => {
+      expect(httpStatusHintOf(error)).toEqual({ status, title, detail: error.message });
+    });
+  }
+
+  // A hint promises a caller-safe detail; a server fault's message does not.
+  const UNBRANDED: readonly HttpError[] = [
+    internalServerError('db password=x'),
+    notImplemented('later'),
+    serviceUnavailable('down'),
+    new HttpError(4004, 'typo'),
+    new HttpError(302, 'moved'),
+    new HttpError(400.5, 'fraction'),
+  ];
+
+  for (const error of UNBRANDED) {
+    it(`does not brand a ${error.statusCode}`, () => {
+      expect(httpStatusHintOf(error)).toBeUndefined();
+    });
+  }
+
+  it('keeps the brand out of enumeration and serialization', () => {
+    const error = notFound('gone');
+    expect(Object.getOwnPropertyDescriptor(error, HTTP_STATUS_HINT)?.enumerable).toBe(false);
+    expect(JSON.stringify(error)).not.toContain('Not Found');
   });
 });

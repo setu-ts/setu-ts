@@ -509,8 +509,12 @@ describe('Redis Streams redelivery', () => {
     release();
     await closing;
     expect(closed).toBe(true);
-    expect(clock.timerCount()).toBe(0);
+    // M131a X88-7: the shared poll/reclaim timers are NOT cleared on unsubscribe
+    // (one subscription stopping must not stop the timers serving its siblings);
+    // they are cleared only at disconnect().
+    expect(clock.timerCount()).toBe(2);
     await broker.disconnect();
+    expect(clock.timerCount()).toBe(0);
   });
 
   it('models atomic claims and trimmed entries faithfully', async () => {

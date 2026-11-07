@@ -40,23 +40,26 @@ not reflected in request completion logs.
 
 `errorHandler(options?)` takes:
 
-| Option               | Type                                                                                                            | Default     | Description                                                                                                              |
-| -------------------- | --------------------------------------------------------------------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `format`             | `ErrorFormat \| ErrorHandlerFormatter`                                                                          | `'default'` | Body shape, or a formatter function.                                                                                     |
-| `includeStackTrace`  | `boolean`                                                                                                       | `false`     | Add the stack to the body. Development only.                                                                             |
-| `maskInternalErrors` | `boolean`                                                                                                       | `true`      | Replace unhandled non-`HttpError` 5xx diagnostics with their status title before serving the response.                   |
-| `logErrors`          | `boolean`                                                                                                       | `true`      | Report handled errors to the resolved `ILogger`.                                                                         |
-| `respond`            | `(error: HttpError, ctx: IRequestContext) => HandlerResult \| undefined \| Promise<HandlerResult \| undefined>` | —           | Write an application-owned caught-error response; return or resolve `undefined` to use the configured formatter instead. |
+| Option               | Type                                                                                                            | Default     | Description                                                                                                                         |
+| -------------------- | --------------------------------------------------------------------------------------------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `format`             | `ErrorFormat \| ErrorHandlerFormatter`                                                                          | `'default'` | Body shape, or a formatter function.                                                                                                |
+| `includeStackTrace`  | `boolean`                                                                                                       | `false`     | Add the stack to the body, with URL userinfo masked and the host visible. Development only.                                         |
+| `maskInternalErrors` | `boolean`                                                                                                       | `true`      | Replace unhandled non-`HttpError` 5xx diagnostics with their status title. Other text passes through with only URL userinfo masked. |
+| `logErrors`          | `boolean`                                                                                                       | `true`      | Report handled errors to the resolved `ILogger`.                                                                                    |
+| `respond`            | `(error: HttpError, ctx: IRequestContext) => HandlerResult \| undefined \| Promise<HandlerResult \| undefined>` | —           | Write an application-owned caught-error response; return or resolve `undefined` to use the configured formatter instead.            |
 
 `format` accepts `'default'`, `'rfc9457'`, the deprecated `'rfc7807'`, or a function. Passing a
 formatter directly is equivalent to naming it — both paths select the same
-`application/problem+json` content type for Problem Details bodies.
+`application/problem+json` content type for Problem Details bodies. Every served string, including
+custom formatter output and stacks, has URL userinfo masked (`scheme://user:password@host` becomes
+`scheme://***@host`); the host stays visible.
 
 `respond` is called after error normalization, masking, and status resolution. It can return or
 resolve an HTML (or another application-owned) result through `ctx.response`; the callback owns that
-result's status, headers, and body. The log retains the unmasked diagnostic and records the status
-that result serves. It applies only to errors caught by `errorHandler`, not responder-based
-terminals such as an unmatched-path `404`.
+result's status, headers, and body, which is not masked. The log keeps the error's own message and
+cause, with URL userinfo masked as in every other sink, and records the status that result serves.
+It applies only to errors caught by `errorHandler`, not responder-based terminals such as an
+unmatched-path `404`.
 
 The natural spelling of the hook omits the one statement that matters and serves `200` for every
 branded error: `renderView(ctx, Component, props)` takes no status, and nothing else sets it. The
@@ -141,6 +144,14 @@ problem type identified by `https://setu-ts.dev/errors/validation` — the same 
   "instance": "/users/42"
 }
 ```
+
+A response produced through `respondWithError` (or a status hint) may carry a `ProblemTypeInit` as
+`init.problem`. Under both Problem Details formats its `type` and `title` replace the status-derived
+ones and its `extensions` are merged into the body. An extension named after a core member (`type`,
+`title`, `status`, `detail`, `instance`, `errors`, `stack`) is dropped, even when that member is
+absent from the body. The `'default'` format does not read `problem` and stays byte-identical. This
+is how `rateLimitMiddleware` answers `429` as the registered `quota-exceeded` problem type with
+`violated-policies`.
 
 > **`'rfc7807'` is deprecated.** RFC 7807 was obsoleted by RFC 9457 in July 2023. The `'rfc7807'`
 > alias and `rfc7807Formatter` still emit the status-derived `type`

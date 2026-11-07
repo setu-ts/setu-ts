@@ -84,6 +84,8 @@ export interface ProjectWiring {
 
 /** One candidate the scan rejected, and what it was missing. */
 export interface SkippedArtifact {
+  /** This seam only re-exports names and registers nothing. */
+  readonly listingOnly?: true;
   /** The path, relative to the project root. */
   readonly path: string;
   /** The symbols the barrel would have imported but the module does not export. */
@@ -305,6 +307,7 @@ export async function readArtifactNames(
     if (useAlternative) symbols = alternative;
     if (missing.length > 0 && !useAlternative) {
       skipped.push({
+        ...(spec.listingOnly === true ? { listingOnly: true as const } : {}),
         path: relative,
         missing:
           alternative === undefined

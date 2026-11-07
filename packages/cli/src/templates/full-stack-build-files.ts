@@ -10,6 +10,7 @@
  * @module
  */
 
+import type { EntryPort } from './project-files.ts';
 import type { GeneratedFile } from '../utils/file-writer.ts';
 import { TAILWIND_RANGE } from './ui-tokens.ts';
 import { NPM_TOOLING_DEV_DEPENDENCIES } from './npm-tooling.ts';
@@ -64,11 +65,11 @@ import { defineConfig } from 'vite';
  * application. The framework owns the server, so \`vite build\` is a build step
  * and \`setu\`/\`main.ts\` is the runtime.
  *
- * \`resolve.tsconfigPaths\` is what makes the \`~/*\` alias work at build time;
+ * \`resolve.tsconfigPaths\` is what makes the \`~/*\` and \`~kernel/*\` aliases work at build time;
  * the same alias is declared in tsconfig.json for the type-checker.
  */
 // Framework packages stay external, resolved by the server runtime. Bundling
-// would inline a second copy: context keys in app/lib/context-keys.server.ts
+// would inline a second copy: context keys in app/server/context-keys.server.ts
 // match by identity, so a loader must share the instance setu.config.ts holds.
 export const frameworkPackages = [${externals}
 ];
@@ -251,6 +252,10 @@ export const FULL_STACK_NPM_DEV_DEPENDENCIES: Readonly<Record<string, string>> =
 export const FULL_STACK_NPM_DEPENDENCIES: Readonly<Record<string, string>> = {
   // shadcn's own class merger: current registry sources import `cn` from it.
   cn: '^0.5.0',
+  // components.json declares the lucide icon library, and shadcn's Dialog,
+  // DropdownMenu and Select import it (X85-1). Exact: read from `npm view` at
+  // M130 implementation.
+  'lucide-react': '1.67.0',
   'class-variance-authority': '^0.7.1',
   'radix-ui': '^1.8.1',
   'react-router': REACT_ROUTER_RANGE,
@@ -262,7 +267,8 @@ export const FULL_STACK_NPM_DEPENDENCIES: Readonly<Record<string, string>> = {
  * `compilerOptions` the emitted TypeScript needs, merged into the project's
  * `tsconfig.json`.
  *
- * `paths` is the `~/*` alias every emitted module imports through;
+ * `paths` holds the `~/*` alias every emitted page module imports through, and
+ * `~kernel/*`, the one spelling pages use to reach kernel types and tokens;
  * `allowImportingTsExtensions` is what lets those imports carry the `.ts`
  * extension that Deno requires, so ONE import style works under both
  * type-checkers.
@@ -273,18 +279,21 @@ export const FULL_STACK_TSCONFIG_OPTIONS: Readonly<Record<string, unknown>> = {
   types: ['vite/client'],
   allowImportingTsExtensions: true,
   noEmit: true,
-  paths: { '~/*': ['./app/*'] },
+  paths: { '~/*': ['./app/*'], '~kernel/*': ['./src/*'] },
 };
 
 /**
  * Import-map entries the emitted TypeScript needs under Deno.
  *
  * The Deno counterpart of the `paths` alias above: without it, `deno check`
- * cannot resolve `~/models/product.ts`. A trailing slash on both sides is
+ * cannot resolve `~/lib/theme.ts` or `~kernel/modules/products/products.token.ts`. A trailing slash on both sides is
  * required — Deno maps prefixes, not globs.
  */
 export const FULL_STACK_DENO_IMPORTS: Readonly<Record<string, string>> = {
   '~/': './app/',
+  // Pages reach kernel types and token modules only through this alias, which
+  // is what makes the boundary checkable (setu.E017, M130 §3.5).
+  '~kernel/': './src/',
 };
 
 /**
@@ -336,16 +345,24 @@ export const FULL_STACK_CHECK_TASK: Readonly<Record<string, string>> = {
  * package and workspace library external, resolved by the server runtime, so a
  * route module and this entry share one module instance. Context keys from
  * `contextKeyFor()` match by identity; a second copy would read different keys.
+ *
+ * @param port - The member's discovery import; omitted for standalone environment defaults
+ * @returns The full-stack development entry file
+ * @since 0.12.0
  */
-export const FULL_STACK_DEV_ENTRY: { readonly path: string; readonly contents: string } = {
-  path: 'dev.ts',
-  contents: `import * as vite from 'vite';
+export function renderFullStackDevEntry(port?: EntryPort): {
+  readonly path: string;
+  readonly contents: string;
+} {
+  return {
+    path: 'dev.ts',
+    contents: `import * as vite from 'vite';
 import { createRequestHandler, RouterContextProvider, type ServerBuild } from 'react-router';
-import { CAPABILITIES, type ILogger } from '@setu-ts/common';
+import { CAPABILITIES, describeError, type ILogger } from '@setu-ts/common';
 import { viteDevExternals } from '@setu-ts/react-router-plugin';
 import { createRuntimeServices } from '@setu-ts/runtime';
 import { createApp } from './setu.config.ts';
-import { frameworkPackages, workspaceLibraries } from './vite.config.ts';
+import { frameworkPackages, workspaceLibraries } from './vite.config.ts';${port === undefined ? '' : `\nimport { ${port.symbol}, VITE_PORT } from '${port.from}';`}
 
 /**
  * Development server: React Router with hot module replacement.
@@ -358,8 +375,8 @@ import { frameworkPackages, workspaceLibraries } from './vite.config.ts';
  */
 const BASE = '/__vite/';
 const runtime = createRuntimeServices();
-const port = Number(runtime.env.PORT ?? '3000');
-const vitePort = Number(runtime.env.VITE_PORT ?? '5173');
+const port = ${port === undefined ? `Number(runtime.env.PORT ?? '3000')` : port.symbol};
+const vitePort = ${port === undefined ? `Number(runtime.env.VITE_PORT ?? '5173')` : 'VITE_PORT'};
 
 // A file module always has a directory; the fallback only satisfies the type.
 const root = import.meta.dirname ?? '.';
@@ -368,7 +385,16 @@ const viteServer = await vite.createServer({
   root,
   configFile: \`\${root}/vite.config.ts\`,
   base: BASE,
-  server: { port: vitePort, strictPort: true },
+  // Vite's own port for the HMR socket on every runtime, never the app port:
+  // the app-port upgrade failed on Node and Deno and reloaded the page on Bun
+  // (X85-2, X85-3). An explicit host also makes strictPort refuse a second
+  // server: unhosted, one bound IPv4 and the other IPv6, and both started.
+  server: {
+    host: '127.0.0.1',
+    port: vitePort,
+    strictPort: true,
+    hmr: { host: 'localhost', port: vitePort, clientPort: vitePort },
+  },
   plugins: [viteDevExternals({
     packages: [...frameworkPackages, ...workspaceLibraries],
     // Resolve with the runtime: routes share this entry's module and context-key identity.
@@ -381,35 +407,47 @@ await viteServer.listen();
 const loadServerBuild = async (): Promise<ServerBuild> =>
   (await viteServer.ssrLoadModule('virtual:react-router/server-build')) as ServerBuild;
 
-const app = await createApp(undefined, undefined, {
-  mode: 'development',
-  loadRequestHandler: (_path, mode) => {
-    const handler = createRequestHandler(loadServerBuild, mode);
-    return Promise.resolve({
-      handler: (request, loadContext) => handler(request, loadContext as RouterContextProvider),
-      // From the same react-router module as the handler: React Router checks
-      // the context with instanceof.
-      createLoadContext: () => new RouterContextProvider(),
-    });
-  },
-});
-
-app.router.get(\`\${BASE}*\`, async (ctx) => {
-  const url = new URL(ctx.request.url);
-  const upstream = await fetch(\`http://localhost:\${vitePort}\${url.pathname}\${url.search}\`, {
-    headers: ctx.request.headers,
+// Creation, route registration and start share one failure path: one masked
+// line, Vite closed, exit 1 — as main.ts does. The default printer would dump a
+// malformed REDIS_URL, password included, and leave Vite running.
+async function boot() {
+  const app = await createApp(undefined, undefined, {
+    mode: 'development',
+    loadRequestHandler: (_path, mode) => {
+      const handler = createRequestHandler(loadServerBuild, mode);
+      return Promise.resolve({
+        handler: (request, loadContext) => handler(request, loadContext as RouterContextProvider),
+        // From the same react-router module as the handler: React Router checks
+        // the context with instanceof.
+        createLoadContext: () => new RouterContextProvider(),
+      });
+    },
   });
-  ctx.response.status(upstream.status);
-  for (const [key, value] of upstream.headers.entries()) {
-    const lower = key.toLowerCase();
-    if (lower !== 'content-encoding' && lower !== 'content-length') {
-      ctx.response.appendHeader(key, value);
-    }
-  }
-  return upstream.body === null ? ctx.response.text('') : ctx.response.stream(upstream.body);
-});
 
-await app.start({ port });
+  app.router.get(\`\${BASE}*\`, async (ctx) => {
+    const url = new URL(ctx.request.url);
+    const upstream = await fetch(\`http://localhost:\${vitePort}\${url.pathname}\${url.search}\`, {
+      headers: ctx.request.headers,
+    });
+    ctx.response.status(upstream.status);
+    for (const [key, value] of upstream.headers.entries()) {
+      const lower = key.toLowerCase();
+      if (lower !== 'content-encoding' && lower !== 'content-length') {
+        ctx.response.appendHeader(key, value);
+      }
+    }
+    return upstream.body === null ? ctx.response.text('') : ctx.response.stream(upstream.body);
+  });
+
+  await app.start({ port });
+  return app;
+}
+
+const app = await boot().catch(async (error: unknown) => {
+  console.error(\`Startup failed: \${describeError(error)}\`);
+  await viteServer.close();
+  return runtime.exit(1);
+});
 
 const logger = app.services.has(CAPABILITIES.LOGGER)
   ? app.services.get<ILogger>(CAPABILITIES.LOGGER)
@@ -428,4 +466,5 @@ for (const signal of ['SIGTERM', 'SIGINT'] as const) {
   });
 }
 `,
-};
+  };
+}

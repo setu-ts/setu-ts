@@ -95,7 +95,7 @@ function workspaceSeed(
       version: WORKSPACE_VERSION,
       runtime: 'deno',
       basePort: 3000,
-      transport: 'http',
+      broker: 'memory',
       members,
     }),
     '/ws/deno.json': `${JSON.stringify(
@@ -146,9 +146,9 @@ describe('devtool enable refuses by name and writes nothing', () => {
           ...(member
             ? {
                 '/ws/setu.workspace.json': renderWorkspaceManifest({
-                  version: 1,
+                  version: 2,
                   runtime: 'node',
-                  transport: 'http',
+                  broker: 'memory',
                   basePort: 3000,
                   members: [{ name: 'a', port: 3000 }],
                 }),
@@ -172,9 +172,9 @@ describe('devtool enable refuses by name and writes nothing', () => {
   it('refuses a stale Node workspace runner with the delete-and-rerun remedy', async () => {
     const h = workspaceHarness({
       '/ws/setu.workspace.json': renderWorkspaceManifest({
-        version: 1,
+        version: 2,
         runtime: 'node',
-        transport: 'http',
+        broker: 'memory',
         basePort: 3000,
         members: [{ name: 'a', port: 3000 }],
       }),
@@ -218,7 +218,7 @@ describe('devtool enable refuses by name and writes nothing', () => {
         version: WORKSPACE_VERSION,
         runtime: 'bun',
         basePort: 3000,
-        transport: 'http',
+        broker: 'memory',
         members: [{ name: 'orders', port: 3000 }],
       }),
       '/ws/package.json': '{}',
@@ -587,18 +587,16 @@ describe('the workspace runner must honor the credential contract', () => {
 });
 
 describe('devtool enable branch coverage', () => {
-  it('prints its usage under --help and exits 0', async () => {
+  it('M131b 3.6 prints its usage under --help and exits 0', async () => {
     const h = workspaceHarness({});
     expect(await h.run(['--help'])).toBe(0);
-    expect(h.log.text()).toContain(
-      `Usage: deno run -A npm:@setu-ts/cli@${VERSION} devtool enable [member]`,
-    );
+    expect(h.log.text()).toContain(`Usage: setu devtool enable [member]`);
   });
 
-  it('refuses a subcommand word other than enable', async () => {
+  it('M131b 3.6 refuses a subcommand word other than enable', async () => {
     const h = workspaceHarness({});
     expect(await h.run(['disable'])).toBe(2);
-    expect(h.err.text()).toContain(`Usage: deno run -A npm:@setu-ts/cli@${VERSION} devtool enable`);
+    expect(h.err.text()).toContain(`Usage: setu devtool enable`);
   });
 
   it('reports the exact dry-run plan and writes nothing (standalone)', async () => {
@@ -902,7 +900,7 @@ describe('generate app --devtool branch coverage', () => {
         version: WORKSPACE_VERSION,
         runtime: 'bun',
         basePort: 3000,
-        transport: 'http',
+        broker: 'memory',
         members: [{ name: 'orders', port: 3000 }],
       }),
       '/ws/package.json': '{}',
@@ -1012,7 +1010,7 @@ describe('devtool enable derives the dev task, refusing when it cannot', () => {
         tasks: {
           start: 'deno run --allow-net --allow-env main.ts',
           dev: 'deno run --allow-net --allow-env main.dev.ts',
-          check: `deno check main.ts setu.config.ts main.dev.ts && deno run -A npm:@setu-ts/cli@^${VERSION} check`,
+          check: `deno check main.ts setu.config.ts main.dev.ts && deno run -A --no-lock npm:@setu-ts/cli@^${VERSION} check`,
         },
         // The pin the enable flow merges: byte-identical, so the whole run is
         // a no-op, which is what makes the command idempotent.

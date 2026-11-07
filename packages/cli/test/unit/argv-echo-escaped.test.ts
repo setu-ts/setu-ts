@@ -260,7 +260,7 @@ describe('a suggested command never carries an unvalidated value', () => {
     );
     expect(code).toBe(2);
     expect(text).toContain(
-      `\`deno run -A npm:@setu-ts/cli@${VERSION} new <name> --workspace --runtime node\``,
+      `\`deno run -A --no-lock npm:@setu-ts/cli@${VERSION} new <name> --workspace --runtime node\``,
     );
   });
 });

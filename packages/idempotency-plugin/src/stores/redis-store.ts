@@ -66,6 +66,8 @@ export interface RedisIdempotencyStoreOptions {
   readonly logger: () => ILogger | undefined;
   /** `true` when this store built the client (so it connects and quits it). */
   readonly ownsClient: boolean;
+  /** Runs once on disconnect, before any QUIT; releases listeners on an injected client. */
+  readonly onDisconnect?: () => void;
 }
 
 /**
@@ -82,6 +84,7 @@ export class RedisIdempotencyStore implements IIdempotencyStore {
   readonly #keyPrefix: string;
   readonly #logger: () => ILogger | undefined;
   readonly #ownsClient: boolean;
+  readonly #onDisconnect: (() => void) | undefined;
 
   /**
    * @param client - The Redis client (injected or built)
@@ -96,6 +99,7 @@ export class RedisIdempotencyStore implements IIdempotencyStore {
     this.#keyPrefix = options.keyPrefix;
     this.#logger = options.logger;
     this.#ownsClient = options.ownsClient;
+    this.#onDisconnect = options.onDisconnect;
   }
 
   /** @inheritdoc */
@@ -155,6 +159,7 @@ export class RedisIdempotencyStore implements IIdempotencyStore {
 
   /** @inheritdoc */
   async disconnect(): Promise<void> {
+    this.#onDisconnect?.();
     if (this.#ownsClient) {
       await this.#client.quit();
     }

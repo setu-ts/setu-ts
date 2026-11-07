@@ -2,7 +2,21 @@ import { describe, expect, it } from 'vitest';
 import { createFakeFs, createRecorder } from '../fixtures/fake-fs.ts';
 import type { FakeFs, Recorder } from '../fixtures/fake-fs.ts';
 import { runCli } from '../../src/cli.ts';
-import { commandFlagsFor, DOCUMENTED_FLAGS, suggestFlag } from '../../src/flags.ts';
+import {
+  BUILT_IN_COMMANDS,
+  commandFlagsFor,
+  DOCUMENTED_FLAGS,
+  suggestFlag,
+} from '../../src/flags.ts';
+import { readFile } from 'node:fs/promises';
+
+it('V11-15 inventories every dispatched built-in name and its flag spec', async () => {
+  const source = await readFile(new URL('../../src/cli.ts', import.meta.url), 'utf8');
+  const names = [...source.matchAll(/case '([\w-]+)':/g)].map((match) => match[1]);
+  expect([...BUILT_IN_COMMANDS].sort()).toEqual([...new Set(names)].sort());
+  for (const name of BUILT_IN_COMMANDS)
+    expect(commandFlagsFor(name, undefined), name).toBeDefined();
+});
 
 /**
  * The flags `--help` presents, parsed from the RENDERED text — the inventory
@@ -240,9 +254,9 @@ describe('every documented flag is accepted', () => {
         '--workspace',
         '--port',
         '4100',
-        '--transport',
+        '--broker',
         'redis',
-        '--transport-url',
+        '--broker-url',
         'redis://localhost:6379',
       ]),
       h.err.text(),
@@ -380,6 +394,7 @@ describe('help text agrees with the inventory', () => {
     ['add', ['add', '--help']],
     ['agents', ['agents', '--help']],
     ['check', ['check', '--help']],
+    ['client', ['client', '--help']],
     ['sync', ['sync', '--help']],
     ['adopt', ['adopt', '--help']],
     ['workspace ports', ['workspace', 'ports', '--help']],
@@ -411,6 +426,9 @@ describe('help text agrees with the inventory', () => {
     expect(newFlags?.allowed).toContain('depends-on');
     const appFlags = commandFlagsFor('generate', 'app');
     expect(appFlags?.allowed).toContain('transport');
+    expect(appFlags?.allowed).toContain('broker-url');
+    expect(newFlags?.allowed).toContain('transport');
+    expect(newFlags?.allowed).toContain('rpc');
     expect(appFlags?.allowed).toContain('runtime');
     expect(appFlags?.allowed).toContain('di');
   });
@@ -458,10 +476,10 @@ describe('named refusals keep precedence over the generic check', () => {
     expect(h.err.text()).not.toContain('Unknown option');
   });
 
-  it('generate app --transport keeps its workspace-wide guidance', async () => {
+  it('generate app --transport keeps its named guidance', async () => {
     const h = harness(WORKSPACE_SEED);
     expect(await h.run(['generate', 'app', 'billing', '--transport', 'http'])).toBe(2);
-    expect(h.err.text()).toContain('workspace-wide choice');
+    expect(h.err.text()).toContain('--transport no longer exists');
     expect(h.err.text()).not.toContain('Unknown option');
   });
 

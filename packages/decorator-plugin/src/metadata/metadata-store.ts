@@ -22,6 +22,7 @@ import type {
   MiddlewareFunction,
   PolicyDefinition,
   ProcessOptions,
+  RouteMcpToolMetadata,
   ScheduleOptions,
   ScopeSource,
   SubscribeOptions,
@@ -287,6 +288,8 @@ export interface RouteMetadata {
   readonly responseHeaders?: readonly ResponseHeaderMetadata[];
   /** Idempotency options declared by `@Idempotent(options?)` (M109a). */
   readonly idempotent?: IdempotentRouteOptions;
+  /** Tool metadata declared by `@McpTool` (M133). */
+  readonly mcpTool?: RouteMcpToolMetadata;
   /** Policy requirements declared by `@RequirePolicy`, top to bottom (M110a). */
   readonly policies?: readonly PolicyRequirement[];
   /** Roles required in a scope, any of which suffices (`@ScopedRoles`, M110b). */
@@ -390,6 +393,8 @@ export interface MethodMeta {
   responseHeaders?: ResponseHeaderMetadata[];
   /** Idempotency options declared by `@Idempotent(options?)` (mutable twin, M109a). */
   idempotent?: IdempotentRouteOptions;
+  /** Tool metadata declared by `@McpTool` (mutable twin, M133). */
+  mcpTool?: RouteMcpToolMetadata;
   /**
    * Policy requirements declared by `@RequirePolicy` (mutable twin, M110a). Decorators
    * apply bottom-up, so each `@RequirePolicy` PREPENDS — the list reads top to bottom,
@@ -922,6 +927,7 @@ export class MetadataStore implements IMetadataStore {
       ...(meta.view !== undefined ? { view: meta.view } : {}),
       ...(meta.httpCode !== undefined ? { httpCode: meta.httpCode } : {}),
       ...(meta.idempotent !== undefined ? { idempotent: meta.idempotent } : {}),
+      ...(meta.mcpTool !== undefined ? { mcpTool: meta.mcpTool } : {}),
       ...(meta.redirect !== undefined ? { redirect: meta.redirect } : {}),
       ...(meta.responseHeaders !== undefined ? { responseHeaders: [...meta.responseHeaders] } : {}),
       ...(meta.policies !== undefined ? { policies: [...meta.policies] } : {}),

@@ -5,6 +5,7 @@
  */
 import type { IRequest, IRequestContext } from '../http.ts';
 import type { Option } from '../option.ts';
+import type { WritePrecondition } from './write-precondition.ts';
 
 /**
  * A resolved tenant.
@@ -40,6 +41,32 @@ export interface ITenantRepository<Entity, Id = string> {
   update(id: Id, data: Readonly<Record<string, unknown>>): Promise<Entity | null>;
   /** Delete a record by its identifier. Returns `true` if a record was deleted. */
   delete(id: Id): Promise<boolean>;
+  /**
+   * Update a record only while it matches `where` as well as the tenant;
+   * `null` when it did not match. Present only when the configured store
+   * supports conditional writes — absence means it does not.
+   *
+   * @param id - The record's identifier
+   * @param where - An equality precondition; must not name the tenant column
+   * @param data - The fields to write
+   * @returns The updated record, or `null`
+   * @since 0.12.0
+   */
+  readonly updateWhere?: (
+    id: Id,
+    where: WritePrecondition,
+    data: Readonly<Record<string, unknown>>,
+  ) => Promise<Entity | null>;
+  /**
+   * Delete a record only while it matches `where` as well as the tenant.
+   * Present only when the configured store supports conditional writes.
+   *
+   * @param id - The record's identifier
+   * @param where - An equality precondition; must not name the tenant column
+   * @returns Whether a record was deleted
+   * @since 0.12.0
+   */
+  readonly deleteWhere?: (id: Id, where: WritePrecondition) => Promise<boolean>;
 }
 
 /**
@@ -87,6 +114,27 @@ export interface IMultiTenancyService {
     entity: string,
   ): ITenantRepository<Entity, Id>;
   /**
+   * With no `tenants` registry configured, answers `some({ id })` for any
+   * non-empty string id — exactly what the HTTP path admits — and `none()` for
+   * a non-string or empty one, so it is NOT validation unless the
+   * plugin was given a registry. With a registry, checks `id` through the SAME
+   * check the tenant middleware runs: `some(tenant)` carries the registry's
+   * canonical tenant, `none()` means the tenant does not exist or is not
+   * active, and an over-long id is `none()` without consulting the registry.
+   *
+   * The entry point for non-HTTP work (a queue job, a scheduled task, a
+   * message handler) that reads a tenant id from its payload: call this
+   * before the trusted {@linkcode getRepositoryFor}.
+   *
+   * @param id - The tenant id to check (untrusted input)
+   * @returns The registry's tenant, or `none()` when unknown
+   * @throws {Error} When the registry could not be consulted (the plugin's
+   * `TenantRegistryUnavailableError`, branded with a 503 status hint) — retry
+   * rather than proceed
+   * @since 0.12.0
+   */
+  lookupTenant(id: string): Promise<Option<ITenant>>;
+  /**
    * Build a cache key that includes the tenant id, joined by the separator
    * the plugin was configured with (`cache.separator`, default `':'`). The
    * separator is deliberately NOT a per-call argument: this method is the
@@ -123,6 +171,41 @@ export interface ITenantResolver {
    * @returns `Some` with the tenant, or `None` when unresolvable
    */
   resolve(request: IRequest): Promise<Option<ITenant>>;
+}
+
+/**
+ * Answers which tenants exist. Consulted by the multi-tenancy plugin's tenant
+ * middleware for every resolved id (its `tenants` option) and by
+ * `IMultiTenancyService.lookupTenant`.
+ *
+ * - `none()` means "does not exist or is not active" — the request is refused
+ *   with the plugin's `unknownTenantStatus` (default 404).
+ * - `some(tenant)` admits the request; the returned tenant is what the
+ *   request carries, and its `id` is the canonical id.
+ * - A THROW means "could not check" (the request answers 503) — never throw
+ *   for "not found". Bound your own I/O: the plugin applies no timeout.
+ *
+ * Implemented by `database-plugin`'s `createDatabaseTenantRegistry` and by
+ * the plugin's internal static registry (a `tenants` array).
+ *
+ * @example
+ * ```typescript
+ * const registry: ITenantRegistry = {
+ *   async lookup(id) {
+ *     return id === 'acme' ? some({ id: 'acme', name: 'Acme' }) : none();
+ *   },
+ * };
+ * ```
+ * @since 0.12.0
+ */
+export interface ITenantRegistry {
+  /**
+   * Looks a tenant up by the id a request or payload named.
+   *
+   * @param id - The requested tenant id (untrusted input)
+   * @returns `Some` with the canonical tenant, or `None` when unknown/inactive
+   */
+  lookup(id: string): Promise<Option<ITenant>>;
 }
 
 /**
@@ -168,6 +251,43 @@ export interface ITenantDataStore {
   ): Promise<E | null>;
   /** Delete a record. Returns `true` if a record was deleted. */
   delete<Id>(tenantId: string, entity: string, id: Id): Promise<boolean>;
+  /**
+   * Update a record only while it belongs to the tenant AND matches `where`,
+   * as one atomic precondition; `null` when it did not match. Optional: a
+   * store without conditional writes omits it.
+   *
+   * @param tenantId - The resolved tenant
+   * @param entity - The entity name
+   * @param id - The record's identifier
+   * @param where - An equality precondition; must not name the tenant column
+   * @param data - The fields to write; a tenant column in it is ignored
+   * @returns The updated record, or `null`
+   * @since 0.12.0
+   */
+  updateWhere?<E, Id>(
+    tenantId: string,
+    entity: string,
+    id: Id,
+    where: WritePrecondition,
+    data: Readonly<Record<string, unknown>>,
+  ): Promise<E | null>;
+  /**
+   * Delete a record only while it belongs to the tenant AND matches `where`.
+   * Optional, as {@linkcode ITenantDataStore.updateWhere}.
+   *
+   * @param tenantId - The resolved tenant
+   * @param entity - The entity name
+   * @param id - The record's identifier
+   * @param where - An equality precondition; must not name the tenant column
+   * @returns Whether a record was deleted
+   * @since 0.12.0
+   */
+  deleteWhere?<Id>(
+    tenantId: string,
+    entity: string,
+    id: Id,
+    where: WritePrecondition,
+  ): Promise<boolean>;
   /** Gracefully close any connections. */
   close?(): Promise<void>;
 }

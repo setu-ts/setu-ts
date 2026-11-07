@@ -24,23 +24,26 @@ deno add npm:@setu-ts/common
 
 ## What's Inside
 
+<!-- version:history -->
+
 `OptionalDependencyUnavailableError(dependency, { cause?, requiredBy? })` preserves `dependency` and
 the original `cause`. Since 0.11.0, loaders pass their npm package name as `requiredBy` to make the
 message actionable; it is used only in the message, with no new instance field:
 `Optional dependency 'ioredis' could not be loaded by '@setu-ts/cache-plugin'. Install it where '@setu-ts/cache-plugin' is installed, in the version range that package declares for it — in an npm, Yarn or Bun workspace that is usually the workspace root, not the member — or choose an option that does not need it on this runtime.`
 Without `requiredBy`, the message says `the package that loads it` generically.
 
-| Area                | Exports                                                                                                                                                                                                                                                                                      |
-| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Capability tokens   | `CAPABILITIES`, `createCapabilityToken()`, `CapabilityToken`, `StandardCapability`                                                                                                                                                                                                           |
-| Plugin contract     | `IPlugin`, `IPluginContext`, `IApplication`, context APIs (`IRouterApi`, `IMiddlewareApi`, `ILifecycleApi`, …)                                                                                                                                                                               |
-| Service registry    | `IServiceRegistry`, `RegisterOptions`, `ServiceFactory`                                                                                                                                                                                                                                      |
-| HTTP abstractions   | `IRequest`, `IResponse`, `IRequestContext`, `IMiddleware`, `MiddlewareFunction`, `RouteHandler`, `RouteDefinition`, `ResponseSnapshot`, `ResponseSnapshotInit`                                                                                                                               |
-| Runtime abstraction | `IRuntimeServices`, `IFileSystem`, `IHttpAdapter`                                                                                                                                                                                                                                            |
-| Optional DI         | `IContainer`, `Provider`, `ServiceScope`, `createToken`, `InjectionToken`, `ContainerToken`, `InjectEntry`                                                                                                                                                                                   |
-| Domain contracts    | `ILogger`, `IConfig`, `IValidationService`, `IHealthIndicator`, `IMetric`, `IJwtService`, `IOrmAdapter`, `ICacheStore`, `IEventBus`, `IMessageBroker`, `IQueue`, `ISecretManager`, `IAuditLogger`, `ICircuitBreaker`, `IStorage`, `IMailer`, `INotifier`, `IFeatureFlags`, `ITenantResolver` |
-| Shared types        | `HttpMethod`, `RuntimePlatform`, `LogLevel`, `LifecyclePhase`, `HealthStatus`, `MetricType`, `PLUGIN_PRIORITY`                                                                                                                                                                               |
-| Utility types       | `Result<T, E>` (`ok`, `err`, `isOk`, `isErr`, `unwrap`), `Option<T>` (`some`, `none`, `isSome`, `isNone`, `fromNullable`), `PathPattern` (`createPathMatcher`)                                                                                                                               |
+| Area                | Exports                                                                                                                                                                                                                                                                                                         |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Capability tokens   | `CAPABILITIES`, `createCapabilityToken()`, `CapabilityToken`, `StandardCapability`                                                                                                                                                                                                                              |
+| Plugin contract     | `IPlugin`, `IPluginContext`, `IApplication`, context APIs (`IRouterApi`, `IMiddlewareApi`, `ILifecycleApi`, …)                                                                                                                                                                                                  |
+| Service registry    | `IServiceRegistry`, `RegisterOptions`, `ServiceFactory`                                                                                                                                                                                                                                                         |
+| HTTP abstractions   | `IRequest`, `IResponse`, `IRequestContext`, `IMiddleware`, `MiddlewareFunction`, `RouteHandler`, `RouteDefinition`, `ResponseSnapshot`, `ResponseSnapshotInit`                                                                                                                                                  |
+| Request services    | `serviceToken()`, `ServiceToken`, `requestService()`, `RequestBoundService`, `resolveRequestService()`, `RequestServiceUnavailableError` — one instance per request and token, shared by kernel routes and React Router loaders (0.12.0)                                                                        |
+| Runtime abstraction | `IRuntimeServices`, `IFileSystem`, `IHttpAdapter`                                                                                                                                                                                                                                                               |
+| Optional DI         | `IContainer`, `Provider`, `ServiceScope`, `createToken`, `InjectionToken`, `ContainerToken`, `InjectEntry`                                                                                                                                                                                                      |
+| Domain contracts    | `ILogger`, `IConfig`, `IValidationService`, `IHealthIndicator`, `IMetric`, `IJwtService`, `IOrmAdapter`, `ICacheStore`, `IEventBus`, `IMessageBroker`, `IQueue`, `ISecretManager`, `IAuditLogger`, `ICircuitBreaker`, `IStorage`, `IMailer`, `INotifier`, `IFeatureFlags`, `ITenantResolver`, `ITenantRegistry` |
+| Shared types        | `HttpMethod`, `RuntimePlatform`, `LogLevel`, `LifecyclePhase`, `HealthStatus`, `MetricType`, `PLUGIN_PRIORITY`                                                                                                                                                                                                  |
+| Utility types       | `Result<T, E>` (`ok`, `err`, `isOk`, `isErr`, `unwrap`), `Option<T>` (`some`, `none`, `isSome`, `isNone`, `fromNullable`), `PathPattern` (`createPathMatcher`)                                                                                                                                                  |
 
 ## Usage
 
@@ -150,6 +153,33 @@ The framework knows four classifications — `DATA_CLASSIFICATIONS.PII` (`'pii'`
 `PCI` (`'pci'`) and `SECRET` (`'secret'`) — and accepts any other string, which reaches
 `redactors[<string>]`.
 
+Every string value no pattern matches still passes one value-based rule: URL userinfo is masked, so
+`redis://user:password@host:6379` becomes `redis://***@host:6379` wherever it sits in the record
+(M131a). It is a best-effort rule for credentials pasted into text, not a parser; the cases it
+handles are tested as a table:
+
+- the userinfo runs to the URL's last `@` on its word, so an unencoded `@`, `/`, `#`, `?` or `://`
+  in the password is masked with it;
+- a password holding one run of whitespace is masked to the next `@` on the line when the text
+  before the whitespace has a `user:password` colon (`redis://:pw x@host`), and a username holding
+  whitespace when the next word is `name:password@host` (`redis://us er:pw@host`);
+- a password holding `@` then whitespace (`redis://:p@ab cd@host`) is masked to the next word's `@`
+  only when the text after the first `@` has no `.`, `:` or `/`.
+
+Left unmasked, as known limits: a password holding a line break (a URL never spans lines), more than
+one run of whitespace after an `@` in the password, or `@` then whitespace where the text after the
+`@` looks like a host (`redis://:p@s.ec ret@host`). Over-masked, erring toward hiding: a path `@`
+after a port, and plain words after a credentialed URL whose host has no `.`, `:` or `/`. Untouched:
+a URL with no userinfo, an email address, and an `@` in a path. The scan is linear and applies to
+strings of any length.
+
+The rule applies where a redaction service runs: the logger's metadata by default, and trace
+attributes and audit records only when those plugins are given a policy. A log message string is not
+redacted. `describeError` therefore masks every name, message and classifier value itself, before
+its 8192-character bound, so the framework's connection-error lines and the line a generated
+`main.ts` prints on a failed start cannot carry a password even when the bound cuts the URL. The
+rule is also exported as `maskUrlUserinfo(value)`.
+
 ```typescript
 import { createMaskRedactor, createRedactionService, DATA_CLASSIFICATIONS } from '@setu-ts/common';
 
@@ -192,6 +222,7 @@ package fits the plugin architecture.
 | `assertPrimaryKeyUnchanged`           | function  |
 | `assertRealPathContained`             | function  |
 | `attachConnectionErrorReporter`       | function  |
+| `attachPoolErrorListener`             | function  |
 | `authorizationFailureInit`            | function  |
 | `brandErrorResponder`                 | function  |
 | `causeMessage`                        | function  |
@@ -220,12 +251,15 @@ package fits the plugin architecture.
 | `err`                                 | function  |
 | `errorResponderOf`                    | function  |
 | `extractContextFromHeaders`           | function  |
+| `fallbackErrorHint`                   | function  |
+| `fallbackErrorStatus`                 | function  |
 | `formEncodingOf`                      | function  |
 | `fromNodeRedis`                       | function  |
 | `fromNullable`                        | function  |
 | `fullJitterDelay`                     | function  |
 | `hasForbiddenAliasCharacter`          | function  |
 | `httpStatusHintOf`                    | function  |
+| `idempotencyMetadataOf`               | function  |
 | `installRequestIdentityGuard`         | function  |
 | `isConnectionFault`                   | function  |
 | `isConnectionFaultCode`               | function  |
@@ -242,6 +276,8 @@ package fits the plugin architecture.
 | `isWorkerTaskReply`                   | function  |
 | `isWorkerTaskRequest`                 | function  |
 | `keysetPredicate`                     | function  |
+| `maskUrlUserinfo`                     | function  |
+| `mcpToolMetadataOf`                   | function  |
 | `mintNextCursor`                      | function  |
 | `none`                                | function  |
 | `ok`                                  | function  |
@@ -259,9 +295,11 @@ package fits the plugin architecture.
 | `replacePrincipal`                    | function  |
 | `replaceTenant`                       | function  |
 | `requestOriginOf`                     | function  |
+| `requestService`                      | function  |
 | `resolveKeysetSort`                   | function  |
 | `resolveProbeTiming`                  | function  |
 | `resolveRegistryEntry`                | function  |
+| `resolveRequestService`               | function  |
 | `resolveResponseStatus`               | function  |
 | `respondWithAuthorizationFailure`     | function  |
 | `respondWithError`                    | function  |
@@ -274,20 +312,34 @@ package fits the plugin architecture.
 | `securityMetadataOf`                  | function  |
 | `serializeCookie`                     | function  |
 | `serializeError`                      | function  |
+| `serviceToken`                        | function  |
 | `setUpgradeIntent`                    | function  |
 | `some`                                | function  |
 | `sortFingerprint`                     | function  |
 | `splitWorkerEnv`                      | function  |
 | `tenantBindingMismatch`               | function  |
+| `toBackendFault`                      | function  |
 | `unwrap`                              | function  |
 | `upgradeIntentOf`                     | function  |
 | `validatedStateKey`                   | function  |
 | `validationMetadataOf`                | function  |
+| `vectorRecordKey`                     | function  |
+| `watchConnection`                     | function  |
 | `withDeadline`                        | function  |
 | `withHttpStatusHint`                  | function  |
+| `withIdempotencyMetadata`             | function  |
+| `withMcpToolMetadata`                 | function  |
 | `withResponseMetadata`                | function  |
 | `withSecurityMetadata`                | function  |
 | `withValidationMetadata`              | function  |
+| `AgentRunApprovalError`               | class     |
+| `AgentRunDefinitionError`             | class     |
+| `AgentRunLeaseLostError`              | class     |
+| `AgentRunNotFoundError`               | class     |
+| `AgentRunStateError`                  | class     |
+| `AgentRunStoreUnavailableError`       | class     |
+| `BackendOutcomeUnknownError`          | class     |
+| `BackendUnavailableError`             | class     |
 | `DuplicateKeyError`                   | class     |
 | `InvalidCursorError`                  | class     |
 | `InvalidFieldValueError`              | class     |
@@ -295,8 +347,19 @@ package fits the plugin architecture.
 | `OptionalDependencyUnavailableError`  | class     |
 | `PrimaryKeyChangeError`               | class     |
 | `ReconnectSupervisor`                 | class     |
+| `RequestServiceUnavailableError`      | class     |
+| `RouteRegistrationError`              | class     |
 | `UnknownPayloadFieldError`            | class     |
 | `UnsupportedFormEncodingError`        | class     |
+| `VectorCollectionMismatchError`       | class     |
+| `VectorCollectionUnknownError`        | class     |
+| `VectorDimensionError`                | class     |
+| `VectorFilterError`                   | class     |
+| `VectorOperationUnsupportedError`     | class     |
+| `VectorRecordError`                   | class     |
+| `VectorScopeInvalidError`             | class     |
+| `VectorScopeRequiredError`            | class     |
+| `VectorVersionConflictError`          | class     |
 | `CAPABILITIES`                        | const     |
 | `CLIENT_IP_STATE_KEY`                 | const     |
 | `CREDENTIAL_SOURCE_STATE_KEY`         | const     |
@@ -306,6 +369,7 @@ package fits the plugin architecture.
 | `ERROR_RESPONDER_BRAND`               | const     |
 | `ERROR_RESPONDER_STATE_KEY`           | const     |
 | `HTTP_STATUS_HINT`                    | const     |
+| `IDEMPOTENCY_METADATA`                | const     |
 | `IDEMPOTENCY_RECORD_KIND`             | const     |
 | `INBOX_RECORD_KIND`                   | const     |
 | `MAX_PUBLISH_HEADER_NAME_BYTES`       | const     |
@@ -313,10 +377,12 @@ package fits the plugin architecture.
 | `MAX_PUBLISH_HEADERS`                 | const     |
 | `MAX_PUBLISH_ID_BYTES`                | const     |
 | `MAX_SCOPE_ID_LENGTH`                 | const     |
+| `MCP_TOOL_METADATA`                   | const     |
 | `ORDERING_KEY_HEADER`                 | const     |
 | `OUTBOX_RECORD_KIND`                  | const     |
 | `PLUGIN_PRIORITY`                     | const     |
 | `REQUEST_ORIGIN_STATE_KEY`            | const     |
+| `REQUIRED_SCOPES_STATE_KEY`           | const     |
 | `RESERVED_HEADER_NAMES`               | const     |
 | `RESERVED_HEADER_PREFIXES`            | const     |
 | `RESPONSE_METADATA`                   | const     |
@@ -331,6 +397,12 @@ package fits the plugin architecture.
 | `UPGRADE_INTENT`                      | const     |
 | `VALIDATION_METADATA`                 | const     |
 | `AddJobOptions`                       | interface |
+| `AgentRunApprovalRow`                 | interface |
+| `AgentRunChunkBatch`                  | interface |
+| `AgentRunEntryRow`                    | interface |
+| `AgentRunRow`                         | interface |
+| `AgentRunSweepReport`                 | interface |
+| `AgentRunView`                        | interface |
 | `AuditEntry`                          | interface |
 | `AuthorizationDecisionObservation`    | interface |
 | `AuthorizationDecisionStep`           | interface |
@@ -347,6 +419,7 @@ package fits the plugin architecture.
 | `ConfigProvenanceEntry`               | interface |
 | `ConnectionErrorReporter`             | interface |
 | `ConnectionErrorReporterOptions`      | interface |
+| `ConnectionWatch`                     | interface |
 | `CookieAttributes`                    | interface |
 | `CqrsCommand`                         | interface |
 | `CqrsQuery`                           | interface |
@@ -358,6 +431,7 @@ package fits the plugin architecture.
 | `DiagnosticsEvent`                    | interface |
 | `DiagnosticsNode`                     | interface |
 | `DiagnosticsSnapshot`                 | interface |
+| `DispatchOptions`                     | interface |
 | `EncodedPayload`                      | interface |
 | `EnvVarSpec`                          | interface |
 | `Err`                                 | interface |
@@ -386,6 +460,8 @@ package fits the plugin architecture.
 | `HealthReport`                        | interface |
 | `HttpStatusHint`                      | interface |
 | `IAdapterTransaction`                 | interface |
+| `IAgentRunService`                    | interface |
+| `IAgentRunStore`                      | interface |
 | `IApplication`                        | interface |
 | `IAuditLogger`                        | interface |
 | `IAuthorizationDiagnosticsSource`     | interface |
@@ -460,6 +536,7 @@ package fits the plugin architecture.
 | `InjectionToken`                      | interface |
 | `INotifier`                           | interface |
 | `IOpenApiApi`                         | interface |
+| `IOpenApiService`                     | interface |
 | `IOrmAdapter`                         | interface |
 | `IOutboundHttpDiagnosticsSource`      | interface |
 | `IOutboxStore`                        | interface |
@@ -468,6 +545,7 @@ package fits the plugin architecture.
 | `IPlugin`                             | interface |
 | `IPluginContext`                      | interface |
 | `IPrincipal`                          | interface |
+| `IPrincipalActor`                     | interface |
 | `IQueryBus`                           | interface |
 | `IQueryHandler`                       | interface |
 | `IQueue`                              | interface |
@@ -503,6 +581,7 @@ package fits the plugin architecture.
 | `ITelemetryService`                   | interface |
 | `ITenant`                             | interface |
 | `ITenantDataStore`                    | interface |
+| `ITenantRegistry`                     | interface |
 | `ITenantRepository`                   | interface |
 | `ITenantResolver`                     | interface |
 | `ITraceDiagnosticsSource`             | interface |
@@ -510,6 +589,8 @@ package fits the plugin architecture.
 | `ITransactionalIdempotencyStore`      | interface |
 | `ITransactionIsolationSupport`        | interface |
 | `IValidationService`                  | interface |
+| `IVectorStore`                        | interface |
+| `IVectorStoreAdapter`                 | interface |
 | `IViewEngine`                         | interface |
 | `IWebSocketConnection`                | interface |
 | `IWebSocketService`                   | interface |
@@ -543,6 +624,7 @@ package fits the plugin architecture.
 | `PolicyAbilityInfo`                   | interface |
 | `PolicyDefinition`                    | interface |
 | `ProbeTiming`                         | interface |
+| `ProblemTypeInit`                     | interface |
 | `ProcessOptions`                      | interface |
 | `ProviderOptions`                     | interface |
 | `PublishOptions`                      | interface |
@@ -569,13 +651,16 @@ package fits the plugin architecture.
 | `RedactionContext`                    | interface |
 | `RedactionPolicy`                     | interface |
 | `RegisterOptions`                     | interface |
+| `RequestBoundService`                 | interface |
 | `RequestOptions`                      | interface |
 | `RetryOptions`                        | interface |
 | `RetryPolicy`                         | interface |
 | `RoleDefinition`                      | interface |
 | `RoomBroadcastOptions`                | interface |
 | `RouteDefinition`                     | interface |
+| `RouteIdempotencyMetadata`            | interface |
 | `RouteInfo`                           | interface |
+| `RouteMcpToolMetadata`                | interface |
 | `RouteResponseMetadata`               | interface |
 | `RouteSchema`                         | interface |
 | `RouteSecurityMetadata`               | interface |
@@ -619,6 +704,11 @@ package fits the plugin architecture.
 | `ValidationIssue`                     | interface |
 | `ValidationMiddlewareOptions`         | interface |
 | `ValueProvider`                       | interface |
+| `VectorCollectionSpec`                | interface |
+| `VectorMatch`                         | interface |
+| `VectorQuery`                         | interface |
+| `VectorRecord`                        | interface |
+| `VectorReplaceOptions`                | interface |
 | `WebSocketCloseEvent`                 | interface |
 | `WebSocketConnectionContext`          | interface |
 | `WebSocketEventSink`                  | interface |
@@ -632,6 +722,8 @@ package fits the plugin architecture.
 | `WorkerTaskReply`                     | interface |
 | `WorkerTaskRequest`                   | interface |
 | `WrapOptions`                         | interface |
+| `AgentRunJson`                        | type      |
+| `AgentRunStatus`                      | type      |
 | `AnonymousPolicyCheck`                | type      |
 | `AuthMethod`                          | type      |
 | `AuthorizationCoverage`               | type      |
@@ -639,6 +731,7 @@ package fits the plugin architecture.
 | `AuthorizationDecisionReason`         | type      |
 | `AuthorizationFailure`                | type      |
 | `AuthorizationSourceState`            | type      |
+| `BackendFault`                        | type      |
 | `BackoffStrategy`                     | type      |
 | `CacheDiagnosticsOperation`           | type      |
 | `CapabilityToken`                     | type      |
@@ -755,6 +848,7 @@ package fits the plugin architecture.
 | `ServiceFactory`                      | type      |
 | `ServiceOutcome`                      | type      |
 | `ServiceScope`                        | type      |
+| `ServiceToken`                        | type      |
 | `SessionData`                         | type      |
 | `SessionView`                         | type      |
 | `SignInOutcome`                       | type      |
@@ -772,6 +866,9 @@ package fits the plugin architecture.
 | `TransactionIsolationLevel`           | type      |
 | `Unsubscribe`                         | type      |
 | `ValidationTarget`                    | type      |
+| `VectorFieldType`                     | type      |
+| `VectorFilter`                        | type      |
+| `VectorMetadataValue`                 | type      |
 | `WebSocketGuardDecision`              | type      |
 | `WebSocketReadyState`                 | type      |
 | `WebSocketUpgradeDecision`            | type      |
@@ -794,6 +891,8 @@ errors. Command errors such as WRONGTYPE remain unclassified.
 set: `ECONNREFUSED`, `ECONNRESET`, `ETIMEDOUT`, `EHOSTUNREACH`, `ENETUNREACH`, `ENOTFOUND`,
 `EAI_AGAIN`, `EPIPE`. Use the predicate instead of the removed, unreleased `CONNECTION_FAULT_CODES`
 export; callers cannot mutate the classification vocabulary.
+
+<!-- version:history -->
 
 ## Using node-redis (0.11.0)
 
@@ -843,6 +942,8 @@ idempotency and the auth rate-limit store.
   and is idempotent; `status` reports `'wait'`, `'connecting'`, `'ready'` or `'end'`.
 
 Cluster and sentinel clients (`createCluster`, `createSentinel`) are not supported.
+
+<!-- version:history -->
 
 ## Portable database refusals (0.11.0)
 

@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AI chat</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --muted: #6b7280;
+        --line: #d1d5db;
+      }
+      body {
+        font:
+          16px/1.5 system-ui,
+          sans-serif;
+        max-width: 42rem;
+        margin: 2rem auto;
+        padding: 0 1rem;
+      }
+      header {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 1rem;
+      }
+      form {
+        display: flex;
+        gap: 0.5rem;
+      }
+      textarea {
+        flex: 1;
+        font: inherit;
+        padding: 0.5rem;
+        min-height: 3rem;
+      }
+      button {
+        font: inherit;
+        padding: 0.5rem 1rem;
+      }
+      #stats {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 0 1rem;
+        margin: 1rem 0;
+        font-size: 0.875rem;
+      }
+      #stats dt {
+        color: var(--muted);
+      }
+      #stats dd {
+        margin: 0;
+        font-variant-numeric: tabular-nums;
+      }
+      meter {
+        width: 100%;
+      }
+      #log > div {
+        border-top: 1px solid var(--line);
+        padding: 0.75rem 0;
+        white-space: pre-wrap;
+      }
+      #log > .usage {
+        border-top: none;
+        padding-top: 0;
+      }
+      .you {
+        font-weight: 600;
+      }
+      .thinking,
+      .note,
+      .usage {
+        color: var(--muted);
+        font-size: 0.875rem;
+      }
+      .error {
+        color: #dc2626;
+        font-size: 0.875rem;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>AI chat</h1>
+      <button id="reset" type="button">New chat</button>
+    </header>
+    <p class="note">
+      Answers stream from <code>POST /chat</code> as they are generated. The page keeps the
+      conversation and sends it with each question.
+    </p>
+    <dl id="stats">
+      <dt>Context</dt>
+      <dd>
+        <span id="context">no request yet</span><br /><meter
+          id="context-meter"
+          min="0"
+          max="1"
+          value="0"
+        ></meter>
+      </dd>
+      <dt>Session tokens</dt>
+      <dd id="session">0 in · 0 out</dd>
+    </dl>
+    <form id="ask">
+      <textarea
+        id="prompt"
+        name="prompt"
+        required
+        maxlength="10000"
+        placeholder="Ask something (Enter sends, Shift+Enter adds a line)"
+      ></textarea>
+      <button id="send" type="submit">Send</button>
+      <button id="stop" type="button" disabled>Stop</button>
+    </form>
+    <div id="log"></div>
+    <script type="module" src="/ui/chat.js"></script>
+  </body>
+</html>

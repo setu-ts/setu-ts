@@ -7,6 +7,8 @@ import { WebSocketPlugin } from '@setu-ts/websocket-plugin';
 import { createResolvers } from './src/modules/books/books.resolvers.ts';
 import { typeDefs } from './src/modules/books/books.schema.ts';
 
+import { registerModules } from './src/modules/index.ts';
+
 /**
  * Builds the demo with every GraphQL transport and feature enabled, without starting it.
  *
@@ -14,7 +16,7 @@ import { typeDefs } from './src/modules/books/books.schema.ts';
  * the interop suite's persisted-query check starts cold.
  */
 export function createApp(): IKernelApplication {
-  return createApplication({
+  const app = createApplication({
     plugins: [
       RuntimePlugin(),
       WebSocketPlugin(),
@@ -33,4 +35,6 @@ export function createApp(): IKernelApplication {
       }),
     ],
   });
+  registerModules(app.router, app.services);
+  return app;
 }

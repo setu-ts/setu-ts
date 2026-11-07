@@ -30,9 +30,9 @@ const ALLOWED_GITHUB_KINDS = [
 
 describe('repository reading routes', () => {
   it('covers the release allowlist and all app READMEs', () => {
-    expect(PACKAGES).toHaveLength(52);
-    expect(APPS).toHaveLength(17);
-    expect(PACKAGES.filter((pkg) => pkg.card)).toHaveLength(50);
+    expect(PACKAGES).toHaveLength(55);
+    expect(APPS).toHaveLength(22);
+    expect(PACKAGES.filter((pkg) => pkg.card)).toHaveLength(53);
     for (const [app, files] of Object.entries(EXAMPLE_FILES)) {
       expect(files, app).toContain('smoke.ts');
       for (const file of files) expect(TRACKED_FILES).toContain(`apps/${app}/${file}`);
@@ -73,7 +73,7 @@ describe('repository reading routes', () => {
       [
         'src/modules/todos/',
         'apps/rest-api',
-        `/examples/rest-api/#${fileAnchor(EXAMPLE_FILES['rest-api'][0])}`,
+        `/examples/rest-api/#${fileAnchor(EXAMPLE_FILES['rest-api'].find((file) => file.startsWith('src/modules/todos/'))!)}`,
       ],
       [
         'https://github.com/setu-ts/setu-ts/blob/main/packages/kernel/README.md#usage',

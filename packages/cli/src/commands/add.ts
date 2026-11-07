@@ -30,6 +30,7 @@ import type { IFileSystem } from '@setu-ts/common';
 import { deriveNames, escapeName, isKebabIdentifier } from '../utils/names.ts';
 import type { ParsedArgs } from '../args.ts';
 import {
+  CONFIG_MODULE,
   EXIT_ERROR,
   EXIT_INTERRUPTED,
   EXIT_OK,
@@ -45,11 +46,15 @@ import {
   resolveDir,
   writeFiles,
 } from '../utils/file-writer.ts';
+import { isMissingPath } from '../utils/filesystem-errors.ts';
 import { frameworkSpecifier } from '../templates/framework-specifier.ts';
 import { BROKER_COMPOSE_FILE, cliInvocation, resolveHost } from '../templates/project-files.ts';
 import { MINIMAL_HOST } from '../templates/minimal.ts';
+import { envFileDeclaration } from '../templates/env-file.ts';
+import type { EnvVariable } from '../templates/registry.ts';
 import {
   brokerComposeFiles,
+  brokerEnvVariables,
   missingComposeServices,
   readArmFlag,
   redisClientRefusal,
@@ -70,7 +75,7 @@ import { readJsonManifest } from '../utils/manifest-reader.ts';
 import { interruptionMessage } from '../utils/interruption.ts';
 import { detectPlugins } from '../utils/plugin-detector.ts';
 import { composingStarter } from '../utils/starter-arms.ts';
-import { repositoryFileUrl } from '../utils/repository-links.ts';
+import { repositoryFileUrl, siteUrl } from '../utils/repository-links.ts';
 import { hostSeamSpecs } from '../seams/registry.ts';
 import {
   seamFiles,
@@ -80,9 +85,26 @@ import {
   starterSeamLiteral,
 } from '../templates/seam.ts';
 import { renderPluginCall } from '../utils/render-call.ts';
-import { installSearchDirs, unknownWorkspaceRedisClient } from '../app-loader.ts';
-import { MEMBERS_DIR, readWorkspaceManifest, type WorkspaceMember } from '../workspace/manifest.ts';
-import { transportSpec, renderConnection, type TransportSpec } from '../workspace/transport.ts';
+import {
+  installSearchDirs,
+  unknownWorkspaceRedisClient,
+  workspaceMemberOf,
+} from '../app-loader.ts';
+import {
+  MEMBERS_DIR,
+  readWorkspaceManifest,
+  type WorkspaceManifest,
+  type WorkspaceMember,
+} from '../workspace/manifest.ts';
+import { memberTransportModule } from '../workspace/rewire.ts';
+import { applyTransportChange } from './workspace.ts';
+import { TRANSPORT_EXPORTS, TRANSPORT_SPECIFIER } from '../workspace/transport-module.ts';
+import {
+  brokerSpec,
+  renderConnection,
+  type RedisClient,
+  type BrokerSpec,
+} from '../workspace/transport.ts';
 import { workspaceProfile } from '../workspace/runtime-profile.ts';
 import { CLIENT_RANGES } from '../templates/client-dependencies.ts';
 import {
@@ -174,11 +196,30 @@ export const ADDABLE: ReadonlyMap<string, IAddablePackage> = new Map([
   ['localization', { pkg: 'localization-plugin' }],
   ['logger', { pkg: 'logger-plugin' }],
   ['mail', { pkg: 'mail-plugin' }],
+  [
+    'mcp',
+    {
+      pkg: 'mcp-plugin',
+      peers: {
+        runtimes: ['node', 'deno', 'bun', 'cloudflare-workers'],
+        packages: ['@modelcontextprotocol/server'],
+      },
+    },
+  ],
   ['messaging', { pkg: 'messaging-plugin' }],
   ['metrics', { pkg: 'metrics-plugin' }],
   ['multi-tenancy', { pkg: 'multi-tenancy-plugin' }],
   ['notification', { pkg: 'notification-plugin' }],
-  ['openapi', { pkg: 'openapi-plugin' }],
+  [
+    'openapi',
+    {
+      pkg: 'openapi-plugin',
+      peers: {
+        runtimes: ['node', 'deno', 'bun'],
+        packages: ['swagger-ui-dist'],
+      },
+    },
+  ],
   ['queue', { pkg: 'queue-plugin' }],
   ['react-router', { pkg: 'react-router-plugin' }],
   ['realtime-backplane', { pkg: 'realtime-backplane-plugin' }],
@@ -214,6 +255,9 @@ export const ADDABLE: ReadonlyMap<string, IAddablePackage> = new Map([
       peers: { runtimes: ['deno', 'node', 'bun', 'cloudflare-workers'], packages: ['zod'] },
     },
   ],
+  // Collections and the adapter's client are the application's, so the
+  // registration is printed, never inserted (M135 §3.13).
+  ['vector-store', { pkg: 'vector-store-plugin' }],
   [
     'view',
     {
@@ -360,6 +404,9 @@ function registrationLine(bare: string): string | undefined {
     return "ReactRouterPlugin({ serverBuildPath: '<server-build-module>' })";
   }
   if (bare === 'multi-tenancy-plugin') return "MultiTenancyPlugin({ resolver: 'header' })";
+  if (bare === 'vector-store-plugin') {
+    return "VectorStorePlugin({ adapter: new MemoryVectorStore(), collections: [{ name: 'documents', dimensions: 768 }] })";
+  }
   if (bare === 'service-discovery-plugin') {
     return "ServiceDiscoveryPlugin({ provider: 'static', services: {} })";
   }
@@ -440,6 +487,36 @@ function importsNodeRedisHelper(source: string): boolean {
 }
 
 /**
+ * Whether the project already depends on ioredis: an `ioredis` entry in its
+ * `package.json` dependencies or its `deno.json` import map.
+ *
+ * @param fs - The file system
+ * @param dir - The project directory
+ * @returns Whether either manifest names `ioredis`
+ */
+async function declaresIoredis(fs: IFileSystem, dir: string): Promise<boolean> {
+  for (const [file, keys] of [
+    ['package.json', ['dependencies', 'devDependencies']],
+    ['deno.json', ['imports']],
+  ] as const) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(new TextDecoder().decode(await fs.readFile(joinPath(dir, file))));
+    } catch {
+      continue;
+    }
+    if (parsed === null || typeof parsed !== 'object') continue;
+    for (const key of keys) {
+      const section = (parsed as Record<string, unknown>)[key];
+      if (section !== null && typeof section === 'object' && Object.hasOwn(section, 'ioredis')) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
  * Names the node-redis helper's import when the configuration does not have it.
  *
  * Every guidance line for the node-redis arm calls `nodeRedisClient(...)`; a
@@ -504,6 +581,15 @@ function printWiringNote(
         }
       }
       log(`  See ${repositoryFileUrl(`packages/starters/${starter.pkg}/README.md`)}`);
+      // X89-3: the full-stack template's own login writes `userEmail`, so a
+      // password-only sign-in needs the recipe, not the starter README.
+      if (bare === 'auth-plugin' && starter.pkg === 'full-stack-starter') {
+        log(
+          `  The full-stack password sign-in recipe: ${siteUrl(
+            'packages/auth-plugin/#in-the-full-stack-template',
+          )}`,
+        );
+      }
       log(
         '  Once that arm is configured, registering a second instance with app.register fails' +
           ' with a duplicate plugin name.',
@@ -705,6 +791,44 @@ export function withDependency(
       : afterScope + 1;
   entries.splice(insertion, 0, [specifier, range]);
   return `${JSON.stringify({ ...parsed, [section]: Object.fromEntries(entries) }, null, 2)}\n`;
+}
+
+/** The OpenTelemetry instrumentation for each Redis client, and its option. */
+const REDIS_INSTRUMENTATION: Readonly<
+  Record<RedisClient, { readonly pkg: string; readonly option: string }>
+> = {
+  ioredis: { pkg: '@opentelemetry/instrumentation-ioredis', option: 'ioredis' },
+  'node-redis': { pkg: '@opentelemetry/instrumentation-redis', option: 'redis' },
+};
+
+/**
+ * What `setu add telemetry` installs beyond the plugin's own peers (M131a
+ * X88-10): the OTLP exporter on every socket runtime, and on Node the loader
+ * hook the generated `instrumentation.mjs` registers plus the instrumentation
+ * for the Redis client the project already uses. Deno and Bun get no hook or
+ * instrumentation: OpenTelemetry's auto-instrumentation does not run there.
+ *
+ * @param bare - Bare package name being added
+ * @param runtime - The detected target runtime
+ * @param client - The project's Redis client, when it has one
+ * @returns Each package and the range to record for it
+ */
+function telemetryPackagesFor(
+  bare: string,
+  runtime: TargetRuntime,
+  client: RedisClient | undefined,
+): readonly { readonly name: string; readonly range: string }[] {
+  if (bare !== 'telemetry-plugin' || runtime === 'cloudflare-workers') return [];
+  const names = [
+    '@opentelemetry/exporter-trace-otlp-http',
+    ...(runtime === 'node'
+      ? [
+          '@opentelemetry/instrumentation',
+          ...(client === undefined ? [] : [REDIS_INSTRUMENTATION[client].pkg]),
+        ]
+      : []),
+  ];
+  return names.map((name) => ({ name, range: CLIENT_RANGES[name]! }));
 }
 
 /**
@@ -958,6 +1082,45 @@ function withPeerDependencies(
   return { contents: `${JSON.stringify(rewritten, null, 2)}\n`, added, moved };
 }
 
+/** Adds the opt-in client scripts; existing script bodies remain the developer's choice. */
+function withClientScripts(
+  source: string,
+  file: string,
+  runtime: TargetRuntime,
+  log: (line: string) => void,
+): string | undefined {
+  const parsed = JSON.parse(source) as Record<string, unknown>;
+  const key = file === 'package.json' ? 'scripts' : 'tasks';
+  const existing = parsed[key];
+  if (
+    existing !== undefined &&
+    (existing === null || typeof existing !== 'object' || Array.isArray(existing))
+  ) {
+    log(`left ${file} ${key} unchanged: not an object.`);
+    return undefined;
+  }
+  const scripts = { ...(existing as Record<string, unknown> | undefined) };
+  const dev = parsed['devDependencies'];
+  const localCli =
+    file === 'package.json' &&
+    typeof dev === 'object' &&
+    dev !== null &&
+    Object.hasOwn(dev, '@setu-ts/cli');
+  const runner = localCli ? 'setu' : cliInvocation(runtime);
+  let changed = false;
+  for (const [name, body] of [
+    ['client', `${runner} client`],
+    ['client:check', `${runner} client --check`],
+  ] as const) {
+    if (Object.hasOwn(scripts, name)) log(`left ${file} ${name} unchanged: already present.`);
+    else {
+      scripts[name] = body;
+      changed = true;
+    }
+  }
+  return changed ? `${JSON.stringify({ ...parsed, [key]: scripts }, null, 2)}\n` : undefined;
+}
+
 /**
  * Finds the local name for one named provider import in the generated config shape.
  *
@@ -1170,7 +1333,12 @@ function withStarterWiring(
       const edited = withStarterOption(result, key, transportArgs);
       if (edited === undefined) return undefined;
       result = edited;
-    } else if (!carriesStarterOptions(existing, transportArgs)) {
+    } else if (
+      !carriesStarterOptions(existing, transportArgs) &&
+      // A member's arm already spreading its transport module's options (M138):
+      // the call is the whole option, so it is present or it is not.
+      !sameOptions(existing, transportArgs)
+    ) {
       const entries = starterLiteralEntries(transportArgs);
       if (entries === undefined) return undefined;
       for (const [property, value] of entries) {
@@ -1223,50 +1391,151 @@ function withNodeRedisImport(original: string, wired: string): string | undefine
   return `${NODE_REDIS_IMPORT_LINE}\n${wired}`;
 }
 
-/** Reads transport options only for a listed workspace member. */
+/** Where a member's options come from when they are its CLI-owned transport module's. */
+interface MemberModuleSource {
+  /** The workspace root. */
+  readonly root: string;
+  readonly manifest: WorkspaceManifest;
+  readonly member: WorkspaceMember;
+  /** The module export the config calls for this plugin. */
+  readonly symbol: string;
+}
+
+/** What a workspace member's transport-backed `setu add` passes the plugin. */
+type WorkspaceAddArgs = {
+  readonly args: string;
+  readonly clients: readonly string[];
+  /** Present for messaging and queue: the options are the transport module's (M138 §3.7). */
+  readonly module?: MemberModuleSource;
+};
+
+/**
+ * Reads transport options only for a listed workspace member.
+ *
+ * Messaging and the queue follow the workspace broker, so a member's config calls
+ * its CLI-owned transport module for them rather than holding a literal — the
+ * call is the same on every broker, and `setu workspace broker` regenerates only
+ * the module. The Redis-only arms keep their literals (M138 §3.9).
+ */
 async function workspaceAddArgs(
   deps: AddCommandDependencies,
   dirs: readonly string[],
   bare: string,
   runtime: TargetRuntime,
   starter: boolean,
-): Promise<{ readonly args: string; readonly clients: readonly string[] } | undefined> {
+  arm?: ArmSelector,
+): Promise<WorkspaceAddArgs | undefined> {
   if (dirs.length === 1) return undefined;
-  const read = await readWorkspaceManifest(deps.fs, dirs[dirs.length - 1]!);
-  if (!read.ok) return undefined;
-  const transport = transportSpec(read.manifest.transport, read.manifest.redisClient);
-  return transportAddArgs(transport, bare, runtime, starter, read.manifest.transportUrl);
+  // The lookup `installSearchDirs` itself uses, so a native Windows path names the
+  // same member it does (one separator comparison, `utils/member-path.ts`).
+  const found = await workspaceMemberOf(deps.fs, dirs[0]!);
+  if (found === undefined) return undefined;
+  const { root, manifest, member } = found;
+  const transport = brokerSpec(manifest.broker, manifest.redisClient);
+  const selector = arm ?? defaultArm(bare);
+  if (selector === 'messagingArgs' || selector === 'queueArgs') {
+    const messaging = selector === 'messagingArgs';
+    const symbol = messaging ? TRANSPORT_EXPORTS.messaging : TRANSPORT_EXPORTS.queue;
+    const call = `${symbol}(${starter ? 'config' : ''})`;
+    const builder = transport[selector];
+    return {
+      args: messaging ? call : `{ ...${call} }`,
+      clients:
+        builder === undefined
+          ? []
+          : ((messaging ? transport.messagingClients : transport.queueClients) ?? []),
+      module: { root, manifest, member, symbol },
+    };
+  }
+  return transportAddArgs(transport, bare, runtime, starter, manifest.brokerUrl, arm);
+}
+
+/**
+ * Adds one export to a config's import of its transport module.
+ *
+ * Exactly one recognised `import { … } from './src/transport/index.ts';` is
+ * extended; with none, one is added after the last import. Anything else (two
+ * declarations, a namespace import, an unclassifiable file) returns `undefined`,
+ * and the caller prints guidance instead of editing.
+ *
+ * @param source - The member's `setu.config.ts`
+ * @param symbol - The export the config will call
+ * @returns The config importing it, or `undefined` when it cannot be shown safe
+ */
+function withTransportModuleImport(source: string, symbol: string): string | undefined {
+  const visible = maskComments(source);
+  if (visible === undefined) return undefined;
+  const declarations = [
+    ...visible.matchAll(/\bimport\s*\{([^}]*)\}\s*from\s*(['"])([^'"]+)\2\s*;?/g),
+  ].filter((match) => match[3] === TRANSPORT_SPECIFIER);
+  const mentions =
+    visible.split(`'${TRANSPORT_SPECIFIER}'`).length +
+    visible.split(`"${TRANSPORT_SPECIFIER}"`).length -
+    2;
+  if (declarations.length > 1 || mentions !== declarations.length) return undefined;
+  if (declarations.length === 1) {
+    const match = declarations[0]!;
+    const names = match[1]!
+      .split(',')
+      .map((name) => name.trim())
+      .filter((name) => name !== '');
+    if (names.includes(symbol)) return source;
+    const start = match.index!;
+    const end = start + match[0].length;
+    return `${source.slice(0, start)}import { ${[...names, symbol].join(', ')} } from '${TRANSPORT_SPECIFIER}';${source.slice(end)}`;
+  }
+  if (referencesIdentifier(visible, symbol)) return undefined;
+  const at = afterLastImport(source, visible);
+  if (at === undefined) return undefined;
+  return `${source.slice(0, at)}\nimport { ${symbol} } from '${TRANSPORT_SPECIFIER}';${source.slice(at)}`;
+}
+
+/** The transport-spec arm a plugin's Redis arm flag selects. */
+type ArmSelector =
+  | 'messagingArgs'
+  | 'queueArgs'
+  | 'cacheArgs'
+  | 'idempotencyArgs'
+  | 'schedulerArgs'
+  | 'backplaneArgs';
+
+/** The arm a plugin's default (flag-less) Redis wiring selects. */
+function defaultArm(bare: string): ArmSelector | undefined {
+  return bare === 'cache-plugin'
+    ? 'cacheArgs'
+    : bare === 'scheduler-plugin'
+      ? 'schedulerArgs'
+      : bare === 'realtime-backplane-plugin'
+        ? 'backplaneArgs'
+        : bare === 'messaging-plugin'
+          ? 'messagingArgs'
+          : bare === 'queue-plugin'
+            ? 'queueArgs'
+            : bare === 'idempotency-plugin'
+              ? 'idempotencyArgs'
+              : undefined;
 }
 
 /** Shares arm selection and literal rendering between workspace and standalone adds. */
 function transportAddArgs(
-  transport: TransportSpec,
+  transport: BrokerSpec,
   bare: string,
   runtime: TargetRuntime,
   starter: boolean,
   override?: string,
-): { readonly args: string; readonly clients: readonly string[] } | undefined {
-  const builder =
-    bare === 'cache-plugin'
-      ? transport.cacheArgs
-      : bare === 'scheduler-plugin'
-        ? transport.schedulerArgs
-        : bare === 'realtime-backplane-plugin'
-          ? transport.backplaneArgs
-          : bare === 'messaging-plugin'
-            ? transport.messagingArgs
-            : bare === 'queue-plugin'
-              ? transport.queueArgs
-              : undefined;
+  arm?: ArmSelector,
+): WorkspaceAddArgs | undefined {
+  const selector = arm ?? defaultArm(bare);
+  const builder = selector === undefined ? undefined : transport[selector];
   if (builder === undefined || transport.connection === undefined) return undefined;
   return {
     args: starter
       ? starterOptionLiteral(builder, transport, override)
       : builder(renderConnection(transport.connection, workspaceProfile(runtime), override)),
     clients:
-      bare === 'messaging-plugin'
+      selector === 'messagingArgs'
         ? (transport.messagingClients ?? [])
-        : bare === 'queue-plugin'
+        : selector === 'queueArgs'
           ? (transport.queueClients ?? [])
           : [transport.redisClient === 'node-redis' ? 'redis' : 'ioredis'],
   };
@@ -1447,58 +1716,134 @@ export async function runAddCommand(
     );
     return EXIT_ERROR;
   }
-  let selected: TransportSpec | undefined;
+  let selected: BrokerSpec | undefined;
+  let selectedArm: ArmSelector | undefined;
   if (args.flags['redis-client'] !== undefined && searchDirs.length > 1) {
     deps.error(
-      '--redis-client cannot apply inside a workspace member: members share the workspace --transport and redisClient.',
+      '--redis-client cannot apply inside a workspace member: members share the workspace broker and redisClient.',
     );
     return EXIT_USAGE;
   }
-  const redisRefusal = redisClientRefusal(
-    args,
-    runtime,
-    args.flags['broker'] === 'redis' || args.flags['queue'] === 'redis',
-  );
+  const redisRefusal = redisClientRefusal(args, runtime);
   if (redisRefusal !== undefined) {
     deps.error(redisRefusal);
     return EXIT_USAGE;
   }
-  for (const flag of ['broker', 'queue'] as const) {
+  // M131a X88-1: a standalone project's Redis client is inferred from what it
+  // already uses — importing the generated nodeRedisClient helper means
+  // node-redis, an `ioredis` dependency means ioredis. A project with neither
+  // has not chosen yet: `--redis-client` chooses, and ioredis is the default.
+  // An explicit `--redis-client` that disagrees with a choice already made is
+  // refused, so a project never drifts to a second Redis driver.
+  const inferredClient: RedisClient | undefined =
+    initialConfig !== undefined && importsNodeRedisHelper(initialConfig)
+      ? 'node-redis'
+      : (await declaresIoredis(deps.fs, dir))
+        ? 'ioredis'
+        : undefined;
+  const explicitClient = args.flags['redis-client'];
+  if (
+    explicitClient !== undefined &&
+    inferredClient !== undefined &&
+    explicitClient !== inferredClient
+  ) {
+    deps.error(
+      `--redis-client ${String(explicitClient)} disagrees with the project's ${inferredClient} client.`,
+    );
+    return EXIT_USAGE;
+  }
+  const client: RedisClient =
+    inferredClient ?? (explicitClient === 'node-redis' ? 'node-redis' : 'ioredis');
+  const pluginFor: Readonly<Record<string, string>> = {
+    'messaging-plugin': 'messaging',
+    'queue-plugin': 'queue',
+    'cache-plugin': 'cache',
+    'idempotency-plugin': 'idempotency',
+    'scheduler-plugin': 'scheduler',
+    'realtime-backplane-plugin': 'realtime-backplane',
+  };
+  const flagPlugins: Readonly<Record<string, readonly string[]>> = {
+    broker: ['messaging'],
+    queue: ['queue'],
+    store: ['cache', 'idempotency'],
+    lock: ['scheduler'],
+    backplane: ['realtime-backplane'],
+  };
+  for (const flag of ['broker', 'queue', 'store', 'lock', 'backplane'] as const) {
     if (args.flags[flag] === undefined) continue;
-    const expected = flag === 'broker' ? 'messaging-plugin' : 'queue-plugin';
-    if (bare !== expected) {
-      deps.error(
-        `--${flag} applies only to setu add ${flag === 'broker' ? 'messaging' : 'queue'}.`,
-      );
+    const plugin = pluginFor[bare];
+    const applicable = flagPlugins[flag];
+    if (plugin === undefined || !applicable.includes(plugin)) {
+      deps.error(`--${flag} applies only to setu add ${applicable.join(' or ')}.`);
       return EXIT_USAGE;
     }
     if (searchDirs.length > 1) {
       deps.error(
-        `--${flag} cannot apply inside a workspace member: members share the workspace --transport.`,
+        `--${flag} cannot apply inside a workspace member: members share the workspace broker (setu workspace broker changes it).`,
       );
       return EXIT_USAGE;
     }
     if (runtime === 'cloudflare-workers') {
-      deps.error(standaloneOverlayRefusal(flag, runtime, resolveHost(MINIMAL_HOST, runtime))!);
+      deps.error(
+        flag === 'broker' || flag === 'queue'
+          ? standaloneOverlayRefusal(flag, runtime, resolveHost(MINIMAL_HOST, runtime))!
+          : `--${flag} cannot apply on Cloudflare Workers: the Workers build has no Redis wiring for ${plugin}. Scaffold for deno, node or bun to select one.`,
+      );
       return EXIT_USAGE;
     }
-    const arm = readArmFlag(args, flag);
+    const arm = readArmFlag(args, flag, plugin, client);
     if (!arm.ok) {
       deps.error(arm.message);
       return EXIT_USAGE;
     }
     selected = arm.spec;
+    selectedArm =
+      plugin === 'messaging'
+        ? 'messagingArgs'
+        : plugin === 'queue'
+          ? 'queueArgs'
+          : plugin === 'cache'
+            ? 'cacheArgs'
+            : plugin === 'idempotency'
+              ? 'idempotencyArgs'
+              : plugin === 'scheduler'
+                ? 'schedulerArgs'
+                : 'backplaneArgs';
+  }
+  // Inside a workspace member, gRPC is the member's RPC style: the same change as
+  // `setu workspace rpc <member> grpc`, through the same planner (M138 §3.7). Placed
+  // after every flag refusal above, so `--broker`, `--queue`, `--redis-client` and the
+  // Redis arm flags are refused here as for any other plugin rather than ignored.
+  if (bare === 'grpc-plugin' && searchDirs.length > 1) {
+    const found = await workspaceMemberOf(deps.fs, dir);
+    if (found !== undefined) {
+      // `reconcile`: on a member already serving gRPC, adding the plugin still
+      // restores its module, its packages and its toolchain files.
+      return await applyTransportChange(
+        {
+          fs: deps.fs,
+          cwd: deps.cwd,
+          log: deps.log,
+          error: deps.error,
+          ...(deps.interrupt === undefined ? {} : { interrupt: deps.interrupt }),
+        },
+        found.root,
+        { kind: 'rpc', member: found.member.name, rpc: 'grpc' },
+        { dryRun: args.flags['dry-run'] === true, force: false, reconcile: true },
+      );
+    }
   }
   const starter =
     initialConfig !== undefined &&
     composingStarter(initialConfig)?.symbol === 'createFullStackAppFromConfig';
   const transport =
     selected === undefined
-      ? await workspaceAddArgs(deps, searchDirs, bare, runtime, starter)
-      : transportAddArgs(selected, bare, runtime, starter);
+      ? await workspaceAddArgs(deps, searchDirs, bare, runtime, starter, selectedArm)
+      : transportAddArgs(selected, bare, runtime, starter, undefined, selectedArm);
   const transportArgs = transport?.args;
   const peerPackages = [
     ...peerPackagesFor(bare, runtime),
+    ...telemetryPackagesFor(bare, runtime, inferredClient),
     ...(transport?.clients ?? []).map((name) => ({ name, range: CLIENT_RANGES[name]! })),
   ];
   const addedPeers: string[] = [];
@@ -1546,6 +1891,11 @@ export async function runAddCommand(
       }
     }
 
+    // Only the manifest the runtime runs scripts from: a Workers project's
+    // deno.json exists for plugin gating, and tasks there would never run.
+    if (bare === 'sdk' && (target.file === 'package.json') === (runtime !== 'deno')) {
+      updated = withClientScripts(updated ?? source, target.file, runtime, deps.log) ?? updated;
+    }
     if (updated === undefined) continue;
     edits.push({ path, contents: updated });
   }
@@ -1667,9 +2017,15 @@ export async function runAddCommand(
   const installing = edits.length > 0;
 
   let configSource: string | undefined;
+  // The configuration as read, kept apart from `configSource`: a wiring step that
+  // throws below leaves the text known, and a read that fails for any reason but
+  // absence is not mistaken for a project without a configuration.
+  let configText: string | undefined;
+  let configUnreadable = false;
   let configRetargeted = false;
   try {
     const config = new TextDecoder().decode(await deps.fs.readFile(configPath));
+    configText = config;
     // An import map that points a framework name elsewhere makes the configuration's
     // imports mean something its text does not say: no automatic wiring then.
     configRetargeted = await frameworkImportsRetargeted(deps.fs, dir);
@@ -1683,15 +2039,32 @@ export async function runAddCommand(
             seam,
             transportArgs === undefined ? undefined : seam?.args,
           );
+    // A member's options come from its transport module, which imports the
+    // node-redis helper itself; the config only needs the module's export.
+    const viaModule =
+      wired === undefined || transport?.module === undefined
+        ? wired
+        : withTransportModuleImport(wired, transport.module.symbol);
     const imported =
-      wired !== undefined && transport?.clients.includes('redis')
-        ? withNodeRedisImport(config, wired)
-        : wired;
+      viaModule !== undefined &&
+      transport?.module === undefined &&
+      transport?.clients.includes('redis')
+        ? withNodeRedisImport(config, viaModule)
+        : viaModule;
     if (imported !== undefined) edits.push({ path: configPath, contents: imported });
     configSource = imported ?? config;
-  } catch {
+  } catch (cause) {
     // `setu add` remains useful for non-scaffolded projects. A missing config
     // simply has no generated ingress composition to activate.
+    configUnreadable = configText === undefined && !isMissingPath(cause);
+  }
+
+  // The member's transport module, regenerated for the packages it now has, so the
+  // export the config calls (or the printed guidance names) exists (M138 §3.7).
+  if (transport?.module !== undefined) {
+    const { root, manifest, member } = transport.module;
+    const file = await memberTransportModule(deps.fs, root, manifest, member, installedAfter);
+    edits.push({ path: joinPath(root, file.path), contents: file.contents });
   }
 
   // The barrels exist whether or not the config could be rewritten: the printed
@@ -1730,11 +2103,63 @@ export async function runAddCommand(
   }
 
   if (selected?.connection !== undefined) {
-    deps.log(
-      `  ${selected.connection.variable}=${selected.connection.localDefault} (local default; .env files are unchanged).`,
-    );
+    const { variable, localDefault } = selected.connection;
+    // The dotenv pair `setu new --broker` writes, appended here only where the
+    // variable is absent: an existing value (or a file the project removed) is the
+    // developer's, and a re-add finds the row and writes nothing.
+    // The file the app loads, read from its configuration: the last listed one,
+    // because ConfigPlugin lets an earlier file override a later one, so a value
+    // written there never shadows one the developer set. A project with no
+    // configuration keeps the `.env` convention; a configuration that loads no
+    // dotenv file, or names it in a way the CLI cannot read, gets no guess.
+    const declaration =
+      configText !== undefined
+        ? envFileDeclaration(configText)
+        : configUnreadable
+          ? ({ kind: 'unread' } as const)
+          : ({ kind: 'paths', paths: ['.env'] } as const);
+    const envFile =
+      declaration.kind === 'paths' ? declaration.paths[declaration.paths.length - 1] : undefined;
+    const updated: string[] = [];
+    const lacking: string[] = [];
+    if (envFile !== undefined) {
+      for (const [file, value] of [
+        [envFile, localDefault],
+        [`${envFile}.example`, ''],
+      ] as const) {
+        const path = joinPath(dir, file);
+        const text = await readProjectText(deps, path, file);
+        if (text === null) return EXIT_ERROR;
+        if (text === undefined) {
+          lacking.push(file);
+          continue;
+        }
+        const appended = withEnvVariable(text, brokerEnvVariables(selected), value);
+        if (appended === undefined) continue;
+        edits.push({ path, contents: appended });
+        updated.push(file);
+      }
+    }
+    deps.log(`Connection: ${variable} (local default ${localDefault}).`);
+    if (updated.length > 0) {
+      const verb = args.flags['dry-run'] === true ? 'Would add' : 'Added';
+      deps.log(`  ${verb} ${variable} to ${updated.join(' and ')}.`);
+    }
+    if (lacking.length > 0) {
+      deps.log(`  No ${lacking.join(' or ')} here; set ${variable} where the app reads it.`);
+    }
+    if (declaration.kind !== 'paths') {
+      const reason =
+        declaration.kind === 'absent'
+          ? `${CONFIG_MODULE} loads no dotenv file (no envFilePath)`
+          : declaration.kind === 'unread'
+            ? `${CONFIG_MODULE} could not be read`
+            : `${CONFIG_MODULE} names its dotenv file in a form the CLI cannot read`;
+      deps.log(`  ${reason}; set ${variable} where the app reads it.`);
+    }
     const composePath = joinPath(dir, BROKER_COMPOSE_FILE);
-    const existingCompose = await readExistingText(deps.fs, composePath);
+    const existingCompose = await readProjectText(deps, composePath, BROKER_COMPOSE_FILE);
+    if (existingCompose === null) return EXIT_ERROR;
     // Every file is create-only: an existing Compose file is never rewritten, so a
     // service it lacks is printed for the developer to add (PR #519 review).
     for (const file of brokerComposeFiles([selected])) {
@@ -1969,6 +2394,15 @@ export async function runAddCommand(
   if (!transportWritten && wiredArm === undefined)
     printWiringNote(configSource, bare, deps.log, seam, transportArgs);
   printNodeRedisImportNote(configSource, transport?.clients ?? [], deps.log);
+  if (bare === 'telemetry-plugin' && runtime === 'node' && inferredClient !== undefined) {
+    deps.log(
+      `  To trace ${inferredClient}, pass instrumentations: { ${REDIS_INSTRUMENTATION[inferredClient].option}: true }` +
+        " with exporter: 'otlp' and the collector's endpoint.",
+    );
+    deps.log(
+      '  The start scripts run ./instrumentation.mjs first, which is what lets those spans record.',
+    );
+  }
   if (bare === 'cloudflare-plugin') {
     // M113d §3.8: the generated factory names its second parameter `_waitUntil`
     // while nothing reads it (a read-free parameter must be underscored to pass
@@ -1984,6 +2418,66 @@ export async function runAddCommand(
   if (runtime === 'deno') printPermissionNote(specifier, deps.log);
   await reportAgentsHint(deps, dir, runtime);
   return EXIT_OK;
+}
+
+/**
+ * Appends a connection variable's dotenv row to an existing file, unless the file
+ * already assigns it.
+ *
+ * Mirrors what `setu new --broker` writes (the description comment, then
+ * `NAME=value`) and never touches an existing assignment, commented or not — so a
+ * value the developer changed survives and a re-add writes nothing.
+ *
+ * @param text - The current file contents
+ * @param variables - The connection variable row (empty for an arm without one)
+ * @param value - The value to write: the local default, or empty for the example
+ * @returns The new contents, or undefined when there is nothing to add
+ */
+export function withEnvVariable(
+  text: string,
+  variables: readonly EnvVariable[],
+  value: string,
+): string | undefined {
+  const variable = variables[0];
+  if (variable === undefined) return undefined;
+  // A line scan, not a regular expression built from the name: nothing here can
+  // backtrack, whatever a developer's file holds. A leading BOM is ignored.
+  const assigns = (line: string): boolean => {
+    let rest = line.trimStart();
+    if (rest.startsWith('#')) rest = rest.slice(1).trimStart();
+    if (/^export[ \t]/.test(rest)) rest = rest.slice('export'.length).trimStart();
+    return (
+      rest.startsWith(variable.name) && rest.slice(variable.name.length).trimStart().startsWith('=')
+    );
+  };
+  if (
+    text
+      .replace(/^\uFEFF/, '')
+      .split(/\r?\n/)
+      .some(assigns)
+  )
+    return undefined;
+  const newline = text.includes('\r\n') ? '\r\n' : '\n';
+  const separator = text === '' || text.endsWith('\n') ? '' : newline;
+  return `${text}${separator}${newline}# ${variable.description}${newline}${variable.name}=${value}${newline}`;
+}
+
+/**
+ * An existing project file's text, `undefined` when it is absent, or `null` after
+ * reporting why it cannot be used (unreadable, not UTF-8, over 1 MiB), so the
+ * command fails with its error code before anything is written.
+ */
+async function readProjectText(
+  deps: AddCommandDependencies,
+  path: string,
+  name: string,
+): Promise<string | undefined | null> {
+  try {
+    return await readExistingText(deps.fs, path);
+  } catch (cause) {
+    deps.error(`Cannot read ${escapeName(name)}: ${escapeName(String(cause))}`);
+    return null;
+  }
 }
 
 /** An add is successful even when its advisory brief reminder cannot be read. */
@@ -2107,8 +2601,12 @@ function printAddHelp(log: (message: string) => void): void {
   log("that added it — so a project's framework packages stay on one version.");
   log('');
   log('Standalone: add messaging --broker <name> or add queue --queue <name>.');
-  log('Redis arms: --redis-client <ioredis|node-redis> (default ioredis).');
-  log('Workspace members use their workspace transport; existing configuration is preserved.');
+  log('Redis arms: add cache --store redis, add idempotency --store redis,');
+  log('add scheduler --lock redis, add realtime-backplane --backplane redis.');
+  log('The client is inferred from the project (node-redis when it imports the');
+  log('generated helper, otherwise ioredis); --redis-client <ioredis|node-redis> is');
+  log('accepted only with a Redis arm and must agree with the inference.');
+  log('Workspace members use their workspace broker; existing configuration is preserved.');
   log('add view writes its page controller to src/controllers/, or with --module <name> into');
   log('that module; a project with modules requires --module.');
   log('');

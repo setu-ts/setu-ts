@@ -62,10 +62,18 @@ export interface JwtVerifierDeps {
   readonly keySet: KeySetReader;
   readonly runtime: IRuntimeServices;
   readonly algorithms: ReadonlySet<IssuerAlgorithm>;
-  /** The `aud` value that must appear in the token. */
-  readonly audience: string;
+  /** The `aud` value, or list of values, one of which must appear in the token. */
+  readonly audience: string | readonly string[];
   readonly clockToleranceSec: number;
+  /**
+   * When `true`, require the RFC 9068 `at+jwt` (or `application/at+jwt`) JOSE
+   * header type before any key is looked up. Default `false`.
+   */
+  readonly requireAccessTokenType?: boolean;
 }
+
+/** The JOSE `typ` values RFC 9068 §4 accepts, lower-cased for comparison. */
+const ACCESS_TOKEN_TYPES: ReadonlySet<string> = new Set(['at+jwt', 'application/at+jwt']);
 
 const TEXT = new TextEncoder();
 
@@ -76,19 +84,22 @@ export class JwtVerifier {
   readonly #keySet: KeySetReader;
   readonly #runtime: IRuntimeServices;
   readonly #algorithms: ReadonlySet<IssuerAlgorithm>;
-  readonly #audience: string;
+  readonly #audiences: readonly string[];
   readonly #clockToleranceSec: number;
+  readonly #requireAccessTokenType: boolean;
   readonly #signatureVerifier: SignatureVerifier;
 
   /**
-   * @param deps - Key set, runtime, algorithm allowlist, audience, clock tolerance
+   * @param deps - Key set, runtime, algorithm allowlist, audience(s), clock
+   *   tolerance, and the optional RFC 9068 `typ` requirement
    */
   constructor(deps: JwtVerifierDeps) {
     this.#keySet = deps.keySet;
     this.#runtime = deps.runtime;
     this.#algorithms = deps.algorithms;
-    this.#audience = deps.audience;
+    this.#audiences = typeof deps.audience === 'string' ? [deps.audience] : deps.audience;
     this.#clockToleranceSec = deps.clockToleranceSec;
+    this.#requireAccessTokenType = deps.requireAccessTokenType ?? false;
     this.#signatureVerifier = new SignatureVerifier(deps.runtime.subtle);
   }
 
@@ -132,6 +143,12 @@ export class JwtVerifier {
       return { ok: false, reason: 'malformed-header' };
     }
     const kid = header.kid;
+    if (this.#requireAccessTokenType) {
+      const typ = header.typ;
+      if (typeof typ !== 'string' || !ACCESS_TOKEN_TYPES.has(typ.toLowerCase())) {
+        return { ok: false, reason: 'typ-mismatch' };
+      }
+    }
 
     let keys = await this.#keySet.keys();
     if (keys === null) {
@@ -169,8 +186,12 @@ export class JwtVerifier {
 
   #checkClaims(payload: Record<string, unknown>): string | null {
     const aud = payload.aud;
-    const audiences = Array.isArray(aud) ? aud : [aud];
-    if (!audiences.includes(this.#audience)) {
+    const audiences: readonly unknown[] = Array.isArray(aud) ? aud : [aud];
+    if (
+      !audiences.some(
+        (audience) => typeof audience === 'string' && this.#audiences.includes(audience),
+      )
+    ) {
       return 'audience-mismatch';
     }
     const now = this.#runtime.now() / 1000;

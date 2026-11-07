@@ -2,6 +2,9 @@
 export const EXAMPLES = [
   'minimal',
   'rest-api',
+  'mcp-tools',
+  'semantic-search',
+  'durable-agent',
   'database',
   'di-decorators',
   'cqrs',
@@ -19,6 +22,8 @@ export type ExampleName = (typeof EXAMPLES)[number];
 
 /** Repository-dependent examples and the supported way to start instead. */
 export const EXCLUDED_EXAMPLES: Readonly<Record<string, string>> = {
+  'ai-chat':
+    'proves in-repository AI recipes against the new quota surface; use --template rest and follow the AI guide, or run it in the repository',
   'full-stack': 'uses repository scripts and package source; use --template full-stack',
   'compiled-binary':
     'uses repository build scripts; use --template rest or run it in the repository',
@@ -28,6 +33,8 @@ export const EXCLUDED_EXAMPLES: Readonly<Record<string, string>> = {
     'imports repository SDK source and scripts; use --template rest or run it in the repository',
   'plugin-development':
     'uses the repository test configuration; use --template rest or run it in the repository',
+  'grpc-workspace':
+    'is a multi-member workspace the CLI generates; use --workspace, then generate app billing --template microservice --rpc grpc for the member the others call',
 };
 
 /** Selects the nearest built-in template for download-failure guidance. */

@@ -12,7 +12,9 @@ import {
   deadlineRangeError,
   isConnectionFault,
   OptionalDependencyUnavailableError,
+  watchConnection,
 } from '@setu-ts/common';
+import type { ConnectionWatch } from '@setu-ts/common';
 import type { ConnectionErrorReporter, IRuntimeServices } from '@setu-ts/common';
 import { RateLimitStoreUnavailableError } from '../errors.ts';
 import type { RateLimitResult, RateLimitStore } from './rate-limit-store.ts';
@@ -68,14 +70,18 @@ export function validateClient(client: unknown): client is IRateLimitRedisClient
 
 /**
  * Resolve the Redis client: prefer injected client, then lazy-load ioredis.
- * The reporter is attached only to a client built here — an injected client
- * belongs to the caller.
+ *
+ * @param reporter - Receives the connection errors of BOTH the built and an
+ *   injected client (M131a X88-3): an injected node-redis client's outages must
+ *   be as visible as a built ioredis client's. The attach is structural, so a
+ *   client without `on` is left alone.
  */
 async function resolveClient(
   url: string,
   injectedClient: IRateLimitRedisClient | undefined,
   reporter: ConnectionErrorReporter | undefined,
   commandTimeoutMs: number,
+  onWatch: (watch: ConnectionWatch) => void,
 ): Promise<IRateLimitRedisClient> {
   if (injectedClient !== undefined) {
     if (!validateClient(injectedClient)) {
@@ -84,6 +90,8 @@ async function resolveClient(
           '(needs: incr, pexpire, pttl, del, quit)',
       );
     }
+    // Detached on disconnect: an injected client outlives this plugin.
+    onWatch(watchConnection(injectedClient, reporter));
     return injectedClient;
   }
   const RedisCtor = await loadIoredis();
@@ -113,12 +121,18 @@ export const DEFAULT_RATE_LIMIT_KEY_PREFIX = 'setu:ratelimit:';
  * Redis-backed rate limit store implementation.
  *
  * Uses INCR (creates if missing) + PEXPIRE on first increment, then PTTL to
- * derive resetTime. The store holds the runtime clock because PTTL returns a
- * relative ms-remaining value, while the contract's RateLimitResult.resetTime
- * must be an absolute epoch-ms timestamp.
+ * derive resetTime. A key found without a TTL (`PTTL` returns `-1`, or `-2`
+ * when it vanished between commands) is re-armed with a fresh window rather
+ * than left to answer 429 for ever. The store holds the runtime clock because
+ * PTTL returns a relative ms-remaining value, while the contract's
+ * RateLimitResult.resetTime must be an absolute epoch-ms timestamp.
  */
 export class RedisRateLimitStore implements RateLimitStore {
   #client: IRateLimitRedisClient | null = null;
+  /** The reporter on an injected client; detached on disconnect. */
+  #watch: ConnectionWatch | undefined;
+  /** The in-flight first resolution, shared by concurrent first requests. */
+  #resolving: Promise<IRateLimitRedisClient> | undefined;
   #url: string;
   #injectedClient: IRateLimitRedisClient | undefined;
   #runtime: IRuntimeServices;
@@ -150,10 +164,10 @@ export class RedisRateLimitStore implements RateLimitStore {
      */
     keyPrefix?: string | undefined;
     /**
-     * Receives the connection errors (`ioredis` `'error'` events) of the
-     * client this store BUILDS, instead of `ioredis` printing each reconnect
-     * failure to the console. Never attached to an injected `client`, which
-     * belongs to the caller. This store is constructed by the application,
+     * Receives the connection errors (`'error'` events) of the client this
+     * store uses, instead of `ioredis` printing each reconnect failure to the
+     * console. Since 0.12.0 it is attached to an injected `client` too, and
+     * detached again on `disconnect()`. This store is constructed by the application,
      * so no plugin supplies one: build it with `createConnectionErrorReporter`
      * from `@setu-ts/common` over your logger. Absent, the built client's
      * connection errors are dropped: nothing reaches the console or a log.
@@ -188,12 +202,21 @@ export class RedisRateLimitStore implements RateLimitStore {
     if (this.#client !== null) {
       return this.#client;
     }
-    this.#client = await resolveClient(
+    // Concurrent first requests share one resolution: each would otherwise
+    // build a client, or attach one more listener pair to an injected one (N-3).
+    this.#resolving ??= resolveClient(
       this.#url,
       this.#injectedClient,
       this.#reporter,
       this.#commandTimeoutMs,
-    );
+      (watch) => {
+        this.#watch?.detach();
+        this.#watch = watch;
+      },
+    ).finally(() => {
+      this.#resolving = undefined;
+    });
+    this.#client = await this.#resolving;
     return this.#client;
   }
 
@@ -211,9 +234,18 @@ export class RedisRateLimitStore implements RateLimitStore {
         await client.pexpire(namespaced, windowMs);
       }
 
-      // PTTL returns time-to-live in ms (relative); convert to absolute resetTime
+      // PTTL returns time-to-live in ms (relative); convert to absolute resetTime.
+      // `-1` means the key has no expiry and `-2` that it vanished between
+      // commands. A key left without a TTL (a refused or lost PEXPIRE) would
+      // otherwise answer 429 for ever, so the store re-arms the window instead.
       const pttl = await client.pttl(namespaced);
-      const resetTime = now + pttl;
+      let resetTime: number;
+      if (pttl < 0) {
+        await client.pexpire(namespaced, windowMs);
+        resetTime = now + windowMs;
+      } else {
+        resetTime = now + pttl;
+      }
 
       return { count, resetTime };
     } catch (error) {
@@ -234,9 +266,19 @@ export class RedisRateLimitStore implements RateLimitStore {
    * Close the Redis connection (calls QUIT).
    */
   async disconnect(): Promise<void> {
-    if (this.#client !== null) {
-      await this.#client.quit();
-      this.#client = null;
+    // Detached only after QUIT, in a finally: an ioredis client with no
+    // 'error' listener prints QUIT's EPIPE on an unreachable server to the
+    // console (M131a re-audit N-4), and a shared injected client must not report
+    // into this stopped component afterwards.
+    const watch = this.#watch;
+    this.#watch = undefined;
+    try {
+      if (this.#client !== null) {
+        await this.#client.quit();
+        this.#client = null;
+      }
+    } finally {
+      watch?.detach();
     }
   }
 }

@@ -14,6 +14,7 @@ describe('agent brief byte budgets', () => {
     for (const runtime of TARGET_RUNTIMES) {
       const compositions: ReadonlySet<string>[] = [
         new Set(),
+        new Set(['@setu-ts/agent-runs-plugin']),
         new Set([...ADDABLE.values()].map((p) => p.pkg)),
       ];
       for (const template of ['rest', 'class-based', 'microservice', 'full-stack']) {
@@ -40,6 +41,11 @@ describe('agent brief byte budgets', () => {
               'start:dev',
               'start:debug',
               'check',
+              'lint',
+              'format',
+              'format:check',
+              'client',
+              'client:check',
               'test',
               'test:e2e',
               'dev',
@@ -55,12 +61,12 @@ describe('agent brief byte budgets', () => {
           });
           const label = `${runtime}/${style}/${installed.size}`;
           expect(new TextEncoder().encode(renderBrief(facts)).length, label).toBeLessThanOrEqual(
-            12288,
+            13312,
           );
           expect(
             new TextEncoder().encode(renderBrief(facts, true)).length,
             label,
-          ).toBeLessThanOrEqual(12288);
+          ).toBeLessThanOrEqual(13312);
         }
       }
       expect(
@@ -70,7 +76,7 @@ describe('agent brief byte budgets', () => {
               runtime,
               version: 1,
               basePort: 3000,
-              transport: 'http',
+              broker: 'memory',
               members: [
                 { name: 'orders', port: 3000 },
                 { name: 'billing', port: 3001 },

@@ -93,9 +93,9 @@ describe('M113i review regressions', () => {
           '--workspace',
           '--runtime',
           'deno',
-          '--transport',
+          '--broker',
           'redis',
-          '--transport-url',
+          '--broker-url',
           url,
         ]),
         deps,
@@ -107,10 +107,12 @@ describe('M113i review regressions', () => {
         cwd: '/work/acme',
       }),
     ).toBe(0);
-    const config = fs.read('/work/acme/apps/orders/setu.config.ts');
-    expect(config).toContain(url);
-    expect(config).toContain("adapter: 'redis'");
-    expect(config).toContain('processors: [...QUEUE_PROCESSORS]');
+    const module = fs.read('/work/acme/apps/orders/src/transport/index.ts');
+    expect(module).toContain(url);
+    expect(module).toContain("adapter: 'redis'");
+    expect(fs.read('/work/acme/apps/orders/setu.config.ts')).toContain(
+      'processors: [...QUEUE_PROCESSORS], ...queueOptions()',
+    );
   });
 
   it('refuses a directory at new main.ts without reading it in a dry run', async () => {
@@ -165,7 +167,7 @@ describe('M113i review regressions', () => {
   });
 
   for (const [runtime, invocation] of [
-    ['deno', `deno run -A npm:@setu-ts/cli@${VERSION}`],
+    ['deno', `deno run -A --no-lock npm:@setu-ts/cli@${VERSION}`],
     ['node', `npx @setu-ts/cli@${VERSION}`],
     ['bun', `bunx @setu-ts/cli@${VERSION}`],
     ['cloudflare-workers', `npx @setu-ts/cli@${VERSION}`],
@@ -187,12 +189,14 @@ describe('M113i review regressions', () => {
           error: error.sink,
         }),
       ).toBe(2);
-      expect(error.text()).toContain(`\`deno run -A npm:@setu-ts/cli@${VERSION} devtool enable\``);
+      expect(error.text()).toContain(
+        `\`deno run -A --no-lock npm:@setu-ts/cli@${VERSION} devtool enable\``,
+      );
     });
     it(`pins generated middleware guidance for ${runtime}`, () => {
       const files = projectFiles('shop', runtime, resolveHost(getTemplate('full-stack')!, runtime));
       expect(
-        files.find((file) => file.path === 'app/middleware/require-user.server.ts')!.contents,
+        files.find((file) => file.path === 'app/server/require-user.server.ts')!.contents,
       ).toContain(`\`${invocation} generate middleware <name>\``);
     });
   }

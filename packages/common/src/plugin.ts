@@ -426,6 +426,16 @@ export interface StartOptions {
   readonly hostname?: string;
 }
 
+/** Options for in-process dispatch through the application's request pipeline.
+ * @since 0.12.0
+ */
+export interface DispatchOptions {
+  /** Caller-reported peer for in-process code; this is not a verified socket address. */
+  readonly ip?: string;
+  /** Required registered route pattern; a different match answers 404 before route middleware. */
+  readonly route?: string;
+}
+
 /**
  * The application: registers plugins, owns the router and middleware
  * pipeline, and manages the server lifecycle.
@@ -468,6 +478,17 @@ export interface IApplication {
    * @returns A web-standard `Response`
    */
   fetch(request: Request): Promise<Response>;
+  /**
+   * Runs a web request through the full pipeline without an HTTP adapter.
+   * A fresh request context is created; identity comes from normal authentication.
+   * Streaming responses retain deferred cleanup until completion or cancellation.
+   * Grants nothing a local HTTP request could not do; the optional IP is caller-reported.
+   * @param request - Request whose signal and body are preserved
+   * @param options - Optional reported peer and required registered route pattern
+   * @returns The pipeline's web response
+   * @since 0.12.0
+   */
+  dispatch?(request: Request, options?: DispatchOptions): Promise<Response>;
   /**
    * Read-only kernel diagnostics reader, present ONLY when the application was
    * created with diagnostics explicitly enabled; the property is absent (and

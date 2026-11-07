@@ -681,7 +681,7 @@ describe('real-backend CI wiring', () => {
       expect(text).toContain(
         'MONGODB_RS_URI: mongodb://127.0.0.1:27018/?replicaSet=rs0&directConnection=true',
       );
-      expect(text).toMatch(/\n {6}postgres:\n {8}image: postgres:16\n/);
+      expect(text).toMatch(/\n {6}postgres:\n {8}image: pgvector\/pgvector:0\.8\.1-pg16\n/);
       expect(text).toContain('POSTGRES_PASSWORD: postgres');
       expect(text).toContain('- 127.0.0.1:5433:5432');
       expect(text).toContain('--health-cmd "pg_isready -U postgres"');
@@ -866,15 +866,17 @@ describe('M111c npm workflow boundaries', () => {
     const text = await readFile('.github/workflows/release.yml', 'utf8');
     const jobs = '\n' + text.split('\njobs:\n')[1];
     expect(text.split('\njobs:\n')[0]).not.toContain('id-token: write');
-    expect([...jobs.matchAll(/^ {2}([a-z]+):$/gm)].map((m) => m[1])).toEqual([
+    expect([...jobs.matchAll(/^ {2}([a-z-]+):$/gm)].map((m) => m[1])).toEqual([
       'gates',
+      'cli-coverage',
       'publish',
       'release',
     ]);
     const publish = jobs.split('\n  publish:')[1].split('\n  release:')[0];
     expect(text.match(/id-token: write/g)).toHaveLength(1);
     for (const fragment of [
-      'needs: gates',
+      // Every gate shard and the merged CLI coverage, so no partial run publishes.
+      'needs: [gates, cli-coverage]',
       'environment: npm',
       'contents: read',
       'id-token: write',
@@ -904,7 +906,7 @@ describe('M111c npm workflow boundaries', () => {
     expect(text).not.toMatch(/dry_run|inputs\./);
     expect(publish).not.toContain('--dry-run');
     expect(gates).toMatch(
-      /if: github\.event_name == 'workflow_dispatch'\n\s+run: pnpm run release:publish --dry-run/,
+      /if: matrix\.shard == 'release-checks' && github\.event_name == 'workflow_dispatch'\n\s+run: pnpm run release:publish --dry-run/,
     );
   });
   it('pins every action in the release workflow to a full commit SHA', () => {
@@ -1090,9 +1092,26 @@ describe('M111c declared artifact coverage', () => {
         async (dir: string) => JSON.parse(await readFile(`${dir}/package.json`, 'utf8')).name,
       ),
     );
-    expect(Object.keys(compat.dependencies).sort()).toEqual(expected.sort());
-    expect(expected).toHaveLength(52);
-    expect(Object.values(compat.dependencies).every((range) => range === 'latest')).toBe(true);
+    // A package between its introduction and its first publish cannot be
+    // installed from npm, so the compat suite lists it as pending instead.
+    const pendingSource = await readFile('compat/compat.test.mjs', 'utf8');
+    const pending = [
+      ...(/const PENDING_FIRST_PUBLISH = \[([^\]]*)\]/.exec(pendingSource)?.[1] ?? '').matchAll(
+        /'([^']+)'/g,
+      ),
+    ].map((match) => match[1]);
+    const installable = expected.filter((name) => !pending.includes(name));
+    expect(Object.keys(compat.dependencies).sort()).toEqual(
+      [...installable, '@modelcontextprotocol/server'].sort(),
+    );
+    expect(expected).toHaveLength(55);
+    expect(pending).toEqual([
+      '@setu-ts/mcp-plugin',
+      '@setu-ts/vector-store-plugin',
+      '@setu-ts/agent-runs-plugin',
+    ]);
+    expect(installable.every((name) => compat.dependencies[name] === 'latest')).toBe(true);
+    expect(compat.dependencies['@modelcontextprotocol/server']).toBe('^2.4.0');
     expect(workspace.scripts['release:publish']).toBe('node scripts/npm-publish.ts');
     expect(workspace.scripts['release:placeholders']).toBe(
       'node scripts/write-npm-placeholders.ts',
@@ -1193,6 +1212,49 @@ describe('Node app gate execution', () => {
       expect(await checkApps(root, runner)).toBe(true);
       await rm(`${root}/apps/a/package.json`);
       expect(await checkApps(root, runner)).toBe(true);
+    } finally {
+      diagnostics.forEach((spy) => spy.mockRestore());
+      await rm(root, { recursive: true });
+    }
+  });
+
+  it('keeps a nested workspace container a single app unit', async () => {
+    // The container's root manifest is what makes it a unit: check and smoke
+    // run once each, in the container's directory — never inside a nested
+    // member or library.
+    const root = await tempDir({ prefix: 'app-gate-nested-' });
+    const diagnostics = [
+      vi.spyOn(console, 'log').mockImplementation(() => {}),
+      vi.spyOn(console, 'warn').mockImplementation(() => {}),
+      vi.spyOn(console, 'error').mockImplementation(() => {}),
+    ];
+    try {
+      await writeFile(
+        `${root}/pnpm-workspace.yaml`,
+        'packages: [apps/*, apps/outer/apps/*, apps/outer/libs/*]',
+      );
+      await mkdir(`${root}/apps/outer/apps/member`, { recursive: true });
+      await mkdir(`${root}/apps/outer/libs/library`, { recursive: true });
+      for (const path of [
+        `${root}/apps/outer/package.json`,
+        `${root}/apps/outer/apps/member/package.json`,
+        `${root}/apps/outer/libs/library/package.json`,
+      ]) {
+        await writeFile(path, JSON.stringify({ scripts: { start: 'x', smoke: 'y' } }));
+      }
+      const runs: string[][] = [];
+      const directories: string[] = [];
+      const runner = (args: readonly string[], cwd: string) => {
+        runs.push([...args]);
+        directories.push(cwd);
+        return Promise.resolve({ code: 0, success: true });
+      };
+      expect(await checkApps(root, runner)).toBe(false);
+      expect(runs).toEqual([
+        ['pnpm', 'run', 'check'],
+        ['pnpm', 'run', 'smoke'],
+      ]);
+      expect(directories).toEqual([`${root}/apps/outer`, `${root}/apps/outer`]);
     } finally {
       diagnostics.forEach((spy) => spy.mockRestore());
       await rm(root, { recursive: true });

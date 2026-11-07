@@ -102,6 +102,12 @@ export class UnsupportedIsolationLevelError extends Error {
  * decides otherwise, so a mistake here can never invent a caller-facing status
  * for an internal fault. Un-branding is never a regression; branding is.
  */
+/**
+ * The caller-input refusal of a conditional write, answered `400` rather than
+ * the `501` of an unsupported query shape (M128 audit L2).
+ */
+const WRITE_PRECONDITION = 'write-precondition';
+
 const QUERY_SHAPE_FEATURES: ReadonlySet<string> = new Set([
   'attribute-value',
   'composite-key',
@@ -282,6 +288,13 @@ export class UnsupportedMigrationError extends Error {
  * refusal reachable from a `Promise`-returning method rejects rather than
  * throwing synchronously.
  *
+ * The feature `'write-precondition'` is the one caller-INPUT refusal (an
+ * invalid conditional-write predicate or payload, an expected version that is
+ * not a non-negative safe integer, a tenant-scoped precondition naming the
+ * tenant column): it answers `400 Bad Request` with a fixed detail (M128),
+ * since the input usually comes from the request — a version read from a
+ * query string, say.
+ *
  * @example
  * ```typescript
  * import { UnsupportedQueryFeatureError } from '@setu-ts/database-plugin';
@@ -321,7 +334,13 @@ export class UnsupportedQueryFeatureError extends Error {
     // Branded only for a caller-caused query shape — see
     // `QUERY_SHAPE_FEATURES`. A configuration or deployment refusal keeps the
     // masked `500` that is correct for an internal fault.
-    if (QUERY_SHAPE_FEATURES.has(feature)) {
+    if (feature === WRITE_PRECONDITION) {
+      withHttpStatusHint(this, {
+        status: 400,
+        title: 'Bad Request',
+        detail: 'The write precondition or its payload is invalid.',
+      });
+    } else if (QUERY_SHAPE_FEATURES.has(feature)) {
       withHttpStatusHint(this, {
         ...NOT_IMPLEMENTED,
         detail: `Query feature '${feature}' is not supported by the '${adapter}' database adapter.`,
@@ -613,6 +632,93 @@ export class DatabaseTimeoutError extends Error {
       status: 504,
       title: 'Gateway Timeout',
       detail: 'The database did not answer in time.',
+    });
+  }
+}
+
+/**
+ * Thrown by {@linkcode updateVersioned} and {@linkcode deleteVersioned} when
+ * the record exists but its version no longer matches the one the caller
+ * read: another write changed it in between (M128). Nothing was written.
+ *
+ * The condition reaches the client as `409 Conflict`. The served `detail` is
+ * a fixed sentence; the entity, when the caller named it, is on
+ * {@linkcode VersionConflictError.entity} and in the logged `message`, and no
+ * id or version value appears in either.
+ *
+ * @example
+ * ```typescript
+ * import { updateVersioned, VersionConflictError } from '@setu-ts/database-plugin';
+ * try {
+ *   await updateVersioned(repo, id, body.version, { title: body.title }, { entity: 'Article' });
+ * } catch (err) {
+ *   if (err instanceof VersionConflictError) {
+ *     // Reload the record and let the user reapply the change.
+ *   }
+ * }
+ * ```
+ * @since 0.12.0
+ */
+export class VersionConflictError extends Error {
+  /** Discriminant for consumers that cannot use `instanceof` across realms. */
+  override readonly name = 'VersionConflictError';
+
+  /** The entity the write targeted, when the caller named it. */
+  readonly entity: string | undefined;
+
+  /**
+   * @param message - The full diagnostic, safe to log, never served
+   * @param options - The entity the write targeted
+   */
+  constructor(message: string, options?: { entity?: string }) {
+    super(message);
+    this.entity = options?.entity;
+    withHttpStatusHint(this, {
+      ...CONFLICT,
+      detail: 'The record was changed after it was read. Reload it and try again.',
+    });
+  }
+}
+
+/**
+ * Thrown by {@linkcode updateVersioned} and {@linkcode deleteVersioned} when
+ * the record does not exist (M128). Nothing was written.
+ *
+ * The condition reaches the client as `404 Not Found`, with a fixed served
+ * `detail`; the entity, when named, is on
+ * {@linkcode EntityNotFoundError.entity} and in the logged `message`.
+ *
+ * @example
+ * ```typescript
+ * import { deleteVersioned, EntityNotFoundError } from '@setu-ts/database-plugin';
+ * try {
+ *   await deleteVersioned(repo, id, version);
+ * } catch (err) {
+ *   if (err instanceof EntityNotFoundError) {
+ *     // Already gone.
+ *   }
+ * }
+ * ```
+ * @since 0.12.0
+ */
+export class EntityNotFoundError extends Error {
+  /** Discriminant for consumers that cannot use `instanceof` across realms. */
+  override readonly name = 'EntityNotFoundError';
+
+  /** The entity the write targeted, when the caller named it. */
+  readonly entity: string | undefined;
+
+  /**
+   * @param message - The full diagnostic, safe to log, never served
+   * @param options - The entity the write targeted
+   */
+  constructor(message: string, options?: { entity?: string }) {
+    super(message);
+    this.entity = options?.entity;
+    withHttpStatusHint(this, {
+      status: 404,
+      title: 'Not Found',
+      detail: 'The record does not exist.',
     });
   }
 }

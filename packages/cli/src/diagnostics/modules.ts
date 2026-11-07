@@ -19,7 +19,13 @@ export function withoutImports(code: string | undefined): string | undefined {
   let kept = '';
   let copied = 0;
   let open = -1;
-  for (const token of code.matchAll(/\bimport\b|\bfrom\b|;/g)) {
+  // Only `import` followed by `{`, `*` or a binding opens a declaration: a
+  // side-effect `import 'x'`, `import.meta` and `import(` have no `from`, and in
+  // code without semicolons would otherwise swallow everything up to a later
+  // `.from(` (M131c review). The lookahead stays on the `import` line — the
+  // code mask blanks a side-effect specifier to spaces — and reads only blanks,
+  // so the scan stays linear.
+  for (const token of code.matchAll(/\bimport\b(?=[ \t]*[{*A-Za-z_$])|\bfrom\b|;/g)) {
     if (token[0] === ';') open = -1;
     else if (token[0] === 'import') open = open < 0 ? token.index : open;
     else if (open >= 0) {

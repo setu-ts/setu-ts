@@ -182,10 +182,22 @@ export interface TrustedIssuer {
   readonly name: string;
   /** Exact `iss` value this entry accepts. */
   readonly issuer: string;
-  /** Audience that must appear in the token's `aud` claim. */
-  readonly audience: string;
+  /**
+   * Audience, or list of audiences, one of which must appear in the token's
+   * `aud` claim. This IS the RFC 8707 / MCP "issued for me" check: it should
+   * name what the authorization server stamps for this resource. It need not
+   * be a URL — Entra issues `api://<guid>` or app-id audiences and Auth0 an
+   * API identifier.
+   */
+  readonly audience: string | readonly string[];
   /** Key-set source. */
   readonly keys: IssuerKeySource;
+  /**
+   * When `true`, refuse a token whose JOSE header `typ` is not `at+jwt` or
+   * `application/at+jwt` (ASCII-case-insensitive), before any key is looked
+   * up (RFC 9068 §4). Default `false`: not every provider stamps it.
+   */
+  readonly requireAccessTokenType?: boolean;
   /** Algorithm allowlist. Defaults to all five supported algorithms. */
   readonly algorithms?: readonly IssuerAlgorithm[];
   /** Clock tolerance for `exp`/`nbf`/`iat`, in seconds, `0`–`300`. Default `30`. */
@@ -273,6 +285,34 @@ export interface IAuthHttp {
 }
 
 /**
+ * OAuth 2.0 resource-server configuration (M132): the RFC 9728 protected
+ * resource metadata document and the `resource_metadata` challenge parameter.
+ *
+ * The resource identifier comes from configuration, never from a request's
+ * `Host` or forwarded headers, so a spoofed host cannot make the server
+ * publish metadata naming another resource.
+ *
+ * @since 0.12.0
+ */
+export interface ResourceServerOptions {
+  /**
+   * The resource identifier clients address. Must be `https`, or `http` on a
+   * loopback host, and carry no query, fragment or userinfo. Published verbatim
+   * as the document's `resource` and used to derive the metadata path.
+   */
+  readonly resource: string;
+  /**
+   * Authorization-server issuer identifiers. Defaults to the distinct `issuer`
+   * values of `issuers`; omitted from the document when empty.
+   */
+  readonly authorizationServers?: readonly string[];
+  /** OAuth scopes the resource understands. Omitted from the document when absent or empty. */
+  readonly scopesSupported?: readonly string[];
+  /** Human-readable resource name. Omitted from the document when absent. */
+  readonly resourceName?: string;
+}
+
+/**
  * Auth plugin configuration options.
  *
  * @since 0.1.0
@@ -345,6 +385,12 @@ export interface AuthPluginOptions {
    * health indicator reporting each issuer's cached key-set state.
    */
   readonly issuers?: readonly TrustedIssuer[];
+  /**
+   * OAuth 2.0 resource-server metadata (M132). When present, the plugin serves
+   * the RFC 9728 protected-resource document at its well-known path and adds
+   * the `resource_metadata` parameter to every Bearer challenge.
+   */
+  readonly resourceServer?: ResourceServerOptions;
   /**
    * Sign-in with an outside provider (M100c). Registers the sign-in routes, the
    * `auth-session` authentication strategy, and `CAPABILITIES.AUTH_SESSION`, and
@@ -619,8 +665,12 @@ export type RefreshPrincipal = (
  *
  * `IAuthSessionService.signIn` records a SHA-256 digest of the value; every
  * request compares the digest of the current value with it in constant time. A
- * different value, a throw, or anything other than a string or `null` makes the
- * request anonymous. `null` means the user has no stamp, and matches only a
+ * different value deletes the HTTP auth record and regenerates its session.
+ * A throw or malformed value only suspends this request without mutation.
+ * Revocation happens when the old cookie is next presented, so the value must
+ * only move forward: restoring an old value revives sessions not yet presented
+ * and copied encrypted-cookie sessions. Read-only callers remain suspension-only.
+ * `null` means the user has no stamp, and matches only a
  * session recorded with none.
  *
  * Called with the principal the request resolved — the session snapshot, or
@@ -649,6 +699,13 @@ export interface RequireAuthOptions {
    * always answered 401, so a guarded sign-in page cannot loop.
    */
   readonly signInPage?: string;
+  /**
+   * How a delegated token (one carrying an RFC 8693 `act` claim, surfaced as
+   * `principal.actor`) is treated. `'allow'` (the default) accepts both;
+   * `'forbid'` refuses a request whose principal has an actor; `'require'`
+   * refuses one whose principal has none. Both refusals are `403`.
+   */
+  readonly delegation?: 'allow' | 'forbid' | 'require';
 }
 
 /**
@@ -781,8 +838,11 @@ export interface SignInConfig {
   refreshPrincipal?: RefreshPrincipal;
   /**
    * Reads the user's current session stamp. Recorded at sign-in and compared on
-   * every request; changing the stamp on the user record ends every session
-   * the user holds. Absent, no stamp is recorded or compared. See
+   * every request. A definite mismatch deletes the HTTP auth record and
+   * regenerates the session when the old cookie is next presented; a reader fault
+   * only suspends that request. Move the stamp forward only: restoring an old
+   * value revives sessions not yet presented and copied encrypted-cookie
+   * sessions. Read-only fromHeaders callers remain suspension-only. Absent, no stamp is recorded or compared. See
    * {@linkcode SessionStamp}.
    *
    * @since 0.11.0

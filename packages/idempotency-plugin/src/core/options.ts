@@ -15,6 +15,7 @@ import type {
   IngressIdempotencyKeySource,
   IRedactionService,
   RedactionPolicy,
+  RouteIdempotencyMetadata,
 } from '@setu-ts/common';
 import { createRedactionService } from '@setu-ts/common';
 import {
@@ -657,4 +658,22 @@ export function resolveIngressOptions(
     topics: options.topics ?? [],
     jobNames: options.jobNames ?? [],
   };
+}
+
+/**
+ * The idempotency brand for a route option set: the header its key is read
+ * from, or none when the key comes from a body field or a function.
+ *
+ * @param options - The route options as the application passed them
+ * @returns The brand both `idempotent()` and the service's `middleware()` write
+ */
+export function routeIdempotencyMetadata(
+  options: IdempotentRouteOptions | undefined,
+): RouteIdempotencyMetadata {
+  const key = options?.key;
+  const required = options?.required ?? true;
+  if (key === undefined) return { idempotent: true, keyHeader: IDEMPOTENCY_KEY_HEADER, required };
+  if (typeof key === 'object' && 'header' in key)
+    return { idempotent: true, keyHeader: key.header, required };
+  return { idempotent: true, required };
 }

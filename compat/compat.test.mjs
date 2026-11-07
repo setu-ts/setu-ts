@@ -23,7 +23,11 @@ const host = typeof globalThis.Bun === 'undefined' ? 'node' : 'bun';
  * would deadlock the milestone PR that introduces it. Remove the entry once the
  * package ships. Anything else missing is a coverage hole and fails check 1.
  */
-const PENDING_FIRST_PUBLISH = [];
+const PENDING_FIRST_PUBLISH = [
+  '@setu-ts/mcp-plugin',
+  '@setu-ts/vector-store-plugin',
+  '@setu-ts/agent-runs-plugin',
+];
 
 let failures = 0;
 
@@ -154,6 +158,62 @@ check(
   failedToLoad.length === 0,
   failedToLoad.join('; '),
 );
+
+// M133: exercise the optional SDK and one tool call once the package is published.
+// While it is pending its first publish it is not installed, so the check waits.
+if (!PENDING_FIRST_PUBLISH.includes('@setu-ts/mcp-plugin')) {
+  try {
+    const { McpPlugin } = await import('@setu-ts/mcp-plugin');
+    const mcpApp = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        McpPlugin({
+          tools: [
+            {
+              name: 'compat_read',
+              description: 'Read compatibility value',
+              route: { method: 'GET', path: '/mcp-value' },
+            },
+          ],
+        }),
+      ],
+    });
+    mcpApp.router.get('/mcp-value', {
+      schema: { security: [] },
+      handler: (ctx) => ctx.response.json({ ok: true }),
+    });
+    await mcpApp.start();
+    try {
+      const response = await mcpApp.fetch(
+        new Request('http://localhost/mcp', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            accept: 'application/json, text/event-stream',
+          },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 1,
+            method: 'tools/call',
+            params: { name: 'compat_read', arguments: {} },
+          }),
+        }),
+      );
+      const text = await response.text();
+      const result = JSON.parse(
+        text.startsWith('event:') ? text.split('data: ')[1].split('\n')[0] : text,
+      );
+      check(
+        'mcp-plugin dispatches one tool through the published kernel',
+        result.result.content[0].text === '{"ok":true}',
+      );
+    } finally {
+      await mcpApp.stop();
+    }
+  } catch (error) {
+    check('mcp-plugin published tool call', false, String(error));
+  }
+}
 
 // 3. The entry points this suite drives directly are the documented shapes.
 check('kernel exports createApplication', typeof createApplication === 'function');

@@ -32,10 +32,12 @@ verified.
   request. Dot segments, backslashes, absolute-form and other target aliases are refused, never
   normalized into a served operation. Its parser has a 16 KiB header limit, 5 s header timeout, 10 s
   request timeout, 5 s keep-alive timeout and 1 s checking interval. At its 32-socket budget, a new
-  connection evicts the oldest non-busy socket (including partial requests and idle keep-alive
-  sockets); only when all 32 are busy is the newcomer closed. A socket stays busy until all its
-  responses finish or close, then moves to the back of the eviction order. Closing the listener
-  stops acceptance and destroys active connections.
+  connection evicts the oldest idle untrusted socket (including partial requests), before any idle
+  trusted socket. Only a sent response below 400 establishes trust; the refusal table below reserves
+  such responses for MAC-verified requests. If no idle untrusted socket exists, the oldest idle
+  trusted socket is evicted. Only when all 32 are busy is the newcomer closed. A socket stays busy
+  until all its responses finish or close, then moves to the back of the eviction order. Closing the
+  listener stops acceptance and destroys active connections.
 - `Expect: 100-continue` and unknown expectations take the ordinary request path on both runtimes.
   Node handles `checkContinue` and `checkExpectation` explicitly, sending neither an interim
   `100 Continue` nor a native `417`; the usual zero-body, framing and protocol checks still apply.

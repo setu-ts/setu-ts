@@ -1,6 +1,6 @@
 {
   "name": "@setu-ts/graphql-plugin",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "description": "GraphQL over HTTP with subscriptions on WebSocket and SSE, batching, and persisted queries",
   "repository": {
     "type": "git",
@@ -48,6 +48,7 @@
     }
   },
   "devDependencies": {
+    "@setu-ts/exceptions": "workspace:^",
     "@setu-ts/health-plugin": "workspace:^",
     "@setu-ts/kernel": "workspace:^",
     "@setu-ts/runtime": "workspace:^",

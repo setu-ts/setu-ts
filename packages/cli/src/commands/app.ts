@@ -43,7 +43,7 @@ import {
   resolveHost,
   withEnvFile,
 } from '../templates/project-files.ts';
-import { resolveTemplateChoice } from '../templates/choice.ts';
+import { resolveTemplateChoice, type TemplateChoice } from '../templates/choice.ts';
 import { resolveLoggerChoice, withLogger } from '../templates/logger.ts';
 import { isCoveredDotenvName, readEnvFilePath } from '../templates/env-file.ts';
 import { listTemplates } from '../templates/registry.ts';
@@ -69,9 +69,12 @@ import { workspaceProfile, type WorkspaceRuntimeProfile } from '../workspace/run
 import type { PortProbe } from '../workspace/port-probe.ts';
 import { withWorkspaceMember } from '../workspace/member-host.ts';
 import { planRootNodeModulesDir, ROOT_MANIFEST } from '../workspace/root-manifest.ts';
-import { TRANSPORTS, type TransportSpec, transportSpec } from '../workspace/transport.ts';
+import { BROKERS, type BrokerSpec, brokerSpec } from '../workspace/transport.ts';
+import { RPC_ALIASES, RPC_STYLES, getRpc, rpcSpec, type RpcStyle } from '../workspace/rpc.ts';
+import { memberTransportModule } from '../workspace/rewire.ts';
 import {
   allocateDevtoolPort,
+  allocateDevPort,
   allocatePort,
   devtoolRangeStart,
   MAX_PORT,
@@ -104,6 +107,40 @@ export interface AppDependencies {
   readonly portAvailable?: PortProbe;
   /** Cooperative interruption signal checked at write boundaries. */
   readonly interrupt?: AbortSignal;
+}
+
+/**
+ * Reads and validates `--rpc`.
+ *
+ * `tcp` is refused by name rather than accepted as a synonym for `http`: this
+ * framework has no raw-TCP transport, and quietly handing back HTTP under another
+ * name would leave the user believing they chose something.
+ *
+ * @param flags - The parsed flags
+ * @returns The style (`http` when the flag is absent), or the refusal to print
+ */
+function readRpcFlag(
+  flags: Readonly<Record<string, string | boolean | readonly string[]>>,
+):
+  | { readonly ok: true; readonly style: RpcStyle }
+  | { readonly ok: false; readonly message: string } {
+  const raw = flags['rpc'];
+  if (raw === undefined) return { ok: true, style: 'http' };
+  if (typeof raw !== 'string') {
+    return { ok: false, message: `--rpc needs a value: ${RPC_STYLES.join(' | ')}.` };
+  }
+  const spec = getRpc(raw);
+  if (spec !== undefined) return { ok: true, style: spec.name };
+  const alias = Object.hasOwn(RPC_ALIASES, raw) ? RPC_ALIASES[raw] : undefined;
+  return {
+    ok: false,
+    message:
+      alias === undefined
+        ? `Unknown --rpc "${escapeName(raw)}". Expected one of: ${RPC_STYLES.join(', ')}.`
+        : `There is no raw ${raw} transport: every inter-service path here is HTTP over ` +
+          `${raw} or a broker client over ${raw}. Use --rpc ${alias} for direct calls ` +
+          `through the discovery map, or the workspace broker for messages.`,
+  };
 }
 
 /**
@@ -141,11 +178,15 @@ function printUsage(log: (message: string) => void): void {
   log('  --devtool-port <n>  The loopback port the connector binds (allocated by default)');
   log('  --env-file <path>   Store local configuration in this ignored relative path');
   log("  --depends-on <name> Wait for this sibling's /ready endpoint before starting this member");
+  log(
+    `  --rpc <style>       ${RPC_STYLES.join(' | ')} (default http): grpc co-serves Connect/gRPC`,
+  );
   log('  --dir <path>        The workspace root, instead of the working directory');
   log('  --dry-run           Print what would be created, write nothing');
   log('');
-  log(`The transport is the workspace's, recorded in ${WORKSPACE_MANIFEST}, and every member`);
-  log('inherits it — services can only talk over a bus they share.');
+  log(`The broker is the workspace's, recorded in ${WORKSPACE_MANIFEST}, and every member`);
+  log('inherits it — services can only talk over a bus they share. Change it for every');
+  log(`member with \`${PROGRAM_NAME} workspace broker <name>\`.`);
 }
 
 /**
@@ -193,11 +234,11 @@ function reportNoWorkspace(
     );
     return EXIT_ERROR;
   }
-  if (problem.kind === 'unknown-transport') {
+  if (problem.kind === 'unknown-broker') {
     error(
-      `${escapeName(joinPath(dir, WORKSPACE_MANIFEST))} names the transport "${escapeName(
-        String(problem.transport),
-      )}", ` + `which this CLI does not know. Expected one of: ${TRANSPORTS.join(', ')}.`,
+      `${escapeName(joinPath(dir, WORKSPACE_MANIFEST))} names the broker "${escapeName(
+        String(problem.broker),
+      )}", ` + `which this CLI does not know. Expected one of: ${BROKERS.join(', ')}.`,
     );
     error(
       'Refused rather than defaulted: quietly moving every member off the bus this workspace ' +
@@ -221,14 +262,16 @@ function reportNoWorkspace(
  *
  * @param name - The member's kebab-case name
  * @param next - The manifest as it will be after this member is added
- * @param args - The parsed arguments, read for `--template`
+ * @param args - The parsed environment and logger options
+ * @param choice - The already resolved template and style choice
  * @returns The planned files, or the usage refusal to print
  */
 function planMember(
   name: string,
   next: WorkspaceManifest,
   args: ParsedArgs,
-  transport: TransportSpec,
+  choice: Extract<TemplateChoice, { readonly ok: true }>,
+  broker: BrokerSpec,
   profile: WorkspaceRuntimeProfile,
   rootManifest: string,
   rootGitignore: string,
@@ -244,8 +287,6 @@ function planMember(
       readonly ok: false;
       readonly message: string;
     } {
-  const choice = resolveTemplateChoice(args);
-  if (!choice.ok) return { ok: false, message: choice.message };
   const envFile = readEnvFilePath(args.flags);
   if (!envFile.ok) return { ok: false, message: envFile.message };
 
@@ -296,12 +337,13 @@ function planMember(
   }
   const host = withWorkspaceMember(
     envHost,
-    transport,
+    broker,
+    rpcSpec(next.members.find((member) => member.name === name)?.rpc),
     name,
     profile,
     // Omitted rather than passed as `undefined`: `exactOptionalPropertyTypes` is
     // on, and the parameter is optional.
-    ...((next.transportUrl === undefined ? [] : [next.transportUrl]) as [string?]),
+    ...((next.brokerUrl === undefined ? [] : [next.brokerUrl]) as [string?]),
   );
   // A starter factory owns its construction, and kernel diagnostics reach the
   // constructor only — refused here, before anything is planned, because the
@@ -324,6 +366,9 @@ function planMember(
   const files: GeneratedFile[] = projectFiles(name, profile.runtime, devHost, {
     symbol: SERVICE_PORT_EXPORT,
     from: DISCOVERY_SPECIFIER,
+    ...(next.members.find((member) => member.name === name)?.inspectPort === undefined
+      ? {}
+      : { inspectPort: next.members.find((member) => member.name === name)!.inspectPort! }),
   }).map((file) => ({ ...file, path: joinPath(memberRoot, file.path) }));
 
   if (devtoolPort !== undefined && profile.runtime === 'node') {
@@ -354,8 +399,8 @@ function planMember(
   // Regenerated for the whole workspace on every member, exactly as the discovery
   // modules are: a stack that names two of three members is worse than none, and
   // the ports it publishes come from the same manifest the maps do.
-  for (const file of workspaceContainerFiles(next, transport, profile)) files.push(file);
-  for (const file of workspaceK8sFiles(next, transport)) files.push(file);
+  for (const file of workspaceContainerFiles(next, broker, profile)) files.push(file);
+  for (const file of workspaceK8sFiles(next, broker)) files.push(file);
 
   for (const file of extra) files.push(file);
 
@@ -400,48 +445,71 @@ export async function runAppCommand(args: ParsedArgs, deps: AppDependencies): Pr
     return EXIT_USAGE;
   }
 
-  // The transport belongs to the WORKSPACE: members can only meet on a bus they
+  // The broker belongs to the WORKSPACE: members can only meet on a bus they
   // share, so a per-member choice would make a workspace whose services cannot
   // reach each other expressible in one flag. The standalone broker flags get
   // the same refusal with their own reason — they configure ONE project, and a
-  // member inherits whatever the workspace already recorded.
-  for (const flag of ['transport', 'transport-url', 'broker', 'queue', 'redis-client'] as const) {
+  // member inherits whatever the workspace already recorded. `--transport` is
+  // the pre-M138 name, refused with the two flags that replaced it.
+  for (const flag of [
+    'transport',
+    'transport-url',
+    'broker',
+    'broker-url',
+    'queue',
+    'redis-client',
+  ] as const) {
     if (args.flags[flag] !== undefined) {
-      if (flag === 'broker' || flag === 'queue') {
+      if (flag === 'transport' || flag === 'transport-url') {
         deps.error(
-          `--${flag} selects a STANDALONE project's own backend; a workspace member inherits ` +
-            `the workspace's --transport instead.`,
+          `--${flag} no longer exists. A member chooses how it is called with --rpc ` +
+            `(${RPC_STYLES.join(' | ')}); the broker is the workspace's.`,
         );
         deps.error(
-          `This workspace already records its transport in ${WORKSPACE_MANIFEST}. To choose ` +
-            `this backend for one service, scaffold it outside the workspace with ` +
+          `This workspace records its broker in ${WORKSPACE_MANIFEST}; change it for every ` +
+            `member with \`${PROGRAM_NAME} workspace broker <name>\`.`,
+        );
+      } else if (flag === 'broker' || flag === 'queue') {
+        deps.error(
+          `--${flag} selects a STANDALONE project's own backend; a workspace member inherits ` +
+            `the workspace's broker instead.`,
+        );
+        deps.error(
+          `This workspace already records its broker in ${WORKSPACE_MANIFEST}. Change it for ` +
+            `every member with \`${PROGRAM_NAME} workspace broker <name>\`, or scaffold this ` +
+            `service outside the workspace with ` +
             `\`${PROGRAM_NAME} new <name> --template microservice --${flag} <value>\`.`,
         );
       } else if (flag === 'redis-client') {
-        // Its own text: the generic suggestion has no `--transport redis`, and a
+        // Its own text: the generic suggestion has no Redis broker, and a
         // --redis-client with no Redis arm is refused.
         deps.error(
           '--redis-client is a workspace-wide choice, not a per-member one: members share the ' +
             'Redis client the workspace records.',
         );
         deps.error(
-          `Set it when you create the workspace: ` +
-            `\`${PROGRAM_NAME} new <name> --workspace --transport redis --redis-client <value>\`. ` +
+          `Change it with \`${PROGRAM_NAME} workspace broker redis --redis-client <value>\`. ` +
             `This workspace already records its own in ${WORKSPACE_MANIFEST}.`,
         );
       } else {
         deps.error(
           `--${flag} is a workspace-wide choice, not a per-member one: members can only talk ` +
-            `over a transport they share.`,
+            `over a broker they share.`,
         );
         deps.error(
-          `Set it when you create the workspace: ` +
-            `\`${PROGRAM_NAME} new <name> --workspace --${flag} <value>\`. ` +
+          `Change it for every member with ` +
+            `\`${PROGRAM_NAME} workspace broker <name> --${flag} <value>\`. ` +
             `This workspace already records its own in ${WORKSPACE_MANIFEST}.`,
         );
       }
       return EXIT_USAGE;
     }
+  }
+
+  const rpc = readRpcFlag(args.flags);
+  if (!rpc.ok) {
+    deps.error(rpc.message);
+    return EXIT_USAGE;
   }
 
   const names = deriveNames(rawName);
@@ -538,7 +606,8 @@ export async function runAppCommand(args: ParsedArgs, deps: AppDependencies): Pr
   const taken = read.manifest.members.find(
     (member) =>
       member.port === requested.port ||
-      (requested.port !== undefined && member.devtoolPort === requested.port),
+      (requested.port !== undefined &&
+        [member.devtoolPort, member.inspectPort, member.vitePort].includes(requested.port)),
   );
   if (taken !== undefined) {
     const devtoolHeld = taken.devtoolPort === requested.port && taken.port !== requested.port;
@@ -612,7 +681,10 @@ export async function runAppCommand(args: ParsedArgs, deps: AppDependencies): Pr
       const devtoolTaken = read.manifest.members.find(
         (member) =>
           member.port === devtoolPortFlag.port ||
-          (devtoolPortFlag.port !== undefined && member.devtoolPort === devtoolPortFlag.port),
+          (devtoolPortFlag.port !== undefined &&
+            [member.devtoolPort, member.inspectPort, member.vitePort].includes(
+              devtoolPortFlag.port,
+            )),
       );
       if (devtoolTaken !== undefined) {
         const devtoolHeld =
@@ -672,7 +744,14 @@ export async function runAppCommand(args: ParsedArgs, deps: AppDependencies): Pr
     return EXIT_ERROR;
   }
 
-  const next: WorkspaceManifest = {
+  const choice = resolveTemplateChoice(args);
+  if (!choice.ok) {
+    deps.error(choice.message);
+    return EXIT_USAGE;
+  }
+  const portHost = resolveHost(choice.host ?? MINIMAL_HOST, read.manifest.runtime);
+
+  let next: WorkspaceManifest = {
     ...read.manifest,
     ...(devtoolPort === undefined
       ? {}
@@ -700,9 +779,41 @@ export async function runAppCommand(args: ParsedArgs, deps: AppDependencies): Pr
         // to decide whether Prometheus annotations would point at a real
         // `/metrics` or at a 404.
         metricsEndpoint: typeof args.flags['template'] === 'string',
+        ...(rpc.style === 'grpc' ? { rpc: rpc.style } : {}),
       },
     ],
   };
+
+  for (const field of (portHost.manifest?.npmBuild?.devEntry !== undefined
+    ? ['inspectPort', 'vitePort']
+    : ['inspectPort']) as readonly ('inspectPort' | 'vitePort')[]) {
+    let candidate = allocateDevPort(next);
+    while (
+      candidate !== undefined &&
+      deps.portAvailable !== undefined &&
+      !(await deps.portAvailable(candidate))
+    )
+      candidate = allocateDevPort({
+        ...next,
+        members: [
+          ...next.members,
+          { name: '__occupied__', port: candidate, inspectPort: candidate },
+        ],
+      });
+    if (candidate === undefined) {
+      deps.error(
+        'No development ports remain in this workspace; set devBasePort in setu.workspace.json.',
+      );
+      return EXIT_ERROR;
+    }
+    const assigned = candidate;
+    next = {
+      ...next,
+      members: next.members.map((member) =>
+        member.name === name ? { ...member, [field]: assigned } : member,
+      ),
+    };
+  }
 
   // Read unconditionally, because whether it is NEEDED depends on the template,
   // which `planMember` resolves. An unreadable root is not an error by itself —
@@ -726,14 +837,15 @@ export async function runAppCommand(args: ParsedArgs, deps: AppDependencies): Pr
     // An absent ignore file is created along with the frontend member.
   }
 
-  // Total: the manifest reader refuses a transport it does not know, so this
+  // Total: the manifest reader refuses a broker it does not know, so this
   // resolves without a "cannot happen" branch.
   const profile = workspaceProfile(next.runtime);
   const plan = planMember(
     name,
     next,
     args,
-    transportSpec(next.transport, next.redisClient),
+    choice,
+    brokerSpec(next.broker, next.redisClient),
     profile,
     rootManifest,
     rootGitignore,
@@ -755,8 +867,18 @@ export async function runAppCommand(args: ParsedArgs, deps: AppDependencies): Pr
     return EXIT_ERROR;
   }
 
+  // Every OTHER member's transport module too (M138 §3.7): it is CLI-owned and
+  // derived from the manifest, so a member made before the module existed gains
+  // it and none drifts. This never refuses — a config that does not read the
+  // module yet is migrated by `setu workspace broker|rpc`, which names the lines.
+  const modules = await Promise.all(
+    next.members
+      .filter((member) => member.name !== name)
+      .map((member) => memberTransportModule(deps.fs, deps.dir, next, member)),
+  );
   const files = [
     ...plan.files,
+    ...modules,
     ...(devtoolRunnerFile === undefined ? [] : [devtoolRunnerFile]),
   ].map((file) => ({ ...file, path: joinPath(deps.dir, file.path) }));
 

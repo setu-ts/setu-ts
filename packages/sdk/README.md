@@ -45,13 +45,13 @@ const board = createRealtimeClient({
 
 ```bash
 # npm / pnpm / yarn
-npm install @setu-ts/sdk@^0.11.0
+npm install @setu-ts/sdk@^0.12.0
 
 # Bun
-bun add @setu-ts/sdk@^0.11.0
+bun add @setu-ts/sdk@^0.12.0
 
 # Deno
-deno add npm:@setu-ts/sdk@^0.11.0
+deno add npm:@setu-ts/sdk@^0.12.0
 ```
 
 ## Quick Start
@@ -341,25 +341,36 @@ description. They are skipped entirely when the request throws.
 
 ## OpenAPI Code Generation
 
-`generateOpenApiClient(document, options?)` is a pure function that turns an OpenAPI 3.1 document
-into TypeScript source.
+In a Setu project, use the CLI to generate and check the typed client:
+
+```bash
+setu add sdk
+npm install
+npm run client             # src/clientsdk/api.ts
+npm run client:check       # opt-in CI drift gate
+setu client --input openapi.json
+```
+
+The command loads this project's own SDK. It boots the app without a port by default, including
+bootstrap hooks, and always stops it; `--input <file|url>` reads JSON without booting. REST
+scaffolds already register OpenApiPlugin. Output is marked as managed, formatted for the target, and
+replaced only when its first line carries the CLI marker. `--check` never writes and exits 1 when
+the file is missing or stale. `--factory` and `--type-name` select the factory and interface names
+(`createApi` and `Api` by default). See the
+[CLI guide](https://setu-ts.dev/docs/cli/#typed-client-setu-client) for all options and bounds.
 
 ```typescript
-import { generateOpenApiClient } from '@setu-ts/sdk';
-import { readFileSync } from 'node:fs';
+import { createClient } from '@setu-ts/sdk';
 
-const document = JSON.parse(readFileSync('openapi.json', 'utf-8'));
-
-const source = generateOpenApiClient(document, {
-  sdkImport: '@setu-ts/sdk',
-  factoryName: 'createApi',
-  apiTypeName: 'Api',
-});
-
-// Write `source` to a file, then import the generated factory:
-// import { createApi } from './generated-api.js';
+const client = createClient({ baseUrl: 'https://api.example.com' });
+// The generated factory takes it:
+// import { createApi } from './src/clientsdk/api.ts';
 // const api = createApi(client);
 ```
+
+For other tooling, `generateOpenApiClient(document, options?)` remains the pure OpenAPI 3.1 to
+TypeScript function. Its options are `factoryName`, `apiTypeName` and `sdkImport` (default
+`@setu-ts/sdk`).
 
 The generated factory accepts an `IHttpClient` and returns typed operation methods. Schema mapping
 covers the M21 vocabulary: primitives, arrays, objects with `required`, `$ref`, `enum`, `const`,

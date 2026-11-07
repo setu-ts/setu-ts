@@ -9,6 +9,7 @@ import type { IFileSystem, StatResult } from '@setu-ts/common';
 import { readArtifactNames, scanArtifacts } from '../../../src/utils/artifact-scanner.ts';
 import { listSeamSpecs } from '../../../src/seams/registry.ts';
 import { FUNCTIONAL_CONTROLLERS_SEAM } from '../../../src/seams/http.ts';
+import { FUNCTIONAL_SERVICES_SEAM } from '../../../src/seams/services.ts';
 import type { SeamSpec } from '../../../src/seams/seam-spec.ts';
 import { seamSpecFor } from '../schematics/_shared.ts';
 import { deriveNames } from '../../../src/utils/names.ts';
@@ -26,6 +27,17 @@ const MISSING = Object.assign(new Error('gone'), { code: 'ENOENT' });
 const ROUTES = FUNCTIONAL_CONTROLLERS_SEAM;
 const PLUGINS = seamSpecFor('plugin')!;
 const MIDDLEWARE = seamSpecFor('middleware')!;
+
+it('X93-10 marks only listing-only skips', async () => {
+  for (const spec of [FUNCTIONAL_SERVICES_SEAM, ROUTES]) {
+    const fs = createFakeFs({
+      [`/app/${spec.dir}/plain${spec.suffix}`]: 'export function work() {}',
+    });
+    const scan = await readArtifactNames(fs, '/app', spec);
+    expect(scan.skipped).toHaveLength(1);
+    expect(scan.skipped[0]?.listingOnly).toBe(spec.listingOnly);
+  }
+});
 
 /**
  * Source text that exports everything a spec's barrel imports from one artifact.

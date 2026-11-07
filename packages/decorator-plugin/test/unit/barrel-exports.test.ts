@@ -82,6 +82,7 @@ const EXPECTED_VALUES = [
   'Optional',
   'HttpCode',
   'Idempotent',
+  'McpTool',
   'Permissions',
   'Public',
   'Redirect',

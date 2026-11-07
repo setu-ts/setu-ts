@@ -5,6 +5,7 @@
  *
  * @module
  */
+import { withHttpStatusHint } from '@setu-ts/common';
 
 /**
  * Thrown by {@link IMessageBroker.request} when no correlated reply arrives
@@ -41,6 +42,13 @@ export class PublishTimeoutError extends Error {
     this.name = 'PublishTimeoutError';
     this.topic = details.topic;
     this.timeoutMs = details.timeoutMs;
+    // M131a X88-5: the uncertain outcome is a 504, not a masked 500 — a
+    // retrying client reads the hint and uses an idempotency key.
+    withHttpStatusHint(this, {
+      status: 504,
+      title: 'Gateway Timeout',
+      detail: 'The backend did not answer; the request may have been applied.',
+    });
   }
 }
 

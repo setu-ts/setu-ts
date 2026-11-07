@@ -59,7 +59,7 @@ export const sources: readonly {
         for (const [field, value] of Object.entries(where)) {
           if (field === 'AND') {
             for (const clause of value as Record<string, unknown>[]) validate(clause);
-          } else if (!['id', 'role', 'name'].includes(field)) {
+          } else if (!['id', 'role', 'name', 'version'].includes(field)) {
             // Real Prisma's validation error is named so and renders the
             // whole query, values included — which is what M105 must not echo.
             const error = new Error(
@@ -133,7 +133,9 @@ export const sources: readonly {
     make: (calls) =>
       createD1DataSource(
         observe(
-          new SqliteD1('CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT, role TEXT)'),
+          new SqliteD1(
+            'CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT, role TEXT, version INTEGER)',
+          ),
           calls,
         ),
         { entity: 'users', table: 'users', primaryKey: ['id'] },

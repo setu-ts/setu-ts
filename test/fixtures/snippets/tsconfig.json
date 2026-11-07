@@ -15,7 +15,15 @@
     "skipLibCheck": true,
     "types": ["node", "deno"],
     "paths": {
+      "~kernel/*": ["../../../.tmp/fence-aliases/kernel/*"],
+      "~/*": ["../../../.tmp/fence-aliases/app/*"],
+      "@modelcontextprotocol/client": [
+        "../../../node_modules/@modelcontextprotocol/client/dist/index.d.mts"
+      ],
       "@setu-ts/common": ["../../../packages/common/src/index.ts"],
+      "@opentelemetry/api": [
+        "../../../packages/telemetry-plugin/node_modules/@opentelemetry/api/dist/index.d.mts"
+      ],
       "redis": ["../../../packages/common/node_modules/redis/dist/index.d.ts"],
       "@setu-ts/kernel": ["../../../packages/kernel/src/index.ts"],
       "@setu-ts/runtime": ["../../../packages/runtime/src/index.ts"],

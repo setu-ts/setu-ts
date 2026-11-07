@@ -32,6 +32,7 @@
     "packages/health-plugin/src/index.ts",
     "packages/http-security-plugin/src/index.ts",
     "packages/idempotency-plugin/src/index.ts",
+    "packages/mcp-plugin/src/index.ts",
     "packages/localization-plugin/src/index.ts",
     "packages/localization-plugin/src/format/index.ts",
     "packages/logger-plugin/src/index.ts",
@@ -54,6 +55,7 @@
     "packages/storage-plugin/src/index.ts",
     "packages/telemetry-plugin/src/index.ts",
     "packages/validation-plugin/src/index.ts",
+    "packages/vector-store-plugin/src/index.ts",
     "packages/view-plugin/src/index.ts",
     "packages/websocket-plugin/src/index.ts",
     "packages/worker-pool-plugin/src/index.ts",
@@ -62,7 +64,8 @@
     "packages/create/src/index.ts",
     "packages/starters/rest-starter/src/index.ts",
     "packages/starters/microservice-starter/src/index.ts",
-    "packages/starters/full-stack-starter/src/index.ts"
+    "packages/starters/full-stack-starter/src/index.ts",
+    "packages/agent-runs-plugin/src/index.ts"
   ],
   "packagesRequiringDocumentation": [
     "@setu-ts/common",
@@ -88,6 +91,7 @@
     "@setu-ts/health-plugin",
     "@setu-ts/http-security-plugin",
     "@setu-ts/idempotency-plugin",
+    "@setu-ts/mcp-plugin",
     "@setu-ts/localization-plugin",
     "@setu-ts/logger-plugin",
     "@setu-ts/mail-plugin",
@@ -109,6 +113,8 @@
     "@setu-ts/storage-plugin",
     "@setu-ts/telemetry-plugin",
     "@setu-ts/validation-plugin",
+    "@setu-ts/vector-store-plugin",
+    "@setu-ts/agent-runs-plugin",
     "@setu-ts/view-plugin",
     "@setu-ts/websocket-plugin",
     "@setu-ts/worker-pool-plugin",

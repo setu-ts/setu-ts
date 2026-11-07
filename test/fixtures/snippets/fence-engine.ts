@@ -79,7 +79,7 @@ export function fenceExtension(lang: string): 'ts' | 'tsx' {
   return lang === 'tsx' || lang === 'jsx' ? 'tsx' : 'ts';
 }
 
-/** The fourteen curated guides whose copyable fences must compile or be classified. */
+/** The curated guides whose copyable fences must compile or be classified. */
 export const GUIDES = [
   'docs/getting-started.md',
   'docs/programmatic-api.md',
@@ -95,6 +95,10 @@ export const GUIDES = [
   'docs/runtime-deployment.md',
   'docs/authorization.md',
   'docs/webhooks.md',
+  'docs/durable-runs.md',
+  'docs/ai.md',
+  'docs/mcp.md',
+  'docs/retrieval.md',
 ] as const;
 
 /** The committed snippet compiler configuration used for all fence compilation. */
@@ -907,6 +911,32 @@ export async function writeProjectStubs(scratchDir: string): Promise<void> {
     '}\n';
   await mkdir(`${scratchDir}/generated/prisma`, { recursive: true });
   await writeFile(`${scratchDir}/generated/prisma/client.ts`, prisma);
+  // The auth-plugin README's full-stack sign-in recipe imports its module's
+  // token from a page through the template's `~kernel/*` alias (a page may
+  // import only `src/modules/<m>/*.token.ts` by value, setu.E017) and the
+  // template's `currentUserContext` through `~/*`. These mirror the token
+  // `setu g module account` writes, typed by the README's service interface,
+  // and the generated `app/server/context-keys.server.ts`; the snippet
+  // tsconfig maps both aliases to `.tmp/fence-aliases`.
+  const accountToken =
+    "import { serviceToken } from '@setu-ts/common';\n" +
+    'export interface AccountService {\n' +
+    '  signIn(email: string, password: string): Promise<boolean>;\n' +
+    '}\n' +
+    "export const ACCOUNT = serviceToken<AccountService>('module.account');\n";
+  const contextKeys =
+    "import { contextKeyFor } from '@setu-ts/react-router-plugin';\n" +
+    'export interface CurrentUser {\n' +
+    '  readonly email: string;\n' +
+    '}\n' +
+    'export const currentUserContext = contextKeyFor<CurrentUser | null>(\n' +
+    "  'app.current-user',\n" +
+    '  null,\n' +
+    ');\n';
+  await mkdir(`${parent}/fence-aliases/kernel/modules/account`, { recursive: true });
+  await mkdir(`${parent}/fence-aliases/app/server`, { recursive: true });
+  await writeFile(`${parent}/fence-aliases/kernel/modules/account/account.token.ts`, accountToken);
+  await writeFile(`${parent}/fence-aliases/app/server/context-keys.server.ts`, contextKeys);
 }
 
 /**

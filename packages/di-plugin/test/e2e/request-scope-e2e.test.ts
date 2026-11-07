@@ -167,3 +167,50 @@ it('fails startup for a captive graph naming both tokens', async () => {
   });
   await expect(app.start()).rejects.toThrow(/captive: SingletonService → RequestUnit/);
 });
+
+it('M131b 3.10 keeps a request scope alive until an early-responded handler settles', async () => {
+  const { app } = harness();
+  const gate = Promise.withResolvers<void>();
+  const disposed = vi.fn();
+  app.register({
+    name: 'scoped-provider',
+    version: '1.0.0',
+    dependencies: [CAPABILITIES.DI_CONTAINER],
+    register(ctx) {
+      ctx.container!.register(
+        'request',
+        { useFactory: () => ({ alive: true }) },
+        { scope: 'scoped', dispose: disposed },
+      );
+    },
+  });
+  let detached: Promise<void> | undefined;
+  app.middleware.add((ctx, next) => {
+    detached = next();
+    // Handled here so the early response does not see an unhandled rejection;
+    // the test awaits `detached` itself, so a failed assertion still fails it.
+    detached.catch(() => {});
+    return ctx.response.text('early');
+  });
+  let scope: IContainer | undefined;
+  app.router.get('/', async (ctx) => {
+    scope = app.services.get<IContainer>(CAPABILITIES.DI_CONTAINER).forRequest(ctx);
+    const instance = scope.resolve('request');
+    await gate.promise;
+    expect(disposed).not.toHaveBeenCalled();
+    expect(scope.resolve('request')).toBe(instance);
+    return ctx.response.text('late');
+  });
+  await app.start();
+  try {
+    expect((await app.inject({ method: 'GET', url: '/' })).body).toBe('early');
+    expect(scope).toBeDefined();
+    expect(disposed).not.toHaveBeenCalled();
+    gate.resolve();
+    await detached;
+    await vi.waitFor(() => expect(disposed).toHaveBeenCalledOnce());
+  } finally {
+    gate.resolve();
+    await app.stop();
+  }
+});

@@ -49,6 +49,7 @@ export const ADOPTED_ENTRIES: readonly string[] = [
   'tsconfig.json',
   'wrangler.toml',
   'main.ts',
+  'dev.ts',
   CONFIG_MODULE,
   'README.md',
   'vite.config.ts',

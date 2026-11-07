@@ -24,6 +24,9 @@
 
 /** The range a scanned external specifier is listed at. */
 export const EXTERNAL_RANGES: Readonly<Record<string, string>> = {
+  ai: '^7.0.159',
+  '@modelcontextprotocol/server': '^2.4.0',
+  '@modelcontextprotocol/client': '^2.4.0',
   esbuild: '~0.28.0',
   prettier: '^3.9.10',
   tsx: '^4.23.0',
@@ -34,6 +37,7 @@ export const EXTERNAL_RANGES: Readonly<Record<string, string>> = {
   '@simplewebauthn/server': '14.0.3',
   '@prisma/adapter-pg': '^7.10.0',
   pg: '^8.0.0',
+  '@qdrant/js-client-rest': '1.20.0',
   hono: '^4.12.30',
   '@hono/node-server': '^2.0.0',
   '@opentelemetry/api': '^1.9.0',
@@ -122,6 +126,13 @@ export const OVERRIDES: readonly Override[] = [
     kind: 'dev-dependency-types',
     reason:
       'The real-backend within fixture imports pg and is included in the Node type-check gate (M111e2).',
+  },
+  {
+    package: 'packages/vector-store-plugin',
+    dependency: '@types/pg',
+    kind: 'dev-dependency-types',
+    reason:
+      'The adapter conformance table drives real pgvector through pg, which ships no declarations (M135).',
   },
   {
     package: 'packages/websocket-plugin',

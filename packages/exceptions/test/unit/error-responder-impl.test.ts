@@ -15,6 +15,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { createErrorResponder } from '../../src/middleware/error-responder-impl.ts';
+import { defaultFormatter } from '../../src/formatters/error-formatter.ts';
 import { rfc9457Formatter } from '../../src/formatters/rfc9457-formatter.ts';
 import { HttpError } from '../../src/errors/http-error.ts';
 import { createFakeContext } from '../fixtures/fake-runtime.ts';
@@ -80,6 +81,36 @@ describe('createErrorResponder', () => {
     const snap = responseSnapshot();
     expect(snap.status).toBe(503);
     expect(snap.headers.get('content-type')).toBe('application/json; charset=utf-8');
+  });
+
+  it('the default format is byte-identical with and without `problem`', () => {
+    // `problem` is a Problem Details channel only. The `default` format must
+    // not gain a member, change a member, or serialize the internal marker.
+    const init = {
+      status: 429,
+      title: 'Too Many Requests',
+      detail: 'Rate limit exceeded',
+    } as const;
+    const problem = {
+      type: 'https://iana.org/assignments/http-problem-types#quota-exceeded',
+      title: 'Quota Exceeded',
+      extensions: { 'violated-policies': ['default'] },
+    } as const;
+
+    const plainResponder = createErrorResponder(defaultFormatter, 'application/json');
+    const plain = createFakeContext({});
+    plainResponder.respond(plain.ctx, init);
+
+    const problemResponder = createErrorResponder(defaultFormatter, 'application/json');
+    const withProblem = createFakeContext({});
+    problemResponder.respond(withProblem.ctx, { ...init, problem });
+
+    const plainBody = plain.responseSnapshot().body;
+    const problemBody = withProblem.responseSnapshot().body;
+    expect(new TextDecoder().decode(problemBody as Uint8Array)).toBe(
+      new TextDecoder().decode(plainBody as Uint8Array),
+    );
+    expect(new TextDecoder().decode(problemBody as Uint8Array)).not.toContain('quota-exceeded');
   });
 });
 

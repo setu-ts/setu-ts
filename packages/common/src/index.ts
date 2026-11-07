@@ -26,6 +26,7 @@ export type {
   ErrorResponderTarget,
   ErrorResponseInit,
   IErrorResponder,
+  ProblemTypeInit,
 } from './errors/error-responder.ts';
 export {
   authorizationFailureInit,
@@ -37,6 +38,7 @@ export { causeMessage, serializeError } from './errors/serialize-error.ts';
 export type { SerializedError } from './errors/serialize-error.ts';
 // One bounded diagnostic line for string-only log sinks (M119g)
 export { describeError } from './errors/describe-error.ts';
+export { attachPoolErrorListener } from './pool-error-listener.ts';
 export { dispatchRealtimeFrame } from './realtime/dispatch.ts';
 export { createRealtimeHandlerErrorReporter } from './realtime/handler-errors.ts';
 export type {
@@ -52,10 +54,40 @@ export { PrimaryKeyChangeError, assertPrimaryKeyUnchanged } from './errors/prima
 export { UnknownPayloadFieldError } from './errors/unknown-payload-field.ts';
 export { InvalidFieldValueError } from './errors/invalid-field-value.ts';
 export { InvalidCursorError } from './errors/invalid-cursor.ts';
+export {
+  VectorCollectionMismatchError,
+  VectorCollectionUnknownError,
+  VectorDimensionError,
+  VectorFilterError,
+  VectorOperationUnsupportedError,
+  VectorRecordError,
+  VectorScopeInvalidError,
+  VectorScopeRequiredError,
+  VectorVersionConflictError,
+} from './errors/vector-store.ts';
+export { vectorRecordKey } from './vector-record-key.ts';
+export type {
+  IVectorStore,
+  IVectorStoreAdapter,
+  VectorCollectionSpec,
+  VectorFieldType,
+  VectorFilter,
+  VectorMatch,
+  VectorMetadataValue,
+  VectorQuery,
+  VectorRecord,
+  VectorReplaceOptions,
+} from './services/vector-store.ts';
 export { OptionalDependencyUnavailableError } from './errors/optional-dependency.ts';
 // HTTP status hint (M89b, X19-1) — how a package that cannot import
 // `@setu-ts/exceptions` states the status its own error should be answered with
-export { HTTP_STATUS_HINT, httpStatusHintOf, withHttpStatusHint } from './errors/status-hint.ts';
+export {
+  fallbackErrorHint,
+  fallbackErrorStatus,
+  HTTP_STATUS_HINT,
+  httpStatusHintOf,
+  withHttpStatusHint,
+} from './errors/status-hint.ts';
 export type { HttpStatusHint } from './errors/status-hint.ts';
 
 // Health probe
@@ -68,12 +100,14 @@ export type { DeadlineOptions } from './health/deadline.ts';
 // logger, de-duplicated, instead of the driver's own console fallback
 export {
   attachConnectionErrorReporter,
+  watchConnection,
   createConnectionErrorReporter,
 } from './health/connection-errors.ts';
 export type {
   ConnectionErrorLogger,
   ConnectionErrorReporter,
   ConnectionErrorReporterOptions,
+  ConnectionWatch,
 } from './health/connection-errors.ts';
 
 // Capability tokens
@@ -117,6 +151,7 @@ export {
   sealRequestIdentity,
 } from './request-identity.ts';
 export {
+  REQUIRED_SCOPES_STATE_KEY,
   CLIENT_IP_STATE_KEY,
   REQUEST_ORIGIN_STATE_KEY,
   CREDENTIAL_SOURCE_STATE_KEY,
@@ -157,6 +192,8 @@ export type {
   RouteSchema,
   RouteSecurityMetadata,
   RouteValidationMetadata,
+  RouteIdempotencyMetadata,
+  RouteMcpToolMetadata,
   SecurityRequirement,
   WebSocketUpgradeIntent,
 } from './http.ts';
@@ -171,6 +208,12 @@ export {
   setUpgradeIntent,
   UPGRADE_INTENT,
   upgradeIntentOf,
+  IDEMPOTENCY_METADATA,
+  withIdempotencyMetadata,
+  idempotencyMetadataOf,
+  MCP_TOOL_METADATA,
+  withMcpToolMetadata,
+  mcpToolMetadataOf,
   VALIDATION_METADATA,
   validationMetadataOf,
   withResponseMetadata,
@@ -240,10 +283,20 @@ export type {
   IRouterApi,
   MiddlewareOptions,
   RouteInfo,
+  DispatchOptions,
   StartOptions,
 } from './plugin.ts';
 
 // Domain service contracts
+export type { IOpenApiService } from './services/openapi.ts';
+/** Request-bound services and typed service tokens (M130). */
+export {
+  RequestServiceUnavailableError,
+  requestService,
+  resolveRequestService,
+  serviceToken,
+} from './services/request-service.ts';
+export type { RequestBoundService, ServiceToken } from './services/request-service.ts';
 export type { ILogger, LogMetadata } from './services/logger.ts';
 export type { IConfig } from './services/config.ts';
 export { validatedStateKey } from './services/validation.ts';
@@ -277,6 +330,7 @@ export type {
   IAuthStrategy,
   IJwtService,
   IPrincipal,
+  IPrincipalActor,
   JwtSignOptions,
   RbacConfig,
   RoleDefinition,
@@ -321,7 +375,7 @@ export type { DataClassification } from './redaction/classification.ts';
 export { createMaskRedactor, eraseRedactor } from './redaction/redactors.ts';
 export type { MaskOptions, RedactionContext, Redactor } from './redaction/redactors.ts';
 export type { FieldRedaction, RedactionPolicy } from './redaction/policy.ts';
-export { createRedactionService } from './redaction/redaction-service.ts';
+export { createRedactionService, maskUrlUserinfo } from './redaction/redaction-service.ts';
 export type { IRedactionService } from './redaction/redaction-service.ts';
 export type {
   EntityKey,
@@ -405,6 +459,7 @@ export type {
   ITenant,
   ITenantDataStore,
   ITenantIsolationStrategy,
+  ITenantRegistry,
   ITenantRepository,
   ITenantResolver,
 } from './services/tenancy.ts';
@@ -721,6 +776,17 @@ export { checkWritePrecondition } from './services/write-precondition.ts';
 /** Shared connection-outage classifier and network errno vocabulary. */
 export { isConnectionFault, isConnectionFaultCode } from './errors/connection-fault.ts';
 
+/**
+ * Backend-fault classification: whether a thrown driver error means the request
+ * was not applied (503) or may have been applied (504).
+ */
+export {
+  BackendOutcomeUnknownError,
+  BackendUnavailableError,
+  toBackendFault,
+} from './errors/backend-fault.ts';
+export type { BackendFault } from './errors/backend-fault.ts';
+
 export { ReconnectSupervisor, fullJitterDelay } from './reconnect/reconnect-supervisor.ts';
 export type {
   ReconnectMode,
@@ -736,3 +802,28 @@ export type {
 } from './redis/node-redis-adapter.ts';
 /** Strict dotenv parser shared by config loading and workspace deploy (M122). */
 export { parseEnv } from './env-file.ts';
+
+export { RouteRegistrationError } from './errors/route-registration.ts';
+
+/** Durable run contracts and persisted JSON rows. */
+export type {
+  IAgentRunService,
+  IAgentRunStore,
+  AgentRunRow,
+  AgentRunEntryRow,
+  AgentRunChunkBatch,
+  AgentRunApprovalRow,
+  AgentRunStatus,
+  AgentRunJson,
+  AgentRunView,
+  AgentRunSweepReport,
+} from './services/agent-runs.ts';
+/** Durable run errors and their value-free HTTP hints. */
+export {
+  AgentRunNotFoundError,
+  AgentRunStateError,
+  AgentRunApprovalError,
+  AgentRunDefinitionError,
+  AgentRunLeaseLostError,
+  AgentRunStoreUnavailableError,
+} from './errors/agent-runs.ts';

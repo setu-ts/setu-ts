@@ -383,3 +383,52 @@ describe('causeMessage', () => {
     expect(barrel.causeMessage).toBe(causeMessage);
   });
 });
+
+it.each([new Error('CANARY'), 'CANARY'])(
+  'M131b 3.4 logs body read native class without request detail',
+  (cause) => {
+    const failure = new Error('safe body detail', { cause });
+    failure.name = 'RequestBodyReadError';
+    Object.defineProperty(failure, Symbol.for('setu.serialize.redact-cause'), { value: true });
+    const logged = serializeError(failure);
+    expect(logged.cause).toEqual({
+      name: cause instanceof Error ? 'Error' : 'string',
+      message: 'safe body detail',
+    });
+    expect(JSON.stringify(logged)).not.toContain('CANARY');
+    expect(failure.cause).toBe(cause);
+  },
+);
+
+it('M131b review: a redacted cause keeps a standard class name and drops any other', () => {
+  const named = (name: string): Error => {
+    const cause = new Error('CANARY native detail');
+    cause.name = name;
+    const failure = new Error('safe body detail', { cause });
+    Object.defineProperty(failure, Symbol.for('setu.serialize.redact-cause'), { value: true });
+    return failure;
+  };
+  expect(serializeError(named('AbortError')).cause).toEqual({
+    name: 'AbortError',
+    message: 'safe body detail',
+  });
+  const hostile = serializeError(named('token=CANARY-secret'));
+  expect(hostile.cause).toEqual({ name: 'Error', message: 'safe body detail' });
+  expect(JSON.stringify(hostile)).not.toContain('CANARY');
+});
+
+it('M131b audit F3: an error only NAMED RequestBodyReadError keeps its cause in the log', () => {
+  const failure = new Error('application failure', { cause: new Error('real diagnostic') });
+  failure.name = 'RequestBodyReadError';
+  expect(JSON.stringify(serializeError(failure))).toContain('real diagnostic');
+});
+
+it('M131b audit F3: a brand read that throws is no brand', () => {
+  const failure = new Error('outer', { cause: new Error('kept') });
+  Object.defineProperty(failure, Symbol.for('setu.serialize.redact-cause'), {
+    get() {
+      throw new Error('hostile getter');
+    },
+  });
+  expect(JSON.stringify(serializeError(failure))).toContain('kept');
+});

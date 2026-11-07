@@ -120,4 +120,35 @@ describe.each(['default RESP3', 'RESP2'] as const)('real node-redis %s', (protoc
       }
     },
   );
+
+  it(
+    'a first-connect failure against a closed port rejects in under 2 s, naming ECONNREFUSED (M131a X88-3)',
+    { skip: url === undefined },
+    async () => {
+      // A closed port on the live host: the shared container is never touched.
+      const target = new URL(url!);
+      const closedUrl = `redis://127.0.0.1:${Number(target.port) + 1}`;
+      const raw =
+        protocol === 'RESP2'
+          ? createClient({ url: closedUrl, RESP: 2 })
+          : createClient({ url: closedUrl });
+      const client = fromNodeRedis(raw);
+      try {
+        const started = performance.now();
+        let thrown: unknown;
+        try {
+          await client.connect();
+        } catch (error) {
+          thrown = error;
+        }
+        const elapsedMs = performance.now() - started;
+        expect(elapsedMs).toBeLessThan(2_000);
+        expect(thrown).toBeInstanceOf(Error);
+        expect((thrown as Error).message).toContain('ECONNREFUSED');
+        expect((thrown as Error).cause).toBeInstanceOf(Error);
+      } finally {
+        raw.destroy();
+      }
+    },
+  );
 });

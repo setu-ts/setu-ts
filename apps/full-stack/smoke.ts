@@ -12,9 +12,8 @@ import { CAPABILITIES } from '@setu-ts/common';
 import type { IDatabaseService } from '@setu-ts/database-plugin';
 import type { IKernelApplication } from '@setu-ts/kernel';
 import { createApp } from './setu.config.ts';
-import { formatPrice } from '~/models/product.ts';
-import type { Product } from '~/models/product.ts';
-import { seedProducts } from '~/services/products.server.ts';
+import type { Product } from './src/modules/products/products.types.ts';
+import { seedProducts } from './src/modules/products/products.seed.ts';
 
 const ORIGIN = 'http://full-stack.test';
 
@@ -41,12 +40,27 @@ describe('full-stack example', () => {
   before(async () => {
     app = await createApp();
     await app.start();
+    const empty = await get('/api/products');
+    assert.equal(empty.status, 200);
+    assert.deepEqual(
+      await empty.json(),
+      { items: [] },
+      'the catalogue must come from the database',
+    );
     seeded = await seedProducts(app.services.get<IDatabaseService>(CAPABILITIES.DATABASE));
     assert.ok(seeded.length > 0, 'seeding produced no products');
   });
 
   after(async () => {
     await app.stop();
+  });
+
+  it('serves the same sorted database catalogue from the kernel API', async () => {
+    const response = await get('/api/products');
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      items: [...seeded].sort((left, right) => left.name.localeCompare(right.name)),
+    });
   });
 
   it('server-renders the products written through the database capability', async () => {
@@ -59,9 +73,13 @@ describe('full-stack example', () => {
     // numbers with comment markers, so `Products (2)` is not a literal substring.
     for (const product of seeded) {
       assert.ok(
-        html.includes(product.name) && html.includes(formatPrice(product)),
-        `"${product.name}" is missing: the load context did not reach the loader`,
+        html.includes(product.name) && html.includes(`$${(product.priceCents / 100).toFixed(2)}`),
+        `"${product.name}" is missing: the request-bound products service did not reach the loader`,
       );
+    }
+    const sorted = [...seeded].sort((left, right) => left.name.localeCompare(right.name));
+    for (let index = 1; index < sorted.length; index++) {
+      assert.ok(html.indexOf(sorted[index - 1]!.name) < html.indexOf(sorted[index]!.name));
     }
   });
 

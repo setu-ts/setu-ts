@@ -188,17 +188,36 @@ ws.route('/ws/chat', {
 
 ## Options
 
-| Option             | Type                                                                 | Default  | Description                                                                                                                                            |
-| ------------------ | -------------------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `maxConnections`   | `number`                                                             | `0`      | Simultaneous open connections; `0` is unlimited. At the limit, upgrades get `503`.                                                                     |
-| `heartbeatMs`      | `number`                                                             | `0`      | Heartbeat interval; `0` disables it and creates no timer at all.                                                                                       |
-| `heartbeatPayload` | `string`                                                             | `'ping'` | The text frame sent each tick. Read only when `heartbeatMs > 0`.                                                                                       |
-| `idleTimeoutMs`    | `number`                                                             | `0`      | Inbound silence after which a peer is closed with `1001`; `0` disables.                                                                                |
-| `maxMessageBytes`  | `number`                                                             | `0`      | Largest inbound frame; `0` is unlimited. A larger frame closes with `1009`.                                                                            |
-| `scalingNotice`    | `boolean`                                                            | `true`   | Logs one `info` line at startup when no realtime backplane is registered. `false` silences it.                                                         |
-| `routes`           | `readonly WebSocketRouteEntry[]`                                     | —        | Declarative exact-path routes. Each entry is a `WebSocketRouteDefinition` (`{ path, handlers, options? }`) or a registry factory resolved at `onInit`. |
-| `behaviors`        | `readonly (IIngressBehavior \| RegistryFactory<IIngressBehavior>)[]` | —        | Plugin-level chain around every route's `onMessage`. It receives the route path and frame in an `IngressContext`.                                      |
-| `diagnostics`      | `RealtimeDiagnosticsOptions`                                         | —        | Opt-in realtime observations (M98l); see [Diagnostics](#diagnostics-m98l).                                                                             |
+| Option             | Type                                                                 | Default  | Description                                                                                                                                                                 |
+| ------------------ | -------------------------------------------------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `allowedOrigins`   | `readonly string[]`                                                  | `[]`     | Browser origins, besides the app's own, that may open a socket. Exact http(s) origins (`'https://app.example.com'`), no wildcards; an invalid entry throws at construction. |
+| `checkOrigin`      | `boolean`                                                            | `true`   | Check every handshake's `Origin` (see below). `false` admits any origin.                                                                                                    |
+| `maxConnections`   | `number`                                                             | `0`      | Simultaneous open connections; `0` is unlimited. At the limit, upgrades get `503`.                                                                                          |
+| `heartbeatMs`      | `number`                                                             | `0`      | Heartbeat interval; `0` disables it and creates no timer at all.                                                                                                            |
+| `heartbeatPayload` | `string`                                                             | `'ping'` | The text frame sent each tick. Read only when `heartbeatMs > 0`.                                                                                                            |
+| `idleTimeoutMs`    | `number`                                                             | `0`      | Inbound silence after which a peer is closed with `1001`; `0` disables.                                                                                                     |
+| `maxMessageBytes`  | `number`                                                             | `0`      | Largest inbound frame; `0` is unlimited. A larger frame closes with `1009`.                                                                                                 |
+| `scalingNotice`    | `boolean`                                                            | `true`   | Logs one `info` line at startup when no realtime backplane is registered. `false` silences it.                                                                              |
+| `routes`           | `readonly WebSocketRouteEntry[]`                                     | —        | Declarative exact-path routes. Each entry is a `WebSocketRouteDefinition` (`{ path, handlers, options? }`) or a registry factory resolved at `onInit`.                      |
+| `behaviors`        | `readonly (IIngressBehavior \| RegistryFactory<IIngressBehavior>)[]` | —        | Plugin-level chain around every route's `onMessage`. It receives the route path and frame in an `IngressContext`.                                                           |
+| `diagnostics`      | `RealtimeDiagnosticsOptions`                                         | —        | Opt-in realtime observations (M98l); see [Diagnostics](#diagnostics-m98l).                                                                                                  |
+
+**Cross-site handshakes are refused.** A browser attaches the user's cookies to a WebSocket
+handshake from any page, and the handshake is a `GET`, so no CSRF middleware sees it. Every
+handshake whose `Origin` is neither the app's public origin nor listed in `allowedOrigins` is
+answered `403` before route guards run and before a connection slot is claimed. The public origin is
+the one a trusted proxy published —
+`HttpSecurityPlugin({ ipSecurity: { trustProxy: true, trustedProxies } })` reads it from `Forwarded`
+/ `X-Forwarded-Host` and `X-Forwarded-Proto` (the full-stack template sets this from its
+`TRUSTED_PROXIES` env var) — else the request URL's. Behind a TLS-terminating proxy without that,
+the request URL is `http://` and every `https://` page is refused, so either trust the proxy or list
+the public origin. A handshake with no `Origin` header — a non-browser client — is admitted. The
+first refusal of each origin is logged at `warn` with the origin to add, so a legitimate client on
+another origin (a separate SPA host, a dev server on its own port) is easy to list:
+
+```typescript
+WebSocketPlugin({ allowedOrigins: ['https://app.example.com', 'http://localhost:5173'] });
+```
 
 `WebSocketRouteOptions.guards` is route-scoped: guards run in declared order before the matched
 route's handshake, and the first `{ status }` refusal wins. It is separate from the plugin-level

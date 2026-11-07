@@ -29,7 +29,7 @@ describe('readWorkspaceManifest', () => {
         version: WORKSPACE_VERSION,
         runtime: 'deno',
         basePort: 3000,
-        transport: 'http',
+        broker: 'memory',
         members: [{ name: 'orders', port: 3000 }],
       }),
     );
@@ -46,7 +46,7 @@ describe('readWorkspaceManifest', () => {
         version: WORKSPACE_VERSION,
         runtime: 'deno',
         basePort: 3000,
-        transport: 'http',
+        broker: 'memory',
         members: [
           { name: 'orders', port: 3000 },
           { name: 'billing', port: 3001, dependsOn: ['orders'] },
@@ -61,7 +61,7 @@ describe('readWorkspaceManifest', () => {
         version: WORKSPACE_VERSION,
         runtime: 'deno',
         basePort: 3000,
-        transport: 'http',
+        broker: 'memory',
         members: [{ name: 'billing', port: 3001, dependsOn: ['orders'] }],
       }),
     );
@@ -133,64 +133,209 @@ describe('readWorkspaceManifest', () => {
     expect(result.problem.kind).toBe('invalid-port');
   });
 
-  it('reports a transportUrl that is not a string', async () => {
-    const result = await readWorkspaceManifest(
-      workspace(
-        `{"version":${WORKSPACE_VERSION},"basePort":3000,"transport":"redis",` +
-          `"transportUrl":42,"members":[]}`,
-      ),
-      '/ws',
+  /**
+   * Reads a manifest from its JSON text.
+   *
+   * @param text - The manifest file's contents
+   * @returns The reader's result
+   */
+  function read(text: string) {
+    return readWorkspaceManifest(workspace(text), '/ws');
+  }
+
+  it('reports a brokerUrl that is not a string', async () => {
+    const result = await read(
+      `{"version":${WORKSPACE_VERSION},"basePort":3000,"broker":"redis","brokerUrl":42,"members":[]}`,
     );
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.problem.kind).toBe('malformed');
   });
 
-  // Absent → http, so a workspace created before the transport choice existed
-  // keeps working and keeps its behaviour.
-  it('defaults an absent transport to http rather than refusing', async () => {
-    const result = await readWorkspaceManifest(
-      workspace(`{"version":${WORKSPACE_VERSION},"basePort":3000,"members":[]}`),
-      '/ws',
-    );
+  // Absent → memory: the messaging plugin's own default, stated as a choice.
+  it('defaults an absent broker to memory rather than refusing', async () => {
+    const result = await read(`{"version":${WORKSPACE_VERSION},"basePort":3000,"members":[]}`);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.manifest.transport).toBe('http');
-    expect(result.manifest.transportUrl).toBeUndefined();
+    expect(result.manifest.broker).toBe('memory');
+    expect(result.manifest.brokerUrl).toBeUndefined();
   });
 
-  it('reads a transport and its endpoint back', async () => {
-    const result = await readWorkspaceManifest(
-      workspace(
-        `{"version":${WORKSPACE_VERSION},"basePort":3000,"transport":"redis",` +
-          `"transportUrl":"redis://shared:6379","members":[]}`,
-      ),
-      '/ws',
+  it('reads a broker and its endpoint back', async () => {
+    const result = await read(
+      `{"version":${WORKSPACE_VERSION},"basePort":3000,"broker":"redis",` +
+        `"brokerUrl":"redis://shared:6379","members":[]}`,
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.manifest.transport).toBe('redis');
-    expect(result.manifest.transportUrl).toBe('redis://shared:6379');
+    expect(result.manifest.broker).toBe('redis');
+    expect(result.manifest.brokerUrl).toBe('redis://shared:6379');
   });
 
   // Refused rather than defaulted: quietly moving every member off the bus the
   // manifest asked for would leave services that cannot reach each other.
   for (const [label, value] of [
     ['an unknown name', '"carrier-pigeon"'],
+    ['a call style', '"grpc"'],
     ['a number', '42'],
   ]) {
-    it(`refuses ${label} as the transport`, async () => {
-      const result = await readWorkspaceManifest(
-        workspace(
-          `{"version":${WORKSPACE_VERSION},"basePort":3000,"transport":${value},"members":[]}`,
-        ),
-        '/ws',
+    it(`refuses ${label} as the broker`, async () => {
+      const result = await read(
+        `{"version":${WORKSPACE_VERSION},"basePort":3000,"broker":${value},"members":[]}`,
       );
       expect(result.ok).toBe(false);
       if (result.ok) return;
-      expect(result.problem.kind).toBe('unknown-transport');
+      expect(result.problem).toEqual({
+        kind: 'unknown-broker',
+        broker: String(JSON.parse(value)),
+      });
     });
   }
+
+  // Only an absent field takes the default; an explicit null is refused by name.
+  for (const version of [1, 2]) {
+    const field = version === 1 ? 'transport' : 'broker';
+    it(`refuses an explicit null ${field} in a version-${version} manifest`, async () => {
+      const result = await read(
+        `{"version":${version},"basePort":3000,"${field}":null,"members":[]}`,
+      );
+      expect(result).toEqual({ ok: false, problem: { kind: 'unknown-broker', broker: 'null' } });
+    });
+  }
+
+  // A stored URL only where `--broker-url` would accept one: the cloud brokers'
+  // values are a project id and a secret, and memory has no endpoint.
+  for (const broker of ['memory', 'pubsub', 'service-bus']) {
+    for (const version of [1, 2]) {
+      it(`refuses a stored URL for ${broker} in a version-${version} manifest`, async () => {
+        const fields =
+          version === 1
+            ? `"transport":"${broker}","transportUrl":"redis://x:1"`
+            : `"broker":"${broker}","brokerUrl":"redis://x:1"`;
+        const result = await read(`{"version":${version},"basePort":3000,${fields},"members":[]}`);
+        expect(result).toEqual({ ok: false, problem: { kind: 'malformed' } });
+      });
+    }
+  }
+
+  // A version-2 file still carrying a version-1 field is half-migrated: which
+  // field wins is a guess, so neither does.
+  for (const field of ['"transport":"redis"', '"transportUrl":"redis://x"']) {
+    it(`refuses a version-2 manifest that still carries ${field}`, async () => {
+      const result = await read(
+        `{"version":${WORKSPACE_VERSION},"basePort":3000,"broker":"redis",${field},"members":[]}`,
+      );
+      expect(result).toEqual({ ok: false, problem: { kind: 'malformed' } });
+    });
+  }
+
+  describe('a member rpc', () => {
+    it('reads grpc, and normalizes a spelled-out http to absent', async () => {
+      const result = await read(
+        `{"version":${WORKSPACE_VERSION},"basePort":3000,"members":[` +
+          `{"name":"a","port":3000,"rpc":"grpc"},{"name":"b","port":3001,"rpc":"http"},` +
+          `{"name":"c","port":3002}]}`,
+      );
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.manifest.members).toEqual([
+        { name: 'a', port: 3000, rpc: 'grpc' },
+        { name: 'b', port: 3001 },
+        { name: 'c', port: 3002 },
+      ]);
+    });
+
+    for (const value of ['"rest"', '1', 'null']) {
+      it(`refuses rpc ${value} as malformed`, async () => {
+        const result = await read(
+          `{"version":${WORKSPACE_VERSION},"basePort":3000,"members":[{"name":"a","port":3000,"rpc":${value}}]}`,
+        );
+        expect(result).toEqual({ ok: false, problem: { kind: 'malformed' } });
+      });
+    }
+  });
+
+  // M138 §3.1: the version-1 `transport` maps onto a broker and per-member rpc.
+  // Every row here is a row of the plan's table; the result always carries the
+  // CURRENT version, so a re-serialized manifest never writes `version: 1` back.
+  describe('a version-1 manifest', () => {
+    const MEMBERS = '[{"name":"a","port":3000},{"name":"b","port":3001}]';
+    for (const [label, fields, broker, url, grpc] of [
+      ['a broker transport', '"transport":"rabbitmq",', 'rabbitmq', undefined, false],
+      [
+        'a broker transport and its URL',
+        '"transport":"redis","transportUrl":"redis://shared:6379",',
+        'redis',
+        'redis://shared:6379',
+        false,
+      ],
+      ['the grpc transport', '"transport":"grpc",', 'memory', undefined, true],
+      ['the http transport', '"transport":"http",', 'memory', undefined, false],
+      ['no transport', '', 'memory', undefined, false],
+    ] as const) {
+      it(`maps ${label}`, async () => {
+        const result = await read(`{"version":1,"basePort":3000,${fields}"members":${MEMBERS}}`);
+        expect(result.ok).toBe(true);
+        if (!result.ok) return;
+        expect(result.manifest.version).toBe(WORKSPACE_VERSION);
+        expect(result.manifest.broker).toBe(broker);
+        expect(result.manifest.brokerUrl).toBe(url);
+        expect(result.manifest.members.map((member) => member.rpc)).toEqual(
+          grpc ? ['grpc', 'grpc'] : [undefined, undefined],
+        );
+      });
+    }
+
+    for (const transport of ['http', 'grpc']) {
+      it(`refuses a transportUrl beside the ${transport} transport`, async () => {
+        const result = await read(
+          `{"version":1,"basePort":3000,"transport":"${transport}","transportUrl":"redis://x","members":[]}`,
+        );
+        expect(result).toEqual({ ok: false, problem: { kind: 'malformed' } });
+      });
+    }
+
+    for (const [label, value] of [
+      ['an unknown name', '"carrier-pigeon"'],
+      ['a number', '42'],
+    ] as const) {
+      it(`refuses ${label} as the transport, as an unknown broker`, async () => {
+        const result = await read(
+          `{"version":1,"basePort":3000,"transport":${value},"members":[]}`,
+        );
+        expect(result).toEqual({
+          ok: false,
+          problem: { kind: 'unknown-broker', broker: String(JSON.parse(value)) },
+        });
+      });
+    }
+
+    for (const field of ['"broker":"redis"', '"brokerUrl":"redis://x"', '"transportUrl":42']) {
+      it(`refuses a version-1 manifest carrying ${field}`, async () => {
+        const result = await read(`{"version":1,"basePort":3000,${field},"members":[]}`);
+        expect(result).toEqual({ ok: false, problem: { kind: 'malformed' } });
+      });
+    }
+
+    it('writes back as version 2 with the mapped fields', async () => {
+      const result = await read(
+        `{"version":1,"basePort":3000,"transport":"grpc","members":[{"name":"a","port":3000}]}`,
+      );
+      if (!result.ok) throw new Error('expected a manifest');
+      const again = await read(renderWorkspaceManifest(result.manifest));
+      expect(again).toEqual(result);
+      expect(JSON.parse(renderWorkspaceManifest(result.manifest))).toMatchObject({
+        version: 2,
+        broker: 'memory',
+        members: [{ name: 'a', port: 3000, rpc: 'grpc' }],
+      });
+    });
+  });
+
+  it('refuses version 3', async () => {
+    const result = await read('{"version":3,"basePort":3000,"members":[]}');
+    expect(result).toEqual({ ok: false, problem: { kind: 'unsupported-version', version: 3 } });
+  });
 
   it('reports a missing basePort', async () => {
     const result = await readWorkspaceManifest(
@@ -311,7 +456,7 @@ describe('renderWorkspaceManifest', () => {
       version: WORKSPACE_VERSION,
       runtime: 'deno',
       basePort: 4100,
-      transport: 'http',
+      broker: 'memory',
       members: [
         { name: 'orders', port: 4100 },
         { name: 'billing', port: 4101 },
@@ -328,7 +473,7 @@ describe('renderWorkspaceManifest', () => {
       version: WORKSPACE_VERSION,
       runtime: 'deno',
       basePort: 3000,
-      transport: 'http',
+      broker: 'memory',
       members: [],
     });
     expect(rendered.endsWith('\n')).toBe(true);
@@ -342,7 +487,7 @@ describe('allocatePort', () => {
         version: WORKSPACE_VERSION,
         runtime: 'deno',
         basePort: 3000,
-        transport: 'http',
+        broker: 'memory',
         members: [],
       }),
     ).toBe(3000);
@@ -354,7 +499,7 @@ describe('allocatePort', () => {
         version: WORKSPACE_VERSION,
         runtime: 'deno',
         basePort: 3000,
-        transport: 'http',
+        broker: 'memory',
         members: [
           { name: 'a', port: 3000 },
           { name: 'b', port: 3001 },
@@ -371,7 +516,7 @@ describe('allocatePort', () => {
         version: WORKSPACE_VERSION,
         runtime: 'deno',
         basePort: 3000,
-        transport: 'http',
+        broker: 'memory',
         members: [
           { name: 'a', port: 4100 },
           { name: 'b', port: 3001 },
@@ -390,14 +535,14 @@ describe('allocatePort', () => {
       version: WORKSPACE_VERSION,
       runtime: 'deno',
       basePort: 3000,
-      transport: 'http',
+      broker: 'memory',
       members: ports,
     });
     const backwards = allocatePort({
       version: WORKSPACE_VERSION,
       runtime: 'deno',
       basePort: 3000,
-      transport: 'http',
+      broker: 'memory',
       members: [...ports].reverse(),
     });
     expect(forwards).toBe(backwards);
@@ -412,7 +557,7 @@ describe('allocatePort', () => {
         version: WORKSPACE_VERSION,
         runtime: 'deno',
         basePort: MAX_PORT,
-        transport: 'http',
+        broker: 'memory',
         members: [{ name: 'a', port: MAX_PORT }],
       }),
     ).toBeUndefined();
@@ -424,7 +569,7 @@ describe('allocatePort', () => {
         version: WORKSPACE_VERSION,
         runtime: 'deno',
         basePort: MAX_PORT - 1,
-        transport: 'http',
+        broker: 'memory',
         members: [{ name: 'a', port: MAX_PORT - 1 }],
       }),
     ).toBe(MAX_PORT);

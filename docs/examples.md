@@ -1,6 +1,6 @@
 # Examples
 
-The [`apps/`](../apps/) directory holds seventeen runnable applications. Each example teaches one
+The [`apps/`](../apps/) directory holds twenty runnable applications. Each example teaches one
 concept, and its `smoke.ts` proves it. Follow the learning path below, then use the deep dives to
 connect each file to the behavior it implements.
 
@@ -17,11 +17,12 @@ npm start       # serves until stopped
 
 `--example` creates a standalone Node project, fetching the example from the GitHub release tag
 matching the CLI version. GitHub must be reachable when scaffolding; `--dry-run` only lists paths
-and fetches nothing. Offered examples are `minimal`, `rest-api`, `database`, `di-decorators`,
-`cqrs`, `multi-tenant`, `static-site`, `worker-pool`, `graphql-demo`, `grpc`, `microservices` and
+and fetches nothing. Offered examples are `minimal`, `rest-api`, `mcp-tools` (from 0.12.0),
+`semantic-search` (from 0.12.0), `durable-agent` (from 0.12.0), `database`, `di-decorators`, `cqrs`,
+`multi-tenant`, `static-site`, `worker-pool`, `graphql-demo`, `grpc`, `microservices` and
 `realtime`. The Redis-backed smoke checks can exit `77` when Redis is unavailable. For `full-stack`,
-use `--template full-stack`; the other excluded examples need repository scripts or source. See
-[the CLI guide](./cli.md#start-from-an-example) for the flag restrictions.
+use `--template full-stack`; the other excluded examples, including `ai-chat`, need repository
+scripts or source. See [the CLI guide](./cli.md#start-from-an-example) for the flag restrictions.
 
 An example is a teaching project, not a production starting point. Some carry fixed demonstration
 values: `rest-api` signs and verifies its tokens with the fixed `DEMO_JWT_SECRET` in
@@ -58,19 +59,49 @@ with Wrangler.
 
 ## How every example is laid out
 
-Each example has the layout of a project after its first `setu g module`, so the shape to copy is
-the shape the CLI gives you. A new project starts flat, with its controllers in `src/controllers/`
-and its services in `src/services/`. The first `setu g module` moves the scaffold's untouched
-greeting example into `src/modules/<feature>/` by itself; controllers or services you have written
-or changed there need `--adopt-controllers`, or it refuses and lists them:
+Examples use the same artifact paths and CLI-managed registration barrels as `setu new` and
+`setu generate`, keeping only the plugins and artifacts their lesson needs. They do not copy a
+template's unused seams. A new project starts flat; the first `setu g module` moves the scaffold's
+untouched greeting into `src/modules/<feature>/`. Changed flat controllers or services require
+`--adopt-controllers` instead.
 
 ```text
 apps/<name>/
-  setu.config.ts          createApp(): the plugin composition, without starting it
-  main.ts                 starts createApp() on a port and stops it cleanly on SIGTERM
-  src/modules/<feature>/  one folder per feature: <feature>.controller.ts, .service.ts, .schemas.ts
-  smoke.ts                proves the example's claim with node:test against createApp()
+  setu.config.ts                      createApp(): composition without starting
+  main.ts                             startup and shutdown, or a run-and-exit demonstration
+  src/modules/index.ts                managed registerModules(router, services?)
+  src/modules/<feature>/index.ts      managed register<Feature>Module(router, services?)
+  src/modules/<feature>/              controllers, services and schemas used by the feature
+  src/plugins/index.ts                managed GENERATED_PLUGINS, when custom plugins exist
+  src/cqrs/index.ts                   managed COMMAND_HANDLERS and QUERY_HANDLERS, when used
+  smoke.ts                            the example's behavioral proof
 ```
+
+`setu.config.ts` calls `registerModules(app.router, app.services)` and spreads `GENERATED_PLUGINS`
+into its plugin list where those artifacts exist. Class-based modules also have
+`<feature>.module.ts` declarations, and their managed activation barrel exports `MODULES`, passed as
+`DecoratorPlugin({ modules: [...MODULES] })` in addition to calling `registerModules`. The module's
+declaration owns its providers; additional services use their own `<name>.service.ts` filenames.
+
+Generate artifacts with the CLI and regenerate its owned files with `setu sync`; their managed
+headers are part of the shape. `setu check` checks the wiring. These examples have no custom
+middleware, event-handler, health-indicator or metric artifacts, so they do not add empty barrels
+for those families. Using HealthPlugin or a plugin-provided indicator alone does not create a source
+artifact.
+
+`grpc-workspace` is the one exception to the empty-barrels rule: it is a replica of what
+`setu new --workspace` and `setu generate app --rpc grpc` write, empty barrels included, and
+`test/grpc-workspace-example.test.ts` regenerates that scaffold and fails when the two drift.
+
+The smallest examples (`minimal`, `static-site`, `compiled-binary`) register their single route
+directly in the factory, as the scaffold does for its root route. GraphQL resolvers and gRPC
+services have no dedicated schematic: their existing files stay inside standard modules with
+CLI-owned indexes, while GraphqlPlugin and GrpcPlugin still own transport registration
+(`grpc-workspace`'s billing, which has no module, adds its service from a generated plugin). The
+CLI-owned registrars in those two modules have no HTTP controllers to register. Worker-pool task
+modules stay in `src/tasks/`; `setu g job` generates queue/scheduler jobs, a different artifact. The
+`microservices` layout is a deliberate exception: two services have separate factories under
+`src/service-a/` and `src/service-b/`.
 
 `setu.config.ts` composes and does not start, so `main.ts` and `smoke.ts` run the same application.
 The smoke check starts it with no port and drives it with `app.inject()`, so most proofs need no
@@ -120,31 +151,32 @@ A few examples differ, and say why: `cloudflare` adds the Worker entry `worker.t
 `compiled-binary` adds the CommonJS entry `sea.ts` its executable is built from, `realtime-clients`
 adds a client driver that runs on several runtimes and a `worker.ts` that hosts it on workerd, and
 `microservices` composes two services, so it has one factory per service under `src/service-a/` and
-`src/service-b/`. `full-stack` keeps the React Router layout `setu new --template full-stack`
-scaffolds — `app/routes`, `app/features`, `app/services` — and reads its port from `PORT`, as that
-template does.
+`src/service-b/`. `full-stack` follows the current `setu new --template full-stack` layout: kernel
+modules under `src/modules/`, pages under `app/routes/`, and session glue under `app/server/`. It
+reads its port from `PORT`, as that template does.
 
 ## A learning path
 
-| Step | Example                                          | Concept                                                    | Needs                                   |
-| ---- | ------------------------------------------------ | ---------------------------------------------------------- | --------------------------------------- |
-| 1    | [minimal](../apps/minimal)                       | Compose a kernel, runtime and one route                    | —                                       |
-| 2    | [rest-api](../apps/rest-api)                     | Build an authenticated, validated API described by OpenAPI | —                                       |
-| 3    | [database](../apps/database)                     | Use repositories and verify transaction rollback           | —                                       |
-| 4    | [di-decorators](../apps/di-decorators)           | Inject decorated services and compare request lifetimes    | —                                       |
-| 5    | [cqrs](../apps/cqrs)                             | Write through a command bus and read through a query bus   | —                                       |
-| 6    | [multi-tenant](../apps/multi-tenant)             | Isolate request data by tenant                             | —                                       |
-| 7    | [plugin-development](../apps/plugin-development) | Register and resolve a custom plugin capability            | —                                       |
-| 8    | [graphql-demo](../apps/graphql-demo)             | Compose a schema-first GraphQL API                         | —                                       |
-| 9    | [grpc](../apps/grpc)                             | Serve descriptor-backed RPC and HTTP on one port           | —                                       |
-| 10   | [static-site](../apps/static-site)               | Serve static files with caching, ETags and byte ranges     | —                                       |
-| 11   | [worker-pool](../apps/worker-pool)               | Offload CPU work and share worker buffers                  | —                                       |
-| 12   | [full-stack](../apps/full-stack)                 | Pass framework services into SSR loaders and form actions  | Node 24 and pnpm                        |
-| 13   | [realtime](../apps/realtime)                     | Deliver SSE messages across replicas                       | Redis                                   |
-| 14   | [microservices](../apps/microservices)           | Discover an HTTP service, then call it through a broker    | Redis for the second half               |
-| 15   | [realtime-clients](../apps/realtime-clients)     | Resume authenticated SSE and keep WebSockets alive         | Node, Bun and Wrangler (fetched by npx) |
-| 16   | [cloudflare](../apps/cloudflare)                 | Wire KV, scheduled work and queue messaging on workerd     | Wrangler                                |
-| 17   | [compiled-binary](../apps/compiled-binary)       | Package a health application as a Node single executable   | —                                       |
+| Step | Example                                          | Concept                                                     | Needs                                   |
+| ---- | ------------------------------------------------ | ----------------------------------------------------------- | --------------------------------------- |
+| 1    | [minimal](../apps/minimal)                       | Compose a kernel, runtime and one route                     | —                                       |
+| 2    | [rest-api](../apps/rest-api)                     | Build an authenticated, validated API described by OpenAPI  | —                                       |
+| 3    | [database](../apps/database)                     | Use repositories and verify transaction rollback            | —                                       |
+| 4    | [di-decorators](../apps/di-decorators)           | Inject decorated services and compare request lifetimes     | —                                       |
+| 5    | [cqrs](../apps/cqrs)                             | Write through a command bus and read through a query bus    | —                                       |
+| 6    | [multi-tenant](../apps/multi-tenant)             | Isolate request data by tenant                              | —                                       |
+| 7    | [plugin-development](../apps/plugin-development) | Register and resolve a custom plugin capability             | —                                       |
+| 8    | [graphql-demo](../apps/graphql-demo)             | Compose a schema-first GraphQL API                          | —                                       |
+| 9    | [grpc](../apps/grpc)                             | Serve descriptor-backed RPC and HTTP on one port            | —                                       |
+| 10   | [static-site](../apps/static-site)               | Serve static files with caching, ETags and byte ranges      | —                                       |
+| 11   | [worker-pool](../apps/worker-pool)               | Offload CPU work and share worker buffers                   | —                                       |
+| 12   | [full-stack](../apps/full-stack)                 | Pass framework services into SSR loaders and form actions   | Node 24 and pnpm                        |
+| 13   | [realtime](../apps/realtime)                     | Deliver SSE messages across replicas                        | Redis                                   |
+| 14   | [microservices](../apps/microservices)           | Discover an HTTP service, then call it through a broker     | Redis for the second half               |
+| 15   | [grpc-workspace](../apps/grpc-workspace)         | Call a sibling workspace member over gRPC through discovery | —                                       |
+| 16   | [realtime-clients](../apps/realtime-clients)     | Resume authenticated SSE and keep WebSockets alive          | Node, Bun and Wrangler (fetched by npx) |
+| 17   | [cloudflare](../apps/cloudflare)                 | Wire KV, scheduled work and queue messaging on workerd      | Wrangler                                |
+| 18   | [compiled-binary](../apps/compiled-binary)       | Package a health application as a Node single executable    | —                                       |
 
 ## Example deep dives
 
@@ -184,6 +216,7 @@ starter also brings health, metrics, security headers and the error handler.
 pnpm --dir apps/rest-api run start 3400
 curl localhost:3400/health                                    # 200
 curl -X POST localhost:3400/todos -H 'content-type: application/json' -d '{"title":"x"}'          # 401 Problem Details
+pnpm --dir apps/rest-api run token                            # a five-minute token for Authorize
 # Swagger UI at http://localhost:3400/docs, the document at /openapi.json
 ```
 
@@ -193,6 +226,10 @@ exist answers a Problem Details `404`. The smoke check issues a token through `i
 reads the written todo back.
 
 **Read, in order:**
+
+- [`src/modules/index.ts`](../apps/rest-api/src/modules/index.ts) and
+  [`todos/index.ts`](../apps/rest-api/src/modules/todos/index.ts) — CLI-owned activation barrels
+  forward the router and service registry to the feature controller.
 
 - [`src/modules/todos/`](../apps/rest-api/src/modules/todos/) — registerTodosRoutes puts requireAuth
   before the bound createBody validator and reads that validator's value when creating a todo.
@@ -223,6 +260,16 @@ curl localhost:3400/lifetimes   # same flags, a different scopedId
 ```
 
 **Read, in order:**
+
+- [`src/modules/index.ts`](../apps/di-decorators/src/modules/index.ts) — the CLI-owned MODULES array
+  and registerModules registrar; setu.config.ts consumes both.
+- [`greeting/index.ts`](../apps/di-decorators/src/modules/greeting/index.ts) and
+  [`lifetimes/index.ts`](../apps/di-decorators/src/modules/lifetimes/index.ts) — managed module
+  indexes re-export declarations and register any function controllers.
+- [`singleton-report.service.ts`](../apps/di-decorators/src/modules/lifetimes/singleton-report.service.ts)
+  and
+  [`scoped-report.service.ts`](../apps/di-decorators/src/modules/lifetimes/scoped-report.service.ts)
+  — independently named service artifacts listed by LifetimesModule.
 
 - [`src/modules/greeting/`](../apps/di-decorators/src/modules/greeting/) — GreetingController
   injects GREETING_SERVICE by constructor position; GreetingService registers that token with
@@ -258,6 +305,10 @@ through Drizzle or Prisma, or MongoDB and the other adapters. See
 
 **Read, in order:**
 
+- [`src/modules/index.ts`](../apps/database/src/modules/index.ts) and
+  [`notes/index.ts`](../apps/database/src/modules/notes/index.ts) — CLI-owned activation barrels
+  forward the router and service registry to the feature controller.
+
 - [`src/modules/notes/`](../apps/database/src/modules/notes/) — notesRepository resolves the notes
   repository from the database service; registerNotesRoutes uses it for create, findById and update.
 - [`smoke.ts`](../apps/database/smoke.ts) — The database.transaction callback throws after creating
@@ -270,7 +321,7 @@ through Drizzle or Prisma, or MongoDB and the other adapters. See
 
 **Concept.** Separate a mutation's command handler from the query that reads its result. Both
 handlers share one feature store; the command handler's factory resolves the runtime clock, while
-the query handler needs no capability.
+the query handler reads the same application-owned store.
 
 `CqrsPlugin` with one command handler and one query handler. `pnpm --dir apps/cqrs run start` sends
 a command, reads the result through the query bus, prints it and exits; it is not a server. The
@@ -284,11 +335,156 @@ pnpm --dir apps/cqrs run start
 
 **Read, in order:**
 
-- [`src/modules/notes/`](../apps/cqrs/src/modules/notes/) — notesHandlers creates the shared store;
-  addNoteHandler stamps writes with runtime.now(), and readNotesHandler returns the store through
-  the separate query registration.
+- [`setu.config.ts`](../apps/cqrs/setu.config.ts) — creates an application-owned note store,
+  consumes COMMAND_HANDLERS and QUERY_HANDLERS in CqrsPlugin, and calls registerModules.
+- [`src/cqrs/index.ts`](../apps/cqrs/src/cqrs/index.ts) — the CLI-owned handler barrel. CQRS
+  handlers are app-wide; the CLI rejects `--module` for these schematics.
+- [`add-note.command-handler.ts`](../apps/cqrs/src/cqrs/add-note.command-handler.ts) — its factory
+  resolves the store and runtime clock; the handler stamps each write with runtime.now().
+- [`read-notes.query-handler.ts`](../apps/cqrs/src/cqrs/read-notes.query-handler.ts) — its factory
+  resolves the same store; the handler returns a copy without changing it.
+- [`src/modules/index.ts`](../apps/cqrs/src/modules/index.ts) and
+  [`notes/index.ts`](../apps/cqrs/src/modules/notes/index.ts) — standard managed module indexes;
+  this run-and-exit example has no HTTP controller.
+- [`notes.service.ts`](../apps/cqrs/src/modules/notes/notes.service.ts) — the store token and
+  factory, creating independent state for each application.
+- [`notes.client.ts`](../apps/cqrs/src/modules/notes/notes.client.ts) — addNote and readNotes send
+  through the separate buses; main.ts and smoke.ts share these helpers.
 
 ---
+
+### mcp-tools
+
+Available from **0.12.0**, the [MCP tools example](../apps/mcp-tools) follows the generated REST
+module layout and exposes four explicitly marked routes through `POST /mcp`. Read-only tokens see
+only `list_items` and `read_item`; writers also see `create_item` and `archive_item`. The
+official-client smoke proves scope filtering, schemas, create/read, idempotent retries, validation,
+Bearer challenges, rate limits, socket Origin checks and a per-principal archive quota. Identical
+archive retries replay before the quota, and a missing item refunds its reservation.
+
+```bash
+pnpm --dir apps/mcp-tools run check
+pnpm --dir apps/mcp-tools run smoke
+pnpm --dir apps/mcp-tools test
+pnpm --dir apps/mcp-tools run test:e2e
+```
+
+From the 0.12.0 release, `setu new demo --example mcp-tools` downloads the matching CLI release's
+files from GitHub. Before release, the packed-package CLI e2e is the proof; after publication,
+repeat the command against the published CLI. Readers who cannot reach GitHub can build the same
+application from the [complete website guide](./mcp.md), which includes every source file. Use a
+shared idempotency store and quota store across replicas. The demo JWT secret and unbounded
+in-memory item storage are for local learning only.
+
+**Read, in order:**
+
+- [`setu.config.ts`](../apps/mcp-tools/setu.config.ts) — compose auth, idempotency and MCP without
+  changing the generated factory signature.
+- [`items.schemas.ts`](../apps/mcp-tools/src/modules/items/items.schemas.ts) — branded
+  body/query/path inputs and object responses.
+- [`items.service.ts`](../apps/mcp-tools/src/modules/items/items.service.ts) — storage isolated to
+  one application.
+- [`items.quota.ts`](../apps/mcp-tools/src/modules/items/items.quota.ts) — reserve, refund refusals
+  and settle successes.
+- [`items.controller.ts`](../apps/mcp-tools/src/modules/items/items.controller.ts) — scopes, rate
+  limits and tool markers, with replay before quota.
+- [`token.ts`](../apps/mcp-tools/token.ts) — issue a short-lived operator credential without
+  application logging.
+- [`smoke.ts`](../apps/mcp-tools/smoke.ts) — the official client in-process and over a socket.
+
+### ai-chat
+
+The [AI chat example](../apps/ai-chat) follows the [AI guide](./ai.md): the SDK owns tool loops,
+structured output, UI streams and model fallback; Setu owns request identity, cancellation, quotas
+and outbox/inbox usage delivery. Run `pnpm --dir apps/ai-chat run smoke` for its Node-only proofs,
+including an in-process OTLP receiver and a content-capture positive control. A real endpoint is
+optional through `AI_COMPAT_BASE_URL`. With a model configured, `pnpm --dir apps/ai-chat run start`
+serves a minimal chat page at `/ui` that keeps the conversation, renders the streamed answer as it
+arrives, counts tokens per turn and per session, shows how much of the context window the last
+request filled, and stops the model call with **Stop**.
+
+### semantic-search
+
+**Concept.** The [semantic search example](../apps/semantic-search) queues an upload, indexes it in
+the background, and searches the result by meaning inside the caller's tenant. The route returns
+`202` before any embedding work runs; the job resolves the tenant again, because a queued job
+outlives the request.
+
+`POST /documents` validates `{ id, text, tag? }` and queues `ingest-document` with the tenant the
+request resolved. The job drops the write if that tenant no longer exists, splits the text into
+800-character chunks, embeds them with the AI SDK, and calls `replaceSource` with the submission's
+version, so re-ingesting a shorter document leaves exactly its new chunks and a late retry of an
+older submission is dropped instead of replacing a newer one. `GET /documents/search?q=&tag=&limit=`
+embeds the query and returns the closest chunks; `limit` is 1–20 and defaults to 5. Both routes read
+the scope from `x-tenant-id`, so a request without one answers `400` and an unknown tenant `404`.
+
+The store is process memory by default. Set `PGVECTOR_URL` to run the same code on PostgreSQL with
+pgvector 0.8+; set `EMBED_BASE_URL`, `EMBED_MODEL`, `EMBED_DIMENSIONS` and, when the server needs
+one, `EMBED_API_KEY` for an OpenAI-compatible embedding server. The defaults target llama.cpp on
+port 8081 with Qwen3-Embedding-0.6B at 1024 dimensions.
+
+```bash
+pnpm --dir apps/semantic-search run smoke
+EMBED_BASE_URL=http://localhost:8081/v1 pnpm --dir apps/semantic-search run smoke   # adds the live-model case
+```
+
+**Read, in order:**
+
+- [`setu.config.ts`](../apps/semantic-search/setu.config.ts) — declares the `documents` collection
+  with `tag` filterable, composes multi-tenancy and the vector store, and queues the ingest job.
+- [`documents.controller.ts`](../apps/semantic-search/src/modules/documents/documents.controller.ts)
+  — queues ingest and searches the caller's scope.
+- [`documents.service.ts`](../apps/semantic-search/src/modules/documents/documents.service.ts) —
+  chunking, `embedMany`, `replaceSource` and the query filter.
+- [`ingest-document.job.ts`](../apps/semantic-search/src/jobs/ingest-document.job.ts) — re-checks
+  the tenant before it writes anything.
+- [`smoke.ts`](../apps/semantic-search/smoke.ts) — a deterministic mock model proves background
+  indexing, tenant isolation, replacement, a refused filter and a dimension mismatch; `PGVECTOR_URL`
+  and a reachable embedding server add the backend and live-model cases.
+
+See [Retrieval (vector search)](./retrieval.md) for the plugin, its adapters and its limits.
+
+### durable-agent
+
+**Concept.** The [durable agent example](../apps/durable-agent) runs a support agent whose run
+outlives the request and the process. The agent looks an order up and asks a person to approve a
+refund before it issues one; reloading the page or restarting the server leaves the run where it
+was, and the refund is written exactly once.
+
+`POST /runs` starts a run and answers `202` at once; the run executes detached.
+`GET /runs/:id/stream` replays the stored AI SDK UI message stream and follows the live run,
+resuming after `Last-Event-ID` on a reconnect. When the agent wants to call `issueRefund`, the run
+parks and the stream ends without `finish`. `POST /runs/:id/approvals/:approvalId` decides, once;
+the run continues on whichever process takes it. Each tool call runs inside tier C idempotency,
+writing through the unit of work the run supplies, so a resumed run replays the recorded result
+instead of calling the tool again.
+
+The page at `/ui` keeps the run id in the URL. With `DATABASE_URL` set (after `db:setup`), stop the
+server while the refund waits, start it again and approve from the new process. The identity is a
+demonstration header, `x-demo-user`: customers (`priya`, `tomas`, `amara`) own one order each and
+can only ask about their own, and only `lead` approves a refund (`canDecide`), so nobody approves
+their own. Each refund's key is its number on the order, so two racing refunds cannot overspend it.
+
+```bash
+pnpm --dir apps/durable-agent run smoke
+AGENT_RUNS_PG_URL=postgres://postgres:postgres@localhost:5432/postgres pnpm --dir apps/durable-agent run smoke   # adds the restart case
+```
+
+**Read, in order:**
+
+- [`support.agent.ts`](../apps/durable-agent/src/modules/support/support.agent.ts) — the definition:
+  the model per step, the two tools, `toolsContext` handing each tool the unit of work, and the
+  approval policy.
+- [`support.controller.ts`](../apps/durable-agent/src/modules/support/support.controller.ts) — the
+  routes over `IAgentRunService`.
+- [`setu.config.ts`](../apps/durable-agent/setu.config.ts) — the database, `IdempotencyPlugin` and
+  `AgentRunsPlugin` added to the generated composition.
+- [`public/run.js`](../apps/durable-agent/public/run.js) — reading the stream, reconnecting with
+  `Last-Event-ID`, and handling `reset-step` and `data-setu-replay`.
+- [`smoke.ts`](../apps/durable-agent/smoke.ts) — approved and denied refunds, and a parked run
+  finished by a new application on the same PostgreSQL database.
+
+See [Durable agent runs](./durable-runs.md) for the plugin and its guarantees.
 
 ### multi-tenant
 
@@ -296,19 +492,27 @@ pnpm --dir apps/cqrs run start
 store. The header resolver requires a tenant, and both note routes obtain their repository through
 that request context.
 
-`MultiTenancyPlugin` resolving the tenant from the `x-tenant-id` header, with `required: true`.
-Notes are stored per tenant, and a request with no tenant is refused.
+`MultiTenancyPlugin` resolving the tenant from the `x-tenant-id` header, with `required: true` and
+`tenants: ['acme', 'globex']`. Notes are stored per tenant, a request with no tenant is refused, and
+a request naming a tenant outside the list is refused before any handler runs.
 
 ```bash
 pnpm --dir apps/multi-tenant run start 3400
 curl -X POST localhost:3400/notes -H 'x-tenant-id: acme' -H 'content-type: application/json' -d '{"text":"a"}'   # 201
 curl localhost:3400/notes -H 'x-tenant-id: acme'                          # [ the note ]
 curl localhost:3400/notes -H 'x-tenant-id: globex'                        # []
+curl localhost:3400/notes -H 'x-tenant-id: initech'                       # 404 Unknown Tenant
 curl localhost:3400/notes                                                 # 400 Tenant Required
 ```
 
 **Read, in order:**
 
+- [`src/modules/index.ts`](../apps/multi-tenant/src/modules/index.ts) and
+  [`notes/index.ts`](../apps/multi-tenant/src/modules/notes/index.ts) — CLI-owned activation barrels
+  forward the router and service registry to the feature controller.
+
+- [`setu.config.ts`](../apps/multi-tenant/setu.config.ts) — the `tenants` list; any other id answers
+  `404 Unknown Tenant`.
 - [`src/modules/notes/`](../apps/multi-tenant/src/modules/notes/) — tenantNotes passes ctx to the
   multi-tenancy service's getRepository; registerNotesRoutes calls it for both create and findAll,
   so each request uses its tenant's notes.
@@ -331,6 +535,9 @@ pnpm --dir apps/plugin-development run test                  # the plugin's own 
 ```
 
 **Read, in order:**
+
+- [`src/plugins/index.ts`](../apps/plugin-development/src/plugins/index.ts) — the generated plugin
+  barrel; setu.config.ts spreads GENERATED_PLUGINS beside RuntimePlugin.
 
 - [`src/plugins/greeting.plugin.ts`](../apps/plugin-development/src/plugins/greeting.plugin.ts) —
   GreetingPlugin declares GREETING in provides, registers an IGreetingService under it, and resolves
@@ -370,6 +577,78 @@ The two arguments are service A's and service B's ports (defaults `3000` and `30
   optional messaging; respondToGreetings registers a responder on the shared topic and answers with
   greetingFor.
 
+For the same call over gRPC between two members of a CLI workspace, see
+[grpc-workspace](#grpc-workspace).
+
+---
+
+### grpc-workspace
+
+**Concept.** Call a sibling service over gRPC in a Setu workspace. Two members, generated by the
+CLI, share one `.proto` contract from a workspace library: `billing` serves
+`billing.v1.BillingService`, and `orders` finds billing through its generated discovery map and
+calls it with a Connect client. Only billing is generated with `--rpc grpc`, so only billing serves
+gRPC, under `/grpc` beside its HTTP routes; orders is an ordinary HTTP member, because calling a
+gRPC member needs only a client.
+
+The example is the scaffold plus the gRPC feature. It was generated with:
+
+```bash
+setu new grpc-workspace --workspace --runtime node --port 3410
+cd grpc-workspace
+setu generate library contracts
+setu generate app billing --template microservice --rpc grpc
+setu generate app orders --template microservice --depends-on billing
+setu generate plugin billing --dir apps/billing
+cd apps/orders
+setu generate controller orders
+setu generate service orders
+setu generate schema orders
+```
+
+Each member has a single feature, so both stay flat, as any service does until its first
+`setu generate module`: billing serves `Quote` from the plugin `setu generate plugin` wrote, and
+orders has a controller, a service and a schema. Billing is generated first so that orders can
+record it with `--depends-on`: the root `dev` script then starts orders only after billing answers
+`/ready`. Billing listens on 3410 and orders on 3411, the ports the workspace manifest and each
+member's `src/discovery/services.ts` record. The contract lives in `libs/contracts`, whose
+`proto:gen` script runs buf through `npx`; its output under `src/gen/` is committed, so nothing else
+needs buf.
+
+```bash
+pnpm --dir apps/grpc-workspace run smoke      # starts both members, makes the cross-member calls
+pnpm --dir apps/grpc-workspace run start      # the generated dev script: billing, then orders
+curl -X POST localhost:3411/orders -H 'content-type: application/json' \
+  -d '{"items":[{"sku":"widget","quantity":2},{"sku":"gadget","quantity":1}]}'   # totalCents 3497
+```
+
+An unknown SKU, or a quantity below one, answers `400`. With billing stopped, `POST /orders` answers
+`503`: over fetch, a refused connection reaches the Connect client as code `Unknown` caused by a
+`TypeError`, and orders maps that and `Unavailable` to "billing is unavailable".
+
+**Read, in order:**
+
+- [`libs/contracts/proto/billing/v1/billing.proto`](../apps/grpc-workspace/libs/contracts/proto/billing/v1/billing.proto)
+  and [`libs/contracts/src/index.ts`](../apps/grpc-workspace/libs/contracts/src/index.ts) — the
+  shared contract and the generated `BillingService` both members import.
+- [`apps/billing/src/plugins/billing.plugin.ts`](../apps/grpc-workspace/apps/billing/src/plugins/billing.plugin.ts)
+  — the `Quote` implementation and the generated plugin that adds it through
+  `IGrpcService.addService`. It depends on the gRPC capability, which the CLI-owned
+  `transportPlugins()` (from `src/transport/index.ts`) provides, and the plugins barrel registers
+  it, so billing's `setu.config.ts` is unchanged.
+- [`apps/orders/src/clients/billing.client.ts`](../apps/grpc-workspace/apps/orders/src/clients/billing.client.ts)
+  and
+  [`apps/orders/src/services/orders.service.ts`](../apps/grpc-workspace/apps/orders/src/services/orders.service.ts)
+  — the Connect client, the address from `discovery.resolveUrl('billing', '/grpc')`, and the error
+  mapping.
+- [`apps/orders/src/controllers/orders.controller.ts`](../apps/grpc-workspace/apps/orders/src/controllers/orders.controller.ts)
+  — the flat function controller: `POST /orders` validates the line items and creates the order.
+- [`smoke.ts`](../apps/grpc-workspace/smoke.ts) — starts billing and orders as separate processes
+  and checks the totals, the `400` paths and the `503` after billing stops.
+
+The example's [README](../apps/grpc-workspace/README.md) lists every file that differs from the
+generated workspace, and why.
+
 ---
 
 ### realtime
@@ -394,6 +673,10 @@ WebSocket rooms are shown in [realtime-clients](#realtime-clients) and in the
 
 **Read, in order:**
 
+- [`src/modules/index.ts`](../apps/realtime/src/modules/index.ts) and
+  [`news/index.ts`](../apps/realtime/src/modules/news/index.ts) — CLI-owned activation barrels
+  forward the router and service registry to the feature controller.
+
 - [`src/modules/news/`](../apps/realtime/src/modules/news/) — registerNewsRoutes adds each /events
   connection to NEWS_CHANNEL and publishes POST /publish messages to that same channel.
 - [`smoke.ts`](../apps/realtime/smoke.ts) — startReplica launches each server separately; the
@@ -413,7 +696,19 @@ authenticated streams send their credentials, and a WebSocket stays alive across
 keep-alive. Its smoke check needs Bun installed and runs Wrangler through `npx` (downloaded on first
 use); a missing one fails the check rather than skipping it.
 
+```bash
+pnpm --dir apps/realtime-clients run start 3400
+curl -N localhost:3400/events -H 'authorization: Bearer smoke-token'   # score events, then heartbeats
+curl localhost:3400/events                                            # 401 without the demo token
+```
+
 **Read, in order:**
+
+- [`src/modules/index.ts`](../apps/realtime-clients/src/modules/index.ts) and
+  [`events/index.ts`](../apps/realtime-clients/src/modules/events/index.ts) — managed module
+  activation with the router and service registry.
+- [`src/plugins/index.ts`](../apps/realtime-clients/src/plugins/index.ts) — GENERATED_PLUGINS
+  registers IdleSocketPlugin, whose dependency waits for WebSocketPlugin.
 
 - [`setu.config.ts`](../apps/realtime-clients/setu.config.ts) — createApp composes SSE and WebSocket
   plugins with short heartbeat and idle timings, plus the idle-socket plugin used by the driver.
@@ -447,6 +742,10 @@ changing the GraphQL transports, not part of `check:apps`.
 
 **Read, in order:**
 
+- [`src/modules/index.ts`](../apps/graphql-demo/src/modules/index.ts) and
+  [`books/index.ts`](../apps/graphql-demo/src/modules/books/index.ts) — standard CLI-owned module
+  activation; GraphqlPlugin registers the transport directly in setu.config.ts.
+
 - [`setu.config.ts`](../apps/graphql-demo/setu.config.ts) — createApp supplies typeDefs and a fresh
   createResolvers result to GraphqlPlugin, with WebSocket/SSE subscriptions, a persisted-query cache
   and batching.
@@ -469,15 +768,23 @@ it needs HTTP/2 trailers a fetch-based server does not send.
 ```bash
 pnpm --dir apps/grpc run start                  # port 5000
 curl localhost:5000/health                       # {"status":"ok"}
+curl -X POST localhost:5000/example.EchoService/Echo -H 'content-type: application/json' -d '{"message":"hi"}'   # {"response":"echo: hi"}
 ```
 
 **Read, in order:**
+
+- [`src/modules/index.ts`](../apps/grpc/src/modules/index.ts) and
+  [`echo/index.ts`](../apps/grpc/src/modules/echo/index.ts) — standard CLI-owned module activation;
+  GrpcPlugin registers the transport directly in setu.config.ts.
 
 - [`src/modules/echo/`](../apps/grpc/src/modules/echo/) — echoServiceRegistration couples the
   revived ECHO_SERVICE descriptor to echo and ping implementations; the descriptor is embedded, so
   this example does not require a generation step.
 - [`smoke.ts`](../apps/grpc/smoke.ts) — createEchoClient sends an RPC to baseUrl, then fetch reads
   /health using that same baseUrl.
+
+Next: [grpc-workspace](#grpc-workspace) calls one service from another over gRPC, in a workspace the
+CLI generates.
 
 ---
 
@@ -498,6 +805,14 @@ pnpm --dir apps/cloudflare run smoke            # needs `wrangler` on PATH
 ```
 
 **Read, in order:**
+
+- [`setu.config.ts`](../apps/cloudflare/setu.config.ts) — registers this application's WORKER_ENV,
+  spreads GENERATED_PLUGINS and calls registerModules(app.router, app.services).
+- [`src/plugins/index.ts`](../apps/cloudflare/src/plugins/index.ts) — the CLI-owned barrel registers
+  CloudflareRuntimePlugin and MessagingSubscriptionsPlugin. The zero-argument runtime plugin reads
+  WORKER_ENV at startup, keeping environments isolated between applications.
+- [`src/modules/index.ts`](../apps/cloudflare/src/modules/index.ts) — the managed audit, diagnostics
+  and values module indexes activate their controllers.
 
 - [`worker.ts`](../apps/cloudflare/worker.ts) — createWorkerHandler shares one startup promise,
   clears failed starts for retry, and supplies the same app to fetch and queue; scheduled writes its
@@ -532,15 +847,14 @@ curl localhost:3400/health        # {"status":"ok"}
 
 ### full-stack
 
-**Concept.** Bridge kernel capabilities into server-rendered route loaders through context keys. The
-composition writes session, CSRF, logger and database values into React Router context; the product
-loader reads its view through that context, and the smoke check verifies rendered database rows and
-a form login.
+**Concept.** Pages read request-bound kernel modules with `getService(context, TOKEN)`. The products
+module reads the database capability and serves both the SSR page and `/api/products`. Session and
+CSRF values reach loaders and actions through application context keys.
 
 A React Router 8 framework-mode application composed with `createFullStackAppFromConfig` from
-`@setu-ts/full-stack-starter`. Its smoke check writes a row through the database capability, renders
-an SSR page that shows it (proving `populateLoadContext` reached the loader), and completes a
-`<Form>` login whose CSRF token round-trips through the session plugin.
+`@setu-ts/full-stack-starter`. Its smoke check verifies an empty API catalogue before seeding,
+writes rows through the database capability, and checks the sorted API response and page HTML. It
+also completes a `<Form>` login whose CSRF token round-trips through the session plugin.
 
 ```bash
 pnpm --dir apps/full-stack run start            # builds first, then serves on PORT or 3000
@@ -551,14 +865,28 @@ pnpm --dir apps/full-stack run start            # builds first, then serves on P
 **Read, in order:**
 
 - [`setu.config.ts`](../apps/full-stack/setu.config.ts) — createApp enables SSR, session and the
-  memory database; populateLoadContext puts the four context values into the provider on each
-  request.
-- [`app/routes/`](../apps/full-stack/app/routes/) — The products loader calls
-  buildProductsView(context), and ProductsRoute renders the returned rows; the login loader reads
-  the CSRF context and its action writes the email into the session.
-- [`smoke.ts`](../apps/full-stack/smoke.ts) — seedProducts writes through the database service
-  before HTML assertions; the login test carries the session cookie and the rendered CSRF token into
-  its form post.
+  memory database, then calls registerModules(app.router, app.services). populateLoadContext sets
+  only the session and CSRF token.
+- [`src/modules/index.ts`](../apps/full-stack/src/modules/index.ts) and
+  [`products/index.ts`](../apps/full-stack/src/modules/products/index.ts) — registerModules
+  registers the products requestService factory and its API route before startup.
+- [`products.types.ts`](../apps/full-stack/src/modules/products/products.types.ts) and
+  [`products.token.ts`](../apps/full-stack/src/modules/products/products.token.ts) — the Product
+  interface and typed PRODUCTS token, the only kernel module a page imports by value.
+- [`products.service.ts`](../apps/full-stack/src/modules/products/products.service.ts) — reads
+  products through CAPABILITIES.DATABASE, logs through CAPABILITIES.LOGGER and sorts by name.
+- [`products.controller.ts`](../apps/full-stack/src/modules/products/products.controller.ts) — GET
+  /api/products resolves the same service through resolveRequestService(ctx, PRODUCTS).
+- [`products.seed.ts`](../apps/full-stack/src/modules/products/products.seed.ts) — PRODUCTS_ENTITY
+  and startup seeding, called by main.ts and smoke.ts after the database connects.
+- [`app/server/context-keys.server.ts`](../apps/full-stack/app/server/context-keys.server.ts) and
+  [`session.server.ts`](../apps/full-stack/app/server/session.server.ts) — stable session and CSRF
+  keys and their stateless accessors.
+- [`app/routes/_app/products._index.tsx`](../apps/full-stack/app/routes/_app/products._index.tsx) —
+  the loader calls getService(context, PRODUCTS).list() and returns products and total. The page
+  formats prices; kernel imports are types or the token only.
+- [`smoke.ts`](../apps/full-stack/smoke.ts) — checks database readback through the API and page,
+  then carries the session cookie and rendered CSRF token into a login form post.
 
 ---
 
@@ -579,6 +907,9 @@ pnpm --dir apps/worker-pool run smoke
 ```
 
 **Read, in order:**
+
+- [`setu.config.ts`](../apps/worker-pool/setu.config.ts) — composes the pool and its health
+  reporting; worker task URLs are separate from the CLI's queue/scheduler job schematic.
 
 - [`src/tasks/`](../apps/worker-pool/src/tasks/) — defineWorkerTask registers a spin that
   deliberately busy-waits; the fill task writes through a Uint8Array view and returns its length,
@@ -638,7 +969,9 @@ skip fails the job unless the app is in the `ALLOW_SKIP` list; see
 
 1. Create it under `apps/<name>/` with a private `package.json` declaring `start`, `smoke` and
    `check` scripts and a `tsconfig.json` extending `../../tsconfig.apps.json`, laid out as
-   [above](#how-every-example-is-laid-out).
+   [above](#how-every-example-is-laid-out). A workspace example keeps its members under
+   `apps/<name>/apps/*` and its libraries under `apps/<name>/libs/*`, lists both in
+   `pnpm-workspace.yaml`, and extends `tsconfig.apps.json` from each member's depth.
 2. Make `smoke.ts` assert the behaviour the example exists for, not only that it started.
 3. Add it to [`apps/README.md`](../apps/README.md) and to this guide.
 4. Run `pnpm run check:apps`, and `pnpm run test:tooling test/apps-layout.test.ts`. The second

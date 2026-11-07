@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { createFakeFs, createRecorder } from '../fixtures/fake-fs.ts';
 import { parseArgs } from '../../src/args.ts';
 import { runNewCommand } from '../../src/commands/new.ts';
-import { listBrokers, listQueues, listTransports } from '../../src/workspace/transport.ts';
-import type { TransportSpec } from '../../src/workspace/transport.ts';
+import { BROKERS, brokerSpec, listBrokers, listQueues } from '../../src/workspace/transport.ts';
+import type { BrokerSpec } from '../../src/workspace/transport.ts';
 import {
   missingComposeServices,
   withBrokerArgs,
@@ -42,12 +42,12 @@ describe('the derived broker and queue lists', () => {
   it('equals the registry arms carrying the matching renderer, plus memory', () => {
     // Derived rather than hand-written: adding an arm without a renderer (or a
     // renderer without an arm) fails this equality instead of drifting.
-    const withMessaging = listTransports()
+    const withMessaging = BROKERS.map((name) => brokerSpec(name))
       .filter((spec) => spec.messagingArgs !== undefined)
       .map((spec) => spec.name);
     expect(listBrokers()).toEqual(['memory', ...withMessaging]);
 
-    const withQueue = listTransports()
+    const withQueue = BROKERS.map((name) => brokerSpec(name))
       .filter((spec) => spec.queueArgs !== undefined)
       .map((spec) => spec.name);
     expect(listQueues()).toEqual(['memory', ...withQueue]);
@@ -65,7 +65,7 @@ describe('the derived broker and queue lists', () => {
 });
 
 describe('a --broker scaffold', () => {
-  for (const spec of listTransports()) {
+  for (const spec of BROKERS.map((name) => brokerSpec(name))) {
     for (const flag of ['broker', 'queue'] as const) {
       const builder = flag === 'broker' ? spec.messagingArgs : spec.queueArgs;
       if (builder === undefined) continue;
@@ -253,12 +253,18 @@ describe('broker and queue refusals', () => {
     expect(h.errText()).toContain('rabbitmq');
   });
 
-  it('refuses a transport with no messaging arm for --broker', async () => {
-    const h = harness();
-    expect(await h.run(['svc', '--template', 'microservice', '--broker', 'http'])).toBe(2);
-    expect(h.errText()).toContain('"http" declares no message-broker wiring');
-    expect(h.errText()).toContain('--broker accepts:');
-  });
+  // `http` and `grpc` were `--transport` values before M138; they say how a
+  // service is called, so the refusal points at the per-member flag instead.
+  for (const style of ['http', 'grpc']) {
+    it(`refuses the call style ${style} as a --broker or --queue`, async () => {
+      for (const flag of ['--broker', '--queue']) {
+        const h = harness();
+        expect(await h.run(['svc', '--template', 'microservice', flag, style])).toBe(2);
+        expect(h.errText()).toContain(`"${style}" is how a service is called, not a backend`);
+        expect(h.errText()).toContain(`generate app <name> --rpc ${style}`);
+      }
+    });
+  }
 
   it('refuses a queue backend the queue does not support', async () => {
     const h = harness();
@@ -292,11 +298,15 @@ describe('broker and queue refusals', () => {
     expect(h.fs.writes).toEqual([]);
   });
 
-  it('refuses --workspace, naming the workspace-wide flag', async () => {
-    const h = harness({});
-    expect(await h.run(['mono', '--workspace', '--broker', 'redis'])).toBe(2);
-    expect(h.errText()).toContain('--transport');
-    expect(h.fs.writes).toEqual([]);
+  // A workspace takes --broker for every member (M138); only --queue is refused,
+  // because the queue follows the broker.
+  it('accepts --broker on --workspace and refuses --queue there', async () => {
+    const accepted = harness({});
+    expect(await accepted.run(['mono', '--workspace', '--broker', 'redis'])).toBe(0);
+    const refused = harness({});
+    expect(await refused.run(['mono', '--workspace', '--queue', 'redis'])).toBe(2);
+    expect(refused.errText()).toContain('follows its broker');
+    expect(refused.fs.writes).toEqual([]);
   });
 
   it('accepts memory everywhere the flag is accepted and rewrites nothing', async () => {
@@ -314,10 +324,9 @@ describe('the transport note carried by both overlay arms', () => {
   // read the same `connection.note`, so a spec that did would print the
   // paragraph twice without the guard. Driven directly rather than left as an
   // assumption about which arms can coexist.
-  const spec: TransportSpec = {
+  const spec: BrokerSpec = {
     name: 'redis',
     description: 'synthetic transport with one note and both arms',
-    plugins: [],
     messagingArgs: () => `{ broker: 'redis-streams' }`,
     queueArgs: () => `{ adapter: 'redis' }`,
     connection: {
@@ -356,7 +365,9 @@ function reindented(block: string, by: number): string {
 }
 
 describe('missingComposeServices (PR #519 review)', () => {
-  for (const spec of listTransports().filter((arm) => arm.compose !== undefined)) {
+  for (const spec of BROKERS.map((name) => brokerSpec(name)).filter(
+    (arm) => arm.compose !== undefined,
+  )) {
     it(`reports ${spec.name} as missing from a file without it, and nothing once present`, () => {
       const block = spec.compose!.services.replace(/\n$/, '');
       expect(missingComposeServices('services:\n  other:\n    image: x\n', spec)).toBe(block);
@@ -364,7 +375,7 @@ describe('missingComposeServices (PR #519 review)', () => {
     });
   }
   it('reports an arm when only some of its services are present', () => {
-    const multi = listTransports()
+    const multi = BROKERS.map((name) => brokerSpec(name))
       .map((arm) => ({
         arm,
         names: [...(arm.compose?.services ?? '').matchAll(/^ {2}([\w-]+):\s*$/gm)].map(
@@ -382,13 +393,13 @@ describe('missingComposeServices (PR #519 review)', () => {
     }
   });
   it('does not count a same-named entry outside services:', () => {
-    const redis = listTransports().find((arm) => arm.name === 'redis')!;
+    const redis = BROKERS.map((name) => brokerSpec(name)).find((arm) => arm.name === 'redis')!;
     const lookalike = 'services:\n  other:\n    image: x\nvolumes:\n  redis:\n';
     expect(missingComposeServices(lookalike, redis)).toBeDefined();
     expect(missingComposeServices('volumes:\n  redis:\n', redis)).toBeDefined();
   });
   it('accepts comments, CRLF line endings and any service indentation', () => {
-    const redis = listTransports().find((arm) => arm.name === 'redis')!;
+    const redis = BROKERS.map((name) => brokerSpec(name)).find((arm) => arm.name === 'redis')!;
     for (const file of [
       'services: # local backing services\n  redis: # the broker\n    image: redis:7\n',
       'services:\r\n  redis:\r\n    image: redis:7\r\n',
@@ -423,7 +434,7 @@ describe('missingComposeServices (PR #519 review)', () => {
     expect(missingComposeServices(nested, redis)).toBeDefined();
   });
   it('has nothing to report for an arm with no backing service', () => {
-    const none = listTransports().find((arm) => arm.compose === undefined)!;
+    const none = BROKERS.map((name) => brokerSpec(name)).find((arm) => arm.compose === undefined)!;
     expect(missingComposeServices('services:\n', none)).toBeUndefined();
   });
 });

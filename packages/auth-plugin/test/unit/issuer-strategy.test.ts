@@ -49,6 +49,58 @@ describe('IssuerStrategy routing', () => {
   });
 });
 
+describe('IssuerStrategy resource-server mapping', () => {
+  it('fills scopes and the actor when the application mapping omits them', async () => {
+    const t = await setupStrategy();
+    const token = await signToken(
+      t.key,
+      valid({ scope: 'tools:read tools:list', act: { sub: 'agent', act: { sub: 'prior' } } }),
+    );
+    expect(await t.strategy.authenticate(request(`Bearer ${token}`))).toEqual({
+      id: 'u1',
+      scopes: ['tools:read', 'tools:list'],
+      actor: { id: 'agent', claims: { sub: 'agent' } },
+    });
+  });
+
+  it("lets the application's own scopes and actor win", async () => {
+    const t = await setupStrategy({
+      issuer: {
+        toPrincipal: () => ({
+          id: 'u1',
+          scopes: ['app:scope'],
+          actor: { id: 'app-actor', claims: { source: 'app' } },
+        }),
+      },
+    });
+    const token = await signToken(
+      t.key,
+      valid({ scope: 'token:scope', act: { sub: 'token-actor' } }),
+    );
+    expect(await t.strategy.authenticate(request(`Bearer ${token}`))).toEqual({
+      id: 'u1',
+      scopes: ['app:scope'],
+      actor: { id: 'app-actor', claims: { source: 'app' } },
+    });
+  });
+
+  it('refuses a malformed act before the application maps claims', async () => {
+    let mapped = false;
+    const t = await setupStrategy({
+      issuer: {
+        toPrincipal: () => {
+          mapped = true;
+          return { id: 'u1' };
+        },
+      },
+    });
+    const token = await signToken(t.key, valid({ act: ['agent'] }));
+    expect(await t.strategy.authenticate(request(`Bearer ${token}`))).toBeNull();
+    expect(mapped).toBe(false);
+    expect(t.refusals).toEqual(['act-malformed']);
+  });
+});
+
 describe('IssuerStrategy refusals', () => {
   async function refusal(
     token: (t: Awaited<ReturnType<typeof setupStrategy>>) => Promise<string> | string,

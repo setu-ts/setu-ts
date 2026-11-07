@@ -32,7 +32,9 @@ export function registerPaymentRoutes(router: IRouterApi): void {
 
 ## Other options
 
-- `store` selects memory, Redis (`type: 'redis'`, `namespace`, `url` or `client`) or a custom store.
+- `store` selects memory, Redis (`type: 'redis'`, `namespace`, `url` or `client`) or a custom store;
+  on node-redis, `client: nodeRedisClient(url)`. `setu add idempotency --store redis` wires it on
+  the Redis URL through the project's Redis client.
 - `required: false` passes unkeyed requests; `response: 'status'` retains no body or headers.
 - `idempotentIngress({ topics, jobNames })` builds a factory for the host's `behaviors` array; work
   outside its allow-list passes through.

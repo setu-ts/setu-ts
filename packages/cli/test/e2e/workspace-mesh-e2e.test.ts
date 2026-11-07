@@ -167,13 +167,15 @@ const app = await createApp();
 await app.start();
 const broker = app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
 const seen: unknown[] = [];
-await broker.subscribe('orders.created', (message) => { seen.push(message); });
+let delivered: () => void = () => {};
+const arrived = new Promise<void>((resolve) => { delivered = resolve; });
+await broker.subscribe('orders.created', (message) => { seen.push(message); delivered(); });
 console.log('SUBSCRIBER_READY');
-setTimeout(async () => {
-  console.log('__PROBE_RESULT__' + JSON.stringify({ received: seen }));
-  await app.stop();
-  Deno.exit(0);
-}, 6000);
+// Up until delivery, bounded: a fixed window raced a publisher still booting.
+await Promise.race([arrived, new Promise((resolve) => setTimeout(resolve, 30_000))]);
+console.log('__PROBE_RESULT__' + JSON.stringify({ received: seen }));
+await app.stop();
+Deno.exit(0);
 `;
 
 /** A spawned peer, as {@linkcode spawnProcess} returns it. */
@@ -284,16 +286,19 @@ describe('a three-service workspace — end to end', () => {
   });
 
   /**
-   * Scaffolds a workspace on the given transport and adds all three members.
+   * Scaffolds a workspace on the given broker and adds all three members.
    *
-   * @param transport - The `--transport` value
+   * @param transport - The `--broker` value
    * @param template - The template every member uses
+   * @param redisClient - The Redis client, on the Redis broker
+   * @param rpc - Every member's `--rpc` style
    * @returns The workspace root
    */
   async function mesh(
     transport: string,
     template = 'microservice',
     redisClient?: 'node-redis',
+    rpc: 'http' | 'grpc' = 'http',
   ): Promise<string> {
     expect(
       await run([
@@ -305,13 +310,15 @@ describe('a three-service workspace — end to end', () => {
         '--workspace',
         '--port',
         String(base),
-        '--transport',
+        '--broker',
         transport,
       ]),
     ).toBe(0);
     const ws = `${root}/acme`;
     for (const member of MEMBERS) {
-      expect(await run(['g', 'app', member, '--template', template, '--dir', ws])).toBe(0);
+      expect(
+        await run(['g', 'app', member, '--template', template, '--rpc', rpc, '--dir', ws]),
+      ).toBe(0);
     }
     return ws;
   }
@@ -326,7 +333,7 @@ describe('a three-service workspace — end to end', () => {
   }
 
   it('gives every member the address of every OTHER member', async () => {
-    const ws = await mesh('http');
+    const ws = await mesh('memory');
 
     const manifest = JSON.parse(await nodeFs.readFile(`${ws}/${WORKSPACE_MANIFEST}`, 'utf8')) as {
       members: { name: string; port: number }[];
@@ -334,9 +341,27 @@ describe('a three-service workspace — end to end', () => {
     // `healthProbes: true` — all three are generated with a template, so the
     // Kubernetes renderer gives them httpGet probes rather than tcpSocket (X2-7).
     expect(manifest.members).toEqual([
-      { name: 'orders', port: base, healthProbes: true, metricsEndpoint: true },
-      { name: 'billing', port: base + 1, healthProbes: true, metricsEndpoint: true },
-      { name: 'shipping', port: base + 2, healthProbes: true, metricsEndpoint: true },
+      {
+        name: 'orders',
+        port: base,
+        inspectPort: base + 2000,
+        healthProbes: true,
+        metricsEndpoint: true,
+      },
+      {
+        name: 'billing',
+        port: base + 1,
+        inspectPort: base + 2001,
+        healthProbes: true,
+        metricsEndpoint: true,
+      },
+      {
+        name: 'shipping',
+        port: base + 2,
+        inspectPort: base + 2002,
+        healthProbes: true,
+        metricsEndpoint: true,
+      },
     ]);
 
     // The full mesh: 3 members × 2 peers. A map that was appended to rather than
@@ -380,7 +405,7 @@ describe('a three-service workspace — end to end', () => {
   it(
     'has one service call BOTH its peers over HTTP',
     async () => {
-      const ws = await mesh('http');
+      const ws = await mesh('memory');
       await useWorkspace(ws);
 
       const peers = ['billing', 'shipping'].map((member) =>
@@ -419,42 +444,54 @@ describe('a three-service workspace — end to end', () => {
   );
 
   it(
-    'has one service call BOTH its peers over gRPC',
+    'has one service call BOTH its peers over gRPC, and stops serving it once a member switches',
     async () => {
-      const ws = await mesh('grpc');
+      const ws = await mesh('memory', 'microservice', undefined, 'grpc');
       await useWorkspace(ws);
 
-      const peers = ['billing', 'shipping'].map((member) =>
-        watchPeer(
-          spawnProcess(denoBinary(), {
-            args: ['run', '-A', '--node-modules-dir=none', `${ws}/apps/${member}/main.ts`],
-            cwd: `${ws}/apps/${member}`,
-            stdout: 'piped',
-            stderr: 'piped',
-          }),
-        ),
-      );
-
-      try {
-        // The same bind wait as the HTTP mesh: a probe sent before a peer listens
-        // reads as status 0.
-        for (const [index, peer] of (['billing', 'shipping'] as const).entries()) {
-          await waitForBind(peers[index]!, peer, `http://127.0.0.1:${base + index + 1}/`);
+      /** Starts both peers, probes them from `orders`, and stops them. */
+      const probe = async () => {
+        const peers = ['billing', 'shipping'].map((member) =>
+          watchPeer(
+            spawnProcess(denoBinary(), {
+              args: ['run', '-A', '--node-modules-dir=none', `${ws}/apps/${member}/main.ts`],
+              cwd: `${ws}/apps/${member}`,
+              stdout: 'piped',
+              stderr: 'piped',
+            }),
+          ),
+        );
+        try {
+          // The same bind wait as the HTTP mesh: a probe sent before a peer listens
+          // reads as status 0.
+          for (const [index, peer] of (['billing', 'shipping'] as const).entries()) {
+            await waitForBind(peers[index]!, peer, `http://127.0.0.1:${base + index + 1}/`);
+          }
+          return (await bootAndProbe(`${ws}/apps/orders`, GRPC_PROBE)) as Record<
+            string,
+            { status: number; body: string }
+          >;
+        } finally {
+          for (const peer of peers) await stopPeer(peer);
         }
+      };
 
-        const result = (await bootAndProbe(`${ws}/apps/orders`, GRPC_PROBE)) as Record<
-          string,
-          { status: number; body: string }
-        >;
-        for (const peer of ['billing', 'shipping'] as const) {
-          expect(result[peer]?.status).toBe(200);
-          // The decoded RPC body, not merely a 200 — a fallthrough Hono 404 or an
-          // empty body would otherwise read as success.
-          expect(String(result[peer]?.body)).toContain('SERVING');
-        }
-      } finally {
-        for (const peer of peers) await stopPeer(peer);
+      const result = await probe();
+      for (const peer of ['billing', 'shipping'] as const) {
+        expect(result[peer]?.status).toBe(200);
+        // The decoded RPC body, not merely a 200 — a fallthrough Hono 404 or an
+        // empty body would otherwise read as success.
+        expect(String(result[peer]?.body)).toContain('SERVING');
       }
+
+      // M138: switching one member to HTTP regenerates its transport module and
+      // leaves its config alone; the member then serves no gRPC mount at all,
+      // while its sibling still does.
+      expect(await run(['workspace', 'rpc', 'billing', 'http', '--dir', ws])).toBe(0);
+      await useWorkspace(ws);
+      const switched = await probe();
+      expect(switched['billing']?.status).toBe(404);
+      expect(switched['shipping']?.status).toBe(200);
     },
     MESH_TIMEOUT_MS,
   );
@@ -556,59 +593,80 @@ if (health.status !== 200 || (await health.json()).checks.messaging.status !== '
     },
   );
 
-  it('delivers a message from one service to another over the redis broker', async (context) => {
-    if (REDIS_URL === undefined || !(await redisReachable(REDIS_URL))) {
-      context.skip('Redis backend opt-in (REDIS_URL) is absent or unavailable');
-      return;
-    }
-
-    const ws = await mesh('redis');
-    await useWorkspace(ws);
-
-    // The subscriber runs first and stays up while the publisher fires.
-    await nodeFs.writeFile(`${ws}/apps/billing/subscriber.ts`, BROKER_SUBSCRIBE_PROBE);
-    const subscriber = spawnProcess(denoBinary(), {
-      args: [
-        'run',
-        '-A',
-        '--node-modules-dir=none',
-        '--config',
-        `${ws}/apps/billing/deno.json`,
-        `${ws}/apps/billing/subscriber.ts`,
-      ],
-      cwd: `${ws}/apps/billing`,
-      stdout: 'piped',
-      stderr: 'piped',
-    });
-
-    try {
-      await new Promise((resolve) => setTimeout(resolve, 3000));
-      const published = await bootAndProbe(`${ws}/apps/orders`, BROKER_PUBLISH_PROBE);
-      expect(published['published']).toBe(true);
-
-      const out = new TextDecoder().decode((await subscriber.output()).stdout);
-      const line = out.split('\n').find((l) => l.startsWith('__PROBE_RESULT__'));
-      expect(line).toBeDefined();
-      const received = JSON.parse(line?.slice('__PROBE_RESULT__'.length) ?? '{}') as {
-        received: { id: number; from: string }[];
-      };
-      // The message CROSSED a process boundary — the thing the in-memory
-      // default cannot do, and reported success at while doing nothing.
-      expect(received.received).toContainEqual({ id: 42, from: 'orders' });
-    } finally {
-      try {
-        subscriber.kill();
-      } catch {
-        // Already exited on its own timer.
+  // Twice: scaffolded on Redis, and scaffolded in memory then switched with
+  // `setu workspace broker redis` (M138) — the switch must produce members that
+  // really meet on the new bus, not only files that type-check.
+  for (const via of ['scaffold', 'switch'] as const) {
+    it(`delivers a message from one service to another over the redis broker (${via})`, async (context) => {
+      if (REDIS_URL === undefined || !(await redisReachable(REDIS_URL))) {
+        context.skip('Redis backend opt-in (REDIS_URL) is absent or unavailable');
+        return;
       }
-      await subscriber.status;
-    }
-  });
+
+      const ws = await mesh(via === 'scaffold' ? 'redis' : 'memory');
+      if (via === 'switch')
+        expect(await run(['workspace', 'broker', 'redis', '--dir', ws])).toBe(0);
+      await useWorkspace(ws);
+
+      // The subscriber runs first and stays up while the publisher fires.
+      await nodeFs.writeFile(`${ws}/apps/billing/subscriber.ts`, BROKER_SUBSCRIBE_PROBE);
+      const subscriber = watchPeer(
+        spawnProcess(denoBinary(), {
+          args: [
+            'run',
+            '-A',
+            '--node-modules-dir=none',
+            '--config',
+            `${ws}/apps/billing/deno.json`,
+            `${ws}/apps/billing/subscriber.ts`,
+          ],
+          cwd: `${ws}/apps/billing`,
+          stdout: 'piped',
+          stderr: 'piped',
+        }),
+      );
+
+      try {
+        // Publish only once the subscription exists: a fixed delay raced it.
+        const deadline = performance.now() + 30_000;
+        while (
+          !subscriber.output().includes('SUBSCRIBER_READY') &&
+          subscriber.exited() === undefined &&
+          performance.now() < deadline
+        )
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        expect(subscriber.output()).toContain('SUBSCRIBER_READY');
+        const published = await bootAndProbe(`${ws}/apps/orders`, BROKER_PUBLISH_PROBE);
+        expect(published['published']).toBe(true);
+
+        await subscriber.server.status;
+        await subscriber.drained;
+        const line = subscriber
+          .output()
+          .split('\n')
+          .find((l) => l.startsWith('__PROBE_RESULT__'));
+        expect(line).toBeDefined();
+        const received = JSON.parse(line?.slice('__PROBE_RESULT__'.length) ?? '{}') as {
+          received: { id: number; from: string }[];
+        };
+        // The message CROSSED a process boundary — the thing the in-memory
+        // default cannot do, and reported success at while doing nothing.
+        expect(received.received).toContainEqual({ id: 42, from: 'orders' });
+      } finally {
+        try {
+          subscriber.server.kill();
+        } catch {
+          // Already exited on delivery or its own bound.
+        }
+        await subscriber.server.status;
+      }
+    });
+  }
 
   // "Standard structure" is a claim the generated tree either honors or does
   // not; this reads the tree rather than trusting the templates.
   it('gives every member the same standard layout', async () => {
-    const ws = await mesh('http');
+    const ws = await mesh('memory');
 
     for (const member of MEMBERS) {
       const dir = `${ws}/apps/${member}`;

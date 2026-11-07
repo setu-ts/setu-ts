@@ -25,11 +25,11 @@ const signature =
   'devtool?: { plugins?: readonly IPlugin[]; diagnostics?: KernelDiagnosticsOptions }';
 const config = `export function createApp(${signature}) { return createApplication({ plugins: [${plugins}], ${diagnostics} }); }`;
 const manifest: WorkspaceManifest = {
-  version: 1,
+  version: 2,
   basePort: 5869,
   devtoolBasePort: 6000,
   runtime: 'deno',
-  transport: 'http',
+  broker: 'memory',
   members: [{ name: 'orders', port: 5869 }],
 };
 const seed = {

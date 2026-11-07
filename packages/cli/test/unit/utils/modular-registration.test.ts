@@ -18,7 +18,6 @@ const CONFIGS: readonly (readonly [string, TemplateHost, 'functional' | 'class-b
   ['rest --style class-based', REST_TEMPLATE.classBased!, 'class-based'],
   ['microservice', MICROSERVICE_TEMPLATE, 'functional'],
   ['microservice --style class-based', MICROSERVICE_TEMPLATE.classBased!, 'class-based'],
-  ['full-stack', FULL_STACK_TEMPLATE, 'functional'],
 ];
 
 function config(host: TemplateHost, runtime: TargetRuntime = 'node'): string {
@@ -48,7 +47,19 @@ function syntaxErrors(source: string): readonly ts.Diagnostic[] {
 }
 
 describe('withModularRegistration', () => {
-  it('switches each of the five generated configurations on every runtime, and nothing else', () => {
+  it('declines the full-stack config, which is modular from the start (M130 §3.4)', () => {
+    for (const runtime of TARGET_RUNTIMES) {
+      const original = config(FULL_STACK_TEMPLATE, runtime);
+      expect(original, runtime).toContain(
+        "import { registerModules } from './src/modules/index.ts';",
+      );
+      expect(original, runtime).not.toContain('registerGeneratedRoutes');
+      // Nothing flat to switch: the editor declines rather than rewriting.
+      expect(withModularRegistration(original, 'functional'), runtime).toBeUndefined();
+    }
+  });
+
+  it('switches each of the four flat generated configurations on every runtime, and nothing else', () => {
     for (const runtime of TARGET_RUNTIMES)
       for (const [name, host, mode] of CONFIGS) {
         const label = `${name} on ${runtime}`;

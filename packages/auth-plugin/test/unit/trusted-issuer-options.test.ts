@@ -26,6 +26,8 @@ describe('TrustedIssuer validation at construction', () => {
     const [compiled] = compileIssuers([base]);
     expect([...compiled.algorithms]).toEqual(['RS256', 'PS256', 'ES256', 'ES384', 'EdDSA']);
     expect(compiled.clockToleranceSec).toBe(30);
+    expect(compiled.audiences).toEqual(['api']);
+    expect(compiled.requireAccessTokenType).toBe(false);
     expect(compiled.timings).toEqual({
       ttlMs: 600_000,
       minRefreshIntervalMs: 60_000,
@@ -35,6 +37,37 @@ describe('TrustedIssuer validation at construction', () => {
     expect(compiled.discoveryUrl).toBeNull();
   });
 
+  it('normalizes a single audience and a list to a non-empty list', () => {
+    const [single] = compileIssuers([base]);
+    expect(single.audiences).toEqual(['api']);
+    const [list] = compileIssuers([{ ...base, audience: ['api', 'https://api.test'] }]);
+    expect(list.audiences).toEqual(['api', 'https://api.test']);
+  });
+
+  it('refuses an empty audience list, an empty entry, a non-string entry and a duplicate', () => {
+    const cases: Array<[unknown, string]> = [
+      [[], 'audience must not be an empty list'],
+      [['api', ''], 'audience entries must be non-empty strings'],
+      [['api', 7], 'audience entries must be non-empty strings'],
+      [['api', 'api'], "duplicate audience 'api'"],
+    ];
+    for (const [audience, message] of cases) {
+      expect(refusal([{ ...base, audience }])).toContain(message);
+    }
+  });
+
+  it('reads requireAccessTokenType, refusing a non-boolean', () => {
+    expect(
+      compileIssuers([{ ...base, requireAccessTokenType: true }])[0].requireAccessTokenType,
+    ).toBe(true);
+    expect(
+      compileIssuers([{ ...base, requireAccessTokenType: false }])[0].requireAccessTokenType,
+    ).toBe(false);
+    expect(refusal([{ ...base, requireAccessTokenType: 'yes' }])).toContain(
+      'requireAccessTokenType must be a boolean',
+    );
+  });
+
   it('refuses each weakening configuration by name', () => {
     const cases: Array<[unknown[], string]> = [
       [[{ ...base, name: '' }], 'non-empty name'],
@@ -42,6 +75,7 @@ describe('TrustedIssuer validation at construction', () => {
       [[base, { ...base, name: 'b' }], "duplicates the issuer 'https://idp.test'"],
       [[{ ...base, issuer: '' }], 'non-empty issuer'],
       [[{ ...base, audience: '' }], 'non-empty audience'],
+      [[{ ...base, audience: 7 }], 'non-empty audience'],
       [[{ ...base, toPrincipal: undefined }], 'toPrincipal'],
       [[{ ...base, algorithms: [] }], 'must not be empty'],
       [[{ ...base, algorithms: ['HS256'] }], "algorithm 'HS256' is not supported"],

@@ -50,7 +50,7 @@ import {
   renderMemberSecret,
   secretValuesPath,
 } from '../workspace/secrets.ts';
-import { transportSpec } from '../workspace/transport.ts';
+import { brokerSpec } from '../workspace/transport.ts';
 
 /** Dependencies of the two operations. */
 export interface WorkspaceOpsDependencies {
@@ -96,7 +96,7 @@ export const BUILD_USAGE: string =
 export const DEPLOY_USAGE: string =
   `Usage: ${PROGRAM_NAME} workspace deploy [--dir <path>] [--context <name>] [--namespace <name>] ` +
   `[--registry <prefix>] [--tag <tag>] [--timeout <duration>] [--build-arg <KEY=VALUE>]… ` +
-  `[--network <name>] [--dry-run]`;
+  `[--network <name>] [--pull-secret <name>]… [--dry-run]`;
 
 const BUILD_HELP: readonly string[] = [
   BUILD_USAGE,
@@ -113,6 +113,7 @@ const DEPLOY_HELP: readonly string[] = [
   '  --dir <path>          The workspace root (default: the current directory)',
   '  --context <name>      kubectl context (default: the current one)',
   '  --namespace <name>    Namespace to deploy into (default: the workspace directory name)',
+  '  --pull-secret <name>  Existing registry Secret in that namespace (repeatable)',
   '  --registry <prefix>   Push images there; required unless the context is kind-<cluster>',
   '  --tag <tag>           Image tag (default: the short commit; <commit>-dirty-<UTC time> with changes)',
   '  --timeout <duration>  Rollout wait per member, e.g. 300s or 5m (default: 120s)',
@@ -465,7 +466,7 @@ async function collectSecrets(
   membersYaml: string,
   deps: WorkspaceOpsDependencies,
 ): Promise<IMemberSecret[] | undefined> {
-  const transport = transportSpec(workspace.manifest.transport);
+  const transport = brokerSpec(workspace.manifest.broker, workspace.manifest.redisClient);
   const problems: string[] = [];
   const secrets: IMemberSecret[] = [];
   for (const member of workspace.manifest.members) {
@@ -643,12 +644,32 @@ function deployOptions(
       readonly namespace: string;
       readonly label: string;
       readonly timeout: string;
+      readonly pullSecrets: readonly string[];
     }
   | false {
   const context = valueFlag(args, 'context', deps);
   const namespace = valueFlag(args, 'namespace', deps);
   const timeout = valueFlag(args, 'timeout', deps);
   if (context === false || namespace === false || timeout === false) return false;
+  const pullSecrets =
+    args.flags['pull-secret'] === undefined ? [] : stringFlags(args.flags, 'pull-secret');
+  if (
+    pullSecrets === undefined ||
+    pullSecrets.some(
+      (name) => name.length > 253 || !name.split('.').every((label) => DNS_LABEL.test(label)),
+    )
+  ) {
+    deps.error(
+      '--pull-secret needs a DNS-1123 subdomain name (lowercase DNS labels, at most 253 characters).',
+    );
+    return false;
+  }
+  // A repeated name would be written twice into imagePullSecrets, a list keyed
+  // by name, and refused only at apply time — after the build and push.
+  if (new Set(pullSecrets).size !== pullSecrets.length) {
+    deps.error('Each --pull-secret name may be given only once.');
+    return false;
+  }
   if (timeout !== undefined && !TIMEOUT_PATTERN.test(timeout)) {
     deps.error(
       `--timeout ${escapeName(timeout)} is not a duration: use seconds, minutes or hours, such as 300s or 5m.`,
@@ -668,7 +689,32 @@ function deployOptions(
     namespace: chosen,
     label: LABEL_VALUE.test(directory) ? directory : chosen,
     timeout: timeout ?? DEFAULT_TIMEOUT,
+    pullSecrets,
   };
+}
+
+/** The Secret types Kubernetes reads image-pull credentials from. */
+const PULL_SECRET_TYPES: ReadonlySet<string> = new Set([
+  'kubernetes.io/dockerconfigjson',
+  'kubernetes.io/dockercfg',
+]);
+
+/**
+ * Whether kubectl answered that the requested object does not exist — the only
+ * failure the pull-secret pre-check answers with a create recipe. Credential
+ * plugins also print "… not found", so the server's own form is required.
+ */
+function isKubectlNotFound(stderr: string): boolean {
+  return /Error from server \(NotFound\)/.test(stderr);
+}
+
+/** kubectl's first real error line (no `Warning:`), escaped, or its exit code. */
+function kubectlFailure(result: { readonly code: number; readonly stderr: string }): string {
+  const line = result.stderr
+    .split(/\r\n|\r|\n/)
+    .map((text) => text.trim())
+    .find((text) => text !== '' && !text.startsWith('Warning:'));
+  return line === undefined ? `kubectl exited with code ${result.code}` : escapeName(line);
 }
 
 /**
@@ -715,14 +761,75 @@ export async function runWorkspaceDeploy(
     return EXIT_USAGE;
   }
   const images = memberImages(workspace, options.registry);
+  if (deploy.pullSecrets.length === 0 && target.kindCluster === undefined)
+    deps.log(
+      'For an authenticated registry, pass --pull-secret <name> naming an existing registry Secret.',
+    );
   const prepared = prepareDeployManifest(membersYaml, {
     namespace: deploy.namespace,
     workspace: deploy.label,
     images,
+    pullSecrets: deploy.pullSecrets,
   });
   if (!prepared.ok) {
     deps.error(prepared.message);
     return EXIT_ERROR;
+  }
+  if (deploy.pullSecrets.length > 0) {
+    const namespace = await workspace.run(
+      'kubectl',
+      ['--context', target.context, 'get', 'namespace', deploy.namespace, '-o', 'name'],
+      { cwd: workspace.dir },
+    );
+    if (namespace.code !== 0) {
+      if (!isKubectlNotFound(namespace.stderr)) {
+        deps.error(`Cannot check namespace ${deploy.namespace}: ${kubectlFailure(namespace)}`);
+        return EXIT_ERROR;
+      }
+      deps.error(
+        `Cannot find namespace ${deploy.namespace} for the registry Secrets; create it first:\n  kubectl create namespace ${deploy.namespace}`,
+      );
+      for (const name of deploy.pullSecrets)
+        deps.error(`  kubectl create secret docker-registry ${name} -n ${deploy.namespace} …`);
+      return EXIT_ERROR;
+    }
+    for (const name of deploy.pullSecrets) {
+      const secret = await workspace.run(
+        'kubectl',
+        // The type alone, never the data: an Opaque Secret exists but cannot
+        // authenticate an image pull.
+        [
+          '--context',
+          target.context,
+          'get',
+          'secret',
+          name,
+          '-n',
+          deploy.namespace,
+          '-o',
+          'jsonpath={.type}',
+        ],
+        { cwd: workspace.dir },
+      );
+      if (secret.code !== 0) {
+        if (!isKubectlNotFound(secret.stderr)) {
+          deps.error(`Cannot check Secret ${name}: ${kubectlFailure(secret)}`);
+          return EXIT_ERROR;
+        }
+        deps.error(
+          `Cannot find registry Secret ${name}; create it first:\n  kubectl create secret docker-registry ${name} -n ${deploy.namespace} …`,
+        );
+        return EXIT_ERROR;
+      }
+      const type = secret.stdout.trim();
+      if (!PULL_SECRET_TYPES.has(type)) {
+        deps.error(
+          `Registry Secret ${name} has type ${escapeName(type === '' ? '(none)' : type)}; an image pull needs kubernetes.io/dockerconfigjson or kubernetes.io/dockercfg:\n  kubectl create secret docker-registry ${name} -n ${deploy.namespace} …`,
+        );
+        return EXIT_ERROR;
+      }
+      deps.log(`  registry Secret ${name} exists in ${deploy.namespace}`);
+    }
   }
   const secrets = await collectSecrets(
     workspace,
@@ -749,6 +856,8 @@ export async function runWorkspaceDeploy(
   if (!(await buildImages(workspace, images, options, deps))) return EXIT_ERROR;
 
   if (options.dryRun) {
+    if (deploy.pullSecrets.length > 0)
+      deps.log(`  would use imagePullSecrets: ${deploy.pullSecrets.join(', ')}`);
     for (const image of images.values()) {
       deps.log(
         target.kindCluster === undefined

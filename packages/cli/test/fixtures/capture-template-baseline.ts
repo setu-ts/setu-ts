@@ -79,13 +79,19 @@ export async function sha256Hex(text: string): Promise<string> {
  * Generated manifests pin the framework to the CLI's version, so hashing the
  * raw text made every release bump fail this baseline although no template
  * changed (cutting `v0.9.0` did). The version is the release's to move; the
- * baseline pins everything else.
+ * baseline pins everything else. Only a whole version token is replaced: a
+ * plain substring replace also rewrote `eslint`'s `^10.12.0` once the CLI
+ * reached `0.12.0`.
  *
  * @param text - The file contents to hash
  * @returns The lowercase hex digest of the version-normalized contents
  */
 export function baselineHash(text: string): Promise<string> {
-  return sha256Hex(text.replaceAll(VERSION, '<cli-version>'));
+  const token = new RegExp(
+    String.raw`(?<![\d.])${VERSION.replaceAll('.', String.raw`\.`)}(?![\d.])`,
+    'g',
+  );
+  return sha256Hex(text.replace(token, '<cli-version>'));
 }
 
 /**

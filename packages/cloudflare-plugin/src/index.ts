@@ -151,6 +151,12 @@ export type { CacheabilityInput, CacheRefusal } from './cache-api/cacheability.t
 // `DatabasePlugin({ type: 'custom', adapter })` by the application
 export { D1Adapter } from './database/d1-adapter.ts';
 export type { D1AdapterOptions, D1EntityMapping } from './database/d1-adapter.ts';
+export { VectorizeVectorStore } from './vectorize/vectorize-store.ts';
+export type {
+  VectorizeIndexLike,
+  VectorizeVectorLike,
+  VectorizeVectorStoreOptions,
+} from './vectorize/vectorize-store.ts';
 
 // Stores — constructible standalone, for wiring a capability the plugin does
 // not register (sessions) or for use outside an application

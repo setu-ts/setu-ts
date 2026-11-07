@@ -6,7 +6,7 @@ import {
   PROTO_TASK_COMMAND,
   protoToolchainFiles,
 } from '../../../src/workspace/proto-toolchain.ts';
-import { transportSpec } from '../../../src/workspace/transport.ts';
+import { rpcSpec } from '../../../src/workspace/rpc.ts';
 
 describe('protoToolchainFiles', () => {
   const files = protoToolchainFiles('orders.v1');
@@ -42,7 +42,9 @@ describe('protoToolchainFiles', () => {
   // command it runs through Deno with no install at all.
   it('declares the codegen plugin as a command, not as a PATH name', () => {
     const config = contentsOf('buf.gen.yaml');
-    expect(config).toContain(`local: ['deno', 'run', '-A', 'npm:@bufbuild/protoc-gen-es@^2']`);
+    expect(config).toContain(
+      `local: ['deno', 'run', '-A', '--no-lock', 'npm:@bufbuild/protoc-gen-es@2.7.0']`,
+    );
     expect(config).not.toMatch(/^\s+- local: protoc-gen-es$/m);
   });
 
@@ -74,6 +76,10 @@ describe('protoToolchainFiles', () => {
   it('maps both the bare specifier and its subpaths', () => {
     expect(PROTO_IMPORTS['@bufbuild/protobuf']).toBeDefined();
     expect(PROTO_IMPORTS['@bufbuild/protobuf/']).toBeDefined();
+    // The runtime is never older than the exact generator that writes the code
+    // (the generator runs with --no-lock, so it cannot float past it).
+    expect(PROTO_IMPORTS['@bufbuild/protobuf']).toBe('npm:@bufbuild/protobuf@^2.7.0');
+    expect(PROTO_IMPORTS['@bufbuild/protobuf/']).toBe('npm:/@bufbuild/protobuf@^2.7.0/');
     expect(PROTO_IMPORTS['@bufbuild/protobuf/']).toContain('npm:/@bufbuild/protobuf');
   });
 
@@ -85,9 +91,9 @@ describe('protoToolchainFiles', () => {
   });
 });
 
-describe('the grpc transport arm', () => {
+describe('the grpc RPC style', () => {
   it('contributes the toolchain, its task, and its imports', () => {
-    const grpc = transportSpec('grpc');
+    const grpc = rpcSpec('grpc');
     expect(grpc.memberFiles?.('orders', true).map((f) => f.path)).toContain('buf.gen.yaml');
     expect(grpc.memberTasks?.['proto:gen']).toBe(PROTO_TASK_COMMAND);
     expect(grpc.memberImports?.['@bufbuild/protobuf']).toBeDefined();
@@ -96,18 +102,17 @@ describe('the grpc transport arm', () => {
   // The package must differ per member, or two services' messages land in one
   // namespace. A hyphenated member name is not a legal proto package component.
   it('derives a distinct, legal proto package per member', () => {
-    const grpc = transportSpec('grpc');
+    const grpc = rpcSpec('grpc');
     const first = grpc.memberFiles?.('orders', true) ?? [];
     const second = grpc.memberFiles?.('order-items', true) ?? [];
     expect(first.some((f) => f.contents.includes('package orders.v1;'))).toBe(true);
     expect(second.some((f) => f.contents.includes('package order_items.v1;'))).toBe(true);
   });
 
-  it('is the only transport that contributes member files', () => {
-    for (const name of ['http', 'memory', 'redis', 'pubsub', 'service-bus'] as const) {
-      expect(transportSpec(name).memberFiles).toBeUndefined();
-      expect(transportSpec(name).memberTasks).toBeUndefined();
-      expect(transportSpec(name).memberImports).toBeUndefined();
-    }
+  it('is the only RPC style that contributes member files', () => {
+    const http = rpcSpec('http');
+    expect(http.memberFiles).toBeUndefined();
+    expect(http.memberTasks).toBeUndefined();
+    expect(http.memberImports).toBeUndefined();
   });
 });

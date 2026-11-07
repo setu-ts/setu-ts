@@ -10,10 +10,12 @@ import {
   respondWithAuthorizationFailure,
   withSecurityMetadata,
 } from '@setu-ts/common';
-import type { RouteSecurityMetadata } from '@setu-ts/common';
+import type { IPrincipal, RouteSecurityMetadata } from '@setu-ts/common';
 import { AuthPluginConfigurationError } from '../errors.ts';
 import type { RequireAuthOptions } from '../interfaces/index.ts';
 import { RETURN_TO_QUERY_PARAM, safeReturnTo } from '../sign-in/return-to.ts';
+import { isScopeToken } from '../resource-server/claims.ts';
+import { REQUIRED_SCOPES_STATE_KEY } from '@setu-ts/common';
 
 /**
  * Brand for a guard that requires an authenticated principal. Shared and
@@ -143,6 +145,23 @@ function compileSignInPage(signInPage: unknown): URL {
   return page;
 }
 
+/** The accepted `requireAuth({ delegation })` values. */
+const DELEGATION_MODES: ReadonlySet<string> = new Set(['allow', 'forbid', 'require']);
+
+/** Whether the configured delegation policy refuses a principal. */
+function delegationRefuses(
+  mode: NonNullable<RequireAuthOptions['delegation']>,
+  user: IPrincipal,
+): boolean {
+  if (mode === 'forbid') {
+    return user.actor !== undefined;
+  }
+  if (mode === 'require') {
+    return user.actor === undefined;
+  }
+  return false;
+}
+
 /**
  * Guard that requires authentication.
  *
@@ -154,24 +173,44 @@ function compileSignInPage(signInPage: unknown): URL {
  * apply again before redirecting back. Every other unauthenticated request keeps
  * the `401`.
  *
- * @param options - Optional sign-in page for browser navigations
+ * With `delegation`, a signed-in principal whose token is delegated (it carries
+ * an `actor`, RFC 8693 `act`) can be refused (`'forbid'`) or required
+ * (`'require'`) with `403`.
+ *
+ * @param options - Optional sign-in page and delegation policy
  * @returns Middleware function
  * @throws {AuthPluginConfigurationError} When `signInPage` is not a same-origin
- *   absolute path
+ *   absolute path, or `delegation` is not `'allow'`, `'forbid'` or `'require'`
  *
  * @example
  * ```typescript
  * app.router.get('/protected', { middleware: [requireAuth()], handler });
  * app.router.get('/account', { middleware: [requireAuth({ signInPage: '/login' })], handler });
+ * app.router.post('/billing', {
+ *   middleware: [requireAuth({ delegation: 'forbid' })],
+ *   handler,
+ * });
  * ```
  */
 export function requireAuth(options?: RequireAuthOptions): MiddlewareFunction {
+  const delegation = options?.delegation ?? 'allow';
+  if (!DELEGATION_MODES.has(delegation)) {
+    throw new AuthPluginConfigurationError(
+      `auth-plugin: requireAuth delegation must be 'allow', 'forbid' or 'require', got '${String(
+        delegation,
+      )}'`,
+    );
+  }
   const signInPage = options?.signInPage;
   if (signInPage === undefined) {
     const guard = async (ctx: IRequestContext, next: () => Promise<void>): Promise<void> => {
       const user = ctx.request.user;
       if (!user) {
         respondWithAuthorizationFailure(ctx, 'authentication-required');
+        return;
+      }
+      if (delegationRefuses(delegation, user)) {
+        respondWithAuthorizationFailure(ctx, 'insufficient-privileges');
         return;
       }
       await next();
@@ -181,7 +220,12 @@ export function requireAuth(options?: RequireAuthOptions): MiddlewareFunction {
 
   const page = compileSignInPage(signInPage);
   const guard = async (ctx: IRequestContext, next: () => Promise<void>): Promise<void> => {
-    if (ctx.request.user) {
+    const user = ctx.request.user;
+    if (user) {
+      if (delegationRefuses(delegation, user)) {
+        respondWithAuthorizationFailure(ctx, 'insufficient-privileges');
+        return;
+      }
       await next();
       return;
     }
@@ -206,6 +250,73 @@ export function requireAuth(options?: RequireAuthOptions): MiddlewareFunction {
     ctx.response.redirect(target.pathname + target.search + target.hash, 302);
   };
   return withSecurityMetadata(guard, AUTHENTICATED);
+}
+
+/**
+ * Guard that requires every listed OAuth 2.0 scope.
+ *
+ * ALL-of, not any-of: a token carries every scope a call needs, so a route
+ * naming two requires both. These are OAuth scopes (`scope`/`scp` claims), NOT
+ * the tenant or organisation grants M110b's `requireScopedRole` calls "scopes".
+ * The scopes are read from `principal.scopes`; no authorization service is
+ * resolved.
+ *
+ * An anonymous request is answered `401`. A signed-in principal missing any
+ * scope is answered `403`, and the required list is recorded so the
+ * `bearer-challenge` middleware can put it in `WWW-Authenticate`.
+ *
+ * @param first - The first required scope
+ * @param rest - Any further required scopes
+ * @returns Middleware function
+ * @throws {AuthPluginConfigurationError} When a scope is not an RFC 6749 §3.3
+ *   `scope-token`, or the same scope is listed twice
+ *
+ * @example
+ * ```typescript
+ * app.router.get('/tools', {
+ *   middleware: [requireScopes('tools:read', 'tools:list')],
+ *   handler,
+ * });
+ * ```
+ * @since 0.12.0
+ */
+export function requireScopes(first: string, ...rest: string[]): MiddlewareFunction {
+  const required: string[] = [];
+  const seen = new Set<string>();
+  for (const scope of [first, ...rest]) {
+    if (typeof scope !== 'string' || !isScopeToken(scope)) {
+      throw new AuthPluginConfigurationError(
+        `auth-plugin: requireScopes scope '${String(scope)}' is not an RFC 6749 scope token`,
+      );
+    }
+    if (seen.has(scope)) {
+      throw new AuthPluginConfigurationError(
+        `auth-plugin: requireScopes lists the scope '${scope}' more than once`,
+      );
+    }
+    seen.add(scope);
+    required.push(scope);
+  }
+  const scopes: readonly string[] = Object.freeze(required);
+  const brand: RouteSecurityMetadata = Object.freeze({ authenticated: true, scopes });
+  const guard = async (ctx: IRequestContext, next: () => Promise<void>): Promise<void> => {
+    const user = ctx.request.user;
+    if (!user) {
+      respondWithAuthorizationFailure(ctx, 'authentication-required');
+      return;
+    }
+    // A non-array `scopes` (an application mapper that copied the raw claim
+    // string) is treated as ABSENT: `includes` on a string would match a
+    // substring, so `'xtools:readx'` would satisfy `tools:read`.
+    const held = Array.isArray(user.scopes) ? user.scopes : [];
+    if (scopes.some((scope) => !held.includes(scope))) {
+      ctx.state.set(REQUIRED_SCOPES_STATE_KEY, scopes);
+      respondWithAuthorizationFailure(ctx, 'insufficient-privileges');
+      return;
+    }
+    await next();
+  };
+  return withSecurityMetadata(guard, brand);
 }
 
 /**

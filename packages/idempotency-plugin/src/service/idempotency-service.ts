@@ -16,8 +16,13 @@ import type {
   IRuntimeServices,
   MiddlewareFunction,
 } from '@setu-ts/common';
+import { withIdempotencyMetadata } from '@setu-ts/common';
 import type { IdempotencyDefaults } from '../core/options.ts';
-import { resolveIngressOptions, resolveRouteOptions } from '../core/options.ts';
+import {
+  resolveIngressOptions,
+  resolveRouteOptions,
+  routeIdempotencyMetadata,
+} from '../core/options.ts';
 import { IdempotencyConfigurationError } from '../errors.ts';
 import { createIngressBehavior } from '../ingress/ingress-behavior.ts';
 import { createHttpMiddleware } from '../middleware/http-middleware.ts';
@@ -70,7 +75,10 @@ export class IdempotencyService implements IIdempotencyService {
   /** @inheritdoc */
   middleware(options?: IdempotentRouteOptions): MiddlewareFunction {
     const resolved = resolveRouteOptions(options, this.#deps.defaults);
-    return createHttpMiddleware(this.#deps, resolved);
+    return withIdempotencyMetadata(
+      createHttpMiddleware(this.#deps, resolved),
+      routeIdempotencyMetadata(options),
+    );
   }
 
   /** @inheritdoc */

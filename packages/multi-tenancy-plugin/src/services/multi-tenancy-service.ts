@@ -3,9 +3,10 @@
  *
  * @module
  */
-import type { IRequestContext, ITenant, ITenantRepository } from '@setu-ts/common';
+import type { IRequestContext, ITenant, ITenantRepository, Option } from '@setu-ts/common';
 import type { IMultiTenancyService, ITenantDataStore } from '@setu-ts/common';
 import { TenantDataStoreNotReadyError, TenantNotResolvedError } from '../errors.ts';
+import { TenantCheck } from '../registry/tenant-check.ts';
 import { TenantRepository } from '../repositories/tenant-repository.ts';
 
 /**
@@ -29,10 +30,30 @@ const DEFAULT_SEPARATOR = ':';
 export class MultiTenancyService implements IMultiTenancyService {
   private store: ITenantDataStore | null;
   private readonly separator: string;
+  private readonly tenantCheck: TenantCheck;
 
-  constructor(options: { store?: ITenantDataStore; separator?: string }) {
+  /**
+   * @param options.store - The data store, unless a factory binds it later
+   * @param options.separator - The cache-key separator (default `':'`)
+   * @param options.check - The tenant check shared with the middleware;
+   * omitted admits every id (no `tenants` registry)
+   */
+  constructor(options: { store?: ITenantDataStore; separator?: string; check?: TenantCheck }) {
     this.store = options.store ?? null;
     this.separator = options.separator ?? DEFAULT_SEPARATOR;
+    this.tenantCheck = options.check ?? new TenantCheck({ configured: false });
+  }
+
+  /**
+   * With no `tenants` registry, answers `some({ id })` for a non-empty string
+   * id — what the HTTP path admits — so it is not validation without one. A
+   * non-string or empty id is `none()` either way. With a registry, runs the
+   * SAME check as the tenant middleware.
+   *
+   * @throws {TenantRegistryUnavailableError} When the registry could not answer
+   */
+  lookupTenant(id: string): Promise<Option<ITenant>> {
+    return this.tenantCheck.check(id);
   }
 
   /**

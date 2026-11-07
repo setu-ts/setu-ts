@@ -75,6 +75,12 @@ function accessPathOf(dataSource: DataSource): string | undefined {
   return reporter.getLastAccessPath?.();
 }
 
+/** Whether a data source carries the per-call access-path diagnostic at all. */
+function hasAccessPathReporter(dataSource: DataSource): boolean {
+  const reporter = dataSource as DataSource & Partial<IDynamoAccessPathReportingDataSource>;
+  return typeof reporter.getLastAccessPath === 'function';
+}
+
 /**
  * Maps a driver rejection onto the package-owned classified error
  * (X38-1/X35-2, M90f), or returns the scrubbed diagnostic when no signal matches.
@@ -206,6 +212,16 @@ class InternalRepo<Entity, Id extends EntityKey = string> extends BaseRepository
 export class DatabaseService implements IDatabaseService {
   private _closed = false;
 
+  /**
+   * Outer-scope repositories, one per entity (X94-3, M128). Building one —
+   * the adapter's data source, the wrapper below and the repository — was
+   * the whole point-read gap against NestJS and Hono, and `getRepository`
+   * per handler is the documented usage. A repository is a stateless facade
+   * over the shared adapter, so concurrent requests can share it.
+   * Transaction-scoped repositories are never stored here.
+   */
+  private readonly _repositories = new Map<string, IRepository<unknown, EntityKey>>();
+
   /** Creates a database service over one adapter and repository data-source factory. */
   constructor(
     /** The underlying database adapter (internal contract with scoped tx factory). */
@@ -257,13 +273,25 @@ export class DatabaseService implements IDatabaseService {
     };
   }
 
-  /** Returns a repository bound to the named entity on the outer database scope. */
+  /**
+   * Returns a repository bound to the named entity on the outer database
+   * scope. Repeated calls for one entity return the same instance, except for
+   * a data source that reports a per-call access path while `logQueries` is
+   * on: that diagnostic is read after each call returns, so a shared source
+   * would log another request's path.
+   */
   getRepository<Entity, Id extends EntityKey = string>(entity: string): IRepository<Entity, Id> {
     if (this._closed) {
       throw new Error('DatabaseService is closed');
     }
-    const dataSource = this.wrapDataSource(entity, this._createDataSource(entity));
-    return new InternalRepo<Entity, Id>(dataSource);
+    const cached = this._repositories.get(entity);
+    if (cached !== undefined) return cached as unknown as IRepository<Entity, Id>;
+    const source = this._createDataSource(entity);
+    const repository = new InternalRepo<Entity, Id>(this.wrapDataSource(entity, source));
+    if (!(hasAccessPathReporter(source) && this._options?.logQueries === true)) {
+      this._repositories.set(entity, repository as unknown as IRepository<unknown, EntityKey>);
+    }
+    return repository;
   }
 
   /** @inheritdoc */
@@ -311,12 +339,14 @@ export class DatabaseService implements IDatabaseService {
       // acknowledgement was lost. Its outcome is unknown, so never advertise
       // the retry-safe contract reserved for definitely rejected operations.
       if (committing) throw duplicateAtCommitOrOriginal(error, this._adapterType);
-      // X38-1 (M90f): a conflict surfaced inside a repository call was
-      // already classified by the `wrapDataSource` wrapper, and
-      // `classifyDriverError` returns `null` for a package-owned error — so
-      // it is rethrown verbatim and the caller's `cause` stays the driver
-      // error, never the first wrapper.
-      throw classifiedOrOriginal(error, this._adapterType);
+      // V11-5 (M128): an error the WORK raised is never classified. Every
+      // database call the work makes through a repository was already
+      // classified by `wrapDataSource`, so what reaches here unclassified is
+      // the caller's own failure — an HTTP call refused with ECONNREFUSED
+      // read as "database unavailable" before this. Scrubbing still applies
+      // (a native Drizzle handle's error carries bound values), and returns a
+      // foreign error unchanged, so the caller gets its own error back.
+      throw scrubDriverError(error);
     }
   }
 
@@ -439,6 +469,7 @@ export class DatabaseService implements IDatabaseService {
   async close(): Promise<void> {
     if (this._closed) return;
     this._closed = true;
+    this._repositories.clear();
     await this._adapter.disconnect();
   }
 

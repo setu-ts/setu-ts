@@ -12,7 +12,7 @@
 import { describe, expect, it } from 'vitest';
 import { DOCKERFILE, workspaceContainerFiles } from '../../src/workspace/compose.ts';
 import { WORKSPACE_VERSION, type WorkspaceManifest } from '../../src/workspace/manifest.ts';
-import { transportSpec } from '../../src/workspace/transport.ts';
+import { brokerSpec } from '../../src/workspace/transport.ts';
 
 /** The Deno-profile Dockerfile for a one-member workspace. */
 function dockerfile(): string {
@@ -20,16 +20,21 @@ function dockerfile(): string {
     version: WORKSPACE_VERSION,
     runtime: 'deno',
     basePort: 3000,
-    transport: 'http',
+    broker: 'memory',
     members: [{ name: 'orders', port: 3000 }],
   };
-  const files = workspaceContainerFiles(manifest, transportSpec('http'));
+  const files = workspaceContainerFiles(manifest, brokerSpec('memory'));
   const file = files.find((candidate) => candidate.path === DOCKERFILE);
   expect(file).toBeDefined();
   return file?.contents ?? '';
 }
 
 describe('generated Dockerfile chown fold (X10-5)', () => {
+  it('X87-4 removes testing and diagnostics from the Deno runtime import map', () => {
+    const source = dockerfile();
+    expect(source).toContain('delete manifest.imports["@setu-ts/testing"]');
+    expect(source).toContain('delete manifest.imports["@setu-ts/diagnostics-plugin"]');
+  });
   it('one RUN carries both the cache and the ownership fixup', () => {
     const contents = dockerfile();
     const runLines = contents.split('\n').filter((line) => line.startsWith('RUN '));

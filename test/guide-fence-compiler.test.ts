@@ -22,6 +22,7 @@
 
 import { run as runProcess } from './../scripts/lib/run.ts';
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -92,12 +93,16 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
     // re-audit added the pinned CI invocation as a fourth shell fence. One more
     // since M117: the Redis-client section shows a shell fence. One fewer since the
     // controllers redesign: one module tree serves both styles. site/--example adds one.
-    total: 22,
+    // One more since M131a: the Redis-arm `setu add` shell fence.
+    // One more since M129: the `setu client` shell fence.
+    // Two more since M131d: the `setu workspace build` and `deploy` shell fences.
+    // One more since M138: the `setu workspace broker` / `rpc` shell fence.
+    total: 27,
     ts: 1,
     compile: 1,
     external: 0,
     pseudocode: 0,
-    skipped: 21,
+    skipped: 26,
   },
   'docs/plugin-architecture.md': {
     total: 17,
@@ -118,6 +123,7 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
     skipped: 0,
   },
   'docs/examples.md': {
+    // grpc-workspace example: +2 skipped shell fences (generation commands, run commands).
     // Rewritten after the examples cold read: the per-app "Key code" blocks
     // described apps that no longer existed (routes, plugins, ports), so each
     // deep dive now gives the shell commands it was checked with and links to
@@ -125,13 +131,15 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
     // every example shares, taken from apps/minimal. Two more skipped blocks:
     // the layout tree and the worker-pool commands.
     // M119i: repository setup adds one shell fence.
-    // site/--example adds one shell fence.
-    total: 22,
+    // site/--example adds one shell fence. M135: the semantic-search section
+    // adds one shell fence. The realtime-clients section adds one. M136: the
+    // durable-agent section adds one.
+    total: 28,
     ts: 1,
     compile: 1,
     external: 0,
     pseudocode: 0,
-    skipped: 21,
+    skipped: 27,
   },
   'docs/decorators.md': {
     // 28 at M76. Two blocks left the guide there: the `deno.json` "Enable
@@ -230,6 +238,11 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
     pseudocode: 0,
     skipped: 0,
   },
+  'docs/durable-runs.md': { total: 2, ts: 1, compile: 1, external: 0, pseudocode: 0, skipped: 1 },
+  'docs/ai.md': { total: 10, ts: 9, compile: 9, external: 0, pseudocode: 0, skipped: 1 },
+  'docs/mcp.md': { total: 19, ts: 16, compile: 16, external: 0, pseudocode: 0, skipped: 3 },
+  // M135: the retrieval guide; every TypeScript fence compiles.
+  'docs/retrieval.md': { total: 10, ts: 8, compile: 8, external: 0, pseudocode: 0, skipped: 2 },
 };
 
 const EXPECTED_AGGREGATE: FenceCounts = {
@@ -266,12 +279,21 @@ const EXPECTED_AGGREGATE: FenceCounts = {
   // M119i: setup, full-stack create and npm tsconfig add three non-TS fences.
   // site/--example adds two shell fences.
   // Controllers redesign: -1 skipped fence in docs/cli.md (one module tree).
-  total: 310,
-  ts: 229,
-  compile: 196,
+  // M131a: +1 skipped shell fence in docs/cli.md (Redis arms); the telemetry README
+  // preload fence is a package README, outside this corpus.
+  // M129: +1 skipped shell fence in docs/cli.md (`setu client`).
+  // M135: docs/retrieval.md joins (+10: 8 compiling, 2 skipped); +1 skipped in examples.md.
+  // Examples walk-through: +1 skipped shell fence in examples.md (realtime-clients).
+  // M131d: +2 skipped shell fences in docs/cli.md (`setu workspace build` and `deploy`).
+  // M136: +1 skipped shell fence in examples.md (durable-agent).
+  // M138: +1 skipped shell fence in docs/cli.md (`setu workspace broker` / `rpc`).
+  // grpc-workspace example: +2 skipped shell fences in docs/examples.md.
+  total: 362,
+  ts: 263,
+  compile: 230,
   external: 33,
   pseudocode: 0,
-  skipped: 81,
+  skipped: 99,
 };
 
 describe('actual-fence compiler — every curated guide (shared engine)', () => {
@@ -285,11 +307,26 @@ describe('actual-fence compiler — every curated guide (shared engine)', () => 
     await writeProjectStubs(SCRATCH_DIR);
     const failures: string[] = [];
     const compiler = {};
+    // Named files form the complete MCP guide project. Materialize every file
+    // before checking any one, so relative imports resolve to the guide's own
+    // code rather than permissive stubs or the repository example.
+    const projectFiles = new Map<number, string>();
+    for (const classified of toCompile) {
+      const fence = classified.fence;
+      if (fence.guide !== 'docs/mcp.md') continue;
+      const name = /^\/\/ file: ((?:[\w-]+\/)*[\w.-]+\.ts)$/m.exec(fence.code)?.[1];
+      if (name === undefined) continue;
+      const file = `${SCRATCH_DIR}/mcp/${name}`;
+      await mkdir(dirname(file), { recursive: true });
+      await writeFile(file, assembleSource(fence, classified));
+      projectFiles.set(fence.index, file);
+    }
     for (const classified of toCompile) {
       const fence = classified.fence;
       const safe = fence.guide.replace(/[/.]/g, '_');
       const file =
-        `${SCRATCH_DIR}/${safe}-f${fence.index}-L${fence.line}` + `.${fenceExtension(fence.lang)}`;
+        (fence.guide === 'docs/mcp.md' ? projectFiles.get(fence.index) : undefined) ??
+        `${SCRATCH_DIR}/${safe}-f${fence.index}-L${fence.line}.${fenceExtension(fence.lang)}`;
       const { assembleSource } = await import('./fixtures/snippets/fence-engine.ts');
       const source = assembleSource(fence, classified);
       await writeFile(file, source);

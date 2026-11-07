@@ -428,10 +428,10 @@ export interface RedisLockOptions {
   /** Injected ioredis-compatible client. */
   client?: IRedisLockClient;
   /**
-   * Receives the connection errors (`ioredis` `'error'` events) of the client
-   * the lock BUILDS, instead of `ioredis` printing each reconnect failure to
-   * the console. Never attached to an injected `client`, which belongs to the
-   * caller. `SchedulerPlugin` supplies one backed by its logger.
+   * Receives the connection errors (`'error'` events) of the client the lock
+   * uses, instead of `ioredis` printing each reconnect failure to the console.
+   * Since 0.12.0 it is attached to an injected `client` too, and detached
+   * again on disconnect. `SchedulerPlugin` supplies one backed by its logger.
    *
    * @since 0.8.0
    */

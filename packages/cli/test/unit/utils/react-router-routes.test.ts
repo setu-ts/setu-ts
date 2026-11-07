@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { kernelShadows, pagePaths, readPagePaths } from '../../../src/utils/react-router-routes.ts';
+import { createFakeFs } from '../../fixtures/fake-fs.ts';
 import type { CommandRunner } from '../../../src/utils/run-command.ts';
 
 describe('pagePaths', () => {
@@ -65,6 +66,31 @@ describe('kernelShadows', () => {
   }
 });
 
+const fs = createFakeFs({ '/app/node_modules/.bin/react-router': '' });
+
+it('X87-1 finds the nearest workspace binary, never a standalone parent binary', async () => {
+  for (const local of [false, true]) {
+    const run = vi.fn(() => Promise.resolve({ code: 0, stdout: '[]', stderr: '' }));
+    const workspace = createFakeFs({
+      '/work/package.json': '{"workspaces":["apps/*"]}',
+      '/work/node_modules/.bin/react-router': '',
+      ...(local ? { '/work/apps/api/node_modules/.bin/react-router': '' } : {}),
+    });
+    expect((await readPagePaths('/work/apps/api', run, workspace)).ok).toBe(true);
+    expect(run).toHaveBeenCalledWith(
+      `${local ? '/work/apps/api' : '/work'}/node_modules/.bin/react-router`,
+      ['routes', '--json'],
+      { cwd: '/work/apps/api', signal: expect.any(AbortSignal) },
+    );
+  }
+  for (const seed of [{ '/work/node_modules/.bin/react-router': '' }, {}]) {
+    const run = vi.fn();
+    const result = await readPagePaths('/work/app', run, createFakeFs(seed));
+    expect(result).toEqual({ ok: false, reason: 'React Router binary is not installed' });
+    expect(run).not.toHaveBeenCalled();
+  }
+});
+
 describe('readPagePaths', () => {
   it('runs only the installed local executable and retains filenames for the refusal', async () => {
     const run: CommandRunner = vi.fn(() =>
@@ -74,7 +100,7 @@ describe('readPagePaths', () => {
         stderr: '',
       }),
     );
-    const result = await readPagePaths('/app', run);
+    const result = await readPagePaths('/app', run, fs);
     expect(run).toHaveBeenCalledWith('/app/node_modules/.bin/react-router', ['routes', '--json'], {
       cwd: '/app',
       signal: expect.any(AbortSignal),
@@ -94,7 +120,7 @@ describe('readPagePaths', () => {
     ['non-Error rejection', () => Promise.reject('broken')],
   ] as const) {
     it(`returns an advisory failure for ${label}`, async () =>
-      expect((await readPagePaths('/app', run)).ok).toBe(false));
+      expect((await readPagePaths('/app', run, fs)).ok).toBe(false));
   }
   it('names only the first stderr line, or says there was none', async () => {
     for (const [stderr, reason] of [
@@ -102,7 +128,7 @@ describe('readPagePaths', () => {
       ['  \n', 'React Router exited 1: (no output)'],
     ] as const) {
       expect(
-        await readPagePaths('/app', () => Promise.resolve({ code: 1, stdout: '', stderr })),
+        await readPagePaths('/app', () => Promise.resolve({ code: 1, stdout: '', stderr }), fs),
       ).toEqual({ ok: false, reason });
     }
   });
@@ -110,10 +136,14 @@ describe('readPagePaths', () => {
     vi.useFakeTimers();
     try {
       let signal: AbortSignal | undefined;
-      const result = readPagePaths('/app', async (_command, _args, options) => {
-        signal = options.signal;
-        return await new Promise(() => {});
-      });
+      const result = readPagePaths(
+        '/app',
+        async (_command, _args, options) => {
+          signal = options.signal;
+          return await new Promise(() => {});
+        },
+        fs,
+      );
       await vi.advanceTimersByTimeAsync(15_000);
       expect(await result).toEqual({
         ok: false,

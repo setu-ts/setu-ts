@@ -169,6 +169,8 @@ only: a browser cannot send the target's real public origin cross-site, and a tr
 passes a client's `X-Forwarded-Host` through would otherwise publish a host the attacker then
 matches. This comparison grants no proxy trust to IP resolution, cookies or public URLs.
 
+<!-- version:history -->
+
 **`Origin: null` is accepted only with `Sec-Fetch-Site: same-origin`** (M119c, V10-1). Under this
 plugin's default `Referrer-Policy: no-referrer`, a browser sends `Origin: null` on a same-origin
 HTML form POST, so before 0.11.0 every such form answered 403 unless `referrerPolicy` was changed.
@@ -179,6 +181,8 @@ still refused: a sandboxed frame, a `data:` or `file:` page and a cross-site red
 `cross-site`. `trustedOrigins: ['null']` is never implied. To refuse every `null` origin as before
 0.11.0, set `csrf: { acceptNullOriginSameOrigin: false }` (and send a real origin with
 `headers: { referrerPolicy: 'same-origin' }`).
+
+<!-- version:history -->
 
 | Option                        | Type            | Default | Description                                                                           |
 | ----------------------------- | --------------- | ------- | ------------------------------------------------------------------------------------- |
@@ -319,6 +323,14 @@ This plugin is middleware-only — it registers no service and no capability tok
 added to the global pipeline via `ctx.middleware.add(...)` and is also available as a standalone
 factory for per-route use. This follows the same pattern as `rateLimitMiddleware` from the
 auth-plugin.
+
+## React Router form posts
+
+The plugin's standalone referrer default remains `no-referrer`. React Router has its own unsafe
+request check and refuses `Origin: null`; accepting that origin in this plugin's CSRF middleware
+does not change React Router's check. Hand-composed React Router apps should set
+`headers: { referrerPolicy: 'same-origin' }`. The full-stack starter supplies that default only when
+`reactRouter` is configured and no referrer policy or header-disable choice was supplied.
 
 ## Exports
 

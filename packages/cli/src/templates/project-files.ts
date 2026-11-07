@@ -11,7 +11,14 @@
  * @module
  */
 
+import {
+  TELEMETRY_PRELOAD_CONTENTS,
+  TELEMETRY_PRELOAD_FLAG,
+  TELEMETRY_PRELOAD_PATH,
+} from './telemetry-preload.ts';
+import { renderFullStackDevEntry } from './full-stack-build-files.ts';
 import { CONFIG_EXPORT, CONFIG_MODULE, VERSION, type TargetRuntime } from '../constants.ts';
+import { siteUrl } from '../utils/repository-links.ts';
 import type { GeneratedFile } from '../utils/file-writer.ts';
 import { renderDockerfile, renderDockerignore } from '../workspace/compose.ts';
 import { workspaceProfile } from '../workspace/runtime-profile.ts';
@@ -63,7 +70,8 @@ import {
  * @returns A command prefix that resolves this CLI's version
  */
 export function cliInvocation(runtime: TargetRuntime): string {
-  const runner = runtime === 'deno' ? 'deno run -A npm:' : runtime === 'bun' ? 'bunx ' : 'npx ';
+  const runner =
+    runtime === 'deno' ? 'deno run -A --no-lock npm:' : runtime === 'bun' ? 'bunx ' : 'npx ';
   return `${runner}@setu-ts/cli@${VERSION}`;
 }
 
@@ -102,6 +110,8 @@ export const BROKER_COMPOSE_FILE = 'docker/compose.yaml';
  * rather than taking an environment override that could drift from the map.
  */
 export interface EntryPort {
+  /** A workspace member's allocated loopback inspector port. */
+  readonly inspectPort?: number;
   /** The identifier the entry imports, e.g. `SERVICE_PORT`. */
   readonly symbol: string;
   /** The module specifier to import it from, e.g. `./src/discovery/services.ts`. */
@@ -180,6 +190,12 @@ export interface ResolvedHost {
   readonly extraScripts: Readonly<Record<string, string>>;
   /** npm `devDependencies` merged into a generated `package.json` (the proto toolchain). */
   readonly extraDevDependencies: Readonly<Record<string, string>>;
+  /**
+   * Framework packages the project declares without the config importing them —
+   * what a workspace member's transport module imports (`@setu-ts/grpc-plugin`
+   * for a gRPC member).
+   */
+  readonly extraFrameworkPackages: readonly string[];
   readonly appFactory?: AppFactoryWiring | undefined;
   readonly appFactoryContext: Omit<AppFactoryRenderContext, 'runtime'>;
   /** Routes the template's own source serves, for the README. */
@@ -237,6 +253,7 @@ export function resolveHost(host: TemplateHost, runtime: TargetRuntime): Resolve
       extraDependencies: {},
       extraScripts: {},
       extraDevDependencies: {},
+      extraFrameworkPackages: [],
       appFactory: host.appFactory,
       routes: host.routes ?? [],
       appFactoryContext: {
@@ -262,7 +279,11 @@ export function resolveHost(host: TemplateHost, runtime: TargetRuntime): Resolve
  * @returns The dotenv file contents
  */
 function envFileContents(variables: readonly EnvVariable[]): string {
-  const header = '# Local configuration. This file is ignored by Git.\n';
+  // M131a X88-2: the local start scripts read this file into the environment
+  // before the process starts, so a value set here wins over a default.
+  const header =
+    '# Local configuration. This file is ignored by Git.\n' +
+    '# The local start scripts read it into the environment before the process starts.\n';
   if (variables.length === 0) return header;
   return `${header}# The values below are development placeholders. Replace them before deploying.\n${variables
     .map((variable) => `\n# ${variable.description}\n${variable.name}=${variable.develop}`)
@@ -602,7 +623,7 @@ ${factoryPluginLines}${middlewareLines}${setupLines}
   const envDoc = onWorkers
     ? `\n * @param env - The Worker's bindings and variables, from the \`fetch\` handler` +
       `\n * @param ${waitUntilParameter} - The platform's post-response sink, from \`src/index.ts\`.` +
-      `\n * Only the Worker ENTRY can import it: \`setu\` loads this module under Deno,` +
+      `\n * Only the Worker ENTRY can import it: \`setu\` loads this module on Node through tsx,` +
       `\n * which cannot resolve \`cloudflare:workers\` at all.${devtoolDoc}`
     : `\n * @param _env - The discovery environment \`setu commands\` passes positionally on` +
       `\n * every target; accepted and unused, because a socket project reads configuration` +
@@ -685,7 +706,7 @@ function serveEntry(runtime: TargetRuntime, port?: EntryPort, serverBuild = fals
 
   return `${serverBuild ? "import * as serverBuild from './build/server/index.js';\n" : ''}import { ${CONFIG_EXPORT} } from './${CONFIG_MODULE}';
 import { createRuntimeServices } from '@setu-ts/runtime';
-import { CAPABILITIES } from '@setu-ts/common';
+import { CAPABILITIES, describeError } from '@setu-ts/common';
 import type { ILogger } from '@setu-ts/common';
 ${portImport}
 // Built before the application, because the port is needed at start() and
@@ -693,9 +714,19 @@ ${portImport}
 // own instance: runtime services are a stateless facade over platform globals.
 const runtime = createRuntimeServices();
 
-const app = await ${CONFIG_EXPORT}(${serverBuild ? 'undefined, undefined, { serverBuild }' : ''});
+// A failed boot prints one line and exits 1. Left to the runtime's default
+// printer, the error is dumped with every property it carries, and a malformed
+// REDIS_URL's TypeError carries the URL, password included, as \`input\`.
+async function boot() {
+  const app = await ${CONFIG_EXPORT}(${serverBuild ? 'undefined, undefined, { serverBuild }' : ''});
+  await app.start({ port: ${portExpression} });
+  return app;
+}
 
-await app.start({ port: ${portExpression} });
+const app = await boot().catch((error: unknown) => {
+  console.error(\`Startup failed: \${describeError(error)}\`);
+  return runtime.exit(1);
+});
 ${shutdownBlock(runtime)}`;
 }
 
@@ -859,7 +890,7 @@ function workersEntry(
   // SUCCESSFUL boot is memoised, so a transient failure is retried on the next
   // request instead of being cached for the isolate's life.
   // THE import lives here and nowhere else. `setu commands` loads
-  // `setu.config.ts` under Deno to discover plugin-contributed verbs, and Deno
+  // `setu.config.ts` on Node through tsx to discover plugin-contributed verbs, and Node
   // cannot resolve `cloudflare:workers` at all — putting it there, which is what
   // the plugin README's only usage example shows, breaks the CLI outright with
   // `Unsupported scheme "cloudflare"`. This entry module is never loaded by
@@ -1120,6 +1151,7 @@ function frameworkPackages(host: ResolvedHost, runtime: TargetRuntime): readonly
   }
   if (host.appFactory !== undefined) packages.add(host.appFactory.pkg);
   for (const entry of host.packageImports) packages.add(entry.pkg);
+  for (const pkg of host.extraFrameworkPackages) packages.add(pkg);
   // Reads the SAME resolved plugin list the renderer emits, so a project never
   // imports a framework package without declaring it.
   for (const pkg of packagesOf(host.plugins, host.middleware)) packages.add(pkg);
@@ -1215,14 +1247,24 @@ function denoTasks(
   runtime: TargetRuntime,
   host: ResolvedHost,
   manifest?: TemplateManifest,
+  port?: EntryPort,
 ): Record<string, string> {
   const entry = runtime === 'deno' ? 'main.ts' : 'src/index.ts';
   // Workers serves through a `fetch` export, so `deno run` binds nothing and
   // exits 0 — Deno's own warning names `deno serve` as the fix (X9-7).
+  // M131a X88-2: a local start script loads `.env` into the environment before
+  // the process starts (the plugin options are evaluated in createApp(), before
+  // any plugin runs, so only the process environment is available there). Deno
+  // uses `--env-file`; a missing `.env` is a hard error, so the flag is passed
+  // only when the manifest writes the dotenv. Production images and Compose keep
+  // the platform environment and pass no flag (the image CMD runs the entry
+  // directly, never `npm start`), so this flag cannot reach a container.
+  const denoEnvFile =
+    manifest?.envFilePath !== undefined ? `--env-file=${manifest.envFilePath} ` : '';
   const start =
     runtime === 'cloudflare-workers'
       ? `deno serve ${denoPermissions(manifest)} ${entry}`
-      : `deno run ${denoPermissions(manifest)} ${entry}`;
+      : `deno run ${denoPermissions(manifest)} ${denoEnvFile}${entry}`;
 
   // A3: every Deno template emits a `test` task now. `setu generate module`
   // writes a `<name>.test.ts`, and NO template declared a task that runs it — so
@@ -1245,8 +1287,8 @@ function denoTasks(
   const development =
     runtime === 'deno'
       ? {
-          'start:dev': `deno run --watch ${denoPermissions(manifest)} main.ts`,
-          'start:debug': `deno run --inspect ${denoPermissions(manifest)} main.ts`,
+          'start:dev': `deno run --watch ${denoPermissions(manifest)} ${denoEnvFile}main.ts`,
+          'start:debug': `deno run ${port?.inspectPort === undefined ? '--inspect' : `--inspect=127.0.0.1:${port.inspectPort}`} ${denoPermissions(manifest)} ${denoEnvFile}main.ts`,
         }
       : {};
 
@@ -1274,8 +1316,8 @@ function denoTasks(
     ...development,
     ...(runtime === 'deno' && manifest.npmBuild.devEntry !== undefined
       ? {
-          'start:dev': `deno task install && deno run -A --watch ${manifest.npmBuild.devEntry.path}`,
-          'start:debug': `deno task install && deno run -A --inspect ${manifest.npmBuild.devEntry.path}`,
+          'start:dev': `deno task install && deno run -A --watch ${denoEnvFile}${manifest.npmBuild.devEntry.path}`,
+          'start:debug': `deno task install && deno run -A ${port?.inspectPort === undefined ? '--inspect' : `--inspect=127.0.0.1:${port.inspectPort}`} ${denoEnvFile}${manifest.npmBuild.devEntry.path}`,
         }
       : {}),
     // The generated smoke test boots `createApp()`, which loads the server
@@ -1307,7 +1349,7 @@ function denoTasks(
  */
 export function cliCommand(runtime: TargetRuntime, args: string): string {
   return runtime === 'deno'
-    ? `deno run -A ${frameworkSpecifier('cli', 'deno')} ${args}`
+    ? `deno run -A --no-lock ${frameworkSpecifier('cli', 'deno')} ${args}`
     : `setu ${args}`;
 }
 
@@ -1341,7 +1383,12 @@ export const DEVTOOL_ENTRY_MODULE = 'main.dev.ts';
  * @returns The `dev` and `check` task bodies
  */
 export function devtoolTasks(manifest?: TemplateManifest): Record<string, string> {
-  const run = `deno run ${denoPermissions(manifest)} ${DEVTOOL_ENTRY_MODULE}`;
+  // M131a X88-2: the local `dev` task loads `.env` through the runtime, exactly
+  // as the `start` task does, so `dev` differs from `start` only in the entry
+  // module. Deno's `--env-file` is a hard error when the file is missing, so
+  // the flag is passed only when the manifest writes the dotenv.
+  const envFile = manifest?.envFilePath !== undefined ? `--env-file=${manifest.envFilePath} ` : '';
+  const run = `deno run ${denoPermissions(manifest)} ${envFile}${DEVTOOL_ENTRY_MODULE}`;
   return {
     dev: manifest?.npmBuild === undefined ? run : `deno task build && ${run}`,
     check: `deno check main.ts ${CONFIG_MODULE} ${DEVTOOL_ENTRY_MODULE} && ${cliCheckCommand('deno')}`,
@@ -1617,6 +1664,17 @@ function generatedTestScripts(
 }
 
 /**
+ * The check a generated Node `start` script runs first (M131b, X87-3): without
+ * a build, `node dist/main.js` dies with a raw `MODULE_NOT_FOUND` trace, so
+ * this names the build script instead. Part of `start` itself rather than a
+ * `prestart`, because pnpm and Bun do not run pre-scripts by default; the
+ * double quotes work in both `sh` and `cmd`. `--input-type=commonjs` keeps
+ * `require` defined when Node 22 runs with
+ * `NODE_OPTIONS=--experimental-default-type=module`.
+ */
+export const NODE_START_BUILD_CHECK = `node --input-type=commonjs -e "require('node:fs').existsSync('dist/main.js')||(console.error('dist/main.js is missing; run the build script first'),process.exitCode=1)"`;
+
+/**
  * The `scripts` a generated `package.json` carries.
  *
  * Node builds type-check and bundle; Bun builds only a declared frontend.
@@ -1627,27 +1685,57 @@ function generatedTestScripts(
  * @param manifest - The template's manifest contributions, when it declares them
  * @returns The scripts block
  */
-function npmScripts(runtime: TargetRuntime, manifest?: TemplateManifest): Record<string, string> {
+function npmScripts(
+  runtime: TargetRuntime,
+  manifest?: TemplateManifest,
+  port?: EntryPort,
+): Record<string, string> {
   const devEntry = manifest?.npmBuild?.devEntry;
   const frontend = manifest?.npmBuild?.script;
   const entry = devEntry?.path ?? 'main.ts';
   const bun = runtime === 'bun';
+  // M131a X88-2: a local start script loads the project's dotenv file into the
+  // environment before the process starts (the plugin options are evaluated in
+  // createApp(), before any plugin runs, so only the process environment is
+  // available there). The file is the one the project declares (`--env-file
+  // local.env` included; CodeRabbit #543), `.env` by default. Node uses
+  // `--env-file-if-exists` (safe when the file is absent); Bun loads `.env`
+  // itself and takes `--env-file=` for any other name (measured, Bun 1.4: a
+  // missing file is tolerated). Production images and Compose keep the platform
+  // environment and pass no flag (the image CMD runs the entry directly, never
+  // `npm start`), so this flag cannot reach a container.
+  const dotenv = manifest?.envFilePath ?? '.env';
+  const envFile = bun
+    ? dotenv === '.env'
+      ? ''
+      : `--env-file=${dotenv} `
+    : `--env-file-if-exists=${dotenv} `;
+  // M131a X88-4: Node runs the OpenTelemetry preload first, so the hook is in
+  // place before any driver loads. Bun gets none (see telemetry-preload.ts).
+  const preload = bun ? '' : `${TELEMETRY_PRELOAD_FLAG} `;
+  const nodeFlags = `${preload}${envFile}`;
   return {
     ...(bun
       ? frontend === undefined
         ? {}
         : { build: frontend }
       : { build: `${frontend === undefined ? '' : `${frontend} && `}tsc --noEmit && setu build` }),
-    start: bun ? 'bun run main.ts' : 'node --enable-source-maps dist/main.js',
+    start: bun
+      ? `bun ${envFile}run main.ts`
+      : `${NODE_START_BUILD_CHECK} && node ${nodeFlags}--enable-source-maps dist/main.js`,
     'start:dev':
       devEntry === undefined
         ? bun
-          ? 'bun --watch main.ts'
-          : `${NODE_RUNNER} watch main.ts`
+          ? `bun ${envFile}--watch main.ts`
+          : // tsx reads its subcommand from the first argument: a flag before
+            // `watch` makes tsx run a file named `watch`.
+            `${NODE_RUNNER} watch ${nodeFlags}main.ts`
         : bun
-          ? `bun run ${entry}`
-          : `${NODE_RUNNER} ${entry}`,
-    'start:debug': bun ? `bun --inspect ${entry}` : `node --inspect --import tsx ${entry}`,
+          ? `bun ${envFile}run ${entry}`
+          : `${NODE_RUNNER} ${nodeFlags}${entry}`,
+    'start:debug': bun
+      ? `bun ${envFile}${port?.inspectPort === undefined ? '--inspect' : `--inspect=127.0.0.1:${port.inspectPort}`} ${entry}`
+      : `node ${nodeFlags}${port?.inspectPort === undefined ? '--inspect' : `--inspect=127.0.0.1:${port.inspectPort}`} --import tsx ${entry}`,
     ...generatedTestScripts(runtime, manifest),
     ...(frontend === undefined ? {} : { check: `${frontend} && tsc --noEmit && setu check` }),
   };
@@ -1953,7 +2041,7 @@ export function projectFiles(
       : `\n${(host.transportNotes ?? []).map((note) => wrapProse(note)).join('\n\n')}\n`;
   const readme = `# ${projectName}
 
-A [Setu-TS](https://github.com/setu-ts/setu-ts) project targeting \`${runtime}\`.
+A [Setu-TS](${siteUrl('')}) project targeting \`${runtime}\`.
 ${
   hasBrokerServices
     ? // Wrapped exactly as `deno fmt` reflows markdown at the emitted
@@ -1989,7 +2077,7 @@ ${
           : runtime === 'bun'
             ? 'bun run start:dev'
             : 'npm run start:dev'
-      }\n\`\`\`\n\nServes the app through Vite, so an edited route renders on the next request with no restart. Vite\nlistens on \`VITE_PORT\` (default 5173); open the app's own port.\n\n`
+      }\n\`\`\`\n\nServes the app through Vite, so an edited route renders on the next request with no restart.${port === undefined ? ' Vite\nlistens on VITE_PORT (default 5173)' : '\nApplication and Vite ports come from setu.workspace.json'}; open the app's own port.\n\n`
     : ''
 }${
     host.devtoolPort === undefined
@@ -2001,7 +2089,7 @@ ${
 ${cliInvocation(runtime)} generate service billing
 ${cliInvocation(runtime)} generate --help
 \`\`\`
-${manifest?.readmeSection === undefined ? '' : `\n${typeof manifest.readmeSection === 'string' ? manifest.readmeSection : manifest.readmeSection(cliInvocation(runtime))}`}${
+${manifest?.readmeSection === undefined ? '' : `\n${typeof manifest.readmeSection === 'string' ? manifest.readmeSection : manifest.readmeSection(cliInvocation(runtime), runtime, port !== undefined)}`}${
     runtime === 'cloudflare-workers'
       ? ''
       : `
@@ -2038,9 +2126,7 @@ docker run --rm -p 3000:3000 ${projectName}
   }${manifest?.envFilePath === undefined ? '' : `${manifest.envFilePath}\n`}${
     // M113d §3.10: on Workers the local variables live in `.dev.vars` (the file
     // `wrangler dev` reads), never committed.
-    runtime === 'cloudflare-workers' && (manifest?.envVariables?.length ?? 0) > 0
-      ? '.dev.vars\n'
-      : ''
+    runtime === 'cloudflare-workers' ? '.dev.vars\n' : ''
   }`;
 
   const files: GeneratedFile[] = [
@@ -2141,7 +2227,7 @@ describe('application composition', () => {
       path: 'deno.json',
       contents: `${JSON.stringify(
         {
-          tasks: denoTasks(runtime, host, manifest),
+          tasks: denoTasks(runtime, host, manifest, port),
           ...(isWorkspaceMember ? {} : rootManifestSettings(generatedOutputDirs(manifest))),
           // A `package.json` switches Deno to node_modules resolution, and the
           // full-stack template is the one that emits one on a Deno target. A
@@ -2189,7 +2275,7 @@ describe('application composition', () => {
           type: 'module',
           scripts: {
             ...NPM_TOOLING_SCRIPTS,
-            ...npmScripts(runtime, manifest),
+            ...npmScripts(runtime, manifest, port),
             ...host.extraScripts,
           },
           dependencies: npmDependencies(host, runtime),
@@ -2225,6 +2311,9 @@ describe('application composition', () => {
       )}\n`,
     });
     for (const file of npmToolingFiles(generatedOutputDirs(manifest))) files.push(file);
+    if (runtime === 'node') {
+      files.push({ path: TELEMETRY_PRELOAD_PATH, contents: TELEMETRY_PRELOAD_CONTENTS });
+    }
   }
 
   files.push({
@@ -2367,7 +2456,13 @@ ${host.wranglerToml}`,
   // binds sockets, which an isolate cannot.
   const devEntry = host.manifest?.npmBuild?.devEntry;
   if (runtime !== 'cloudflare-workers' && devEntry !== undefined) {
-    files.push({ path: devEntry.path, contents: devEntry.contents });
+    files.push({
+      path: devEntry.path,
+      contents:
+        port !== undefined && devEntry.path === 'dev.ts'
+          ? renderFullStackDevEntry(port).contents
+          : devEntry.contents,
+    });
   }
 
   // Template source files last. Any path colliding with the fixed set above is

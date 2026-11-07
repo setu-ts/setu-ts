@@ -6,11 +6,21 @@ OpenTelemetry distributed tracing. Registers an `ITelemetryService` under `CAPAB
 Without an `exporter` the plugin runs in noop mode. With an exporter, install the optional peers for
 the features you enable; the SDK is loaded during registration.
 
+`registerGlobal: true` opts into the process-global OTel provider; it defaults to false. Only the
+first app's provider can be global. A refused second registration warns once: library spans from the
+second app still use the first app's exporter and `service.name`, and are dropped after that first
+app stops. Only the second app's own Setu spans use its private provider. Shutdown does not
+unregister the global provider. Use one global provider per process.
+
 Install peers within the ranges declared by this package's `peerDependencies`, where this package is
 installed — usually the root in an npm/Yarn/Bun workspace. A peer nested only under a member cannot
-be loaded by a root-hoisted plugin. `setu add telemetry` records the four console-exporter peers in
-both manifests in a Node or Bun Setu workspace. See
-[Optional peers in a workspace](https://github.com/setu-ts/setu-ts/blob/main/docs/plugins.md#optional-peers-in-a-workspace).
+be loaded by a root-hoisted plugin. `setu add telemetry` records `@opentelemetry/api`,
+`@opentelemetry/sdk-trace-base`, `@opentelemetry/resources` and
+`@opentelemetry/context-async-hooks`, plus `@opentelemetry/exporter-trace-otlp-http` everywhere but
+Cloudflare Workers; on Node it also records `@opentelemetry/instrumentation` and, when the project
+has a Redis client, its instrumentation (`@opentelemetry/instrumentation-ioredis` or
+`@opentelemetry/instrumentation-redis`). See
+[Optional peers in a workspace](https://setu-ts.dev/docs/plugins/#optional-peers-in-a-workspace).
 
 ## Installation
 
@@ -101,6 +111,39 @@ the application starts, so `redis` must not be loaded before then: build the cli
 factory, `fromNodeRedis(async () => (await import('redis')).createClient({ url }))`, as a
 `--redis-client node-redis` scaffold does. A `redis` imported at module load records no spans.
 
+### ESM applications: the preload
+
+An ES-module application on Node must register OpenTelemetry's loader hook **before** the
+application loads, or the drivers the plugins import lazily (`ioredis`, `redis`, `amqplib`,
+`kafkajs`) are loaded unpatched and record no spans. Measured on Node 24: with the hook registered
+by a preload, a lazily imported `ioredis` is instrumented; without it, it is not. The plugin cannot
+do this itself — by the time it registers, the loader is already running — so the preload is a file
+the process runs first:
+
+```js
+// instrumentation.mjs
+import { register } from 'node:module';
+
+try {
+  register('@opentelemetry/instrumentation/hook.mjs', import.meta.url);
+} catch {
+  // No instrumentation package: start without the hook.
+}
+```
+
+Run it with `node --import ./instrumentation.mjs`, ahead of every other flag that loads code (the
+`tsx` runner takes it after its `watch` subcommand: `tsx watch --import ./instrumentation.mjs`), and
+install `@opentelemetry/instrumentation` in the application, so the hook resolves from the project
+root under any package manager. Without that package the `catch` swallows the failed `register` and
+the application starts with nothing wrapped.
+
+A Node project from `setu new` or `setu generate app` already has this file, runs it from its
+`start`, `start:dev` and `start:debug` scripts, and copies it into the production image, whose `CMD`
+passes the same flag. `setu add telemetry` installs `@opentelemetry/instrumentation`, the OTLP
+exporter, and the instrumentation for the Redis client the project uses, and prints the
+`instrumentations` key that enables it. Deno and Bun need no preload: OpenTelemetry's
+auto-instrumentation does not run there.
+
 Each plugin instance calls `setTracerProvider` on itself; there is no global singleton.
 
 Outcomes are reported through the plugin's logger (`ctx.logger`, read at call time): an enabled
@@ -155,9 +198,7 @@ at registration and continues to omit the query string.
 
 The plugin exports to **one** endpoint. To fan a single trace stream out to several vendors, point
 it at an OpenTelemetry Collector — see
-[docs/telemetry-collector-fanout.md](https://github.com/setu-ts/setu-ts/blob/main/docs/telemetry-collector-fanout.md)
-and the reference config in
-[docker/otel-collector/](https://github.com/setu-ts/setu-ts/tree/main/docker/otel-collector).
+[the telemetry fan-out guide](https://setu-ts.dev/docs/telemetry-collector-fanout/).
 
 ## Trace diagnostics (M98g)
 

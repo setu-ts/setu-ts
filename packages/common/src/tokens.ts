@@ -37,6 +37,8 @@ export type CapabilityToken = string;
  * @since 0.1.0
  */
 export const CAPABILITIES = {
+  /** Durable agent-run service (IAgentRunService). */
+  AGENT_RUNS: 'agent-runs',
   /** Runtime services provided by the RuntimePlugin. Mandatory in every application. */
   RUNTIME: 'runtime',
   /** Structured logger. */
@@ -310,6 +312,12 @@ export const CAPABILITIES = {
    * consumed by the DiagnosticsPlugin. Not a generic second HTTP server API.
    */
   LOCAL_DIAGNOSTICS_LISTENER: 'local-diagnostics-listener',
+  /**
+   * Vector store — tenant-scoped similarity search (`IVectorStore`). Provided
+   * by `@setu-ts/vector-store-plugin`; every data method takes the tenant scope
+   * as a required argument.
+   */
+  VECTOR_STORE: 'vector-store',
 } as const;
 
 /**

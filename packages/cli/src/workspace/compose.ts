@@ -34,12 +34,13 @@
  * @module
  */
 
+import { TELEMETRY_PRELOAD_PATH } from '../templates/telemetry-preload.ts';
 import type { GeneratedFile } from '../utils/file-writer.ts';
 import { hostVariable } from './discovery-module.ts';
 import { LIBS_DIR } from './library.ts';
 import { MEMBERS_DIR, type WorkspaceManifest } from './manifest.ts';
 import { workspaceProfile, type WorkspaceRuntimeProfile } from './runtime-profile.ts';
-import type { TransportSpec } from './transport.ts';
+import type { BrokerSpec } from './transport.ts';
 
 /** Where the workspace's container artifacts live, relative to its root. */
 export const DOCKER_DIR = 'docker';
@@ -210,7 +211,7 @@ COPY --from=frontend /srv/${MEMBERS_DIR}/\${MEMBER}/buil[d] ./build/
 # The parser is pinned to an exact version and may read and write only the
 # member and root manifests, so this unlocked fetch cannot float or touch any
 # other file in the image.
-RUN printf '%s' 'import { parse } from "jsr:@std/jsonc@1.0.3"; for (const directory of [".", "/srv"]) { for (const name of ["deno.json", "deno.jsonc"]) { const path = directory + "/" + name; let source; try { source = Deno.readTextFileSync(path); } catch (error) { if (error instanceof Deno.errors.NotFound) continue; throw error; } const manifest = parse(source); if (manifest.imports) delete manifest.imports["@setu-ts/diagnostics-plugin"]; Deno.writeTextFileSync(path, JSON.stringify(manifest)); break; } }' | DENO_DIR=/srv/.setu-build-cache deno run --no-config --no-lock --no-prompt --allow-read=./deno.json,./deno.jsonc,/srv/deno.json,/srv/deno.jsonc --allow-write=./deno.json,./deno.jsonc,/srv/deno.json,/srv/deno.jsonc - && rm -rf /srv/.setu-build-cache
+RUN printf '%s' 'import { parse } from "jsr:@std/jsonc@1.0.3"; for (const directory of [".", "/srv"]) { for (const name of ["deno.json", "deno.jsonc"]) { const path = directory + "/" + name; let source; try { source = Deno.readTextFileSync(path); } catch (error) { if (error instanceof Deno.errors.NotFound) continue; throw error; } const manifest = parse(source); if (manifest.imports) { delete manifest.imports["@setu-ts/diagnostics-plugin"]; delete manifest.imports["@setu-ts/testing"]; } Deno.writeTextFileSync(path, JSON.stringify(manifest)); break; } }' | DENO_DIR=/srv/.setu-build-cache deno run --no-config --no-lock --no-prompt --allow-read=./deno.json,./deno.jsonc,/srv/deno.json,/srv/deno.jsonc --allow-write=./deno.json,./deno.jsonc,/srv/deno.json,/srv/deno.jsonc - && rm -rf /srv/.setu-build-cache
 # The registry the install step resolves from. Unset by default, which is the
 # public npm registry; a gate building against a local registry passes it with
 # \`--build-arg\`. An ARG never reaches the running container's environment, but
@@ -370,10 +371,10 @@ ${manifests}
 ARG NPM_CONFIG_REGISTRY=
 RUN ${NPMRC_MOUNT} ${guard} && ${install}${bun ? ' --production' : ` --omit=dev${workspace ? ' --workspace apps/${MEMBER} --workspace libs' : ''}`}
 ${bun ? `COPY ${member} ${workspace ? `./${member}` : '.'}\n` : ''}WORKDIR /srv${workspace ? '/apps/${MEMBER}' : ''}
-${bun ? '' : `COPY --from=build /srv${workspace ? '/apps/${MEMBER}' : ''}/dist ./dist\n`}COPY --from=build /srv${workspace ? '/apps/${MEMBER}' : ''}/buil[d] ./build/
+${bun ? '' : `COPY --from=build /srv${workspace ? '/apps/${MEMBER}' : ''}/dist ./dist\nCOPY --from=build /srv${workspace ? '/apps/${MEMBER}' : ''}/${TELEMETRY_PRELOAD_PATH} ./\n`}COPY --from=build /srv${workspace ? '/apps/${MEMBER}' : ''}/buil[d] ./build/
 # NUMERIC, not a name: Kubernetes can verify this user is non-root.
 USER ${uid}:${uid}
-CMD ${bun ? '["bun", "run", "main.ts"]' : '["node", "--enable-source-maps", "dist/main.js"]'}
+CMD ${bun ? '["bun", "run", "main.ts"]' : `["node", "--import", "./${TELEMETRY_PRELOAD_PATH}", "--enable-source-maps", "dist/main.js"]`}
 `;
 }
 
@@ -392,7 +393,7 @@ CMD ${bun ? '["bun", "run", "main.ts"]' : '["node", "--enable-source-maps", "dis
  */
 export function memberEnvironment(
   siblings: readonly WorkspaceManifest['members'][number][],
-  transport: TransportSpec,
+  transport: BrokerSpec,
 ): Readonly<Record<string, string>> {
   return {
     ...Object.fromEntries(siblings.map((sibling) => [hostVariable(sibling.name), sibling.name])),
@@ -419,7 +420,7 @@ function memberService(
   name: string,
   port: number,
   siblings: readonly WorkspaceManifest['members'][number][],
-  transport: TransportSpec,
+  transport: BrokerSpec,
 ): string {
   const backing = transport.compose;
 
@@ -496,7 +497,7 @@ ${dependsOn
  */
 export function workspaceContainerFiles(
   manifest: WorkspaceManifest,
-  transport: TransportSpec,
+  transport: BrokerSpec,
   profile: WorkspaceRuntimeProfile = workspaceProfile(manifest.runtime),
 ): readonly GeneratedFile[] {
   const backing = transport.compose;

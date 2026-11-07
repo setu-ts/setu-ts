@@ -82,9 +82,38 @@ export const EXCLUDED_EXAMPLES: readonly ExcludedExample[] = [
     reason:
       'Its main.ts starts both services, makes its calls and stops in a finally — a self-terminating script, not a server, so an image would exit immediately.',
   },
+  {
+    app: 'grpc-workspace',
+    kind: 'unsupported',
+    reason:
+      'A multi-member workspace deployed with `setu workspace build/deploy` — one image per member from its generated docker/, not a single-APP build.',
+  },
   // The rest ARE containerizable — `docker build --build-arg APP=<name>` works for each — but
   // they differ from the matrix only in which plugins they import, and the build path does not
   // branch on that. Building all of them would multiply gate runtime for no new coverage.
+  {
+    app: 'ai-chat',
+    kind: 'redundant',
+    reason:
+      'Same build shape as rest-api; it proves AI SDK recipes through a mock-model smoke, not an image.',
+  },
+  {
+    app: 'mcp-tools',
+    kind: 'redundant',
+    reason: 'Same build shape as rest-api; proves MCP tools through an official-client smoke.',
+  },
+  {
+    app: 'semantic-search',
+    kind: 'redundant',
+    reason:
+      'Same build shape as rest-api; proves tenant-scoped retrieval through a mock-model smoke.',
+  },
+  {
+    app: 'durable-agent',
+    kind: 'redundant',
+    reason:
+      'Same build shape as rest-api; proves durable runs through a scripted-model smoke and a PostgreSQL restart case.',
+  },
   {
     app: 'cqrs',
     kind: 'redundant',
@@ -979,7 +1008,7 @@ async function checkGenerated(): Promise<CheckOutcome> {
       '--workspace',
       '--runtime',
       'deno',
-      '--transport',
+      '--broker',
       'redis',
       '--port',
       String(GENERATED_PORT),
@@ -1291,8 +1320,6 @@ async function checkWorkspace(clusterModeFollows: boolean): Promise<CheckOutcome
         '--workspace',
         '--runtime',
         'node',
-        '--transport',
-        'http',
         '--port',
         String(WORKSPACE_GATE.port),
       ],
@@ -1577,7 +1604,7 @@ async function checkDenoWorkspaceTest(directory: string, registry: string): Prom
   const cli = (args: readonly string[]) =>
     run([...CLI_COMMAND, ...args], { quiet: true, cwd: directory });
   for (const args of [
-    ['new', 'denows', '--workspace', '--runtime', 'deno', '--transport', 'http'],
+    ['new', 'denows', '--workspace', '--runtime', 'deno'],
     ['generate', 'app', 'api', '--template', 'rest', '--dir', root],
   ]) {
     const step = await cli(args);

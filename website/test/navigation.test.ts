@@ -4,6 +4,24 @@ import { exampleStart, insertAfterTitle, tryItHtml } from '../src/lib/example-st
 import { APPS, EXAMPLE_NAVIGATION, PACKAGES, PACKAGE_NAVIGATION } from '../src/lib/repository.ts';
 import { EXAMPLES_REPOSITORY_ROUTE } from '../src/lib/docs-links.ts';
 import { EXAMPLES, EXCLUDED_EXAMPLES } from '../../packages/cli/src/examples/catalog.ts';
+import { DOCS_NAV, NAV_SLUGS } from '../src/lib/docs-nav.ts';
+import { readSource } from '../src/lib/repository.ts';
+
+describe('guide navigation', () => {
+  it('points each unique slug at an existing guide and exposes durable runs beside the AI guides', () => {
+    const items = DOCS_NAV.flatMap((group) => group.items);
+    expect(NAV_SLUGS.size).toBe(items.length);
+    for (const item of items) {
+      expect(item.slug).toMatch(/^[a-z0-9-]+$/);
+      expect(item.label.trim()).not.toBe('');
+      expect(readSource(`docs/${item.slug}.md`)).toMatch(/^# /);
+      expect(NAV_SLUGS.has(item.slug)).toBe(true);
+    }
+    expect(
+      DOCS_NAV.find((group) => group.items.some((item) => item.slug === 'ai'))?.items,
+    ).toContainEqual({ slug: 'durable-runs', label: 'Durable agent runs' });
+  });
+});
 
 describe('siteSection', () => {
   it.each([
@@ -52,6 +70,14 @@ describe('exampleStart', () => {
     expect(exampleStart(app)).toEqual({ kind: 'repository', command });
   });
 
+  it('maps the repository-only grpc-workspace to a workspace and the member to add', () => {
+    expect(exampleStart('grpc-workspace')).toEqual({
+      kind: 'repository',
+      command: 'npm create @setu-ts my-app -- --workspace',
+      member: 'generate app billing --template microservice --rpc grpc',
+    });
+  });
+
   it('refuses an example the catalog does not know', () => {
     expect(() => exampleStart('nope')).toThrow(/neither offered nor excluded/);
   });
@@ -70,6 +96,12 @@ describe('tryItHtml', () => {
     expect(tryItHtml('cloudflare')).toContain('&amp;&amp; npm install\nnpx wrangler dev</code>');
     expect(tryItHtml('full-stack')).toContain('npm install\nnpm run start:dev</code>');
     expect(tryItHtml('full-stack')).toContain('runs inside the Setu-TS repository');
+  });
+
+  it('adds a member before installing a workspace, then runs every member with dev', () => {
+    expect(tryItHtml('grpc-workspace')).toContain(
+      '<pre><code>npm create @setu-ts my-app -- --workspace\ncd my-app &amp;&amp; npx @setu-ts/cli generate app billing --template microservice --rpc grpc\nnpm install &amp;&amp; npm run dev</code></pre>',
+    );
   });
 
   it('carries no paragraph, so the README stays the meta description', () => {

@@ -1,0 +1,24 @@
+{
+  "name": "@setu-ts/vector-store-plugin",
+  "version": "0.12.0",
+  "license": "MIT",
+  "exports": "./src/index.ts",
+  "test": {
+    "permissions": {
+      "read": true,
+      "env": true,
+      "sys": [
+        "hostname",
+        "osRelease"
+      ]
+    }
+  },
+  "imports": {
+    "@qdrant/js-client-rest": "npm:@qdrant/js-client-rest@1.20.0",
+    "drizzle-orm": "npm:drizzle-orm@0.45.2",
+    "drizzle-orm/node-postgres": "npm:drizzle-orm@0.45.2/node-postgres",
+    "drizzle-orm/pg-core": "npm:drizzle-orm@0.45.2/pg-core",
+    "pg": "npm:pg@^8.0.0",
+    "vitest": "npm:vitest@5.0.3"
+  }
+}

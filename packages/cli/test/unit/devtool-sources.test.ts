@@ -14,6 +14,7 @@ import {
   maskComments,
   maskImportDeclarations,
   maskSourceCode,
+  maskSourceDiagnosis,
   packageSpecifierCount,
   parseImportItem,
   readDevtoolSourceNames,
@@ -22,6 +23,70 @@ import {
   withDevtoolSourceWiring,
   withSourceArgs,
 } from '../../src/devtool/sources.ts';
+
+describe('V11-8 source stop locations preserve the audited accept set', () => {
+  it('V11-8 escapes terminal controls and bounds unsupported import labels', () => {
+    const result = maskSourceDiagnosis("import x from '\u001b[31m" + 'x'.repeat(100) + "';");
+    expect(result).toMatchObject({ stop: { reason: expect.stringContaining('\\u001b[31m') } });
+    if ('stop' in result) {
+      expect(result.stop.reason).not.toContain('\u001b');
+      expect(result.stop.reason.length).toBeLessThanOrEqual(87);
+    }
+  });
+  const prefix = '// safe comment\n';
+  const cases: readonly (readonly [string, string, number])[] = [
+    ['`text`', 'template literal', 0],
+    ['a / b', '/', 2],
+    ['#private', '#', 0],
+    ['\\u0061', '\\', 0],
+    ['café', 'non-ASCII code', 3],
+    ["'open", 'unterminated string', 0],
+    ["'open\n", 'unterminated string', 0],
+    ["'a\\n'", '\\ in string', 2],
+    ['/* open', 'unterminated comment', 0],
+    ['<!-- comment', 'HTML comment', 0],
+    ['--> comment', 'HTML comment', 0],
+    ["import('x')", 'dynamic import(', 0],
+    ["import process from 'node:process'", 'import node:process', 20],
+    ["import 'foreign'", 'import foreign', 7],
+    ['env[key]', 'computed member access', 3],
+    ...[
+      'Object',
+      'Reflect',
+      'Proxy',
+      'constructor',
+      'prototype',
+      '__proto__',
+      'setPrototypeOf',
+      'defineProperty',
+      'defineProperties',
+      '__defineGetter__',
+      '__defineSetter__',
+      '__lookupGetter__',
+      '__lookupSetter__',
+      'globalThis',
+      'self',
+      'window',
+      'eval',
+      'Function',
+      'require',
+    ].map((word): readonly [string, string, number] => [`const x = ${word};`, word, 10]),
+  ];
+  for (const [source, reason, offset] of cases)
+    it(`locates ${reason}: ${source}`, () => {
+      expect(maskSourceDiagnosis(prefix + source)).toEqual({
+        stop: { reason, offset: prefix.length + offset },
+      });
+      expect(maskSourceCode(prefix + source)).toBeUndefined();
+      expect(maskComments(prefix + source)).toBeUndefined();
+    });
+  it('keeps the two mask projections on accepted source', () => {
+    const source =
+      "import { RuntimePlugin } from '@setu-ts/runtime';\nconst key = env['PORT']; // comment";
+    expect(maskSourceDiagnosis(source)).toEqual({ code: maskSourceCode(source) });
+    expect(maskSourceDiagnosis(source, false)).toEqual({ code: maskComments(source) });
+  });
+});
 
 const packages = new Set([
   'cache-plugin',
@@ -104,6 +169,33 @@ describe('development source policies', () => {
     expect(
       withDevtoolSourceWiring(wired.source, new Set(['cache-plugin', 'health-plugin'])).source,
     ).toBe(wired.source);
+  });
+
+  // M138 §3.4: a workspace member's QueuePlugin spreads its transport module's
+  // options; exactly one zero-argument call spread is still auto-wired.
+  it('wires a queue call that spreads one transport-module call', () => {
+    const imports = "import { QueuePlugin } from '@setu-ts/queue-plugin';\n";
+    const wired = withDevtoolSourceWiring(
+      imports +
+        signature +
+        '\n return createApplication({ plugins: [\n  QueuePlugin({ processors: [...QUEUE_PROCESSORS], ...queueOptions() }),\n] });\n}',
+      new Set(['queue-plugin']),
+    );
+    expect(wired.manual).toEqual([]);
+    expect(wired.source).toContain(
+      'QueuePlugin({ ...{ processors: [...QUEUE_PROCESSORS], ...queueOptions() }, ...sources.queue })',
+    );
+    for (const call of [
+      'QueuePlugin({ ...queueOptions(), ...other() }),',
+      'QueuePlugin({ ...queueOptions(config) }),',
+      'QueuePlugin(queueOptions()),',
+    ]) {
+      const source =
+        imports + signature + `\n return createApplication({ plugins: [\n  ${call}\n] });\n}`;
+      const result = withDevtoolSourceWiring(source, new Set(['queue-plugin']));
+      expect(result.source).toBe(source);
+      expect(result.manual).toEqual(['QueuePlugin({ ...options, ...sources.queue })']);
+    }
   });
 
   it('never rewrites plugin examples inside comments, literals or unfamiliar calls', () => {
@@ -441,6 +533,59 @@ describe('development source policies', () => {
       'type T = Map<[A, B], C>;',
     ]) {
       expect(maskSourceCode(source), source).toBeDefined();
+    }
+  });
+
+  // `env['X']` reaches exactly what `env.X` reaches, so a single plain string naming
+  // a decidable property is accepted; every shape that could spell or smuggle an
+  // undecidable name keeps the round 6 and 7 refusal.
+  it('accepts member access by one plain decidable name, refuses every other shape', () => {
+    for (const source of [
+      "const s = env['JWT_SECRET'] ?? 'd';",
+      "const s = env['X'];",
+      'const s = env["X"];',
+      "const s = env[ 'X' ];",
+      "const s = o!['k'];",
+      "const s = o?.['k'];",
+      "const s = f()['k'];",
+      "const s = a['b']['c'];",
+      // After a modifier word a computed key names the same property as the plain key.
+      "const o = { get ['k']() { return 1; } };",
+      "class C { static ['k'] = 1; }",
+      // After a keyword the bracket is an array of one string, which reaches nothing.
+      "function f() { return ['k']; }",
+    ]) {
+      expect(maskSourceCode(source), source).toBeDefined();
+    }
+    for (const source of [
+      "const o = x['constructor'];",
+      "const o = x['__proto__'];",
+      'const o = x["prototype"];',
+      "const o = x['globalThis'];",
+      "const o = x['k', 'constructor'];",
+      "const o = x['k' + y];",
+      "const o = x['k']['constructor'];",
+      'const o = x[k];',
+      "const o = x['a-b'];",
+      "const o = x[''];",
+      "const o = x['cоnstructor'];",
+      "const o = { ['JWT']: v };",
+      "const o = x.['k'];",
+      "const o = x[/* c */ 'constructor'];",
+      "const o = { get ['__proto__']() { return 1; } };",
+      "class C { static ['prototype'] = 1; }",
+      // Legacy accessor methods reach a prototype through a blanked string argument.
+      "const g = ({}).__lookupGetter__('__proto__');",
+      "x.__defineGetter__('k', f);",
+      "x.__defineSetter__('k', f);",
+      "x.__lookupSetter__('k');",
+      "const g = x['__lookupGetter__'];",
+      "const g = x['__defineGetter__'];",
+      "const g = x['__defineSetter__'];",
+      "const g = x['__lookupSetter__'];",
+      "const o = { a: 1, ['JWT']: v };",
+    ]) {
+      expect(maskSourceCode(source), source).toBeUndefined();
     }
   });
 

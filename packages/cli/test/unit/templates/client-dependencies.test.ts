@@ -12,20 +12,30 @@ import {
 } from '../../../src/templates/client-dependencies.ts';
 import { resolveHost } from '../../../src/templates/project-files.ts';
 import { getTemplate } from '../../../src/templates/registry.ts';
+import { SWAGGER_UI_DIST_VERSION } from '../../../src/templates/swagger-version.ts';
 
 describe('CLIENT_RANGES', () => {
   // A project installs the client the plugin will `import()`; a range outside
   // the plugin's own peer range is a version the plugin was never built against.
-  it('uses framework ranges except the reviewed OpenTelemetry compatibility bounds', () => {
+  it('uses framework ranges except reviewed OpenTelemetry bounds and the Swagger integrity pin', () => {
     const otel: Readonly<Record<string, string>> = {
       '@opentelemetry/api': '~1.9.0',
       '@opentelemetry/sdk-trace-base': '^2.9.0',
       '@opentelemetry/resources': '^2.9.0',
       '@opentelemetry/context-async-hooks': '^2.0.0',
+      // The ESM loader hook the generated preload registers (M131a X88-4). Not
+      // a framework dependency: on the line of the instrumentations' own.
+      '@opentelemetry/instrumentation': '^0.220.0',
     };
     for (const [name, range] of Object.entries(otel)) expect(CLIENT_RANGES[name]).toBe(range);
+    expect(CLIENT_RANGES['swagger-ui-dist']).toBe(SWAGGER_UI_DIST_VERSION);
     for (const [name, range] of Object.entries(CLIENT_RANGES)) {
-      expect(otel[name] ?? EXTERNAL_RANGES[name], name).toBe(range);
+      expect(
+        name === 'swagger-ui-dist'
+          ? SWAGGER_UI_DIST_VERSION
+          : (otel[name] ?? EXTERNAL_RANGES[name]),
+        name,
+      ).toBe(range);
     }
   });
 });

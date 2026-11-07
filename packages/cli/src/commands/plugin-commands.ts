@@ -10,11 +10,16 @@
  * @module
  */
 
-import type { CliCommandHandler, IFileSystem } from '@setu-ts/common';
+import type { CliCommandHandler, IApplication, IFileSystem } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { ParsedArgs } from '../args.ts';
 import { stringFlag } from '../args.ts';
-import { firstUnknownFlag, PLUGIN_COMMAND_FLAGS, unknownOptionMessage } from '../flags.ts';
+import {
+  BUILT_IN_COMMANDS,
+  firstUnknownFlag,
+  PLUGIN_COMMAND_FLAGS,
+  unknownOptionMessage,
+} from '../flags.ts';
 import {
   CONFIG_EXPORT,
   CONFIG_MODULE,
@@ -70,7 +75,7 @@ export interface PluginCommandDependencies {
 }
 
 /**
- * Boots the project's application, hands its commands to `use`, and always
+ * Boots the project's application, hands it to `use`, and always
  * tears down.
  *
  * `start()` is called with NO port: the kernel skips `listen` when none is
@@ -81,34 +86,26 @@ export interface PluginCommandDependencies {
  * @param deps - Filesystem, working directory, and the loader seam
  * @param dir - The project root (absolute)
  * @param config - The `--config` override, when supplied
- * @param use - Receives the discovered commands
+ * @param purpose - The caller whose boot failure is explained
+ * @param use - Receives the started application
  * @returns Whatever `use` returns
  */
-async function withPluginCommands(
+export async function withStartedApp<T>(
   deps: PluginCommandDependencies,
   dir: string,
   config: string | undefined,
-  use: (commands: readonly RegisteredCommand[]) => Promise<number> | number,
-): Promise<number> {
+  purpose: 'plugin commands' | 'client',
+  use: (app: IApplication) => Promise<T> | T,
+): Promise<T> {
   throwIfInterrupted(deps.interrupt);
   const refusal = await denoInstallRefusal(deps.fs, dir);
   if (refusal !== undefined) throw new Error(refusal);
-  const app = await loadApp(dir, config, deps.loadApp);
+  const app = await loadApp(dir, config, deps.loadApp, purpose);
   try {
     throwIfInterrupted(deps.interrupt);
     await app.start();
     throwIfInterrupted(deps.interrupt);
-    const commands = app.services.getAll<RegisteredCommand>(CAPABILITIES.CLI_COMMAND);
-
-    // Detected here rather than in each caller: both refuse identically, and
-    // neither should have to remember to.
-    const duplicates = duplicateCounts(commands);
-    if (duplicates.size > 0) {
-      reportDuplicates(duplicates, deps.error);
-      return EXIT_ERROR;
-    }
-
-    return await use(commands);
+    return await use(app);
   } finally {
     // Teardown is attempted on every path: stop() no-ops when start() never
     // completed, and is idempotent. Without it, a bootstrap hook's timer or
@@ -128,6 +125,26 @@ async function withPluginCommands(
       );
     }
   }
+}
+
+/** Shares application boot while keeping command-registration checks in the dispatcher. */
+async function withPluginCommands(
+  deps: PluginCommandDependencies,
+  dir: string,
+  config: string | undefined,
+  use: (commands: readonly RegisteredCommand[]) => Promise<number> | number,
+): Promise<number> {
+  return await withStartedApp(deps, dir, config, 'plugin commands', async (app) => {
+    const commands = app.services.getAll<RegisteredCommand>(CAPABILITIES.CLI_COMMAND);
+    // Detected here rather than in each caller: both refuse identically, and
+    // neither should have to remember to.
+    const duplicates = duplicateCounts(commands);
+    if (duplicates.size > 0) {
+      reportDuplicates(duplicates, deps.error);
+      return EXIT_ERROR;
+    }
+    return await use(commands);
+  });
 }
 
 /**
@@ -212,14 +229,24 @@ export async function runCommandsListing(
   try {
     const runtime = await detectTargetRuntime(deps.fs, dir);
     return await withPluginCommands(deps, dir, config, (commands) => {
-      if (commands.length === 0) {
+      const visible = commands.filter((command) => !BUILT_IN_COMMANDS.has(command.name));
+      for (const command of commands)
+        if (BUILT_IN_COMMANDS.has(command.name))
+          deps.error(
+            `plugin command '${command.name}' is shadowed by the built-in \`setu ${command.name}\`; rename it`,
+          );
+      if (visible.length === 0 && commands.length > 0) {
+        deps.log('No plugin commands are available: every registered name is a built-in.');
+        return EXIT_OK;
+      }
+      if (visible.length === 0) {
         deps.log('No plugin commands are registered by this application.');
         deps.log(`Plugins publish them with \`ctx.cli.register('plugin:command', handler)\`.`);
         return EXIT_OK;
       }
 
       deps.log(`Commands provided by this application's plugins:`);
-      for (const command of [...commands].sort((a, b) => a.name.localeCompare(b.name))) {
+      for (const command of [...visible].sort((a, b) => a.name.localeCompare(b.name))) {
         deps.log(`  ${cliInvocation(runtime)} ${command.name}`);
       }
       return EXIT_OK;

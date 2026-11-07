@@ -1,7 +1,7 @@
 import { Form, redirect, useActionData, useLoaderData } from 'react-router';
 
 import type { AppLoadContext } from '~/lib/load-context.ts';
-import { getCsrfToken, getSession } from '~/config/services.server.ts';
+import { getCsrfToken, getSession } from '~/server/session.server.ts';
 
 /**
  * Hands the form its CSRF token.
@@ -34,8 +34,8 @@ export async function action({ request, context }: { request: Request; context: 
   const form = await request.formData();
   const email = String(form.get('email') ?? '');
 
-  // Replace with a real credential check — resolve the auth service through a
-  // context key, exactly as the database is resolved.
+  // Replace with a real credential check — resolve the auth service with
+  // getService(context, TOKEN), exactly as the products service is resolved.
   if (email === '') {
     return { error: 'Email is required.' };
   }

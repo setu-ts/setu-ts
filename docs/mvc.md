@@ -225,19 +225,23 @@ clean — only the boundary is refused.
 
 ## Layouts are components taking `children`
 
-A layout is an ordinary component that accepts `children`:
+A full-document layout is an ordinary component that accepts `children` and emits its own
+`<!DOCTYPE html>`. `setu add view` generates this doctype; `renderView` and `@Render` send the
+engine's output unchanged so fragments and mail bodies do not acquire a document prefix:
 
 ```tsx
 import type { Child } from 'hono/jsx';
+import { raw } from '@setu-ts/view-plugin';
 
+// UNCHECKED-EXEMPT: raw receives only the constant doctype; props still use JSX escaping.
 function Layout(props: { readonly title: string; readonly children: Child }) {
   return (
-    <html>
+    <>{raw('<!DOCTYPE html>')}<html>
       <head>
         <title>{props.title}</title>
       </head>
       <body>{props.children}</body>
-    </html>
+    </html></>
   );
 }
 

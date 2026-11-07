@@ -19,8 +19,9 @@ import type {
 import { httpStatusHintOf, resolveResponseStatus } from '@setu-ts/common';
 
 import { HttpError } from '../errors/http-error.ts';
-import { RESPONDER_DETAIL } from '../formatters/problem-details.ts';
+import { RESPONDER_DETAIL, RESPONDER_PROBLEM } from '../formatters/problem-details.ts';
 import type { ErrorHandlerFormatter } from '../formatters/error-formatter.ts';
+import { stringifyMasked } from './mask-url-userinfo-deep.ts';
 
 /**
  * The `application/problem+json` content type for Problem Details responses.
@@ -89,7 +90,8 @@ function isFullRequestContext(target: ErrorResponderTarget): target is IRequestC
  * the {@linkcode RESPONDER_DETAIL} symbol, so getting either half wrong loses
  * the disclosure in exactly one format.
  *
- * @param init - The status, title, disclosure and optional structured details
+ * @param init - The status, title, disclosure, optional structured details and
+ *   optional problem type
  * @returns An `HttpError` every formatter renders with the disclosure intact
  */
 export function buildErrorFromInit(init: ErrorResponseInit): HttpError {
@@ -119,6 +121,17 @@ export function buildErrorFromInit(init: ErrorResponseInit): HttpError {
   if (init.detail !== undefined) {
     Object.defineProperty(error, RESPONDER_DETAIL, {
       value: init.detail,
+      enumerable: false,
+      writable: false,
+      configurable: true,
+    });
+  }
+  // The problem type travels on its own module-private symbol rather than in
+  // `details`, so the `default` formatter's output stays byte-identical with
+  // and without `problem`; only `buildProblemDetails` reads it.
+  if (init.problem !== undefined) {
+    Object.defineProperty(error, RESPONDER_PROBLEM, {
+      value: init.problem,
       enumerable: false,
       writable: false,
       configurable: true,
@@ -185,7 +198,7 @@ export function createErrorResponder(
       ) {
         body = { ...body, instance: target.request.path };
       }
-      const bytes = new TextEncoder().encode(JSON.stringify(body));
+      const bytes = new TextEncoder().encode(stringifyMasked(body));
       target.response.status(status).header('content-type', contentType).send(bytes);
     },
   };

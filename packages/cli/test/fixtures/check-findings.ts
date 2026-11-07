@@ -13,6 +13,7 @@ export const CHECK_FINDINGS: readonly Finding[] = [
     barrel: 'src/controllers/index.ts',
     unlisted: ['src/controllers/extra.controller.ts'],
     stale: ['src/controllers/gone.controller.ts'],
+    uncalled: [],
   },
   { kind: 'barrel-unreadable', barrel: 'src/controllers/index.ts', reason: 'not-a-file' },
   {
@@ -41,10 +42,11 @@ export const CHECK_FINDINGS: readonly Finding[] = [
   { kind: 'check-config-invalid', path: '.setu-ts/check.json', entry: 'invalid JSON' },
   {
     kind: 'unwired',
-    barrel: 'src/controllers/index.ts',
+    barrel: 'setu.config.ts',
     symbols: ['registerGeneratedRoutes'],
     site: 'config',
     outcome: 'unclassifiable',
+    stop: { reason: 'globalThis', offset: 0, line: 1 },
   },
   { kind: 'no-config', barrels: ['src/controllers/index.ts'] },
   { kind: 'legacy-registrar' },
@@ -58,4 +60,13 @@ export const CHECK_FINDINGS: readonly Finding[] = [
     family: 'controller',
     paths: ['src/controllers/a/orders.controller.ts', 'src/controllers/b/orders.controller.ts'],
   },
+  {
+    kind: 'page-kernel-value-import',
+    path: 'app/routes/_app/products._index.tsx',
+    line: 7,
+    specifier: '~kernel/modules/products/products.service.ts',
+    reason: 'value-import',
+  },
+  { kind: 'page-unreadable', path: 'app/routes/broken.tsx' },
+  { kind: 'artifact-unlisted', path: 'src/services/plain.service.ts', missing: ['describePlain'] },
 ];

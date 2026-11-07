@@ -263,6 +263,9 @@ describe('local CI plan', () => {
       NATS_URL: 'nats://127.0.0.1:4222',
       KAFKA_BROKERS: '127.0.0.1:9092',
       OUTBOX_POSTGRES_URL: 'postgres://postgres:postgres@127.0.0.1:5433/postgres',
+      AGENT_RUNS_PG_URL: 'postgres://postgres:postgres@127.0.0.1:5433/postgres',
+      PGVECTOR_URL: 'postgres://postgres:postgres@127.0.0.1:5433/postgres',
+      QDRANT_URL: 'http://127.0.0.1:6333',
       MONGODB_RS_URI: 'mongodb://127.0.0.1:27018/?replicaSet=rs0&directConnection=true',
     });
     expect(ciEnvironment('jobs: {node: {env: {REDIS_URL: changed}, steps: []}}')).toEqual({
@@ -333,7 +336,7 @@ describe('local CI plan', () => {
     expect(ci.jobs.node.steps.filter((step) => step.run?.includes('docker run '))).toHaveLength(
       full.length - Object.keys(ci.jobs.node.services).length,
     );
-    expect(full).toHaveLength(13);
+    expect(full).toHaveLength(14);
     expect(backendSpecs('cli-1')).toEqual(full);
     expect(backendSpecs('messaging')).toEqual(full);
     for (const [name, service] of Object.entries(ci.jobs.node.services))
@@ -342,7 +345,7 @@ describe('local CI plan', () => {
       expect(workflow).toContain(full.find((spec) => spec.name === name)!.image);
     for (const shard of [...SHARDS, 'compat', 'deno-lane', 'node-build'] as const)
       expect(() => assertUniquePorts(backendSpecs(shard))).not.toThrow();
-    expect(backendSpecs('static').map((spec) => spec.name)).toEqual(['redis']);
+    expect(backendSpecs('static').map((spec) => spec.name)).toEqual(['redis', 'postgres']);
     for (const shard of ['tooling', 'compat', 'deno-lane', 'node-build', 'cli-coverage'] as const)
       expect(backendSpecs(shard)).toEqual([]);
     expect(full.find((spec) => spec.name === 'keycloak')!.args).toContain(

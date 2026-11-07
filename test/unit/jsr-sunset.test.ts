@@ -15,7 +15,14 @@ describe('JSR sunset descriptions', () => {
         Buffer.byteLength(jsrSunsetDescription(name, PACKAGE_METADATA[name]!.description)),
       ).toBeLessThanOrEqual(250);
     }
-    for (const name of ['localization-plugin', 'idempotency-plugin', 'create'])
+    for (const name of [
+      'localization-plugin',
+      'idempotency-plugin',
+      'mcp-plugin',
+      'vector-store-plugin',
+      'agent-runs-plugin',
+      'create',
+    ])
       expect(JSR_PACKAGES).not.toContain(name);
   });
   it('retains a short base without changing npm metadata', () => {

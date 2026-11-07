@@ -377,7 +377,7 @@ describe('GraphqlService', () => {
   describe('subscribe', () => {
     /** Fake runtime whose operation kind and parse behavior are controllable. */
     function createSubscribeRuntime(opts: {
-      operation?: 'query' | 'subscription';
+      operation?: 'query' | 'mutation' | 'subscription';
       parseThrows?: boolean;
       subscribeStream?: AsyncIterable<unknown>;
     }): GraphqlRuntime {
@@ -471,6 +471,91 @@ describe('GraphqlService', () => {
       expect(outcome.kind).toBe('error');
       if (outcome.kind === 'error') {
         expect(outcome.result.errors).toBeDefined();
+      }
+    });
+
+    // Only a POST may run a mutation on the SSE path: GET is what a cross-site
+    // navigation sends, and the rule fails closed for any other verb.
+    for (const method of ['GET', 'HEAD'] as const) {
+      it(`refuses a mutation whose request context arrived over ${method} (405)`, async () => {
+        const service = makeService(createSubscribeRuntime({ operation: 'mutation' }));
+        const requestContext = {
+          services: mockServiceRegistry,
+          request: { method },
+        } as unknown as IRequestContext;
+        const outcome = await service.subscribe(
+          { query: 'mutation { transfer }' },
+          { requestContext },
+        );
+        expect(outcome.kind).toBe('error');
+        expect(outcome.status).toBe(405);
+      });
+    }
+
+    it('runs a mutation over POST, and on WebSocket where no request context exists', async () => {
+      const service = makeService(createSubscribeRuntime({ operation: 'mutation' }));
+      const requestContext = {
+        services: mockServiceRegistry,
+        request: { method: 'POST' },
+      } as unknown as IRequestContext;
+      const connection: GraphqlConnectionInfo = {
+        id: 'c1',
+        headers: new Headers(),
+        query: {},
+        data: new Map(),
+      };
+      for (const context of [{ requestContext }, { connection }]) {
+        const outcome = await service.subscribe({ query: 'mutation { transfer }' }, context);
+        expect(outcome.kind).toBe('single');
+      }
+    });
+
+    // execute() applies the same rule when a caller passes a request context but
+    // no method: an app route forwarding a GET cannot run a mutation.
+    for (const method of ['GET', 'HEAD', 'PUT'] as const) {
+      it(`execute refuses a mutation whose request context arrived over ${method} (405)`, async () => {
+        const service = makeService(createSubscribeRuntime({ operation: 'mutation' }));
+        const requestContext = {
+          services: mockServiceRegistry,
+          request: { method },
+        } as unknown as IRequestContext;
+        const outcome = await service.execute({ query: 'mutation { transfer }' }, requestContext);
+        expect(outcome.status).toBe(405);
+        expect(outcome.result.errors?.[0]?.extensions?.code).toBe('METHOD_NOT_ALLOWED');
+      });
+    }
+
+    // An explicit method is normalized the same fail-closed way: a JavaScript
+    // caller forwarding a raw method string cannot slip a mutation past it.
+    for (const explicit of ['', 'get', 'HEAD', 'post']) {
+      it(`execute refuses a mutation for an explicit malformed method ${JSON.stringify(explicit)}`, async () => {
+        const service = makeService(createSubscribeRuntime({ operation: 'mutation' }));
+        const requestContext = {
+          services: mockServiceRegistry,
+          request: { method: 'GET' },
+        } as unknown as IRequestContext;
+        const outcome = await service.execute(
+          { query: 'mutation { transfer }' },
+          requestContext,
+          explicit as 'GET' | 'POST',
+        );
+        expect(outcome.status).toBe(405);
+      });
+    }
+
+    it('execute runs a mutation over POST, with an explicit method, or with no request', async () => {
+      const service = makeService(createSubscribeRuntime({ operation: 'mutation' }));
+      const context = (method: string) =>
+        ({ services: mockServiceRegistry, request: { method } }) as unknown as IRequestContext;
+      for (const outcome of [
+        await service.execute({ query: 'mutation { transfer }' }, context('POST')),
+        // An explicit method wins over the one derived from the request.
+        await service.execute({ query: 'mutation { transfer }' }, context('GET'), 'POST'),
+        // A server-side call with no request is not method-checked.
+        await service.execute({ query: 'mutation { transfer }' }),
+      ]) {
+        expect(outcome.status).toBe(200);
+        expect(outcome.result.errors).toBeUndefined();
       }
     });
 

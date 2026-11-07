@@ -20,7 +20,12 @@ import type {
   TraceInstrumentationKind,
   TraceSamplerDescription,
 } from '@setu-ts/common';
-import { CAPABILITIES, createRedactionService } from '@setu-ts/common';
+import {
+  CAPABILITIES,
+  createRedactionService,
+  OptionalDependencyUnavailableError,
+} from '@setu-ts/common';
+import type { TracerProvider } from '@opentelemetry/api';
 import type { RedactionPolicy } from '@setu-ts/common';
 import type { SamplingConfig, TelemetryPluginOptions, TracerHost } from '../interfaces/index.ts';
 import { NoopTelemetryService, TelemetryService } from '../services/telemetry-service.ts';
@@ -252,6 +257,23 @@ export function TelemetryPlugin(options: TelemetryPluginOptions = {}): IPlugin {
           );
         }
         service = new TelemetryService(tracerHost);
+
+        if (options.registerGlobal && tracerHost.otelProvider) {
+          let api: typeof import('@opentelemetry/api');
+          try {
+            api = await import('@opentelemetry/api');
+          } catch (cause) {
+            throw new OptionalDependencyUnavailableError('@opentelemetry/api', {
+              requiredBy: '@setu-ts/telemetry-plugin',
+              cause,
+            });
+          }
+          if (!api.trace.setGlobalTracerProvider(tracerHost.otelProvider as TracerProvider)) {
+            ctx.logger?.warn(
+              "Global tracer provider registration refused: another provider is already global, so library spans traced through the OTel API do not reach this app's provider. Only this app's own spans use its private provider.",
+            );
+          }
+        }
 
         // Build instrumentation registry after the host is obtained.
         // Only runs when all three conditions hold: instrumentations configured,

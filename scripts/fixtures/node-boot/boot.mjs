@@ -11,8 +11,8 @@ import { readFileSync } from 'node:fs';
 const packages = Object.keys(
   JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).dependencies,
 ).filter((name) => name.startsWith('@setu-ts/'));
-if (packages.length !== 52) {
-  throw new Error(`Expected 52 installed members, found ${packages.length}`);
+if (packages.length !== 55) {
+  throw new Error(`Expected 55 installed members, found ${packages.length}`);
 }
 for (const name of packages) {
   const surface = await import(name);

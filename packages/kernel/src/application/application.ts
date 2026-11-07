@@ -7,14 +7,20 @@
  */
 import {
   CAPABILITIES,
+  createRedactionService,
   ERROR_RESPONDER_STATE_KEY,
   errorResponderOf,
   isPromiseLike,
+  isWebSocketUpgradeRequest,
+  requestOriginOf,
   respondWithError,
+  fallbackErrorHint,
+  maskUrlUserinfo,
   serializeError,
   setUpgradeIntent,
 } from '@setu-ts/common';
 import type {
+  DispatchOptions,
   CliCommandHandler,
   DecoratorHandler,
   EnvVarSpec,
@@ -57,6 +63,8 @@ import { LifecycleManager } from '../lifecycle/lifecycle-manager.ts';
 import { createRequestContext } from '../context/request-context.ts';
 import { runDeferred, wrapDeferredStream } from '../context/deferred.ts';
 import type { RequestContextHandle } from '../context/request-context.ts';
+import { DispatchedRequest } from './dispatched-request.ts';
+import { guardEmptyChunks } from '../context/stream-guard.ts';
 import { coerceInjectBody, InjectedRequest } from './inject-body.ts';
 import { ResponseBuilder } from '../context/response.ts';
 import { DiagnosticsCollector } from '../diagnostics/collector.ts';
@@ -88,6 +96,13 @@ export type { KernelDiagnosticsLabelOptions, KernelDiagnosticsOptions };
  * @internal
  */
 const COLLECTORS = new WeakMap<IApplication, DiagnosticsCollector>();
+
+/**
+ * Masks URL userinfo (`scheme://user:password@host`) in every string of a
+ * record and nothing else: an empty field policy classifies no path, so only
+ * the redaction service's default userinfo mask applies. Compiled once.
+ */
+const URL_USERINFO_MASK = createRedactionService({ fields: {} });
 
 /**
  * Returns an application's diagnostics collector, or `undefined` when
@@ -928,6 +943,21 @@ class Application implements IKernelApplication {
     return await adapter.fetch(request);
   }
 
+  /** Runs a web request through the pipeline, preserving streams and cancellation. */
+  async dispatch(request: Request, options?: DispatchOptions): Promise<Response> {
+    const response = await this.#handleRequest(new DispatchedRequest(request, options));
+    const snapshot = response.snapshot();
+    // Match the adapters: the web Response constructor refuses even an empty
+    // body at these statuses, and discarding a stream must release its source.
+    if ([204, 205, 304].includes(snapshot.status)) {
+      if (snapshot.streaming) void snapshot.body.cancel().catch(() => {});
+      return new Response(null, { status: snapshot.status, headers: snapshot.headers });
+    }
+    const body =
+      snapshot.body instanceof Uint8Array ? new Uint8Array(snapshot.body) : snapshot.body;
+    return new Response(body, { status: snapshot.status, headers: snapshot.headers });
+  }
+
   /** Synthesizes an inject request and runs it through the full pipeline. */
   async inject(request: InjectRequest): Promise<InjectResponse> {
     // Per-shape coercion (M95c §3.9): bytes verbatim, Blob awaited,
@@ -1208,6 +1238,7 @@ class Application implements IKernelApplication {
 
     // Execute pipeline with route dispatch as terminal, observing each global
     // stage's completion when diagnostics are enabled.
+    handle.trackHandler = true;
     await this.#pipeline.execute(
       ctx,
       async () => {
@@ -1448,6 +1479,15 @@ class Application implements IKernelApplication {
       return undefined;
     }
 
+    if (
+      request instanceof DispatchedRequest &&
+      request.expectedRoute !== undefined &&
+      routeResult.entry.pattern !== request.expectedRoute
+    ) {
+      respondWithError(ctx, { status: 404, title: 'Not Found' });
+      return undefined;
+    }
+
     // Install matched params via the internal setter (no readonly cast)
     const { definition, params, entry } = routeResult;
     handle.setParams(params);
@@ -1463,9 +1503,11 @@ class Application implements IKernelApplication {
         routeMiddleware,
         ctx,
         async () => {
-          await this.#observeHandler(ctx, entry, async () => {
+          const pending = this.#observeHandler(ctx, entry, async () => {
             await definition.handler(ctx);
           });
+          this.#trackHandler(handle, pending);
+          await pending;
         },
         undefined,
         this.#chainObserver('route', this.#collector?.requestOperationIdOf(ctx), entry.index),
@@ -1481,7 +1523,7 @@ class Application implements IKernelApplication {
     if ((ctx.response as ResponseBuilder).ended) {
       return undefined;
     }
-    return this.#invokeHandlerObserved(ctx, entry, definition);
+    return this.#invokeHandlerObserved(ctx, entry, definition, handle);
   }
 
   /**
@@ -1499,6 +1541,7 @@ class Application implements IKernelApplication {
     ctx: IRequestContext,
     entry: RouteEntry,
     definition: RouteDefinition,
+    handle: RequestContextHandle,
   ): undefined | Promise<unknown> {
     const collector = this.#collector;
     if (collector === undefined) {
@@ -1509,7 +1552,10 @@ class Application implements IKernelApplication {
       // response while the handler was still running (M87 review).
       // `Promise.resolve` returns a native promise unchanged, so the ordinary
       // async path allocates nothing extra.
-      return isPromiseLike(result) ? Promise.resolve(result) : undefined;
+      if (!isPromiseLike(result)) return undefined;
+      const pending = Promise.resolve(result);
+      if (handle.trackHandler) this.#trackHandler(handle, pending);
+      return pending;
     }
     const parentOperationId = collector.requestOperationIdOf(ctx) ?? '<unkeyed>';
     const nodeId = collector.routeNodeIdOf(entry.index) ?? null;
@@ -1530,6 +1576,7 @@ class Application implements IKernelApplication {
     }
     if (isPromiseLike(result)) {
       const pending = Promise.resolve(result);
+      if (handle.trackHandler) this.#trackHandler(handle, pending);
       // Observation only: the ORIGINAL promise is returned to the caller and
       // its rejection propagates unchanged — this detached chain never
       // swallows or re-routes it.
@@ -1657,17 +1704,16 @@ class Application implements IKernelApplication {
   }
 
   /**
-   * Reports the unhandled error and writes the opaque 500, closing out the
+   * Reports an unhandled failure, honours client status hints, and closes out the
    * request's in-flight accounting.
    *
-   * X11-2: the unhandled error is visible to the operator. The body stays
-   * opaque — the message is not disclosed to the client (M70b's
-   * `maskInternalErrors` decision applied consistently); only the log carries
-   * it.
+   * X11-2: the unhandled error is visible to the operator. Client status hints
+   * disclose their explicit detail; every other failure keeps the opaque 500
+   * body (M70b's `maskInternalErrors` decision).
    *
    * @param err - The normalized error
    * @param ctx - The live request context
-   * @returns The response builder carrying the 500
+   * @returns The response builder carrying a client refusal or an opaque 500
    */
   #finishFailure(
     err: Error,
@@ -1675,8 +1721,21 @@ class Application implements IKernelApplication {
     handle: RequestContextHandle,
   ): ResponseBuilder | Promise<ResponseBuilder> {
     try {
-      this.#reportUnhandledError(err, ctx);
-      respondWithError(ctx, { status: 500, title: 'Internal Server Error' });
+      // One read of the hint decides both the status and the body.
+      const hint = fallbackErrorHint(err);
+      this.#reportUnhandledError(err, ctx, hint === undefined ? 'error' : 'warn');
+      respondWithError(
+        ctx,
+        hint === undefined
+          ? { status: 500, title: 'Internal Server Error' }
+          : {
+              status: hint.status,
+              title: hint.title,
+              // URL userinfo is masked as errorHandler masks every string it
+              // serves: a 4xx HttpError's hint detail is its own message.
+              detail: maskUrlUserinfo(hint.detail),
+            },
+      );
     } catch (failure) {
       // A throwing responder must still release the request — its cleanups
       // and its in-flight count — or the shutdown drain stalls until its
@@ -1687,6 +1746,15 @@ class Application implements IKernelApplication {
     return this.#settleRequest(ctx, handle, 'error');
   }
 
+  /** Retains a running terminal without changing the promise propagated to middleware. */
+  #trackHandler(handle: RequestContextHandle, pending: Promise<unknown>): void {
+    const complete = (): void => {
+      handle.handlerSettled = true;
+    };
+    handle.handlerSettled = false;
+    handle.pendingHandler = pending.then(complete, complete);
+  }
+
   /** Settles generic cleanup before releasing the request from shutdown drain. */
   #settleRequest(
     ctx: IRequestContext,
@@ -1694,6 +1762,46 @@ class Application implements IKernelApplication {
     outcome: DiagnosticsEventOutcome,
   ): ResponseBuilder | Promise<ResponseBuilder> {
     const response = ctx.response as ResponseBuilder;
+    const pendingHandler = handle.pendingHandler;
+    if (pendingHandler !== undefined && !handle.handlerSettled) {
+      // Keep the request in the shutdown drain, and leave defer open for work
+      // registered by the handler after this early response has been sent.
+      const finish = async (): Promise<void> => {
+        const cleanups = handle.takeDeferred();
+        if (cleanups !== undefined) await runDeferred(cleanups, this.#registry);
+        this.#inFlight--;
+        this.#completeRequest(ctx, outcome);
+      };
+      const streamed = response.streamingBody;
+      if (streamed === undefined) {
+        // The buffered response has already been returned. Settle against it:
+        // a stream the handler sets later is never read, so cleanup must not
+        // wait for it to be consumed.
+        void pendingHandler.then(finish);
+      } else {
+        const complete = (): void => {
+          void pendingHandler.then(finish);
+        };
+        response.stream(
+          wrapDeferredStream(
+            guardEmptyChunks(streamed, this.#registry.get<IRuntimeServices>(CAPABILITIES.RUNTIME)),
+            [],
+            this.#registry,
+            complete,
+          ),
+        );
+      }
+      return response;
+    }
+    const streamed = response.streamingBody;
+    if (streamed !== undefined) {
+      // Every streamed body leaves through here (adapters and dispatch alike), so
+      // this is the one place an empty-chunk source can be stopped from starving
+      // the event loop.
+      response.stream(
+        guardEmptyChunks(streamed, this.#registry.get<IRuntimeServices>(CAPABILITIES.RUNTIME)),
+      );
+    }
     const cleanups = handle.takeDeferred();
     if (cleanups === undefined) {
       this.#inFlight--;
@@ -1773,7 +1881,17 @@ class Application implements IKernelApplication {
       // carries whatever the authentication band produced. The parameter is
       // optional on the contract (M73 §3.7): a service written before the
       // widening simply never receives it.
-      decision = await wsService.routeUpgrade(raw, ctx.request.user);
+      //
+      // The public origin (honouring one a trusted proxy published) lets the
+      // router refuse a cross-site handshake: only the kernel holds `ctx`.
+      // It is computed only for an upgrade, because this runs on EVERY request
+      // of an app with WebSockets and `requestOriginOf` parses a URL (§14);
+      // the router still makes the upgrade decision itself. Both calls are
+      // inside this `try`, so a throw is reported like any router failure.
+      const publicOrigin = isWebSocketUpgradeRequest(raw.headers)
+        ? requestOriginOf(ctx).origin
+        : undefined;
+      decision = await wsService.routeUpgrade(raw, ctx.request.user, publicOrigin);
     } catch (cause) {
       // Reported, not swallowed. The pre-M70a backstop in the adapter's
       // `UpgradeRouterStore` discarded the cause because the adapter holds no
@@ -2143,23 +2261,34 @@ class Application implements IKernelApplication {
    * @param error - The unhandled error
    * @param ctx - The request context it occurred in
    */
-  #reportUnhandledError(error: Error, ctx: IRequestContext): void {
+  #reportUnhandledError(
+    error: Error,
+    ctx: IRequestContext,
+    level: 'warn' | 'error' = 'error',
+  ): void {
     try {
       if (!this.#registry.has(CAPABILITIES.LOGGER)) {
         // `msg` carries the label and `message` the error's own text, the same
         // two keys the console logger writes for the branch below.
-        this.#registry.get<IRuntimeServices>(CAPABILITIES.RUNTIME).reportError?.({
-          level: 'error',
-          msg: 'Unhandled request error',
-          ...serializeError(error),
-          requestId: ctx.id,
-          method: ctx.request.method,
-          path: ctx.request.path,
-        });
+        //
+        // With no logger there is no LoggerPlugin redaction either, so the
+        // record is masked here: URL userinfo in the message, the stack and
+        // every serialized cause, as LoggerPlugin's default mask and
+        // `errorHandler` treat each string they emit.
+        this.#registry.get<IRuntimeServices>(CAPABILITIES.RUNTIME).reportError?.(
+          URL_USERINFO_MASK.redactRecord({
+            level,
+            msg: 'Unhandled request error',
+            ...serializeError(error),
+            requestId: ctx.id,
+            method: ctx.request.method,
+            path: ctx.request.path,
+          }),
+        );
         return;
       }
       const logger = this.#registry.get<ILogger>(CAPABILITIES.LOGGER);
-      logger.error('Unhandled request error', {
+      logger[level]('Unhandled request error', {
         ...serializeError(error),
         requestId: ctx.id,
         method: ctx.request.method,

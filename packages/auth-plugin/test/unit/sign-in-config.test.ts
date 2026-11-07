@@ -229,7 +229,7 @@ describe('compileSignIn', () => {
     // audience = clientId is what makes an ID token minted for another client
     // fail, and routing through compileIssuers means M100b's pinned validation
     // applies to the same provider.
-    expect(provider?.compiledIssuer?.audience).toBe('client-1');
+    expect(provider?.compiledIssuer?.audiences).toEqual(['client-1']);
     expect(provider?.compiledIssuer?.issuer).toBe('https://idp.test');
     expect(provider?.compiledIssuer?.discoveryUrl).toBe(
       'https://idp.test/.well-known/openid-configuration',

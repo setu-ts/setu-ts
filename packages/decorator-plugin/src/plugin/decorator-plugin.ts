@@ -31,7 +31,13 @@ import type {
   ValidationMiddlewareOptions,
   ValidationTarget,
 } from '@setu-ts/common';
-import { CAPABILITIES, PLUGIN_PRIORITY, withResponseMetadata } from '@setu-ts/common';
+import {
+  CAPABILITIES,
+  RouteRegistrationError,
+  PLUGIN_PRIORITY,
+  withMcpToolMetadata,
+  withResponseMetadata,
+} from '@setu-ts/common';
 import type { IIdempotencyService } from '@setu-ts/common';
 
 import { createPermissionsMiddleware, createRolesMiddleware } from './authorization-middleware.ts';
@@ -358,6 +364,18 @@ function applyResponseShaping(response: IResponse, shaping: ResponseShaping): vo
   }
 }
 
+/** Binds the actual instance method, including constructor-installed overrides. */
+function bindControllerMethod(
+  instance: unknown,
+  handlerName: string,
+): (...args: unknown[]) => unknown {
+  const fn = (instance as Record<string, unknown>)[handlerName];
+  if (typeof fn !== 'function') {
+    throw new Error(`Handler '${handlerName}' is not a method on the controller instance.`);
+  }
+  return fn.bind(instance) as (...args: unknown[]) => unknown;
+}
+
 /**
  * Builds the route handler wrapper: resolves decorator parameters, applies the
  * declared response shaping, calls the controller method, and serializes the
@@ -379,12 +397,16 @@ function createHandler(
   params: readonly ParameterMetadata[],
   render?: RenderRoute,
   shaping?: ResponseShaping,
+  resolveInstance?: () => unknown,
 ): RouteHandler {
-  const fn = (instance as Record<string, unknown>)[handlerName];
-  if (typeof fn !== 'function') {
-    throw new Error(`Handler '${handlerName}' is not a method on the controller instance.`);
-  }
-  const method = fn.bind(instance) as (...args: unknown[]) => unknown | Promise<unknown>;
+  let deferredMethod: ((...args: unknown[]) => unknown) | undefined;
+  const method =
+    resolveInstance === undefined
+      ? bindControllerMethod(instance, handlerName)
+      : (...args: unknown[]): unknown => {
+          deferredMethod ??= bindControllerMethod(resolveInstance(), handlerName);
+          return deferredMethod(...args);
+        };
   const handler: RouteHandler = async (ctx) => {
     const args = await resolveParameters(ctx, params);
     if (shaping !== undefined) {
@@ -804,29 +826,41 @@ function registerOnRouter(
   method: HttpMethod,
   path: string,
   routeDef: RouteDefinition,
+  label: string,
 ): void {
-  switch (method) {
-    case 'GET':
-      ctx.router.get(path, routeDef);
-      return;
-    case 'POST':
-      ctx.router.post(path, routeDef);
-      return;
-    case 'PUT':
-      ctx.router.put(path, routeDef);
-      return;
-    case 'PATCH':
-      ctx.router.patch(path, routeDef);
-      return;
-    case 'DELETE':
-      ctx.router.delete(path, routeDef);
-      return;
-    case 'HEAD':
-      ctx.router.head(path, routeDef);
-      return;
-    case 'OPTIONS':
-      ctx.router.options(path, routeDef);
-      return;
+  try {
+    switch (method) {
+      case 'GET':
+        ctx.router.get(path, routeDef);
+        return;
+      case 'POST':
+        ctx.router.post(path, routeDef);
+        return;
+      case 'PUT':
+        ctx.router.put(path, routeDef);
+        return;
+      case 'PATCH':
+        ctx.router.patch(path, routeDef);
+        return;
+      case 'DELETE':
+        ctx.router.delete(path, routeDef);
+        return;
+      case 'HEAD':
+        ctx.router.head(path, routeDef);
+        return;
+      case 'OPTIONS':
+        ctx.router.options(path, routeDef);
+        return;
+    }
+  } catch (error) {
+    if (!(error instanceof RouteRegistrationError)) throw error;
+    throw new RouteRegistrationError(
+      error.reason,
+      error.method,
+      error.path,
+      `${label}: ${error.message}`,
+      { cause: error },
+    );
   }
 }
 
@@ -984,7 +1018,33 @@ function registerController(
     return;
   }
   registerInContainer(ctx, target, metadataStore.getService(target), true);
-  const instance = instantiate(target, ctx);
+  let instance: unknown;
+  let resolveInstance: (() => unknown) | undefined;
+  try {
+    instance = instantiate(target, ctx);
+  } catch (error) {
+    // DI closes only after compileAll succeeds: a graph validation failure
+    // during bootstrap therefore comes from an open container. This also
+    // covers controllers whose recipes were registered by an earlier plugin.
+    // Read the named error contract without a runtime import of another plugin.
+    if (
+      ctx.container === undefined ||
+      !(error instanceof Error) ||
+      error.name !== 'ContainerValidationError'
+    ) {
+      throw error;
+    }
+    instance = target.prototype;
+    let resolved = false;
+    let controller: unknown;
+    resolveInstance = () => {
+      if (!resolved) {
+        controller = instantiate(target, ctx);
+        resolved = true;
+      }
+      return controller;
+    };
+  }
   for (const route of metadataStore.getRoutesFor(target)) {
     const fullPath = joinPaths(ctrlMeta.version ?? '', ctrlMeta.path, route.path);
     warnUnresolvableParameters(ctx, target, route);
@@ -993,7 +1053,14 @@ function registerController(
         ? { view: route.view, engine: requireViewEngine(viewEngine, target, route, fullPath) }
         : undefined;
     const shaping = validateResponseShaping(route, routeLabel(target, route, fullPath));
-    const handler = createHandler(instance, route.handler, route.params, render, shaping);
+    const handler = createHandler(
+      instance,
+      route.handler,
+      route.params,
+      render,
+      shaping,
+      resolveInstance,
+    );
     const middleware = composeGuards(ctrlMeta, route);
     if (enforceRoles) {
       appendAuthorizationMiddleware(ctx, target, ctrlMeta, route, middleware, authorization);
@@ -1025,6 +1092,14 @@ function registerController(
     // Appended AFTER the validation band whether or not `enforceSchemas` is on,
     // so a `@ValidateBody` route always runs idempotency last (M109a §3.9).
     appendIdempotencyMiddleware(target, route, fullPath, middleware, idempotency);
+    if (route.mcpTool !== undefined) {
+      middleware.push(
+        withMcpToolMetadata((_ctx, next) => next(), {
+          ...route.mcpTool,
+          name: route.mcpTool.name ?? route.openapi?.operationId ?? route.handler,
+        }),
+      );
+    }
     const schema = buildRouteSchema(
       ctrlMeta,
       route,
@@ -1036,7 +1111,7 @@ function registerController(
       ...(middleware.length > 0 ? { middleware } : {}),
       ...(schema !== undefined ? { schema } : {}),
     };
-    registerOnRouter(ctx, route.method, fullPath, routeDef);
+    registerOnRouter(ctx, route.method, fullPath, routeDef, routeLabel(target, route, fullPath));
   }
 }
 

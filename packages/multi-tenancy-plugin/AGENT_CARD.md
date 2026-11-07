@@ -14,6 +14,7 @@ export const tenancy = MultiTenancyPlugin({
   resolver: 'subdomain',
   subdomain: { baseDomain: 'example.com' },
   required: true,
+  tenants: ['acme', 'globex'],
 });
 ```
 
@@ -45,11 +46,14 @@ export function registerOrderRoutes(router: IRouterApi): void {
   databases: that needs an injected store implementing the selected strategy.
 - The JWT resolver decodes an unverified claim; use authentication that separately verifies it.
 - `getRepositoryFor` trusts its explicit tenant id; HTTP routes should use the resolved context.
+- With `tenants`, an unlisted id answers 404 and a registry fault 503 before the handler. Without it
+  any resolved id is the tenant, and `lookupTenant` admits any non-empty string id.
 
 ## Other options
 
 - `resolver` also accepts header, path, JWT or resolver instances tried in order.
 - `database` selects column, schema or database isolation; `dataStore` accepts an instance or
   factory.
+- `tenants` also takes a registry or factory; `tenantCache` bounds its cache.
 - `exclude` skips paths; `middlewarePriority` changes ordering.
 - `prefixCacheKey` and `getTenantCachePrefix` scope cache keys; `cache.separator` defaults to `':'`.

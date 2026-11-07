@@ -130,8 +130,11 @@ application, or pass `openapi: { swagger: { assets: 'cdn' } }`. Without either, 
 from, the starter selects the CDN itself when no Swagger asset mode is chosen.
 
 The inherited `auth` arm accepts any `AuthPluginOptions` with at least one passive strategy (`jwt`,
-`apiKey`, `session`, or `strategies`). When present, `AuthPlugin` installs authentication middleware
-globally at priority 300 unless `auth.middleware` disables or moves it.
+`apiKey`, `session`, or `strategies`); a `signIn` block counts as one, so a password-only
+`signIn: { providers: [] }` with `local.verify` is a complete arm — see
+[the full-stack sign-in recipe](https://setu-ts.dev/packages/auth-plugin/#in-the-full-stack-template).
+When present, `AuthPlugin` installs authentication middleware globally at priority 300 unless
+`auth.middleware` disables or moves it.
 
 Gated plugins (`featureFlags`, `notifications`, `multiTenancy`, `reactRouter`, `static`) are only
 registered when explicitly provided in options. The `static` arm exists because this is the one tier
@@ -231,7 +234,7 @@ export class PricingService {
   }
 }
 
-// Declare it beside the template's other keys in app/lib/context-keys.server.ts:
+// Declare it beside the template's other keys in app/server/context-keys.server.ts:
 // contextKeyFor reuses one key per name; separate { defaultValue: null } objects would not.
 export const pricingContext = contextKeyFor<PricingService | null>('app.pricing', null);
 
@@ -253,6 +256,8 @@ await app.start({ port: 3000 });
 A loader then calls `context.get(pricingContext)?.quote(4900)`.
 
 Three things to know:
+
+<!-- version:history -->
 
 - **`di: {}` falls back to the kernel registry.** `DiPlugin`'s `autoRegister` defaults to `true`,
   which is what lets `@Inject(CAPABILITIES.LOGGER)` find the framework's own services. Earlier
@@ -308,8 +313,9 @@ await app.start({ port: 3000 });
 
 The Redis options above require `ioredis` installed in the application. The CLI supplies that client
 and these options with `setu new portal --template full-stack --broker redis --queue redis`, or from
-a workspace's `--transport redis` when generating a full-stack member. The same config read sees
-dotenv and deployment environment values; omitting the options keeps the starter's memory defaults.
+a workspace's `--broker redis`, through the member's CLI-owned `src/transport/index.ts`. The same
+config read sees dotenv and deployment environment values; omitting the options keeps the starter's
+memory defaults.
 
 Configuration is loaded once and the **same snapshot** is registered under `CAPABILITIES.CONFIG`, so
 the values the composition branched on are the values handlers read — not a second snapshot taken a
@@ -333,6 +339,11 @@ which generates a `setu.config.ts` calling `createFullStackAppFromConfig`:
 ```bash
 setu new my-app --template full-stack
 ```
+
+The starter also keeps the page catch-all, the asset routes and the generated `dev.ts` Vite proxy
+out of the OpenAPI document: it adds `react-router-plugin` to `openapi.excludeOwners` and
+`/__vite/*` to `openapi.exclude`, merged with the lists you pass. Without your own `excludeOwners`,
+OpenApiPlugin's default `['health-plugin', 'metrics-plugin']` still applies.
 
 ## Coming from NestJS
 
@@ -382,6 +393,14 @@ Two consequences follow from the list being positional:
 - [PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#starter-exports-and-option-arms)
 - [rest-starter](https://github.com/setu-ts/setu-ts/blob/main/packages/starters/rest-starter/README.md)
 - [microservice-starter](https://github.com/setu-ts/setu-ts/blob/main/packages/starters/microservice-starter/README.md)
+
+## Referrer policy with React Router
+
+When `reactRouter` is configured, `createFullStackApp` and `createFullStackAppFromConfig` default
+`httpSecurity.headers.referrerPolicy` to `same-origin`. This keeps browser form POSTs from carrying
+an opaque `Origin: null` that React Router refuses. An explicit referrer policy,
+`referrerPolicy: false`, or `headers: { enabled: false }` is preserved. Without `reactRouter`, the
+HTTP-security plugin keeps its own `no-referrer` default.
 
 ## Exports
 

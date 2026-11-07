@@ -45,7 +45,7 @@ import { type Dirent } from 'node:fs';
 import { dirname, relative, resolve } from 'node:path';
 import { workspaceApps, workspaceMembers } from './lib/workspace.ts';
 
-import { DENO_LANE_TESTS, DENO_ONLY_SOURCES } from './test-lanes.ts';
+import { DENO_LANE_TESTS, DENO_ONLY_SOURCES, denoLaneGroup } from './test-lanes.ts';
 import { type ImportEdge, scanImportEdges } from './npm-specifier-audit.ts';
 import { PACKAGE_METADATA } from './jsr-metadata.ts';
 import { REPOSITORY_URL } from './npm-release-gate.ts';
@@ -466,7 +466,9 @@ export function renderPackageJson(member: MemberInput, classified: ClassifiedMem
     const peers = sortedRecord(classified.peerDependencies);
     pkg.peerDependencies = peers;
     pkg.peerDependenciesMeta = Object.fromEntries(
-      Object.keys(peers).map((name) => [name, { optional: true }]),
+      Object.keys(peers)
+        .filter((name) => !(member.name === '@setu-ts/agent-runs-plugin' && name === 'ai'))
+        .map((name) => [name, { optional: true }]),
     );
   }
   if (classified.devDependencies.size > 0) {
@@ -590,6 +592,13 @@ export function renderRootPackageJson(): string {
         zod: EXTERNAL_RANGES['zod-v4']!.replace('npm:zod@', ''),
         graphql: EXTERNAL_RANGES.graphql,
         'drizzle-orm': EXTERNAL_RANGES['drizzle-orm'],
+        '@modelcontextprotocol/client': EXTERNAL_RANGES['@modelcontextprotocol/client'],
+        // docs/ai.md fences compile against the AI SDK (M134); ai pins the release
+        // @ai-sdk/otel itself depends on.
+        ai: '7.0.159',
+        '@ai-sdk/openai-compatible': '^3',
+        'ai-fallback': '3.0.0',
+        '@ai-sdk/otel': '1.0.159',
       },
     },
     null,
@@ -802,7 +811,9 @@ export function renderLaneConfig(members: readonly MemberInput[], laneJson: stri
   const imports = { ...lane.imports };
   const permissions: Record<string, unknown> = {};
   for (const member of members) {
-    if (DENO_LANE_TESTS.some((path) => path.startsWith(`${member.dir}/test/`))) {
+    if (
+      DENO_LANE_TESTS.some((path) => denoLaneGroup(path) === member.dir.slice('packages/'.length))
+    ) {
       const manifest = JSON.parse(member.denoJson) as { test: { permissions: unknown } };
       permissions[member.dir.slice('packages/'.length)] = manifest.test.permissions;
     }
@@ -954,7 +965,18 @@ export async function runNodeManifests(args: readonly string[], root = '.'): Pro
     files.set('test/deno-lane/lane.config.json', renderLaneConfig(members, lane));
     files.set('tsconfig.apps.json', renderAppsTsconfig());
     for (const app of await workspaceApps(root)) {
-      files.set(`${app}/tsconfig.json`, renderAppTsconfig(app));
+      // A Setu workspace container (apps/grpc-workspace) is the scaffold's own
+      // layout: its members keep the tsconfig the CLI generated, so it gets none.
+      const container = await readFile(`${root}/${app}/setu.workspace.json`, 'utf8').then(
+        () => true,
+        (error: unknown) => {
+          // Only an absent manifest means "not a container"; any other read
+          // error must not let a generated tsconfig.json overwrite a container's.
+          if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return false;
+          throw error;
+        },
+      );
+      if (!container) files.set(`${app}/tsconfig.json`, renderAppTsconfig(app));
     }
   }
   if (refusals.length > 0) {
@@ -1075,7 +1097,7 @@ export function renderAppsTsconfig(): string {
   );
 }
 
-/** Generated per-app roots; full-stack replaces paths to add its React route alias. */
+/** Generated per-app roots; full-stack replaces paths to add its page and kernel aliases. */
 export function renderAppTsconfig(app: string): string {
   return (
     JSON.stringify(
@@ -1085,7 +1107,11 @@ export function renderAppTsconfig(app: string): string {
           ? {
               compilerOptions: {
                 jsx: 'react-jsx',
-                paths: { ...sourcePaths('../../'), '~/*': ['./app/*'] },
+                paths: {
+                  ...sourcePaths('../../'),
+                  '~/*': ['./app/*'],
+                  '~kernel/*': ['./src/*'],
+                },
               },
             }
           : {}),

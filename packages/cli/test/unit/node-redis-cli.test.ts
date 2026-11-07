@@ -7,11 +7,12 @@ import { runCli } from '../../src/cli.ts';
 import { parseArgs } from '../../src/args.ts';
 import { resolveNewChoices } from '../../src/commands/new-interactive.ts';
 import { readWorkspaceManifest, WORKSPACE_MANIFEST } from '../../src/workspace/manifest.ts';
-import { transportSpec } from '../../src/workspace/transport.ts';
+import { brokerSpec } from '../../src/workspace/transport.ts';
 import { withClientDependencies, CLIENT_RANGES } from '../../src/templates/client-dependencies.ts';
 import { resolveHost } from '../../src/templates/project-files.ts';
 import { MINIMAL_HOST } from '../../src/templates/minimal.ts';
 import { nodeRedisClientCall } from '../../src/templates/node-redis.ts';
+import { formatForTarget } from '../../src/utils/prettier-format.ts';
 
 function harness() {
   const fs = createFakeFs();
@@ -31,7 +32,7 @@ function harness() {
 }
 
 const VERSION_PIN = new RegExp(
-  String.raw`(@setu-ts/[a-z0-9-]+@\^?|\x22@setu-ts/[a-z0-9-]+\x22: \x22\^?)0\.10\.0`,
+  String.raw`(@setu-ts/[a-z0-9-]+@\^?|\x22@setu-ts/[a-z0-9-]+\x22: \x22\^?)\d+\.\d+\.\d+`,
   'g',
 );
 
@@ -97,15 +98,7 @@ describe('node-redis CLI', () => {
   it('omits redisClient for an explicit ioredis workspace', async () => {
     const h = harness();
     expect(
-      await h.run([
-        'new',
-        'ws',
-        '--workspace',
-        '--transport',
-        'redis',
-        '--redis-client',
-        'ioredis',
-      ]),
+      await h.run(['new', 'ws', '--workspace', '--broker', 'redis', '--redis-client', 'ioredis']),
     ).toBe(0);
     expect(JSON.parse(h.fs.read(`/work/ws/${WORKSPACE_MANIFEST}`))).not.toHaveProperty(
       'redisClient',
@@ -213,7 +206,8 @@ describe('node-redis CLI', () => {
       ],
     };
     // The capture pins the framework at the release it was taken on; generated output
-    // pins the running CLI's version, so only that version token is normalized.
+    // pins the running CLI's version, so only the framework version token is normalized
+    // (the capture's later recaptures pinned a later release than the first).
     const expected: Record<string, string> = Object.fromEntries(
       Object.entries(baseline).map(([path, text]) => [
         path,
@@ -225,6 +219,85 @@ describe('node-redis CLI', () => {
     for (const [path, [before, after]] of Object.entries(relaid)) {
       expect(expected[path]).toContain(before);
       expected[path] = expected[path]!.replace(before, after);
+    }
+    // The second deliberate change (X91-9): `setu add messaging --broker redis` and
+    // `setu add queue --queue redis` append the REDIS_URL row `setu new --broker`
+    // writes — the local default in `.env`, empty in the tracked example.
+    const description =
+      '# Where the redis transport connects. The local start scripts read this ' +
+      'value; a deployment sets REDIS_URL in its own environment.';
+    for (const runtime of ['deno', 'node', 'bun']) {
+      for (const command of ['add-messaging', 'add-queue']) {
+        for (const [file, value] of [
+          ['.env', 'redis://127.0.0.1:6379'],
+          ['.env.example', ''],
+        ] as const) {
+          const path = `${runtime}/${command}/work/app/${file}`;
+          expect(expected[path], path).toBeDefined();
+          expected[path] = `${expected[path]}\n${description}\nREDIS_URL=${value}\n`;
+        }
+      }
+    }
+    // M131c changes only tooling lock writes, the production strip list, and
+    // member development-port metadata/scripts. Preserve this historical capture
+    // and transform those specified differences before comparing every byte.
+    for (const [path, original] of Object.entries(expected)) {
+      const runtime = path.split('/')[0] as 'deno' | 'node' | 'bun';
+      let contents = original
+        .replaceAll('deno run -A npm:', 'deno run -A --no-lock npm:')
+        .replace(
+          'if (manifest.imports) delete manifest.imports["@setu-ts/diagnostics-plugin"];',
+          'if (manifest.imports) { delete manifest.imports["@setu-ts/diagnostics-plugin"]; delete manifest.imports["@setu-ts/testing"]; }',
+        )
+        // PR #570: each workspace dev runner's /ready probe is bounded.
+        .replace(
+          '      if ((await fetch(`http://127.0.0.1:${member.port}/ready`)).ok) return;\n' +
+            '    } catch {\n' +
+            '      // Not listening yet: keep polling until the deadline.\n',
+          '      // Bounded, so a prerequisite that accepts the connection but never answers\n' +
+            '      // cannot hold one probe past the deadline below.\n' +
+            '      const probe = await fetch(`http://127.0.0.1:${member.port}/ready`, {\n' +
+            '        signal: AbortSignal.timeout(1_000),\n' +
+            '      });\n' +
+            '      if (probe.ok) return;\n' +
+            '    } catch {\n' +
+            '      // Not listening, or not answering within the probe bound: keep polling until the deadline.\n',
+        )
+        .replace(
+          'type Member = { name: string; port: number; dependsOn?: string[]; devtoolPort?: number };',
+          'type Member = {\n  name: string;\n  port: number;\n  dependsOn?: string[];\n  devtoolPort?: number;\n  inspectPort?: number;\n  vitePort?: number;\n};',
+        );
+      if (path.endsWith('/setu.workspace.json')) {
+        const manifest = JSON.parse(contents);
+        manifest.members = manifest.members.map((member: { name: string; port: number }) => ({
+          ...member,
+          inspectPort: manifest.basePort + 2000,
+        }));
+        contents = JSON.stringify(manifest, null, 2) + '\n';
+      }
+      if (runtime === 'deno' && path.endsWith('/README.md')) {
+        contents = contents.replace(
+          '`deno run -A --no-lock npm:@setu-ts/cli@' +
+            VERSION +
+            ' workspace ports --reallocate`; it rewrites the manifest, maps,\nand deployment artifacts together. It assigns from the base port upward, so a service still running\nholds its own port and is moved off it.',
+          '`deno run -A --no-lock npm:@setu-ts/cli@' +
+            VERSION +
+            ' workspace ports --reallocate`; it rewrites the\nmanifest, maps, and deployment artifacts together. It assigns from the base port upward, so a\nservice still running holds its own port and is moved off it.',
+        );
+      }
+      if (path.includes('/apps/svc/') && /\/(package|deno)\.json$/.test(path)) {
+        const manifest = JSON.parse(contents);
+        const scripts = manifest.scripts ?? manifest.tasks;
+        scripts['start:debug'] = scripts['start:debug'].replace(
+          '--inspect ',
+          '--inspect=127.0.0.1:5000 ',
+        );
+        contents = JSON.stringify(manifest, null, 2) + '\n';
+      }
+      const file = path.slice(path.indexOf('/work/') + '/work/app/'.length);
+      expected[path] = (
+        await formatForTarget([{ path: file, contents }], runtime, '/work/app', () => {})
+      )[0]!.contents;
     }
     expect(await redisDefaultOutputs()).toEqual(expected);
   });
@@ -242,7 +315,7 @@ describe('node-redis CLI', () => {
       "{ transport: 'redis', client: nodeRedisClient(endpoint), subscriber: nodeRedisClient(endpoint) }",
     ],
   ] as const)('renders the node-redis %s literal', (arm, expected) => {
-    const spec = transportSpec('redis', 'node-redis');
+    const spec = brokerSpec('redis', 'node-redis');
     expect(spec[arm]!('endpoint')).toBe(expected);
     expect(spec.messagingClients).toEqual(['redis']);
     expect(spec.queueClients).toEqual(['redis']);
@@ -291,7 +364,7 @@ describe('node-redis CLI', () => {
           '--workspace',
           '--runtime',
           runtime,
-          '--transport',
+          '--broker',
           'redis',
           '--redis-client',
           'node-redis',
@@ -309,8 +382,13 @@ describe('node-redis CLI', () => {
           h.errors.join('\n'),
         ).toBe(0);
       }
+      // Messaging and the queue read the member's transport module (M138), which
+      // builds their two clients; the four Redis-only arms keep theirs in the config.
       const config = h.fs.read('/work/ws/apps/svc/setu.config.ts');
-      expect(config.match(/nodeRedisClient\(/g)).toHaveLength(6);
+      expect(config.match(/nodeRedisClient\(/g)).toHaveLength(4);
+      const module = h.fs.read('/work/ws/apps/svc/src/transport/index.ts');
+      expect(module.match(/nodeRedisClient\(/g)).toHaveLength(2);
+      expect(module).toContain("from '../node-redis.ts'");
       expect(config).not.toMatch(/from ['"]redis['"]/);
       expect(config.match(/from ['"]\.\/src\/node-redis\.ts['"]/g)).toHaveLength(1);
       expect(h.fs.read('/work/ws/apps/svc/src/node-redis.ts')).toContain("import('redis')");
@@ -327,6 +405,8 @@ describe('node-redis CLI', () => {
     'adds standalone %s with the existing manifest writer',
     async (plugin) => {
       const h = harness();
+      // M131a X88-1: a project with no Redis client yet chooses one with
+      // --redis-client on its first Redis add (the M117 path).
       await h.run(['new', 'svc', '--template', 'rest']);
       expect(
         await h.run([
@@ -397,7 +477,7 @@ describe('node-redis CLI', () => {
 
   it('refuses an unknown stored redisClient by name', async () => {
     const h = harness();
-    await h.run(['new', 'ws', '--workspace', '--transport', 'redis']);
+    await h.run(['new', 'ws', '--workspace', '--broker', 'redis']);
     expect(await h.run(['generate', 'app', 'existing', '--dir', '/work/ws'])).toBe(0);
     const path = `/work/ws/${WORKSPACE_MANIFEST}`;
     await h.fs.writeFile(

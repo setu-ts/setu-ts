@@ -27,6 +27,7 @@ import {
 import type { AuthorizationObserver } from '../../src/diagnostics/authorization-observer.ts';
 import { attachAuthorizationObserver } from '../../src/diagnostics/authorization-observer.ts';
 import { RbacService } from '../../src/services/rbac-service.ts';
+import { AuthPluginConfigurationError } from '../../src/errors.ts';
 
 /**
  * Create a fake response that records the status and body.
@@ -197,6 +198,68 @@ describe('requireAuth', () => {
     await guard(ctx, nt.next);
     expect(response.status).toBe(401);
     expect(nt.calls).toBe(0);
+  });
+});
+
+describe('requireAuth delegation', () => {
+  const actor = { id: 'agent', claims: { iss: 'https://as.test' } };
+
+  it('allows both direct and delegated principals by default', async () => {
+    for (const user of [{ id: 'u1' }, { id: 'u1', actor }]) {
+      const guard = requireAuth();
+      const { ctx } = createContext({ user });
+      const nt = createNext();
+      await guard(ctx, nt.next);
+      expect(nt.calls).toBe(1);
+    }
+  });
+
+  it('forbids a delegated principal and keeps a direct one', async () => {
+    const guard = requireAuth({ delegation: 'forbid' });
+    const delegated = createContext({ user: { id: 'u1', actor } });
+    const refused = createNext();
+    await guard(delegated.ctx, refused.next);
+    expect(delegated.response.status).toBe(403);
+    expect(refused.calls).toBe(0);
+
+    const direct = createContext({ user: { id: 'u1' } });
+    const allowed = createNext();
+    await guard(direct.ctx, allowed.next);
+    expect(allowed.calls).toBe(1);
+  });
+
+  it('requires a delegated principal and refuses a direct one', async () => {
+    const guard = requireAuth({ delegation: 'require' });
+    const delegated = createContext({ user: { id: 'u1', actor } });
+    const allowed = createNext();
+    await guard(delegated.ctx, allowed.next);
+    expect(allowed.calls).toBe(1);
+
+    const direct = createContext({ user: { id: 'u1' } });
+    const refused = createNext();
+    await guard(direct.ctx, refused.next);
+    expect(direct.response.status).toBe(403);
+    expect(refused.calls).toBe(0);
+  });
+
+  it('refuses an invalid delegation mode when the guard is built', () => {
+    expect(() => requireAuth({ delegation: 'sometimes' as never })).toThrow(
+      AuthPluginConfigurationError,
+    );
+  });
+
+  it('combines with signInPage', async () => {
+    const guard = requireAuth({ signInPage: '/login', delegation: 'forbid' });
+    const delegated = createContext({ user: { id: 'u1', actor } });
+    const refused = createNext();
+    await guard(delegated.ctx, refused.next);
+    expect(delegated.response.status).toBe(403);
+    expect(refused.calls).toBe(0);
+
+    const direct = createContext({ user: { id: 'u1' } });
+    const allowed = createNext();
+    await guard(direct.ctx, allowed.next);
+    expect(allowed.calls).toBe(1);
   });
 });
 

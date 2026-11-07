@@ -18,7 +18,12 @@ import {
   MAX_EXISTING_FILE_BYTES,
   PathEscapesProjectError,
 } from './file-writer.ts';
-import { registerModuleSymbol } from '../seams/modules.ts';
+import {
+  MODULE_SERVICE_ARTIFACTS,
+  registerModuleSymbol,
+  renderFunctionalModuleIndex,
+} from '../seams/modules.ts';
+import type { SeamSpec } from '../seams/seam-spec.ts';
 import { deriveNames, isKebabIdentifier } from './names.ts';
 import { isMissingPath } from './filesystem-errors.ts';
 import { exportsSymbol } from '../seams/seam-spec.ts';
@@ -230,30 +235,84 @@ export async function scanModules(
   };
 }
 
-/** Scans controllers inside one admitted feature using the project's controller shape. */
-export function scanModuleArtifacts(
+/**
+ * The request-bound service family of one module (M130 §3.4): the module's own
+ * `<m>.token.ts` exporting `<SCREAMING>`. No `exports`, so the scanner never
+ * reports it as adopted or hand-wired, and barrel drift skips it; the index
+ * renderer reads the admitted name instead.
+ *
+ * @param module - The module's kebab name
+ * @returns The family's seam spec
+ */
+export function moduleServiceSeam(module: string): SeamSpec {
+  const moduleDir = `${MODULES_DIR}/${module}`;
+  return {
+    schematic: MODULE_SERVICE_ARTIFACTS,
+    dir: moduleDir,
+    suffix: '.token.ts',
+    importSymbols: (names) => [names.screaming],
+    barrel: `${moduleDir}/index.ts`,
+    exports: [],
+    renderBarrel: (artifacts) => renderFunctionalModuleIndex(deriveNames(module), artifacts),
+  };
+}
+
+/** Options for {@linkcode scanModuleArtifacts}. */
+export interface ModuleArtifactScanOptions {
+  /** Admit the module's request-bound service token (full-stack functional projects). */
+  readonly moduleServices?: boolean;
+}
+
+/**
+ * Scans controllers inside one admitted feature using the project's controller
+ * shape, plus the module's request-bound service token when asked.
+ *
+ * @param fs - The filesystem to read through
+ * @param dir - The project's root directory
+ * @param module - The module's kebab name
+ * @param mode - The project's generator mode
+ * @param options - Which optional families to scan
+ * @returns The module's admitted families
+ */
+export async function scanModuleArtifacts(
   fs: IFileSystem,
   dir: string,
   module: string,
   mode: GeneratorMode = 'functional',
+  options: ModuleArtifactScanOptions = {},
 ): Promise<ArtifactScanAll> {
   const moduleDir = `${MODULES_DIR}/${module}`;
-  return scanArtifacts(
+  const controllers: SeamSpec = {
+    ...(mode === 'class-based'
+      ? {
+          ...CONTROLLERS_SEAM,
+          alternative: { ...CONTROLLERS_SEAM.alternative!, onlyShapeInBarrel: true },
+        }
+      : FUNCTIONAL_CONTROLLERS_SEAM),
+    dir: moduleDir,
+    barrel: `${moduleDir}/index.ts`,
+  };
+  const withServices = options.moduleServices === true && mode === 'functional';
+  const scan = await scanArtifacts(
     fs,
     dir,
-    [
-      mode === 'class-based'
-        ? {
-            ...CONTROLLERS_SEAM,
-            alternative: { ...CONTROLLERS_SEAM.alternative!, onlyShapeInBarrel: true },
-          }
-        : FUNCTIONAL_CONTROLLERS_SEAM,
-    ].map((spec) => ({
-      ...spec,
-      dir: moduleDir,
-      barrel: `${moduleDir}/index.ts`,
-    })),
+    withServices ? [controllers, moduleServiceSeam(module)] : [controllers],
   );
+  if (!withServices) return scan;
+  // Only the module's own token registers; any other `*.token.ts` is the
+  // developer's, so it is neither listed nor reported as skipped, unreadable,
+  // adopted or hand-wired.
+  const ownToken = `${moduleDir}/${module}.token.ts`;
+  const keep = (entry: { readonly path: string }): boolean =>
+    !entry.path.endsWith('.token.ts') || entry.path === ownToken;
+  const own = (scan.artifacts[MODULE_SERVICE_ARTIFACTS] ?? []).filter((name) => name === module);
+  return {
+    artifacts: { ...scan.artifacts, [MODULE_SERVICE_ARTIFACTS]: own },
+    skipped: scan.skipped.filter(keep),
+    adopted: scan.adopted.filter(keep),
+    manual: scan.manual.filter(keep),
+    unreadable: scan.unreadable.filter(keep),
+  };
 }
 
 /**

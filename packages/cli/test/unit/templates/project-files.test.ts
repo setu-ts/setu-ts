@@ -10,10 +10,34 @@ import { getTemplate } from '../../../src/templates/registry.ts';
 import { MINIMAL_HOST } from '../../../src/templates/minimal.ts';
 import { VERSION } from '../../../src/version.ts';
 import { withQueueArgs } from '../../../src/templates/broker.ts';
-import { getTransport } from '../../../src/workspace/transport.ts';
+import { getBroker } from '../../../src/workspace/transport.ts';
 import { workspaceProfile } from '../../../src/workspace/runtime-profile.ts';
 import { withPluginOptionSeams } from '../../../src/templates/seam.ts';
 import { JOBS_SEAM } from '../../../src/seams/jobs.ts';
+
+it('V11-3 names Node through tsx as the config loader on Workers', () => {
+  const files = projectFiles(
+    'worker',
+    'cloudflare-workers',
+    resolveHost(getTemplate('rest')!, 'cloudflare-workers'),
+  );
+  expect(contentsOf(files, 'setu.config.ts')).toContain('loads this module on Node through tsx');
+  expect(contentsOf(files, 'setu.config.ts')).not.toContain('loads this module under Deno');
+});
+
+it('V11-4 always ignores Workers local variables while keeping variable files conditional', () => {
+  for (const name of ['rest', 'microservice', 'full-stack']) {
+    const host = resolveHost(getTemplate(name)!, 'cloudflare-workers');
+    const files = projectFiles('worker', 'cloudflare-workers', {
+      ...host,
+      manifest: { ...host.manifest, envVariables: [] },
+    });
+    expect(contentsOf(files, '.gitignore')).toContain('.dev.vars\n');
+    expect(
+      files.some((file) => file.path === '.dev.vars' || file.path === '.dev.vars.example'),
+    ).toBe(false);
+  }
+});
 
 describe('functional hosts and generated test tasks', () => {
   it('emits the TLS proxy setting and warns about universal trust (M119c)', () => {
@@ -41,18 +65,28 @@ describe('functional hosts and generated test tasks', () => {
   });
   for (const target of ['node', 'deno', 'bun', 'cloudflare-workers'] as const) {
     for (const name of ['minimal', 'rest', 'microservice', 'full-stack']) {
-      it(`starts flat and splits unit/e2e tasks for ${name} on ${target}`, () => {
+      it(`starts in its layout and splits unit/e2e tasks for ${name} on ${target}`, () => {
         const host = resolveHost(name === 'minimal' ? MINIMAL_HOST : getTemplate(name)!, target);
         const files = [...projectFiles('svc', target, host)];
         const config = contentsOf(files, 'setu.config.ts');
-        // A new project starts flat: the first `setu g module` writes the module
-        // barrel and switches these lines.
-        expect(config).toContain(
-          "import { registerGeneratedRoutes } from './src/controllers/index.ts'",
-        );
-        expect(config).toContain('registerGeneratedRoutes(app.router, app.services);');
-        expect(config).not.toContain('registerModules');
-        expect(files.some((file) => file.path === 'src/modules/index.ts')).toBe(false);
+        if (name === 'full-stack') {
+          // M130 §3.4: full-stack is modular from the start — its products
+          // service is a kernel module, so there is no flat controller home.
+          expect(config).toContain("import { registerModules } from './src/modules/index.ts'");
+          expect(config).toContain('registerModules(app.router, app.services);');
+          expect(config).not.toContain('registerGeneratedRoutes');
+          expect(files.some((file) => file.path === 'src/modules/index.ts')).toBe(true);
+          expect(files.some((file) => file.path === 'src/controllers/index.ts')).toBe(false);
+        } else {
+          // A new project starts flat: the first `setu g module` writes the module
+          // barrel and switches these lines.
+          expect(config).toContain(
+            "import { registerGeneratedRoutes } from './src/controllers/index.ts'",
+          );
+          expect(config).toContain('registerGeneratedRoutes(app.router, app.services);');
+          expect(config).not.toContain('registerModules');
+          expect(files.some((file) => file.path === 'src/modules/index.ts')).toBe(false);
+        }
         // V10-23: every target, Workers included, emits socket test support and
         // the app-level e2e smoke test. Workers boots the real Worker on workerd
         // through the same `startTestServer()`.
@@ -120,7 +154,7 @@ describe('guidance and queue seam composition', () => {
     ['node', 'npx @setu-ts/cli@'],
     ['cloudflare-workers', 'npx @setu-ts/cli@'],
     ['bun', 'bunx @setu-ts/cli@'],
-    ['deno', 'deno run -A npm:@setu-ts/cli@'],
+    ['deno', 'deno run -A --no-lock npm:@setu-ts/cli@'],
   ] as const) {
     it(`README command resolves through the pinned CLI on ${runtime}`, () => {
       const readme = contentsOf(
@@ -144,10 +178,10 @@ describe('guidance and queue seam composition', () => {
     const host = resolveHost(getTemplate('microservice')!, 'deno');
     const config = contentsOf([...projectFiles('svc', 'deno', host)], 'setu.config.ts');
     expect(config).toContain('QueuePlugin({ processors: [...QUEUE_PROCESSORS] })');
-    const redis = withQueueArgs(host, getTransport('redis')!, workspaceProfile('deno'));
+    const redis = withQueueArgs(host, getBroker('redis')!, workspaceProfile('deno'));
     const transportFirst = withQueueArgs(
       { ...host, plugins: getTemplate('microservice')!.plugins },
-      getTransport('redis')!,
+      getBroker('redis')!,
       workspaceProfile('deno'),
     );
     for (const plugins of [
@@ -320,7 +354,11 @@ describe('the entry shutdown handler', () => {
       expect(main).not.toContain('Deno.exit');
       expect(main).not.toContain('process.on(');
       expect(main).not.toContain('process.exit');
-      expect(main).not.toContain('console.error');
+      // One console line, and only for a failed boot (M131a X88-8): no plugin
+      // has registered then, so there is no logger to report through. A failed
+      // shutdown still goes through the logger (next test).
+      expect(main.match(/console\.error/g)).toHaveLength(1);
+      expect(main).toContain('console.error(`Startup failed: ${describeError(error)}`);');
     });
 
     // Shutdown failures used to bypass structured logging entirely. The logger
@@ -454,7 +492,9 @@ describe('a template with a frontend build, on a Deno target', () => {
   it('emits the same development entry on Node and Bun, run by a dev script', () => {
     const deno = contentsOf([...projectFiles('shop', 'deno', host)], 'dev.ts');
     for (const [runtime, dev] of [
-      ['node', 'tsx dev.ts'],
+      // M131a: Node runs the OpenTelemetry preload and loads `.env` through the
+      // runtime; Bun loads `.env` itself and takes no preload.
+      ['node', 'tsx --import ./instrumentation.mjs --env-file-if-exists=.env dev.ts'],
       ['bun', 'bun run dev.ts'],
     ] as const) {
       const files = [
@@ -534,7 +574,7 @@ describe('the Cloudflare Workers target', () => {
   });
 
   it('keeps the platform specifier OUT of setu.config.ts', () => {
-    // `setu commands` loads that module under Deno, which cannot resolve
+    // `setu commands` loads that module on Node through tsx, which cannot resolve
     // `cloudflare:workers` at all — putting the import there, which is what the
     // plugin README's only usage example shows, breaks the CLI outright.
     const config = contentsOf(filesOf(micro), 'setu.config.ts');
@@ -765,7 +805,7 @@ describe('the Cloudflare Workers target', () => {
 
 describe('a standalone README transport note', () => {
   it('renders a transport note and re-wraps it to the emitted width (V9-17)', () => {
-    // The text comes from `TransportSpec.connection.note`, carried onto the host
+    // The text comes from `BrokerSpec.connection.note`, carried onto the host
     // by the broker overlay. A standalone project has no spec at render time, so
     // the host is the only source. The note is LONGER than one line so the
     // programmatic re-wrap is what makes the project pass its own fmt --check.
@@ -819,7 +859,13 @@ describe('the routes a generated README lists', () => {
     // The factory hides HealthPlugin, MetricsPlugin and OpenApiPlugin from the
     // wirings, so only its `composes` declaration can put them here.
     expect(resolveHost(getTemplate('full-stack')!, 'deno').plugins).toEqual([]);
-    expect(pathsOf('full-stack')).toEqual(['/', '/products', '/login', ...PLUGIN_PATHS]);
+    expect(pathsOf('full-stack')).toEqual([
+      '/',
+      '/products',
+      '/login',
+      '/api/products',
+      ...PLUGIN_PATHS,
+    ]);
   });
 
   it('keeps the list after a runtime swap', () => {
@@ -832,6 +878,9 @@ describe('the routes a generated README lists', () => {
         (f) => f.path === 'README.md',
       )?.contents ?? '';
     expect(readme('deno')).toContain('## What it serves\n\nAt `http://localhost:3000`');
+    // X93-7: the generated README links the rendered site, not GitHub.
+    expect(readme('deno')).toContain('A [Setu-TS](https://setu-ts.dev/) project targeting `deno`.');
+    expect(readme('deno')).not.toContain('A [Setu-TS](https://github.com/setu-ts/setu-ts)');
     expect(readme('node')).toContain('- `/docs` — Swagger UI for the API');
     expect(readme('cloudflare-workers')).toContain(
       'Under `npx wrangler dev`, at `http://localhost:8787`',

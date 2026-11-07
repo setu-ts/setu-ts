@@ -5,6 +5,29 @@ import { moduleActive, moduleSymbol } from '../../src/diagnostics/modules.ts';
 import { runCli } from '../../src/cli.ts';
 import { createFakeFs } from '../fixtures/fake-fs.ts';
 
+it('M1 L1 keeps each collapsed warning scoped to its own diagnostic group', async () => {
+  const fs = createFakeFs({
+    '/app/setu.config.ts': 'const label = `unsupported`;',
+    '/app/src/modules/orders/index.ts': 'export function registerOrdersModule() {}',
+    '/app/src/modules/index.ts': 'registerOrdersModule();',
+  });
+  const diagnosis = await diagnoseProject(fs, '/app', new Set(), { module: 'orders' });
+  for (const group of [diagnosis.findings, diagnosis.generateWiring]) {
+    expect(
+      group.filter((finding) => finding.kind === 'unwired' && finding.stop !== undefined),
+    ).toHaveLength(1);
+  }
+  // check's warning names only what check requires; generate's names generate's own sites.
+  expect(diagnosis.findings.find((finding) => finding.kind === 'unwired')).toMatchObject({
+    symbols: ['registerModules'],
+  });
+  expect(diagnosis.generateWiring).toMatchObject([{ symbols: ['registerModules'] }]);
+  // generate's groups keep their own barrel-scoped findings, each carrying the stop.
+  expect(diagnosis.moduleWiring).toMatchObject([
+    { barrel: 'src/modules/index.ts', symbols: ['registerModules'], stop: { line: 1 } },
+  ]);
+});
+
 it('returns typed scanner findings, legacy notices and raw generator inputs without writes', async () => {
   const fs = createFakeFs({
     '/app/src/controllers/bad.controller.ts': '',

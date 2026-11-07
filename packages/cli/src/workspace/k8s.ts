@@ -37,7 +37,7 @@ import { memberEnvironment } from './compose.ts';
 import { envFromBlock, SECRET_VERSION_ANNOTATION } from './secrets.ts';
 import { cliInvocation } from '../templates/project-files.ts';
 import type { WorkspaceManifest } from './manifest.ts';
-import type { TransportSpec } from './transport.ts';
+import type { BrokerSpec } from './transport.ts';
 import { wrapProse } from '../utils/wrap-prose.ts';
 
 /** Where the generated Kubernetes objects live, relative to the workspace root. */
@@ -73,7 +73,7 @@ function memberObjects(
   name: string,
   port: number,
   siblings: readonly WorkspaceManifest['members'][number][],
-  transport: TransportSpec,
+  transport: BrokerSpec,
   healthProbes: boolean,
   metricsEndpoint: boolean,
 ): string {
@@ -263,7 +263,7 @@ spec:
  */
 export function workspaceK8sFiles(
   manifest: WorkspaceManifest,
-  transport: TransportSpec,
+  transport: BrokerSpec,
 ): readonly GeneratedFile[] {
   if (manifest.members.length === 0) return [];
 

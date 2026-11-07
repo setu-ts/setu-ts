@@ -7,7 +7,7 @@
  *
  * @module
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { CAPABILITIES } from '@setu-ts/common';
@@ -46,6 +46,11 @@ function buildApp(options: Partial<SessionPluginOptions> = {}) {
     session.set('user', 'alice');
     session.regenerate();
     return ctx.response.json({ id: session.id });
+  });
+
+  app.router.get('/regenerate-then-throw', (ctx) => {
+    getSession(ctx).regenerate();
+    throw new Error('handler failed after regenerating');
   });
 
   app.router.get('/logout', (ctx) => {
@@ -207,6 +212,100 @@ describe('session e2e (real kernel app)', () => {
       const second = await app.inject(get('/read', cookie));
       expect(second.json<{ count: number | null }>().count).toBe(1);
 
+      await app.stop();
+    });
+
+    it('revokes the superseded row even when the request throws (M131b audit F1)', async () => {
+      const { app } = buildApp({ store: 'memory' });
+      await app.start();
+
+      const first = await app.inject(get('/bump'));
+      const cookie = cookieOf(first.headers);
+
+      // The throw skips the commit, so the new session is never written, but a
+      // regeneration is a revocation: the old id must stop reading its row.
+      const failed = await app.inject(get('/regenerate-then-throw', cookie));
+      expect(failed.statusCode).toBe(500);
+
+      const after = await app.inject(get('/read', cookie));
+      const read = after.json<{ count: number | null; isNew: boolean }>();
+      expect(read.count).toBe(null);
+      expect(read.isNew).toBe(true);
+
+      await app.stop();
+    });
+
+    it('surfaces the handler error when revoking the superseded row also fails', async () => {
+      // A store that can read and write but not delete: the revocation on the
+      // throw path is best effort and must not replace the request's own error.
+      const rows = new Map<string, unknown>();
+      const store = {
+        read: (id: string) => Promise.resolve((rows.get(id) as never) ?? null),
+        write: (id: string, data: unknown) => {
+          rows.set(id, data);
+          return Promise.resolve();
+        },
+        destroy: () => Promise.reject(new Error('store down')),
+      };
+      const { app } = buildApp({ store: store as never });
+      const warnings: unknown[][] = [];
+      const noop = (): void => undefined;
+      app.services.register(CAPABILITIES.LOGGER, {
+        debug: noop,
+        info: noop,
+        warn: (...args: unknown[]) => warnings.push(args),
+        error: noop,
+        child: () => undefined,
+      } as never);
+      await app.start();
+      const cookie = cookieOf((await app.inject(get('/bump'))).headers);
+      const failed = await app.inject(get('/regenerate-then-throw', cookie));
+      expect(failed.statusCode).toBe(500);
+      // Reported, not dropped (audit R1).
+      const revocation = warnings.filter(
+        ([message]) => message === 'Session revocation failed on an errored request',
+      );
+      expect(revocation).toHaveLength(1);
+      expect(JSON.stringify(revocation[0]![1])).toContain('store down');
+      await app.stop();
+    });
+
+    it('surfaces the handler error when the revocation warning itself throws', async () => {
+      const store = {
+        read: () => Promise.resolve(null),
+        write: () => Promise.resolve(),
+        destroy: () => Promise.reject(new Error('store down')),
+      };
+      const { app } = buildApp({ store: store as never });
+      const noop = (): void => undefined;
+      const warn = vi.fn(() => {
+        throw new Error('logger down');
+      });
+      app.services.register(CAPABILITIES.LOGGER, {
+        debug: noop,
+        info: noop,
+        warn,
+        error: noop,
+        child: () => undefined,
+      } as never);
+      const seen: unknown[] = [];
+      app.middleware.add(
+        async (_ctx, next) => {
+          try {
+            await next();
+          } catch (error) {
+            seen.push(error);
+            throw error;
+          }
+        },
+        { priority: 0 },
+      );
+      await app.start();
+      const cookie = cookieOf((await app.inject(get('/bump'))).headers);
+      expect((await app.inject(get('/regenerate-then-throw', cookie))).statusCode).toBe(500);
+      expect(warn).toHaveBeenCalledOnce();
+      expect(seen).toHaveLength(1);
+      expect((seen[0] as Error).message).toBe('handler failed after regenerating');
       await app.stop();
     });
 

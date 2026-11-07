@@ -52,7 +52,6 @@ describe('functional module activation guidance', () => {
     'export const plugins = [];',
     '// registerModules\nexport const plugins = [];',
     'const text = "registerModules";',
-    'export const broken = /unclassifiable/;',
   ]) {
     it(`prints the exact activation lines for an unwired config: ${config}`, async () => {
       const h = harness({ '/app/deno.json': manifest(), '/app/setu.config.ts': config });
@@ -67,7 +66,7 @@ describe('functional module activation guidance', () => {
       '/app/setu.config.ts': 'registerModules(app.router, app.services);',
     });
     expect(await h.run(['module', 'invoices'])).toBe(0);
-    expect(h.err.text()).not.toContain('does not reference registerModules');
+    expect(h.err.text()).not.toContain('does not call registerModules');
   });
 });
 
@@ -167,7 +166,24 @@ describe('setu generate — an unwired decorator barrel is reported', () => {
 
     expect(await h.run(['service', 'billing'])).toBe(0);
 
-    expect(h.err.text()).toContain('setu.config.ts does not reference APP_SERVICES;');
+    expect(h.err.lines).toHaveLength(1);
+    expect(h.err.text()).toContain(
+      'could not classify setu.config.ts at line 1 (`template literal`)',
+    );
+    expect(h.err.text()).toContain('APP_SERVICES');
+    expect(h.err.text()).not.toContain('does not reference');
+  });
+
+  it('M-a names no module site when a flat functional project generates a controller', async () => {
+    for (const extra of [[], ['--dry-run']]) {
+      const h = harness({
+        '/app/deno.json': manifest(),
+        '/app/setu.config.ts': 'const note = `x`;\nexport const plugins = [];\n',
+      });
+      expect(await h.run(['controller', 'widgets', ...extra])).toBe(0);
+      // The project has no src/modules/, so registerModules is not this run's concern.
+      expect(h.err.text()).not.toContain('registerModules');
+    }
   });
 
   it('reports nothing when the project has no config to point at', async () => {

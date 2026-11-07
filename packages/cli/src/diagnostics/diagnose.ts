@@ -1,4 +1,5 @@
 /** The read-only owner of generated-project diagnostics. @module */
+import { scanPageImports, type PageImportReason } from './page-imports.ts';
 import type { IFileSystem } from '@setu-ts/common';
 import type { ArtifactScanAll, UnreadableArtifact } from '../utils/artifact-scanner.ts';
 import { DuplicateArtifactNameError, scanArtifacts } from '../utils/artifact-scanner.ts';
@@ -15,8 +16,8 @@ import {
 import { legacyRegistrarNotice, readLegacyHttpFiles } from '../utils/legacy-layout.ts';
 import { joinPath } from '../utils/file-writer.ts';
 import { diagnoseBarrels, readBarrel } from './barrel-drift.ts';
-import { moduleActive, moduleSymbol, withoutImports } from './modules.ts';
-import { maskSourceCode } from '../devtool/sources.ts';
+import { moduleActive, moduleSymbol } from './modules.ts';
+import { maskSourceDiagnosis, type ISourceStop } from '../devtool/sources.ts';
 import { wiringFinding, wiringSites } from './wiring.ts';
 import { flatArtifactFiles, projectLayout, type ProjectLayout } from '../utils/project-layout.ts';
 import { composingStarter } from '../utils/starter-arms.ts';
@@ -32,7 +33,7 @@ export type Finding =
       readonly mode: GeneratorMode;
     }
   | {
-      readonly kind: 'artifact-skipped';
+      readonly kind: 'artifact-skipped' | 'artifact-unlisted';
       readonly path: string;
       readonly missing: readonly string[];
     }
@@ -49,6 +50,7 @@ export type Finding =
       readonly barrel: string;
       readonly unlisted: readonly string[];
       readonly stale: readonly string[];
+      readonly uncalled: readonly string[];
     }
   | {
       readonly kind: 'barrel-unreadable';
@@ -62,6 +64,8 @@ export type Finding =
       readonly site: string;
       readonly outcome: 'unwired' | 'unclassifiable';
       readonly starter?: string;
+      readonly unusedImports?: readonly string[];
+      readonly stop?: ISourceStop & { readonly line: number };
     }
   | {
       readonly kind: 'module-inactive';
@@ -83,6 +87,14 @@ export type Finding =
   | { readonly kind: 'check-config-invalid'; readonly path: string; readonly entry: string }
   | { readonly kind: 'mixed-layout'; readonly files: readonly string[] }
   | { readonly kind: 'unresolved-import'; readonly path: string; readonly specifier: string }
+  | {
+      readonly kind: 'page-kernel-value-import';
+      readonly path: string;
+      readonly line: number;
+      readonly specifier: string;
+      readonly reason: PageImportReason;
+    }
+  | { readonly kind: 'page-unreadable'; readonly path: string }
   | { readonly kind: 'duplicate-name'; readonly family: string; readonly paths: readonly string[] }
   | { readonly kind: 'silence-unmatched'; readonly entry: string };
 
@@ -133,6 +145,8 @@ export async function diagnoseProject(
   const modules = await scanModules(fs, dir, mode);
   const layout = await projectLayout(fs, dir, modules);
   const specs = scanSeamSpecs(installed);
+  // M130: a full-stack module's request-bound service registers from its index.
+  const moduleScanOptions = { moduleServices: installed.has('react-router-plugin') };
   const duplicates: Finding[] = [];
   // Two files of one family with one base name would bind one symbol twice. The
   // scan refuses rather than alias them; the diagnosis reports it as E016 and
@@ -150,7 +164,7 @@ export async function diagnoseProject(
   const scan = await guarded(() =>
     options?.module === undefined
       ? scanArtifacts(scanFs, dir, specs)
-      : scanModuleArtifacts(scanFs, dir, options.module, mode),
+      : scanModuleArtifacts(scanFs, dir, options.module, mode, moduleScanOptions),
   );
   const findings: Finding[] = [
     ...modules.rejected.map((path) => ({ kind: 'module-rejected' as const, path })),
@@ -167,7 +181,11 @@ export async function diagnoseProject(
       findings.push(
         skip.invalidName === true
           ? { kind: 'artifact-invalid', path: skip.path }
-          : { kind: 'artifact-skipped', path: skip.path, missing: skip.missing },
+          : {
+              kind: skip.listingOnly === true ? 'artifact-unlisted' : 'artifact-skipped',
+              path: skip.path,
+              missing: skip.missing,
+            },
       );
     for (const manual of value.manual) findings.push({ kind: 'manual-registration', ...manual });
     for (const unreadable of value.unreadable)
@@ -241,7 +259,6 @@ export async function diagnoseProject(
     else if (config !== '' && options?.module === module) {
       // A class-based config needs both: MODULES for the class controllers and
       // registerModules for each module's function controllers.
-      const code = withoutImports(maskSourceCode(config));
       const required: readonly (readonly [symbol: string, site: string])[] =
         mode === 'class-based'
           ? [
@@ -249,17 +266,14 @@ export async function diagnoseProject(
               ['registerModules', 'registerModules'],
             ]
           : [['registerModules', 'registerModules']];
-      for (const [symbol, site] of required)
-        if (code === undefined || !new RegExp(`\\b${symbol}\\b`).test(code))
-          moduleWiring.push({
-            kind: 'unwired',
-            barrel: 'src/modules/index.ts',
-            symbols: [symbol],
-            site,
-            outcome: code === undefined ? 'unclassifiable' : 'unwired',
-          });
+      for (const [symbol, site] of required) {
+        const finding = wiringFinding(config, 'src/modules/index.ts', [symbol], site);
+        if (finding !== undefined) moduleWiring.push(finding);
+      }
     }
-    const internal = await guarded(() => scanModuleArtifacts(scanFs, dir, module, mode));
+    const internal = await guarded(() =>
+      scanModuleArtifacts(scanFs, dir, module, mode, moduleScanOptions),
+    );
     if (options?.module === undefined) {
       addScan(internal);
       for (const issue of internal.unreadable)
@@ -290,7 +304,48 @@ export async function diagnoseProject(
     generateFindings.push(mixed);
   }
   findings.push(...duplicates, ...(await unresolvedImports(fs, dir, modules.names, mode, config)));
+  // M130 §3.7: a page may import kernel types and token modules only.
+  const pages = await scanPageImports(fs, dir);
+  for (const violation of pages.violations)
+    findings.push({ kind: 'page-kernel-value-import', ...violation });
+  for (const path of pages.unreadable) findings.push({ kind: 'page-unreadable', path });
   const starter = composingStarter(config);
+  const classified = maskSourceDiagnosis(config);
+  if ('stop' in classified) {
+    const isUncertain = (f: Finding): boolean =>
+      f.kind === 'unwired' && f.outcome === 'unclassifiable';
+    const stop = {
+      ...classified.stop,
+      line: config.slice(0, classified.stop.offset).split(/\r\n|\r|\n|\u2028|\u2029/).length,
+    };
+    // check gets ONE warning naming only what check requires. generate keeps its
+    // per-barrel findings, each stamped with the stop: it prints only the barrels
+    // the run generated (or the --module group), so the warning never names a
+    // site the run does not touch (review fix round 2, M-a).
+    const collapse = (sources: readonly Finding[][], target: Finding[]): void => {
+      const uncertain = sources.flat().filter(isUncertain);
+      if (uncertain.length === 0) return;
+      for (const group of sources)
+        for (let i = group.length - 1; i >= 0; i--) if (isUncertain(group[i]!)) group.splice(i, 1);
+      target.push({
+        kind: 'unwired',
+        barrel: 'setu.config.ts',
+        symbols: [
+          ...new Set(uncertain.flatMap((f) => (f.kind === 'unwired' ? f.symbols : []))),
+        ].sort(),
+        site: 'config',
+        outcome: 'unclassifiable',
+        stop,
+      });
+    };
+    collapse([findings], findings);
+    for (const group of [generateWiring, moduleWiring])
+      for (let i = 0; i < group.length; i++) {
+        const finding = group[i]!;
+        if (finding.kind === 'unwired' && finding.outcome === 'unclassifiable')
+          group[i] = { ...finding, stop };
+      }
+  }
   return {
     ...(starter === undefined ? {} : { starter }),
     mode,

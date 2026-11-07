@@ -18,6 +18,7 @@ import type { IAuthStrategy, IPrincipal, IRequest, IRuntimeServices } from '@set
 import type { IssuerKeySet } from '../issuers/key-set-cache.ts';
 import type { CompiledIssuer } from '../issuers/trusted-issuer.ts';
 import { decodeJsonSegment, JwtVerifier } from '../issuers/jwt-verifier.ts';
+import { parseActClaim, parseScopeClaim } from '../resource-server/claims.ts';
 
 /** Reports why a token was refused. `reason` is a fixed code. */
 export type TokenRefusalReporter = (issuer: string, reason: string) => void;
@@ -64,8 +65,9 @@ export class IssuerStrategy implements IAuthStrategy {
           keySet: binding.keySet,
           runtime: options.runtime,
           algorithms: binding.issuer.algorithms,
-          audience: binding.issuer.audience,
+          audience: binding.issuer.audiences,
           clockToleranceSec: binding.issuer.clockToleranceSec,
+          requireAccessTokenType: binding.issuer.requireAccessTokenType,
         }),
       ]),
     );
@@ -130,7 +132,25 @@ export class IssuerStrategy implements IAuthStrategy {
         this.#report(binding.issuer.name, 'id-token-as-bearer');
         return null;
       }
-      return await binding.issuer.toPrincipal(outcome.claims);
+      // A malformed `act` is refused before the application maps claims: a
+      // delegated token whose actor cannot be identified must not pass as a
+      // direct user token (M132 §3.9).
+      const act = parseActClaim(outcome.claims);
+      if (!act.ok) {
+        this.#report(binding.issuer.name, 'act-malformed');
+        return null;
+      }
+      const principal = await binding.issuer.toPrincipal(outcome.claims);
+      if (principal === null) {
+        return null;
+      }
+      // The application's own mapping wins: only fill a member it left absent.
+      const scopes = principal.scopes === undefined ? parseScopeClaim(outcome.claims) : undefined;
+      return {
+        ...principal,
+        ...(scopes === undefined ? {} : { scopes }),
+        ...(principal.actor === undefined && act.actor !== undefined ? { actor: act.actor } : {}),
+      };
     } catch {
       this.#report(binding.issuer.name, 'verification-error');
       return null;

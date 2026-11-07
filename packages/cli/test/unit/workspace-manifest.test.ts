@@ -21,8 +21,36 @@ function fsWith(files: Record<string, string>): IFileSystem {
 }
 
 function baseManifest(members: WorkspaceManifest['members']): WorkspaceManifest {
-  return { version: 1, basePort: 3000, transport: 'http', runtime: 'deno', members };
+  return { version: 2, basePort: 3000, broker: 'memory', runtime: 'deno', members };
 }
+
+it('X87-2 X87-6 round-trips and validates development ports without dropping fields', async () => {
+  const manifest = {
+    ...baseManifest([{ name: 'web', port: 3000, inspectPort: 5100, vitePort: 5101 }]),
+    devBasePort: 5100,
+  };
+  expect(
+    await readWorkspaceManifest(
+      fsWith({ '/ws/setu.workspace.json': renderWorkspaceManifest(manifest) }),
+      '/ws',
+    ),
+  ).toEqual({ ok: true, manifest });
+  for (const field of ['inspectPort', 'vitePort', 'devBasePort'] as const)
+    for (const value of [0, 65536, -1, 3.2, '5100', null]) {
+      const source =
+        field === 'devBasePort'
+          ? { ...manifest, [field]: value }
+          : { ...manifest, members: [{ ...manifest.members[0], [field]: value }] };
+      expect(
+        (
+          await readWorkspaceManifest(
+            fsWith({ '/ws/setu.workspace.json': JSON.stringify(source) }),
+            '/ws',
+          )
+        ).ok,
+      ).toBe(false);
+    }
+});
 
 describe('devtoolPort in the workspace manifest', () => {
   it('round-trips through render and read', async () => {

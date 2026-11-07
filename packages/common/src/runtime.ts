@@ -485,7 +485,8 @@ export interface IHttpAdapter {
    *
    * @param port - TCP port to bind
    * @param hostname - Bind address (defaults to all interfaces)
-   * @returns An opaque server handle (returned from `listen`, passed to `close`)
+   * @returns An opaque server handle only once the port is bound (passed to `close`)
+   * @throws The native bind error when the port cannot be bound
    */
   listen(port: number, hostname?: string): Promise<ServerHandle>;
   /**

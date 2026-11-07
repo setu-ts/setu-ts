@@ -25,6 +25,7 @@ import {
   withQueueArgs,
 } from '../templates/broker.ts';
 import type { ResolvedHost } from '../templates/project-files.ts';
+import type { RedisClient } from '../workspace/transport.ts';
 import {
   DEFAULT_DEVTOOL_PORT,
   devtoolRuntimeRefusal,
@@ -57,15 +58,15 @@ import {
 import { readEnvFilePath } from '../templates/env-file.ts';
 import { DEFAULT_BASE_PORT, readPortFlag } from '../workspace/manifest.ts';
 import {
-  DEFAULT_TRANSPORT,
-  getTransport,
+  BROKERS,
+  brokerSpec,
+  DEFAULT_BROKER,
+  getBroker,
   listBrokers,
   listQueues,
-  listTransports,
-  TRANSPORT_ALIASES,
-  TRANSPORTS,
-  type TransportSpec,
+  type BrokerSpec,
 } from '../workspace/transport.ts';
+import { getRpc, RPC_STYLES } from '../workspace/rpc.ts';
 import {
   isWorkspaceRuntime,
   WORKSPACE_RUNTIMES,
@@ -241,24 +242,41 @@ function planWorkspace(
     };
   }
 
-  // The broker flags are a STANDALONE project's own composition choice; the
-  // workspace-wide equivalent is --transport, chosen once at creation.
-  for (const flag of ['broker', 'queue'] as const) {
-    if (args.flags[flag] !== undefined) {
-      return {
-        ok: false,
-        message:
-          `--${flag} selects one standalone project's own transport backend; a ` +
-          `workspace's members share one instead. Create the workspace with ` +
-          `--transport <name> — its value covers the message brokers too.`,
-      };
-    }
+  // The queue follows the broker in a workspace (X2-3): a separate choice would
+  // let a workspace pointed at RabbitMQ keep its jobs in one process's memory.
+  if (args.flags['queue'] !== undefined) {
+    return {
+      ok: false,
+      message:
+        `--queue selects one standalone project's own job backend; a workspace's queue ` +
+        `follows its broker. Create the workspace with --broker <name> — the queue uses the ` +
+        `same backend wherever the queue supports it (${listQueues().join(', ')}).`,
+    };
+  }
+  // M138 split the one transport into a workspace broker and a per-member RPC style.
+  if (args.flags['transport'] !== undefined || args.flags['transport-url'] !== undefined) {
+    const flag = args.flags['transport'] !== undefined ? 'transport' : 'transport-url';
+    return {
+      ok: false,
+      message:
+        `--${flag} no longer exists. Choose the workspace's broker with --broker <name>` +
+        `${flag === 'transport-url' ? ' and its endpoint with --broker-url <url>' : ''}, ` +
+        `and gRPC per member with \`${PROGRAM_NAME} generate ${APP_VERB} <name> --rpc grpc\`.`,
+    };
+  }
+  if (args.flags['rpc'] !== undefined) {
+    return {
+      ok: false,
+      message:
+        `--rpc is chosen per member, not for a workspace root: add each service with ` +
+        `\`${PROGRAM_NAME} generate ${APP_VERB} <name> --rpc <${RPC_STYLES.join('|')}>\`.`,
+    };
   }
 
   const basePort = readPortFlag(args.flags);
   if (!basePort.ok) return { ok: false, message: basePort.message };
 
-  const transport = readTransport(args);
+  const transport = readWorkspaceBroker(args);
   if (!transport.ok) return { ok: false, message: transport.message };
 
   return {
@@ -275,81 +293,75 @@ function planWorkspace(
 }
 
 /**
- * Reads and validates `--transport` and `--transport-url`.
+ * Reads and validates a workspace's `--broker` and `--broker-url`.
  *
- * `tcp` is refused by name rather than accepted as a synonym for `http`: this
- * framework has no raw-TCP transport, every inter-service path is HTTP over TCP
- * or a broker client over TCP, and quietly handing back HTTP under another name
- * would leave the user believing they chose something.
+ * `http` and `grpc` were `--transport` values before M138. They say how a
+ * service is called, which is now each member's own `--rpc`, so naming one here
+ * is refused with that pointer rather than read as an unknown broker.
  *
  * @param args - The parsed arguments
- * @returns The transport spec and endpoint, or the refusal to print
+ * @returns The broker spec and endpoint, or the refusal to print
  */
-function readTransport(args: ParsedArgs):
-  | { readonly ok: true; readonly spec: TransportSpec; readonly url?: string }
+function readWorkspaceBroker(args: ParsedArgs):
+  | { readonly ok: true; readonly spec: BrokerSpec; readonly url?: string }
   | {
       readonly ok: false;
       readonly message: string;
     } {
-  const raw = args.flags['transport'];
-  const named = raw === undefined ? DEFAULT_TRANSPORT : raw;
+  const raw = args.flags['broker'];
+  const named = raw === undefined ? DEFAULT_BROKER : raw;
   if (typeof named !== 'string') {
     return {
       ok: false,
-      message: `--transport needs a value: ${TRANSPORTS.join(' | ')}.`,
+      message: `--broker needs a value: ${BROKERS.join(' | ')}.`,
     };
   }
 
-  const spec = getTransport(
+  const spec = getBroker(
     named,
     args.flags['redis-client'] === 'node-redis' ? 'node-redis' : 'ioredis',
   );
   if (spec === undefined) {
-    // An own-key read: the table is a plain object, so `constructor` or
-    // `toString` would otherwise take the alias branch and be suggested back.
-    const alias = Object.hasOwn(TRANSPORT_ALIASES, named) ? TRANSPORT_ALIASES[named] : undefined;
     return {
       ok: false,
       message:
-        alias === undefined
-          ? `Unknown transport "${escapeName(named)}". Expected one of: ${TRANSPORTS.join(', ')}.`
-          : `There is no raw ${named} transport: every inter-service path here is HTTP over ` +
-            `${named} or a broker client over ${named}. Use --transport ${alias} for direct calls ` +
-            `through the discovery map, or a broker (${TRANSPORTS.filter(
-              (t) => t !== 'http' && t !== 'grpc',
-            ).join(', ')}).`,
+        getRpc(named) === undefined
+          ? `Unknown broker "${escapeName(named)}". Expected one of: ${BROKERS.join(', ')}.`
+          : `"${named}" is how a service is called, not a broker. Choose it per member with ` +
+            `\`${PROGRAM_NAME} generate ${APP_VERB} <name> --rpc ${named}\`; the workspace ` +
+            `broker is one of: ${BROKERS.join(', ')}.`,
     };
   }
 
-  const rawUrl = args.flags['transport-url'];
+  const rawUrl = args.flags['broker-url'];
   if (rawUrl === undefined) return { ok: true, spec };
   if (typeof rawUrl !== 'string') {
-    return { ok: false, message: `--transport-url needs a value.` };
+    return { ok: false, message: `--broker-url needs a value.` };
   }
   // Refused rather than stored, for two different reasons — and they are told
-  // apart, because "this transport has no broker" is wrong advice for a cloud arm
+  // apart, because "this broker has no endpoint" is wrong advice for a cloud arm
   // that plainly does.
   if (spec.connection?.urlOverridable !== true) {
-    const applies = listTransports()
-      .filter((t) => t.connection?.urlOverridable === true)
-      .map((t) => t.name)
+    const applies = BROKERS.map((name) => brokerSpec(name))
+      .filter((broker) => broker.connection?.urlOverridable === true)
+      .map((broker) => broker.name)
       .join(', ');
 
     if (spec.connection !== undefined) {
       return {
         ok: false,
         message:
-          `--transport ${spec.name} is not configured by URL: its connection value is ` +
+          `--broker ${spec.name} is not configured by URL: its connection value is ` +
           `read from ${spec.connection.variable} at run time, because it is a project id or a ` +
           `secret and a generated file is the wrong place for either. Leave it unset to use the ` +
-          `local emulator. --transport-url applies to ${applies}.`,
+          `local emulator. --broker-url applies to ${applies}.`,
       };
     }
 
     return {
       ok: false,
       message:
-        `--transport ${spec.name} has no broker, so --transport-url has nothing to ` +
+        `--broker ${spec.name} runs inside each member, so --broker-url has nothing to ` +
         `address. It applies to ${applies}.`,
     };
   }
@@ -387,11 +399,11 @@ function dependsOnRefusal(): string {
  */
 function applyBrokerOverlay(
   host: ResolvedHost,
-  selection: { readonly broker?: TransportSpec; readonly queue?: TransportSpec },
+  selection: { readonly broker?: BrokerSpec; readonly queue?: BrokerSpec },
   profile: ReturnType<typeof workspaceProfile>,
 ): ResolvedHost {
   let next = host;
-  const specs: TransportSpec[] = [];
+  const specs: BrokerSpec[] = [];
   if (selection.broker !== undefined) {
     next = withBrokerArgs(next, selection.broker, profile);
     specs.push(selection.broker);
@@ -468,24 +480,35 @@ async function planProject(
     return { ok: false, message: dependsOnRefusal() };
   }
 
-  // Same class: a transport describes how the members of a workspace reach each
-  // other, and a standalone project has no members. Accepting it would report
-  // success for a project that registers nothing of the kind.
-  for (const flag of ['transport', 'transport-url']) {
+  // `--transport` is the pre-M138 workspace flag, and `--broker-url`/`--rpc` are
+  // workspace-only: a standalone project has no members to share a broker
+  // endpoint with, and `--rpc` records a member's style in the workspace manifest.
+  // Accepting any of them would report success for a project that registers
+  // nothing of the kind.
+  for (const flag of ['transport', 'transport-url', 'broker-url', 'rpc']) {
     if (args.flags[flag] !== undefined) {
       return {
         ok: false,
         message:
-          `--${flag} applies to \`${PROGRAM_NAME} new <name> --workspace\`: it decides ` +
-          `how a workspace's services talk to each other, and a standalone project has none. ` +
-          `To configure THIS project's own backends, use --broker <name> and --queue <name>.`,
+          flag === 'rpc'
+            ? `--rpc applies to \`${PROGRAM_NAME} generate ${APP_VERB} <name>\` inside a ` +
+              `workspace. For a standalone project, \`${PROGRAM_NAME} add grpc\` installs the ` +
+              `gRPC plugin.`
+            : flag === 'broker-url'
+              ? `--broker-url applies to \`${PROGRAM_NAME} new <name> --workspace\`, where ` +
+                `members share one endpoint. A standalone project reads its broker's variable ` +
+                `from the environment; set it in .env.`
+              : `--${flag} no longer exists. To configure THIS project's own backends, use ` +
+                `--broker <name> and --queue <name>; a workspace takes --broker at creation.`,
       };
     }
   }
 
-  const broker = readArmFlag(args, 'broker');
+  const client: RedisClient =
+    args.flags['redis-client'] === 'node-redis' ? 'node-redis' : 'ioredis';
+  const broker = readArmFlag(args, 'broker', 'messaging', client);
   if (!broker.ok) return { ok: false, message: broker.message };
-  const queue = readArmFlag(args, 'queue');
+  const queue = readArmFlag(args, 'queue', 'queue', client);
   if (!queue.ok) return { ok: false, message: queue.message };
 
   const choice = resolveTemplateChoice(args);
@@ -633,15 +656,11 @@ export async function runNewCommand(args: ParsedArgs, deps: NewDependencies): Pr
     deps.log(
       `  --port <n>          Base port for workspace members (default ${DEFAULT_BASE_PORT})`,
     );
-    deps.log(
-      `  --transport <name>  How a workspace's services talk: ${TRANSPORTS.join(' | ')} ` +
-        `(default ${DEFAULT_TRANSPORT})`,
-    );
-    deps.log('  --transport-url <url>  Broker endpoint, for the broker transports');
+    deps.log('  --broker-url <url>  With --workspace: the broker endpoint, for networked brokers');
     deps.log('  --redis-client <name>  ioredis | node-redis (default ioredis; Redis arms only)');
     deps.log(
-      `  --broker <name>     Message broker for a standalone project: ` +
-        `${listBrokers().join(' | ')} (default memory)`,
+      `  --broker <name>     Message broker: this project's, or with --workspace every member's: ` +
+        `${listBrokers().join(' | ')} (default ${DEFAULT_BROKER})`,
     );
     deps.log(
       `  --queue <name>      Job queue backend for a standalone project: ` +
@@ -699,7 +718,7 @@ export async function runNewCommand(args: ParsedArgs, deps: NewDependencies): Pr
   const redisRefusal = redisClientRefusal(
     chosen,
     runtime,
-    ['broker', 'queue', 'transport'].some((flag) => chosen.flags[flag] === 'redis'),
+    ['broker', 'queue'].some((flag) => chosen.flags[flag] === 'redis'),
   );
   if (redisRefusal !== undefined) {
     deps.error(redisRefusal);
@@ -821,7 +840,10 @@ export async function runNewCommand(args: ParsedArgs, deps: NewDependencies): Pr
     );
     for (const outcome of outcomes) deps.log(`${outcome.outcome} ${escapeName(outcome.path)}`);
     if (chosen.flags['agents'] === true) {
-      const code = await runAgentsCommand({ positionals: [], flags: {} }, { ...deps, cwd: root });
+      const code = await runAgentsCommand(
+        { positionals: [], flags: {} },
+        { ...deps, cwd: root, installPending: true },
+      );
       if (code !== EXIT_OK) return code;
     }
   } catch (cause) {

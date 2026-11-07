@@ -714,7 +714,71 @@ here.
   that does not match the code, or is missing; V10-7…V10-57 rows plus the folded scope: development
   commands in briefs, scaffold-first guides, npm plugin publishing, example walkthroughs) — complete
   (PR #528).
-- **Next milestone** — none scheduled in ROADMAP.md.
+- **Milestone 128** (`database-plugin` + `common` + `multi-tenancy-plugin` — `updateVersioned` /
+  `deleteVersioned` with `VersionConflictError` and `EntityNotFoundError`, optional tenant-path
+  conditional writes, and the fault group: X94-1, X94-2, V11-5, X94-3) — complete (PR #540).
+- **Milestone 132** (`auth-plugin` + `common` + `openapi-plugin` — resource-server authentication:
+  OAuth scopes and `requireScopes`, Bearer challenges, RFC 9728 metadata, audience lists, opt-in
+  `at+jwt`, the `act` actor with `requireAuth({ delegation })`; ships in `0.12.0`) — complete (PR
+  #541).
+- **Milestone 133** (`mcp-plugin` (new) + `common` + `kernel` + `decorator-plugin` +
+  `idempotency-plugin` + `cli` — routes as MCP tools: `mcpTool()`/`@McpTool()` markers, a stateless
+  `POST /mcp` on the official SDK, in-process `IApplication.dispatch` with a route pin, per-call
+  timeout, the kernel empty-chunk stream guard) — complete (PR #545).
+- **Milestone 131a** (`common` + the Redis-backed plugins + `notification-plugin` + `cli` — Redis,
+  node-redis and readiness: the V11-10 queue probe, notification out of readiness, `503`/`504`
+  backend faults, `setu add` Redis arms, an OpenTelemetry preload, `.env` start scripts, URL
+  userinfo masking; V11-10, V11-11, X88-1…X88-10) — complete (PR #543).
+- **Milestone 129** (`cli` + `common` + `openapi-plugin` — `setu client`: the typed client generated
+  with the project's own sdk and Prettier into a marker-owned `src/clientsdk/api.ts`, `--input` and
+  `--check`, `IOpenApiService` in `common`, `setu add sdk` scripts, and `setu add openapi`
+  installing `swagger-ui-dist`; V11-20) — complete (PR #547).
+- **Milestone 127** (`common` + `multi-tenancy-plugin` + `database-plugin` — a registry of real
+  tenants: the `tenants` option (list, `ITenantRegistry` or factory), `404 Unknown Tenant` and `503`
+  on registry fault through one check shared with `lookupTenant`, a bounded canonical-only cache,
+  `createDatabaseTenantRegistry`, a fault warning with no registry message text) — complete (PR
+  #548).
+- **Milestone 130** (`common` + `react-router-plugin` + `full-stack-starter` + `cli` — the
+  full-stack template's kernel modules: `requestService`/`resolveRequestService` in `common`,
+  `getService` in loaders, `src/modules/` behind `app/` pages, `setu g module --page`, `setu.E017`
+  page value imports, OpenAPI page exclusions, `handleError`, the HMR port; X85-1, X85-2, X85-3,
+  X91-2, X91-5, X91-6, X91-7, V11-7, V11-19; plus `errorHandler` log and response masking) —
+  complete (PR #551).
+- **Milestone 134** (`auth-plugin` + `telemetry-plugin` + `docs/ai.md` + `apps/ai-chat` — AI SDK
+  recipes and weighted quotas: `createQuota` with memory and Redis stores, the shared 429
+  initializer, `registerGlobal`, a scaffold-shaped example proven against a real model; ships in
+  `0.12.0`) — complete (PR #549).
+- **Milestone 131b** (`runtime` + `kernel` + `common` + `di-plugin` + `decorator-plugin` +
+  `auth-plugin` + `session-plugin` + `messaging-plugin` + `openapi-plugin` + `cli` and 8 more —
+  kernel, runtime and plugin contracts: Node bind waits, cancelled uploads as client faults with one
+  served-status rule, atomic `setHeaders`, cleanup after the handler, whole-graph boot validation,
+  `RouteRegistrationError`, session-stamp revocation, Kafka first-join skip window, stable OpenAPI
+  component names; 17 smoke rows) — complete (PR #557).
+- **Milestone 135** (`vector-store-plugin` (new) + `common` + `cloudflare-plugin` + `cli` —
+  tenant-scoped retrieval: `IVectorStore` under `CAPABILITIES.VECTOR_STORE`, the scope a required
+  argument, filters refused rather than ignored, memory/pgvector/Qdrant adapters plus
+  `VectorizeVectorStore`, `setu add vector-store`, the `semantic-search` example; ships in `0.12.0`)
+  — complete (PR #558).
+- **Milestone 131c** (`packages/cli` — CLI gates, generators and workspace deploy: `setu check`
+  fails an imported-but-unused registration and names the line of a config it cannot read, W005 for
+  an unlisted service, same-named controller adoption, hoisted `react-router`, per-member Vite and
+  inspector ports, a Deno image without dev tooling, `workspace deploy --pull-secret`, brief and
+  scaffold text; 17 smoke rows) — complete (PR #560).
+- **Milestone 131d** (docs + `apps/` + READMEs + website + `cli` text — documentation, examples and
+  the website: the #526 and agent-brief upgrade notes, M131c's upgrade subsection, the scaffolded
+  deployment path and `--pull-secret` walkthrough, the full-stack password sign-in recipe,
+  graphql-demo's `ws`, generated READMEs linking the site, CHANGELOG link definitions with a bump
+  step and release check, `docs/versioning.md` and cross-page anchor checks; 18 smoke rows) —
+  complete (PR #564).
+- **Milestone 136** (`agent-runs-plugin` + `common` + `database-plugin` + `apps/durable-agent` —
+  durable model/tool runs, fenced leases, timed approvals and UI-message replay, with a
+  support-agent example that survives restarts) — complete (PR #565).
+- **Milestone 138** (`packages/cli` — workspace broker and per-member RPC style: a version-2
+  `setu.workspace.json` with `broker` and per-member `rpc`, a CLI-owned `src/transport/index.ts` per
+  member that its config calls, `setu workspace broker` and `setu workspace rpc`, and one planner
+  behind them, `generate app`, `setu sync` and a member's `setu add`) — complete (PR #568).
+- **Release `v0.12.0`** — cut 2026-11-07 (PR #571); 55 packages.
+- **Next milestone** — to be chosen after the `0.12.0` release.
 
 ## Verification (run before declaring any work done)
 

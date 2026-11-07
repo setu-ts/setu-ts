@@ -21,6 +21,7 @@ import type {
 } from '@setu-ts/common';
 import type { ApqResolveResult, IApqResolver } from '../../apq/apq-resolver.ts';
 import { bodyRefusalOf } from '../../http/body-refusal.ts';
+import { isJsonContentType } from '../../http/json-content-type.ts';
 import { encodeSseComment, encodeSseComplete, encodeSseEvent } from './sse-frame.ts';
 
 /**
@@ -70,6 +71,22 @@ async function handleSseRequest(
   heartbeatMs: number,
   apqResolver: IApqResolver | null,
 ): Promise<HandlerResult> {
+  // Refuse a non-JSON body BEFORE reading it, with the HTTP route's own rule
+  // and 415. A `text/plain` or form POST is a CORS simple request: answering it
+  // let a cross-site page run a mutation with the victim's cookies. It is a
+  // transport failure, so it is buffered rather than put in-stream, as the
+  // graphql-sse reference handler does.
+  if (!isJsonContentType(ctx.request.headers.get('content-type'))) {
+    return sendBufferedError(response, 415, {
+      errors: [
+        {
+          message: 'Unsupported media type. Expected application/json',
+          extensions: { code: 'UNSUPPORTED_MEDIA_TYPE' },
+        },
+      ],
+    });
+  }
+
   // Parse body
   let body: unknown;
   try {
@@ -251,6 +268,24 @@ async function handleSseGet(
 }
 
 /**
+ * Answer a transport failure as a buffered JSON response, before any stream.
+ *
+ * @param response - The response builder
+ * @param status - The HTTP status
+ * @param body - The `{ errors }` body to send
+ * @returns The buffered handler result
+ */
+function sendBufferedError(
+  response: IResponse,
+  status: number,
+  body: { errors?: readonly unknown[] },
+): HandlerResult {
+  response.status(status);
+  response.header('Content-Type', 'application/json');
+  return response.send(new TextEncoder().encode(JSON.stringify(body)));
+}
+
+/**
  * Answer a GraphQL request error inside an accepted event stream.
  *
  * One `next` carrying the errors, then the `complete` terminator — the shape
@@ -294,6 +329,14 @@ async function streamSseResult(
 
   // Call service.subscribe
   const outcome = await graphqlService.subscribe(params, context);
+
+  // A mutation over GET (or HEAD) is refused 405 by the shared operation check.
+  // That is a method failure, not a GraphQL request error, so it is answered
+  // buffered with `Allow: POST` like the HTTP route — never as a 200 stream.
+  if (outcome.kind === 'error' && outcome.status === 405) {
+    response.header('Allow', 'POST');
+    return sendBufferedError(response, 405, outcome.result);
+  }
 
   // Open the stream — even for errors, the protocol requires the stream
   response.status(200);

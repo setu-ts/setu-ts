@@ -19,6 +19,148 @@ function harness(seed: Readonly<Record<string, string>> = { '/app/package.json':
   };
 }
 
+it('H1 keeps a missing full-stack module token export at E001', async () => {
+  const h = harness();
+  expect(await h.run(['new', 'web', '--template', 'full-stack', '--runtime', 'node'])).toBe(0);
+  expect(await h.run(['g', 'module', 'inventory', '--dir', '/app/web'])).toBe(0);
+  await h.fs.writeFile(
+    '/app/web/src/modules/inventory/inventory.token.ts',
+    new TextEncoder().encode('const token = 1;'),
+  );
+  const start = h.err.lines.length;
+  expect(await h.run(['check', '--dir', '/app/web'])).toBe(1);
+  const output = h.err.lines.slice(start).join('\n');
+  expect(output).toContain('setu.E001');
+  expect(output).toContain('inventory.token.ts');
+  expect(output).not.toContain('setu.W005');
+});
+
+it('M1 keeps REST check warning symbols local to its required wiring', async () => {
+  const h = harness();
+  expect(await h.run(['new', 'rest', '--template', 'rest', '--runtime', 'node'])).toBe(0);
+  const path = '/app/rest/setu.config.ts';
+  await h.fs.writeFile(
+    path,
+    new TextEncoder().encode(h.fs.read(path) + '\nconst label = `unsupported`;'),
+  );
+  const start = h.err.lines.length;
+  expect(await h.run(['check', '--dir', '/app/rest'])).toBe(0);
+  const warnings = h.err.lines.slice(start).filter((line) => line.includes('setu.W001'));
+  expect(warnings).toHaveLength(1);
+  expect(warnings[0]).toContain('registerGeneratedRoutes');
+  expect(warnings[0]).not.toContain('registerModules');
+});
+
+it('L1 prints the collapsed config warning for g module dry-run', async () => {
+  const h = harness({
+    '/app/package.json': '{}',
+    '/app/setu.config.ts': 'const label = `unsupported`;',
+  });
+  const before = h.fs.writes.length;
+  expect(await h.run(['g', 'module', 'orders', '--dry-run'])).toBe(0);
+  expect(
+    h.err.lines.filter((line) => line.includes('could not classify setu.config.ts')),
+  ).toHaveLength(1);
+  expect(h.fs.writes).toHaveLength(before);
+});
+
+it('X91-3 fails import-only config wiring and a registerModules value that is never called', async () => {
+  for (const extra of ['', 'const pending = registerModules;']) {
+    const h = harness({
+      '/app/package.json': '{}',
+      '/app/src/modules/index.ts': 'export function registerModules() {}',
+      '/app/setu.config.ts': "import { registerModules } from './src/modules/index.ts';\n" + extra,
+    });
+    expect(await h.run(['check'])).toBe(1);
+    expect(h.err.text()).toContain('setu.E006');
+    if (extra === '') expect(h.err.text()).toContain('imports registerModules but never uses it');
+    else expect(h.err.text()).toContain('does not call registerModules');
+  }
+});
+
+it('X91-3 distinguishes unused imports from missing symbols in the same barrel finding', async () => {
+  const h = harness({
+    '/app/package.json': '{"dependencies":{"@setu-ts/decorator-plugin":"^0.11.0"}}',
+    '/app/src/controllers/index.ts': '',
+    '/app/setu.config.ts': "import { APP_CONTROLLERS } from './src/controllers/index.ts';",
+  });
+  expect(await h.run(['check'])).toBe(1);
+  expect(h.err.text()).toContain(
+    'imports APP_CONTROLLERS but never uses it; it does not use registerGeneratedRoutes outside imports',
+  );
+  expect(h.err.text()).not.toContain('imports APP_CONTROLLERS, registerGeneratedRoutes');
+});
+
+it('X91-3 2b detects a deleted module registrar call through check', async () => {
+  const h = harness({ '/app/package.json': '{}' });
+  expect(await h.run(['g', 'module', 'inventory'])).toBe(0);
+  const path = '/app/src/modules/inventory/index.ts';
+  await h.fs.writeFile(
+    path,
+    new TextEncoder().encode(
+      h.fs.read(path).replace('registerInventoryRoutes(router, services);', ''),
+    ),
+  );
+  expect(await h.run(['check'])).toBe(1);
+  expect(h.err.text()).toContain('setu.E003');
+  expect(h.err.text()).toContain(
+    'imports registerInventoryRoutes but never registers it; run setu sync',
+  );
+});
+
+it('V11-8 emits one located config warning and silences it by the config path', async () => {
+  for (const [construct, label] of [
+    ["import process from 'node:process';", 'import node:process'],
+    ['const port = globalThis.PORT;', 'globalThis'],
+    ['const port = env[key];', 'computed member access'],
+  ]) {
+    const seed = {
+      '/app/package.json': JSON.stringify({
+        dependencies: { '@setu-ts/decorator-plugin': '^0.11.0' },
+      }),
+      '/app/src/controllers/index.ts': '',
+      '/app/src/modules/index.ts': '',
+      '/app/setu.config.ts': '// line one\n' + construct,
+    };
+    const h = harness(seed);
+    expect(await h.run(['check'])).toBe(0);
+    expect(h.err.lines).toHaveLength(1);
+    expect(h.err.text()).toContain(
+      'warning setu.W001: could not classify setu.config.ts at line 2',
+    );
+    expect(h.err.text()).toContain(label);
+    expect(h.err.text()).not.toContain('does not reference');
+    const silent = harness({
+      ...seed,
+      '/app/.setu-ts/check.json': JSON.stringify({
+        silence: [{ id: 'setu.W001', path: 'setu.config.ts' }],
+      }),
+    });
+    expect(await silent.run(['check'])).toBe(0);
+    expect(silent.err.lines).toEqual([]);
+    expect(silent.log.text()).toContain('1 silenced');
+  }
+});
+
+it('X93-10 warns about an unlisted plain service but still refuses a missing registrar', async () => {
+  const plain = harness({
+    '/app/package.json': '{}',
+    '/app/src/services/plain.service.ts': 'export function work() {}',
+  });
+  expect(await plain.run(['check'])).toBe(0);
+  expect(plain.err.text()).toContain('setu.W005');
+  expect(plain.err.text()).toContain(
+    'not re-exported from src/services/index.ts: it does not export describePlain',
+  );
+  expect(plain.err.text()).not.toContain('nothing registers it');
+  const route = harness({
+    '/app/package.json': '{}',
+    '/app/src/controllers/plain.controller.ts': 'export function work() {}',
+  });
+  expect(await route.run(['check'])).toBe(1);
+  expect(route.err.text()).toContain('setu.E001');
+});
+
 it('applies the exit and summary policy to every finding identity through runCli', async () => {
   const base = await diagnostics.diagnoseProject(createFakeFs(), '/app', new Set());
   const spy = vi.spyOn(diagnostics, 'diagnoseProject');
@@ -56,7 +198,7 @@ it('renders each stable id with its severity and strict counts', () => {
     'Module "orders" is not activated in src/modules/index.ts, so its routes are unreachable; add:',
     'src/routes/ still holds 1 file(s): old.routes.ts.',
     'Invalid .setu-ts/check.json: invalid JSON. Nothing was silenced.',
-    'setu.config.ts does not reference registerGeneratedRoutes; consume the barrel exports: (src/controllers/index.ts; config is unclassifiable)',
+    'could not classify setu.config.ts at line 1 (`globalThis`); setu check cannot tell whether it registers registerGeneratedRoutes',
     'No setu.config.ts; cannot check wiring for src/controllers/index.ts.',
     'setu.config.ts calls registerGeneratedRoutes(app.router) without the service registry.',
     'Silence entry "setu.E003" matched no finding.',
@@ -65,6 +207,9 @@ it('renders each stable id with its severity and strict counts', () => {
     'This project has modules and also keeps controllers or services outside them: src/controllers/orders.controller.ts.',
     'src/modules/index.ts imports ./gone/index.ts, which does not exist.',
     'Two controller files share a base name and would bind one symbol: src/controllers/a/orders.controller.ts, src/controllers/b/orders.controller.ts.',
+    'app/routes/_app/products._index.tsx:7 imports ~kernel/modules/products/products.service.ts by value, which would carry kernel code into the browser bundle.',
+    'Cannot read the imports of app/routes/broken.tsx, so whether it imports kernel code by value cannot be checked.',
+    'src/services/plain.service.ts is not re-exported from src/services/index.ts: it does not export describePlain.',
   ];
   for (const [index, finding] of CHECK_FINDINGS.entries()) {
     for (const strict of [false, true]) {
@@ -171,4 +316,34 @@ it('refuses extra arguments and unsupported flags before any writes and document
     expect(await h.run([verb, '-h'])).toBe(0);
     expect(h.log.text()).toContain(`Usage: setu ${verb}`);
   }
+});
+
+it('refuses a page value import as setu.E017 and lets .setu-ts/check.json silence it (M130 §3.7)', async () => {
+  const page = 'app/routes/_app/products._index.tsx';
+  const seed = {
+    '/app/package.json': JSON.stringify({
+      dependencies: { '@setu-ts/react-router-plugin': '^0.11.0' },
+    }),
+    [`/app/${page}`]:
+      "import type { Product } from '~kernel/modules/products/products.types.ts';\n" +
+      "import { PRODUCTS } from '~kernel/modules/products/products.token.ts';\n" +
+      "import { productsService } from '~kernel/modules/products/products.service.ts';\n",
+  };
+  const refused = harness(seed);
+  expect(await refused.run(['check'])).toBe(1);
+  expect(refused.err.text()).toContain(
+    `error setu.E017: ${page}:3 imports ~kernel/modules/products/products.service.ts by value`,
+  );
+  // The type import and the token import on lines 1 and 2 are allowed.
+  expect(refused.err.text()).not.toContain(`${page}:1`);
+  expect(refused.err.text()).not.toContain(`${page}:2`);
+
+  const silenced = harness({
+    ...seed,
+    '/app/.setu-ts/check.json': JSON.stringify({ silence: ['setu.E017'] }),
+  });
+  expect(await silenced.run(['check'])).toBe(0);
+  expect(silenced.log.lines.at(-1)).toBe(
+    'setu check: 0 error(s), 0 warning(s), 1 silenced in /app.',
+  );
 });

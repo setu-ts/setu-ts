@@ -82,7 +82,7 @@ it('renders both activation modes and functional internal barrels while preservi
       '/app/package.json': JSON.stringify({
         dependencies: mode === 'class-based' ? { '@setu-ts/decorator-plugin': '^0.10.0' } : {},
       }),
-      '/app/setu.config.ts': 'registerModules; MODULES;',
+      '/app/setu.config.ts': 'registerModules(app.router, app.services); MODULES;',
     });
     expect(await h.run(['generate', 'module', 'orders'])).toBe(0);
     const index = h.fs.read('/app/src/modules/orders/index.ts');
@@ -153,7 +153,13 @@ it('uses member scope for workspaces and reports write refusals and interruption
     '/app/apps/orders/setu.config.ts': 'registerGeneratedRoutes;',
   });
   expect(await h.run(['sync'])).toBe(0);
-  expect(h.log.lines[0]).toContain('orders: updated /app/apps/orders/src/controllers/index.ts');
+  expect(h.log.lines).toContainEqual(
+    expect.stringContaining('orders: updated /app/apps/orders/src/controllers/index.ts'),
+  );
+  // A workspace member's sync also writes its CLI-owned transport module (M138).
+  expect(h.log.lines).toContainEqual(
+    expect.stringContaining('orders: created /app/apps/orders/src/transport/index.ts'),
+  );
   const unsafe = harness({ '/app/src/controllers/index.ts/child': '' });
   expect(await unsafe.run(['sync'])).toBe(1);
   expect(unsafe.err.text()).toContain('Cannot sync /app:');
@@ -169,4 +175,55 @@ it('uses member scope for workspaces and reports write refusals and interruption
   expect(await interrupted.run(['sync'], controller.signal)).toBe(130);
   expect(interrupted.fs.has('/app/src/controllers/index.ts')).toBe(false);
   expect(interrupted.err.text()).toContain('Interrupted; the files this run wrote were removed.');
+});
+
+// M138 §3.7: a workspace member's transport module depends on the manifest and its
+// packages, never on setu.config.ts, so sync rewrites it even when the config
+// cannot be read — it is what a member migrating to it needs first.
+it('writes a member transport module when its config cannot be read, and only then', async () => {
+  const seed = {
+    '/ws/setu.workspace.json': JSON.stringify({
+      version: 2,
+      runtime: 'node',
+      basePort: 3000,
+      broker: 'redis',
+      members: [{ name: 'orders', port: 3000 }],
+    }),
+    '/ws/package.json': '{}',
+    '/ws/apps/orders/package.json': JSON.stringify({
+      dependencies: { '@setu-ts/messaging-plugin': '^0.11.0' },
+    }),
+    // A directory where the config should be: unreadable, so E012.
+    '/ws/apps/orders/setu.config.ts/child': '',
+  };
+  const run = async (args: readonly string[]) => {
+    const fs = createFakeFs(seed);
+    const log = createRecorder();
+    const err = createRecorder();
+    const code = await runCli(args, {
+      fs,
+      cwd: '/ws/apps/orders',
+      now: () => 0,
+      log: log.sink,
+      error: err.sink,
+    });
+    return { fs, code, out: log.text(), err: err.text() };
+  };
+  const synced = await run(['sync']);
+  expect(synced.code).toBe(1);
+  expect(synced.err).toContain('setu sync wrote no barrels: setu.config.ts cannot be read');
+  expect(synced.fs.read('/ws/apps/orders/src/transport/index.ts')).toContain(
+    "broker: 'redis-streams'",
+  );
+  const dry = await run(['sync', '--dry-run']);
+  expect(dry.code).toBe(1);
+  expect(() => dry.fs.read('/ws/apps/orders/src/transport/index.ts')).toThrow();
+
+  // Outside a workspace there is no module, and the message says nothing was written.
+  const fs = createFakeFs({ '/app/package.json': '{}', '/app/setu.config.ts/child': '' });
+  const err = createRecorder();
+  expect(
+    await runCli(['sync'], { fs, cwd: '/app', now: () => 0, log: () => {}, error: err.sink }),
+  ).toBe(1);
+  expect(err.text()).toContain('setu sync wrote nothing: setu.config.ts cannot be read');
 });

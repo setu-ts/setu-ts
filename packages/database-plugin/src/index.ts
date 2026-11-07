@@ -111,6 +111,7 @@ export {
   CosmosTransactionScopeError,
   DatabaseUnavailableError,
   DatabaseTimeoutError,
+  EntityNotFoundError,
   UnknownPayloadFieldError,
   MissingKeyColumnError,
   TenantColumnUnresolvedError,
@@ -121,7 +122,16 @@ export {
   UnsupportedMigrationError,
   UnsupportedQueryFeatureError,
   UnsupportedRawQueryError,
+  VersionConflictError,
 } from './errors.ts';
+
+// Optimistic locking (M128)
+export { deleteVersioned, updateVersioned } from './repositories/versioned-write.ts';
+export type {
+  VersionedDeletable,
+  VersionedWritable,
+  VersionedWriteOptions,
+} from './repositories/versioned-write.ts';
 
 // The data-access port, promoted to `common` in M52c. Re-exported here so a
 // backend author can reach the whole contract from one import, and so the
@@ -153,6 +163,10 @@ export {
   DatabaseTenantDataStore,
   TenantStoreStrategyUnsupportedError,
 } from './tenancy/database-tenant-data-store.ts';
+// Tenant registry (M127) — tenants are rows, for the multi-tenancy plugin's
+// `tenants` option.
+export { createDatabaseTenantRegistry } from './tenancy/database-tenant-registry.ts';
+export type { DatabaseTenantRegistryOptions } from './tenancy/database-tenant-registry.ts';
 
 // Scoped RBAC sources (M110b) — grants and per-scope custom roles read from the
 // application's database, for AuthPlugin's `scopedRbac` option.
@@ -314,3 +328,10 @@ export type {
   BigtableRowKeyMapping,
   BigtableValueEncoding,
 } from './adapters/bigtable/bigtable-mapping.ts';
+/** Database-backed durable agent run store and factory. @since 0.12.0 */
+export {
+  createDatabaseAgentRunStore,
+  DatabaseAgentRunStore,
+} from './agent-runs/database-agent-run-store.ts';
+/** Entity and named-connection mapping for durable agent run storage. @since 0.12.0 */
+export type { DatabaseAgentRunStoreOptions } from './agent-runs/database-agent-run-store.ts';

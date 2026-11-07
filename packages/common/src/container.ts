@@ -24,6 +24,10 @@ export interface InjectionToken<T> {
 /**
  * Creates a distinct frozen injection token without process state.
  *
+ * `T` is erased at runtime; this token performs no runtime type check. Run the
+ * project's type-checker (`tsc --noEmit`, or `deno check` on Deno) to enforce
+ * its type; `start:dev` / `tsx` strips types without checking them.
+ *
  * @param name - Diagnostic name
  *
  * @returns A new identity-keyed token

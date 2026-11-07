@@ -19,6 +19,8 @@
  * therefore asserts the WIRE SEQUENCE, not just the final data — a warm cache
  * fails it.
  *
+ * In this repository:
+ *
  * ```
  * pnpm --dir apps/graphql-demo run interop
  * ```

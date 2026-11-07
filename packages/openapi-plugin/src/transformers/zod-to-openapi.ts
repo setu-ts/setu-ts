@@ -31,6 +31,8 @@ export interface OpenApiSchemaObject {
   minLength?: number;
   /** For strings: maximum length. */
   maxLength?: number;
+  /** For strings: an ECMA-262 regular expression the value must match. */
+  pattern?: string;
   /** For numbers: minimum value. */
   minimum?: number;
   /** For numbers: maximum value. */
@@ -101,11 +103,15 @@ const LEGITIMATELY_EMPTY_TYPES: ReadonlySet<string> = new Set(['any', 'unknown']
  * Zod schema about to be transformed.
  *
  * @param schema - The Zod schema about to be transformed
+ * @param path - JSON Schema path within this conversion, empty for its root
  * @returns A replacement schema object, or `undefined` to transform normally
  *
  * @since 0.3.0
  */
-export type SchemaNodeHook = (schema: unknown) => OpenApiSchemaObject | undefined;
+export type SchemaNodeHook = (
+  schema: unknown,
+  path?: readonly (string | number)[],
+) => OpenApiSchemaObject | undefined;
 
 /**
  * Deletes every own enumerable key of `target` and assigns `source`'s keys in
@@ -130,6 +136,26 @@ function replaceOwnKeys(target: Record<string, unknown>, source: OpenApiSchemaOb
 function zod4DefType(zodSchema: unknown): string {
   const def = (zodSchema as { _zod?: { def?: { type?: unknown } } })._zod?.def;
   return typeof def?.type === 'string' ? def.type : 'unknown';
+}
+
+/**
+ * Whether `clone` derives from `original` through zod's `_zod.parent` chain —
+ * the link `.meta()` and `.describe()` clones carry. A wrapper such as
+ * `.optional()` holds its inner schema as `innerType` instead, so it is not a
+ * clone of it.
+ *
+ * @param clone - The outermost node recorded at a path
+ * @param original - The node being visited at that path
+ * @returns Whether `clone` is a transparent metadata clone of `original`
+ */
+function isCloneOf(clone: unknown, original: unknown): boolean {
+  type Node = { _zod?: { parent?: unknown } };
+  let current = (clone as Node)._zod?.parent;
+  while (current !== undefined) {
+    if (current === original) return true;
+    current = (current as Node)._zod?.parent;
+  }
+  return false;
 }
 
 /**
@@ -233,11 +259,10 @@ function isSchemaMap(value: unknown): value is Record<string, unknown> {
  * {@linkcode OpenApiSchemaObject.type} stays a single type name, which is only true
  * because nothing downstream of here can see an array. And `anyOf` is the
  * spelling OpenAPI 3.0 downgrade tooling understands, where a `type` array
- * is 3.1-only. Without it an application's zod PATCH version silently
- * decided whether a primitive union earned a `components/schemas` entry
- * (`isStructuralShape` keys on `anyOf`), so a regenerated SDK client changed
- * shape for no API reason — which is how this reached the weekly
- * dependency-drift gate (issue #253) rather than a pull request.
+ * is 3.1-only. Before nullable primitives were deliberately kept inline,
+ * omitting this normalization also changed component hoisting across Zod
+ * patch versions (issue #253). The canonical spelling still keeps the
+ * public schema shape and generated clients independent of that spelling.
  *
  * The rewrite is lossless for ANY sibling set, including one no measured zod
  * version produces: sibling keywords stay on the outer object rather than
@@ -353,7 +378,11 @@ export class ZodToOpenApi {
   readonly #channels:
     | {
         /** Claims a unique component name for a surviving `$def`. */
-        readonly onDefinitionClaim?: (hint: string) => string;
+        readonly onDefinitionClaim?: (
+          hint: string,
+          path?: readonly (string | number)[],
+          root?: boolean,
+        ) => string;
         /** Delivers an adapted `$def` under the name claimed for it. */
         readonly onDefinition?: (name: string, schema: OpenApiSchemaObject) => void;
         /** Reports a node that could not be represented (still emits `{}`). */
@@ -368,6 +397,8 @@ export class ZodToOpenApi {
    * Saved/restored because hoisting a child re-enters {@linkcode transform}.
    */
   #zod4ConversionRoot: unknown = undefined;
+  #conversionNodes = new Map<string, unknown>();
+  /** Outermost public schema at each position, excluding transparent parent clones. */
 
   /**
    * Creates a transformer.
@@ -382,7 +413,11 @@ export class ZodToOpenApi {
   constructor(
     onSchema?: SchemaNodeHook,
     channels?: {
-      readonly onDefinitionClaim?: (hint: string) => string;
+      readonly onDefinitionClaim?: (
+        hint: string,
+        path?: readonly (string | number)[],
+        root?: boolean,
+      ) => string;
       readonly onDefinition?: (name: string, schema: OpenApiSchemaObject) => void;
       readonly onUnrepresentable?: (diagnostic: { readonly reason: string }) => void;
     },
@@ -403,7 +438,7 @@ export class ZodToOpenApi {
     // Consulted BEFORE recognition, so a hook sees every node the
     // caller asked about — including one it may want to name even though this
     // transformer would degrade it to `{}`.
-    const replacement = this.#onSchema?.(schema);
+    const replacement = this.#onSchema?.(schema, []);
     if (replacement !== undefined) return replacement;
 
     // Recognize schemas by the public conversion method.
@@ -433,8 +468,24 @@ export class ZodToOpenApi {
    */
   #transformZod4(schema: Zod4SchemaLike, io: SchemaIo): OpenApiSchemaObject {
     const previousRoot = this.#zod4ConversionRoot;
+    const previousNodes = this.#conversionNodes;
     this.#zod4ConversionRoot = schema;
+    this.#conversionNodes = new Map();
     try {
+      if (this.#onSchema !== undefined) {
+        // Transparent metadata clones share a public path with their parent.
+        // Only the outermost clone may claim the name at that path; a wrapper
+        // such as `.optional()` does not hide its inner schema from the hook.
+        schema.toJSONSchema({
+          reused: 'ref',
+          cycles: 'ref',
+          io,
+          unrepresentable: 'any',
+          override: (ctx: Zod4OverrideContext): void => {
+            this.#conversionNodes.set(JSON.stringify(ctx.path), ctx.zodSchema);
+          },
+        });
+      }
       const js = schema.toJSONSchema({
         reused: 'ref',
         cycles: 'ref',
@@ -445,6 +496,7 @@ export class ZodToOpenApi {
       return this.#adaptDocument(js);
     } finally {
       this.#zod4ConversionRoot = previousRoot;
+      this.#conversionNodes = previousNodes;
     }
   }
 
@@ -460,7 +512,14 @@ export class ZodToOpenApi {
     // The conversion ROOT was already consulted by `transform` on entry;
     // consulting it again here would double-count it.
     const isConversionRoot = ctx.zodSchema === this.#zod4ConversionRoot;
-    const replacement = isConversionRoot ? undefined : this.#onSchema?.(ctx.zodSchema);
+    const outermost = this.#conversionNodes.get(JSON.stringify(ctx.path));
+    const replacement =
+      isConversionRoot ||
+      (outermost !== undefined &&
+        outermost !== ctx.zodSchema &&
+        isCloneOf(outermost, ctx.zodSchema))
+        ? undefined
+        : this.#onSchema?.(ctx.zodSchema, ctx.path);
     if (replacement !== undefined) {
       replaceOwnKeys(ctx.jsonSchema, replacement);
       return;
@@ -519,7 +578,14 @@ export class ZodToOpenApi {
 
     // A document with no reused schemas carries no `$defs` at all; the root
     // force-hoist below must still apply to it.
-    const defs = (root.$defs ?? {}) as Record<string, Record<string, unknown>>;
+    // Keyed by the JSON-Pointer token (RFC 6901: `~` as `~0`, `/` as `~1`) the
+    // `$ref` strings carry, so a schema id containing `/` or `~` still finds its
+    // definition (M131b audit F5); an id without them is unchanged.
+    const defs = Object.fromEntries(
+      Object.entries((root.$defs ?? {}) as Record<string, Record<string, unknown>>).map(
+        ([key, value]) => [key.replace(/~/g, '~0').replace(/\//g, '~1'), value],
+      ),
+    ) as Record<string, Record<string, unknown>>;
     delete root.$defs;
 
     // Alias resolution: a hook splice lands INSIDE the mechanical $def (both
@@ -565,9 +631,25 @@ export class ZodToOpenApi {
     // Claim names BEFORE adapting content: defs can be mutually referential
     // (a nested cyclic subschema becomes a self-referencing $def), so a name
     // must never depend on the content being finished.
+    const paths = new Map<string, readonly (string | number)[]>();
+    const findPaths = (node: unknown, path: readonly (string | number)[]): void => {
+      if (Array.isArray(node)) {
+        node.forEach((child, index) => findPaths(child, [...path, index]));
+      } else if (node !== null && typeof node === 'object') {
+        for (const [key, value] of Object.entries(node)) {
+          if (key === '$ref' && typeof value === 'string' && value.startsWith(DEFS_REF_PREFIX)) {
+            const target = value.slice(DEFS_REF_PREFIX.length);
+            if (!paths.has(target)) paths.set(target, path);
+          } else findPaths(value, [...path, key]);
+        }
+      }
+    };
+    findPaths(root, []);
+    for (const key of reachable) findPaths(defs[key], paths.get(key) ?? []);
     const claimed = new Map<string, string>();
     for (const key of reachable) {
-      if (!aliases.has(key)) claimed.set(key, claim(key));
+      if (!aliases.has(key))
+        claimed.set(key, claim(key, paths.get(key), root.$ref === DEFS_REF_PREFIX + key));
     }
     const refTargetFor = (key: string): string => {
       const alias = aliases.get(key);
@@ -590,7 +672,7 @@ export class ZodToOpenApi {
     collectRefs(root, (ref) => {
       if (ref === '#') sawRootCycle = true;
     });
-    const rootName = sawRootCycle ? claim('Schema') : undefined;
+    const rootName = sawRootCycle ? claim('Schema', [], true) : undefined;
 
     const mapped = mapRefs(root, (ref) => {
       if (ref === '#' && rootName !== undefined) {

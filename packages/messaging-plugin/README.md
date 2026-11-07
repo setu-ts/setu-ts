@@ -209,8 +209,8 @@ above is stated per broker rather than left implied.
 
 With `'redis-streams'`, connection errors of the `ioredis` client the broker builds go to the
 application logger — the first error of an outage at `warn`, identical repeats at `debug`, the
-recovery at `info` — instead of `ioredis` printing every reconnect failure to `console.error`. An
-injected client gets no listener: it belongs to the caller.
+recovery at `info` — instead of `ioredis` printing every reconnect failure to `console.error`. Since
+0.12.0 an injected client gets the same listener, removed again when the broker stops.
 
 **node-redis.** To use node-redis instead of ioredis, pass
 `{ broker: 'redis-streams', client: fromNodeRedis(createClient({ url })) }` (`fromNodeRedis` from
@@ -444,6 +444,8 @@ topics, which used to attach silently to the first topic's consumer. A consumer 
 release carries no `setu.queue`; it is accepted when its durable name equals the requested queue and
 its filter matches the topic.
 
+<!-- version:history -->
+
 **A queue-less subscription is a shared durable group.** Without a `queue` — `subscribe()`, and
 `respond()` with no queue included — the subscription uses ONE durable JetStream consumer per topic,
 named from `defaultQueue` (default `'messaging-consumers'`): the group is `<defaultQueue>.<topic>`.
@@ -508,6 +510,8 @@ try {
 }
 ```
 
+<!-- version:history -->
+
 The timeout does not cancel the transport or prove the message was dropped, so account for possible
 delivery before retrying. The Kafka, Pub/Sub and RabbitMQ message texts are unchanged from before,
 so a caller matching on the text keeps working. On Redis Streams the bound covers the publish's
@@ -515,6 +519,26 @@ so a caller matching on the text keeps working. On Redis Streams the bound cover
 `timeout` and held by the framework's deadline as well; before 0.11.0 the NATS bound was the
 client's fixed 5 s. Configure a longer bound for slow brokers, or `0` for an unbounded wait (the
 previous behaviour on Redis Streams).
+
+`publishTimeoutMs: 0` removes only this plugin's bound. An injected node-redis client wrapped in
+`fromNodeRedis` (the generated `nodeRedisClient(url)`) still applies the adapter's own
+`commandTimeoutMs`, 15000 ms by default, so its `XADD` rejects with `Command timed out` after 15 s.
+For a longer or unbounded wait on node-redis, raise that bound too:
+`fromNodeRedis(factory, { commandTimeoutMs: 0 })`.
+
+**What the client receives (M131a).** `PublishTimeoutError` answers `504 Gateway Timeout` with the
+detail "The backend did not answer; the request may have been applied." On Redis Streams a driver
+failure is classified the same way. A refusal before any send — a refused or unresolvable
+connection, a closed or offline client, ioredis with its offline queue switched off — means the
+message was not sent: `BackendUnavailableError` from `@setu-ts/common`, `503` with "The request was
+not applied.". A lost connection (`MaxRetriesPerRequestError`, "Connection is closed.", a reset) or
+an expired bound (`Command timed out`) answers `BackendOutcomeUnknownError`, `504`, in every case:
+the message may already be stored, because ioredis rejects commands already sent with these errors
+and both drivers write a command queued while disconnected as soon as a socket opens. A stopped
+Redis therefore answers `504` once the retry budget or the bound runs out, except node-redis's first
+refused connect, which is a `503`. A client that retries a `504` should send an idempotency key.
+Both are exported by `@setu-ts/common` and keep the driver error as `cause` for the log; it is never
+served. Any other driver error is rethrown unchanged and answers a masked `500`.
 
 ### Kafka consumer groups
 
@@ -536,7 +560,12 @@ still-uncommitted partitions to the minimum start offset advertised by the curre
 message published after `subscribe()` resolves on any member is delivered to the group, including
 when several members first start together; nothing published before the first member’s `subscribe()`
 is replayed. `subscribe()` returns without waiting for the join. A group with any committed offset
-captures nothing; committed partitions and subsequent joins are left untouched.
+captures nothing; committed partitions and subsequent joins are left untouched. If a member has
+already delivered messages before that first join seeks backwards, it records the first/last
+successfully delivered window per partition. Historical offsets before that window still reach the
+handler; offsets inside it resolve for commit without invoking the handler again. The window is
+removed once delivery advances beyond it. This suppresses that first-join replay only; ordinary
+Kafka redelivery after failures or rebalances retains its at-least-once contract.
 
 **Group members are trusted.** The minimum is taken over what every current member advertises, so
 any client able to join the group can move a new group's start earlier, which replays history to it;

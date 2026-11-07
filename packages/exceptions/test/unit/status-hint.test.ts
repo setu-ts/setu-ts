@@ -116,6 +116,31 @@ describe('errorHandler — HTTP status hint', () => {
     }
   });
 
+  it('honours a `problem` carried by the hint under both Problem Details formats', async () => {
+    // The hint IS an `ErrorResponseInit`, so a package that can only brand its
+    // error may still identify a registered problem type. `errorHandler`'s
+    // hint path funnels through `buildErrorFromInit`, which carries it.
+    const problem = {
+      type: 'https://iana.org/assignments/http-problem-types#quota-exceeded',
+      title: 'Quota Exceeded',
+      extensions: { 'violated-policies': ['per-user'] },
+    };
+    const hint: HttpStatusHint = { ...HINT, problem };
+
+    for (const format of ['rfc9457', 'rfc7807'] as const) {
+      const { ctx, responseSnapshot } = createFakeContext();
+
+      await errorHandler({ format })(ctx, nextThrows(withHttpStatusHint(new Error('boom'), hint)));
+
+      const body = parseBody(responseSnapshot().body);
+      expect(body.type, format).toBe(problem.type);
+      expect(body.title, format).toBe(problem.title);
+      expect(body['violated-policies'], format).toEqual(['per-user']);
+      expect(body.status, format).toBe(501);
+      expect(body.detail, format).toBe(HINT.detail);
+    }
+  });
+
   it('logs the UNMASKED diagnostic while serving only the hint detail', async () => {
     // The operator keeps everything: the hint changes the response, never the
     // log. Losing this would trade one blind spot for another.

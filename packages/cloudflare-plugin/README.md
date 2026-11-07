@@ -286,6 +286,49 @@ of moving the row, and a cursor D1 cannot use — malformed, made under a differ
 wrong shape for the target — is refused with `InvalidCursorError` (`400`) before any query runs.
 Both classes are exported from `@setu-ts/common`.
 
+## Vectorize
+
+`VectorizeVectorStore` serves `CAPABILITIES.VECTOR_STORE` from the current `Vectorize` binding. It
+implements the `IVectorStoreAdapter` contract from `@setu-ts/common`, so register it with
+`VectorStorePlugin` from `@setu-ts/vector-store-plugin`; the two packages never import each other.
+
+```typescript
+import { VectorizeVectorStore } from '@setu-ts/cloudflare-plugin';
+import type { VectorizeIndexLike } from '@setu-ts/cloudflare-plugin';
+import { VectorStorePlugin } from '@setu-ts/vector-store-plugin';
+
+export const vectorStore = VectorStorePlugin({
+  adapter: new VectorizeVectorStore({ index: env.DOCUMENTS_INDEX as VectorizeIndexLike }),
+  collections: [{ name: 'documents', dimensions: 768, filterable: { tag: 'string' } }],
+});
+```
+
+Create the index with cosine distance, and a metadata index for every declared filterable field,
+before the first write:
+
+```bash
+npx wrangler vectorize create documents --dimensions=768 --metric=cosine
+npx wrangler vectorize create-metadata-index documents --property-name=tag --type=string
+```
+
+One adapter serves one index, so it serves one collection: declaring a second collection on the same
+`VectorizeVectorStore` fails registration with `VectorOperationUnsupportedError`.
+
+The scope is the namespace. Vector ids are global to an index, so the stored id is
+`vectorRecordKey(subtle, scope, id)` and the caller's id travels in metadata: two tenants writing
+the same id do not overwrite each other. `ensureCollection` checks only the binding's reported
+dimensions — the current API does not report the metric — so the `--metric cosine` flag is the only
+guarantee of matching distance. A filter on a field without a metadata index is not refused by the
+binding; the query may just return fewer matches.
+
+Vectorize cannot delete by namespace or by filter. `replaceSource` and `deleteScope` throw
+`VectorOperationUnsupportedError` rather than being emulated: upsert deterministic ids and delete
+the stale ones yourself, or give each tenant group its own index. Writes are applied asynchronously,
+so a read may not see a write yet. One index holds 50,000 namespaces on Workers Paid (1,000 on
+Free), which caps the tenants a single index can serve. Vectorize stores at most 10 KiB of metadata
+per vector, and the record's content travels in it, so a record whose metadata, content included,
+exceeds 10 KiB as JSON throws `VectorRecordError` before any record of the write is sent.
+
 ## Durable Objects — realtime backplane and distributed lock
 
 Both features need a Durable Object class **your application exports**, plus a wrangler stanza. No
@@ -480,8 +523,8 @@ job.
 
 ## Not in this package
 
-- **Hyperdrive, Vectorize, Workers AI, Analytics Engine.** Reachable now through
-  `bindings.get<T>('NAME')`; each becomes a first-class port only when an application needs one.
+- **Hyperdrive, Workers AI, Analytics Engine.** Reachable now through `bindings.get<T>('NAME')`;
+  each becomes a first-class port only when an application needs one.
 
 ## Documentation
 
@@ -525,6 +568,7 @@ MIT
 | `R2Storage`                               | class     |
 | `RealtimeBackplaneObjectCore`             | class     |
 | `ReplyInboxObjectCore`                    | class     |
+| `VectorizeVectorStore`                    | class     |
 | `WorkersBroker`                           | class     |
 | `WorkersCron`                             | class     |
 | `WorkersQueue`                            | class     |
@@ -581,6 +625,9 @@ MIT
 | `RealtimeBackplaneObjectCoreOptions`      | interface |
 | `ReplyInboxBinding`                       | interface |
 | `ReplyInboxObjectCoreOptions`             | interface |
+| `VectorizeIndexLike`                      | interface |
+| `VectorizeVectorLike`                     | interface |
+| `VectorizeVectorStoreOptions`             | interface |
 | `WorkersBrokerOptions`                    | interface |
 | `WorkersCronOptions`                      | interface |
 | `WorkersMessagingArm`                     | interface |
@@ -641,6 +688,8 @@ The store takes `namespace` (required), `keyPrefix` (default `'idempotency:'`), 
 messages) and `timeoutMs` (default 5,000; `0` disables). It advertises `maxRecordBytes` of 120,000 —
 under the KV-backed Durable Object value limit — and has no `isHealthy`, because probing it would
 create and bill an object.
+
+<!-- version:history -->
 
 ## D1 payload refusals (M119e, 0.11.0)
 

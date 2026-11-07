@@ -43,6 +43,10 @@ export const DOCS_NAV: DocsNavGroup[] = [
       { slug: 'plugins', label: 'Plugin catalog' },
       { slug: 'custom-plugins', label: 'Custom plugins' },
       { slug: 'health-indicators', label: 'Health indicators' },
+      { slug: 'mcp', label: 'Tools for AI agents (MCP)' },
+      { slug: 'ai', label: 'AI calls and budgets' },
+      { slug: 'durable-runs', label: 'Durable agent runs' },
+      { slug: 'retrieval', label: 'Retrieval (vector search)' },
     ],
   },
   {
@@ -51,6 +55,7 @@ export const DOCS_NAV: DocsNavGroup[] = [
       { slug: 'migration-nestjs', label: 'From NestJS' },
       { slug: 'migration-fastify', label: 'From Fastify' },
       { slug: 'upgrading', label: 'Upgrading Setu-TS' },
+      { slug: 'versioning', label: 'Versioning policy' },
     ],
   },
   {

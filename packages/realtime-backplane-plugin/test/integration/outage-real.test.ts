@@ -209,6 +209,9 @@ describe.each(REDIS_CLIENTS)('%s', (redisVariant) => {
       'rejects, is recorded failed, and publishing recovers — silent and dropped connections',
       {
         skip: REDIS_URL === undefined,
+        // Three 30 s publish waits (baseline, after unpause, after restart), two
+        // 6 s outage settles and the container operations exceed the 30 s default.
+        timeout: 150_000,
       },
       async () => {
         const port = new URL(REDIS_URL!).port === '' ? 6379 : Number(new URL(REDIS_URL!).port);
@@ -234,10 +237,26 @@ describe.each(REDIS_CLIENTS)('%s', (redisVariant) => {
           CAPABILITIES.REALTIME_DIAGNOSTICS,
         );
         const frame = { kind: 'ws-room' as const, origin: 'x', name: 'lobby', data: 'hi' };
+        // Frames from another origin come back through this backplane's own
+        // subscription, which shows the subscriber connection is live.
+        let received = 0;
+        await backplane.subscribe(() => {
+          received++;
+        });
         let paused = false;
+        let failure: unknown;
         try {
-          await backplane.publish(frame);
-          expect(publishRecord(source!)).toMatchObject({ succeeded: 1, failed: 0 });
+          // The first command on a loaded runner can outlast the short command
+          // bound before anything is paused, so the baseline waits for one
+          // publish to land. (The bare `Command timed out` CI reported came from
+          // the stop after the restart, below; a publish failure is wrapped.)
+          await waitTrue(
+            () => settleWithin(backplane.publish(frame), 3_000).then((r) => r === 'resolved'),
+            'baseline publish',
+            30_000,
+          );
+          const baseline = publishRecord(source!)!;
+          expect(baseline.succeeded).toBeGreaterThanOrEqual(1);
 
           // (1) SILENT: the socket stays open while the server answers nothing — a
           // paused or partitioned host that sends no reset. Before the command
@@ -246,8 +265,15 @@ describe.each(REDIS_CLIENTS)('%s', (redisVariant) => {
           await docker(['pause', containerId]);
           paused = true;
           const silent = await settleWithin(backplane.publish(frame), COMMAND_TIMEOUT_MS * 4);
-          expect(silent).toBe('rejected: Command timed out');
-          expect(publishRecord(source!)).toMatchObject({ succeeded: 1, failed: 1 });
+          // M131a X88-5: classified as outcome-unknown (504); the driver's
+          // `Command timed out` stays the `cause`.
+          expect(silent).toBe(
+            'rejected: realtime-backplane-plugin: redis transport: the backend did not answer; the request may have been applied',
+          );
+          expect(publishRecord(source!)).toMatchObject({
+            succeeded: baseline.succeeded,
+            failed: baseline.failed + 1,
+          });
           expect(publishRecord(source!)!.lastDurationMs).toBeGreaterThanOrEqual(
             COMMAND_TIMEOUT_MS - 50,
           );
@@ -265,23 +291,48 @@ describe.each(REDIS_CLIENTS)('%s', (redisVariant) => {
           const before = publishRecord(source!)!;
           await docker(['stop', containerId]);
           const dropped = await settleWithin(backplane.publish(frame), COMMAND_TIMEOUT_MS * 4);
-          expect(dropped).toBe('rejected: Command timed out');
+          // Queued while disconnected and rejected by the bound: a driver would
+          // have written it as soon as a socket opened, so the outcome is
+          // unknown (504; M131a audits).
+          expect(dropped).toBe(
+            'rejected: realtime-backplane-plugin: redis transport: the backend did not answer; the request may have been applied',
+          );
           expect(publishRecord(source!)).toMatchObject({ failed: before.failed + 1 });
 
-          // Restarted, the same connections carry the next publish.
+          // Restarted, the same connections carry the next publish. Wait until one
+          // is also delivered: each node-redis connection backs off on its own
+          // schedule (up to about 2.2 s), so the subscriber can still be
+          // reconnecting when the publisher is back. Stopping then queues
+          // UNSUBSCRIBE and QUIT behind that reconnect, past the 1.5 s command
+          // bound, and the stop fails with a bare `Command timed out`.
           await docker(['start', containerId]);
           await waitTrue(
-            () => settleWithin(backplane.publish(frame), 3_000).then((r) => r === 'resolved'),
-            'publish after restart',
+            async () => {
+              const before = received;
+              if ((await settleWithin(backplane.publish(frame), 3_000)) !== 'resolved')
+                return false;
+              const deadline = performance.now() + 1_000;
+              while (received === before && performance.now() < deadline) await wait(20);
+              return received > before;
+            },
+            'publish after restart, delivered',
             30_000,
           );
           expect(publishRecord(source!)!.succeeded).toBeGreaterThan(before.succeeded);
+        } catch (error) {
+          failure = error;
+          throw error;
         } finally {
           if (paused) {
             await runProcess('docker', { args: ['unpause', containerId] });
           }
           await runProcess('docker', { args: ['start', containerId] });
-          await app.stop();
+          // close() rethrows the first failure of releasing its connections, such as
+          // `Command timed out`. Thrown here it would replace the body's failure, which
+          // is how CI came to report a bare timeout with no test frame.
+          await app.stop().catch((error: unknown) => {
+            if (failure === undefined) throw error;
+          });
         }
       },
     );

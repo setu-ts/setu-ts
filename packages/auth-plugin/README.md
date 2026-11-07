@@ -12,8 +12,8 @@ The package declares two optional drivers, which npm therefore installs alongsid
 `RedisRateLimitStore` lazy-loads `ioredis`, and a `saml` sign-in provider lazy-loads
 `@node-saml/node-saml` (which needs the `nodejs_compat` flag on Cloudflare Workers). Nothing imports
 either unless you construct that store or configure that provider — the defaults need no driver. See
-[Optional npm drivers](https://github.com/setu-ts/setu-ts/blob/main/docs/plugins.md#optional-npm-drivers)
-for what that means on npm versus Deno.
+[Optional npm drivers](https://setu-ts.dev/docs/plugins/#optional-npm-drivers) for what that means
+on npm versus Deno.
 
 The plugin always registers JWT and authentication services. It registers authorization only when
 the optional `rbac` configuration is supplied:
@@ -318,6 +318,7 @@ import {
   requireAuth,
   requirePermission,
   requireRole,
+  requireScopes,
 } from '@setu-ts/auth-plugin';
 
 app.router.get('/profile', { middleware: [requireAuth()], handler });
@@ -334,6 +335,7 @@ app.router.post('/bulk', {
   middleware: [requireAuth(), requireAllPermissions(['users:read', 'users:write'])],
   handler,
 });
+app.router.get('/tools', { middleware: [requireScopes('tools:read', 'tools:list')], handler });
 app.router.get('/health', { middleware: [publicRoute()], handler });
 ```
 
@@ -455,6 +457,7 @@ Workers application passes `new PasswordHasher(runtime, { iterations: 100_000 })
 | `strategies`                     | `readonly IAuthStrategy[]`                            | -                   | Caller-supplied strategies, appended after every built-in in declaration order.                                                                                                                                                                 |
 | `middleware`                     | `false \| AuthMiddlewareOption`                       | `{ priority: 300 }` | Move, exclude paths from, or disable the global authentication middleware.                                                                                                                                                                      |
 | `issuers`                        | `readonly TrustedIssuer[]`                            | -                   | Outside identity providers whose access tokens are accepted.                                                                                                                                                                                    |
+| `resourceServer`                 | `ResourceServerOptions`                               | -                   | M132 RFC 9728 protected-resource metadata and the `resource_metadata` challenge parameter.                                                                                                                                                      |
 | `http`                           | `IAuthHttp`                                           | `fetch`-based       | Outbound HTTP for issuer key sets, discovery documents, and the sign-in token exchange.                                                                                                                                                         |
 | `signIn`                         | `SignInConfig`                                        | -                   | Sign-in with outside providers; registers `IAuthSessionService`. Requires `SessionPlugin`.                                                                                                                                                      |
 
@@ -519,16 +522,18 @@ AuthPlugin({
 - **Algorithms.** RS256, PS256, ES256, ES384 and EdDSA (also spelled `Ed25519`), narrowed per issuer
   with `algorithms`. `none` and every `HS*` algorithm are refused before any key is looked up, so a
   token signed with HMAC using the provider's public key as the secret cannot pass.
-- **Claims.** `iss` exact, `aud` must contain `audience`, `exp` required; `exp`, `nbf` and a future
-  `iat` allow `clockToleranceSec` (default 30, at most 300). Expiry is refused at
-  `now >= exp + clockToleranceSec`; not-before is refused while `now + clockToleranceSec < nbf`.
-  `toPrincipal` receives the full verified claims and decides where roles live — the plugin never
-  guesses. **Namespace the id whenever this issuer is not the only identity source** — `sub` is
-  unique only within its issuer, and a self-issued `jwt`, another issuer, an API key, a session or a
-  custom strategy can each produce the same id. ``{ id: `${claims.iss}|${claims.sub}` }`` (as in the
-  example) separates an outside `sub` from the other sources only if none of them can produce an id
-  of that form — a self-issued `sub` or a user-chosen username could — so namespace every source
-  (for example ``{ id: `local|${id}` }``) or keep the other sources' ids free of the separator.
+- **Claims.** `iss` exact, `aud` (a string or an array) must contain ANY configured `audience`
+  value, `exp` required; `exp`, `nbf` and a future `iat` allow `clockToleranceSec` (default 30, at
+  most 300). Expiry is refused at `now >= exp + clockToleranceSec`; not-before is refused while
+  `now + clockToleranceSec < nbf`. A present but malformed RFC 8693 `act` claim refuses the token
+  (`act-malformed`), never ignored. `toPrincipal` receives the full verified claims and decides
+  where roles live — the plugin never guesses. **Namespace the id whenever this issuer is not the
+  only identity source** — `sub` is unique only within its issuer, and a self-issued `jwt`, another
+  issuer, an API key, a session or a custom strategy can each produce the same id.
+  ``{ id: `${claims.iss}|${claims.sub}` }`` (as in the example) separates an outside `sub` from the
+  other sources only if none of them can produce an id of that form — a self-issued `sub` or a
+  user-chosen username could — so namespace every source (for example ``{ id: `local|${id}` }``) or
+  keep the other sources' ids free of the separator.
 - **Rotation.** The key set is cached for `keySet.ttlMs` (default 10 minutes). A token naming an
   unknown `kid` triggers at most one refetch per `keySet.minRefreshIntervalMs` (default 60 s), and
   concurrent refetches share one request, so forged `kid`s cannot turn requests into outbound
@@ -547,13 +552,118 @@ AuthPlugin({
   reason per issuer, and repeats at `debug`; a successful refresh resets it. Both lines carry the
   fixed reason code, never the token.
 
-**Give the API its own audience.** Access-token type (`typ: at+jwt`, RFC 9068) is not enforced, so a
-provider's **ID token** whose `aud` equals `audience` could verify as an access token. That happens
-when an API reuses a sign-in client's id as its audience; configure a distinct resource identifier
-for the API instead. A token carrying Keycloak's `typ: "ID"` claim is refused either way, but other
-providers do not mark their ID tokens. **Multi-tenant Entra ID** (`common`/`organizations`) is not
-supported, because its discovery document carries a `{tenantid}` issuer template that cannot equal a
-configured issuer; a single-tenant Entra issuer works.
+**Give the API its own audience.** RFC 9068 access-token type (`typ: at+jwt`) is opt-in per issuer
+with `requireAccessTokenType: true`: the verifier then refuses, before key lookup, a JOSE header
+`typ` other than `at+jwt` or `application/at+jwt` (ASCII-case-insensitive), reporting the fixed
+reason `typ-mismatch`. It is off by default because Entra, Keycloak and others do not stamp it, so a
+provider's **ID token** whose `aud` equals a configured audience could still verify as an access
+token. That happens when an API reuses a sign-in client's id as its audience; configure a distinct
+resource identifier for the API instead, or turn the check on. A token carrying Keycloak's
+`typ: "ID"` claim is refused either way, but other providers do not mark their ID tokens.
+**Multi-tenant Entra ID** (`common`/`organizations`) is not supported, because its discovery
+document carries a `{tenantid}` issuer template that cannot equal a configured issuer; a
+single-tenant Entra issuer works.
+
+## Acting as a resource server
+
+An API or an MCP server can accept access tokens issued by an outside authorization server.
+Configure `issuers` to verify them and `resourceServer` to publish RFC 9728 protected-resource
+metadata and put the metadata URL in every Bearer challenge:
+
+```typescript
+import { AuthPlugin } from '@setu-ts/auth-plugin';
+
+AuthPlugin({
+  issuers: [
+    {
+      name: 'workforce',
+      issuer: 'https://id.example.com',
+      audience: ['api://orders', 'https://api.example.com'], // any match is accepted
+      keys: { discovery: true },
+      requireAccessTokenType: true,
+      toPrincipal: (claims) =>
+        typeof claims.sub === 'string' ? { id: `workforce|${claims.sub}` } : null,
+    },
+  ],
+  resourceServer: {
+    resource: 'https://api.example.com',
+    authorizationServers: ['https://id.example.com'],
+    scopesSupported: ['orders:read', 'orders:write'],
+    resourceName: 'Orders API',
+  },
+});
+```
+
+`resource` is published verbatim and used to derive the metadata path:
+`/.well-known/oauth-protected-resource` followed by the resource's path with a trailing `/` removed,
+so `https://api.example.com` serves `/.well-known/oauth-protected-resource` and
+`https://api.example.com/mcp` serves `/.well-known/oauth-protected-resource/mcp`. The document
+carries `resource`, `authorization_servers` (defaulting to the distinct `issuer` values of
+`issuers`), `scopes_supported`, `resource_name` and `bearer_methods_supported: ['header']`, omitting
+any absent or empty member. `GET` on that path is unguarded, answers `200` `application/json` with
+`Cache-Control: public, max-age=300` and `Access-Control-Allow-Origin: *`, and is fetched before a
+client has a token.
+
+With a bearer strategy (`jwt` or `issuers`) or `resourceServer` configured, the plugin adds a
+`WWW-Authenticate` header to a refused request: a `401` gets `Bearer` — with `error="invalid_token"`
+when a credential was sent in the header and scheme the bearer strategies read
+(`Authorization: Bearer`, or the configured `jwt.header`/`jwt.scheme`), bare otherwise — and a scope
+`403` gets `Bearer error="insufficient_scope", scope="<required scopes>"`.
+`resource_metadata="<url>"` is appended to both when `resourceServer` is configured. An
+application-set header is left alone, an unrelated status (including the sign-in redirect) is
+untouched, and nothing from the request is echoed into the header.
+
+### Requiring OAuth scopes
+
+`requireScopes` enforces OAuth 2.0 scopes from the token's `scope` (space-delimited) or `scp`
+(string or array) claim. It is ALL-of: every listed scope is required, and an anonymous request is
+`401` while a signed-in principal missing one is `403` with the challenge above. These are OAuth
+scopes, **not** the tenant or organisation grants `scopedRbac`'s `requireScopedRole` calls "scopes".
+
+```typescript
+import { requireScopes } from '@setu-ts/auth-plugin';
+
+app.router.get('/orders', {
+  middleware: [requireScopes('orders:read')],
+  handler,
+});
+```
+
+Each scope must be an RFC 6749 §3.3 `scope-token` (no space, `"` or `\`) and may be listed only
+once; a bad or duplicate scope throws `AuthPluginConfigurationError` when the guard is built, not
+when a request arrives. The guard brands `{ authenticated: true, scopes }`, so
+`@setu-ts/openapi-plugin`'s `deriveSecurity` documents the scopes.
+
+**The audience list is the "issued for me" check.** A token is accepted when its `aud` contains any
+configured audience, so list what the authorization server stamps for this resource. It need not be
+the resource URL: Entra stamps `api://<guid>` or an application id, Auth0 an API identifier.
+Configuring `resourceServer` does **not** require `resource` to appear among the audiences.
+
+`requireAccessTokenType: true` opts into RFC 9068: a JOSE header `typ` other than `at+jwt` or
+`application/at+jwt` is refused before key lookup with the reason `typ-mismatch`. It defaults to
+`false` because Entra, Keycloak and others do not stamp it.
+
+### Refusing or requiring delegated tokens
+
+When a token carries an RFC 8693 `act` claim, `principal.actor` is `{ id, claims }` — the id is the
+claim's non-empty `sub`, else its `client_id`, and `claims` are the claim's members except a nested
+`act`, which is never read. A route can then require a direct user or a delegated one:
+
+```typescript
+import { requireAuth } from '@setu-ts/auth-plugin';
+
+const directOnly = requireAuth({ delegation: 'forbid' });
+app.router.post('/billing', { middleware: [directOnly], handler });
+```
+
+`delegation` is `'allow'` (the default), `'forbid'` or `'require'`; a refusal is `403`. A present
+but malformed `act` — not an object, or an object with no usable `sub`/`client_id` — refuses the
+token itself (`401`), so an unidentifiable delegation cannot pass as a direct user.
+`RefreshTokenService` keeps a delegated principal delegated: the access token it mints, and every
+rotation, carries the actor back as the `act` claim, so exchanging a delegated token for a
+self-issued one does not turn the agent into the user. The principal's OAuth scopes travel the same
+way, as the `scope` claim, so `requireScopes` still admits the exchanged token; a value that is not
+a scope token is dropped rather than split.
 
 ## Signing a user in
 
@@ -678,6 +788,10 @@ app.router.post('/login', async (ctx) => {
 });
 ```
 
+This route reads a JSON body. Under `SessionPlugin({ csrf })` an unsafe request without a valid
+token answers `403`, so a JSON client sends the token in the `x-csrf-token` header, and a form posts
+it in the `_csrf` field.
+
 **Logging out.** `POST /auth/logout` ends the local session and redirects to `/` — or, for the one
 `oidc` provider that sets `rpInitiatedLogout`, when the session signed in through that provider, to
 its advertised end-session endpoint with `client_id` and `post_logout_redirect_uri`. A password
@@ -709,10 +823,128 @@ app.router.get('/account', (ctx) =>
   principal, or `null` to make the request anonymous. It runs per request, so it is opt-in; a
   throwing re-read is treated as anonymous, never as the stale snapshot.
 - **Ending every session of one user** is `signIn.sessionStamp` — see below.
-- **`IAuthSessionService.current(ctx)` is the stored snapshot**: neither re-read runs, so it still
-  returns a user whose session `refreshPrincipal` or the stamp has ended. Decide who may act from
-  `ctx.request.user`, which the `auth-session` strategy re-checked. The plugin's own passkey
-  registration routes re-check the same way.
+- **`IAuthSessionService.current(ctx)` reads the stored snapshot without re-checking it.** Use
+  `ctx.request.user` for authorization. A reader fault or `refreshPrincipal` refusal can leave the
+  snapshot present while this request is anonymous; a definite stamp mismatch deletes the auth
+  record, so subsequent snapshot reads return null. The plugin's passkey registration uses the
+  verified read and applies the same mismatch revocation.
+
+### In the full-stack template
+
+The generated `/login` page is a placeholder: it stores the typed email in the session and checks no
+password. To sign in for real, give the starter's `auth` arm a password-only `signIn` and a
+`local.verify` — `signIn` alone satisfies the plugin's passive-strategy rule, and without
+`local.verify` the `verifyCredentials` call below always answers `null`:
+
+```typescript
+import type { IPrincipal } from '@setu-ts/common';
+import type { AuthPluginOptions } from '@setu-ts/auth-plugin';
+
+declare function findUser(email: string, password: string): Promise<IPrincipal | null>;
+
+// The `auth` arm of the options `createFullStackAppFromConfig` reads.
+export const auth: AuthPluginOptions = {
+  signIn: { providers: [] },
+  local: { verify: (email, password) => findUser(email, password) },
+};
+```
+
+A React Router action never receives the kernel request, and `IAuthSessionService.signIn` needs it.
+Wrap the sign-in in a request-bound module service, whose factory receives the request; the action
+reaches it with `getService`. Generate the module, then keep only its token, its service and its
+index:
+
+```bash
+setu g module account
+rm src/modules/account/account.{controller,types,test,e2e.test}.ts
+```
+
+Replace `src/modules/account/account.service.ts` with the sign-in service, then run `setu sync`,
+which rewrites the module's index to register only the service. `account.token.ts` keeps exporting
+`ACCOUNT`, typed by this interface, and the module index already registers
+`requestService(accountService)` under it:
+
+```typescript
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IAuthService, IAuthSessionService, IRequestContext } from '@setu-ts/common';
+
+/** What the sign-in page calls. Built once per request, so it can write the session. */
+export interface AccountService {
+  signIn(email: string, password: string): Promise<boolean>;
+}
+
+export function accountService(ctx: IRequestContext): AccountService {
+  return {
+    async signIn(email, password) {
+      const auth = ctx.services.get<IAuthService>(CAPABILITIES.AUTH);
+      const principal = await auth.verifyCredentials({ identifier: email, secret: password });
+      if (!principal) return false;
+      const authSession = ctx.services.get<IAuthSessionService>(CAPABILITIES.AUTH_SESSION);
+      await authSession.signIn(ctx, principal, { methods: ['pwd'] });
+      return true;
+    },
+  };
+}
+```
+
+The login page's action (`app/routes/_auth/login.tsx`) calls it and keeps the template's hidden
+`_csrf` field, so the session plugin's form CSRF check still runs before the action. The template's
+`requireUser` (`app/server/require-user.server.ts`) reads the `userEmail` the placeholder wrote,
+which a real sign-in never writes: read the signed-in principal from `userContext` instead, which
+the plugin sets on every authenticated request, and keep setting `currentUserContext`, which the
+products loader reads through `getCurrentUser`. The session cookie reaches the browser on the
+action's redirect, because the session plugin commits the session after the page has rendered. A
+page may import only a module's `*.token.ts` by value (`setu check` refuses anything else as
+`setu.E017`), through the template's aliases, `~kernel/*` for `src/` and `~/*` for `app/`:
+
+`app/routes/_auth/login.tsx` — the action:
+
+```typescript
+import { getService } from '@setu-ts/react-router-plugin';
+import type { RouterContextKey } from '@setu-ts/react-router-plugin';
+import { ACCOUNT } from '~kernel/modules/account/account.token.ts';
+
+export async function action({
+  request,
+  context,
+}: {
+  request: Request;
+  context: { get<V>(key: RouterContextKey<V>): V };
+}) {
+  const form = await request.formData();
+  const signedIn = await getService(context, ACCOUNT).signIn(
+    String(form.get('email') ?? ''),
+    String(form.get('password') ?? ''),
+  );
+  if (!signedIn) return { error: 'Invalid email or password.' };
+  return new Response(null, { status: 303, headers: { location: '/products' } });
+}
+```
+
+`app/server/require-user.server.ts` — the guard, with the imports it now needs:
+
+```typescript
+import { userContext } from '@setu-ts/react-router-plugin';
+import type { RouterContextKey } from '@setu-ts/react-router-plugin';
+import { currentUserContext } from '~/server/context-keys.server.ts';
+
+interface Context {
+  get<V>(key: RouterContextKey<V>): V;
+  set<V>(key: RouterContextKey<V>, value: V): void;
+}
+
+export function requireUser({ context }: { context: Context }, next: () => Promise<Response>) {
+  const principal = context.get(userContext);
+  // The template throws redirect('/login') here; the thrown Response ends the chain.
+  if (principal === null) throw new Response(null, { status: 302, headers: { location: '/login' } });
+  context.set(currentUserContext, { email: principal.id });
+  return next();
+}
+```
+
+`principal.id` is the id your `local.verify` returned. Once the action no longer writes the session,
+remove `getSession` from the login route's imports: React Router refuses to build a route that keeps
+an import from a `.server.ts` module no loader or action uses.
 
 ### Ending every session of a user
 
@@ -720,8 +952,22 @@ Keep a stamp on your user record — a `sessionVersion` counter, or a prefix of 
 Laravel, Django and Devise do — and give `signIn` a reader for it. `IAuthSessionService.signIn`
 records a SHA-256 digest of the stamp; every request compares the digest of the current stamp with
 it, in constant time. Change the stamp and every session of that user answers anonymous on its next
-request — `ctx.request.user` is unset, and passkey registration refuses it — on the cookie strategy
-as well as the store strategy.
+request — `ctx.request.user` is unset, and passkey registration refuses it. A definite mismatch
+removes the auth record and regenerates the writable HTTP session when the old cookie is next
+presented on a request the session strategy authenticates, even if that request throws (strategies
+answer first-match, so a request that also carries a valid bearer token is authenticated by the JWT
+strategy and leaves the cookie unchecked); the store strategy deletes the old session id then, so a
+later stamp restore cannot revive it. When that request completes normally, the browser also
+receives a replacement cookie without its auth record; a request that throws sends none. Revocation
+needs that presentation: an id never presented while the stamp differed, and any copy of an
+encrypted-cookie session (which has no server-side record, even after it was presented),
+authenticate again if the stamp is restored. So a stamp must only move forward on either strategy:
+to end sessions, set a new value, never an old one. A throwing reader or malformed return suspends
+only this request and leaves the record and id unchanged, so an identity-store outage does not sign
+everyone out. `verifiedCurrent(ctx)` applies the same mutation for the plugin's own identity reads.
+Read-only `fromHeaders` callers (including WebSocket upgrades) remain suspension-only because they
+cannot commit a session change, and so does the auth middleware when a custom `middleware.priority`
+runs it before the session middleware has loaded the session.
 
 ```typescript
 import type { IPrincipal } from '@setu-ts/common';
@@ -1369,17 +1615,54 @@ await refresh.revoke(next!.refreshToken); // logout
 
 `rateLimitMiddleware(options)` is a standalone fixed-window limiter, independent of `AuthPlugin` and
 registered under no capability token. Over-limit requests are short-circuited with **429**
-(`Retry-After` always set; `RateLimit-Limit`/`RateLimit-Remaining`/`RateLimit-Reset` set unless
-`standardHeaders: false` — `Reset` and `Retry-After` are both delta-seconds). The default store is
-in-memory (single-process); use `RedisRateLimitStore` for multi-instance deployments (pass an
-ioredis-compatible `client`, or `ioredis` is lazily imported on first use).
+(`Retry-After` always set; the draft-11 `RateLimit` and `RateLimit-Policy` fields set unless
+`standardHeaders: false`). Both fields are Structured Field Lists (RFC 9651), and each limiter
+appends one member:
+
+```
+RateLimit-Policy: "default";q=100;w=60
+RateLimit: "default";r=99;t=60
+```
+
+`q` is the quota (0 to 999999999999999), `w` the window in whole seconds (rounded up), `r` the
+remaining budget, and `t` the non-negative delta-seconds until reset. `t` and `Retry-After` are
+capped at 999999999999999 (the RFC 9651 sf-integer maximum). Give two stacked limiters distinct
+`policyName`s — both append to the same two lists, so a shared name makes their budgets
+indistinguishable (`RateLimit-Policy: "a";q=10;w=60, "b";q=5;w=60`).
+
+The factory validates its options once and throws before any request: `max` must be an integer from
+0 to 999999999999999 (`RangeError`), `windowMs` a positive integer number of milliseconds
+(`RangeError`), and `policyName` a non-empty printable-ASCII string (`TypeError`).
+
+A store result whose `count` is not a non-negative whole number, or whose `resetTime` is not finite,
+answers 429 for a full window (fail closed): the limiter refuses rather than serves when it cannot
+read its own counter.
+
+The default store is in-memory (single-process); use `RedisRateLimitStore` for multi-instance
+deployments (pass an ioredis-compatible `client`, or `ioredis` is lazily imported on first use).
+`RedisRateLimitStore` re-arms a key it finds without an expiry, so a lost `PEXPIRE` cannot leave a
+counter that answers 429 for ever.
 
 The 429 body uses `@setu-ts/common`'s error-responder seam, so it follows the application's
-configured error format. The operational paths `/live`, `/ready`, `/health`, `/metrics`,
-`/openapi.json`, and `/docs` are exempt by default through `DEFAULT_RATE_LIMIT_EXCLUDED_PATHS`; an
-`exclude` list replaces the defaults, so spread the constant to extend them. `RedisRateLimitStore`
-prefixes its keys with `'setu:ratelimit:'` by default; set `keyPrefix` per application when several
-share Redis, or `''` to keep pre-M90a keys.
+configured error format. Under the Problem Details formats (`rfc9457`, `rfc7807`) it identifies
+itself as the registered `quota-exceeded` problem:
+
+```json
+{
+  "type": "https://iana.org/assignments/http-problem-types#quota-exceeded",
+  "title": "Quota Exceeded",
+  "status": 429,
+  "detail": "Rate limit exceeded",
+  "instance": "/orders",
+  "violated-policies": ["default"]
+}
+```
+
+The default `'default'` format is unchanged. The operational paths `/live`, `/ready`, `/health`,
+`/metrics`, `/openapi.json`, and `/docs` are exempt by default through
+`DEFAULT_RATE_LIMIT_EXCLUDED_PATHS`; an `exclude` list replaces the defaults, so spread the constant
+to extend them. `RedisRateLimitStore` prefixes its keys with `'setu:ratelimit:'` by default; set
+`keyPrefix` per application when several share Redis, or `''` to keep pre-M90a keys.
 
 `RedisRateLimitStore` is constructed by the application, so no plugin wires its connection errors.
 Pass `connectionErrorReporter` (built with `createConnectionErrorReporter` from `@setu-ts/common`
@@ -1449,17 +1732,64 @@ rateLimitMiddleware({
 
 | Option            | Type                     | Default                                               | Description                                                              |
 | ----------------- | ------------------------ | ----------------------------------------------------- | ------------------------------------------------------------------------ |
-| `windowMs`        | `number`                 | -                                                     | Window length in ms.                                                     |
-| `max`             | `number`                 | -                                                     | Max requests per window per key.                                         |
+| `windowMs`        | `number`                 | -                                                     | Window length in ms; a positive integer.                                 |
+| `max`             | `number`                 | -                                                     | Max requests per window per key; 0 to 999999999999999.                   |
 | `store`           | `RateLimitStore`         | `MemoryRateLimitStore`                                | Counter backend.                                                         |
 | `keyGenerator`    | `(ctx) => string`        | principal → client IP → `IRequest.ip` → `'anonymous'` | Caller identity for the counter.                                         |
 | `message`         | `string`                 | `'Rate limit exceeded'`                               | 429 body message.                                                        |
-| `standardHeaders` | `boolean`                | `true`                                                | Emit `RateLimit-*` headers.                                              |
+| `standardHeaders` | `boolean`                | `true`                                                | Emit the draft-11 `RateLimit` and `RateLimit-Policy` fields.             |
+| `policyName`      | `string`                 | `'default'`                                           | Policy name in both fields and `violated-policies`; use distinct names.  |
 | `exclude`         | `readonly PathPattern[]` | six operational paths                                 | Paths skipped entirely; strings match exactly and regexps test the path. |
 
 `MemoryRateLimitStore` reclaims expired windows on `increment()` with a doubling-threshold sweep
 starting at 1,024 entries. Each key retains its own window duration; live windows are never evicted
 for a hard cap, so active rate limits survive cleanup.
+
+## Weighted quotas (M134)
+
+`createQuota({ name, store, limit, window, runtime })` is a standalone reserve-then-settle quota.
+Choose non-negative safe integer units (tokens or micro-dollars). `reserve(key, amount)` atomically
+admits only within the limit and returns a frozen `QuotaReservation`; `settle(receipt, actual)`
+refunds or adds the difference to the original window, keeping usage between zero and
+`Number.MAX_SAFE_INTEGER`. `release(receipt)` settles zero. Settlement is idempotent, including
+concurrent calls; fabricated and foreign receipts throw `TypeError`. A store failure fails closed
+with `QuotaStoreUnavailableError`, which carries a value-free 503 status hint like
+`RateLimitStoreUnavailableError`.
+
+`name` matches `[a-z0-9-]+`; keys are non-empty, well-formed Unicode strings of at most 512 UTF-8
+bytes. `limit` is a number or an asynchronous per-key callback returning a number or undefined
+(unlimited but still recorded). Both stores refuse a reservation that would take the counter above
+`Number.MAX_SAFE_INTEGER`, even on an unlimited key, using the normal not-admitted path rather than
+a 503. Amounts and resolved limits reject NaN, infinities, negative, fractional and unsafe integers
+before storage. Windows are epoch-aligned positive integer milliseconds, `utc-day` or `utc-month`.
+Usage expires at the window's end plus one day; settlement after a boundary still charges its old
+window.
+
+Use `new MemoryQuotaStore(runtime)` for one process, or `new RedisQuotaStore({ client, namespace })`
+for a shared budget. `IQuotaRedisClient` requires ioredis-style `eval(script, numkeys, ...args)` and
+`quit()`; node-redis can use common's `fromNodeRedis` adapter. The namespace must be non-empty and
+well-formed UTF-16. Redis passes caller data through KEYS/ARGV, uses atomic scripts and absolute
+expiry, and wraps failures with their original cause. `close()` quits the injected client, so
+dedicate that client to the store. The application owns the injected client's `'error'` listener;
+the store attaches none.
+
+The store never times out a call itself: the injected client must bound commands. Use ioredis
+`new Redis(url, { commandTimeout: 15_000 })` or node-redis through
+`fromNodeRedis(createClient({ url }))`, which bounds commands at 15 seconds by default. An unbounded
+client lets a stalled Redis hold every request.
+
+`QuotaExceededError` (`name` `'QuotaExceededError'`) carries the policy in `policyName`, whole
+`retryAfterSeconds` (at least one), and a 429 status hint. Its constructor throws `TypeError` unless
+the policy name is a non-empty string and the retry value is a safe integer of at least 1. Under
+`errorHandler({ format: 'rfc9457' })` its body has the IANA quota-exceeded type, title
+`Quota Exceeded`, detail `The quota for this request is spent.`, `violated-policies` and
+`retry-after` extensions. It carries no usage, tenant or limit. The hint contract has no headers;
+call `respondQuotaExceeded(ctx, error)` to include `Retry-After`. The request-rate limiter uses the
+same body initializer and preserves its existing bytes and headers.
+
+The [AI guide](https://github.com/setu-ts/setu-ts/blob/main/docs/ai.md) and
+[example](https://github.com/setu-ts/setu-ts/tree/main/apps/ai-chat) demonstrate trusted per-tenant
+keys, conservative provider-call reservations, settlement and transactional usage records.
 
 ## Diagnostics
 
@@ -1503,8 +1833,10 @@ can document which operations require authentication without either package impo
 is documented as protected; one carrying `publicRoute()` is documented as public.
 
 The brand is symbol-keyed and non-enumerable — guard behaviour is unchanged — and it carries
-authentication presence only. An OpenAPI security requirement names a scheme, not a role, so
-`requireRole('admin')` documents that authentication is required and nothing about the role.
+authentication presence, plus the OAuth scopes a `requireScopes` guard requires. An OpenAPI security
+requirement names a scheme, not a role, so `requireRole('admin')` documents that authentication is
+required and nothing about the role; scopes are merged, sorted and de-duplicated into the derived
+requirement's scope list.
 
 ## License
 
@@ -1516,6 +1848,7 @@ MIT
 | ----------------------------------- | --------- |
 | `authMiddleware`                    | function  |
 | `AuthPlugin`                        | function  |
+| `createQuota`                       | function  |
 | `defaultRateLimitKey`               | function  |
 | `definePolicy`                      | function  |
 | `publicRoute`                       | function  |
@@ -1529,6 +1862,8 @@ MIT
 | `requireRole`                       | function  |
 | `requireScopedPermission`           | function  |
 | `requireScopedRole`                 | function  |
+| `requireScopes`                     | function  |
+| `respondQuotaExceeded`              | function  |
 | `safeReturnTo`                      | function  |
 | `AuthorizationDeniedError`          | class     |
 | `AuthPluginConfigurationError`      | class     |
@@ -1536,12 +1871,16 @@ MIT
 | `MalformedPasswordHashError`        | class     |
 | `MemoryAccessTokenRevocationStore`  | class     |
 | `MemoryPasskeyStore`                | class     |
+| `MemoryQuotaStore`                  | class     |
 | `MemoryRateLimitStore`              | class     |
 | `MemoryRefreshTokenStore`           | class     |
 | `MemorySamlRequestStore`            | class     |
 | `MemoryTotpStore`                   | class     |
 | `PasswordHasher`                    | class     |
+| `QuotaExceededError`                | class     |
+| `QuotaStoreUnavailableError`        | class     |
 | `RateLimitStoreUnavailableError`    | class     |
+| `RedisQuotaStore`                   | class     |
 | `RedisRateLimitStore`               | class     |
 | `RefreshTokenService`               | class     |
 | `SamlRuntimeLoadError`              | class     |
@@ -1564,6 +1903,9 @@ MIT
 | `IJwtService`                       | interface |
 | `IPasskeyStore`                     | interface |
 | `IPrincipal`                        | interface |
+| `IQuota`                            | interface |
+| `IQuotaRedisClient`                 | interface |
+| `IQuotaStore`                       | interface |
 | `ISamlRequestStore`                 | interface |
 | `ITotpStore`                        | interface |
 | `JwtOptions`                        | interface |
@@ -1587,6 +1929,7 @@ MIT
 | `RefreshTokenStore`                 | interface |
 | `RequireAuthOptions`                | interface |
 | `ReserveAttemptResult`              | interface |
+| `ResourceServerOptions`             | interface |
 | `RoleDefinition`                    | interface |
 | `SamlModule`                        | interface |
 | `SamlPendingRequest`                | interface |
@@ -1614,6 +1957,8 @@ MIT
 | `IssuerKeySource`                   | type      |
 | `PasskeySaveResult`                 | type      |
 | `PolicyDenial`                      | type      |
+| `QuotaOptions`                      | type      |
+| `QuotaReservation`                  | type      |
 | `RecoveryCodesResult`               | type      |
 | `RecoveryVerifyResult`              | type      |
 | `RefreshPrincipal`                  | type      |

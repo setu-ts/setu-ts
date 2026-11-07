@@ -12,13 +12,66 @@ Hono app ──OTLP/HTTP:4318──►  Collector ┼─────────
 (exporter:'otlp')             (contrib) └──────────────► Azure App Insights
 ```
 
-Reference config:
-[`docker/otel-collector/collector-config.yaml`](../docker/otel-collector/collector-config.yaml)
-(note: the path is relative to the repo root, not this file).
+Reference config. Save the following as `collector-config.yaml` in the directory you run the
+collector from; the validate commands below use that local file.
+
+```yaml
+receivers:
+  # The plugin emits OTLP/HTTP on :4318. gRPC (:4317) is included for other producers.
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+      grpc:
+        endpoint: 0.0.0.0:4317
+
+processors:
+  # memory_limiter MUST be first so the collector sheds load before OOM.
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 80
+    spike_limit_percentage: 25
+  batch:
+    send_batch_size: 512
+    timeout: 5s
+
+exporters:
+  # Datadog — API key + site (e.g. datadoghq.com, datadoghq.eu, us3.datadoghq.com).
+  datadog:
+    api:
+      key: ${env:DD_API_KEY}
+      site: ${env:DD_SITE}
+
+  # New Relic — OTLP native ingest. US: https://otlp.nr-data.net  EU: https://otlp.eu01.nr-data.net
+  # The `api-key` header carries the New Relic LICENSE key (not a user API key).
+  otlphttp/newrelic:
+    endpoint: ${env:NEW_RELIC_OTLP_ENDPOINT}
+    headers:
+      api-key: ${env:NEW_RELIC_LICENSE_KEY}
+
+  # Azure Application Insights — full connection string
+  # (InstrumentationKey=...;IngestionEndpoint=...).
+  azuremonitor:
+    connection_string: ${env:APPLICATIONINSIGHTS_CONNECTION_STRING}
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [datadog, otlphttp/newrelic, azuremonitor]
+  telemetry:
+    logs:
+      level: info
+```
+
+The repository keeps the same configuration, under a header comment, at
+[`docker/otel-collector/collector-config.yaml`](../docker/otel-collector/collector-config.yaml), and
+the Compose `telemetry` profile mounts that copy.
 
 > **Scope.** This page and that config are the telemetry fan-out reference only. To run the
 > collector beside an application, use the `telemetry` profile of the Compose stack, which mounts
-> this same file: see
+> the repository copy: see
 > [Docker and Kubernetes — Local development with Compose](./deployment.md#local-development-with-compose).
 
 ## 1. App side — point the plugin at the collector
@@ -77,7 +130,7 @@ The five variables from section 3 must be set first, or validation fails on the 
 vendor, so placeholders are enough to check the file:
 
 ```bash
-otelcol-contrib validate --config docker/otel-collector/collector-config.yaml
+otelcol-contrib validate --config collector-config.yaml
 ```
 
 If the binary is not installed locally, validate via the image:
@@ -87,7 +140,7 @@ docker run --rm \
   -e DD_API_KEY=placeholder -e DD_SITE=datadoghq.com \
   -e NEW_RELIC_OTLP_ENDPOINT=https://otlp.nr-data.net -e NEW_RELIC_LICENSE_KEY=placeholder \
   -e 'APPLICATIONINSIGHTS_CONNECTION_STRING=InstrumentationKey=00000000-0000-0000-0000-000000000000;IngestionEndpoint=https://example.invalid/' \
-  -v "$PWD/docker/otel-collector:/cfg" \
+  -v "$PWD:/cfg" \
   otel/opentelemetry-collector-contrib:latest validate --config /cfg/collector-config.yaml
 ```
 

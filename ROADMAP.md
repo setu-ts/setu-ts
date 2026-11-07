@@ -16089,6 +16089,816 @@ through the `dev` script, and teardown across the npm/shell/tsx/node chain.
 
 ---
 
+## Milestone 127: A Registry of Real Tenants
+
+**Package(s):** `packages/common` (the `ITenantRegistry` port), `packages/multi-tenancy-plugin` (the
+`tenants` option, the middleware step, the cache, `lookupTenant`), `packages/database-plugin`
+(`createDatabaseTenantRegistry`); `apps/multi-tenant`; docs.
+
+**Source:** the CMS demo planned against published `0.11.0` (2026-10-31), which had to write its own
+known-tenant resolver; the design is in the maintainer's working note
+`hono-enterprise-plans/next-release-framework-gaps.md` (gap 1), every fact in it read from the
+`0.11.0` source.
+
+**The problem.** A tenant is whatever the request names. The shipped resolvers return `some({ id })`
+from a trimmed header, the left-most host label, a path segment or an unverified JWT claim, and
+nothing compares it with a list of tenants that exist (`multi-tenancy-plugin/src/resolvers/*`,
+`middleware/tenant-middleware.ts:121-190`). Column isolation stops this becoming a data leak, but
+every write under an invented tenant creates rows, a typo looks like an empty site instead of an
+error, and anyone can mint unlimited tenants — rows, cache keys and per-tenant rate-limit buckets.
+Finbuckle.MultiTenant on ASP.NET Core requires a tenant store for this reason.
+
+**Decisions the plan takes:**
+
+1. **A registry port in common:** `ITenantRegistry.lookup(id): Promise<Option<ITenant>>`, `none()`
+   meaning "does not exist or is not active". The returned `ITenant` replaces the resolver's bare
+   `{ id }`, so `name` and `metadata` reach `ctx.request.tenant`.
+2. **One option, `tenants`,** taking an array of ids or tenants (an internal static registry built
+   once at `register()`, duplicates and empty ids refused), an `ITenantRegistry`, or a
+   `RegistryFactory` resolved in `onInit` (the `dataStore` arm). Omitted: today's behaviour.
+   `unknownTenantStatus` (default 404).
+3. **The middleware step** between resolution and `replaceTenant`: a hit replaces the tenant; a miss
+   answers `Unknown Tenant` with `unknownTenantStatus` and runs nothing downstream; a registry that
+   throws answers 503 and never falls open. No detail echoes the caller-supplied id. Excluded paths
+   still bypass the lookup; the lookup runs before the session tenant-binding check.
+4. **`createDatabaseTenantRegistry({ entity, idField, activeField? })`** in database-plugin, a
+   `RegistryFactory` like `createDatabaseTenantDataStore()`; a falsy `activeField` is a miss.
+5. **A bounded positive-hit cache** for non-static registries: TTL (default 30 s) plus an entry AND
+   a byte bound, because the key is a request-supplied string. Misses are not cached.
+6. **Non-HTTP ingress:** `IMultiTenancyService.lookupTenant(id)` so queue, scheduler and messaging
+   handlers validate a payload's tenant through the same registry.
+
+**Gate:** the short-circuit test (a miss runs no handler), the 503-on-throw test, the cache bounds,
+`createDatabaseTenantRegistry` on memory and Drizzle, and `apps/multi-tenant` on
+`tenants: ['acme', 'globex']` with its smoke asserting an unknown tenant answers 404. The change
+crosses a trust boundary, so the milestone is **security-audited** by a fresh agent before it merges
+(CLAUDE.md, `.roo/skills/security-audit/SKILL.md`).
+
+---
+
+## Milestone 128: Optimistic Locking, and the Database Plugin Under Faults
+
+**Package(s):** `packages/database-plugin`, `packages/common` (optional tenant-store members),
+`packages/multi-tenancy-plugin` (delegation); docs.
+
+**Source:** the CMS demo (gap 2 of the working note) and, folded in by the maintainer's decision of
+2026-11-01, the database-plugin fault group from the `0.11.0` smoke programme
+(`smoke/X94-X95-FINDINGS.md`, `smoke/CMS-DEMO-FINDINGS.md`, grouped in `smoke/OPEN-AFTER-0110.md` as
+G1). Closes **X94-1 (High)**, **X94-2**, **V11-5** and **X94-3**.
+
+### Part A — the fault rows (first: it holds the programme's only High)
+
+- **X94-1 (High)** — a connection lost while a Drizzle × PostgreSQL Unit-of-Work transaction is open
+  crashes the Node process: the `pg` `Client` checked out inside `db.transaction(...)` has no
+  `'error'` listener, so `57P01` is an unhandled `'error'` event. Reproduced in isolation; the same
+  kill during a plain query answers 500 and the process lives; Prisma over `@prisma/adapter-pg`
+  survived the identical phase. M119e's listener covers idle pool clients only.
+- **X94-2** — outage-time driver errors answer a generic 500 on every backend (pg 57P01 and
+  "Connection terminated unexpectedly", Prisma P1001/P2028/P2039, MongoDB wait-queue / pool-cleared
+  / `NotWritablePrimary`, `SQLITE_BUSY`), while the pool-timeout path of the same outages is already
+  a 503/504. `errors/classify.ts` lacks those anchors.
+- **V11-5** — `IDatabaseService.transaction()` classifies EVERY error its work throws as a driver
+  error, so an inbox handler's refused HTTP call is reported as a database fault.
+- **X94-3** — `getRepository()` rebuilds its data source and wrapper on every call
+  (`services/database-service.ts:261-266`: `_createDataSource`, `wrapDataSource`'s spread and ~10
+  closures, `new InternalRepo`): ~1.0 µs CPU per request on Drizzle, ~1.8 µs on Prisma — the whole
+  point-read gap measured against NestJS 12 (Fastify) and Hono. Fetched once, Setu uses less CPU
+  than both.
+
+### Part B — optimistic locking
+
+Every app re-derives read-version → `updateWhere(id, { version }, …)` → re-read on `null` to tell
+404 from 409, and the tenant repository cannot do it at all (`ITenantRepository.update` has no
+precondition). Decisions:
+
+1. **`updateVersioned` / `deleteVersioned`**, free functions over `updateWhere`/`deleteWhere` taking
+   the structural minimum (`{ updateWhere?, findById }`), so one implementation serves
+   `IRepository`, unit-of-work repositories and tenant repositories. The helper owns the version
+   field (default `version`) and refuses before any I/O on an invalid expected version, a `data`
+   that already sets the field, or a repository without conditional writes (the existing
+   `conditional-write` 501).
+2. **`VersionConflictError`** (409 hint) and, if absent, `EntityNotFoundError` (404 hint), each
+   carrying the entity but no ids or values.
+3. **Optional `updateWhere?`/`deleteWhere?`** on `ITenantDataStore` and `ITenantRepository`;
+   `DatabaseTenantDataStore` merges the caller's precondition into the tenant-column precondition it
+   already builds, refusing a `where` that names the tenant column; `MemoryTenantDataStore` too.
+4. **Not in scope:** a per-entity version-field declaration in adapter options.
+
+**Decisions the plan takes for Part A:** where the transaction-scoped client gets its listener (and
+what the request in flight answers), the new classifier anchors per driver with the set kept as test
+data, how `transaction()` tells the work's own errors from the driver's, and how `getRepository`
+memoizes per entity without sharing a tenant- or transaction-scoped repository and while keeping the
+closed-service refusal.
+
+**Gate:** the X94-1 reproduction (kill the backend while a Drizzle transaction is open and idle) on
+a real PostgreSQL — the process lives and the request answers 503 (a kill landing on an in-flight
+statement answers 503 or 504, never a crash); the classifier table per driver; the versioned row
+added to `conditional-write-conformance.test.ts` across all eight adapters and a transaction table
+as data; the 409 Problem Details field by field; and the database benchmark
+(`~/setu-benchmarks/2026-10-31-db/`) re-run for the X94-3 before/after.
+
+---
+
+## Milestone 129: `setu client` — the Typed Client as a Command
+
+**Package(s):** `packages/cli`, `packages/common` (`IOpenApiService` promoted from openapi-plugin),
+`packages/openapi-plugin`; docs and agent briefs.
+
+**Source:** the CMS demo (gap 3 of the working note): every project writes the same script around
+`generateOpenApiClient`, and the generated file drifts from the API with nothing to catch it.
+
+**Decisions the plan takes** (the verb, flags and exit codes are compared with Kiota, Orval and
+openapi-typescript before they are fixed — the repository rule):
+
+1. **Load the document** by booting the project the way plugin commands already do (`loadApp`, a
+   no-port `start()`, `getSpec()`, `stop()` in a `finally`), or from `--input <file|url>` for
+   Workers projects and apps whose start needs a live database. A named refusal when openapi-plugin
+   is not registered.
+2. **Generate with the project's own `@setu-ts/sdk`**, lazily imported and awaited inside a
+   `try`/`catch`; the CLI gains no sdk dependency.
+3. **Write a managed file** through the CLI's write-safety path, with `--dry-run`.
+4. **`--check`** regenerates in memory and exits 1 on drift — a CI gate beside `setu check`.
+
+**Gate:** an e2e that scaffolds a REST project, adds openapi and sdk, runs `setu client`,
+type-checks the output, calls an endpoint through it, then changes a route and asserts `--check`
+exits 1.
+
+---
+
+## Milestone 130: The Full-Stack Template — Kernel Modules Behind the Pages
+
+**Package(s):** `packages/react-router-plugin` (`getService`), `packages/cli` (the full-stack
+template, `setu g module --page`, `setu check`), `packages/starters/full-stack-starter`; docs. Also
+the full-stack half of the `0.11.0` smoke group G5.
+
+**Source:** the CMS demo (gap 4 of the working note) and the maintainer's structure decisions of
+2026-11-01; the generated-output rows of `smoke/OPEN-AFTER-0110.md` G5.
+
+**The problem.** A loader cannot see the kernel request, so each kernel service a page needs is
+wired by hand in four places (a context key, a `context.set` in `populateLoadContext`, an accessor,
+usually a page-side adapter). The template keeps business logic page-side across `app/services/`,
+`app/features/` and `app/models/`, and "services" means one thing in `app/` and another in `src/`.
+The CMS demo's shortcut — one key exposing the whole kernel request (`getKernel(context)`) — defeats
+the explicitness the keys exist for.
+
+**Decided (maintainer, 2026-11-01):**
+
+1. **Kernel modules own business logic.** `src/modules/<name>/` holds the service, its types and its
+   `/api` routes; pages call the same service in process — no HTTP hop — so one service feeds the
+   pages and the public API.
+2. **`app/` is `routes/`, `components/`, `lib/` (client-safe) and `server/` (server-only page glue:
+   guards such as `requireUser`, session / CSRF / current-user access).** `app/models/`,
+   `app/features/`, `app/services/` and `app/config/` go.
+3. **Loaders reach services with `getService<T>(context, TOKEN)`**, bound to the current request's
+   tenant and principal; `app/` imports only TYPES from `src/` (a `~kernel/*` alias), and a lint
+   rule refuses value imports from it. Values that are not services (session, CSRF token, current
+   user) keep explicit keys.
+
+**Decisions the plan takes:** how `getService` binds to the request (M125's per-request scope is the
+expected seam), how a functional-style module exposes a request-bound service, how token modules are
+allowed through the lint rule, `setu g module <name> --page`, and keeping the `contextKeyFor()`
+identity rule across the separately bundled SSR build.
+
+**Smoke rows folded in (G5's template half):** X85-1 (`components.json` declares `lucide` but
+nothing installs `lucide-react`), X91-6 and V11-7 (`/openapi.json` lists the page catch-all `/*`,
+`/assets/*` and the dev-only `/__vite/*`), X91-7 (no `handleError`: every unknown URL prints a stack
+trace to stderr), X85-3 (the dev HMR socket through the app port fails on Node and Deno, logged at
+error), X85-2 (Bun reloads the document on a component edit), V11-19 (a "Deploying to Cloudflare
+Workers" README section in every non-Workers full-stack project), X91-5 (generated POST routes
+answer 403 to plain API clients, unexplained) and X91-2 (`g module` writes full-stack tests without
+a CSRF token).
+
+**Gate:** the scaffold e2e boots a full-stack project, `setu g module articles --page`, requests the
+page signed in and asserts the data came from the module's service; a template baseline asserts no
+hand edit to `setu.config.ts` is needed for a page to use a module's service; the folded rows each
+re-checked.
+
+**Shipped (M130).** As decided, with two plan-time choices recorded here: the "lint rule" of
+decision 3 is a `setu check` finding, `setu.E017` (with `setu.E018` for a page it cannot parse),
+because it is the one gate every runtime's `check` script runs (maintainer decision, 2026-11-03);
+and a module's request-bound service is a `requestService` factory over the kernel request context,
+resolved through `resolveRequestService` in `common`, rather than M125's DI scope, which the
+functional-only template does not install.
+
+---
+
+## Milestone 131: The `v0.11.0` Smoke Closeout
+
+**Source:** the `v0.11.0` smoke programme, run 2026-10-31 against the published npm artifacts — the
+regression run (`smoke/V0110-REGRESSION.md`: 59 of 66 V10 rows closed, 7 partial, one regression),
+Part 19's X85 steps 6–7 (`smoke/X83-X86-FINDINGS.md`), Part 20's X87–X93
+(`smoke/X87-X93-FINDINGS.md`), Part 21's soaks (`smoke/X94-X95-FINDINGS.md`) and the CMS demo
+(`smoke/CMS-DEMO-FINDINGS.md`). Grouped in `smoke/OPEN-AFTER-0110.md`. The database group is M128
+and the full-stack template group is M130; V10-33 and V10-45 remain as documented contracts (no row
+work), and V10-63's idempotency half is a re-check, not a defect. The rest is four letters, by the
+maintainer's choice of 2026-11-01 (fewer, larger letters than M119's nine), **regression first**.
+
+| Letter    | Kind   | Shape                                                             | Rows                                                                                                                                                    | Packages                                                                                                                                                                                                                    |
+| --------- | ------ | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **M131a** | design | Redis, node-redis and readiness — **holds the regression V11-10** | V11-10, X88-1, X88-2, X88-3, X88-4, X88-5, X88-6, X88-7, X88-8, X88-9, X88-10, V11-11                                                                   | `queue`, `cache`, `scheduler`, `realtime-backplane`, `idempotency`, `messaging`, `notification`, `health`, `telemetry`, `logger`, `common`, `cli`, `auth` (§3.5 only), `exceptions` (tests)                                 |
+| **M131b** | fix    | kernel, runtime and plugin contracts                              | X92-1, X95b-1, X92-2, X87-3, X90-2, X90-3, X90-4, X90-5, X90-6, V11-13, X89-1, V10-2 remainder, V11-6, X92-3, X92-4, V11-1, V11-12                      | `runtime`, `kernel`, `exceptions`, `di`, `decorator`, `resilience`, `auth`, `messaging`, `openapi`, `sdk`, `diagnostics`, `react-router`, `full-stack-starter`, `view`, `cli`, `metrics-plugin`, `session-plugin`, `common` |
+| **M131c** | fix    | CLI gates, generators and workspace deploy                        | X91-1, X91-3, V11-8 (= X89-2), X93-10, X87-1, V11-15, X91-4, V10-27 remainder, X87-2, X87-4, X87-5, X87-6, V10-50 remainder, V11-3, V11-4, V11-9, X93-8 | `cli`                                                                                                                                                                                                                       |
+| **M131d** | docs   | documentation, examples and the website                           | X90-1, X93-1, X93-2, V11-18, V10-16 remainder, X89-3, V11-14, V11-16, V11-17, X91-8, X93-3…X93-7, X93-9, V11-2                                          | `docs/`, `apps/`, READMEs, agent cards, the website, CHANGELOG                                                                                                                                                              |
+
+**Sequence.** M131a first: **V11-10** is the only regression in `0.11.0` — a STOPPED Redis now reads
+`up` with `reachable: 'unknown'` on the queue indicator, because M119b mapped every unanswered probe
+to `up` and ioredis queues commands for a stopped server, so a refused connection times out like a
+hung one. It may ship ahead of the rest of the letter on its own `fix/…` branch. M131b and M131c can
+start at once; M131d batches the documentation at the end, after the code letters change what the
+docs must say. M128 (the High) is sequenced before every letter here.
+
+### Milestone 131a: Redis, node-redis and Readiness
+
+**Package(s):** `queue-plugin`, `cache-plugin`, `scheduler-plugin`, `realtime-backplane-plugin`,
+`idempotency-plugin`, `messaging-plugin`, `notification-plugin`, `health-plugin`,
+`telemetry-plugin`, `logger-plugin`, `common`, `cli`
+
+- **V11-10 (regression)** — the queue indicator reads `up`/`reachable: 'unknown'` for a STOPPED
+  Redis (0.10.0: `down` at once); the queue-plugin README still promises `down`.
+- **X88-1, X88-2, X88-3** — node-redis from the CLI: `setu add` leaves the Redis-backed plugins in
+  memory and `add queue --queue redis` adds ioredis; the scaffold's `.env` `REDIS_URL` is read
+  before ConfigPlugin loads `.env`; the generated `src/node-redis.ts` passes no `onError`, so an
+  outage logs no reason and a down Redis at boot fails after 15.3 s with a bare "Command timed out".
+- **X88-5** — against a paused Redis, `queue.add()` and backplane `publish()` answer 500 while the
+  work WAS enqueued (a retrying client doubles the job); an uncaught `PublishTimeoutError` is a 500.
+- **X88-4, X88-7, X88-10** — tracing: `instrumentations.ioredis` sees none of the plugins' clients
+  (`await import()` is not patched); Redis Streams poll spans attach to the subscribing request; the
+  node-redis trace arm is missing from the cards and from `setu add telemetry`.
+- **X88-8** — a malformed `REDIS_URL` prints its password to stderr, and redaction misses a password
+  inside a URL string. Touches redaction, so the letter is **security-audited** before it merges.
+- **X88-6, X88-9** — `publishTimeoutMs: 0` is not unbounded on node-redis; the queue logs "recurring
+  scheduling failed" at error on every poll during an outage.
+- **V11-11** — an SMTP outage still fails `/ready` through the `notification` indicator, which
+  probes the mailer with no readiness option (V10-49's remainder).
+
+### Milestone 131b: Kernel, Runtime and Plugin Contracts
+
+**Package(s):** `runtime`, `kernel`, `exceptions`, `di-plugin`, `decorator-plugin`,
+`resilience-plugin`, `auth-plugin`, `messaging-plugin`, `openapi-plugin`, `sdk`,
+`diagnostics-plugin`, `react-router-plugin`, `full-stack-starter`, `view-plugin`, `cli`,
+`metrics-plugin`, `common`
+
+- **X92-1** — on Node a taken app port crashes the process: `NodeHttpAdapter.listen` awaits a
+  `serve()` that returns synchronously and never waits for `listening`/`error` (the M126 note on
+  `@hono/node-server` names the same mechanism). **X92-2**, **X87-3** — a devtool-port conflict and
+  `npm start` without a build end in raw stack traces.
+- **X95b-1** — a client that cancels an upload is logged at error as a 500.
+- **X90-2 … X90-6** — container and kernel contracts: wrong-type typed tokens caught only by `tsc`;
+  boot validation stopping at a decorated controller's subgraph; `IResponse.setHeaders` not atomic;
+  a request scope disposed at send time while a timed-out handler runs; route-pattern refusals as a
+  plain `Error` naming no controller or method.
+- **V11-13** — a retry `limit` below 1 never runs the wrapped function.
+- **X89-1** — a `sessionStamp` change only suspends sessions; reverting the stamp revives them.
+- **V10-2 remainder** — a new Kafka group's first-join seek can still replay delivered messages.
+- **V11-6** — a reused schema is named after the operation slot that first used it.
+- **X92-3, X92-4** — the diagnostics listener's 32-socket eviction can drop a paired request;
+  `setu devtool --help` prints a Deno usage line from the npm CLI.
+- **V11-1, V11-12** — React Router refuses `Origin: null` in a hand-composed full-stack app; the
+  view layout has no doctype.
+
+### Milestone 131c: CLI Gates, Generators and Workspace Deploy
+
+**Package(s):** `packages/cli`
+
+- **X91-3** — `setu check` misses a deleted registration call: an import alone counts as wired.
+- **V11-8 (= X89-2)** — false W001 warnings when the config is merely unclassifiable.
+- **X93-10** — E001 fails `check` and `build` when a service file does not export the placeholder
+  `describe<Name>`.
+- **X91-1** — `g module orders --adopt-controllers` refused when an `orders` controller exists.
+- **X87-1, V11-15, X91-4, V10-27 remainder** — the page-collision check in an npm workspace; a
+  plugin command named `agents` silently overridden; a page and a kernel route on one path; the
+  symlinked-member refusal's wrong second remedy.
+- **X87-2, X87-4, X87-5, X87-6, V10-50 remainder** — workspaces: a full-stack member's dev port; the
+  Deno image shipping dev tooling; no `imagePullSecrets` for an authenticated registry; every
+  member's inspector on 9229; member-nested peers and the OTLP exporter peer.
+- **V11-3, V11-4, V11-9, X93-8** — generated text and briefs: the Workers `setu.config.ts` comment
+  says the CLI loads it under Deno; a Workers scaffold without env variables does not gitignore
+  `.dev.vars`; the agent brief lists no `lint`/`format` commands; `setu new --agents` warns about 12
+  missing cards before the install it then asks for.
+
+### Milestone 131d: Documentation, Examples and the Website
+
+**Package(s):** `docs/`, `apps/` (examples), package READMEs and agent cards, the website, CHANGELOG
+
+- **X90-1, V11-18, V10-16 remainder** — `docs/upgrading.md ## 0.11.0`: the #526 controllers break,
+  the `setu agents --check` break, the Workers full-stack repair's missing `@types/node` step.
+- **X93-1, X93-6** — `--example graphql-demo` lacks `ws`; example READMEs keep repository-only text.
+- **X93-2** — the collector fan-out and container/Kubernetes deployment guides depend on files that
+  live only on GitHub, and never mention `setu build`.
+- **X89-3, V11-14, V11-16, V11-17, X91-8, X93-3 … X93-7, X93-9, V11-2** — the remaining doc and
+  README mismatches, each listed with its fix in `smoke/OPEN-AFTER-0110.md`.
+
+## The AI Layer (M132–M136)
+
+**Source:** the AI-layer survey of 2026-11-01 — six research tracks (model providers, MCP, retrieval
+and vector stores, durable execution, operations and security, and Setu's own seams read from
+source), comparing the Vercel AI SDK, Spring AI, Mastra, LangChain.js, Genkit, `laravel/ai`, the MCP
+TypeScript SDK and its Hono, NestJS, Spring, FastAPI and Cloudflare integrations, the OTel GenAI
+semantic conventions, and Temporal, Inngest, Restate and DBOS. The maintainer accepted its four
+recommendations on 2026-11-01: depend on the AI SDK's provider types, dispatch MCP tool calls
+in-process through the kernel, serve MCP with the official v2 server SDK, and target the cycle after
+`0.12.0`.
+
+**The finding that shapes all five.** Model libraries are plentiful and good; what is missing
+everywhere is identity, tenant isolation, budgets, audit, redaction and side effects that are safe
+to retry — most of which Setu already has. The incidents and defects the survey found share one
+shape: an AI feature built as a second pipeline beside the real one, which then reads across tenants
+or skips row-level security, or a metadata filter that fails open. **Every AI entry point in this
+programme runs through the kernel pipeline as the real principal and tenant**; none adds a parallel
+path.
+
+**Sequence.** M132 first: M133 needs every piece of it, and it stands on its own. M133 and M134 can
+run in parallel after M132. M135 is independent of M133 and M134. M136 builds on M134. None of the
+five changes a required member of a published interface — new contract members are optional, per the
+versioning policy below — so each can ship in a patch release.
+
+**MCP facts verified from primary sources on 2026-11-01**, because the `2026-07-28` revision and the
+v2 SDK are newer than some of the survey's material. From the specification
+(`modelcontextprotocol.io/specification/2026-07-28`, its changelog, transport, lifecycle and
+authorization pages): protocol-level sessions, the `Mcp-Session-Id` header and the `initialize`
+handshake are removed; every request carries an `MCP-Protocol-Version` header (plus `Mcp-Method`,
+and `Mcp-Name` on `tools/call`), and a version the server does not support answers 400 with an
+`UnsupportedProtocolVersionError`; the transport is a single POST endpoint, the GET stream is gone
+(legacy GET/DELETE SHOULD answer 405) and `Last-Event-ID` resumption is not supported; servers MUST
+publish RFC 9728 metadata, MUST validate that a token's audience is themselves and MUST NOT accept
+or transit other tokens; `insufficient_scope` is a SHOULD; Dynamic Client Registration is deprecated
+in favour of Client ID Metadata Documents. From the published `@modelcontextprotocol/server@2.4.0`
+manifest and the SDK source: `createMcpHandler(factory, options)` builds a server per request and
+returns `{ fetch(request, { authInfo?, parsedBody? }), close, … }`; `authInfo` is pass-through only
+— the SDK never reads it from headers — and a tool callback reads it as `ctx.http?.authInfo`, with
+its abort signal at `ctx.mcpReq.signal`; `registerTool` takes a Standard Schema (Zod 4 works); the
+modern path serves `2026-07-28` and the `legacy: 'stateless' | 'reject'` option (default
+`'stateless'`) serves `2025-11-25` and older; the request body is capped at 4 MiB by default; zod
+`^4.2.0` is a hard dependency and there are no peers. The README names Node, Bun and Deno; Workers
+has a `workerd` export condition but is unproven until M133's gate runs there.
+
+---
+
+## Milestone 132: Resource-Server Authentication for Agents and Tools
+
+**Package(s):** `packages/auth-plugin`, `packages/common` (optional `IPrincipal` members); docs.
+
+**Source:** the AI-layer survey (above), track 02 (MCP authorization) and track 05 (agent identity).
+Useful without any AI feature: these are OAuth resource-server behaviours any API serving
+third-party clients needs.
+
+**The problem.** An MCP server is an OAuth 2.1 resource server, and the specification requires
+behaviours auth-plugin does not have. Scopes are not first-class (`IPrincipal` carries `roles`,
+`permissions` and raw `claims`, `common/src/services/auth.ts:16-25`); a `TrustedIssuer` accepts one
+audience (`auth-plugin/src/interfaces/index.ts:186`); nothing publishes RFC 9728 protected-resource
+metadata or answers a missing scope with a `WWW-Authenticate` challenge; and an agent acting for a
+user cannot be told apart from the user, because nothing reads the RFC 8693 `act` claim.
+
+**Decisions the plan takes:**
+
+1. **Scopes on the principal:** an optional `scopes?: readonly string[]` on `IPrincipal`, parsed
+   from the `scope` (space-separated) or `scp` (array) claim, and a `requireScopes(...)` guard
+   beside `requireAuth`. A missing scope answers **403** with
+   `WWW-Authenticate: Bearer error="insufficient_scope", scope="…"` (RFC 6750 §3.1); a missing or
+   invalid token answers 401 with a challenge naming the resource metadata URL.
+2. **RFC 9728 protected-resource metadata** served at `/.well-known/oauth-protected-resource` (and
+   the path-suffixed form for a resource below the root), built from configuration: the resource
+   identifier, the authorization servers, the supported scopes. Not an authorization server.
+3. **Audience binding (RFC 8707):** a trusted issuer accepts a list of audiences, and configuring
+   `resourceServer` does NOT require the resource identifier among them. The audience list is what
+   the issuer stamps for this resource — Entra an `api://<guid>` or app id, Auth0 an API identifier
+   — so forcing the resource URL would refuse valid deployments. A token minted for another resource
+   is refused; Setu never forwards an inbound token to an upstream service (the MCP authorization
+   page: servers "MUST NOT accept or transit any other tokens").
+4. **Delegation:** the `act` claim exposed as an optional `actor` on the principal, its nesting
+   bounded, and a guard option that refuses or requires delegated tokens per route.
+5. **What is NOT built:** an authorization server, Dynamic Client Registration, Client ID Metadata
+   Documents, or ID-JAG (still a draft). The plan records which established resource servers (Spring
+   Security, ASP.NET Core, the MCP SDK's own auth helpers) it compared each behaviour with.
+
+**Gate:** each challenge asserted header by header, forbidden parameters included; the metadata
+document field by field against RFC 9728; a wrong-audience token refused; an `act` token surfaced
+and refused where the route forbids delegation. The change crosses a trust boundary, so the
+milestone is **security-audited** by a fresh agent before it merges.
+
+---
+
+## Milestone 133: `mcp-plugin` — Routes as Model Context Protocol Tools
+
+**Package(s):** new `packages/mcp-plugin`, `packages/common` (a public in-process dispatch entry on
+`IApplication`), `packages/kernel` (that entry), `packages/cli` (`setu add mcp`, agent card); docs,
+a runnable README walkthrough and the integration-test app. No MCP capability token.
+
+**Source:** the AI-layer survey, track 02 and track 06. Distinct from the MCP server M116 deferred
+(listed under M116's "Not in this milestone"): that one would describe the _framework_ to a coding
+agent; this one lets an _application_ expose its own operations to agents.
+
+**The problem.** Agents reach SaaS products through MCP, and every way to add MCP to a Setu app
+today bypasses the framework: a hand-mounted SDK handler runs outside the route's guards,
+validation, tenant resolution, idempotency and audit. The pipeline cannot be re-entered from inside
+a request on the public contract either — `IApplication.fetch` exists (`common/src/plugin.ts:470`),
+but `inject` lives only on the kernel's own application type
+(`kernel/src/application/application.ts:195`) and refuses streams, sets no abort signal and drops
+GET bodies.
+
+**Decisions the plan takes:**
+
+1. **One stateless endpoint,** `POST /mcp` registered as an ordinary kernel route so global
+   middleware (tenant resolution, rate limiting, request logging) runs on it, served by the official
+   v2 server SDK (`@modelcontextprotocol/server`, `createMcpHandler`) as an optional peer, lazily
+   imported and awaited inside a `try`/`catch`. The plan decides whether pre-`2026-07-28` clients
+   are served (`legacy: 'stateless'`) or refused (`'reject'`), and how the per-request server
+   factory stays cheap: tool definitions and their JSON Schemas are built once at registration
+   (AI_GUIDELINES §14), and the factory only binds them.
+2. **Tools are declared by hand and opt-in:** a name and model-facing description bound to an
+   existing route; required scopes derive from its security brands, and the input schema derives
+   from its validation metadata, and body-carrying methods without a body validation brand are
+   refused. Routes without inputs or with only path parameters are accepted. Nothing is exposed
+   automatically — every maintained integration the survey read declares tools explicitly, and
+   auto-exposing every route is the pattern their docs warn against. The spec's tool-name rules
+   (1–128 characters of `A-Z a-z 0-9 _ - .`, case-sensitive, unique per server) are SHOULDs; the
+   plugin refuses a name outside them, and a duplicate, at registration. A route with a response
+   schema (M97b) supplies an `outputSchema`, and its result is returned as `structuredContent` plus
+   the serialized JSON as text, since a server MUST return structured results that conform.
+   `readOnlyHint` and `idempotentHint` annotations are derived from the method and the idempotency
+   binding, never declared freely; clients treat annotations as untrusted anyway. The tool set is
+   fixed at startup, so the server advertises no `listChanged`. The plan decides whether CQRS
+   commands are a second binding target or wait for the command registry to carry schemas.
+3. **In-process dispatch through the route's own pipeline** as the verified principal and tenant.
+   The plugin forwards credential and tenant headers so authentication and tenancy run again; no
+   principal or `authInfo` is copied, and a tool call reaches its route via a new public entry on
+   `IApplication` that takes an `AbortSignal` (the SDK's `ctx.mcpReq.signal` is passed through) and
+   allows a streamed body (an optional member, per the versioning policy). Guards, validation,
+   idempotency and audit run exactly as for an HTTP caller; nothing re-implements them.
+4. **The tool list is filtered** by authentication and required scopes. Role, permission and policy
+   guards remain on the route, so a visible tool can still refuse a call there. The spec allows a
+   list to vary by the authorization presented, but its `tools/list` response carries a cache hint
+   (`ttlMs`, `cacheScope`, with `public` in its example), so a filtered list must never go out under
+   a shared cache scope; the plan names the scope it sends and tests it. A missing scope answers
+   M132's `insufficient_scope` challenge; the plan reads the SDK's per-tool `scopeChallenge` option
+   and decides whether the plugin uses it or answers before the SDK sees the call.
+5. **Errors, as the spec divides them:** an unknown tool or a request that fails the
+   `CallToolRequest` schema is a JSON-RPC protocol error (`-32602`); input-validation, API and
+   business failures are tool execution errors (`isError: true`), which clients SHOULD show the
+   model so it can correct itself. So a route's 4xx Problem Details (a 400/422 validation refusal,
+   a 409) becomes an `isError` result carrying its `title` and `detail` after the redaction seam,
+   and a 5xx or a thrown internal error becomes a generic error with no stack or message. The
+   mapping is a table the test iterates.
+6. **Rate limiting is a server MUST** in the spec's security considerations (beside validating
+   inputs, access control and sanitising outputs, which the route pipeline already does). A limit on
+   `POST /mcp` counts requests, not tools, so the plan decides how a per-tool or per-principal limit
+   is applied — the route's own limiter running on the in-process dispatch is the default candidate.
+7. **Retries:** with no sessions and no stream resumption, a response lost mid-call cannot be
+   recovered, so a client that wants the result calls again. A tool bound to a non-idempotent route
+   is therefore refused at registration unless the route is behind the idempotency plugin or the
+   declaration says it is safe to repeat.
+8. **Not in this milestone:** `x-mcp-header` parameter mirroring (optional for servers, and the spec
+   warns against marking sensitive values with it), resources and prompts beyond what the plan shows
+   a consumer for, the authorization server (M132 is resource-server only), and a tool registry that
+   refuses untrusted-input + private-data + outbound-action compositions (the "lethal trifecta").
+   That registry is a named follow-on.
+
+**Gate:** an MCP client (the SDK's own) against a kernel app: list tools as two principals with
+different scopes and assert different lists; call a tool and assert the route's guard, validation,
+tenant and audit each ran (a refused guard short-circuits the handler); a validation refusal arrives
+as `isError` and an unknown tool as `-32602`; a filtered list never carries a shared cache scope; a
+retried call does not repeat its side effect; an internal error reaches the client redacted. Node
+has the full integration suite and Deno one native list/call proof. Bun is unproven until the 0.12.0
+published-artifact compat row runs. Workers has a workerd-condition bundle-resolution proof; a live
+workerd run is a follow-on. **Security-audited** by a fresh agent before it merges.
+
+---
+
+## Milestone 134: AI SDK Recipes and Weighted Quotas
+
+**Package(s):** `packages/auth-plugin` (weighted reserve/settle quota), `packages/telemetry-plugin`
+(optional global provider registration); website guide and `apps/ai-chat`. Ships in `0.12.0`.
+
+**The problem.** Model calls need trusted identity, spend caps under concurrency and usage records
+that billing can deduplicate. The AI SDK already provides providers, bounded tool loops, structured
+output, UI streams and test models; its ecosystem provides fallback and GenAI telemetry.
+
+**Decisions:** use and test `ai` 7.x (`LanguageModelV4`), `ai-fallback` 3.x and `@ai-sdk/otel` 1.x.
+No Setu AI package, AI token, tool loop, fake model or GenAI instrumentation is added. AI
+dependencies belong only to the example and root development tooling. The website guide compiles its
+recipes.
+
+Auth-plugin adds `createQuota`, `MemoryQuotaStore`, `RedisQuotaStore`, issued frozen reservations,
+single settlement/release, integer billing units, epoch/UTC calendar windows and fail-closed Redis
+storage. Its quota refusal and existing limiter share the 429 initializer while preserving limiter
+bytes. `TelemetryPlugin.registerGlobal` defaults to false; opt-in library spans reach Setu's
+existing provider. One process owns one global provider; shutdown does not unregister it.
+
+The budget recipe reserves per model call using a conservative byte/template/media input bound and
+required maximum output tokens; known usage refunds the difference, unknown/aborted usage charges
+the reservation, and pre-output failure releases it before fallback. Trusted request identity
+supplies quota/tool tenancy. A producer call id keys usage through the existing transactional outbox
+and inbox. Usage becomes durable only at the outbox write. Content capture stays off; enabling it
+records unredacted content. A redacting processor and billing vendors remain out of scope.
+
+**Gate:** Node example smoke proves step cap, mid-stream abort, UI parsing with the SDK's parser,
+last-budget concurrency, usage read back once after redelivery, OTLP request parenting with capture
+off and a capture-on positive control, trusted tool identity, 503 fallback and an optional real
+OpenAI-compatible endpoint. Quota tests prove atomic memory admission and guarded real Redis; guide
+fences compile. Deno, Bun and Workers AI SDK integration remains unverified. **Security-audited**
+before merge, including quota abuse controls, capture and egress guidance.
+
+---
+
+## Milestone 135: `vector-store-plugin` — Tenant-Scoped Retrieval
+
+**Package(s):** new `packages/vector-store-plugin`, `packages/common` (a vector-store capability
+token, the store and embedder ports), `packages/cloudflare-plugin` (a Vectorize adapter),
+`packages/cli` (`setu add vector-store`, agent card); docs.
+
+**Source:** the AI-layer survey, track 03.
+
+**The problem.** Retrieval needs similarity search, and the only way to do it in Setu today is raw
+SQL through `query()` or the Drizzle seam (`getDrizzleTransaction`), with tenant isolation left to
+the caller. Every vector abstraction the survey read has shipped a metadata filter that silently
+matched everything when it could not translate a clause, and tenant scope expressed as one more
+filter key inherits that failure.
+
+**Decisions the plan takes:**
+
+1. **A separate plugin and token,** not a database-plugin backend: several strong vector stores are
+   not repository backends, and the query shape (top-k by distance with a filter) is not
+   `IRepository`'s.
+2. **Tenant scope is a required parameter** of every read and write, never a filter key; a store
+   opened without multi-tenancy uses one fixed scope, stated in configuration.
+3. **Filter fields are declared up front** per collection; a filter naming an undeclared field, or
+   one an adapter cannot translate, throws a named error before any I/O. One conformance table runs
+   every filter case across every adapter, as data.
+4. **An embedder port** with an AI SDK embedding-model arm (building on the AI SDK and M134 quota),
+   batching and a dimension check against the collection.
+5. **Adapters, in order:** memory (zero-dependency default), pgvector through Drizzle, then
+   Cloudflare Vectorize. MongoDB Atlas and Cosmos DB vector search are named follow-ons.
+6. **Ingestion** (chunk, embed, upsert) as a queue job with an idempotent document id, so a re-run
+   replaces rather than duplicates.
+
+**Re-examined at plan time (M134, 2026-11-04).** M134 chose to document and test the AI SDK rather
+than wrap it, so this plan decides whether decision 4's embedder port is still needed: the AI SDK
+already ships `embed` and `embedMany`, and the alternative is to accept vectors or an
+application-supplied embed function, and document embedding spend under M134's weighted quota.
+
+**As planned and built (M135, 2026-11-05).** No embedder port: the store takes vectors, and the
+application computes them with the AI SDK's `embed`/`embedMany` (decision 4 dropped; the
+maintainer's choice). Adapters: memory, pgvector through Drizzle, Qdrant (added) and Cloudflare
+Vectorize, which refuses `replaceSource` and `deleteScope` because Vectorize cannot delete by
+namespace or filter. Ingestion (decision 6) is the `apps/semantic-search` example's queue job over
+`replaceSource`, not a framework job. The common port is `IVectorStore` under
+`CAPABILITIES.VECTOR_STORE`.
+
+**Not in this milestone:** a document-loader library, re-ranking, hybrid lexical search.
+
+**Gate:** the filter conformance table on memory and a real PostgreSQL with pgvector; a query under
+tenant A never returns tenant B's rows, asserted on every adapter; an untranslatable filter refused
+before I/O; a re-run ingestion leaves one copy. **Security-audited** (tenant isolation) before it
+merges.
+
+---
+
+## Milestone 136: Durable Agent Runs
+
+**Package(s):** `packages/agent-runs-plugin`, a run primitive over the AI SDK and M134 quota,
+`packages/common` (run contracts), `packages/database-plugin` (run storage and bounded chunk log);
+docs. The SSE plugin is unchanged: its in-process channels cannot retain a cross-process log.
+
+**Source:** the AI-layer survey, track 04.
+
+**The problem.** An agent run that lasts longer than a request — tool calls, a human approval, a
+browser that reconnects — loses its state when the process restarts, and a retried step can repeat a
+side effect. `sse-plugin` reads `Last-Event-ID` (`sse-plugin/src/connection/sse-connection.ts:57`)
+but keeps no log to replay from.
+
+**Decisions the plan takes.** Every engine the survey read (Temporal, Inngest, Restate, DBOS,
+Cloudflare Workflows) is at-least-once and keys idempotency on the step, as Setu's idempotency
+plugin already does; none runs on all four Setu runtimes, and recovery across several instances is
+the weak point everywhere. So this is a **narrow primitive — the agent loop over persisted state —
+not a workflow engine**:
+
+1. **A run row with a fenced lease,** so one instance owns a run and a stale owner's writes are
+   refused (the outbox relay's fencing, M107b, is the model).
+2. **The model's reply is persisted before any tool runs,** so a crash between them resumes without
+   a second model call.
+3. **Tool side effects keyed on run id and step,** through the idempotency plugin.
+4. **Approvals as rows** with a timeout and an outcome, so a human-in-the-loop pause survives a
+   restart.
+5. **A bounded SSE replay log** keyed by run, so a reconnecting browser resumes from
+   `Last-Event-ID`.
+6. **A version stamp** on each run, with a documented rule for runs started on older code, and
+   cancellation through an `AbortSignal`.
+7. **Tenant ids on every row,** and reads scoped by them.
+
+General multi-step workflows belong to an engine; the plan decides whether this milestone ships
+adapter guidance or a first adapter, and to which engine.
+
+**Re-examined at plan time (M134, 2026-11-04).** These decisions assumed a Setu-owned tool loop.
+M134 instead uses the AI SDK's loop, which executes tools inside a step, so decision 2 (persist the
+reply before any tool runs) needs a step-at-a-time design over the SDK. The AI SDK 7.x also ships
+tool approval requests and a client stream resume, which overlap decisions 4 and 5. Before the plan
+is written, a fresh survey compares those, and existing durable-agent tooling, with what this
+milestone would build. The reviewed plan chooses schema-only SDK tools, persists the model entry,
+then executes calls through transactional idempotency. Approval rows and the chunk log belong to the
+run store. It ships a workflow-engine guide, without an engine adapter.
+
+**Gate:** kill the process between the model reply and the tool call — the run resumes with one
+model call and one side effect; a stale lease holder's write refused; an approval timing out on
+schedule across a restart; a reconnecting client receives exactly the missed chunks.
+
+---
+
+## Milestone 137: OpenAPI Coverage — Forms, Lifecycle and Derived Responses
+
+**Source:** a review of `@setu-ts/openapi-plugin` against `@nestjs/swagger` (2026-11-04), narrowed
+to the gaps that leave a real API undocumentable or misdocumented, and checked against the sources
+of ASP.NET Core (`dotnet/aspnetcore` `227a6cc`), FastAPI (`69c67a1`), springdoc (`3316c45`),
+`@hono/zod-openapi` (`honojs/middleware` `9cb24a0`), NestJS (`ca016f9`) and three client generators
+— hey-api (`d6ba11f`), openapi-generator (`860e53f`) and openapi-fetch (`d46a319`). Nest's other
+decorators (callbacks, links, `x-` extensions, per-route security decorators, a compiler plugin,
+mapped-type helpers, per-request document patching, UI theming) are **out of scope**: each either
+duplicates a derivation Setu-TS already makes (`deriveSecurity`, Zod composition) or has no consumer
+yet. Multiple documents per application, a YAML endpoint, webhooks, discriminators and named enums
+are deferred until someone asks for them.
+
+**The principle the three letters share:** the document is derived from what the route enforces —
+validation brands, guard brands, the handler's response brand — and a declared field overrides a
+derived one per field. A new feature extends a derivation before it adds a decorator.
+
+| Letter    | Shape                                                                     | Packages                                                        | Size         |
+| --------- | ------------------------------------------------------------------------- | --------------------------------------------------------------- | ------------ |
+| **M137a** | document metadata, `deprecated`, per-route exclusion                      | `common`, `openapi-plugin`, `decorator-plugin`, `sdk` (codegen) | small        |
+| **M137b** | derived error responses and headers, declared response headers            | `common`, `openapi-plugin`, `auth-plugin`, `decorator-plugin`   | medium       |
+| **M137c** | form bodies and file uploads, in the document and in the generated client | `common`, `validation-plugin`, `openapi-plugin`, `sdk`          | medium–large |
+
+**Sequence.** M137a first (contained, no new derivation). M137b next. M137c last: it is the only
+letter that fixes a defect the code already admits — the validation-plugin README's "Stated limits:
+the generated OpenAPI document still describes a validated body as `application/json`" — but it is
+the riskiest, because a document fixed without the client turns into a generated client that drops
+the body. All three are additive surface (optional fields and options), so they ship in patches
+under the versioning policy below; the document changes they cause are named in the CHANGELOG, and
+`setu client --check` will report them as drift, which is the intended signal.
+
+### Milestone 137a: Document Metadata, Deprecation and Per-Route Exclusion
+
+**Package(s):** `packages/common` (`RouteSchema`), `packages/openapi-plugin`,
+`packages/decorator-plugin` (`ApiOperationConfig`), `packages/sdk` (codegen); docs.
+
+**The problem.** The emitted `info` object carries only `title`, `version` and `description`
+(`openapi-generator.ts` `generate()`); there is no `contact`, `license`, `termsOfService` or
+`externalDocs`, and tags are bare names with no description. No route can be marked deprecated. The
+only exclusion is `exclude` (an exact path, dropping **every** method on it — `isRouteExcluded` in
+`generators/declared-operation-ids.ts`) and `excludeOwners`, so `DELETE /users/:id` cannot be hidden
+while `GET /users/:id` stays documented.
+
+**Decisions:**
+
+1. **Two optional `RouteSchema` fields in common:** `deprecated?: boolean` (emitted as the
+   operation's `deprecated: true`) and `excludeFromDocument?: boolean` (the operation is omitted).
+   `ApiOperationConfig` gains the same two fields, so the decorator and functional entry points
+   write the same metadata.
+2. **Exclusion uses the one existing predicate.** `isRouteExcluded` also reads
+   `excludeFromDocument`, so `claimDeclaredOperationIds` skips a hidden route exactly as it skips a
+   path-excluded one — a hidden route's `operationId` can never cause an `OperationIdError`.
+3. **Document-level options on `OpenApiGeneratorOptions`:** `contact`, `license`, `termsOfService`,
+   `externalDocs`, and `tags` as `{ name, description?, externalDocs? }[]` emitted at the document's
+   top-level `tags`. OpenAPI 3.1 makes `license.identifier` and `license.url` mutually exclusive, so
+   supplying both is refused at construction with a named error, never emitted.
+4. **Generated clients carry the deprecation.** `sdk`'s codegen writes `/** @deprecated */` on the
+   method of a deprecated operation, so an editor flags the call site.
+
+**Out of scope:** RFC 9745 `Deprecation`/`Sunset` response headers (no adopter has asked; the field
+is documentation, not behaviour).
+
+**Gate:** the document fields asserted field by field against the OpenAPI 3.1 object names, absent
+fields included; `deprecated` and `excludeFromDocument` driven through **both** entry points
+(`RouteSchema` and `@ApiOperation`) with identical output; a hidden `DELETE` beside a documented
+`GET` on one path; a hidden route whose `operationId` duplicates a visible one raises no error; the
+`license` refusal; `setu client` output containing `@deprecated` for a deprecated route.
+
+### Milestone 137b: Derived Error Responses and Headers
+
+**Package(s):** `packages/common` (the security brand, a new rate-limit brand, the response
+wrapper), `packages/openapi-plugin`, `packages/auth-plugin` (brands on its guards and limiters),
+`packages/decorator-plugin` (`ApiResponseConfig`); docs.
+
+**The problem.** The statuses and headers Setu-TS's own middleware produces are absent from the
+document, although the middleware is already branded for three of them:
+
+| Runtime behaviour                                                                                                                  | Brand today                                                                                                | Missing from the document                                                                      |
+| ---------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| idempotency middleware reads `Idempotency-Key` and sends `Idempotent-Replayed` on a replay (`idempotency-plugin/src/constants.ts`) | yes: `withIdempotencyMetadata({ idempotent, keyHeader? })` — read by `mcp-plugin`, not by `openapi-plugin` | the request header parameter, the replay header, the refusal statuses                          |
+| auth guards answer 401 with `WWW-Authenticate`, and 403 when an authenticated caller lacks a scope, role, permission or policy     | yes: `withSecurityMetadata({ authenticated, scopes? })` — `deriveSecurity` reads it                        | every 401 and 403; and the brand cannot tell `requireAuth` (401 only) from a 403-capable guard |
+| `rateLimitMiddleware` and spent quotas answer 429 with `Retry-After` and the `RateLimit`/`RateLimit-Policy` fields                 | none                                                                                                       | the 429 and its headers                                                                        |
+| a body validator answers 415 for an unsupported media type (`validation-middleware.ts`)                                            | yes: the validation brand                                                                                  | the 415 (the derived 400 is already emitted)                                                   |
+| a handler answering `201` with `Location`, or with `ETag`                                                                          | none — only the handler knows                                                                              | any way to declare a response header                                                           |
+
+Every generated error response is also a bare `{ description }`, with no body schema.
+
+**Already shipped (the examples walk-through fix, PR #561).** openapi-plugin documents the
+idempotency brand's `keyHeader` as a request header parameter, and the brand gained
+`required?: boolean`, because `apps/mcp-tools` was unusable from Swagger UI without it. That
+derivation is unconditional today; this milestone decides whether it moves under
+`deriveErrorResponses`, and still owns the `Idempotent-Replayed` response header and the idempotency
+refusal statuses.
+
+**Decisions:**
+
+1. **Derive from the brands, one option to turn it off.** A new `deriveErrorResponses?: boolean`
+   (default `true`, the precedent of `deriveRequestSchemas`) adds, per route: `401` with a
+   `WWW-Authenticate` header for an authenticated route; `403` for a route carrying a 403-capable
+   guard; `415` for a route with a body brand; `429` with `Retry-After`, `RateLimit` and
+   `RateLimit-Policy` for a rate-limited route; the `Idempotency-Key` header parameter (named by
+   `keyHeader`, with the requiredness and refusal statuses the idempotency middleware actually
+   enforces, read from its source in the plan) and an `Idempotent-Replayed` response header. A
+   **declared** status always wins over a derived one, per status.
+2. **The security brand gains one optional field,** `forbids?: true`, set by `requireScopes`,
+   `requireRole`, `requireAnyRole`, `requirePermission`, `requireAllPermissions`, `requirePolicy`,
+   `requireScopedRole` and `requireScopedPermission` — not by `requireAuth`; `requireMfa` takes
+   whichever its source shows it answers — so a 403 is documented only where one can occur.
+3. **A rate-limit brand in common,** `withRateLimitMetadata`/`rateLimitMetadataOf` (the pattern of
+   the three existing brands), applied by `rateLimitMiddleware` and the quota refusal
+   (`quotaProblemInit`), carrying whether the `RateLimit` fields are emitted (the middleware's
+   existing option) so the document never lists a header the route does not send.
+4. **Declared response headers.** The `{ schema?, description? }` response wrapper (already
+   unwrapped by `#normalizeResponse`) and `ApiResponseConfig` gain
+   `headers?: Record<string, { schema?, description?, required? }>`, emitted as the response's
+   `headers` object.
+5. **Error bodies only when the format is known.** The error body shape is the application's choice
+   (`ValidationPlugin({ errorFormat })` and the exceptions responder), which the generator cannot
+   read. An `errorSchema?: 'rfc9457'` option attaches one shared `ProblemDetails` component under
+   `application/problem+json` to every generated error response; omitted, error responses keep no
+   schema. The CLI templates, which already set both formats to `'rfc9457'`, set it too.
+
+**Gate:** a table-driven test — the brand set as data, each row naming the statuses and headers it
+must produce — run against the generator; and the same table run against a **live** app driving each
+guard, limiter and validator, asserting each documented status and header actually occurs, so the
+document cannot claim a response the route never sends. A declared status overrides a derived one.
+The `ProblemDetails` component asserted field by field against RFC 9457 (`type`, `title`, `status`,
+`detail`, `instance`). `requireAuth` alone documents no 403.
+
+### Milestone 137c: Form Bodies and File Uploads
+
+**Package(s):** `packages/common` (the validation brand, a file-field brand),
+`packages/validation-plugin` (`formFile()`), `packages/openapi-plugin`, `packages/sdk` (HTTP client
+and codegen); docs, and the validation-plugin README's stated limit removed.
+
+**The problem.** `validateBody(schema, { forms: true })` accepts JSON, urlencoded and multipart
+bodies (`validation-middleware.ts:197`), but the validation brand records only `{ target, schema }`
+and drops `forms`, and the generator writes `application/json` for every body
+(`openapi-generator.ts` `#createOperation`). A file field shaped as the framework's `FormFile` is
+emitted as an object with an empty `data` schema and an `x-setu-unrepresentable` diagnostic
+(measured 2026-11-04). The generated client reads only `content['application/json']`
+(`sdk/src/codegen/openapi-codegen.ts:604`) and the SDK's HTTP client sends only JSON, so a document
+fixed on its own would produce a client that silently drops the body.
+
+**What the reference implementations do** (read from source; see the commits above):
+
+- ASP.NET Core lists `multipart/form-data` and `application/x-www-form-urlencoded` for a form
+  parameter, **`multipart/form-data` alone when a file parameter is present**
+  (`RequestDelegateFactory.cs:129-130, 2104-2113`), refuses form and JSON body parameters on one
+  endpoint at startup, and refuses other content types at runtime.
+- FastAPI documents one form media type while Starlette's `request.form()` parses both; NestJS and
+  springdoc document `application/json` by default while Express's parsers accept urlencoded too —
+  the documented-less-than-accepted drift this letter must not reproduce.
+- hey-api sends **JSON whenever the body offers it**, else the first type
+  (`shared/src/openApi/3.1.x/parser/operation.ts:113`); openapi-generator sends **the first listed
+  type** (`DefaultCodegen.java:7585`). Both read `format: binary` as a file; hey-api also maps a
+  file-like `contentMediaType`.
+
+**Decisions:**
+
+1. **The validation brand records the encodings,** an optional `forms?: true` on
+   `RouteValidationMetadata`, set by both entry points (`validateBody` and
+   `IValidationService.middleware`).
+2. **A route without a file field** (`forms: true`) lists `application/json` **first**, then
+   `application/x-www-form-urlencoded` and `multipart/form-data`, with one schema under each — what
+   the route accepts. Both generators then send JSON, which works.
+3. **A route with a file field lists `multipart/form-data` only** (ASP.NET's rule): JSON validation
+   refuses a file and urlencoded cannot carry one, and a JSON entry would make hey-api clients send
+   JSON. The multipart entry carries an `encoding` object naming each file field's accepted media
+   types when they are declared.
+4. **A file-field brand and helper.** common gains a schema brand (`withFormFileMetadata` /
+   `formFileMetadataOf`, the existing brand pattern; `common` stays dependency-free).
+   validation-plugin exports `formFile({ mimeTypes?, maxBytes? })`, a Zod schema that validates the
+   `FormFile` shape, enforces both options, and carries the brand. The transformer emits a branded
+   field as `{ type: 'string', format: 'binary', contentMediaType: 'application/octet-stream' }`
+   (both keywords, because the generators read different ones); an array of them is an array of
+   binaries.
+5. **The SDK sends `FormData` only for a multipart-only body,** and JSON otherwise — the selection
+   is a fixed rule, not the order of a map. It never sets `Content-Type` on a `FormData` body (the
+   boundary must be the runtime's), and a file field is typed `Blob | File` with the filename taken
+   from `File.name` or a declared default, because `FormFile` requires one.
+6. **Every declared media type is enforced.** The route already answers 415 for an encoding it does
+   not accept, so the document lists exactly the accepted set — the property ASP.NET and Hono have.
+
+**Gate:** a `forms: true` route without a file documents three media types, JSON first; with a file,
+multipart alone with `format: binary` and the `encoding` entry; both validation entry points produce
+the same brand. An end-to-end test generates a client with `setu client`, uploads a real file
+through it to a running app, and reads the stored bytes and filename back; the same document is fed
+to hey-api and openapi-generator in the plan's verification and each generated client sends the
+encoding rule 2–3 predicts. The README's stated limit is deleted in the same change. The upload path
+crosses a trust boundary (client-supplied filenames and media types), so the letter is
+**security-audited** by a fresh agent before it merges (CLAUDE.md,
+`.roo/skills/security-audit/SKILL.md`).
+
+---
+
 ## Versioning Policy From `0.9.0`
 
 **Decision (2026-10-05):** from `0.9.0` on, the **patch** is the normal release (`0.9.1`, `0.9.2`,
@@ -16123,6 +16933,41 @@ carries none unless `--allow-quiet-minor` says the quiet minor is deliberate. Bo
 **What this does not change.** `0.x` stays pre-1.0: the GitHub Release keeps its `prerelease` flag
 (the `0.*` arm — drop it at 1.0), and 1.0 stays gated on M40. A `hotfix/…` branch from `main` is a
 patch by construction and gains nothing new here.
+
+---
+
+## Milestone 138: Workspace Broker and RPC Style
+
+**Package(s):** `packages/cli`; docs.
+
+**Source:** planning the gRPC workspace example (2026-11-06), which found that one workspace
+`transport` field could not describe a gRPC workspace with a real broker.
+
+**The problem.** `setu new --workspace --transport` recorded ONE value covering two different
+choices: how a service is called (`http`, `grpc`) and the bus members publish to (`memory`, `redis`,
+`rabbitmq`, `nats`, `kafka`, `pubsub`, `service-bus`). A `--transport grpc` workspace therefore kept
+every member on the in-memory broker. Nothing could change the choice after scaffolding, and
+`generate app` told a user who wanted a different backend to scaffold the service outside the
+workspace.
+
+**What ships.** Compared first with Dapr (per-app protocol, shared pub/sub component), NestJS
+(per-service transport, hybrid apps), Moleculer (one shared transporter), MassTransit (one bus,
+MultiBus for more), Spring Cloud Stream and Quarkus (binders and connectors set in configuration):
+
+1. **A workspace broker and a per-member RPC style,** recorded separately in a version-2
+   `setu.workspace.json` (`broker`, `brokerUrl`, per-member `rpc`); version 1 is still read.
+   `--broker`/`--broker-url` on the workspace, `--rpc http|grpc` on `generate app`.
+2. **A CLI-owned `src/transport/index.ts` per member** that its `setu.config.ts` calls, so the
+   config reads the same on every broker and style — the configuration-not-code change every
+   compared framework uses, on the discovery map's own pattern.
+3. **`setu workspace broker <name>` and `setu workspace rpc <member> <style>`,** one planner behind
+   them and behind `generate app`, `setu sync` and a member's `setu add messaging|queue|grpc`. It
+   rewrites only CLI-owned files, merges packages additively, never writes `setu.config.ts` (it
+   refuses with the lines to add), and refuses a change that would orphan source, unless `--force`.
+
+**Gate:** a Deno workspace formatted, linted and type-checked across a broker switch and two RPC
+switches; a mesh member answering gRPC health `200`, then `404` after `workspace rpc <m> http`; a
+real Redis delivery after switching from memory; every changed file at the 90% per-file bar.
 
 ---
 
@@ -16378,3 +17223,22 @@ patch by construction and gains nothing new here.
 | 124       | ✅     | auth-plugin — session and account lifecycle: password-only `signIn` re-check, `requireAuth({ signInPage })` page redirect vs API 401, `signIn.sessionStamp` signs out all of a user's sessions                                                                                            |
 | 125       | ✅     | di-plugin + common + kernel + decorator-plugin — a compiled container and a lazy request scope: typed tokens, boot-time graph validation, the singleton-captures-scoped fix                                                                                                               |
 | 126       | ✅     | runtime + cli — a local diagnostics listener on Node, and the devtool opt-in for Node targets                                                                                                                                                                                             |
+| 127       | ✅     | common + multi-tenancy-plugin + database-plugin — a registry of real tenants: `tenants` option, Unknown Tenant 404, 503 on registry failure, bounded cache                                                                                                                                |
+| 128       | ✅     | database-plugin + common + multi-tenancy-plugin — optimistic locking (`updateVersioned`, `VersionConflictError`) and the database plugin under faults (X94-1 High, X94-2, V11-5, X94-3)                                                                                                   |
+| 129       | ✅     | cli + common + openapi-plugin — `setu client`: the typed client as a command, with a `--check` drift gate                                                                                                                                                                                 |
+| 130       | ✅     | react-router-plugin + cli + full-stack-starter — the full-stack template: kernel modules behind the pages, `getService`, the template half of smoke group G5                                                                                                                              |
+| 131       | ⬜     | the `v0.11.0` smoke closeout — four letters, regression first                                                                                                                                                                                                                             |
+| 131a      | ✅     | queue + Redis-backed plugins + notification + health + telemetry + logger + cli — Redis, node-redis and readiness (V11-10 regression)                                                                                                                                                     |
+| 131b      | ✅     | runtime + kernel + di + decorator + resilience + auth + messaging + openapi + diagnostics — kernel, runtime and plugin contracts (fix branches)                                                                                                                                           |
+| 131c      | ✅     | cli — gates, generators and workspace deploy (fix branches)                                                                                                                                                                                                                               |
+| 131d      | ✅     | docs — documentation, examples and the website                                                                                                                                                                                                                                            |
+| 132       | ✅     | auth-plugin + common — resource-server authentication for agents and tools: scopes, `insufficient_scope` challenges, RFC 9728 metadata, audience binding, the `act` claim                                                                                                                 |
+| 133       | ✅     | mcp-plugin (new) + common + kernel + cli — routes as MCP tools, dispatched in-process through the route's own pipeline                                                                                                                                                                    |
+| 134       | ✅     | auth-plugin + telemetry-plugin, AI SDK guide and example — weighted reserve/settle quotas, usage delivery and content-off library telemetry                                                                                                                                               |
+| 135       | ✅     | vector-store-plugin (new) + common + cloudflare + cli — tenant-scoped retrieval with refused-not-ignored filters                                                                                                                                                                          |
+| 136       | ✅     | agent-runs-plugin + common + database-plugin — durable agent runs: fenced leases, persisted model/tool entries, timed approvals and UI-message replay (PR #565)                                                                                                                           |
+| 137       | ⬜     | OpenAPI coverage — forms, lifecycle and derived responses (three letters)                                                                                                                                                                                                                 |
+| 137a      | ⬜     | common + openapi-plugin + decorator-plugin + sdk — document metadata, `deprecated`, per-route exclusion                                                                                                                                                                                   |
+| 137b      | ⬜     | common + openapi-plugin + auth-plugin + decorator-plugin — derived 401/403/415/429 and idempotency headers, declared response headers, opt-in Problem Details schema                                                                                                                      |
+| 137c      | ⬜     | common + validation-plugin + openapi-plugin + sdk — form bodies and file uploads in the document and the generated client                                                                                                                                                                 |
+| 138       | ✅     | cli — workspace broker and per-member RPC style: a CLI-owned transport module per member, `setu workspace broker` and `setu workspace rpc`; PR #568                                                                                                                                       |

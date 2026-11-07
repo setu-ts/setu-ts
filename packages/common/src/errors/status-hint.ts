@@ -16,7 +16,7 @@
  *
  * @module
  */
-import type { ErrorResponseInit } from './error-responder.ts';
+import type { ErrorResponseInit, ProblemTypeInit } from './error-responder.ts';
 
 /**
  * Key under which an `Error` carries its {@linkcode HttpStatusHint}.
@@ -175,9 +175,9 @@ export function withHttpStatusHint<T extends Error>(error: T, hint: HttpStatusHi
 export function httpStatusHintOf(error: unknown): HttpStatusHint | undefined {
   if (typeof error !== 'object' || error === null) return undefined;
   // Every read of the carrier and of the brand happens inside this `try`, and
-  // each member is read EXACTLY ONCE into a local. Two reasons, both of which
-  // the documented "a foreign value is treated as absent rather than trusted"
-  // promise depends on:
+  // each member — including the nested `problem` members — is read EXACTLY
+  // ONCE into a local. Two reasons, both of which the documented "a foreign
+  // value is treated as absent rather than trusted" promise depends on:
   //
   //   1. The key is `Symbol.for`, so any package can define it — including as
   //      a throwing getter. Left unguarded that throw escapes `errorHandler`'s
@@ -198,11 +198,13 @@ export function httpStatusHintOf(error: unknown): HttpStatusHint | undefined {
       title?: unknown;
       detail?: unknown;
       details?: unknown;
+      problem?: unknown;
     };
     const status = candidate.status;
     const title = candidate.title;
     const detail = candidate.detail;
     const details = candidate.details;
+    const problem = candidate.problem;
     if (!isConformingStatus(status)) return undefined;
     if (typeof title !== 'string' || typeof detail !== 'string') return undefined;
     // `details` is optional on `ErrorResponseInit`. A non-plain-object value
@@ -213,16 +215,62 @@ export function httpStatusHintOf(error: unknown): HttpStatusHint | undefined {
       typeof details === 'object' && details !== null && !Array.isArray(details)
         ? (details as Readonly<Record<string, unknown>>)
         : undefined;
-    return Object.freeze(
-      carriedDetails === undefined
-        ? { status, title, detail }
-        : { status, title, detail, details: carriedDetails },
-    );
+    // `problem` is optional too, and follows the same drop policy as
+    // `details`: a malformed value (not a plain object, or missing a non-empty
+    // string `type`/`title`) leaves the rest of the hint intact. Its own
+    // members are read once, into locals, for the same stateful-getter reason
+    // every other member is.
+    const carriedProblem = snapshotProblem(problem);
+    return Object.freeze({
+      status,
+      title,
+      detail,
+      ...(carriedDetails === undefined ? {} : { details: carriedDetails }),
+      ...(carriedProblem === undefined ? {} : { problem: carriedProblem }),
+    });
   } catch {
     // A hostile or buggy accessor reads as ABSENT, exactly like a malformed
     // brand: the error then takes the ordinary masked path.
     return undefined;
   }
+}
+
+/**
+ * Snapshots an {@linkcode ErrorResponseInit.problem} value read from a brand.
+ *
+ * Reads each member exactly once and returns a fresh frozen object, or
+ * `undefined` when the value is malformed. `extensions` is optional: a
+ * non-plain-object value drops only that member, keeping the problem.
+ */
+function snapshotProblem(value: unknown): ProblemTypeInit | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+  const candidate = value as {
+    type?: unknown;
+    title?: unknown;
+    extensions?: unknown;
+  };
+  const type = candidate.type;
+  const title = candidate.title;
+  const extensions = candidate.extensions;
+  if (typeof type !== 'string' || type === '') return undefined;
+  if (typeof title !== 'string' || title === '') return undefined;
+  // Only the classification is guarded: a revoked Proxy throws on the
+  // `Array.isArray` probe, and dropping just `extensions` keeps the rest of the
+  // hint and the problem intact rather than losing the whole response.
+  let carriedExtensions: Readonly<Record<string, unknown>> | undefined;
+  try {
+    carriedExtensions =
+      typeof extensions === 'object' && extensions !== null && !Array.isArray(extensions)
+        ? (extensions as Readonly<Record<string, unknown>>)
+        : undefined;
+  } catch {
+    carriedExtensions = undefined;
+  }
+  return Object.freeze(
+    carriedExtensions === undefined
+      ? { type, title }
+      : { type, title, extensions: carriedExtensions },
+  );
 }
 
 /**
@@ -256,4 +304,59 @@ function isConformingStatus(status: unknown): status is number {
   // mis-derived status collapses to. Measured, not assumed.
   if (!Number.isInteger(status)) return false;
   return status >= MIN_HINT_STATUS && status <= MAX_HINT_STATUS;
+}
+
+/**
+ * The status the kernel serves for a thrown value when no error responder (such
+ * as `errorHandler`) handles it: a status hint between 400 and 499 is served as
+ * hinted, and everything else — unhinted errors and 5xx hints — as `500`.
+ *
+ * This is the one rule for that fallback. The kernel serves it, and middleware
+ * that predicts the served status (request logging, HTTP metrics) uses
+ * `responder?.statusFor?.(error) ?? fallbackErrorStatus(error)`, so a log line or
+ * a metric label never disagrees with the response.
+ *
+ * @example
+ * ```typescript
+ * import { fallbackErrorStatus, withHttpStatusHint } from '@setu-ts/common';
+ *
+ * fallbackErrorStatus(
+ *   withHttpStatusHint(new Error('stale'), { status: 409, title: 'Conflict', detail: 'Stale.' }),
+ * ); // 409
+ * fallbackErrorStatus(new Error('fault')); // 500
+ * ```
+ *
+ * @param error - The thrown value
+ * @returns The status the kernel's fallback serves for it
+ * @since 0.12.0
+ */
+export function fallbackErrorStatus(error: unknown): number {
+  return fallbackErrorHint(error)?.status ?? 500;
+}
+
+/**
+ * The status hint the kernel's fallback serves for a thrown value, read once:
+ * the hint when its status is between 400 and 499, otherwise `undefined` (the
+ * fallback then serves an opaque `500`). {@linkcode fallbackErrorStatus} is
+ * this rule's status; a caller that also needs the hint's `title` and `detail`
+ * reads both from this one snapshot, so a stateful hint cannot make the status
+ * and the body disagree.
+ *
+ * @example
+ * ```typescript
+ * import { fallbackErrorHint, withHttpStatusHint } from '@setu-ts/common';
+ *
+ * fallbackErrorHint(
+ *   withHttpStatusHint(new Error('stale'), { status: 409, title: 'Conflict', detail: 'Stale.' }),
+ * ); // { status: 409, title: 'Conflict', detail: 'Stale.' }
+ * fallbackErrorHint(new Error('fault')); // undefined
+ * ```
+ *
+ * @param error - The thrown value
+ * @returns The served client-error hint, or `undefined` for the opaque 500
+ * @since 0.12.0
+ */
+export function fallbackErrorHint(error: unknown): HttpStatusHint | undefined {
+  const hint = httpStatusHintOf(error);
+  return hint !== undefined && hint.status >= 400 && hint.status <= 499 ? hint : undefined;
 }

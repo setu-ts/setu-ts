@@ -39,8 +39,8 @@ npm install @setu-ts/messaging-plugin kafkajs
 # Deno: deno add npm:@setu-ts/messaging-plugin npm:kafkajs
 ```
 
-`setu new --broker`/`--queue` and a workspace's `--transport` already add the client for the arm
-they wire. `setu add` records peers for the default arm it wires (for example the console telemetry
+`setu new --broker`/`--queue` and a workspace's `--broker` already add the client for the arm they
+wire. `setu add` records peers for the default arm it wires (for example the console telemetry
 exporter); any other arm you select by hand needs its driver installed as above.
 
 ### Optional peers in a workspace
@@ -54,7 +54,13 @@ of a peer, including incompatible versions.
 
 The startup symptom is `Optional dependency '<d>' could not be loaded by '<package>'`, followed by
 the instruction to install it where that package is installed. Check the installed framework
-package's `package.json` for its peer ranges rather than installing the latest upstream major.
+package's `package.json` for its peer ranges rather than installing the latest upstream major. No
+framework option changes where the package looks: a peer the plugin imports belongs in the root. An
+option that hands the plugin the dependency instead, such as
+`LoggerPlugin({ transport: 'pino', pinoFactory })`, skips that import, so the application may load
+the library from wherever it is installed and pass the factory in.
+
+<!-- version:history -->
 
 Since 0.11.0, `setu add <plugin> --dir apps/<member>` in a listed Node or Bun Setu workspace records
 the peers it supplies in the member's `package.json` `dependencies` and, when the root has a
@@ -599,6 +605,63 @@ emitDecoratorMetadata).
 
 ---
 
+### @setu-ts/agent-runs-plugin
+
+**Purpose:** Durable model/tool runs with recovery, approvals and stream replay.
+
+**Runtime Compatibility:**
+
+| Deno | Node | Bun | Workers                                         |
+| ---- | ---- | --- | ----------------------------------------------- |
+| ✅   | ✅   | ✅  | ✅ (host background lifetime and cron required) |
+
+Persists model/tool runs with fenced leases, transactional idempotency, timed approvals and
+UI-message SSE replay. Provides `CAPABILITIES.AGENT_RUNS` (`IAgentRunService`); requires runtime,
+idempotency, a supplied run store and the `ai@^7.0.159` peer. Install manually and register
+`AgentRunsPlugin({ store, definitions })`. See [durable runs](./durable-runs.md), the
+[README](../packages/agent-runs-plugin/README.md),
+[agent card](../packages/agent-runs-plugin/AGENT_CARD.md) and
+[API Reference](./api/modules/agent-runs-plugin_src.html).
+
+### @setu-ts/vector-store-plugin
+
+**Purpose:** Tenant-scoped vector storage and similarity search, with filters that are refused
+rather than ignored.
+
+**Capability Token:** `CAPABILITIES.VECTOR_STORE`
+
+**Runtime Compatibility:**
+
+| Deno | Node | Bun | Workers                   |
+| ---- | ---- | --- | ------------------------- |
+| ✅   | ✅   | ✅  | ✅ (memory, or Vectorize) |
+
+**Adapters:**
+
+- Memory (built-in)
+- pgvector (the PostgreSQL extension, version 0.8 or later, through an injected Drizzle database)
+- Qdrant (an injected official client)
+- Custom (`IVectorStoreAdapter`)
+
+> Cloudflare Vectorize is provided by [`@setu-ts/cloudflare-plugin`](#setu-tscloudflare-plugin) as
+> `VectorizeVectorStore`, which this plugin takes as its adapter. It cannot `replaceSource` or
+> `deleteScope`.
+
+**Features:**
+
+- A required tenant scope on every data method, mapped to each backend's native boundary
+- Cosine similarity search, ordered by score and then record id
+- Declared filterable fields with `eq`, `in`, `gt`, `gte`, `lt`, `lte` and `and`
+- `upsert`, `replaceSource`, `delete`, `deleteScope` and `query`
+
+**Links:**
+
+- [README](../packages/vector-store-plugin/README.md)
+- [Retrieval guide](./retrieval.md)
+- [API Reference](./api/modules/vector-store-plugin_src.html)
+
+---
+
 ## Tier 4: Infrastructure
 
 ### @setu-ts/metrics-plugin
@@ -1033,6 +1096,7 @@ the browser.
 - Durable Objects (backplane, locks)
 - Workers Queues
 - Cron Triggers
+- Vectorize vector store (`VectorizeVectorStore`) for `@setu-ts/vector-store-plugin`
 - Messaging (`CAPABILITIES.MESSAGING`) — publish/subscribe over Workers Queues, and request/reply
   through a Durable Object reply inbox
 - Cache API middleware
@@ -1066,6 +1130,38 @@ the browser.
 
 - [README](../packages/grpc-plugin/README.md)
 - [API Reference](./api/modules/grpc-plugin_src.html)
+
+---
+
+### @setu-ts/mcp-plugin
+
+**Purpose:** Expose explicitly declared routes as Model Context Protocol tools through the kernel
+pipeline.
+
+**Capability Token:** None; the plugin registers an ordinary stateless POST endpoint.
+
+**Runtime Compatibility:**
+
+| Deno | Node | Bun | Workers |
+| ---- | ---- | --- | ------- |
+| ✅   | ✅   | ✅  | ✅      |
+
+Node has the full integration suite and Deno one native list/call proof. Bun is unproven until the
+0.12.0 published-artifact row runs. Workers has a workerd-condition bundle-resolution proof; a live
+Workers run remains a follow-on.
+
+**Features:**
+
+- Explicit tool declarations with Zod v4 input/output schemas
+- Caller-filtered lists with private cache hints, existing Bearer challenges on hidden calls
+- In-process dispatch through authentication, validation, tenancy, rate limits, idempotency and
+  audit
+- Optional `@modelcontextprotocol/server@^2.4.0` peer and legacy stateless clients
+
+**Links:**
+
+- [README](../packages/mcp-plugin/README.md)
+- [API Reference](./api/modules/mcp-plugin_src.html)
 
 ---
 
@@ -1348,7 +1444,8 @@ default.
   `--style class-based` opts into decorators and dependency injection together on `rest` and
   `microservice`, and `--template class-based` is a byte-identical alias of
   `--template rest --style class-based`
-- `setu new <name> --workspace` - Create a monorepo root (`--port`, `--transport`)
+- `setu new <name> --workspace` - Create a monorepo root (`--port`, `--broker`);
+  `setu workspace broker|rpc` changes it later
 - `setu generate <type> <name>` - Generate code; 16 schematics, every one except `guard`,
   `migration` and (in a functional project) `service` and `job` wired into a registration site with
   no edit to a file you own

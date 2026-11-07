@@ -1,10 +1,32 @@
 import { expect, it } from 'vitest';
-import { projectFiles, resolveHost } from '../../src/templates/project-files.ts';
+import {
+  NODE_START_BUILD_CHECK,
+  projectFiles,
+  resolveHost,
+} from '../../src/templates/project-files.ts';
 import { MINIMAL_HOST } from '../../src/templates/minimal.ts';
 import { REST_TEMPLATE } from '../../src/templates/rest.ts';
 import { CLASS_BASED_TEMPLATE } from '../../src/templates/class-based.ts';
 import { MICROSERVICE_TEMPLATE } from '../../src/templates/microservice.ts';
 import { FULL_STACK_TEMPLATE } from '../../src/templates/full-stack.ts';
+
+it('X87-6 gives member debug scripts their own loopback inspector port on every runtime', () => {
+  for (const runtime of ['node', 'bun', 'deno'] as const)
+    for (const host of [REST_TEMPLATE, FULL_STACK_TEMPLATE]) {
+      const files = projectFiles('web', runtime, resolveHost(host, runtime), {
+        symbol: 'SERVICE_PORT',
+        from: './src/discovery/services.ts',
+        inspectPort: 5100,
+      });
+      const manifest = JSON.parse(
+        files.find((file) => file.path === (runtime === 'deno' ? 'deno.json' : 'package.json'))!
+          .contents,
+      );
+      expect((manifest.tasks ?? manifest.scripts)['start:debug']).toContain(
+        '--inspect=127.0.0.1:5100',
+      );
+    }
+});
 
 for (const host of [
   MINIMAL_HOST,
@@ -14,7 +36,7 @@ for (const host of [
   FULL_STACK_TEMPLATE,
 ]) {
   for (const runtime of ['node', 'bun', 'deno'] as const) {
-    it(`renders production and development scripts for ${'name' in host ? host.name : 'minimal'}/${runtime}`, () => {
+    it(`M131b 3.3 renders production and development scripts for ${'name' in host ? host.name : 'minimal'}/${runtime}`, () => {
       const files = projectFiles('probe', runtime, resolveHost(host, runtime));
       const full = host === FULL_STACK_TEMPLATE;
       const manifest = JSON.parse(
@@ -26,13 +48,20 @@ for (const host of [
       };
       const scripts = manifest.scripts ?? manifest.tasks!;
       if (runtime === 'node') {
+        // M131a: local Node scripts run the OpenTelemetry preload (X88-4) and
+        // load `.env` through the runtime (X88-2).
+        const envFile = '--import ./instrumentation.mjs --env-file-if-exists=.env ';
         expect(scripts['build']).toBe(
           `${full ? 'react-router build && ' : ''}tsc --noEmit && setu build`,
         );
-        expect(scripts['start']).toBe('node --enable-source-maps dist/main.js');
-        expect(scripts['start:dev']).toBe(full ? 'tsx dev.ts' : 'tsx watch main.ts');
+        expect(scripts['start']).toBe(
+          `${NODE_START_BUILD_CHECK} && node ${envFile}--enable-source-maps dist/main.js`,
+        );
+        expect(scripts['start:dev']).toBe(
+          full ? `tsx ${envFile}dev.ts` : `tsx watch ${envFile}main.ts`,
+        );
         expect(scripts['start:debug']).toBe(
-          `node --inspect --import tsx ${full ? 'dev.ts' : 'main.ts'}`,
+          `node ${envFile}--inspect --import tsx ${full ? 'dev.ts' : 'main.ts'}`,
         );
         expect(files.find((file) => file.path === '.gitignore')!.contents).toContain('dist/');
       } else if (runtime === 'bun') {
@@ -41,11 +70,13 @@ for (const host of [
         expect(scripts['start:debug']).toBe(`bun --inspect ${full ? 'dev.ts' : 'main.ts'}`);
         expect(scripts['build']).toBe(full ? 'react-router build' : undefined);
       } else {
+        // M131a X88-2: full-stack writes a `.env`, so its Deno scripts load it.
+        const envFile = full ? '--env-file=.env ' : '';
         for (const flag of ['watch', 'inspect']) {
           const command = scripts[flag === 'watch' ? 'start:dev' : 'start:debug'];
           expect(command).toBe(
             full
-              ? `deno task install && deno run -A --${flag} dev.ts`
+              ? `deno task install && deno run -A --${flag} ${envFile}dev.ts`
               : scripts['start']!.replace('deno run ', `deno run --${flag} `),
           );
         }

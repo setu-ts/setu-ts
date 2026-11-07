@@ -1,5 +1,6 @@
 packages:
   - packages/common
+  - packages/agent-runs-plugin
   - packages/kernel
   - packages/runtime
   - packages/exceptions
@@ -51,15 +52,22 @@ packages:
   - packages/localization-plugin
   - packages/diagnostics-plugin
   - packages/idempotency-plugin
+  - packages/mcp-plugin
+  - packages/vector-store-plugin
   - apps/*
+  - apps/grpc-workspace/apps/*
+  - apps/grpc-workspace/libs/*
 
 # Dev-only workspace edges are cyclic (test-only imports, plan §3.1); each
 # member's build is `tsc -b`, which orders its own references.
 ignoreWorkspaceCycles: true
 
 # @azure/identity still requests msal-node 6; 7.1 fixes GHSA-xcx6-jx8p-x3h5.
+# @qdrant/js-client-rest 1.20.0 pins undici 7.29.1; 7.30.1 fixes GHSA-2m5v-pch6-74hx,
+# GHSA-4w7w-5xrc-9h26, GHSA-xjj6-f33q-929c and GHSA-qrxm-fqhp-jwvm (M135 audit F4).
 overrides:
   '@azure/msal-node': ^7.1.0
+  '@qdrant/js-client-rest>undici': 7.30.1
 
 # Google SDK install scripts are denied: both are transitive deps of
 # the Google Cloud SDKs the tests reach only through fakes and guarded

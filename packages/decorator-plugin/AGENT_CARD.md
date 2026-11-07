@@ -1,8 +1,7 @@
 # @setu-ts/decorator-plugin — class controllers and injection
 
 **Add it:** `setu add decorator` adds the dependency; register `DecoratorPlugin({ controllers })` in
-`setu.config.ts`. It provides `CAPABILITIES.METADATA_STORE` (`IMetadataStore`); class-based
-scaffolds already register it.
+`setu.config.ts`. It provides `CAPABILITIES.METADATA_STORE` (`IMetadataStore`).
 
 ## Serve a controller with injected configuration
 
@@ -26,7 +25,7 @@ export class OrdersController {
 app.register(DecoratorPlugin({ controllers: [OrdersController] }));
 ```
 
-Register a config provider for that token; add the class to the existing controller registration.
+Register a config provider for that token.
 
 ## Behaviour the types do not show
 
@@ -34,14 +33,15 @@ Register a config provider for that token; add the class to the existing control
 - These are standard decorators: `@Params(...)` goes on the method with one source per argument.
   Constructor injection uses class-level `@Inject(...)`; a controller is a singleton, so it takes
   `'scoped'` services as `@Params(Service(token))`.
-- A plain handler return is serialized as JSON. `Ctx()` supplies request context for returning a
-  response writer directly; an explicit writer result takes precedence over response-shaping
-  metadata.
+- Plain returns serialize as JSON; `Ctx()` supplies the response writer, which overrides shaping.
 - `enforceSchemas` defaults to `true`; validation decorators enforce only when a validation service
   is registered, otherwise they remain descriptive and the plugin warns.
 - `enforceRoles` defaults to `true`; role/permission routes without an authorization provider fail
   closed with `501` instead of running unguarded.
-- Imported modules are visited depth-first; each module contributes providers before controllers.
+- `@McpTool(meta?)` marks one method for @setu-ts/mcp-plugin discovery. Name defaults to
+  operationId, then method; description to operation description, then summary. Register
+  `McpPlugin({})`. Every tool needs a security brand or `schema.security`; `@Public()` declares
+  public intent.
 
 ## Other options
 

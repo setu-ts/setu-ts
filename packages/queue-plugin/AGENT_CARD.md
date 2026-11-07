@@ -60,8 +60,8 @@ export function createReceiptJobProcessor(
 
 ## Other options
 
-- `adapter: 'redis'` or `'rabbitmq'` uses `url`; `'sqs'` uses `sqs`.
-- `schedule` registers recurring jobs with a cron expression.
+- `adapter: 'redis'` or `'rabbitmq'` uses `url` (node-redis: `client`); `'sqs'` uses `sqs`.
+- `schedule` registers cron-recurring jobs.
 - `behaviors` wraps processor execution; `diagnostics` observes approved queue names only.
 
 <!-- card-allow: LoggerPlugin -->

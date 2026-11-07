@@ -19,6 +19,7 @@ import type {
 } from '../../src/index.ts';
 import type {
   HttpStatusHint,
+  ProblemTypeInit,
   RouteSchema,
   RouteSecurityMetadata,
   SecurityRequirement,
@@ -205,10 +206,16 @@ describe('@setu-ts/common barrel', () => {
     // `@setu-ts/exceptions` reach these through the barrel and nowhere else,
     // so dropping one here would break the M89b path with every unit test in
     // both packages still green.
+    const problem: ProblemTypeInit = {
+      type: 'https://iana.org/assignments/http-problem-types#quota-exceeded',
+      title: 'Quota Exceeded',
+      extensions: { 'violated-policies': ['default'] },
+    };
     const hint: HttpStatusHint = {
       status: 501,
       title: 'Not Implemented',
       detail: 'Raw queries are not supported by this adapter.',
+      problem,
     };
     const branded = withHttpStatusHint(new Error('the full diagnostic'), hint);
 

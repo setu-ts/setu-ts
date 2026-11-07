@@ -65,7 +65,7 @@ const READMES: Readonly<Record<string, number>> = {
   'packages/messaging-plugin/README.md': 17,
   // M89c: the tenant-in-a-behaviour recipe (`getRepositoryFor`) is the one new
   // fence — gated so it cannot ship uncompilable.
-  'packages/multi-tenancy-plugin/README.md': 4,
+  'packages/multi-tenancy-plugin/README.md': 6,
   'packages/scheduler-plugin/README.md': 3,
   // M90i: +1 for the trace-propagation example.
   'packages/queue-plugin/README.md': 10,
@@ -88,7 +88,9 @@ const READMES: Readonly<Record<string, number>> = {
   // M110a: +1 for the Authorization Policies example.
   // M110b: +1 for the Scoped Roles example.
   // M101h: +1 for the authorization-diagnostics registration example.
-  'packages/auth-plugin/README.md': 22,
+  // M131d: +4 for the full-stack password sign-in recipe (the arm, the account module's
+  // request-bound service, the login action, and the requireUser guard).
+  'packages/auth-plugin/README.md': 29,
   'packages/static-plugin/README.md': 3,
   // M94c: +1 for the escaping Hono-template `raw(csrfTokenField(ctx))` example.
   // M101c: +1 for the Tenant binding opt-out example.
@@ -103,7 +105,7 @@ const READMES: Readonly<Record<string, number>> = {
   // previously documented nowhere).
   // M110a: +1 for the Authorization policies (@Policy/@RequirePolicy) example.
   // M110b: +1 for the Scoped roles (@ScopedRoles/@ScopedPermissions) example.
-  'packages/decorator-plugin/README.md': 8,
+  'packages/decorator-plugin/README.md': 9,
   // M92: the new package's README is born gated — usage, functional renderView,
   // the @Render decorator and the raw() opt-out.
   'packages/view-plugin/README.md': 6,
@@ -113,10 +115,10 @@ const READMES: Readonly<Record<string, number>> = {
   'packages/localization-plugin/README.md': 7,
   'packages/validation-plugin/README.md': 3,
   'packages/sse-plugin/README.md': 6,
-  'packages/websocket-plugin/README.md': 10,
+  'packages/websocket-plugin/README.md': 11,
   'packages/realtime-backplane-plugin/README.md': 3,
   'packages/resilience-plugin/README.md': 2,
-  'packages/react-router-plugin/README.md': 4,
+  'packages/react-router-plugin/README.md': 5,
   'packages/starters/rest-starter/README.md': 7,
   'packages/starters/microservice-starter/README.md': 6,
   'packages/starters/full-stack-starter/README.md': 8,
@@ -140,6 +142,9 @@ const READMES: Readonly<Record<string, number>> = {
   // M109a: the new package's README is born gated — the usage example and the
   // derived-key forwarding example.
   'packages/idempotency-plugin/README.md': 3,
+  'packages/mcp-plugin/README.md': 2,
+  'packages/vector-store-plugin/README.md': 8,
+  'packages/agent-runs-plugin/README.md': 1,
   // M98a: +1 for the kernel-diagnostics polling example.
   'packages/kernel/README.md': 3,
   'packages/logger-plugin/README.md': 4,
@@ -158,9 +163,9 @@ const READMES: Readonly<Record<string, number>> = {
   // pinned counts; the UNGATED exemption is deleted, so this record is now
   // every package README on disk.
   'packages/cli/README.md': 4,
-  'packages/cloudflare-plugin/README.md': 9,
+  'packages/cloudflare-plugin/README.md': 10,
   'packages/cqrs-plugin/README.md': 2,
-  'packages/database-plugin/README.md': 17,
+  'packages/database-plugin/README.md': 19,
   'packages/notification-plugin/README.md': 3,
   'packages/openapi-plugin/README.md': 6,
   'packages/secrets-plugin/README.md': 6,
@@ -207,7 +212,7 @@ describe('package README fences compile (X8-8, X6-2/X7-1)', () => {
     // Pin the SIZE of the target list too: without this, deleting an entry
     // shrinks both sides of the equality below and the gate passes vacuously
     // (negative control §6.7 of the M70n plan).
-    expect(Object.keys(READMES)).toHaveLength(52);
+    expect(Object.keys(READMES)).toHaveLength(55);
 
     // And pin the COVERAGE: the gated set is every package README on disk —
     // M119i deleted the known-gap list, so a new package cannot ship an

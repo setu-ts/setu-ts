@@ -1,6 +1,6 @@
 # Releasing to npm
 
-The npm publisher ships all 52 workspace members as `@setu-ts/*`. M111c builds the machinery; it
+The npm publisher ships all 55 workspace members as `@setu-ts/*`. M111c builds the machinery; it
 publishes nothing. `v0.9.0` was the first npm release. Existing versions through `0.8.0` remain on
 JSR. npm versions cannot be reused.
 
@@ -127,7 +127,7 @@ own placeholder and trust configuration before their first real release.
   `npm:` or `jsr:` specifier under `packages/*/src`, so there is nothing to grep for. **Never bump
   an `@since` tag**: it records when a symbol appeared, so moving it makes it a lie.
 - **`release:bump` rewrites `test/deno-lane/deno.lock` in place, and you commit that result.** The
-  lane lock records every workspace member under `workspace.links` at the shipping version (52
+  lane lock records every workspace member under `workspace.links` at the shipping version (55
   `jsr:@setu-ts/<pkg>@<version>` keys), so it is the swept file that keeps the sweep's
   zero-reference guard meaningful. `pnpm-lock.yaml` records workspace members as `link:` entries
   with a `workspace:^` specifier and no version, so a bump does not change it and it is not swept;
@@ -190,6 +190,27 @@ own placeholder and trust configuration before their first real release.
   matching cases to `test/docs-gate.test.ts` in the same change** — both checkers read that regex
   separately, so each needs its own, and a widening nothing asserts can be narrowed back later
   without a single test going red.
+- **Lessons from cutting `v0.12.0`.** Check each of these before the full run, not after it:
+  - **A package new to npm needs its name and trust first.** `npm view @setu-ts/<pkg>` answering
+    `E404` means the One-time setup steps apply to that package: placeholder now, `npm trust` just
+    before the tag, deprecation afterwards. 0.12.0 had three (`mcp-plugin`, `vector-store-plugin`,
+    `agent-runs-plugin`).
+  - **`check:docs` reports every "since 0.11.0" claim in prose** once the line widens — about 70 for
+    0.12.0. Most are history: stand `<!-- version:history -->` (a `#` or `//` comment inside a code
+    fence) above the block. Bump only the claims about the current release: README's status line and
+    pin advice, `docs/versioning.md`'s caret range, and install snippets in `docs/custom-plugins.md`
+    and `docs/runtime-deployment.md`.
+  - **Update the package count** wherever it is stated as current (README status, layout tree and
+    release-train sentence; this file's opening line, lane-lock and compat sentences) when a release
+    adds packages. The historical `v0.9.0` bootstrap counts stay.
+  - **Tests that pin the version must match it only as a whole token.** The template baseline's
+    substring replace also rewrote eslint's `^10.12.0`; a package barrel test that hard-codes its
+    `VERSION` fails on every bump; a captured output normalizes any framework version, not one. Run
+    `packages/cli/test/unit/templates/style-baseline.test.ts`,
+    `packages/cli/test/unit/node-redis-cli.test.ts` and each new package's barrel test right after
+    the bump.
+  - **The CHANGELOG's references to "`docs/upgrading.md`, Unreleased"** are renamed with the
+    headings.
 - Add the release's `CHANGELOG.md` entry.
 - **A release that carries reader action adds a `docs/upgrading.md` entry.** The CHANGELOG records
   what the framework changed; the guide records what a reader must change in their own project. The
@@ -215,21 +236,23 @@ pnpm run check:node-build --require-all
 pnpm run release:publish --dry-run
 ```
 
-The npm dry run builds once, packs all 52 with scripts disabled, checks each exact packed manifest,
+The npm dry run builds once, packs all 55 with scripts disabled, checks each exact packed manifest,
 performs the packument lookup, and runs `npm publish <tarball> --dry-run`. It refuses publication
 holds, stale internal ranges, missing metadata and missing `dist` or `src` file entries. Only HTTP
 404 means a new package; registry errors fail the publisher. An existing version is skipped, so
 retries resume. A prerelease uses tag `next`; an ordinary release uses `latest`.
 
 `release:verify` checks version sites, source `workspace:^` ranges, release-list coverage, non-stub
-exports, non-empty READMEs, manifest metadata, release assets, changelog PRs and release shape. The
-changelog PR check exempts the release PR for the version being verified (`release/v<version>`): its
-source changes are the version bump, and the section it would have to name is the release itself.
-Without the exemption the check passes on the release PR, which is not merged yet, and fails on the
-tag (#452). JSR's slow-type dry run is replaced by `tsc -b` with `isolatedDeclarations`; the
-`@module`-first rule is retired because npm renders README.md. The `@since` gate reads JSR through
-0.8.x and later claims from npm tarball `package/src/` sources. `check:versions` still catches stale
-specifiers outside manifests; fixtures remain data.
+exports, non-empty READMEs, manifest metadata, release assets, changelog PRs, changelog link
+definitions and release shape. The changelog link check requires a `[x]: …` definition for every
+released heading and an `[unreleased]` that compares from the newest release, so a cut cannot leave
+either to a hand edit. The changelog PR check exempts the release PR for the version being verified
+(`release/v<version>`): its source changes are the version bump, and the section it would have to
+name is the release itself. Without the exemption the check passes on the release PR, which is not
+merged yet, and fails on the tag (#452). JSR's slow-type dry run is replaced by `tsc -b` with
+`isolatedDeclarations`; the `@module`-first rule is retired because npm renders README.md. The
+`@since` gate reads JSR through 0.8.x and later claims from npm tarball `package/src/` sources.
+`check:versions` still catches stale specifiers outside manifests; fixtures remain data.
 
 ### 3. Merge, tag, and let CI publish
 
@@ -241,16 +264,21 @@ git tag v0.9.0 <reviewed-main-merge-sha>
 git push origin v0.9.0
 ```
 
-`release.yml` has three jobs. `gates` has `contents: read`, runs every test lane and release gate,
-and uploads `resolved-set.json`. `publish` needs gates, names environment `npm`, and alone holds
-`id-token: write` (plus `contents: read`). It checks out without credentials, installs with
-`--ignore-scripts`, builds, packs and publishes with scripts disabled, and runs no tests. It uses
-OIDC alone; there is no npm token. `release` needs publish, holds `contents: write`, downloads the
-resolved-set artifact and creates the GitHub Release. Both `publish` and `release` run only for a
-pushed `v*` tag. A manual `workflow_dispatch` is always a rehearsal: it runs the gates and then the
-publisher's dry run INSIDE the gates job, which cannot request an OIDC token, and neither later job
-runs. Every action in the workflow is pinned to a full commit SHA, with its version in a comment;
-update a pin by resolving the new tag to its commit, never by switching back to a tag.
+`release.yml` has four jobs. `gates` has `contents: read` and runs as nine parallel shards, split
+like ci.yml's `node` job: static checks, three CLI shards, messaging, the other packages, the Deno
+lane, tooling, and the release checks that verify the tag and upload `resolved-set.json`.
+`cli-coverage` merges the three CLI shards' reports and enforces the per-file bar. Sharded, the
+gates should take about as long as PR CI rather than the ~75 minutes one job took for `v0.11.0`, and
+a failed shard can be re-run alone. `publish` needs every shard and `cli-coverage`, names
+environment `npm`, and alone holds `id-token: write` (plus `contents: read`). It checks out without
+credentials, installs with `--ignore-scripts`, builds, packs and publishes with scripts disabled,
+and runs no tests. It uses OIDC alone; there is no npm token. `release` needs publish, holds
+`contents: write`, downloads the resolved-set artifact and creates the GitHub Release. Both
+`publish` and `release` run only for a pushed `v*` tag. A manual `workflow_dispatch` is always a
+rehearsal: it runs the gates and then the publisher's dry run INSIDE the gates job, which cannot
+request an OIDC token, and neither later job runs. Every action in the workflow is pinned to a full
+commit SHA, with its version in a comment; update a pin by resolving the new tag to its commit,
+never by switching back to a tag.
 
 The publisher requires npm ≥11.5.1 and adds `--provenance` on GitHub Actions. A local dry run cannot
 establish OIDC or live provenance; the first tag run supplies that proof. Back-merge `main` into
@@ -401,7 +429,7 @@ await app.stop();
 Run `node proof.mjs` and `bun proof.mjs`; require 200 and `{"ok":true}`. Inspect
 `npm view <package>@0.9.0 dist.attestations --json` and `npm view <package> dist-tags --json` for
 all 52 names: provenance must exist and `latest` must name `0.9.0`. Confirm descriptions, repository
-links and README on npm. The weekly compat suite installs/imports all 52 and serves real sockets on
+links and README on npm. The weekly compat suite installs/imports all 55 and serves real sockets on
 Node/Bun. Before the first publish, its explicit scope probe reports HTTP 404 and skips; HTTP 200
 arms the suite, and any other status fails.
 

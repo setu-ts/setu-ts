@@ -2,10 +2,24 @@ import { expect, it } from 'vitest';
 import { classifyWiring, wiringFinding, wiringSites } from '../../src/diagnostics/wiring.ts';
 import { hostSeamSpecs } from '../../src/seams/registry.ts';
 
+it('X91-3 requires registerModules to be called and consumes values outside imports', () => {
+  for (const source of [
+    "import { registerModules } from './index.ts';",
+    "import { registerModules } from './index.ts'; const pending = registerModules;",
+  ])
+    expect(classifyWiring(source, 'registerModules')).toBe('unwired');
+  expect(
+    classifyWiring(
+      "import { GENERATED_PLUGINS } from './index.ts'; const p = [...GENERATED_PLUGINS];",
+      'GENERATED_PLUGINS',
+    ),
+  ).toBe('wired');
+});
+
 it('classifies code and imports, masks strings/comments and refuses undecidable source', () => {
   expect(classifyWiring('use(APP_CONTROLLERS)', 'APP_CONTROLLERS')).toBe('wired');
   expect(classifyWiring("import { APP_CONTROLLERS } from './index.ts';", 'APP_CONTROLLERS')).toBe(
-    'wired',
+    'unwired',
   );
   expect(
     classifyWiring("// APP_CONTROLLERS\nconst label = 'APP_CONTROLLERS';", 'APP_CONTROLLERS'),
@@ -13,6 +27,19 @@ it('classifies code and imports, masks strings/comments and refuses undecidable 
   expect(classifyWiring('const label = `APP_CONTROLLERS`;', 'APP_CONTROLLERS')).toBe(
     'unclassifiable',
   );
+});
+
+it('classifies a config reading env by bracket access, still refusing a computed constructor', () => {
+  const config = [
+    "import { registerModules } from './src/modules/index.ts';",
+    "const secret = createRuntimeServices().env['JWT_SECRET'] ?? 'demo';",
+    'registerModules(app.router, app.services);',
+  ].join('\n');
+  expect(classifyWiring(config, 'registerModules')).toBe('wired');
+  expect(classifyWiring(config, 'GENERATED_PLUGINS')).toBe('unwired');
+  expect(
+    classifyWiring(config.replace("['JWT_SECRET']", "['constructor']"), 'registerModules'),
+  ).toBe('unclassifiable');
 });
 
 it('checks every host export and preserves the narrower generator inventory', () => {

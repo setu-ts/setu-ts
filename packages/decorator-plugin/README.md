@@ -52,6 +52,38 @@ class UsersController {
 app.register(DecoratorPlugin({ controllers: [UsersController] }));
 ```
 
+## MCP tools
+
+`@McpTool(meta?)` marks one route method for MCP discovery. It accepts common's
+`RouteMcpToolMetadata`: `name?`, `description?`, `title?`, `repeatable?: true`. The name defaults to
+`@ApiOperation`'s `operationId`, then the method name. Description defaults to the operation
+description, then summary. It has no class-level form.
+
+```typescript
+import { requireScopes } from '@setu-ts/auth-plugin';
+import { ApiOperation, Controller, DecoratorPlugin, Get, McpTool, UseGuards } from '@setu-ts/decorator-plugin';
+import { McpPlugin } from '@setu-ts/mcp-plugin';
+
+@Controller('/orders')
+class OrdersController {
+  @Get('/')
+  @ApiOperation({ operationId: 'list_orders', summary: 'List orders' })
+  @McpTool()
+  @UseGuards(requireScopes('orders:read'))
+  list() { return { orders: [] }; }
+}
+
+export const controllers = DecoratorPlugin({ controllers: [OrdersController] });
+export const mcp = McpPlugin({});
+```
+
+Register both plugins in your application. The decorator stores metadata and appends a branded
+pass-through; it imports nothing from mcp-plugin. That plugin discovers the brand at bootstrap and
+re-enters the controller route for each call, preserving DI, guards and validation. Names must be
+unique and match `^[A-Za-z0-9_.-]{1,64}$`; description is required. Startup refuses a tool route
+without a security brand or defined `schema.security`. Use guards for protected routes, or
+`@Public()` to declare an intentionally public route.
+
 ## Non-HTTP ingress
 
 The same explicit class list registers queue processors, scheduled jobs, domain-event and broker
@@ -430,6 +462,7 @@ checked through the permissions it bundles). They run after `@Roles`/`@Permissio
 | `Idempotent`                 | function  |
 | `Inject`                     | function  |
 | `Injectable`                 | function  |
+| `McpTool`                    | function  |
 | `Module`                     | function  |
 | `OnEvent`                    | function  |
 | `Optional`                   | function  |

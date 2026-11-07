@@ -5,6 +5,9 @@
       "path": "./packages/common"
     },
     {
+      "path": "./packages/agent-runs-plugin"
+    },
+    {
       "path": "./packages/kernel"
     },
     {
@@ -156,6 +159,12 @@
     },
     {
       "path": "./packages/idempotency-plugin"
+    },
+    {
+      "path": "./packages/mcp-plugin"
+    },
+    {
+      "path": "./packages/vector-store-plugin"
     }
   ]
 }

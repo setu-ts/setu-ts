@@ -14,6 +14,8 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  fallbackErrorHint,
+  fallbackErrorStatus,
   HTTP_STATUS_HINT,
   type HttpStatusHint,
   httpStatusHintOf,
@@ -171,6 +173,117 @@ describe('HTTP status hint', () => {
     }
   });
 
+  it('should carry a well-formed frozen `problem`, extensions included', () => {
+    // `problem` is the channel a rate limiter uses to identify its refusal as
+    // the IANA `quota-exceeded` type; the Problem Details formatters read it
+    // off the snapshot.
+    const extensions = { 'violated-policies': ['default'] };
+    const problem = {
+      type: 'https://iana.org/assignments/http-problem-types#quota-exceeded',
+      title: 'Quota Exceeded',
+      extensions,
+    };
+    const error = new Error('boom');
+    Object.defineProperty(error, HTTP_STATUS_HINT, {
+      value: { status: 429, title: 'T', detail: 'D', problem },
+      configurable: true,
+    });
+
+    const hint = httpStatusHintOf(error);
+
+    expect(hint?.problem).toEqual(problem);
+    expect(Object.isFrozen(hint?.problem)).toBe(true);
+  });
+
+  it('should DROP a malformed `problem` but keep the rest of the hint', () => {
+    // Same policy as `details`: the three required members still build the
+    // response, so a bad optional member must not reject the whole hint.
+    for (const problem of [
+      'a string',
+      ['an', 'array'],
+      null,
+      { title: 'Quota Exceeded' },
+      { type: 'urn:example:quota', title: '' },
+      { type: '', title: 'Quota Exceeded' },
+      { type: 42, title: 'Quota Exceeded' },
+    ]) {
+      const error = new Error('boom');
+      Object.defineProperty(error, HTTP_STATUS_HINT, {
+        value: { status: 501, title: 'T', detail: 'D', problem },
+        configurable: true,
+      });
+
+      const hint = httpStatusHintOf(error);
+      expect(hint, JSON.stringify(problem)).toEqual({ status: 501, title: 'T', detail: 'D' });
+      expect('problem' in (hint ?? {}), JSON.stringify(problem)).toBe(false);
+    }
+  });
+
+  it('should drop only `extensions` when it is not a plain object', () => {
+    for (const extensions of [['an', 'array'], 'a string', 42, null]) {
+      const error = new Error('boom');
+      Object.defineProperty(error, HTTP_STATUS_HINT, {
+        value: {
+          status: 501,
+          title: 'T',
+          detail: 'D',
+          problem: { type: 'urn:example:quota', title: 'Quota Exceeded', extensions },
+        },
+        configurable: true,
+      });
+
+      const hint = httpStatusHintOf(error);
+      expect(hint?.problem, JSON.stringify(extensions)).toEqual({
+        type: 'urn:example:quota',
+        title: 'Quota Exceeded',
+      });
+      expect(Object.isFrozen(hint?.problem), JSON.stringify(extensions)).toBe(true);
+    }
+  });
+
+  it('should drop only `extensions` when it is a revoked Proxy', () => {
+    const { proxy, revoke } = Proxy.revocable<Record<string, unknown>>({}, {});
+    revoke();
+    const error = new Error('boom');
+    Object.defineProperty(error, HTTP_STATUS_HINT, {
+      value: {
+        status: 501,
+        title: 'T',
+        detail: 'D',
+        problem: { type: 'urn:example:quota', title: 'Quota Exceeded', extensions: proxy },
+      },
+      configurable: true,
+    });
+
+    const hint = httpStatusHintOf(error);
+
+    expect(hint).toEqual({
+      status: 501,
+      title: 'T',
+      detail: 'D',
+      problem: { type: 'urn:example:quota', title: 'Quota Exceeded' },
+    });
+  });
+
+  it('should read a throwing `problem` getter as ABSENT rather than throwing', () => {
+    // The nested member is read inside the same `try` as the carrier, so a
+    // hostile getter behaves exactly like a hostile carrier.
+    const error = new Error('boom');
+    Object.defineProperty(error, HTTP_STATUS_HINT, {
+      configurable: true,
+      value: {
+        status: 501,
+        title: 'T',
+        detail: 'D',
+        get problem() {
+          throw new Error('hostile problem getter');
+        },
+      },
+    });
+
+    expect(httpStatusHintOf(error)).toBeUndefined();
+  });
+
   it('should return a FROZEN snapshot, read once, not the branded object', () => {
     // Two properties in one. The snapshot is frozen, so a caller cannot mutate
     // what the response will be built from. And each member is read EXACTLY
@@ -276,5 +389,35 @@ describe('HTTP status hint', () => {
     const branded = secondCopy.withHttpStatusHint(new Error('boom'), NOT_IMPLEMENTED);
 
     expect(httpStatusHintOf(branded)).toEqual(NOT_IMPLEMENTED);
+  });
+});
+
+describe('fallbackErrorStatus (M131b)', () => {
+  const hinted = (status: number): Error =>
+    withHttpStatusHint(new Error('x'), { status, title: 't', detail: 'd' });
+  it.each([
+    ['a 400 hint', hinted(400), 400],
+    ['a 409 hint', hinted(409), 409],
+    ['a 499 hint', hinted(499), 499],
+    ['a 500 hint', hinted(500), 500],
+    ['a 503 hint', hinted(503), 500],
+    ['an unhinted error', new Error('fault'), 500],
+    ['a thrown string', 'fault', 500],
+    ['null', null, 500],
+  ] as const)('serves %s as %s', (_label, error, expected) => {
+    expect(fallbackErrorStatus(error)).toBe(expected);
+  });
+});
+
+describe('fallbackErrorHint (M131b review)', () => {
+  it('returns the served client hint and undefined for the opaque 500', () => {
+    const conflict = withHttpStatusHint(new Error('x'), { status: 409, title: 't', detail: 'd' });
+    expect(fallbackErrorHint(conflict)).toMatchObject({ status: 409, title: 't', detail: 'd' });
+    expect(
+      fallbackErrorHint(
+        withHttpStatusHint(new Error('x'), { status: 503, title: 't', detail: 'd' }),
+      ),
+    ).toBeUndefined();
+    expect(fallbackErrorHint(new Error('fault'))).toBeUndefined();
   });
 });

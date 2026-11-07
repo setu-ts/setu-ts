@@ -1,3 +1,4 @@
+import { cliInvocation } from '../../src/templates/project-files.ts';
 import { readFile } from 'node:fs/promises';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { runCli } from '../../src/cli.ts';
@@ -17,6 +18,14 @@ import {
 import { VERSION } from '../../src/version.ts';
 
 const root = new URL('../../../../', import.meta.url);
+
+it('X93-8 example new defers missing cards until install', async () => {
+  const h = harness();
+  expect(await h.run(['new', 'demo', '--example', 'minimal', '--agents'])).toBe(0);
+  expect(h.err.lines).toEqual([
+    `agent cards resolve after \`npm install\`; then run \`${cliInvocation('node')} agents --check --strict\``,
+  ]);
+});
 const repositoryFetch: typeof fetch = async (input) => {
   const path = String(input).split(`/v${VERSION}/`)[1];
   return new Response(await readFile(new URL(path, root)));
@@ -47,6 +56,60 @@ function harness(
 afterEach(() => vi.unstubAllGlobals());
 
 describe('example scaffolding', () => {
+  it('downloads the MCP example with standalone SDK ranges, scripts and local smoke imports', async () => {
+    const h = harness();
+    expect(await h.run(['new', 'demo', '--example', 'mcp-tools']), h.err.text()).toBe(0);
+    const prefix = '/work/demo/';
+    const manifest = JSON.parse(h.fs.read(`${prefix}package.json`));
+    expect(manifest.dependencies['@setu-ts/mcp-plugin']).toBe(`^${VERSION}`);
+    expect(manifest.dependencies['@modelcontextprotocol/server']).toBe('^2.4.0');
+    expect(manifest.devDependencies['@modelcontextprotocol/client']).toBe('^2.4.0');
+    expect(manifest.scripts.check).toBe('tsc --noEmit');
+    expect(manifest.scripts.start).toContain('dist/main.js');
+    expect(manifest.scripts.build).toContain('setu build');
+    expect(h.fs.read(`${prefix}instrumentation.mjs`)).toContain('node:module');
+    expect(h.fs.read(`${prefix}smoke.ts`)).toContain('./smoke-helpers.ts');
+    expect(h.fs.read(`${prefix}smoke-helpers.ts`)).not.toContain('source-register');
+    expect(h.fs.read(`${prefix}token.ts`)).toContain('issueDemoToken');
+    // Its start runs dist/, so the next steps build before starting.
+    const out = h.out.text();
+    for (const step of ['npm run smoke', 'npm run build', 'npm start']) expect(out).toContain(step);
+    expect(out.indexOf('npm run smoke')).toBeLessThan(out.indexOf('npm run build'));
+    expect(out.indexOf('npm run build')).toBeLessThan(out.indexOf('npm start'));
+    expect(h.fs.read(`${prefix}tsconfig.json`)).not.toMatch(/extends|paths/);
+    expect(h.fs.writes.map((path) => path.slice(prefix.length)).sort()).toEqual(
+      [...examplePaths('mcp-tools')].sort(),
+    );
+  });
+  it('downloads the durable-agent example with the agent-runs and AI SDK ranges', async () => {
+    const h = harness();
+    expect(await h.run(['new', 'demo', '--example', 'durable-agent']), h.err.text()).toBe(0);
+    const prefix = '/work/demo/';
+    const manifest = JSON.parse(h.fs.read(`${prefix}package.json`));
+    expect(manifest.dependencies['@setu-ts/agent-runs-plugin']).toBe(`^${VERSION}`);
+    expect(manifest.dependencies['@setu-ts/idempotency-plugin']).toBe(`^${VERSION}`);
+    expect(manifest.dependencies['ai']).toBe('7.0.159');
+    expect(manifest.scripts['db:setup']).toBe('tsx --env-file-if-exists=.env db-setup.ts');
+    expect(h.fs.read(`${prefix}.env.example`)).toContain('AI_COMPAT_BASE_URL=');
+    expect(h.fs.writes.map((path) => path.slice(prefix.length)).sort()).toEqual(
+      [...examplePaths('durable-agent')].sort(),
+    );
+  });
+  it('downloads the semantic-search example with the vector store and AI SDK ranges', async () => {
+    const h = harness();
+    expect(await h.run(['new', 'demo', '--example', 'semantic-search']), h.err.text()).toBe(0);
+    const prefix = '/work/demo/';
+    const manifest = JSON.parse(h.fs.read(`${prefix}package.json`));
+    expect(manifest.dependencies['@setu-ts/vector-store-plugin']).toBe(`^${VERSION}`);
+    expect(manifest.dependencies['@setu-ts/multi-tenancy-plugin']).toBe(`^${VERSION}`);
+    expect(manifest.dependencies['ai']).toBe('7.0.159');
+    expect(manifest.dependencies['drizzle-orm']).toBe('0.45.2');
+    expect(manifest.scripts.check).toBe('tsc --noEmit');
+    expect(h.fs.read(`${prefix}.env.example`)).toContain('EMBED_DIMENSIONS=1024');
+    expect(h.fs.writes.map((path) => path.slice(prefix.length)).sort()).toEqual(
+      [...examplePaths('semantic-search')].sort(),
+    );
+  });
   it('downloads version-tagged sources, rewrites manifests and prints runnable next steps through both entry points', async () => {
     for (const argv of [['new', 'demo'], createArgs(['demo'])]) {
       const h = harness();
@@ -70,6 +133,8 @@ describe('example scaffolding', () => {
       expect(h.out.text()).toContain('cd demo && npm install');
       // The smoke check exits; `npm start` serves until stopped, so it comes last.
       expect(h.out.text().indexOf('npm run smoke')).toBeLessThan(h.out.text().indexOf('npm start'));
+      // A tsx start needs no build step.
+      expect(h.out.text()).not.toContain('npm run build');
       expect(h.fs.writes.map((path) => path.slice(prefix.length)).sort()).toEqual(
         [...examplePaths('grpc')].sort(),
       );
@@ -169,11 +234,65 @@ describe('example scaffolding', () => {
       expect(h.err.text()).toContain(
         `https://raw.githubusercontent.com/setu-ts/setu-ts/v${VERSION}/apps/minimal/package.json`,
       );
-      expect(h.err.text()).toContain('setu new demo --template rest');
+      expect(h.err.text()).toContain('npx @setu-ts/cli new demo --template rest');
       expect(h.fs.writes).toEqual([]);
       expect(h.fs.mkdirs).toEqual([]);
     }
     expect(exampleTemplate('microservices')).toBe('microservice');
+  });
+  it('appends a nested fetch cause and its code, escaped (X93-3)', async () => {
+    const nested = Object.assign(new Error('getaddrinfo ENOTFOUND raw.githubusercontent.com'), {
+      code: 'ENOTFOUND',
+    });
+    let calls = 0;
+    const fetchFile: typeof fetch = (input, options) => {
+      calls++;
+      if (calls < 3) return repositoryFetch(input, options);
+      return Promise.reject(new Error('fetch failed', { cause: nested }));
+    };
+    const h = harness({}, fetchFile);
+    expect(await h.run(['new', 'demo', '--example', 'minimal'])).toBe(1);
+    expect(h.err.text()).toContain(
+      'Cause: getaddrinfo ENOTFOUND raw.githubusercontent.com (code ENOTFOUND).',
+    );
+    expect(h.err.text()).toContain('npx @setu-ts/cli new demo --template rest');
+    expect(h.fs.writes).toEqual([]);
+  });
+  it('names a refused connection from its first attempt, and a nested cause with no code', async () => {
+    const refused = Object.assign(
+      new AggregateError([new Error('connect ECONNREFUSED 127.0.0.1:443')], ''),
+      { code: 'ECONNREFUSED' },
+    );
+    for (const [nested, expected] of [
+      [refused, 'Cause: connect ECONNREFUSED 127.0.0.1:443 (code ECONNREFUSED).'],
+      [new Error('socket hang up'), 'Cause: socket hang up.'],
+      [
+        Object.assign(new AggregateError([], ''), { code: 'ETIMEDOUT' }),
+        'Cause: (code ETIMEDOUT).',
+      ],
+    ] as const) {
+      let calls = 0;
+      const fetchFile: typeof fetch = (input, options) => {
+        calls++;
+        if (calls < 3) return repositoryFetch(input, options);
+        return Promise.reject(new Error('fetch failed', { cause: nested }));
+      };
+      const h = harness({}, fetchFile);
+      expect(await h.run(['new', 'demo', '--example', 'minimal'])).toBe(1);
+      expect(h.err.text()).toContain(expected);
+      expect(h.err.text()).not.toContain('Cause:  ');
+    }
+  });
+  it('prints no cause line for an empty nested error', async () => {
+    let calls = 0;
+    const fetchFile: typeof fetch = (input, options) => {
+      calls++;
+      if (calls < 3) return repositoryFetch(input, options);
+      return Promise.reject(new Error('fetch failed', { cause: new AggregateError([], '') }));
+    };
+    const h = harness({}, fetchFile);
+    expect(await h.run(['new', 'demo', '--example', 'minimal'])).toBe(1);
+    expect(h.err.text()).not.toContain('Cause:');
   });
   it('refuses unsafe names and collisions, including dry-run collisions', async () => {
     for (const name of ['../escape', '.', 'bad\nname']) {

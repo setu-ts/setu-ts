@@ -176,6 +176,57 @@ describe('JwtStrategy', () => {
     expect(principal?.claims).toBeUndefined();
   });
 
+  it('fills scopes from the scope claim', async () => {
+    const token = await jwt.sign({ sub: 'user123', scope: 'tools:read tools:list' });
+    const principal = await strategy.authenticate(
+      createRequest({ authorization: `Bearer ${token}` }),
+    );
+    expect(principal?.scopes).toEqual(['tools:read', 'tools:list']);
+    // The raw claim still travels in claims, exactly as before.
+    expect(principal?.claims?.scope).toBe('tools:read tools:list');
+  });
+
+  it('fills scopes from scp and refuses a malformed one', async () => {
+    const token = await jwt.sign({ sub: 'user123', scp: ['tools:read'] });
+    const principal = await strategy.authenticate(
+      createRequest({ authorization: `Bearer ${token}` }),
+    );
+    expect(principal?.scopes).toEqual(['tools:read']);
+
+    const malformed = await jwt.sign({ sub: 'user123', scp: ['tools:read', 7] });
+    const noScopes = await strategy.authenticate(
+      createRequest({ authorization: `Bearer ${malformed}` }),
+    );
+    expect(noScopes).not.toBeNull();
+    expect(noScopes?.scopes).toBeUndefined();
+  });
+
+  it('fills the actor from the outermost act claim', async () => {
+    const token = await jwt.sign({
+      sub: 'user123',
+      act: { sub: 'agent', nested: 'x', act: { sub: 'prior' } },
+    });
+    const principal = await strategy.authenticate(
+      createRequest({ authorization: `Bearer ${token}` }),
+    );
+    expect(principal?.actor).toEqual({ id: 'agent', claims: { sub: 'agent', nested: 'x' } });
+    // The raw claim is still available where it always was.
+    expect(principal?.claims?.act).toEqual({
+      sub: 'agent',
+      nested: 'x',
+      act: { sub: 'prior' },
+    });
+  });
+
+  it('refuses a token whose act claim is malformed', async () => {
+    for (const act of [[], 'agent', 7, null, {}, { sub: 7 }]) {
+      const token = await jwt.sign({ sub: 'user123', act });
+      expect(
+        await strategy.authenticate(createRequest({ authorization: `Bearer ${token}` })),
+      ).toBeNull();
+    }
+  });
+
   it('has the name "jwt"', () => {
     expect(strategy.name).toBe('jwt');
   });

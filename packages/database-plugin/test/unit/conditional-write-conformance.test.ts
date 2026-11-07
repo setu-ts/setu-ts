@@ -10,7 +10,22 @@ import { createFakeCosmosClient } from '../fixtures/fake-cosmos-client.ts';
 import { createFakeBigtableClient, FakeBigtableStore } from '../fixtures/fake-bigtable-client.ts';
 import { dynamoFixture } from '../fixtures/conditional-dynamo.ts';
 import { BaseRepository } from '../../src/repositories/base-repository.ts';
-import { UnsupportedQueryFeatureError } from '../../src/errors.ts';
+import {
+  EntityNotFoundError,
+  UnsupportedQueryFeatureError,
+  VersionConflictError,
+} from '../../src/errors.ts';
+import { deleteVersioned, updateVersioned } from '../../src/repositories/versioned-write.ts';
+import { DrizzleAdapter } from '../../src/adapters/drizzle/drizzle-adapter.ts';
+import { PrismaAdapter } from '../../src/adapters/prisma/prisma-adapter.ts';
+import { MongoAdapter } from '../../src/adapters/mongo/mongo-adapter.ts';
+import { createDrizzleDatabase } from '../../src/index.ts';
+import { createFakePrismaClient } from '../fixtures/fake-prisma-client.ts';
+import {
+  createFakeDrizzleInstance,
+  createFakeDrizzleTable,
+} from '../fixtures/fake-drizzle-instance.ts';
+import { FakeMongoClient } from '../fixtures/fake-mongo-client.ts';
 import { DatabaseService } from '../../src/services/database-service.ts';
 import {
   createD1TransactionDataSource,
@@ -247,3 +262,165 @@ describe('conditional writes conjoin key and predicate at every public data sour
     });
   }
 });
+
+describe('updateVersioned / deleteVersioned at every public data source (M128)', () => {
+  for (const { name, make } of sources) {
+    it(`${name}: applied, stale and missing`, async () => {
+      const repo = new Repo(make());
+      await repo.create({ id: 'a', name: 'old', version: 1 });
+      const updated = await updateVersioned(repo, 'a', 1, { name: 'new' }, { entity: 'User' });
+      expect(updated).toMatchObject({ id: 'a', name: 'new', version: 2 });
+      const stale = await updateVersioned(repo, 'a', 1, { name: 'lost' }).catch((e: unknown) => e);
+      expect(stale).toBeInstanceOf(VersionConflictError);
+      expect(await repo.findById('a')).toMatchObject({ name: 'new', version: 2 });
+      await expect(updateVersioned(repo, 'missing', 1, { name: 'x' })).rejects.toBeInstanceOf(
+        EntityNotFoundError,
+      );
+      await expect(deleteVersioned(repo, 'a', 1)).rejects.toBeInstanceOf(VersionConflictError);
+      await deleteVersioned(repo, 'a', 2);
+      expect(await repo.findById('a')).toBeNull();
+      await expect(deleteVersioned(repo, 'a', 2)).rejects.toBeInstanceOf(EntityNotFoundError);
+    });
+  }
+});
+
+/**
+ * Inside a transaction, the versioned write applies exactly where the
+ * transaction-scoped source has conditional writes. The two sets are data:
+ * a source moving between them fails here, not in prose.
+ */
+const TRANSACTION_OUTCOMES: Readonly<Record<'applies' | 'refuses', readonly string[]>> = {
+  applies: ['drizzle', 'prisma', 'mongodb'],
+  refuses: ['memory', 'd1', 'dynamodb', 'cosmos', 'bigtable'],
+};
+
+describe('updateVersioned inside a transaction (M128)', () => {
+  it('the two sets cover every adapter exactly once', () => {
+    expect([...TRANSACTION_OUTCOMES.applies, ...TRANSACTION_OUTCOMES.refuses].sort()).toEqual(
+      sources.map((source) => source.name).sort(),
+    );
+  });
+
+  it('applies on the transaction sources with conditional writes', async () => {
+    const transactionSources = await applyingTransactionSources();
+    expect(Object.keys(transactionSources).sort()).toEqual(
+      [...TRANSACTION_OUTCOMES.applies].sort(),
+    );
+    for (const [name, { source, done }] of Object.entries(transactionSources)) {
+      try {
+        const repo = new Repo(source);
+        await repo.create({ id: 'a', name: 'old', version: 1 });
+        await expect(updateVersioned(repo, 'a', 1, { name: 'new' }), name).resolves.toMatchObject({
+          version: 2,
+        });
+        await expect(updateVersioned(repo, 'a', 1, { name: 'x' }), name).rejects.toBeInstanceOf(
+          VersionConflictError,
+        );
+      } finally {
+        await done();
+      }
+    }
+  });
+
+  it('refuses on the buffered and deferred transaction sources with conditional-write', async () => {
+    const transactionSources = await refusingTransactionSources();
+    expect(Object.keys(transactionSources).sort()).toEqual(
+      [...TRANSACTION_OUTCOMES.refuses].sort(),
+    );
+    for (const [name, { source, done }] of Object.entries(transactionSources)) {
+      try {
+        const repo = new Repo(source);
+        await expect(updateVersioned(repo, 'a', 1, { name: 'x' }), name).rejects.toMatchObject({
+          feature: 'conditional-write',
+        });
+        await expect(deleteVersioned(repo, 'a', 1), name).rejects.toMatchObject({
+          feature: 'conditional-write',
+        });
+      } finally {
+        await done();
+      }
+    }
+  });
+});
+
+/** One transaction-scoped source per applying adapter, opened through the adapter itself. */
+async function applyingTransactionSources(): Promise<
+  Record<string, { source: import('@setu-ts/common').IDataSource; done: () => Promise<void> }>
+> {
+  const prismaClient = createFakePrismaClient();
+  const adapters = {
+    drizzle: new DrizzleAdapter({
+      drizzleInstance: createDrizzleDatabase(createFakeDrizzleInstance(), (database, work) =>
+        database.transaction(work),
+      ),
+      drizzleTables: { User: createFakeDrizzleTable('user') },
+    }),
+    prisma: new PrismaAdapter({ prismaClient }),
+    mongodb: new MongoAdapter({
+      url: 'mongodb://localhost:27017/db',
+      client: new FakeMongoClient(),
+    }),
+  };
+  const result: Record<
+    string,
+    { source: import('@setu-ts/common').IDataSource; done: () => Promise<void> }
+  > = {};
+  for (const [name, adapter] of Object.entries(adapters)) {
+    await adapter.connect();
+    const tx = await adapter.beginTransaction();
+    result[name] = {
+      source: tx.createDataSource('User'),
+      done: async () => {
+        await tx.rollback();
+        await adapter.disconnect();
+      },
+    };
+  }
+  return result;
+}
+
+/** One transaction-scoped source per refusing adapter, each with its teardown. */
+async function refusingTransactionSources(): Promise<
+  Record<string, { source: import('@setu-ts/common').IDataSource; done: () => Promise<void> }>
+> {
+  const result: Record<
+    string,
+    { source: import('@setu-ts/common').IDataSource; done: () => Promise<void> }
+  > = {};
+  const adapters = {
+    memory: new MemoryAdapter(),
+    dynamodb: new DynamoAdapter({
+      client: dynamoFixture().client,
+      entities: { User: { partitionKey: 'id' } },
+    }),
+    cosmos: new CosmosAdapter({
+      database: 'db',
+      client: createFakeCosmosClient({ containers: { User: { partitionKeyPaths: ['/id'] } } })
+        .client,
+    }),
+    bigtable: new BigtableAdapter({
+      client: createFakeBigtableClient(new FakeBigtableStore()),
+      instance: 'i',
+    }),
+  };
+  for (const [name, adapter] of Object.entries(adapters)) {
+    await adapter.connect();
+    const tx = await adapter.beginTransaction();
+    result[name] = {
+      source: tx.createDataSource('User'),
+      done: async () => {
+        await tx.rollback();
+        await adapter.disconnect();
+      },
+    };
+  }
+  result['d1'] = {
+    source: createD1TransactionDataSource(
+      new SqliteD1('CREATE TABLE users(id TEXT PRIMARY KEY)'),
+      { entity: 'users', table: 'users', primaryKey: ['id'] },
+      new D1TransactionBuffer(),
+    ),
+    done: () => Promise.resolve(),
+  };
+  return result;
+}

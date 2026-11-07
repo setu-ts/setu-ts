@@ -28,7 +28,14 @@ it('lists 49 exact sunset descriptions without a token or network use', async ()
       jsrSunsetDescription('kernel', PACKAGE_METADATA['kernel']!.description),
     );
     expect(result.stdout).toContain('All 49 packages simulated.');
-    for (const name of ['localization-plugin', 'idempotency-plugin', 'create'])
+    for (const name of [
+      'localization-plugin',
+      'idempotency-plugin',
+      'mcp-plugin',
+      'vector-store-plugin',
+      'agent-runs-plugin',
+      'create',
+    ])
       expect(result.stdout).not.toContain(`would set @setu-ts/${name}\n`);
   } finally {
     await rm(preload, { force: true });

@@ -16,6 +16,7 @@ import {
   resolveAddablePackage,
   runAddCommand,
   withDependency,
+  withEnvVariable,
   withPluginWiring,
 } from '../../../src/commands/add.ts';
 import { VERSION } from '../../../src/constants.ts';
@@ -27,7 +28,112 @@ import { EVENTS_SEAM } from '../../../src/seams/events.ts';
 import { COMMAND_HANDLER_SEAM } from '../../../src/seams/cqrs.ts';
 import { runCli } from '../../../src/cli.ts';
 import { CLIENT_RANGES } from '../../../src/templates/client-dependencies.ts';
-import { listTransports } from '../../../src/workspace/transport.ts';
+import { SWAGGER_UI_DIST_VERSION } from '../../../src/templates/swagger-version.ts';
+import { BROKERS, brokerSpec } from '../../../src/workspace/transport.ts';
+
+describe('setu add openapi Swagger UI dependency (M129)', () => {
+  for (const runtime of ['node', 'deno', 'bun', 'cloudflare-workers'] as const) {
+    it(`records the integrity-matched Swagger UI pin only on socket runtimes: ${runtime}`, async () => {
+      const h = harness();
+      expect(
+        await runNewCommand(parseArgs(['api', '--runtime', runtime]), {
+          fs: h.fs,
+          cwd: '/app',
+          log: (line) => h.out.push(line),
+          error: (line) => h.err.push(line),
+        }),
+      ).toBe(0);
+      expect(await h.run(['openapi', '--dir', '/app/api'])).toBe(0);
+      const file = runtime === 'deno' ? 'deno.json' : 'package.json';
+      const manifest = JSON.parse(h.read(`/app/api/${file}`)) as Record<
+        string,
+        Record<string, string>
+      >;
+      const dependencies = manifest[runtime === 'deno' ? 'imports' : 'dependencies']!;
+      expect(dependencies['@setu-ts/openapi-plugin']).toBeDefined();
+      if (runtime === 'cloudflare-workers') {
+        expect(dependencies).not.toHaveProperty('swagger-ui-dist');
+      } else {
+        expect(dependencies['swagger-ui-dist']).toBe(
+          runtime === 'deno'
+            ? `npm:swagger-ui-dist@${SWAGGER_UI_DIST_VERSION}`
+            : SWAGGER_UI_DIST_VERSION,
+        );
+      }
+    });
+  }
+});
+
+describe('setu add sdk client scripts', () => {
+  for (const runtime of ['node', 'bun', 'deno', 'cloudflare-workers'] as const) {
+    it(`adds opt-in client scripts for ${runtime} without changing check`, async () => {
+      const deno = runtime === 'deno';
+      const path = deno ? '/app/deno.json' : '/app/package.json';
+      const key = deno ? 'tasks' : 'scripts';
+      const runner = deno ? cliInvocation(runtime) : 'setu';
+      const h = harness({
+        [path]: JSON.stringify({
+          [key]: { check: 'existing-check' },
+          ...(!deno ? { devDependencies: { '@setu-ts/cli': '^1' } } : {}),
+        }),
+        ...(runtime === 'bun' ? { '/app/bun.lock': '' } : {}),
+        ...(runtime === 'cloudflare-workers' ? { '/app/wrangler.toml': '' } : {}),
+      });
+      expect(await h.run(['sdk'])).toBe(0);
+      const manifest = JSON.parse(h.read(path)) as Record<string, Record<string, string>>;
+      expect(manifest[key]).toEqual({
+        check: 'existing-check',
+        client: `${runner} client`,
+        'client:check': `${runner} client --check`,
+      });
+    });
+  }
+  it('writes the scripts only to the manifest the runtime runs them from', async () => {
+    const h = harness({
+      '/app/package.json': JSON.stringify({ devDependencies: { '@setu-ts/cli': '^1' } }),
+      '/app/deno.json': JSON.stringify({ imports: {} }),
+      '/app/wrangler.toml': '',
+    });
+    expect(await h.run(['sdk'])).toBe(0);
+    expect(h.read('/app/package.json')).toContain('"client:check": "setu client --check"');
+    expect(JSON.parse(h.read('/app/deno.json'))).not.toHaveProperty('tasks');
+  });
+  it('uses the invocation prefix when the CLI is not a devDependency, and keeps each existing script', async () => {
+    for (const kept of ['client', 'client:check']) {
+      const h = harness({
+        '/app/package.json': JSON.stringify({ scripts: { [kept]: 'custom-client' } }),
+      });
+      expect(await h.run(['sdk'])).toBe(0);
+      const scripts = (
+        JSON.parse(h.read('/app/package.json')) as { scripts: Record<string, string> }
+      ).scripts;
+      expect(scripts[kept]).toBe('custom-client');
+      const added = kept === 'client' ? 'client:check' : 'client';
+      expect(scripts[added]).toBe(
+        `${cliInvocation('node')} client${added === 'client:check' ? ' --check' : ''}`,
+      );
+      expect(h.out.join('\n')).toContain(`left package.json ${kept} unchanged`);
+      const before = h.read('/app/package.json');
+      expect(await h.run(['sdk'])).toBe(0);
+      expect(h.read('/app/package.json')).toBe(before);
+    }
+  });
+  it('adds missing scripts even if sdk is already installed, but preserves malformed scripts', async () => {
+    const h = harness({
+      '/app/package.json': JSON.stringify({ dependencies: { '@setu-ts/sdk': `^${VERSION}` } }),
+    });
+    expect(await h.run(['sdk'])).toBe(0);
+    expect(h.read('/app/package.json')).toContain('client:check');
+    for (const scripts of [[], null, 'custom']) {
+      const bad = harness({ '/app/package.json': JSON.stringify({ scripts }) });
+      expect(await bad.run(['sdk'])).toBe(0);
+      expect((JSON.parse(bad.read('/app/package.json')) as { scripts: unknown }).scripts).toEqual(
+        scripts,
+      );
+      expect(bad.out.join('\n')).toContain('not an object');
+    }
+  });
+});
 
 describe('M121 transport additions', () => {
   // PR #519 review: guidance reads the starter's actual option and the provider's actual call.
@@ -149,7 +255,7 @@ export function createApp(): IKernelApplication {
               error: (m) => h.err.push(m),
             });
           expect(
-            await cli(['new', 'ws', '--workspace', '--runtime', runtime, '--transport', transport]),
+            await cli(['new', 'ws', '--workspace', '--runtime', runtime, '--broker', transport]),
           ).toBe(0);
           if (runtime === 'deno') {
             const path = '/app/ws/deno.json';
@@ -171,18 +277,27 @@ export function createApp(): IKernelApplication {
           const manifest = h.read(`${dir}/${runtime === 'deno' ? 'deno.json' : 'package.json'}`);
           expect(manifest).toContain(client);
           if (runtime === 'node') expect(h.read('/app/ws/package.json')).toContain(client);
+          // M138: the options live in the member's CLI-owned transport module, so the
+          // config calls it whatever the broker and the module carries the broker.
+          const module = h.read(`${dir}/src/transport/index.ts`);
           if (template === 'rest') {
-            // Existing calls are preserved. REST has neither provider originally.
-            expect(config).toContain(
+            // REST has neither provider originally: both are inserted calling the module.
+            expect(config).toContain('MessagingPlugin(messagingOptions())');
+            expect(config).toContain('...queueOptions()');
+            expect(config).toMatch(
+              /import \{[^}]*messagingOptions[^}]*\} from '\.\/src\/transport\/index\.ts';/,
+            );
+            expect(module).toContain(
               `broker: '${transport === 'redis' ? 'redis-streams' : 'nats'}'`,
             );
           } else if (template === 'full-stack') {
-            expect(config).toContain('messaging: {');
-            expect(config).toContain('config.get<string>(');
+            expect(config).toContain('messaging: messagingOptions(config),');
+            expect(module).toContain('config.get<string>(');
             // `add queue` wires the starter's queue arm with the job barrel on every
-            // transport; only Redis also selects a queue backend there.
+            // broker; only Redis also selects a queue backend, in the module.
             expect(config).toContain('processors: [...QUEUE_PROCESSORS]');
-            expect(config.includes("adapter: 'redis'")).toBe(transport === 'redis');
+            expect(config).toContain('...queueOptions(config),');
+            expect(module.includes("adapter: 'redis'")).toBe(transport === 'redis');
           } else {
             // Generated with the workspace transport, so a re-add finds it already set.
             expect(h.out.join('\n')).toContain('already passes these options to MessagingPlugin');
@@ -192,10 +307,12 @@ export function createApp(): IKernelApplication {
         });
       }
     }
-    for (const spec of listTransports().filter((arm) => arm.connection !== undefined)) {
+    for (const spec of BROKERS.map((name) => brokerSpec(name)).filter(
+      (arm) => arm.connection !== undefined,
+    )) {
       for (const flag of ['broker', 'queue'] as const) {
         if ((flag === 'broker' ? spec.messagingArgs : spec.queueArgs) === undefined) continue;
-        it(`adds standalone ${runtime} ${flag} ${spec.name} and preserves Compose and dotenv on re-add`, async () => {
+        it(`adds standalone ${runtime} ${flag} ${spec.name}, appends its dotenv rows once, and preserves both on re-add`, async () => {
           const h = harness();
           expect(
             await runNewCommand(
@@ -216,6 +333,9 @@ export function createApp(): IKernelApplication {
           expect(h.fs.writes.length).toBe(beforeDryRun);
           expect(h.out.join('\n')).toContain('docker/compose.yaml');
           expect(h.out.join('\n')).toContain('setu.config.ts');
+          expect(h.out.join('\n')).toContain(
+            `Would add ${spec.connection!.variable} to .env and .env.example.`,
+          );
           expect(await h.run(args), h.err.join('\n')).toBe(0);
           const config = h.read('/app/portal/setu.config.ts');
           expect(config).toContain(`${flag === 'broker' ? 'messaging' : 'queue'}: {`);
@@ -225,15 +345,26 @@ export function createApp(): IKernelApplication {
           for (const client of (flag === 'broker' ? spec.messagingClients : spec.queueClients) ??
             [])
             expect(manifest).toContain(client);
-          expect(h.read('/app/portal/.env')).toBe(env);
+          // X91-9: the variable `setu new --broker` writes is appended where absent,
+          // with the local default in .env and empty in the tracked example.
+          const { variable, localDefault } = spec.connection!;
+          const envAfter = h.read('/app/portal/.env');
+          expect(envAfter.startsWith(env)).toBe(true);
+          expect(envAfter.match(new RegExp(`^${variable}=`, 'gm'))?.length).toBe(1);
+          expect(envAfter).toContain(`\n${variable}=${localDefault}\n`);
+          const example = h.read('/app/portal/.env.example');
+          expect(example.match(new RegExp(`^${variable}=$`, 'gm'))?.length).toBe(1);
+          expect(h.out.join('\n')).toContain(`Added ${variable} to .env and .env.example.`);
           const compose = h.read('/app/portal/docker/compose.yaml');
           const beforeReAdd = h.fs.writes.length;
           expect(await h.run(args)).toBe(0);
           expect(h.read('/app/portal/setu.config.ts')).toBe(config);
           expect(h.read('/app/portal/docker/compose.yaml')).toBe(compose);
+          expect(h.read('/app/portal/.env')).toBe(envAfter);
+          expect(h.read('/app/portal/.env.example')).toBe(example);
           expect(h.fs.writes.length).toBe(beforeReAdd);
           expect(h.out.join('\n')).toContain(
-            `${spec.connection!.variable}=${spec.connection!.localDefault}`,
+            `Connection: ${variable} (local default ${localDefault}).`,
           );
         });
       }
@@ -282,7 +413,7 @@ export function createApp(): IKernelApplication {
           '/app/ws/apps/api',
         ]),
       ).toBe(2);
-      expect(h.err.join('\n')).toContain('workspace --transport');
+      expect(h.err.join('\n')).toContain('members share the workspace broker');
       expect(h.fs.writes.length).toBe(before);
     });
   }
@@ -372,9 +503,214 @@ export function createApp(): IKernelApplication {
   });
 });
 
+describe('the connection variable in the dotenv pair (X91-9)', () => {
+  const row = [
+    { name: 'REDIS_URL', description: 'Where the redis transport connects.', develop: '' },
+  ];
+
+  it('appends the row once, keeping the file and its line endings', () => {
+    expect(withEnvVariable('# Local\nA=1\n', row, 'redis://127.0.0.1:6379')).toBe(
+      '# Local\nA=1\n\n# Where the redis transport connects.\nREDIS_URL=redis://127.0.0.1:6379\n',
+    );
+    expect(withEnvVariable('A=1', row, '')).toBe(
+      'A=1\n\n# Where the redis transport connects.\nREDIS_URL=\n',
+    );
+    expect(withEnvVariable('A=1\r\n', row, '')).toBe(
+      'A=1\r\n\r\n# Where the redis transport connects.\r\nREDIS_URL=\r\n',
+    );
+    expect(withEnvVariable('', row, 'x')).toBe(
+      '\n# Where the redis transport connects.\nREDIS_URL=x\n',
+    );
+  });
+
+  it('leaves any existing assignment alone, set, exported or commented out', () => {
+    for (const text of [
+      'REDIS_URL=redis://cache:6379\n',
+      'export REDIS_URL=redis://cache:6379\n',
+      '  REDIS_URL = x\n',
+      '# REDIS_URL=\n',
+    ]) {
+      expect(withEnvVariable(text, row, 'redis://127.0.0.1:6379'), text).toBeUndefined();
+    }
+    // A longer name that merely starts with the variable is not an assignment of it.
+    expect(withEnvVariable('REDIS_URL_OLD=x\n', row, 'y')).toContain('\nREDIS_URL=y\n');
+    expect(withEnvVariable('A=1\n', [], 'y')).toBeUndefined();
+    expect(withEnvVariable('\uFEFFREDIS_URL=x\n', row, 'y')).toBeUndefined();
+    // Long whitespace-only lines are answered at once (no backtracking).
+    const padded = `${' '.repeat(200_000)}\n${'\t'.repeat(200_000)}\n`;
+    const started = performance.now();
+    expect(withEnvVariable(padded, row, 'y')).toContain('\nREDIS_URL=y\n');
+    expect(performance.now() - started).toBeLessThan(1000);
+    expect(withEnvVariable('exported=1\nREDIS_URLX=1\n', row, 'y')).toContain('\nREDIS_URL=y\n');
+  });
+
+  it('writes to the configured env file and its example, and keeps a value the developer set', async () => {
+    const h = harness();
+    expect(
+      await runNewCommand(
+        parseArgs([
+          'portal',
+          '--runtime',
+          'node',
+          '--template',
+          'full-stack',
+          '--env-file',
+          'config/app.env',
+        ]),
+        { fs: h.fs, cwd: '/app', log: () => {}, error: () => {} },
+      ),
+    ).toBe(0);
+    await h.fs.writeFile(
+      '/app/portal/config/app.env',
+      new TextEncoder().encode(
+        `${h.read('/app/portal/config/app.env')}REDIS_URL=redis://cache:6380\n`,
+      ),
+    );
+    expect(await h.run(['messaging', '--broker', 'redis', '--dir', '/app/portal'])).toBe(0);
+    expect(h.read('/app/portal/config/app.env').match(/^REDIS_URL=/gm)).toEqual(['REDIS_URL=']);
+    expect(h.read('/app/portal/config/app.env')).toContain('REDIS_URL=redis://cache:6380');
+    expect(h.read('/app/portal/config/app.env.example')).toMatch(/^REDIS_URL=$/m);
+    expect(h.out.join('\n')).toContain('Added REDIS_URL to config/app.env.example.');
+  });
+
+  it('writes the last listed file of an array, and guesses no file it cannot read', async () => {
+    const scaffold = async (): Promise<ReturnType<typeof harness>> => {
+      const h = harness();
+      expect(
+        await runNewCommand(
+          parseArgs(['portal', '--runtime', 'node', '--template', 'full-stack']),
+          { fs: h.fs, cwd: '/app', log: () => {}, error: () => {} },
+        ),
+      ).toBe(0);
+      return h;
+    };
+    const retarget = async (h: ReturnType<typeof harness>, value: string): Promise<string> => {
+      const config = h.read('/app/portal/setu.config.ts');
+      expect(config).toContain("envFilePath: '.env'");
+      await h.fs.writeFile(
+        '/app/portal/setu.config.ts',
+        new TextEncoder().encode(config.replace("envFilePath: '.env'", value)),
+      );
+      return h.read('/app/portal/.env');
+    };
+
+    // ConfigPlugin lets an earlier file override a later one: the last is the base.
+    const listed = await scaffold();
+    await retarget(listed, "envFilePath: ['.env.local', '.env']");
+    expect(await listed.run(['queue', '--queue', 'redis', '--dir', '/app/portal'])).toBe(0);
+    expect(listed.read('/app/portal/.env')).toMatch(/^REDIS_URL=redis:\/\/127\.0\.0\.1:6379$/m);
+    expect(listed.out.join('\n')).toContain('Added REDIS_URL to .env and .env.example.');
+
+    for (const [value, reason] of [
+      ['envFilePath: process.env.ENV_FILE', 'names its dotenv file in a form the CLI cannot read'],
+      ["envFileOptional: true, other: '.env'", 'loads no dotenv file (no envFilePath)'],
+    ] as const) {
+      const h = await scaffold();
+      const before = await retarget(h, value);
+      const example = h.read('/app/portal/.env.example');
+      expect(await h.run(['queue', '--queue', 'redis', '--dir', '/app/portal'])).toBe(0);
+      expect(h.read('/app/portal/.env')).toBe(before);
+      expect(h.read('/app/portal/.env.example')).toBe(example);
+      expect(h.out.join('\n')).toContain(
+        `setu.config.ts ${reason}; set REDIS_URL where the app reads it.`,
+      );
+      expect(h.out.join('\n')).not.toContain('Added REDIS_URL');
+    }
+  });
+
+  it('fails before writing when a dotenv or Compose file cannot be read, and guesses no file for an unreadable config', async () => {
+    const scaffold = async (): Promise<ReturnType<typeof harness>> => {
+      const h = harness();
+      expect(
+        await runNewCommand(
+          parseArgs(['portal', '--runtime', 'node', '--template', 'full-stack']),
+          { fs: h.fs, cwd: '/app', log: () => {}, error: () => {} },
+        ),
+      ).toBe(0);
+      return h;
+    };
+    const denying = (h: ReturnType<typeof harness>, denied: string): void => {
+      const readFile = h.fs.readFile.bind(h.fs);
+      h.fs.readFile = (path: string) =>
+        path === denied ? Promise.reject(new Error('EACCES: permission denied')) : readFile(path);
+    };
+
+    for (const [denied, name] of [
+      ['/app/portal/.env', '.env'],
+      ['/app/portal/.env.example', '.env.example'],
+    ] as const) {
+      const h = await scaffold();
+      await h.fs.writeFile(
+        '/app/portal/docker/compose.yaml',
+        new TextEncoder().encode('services: {}\n'),
+      );
+      const config = h.read('/app/portal/setu.config.ts');
+      const manifest = h.read('/app/portal/package.json');
+      denying(h, denied);
+      expect(await h.run(['queue', '--queue', 'redis', '--dir', '/app/portal'])).toBe(1);
+      expect(h.err).toEqual([`Cannot read ${name}: Error: EACCES: permission denied`]);
+      // Nothing of the edit plan was written.
+      expect(h.read('/app/portal/setu.config.ts')).toBe(config);
+      expect(h.read('/app/portal/package.json')).toBe(manifest);
+    }
+
+    const compose = await scaffold();
+    await compose.fs.writeFile(
+      '/app/portal/docker/compose.yaml',
+      new TextEncoder().encode('services: {}\n'),
+    );
+    denying(compose, '/app/portal/docker/compose.yaml');
+    expect(await compose.run(['queue', '--queue', 'redis', '--dir', '/app/portal'])).toBe(1);
+    expect(compose.err).toEqual([
+      'Cannot read docker/compose.yaml: Error: EACCES: permission denied',
+    ]);
+
+    // A configuration that exists but cannot be read is not an absent one: no `.env` guess.
+    const config = await scaffold();
+    const env = config.read('/app/portal/.env');
+    denying(config, '/app/portal/setu.config.ts');
+    expect(await config.run(['queue', '--queue', 'redis', '--dir', '/app/portal'])).toBe(0);
+    expect(config.read('/app/portal/.env')).toBe(env);
+    expect(config.out.join('\n')).toContain(
+      'setu.config.ts could not be read; set REDIS_URL where the app reads it.',
+    );
+  });
+
+  it('keeps the .env convention for a project with no configuration', async () => {
+    const h = harness({ '/app/package.json': '{}', '/app/.env': 'A=1\n' });
+    expect(await h.run(['queue', '--queue', 'redis'])).toBe(0);
+    expect(h.read('/app/.env')).toMatch(/^REDIS_URL=redis:\/\/127\.0\.0\.1:6379$/m);
+    expect(h.out.join('\n')).toContain(
+      'No .env.example here; set REDIS_URL where the app reads it.',
+    );
+  });
+
+  it('names the files it could not find instead of creating them', async () => {
+    const h = harness();
+    expect(
+      await runNewCommand(parseArgs(['portal', '--runtime', 'node', '--template', 'full-stack']), {
+        fs: h.fs,
+        cwd: '/app',
+        log: () => {},
+        error: () => {},
+      }),
+    ).toBe(0);
+    await h.fs.rm('/app/portal/.env');
+    expect(await h.run(['queue', '--queue', 'redis', '--dir', '/app/portal'])).toBe(0);
+    expect(
+      await h.fs.readFile('/app/portal/.env').then(
+        () => true,
+        () => false,
+      ),
+    ).toBe(false);
+    expect(h.out.join('\n')).toContain('No .env here; set REDIS_URL where the app reads it.');
+    expect(h.read('/app/portal/.env.example')).toMatch(/^REDIS_URL=$/m);
+  });
+});
+
 describe('safe-default additions (M119c)', () => {
   for (const runtime of ['node', 'bun', 'deno']) {
-    it(`installs only the four console telemetry peers on ${runtime}`, async () => {
+    it(`installs the console telemetry peers and the OTLP exporter on ${runtime}`, async () => {
       const h = harness();
       expect(
         await runNewCommand(parseArgs(['api', '--runtime', runtime]), {
@@ -392,9 +728,14 @@ describe('safe-default additions (M119c)', () => {
       >;
       const deps = manifest[runtime === 'deno' ? 'imports' : 'dependencies']!;
       const peers = Object.keys(deps).filter((name) => name.startsWith('@opentelemetry/'));
+      // M131a X88-10: plus the OTLP exporter, and on Node the loader hook the
+      // generated preload registers. This project has no Redis client, so no
+      // Redis instrumentation is added.
       expect(peers.sort()).toEqual([
         '@opentelemetry/api',
         '@opentelemetry/context-async-hooks',
+        '@opentelemetry/exporter-trace-otlp-http',
+        ...(runtime === 'node' ? ['@opentelemetry/instrumentation'] : []),
         '@opentelemetry/resources',
         '@opentelemetry/sdk-trace-base',
       ]);
@@ -417,9 +758,9 @@ describe('safe-default additions (M119c)', () => {
     ).toBe('1.9.1');
   });
 
-  for (const transport of ['redis', 'nats', 'http']) {
+  for (const transport of ['redis', 'nats', 'memory']) {
     for (const runtime of ['node', 'deno']) {
-      it(`uses the ${transport} workspace transport on ${runtime} and configures scheduler locks`, async () => {
+      it(`uses the ${transport} workspace broker on ${runtime} and configures scheduler locks`, async () => {
         const h = harness();
         const cli = (args: readonly string[]) =>
           runCli(args, {
@@ -430,7 +771,7 @@ describe('safe-default additions (M119c)', () => {
             error: (m) => h.err.push(m),
           });
         expect(
-          await cli(['new', 'ws', '--workspace', '--runtime', runtime, '--transport', transport]),
+          await cli(['new', 'ws', '--workspace', '--runtime', runtime, '--broker', transport]),
         ).toBe(0);
         expect(await cli(['g', 'app', 'api', '--dir', '/app/ws'])).toBe(0);
         for (const plugin of ['cache', 'scheduler', 'realtime-backplane']) {
@@ -802,11 +1143,7 @@ describe('setu add — optional peers in a Setu workspace (M119f)', () => {
   it('places transport-selected ioredis in root dependencies too', async () => {
     const h = await workspace();
     const manifest = JSON.parse(h.read('/app/ws/setu.workspace.json')) as Record<string, unknown>;
-    await put(
-      h,
-      '/app/ws/setu.workspace.json',
-      JSON.stringify({ ...manifest, transport: 'redis' }),
-    );
+    await put(h, '/app/ws/setu.workspace.json', JSON.stringify({ ...manifest, broker: 'redis' }));
     expect(await h.run(['cache', '--dir', '/app/ws/apps/api'])).toBe(0);
     expect(dependencies(h, '/app/ws/package.json')['ioredis']).toBe(CLIENT_RANGES['ioredis']);
   });
@@ -817,7 +1154,7 @@ describe('setu add — optional peers in a Setu workspace (M119f)', () => {
     await put(
       h,
       '/app/ws/setu.workspace.json',
-      JSON.stringify({ ...manifest, transport: 'redis', redisClient: 'node-redis' }),
+      JSON.stringify({ ...manifest, broker: 'redis', redisClient: 'node-redis' }),
     );
     expect(await h.run(['cache', '--dir', '/app/ws/apps/api'])).toBe(0);
     for (const path of ['/app/ws/package.json', '/app/ws/apps/api/package.json']) {
@@ -956,7 +1293,7 @@ describe('resolveAddablePackage', () => {
       const h = harness({ '/app/deno.json': DENO_MANIFEST });
       expect(await h.run([name])).toBe(2);
       expect(h.err.join('\n')).toContain(
-        `\`@setu-ts/diagnostics-plugin\` is installed and wired by \`deno run -A npm:@setu-ts/cli@${VERSION} devtool enable\`.`,
+        `\`@setu-ts/diagnostics-plugin\` is installed and wired by \`deno run -A --no-lock npm:@setu-ts/cli@${VERSION} devtool enable\`.`,
       );
       expect(h.fs.writes).toEqual([]);
     });
@@ -1485,11 +1822,24 @@ describe('runAddCommand', () => {
         `https://github.com/setu-ts/setu-ts/blob/v${VERSION}/packages/starters/${pkg}/README.md`,
       );
       expect(h.out.join('\n')).not.toContain('/blob/develop/');
+      // X89-3: the recipe URL is printed only for auth on the full-stack starter.
+      const recipe = 'https://setu-ts.dev/packages/auth-plugin/#in-the-full-stack-template';
+      if (pkg === 'full-stack-starter') {
+        expect(h.out.join('\n')).toContain(recipe);
+      } else {
+        expect(h.out.join('\n')).not.toContain(recipe);
+      }
       const grpc = harness({ '/app/deno.json': DENO_MANIFEST, '/app/setu.config.ts': config });
       expect(await grpc.run(['grpc'])).toBe(0);
       expect(grpc.out.join('\n')).toContain(
         'Register it after the factory returns: app.register(GrpcPlugin(',
       );
+      expect(grpc.out.join('\n')).not.toContain(recipe);
+      // Another starter-owned arm on the same starter prints no recipe either.
+      const session = harness({ '/app/deno.json': DENO_MANIFEST, '/app/setu.config.ts': config });
+      expect(await session.run(['session'])).toBe(0);
+      expect(session.out.join('\n')).toContain('configure its session arm');
+      expect(session.out.join('\n')).not.toContain(recipe);
     }
   });
 
@@ -1517,6 +1867,7 @@ describe('runAddCommand', () => {
       ['static', 'StaticPlugin'],
       ['multi-tenancy', 'MultiTenancyPlugin'],
       ['service-discovery', 'ServiceDiscoveryPlugin'],
+      ['vector-store', 'VectorStorePlugin'],
     ]) {
       const h = harness({ '/app/deno.json': DENO_MANIFEST });
       expect(await h.run([pkg!]), h.err.join('\n')).toBe(0);
@@ -1554,6 +1905,7 @@ describe('runAddCommand', () => {
       'static',
       'multi-tenancy',
       'service-discovery',
+      'vector-store',
       'cloudflare',
     ]) {
       const h = harness({
@@ -2716,4 +3068,38 @@ describe('starter handler-arm wiring', () => {
     expect(h.read(path).match(/import \{ EVENT_HANDLERS \}/g)).toHaveLength(1);
     expect(h.read(path)).toContain('events: { handlers: EVENT_HANDLERS }');
   });
+});
+
+describe('M133 setu add mcp', () => {
+  it('adds the package and SDK optional peer to npm without inventing zero-config registration', async () => {
+    const h = harness({
+      '/app/package.json': JSON.stringify({ type: 'module', dependencies: {} }),
+    });
+    expect(await h.run(['mcp'])).toBe(0);
+    const manifest = JSON.parse(h.read('/app/package.json')) as {
+      dependencies: Record<string, string>;
+    };
+    expect(manifest.dependencies['@setu-ts/mcp-plugin']).toBe(`^${VERSION}`);
+    expect(manifest.dependencies['@modelcontextprotocol/server']).toBe('^2.4.0');
+    expect(h.out.join('\n')).not.toContain('McpPlugin()');
+  });
+  it('adds the package and SDK peer to Deno', async () => {
+    const h = harness({ '/app/deno.json': DENO_MANIFEST });
+    expect(await h.run(['mcp'])).toBe(0);
+    const manifest = JSON.parse(h.read('/app/deno.json')) as { imports: Record<string, string> };
+    expect(manifest.imports['@modelcontextprotocol/server']).toBe(
+      'npm:@modelcontextprotocol/server@^2.4.0',
+    );
+  });
+});
+
+it('setu add mcp installs the SDK peer for a Workers project', async () => {
+  const h = harness({
+    '/app/package.json': JSON.stringify({ scripts: { dev: 'wrangler dev' }, dependencies: {} }),
+    '/app/wrangler.toml': 'name = "edge"\n',
+  });
+  expect(await h.run(['mcp'])).toBe(0);
+  expect(JSON.parse(h.read('/app/package.json')).dependencies['@modelcontextprotocol/server']).toBe(
+    '^2.4.0',
+  );
 });

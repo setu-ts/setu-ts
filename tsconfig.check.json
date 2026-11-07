@@ -52,6 +52,7 @@
     "packages/diagnostics-plugin/test/unit/realtime-observations.test.ts",
     "packages/diagnostics-plugin/test/unit/scheduler-observations.test.ts",
     "packages/diagnostics-plugin/test/unit/storage-observations.test.ts",
+    "packages/mcp-plugin/test/integration/mcp-deno.test.ts",
     "packages/websocket-plugin/test/integration/guarded-upgrade.test.ts",
     "packages/websocket-plugin/test/integration/upgrade-body-cap-slot.test.ts",
     "packages/websocket-plugin/test/integration/upgrade-guards.test.ts",

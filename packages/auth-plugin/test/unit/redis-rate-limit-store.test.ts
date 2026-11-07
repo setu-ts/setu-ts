@@ -12,6 +12,46 @@ import type { IRateLimitRedisClient } from '../../src/stores/redis-rate-limit-st
 import { FakeIoredisClient } from '../fixtures/fake-ioredis-client.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 
+/**
+ * A recording client whose PTTL returns the given values in order, repeating
+ * the last one. INCR counts normally, so a sequence models a first increment
+ * followed by later ones.
+ */
+function createPttlClient(pttls: readonly number[]): {
+  client: IRateLimitRedisClient;
+  calls: Array<{ method: string; args: readonly unknown[] }>;
+} {
+  const calls: Array<{ method: string; args: readonly unknown[] }> = [];
+  let count = 0;
+  let pttlIndex = 0;
+  const client: IRateLimitRedisClient = {
+    incr: (key) => {
+      calls.push({ method: 'incr', args: [key] });
+      count += 1;
+      return Promise.resolve(count);
+    },
+    pexpire: (key, ms) => {
+      calls.push({ method: 'pexpire', args: [key, ms] });
+      return Promise.resolve(1);
+    },
+    pttl: (key) => {
+      calls.push({ method: 'pttl', args: [key] });
+      const value = pttls[Math.min(pttlIndex, pttls.length - 1)] ?? 0;
+      pttlIndex += 1;
+      return Promise.resolve(value);
+    },
+    del: (...keys) => {
+      calls.push({ method: 'del', args: keys });
+      return Promise.resolve(0);
+    },
+    quit: () => {
+      calls.push({ method: 'quit', args: [] });
+      return Promise.resolve();
+    },
+  };
+  return { client, calls };
+}
+
 describe('RedisRateLimitStore', () => {
   describe('with an injected fake client', () => {
     it('first increment calls INCR then PEXPIRE then PTTL', async () => {
@@ -53,6 +93,35 @@ describe('RedisRateLimitStore', () => {
 
       expect(result.count).toBe(1);
       expect(result.resetTime).toBe(now + 45000);
+    });
+
+    it.each([-1, -2])('re-arms a key whose PTTL is %i on a count above one', async (pttl) => {
+      const runtime = createFakeRuntime();
+      const { client, calls } = createPttlClient([45000, pttl]);
+      const store = new RedisRateLimitStore({ runtime, client });
+
+      const first = await store.increment('key-stale', 45000);
+      expect(first.resetTime).toBe(runtime.now() + 45000);
+
+      const second = await store.increment('key-stale', 45000);
+
+      expect(second.count).toBe(2);
+      expect(second.resetTime).toBe(runtime.now() + 45000);
+      const lastPexpire = calls.filter((call) => call.method === 'pexpire').at(-1);
+      expect(lastPexpire?.args).toEqual(['setu:ratelimit:key-stale', 45000]);
+    });
+
+    it('calls PEXPIRE only on the first increment while PTTL is positive', async () => {
+      const runtime = createFakeRuntime();
+      const { client, calls } = createPttlClient([1234]);
+      const store = new RedisRateLimitStore({ runtime, client });
+
+      const first = await store.increment('key-live', 60000);
+      const second = await store.increment('key-live', 60000);
+
+      expect(first.resetTime).toBe(runtime.now() + 1234);
+      expect(second.resetTime).toBe(runtime.now() + 1234);
+      expect(calls.filter((call) => call.method === 'pexpire')).toHaveLength(1);
     });
 
     it('reset calls DEL and clears the counter', async () => {

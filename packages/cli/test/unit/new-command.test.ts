@@ -1,3 +1,4 @@
+import { cliInvocation } from '../../src/templates/project-files.ts';
 import { describe, expect, it } from 'vitest';
 import { createFakeFs, createRecorder, type FakeFs } from '../fixtures/fake-fs.ts';
 import { parseArgs } from '../../src/args.ts';
@@ -5,8 +6,17 @@ import { runNewCommand } from '../../src/commands/new.ts';
 import { VERSION } from '../../src/version.ts';
 import { createTerminalPrompter } from '../../src/prompt.ts';
 import { listTemplates } from '../../src/templates/registry.ts';
+import { NODE_START_BUILD_CHECK } from '../../src/templates/project-files.ts';
 import { detectTargetRuntime } from '../../src/utils/runtime-detector.ts';
 import type { PortProbe } from '../../src/workspace/port-probe.ts';
+
+it('X93-8 new defers missing cards until the first install', async () => {
+  const h = harness();
+  expect(await h.run(['fresh', '--template', 'rest', '--runtime', 'node', '--agents'])).toBe(0);
+  expect(h.err.lines).toEqual([
+    `agent cards resolve after \`npm install\`; then run \`${cliInvocation('node')} agents --check --strict\``,
+  ]);
+});
 
 describe('Node standalone devtool scaffold', () => {
   it('writes the development entry, script and development-only pin with exact dry-run parity', async () => {
@@ -206,7 +216,12 @@ describe('the Workers target is deployable as documented', () => {
 
 describe('a template with a frontend build, on an npm target', () => {
   for (const [runtime, entry] of [
-    ['node', 'node --enable-source-maps dist/main.js'],
+    // M131a: Node runs the OpenTelemetry preload and loads `.env` through the
+    // runtime; Bun loads `.env` itself and takes no preload.
+    [
+      'node',
+      `${NODE_START_BUILD_CHECK} && node --import ./instrumentation.mjs --env-file-if-exists=.env --enable-source-maps dist/main.js`,
+    ],
     ['bun', 'bun run main.ts'],
   ] as const) {
     it(`starts without rebuilding on ${runtime}; tests build the frontend only`, async () => {
@@ -229,7 +244,9 @@ describe('a template with a frontend build, on an npm target', () => {
     const manifest = JSON.parse(h.fs.read('/work/app/package.json')) as {
       scripts: Record<string, string>;
     };
-    expect(manifest.scripts['start']).toBe('node --enable-source-maps dist/main.js');
+    expect(manifest.scripts['start']).toBe(
+      `${NODE_START_BUILD_CHECK} && node --import ./instrumentation.mjs --env-file-if-exists=.env --enable-source-maps dist/main.js`,
+    );
   });
 });
 
@@ -247,7 +264,11 @@ describe('the Node target can run decorated source', () => {
 
   it('runs Node through a transpiler, not through type stripping', async () => {
     const manifest = await manifestOf('node');
-    expect(manifest.scripts['start:dev']).toBe('tsx watch main.ts');
+    // M131a: the dev script runs the OpenTelemetry preload and loads `.env`
+    // through the runtime; both flags follow `watch`, tsx's subcommand.
+    expect(manifest.scripts['start:dev']).toBe(
+      'tsx watch --import ./instrumentation.mjs --env-file-if-exists=.env main.ts',
+    );
     expect(manifest.scripts['start']).not.toContain('experimental-strip-types');
     expect(manifest.scripts['start']).not.toContain('experimental-transform-types');
   });
@@ -433,9 +454,10 @@ describe('runNewCommand', () => {
       for (const file of [
         'app/routes.ts',
         'app/root.tsx',
-        'app/lib/context-keys.server.ts',
+        'app/server/context-keys.server.ts',
         'app/lib/load-context.ts',
-        'app/features/products/products.server.ts',
+        'src/modules/products/products.service.ts',
+        'src/modules/index.ts',
         'vite.config.ts',
         'react-router.config.ts',
       ]) {
@@ -1383,14 +1405,19 @@ describe('--workspace', () => {
       });
     }
 
-    // The transport describes how a workspace's members reach each other, and a
-    // standalone project has none — accepting it would report success for a
-    // project that registers nothing of the kind.
-    for (const flag of ['--transport', '--transport-url']) {
+    // `--transport` is the pre-M138 flag, and `--broker-url`/`--rpc` belong to a
+    // workspace: accepting any of them would report success for a project that
+    // registers nothing of the kind.
+    for (const [flag, expected] of [
+      ['--transport', '--transport no longer exists'],
+      ['--transport-url', '--transport-url no longer exists'],
+      ['--broker-url', '--broker-url applies to `setu new <name> --workspace`'],
+      ['--rpc', '--rpc applies to `setu generate app <name>`'],
+    ] as const) {
       it(`refuses ${flag} on a standalone project`, async () => {
         const h = harness();
         expect(await h.run(['acme', flag, 'redis'])).toBe(2);
-        expect(h.err.text()).toContain('--workspace');
+        expect(h.err.text()).toContain(expected);
         expect(h.fs.writes).toEqual([]);
       });
     }
@@ -1414,12 +1441,12 @@ describe('--workspace', () => {
   });
 });
 
-describe('--workspace --transport', () => {
+describe('--workspace --broker', () => {
   /**
-   * Reads the manifest of a workspace scaffolded with the given flags.
+   * Scaffolds a workspace with the given flags.
    *
    * @param argv - Arguments after the project name
-   * @returns The harness and the parsed manifest
+   * @returns The harness and the exit code
    */
   async function workspaceWith(argv: readonly string[]) {
     const h = harness();
@@ -1427,107 +1454,136 @@ describe('--workspace --transport', () => {
     return { h, code };
   }
 
-  it('records http when no transport is named, so the default is explicit', async () => {
+  it('records memory when no broker is named, so the default is explicit', async () => {
     const { h, code } = await workspaceWith([]);
     expect(code).toBe(0);
     expect(JSON.parse(h.fs.read('/work/acme/setu.workspace.json'))).toMatchObject({
-      transport: 'http',
+      version: 2,
+      broker: 'memory',
     });
   });
 
-  for (const transport of ['grpc', 'memory', 'redis', 'rabbitmq', 'nats', 'kafka']) {
-    it(`records the ${transport} transport`, async () => {
-      const { h, code } = await workspaceWith(['--transport', transport]);
+  for (const broker of ['memory', 'redis', 'rabbitmq', 'nats', 'kafka', 'pubsub', 'service-bus']) {
+    it(`records the ${broker} broker`, async () => {
+      const { h, code } = await workspaceWith(['--broker', broker]);
       expect(code).toBe(0);
-      expect(JSON.parse(h.fs.read('/work/acme/setu.workspace.json'))).toMatchObject({ transport });
+      expect(JSON.parse(h.fs.read('/work/acme/setu.workspace.json'))).toMatchObject({ broker });
     });
   }
 
-  it('describes the chosen transport in the workspace README', async () => {
-    const { h } = await workspaceWith(['--transport', 'redis']);
-    expect(h.fs.read('/work/acme/README.md')).toContain('redis');
+  it('describes the chosen broker in the workspace README', async () => {
+    const { h } = await workspaceWith(['--broker', 'redis']);
+    expect(h.fs.read('/work/acme/README.md')).toContain('Members share the **redis** broker');
     expect(h.fs.read('/work/acme/README.md')).toContain('Redis Streams');
   });
 
-  it('records an endpoint override beside the transport', async () => {
+  it('records an endpoint override beside the broker', async () => {
     const { h, code } = await workspaceWith([
-      '--transport',
+      '--broker',
       'redis',
-      '--transport-url',
+      '--broker-url',
       'redis://shared:6379',
     ]);
     expect(code).toBe(0);
     expect(JSON.parse(h.fs.read('/work/acme/setu.workspace.json'))).toMatchObject({
-      transport: 'redis',
-      transportUrl: 'redis://shared:6379',
+      broker: 'redis',
+      brokerUrl: 'redis://shared:6379',
     });
   });
 
   // The manifest states a CHOICE; restating a constant the CLI already holds
   // would invite the two to drift.
   it('omits the endpoint when it was not overridden', async () => {
-    const { h } = await workspaceWith(['--transport', 'redis']);
-    expect(JSON.parse(h.fs.read('/work/acme/setu.workspace.json')).transportUrl).toBeUndefined();
+    const { h } = await workspaceWith(['--broker', 'redis']);
+    expect(JSON.parse(h.fs.read('/work/acme/setu.workspace.json')).brokerUrl).toBeUndefined();
   });
 
   describe('refusals', () => {
-    it('refuses an unknown transport, naming every real one', async () => {
-      const { h, code } = await workspaceWith(['--transport', 'carrier-pigeon']);
+    it('refuses an unknown broker, naming every real one', async () => {
+      const { h, code } = await workspaceWith(['--broker', 'carrier-pigeon']);
       expect(code).toBe(2);
-      expect(h.err.text()).toContain('Unknown transport "carrier-pigeon"');
+      expect(h.err.text()).toContain('Unknown broker "carrier-pigeon"');
       expect(h.err.text()).toContain('rabbitmq');
       expect(h.fs.writes).toEqual([]);
     });
 
-    // There is no raw-TCP transport here. Accepting `tcp` as a synonym for HTTP
-    // would leave the user believing they chose something.
-    it('refuses tcp by explaining what it actually maps to', async () => {
-      const { h, code } = await workspaceWith(['--transport', 'tcp']);
-      expect(code).toBe(2);
-      expect(h.err.text()).toContain('no raw tcp transport');
-      expect(h.err.text()).toContain('--transport http');
-      expect(h.fs.writes).toEqual([]);
-    });
-
-    // The alias table is a plain object: an inherited key such as
-    // `constructor` must read as an unknown transport, not take the alias
-    // branch and suggest `--transport function Object() { [native code] }`.
-    it('treats an inherited key as an unknown transport, not an alias', async () => {
-      for (const named of ['constructor', 'toString', '__proto__']) {
-        const { h, code } = await workspaceWith(['--transport', named]);
+    // `http` and `grpc` were `--transport` values; they say how a service is
+    // called, so the refusal points at the per-member flag.
+    for (const style of ['http', 'grpc']) {
+      it(`refuses --broker ${style}, naming generate app --rpc`, async () => {
+        const { h, code } = await workspaceWith(['--broker', style]);
         expect(code).toBe(2);
-        expect(h.err.text()).toContain(`Unknown transport "${named}"`);
+        expect(h.err.text()).toContain(`"${style}" is how a service is called, not a broker`);
+        expect(h.err.text()).toContain(`generate app <name> --rpc ${style}`);
+        expect(h.fs.writes).toEqual([]);
+      });
+    }
+
+    // The registry is a plain object: an inherited key must read as unknown.
+    it('treats an inherited key as an unknown broker', async () => {
+      for (const named of ['constructor', 'toString', '__proto__']) {
+        const { h, code } = await workspaceWith(['--broker', named]);
+        expect(code).toBe(2);
+        expect(h.err.text()).toContain(`Unknown broker "${named}"`);
         expect(h.err.text()).not.toContain('native code');
       }
     });
 
-    it('refuses --transport with no value', async () => {
-      const { h, code } = await workspaceWith(['--transport']);
+    it('refuses --broker with no value', async () => {
+      const { h, code } = await workspaceWith(['--broker']);
       expect(code).toBe(2);
-      expect(h.err.text()).toContain('--transport needs a value');
+      expect(h.err.text()).toContain('--broker needs a value');
     });
 
-    it('refuses --transport-url with no value', async () => {
-      const { h, code } = await workspaceWith(['--transport', 'redis', '--transport-url']);
+    it('refuses --broker-url with no value', async () => {
+      const { h, code } = await workspaceWith(['--broker', 'redis', '--broker-url']);
       expect(code).toBe(2);
-      expect(h.err.text()).toContain('--transport-url needs a value');
+      expect(h.err.text()).toContain('--broker-url needs a value');
     });
 
-    // A transport with no broker has nothing to address, so storing the URL
-    // would put a value in the manifest no generated config ever reads.
-    for (const transport of ['http', 'grpc', 'memory']) {
-      it(`refuses --transport-url for ${transport}, which has no broker`, async () => {
-        const { h, code } = await workspaceWith([
-          '--transport',
-          transport,
-          '--transport-url',
-          'redis://x:1',
-        ]);
+    // The in-process broker has nothing to address, so storing the URL would put
+    // a value in the manifest no generated config ever reads.
+    it('refuses --broker-url for memory, which has no endpoint', async () => {
+      for (const argv of [
+        ['--broker-url', 'redis://x:1'],
+        ['--broker', 'memory', '--broker-url', 'redis://x:1'],
+      ]) {
+        const { h, code } = await workspaceWith(argv);
         expect(code).toBe(2);
-        expect(h.err.text()).toContain('has no broker');
+        expect(h.err.text()).toContain('runs inside each member');
+        expect(h.fs.writes).toEqual([]);
+      }
+    });
+
+    it('refuses --broker-url for a cloud broker, naming its variable', async () => {
+      const { h, code } = await workspaceWith(['--broker', 'pubsub', '--broker-url', 'x']);
+      expect(code).toBe(2);
+      expect(h.err.text()).toContain('read from PUBSUB_PROJECT_ID');
+    });
+
+    // M138: the pre-split flags are refused with the two that replaced them.
+    for (const flag of ['--transport', '--transport-url']) {
+      it(`refuses ${flag}, naming --broker and generate app --rpc`, async () => {
+        const { h, code } = await workspaceWith([flag, 'redis']);
+        expect(code).toBe(2);
+        expect(h.err.text()).toContain(`${flag} no longer exists`);
+        expect(h.err.text()).toContain('--broker <name>');
+        expect(h.err.text()).toContain('generate app <name> --rpc grpc');
         expect(h.fs.writes).toEqual([]);
       });
     }
+
+    it('refuses --rpc on a workspace root, naming generate app', async () => {
+      const { h, code } = await workspaceWith(['--rpc', 'grpc']);
+      expect(code).toBe(2);
+      expect(h.err.text()).toContain('--rpc is chosen per member');
+    });
+
+    it('refuses --queue on a workspace, since the queue follows the broker', async () => {
+      const { h, code } = await workspaceWith(['--queue', 'redis']);
+      expect(code).toBe(2);
+      expect(h.err.text()).toContain("a workspace's queue follows its broker");
+    });
   });
 });
 

@@ -124,27 +124,34 @@ async function read(response: Response): Promise<{ contentType: string; body: un
 }
 
 describe('rate-limit 429 error format (X32-2)', () => {
-  it("under 'rfc9457' the 429 is a Problem Details body under problem+json", async () => {
-    const app = await bootApp('rfc9457');
-    try {
-      const response = await app.fetch(new Request('http://localhost/limited'));
-      expect(response.status).toBe(429);
+  // The IANA-registered type this limiter identifies its refusal as.
+  const QUOTA_EXCEEDED = 'https://iana.org/assignments/http-problem-types#quota-exceeded';
 
-      const { contentType, body } = await read(response);
-      expect(contentType).toContain('application/problem+json');
+  for (const format of ['rfc9457', 'rfc7807'] as const) {
+    it(`under '${format}' the 429 is a quota-exceeded Problem Details body`, async () => {
+      const app = await bootApp(format);
+      try {
+        const response = await app.fetch(new Request('http://localhost/limited'));
+        expect(response.status).toBe(429);
 
-      const problem = body as Record<string, unknown>;
-      // Field by field, forbidden fields included: a Problem Details body
-      // carries `detail`, never `message`.
-      expect(problem.type).toBe('about:blank');
-      expect(problem.title).toBe('Too Many Requests');
-      expect(problem.status).toBe(429);
-      expect(problem.detail).toBe('Rate limit exceeded');
-      expect('message' in problem).toBe(false);
-    } finally {
-      await app.stop();
-    }
-  });
+        const { contentType, body } = await read(response);
+        expect(contentType).toContain('application/problem+json');
+
+        const problem = body as Record<string, unknown>;
+        // Field by field, forbidden fields included: a Problem Details body
+        // carries `detail`, never `message`.
+        expect(problem.type).toBe(QUOTA_EXCEEDED);
+        expect(problem.title).toBe('Quota Exceeded');
+        expect(problem.status).toBe(429);
+        expect(problem.detail).toBe('Rate limit exceeded');
+        expect(problem['violated-policies']).toEqual(['default']);
+        expect(problem.instance).toBe('/limited');
+        expect('message' in problem).toBe(false);
+      } finally {
+        await app.stop();
+      }
+    });
+  }
 
   // The real assertion of X32-2, and it is run under BOTH formats on purpose:
   // asserting only `rfc9457` would pass against a middleware that hardcoded
@@ -164,9 +171,12 @@ describe('rate-limit 429 error format (X32-2)', () => {
         const guarded = await read(guardedResponse);
 
         expect(guarded.contentType).toBe(limited.contentType);
-        expect(Object.keys(guarded.body as object).sort()).toEqual(
-          Object.keys(limited.body as object).sort(),
-        );
+        // `violated-policies` is this refusal's own extension member; strip it
+        // before comparing so the assertion still says "the same shape family".
+        const limitedKeys = Object.keys(limited.body as object)
+          .filter((key) => key !== 'violated-policies')
+          .sort();
+        expect(Object.keys(guarded.body as object).sort()).toEqual(limitedKeys);
       } finally {
         await app.stop();
       }
@@ -178,7 +188,7 @@ describe('rate-limit 429 error format (X32-2)', () => {
     // details }` — which is what the tenant, session and auth short-circuits
     // have answered with since M70f. The 429 used to answer
     // `{ error, message }` here instead: a BREAKING body change, recorded in
-    // the CHANGELOG.
+    // the CHANGELOG. `problem` never reaches this format.
     const app = await bootApp('default');
     try {
       const response = await app.fetch(new Request('http://localhost/limited'));
@@ -191,21 +201,22 @@ describe('rate-limit 429 error format (X32-2)', () => {
         message: 'Too Many Requests',
         details: { detail: 'Rate limit exceeded' },
       });
+      expect('type' in (body as object)).toBe(false);
+      expect('violated-policies' in (body as object)).toBe(false);
     } finally {
       await app.stop();
     }
   });
 
-  it('the Retry-After and RateLimit-* headers survive the responder', async () => {
+  it('the Retry-After and draft-11 fields survive the responder', async () => {
     // The formatter writes the body through `.send(bytes)`; a header written
     // before it must still reach the wire.
     const app = await bootApp('rfc9457');
     try {
       const response = await app.fetch(new Request('http://localhost/limited'));
       expect(response.headers.get('Retry-After')).toBe('60');
-      expect(response.headers.get('RateLimit-Limit')).toBe('1');
-      expect(response.headers.get('RateLimit-Remaining')).toBe('0');
-      expect(response.headers.get('RateLimit-Reset')).toBe('60');
+      expect(response.headers.get('RateLimit-Policy')).toBe('"default";q=1;w=60');
+      expect(response.headers.get('RateLimit')).toBe('"default";r=0;t=60');
       await response.body?.cancel();
     } finally {
       await app.stop();

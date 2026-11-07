@@ -19,7 +19,7 @@ it('pins and invokes the CLI in every runtime and template check script', () => 
           tasks: Record<string, string>;
         };
         expect(manifest.tasks.check).toBe(
-          `${host.manifest?.npmBuild === undefined ? '' : 'deno task build && '}deno check main.ts setu.config.ts && deno run -A npm:@setu-ts/cli@^${VERSION} check`,
+          `${host.manifest?.npmBuild === undefined ? '' : 'deno task build && '}deno check main.ts setu.config.ts && deno run -A --no-lock npm:@setu-ts/cli@^${VERSION} check`,
         );
       } else {
         const manifest = JSON.parse(

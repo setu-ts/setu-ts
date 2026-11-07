@@ -129,6 +129,42 @@ describe('errorHandler in a kernel application', () => {
     });
   });
 
+  it('drops hostile problem extensions and still serves the hinted 422', async () => {
+    const thrown = withHttpStatusHint(new Error('the full diagnostic'), {
+      status: 422,
+      title: 'Unprocessable Entity',
+      detail: 'Bad input',
+      problem: {
+        type: 'urn:example:hostile-problem',
+        title: 'Hostile Problem',
+        extensions: {
+          member: {
+            toJSON(): never {
+              throw new Error('hostile toJSON');
+            },
+          },
+        },
+      },
+    });
+    const app = await createErroringApp('rfc9457', thrown);
+    try {
+      const { status, contentType, body } = await fetchProblem(app);
+
+      expect(status).toBe(422);
+      expect(contentType).toBe('application/problem+json');
+      expect(body).toEqual({
+        type: 'urn:example:hostile-problem',
+        title: 'Hostile Problem',
+        status: 422,
+        detail: 'Bad input',
+        instance: '/boom',
+      });
+      expect(() => JSON.stringify(body)).not.toThrow();
+    } finally {
+      await app.stop();
+    }
+  });
+
   describe('maskInternalErrors (X12-3)', () => {
     // A real driver-shaped error — the message carries SQL and bound values.
     const driverError = new Error(

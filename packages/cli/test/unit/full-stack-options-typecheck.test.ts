@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { FULL_STACK_TEMPLATE } from '../../src/templates/full-stack.ts';
 import { projectFiles, resolveHost } from '../../src/templates/project-files.ts';
 import { withBrokerArgs, withQueueArgs } from '../../src/templates/broker.ts';
-import { listTransports } from '../../src/workspace/transport.ts';
+import { BROKERS, brokerSpec } from '../../src/workspace/transport.ts';
 import { workspaceProfile } from '../../src/workspace/runtime-profile.ts';
 
 interface IDiagnostic {
@@ -13,7 +13,7 @@ interface IDiagnostic {
 }
 
 describe('the generated full-stack typed options position', () => {
-  for (const spec of listTransports()) {
+  for (const spec of BROKERS.map((name) => brokerSpec(name))) {
     for (const flag of ['broker', 'queue'] as const) {
       if ((flag === 'broker' ? spec.messagingArgs : spec.queueArgs) === undefined) continue;
       it(`checks every ${flag} arm: ${spec.name}`, { timeout: 120_000 }, () => {

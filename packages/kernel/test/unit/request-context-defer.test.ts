@@ -101,3 +101,127 @@ it('continues cleanup without a logger and when the logger itself throws', async
     registry,
   );
 });
+
+for (const routeMiddleware of [false, true]) {
+  for (const fails of [false, true]) {
+    it(`M131b 3.10 waits for detached handler and shutdown routeMiddleware=${routeMiddleware} fails=${fails}`, async () => {
+      const { createApplication } = await import('../../src/index.ts');
+      const { RuntimePlugin } = await import('@setu-ts/runtime');
+      const { promise, resolve } = Promise.withResolvers<void>();
+      const started = Promise.withResolvers<void>();
+      const cleaned = vi.fn();
+      const late = vi.fn();
+      const app = createApplication({ plugins: [RuntimePlugin()] });
+      const early: import('@setu-ts/common').MiddlewareFunction = (ctx, next) => {
+        void next().catch(() => {});
+        return ctx.response.text('early');
+      };
+      if (!routeMiddleware) app.middleware.add(early);
+      app.router.get('/', {
+        ...(routeMiddleware ? { middleware: [early] } : {}),
+        handler: async (ctx) => {
+          ctx.defer?.(cleaned);
+          started.resolve();
+          await promise;
+          ctx.defer?.(late);
+          if (fails) throw new Error('late handler failure');
+          return ctx.response.text('late');
+        },
+      });
+      await app.start();
+      try {
+        const response = await app.inject({ method: 'GET', url: '/' });
+        await started.promise;
+        expect(response.body).toBe('early');
+        expect(cleaned).not.toHaveBeenCalled();
+        let stopped = false;
+        const stopping = app.stop().then(() => {
+          stopped = true;
+        });
+        await new Promise<void>((done) => setTimeout(done, 25));
+        expect(stopped).toBe(false);
+        resolve();
+        await stopping;
+        expect(late).toHaveBeenCalledOnce();
+        expect(cleaned).toHaveBeenCalledOnce();
+      } finally {
+        resolve();
+        await app.stop();
+      }
+    });
+  }
+}
+
+it('M131b review: a handler that streams after an early buffered response still releases the request', async () => {
+  const { createApplication } = await import('../../src/index.ts');
+  const { RuntimePlugin } = await import('@setu-ts/runtime');
+  const gate = Promise.withResolvers<void>();
+  const cleaned = vi.fn();
+  const app = createApplication({ plugins: [RuntimePlugin()] });
+  app.middleware.add((ctx, next) => {
+    void next().catch(() => {});
+    return ctx.response.text('early');
+  });
+  app.router.get('/', async (ctx) => {
+    ctx.defer?.(cleaned);
+    await gate.promise;
+    // Too late: the client already has the buffered response.
+    return ctx.response.stream(
+      new ReadableStream<Uint8Array>({
+        pull(controller) {
+          controller.enqueue(new Uint8Array([65]));
+        },
+      }),
+    );
+  });
+  await app.start();
+  try {
+    expect((await app.inject({ method: 'GET', url: '/' })).body).toBe('early');
+    gate.resolve();
+    await vi.waitFor(() => expect(cleaned).toHaveBeenCalledOnce());
+    // Released from the drain: stop() does not wait out its deadline.
+    const stopped = await Promise.race([
+      app.stop().then(() => 'stopped'),
+      new Promise<string>((done) => setTimeout(() => done('still draining'), 1000)),
+    ]);
+    expect(stopped).toBe('stopped');
+  } finally {
+    gate.resolve();
+    await app.stop();
+  }
+});
+
+it('M131b 3.10 waits for handler after an early stream has already ended', async () => {
+  const { createApplication } = await import('../../src/index.ts');
+  const { RuntimePlugin } = await import('@setu-ts/runtime');
+  const gate = Promise.withResolvers<void>();
+  const cleaned = vi.fn();
+  const app = createApplication({ plugins: [RuntimePlugin()] });
+  app.middleware.add((ctx, next) => {
+    void next().catch(() => {});
+    return ctx.response.stream(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new Uint8Array([65]));
+          controller.close();
+        },
+      }),
+    );
+  });
+  app.router.get('/', async (ctx) => {
+    await gate.promise;
+    ctx.defer?.(cleaned);
+    return ctx.response.text('late');
+  });
+  await app.start();
+  try {
+    const response = await app.fetch(new Request('http://test/'));
+    expect(await response.text()).toBe('A');
+    expect(cleaned).not.toHaveBeenCalled();
+    gate.resolve();
+    await vi.waitFor(() => expect(cleaned).toHaveBeenCalledOnce());
+  } finally {
+    gate.resolve();
+    await app.stop();
+  }
+});

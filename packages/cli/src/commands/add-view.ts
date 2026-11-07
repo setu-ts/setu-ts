@@ -129,7 +129,7 @@ export function planViewSetup(input: IViewSetupInput): IViewSetupPlan {
       if (scripts === undefined) note(`${path} ${scriptKey}`);
       else {
         const css = deno
-          ? `deno install && deno run -A npm:@tailwindcss/cli@${TAILWIND_RANGE} ${CSS_ARGS}`
+          ? `deno install && deno run -A --no-lock npm:@tailwindcss/cli@${TAILWIND_RANGE} ${CSS_ARGS}`
           : `tailwindcss ${CSS_ARGS}`;
         for (const [name, value] of [
           ['css', css],
@@ -320,53 +320,58 @@ const TOGGLE_SCRIPT =
 /** A fixed shell; only the content scrolls. Inline scripts need a CSP hash or nonce. */
 export function Layout({ title, children }: { title: string; children: Child }) {
   return (
-    <html lang='en'>
-      <head>
-        <script>{raw(THEME_SCRIPT)}</script>
-        <meta charSet='utf-8' />
-        <meta name='viewport' content='width=device-width, initial-scale=1' />
-        <title>{title}</title>
-        ${workers ? '' : "<link rel='stylesheet' href='/assets/app.css' />"}
-      </head>
-      <body>
-        <div data-shell='frame' class='flex h-dvh flex-col overflow-hidden'>
-          <header
-            data-shell='header'
-            class='flex h-14 shrink-0 items-center justify-between border-b px-6'
-          >
-            <span class='font-semibold'>{title}</span>
-            <button
-              id='theme-toggle'
-              type='button'
-              aria-label='Theme: system'
-              class='inline-flex size-9 items-center justify-center rounded-md hover:bg-accent'
+    <>
+      {raw('<!DOCTYPE html>')}
+      <html lang='en'>
+        <head>
+          <script>{raw(THEME_SCRIPT)}</script>
+          <meta charSet='utf-8' />
+          <meta name='viewport' content='width=device-width, initial-scale=1' />
+          <title>{title}</title>
+          ${workers ? '' : "<link rel='stylesheet' href='/assets/app.css' />"}
+        </head>
+        <body>
+          <div data-shell='frame' class='flex h-dvh flex-col overflow-hidden'>
+            <header
+              data-shell='header'
+              class='flex h-14 shrink-0 items-center justify-between border-b px-6'
             >
-              <span aria-hidden='true'>◐</span>
-            </button>
-          </header>
-          <nav
-            aria-label='Mobile navigation'
-            class='flex shrink-0 overflow-x-auto border-b p-2 md:hidden'
-          >
-            <a href='/ui'>Home</a>
-          </nav>
-          <div class='flex min-h-0 flex-1'>
-            <aside
-              data-shell='sidebar'
-              class='hidden w-56 shrink-0 overflow-y-auto border-r p-3 md:block'
+              <span class='font-semibold'>{title}</span>
+              <button
+                id='theme-toggle'
+                type='button'
+                aria-label='Theme: system'
+                class='inline-flex size-9 items-center justify-center rounded-md hover:bg-accent'
+              >
+                <span aria-hidden='true'>◐</span>
+              </button>
+            </header>
+            <nav
+              aria-label='Mobile navigation'
+              class='flex shrink-0 overflow-x-auto border-b p-2 md:hidden'
             >
-              <nav>
-                <a href='/ui' class='block rounded-md bg-accent px-3 py-2 text-accent-foreground'>
-                  Home
-                </a>
-              </nav>
-            </aside>
-            <main data-shell='content' class='min-w-0 flex-1 overflow-y-auto p-6'>{children}</main>
+              <a href='/ui'>Home</a>
+            </nav>
+            <div class='flex min-h-0 flex-1'>
+              <aside
+                data-shell='sidebar'
+                class='hidden w-56 shrink-0 overflow-y-auto border-r p-3 md:block'
+              >
+                <nav>
+                  <a href='/ui' class='block rounded-md bg-accent px-3 py-2 text-accent-foreground'>
+                    Home
+                  </a>
+                </nav>
+              </aside>
+              <main data-shell='content' class='min-w-0 flex-1 overflow-y-auto p-6'>
+                {children}
+              </main>
+            </div>
           </div>
-        </div>
-        <script>{raw(TOGGLE_SCRIPT)}</script>
-      </body>
-    </html>
+          <script>{raw(TOGGLE_SCRIPT)}</script>
+        </body>
+      </html>
+    </>
   );
 }
 `;
