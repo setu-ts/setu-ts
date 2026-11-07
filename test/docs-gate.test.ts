@@ -1688,6 +1688,29 @@ describe('documentation gate — install-snippet versions', () => {
     expect(fenceExtension('typescript')).toBe('ts');
   });
 
+  it('reads the post-alpha 0.12.x line, and still reads 0.11.x as stale beside it', () => {
+    // Stale WITHIN 0.12 — the only case that discriminates.
+    const withinLine = checkInstallVersions(
+      doc('README.md', 'npm install @setu-ts/kernel@^0.12.0\n'),
+      '0.12.1',
+    );
+    expect(withinLine).toHaveLength(1);
+    expect(withinLine[0]?.message).toContain('0.12.0');
+    expect(withinLine[0]?.message).toContain('0.12.1');
+
+    expect(
+      checkInstallVersions(doc('README.md', 'npm install @setu-ts/kernel@^0.12.0\n'), '0.12.0'),
+    ).toEqual([]);
+
+    const outgoing = checkInstallVersions(
+      doc('README.md', 'npm install @setu-ts/kernel@^0.11.0\n'),
+      '0.12.0',
+    );
+    expect(outgoing).toHaveLength(1);
+    expect(outgoing[0]?.message).toContain('0.11.0');
+    expect(outgoing[0]?.message).toContain('0.12.0');
+  });
+
   it('reads the post-alpha 0.11.x line, and still reads 0.10.x as stale beside it', () => {
     // Stale WITHIN 0.11 — the only case that discriminates.
     const withinLine = checkInstallVersions(
@@ -2076,6 +2099,18 @@ describe('documentation gate — bare version claims', () => {
 
   // The bare-claim checker reads its own copy of the alternation, so the 0.6
   // line is unproven here until asserted here.
+  it('reads the post-alpha 0.12.x line in a bare claim', () => {
+    const withinLine = checkVersionClaims(doc('README.md', 'ships `v0.12.0`\n'), '0.12.1');
+    expect(withinLine).toHaveLength(1);
+    expect(withinLine[0]?.message).toContain('0.12.0');
+
+    expect(checkVersionClaims(doc('README.md', 'ships `v0.12.0`\n'), '0.12.0')).toEqual([]);
+
+    const outgoing = checkVersionClaims(doc('README.md', 'ships `v0.11.0`\n'), '0.12.0');
+    expect(outgoing).toHaveLength(1);
+    expect(outgoing[0]?.message).toContain('0.11.0');
+  });
+
   it('reads the post-alpha 0.11.x line in a bare claim', () => {
     const withinLine = checkVersionClaims(doc('README.md', 'ships `v0.11.0`\n'), '0.11.1');
     expect(withinLine).toHaveLength(1);

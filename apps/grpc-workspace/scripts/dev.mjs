@@ -24,7 +24,7 @@ if (devtoolSelectedName !== undefined && devtoolSelectedName !== '') {
   if (named.devtoolPort === undefined) {
     throw new Error(
       `SETU_DEVTOOL_MEMBER names "${devtoolSelectedName}", but that member carries no ` +
-        `devtoolPort. Run npx @setu-ts/cli@0.11.0 devtool enable ${devtoolSelectedName} first.`,
+        `devtoolPort. Run npx @setu-ts/cli@0.12.0 devtool enable ${devtoolSelectedName} first.`,
     );
   }
   devtoolSelected = named;

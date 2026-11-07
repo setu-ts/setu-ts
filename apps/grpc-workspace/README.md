@@ -66,7 +66,7 @@ A [Setu-TS](https://setu-ts.dev/) workspace: one repository, many deployable ser
 ## Add a service
 
 ```bash
-npx @setu-ts/cli@0.11.0 generate app orders --template microservice
+npx @setu-ts/cli@0.12.0 generate app orders --template microservice
 ```
 
 Each service lives in `apps/<name>/`, binds a port the CLI allocates, and is registered in every
@@ -83,7 +83,7 @@ npm run dev
 When a service needs another one during startup, declare it as it is added:
 
 ```bash
-npx @setu-ts/cli@0.11.0 generate app billing --template microservice --depends-on orders
+npx @setu-ts/cli@0.12.0 generate app billing --template microservice --depends-on orders
 ```
 
 The generated dev runner starts prerequisites first and waits for each prerequisite's `/ready`
@@ -94,10 +94,10 @@ where a service is, not whether this service must wait for it at startup.
 
 `setu.workspace.json` records the port each service binds. It is the source the generated
 `src/discovery/services.ts` modules are rendered from; change a port there and the next
-`npx @setu-ts/cli@0.11.0 generate app` rewrites them all.
+`npx @setu-ts/cli@0.12.0 generate app` rewrites them all.
 
 If a local process occupies a port, the CLI skips it during allocation. To repair existing
-assignments, stop the services and run `npx @setu-ts/cli@0.11.0 workspace ports --reallocate`; it
+assignments, stop the services and run `npx @setu-ts/cli@0.12.0 workspace ports --reallocate`; it
 rewrites the manifest, maps, and deployment artifacts together. It assigns from the base port
 upward, so a service still running holds its own port and is moved off it.
 
@@ -110,7 +110,7 @@ Members share the **memory** broker — In-process broker — messages never lea
 
 The broker is a property of the whole workspace, recorded in `setu.workspace.json`, because members
 can only meet on a bus they share. Every service added later inherits it. How a service is called is
-its own choice: `npx @setu-ts/cli@0.11.0 generate app <name> --rpc grpc` adds Connect/gRPC beside
+its own choice: `npx @setu-ts/cli@0.12.0 generate app <name> --rpc grpc` adds Connect/gRPC beside
 its HTTP routes.
 
 <!-- /setu:transport -->

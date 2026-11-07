@@ -1,6 +1,6 @@
 # Releasing to npm
 
-The npm publisher ships all 52 workspace members as `@setu-ts/*`. M111c builds the machinery; it
+The npm publisher ships all 55 workspace members as `@setu-ts/*`. M111c builds the machinery; it
 publishes nothing. `v0.9.0` was the first npm release. Existing versions through `0.8.0` remain on
 JSR. npm versions cannot be reused.
 
@@ -127,7 +127,7 @@ own placeholder and trust configuration before their first real release.
   `npm:` or `jsr:` specifier under `packages/*/src`, so there is nothing to grep for. **Never bump
   an `@since` tag**: it records when a symbol appeared, so moving it makes it a lie.
 - **`release:bump` rewrites `test/deno-lane/deno.lock` in place, and you commit that result.** The
-  lane lock records every workspace member under `workspace.links` at the shipping version (52
+  lane lock records every workspace member under `workspace.links` at the shipping version (55
   `jsr:@setu-ts/<pkg>@<version>` keys), so it is the swept file that keeps the sweep's
   zero-reference guard meaningful. `pnpm-lock.yaml` records workspace members as `link:` entries
   with a `workspace:^` specifier and no version, so a bump does not change it and it is not swept;
@@ -215,7 +215,7 @@ pnpm run check:node-build --require-all
 pnpm run release:publish --dry-run
 ```
 
-The npm dry run builds once, packs all 52 with scripts disabled, checks each exact packed manifest,
+The npm dry run builds once, packs all 55 with scripts disabled, checks each exact packed manifest,
 performs the packument lookup, and runs `npm publish <tarball> --dry-run`. It refuses publication
 holds, stale internal ranges, missing metadata and missing `dist` or `src` file entries. Only HTTP
 404 means a new package; registry errors fail the publisher. An existing version is skipped, so
@@ -408,7 +408,7 @@ await app.stop();
 Run `node proof.mjs` and `bun proof.mjs`; require 200 and `{"ok":true}`. Inspect
 `npm view <package>@0.9.0 dist.attestations --json` and `npm view <package> dist-tags --json` for
 all 52 names: provenance must exist and `latest` must name `0.9.0`. Confirm descriptions, repository
-links and README on npm. The weekly compat suite installs/imports all 52 and serves real sockets on
+links and README on npm. The weekly compat suite installs/imports all 55 and serves real sockets on
 Node/Bun. Before the first publish, its explicit scope probe reports HTTP 404 and skips; HTTP 200
 arms the suite, and any other status fails.
 

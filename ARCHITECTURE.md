@@ -118,6 +118,8 @@ via plugins.
 
 ### Why It Uses Hono
 
+<!-- version:history -->
+
 As of Milestone 22, Hono is used as the **internal routing engine** inside the kernel `Router`
 class. Route matching is delegated to a `new Hono({ strict: false })` instance constructed with
 Hono's `TrieRouter` (M22 chose `LinearRouter`; `TrieRouter` replaced it in 0.11.0 because it returns

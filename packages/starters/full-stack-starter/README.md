@@ -257,6 +257,8 @@ A loader then calls `context.get(pricingContext)?.quote(4900)`.
 
 Three things to know:
 
+<!-- version:history -->
+
 - **`di: {}` falls back to the kernel registry.** `DiPlugin`'s `autoRegister` defaults to `true`,
   which is what lets `@Inject(CAPABILITIES.LOGGER)` find the framework's own services. Earlier
   releases defaulted it to `false`, so write `di: { autoRegister: true }` there, or every page

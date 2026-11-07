@@ -689,6 +689,8 @@ messages) and `timeoutMs` (default 5,000; `0` disables). It advertises `maxRecor
 under the KV-backed Durable Object value limit — and has no `isHealthy`, because probing it would
 create and bill an object.
 
+<!-- version:history -->
+
 ## D1 payload refusals (M119e, 0.11.0)
 
 D1 `create`, `update` and `updateWhere` refuse invalid payload identifiers or unknown payload

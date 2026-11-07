@@ -44,6 +44,8 @@ Without a registered logger, unhandled kernel errors and handled 5xx use the run
 sink (one JSON line to stderr; Workers uses its platform log channel). Handled 4xx stays silent
 without a logger. Registering a logger selects it exclusively, including a no-op logger.
 
+<!-- version:history -->
+
 | Option                 | Type                                   | Default               | Description                                                                                             |
 | ---------------------- | -------------------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------- |
 | `level`                | `LogLevel`                             | `'info'`              | Minimum level to emit.                                                                                  |
@@ -64,6 +66,8 @@ a console-logging application never pulls it in. You may also inject a pre-built
 `PinoLoggerOptions` to skip the import entirely.
 
 ## Custom logger
+
+<!-- version:history -->
 
 Since 0.11.0, `transport: 'custom'` accepts an `ILogger` adapter. Level filtering, default secret
 redaction, explicit `redact` paths, a `redaction` policy/service, request logging and trace
@@ -103,6 +107,8 @@ LoggerPlugin({ transport: 'custom', logger: adapt(existingSink), requestLogging:
 ```
 
 ## Request logging
+
+<!-- version:history -->
 
 Since 0.11.0, `createRequestLoggerMiddleware(options)` emits one `info` entry per request:
 `request completed`, carrying `method`, `path`, `status`, `duration` and the child logger's
