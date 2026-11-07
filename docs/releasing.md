@@ -190,6 +190,27 @@ own placeholder and trust configuration before their first real release.
   matching cases to `test/docs-gate.test.ts` in the same change** — both checkers read that regex
   separately, so each needs its own, and a widening nothing asserts can be narrowed back later
   without a single test going red.
+- **Lessons from cutting `v0.12.0`.** Check each of these before the full run, not after it:
+  - **A package new to npm needs its name and trust first.** `npm view @setu-ts/<pkg>` answering
+    `E404` means the One-time setup steps apply to that package: placeholder now, `npm trust` just
+    before the tag, deprecation afterwards. 0.12.0 had three (`mcp-plugin`, `vector-store-plugin`,
+    `agent-runs-plugin`).
+  - **`check:docs` reports every "since 0.11.0" claim in prose** once the line widens — about 70 for
+    0.12.0. Most are history: stand `<!-- version:history -->` (a `#` or `//` comment inside a code
+    fence) above the block. Bump only the claims about the current release: README's status line and
+    pin advice, `docs/versioning.md`'s caret range, and install snippets in `docs/custom-plugins.md`
+    and `docs/runtime-deployment.md`.
+  - **Update the package count** wherever it is stated as current (README status, layout tree and
+    release-train sentence; this file's opening line, lane-lock and compat sentences) when a release
+    adds packages. The historical `v0.9.0` bootstrap counts stay.
+  - **Tests that pin the version must match it only as a whole token.** The template baseline's
+    substring replace also rewrote eslint's `^10.12.0`; a package barrel test that hard-codes its
+    `VERSION` fails on every bump; a captured output normalizes any framework version, not one. Run
+    `packages/cli/test/unit/templates/style-baseline.test.ts`,
+    `packages/cli/test/unit/node-redis-cli.test.ts` and each new package's barrel test right after
+    the bump.
+  - **The CHANGELOG's references to "`docs/upgrading.md`, Unreleased"** are renamed with the
+    headings.
 - Add the release's `CHANGELOG.md` entry.
 - **A release that carries reader action adds a `docs/upgrading.md` entry.** The CHANGELOG records
   what the framework changed; the guide records what a reader must change in their own project. The
