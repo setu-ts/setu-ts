@@ -24,7 +24,7 @@ Enterprise architecture without the weight. Runtime freedom without the chaos.
 
 ---
 
-> [!IMPORTANT] **Status: `v0.11.0` publishes 52 packages to npm under `@setu-ts`.** Versions
+> [!IMPORTANT] **Status: `v0.12.0` publishes 55 packages to npm under `@setu-ts`.** Versions
 > published before the move to npm remain on JSR, and nothing new is published there.
 >
 > <!-- version:history -->
@@ -197,16 +197,16 @@ Every ✅ row is a package in this repository with 90%+ test coverage on branch,
 
 ```bash
 # Node (pnpm add / yarn add work the same way)
-npm install @setu-ts/kernel@^0.11.0 @setu-ts/runtime@^0.11.0
+npm install @setu-ts/kernel@^0.12.0 @setu-ts/runtime@^0.12.0
 
 # Bun
-bun add @setu-ts/kernel@^0.11.0 @setu-ts/runtime@^0.11.0
+bun add @setu-ts/kernel@^0.12.0 @setu-ts/runtime@^0.12.0
 
 # Deno
-deno add npm:@setu-ts/kernel@^0.11.0 npm:@setu-ts/runtime@^0.11.0
+deno add npm:@setu-ts/kernel@^0.12.0 npm:@setu-ts/runtime@^0.12.0
 ```
 
-**The `@^0.11.0` is recommended, not required.** npm points `latest` at the current release, so a
+**The `@^0.12.0` is recommended, not required.** npm points `latest` at the current release, so a
 bare `npm install @setu-ts/kernel` resolves without a version. Pin anyway if you would rather meet
 the next breaking release as a deliberate upgrade than as a surprise — see
 [Versioning](#versioning). Earlier releases are on JSR only; see the
@@ -233,7 +233,7 @@ installing the framework from npm with its own package manager.
 
 <!-- version:history -->
 
-All 52 workspace members ship as one release train: the core (`common`, `kernel`, `runtime`,
+All 55 workspace members ship as one release train: the core (`common`, `kernel`, `runtime`,
 `exceptions`, `testing`), every plugin in the tables above, the three starters, the `sdk`, the `cli`
 and `create` — on npm from `v0.9.0`, which publishes `localization-plugin`, `idempotency-plugin` and
 `create` for the first time. Earlier releases were published on JSR.
@@ -253,7 +253,7 @@ freeze — is [docs/versioning.md](docs/versioning.md).
 ## Quick Example
 
 A small application — the kernel, a runtime, and a logger. Add the logger to the two packages
-installed above (`npm install @setu-ts/logger-plugin@^0.11.0`), save this as `main.ts`:
+installed above (`npm install @setu-ts/logger-plugin@^0.12.0`), save this as `main.ts`:
 
 ```typescript
 import { createApplication } from '@setu-ts/kernel';
@@ -357,7 +357,7 @@ published to JSR.
 
 ```
 setu-ts/
-├── packages/              # 52 workspace members, published on npm (JSR before v0.9.0)
+├── packages/              # 55 workspace members, published on npm (JSR before v0.9.0)
 │   ├── common/            # Shared contracts, capability tokens (no dependencies)
 │   ├── kernel/            # Plugin kernel, middleware pipeline, router
 │   ├── runtime/           # Runtime services and HTTP adapters (Node, Deno, Bun, Workers)

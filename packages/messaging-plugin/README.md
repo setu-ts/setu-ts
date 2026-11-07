@@ -444,6 +444,8 @@ topics, which used to attach silently to the first topic's consumer. A consumer 
 release carries no `setu.queue`; it is accepted when its durable name equals the requested queue and
 its filter matches the topic.
 
+<!-- version:history -->
+
 **A queue-less subscription is a shared durable group.** Without a `queue` — `subscribe()`, and
 `respond()` with no queue included — the subscription uses ONE durable JetStream consumer per topic,
 named from `defaultQueue` (default `'messaging-consumers'`): the group is `<defaultQueue>.<topic>`.
@@ -507,6 +509,8 @@ try {
   console.warn(`publish to ${error.topic} unconfirmed after ${error.timeoutMs} ms`);
 }
 ```
+
+<!-- version:history -->
 
 The timeout does not cancel the transport or prove the message was dropped, so account for possible
 delivery before retrying. The Kafka, Pub/Sub and RabbitMQ message texts are unchanged from before,

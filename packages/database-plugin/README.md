@@ -70,6 +70,8 @@ await db.transaction(async (uow) => {
 
 ## The repository surface
 
+<!-- version:history -->
+
 ### Portable data guarantees (M119e, 0.11.0)
 
 | Operation / condition                                                              | Guarantee                                                                                                                                                       |
@@ -1378,6 +1380,8 @@ themselves, and it carries the targeted `entity` when the failing call names one
 at `commit()` (D1's batch, a Cosmos transactional batch, a DynamoDB `TransactWriteItems` cancelled
 by a create's guard, a buffered memory or Bigtable create) is mapped too; every other commit
 rejection is still rethrown unchanged, because its outcome can be unknown.
+
+<!-- version:history -->
 
 **Connection loss during an outage (M128).** The connection-loss signals measured during the
 `0.11.0` outage runs are classified by one rule: if the server said the statement did not run, or

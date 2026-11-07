@@ -10,9 +10,11 @@ is the union of every section between the version you are on and the one you are
 `## Unreleased` holds entries written as their milestone landed, which is where the knowledge is;
 cutting a release renames that heading to the version and is a rename, not a recall.
 
-## Unreleased
+## 0.12.0
 
 ### Workspace broker and RPC style (M138, `@setu-ts/cli`)
+
+<!-- version:history -->
 
 - **Flags.** Replace `setu new --workspace --transport <broker>` with `--broker <broker>`, and
   `--transport-url` with `--broker-url`. Replace `--transport grpc` with `--rpc grpc` on each
@@ -334,6 +336,8 @@ policy. The `default` format is unchanged. If you build error responses yourself
 `ErrorResponseInit.problem` (type `ProblemTypeInit`) carries the same override and is honoured by
 both Problem Details formatters and by status hints.
 
+<!-- version:history -->
+
 ## 0.11.0
 
 ### One place for routes: controllers (#526, `@setu-ts/cli`, breaking)
@@ -384,7 +388,11 @@ A custom client implementing `IRedisLockClient` keeps compiling: `eval` now retu
 `Promise<unknown>`. A custom `IRedisBackplaneClient` that exposes `connect()` and reports `status`
 `'wait'` is now connected when the backplane starts.
 
+<!-- version:history -->
+
 ### Workspace build, test and deploy from the root (M122, 0.11.0, `@setu-ts/cli`, `@setu-ts/common`)
+
+<!-- version:history -->
 
 `setu workspace build` and `setu workspace deploy` work in any existing workspace; nothing has to be
 regenerated to run them. A workspace root created with 0.11.0 also gets `build` and `deploy` scripts
@@ -408,6 +416,8 @@ path in older roots.
 `parseEnv`, the dotenv parser `ConfigPlugin` uses, is now exported from `@setu-ts/common`. It was
 internal to `@setu-ts/config-plugin`, whose own surface is unchanged.
 
+<!-- version:history -->
+
 ### Session and account lifecycle (M124, 0.11.0, `@setu-ts/auth-plugin`)
 
 Nothing breaks. Three things change what an existing application can rely on:
@@ -423,6 +433,8 @@ Nothing breaks. Three things change what an existing application can rely on:
 - **`requireAuth()` without options is unchanged.** With `signInPage`, an anonymous `fetch()` still
   gets `401`; only a page navigation is redirected. A route guarded by a role or permission guard
   alone keeps answering `401`; put `requireAuth({ signInPage })` first to redirect it.
+
+<!-- version:history -->
 
 ### `setu add messaging` and full-stack brokers (M121, 0.11.0, `@setu-ts/cli`)
 
@@ -443,6 +455,8 @@ workspace member with `setu generate app <name> --template full-stack`. Adding t
 does not create the frontend files, routes or build scripts. Workers continues to refuse broker and
 queue flags.
 
+<!-- version:history -->
+
 ### `setu add view` and the styled app shell (M123, 0.11.0, `@setu-ts/cli`)
 
 Fresh full-stack scaffolds include Tailwind 4 through Vite, neutral shadcn tokens, Button/Card,
@@ -462,6 +476,8 @@ already called `css` is left as it was, so check its order. Run the separate CSS
 editing. Workers receives only the dependency/JSX/example-view pieces; use Wrangler static assets
 for CSS. See [styling server-rendered views](./mvc.md#styling-server-rendered-views). If adding a
 CSP, allow the static inline theme scripts by hash or nonce.
+
+<!-- version:history -->
 
 ### `setu build`, production images and Bun library resolution (M120, 0.11.0, `@setu-ts/cli`)
 
@@ -526,12 +542,16 @@ For built Node migrations use `node dist/src/migrations/run.js`; in development 
 `npx tsx src/migrations/run.ts`. Bun and Deno keep their source runners. Native `bun build` and
 `deno compile` are available for custom packaging; generated services do not emit those steps.
 
+<!-- version:history -->
+
 ### `setu check` in the generated check script (M118, 0.11.0, `@setu-ts/cli`)
 
 New projects run `setu check` from their `check` script. Nothing rewrites an existing project's
 scripts, so add it yourself. In a Node, Bun or Workers project, add the CLI as a development
 dependency at your framework version and append ` && setu check` to the end of your existing `check`
 script, keeping whatever runs before it:
+
+<!-- version:history -->
 
 ```json
 {
@@ -549,7 +569,7 @@ enabled the devtool):
 ```json
 {
   "tasks": {
-    "check": "deno check main.ts setu.config.ts && deno run -A npm:@setu-ts/cli@^0.11.0 check"
+    "check": "deno check main.ts setu.config.ts && deno run -A npm:@setu-ts/cli@^0.12.0 check"
   }
 }
 ```
@@ -564,6 +584,8 @@ you accept can be silenced in `.setu-ts/check.json` — see
 older `check` task by name; change the task to the form above, with `main.dev.ts` in the list.
 
 A plugin command named `check` or `sync` is now shadowed by the built-in verb; rename it.
+
+<!-- version:history -->
 
 ### Optional peers and `setu add` workspace root entries (M119f, 0.11.0, `@setu-ts/common`, `@setu-ts/cli`)
 
@@ -590,6 +612,8 @@ writing. Deno workspaces and standalone projects keep their existing behavior.
 The startup error now names the loading package and the placement rule via the optional `requiredBy`
 constructor option. Its `dependency` and `cause` are unchanged. See
 [Optional peers in a workspace](./plugins.md#optional-peers-in-a-workspace).
+
+<!-- version:history -->
 
 ### Portable data contract: tenant columns, cursors, unknown fields and refused values (M119e, 0.11.0, `@setu-ts/database-plugin`, `@setu-ts/common`, `@setu-ts/cloudflare-plugin`)
 
@@ -619,6 +643,8 @@ Prisma conditional-write validation now uses the same 400 split as ordinary writ
 previous 501. Prisma refusal causes contain a fresh error with only the original name and code in a
 fixed message; query text and payload values are discarded.
 
+<!-- version:history -->
+
 ### Upgrade `zod` and override `@azure/msal-node` for Azure secrets (0.11.0)
 
 Upgrade Zod to `>=4.6.6 <5` and migrate any Zod 3 API usage. Zod 3 support has been removed;
@@ -638,6 +664,8 @@ For npm, put `"overrides": { "@azure/msal-node": "^7.1.0" }` in the root `packag
 dependencies and verify that the lockfile resolves MSAL Node 7.1.0 or newer. These steps address
 [GHSA-mrhx-c7xc-m3w5](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5) and
 [GHSA-xcx6-jx8p-x3h5](https://github.com/advisories/GHSA-xcx6-jx8p-x3h5).
+
+<!-- version:history -->
 
 ### NATS subscriptions without a queue are shared, and every publish is bounded (M119a, 0.11.0, `@setu-ts/messaging-plugin`)
 
@@ -675,6 +703,8 @@ on the Kafka, Pub/Sub, RabbitMQ, Redis Streams or NATS arm that publishes.
   removes them once nothing reads from them; a replica still running an older version keeps its
   consumer while it reads. A user queue literally named `messaging-<uuid>` is a reserved shape for
   this reason: such a consumer is reaped only after 5 min with no client attached.
+
+<!-- version:history -->
 
 ### Health indicators gain a readiness membership, and a mail outage no longer drains every replica (M119b, 0.11.0, `@setu-ts/health-plugin`, `@setu-ts/mail-plugin`)
 
@@ -715,7 +745,11 @@ health bridge.
   still checked — and a paused database reads `degraded` within one ~2 s bound instead of `down`
   after ~4 s.
 
+<!-- version:history -->
+
 ### Generated projects, CSRF and `setu add` defaults that broke a normal setup (M119c, 0.11.0, `@setu-ts/cli`, `@setu-ts/http-security-plugin`)
+
+<!-- version:history -->
 
 - **Full-stack behind a TLS proxy:** a project generated by `setu new --template full-stack` before
   0.11.0 answers 400 on every React Router action behind TLS termination. Add IP security yourself —
@@ -742,7 +776,11 @@ health bridge.
 - **Generated tests:** add `--test-force-exit` to an existing Node project's `test` and `test:e2e`
   scripts to stop a failed start hanging CI.
 
+<!-- version:history -->
+
 ### Workers tests, `setu agents` output and module 404 details (M119h, 0.11.0, `@setu-ts/cli`)
+
+<!-- version:history -->
 
 - **Workers projects can run tests.** A `cloudflare-workers` project scaffolded before 0.11.0 has no
   test scripts, and its `deno.json` `test` task permits an empty suite. Add the two scripts and the
@@ -786,6 +824,8 @@ health bridge.
   }
   ```
 
+<!-- version:history -->
+
 - **`setu agents --dry-run` speaks in `would create` / `would update` / `unchanged`.** A script that
   matched the old `would write <path>` line must match the verb; an unchanged brief is reported and
   no longer rewritten by the real run. Add `--strict` to `setu agents --check` where CI should also
@@ -798,10 +838,14 @@ health bridge.
   older CLI as stale, so a CI job running it fails on the version bump; run `setu agents` and commit
   the rewritten briefs.
 
+<!-- version:history -->
+
 ### DI lifetimes are enforced, and every request has a scope (M125, 0.11.0, `@setu-ts/di-plugin`, `@setu-ts/common`, `@setu-ts/decorator-plugin`, breaking)
 
 Affects applications that register `DiPlugin`, and any code implementing `IContainer` itself. An
 application without `DiPlugin` is unaffected.
+
+<!-- version:history -->
 
 - **A boot failure naming a `captive` dependency** means a `singleton` reaches a `scoped` service,
   directly or through `transient`s. Before 0.11.0 the singleton kept the first scope's instance for

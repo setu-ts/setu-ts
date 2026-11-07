@@ -1,4 +1,4 @@
-{"name":"@setu-ts/agent-runs-plugin","version":"0.11.0","license":"MIT","exports":"./src/index.ts",
+{"name":"@setu-ts/agent-runs-plugin","version":"0.12.0","license":"MIT","exports":"./src/index.ts",
   "imports": {
     "ai": "npm:ai@^7.0.159",
     "ai/test": "npm:ai@^7.0.159/test",

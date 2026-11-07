@@ -85,6 +85,8 @@ await app.start({ port: 3000 });
 
 ## Component names when regenerating a client
 
+<!-- version:history -->
+
 A hoisted node uses its own Zod `.meta({ id })` / registry id when it has one; otherwise its name
 uses the first operation's body/response hint plus the node's schema path, such as
 `PostOrdersBodyLinesItems`. Roots reserve their own name before descending. Nullable primitives stay
