@@ -182,6 +182,8 @@ setu workspace broker nats          # every member, Compose, k8s and the README 
 setu workspace rpc orders http      # one member
 ```
 
+<!-- version:history -->
+
 A change writes only CLI-owned files and merges the packages it needs; it never removes one, and it
 refuses — writing nothing — when a member's config does not call the module (the lines to add are
 printed) or when source still uses what it removes (`--force` goes ahead). `--transport` from 0.11.0
@@ -189,6 +191,8 @@ is refused with a pointer to `--broker` and `--rpc`. See the
 [CLI guide](https://setu-ts.dev/docs/cli/#broker-and-rpc-style).
 
 ## Workspace operations
+
+<!-- version:history -->
 
 Since 0.11.0, a workspace root builds, tests and deploys every member from one place. The commands
 read `setu.workspace.json` when they run, so a member added later is included without editing
@@ -199,6 +203,8 @@ setu workspace build                  # one image per member: <member>:<short co
 setu workspace deploy --dry-run       # every check, and the plan, with nothing changed
 setu workspace deploy                 # build, ship, apply k8s/, wait for each rollout
 ```
+
+<!-- version:history -->
 
 A workspace created with 0.11.0 or later also has root `build` and `deploy` scripts (Deno: tasks)
 and, on npm and Bun, a root `test` script. It is the package manager's own recursion —
@@ -217,6 +223,8 @@ rolls out; or `build-<UTC timestamp>` outside git). `--registry <prefix>` names 
 `--build-arg NPM_CONFIG_REGISTRY=<url>`, and keep its token in `NPMRC`, never in a build argument.
 
 `deploy` decides everything before it changes anything:
+
+<!-- version:history -->
 
 - **Secrets.** A member's variables are the names its committed `.env.example` declares, less those
   the generated manifest already sets (sibling hosts, the transport URL). Their values go in
@@ -410,6 +418,8 @@ imports or boots your project. A schematic whose plugin is missing is refused, n
 install, and `setu generate --help` lists only what is available here.
 
 ## Options
+
+<!-- version:history -->
 
 | Option                  | Behavior                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

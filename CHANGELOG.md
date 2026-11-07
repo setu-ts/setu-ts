@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.12.0] — 2026-11-07
+
 ### Added
 
 - **gRPC workspace example (`@setu-ts/cli`, #570).** `apps/grpc-workspace` is what
@@ -340,7 +342,7 @@ All notable changes to this project are documented here. The format follows
   `@setu-ts/auth-plugin`).** A JWT-strategy or trusted-issuer token whose `act` is present but is
   not an object with a non-empty `sub` or `client_id` was accepted before and is now refused (`401`;
   the issuer reason is `act-malformed`). An absent `act` is unaffected. The migration steps are in
-  `docs/upgrading.md`, Unreleased, "Resource-server authentication (M132, `@setu-ts/auth-plugin`,
+  `docs/upgrading.md`, 0.12.0, "Resource-server authentication (M132, `@setu-ts/auth-plugin`,
   `@setu-ts/common`)".
 
 - **Bearer challenges on 401s and scope 403s (M132, #541, `@setu-ts/auth-plugin`).** An application
@@ -351,7 +353,7 @@ All notable changes to this project are documented here. The format follows
 - **Breaking: the rate limiter emits draft-11 header fields and refuses options it used to accept
   (#539, `@setu-ts/auth-plugin`, `@setu-ts/common`, `@setu-ts/exceptions`).** Each item below is
   breaking, and none has an option that restores the old behaviour. The migration steps are in
-  `docs/upgrading.md`, Unreleased, "Rate limiter now emits draft-11 `RateLimit` fields".
+  `docs/upgrading.md`, 0.12.0, "Rate limiter now emits draft-11 `RateLimit` fields".
   - `rateLimitMiddleware` emits the `RateLimit` and `RateLimit-Policy` Structured Field Lists of
     draft-ietf-httpapi-ratelimit-headers-11 instead of `RateLimit-Limit`, `RateLimit-Remaining` and
     `RateLimit-Reset`. A client that read the old fields, or a CORS `exposedHeaders` list naming
@@ -10514,7 +10516,8 @@ are never hard dependencies. Each is injected through plugin options or imported
 Milestones 0–33 and 41–46. See [ROADMAP.md](ROADMAP.md) for scope per milestone and
 [PUBLIC_API.md](PUBLIC_API.md) for the full exported surface.
 
-[unreleased]: https://github.com/setu-ts/setu-ts/compare/v0.11.0...HEAD
+[unreleased]: https://github.com/setu-ts/setu-ts/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.12.0
 [0.11.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.11.0
 [0.10.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.10.0
 [0.9.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.9.0

@@ -936,6 +936,8 @@ content.
 
 ### Workspaces
 
+<!-- version:history -->
+
 `setu add <plugin> --dir apps/<member>` in a listed Node or Bun Setu workspace records its optional
 peers in the member's `package.json` `dependencies` and, when the workspace root has a
 `package.json`, in the root's as well (since 0.11.0). A peer already declared in `dependencies`,

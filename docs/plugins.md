@@ -60,6 +60,8 @@ option that hands the plugin the dependency instead, such as
 `LoggerPlugin({ transport: 'pino', pinoFactory })`, skips that import, so the application may load
 the library from wherever it is installed and pass the factory in.
 
+<!-- version:history -->
+
 Since 0.11.0, `setu add <plugin> --dir apps/<member>` in a listed Node or Bun Setu workspace records
 the peers it supplies in the member's `package.json` `dependencies` and, when the root has a
 `package.json`, in the root's too. It leaves a peer already declared in `dependencies`,

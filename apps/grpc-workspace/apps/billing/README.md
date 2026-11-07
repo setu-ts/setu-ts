@@ -23,8 +23,8 @@ On the port `./src/discovery/services.ts` exports:
 ## Generate code
 
 ```bash
-npx @setu-ts/cli@0.11.0 generate service billing
-npx @setu-ts/cli@0.11.0 generate --help
+npx @setu-ts/cli@0.12.0 generate service billing
+npx @setu-ts/cli@0.12.0 generate --help
 ```
 
 ## Production

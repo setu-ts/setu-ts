@@ -528,6 +528,8 @@ TCP member to HTTP probes, add `HealthPlugin` and `healthProbes: true` to its re
 
 ### Build, test and deploy from the root
 
+<!-- version:history -->
+
 Since 0.11.0 the CLI runs these across every member, reading `setu.workspace.json` each time:
 
 ```bash

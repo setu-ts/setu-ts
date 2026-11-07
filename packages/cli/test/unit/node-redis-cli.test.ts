@@ -32,7 +32,7 @@ function harness() {
 }
 
 const VERSION_PIN = new RegExp(
-  String.raw`(@setu-ts/[a-z0-9-]+@\^?|\x22@setu-ts/[a-z0-9-]+\x22: \x22\^?)0\.10\.0`,
+  String.raw`(@setu-ts/[a-z0-9-]+@\^?|\x22@setu-ts/[a-z0-9-]+\x22: \x22\^?)\d+\.\d+\.\d+`,
   'g',
 );
 
@@ -206,7 +206,8 @@ describe('node-redis CLI', () => {
       ],
     };
     // The capture pins the framework at the release it was taken on; generated output
-    // pins the running CLI's version, so only that version token is normalized.
+    // pins the running CLI's version, so only the framework version token is normalized
+    // (the capture's later recaptures pinned a later release than the first).
     const expected: Record<string, string> = Object.fromEntries(
       Object.entries(baseline).map(([path, text]) => [
         path,

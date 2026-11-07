@@ -398,6 +398,8 @@ router.get('/api/products', async (ctx) =>
 
 ## Dotenv parser (`@setu-ts/common`)
 
+<!-- version:history -->
+
 Since 0.11.0, common exports `parseEnv(content: string): Readonly<Record<string, string>>`, the
 strict dotenv parser `ConfigPlugin` loads `.env` files with. It moved from config-plugin, where it
 was internal, so that `setu workspace deploy` builds a member's Kubernetes Secret from exactly the
@@ -853,12 +855,16 @@ app.register(
 
 ### Transports
 
+<!-- version:history -->
+
 | Transport   | Description                                                                                             |
 | ----------- | ------------------------------------------------------------------------------------------------------- |
 | `'console'` | Runtime-independent JSON lines (or pretty text) via `console`. Default.                                 |
 | `'pino'`    | Pino-backed, loaded via `await import('pino')` or injected factory. `register()` is async.              |
 | `'noop'`    | Discards all output. For tests or disabling logging.                                                    |
 | `'custom'`  | Wraps `LoggerPluginOptions.logger: ILogger` with framework level filtering and redaction. Since 0.11.0. |
+
+<!-- version:history -->
 
 `LoggerPluginOptions.logger?: ILogger` (since 0.11.0) is required with `transport: 'custom'` and
 refused with every other transport, including the default. Invalid combinations throw an `Error`
@@ -1513,6 +1519,8 @@ app.register(
 
 ## DatabasePlugin() (`@setu-ts/database-plugin`)
 
+<!-- version:history -->
+
 ### Portable data refusals and tenant resolution (M119e, since 0.11.0)
 
 `UnknownPayloadFieldError` is defined in `@setu-ts/common` and re-exported unchanged here.
@@ -2074,6 +2082,8 @@ or `null`; `deleteWhere` returns whether a row was deleted. An absent key and a 
 the same outcome and write nothing. The key and predicate remain separate conjunctions even when the
 predicate names a key field.
 
+<!-- version:history -->
+
 `WritePrecondition`, exported by `@setu-ts/common`, is `Readonly<Record<string, string | number>>`.
 `checkWritePrecondition(where, data?)` returns a `WritePreconditionCheck`: `{ ok: false, problem }`,
 or `{ ok: true, where, data }` carrying private copies of the inputs. It requires a non-empty plain
@@ -2218,6 +2228,8 @@ identical encoding and a plugin may not import another plugin (AI_GUIDELINES §2
 `sortFingerprint`, `mintNextCursor` and `resolveKeysetSort` are **not** re-exported; import them
 from `@setu-ts/common`.
 
+<!-- version:history -->
+
 | Symbol              | Kind      | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | ------------------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `EntityKey`         | type      | A primary key: a scalar `string`/`number`, or a composite `Readonly<Record<string, string \| number>>`. A record rather than an array, because a composite key is named columns and an array would make the caller depend on a column order the mapping owns.                                                                                                                                                              |
@@ -2233,12 +2245,16 @@ from `@setu-ts/common`.
 
 #### Composite keys
 
+<!-- version:history -->
+
 **Scoped fingerprints (since 0.11.0).**
 `sortFingerprint(orderBy: Readonly<Record<string, OrderDirection>>, scope?: { readonly entity: string; readonly keyColumns: readonly string[] }): string`
 returns the byte-identical legacy `field:direction` pairs without scope. With scope it returns
 `JSON.stringify([scope.entity, scope.keyColumns, pairs])`. Memory, Prisma, Drizzle, MongoDB,
 DynamoDB, Cosmos DB, Bigtable and D1 pass the resolved entity and key columns on mint and decode.
 Scope is a correctness check, not authorization; tenant predicates remain required.
+
+<!-- version:history -->
 
 **Portable refusal classes (`@setu-ts/common`, since 0.11.0).**
 `UnknownPayloadFieldError(entity: string, field: string, options?: ErrorOptions)` has name
@@ -3407,6 +3423,8 @@ what changed is that the refusal is legible.
 > `AuthPlugin` option. `IJwtService` still exposes only `sign`/`verify`/`decode` — a refresh token
 > is a signed JWT carrying `type: 'refresh'` and a `jti`.
 
+> <!-- version:history -->
+>
 > **Session and account lifecycle (M124, 0.11.0):** `signIn.providers` may be empty with neither
 > `mfa` nor `passkeys` — a password-only sign-in that registers `CAPABILITIES.AUTH_SESSION`, the
 > `auth-session` strategy and the logout route only; a non-array `providers` still throws
@@ -4180,6 +4198,8 @@ CSP and Permissions-Policy have no default (explicitly configure to enable). Per
 omits that header.
 
 #### CSRF (`csrfMiddleware`)
+
+<!-- version:history -->
 
 Stateless Origin/Referer validation for unsafe methods (`POST`, `PUT`, `PATCH`, `DELETE`). The
 request's URL origin, `requestOriginOf(ctx).origin`, and — only when the request carries
@@ -4991,6 +5011,8 @@ registers and subscribes.
 ### Options
 
 Discriminated on `transport`.
+
+<!-- version:history -->
 
 `BackplaneCommonOptions.onHandlerError?: (error: unknown, frame: RealtimeFrame) => void` (0.11.0)
 replaces default subscriber logging for every sync throw and async rejection on built-in transports.
@@ -6603,6 +6625,8 @@ interface ConsumerRetryOptions {
   readonly delaysMs?: readonly number[];
   readonly isRetryable?: (error: unknown) => boolean;
 }
+
+// version:history
 
 // ── Redis Streams ────────────────────────────────────────────────────────────────────
 interface RedisStreamsMessagingOptions extends MessagingCommonOptions {
@@ -10815,6 +10839,8 @@ earlier) is refused the same way, pointing at the upgrade guide.
 
 ### `@setu-ts/cli/main` — the process boundary
 
+<!-- version:history -->
+
 `setu new --logger console|pino` and `setu generate app --logger console|pino` (since 0.11.0) select
 the logger for `rest`, `microservice`, `class-based`, and `full-stack`, including styled templates.
 The default is Pino on Node, Deno and Bun, and console on Cloudflare Workers. Pino adds `pino: 10.x`
@@ -10878,6 +10904,8 @@ Every socket-target scaffold includes `test/app.test.ts`: it starts the applicat
 `createApp()` through `createTestApp`, injects its smoke-test endpoint, and stops it. Workers needs
 the platform environment and emits no smoke test; its `test` task permits an empty suite.
 `setu add testing` pins `@setu-ts/testing` in Deno's import map or npm's `devDependencies`.
+
+<!-- version:history -->
 
 ```bash
 # Scaffold a project (creates ./my-app)
@@ -11048,6 +11076,8 @@ A **workspace root** is refused (exit `2`, nothing written) — recognised by `s
 `deno.json` `workspace` key, or a `package.json` `workspaces` key. Framework packages are pinned in
 each member, because `setu generate` reads the member's manifest for plugin gating; run
 `setu add <plugin> --dir <member directory>` instead.
+
+<!-- version:history -->
 
 Since 0.11.0 (M119f), optional peers supplied by `setu add` are also recorded in the workspace
 root's `package.json` `dependencies` when the target is a listed Node/Bun Setu workspace member. The
@@ -13203,6 +13233,8 @@ since M117, node-redis 6's: messages `The client is closed`, `The client is offl
 `Socket timeout timeout. Expecting data, but didn't receive any in <n>ms.` (all `name: 'Error'`). It
 never mutates errors. Command errors such as WRONGTYPE remain unclassified.
 
+<!-- version:history -->
+
 **node-redis (M117, 0.11.0).**
 `fromNodeRedis(client: NodeRedisClientLike | NodeRedisClientFactory, options?: NodeRedisAdapterOptions): NodeRedisAdapter`
 wraps a node-redis client (`redis` v5/v6) in one ioredis-shaped adapter that every Redis-backed
@@ -13236,6 +13268,8 @@ export; callers cannot mutate the classification vocabulary.
 The contract layer every other package builds on. Implemented in **Milestone 1**; this section is
 the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSDoc.
 
+<!-- version:history -->
+
 ### Realtime subscriber dispatch (0.11.0)
 
 `dispatchRealtimeFrame(handlers: Iterable<RealtimeFrameHandler>, frame: RealtimeFrame, reporter: IRealtimeHandlerErrorReporter): boolean`
@@ -13264,6 +13298,8 @@ as `é` remains accepted. The browser SDK maintains the same policy locally to p
 common imports.
 
 ### Redaction
+
+<!-- version:history -->
 
 `createRedactionService(policy)` compiles a synchronous `RedactionPolicy` once and returns an
 `IRedactionService`. Policies classify dot paths (`*` matches one segment and `**` matches any
@@ -13461,8 +13497,12 @@ reaches `redactors[<string>]`):
 on registration or resolution. Run the project's type-checker (`tsc --noEmit`, or `deno check` on
 Deno) to enforce it; `start:dev` / `tsx` strips types without checking them.
 
+<!-- version:history -->
+
 **DI container contract (M125).** The container is optional (no plugin may require it), and its
 contract changed in 0.11.0:
+
+<!-- version:history -->
 
 - **Tokens.** Every `IContainer` method takes a `ContainerToken<T>`: a string, an
   `InjectionToken<T>` from `createToken<T>(name)`, or a class (`Constructor<T>`). Object tokens are
@@ -13635,6 +13675,8 @@ Contract notes:
   document should claim. It carries the status ONLY: a response header is not represented, since an
   OpenAPI response-header entry needs a schema and a description a
   `@ResponseHeader('X-Total', '42')` declaration does not carry.
+
+<!-- version:history -->
 
 - `IRequest.json()` rejects with `MalformedRequestBodyError` — branded `400` — when the body is not
   valid JSON (X37-1). The read is lazy (M87) and happens inside the handler, so the rejection
@@ -14061,6 +14103,8 @@ The plugin kernel: resolves plugin dependencies, builds the middleware pipeline 
 validates environment variables, and dispatches requests. Implemented in **Milestone 2**; route
 matching was delegated to Hono in **Milestone 22** (behind the unchanged `IRouterApi` contract).
 This section is the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSDoc.
+
+<!-- version:history -->
 
 Route patterns are static segments, `:name` parameters (a word, `\w+`, other than `__proto__`), a
 final optional `:name?`, `*` segments and a final `prefix*`. Since 0.11.0 anything else is refused
@@ -14553,6 +14597,8 @@ exports carry full JSDoc.
 | `ScopeDisposedError`           | class    | Thrown by `resolve` on a disposed scope                                                                      |
 | `ContainerClosedError`         | class    | Thrown by `register` on a closed root container                                                              |
 | `RequestScopeUnavailableError` | class    | Thrown by `forRequest` when the request context has no `defer` (for example one from `createTestContext`)    |
+
+<!-- version:history -->
 
 `ScopeManager` was removed in 0.11.0: the compiled graph keeps singletons on their compiled entries
 and scoped instances in a per-scope slot array.
@@ -15172,7 +15218,7 @@ not register a plugin or resolve capability tokens — it is an external-consume
 ### Installation
 
 ```bash
-npm install @setu-ts/sdk@^0.11.0
+npm install @setu-ts/sdk@^0.12.0
 ```
 
 ### createClient()
@@ -15907,6 +15953,8 @@ asserted verbatim, and the whole surface is driven against a real SQLite engine 
 runs), including batch rollback.
 
 ### Durable Objects — realtime backplane and distributed lock
+
+<!-- version:history -->
 
 `DurableObjectBackplaneOptions.onHandlerError?: (error: unknown, frame: RealtimeFrame) => void`
 (0.11.0) receives every subscriber throw or rejection instead of default logging. The default

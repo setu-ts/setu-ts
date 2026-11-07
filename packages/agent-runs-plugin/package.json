@@ -1,6 +1,6 @@
 {
   "name": "@setu-ts/agent-runs-plugin",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "description": "Durable agent runs with fenced leases, approvals and stream replay",
   "repository": {
     "type": "git",

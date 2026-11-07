@@ -24,6 +24,8 @@ deno add npm:@setu-ts/common
 
 ## What's Inside
 
+<!-- version:history -->
+
 `OptionalDependencyUnavailableError(dependency, { cause?, requiredBy? })` preserves `dependency` and
 the original `cause`. Since 0.11.0, loaders pass their npm package name as `requiredBy` to make the
 message actionable; it is used only in the message, with no new instance field:
@@ -890,6 +892,8 @@ set: `ECONNREFUSED`, `ECONNRESET`, `ETIMEDOUT`, `EHOSTUNREACH`, `ENETUNREACH`, `
 `EAI_AGAIN`, `EPIPE`. Use the predicate instead of the removed, unreleased `CONNECTION_FAULT_CODES`
 export; callers cannot mutate the classification vocabulary.
 
+<!-- version:history -->
+
 ## Using node-redis (0.11.0)
 
 Every Redis-backed plugin uses ioredis by default and takes an injected `client`. To use
@@ -938,6 +942,8 @@ idempotency and the auth rate-limit store.
   and is idempotent; `status` reports `'wait'`, `'connecting'`, `'ready'` or `'end'`.
 
 Cluster and sentinel clients (`createCluster`, `createSentinel`) are not supported.
+
+<!-- version:history -->
 
 ## Portable database refusals (0.11.0)
 
