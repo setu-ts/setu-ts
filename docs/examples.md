@@ -89,10 +89,15 @@ middleware, event-handler, health-indicator or metric artifacts, so they do not 
 for those families. Using HealthPlugin or a plugin-provided indicator alone does not create a source
 artifact.
 
+`grpc-workspace` is the one exception to the empty-barrels rule: it is a replica of what
+`setu new --workspace` and `setu generate app --rpc grpc` write, empty barrels included, and
+`test/grpc-workspace-example.test.ts` regenerates that scaffold and fails when the two drift.
+
 The smallest examples (`minimal`, `static-site`, `compiled-binary`) register their single route
 directly in the factory, as the scaffold does for its root route. GraphQL resolvers and gRPC
 services have no dedicated schematic: their existing files stay inside standard modules with
-CLI-owned indexes, while GraphqlPlugin and GrpcPlugin still own transport registration. The
+CLI-owned indexes, while GraphqlPlugin and GrpcPlugin still own transport registration
+(`grpc-workspace`'s billing, which has no module, adds its service from a generated plugin). The
 CLI-owned registrars in those two modules have no HTTP controllers to register. Worker-pool task
 modules stay in `src/tasks/`; `setu g job` generates queue/scheduler jobs, a different artifact. The
 `microservices` layout is a deliberate exception: two services have separate factories under
@@ -152,25 +157,26 @@ reads its port from `PORT`, as that template does.
 
 ## A learning path
 
-| Step | Example                                          | Concept                                                    | Needs                                   |
-| ---- | ------------------------------------------------ | ---------------------------------------------------------- | --------------------------------------- |
-| 1    | [minimal](../apps/minimal)                       | Compose a kernel, runtime and one route                    | —                                       |
-| 2    | [rest-api](../apps/rest-api)                     | Build an authenticated, validated API described by OpenAPI | —                                       |
-| 3    | [database](../apps/database)                     | Use repositories and verify transaction rollback           | —                                       |
-| 4    | [di-decorators](../apps/di-decorators)           | Inject decorated services and compare request lifetimes    | —                                       |
-| 5    | [cqrs](../apps/cqrs)                             | Write through a command bus and read through a query bus   | —                                       |
-| 6    | [multi-tenant](../apps/multi-tenant)             | Isolate request data by tenant                             | —                                       |
-| 7    | [plugin-development](../apps/plugin-development) | Register and resolve a custom plugin capability            | —                                       |
-| 8    | [graphql-demo](../apps/graphql-demo)             | Compose a schema-first GraphQL API                         | —                                       |
-| 9    | [grpc](../apps/grpc)                             | Serve descriptor-backed RPC and HTTP on one port           | —                                       |
-| 10   | [static-site](../apps/static-site)               | Serve static files with caching, ETags and byte ranges     | —                                       |
-| 11   | [worker-pool](../apps/worker-pool)               | Offload CPU work and share worker buffers                  | —                                       |
-| 12   | [full-stack](../apps/full-stack)                 | Pass framework services into SSR loaders and form actions  | Node 24 and pnpm                        |
-| 13   | [realtime](../apps/realtime)                     | Deliver SSE messages across replicas                       | Redis                                   |
-| 14   | [microservices](../apps/microservices)           | Discover an HTTP service, then call it through a broker    | Redis for the second half               |
-| 15   | [realtime-clients](../apps/realtime-clients)     | Resume authenticated SSE and keep WebSockets alive         | Node, Bun and Wrangler (fetched by npx) |
-| 16   | [cloudflare](../apps/cloudflare)                 | Wire KV, scheduled work and queue messaging on workerd     | Wrangler                                |
-| 17   | [compiled-binary](../apps/compiled-binary)       | Package a health application as a Node single executable   | —                                       |
+| Step | Example                                          | Concept                                                     | Needs                                   |
+| ---- | ------------------------------------------------ | ----------------------------------------------------------- | --------------------------------------- |
+| 1    | [minimal](../apps/minimal)                       | Compose a kernel, runtime and one route                     | —                                       |
+| 2    | [rest-api](../apps/rest-api)                     | Build an authenticated, validated API described by OpenAPI  | —                                       |
+| 3    | [database](../apps/database)                     | Use repositories and verify transaction rollback            | —                                       |
+| 4    | [di-decorators](../apps/di-decorators)           | Inject decorated services and compare request lifetimes     | —                                       |
+| 5    | [cqrs](../apps/cqrs)                             | Write through a command bus and read through a query bus    | —                                       |
+| 6    | [multi-tenant](../apps/multi-tenant)             | Isolate request data by tenant                              | —                                       |
+| 7    | [plugin-development](../apps/plugin-development) | Register and resolve a custom plugin capability             | —                                       |
+| 8    | [graphql-demo](../apps/graphql-demo)             | Compose a schema-first GraphQL API                          | —                                       |
+| 9    | [grpc](../apps/grpc)                             | Serve descriptor-backed RPC and HTTP on one port            | —                                       |
+| 10   | [static-site](../apps/static-site)               | Serve static files with caching, ETags and byte ranges      | —                                       |
+| 11   | [worker-pool](../apps/worker-pool)               | Offload CPU work and share worker buffers                   | —                                       |
+| 12   | [full-stack](../apps/full-stack)                 | Pass framework services into SSR loaders and form actions   | Node 24 and pnpm                        |
+| 13   | [realtime](../apps/realtime)                     | Deliver SSE messages across replicas                        | Redis                                   |
+| 14   | [microservices](../apps/microservices)           | Discover an HTTP service, then call it through a broker     | Redis for the second half               |
+| 15   | [grpc-workspace](../apps/grpc-workspace)         | Call a sibling workspace member over gRPC through discovery | —                                       |
+| 16   | [realtime-clients](../apps/realtime-clients)     | Resume authenticated SSE and keep WebSockets alive          | Node, Bun and Wrangler (fetched by npx) |
+| 17   | [cloudflare](../apps/cloudflare)                 | Wire KV, scheduled work and queue messaging on workerd      | Wrangler                                |
+| 18   | [compiled-binary](../apps/compiled-binary)       | Package a health application as a Node single executable    | —                                       |
 
 ## Example deep dives
 
@@ -571,6 +577,78 @@ The two arguments are service A's and service B's ports (defaults `3000` and `30
   optional messaging; respondToGreetings registers a responder on the shared topic and answers with
   greetingFor.
 
+For the same call over gRPC between two members of a CLI workspace, see
+[grpc-workspace](#grpc-workspace).
+
+---
+
+### grpc-workspace
+
+**Concept.** Call a sibling service over gRPC in a Setu workspace. Two members, generated by the
+CLI, share one `.proto` contract from a workspace library: `billing` serves
+`billing.v1.BillingService`, and `orders` finds billing through its generated discovery map and
+calls it with a Connect client. Only billing is generated with `--rpc grpc`, so only billing serves
+gRPC, under `/grpc` beside its HTTP routes; orders is an ordinary HTTP member, because calling a
+gRPC member needs only a client.
+
+The example is the scaffold plus the gRPC feature. It was generated with:
+
+```bash
+setu new grpc-workspace --workspace --runtime node --port 3410
+cd grpc-workspace
+setu generate library contracts
+setu generate app billing --template microservice --rpc grpc
+setu generate app orders --template microservice --depends-on billing
+setu generate plugin billing --dir apps/billing
+cd apps/orders
+setu generate controller orders
+setu generate service orders
+setu generate schema orders
+```
+
+Each member has a single feature, so both stay flat, as any service does until its first
+`setu generate module`: billing serves `Quote` from the plugin `setu generate plugin` wrote, and
+orders has a controller, a service and a schema. Billing is generated first so that orders can
+record it with `--depends-on`: the root `dev` script then starts orders only after billing answers
+`/ready`. Billing listens on 3410 and orders on 3411, the ports the workspace manifest and each
+member's `src/discovery/services.ts` record. The contract lives in `libs/contracts`, whose
+`proto:gen` script runs buf through `npx`; its output under `src/gen/` is committed, so nothing else
+needs buf.
+
+```bash
+pnpm --dir apps/grpc-workspace run smoke      # starts both members, makes the cross-member calls
+pnpm --dir apps/grpc-workspace run start      # the generated dev script: billing, then orders
+curl -X POST localhost:3411/orders -H 'content-type: application/json' \
+  -d '{"items":[{"sku":"widget","quantity":2},{"sku":"gadget","quantity":1}]}'   # totalCents 3497
+```
+
+An unknown SKU, or a quantity below one, answers `400`. With billing stopped, `POST /orders` answers
+`503`: over fetch, a refused connection reaches the Connect client as code `Unknown` caused by a
+`TypeError`, and orders maps that and `Unavailable` to "billing is unavailable".
+
+**Read, in order:**
+
+- [`libs/contracts/proto/billing/v1/billing.proto`](../apps/grpc-workspace/libs/contracts/proto/billing/v1/billing.proto)
+  and [`libs/contracts/src/index.ts`](../apps/grpc-workspace/libs/contracts/src/index.ts) — the
+  shared contract and the generated `BillingService` both members import.
+- [`apps/billing/src/plugins/billing.plugin.ts`](../apps/grpc-workspace/apps/billing/src/plugins/billing.plugin.ts)
+  — the `Quote` implementation and the generated plugin that adds it through
+  `IGrpcService.addService`. It depends on the gRPC capability, which the CLI-owned
+  `transportPlugins()` (from `src/transport/index.ts`) provides, and the plugins barrel registers
+  it, so billing's `setu.config.ts` is unchanged.
+- [`apps/orders/src/clients/billing.client.ts`](../apps/grpc-workspace/apps/orders/src/clients/billing.client.ts)
+  and
+  [`apps/orders/src/services/orders.service.ts`](../apps/grpc-workspace/apps/orders/src/services/orders.service.ts)
+  — the Connect client, the address from `discovery.resolveUrl('billing', '/grpc')`, and the error
+  mapping.
+- [`apps/orders/src/controllers/orders.controller.ts`](../apps/grpc-workspace/apps/orders/src/controllers/orders.controller.ts)
+  — the flat function controller: `POST /orders` validates the line items and creates the order.
+- [`smoke.ts`](../apps/grpc-workspace/smoke.ts) — starts billing and orders as separate processes
+  and checks the totals, the `400` paths and the `503` after billing stops.
+
+The example's [README](../apps/grpc-workspace/README.md) lists every file that differs from the
+generated workspace, and why.
+
 ---
 
 ### realtime
@@ -704,6 +782,9 @@ curl -X POST localhost:5000/example.EchoService/Echo -H 'content-type: applicati
   this example does not require a generation step.
 - [`smoke.ts`](../apps/grpc/smoke.ts) — createEchoClient sends an RPC to baseUrl, then fetch reads
   /health using that same baseUrl.
+
+Next: [grpc-workspace](#grpc-workspace) calls one service from another over gRPC, in a workspace the
+CLI generates.
 
 ---
 
@@ -888,7 +969,9 @@ skip fails the job unless the app is in the `ALLOW_SKIP` list; see
 
 1. Create it under `apps/<name>/` with a private `package.json` declaring `start`, `smoke` and
    `check` scripts and a `tsconfig.json` extending `../../tsconfig.apps.json`, laid out as
-   [above](#how-every-example-is-laid-out).
+   [above](#how-every-example-is-laid-out). A workspace example keeps its members under
+   `apps/<name>/apps/*` and its libraries under `apps/<name>/libs/*`, lists both in
+   `pnpm-workspace.yaml`, and extends `tsconfig.apps.json` from each member's depth.
 2. Make `smoke.ts` assert the behaviour the example exists for, not only that it started.
 3. Add it to [`apps/README.md`](../apps/README.md) and to this guide.
 4. Run `pnpm run check:apps`, and `pnpm run test:tooling test/apps-layout.test.ts`. The second

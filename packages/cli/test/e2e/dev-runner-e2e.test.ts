@@ -362,6 +362,40 @@ describe('the npm-profile dev runner, executed', () => {
     expect(await observed()).toBe('true');
   });
 
+  it('fails by name at the deadline when a prerequisite accepts but never answers /ready', async () => {
+    // PR #570 review: an unbounded probe to a server that accepts the
+    // connection and never responds held the loop for fetch's own 300 s header
+    // timeout, so the 30 s deadline never ran. Each probe is bounded now.
+    const orders = await unusedPort();
+    const billing = await unusedPort();
+    await writeNodeWorkspace(
+      [
+        { name: 'orders', port: orders },
+        { name: 'billing', port: billing, dependsOn: ['orders'] },
+      ],
+      0,
+    );
+    await nodeFs.writeFile(
+      `${root}/apps/orders/server.mjs`,
+      `import { createServer } from 'node:http';\n` +
+        `createServer(() => {}).listen(${orders}, '127.0.0.1');\n`,
+    );
+    const started = performance.now();
+    const result = await spawnProcess(process.execPath, {
+      args: ['scripts/dev.mjs'],
+      cwd: root,
+      stdout: 'piped',
+      stderr: 'piped',
+    }).output();
+    const seconds = (performance.now() - started) / 1000;
+    expect(result.code).not.toBe(0);
+    expect(new TextDecoder().decode(result.stderr)).toContain(
+      'Dependency "orders" did not become ready within 30 seconds.',
+    );
+    expect(seconds).toBeLessThan(45);
+    expect(await observed()).toBeUndefined();
+  }, 60_000);
+
   it('does not wait when nothing is declared — the control', async () => {
     const orders = await unusedPort();
     const billing = await unusedPort();

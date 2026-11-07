@@ -33,6 +33,8 @@ export const EXCLUDED_EXAMPLES: Readonly<Record<string, string>> = {
     'imports repository SDK source and scripts; use --template rest or run it in the repository',
   'plugin-development':
     'uses the repository test configuration; use --template rest or run it in the repository',
+  'grpc-workspace':
+    'is a multi-member workspace the CLI generates; use --workspace, then generate app billing --template microservice --rpc grpc for the member the others call',
 };
 
 /** Selects the nearest built-in template for download-failure guidance. */

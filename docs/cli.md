@@ -769,7 +769,8 @@ Two choices decide how members talk, and they are recorded in different places:
 - **The RPC style** is how a member is called: `http`, or `grpc`, which co-serves Connect/gRPC under
   `/grpc` on the same port. It is the member's own, chosen with
   `setu generate app <name> --rpc grpc`, because an HTTP member and a gRPC member still reach each
-  other over HTTP through the discovery map.
+  other over HTTP through the discovery map. The
+  [grpc-workspace example](./examples.md#grpc-workspace) shows an HTTP member calling a gRPC one.
 
 `--transport` and `--transport-url` no longer exist; both are refused with a pointer to these flags.
 

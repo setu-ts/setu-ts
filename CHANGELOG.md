@@ -8,6 +8,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **gRPC workspace example (`@setu-ts/cli`, #570).** `apps/grpc-workspace` is what
+  `setu new --workspace` and `setu generate app` write, plus one gRPC call between members:
+  `billing`, generated with `--rpc grpc`, serves `billing.v1.BillingService/Quote` from a `.proto`
+  in a workspace library, and `orders` calls it with a Connect client at the address its generated
+  discovery map gives, answering `400` and `503` for billing's refusals and outages. A conformance
+  test regenerates the workspace and fails when the example drifts from the generator. The example
+  runs in the repository; `setu new --example grpc-workspace` explains that and points at
+  `--workspace` and `--rpc grpc`.
+
 - **Durable agent runs (M136, #565, `@setu-ts/agent-runs-plugin`, `@setu-ts/common`,
   `@setu-ts/database-plugin`, `@setu-ts/cli`).** `AgentRunsPlugin`, `AgentRunsPluginOptions`,
   `defineAgentRun`, `AgentRunDefinition`, `AgentRunContext`, `AgentRunToolCall`,
@@ -367,6 +376,12 @@ All notable changes to this project are documented here. The format follows
   `RedisRateLimitStore` re-arms a key it finds without an expiry instead of answering 429 for ever.
 
 ### Fixed
+
+- **A workspace's dev runner gives up on a prerequisite that never answers `/ready` (#570,
+  `@setu-ts/cli`).** The generated `scripts/dev.mjs` and `scripts/dev.ts` probed `/ready` with no
+  bound, so a prerequisite that accepted the connection and never responded held the runner for
+  fetch's own 300-second header timeout instead of its 30-second deadline. Each probe now times out
+  after one second, and the runner names the stalled service at the deadline.
 
 - **Generated READMEs link the site, and the example-download refusal works from `npm create`
   (X93-7, X93-3, M131d, #564, `@setu-ts/cli`).** A scaffolded project's and a workspace's README

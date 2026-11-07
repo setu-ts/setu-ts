@@ -14,7 +14,14 @@ const gitignore = fileURLToPath(new URL('.gitignore', import.meta.url));
 export default tseslint.config(
   includeIgnoreFile(gitignore),
   // The website's build output and its own installed graph are generated, not authored.
-  { ignores: ['website/dist/**', 'website/.astro/**'] },
+  // `src/gen/` is protoc-gen-es output, which carries its own `/* eslint-disable */`.
+  {
+    ignores: [
+      'website/dist/**',
+      'website/.astro/**',
+      'apps/grpc-workspace/libs/contracts/src/gen/**',
+    ],
+  },
   {
     linterOptions: { reportUnusedDisableDirectives: 'error' },
   },

@@ -1,0 +1,11 @@
+node_modules/
+apps/*/node_modules/
+libs/*/node_modules/
+coverage/
+apps/*/dist/
+apps/*/build/
+.react-router/
+.env
+.env.*
+!.env.example
+k8s/secrets/

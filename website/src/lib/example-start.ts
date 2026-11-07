@@ -12,8 +12,11 @@ import { EXAMPLES, EXCLUDED_EXAMPLES } from '../../../packages/cli/src/examples/
 export type ExampleStart =
   /** `npm create … --example <name>` reproduces this example outside the repository. */
   | { kind: 'example'; command: string }
-  /** Repository-only; `command` starts the nearest project the CLI recommends instead. */
-  | { kind: 'repository'; command: string };
+  /**
+   * Repository-only; `command` starts the nearest project the CLI recommends instead,
+   * and `member`, for a workspace, is the `generate app` the catalog names next.
+   */
+  | { kind: 'repository'; command: string; member?: string };
 
 const CREATE = 'npm create @setu-ts my-app --';
 
@@ -25,12 +28,24 @@ export function exampleStart(app: string): ExampleStart {
   if (reason === undefined) {
     throw new Error(`example-start: ${app} is neither offered nor excluded by the CLI catalog`);
   }
-  // The catalog phrases each exclusion as "…; use --<flag> <value>…".
-  const alternative = /\buse (--[a-z-]+ [a-z-]+)/.exec(reason)?.[1];
+  // The catalog phrases each exclusion as "…; use --<flag> [<value>]…", one or more flags.
+  const alternative =
+    /\buse (--[a-z-]+(?: (?!--)[a-z0-9][a-z0-9-]*)?(?: --[a-z-]+(?: (?!--)[a-z0-9][a-z0-9-]*)?)*)/.exec(
+      reason,
+    )?.[1];
   if (alternative === undefined) {
     throw new Error(`example-start: no "use --flag value" alternative in the reason for ${app}`);
   }
-  return { kind: 'repository', command: `${CREATE} ${alternative}` };
+  const command = `${CREATE} ${alternative}`;
+  // A workspace starts empty, so its reason also names the member to add: "…, then generate app …".
+  const member = /\bthen (generate app [a-z0-9 -]+?)(?: for\b|[;,.]|$)/.exec(reason)?.[1];
+  if (alternative.includes('--workspace')) {
+    if (member === undefined) {
+      throw new Error(`example-start: no "then generate app …" member in the reason for ${app}`);
+    }
+    return { kind: 'repository', command, member };
+  }
+  return { kind: 'repository', command };
 }
 
 /**
@@ -52,8 +67,14 @@ export function tryItHtml(app: string): string {
       : start.command.includes('cloudflare-workers')
         ? 'npx wrangler dev'
         : 'npm run start:dev';
+  // A workspace starts empty: `setu new --workspace` prints `generate app` as the next
+  // step, and the generated workspace README runs every member with the root dev script.
+  const member = start.kind === 'repository' ? start.member : undefined;
   // Written as entities: the box is raw HTML, so `&` must not reach it bare.
-  const commands = `${start.command}\ncd my-app &amp;&amp; npm install\n${run}`;
+  const commands =
+    member !== undefined
+      ? `${start.command}\ncd my-app &amp;&amp; npx @setu-ts/cli ${member}\nnpm install &amp;&amp; npm run dev`
+      : `${start.command}\ncd my-app &amp;&amp; npm install\n${run}`;
   return (
     '<div class="try-it">' +
     '<div class="try-it-title">Try it</div>' +

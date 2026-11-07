@@ -123,6 +123,7 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
     skipped: 0,
   },
   'docs/examples.md': {
+    // grpc-workspace example: +2 skipped shell fences (generation commands, run commands).
     // Rewritten after the examples cold read: the per-app "Key code" blocks
     // described apps that no longer existed (routes, plugins, ports), so each
     // deep dive now gives the shell commands it was checked with and links to
@@ -133,12 +134,12 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
     // site/--example adds one shell fence. M135: the semantic-search section
     // adds one shell fence. The realtime-clients section adds one. M136: the
     // durable-agent section adds one.
-    total: 26,
+    total: 28,
     ts: 1,
     compile: 1,
     external: 0,
     pseudocode: 0,
-    skipped: 25,
+    skipped: 27,
   },
   'docs/decorators.md': {
     // 28 at M76. Two blocks left the guide there: the `deno.json` "Enable
@@ -286,12 +287,13 @@ const EXPECTED_AGGREGATE: FenceCounts = {
   // M131d: +2 skipped shell fences in docs/cli.md (`setu workspace build` and `deploy`).
   // M136: +1 skipped shell fence in examples.md (durable-agent).
   // M138: +1 skipped shell fence in docs/cli.md (`setu workspace broker` / `rpc`).
-  total: 360,
+  // grpc-workspace example: +2 skipped shell fences in docs/examples.md.
+  total: 362,
   ts: 263,
   compile: 230,
   external: 33,
   pseudocode: 0,
-  skipped: 97,
+  skipped: 99,
 };
 
 describe('actual-fence compiler — every curated guide (shared engine)', () => {

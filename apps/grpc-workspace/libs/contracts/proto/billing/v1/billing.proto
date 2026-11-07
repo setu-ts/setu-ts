@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+package billing.v1;
+
+// The shared contract between this workspace's members. `billing` serves
+// `BillingService`; `orders` calls it. Regenerate the TypeScript with
+// `npm run proto:gen` from this library's root, then commit `src/gen/`.
+
+// One line of an order, as the caller sends it.
+message LineItem {
+  // The SKU to price.
+  string sku = 1;
+  // How many units. The caller validates it as positive; billing re-checks.
+  int32 quantity = 2;
+}
+
+// A request to price a set of line items.
+message QuoteRequest {
+  repeated LineItem items = 1;
+}
+
+// The price of the requested line items.
+message QuoteResponse {
+  // The total, in cents.
+  int64 total_cents = 1;
+}
+
+service BillingService {
+  // Prices the requested line items.
+  rpc Quote(QuoteRequest) returns (QuoteResponse);
+}

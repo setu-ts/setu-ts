@@ -26,3 +26,5 @@ descriptor, client and service files stay application-owned and `setu.config.ts`
 RPC transport through `GrpcPlugin`.
 
 Read the [example deep dive](../../docs/examples.md#grpc) for the concept and source walkthrough.
+Next, [grpc-workspace](https://setu-ts.dev/examples/grpc-workspace/) calls one service from another
+over gRPC, in a workspace the CLI generates.

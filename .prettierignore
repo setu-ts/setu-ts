@@ -35,3 +35,6 @@ packages/starters/*/tsconfig.json
 packages/starters/*/deno.json
 # - The workflows: 111e3 rewrites them, and nine root tests pin their text.
 .github/workflows/
+
+# protoc-gen-es output, committed as generated (it also carries its own eslint-disable).
+apps/grpc-workspace/libs/contracts/src/gen/
