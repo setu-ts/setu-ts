@@ -40,10 +40,10 @@ it(
     try {
       await admin.connect();
       await producer.connect();
-      await admin.createTopics({
-        topics: topics.map((topic) => ({ topic, numPartitions: 1, replicationFactor: 1 })),
-        waitForLeaders: true,
-      });
+      await createServedTopics(
+        admin,
+        topics.map((topic) => ({ topic, numPartitions: 1, replicationFactor: 1 })),
+      );
       for (const topic of topics) {
         const broker = new KafkaBroker(createRuntimeServices(), new JsonSerializer(), {
           brokers,
@@ -55,7 +55,6 @@ it(
         });
         const received: string[] = [];
         try {
-          await fetchTopicOffsets(admin, topic);
           await broker.connect();
           await broker.subscribe(
             topic,
@@ -80,6 +79,21 @@ it(
     }
   },
 );
+
+/**
+ * Creates topics and waits until every partition is served. kafkajs's own
+ * `waitForLeaders` retries only LEADER_NOT_AVAILABLE, while Kafka 4 (KRaft)
+ * can briefly answer UNKNOWN_TOPIC_OR_PARTITION for a topic it just created;
+ * polling `fetchTopicOffsets` retries every retriable error instead.
+ */
+async function createServedTopics(
+  admin: Admin,
+  topics: Parameters<Admin['createTopics']>[0]['topics'],
+): Promise<void> {
+  // kafkajs defaults `waitForLeaders` to true; the poll below replaces that wait.
+  await admin.createTopics({ topics, waitForLeaders: false });
+  for (const { topic } of topics) await fetchTopicOffsets(admin, topic);
+}
 
 /** Waits for fresh-topic leaders to serve offsets, preserving permanent failures. */
 async function fetchTopicOffsets(
@@ -182,10 +196,7 @@ describe(
       );
       try {
         await admin.connect();
-        await admin.createTopics({
-          topics: [{ topic, numPartitions: 2, replicationFactor: 1 }],
-          waitForLeaders: true,
-        });
+        await createServedTopics(admin, [{ topic, numPartitions: 2, replicationFactor: 1 }]);
         await producer.connect();
         await producer.send({
           topic,
@@ -243,13 +254,10 @@ describe(
       const adminKafka = new kafkajs.Kafka({ clientId: 'm90d-setup', brokers });
       const admin = adminKafka.admin();
       await admin.connect();
-      await admin.createTopics({
-        topics: topicsToCreate.map((name) => ({
-          topic: name,
-          numPartitions: 1,
-          replicationFactor: 1,
-        })),
-      });
+      await createServedTopics(
+        admin,
+        topicsToCreate.map((name) => ({ topic: name, numPartitions: 1, replicationFactor: 1 })),
+      );
       await admin.disconnect();
 
       let broker: IMessageBroker | undefined;
@@ -452,9 +460,7 @@ describe(
       const adminKafka = new kafkajs.Kafka({ clientId: 'm106-part-admin', brokers });
       const admin = adminKafka.admin();
       await admin.connect();
-      await admin.createTopics({
-        topics: [{ topic, numPartitions: 3, replicationFactor: 1 }],
-      });
+      await createServedTopics(admin, [{ topic, numPartitions: 3, replicationFactor: 1 }]);
 
       let broker: IMessageBroker | undefined;
       const app = createApplication({
@@ -511,9 +517,7 @@ describe(
       const adminKafka = new kafkajs.Kafka({ clientId: 'm106-block-admin', brokers });
       const admin = adminKafka.admin();
       await admin.connect();
-      await admin.createTopics({
-        topics: [{ topic, numPartitions: 3, replicationFactor: 1 }],
-      });
+      await createServedTopics(admin, [{ topic, numPartitions: 3, replicationFactor: 1 }]);
 
       let broker: IMessageBroker | undefined;
       const app = createApplication({
