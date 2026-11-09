@@ -169,3 +169,20 @@ describe('compileResourceServer document', () => {
     expect(parsed.authorization_servers).toEqual(['https://explicit.test']);
   });
 });
+
+describe('M139a resource name URLs', () => {
+  it('accepts localhost names for resources and authorization servers', () => {
+    const result = compileResourceServer(
+      {
+        resource: 'http://acme.localhost:3000',
+        authorizationServers: ['http://idp.localhost:4000'],
+      },
+      [],
+    );
+    expect(JSON.parse(result.body)).toMatchObject({
+      resource: 'http://acme.localhost:3000',
+      authorization_servers: ['http://idp.localhost:4000'],
+    });
+    expect(() => compileResourceServer({ resource: 'http://acme.example' }, [])).toThrow();
+  });
+});

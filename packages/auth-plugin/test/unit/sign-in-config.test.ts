@@ -335,3 +335,35 @@ describe('compileSignIn', () => {
     });
   });
 });
+
+describe('M139a sign-in URL classification', () => {
+  it.each(['redirectUri', 'authorizationEndpoint'] as const)(
+    'accepts browser field %s',
+    (field) => {
+      expect(() =>
+        compileSignIn({
+          providers: [oauth2({ [field]: 'http://acme.localhost/auth/github/callback' })],
+        }),
+      ).not.toThrow();
+    },
+  );
+  it('accepts the logout redirect browser field', () => {
+    expect(() =>
+      compileSignIn({
+        providers: [
+          oidc({ rpInitiatedLogout: { postLogoutRedirectUri: 'http://acme.localhost/logout' } }),
+        ],
+      }),
+    ).not.toThrow();
+  });
+  it.each(['tokenEndpoint', 'userinfoEndpoint'] as const)('refuses fetched field %s', (field) => {
+    expect(() =>
+      compileSignIn({ providers: [oauth2({ [field]: 'http://acme.localhost/token' })] }),
+    ).toThrow('http on localhost, 127.0.0.1 or [::1]');
+  });
+  it('refuses OIDC discovery through a localhost subdomain', () => {
+    expect(() => compileSignIn({ providers: [oidc({ issuer: 'http://acme.localhost' })] })).toThrow(
+      'http on localhost, 127.0.0.1 or [::1]',
+    );
+  });
+});

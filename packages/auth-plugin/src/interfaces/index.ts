@@ -9,6 +9,7 @@ import type {
   IAuthStrategy,
   IGrantSource,
   IPrincipal,
+  IRequest,
   IScopedRoleSource,
   PathPattern,
   PolicyDefinition,
@@ -28,6 +29,12 @@ import type { ISamlRequestStore } from '../stores/saml-request-store.ts';
  * @since 0.1.0
  */
 export interface JwtOptions {
+  /**
+   * Verified claim bound to the request tenant. With no tenant, a token carrying
+   * this claim is refused. Absent, tenant binding is disabled.
+   * @since 0.13.0
+   */
+  readonly tenantClaim?: string;
   /** Secret key for HS256 algorithm. Required if RS256 keys not provided. */
   readonly secret?: string | Uint8Array;
   /** Private key for RS256 signing (PEM format). Required if HS256 secret not provided. */
@@ -61,9 +68,13 @@ export interface ApiKeyOptions {
   readonly header?: string;
   /**
    * Callback to validate the API key and return a principal.
-   * Return `null` if the key is invalid.
+   * Return `null` if the key is invalid. Under multi-tenancy, bind the key to
+   * `request.tenant`: `tenantClaim` covers bearer tokens only.
+   * @param key - The key from the configured header
+   * @param request - The request being authenticated
+   * @returns The principal, or `null` when the key is invalid
    */
-  readonly validate: (key: string) => Promise<IPrincipal | null>;
+  readonly validate: (key: string, request?: IRequest) => Promise<IPrincipal | null>;
 }
 
 /**
@@ -74,9 +85,15 @@ export interface ApiKeyOptions {
 export interface LocalOptions {
   /**
    * Callback to verify credentials (e.g., username/password).
-   * Return `null` if credentials are invalid.
+   * Return `null` if credentials are invalid. Scope application lookups using
+   * the optional request tenant.
+   * @param request - Optional request for application tenant-scoped lookup
    */
-  readonly verify: (identifier: string, secret: string) => Promise<IPrincipal | null>;
+  readonly verify: (
+    identifier: string,
+    secret: string,
+    /** Request for application tenant-scoped lookup. @since 0.13.0 */ request?: IRequest,
+  ) => Promise<IPrincipal | null>;
 }
 
 /**
@@ -178,6 +195,12 @@ export type IssuerKeySource = { readonly jwksUri: string } | { readonly discover
  * @since 0.8.0
  */
 export interface TrustedIssuer {
+  /**
+   * Verified claim bound to the request tenant. With no tenant, a token carrying
+   * this claim is refused. Absent, tenant binding is disabled.
+   * @since 0.13.0
+   */
+  readonly tenantClaim?: string;
   /** Unique name, used in health output and logs. */
   readonly name: string;
   /** Exact `iss` value this entry accepts. */
@@ -318,6 +341,15 @@ export interface ResourceServerOptions {
  * @since 0.1.0
  */
 export interface AuthPluginOptions {
+  /**
+   * Refuse principals with an array of OAuth scopes at every RBAC and scoped
+   * RBAC entry point. Default true; false restores 0.12 behaviour. This also
+   * confines OIDC access tokens carrying scope: 'openid profile'. Use
+   * requireScopes for token routes or a session for role-based user access.
+   * Application policies remain responsible for their own scope checks.
+   * @since 0.13.0
+   */
+  readonly confineScopedTokens?: boolean;
   /** JWT configuration. Omit when the application uses another strategy. */
   readonly jwt?: JwtOptions;
   /**
@@ -688,6 +720,16 @@ export type SessionStamp = (principal: IPrincipal) => string | null | Promise<st
  * @since 0.11.0
  */
 export interface RequireAuthOptions {
+  /**
+   * Require the credential source recorded by this plugin's authentication.
+   * Default 'any'. An unset source fails closed for 'cookie' and 'header'.
+   * A strategy must declare its `credential` to satisfy either restriction;
+   * an undeclared strategy can satisfy only 'any'.
+   * Applications replacing principals must update CREDENTIAL_SOURCE_STATE_KEY
+   * too, or use 'any'. Header strategies take precedence over session cookies.
+   * @since 0.13.0
+   */
+  readonly credentials?: 'any' | 'cookie' | 'header';
   /**
    * Where an unauthenticated browser navigation is sent: a same-origin absolute
    * path, refused when the guard is built otherwise. A `GET` or `HEAD` that is

@@ -17,3 +17,8 @@ describe('state keys', () => {
     expect(KEY_PATTERN.test(ERROR_RESPONDER_STATE_KEY)).toBe(true);
   });
 });
+
+it('M139a pins the shared CSRF exemption key on the barrel', async () => {
+  const { CSRF_EXEMPT_STATE_KEY } = await import('../../src/index.ts');
+  expect(CSRF_EXEMPT_STATE_KEY).toBe('session-plugin:csrf-exempt');
+});

@@ -778,7 +778,13 @@ here.
   member that its config calls, `setu workspace broker` and `setu workspace rpc`, and one planner
   behind them, `generate app`, `setu sync` and a member's `setu add`) — complete (PR #568).
 - **Release `v0.12.0`** — cut 2026-11-07 (PR #571); 55 packages.
-- **Next milestone** — to be chosen after the `0.12.0` release.
+- **Milestone 139a** (`auth-plugin` + `common` + `session-plugin` + `mcp-plugin` +
+  `multi-tenancy-plugin` docs + `cli` — identity and authorization a token or a tenant can escape:
+  scoped tokens confined by default, `requireAuth({ credentials })`, `tenantClaim`, `sub` refusal,
+  the request on `local.verify`, the template login's `regenerate()`, MCP exempt from form CSRF,
+  `*.localhost` for non-fetched URLs; V12-37, V12-18, V12-19, V12-11, V12-35, V12-34; ships in
+  `0.13.0`) — complete (PR #576).
+- **Next milestone** — the remaining M139 letters.
 
 ## Verification (run before declaring any work done)
 

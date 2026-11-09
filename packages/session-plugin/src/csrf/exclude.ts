@@ -17,7 +17,11 @@
  * @module
  */
 import type { IRequestContext, ISession } from '@setu-ts/common';
-import { CREDENTIAL_SOURCE_STATE_KEY, SESSION_STATE_KEY } from '@setu-ts/common';
+import {
+  CSRF_EXEMPT_STATE_KEY,
+  CREDENTIAL_SOURCE_STATE_KEY,
+  SESSION_STATE_KEY,
+} from '@setu-ts/common';
 
 import type { CsrfFormOptions, ResolvedCsrfConfig } from '../options.ts';
 
@@ -53,13 +57,13 @@ export function isBearerRequest(headers: Headers): boolean {
 }
 
 /**
- * The `ctx.state` key under which form CSRF marks a request the BEARER exemption
+ * The `ctx.state` key under which form CSRF marks a request a bearer or in-process exemption
  * admitted, so `sessionMiddleware` does not commit its session (M113e, L4).
  *
  * Internal to `session-plugin` — both writer and reader live here — so it is
  * not in `common` and not on the barrel.
  */
-export const BEARER_EXEMPT_STATE_KEY = 'session-plugin:bearer-exempt';
+export const NO_COMMIT_STATE_KEY = 'session-plugin:no-commit';
 
 /**
  * Whether the bearer rule exempts this request: `exemptBearer` is on, the
@@ -91,7 +95,8 @@ export function isBearerExempt(ctx: IRequestContext, config: ResolvedCsrfConfig)
 }
 
 /**
- * Whether form-CSRF verification is skipped for this request: the bearer rule
+ * Whether form-CSRF verification is skipped for this request: the in-process
+ * boolean flag, the bearer rule
  * ({@linkcode isBearerExempt}) or an explicit path exclusion. Pure — it records
  * nothing; the entry points call {@linkcode applyCsrfExemption}.
  *
@@ -105,12 +110,16 @@ export function isCsrfExempt(
   config: ResolvedCsrfConfig,
   exclude: CsrfFormOptions['exclude'],
 ): boolean {
-  return isBearerExempt(ctx, config) || isCsrfExcluded(ctx, exclude);
+  return (
+    ctx.state.get(CSRF_EXEMPT_STATE_KEY) === true ||
+    isBearerExempt(ctx, config) ||
+    isCsrfExcluded(ctx, exclude)
+  );
 }
 
 /**
- * {@linkcode isCsrfExempt}, and when the BEARER rule is what exempts the request,
- * marks it under {@linkcode BEARER_EXEMPT_STATE_KEY} so its session is not
+ * {@linkcode isCsrfExempt}, and when a bearer or in-process flag exempts the request,
+ * marks it under {@linkcode NO_COMMIT_STATE_KEY} so its session is not
  * committed (M113e, L4).
  *
  * The bearer rule admits only a request that restored no session, but the
@@ -130,8 +139,8 @@ export function applyCsrfExemption(
   config: ResolvedCsrfConfig,
   exclude: CsrfFormOptions['exclude'],
 ): boolean {
-  if (isBearerExempt(ctx, config)) {
-    ctx.state.set(BEARER_EXEMPT_STATE_KEY, true);
+  if (ctx.state.get(CSRF_EXEMPT_STATE_KEY) === true || isBearerExempt(ctx, config)) {
+    ctx.state.set(NO_COMMIT_STATE_KEY, true);
     return true;
   }
   return isCsrfExcluded(ctx, exclude);

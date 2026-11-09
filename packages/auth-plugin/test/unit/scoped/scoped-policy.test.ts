@@ -177,3 +177,28 @@ describe('scoped-rbac policy — grantableIn', () => {
     expect(await check(harness, 'perm:invoices:read', ORG)).toBe(true);
   });
 });
+
+describe('M139a scoped confinement', () => {
+  for (const cap of [false, true])
+    for (const scopes of [undefined, [], ['x']]) {
+      it(`cap ${cap}, scopes ${JSON.stringify(scopes)} across both abilities`, async () => {
+        const harness = scopedHarness(
+          {
+            sources: [{ kind: 'static', grants: [{ subject: 'u1', role: 'owner', scope: null }] }],
+          },
+          undefined,
+          cap,
+        );
+        const user = principal('u1', scopes === undefined ? {} : { scopes });
+        const expected = !cap || scopes === undefined;
+        expect(await check(harness, 'role:owner', null, user)).toBe(expected);
+        expect(await check(harness, 'perm:invoices:read', null, user)).toBe(expected);
+        if (!expected)
+          expect(harness.logger.records).toContainEqual(
+            expect.objectContaining({
+              fields: expect.objectContaining({ reason: 'token-confined' }),
+            }),
+          );
+      });
+    }
+});

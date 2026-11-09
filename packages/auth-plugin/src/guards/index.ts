@@ -7,6 +7,7 @@
 import type { IAuthorizationService, IRequestContext, MiddlewareFunction } from '@setu-ts/common';
 import {
   CAPABILITIES,
+  CREDENTIAL_SOURCE_STATE_KEY,
   respondWithAuthorizationFailure,
   withSecurityMetadata,
 } from '@setu-ts/common';
@@ -177,10 +178,13 @@ function delegationRefuses(
  * an `actor`, RFC 8693 `act`) can be refused (`'forbid'`) or required
  * (`'require'`) with `403`.
  *
+ * Credential restrictions read CREDENTIAL_SOURCE_STATE_KEY and treat a mismatch
+ * or missing source as unauthenticated, before the delegation check.
+ *
  * @param options - Optional sign-in page and delegation policy
  * @returns Middleware function
  * @throws {AuthPluginConfigurationError} When `signInPage` is not a same-origin
- *   absolute path, or `delegation` is not `'allow'`, `'forbid'` or `'require'`
+ *   absolute path, credentials is unknown, or delegation is unknown
  *
  * @example
  * ```typescript
@@ -193,6 +197,14 @@ function delegationRefuses(
  * ```
  */
 export function requireAuth(options?: RequireAuthOptions): MiddlewareFunction {
+  const credentials = options?.credentials === undefined ? 'any' : options.credentials;
+  if (credentials !== 'any' && credentials !== 'cookie' && credentials !== 'header') {
+    throw new AuthPluginConfigurationError(
+      "auth-plugin: requireAuth credentials must be 'any', 'cookie' or 'header'",
+    );
+  }
+  const matchesCredential = (ctx: IRequestContext): boolean =>
+    credentials === 'any' || ctx.state.get(CREDENTIAL_SOURCE_STATE_KEY) === credentials;
   const delegation = options?.delegation ?? 'allow';
   if (!DELEGATION_MODES.has(delegation)) {
     throw new AuthPluginConfigurationError(
@@ -205,7 +217,7 @@ export function requireAuth(options?: RequireAuthOptions): MiddlewareFunction {
   if (signInPage === undefined) {
     const guard = async (ctx: IRequestContext, next: () => Promise<void>): Promise<void> => {
       const user = ctx.request.user;
-      if (!user) {
+      if (!user || !matchesCredential(ctx)) {
         respondWithAuthorizationFailure(ctx, 'authentication-required');
         return;
       }
@@ -221,7 +233,7 @@ export function requireAuth(options?: RequireAuthOptions): MiddlewareFunction {
   const page = compileSignInPage(signInPage);
   const guard = async (ctx: IRequestContext, next: () => Promise<void>): Promise<void> => {
     const user = ctx.request.user;
-    if (user) {
+    if (user && matchesCredential(ctx)) {
       if (delegationRefuses(delegation, user)) {
         respondWithAuthorizationFailure(ctx, 'insufficient-privileges');
         return;

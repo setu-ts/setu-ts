@@ -53,3 +53,21 @@ describe('LocalStrategy', () => {
     expect(result).toEqual(principal);
   });
 });
+
+describe('M139a local request forwarding', () => {
+  it.each([true, false])(
+    'passes optional request as third callback argument: %j',
+    async (supplied) => {
+      const request = supplied
+        ? ({ tenant: { id: 'acme' } } as import('@setu-ts/common').IRequest)
+        : undefined;
+      const calls: unknown[][] = [];
+      const local = new LocalStrategy((...args) => {
+        calls.push(args);
+        return Promise.resolve(null);
+      });
+      await local.verify('u1', 'pw', request);
+      expect(calls).toEqual([['u1', 'pw', request]]);
+    },
+  );
+});

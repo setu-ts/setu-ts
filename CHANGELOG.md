@@ -6,6 +6,84 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING — scoped tokens are confined by default (M139a, #576, `@setu-ts/auth-plugin`,
+  `@setu-ts/common`, V12-37).** `AuthPlugin({ confineScopedTokens })` defaults to `true`: a
+  principal whose `scopes` is an array (a bearer token carrying a `scope` or `scp` claim) fails
+  every role and permission check (`requireRole`, `requirePermission`, `requireAnyRole`,
+  `requireAllPermissions`, `@Roles`, `@Permissions`, direct `hasRole` calls) and every scoped-RBAC
+  check (`requireScopedRole`, `requireScopedPermission`), whatever its subject holds. Before, a
+  token minted `envelopes:read` for an admin passed every admin route. Such a token reaches routes
+  guarded by `requireScopes`, which is unchanged; sessions and tokens with no scope claim are
+  unaffected. Authorization diagnostics record the refusal as the new `AuthorizationDecisionReason`
+  `token-confined`; scoped RBAC reports it with the same name. A `scope` or `scp` claim that is
+  present but malformed counts as an empty scope list, so it confines rather than escapes.
+  **Migration:** guard token routes with `requireScopes`, or sign browsers in with a session. An
+  application whose identity provider stamps every access token with scopes (`openid profile`) and
+  authorizes those tokens by role sets `confineScopedTokens: false` to keep the 0.12 behaviour.
+  `requirePolicy` is not capped. A consumer switching exhaustively on `AuthorizationDecisionReason`
+  needs a `token-confined` case. The diagnostics connector's authorization pages can now carry that
+  reason, and a diagnostics client (such as a devtool) built on 0.12 refuses a page containing it:
+  upgrade the client together with the application.
+- **BREAKING — a JWT without a subject is refused (M139a, #576, `@setu-ts/auth-plugin`, V12-18).**
+  The JWT strategy refuses a verified token whose `sub` is missing, not a string or empty. Before,
+  every such token authenticated as one shared principal, `'unknown'`, so grants, idempotency
+  records and ownership keyed by the principal id were shared across their callers. **Migration:**
+  put a subject in every token you mint; for a service token, the client id (RFC 9068 §2.2).
+
+### Added
+
+- **One credential per route (M139a, #576, `@setu-ts/auth-plugin`, V12-37).**
+  `requireAuth({ credentials: 'cookie' | 'header' })` admits only a principal the plugin
+  authenticated with that kind of credential (`'any'` is the default). A mismatch, or a request
+  whose credential kind was never recorded, is answered as unauthenticated: `401`, or the
+  `signInPage` redirect. Header strategies run first, so a request carrying a bearer token and a
+  session cookie counts as `'header'`; a caller-supplied strategy that declares no `credential`
+  satisfies only `'any'`.
+- **Tokens bound to the tenant (M139a, #576, `@setu-ts/auth-plugin`, V12-19).** `jwt.tenantClaim`
+  and a per-issuer `tenantClaim` name the claim that carries the tenant id. When set, a token whose
+  verified claim differs from `request.tenant.id` is refused, and so is a token carrying the claim
+  on a request with no tenant; an issuer token refused this way is reported as `tenant-mismatch`.
+  Opt-in, with no default claim name.
+- **The request reaches the password check (M139a, #576, `@setu-ts/common`, `@setu-ts/auth-plugin`,
+  V12-19).** `IAuthService.verifyCredentials(credentials, request?)` and
+  `local.verify(identifier, secret, request?)` take an optional request, so a multi-tenant
+  application can look the user up within `request.tenant`; `apiKey.validate(key, request?)` gets it
+  too, so a key can be bound to its tenant. The auth README's full-stack sign-in recipe passes
+  `ctx.request`; the multi-tenancy README explains why a lookup by email alone lets a user sign in
+  on another tenant's host. Existing callbacks and implementations still type-check.
+- **`CSRF_EXEMPT_STATE_KEY` (M139a, #576, `@setu-ts/common`, `@setu-ts/session-plugin`).**
+  In-process middleware that runs before form CSRF may set this flag to `true` for an exact route
+  that enforces its own cross-site rule; form CSRF then skips the request and commits no session for
+  it.
+
+### Fixed
+
+- **MCP discovery behind form CSRF (M139a, #576, `@setu-ts/mcp-plugin`, V12-35).** In a full-stack
+  app, an anonymous `POST /mcp` was answered `403 CSRF token validation failed` before
+  authentication could send the `401` with `WWW-Authenticate: Bearer resource_metadata="…"` that an
+  MCP client needs to start discovery. `McpPlugin` now marks `POST` on its own path exempt through
+  `CSRF_EXEMPT_STATE_KEY`; the route's `Origin` check still refuses a cross-site browser, and tool
+  calls are still verified by form CSRF on their inner requests. The session plugin commits no
+  session for a request carrying the marker, even without form CSRF. `McpPlugin({ path })` now
+  refuses a path ending in `/`: the router lets `/x/` reach a route registered as `/x`, so such a
+  path could share its request path with an application route that the exemption would then cover.
+- **Issuer principals keep their mapped scopes (M139a, #576, `@setu-ts/auth-plugin`).** When an
+  issuer's `toPrincipal` returned an object whose `scopes` was inherited or non-enumerable, the
+  strategy's object spread dropped them, so a scoped token escaped `confineScopedTokens`. The mapped
+  scopes are now read once and written back.
+- **`*.localhost` URLs (M139a, #576, `@setu-ts/auth-plugin`, V12-34).** `resource`,
+  `authorizationServers`, sign-in redirect and authorization URLs, SAML `acsUrl` and `idp.ssoUrl`,
+  and passkey origins accept `http` on any `*.localhost` name (RFC 6761 §6.3), so
+  `http://acme.localhost:3000` starts. URLs the server fetches (JWKS, discovery issuers, token and
+  userinfo endpoints) still accept `http` only on `localhost`, `127.0.0.1` or `[::1]`, and the
+  refusal says which rule applied.
+- **The full-stack template rotates the session at login (M139a, #576, `@setu-ts/cli`, V12-11).**
+  The generated `app/routes/_auth/login.tsx` calls `session.regenerate()` before writing the
+  signed-in user, so a session id planted before login no longer carries into the signed-in session.
+  Projects already generated should add the same call.
+
 ## [0.12.0] — 2026-11-07
 
 ### Added

@@ -99,6 +99,21 @@ const AUTH_MIDDLEWARE_PRIORITY = 300;
  */
 export function AuthPlugin(options: AuthPluginOptions): IPlugin {
   if (
+    options.confineScopedTokens !== undefined &&
+    typeof options.confineScopedTokens !== 'boolean'
+  ) {
+    throw new AuthPluginConfigurationError('auth-plugin: confineScopedTokens must be a boolean');
+  }
+  const confineScopedTokens = options.confineScopedTokens ?? true;
+  if (
+    options.jwt?.tenantClaim !== undefined &&
+    (typeof options.jwt.tenantClaim !== 'string' || options.jwt.tenantClaim.length === 0)
+  ) {
+    throw new AuthPluginConfigurationError(
+      'auth-plugin: jwt.tenantClaim must be a non-empty string',
+    );
+  }
+  if (
     options.jwt !== undefined &&
     !options.jwt.secret &&
     !(options.jwt.privateKey && options.jwt.publicKey)
@@ -156,7 +171,12 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
   const compiledScoped: CompiledScopedRbac | null =
     options.scopedRbac === undefined
       ? null
-      : compileScopedRbac(options.scopedRbac, options.rbac, compiledSignIn !== null);
+      : compileScopedRbac(
+          options.scopedRbac,
+          options.rbac,
+          compiledSignIn !== null,
+          confineScopedTokens,
+        );
   if (options.http !== undefined && compiledIssuers.length === 0 && compiledSignIn === null) {
     throw new AuthPluginConfigurationError(
       'auth-plugin: http is only read for issuers and signIn; configure one or drop http',
@@ -249,8 +269,12 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
           jwtService: JwtService;
           header?: string;
           scheme?: string;
+          tenantClaim?: string;
           accessTokenRevocationStore?: IAccessTokenRevocationStore;
         } = { jwtService };
+        if (options.jwt.tenantClaim !== undefined) {
+          jwtStrategyOpts.tenantClaim = options.jwt.tenantClaim;
+        }
         if (options.jwt.header !== undefined) {
           jwtStrategyOpts.header = options.jwt.header;
         }
@@ -598,7 +622,8 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
       // both are present. The boolean IAuthorizationService remains
       // authoritative and unchanged; a diagnostic failure can never alter an
       // allow/deny or a guard's short-circuit order.
-      const rbacService = options.rbac === undefined ? null : new RbacService(options.rbac);
+      const rbacService =
+        options.rbac === undefined ? null : new RbacService(options.rbac, confineScopedTokens);
       if (rbacService !== null) {
         ctx.services.register(CAPABILITIES.AUTHORIZATION, rbacService);
       }

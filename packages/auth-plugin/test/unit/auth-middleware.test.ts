@@ -244,3 +244,23 @@ describe('authMiddleware', () => {
     expect(nextCalled).toBe(true);
   });
 });
+
+it('audit F2 records no credential source for an authenticated undeclared strategy', async () => {
+  const principal: IPrincipal = { id: 'custom-header-user' };
+  const strategy: IAuthStrategy = {
+    name: 'undeclared-header',
+    authenticate: (request) =>
+      Promise.resolve(request.headers.get('authorization') === 'Bearer custom' ? principal : null),
+  };
+  const service = new AuthService([strategy], new LocalStrategy(() => Promise.resolve(null)));
+  const { ctx, request } = createContext(service);
+  ctx.request.headers.set('authorization', 'Bearer custom');
+  let continued = false;
+  await authMiddleware()(ctx, () => {
+    continued = true;
+    return Promise.resolve();
+  });
+  expect(request.user).toBe(principal);
+  expect(ctx.state.has(CREDENTIAL_SOURCE_STATE_KEY)).toBe(false);
+  expect(continued).toBe(true);
+});

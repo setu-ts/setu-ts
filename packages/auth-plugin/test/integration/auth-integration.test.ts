@@ -17,6 +17,7 @@ import {
 } from '../../src/guards/index.ts';
 import { CAPABILITIES } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
 import type {
   HandlerResult,
   IJwtService,
@@ -515,4 +516,53 @@ describe('AuthPlugin without RBAC — real application', () => {
 
     await app.stop();
   });
+});
+
+it('audit F2 an undeclared header strategy satisfies only unrestricted authentication', async () => {
+  const app = createApplication({
+    plugins: [
+      RuntimePlugin(),
+      AuthPlugin({
+        strategies: [
+          {
+            name: 'undeclared-header',
+            authenticate: (request) =>
+              Promise.resolve(
+                request.headers.get('authorization') === 'Bearer custom'
+                  ? { id: 'custom-user' }
+                  : null,
+              ),
+          },
+        ],
+      }),
+    ],
+  });
+  const handled: string[] = [];
+  for (const credentials of ['cookie', 'header', 'any'] as const) {
+    app.router.get(`/${credentials}`, {
+      middleware: [requireAuth({ credentials })],
+      handler: (ctx) => {
+        handled.push(credentials);
+        return ctx.response.json({ id: ctx.request.user?.id });
+      },
+    });
+  }
+  await app.start();
+  try {
+    for (const [credentials, status] of [
+      ['cookie', 401],
+      ['header', 401],
+      ['any', 200],
+    ] as const) {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/${credentials}`,
+        headers: { authorization: 'Bearer custom' },
+      });
+      expect(response.statusCode).toBe(status);
+    }
+    expect(handled).toEqual(['any']);
+  } finally {
+    await app.stop();
+  }
 });

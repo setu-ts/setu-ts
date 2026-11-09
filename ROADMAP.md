@@ -17003,7 +17003,11 @@ docs must say.
 
 ### Milestone 139a: Identity and Authorization a Token or a Tenant Can Escape
 
-**Package(s):** `auth-plugin`, `multi-tenancy-plugin`, `session-plugin`, `mcp-plugin`, `cli`
+**Package(s):** `auth-plugin`, `multi-tenancy-plugin`, `session-plugin`, `mcp-plugin`, `cli`, and
+`common` (a CSRF state key, the optional request on `verifyCredentials`, a diagnostics reason).
+Ships in `0.13.0`. The plan settles the V12-37 question: a scoped token IS confined by default
+(`confineScopedTokens: true`), and `requireAuth({ credentials })` restricts a route to one
+credential.
 
 - **V12-37** — with `auth.jwt` set, a bearer JWT authenticates on every route and `requireRole` /
   `requireScopedPermission` authorize by the subject's roles without reading the token's `scope`, so
@@ -17458,7 +17462,7 @@ thing.
 | 137c      | ⬜     | common + validation-plugin + openapi-plugin + sdk — form bodies and file uploads in the document and the generated client                                                                                                                                                                 |
 | 138       | ✅     | cli — workspace broker and per-member RPC style: a CLI-owned transport module per member, `setu workspace broker` and `setu workspace rpc`; PR #568                                                                                                                                       |
 | 139       | ⬜     | the `v0.12.0` smoke closeout — the `0.12.0` row re-run done, then seven letters (0.13.0)                                                                                                                                                                                                  |
-| 139a      | ⬜     | auth-plugin + multi-tenancy + session + mcp + cli — identity and authorization a token or a tenant can escape                                                                                                                                                                             |
+| 139a      | ✅     | auth-plugin + multi-tenancy + session + mcp + cli — identity and authorization a token or a tenant can escape                                                                                                                                                                             |
 | 139b      | ⬜     | common + kernel + runtime + grpc-plugin — gRPC over HTTP/2: streamed RPC bodies, an HTTP/2 listener that keeps HTTP/1.1, response trailers and native gRPC on Node and Bun                                                                                                                |
 | 139c      | ⬜     | agent-runs + vector-store + auth + multi-tenancy + mail + common — AI-layer and data contracts with a missing half                                                                                                                                                                        |
 | 139d      | ⬜     | cli — the CLI on a full-stack project: `add`, `build`, `check`, the brief                                                                                                                                                                                                                 |

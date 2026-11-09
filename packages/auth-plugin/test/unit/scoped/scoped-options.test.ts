@@ -312,3 +312,21 @@ describe('AuthPlugin — scopedRbac construction', () => {
     expect(() => AuthPlugin({ policies: [policy] })).toThrow('is reserved for scoped RBAC');
   });
 });
+
+it('M139a compiles the confinement flag with a true default', () => {
+  expect(
+    compileScopedRbac(
+      { sources: [{ kind: 'static', grants: [] }] },
+      { roles: { admin: {} } },
+      false,
+    ).confineScopedTokens,
+  ).toBe(true);
+  expect(
+    compileScopedRbac(
+      { sources: [{ kind: 'static', grants: [] }] },
+      { roles: { admin: {} } },
+      false,
+      false,
+    ).confineScopedTokens,
+  ).toBe(false);
+});

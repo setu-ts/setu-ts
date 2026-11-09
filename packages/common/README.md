@@ -363,6 +363,7 @@ package fits the plugin architecture.
 | `CAPABILITIES`                        | const     |
 | `CLIENT_IP_STATE_KEY`                 | const     |
 | `CREDENTIAL_SOURCE_STATE_KEY`         | const     |
+| `CSRF_EXEMPT_STATE_KEY`               | const     |
 | `DATA_CLASSIFICATIONS`                | const     |
 | `DEDUPLICATION_ID_HEADER`             | const     |
 | `DEFAULT_SECRET_FIELD_PATTERNS`       | const     |

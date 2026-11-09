@@ -23,6 +23,23 @@ describe('ApiKeyStrategy', () => {
     };
   }
 
+  it('passes the request to validate, so a key can be bound to its tenant', async () => {
+    const seen: Array<IRequest | undefined> = [];
+    const strategy = new ApiKeyStrategy({
+      validate: (key, request) => {
+        seen.push(request);
+        return Promise.resolve(
+          key === 'acme-key' && request?.tenant?.id === 'acme' ? { id: 'svc' } : null,
+        );
+      },
+    });
+    const acme = { ...createRequest({ 'X-API-Key': 'acme-key' }), tenant: { id: 'acme' } };
+    const globex = { ...createRequest({ 'X-API-Key': 'acme-key' }), tenant: { id: 'globex' } };
+    expect(await strategy.authenticate(acme)).toEqual({ id: 'svc' });
+    expect(await strategy.authenticate(globex)).toBeNull();
+    expect(seen).toEqual([acme, globex]);
+  });
+
   it('returns a principal when the key validates', async () => {
     const expectedPrincipal: IPrincipal = { id: 'api-user', roles: ['service'] };
     const strategy = new ApiKeyStrategy({

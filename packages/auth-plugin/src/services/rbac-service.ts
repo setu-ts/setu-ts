@@ -44,13 +44,21 @@ interface SingleEval {
  * returned boolean. The emission is a pure side observation: it is wrapped so
  * that any diagnostic failure is dropped, never propagated, and never changes
  * the boolean, the short-circuit order, or the caches.
+ * With confinement enabled, an OAuth scope array refuses every check, including
+ * an empty compound permission check.
  */
 export class RbacService implements IAuthorizationService {
   private readonly roleDefinitions: Readonly<Record<string, RoleDefinition>>;
   private readonly resolvedPermissions: Map<string, Set<string>>;
   private readonly resolvedInheritance: Map<string, Set<string>>;
 
-  constructor(config: RbacConfig) {
+  private readonly confineScopedTokens: boolean;
+
+  /**
+   * @param confineScopedTokens - Refuse principals carrying an OAuth scope array
+   */
+  constructor(config: RbacConfig, confineScopedTokens = true) {
+    this.confineScopedTokens = confineScopedTokens;
     this.roleDefinitions = config.roles;
     this.resolvedPermissions = new Map();
     this.resolvedInheritance = new Map();
@@ -215,7 +223,7 @@ export class RbacService implements IAuthorizationService {
     const observer = authorizationObserverOf(this);
     const evaluated: PermissionStepEval[] = [];
     let evaluatedCount = 0;
-    let result = true;
+    let result = !(this.confineScopedTokens && Array.isArray(principal.scopes));
     for (const permission of permissions) {
       const outcome = this.evaluatePermission(principal, permission);
       evaluatedCount += 1;
@@ -246,6 +254,9 @@ export class RbacService implements IAuthorizationService {
    * used, and the granting role when the role was inherited.
    */
   private evaluateRole(principal: IPrincipal, role: string): SingleEval {
+    if (this.confineScopedTokens && Array.isArray(principal.scopes)) {
+      return { result: false, reason: 'token-confined', viaRole: null };
+    }
     const principalRoles = principal.roles ?? [];
 
     // Check if principal has the role directly
@@ -273,6 +284,9 @@ export class RbacService implements IAuthorizationService {
    * principal's roles — grants every permission.
    */
   private evaluatePermission(principal: IPrincipal, permission: string): SingleEval {
+    if (this.confineScopedTokens && Array.isArray(principal.scopes)) {
+      return { result: false, reason: 'token-confined', viaRole: null };
+    }
     // Check direct permissions
     const principalPermissions = principal.permissions ?? [];
     if (principalPermissions.includes(permission)) {
