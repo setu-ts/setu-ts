@@ -57,8 +57,9 @@ export interface GrpcServiceOptions {
  * asks for. At the root, `claims()` reports only registered procedure paths, so
  * the kernel consults this service before route matching without shadowing
  * ordinary routes. Connect and gRPC-Web are then served at their natural
- * addresses; native `application/grpc` is refused with a Trailers-Only
- * `UNIMPLEMENTED`. Pass `basePath: '/grpc'` to restore the pre-M70i prefix.
+ * addresses; native `application/grpc` is served where the connection carries
+ * trailers and refused with a Trailers-Only `UNIMPLEMENTED` elsewhere. Pass
+ * `basePath: '/grpc'` to restore the pre-M70i prefix.
  *
  * @example
  * ```typescript

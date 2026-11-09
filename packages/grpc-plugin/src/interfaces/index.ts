@@ -19,8 +19,9 @@ export interface GrpcPluginOptions {
    * prefixed default puts every procedure at an address no such client asks
    * for. At the root, unknown paths fall through to Hono and only registered
    * procedure paths are claimed. This makes Connect and gRPC-Web reachable at
-   * their natural addresses; native `application/grpc` reaches the server too
-   * but is deliberately refused with a Trailers-Only `UNIMPLEMENTED`. Pass
+   * their natural addresses; native `application/grpc` is served there too where
+   * the connection carries trailers (Node and Bun with `RuntimePlugin({ http2 })`)
+   * and refused with a Trailers-Only `UNIMPLEMENTED` elsewhere. Pass
    * `'/grpc'` to restore the pre-M70i prefix.
    */
   basePath?: string;

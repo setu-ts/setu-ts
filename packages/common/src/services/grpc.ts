@@ -173,8 +173,8 @@ export interface IGrpcService {
    *
    * The kernel calls this immediately after {@linkcode IGrpcService.claims}
    * and **before it reads the request body**. That ordering is the whole
-   * point. A native `application/grpc` request is refused whatever its body
-   * contains, and buffering first made the refusal unreachable for the case
+   * point. A native `application/grpc` request on a connection without
+   * trailers is refused whatever its body contains, and buffering first made the refusal unreachable for the case
    * that needs it most: a client-streaming or bidirectional call holds its
    * request stream OPEN, so the body read never resolves and the caller
    * receives no frames at all rather than the refusal (V5-5). `grpcurl` opens

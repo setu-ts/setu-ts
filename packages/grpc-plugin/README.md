@@ -9,14 +9,17 @@ drain as every other route. No adapter seam is involved: `GrpcService.available`
 
 ## Features
 
-- Supports all four RPC kinds: unary, server-streaming, client-streaming, and bidi (HTTP/2 required)
+- Supports all four RPC kinds: unary, server-streaming, client-streaming, and bidi (bidi needs
+  HTTP/2). Streamed responses reach the client message by message, and client- and bidi-streaming
+  requests reach the procedure while the client is still sending
 - Connect protocol (`application/connect+json`, `application/connect+proto`)
 - gRPC-Web protocol (`application/grpc-web+json`, `application/grpc-web+proto`)
-- Native gRPC-binary requests (`application/grpc`, `application/grpc+proto`,
-  `application/grpc+json`) are refused with a Trailers-Only `UNIMPLEMENTED` response — see
+- Native gRPC (`application/grpc`, `+proto`, `+json`) on Node and Bun with
+  `RuntimePlugin({ http2 })` — so `grpcurl`, `ghz` and grpc-go/grpc-java clients reach the server
+  directly. Elsewhere it is refused with a Trailers-Only `UNIMPLEMENTED` — see
   [Limitations](#limitations)
-- Server reflection (v1, default ON), reachable over Connect and gRPC-Web — **not** from stock
-  `grpcurl`/`grpcui`, which speak native `application/grpc` (see Limitations)
+- Server reflection (v1, default ON), reachable over Connect and gRPC-Web everywhere, and from stock
+  `grpcurl`/`grpcui` wherever native gRPC is served
 - gRPC Health v1 service bridged to M20 health plugin (default ON)
 - Zero runtime dependencies in the source — Connect-ES is loaded lazily behind a structural facade
 - Module loading works on Node, Deno, Bun, and Cloudflare Workers without modification
@@ -79,6 +82,12 @@ The `GrpcPlugin` accepts optional configuration:
   (`createConnectRouter({ interceptors })`). Composed after the built-in handler-error logging, so a
   handler throw is logged before an application interceptor observes it. Absent: none installed
   (defaults to `[]`)
+- `readMaxBytes`: The largest request message a procedure accepts, in bytes (defaults to 4 MiB, the
+  receive limit grpc-go and grpc-js default to). Connect applies it per message on gRPC, gRPC-Web
+  and Connect streaming, and to the whole body of a unary Connect request; a larger message is
+  refused with `RESOURCE_EXHAUSTED`. It is the bound on a streamed request:
+  `RuntimePlugin({ maxBodyBytes })` is a total, so it bounds only the buffered bodies of unary and
+  server-streaming calls. An integer from 1 to `4294967295`; anything else throws at `GrpcPlugin()`
 
 ```typescript
 GrpcPlugin({
@@ -128,51 +137,48 @@ are left to Connect's automatic `unimplemented` responder.
   client's base URL at `basePath`. Paths outside it — including prefix-adjacent ones like `/grpcfoo`
   — fall through to Hono untouched.
 
-- **Bidi streaming needs a genuinely full-duplex transport** — HTTP/2, or in-process `app.fetch`.
-  The plugin deliberately leaves Connect's `httpVersion` option unset, because `IHttpAdapter`
-  surfaces no negotiated version and guessing `'1.1'` would make Connect refuse bidi even on
-  transports that support it. The consequence is that a bidi call over a real HTTP/1.1 socket fails
-  at the transport rather than with a clean `505`. In practice this is benign — gRPC clients speak
-  HTTP/2 — but note it also applies to this plugin's OWN `grpc.reflection.v1.ServerReflection`,
-  whose sole method is bidi-streaming. Unary, server-streaming and client-streaming are unaffected
-  on every runtime.
+- **What each runtime serves** (since `0.13.0`):
 
-  Separately, the kernel BUFFERS the request body before dispatching a call it will actually serve,
-  so a client that holds its request stream open past its last message stalls until it closes. A
-  Connect or gRPC-Web client that sends its messages and finishes is unaffected, which is every
-  in-repo client and every one the reference suite exercises. A native `application/grpc` call is
-  refused from its headers and never reaches the buffering — which is what a half-open stream used
-  to hang on.
+  | Runtime and listener                                             | Connect, gRPC-Web | Server streams as sent | Client and bidi streaming     | Native gRPC, reflection via `grpcurl`      |
+  | ---------------------------------------------------------------- | ----------------- | ---------------------- | ----------------------------- | ------------------------------------------ |
+  | Node, default (HTTP/1.1)                                         | yes               | yes                    | client yes, bidi no           | refused                                    |
+  | Node, `RuntimePlugin({ http2: true })`                           | yes, h1 and h2c   | yes                    | yes over HTTP/2               | yes over HTTP/2                            |
+  | Node, `RuntimePlugin({ http2: { key, cert } })`                  | yes, h1 and h2    | yes                    | yes over HTTP/2               | yes over HTTP/2                            |
+  | Bun, default (`Bun.serve`)                                       | yes               | yes                    | client yes, bidi no           | refused                                    |
+  | Bun with `http2` (served by `node:http2`)                        | as Node           | yes                    | as Node                       | as Node                                    |
+  | Deno (`Deno.serve`, h1 and h2c; TLS with `http2: { key, cert }`) | yes               | yes                    | yes over HTTP/2               | refused — `Deno.serve` writes no trailers  |
+  | Cloudflare Workers                                               | yes               | yes                    | client yes; bidi not verified | refused — no trailers on a Worker response |
 
-- **Application injection**: `Application.inject()` reaches gRPC handlers — the kernel dispatches
-  gRPC from the service registry, not through the HTTP adapter, so an injected request is routed
-  exactly like an adapter-delivered one. `app.fetch()` with a web `Request` works too, for streaming
-  procedures.
+  Native gRPC reports each call's status in HTTP/2 trailers, so it is served only where the adapter
+  can write them: the Node adapter on an HTTP/2 connection (`IRequest.responseTrailers`). On the
+  shared cleartext port, an HTTP/1.1 request for a native procedure is still refused, since a native
+  client never speaks HTTP/1.1. Bidi needs a full-duplex transport: over HTTP/1.1 Connect's own bidi
+  check is left unset (the adapter reports no negotiated version), so a bidi call there fails at the
+  transport rather than with a clean `505`.
+
+- **Request bodies.** A unary or server-streaming call's single request message is buffered under
+  `RuntimePlugin({ maxBodyBytes })`. A client- or bidi-streaming call gets the unread body stream,
+  bounded per message by `readMaxBytes` — unless middleware already read the body, in which case it
+  is dispatched from that read.
+
+- **Timing and `inject()`.** A streamed reply leaves the pipeline at its first byte, so the request
+  logger, metrics and the telemetry span time a streaming RPC to its first message, as they do SSE;
+  time a whole call in a Connect interceptor (`interceptors`). `Application.inject()` reaches unary
+  and client-streaming procedures, whose replies are buffered; a server-streaming or bidi reply is a
+  stream, which `inject()` refuses — use `app.fetch()` with a web `Request` and read the body.
 - **No client SDK**: This plugin only provides server-side gRPC serving. Client-side gRPC calls are
   handled by generated Connect/gRPC client code in the application.
 
 <!-- version:history -->
 
-- **Native gRPC-binary is refused by design**: requests with a native gRPC content type
-  (`application/grpc`, `application/grpc+proto`, `application/grpc+json`) are answered with a
-  **Trailers-Only `UNIMPLEMENTED`** response — HTTP `200`, `content-type: application/grpc`, and
-  `grpc-status: 12` in the headers. The native wire protocol depends on HTTP/2 trailers for status
-  signaling, and no fetch-based server runtime exposes them to a `Response` (Deno's `Deno.serve`
-  surfaces no trailers; Node's and Bun's fetch handlers do not either). Module loading itself is
-  unaffected — the plugin loads its Connect dependency on every runtime it runs on — but a fetch
-  `Response` carries trailers nowhere, so the protocol cannot be served honestly. Serving half of
-  the protocol — reflection and health resolve, every real call fails with "missing status" — is
-  worse than refusing it cleanly: clients see an explicit, well-formed `UNIMPLEMENTED` instead of an
-  opaque transport error after a successful handshake. Measured with real `grpcurl` v1.9.3: a unary
-  native call reports `target server does not expose service …` and exits 1. A **bidi** native call
-  reports the same refusal, and since `0.7.0` it does so without hanging: the refusal is decided
-  from the request HEADERS and answered before the body is read. **Use Connect or gRPC-Web
-  instead**; both work completely for unary, server-streaming and client-streaming over both
-  HTTP/1.1 and HTTP/2; bidi additionally requires HTTP/2, per the bidi bullet above. Every non-JS
-  gRPC client can speak Connect or gRPC-Web, but **not through `grpcurl`** — its `-format` flag
-  selects the message encoding (`json`/`text`), not the wire protocol, and it implements native gRPC
-  only. Use `buf curl --protocol connect` (or `--protocol grpcweb`), a generated Connect client, or
-  a web client; for an existing native-gRPC fleet, put Envoy's `grpc_web` filter in front.
+- **Native gRPC before `0.13.0`** was refused on every runtime, because the kernel wrote replies
+  through a fetch `Response`, which carries no trailers, and Node served HTTP/1.1 only. Where it is
+  still refused (see the table above), the answer is a **Trailers-Only `UNIMPLEMENTED`** — HTTP
+  `200`, `content-type: application/grpc`, `grpc-status: 12` in the headers — decided from the
+  request headers before the body is read, so a half-open native stream gets it without hanging.
+  There, use Connect or gRPC-Web (`buf curl --protocol connect` or `--protocol grpcweb`, a generated
+  Connect client, or Envoy's `grpc_web` filter in front of a native fleet); `grpcurl` implements
+  native gRPC only.
 
 ## Health Indicator
 

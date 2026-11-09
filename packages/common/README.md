@@ -665,6 +665,8 @@ package fits the plugin architecture.
 | `RouteSchema`                         | interface |
 | `RouteSecurityMetadata`               | interface |
 | `RouteValidationMetadata`             | interface |
+| `RpcReply`                            | interface |
+| `RpcTransport`                        | interface |
 | `ScheduledJob`                        | interface |
 | `ScheduleOptions`                     | interface |
 | `SchedulerDiagnosticsRecord`          | interface |
@@ -690,6 +692,7 @@ package fits the plugin architecture.
 | `StorageDiagnosticsRecord`            | interface |
 | `StorageDiagnosticsResponse`          | interface |
 | `StorageDiagnosticsSnapshot`          | interface |
+| `StreamOptions`                       | interface |
 | `SubscribeOptions`                    | interface |
 | `TaskPoolStats`                       | interface |
 | `TelemetryContext`                    | interface |

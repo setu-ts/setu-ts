@@ -2,10 +2,11 @@
  * Native gRPC-binary refusal (M70i §3.3).
  *
  * The native `application/grpc` wire format signals completion in HTTP/2
- * **trailers**. The Fetch `Response` has no trailer mechanism, and the whole
- * framework serves through Hono's `fetch` entry point (M23), so no runtime
- * adapter can emit trailers. A native client pointed at this server therefore
- * never gets a legal response.
+ * **trailers**. Since M139b they are written where the adapter can — the Node
+ * adapter on an HTTP/2 connection — and native calls are served there. Every
+ * other connection (HTTP/1.1, Deno, Workers, `inject()`) has no trailer
+ * mechanism, so a native client pointed at it would never get a legal
+ * response; this refusal is what it gets instead.
  *
  * M70i repairs the default `basePath` to the root (§3.2), which makes the
  * server **reachable** by native clients for the first time — so the number

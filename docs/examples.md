@@ -762,8 +762,10 @@ calls the Connect client and the health URL on the same application port, showin
 into the server rather than replacing it.
 
 `GrpcPlugin` serving a Connect RPC from an embedded service descriptor on the same port as an
-ordinary `GET /health` route. Connect and gRPC-Web clients can call it; native gRPC cannot, because
-it needs HTTP/2 trailers a fetch-based server does not send.
+ordinary `GET /health` route. Connect and gRPC-Web clients can call it. Native gRPC needs HTTP/2
+trailers, which the example's default HTTP/1.1 listener cannot send; with
+`RuntimePlugin({ http2: true })` on Node or Bun, `grpcurl` and other native clients reach the same
+port.
 
 ```bash
 pnpm --dir apps/grpc run start                  # port 5000

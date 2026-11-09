@@ -6,6 +6,51 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **HTTP/2 and native gRPC (M139b, `@setu-ts/runtime`, `@setu-ts/common`, `@setu-ts/kernel`,
+  `@setu-ts/grpc-plugin`).** `RuntimePlugin({ http2: true })` serves cleartext HTTP/2 (h2c) and
+  HTTP/1.1 on one port: each connection is classified by its first bytes, as `Deno.serve` and Go's
+  unencrypted HTTP/2 do, so browsers, probes and WebSocket upgrades keep working beside gRPC
+  clients, and a connection that sends nothing for 10 s is closed.
+  `RuntimePlugin({ http2: { key, cert } })` serves HTTP/2 over TLS with ALPN and HTTP/1.1 on the
+  same port; `Http2TlsOptions` is its type. Bun is served by the Node adapter while the option is
+  set (WebSockets then need `ws`); Deno passes TLS to `Deno.serve`; Workers ignore it. Closing sends
+  `GOAWAY` to open HTTP/2 sessions. Common gains `IRequest.responseTrailers`, `StreamOptions` for
+  `IResponse.stream(body, { trailers })`, a `trailers` member on the streaming `ResponseSnapshot`,
+  and `RpcTransport`/`RpcReply` with the optional `IGrpcService.handleRpc` and
+  `IGrpcService.streamsRequest` members; `refuses` takes an optional transport. The Node adapter
+  writes trailers on HTTP/2, and `GrpcPlugin` serves native `application/grpc` there, so `grpcurl`,
+  `ghz` and grpc-go clients — and reflection through `grpcurl` — reach Setu directly; HTTP/1.1, Deno
+  and Workers keep the Trailers-Only `UNIMPLEMENTED`. `GrpcPluginOptions.readMaxBytes` (default 4
+  MiB) bounds each request message. Ships in 0.13.0.
+
+### Changed
+
+- **gRPC replies stream; streamed request bodies reach the procedure (M139b, `@setu-ts/kernel`,
+  `@setu-ts/grpc-plugin`).** A server-streaming or bidi reply, or one with trailers, is written with
+  `IResponse.stream`, so middleware that inspects RPC replies now sees `streaming: true` for them,
+  `inject()` refuses them (use `app.fetch()`), and the request logger, metrics and telemetry time
+  them to the first message. Unary replies stay buffered. A client- or bidi-streaming call whose
+  body nothing read gets the unread body, bounded per message by `readMaxBytes` rather than
+  `RuntimePlugin({ maxBodyBytes })`; unary and server-streaming bodies keep the `maxBodyBytes`
+  bound. Both forms carry the client's abort signal. An `IGrpcService` without `handleRpc` keeps the
+  buffered write. The `grpc-workspace` example calls billing over one HTTP/2 connection with
+  `@connectrpc/connect-node`.
+
+### Fixed
+
+- **gRPC server streams arrived as one chunk at the end (V12-39, `@setu-ts/kernel`).** The kernel
+  read the whole Connect response before writing it, so five messages sent 500 ms apart reached the
+  client together at 2.5 s, and a stream that never ends delivered nothing while holding memory.
+- **The grpc-plugin README's HTTP/2 claim was not true on Node (V12-40, `@setu-ts/grpc-plugin`).**
+  Node served HTTP/1.1 only; `RuntimePlugin({ http2 })` makes Connect and gRPC-Web over HTTP/2 real,
+  and the README now states what each runtime serves.
+- **A client could choose the scheme of `request.url` (V12-51, `@setu-ts/runtime`).** Over cleartext
+  HTTP/2 the scheme came from the client's `:scheme` (Deno at `0.12.0`), and on Node an
+  absolute-form request line (`GET https://… HTTP/1.1`) set it, so `requestOriginOf` saw `https` on
+  a plain connection. Served requests now take the listener's scheme, `https` only under TLS.
+
 ## [0.12.0] — 2026-11-07
 
 ### Added
