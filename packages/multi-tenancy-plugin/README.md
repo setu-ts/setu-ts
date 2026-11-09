@@ -95,7 +95,10 @@ Bind each credential to it:
 
 - **Bearer tokens.** Set `tenantClaim` on auth-plugin's `jwt` option and on each `issuers` entry. A
   token whose verified claim differs from the request's tenant is then refused, and so is a token
-  carrying the claim on a request with no tenant. See auth-plugin's
+  carrying the claim on a request with no tenant. So the tenant must be resolved before
+  authentication runs (priority 300); the built-in resolvers run at 40. Do not combine `tenantClaim`
+  with the principal-derived resolver at priority 310 above: it resolves after authentication, so
+  every bound token would be refused. See auth-plugin's
   [Binding tokens to the tenant](https://github.com/setu-ts/setu-ts/blob/main/packages/auth-plugin/README.md#binding-tokens-to-the-tenant).
 - **Password sign-in.** `local.verify(identifier, secret, request)` and
   `verifyCredentials(credentials, request)` receive the request. Pass `ctx.request` and look the

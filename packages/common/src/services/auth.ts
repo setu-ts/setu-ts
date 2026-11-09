@@ -142,8 +142,9 @@ export interface IAuthStrategy {
   /**
    * Where this strategy reads its credential. `'header'` — a credential the client sends explicitly (a bearer or
    * API-key header); `'cookie'` — one the browser attaches by itself (a session cookie). Read by form CSRF: only a
-   * request authenticated by a `'header'` strategy may skip the synchronizer-token check. Absent is treated as
-   * `'cookie'` (fail closed).
+   * request authenticated by a `'header'` strategy may skip the synchronizer-token check. When absent, no credential
+   * source is recorded: form CSRF still verifies the request (fail closed), and the request satisfies only
+   * `requireAuth({ credentials: 'any' })` — declare it to satisfy a `'cookie'` or `'header'` restriction.
    *
    * @since 0.10.0
    */

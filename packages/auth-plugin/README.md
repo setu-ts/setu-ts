@@ -752,13 +752,16 @@ AuthPlugin({
 });
 ```
 
-With `tenantClaim` set and a tenant resolved for the request (`request.tenant`), the token is
-refused unless that claim, read from the verified token, is a string equal to the tenant's id. On a
-request with no tenant, a token without the claim is accepted and a token carrying it is refused, so
-a tenant's token never acts on a platform route. An issuer token refused this way is reported as
-`tenant-mismatch`, without the tenant id. There is no default claim name, because providers differ
-(`tid`, `org_id`); without `tenantClaim` nothing is compared. The multi-tenancy plugin's `jwt`
-resolver reads the claim unverified to choose the tenant; this check is what verifies it.
+The tenant must be resolved before authentication (priority 300): the multi-tenancy plugin's
+built-in resolvers run at 40, but a resolver that derives the tenant from the signed-in principal
+runs after authentication and cannot be combined with `tenantClaim`. With `tenantClaim` set and a
+tenant resolved for the request (`request.tenant`), the token is refused unless that claim, read
+from the verified token, is a string equal to the tenant's id. On a request with no tenant, a token
+without the claim is accepted and a token carrying it is refused, so a tenant's token never acts on
+a platform route. An issuer token refused this way is reported as `tenant-mismatch`, without the
+tenant id. There is no default claim name, because providers differ (`tid`, `org_id`); without
+`tenantClaim` nothing is compared. The multi-tenancy plugin's `jwt` resolver reads the claim
+unverified to choose the tenant; this check is what verifies it.
 
 ## Signing a user in
 
