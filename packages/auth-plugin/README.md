@@ -760,8 +760,17 @@ from the verified token, is a string equal to the tenant's id. On a request with
 without the claim is accepted and a token carrying it is refused, so a tenant's token never acts on
 a platform route. An issuer token refused this way is reported as `tenant-mismatch`, without the
 tenant id. There is no default claim name, because providers differ (`tid`, `org_id`); without
-`tenantClaim` nothing is compared. The multi-tenancy plugin's `jwt` resolver reads the claim
-unverified to choose the tenant; this check is what verifies it.
+`tenantClaim` nothing is compared.
+
+`tenantClaim` binds **bearer tokens only**: it verifies the tenant when the JWT or issuer strategy
+is what authenticated the request. An API key, a custom strategy or a session is not compared
+against it. Sessions are sealed to their tenant by the session plugin's tenant binding; an API key's
+`validate` must bind the key to `request.tenant` itself. This matters most with the multi-tenancy
+plugin's `jwt` resolver, which reads the tenant from an **unverified** bearer token: a forged bearer
+can choose the tenant while a valid API key authenticates the request, and nothing verifies that
+tenant. With that resolver, either accept only bearer tokens on tenant routes
+(`requireAuth({ credentials: 'header' })` does not distinguish an API key from a bearer, so do not
+configure `apiKey` beside it), or bind every other credential to the tenant yourself.
 
 ## Signing a user in
 

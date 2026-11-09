@@ -23,7 +23,9 @@ All notable changes to this project are documented here. The format follows
   application whose identity provider stamps every access token with scopes (`openid profile`) and
   authorizes those tokens by role sets `confineScopedTokens: false` to keep the 0.12 behaviour.
   `requirePolicy` is not capped. A consumer switching exhaustively on `AuthorizationDecisionReason`
-  needs a `token-confined` case.
+  needs a `token-confined` case. The diagnostics connector's authorization pages can now carry that
+  reason, and a diagnostics client (such as a devtool) built on 0.12 refuses a page containing it:
+  upgrade the client together with the application.
 - **BREAKING — a JWT without a subject is refused (M139a, #576, `@setu-ts/auth-plugin`, V12-18).**
   The JWT strategy refuses a verified token whose `sub` is missing, not a string or empty. Before,
   every such token authenticated as one shared principal, `'unknown'`, so grants, idempotency
