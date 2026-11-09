@@ -36,7 +36,7 @@
     "@grpc-workspace/contracts": "workspace:*",
     "pino": "10.x",
     "@connectrpc/connect": "^2.1.2",
-    "@connectrpc/connect-web": "^2.1.2",
+    "@connectrpc/connect-node": "^2.1.2",
     "swagger-ui-dist": "5.33.3",
     "zod": "^4.6.6"
   },

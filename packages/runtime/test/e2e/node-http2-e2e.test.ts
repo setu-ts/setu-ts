@@ -230,3 +230,25 @@ describeNode('NodeHttpAdapter http2 bind failure', () => {
     await expect(second.listen(port, '127.0.0.1')).rejects.toMatchObject({ code: 'EADDRINUSE' });
   });
 });
+
+describeNode('NodeHttpAdapter http2 shutdown', () => {
+  it.each([
+    ['cleartext', true, (port: number) => http2Connect(`http://127.0.0.1:${port}`)],
+    ['TLS', TLS, (port: number) => http2Connect(`https://localhost:${port}`, { ca: TLS.cert })],
+  ] as const)(
+    '%s: close() sends GOAWAY to a session the client keeps open',
+    async (_name, http2, connect) => {
+      const started = await start(http2);
+      const session = connect(started.port);
+      try {
+        await h2(session, { ':path': '/open' });
+        const goaway = new Promise<void>((resolve) => session.once('goaway', () => resolve()));
+        await started.adapter.close(started.handle);
+        running = undefined;
+        await goaway;
+      } finally {
+        session.destroy();
+      }
+    },
+  );
+});

@@ -46,18 +46,15 @@ export async function resolveBillingClient(services: IServiceRegistry): Promise<
 
 /**
  * Whether a billing call failed because billing could not be reached in time.
- * A server-side outage is `Unavailable`, and a call past the client's deadline is
- * `DeadlineExceeded`. Over `fetch`, a refused or reset connection surfaces as
- * Connect `Unknown` caused by the `TypeError('fetch failed')` fetch throws; any
- * other `TypeError` (a malformed URL, a bug) is not an outage and stays a 500.
+ * A server-side outage, and a refused or reset connection, are `Unavailable` —
+ * connect-node's HTTP/2 transport reports a connection failure that way — and a
+ * call past the client's deadline is `DeadlineExceeded`. Anything else (`Unknown`
+ * from a bug, say) is not an outage and stays a 500.
  */
 function isUnreachable(error: unknown): boolean {
-  if (!(error instanceof ConnectError)) return false;
-  if (error.code === Code.Unavailable || error.code === Code.DeadlineExceeded) return true;
   return (
-    error.code === Code.Unknown &&
-    error.cause instanceof TypeError &&
-    error.cause.message === 'fetch failed'
+    error instanceof ConnectError &&
+    (error.code === Code.Unavailable || error.code === Code.DeadlineExceeded)
   );
 }
 

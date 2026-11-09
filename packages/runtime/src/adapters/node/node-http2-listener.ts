@@ -73,6 +73,29 @@ export function classifyPreface(bytes: Uint8Array): PrefaceVerdict {
   return bytes.length >= PREFACE.length ? 'http2' : 'pending';
 }
 
+/**
+ * Closes, gracefully, every HTTP/2 session a server holds when the returned
+ * function runs. An HTTP/2 server's own `close()` only stops new connections:
+ * a client that keeps its session open (connect-node and grpc-js both do)
+ * would otherwise hold the listener past shutdown. `session.close()` sends
+ * GOAWAY and lets streams in flight finish.
+ *
+ * @param server - Any `node:http2` server
+ * @returns Closes the sessions open at the time of the call
+ */
+export function trackHttp2Sessions(server: {
+  on(event: 'session', listener: (session: Http2Session) => void): unknown;
+}): () => void {
+  const sessions = new Set<Http2Session>();
+  server.on('session', (session) => {
+    sessions.add(session);
+    session.once('close', () => sessions.delete(session));
+  });
+  return () => {
+    for (const session of sessions) session.close();
+  };
+}
+
 /** The request listener both inner servers share (node-server's `getRequestListener`). */
 export type SharedRequestListener = (
   incoming: IncomingMessage | Http2ServerRequest,
@@ -94,11 +117,13 @@ export class CleartextHttp2Server {
   readonly #outer: NetServer;
   readonly #http1: HttpServer;
   readonly #http2: ReturnType<typeof createHttp2Server>;
+  readonly #closeSessions: () => void;
 
   constructor(outer: NetServer, http1: HttpServer, http2: ReturnType<typeof createHttp2Server>) {
     this.#outer = outer;
     this.#http1 = http1;
     this.#http2 = http2;
+    this.#closeSessions = trackHttp2Sessions(http2);
   }
 
   /** The outer TCP server, for `listen`, `address` and bind errors. */
@@ -128,11 +153,16 @@ export class CleartextHttp2Server {
     return this;
   }
 
-  /** Stops accepting connections and closes both inner servers. */
+  /**
+   * Stops accepting connections, closes both inner servers, sends GOAWAY to
+   * every open HTTP/2 session and closes idle HTTP/1.1 keep-alive connections.
+   */
   close(): void {
     this.#outer.close();
     this.#http1.close();
+    this.#http1.closeIdleConnections();
     this.#http2.close();
+    this.#closeSessions();
   }
 }
 

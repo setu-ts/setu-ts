@@ -33,13 +33,15 @@ const MAY_DIFFER: Readonly<Record<string, string>> = {
   'apps/billing/package.json':
     'framework ranges become workspace:^, the contracts library is linked, check is tsc only, lint names lint.config.js, the per-member buf toolchain is removed',
   'apps/orders/package.json':
-    'as billing, plus @connectrpc/connect and @connectrpc/connect-web: an http member ships no Connect client',
+    'as billing, plus @connectrpc/connect and @connectrpc/connect-node: an http member ships no Connect client',
   'libs/contracts/package.json':
     'the library owns the contract: @bufbuild/protobuf, check, and proto:gen through a pinned npx buf',
   'apps/billing/tsconfig.json':
     'extends the repository tsconfig.apps.json, so @setu-ts/* resolves to source',
   'apps/orders/tsconfig.json':
     'extends the repository tsconfig.apps.json, so @setu-ts/* resolves to source',
+  'apps/billing/setu.config.ts':
+    'RuntimePlugin({ http2: true }): billing serves HTTP/2 beside HTTP/1.1, which orders calls over one connection',
   'apps/billing/main.ts':
     'the repository lint forbids console outside the CLI; one eslint-disable line',
   'apps/orders/main.ts':

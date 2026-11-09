@@ -44,14 +44,15 @@ reason). In short:
 - **billing**, the one member generated with `--rpc grpc`, has one feature, so it stays flat too.
   `setu generate plugin billing` wrote `src/plugins/billing.plugin.ts`, which now implements `Quote`
   and adds it through `IGrpcService.addService`, depending on the gRPC capability: the CLI owns
-  `GrpcPlugin` itself, in `src/transport/index.ts`. The plugins barrel registers it, so billing's
-  `setu.config.ts` is the generated one, unchanged.
-- **orders** is an HTTP member: it adds `@connectrpc/connect` and `@connectrpc/connect-web`, which
-  an HTTP member does not ship, and a client in `src/clients/billing.client.ts`. It has one feature,
-  so it stays flat, as a new service does until its first `setu generate module`: the generated
-  `src/controllers/orders.controller.ts`, `src/services/orders.service.ts` and
-  `src/shared/schemas/orders.schemas.ts` now create, list and read orders, quoting each new one
-  through billing. Its tests use a fake billing.
+  `GrpcPlugin` itself, in `src/transport/index.ts`. The plugins barrel registers it. billing's
+  `setu.config.ts` differs from the generated one in one line: `RuntimePlugin({ http2: true })`, so
+  billing serves HTTP/2 and HTTP/1.1 on its one port.
+- **orders** is an HTTP member: it adds `@connectrpc/connect` and `@connectrpc/connect-node`, which
+  an HTTP member does not ship, and a client in `src/clients/billing.client.ts` that calls billing
+  over one reused HTTP/2 connection. It has one feature, so it stays flat, as a new service does
+  until its first `setu generate module`: the generated `src/controllers/orders.controller.ts`,
+  `src/services/orders.service.ts` and `src/shared/schemas/orders.schemas.ts` now create, list and
+  read orders, quoting each new one through billing. Its tests use a fake billing.
 - **In this repository**, framework packages are `workspace:^`, the library is linked with
   `workspace:*`, each member's `tsconfig.json` extends the repository's `tsconfig.apps.json`, member
   `check` is `tsc` only (`setu check` runs in the conformance test), `eslint.config.js` is named

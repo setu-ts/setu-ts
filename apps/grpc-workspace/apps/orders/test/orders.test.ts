@@ -6,7 +6,7 @@ import type { IServiceDiscovery } from '@setu-ts/common';
 import { HttpError } from '@setu-ts/exceptions';
 import { createTestApp, overrideCapability } from '@setu-ts/testing';
 import { createApp } from '../setu.config.ts';
-import type { BillingClient } from '../src/clients/billing.client.ts';
+import { createBillingClient, type BillingClient } from '../src/clients/billing.client.ts';
 import { createOrders } from '../src/services/orders.service.ts';
 import { startFakeBilling } from './support/fake-billing.ts';
 
@@ -60,7 +60,7 @@ describe('orders', () => {
     assert.deepStrictEqual((rejected as HttpError).message, 'billing rejected the request.');
   });
 
-  it('answers an unreachable billing (Unavailable, or a refused fetch) with a 503 and other codes with the default 500', async () => {
+  it('answers an unreachable billing (Unavailable, or a refused connection) with a 503 and other codes with the default 500', async () => {
     const unavailable = await createOrders(
       { items: [...ITEMS] },
       fakeQuote(() => Promise.reject(new ConnectError('the upstream says no', Code.Unavailable))),
@@ -69,20 +69,11 @@ describe('orders', () => {
     assert.deepStrictEqual((unavailable as HttpError).statusCode, 503);
     assert.deepStrictEqual((unavailable as HttpError).message, 'billing is unavailable.');
 
-    // Over fetch, a refused connection is Connect `Unknown` caused by fetch's TypeError.
+    // A refused connection, through the real HTTP/2 client: connect-node reports
+    // it as `Unavailable`. Port 1 on loopback has no listener.
     const refused = await createOrders(
       { items: [...ITEMS] },
-      fakeQuote(() =>
-        Promise.reject(
-          new ConnectError(
-            'fetch failed',
-            Code.Unknown,
-            undefined,
-            undefined,
-            new TypeError('fetch failed'),
-          ),
-        ),
-      ),
+      createBillingClient('http://127.0.0.1:1/grpc'),
     ).catch((error: unknown) => error);
     assert.ok(refused instanceof HttpError);
     assert.deepStrictEqual((refused as HttpError).statusCode, 503);

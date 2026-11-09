@@ -244,6 +244,16 @@ async function serveHttp2(
         },
         ready,
       );
+      // `close()` must also end the HTTP/2 sessions clients keep open, or they
+      // hold the listener past shutdown (see `trackHttp2Sessions`).
+      const closeSessions = listener.trackHttp2Sessions(
+        server as unknown as Parameters<typeof listener.trackHttp2Sessions>[0],
+      );
+      const closeServer = server.close.bind(server);
+      server.close = ((callback?: (error?: Error) => void) => {
+        closeSessions();
+        return closeServer(callback);
+      }) as typeof server.close;
       function ready(): void {
         server.removeListener('error', failed);
         resolve(server);

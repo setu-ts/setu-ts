@@ -797,7 +797,7 @@ importers:
       '@connectrpc/connect':
         specifier: ^2.1.2
         version: 2.3.0(@bufbuild/protobuf@2.16.0)
-      '@connectrpc/connect-web':
+      '@connectrpc/connect-node':
         specifier: ^2.1.2
         version: 2.3.0(@bufbuild/protobuf@2.16.0)(@connectrpc/connect@2.3.0(@bufbuild/protobuf@2.16.0))
       '@grpc-workspace/contracts':
