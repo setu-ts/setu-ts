@@ -11,7 +11,7 @@
 // Plugin factory
 export { RuntimePlugin } from './plugin/runtime-plugin.ts';
 export type { HttpAdapterFactories, RuntimeOptions } from './plugin/runtime-plugin.ts';
-export type { HttpAdapterOptions } from './adapters/shared/adapter-options.ts';
+export type { HttpAdapterOptions, Http2TlsOptions } from './adapters/shared/adapter-options.ts';
 // Raised by the bounded body read `RuntimeOptions.maxBodyBytes` arms.
 export { RequestBodyReadError, RequestBodyTooLargeError } from './adapters/shared/fetch-mapping.ts';
 

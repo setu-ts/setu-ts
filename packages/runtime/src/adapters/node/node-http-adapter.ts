@@ -33,7 +33,9 @@ import {
   mapSnapshotToWebResponse,
   mapWebRequestToFrameworkRequest,
 } from '../shared/fetch-mapping.ts';
-import type { HttpAdapterOptions } from '../shared/adapter-options.ts';
+import type { HttpAdapterOptions, Http2TlsOptions } from '../shared/adapter-options.ts';
+import type { PEER_ADDRESS } from './node-peer.ts';
+import { peerAddressOf } from './node-peer.ts';
 import { UpgradeRouterStore } from '../shared/upgrade-router-store.ts';
 import { ABNORMAL_CLOSURE } from '../shared/web-socket-transport.ts';
 import type { NodeIncomingMessage, RawUpgradeSocket, WsModuleLike } from './node-ws-upgrader.ts';
@@ -63,14 +65,26 @@ export interface NodeOutgoing {
    * @returns Whatever the underlying response returns
    */
   writeHead(status: number, ...rest: unknown[]): unknown;
+  /**
+   * Queues trailers to send after the body. Present on node-server's HTTP/2
+   * response (`Http2ServerResponse`); the adapter writes trailers only on an
+   * HTTP/2 request, where it is.
+   *
+   * @param headers - The trailer fields
+   */
+  addTrailers?(headers: Readonly<Record<string, string>>): void;
 }
 
 /**
  * The second argument `@hono/node-server` passes to a fetch callback.
  */
 export interface NodeFetchEnv {
-  /** The socket peer, supplied by node-server on served requests. */
-  readonly incoming?: { readonly socket?: { readonly remoteAddress?: string | undefined } };
+  /** The incoming request: its socket peer, its HTTP version, and any peer the listener recorded. */
+  readonly incoming?: {
+    readonly socket?: { readonly remoteAddress?: string | undefined };
+    readonly httpVersion?: string;
+    readonly [PEER_ADDRESS]?: string | undefined;
+  };
   /** The Node response the reply is written to. */
   readonly outgoing?: NodeOutgoing;
 }
@@ -106,13 +120,25 @@ export interface NodeServeHost {
     fetch: (
       request: Request,
       env?: {
-        readonly incoming?: { readonly socket?: { readonly remoteAddress?: string | undefined } };
-        readonly outgoing?: { writeHead(status: number, ...rest: unknown[]): unknown };
+        readonly incoming?: {
+          readonly socket?: { readonly remoteAddress?: string | undefined };
+          readonly httpVersion?: string;
+        };
+        readonly outgoing?: {
+          writeHead(status: number, ...rest: unknown[]): unknown;
+          addTrailers?(headers: Readonly<Record<string, string>>): void;
+        };
       },
     ) => Response | Promise<Response>;
     port: number;
     hostname?: string;
     overrideGlobalObjects?: boolean;
+    /**
+     * Serve HTTP/2 beside HTTP/1.1 — `true` for cleartext on one port, TLS
+     * material for ALPN. An injected host that ignores it serves HTTP/1.1.
+     * @since 0.13.0
+     */
+    http2?: true | Http2TlsOptions;
   }): Promise<NodeServer>;
 }
 
@@ -164,8 +190,10 @@ const defaultNodeServeHost: NodeServeHost = {
     // internal cache symbol. Opting out therefore forced EVERY response onto
     // the slow path, and made the kernel's synchronous request path
     // unrewarded, since the fast path is gated on both conditions at once.
+    const { http2, ...serveOptions } = options;
+    if (http2 !== undefined) return serveHttp2(mod, serveOptions, http2);
     return new Promise<NodeServer>((resolve, reject) => {
-      const server = mod.serve({ ...options }, ready);
+      const server = mod.serve({ ...serveOptions }, ready);
       function ready(): void {
         server.removeListener('error', failed);
         resolve(server);
@@ -181,6 +209,107 @@ const defaultNodeServeHost: NodeServeHost = {
     });
   },
 };
+
+/** The `serve()` options the default host forwards, without `http2`. */
+type ServeOptions = Omit<Parameters<NodeServeHost['serve']>[0], 'http2'>;
+
+/**
+ * Starts the HTTP/2 listener (M139b §3.4). The listener module, and with it
+ * every `node:http2` builtin, is loaded only here — never by a Worker, never
+ * by an application that did not ask for HTTP/2.
+ *
+ * - TLS: node-server's own `serve()` over `http2.createSecureServer` with
+ *   `allowHTTP1`, so ALPN picks `h2` or HTTP/1.1 and `upgrade` still fires.
+ * - Cleartext: the shared-port listener, running the same request listener
+ *   `serve()` builds (`getRequestListener(fetch, { hostname })`).
+ *
+ * @param mod - The loaded `@hono/node-server`
+ * @param options - The serve options
+ * @param http2 - `true`, or the TLS material
+ * @returns The server, once bound
+ */
+async function serveHttp2(
+  mod: typeof import('@hono/node-server'),
+  options: ServeOptions,
+  http2: true | Http2TlsOptions,
+): Promise<NodeServer> {
+  const listener = await import('./node-http2-listener.ts');
+  if (http2 !== true) {
+    return new Promise<NodeServer>((resolve, reject) => {
+      const server = mod.serve(
+        {
+          ...options,
+          createServer: listener.createSecureServer,
+          serverOptions: { key: http2.key, cert: http2.cert, allowHTTP1: true },
+        },
+        ready,
+      );
+      function ready(): void {
+        server.removeListener('error', failed);
+        resolve(server);
+      }
+      function failed(error: Error): void {
+        server.removeAllListeners('listening');
+        server.close();
+        reject(error);
+      }
+      server.once('error', failed);
+    });
+  }
+  const server = listener.createCleartextHttp2Server(
+    mod.getRequestListener(options.fetch, {
+      ...(options.hostname === undefined ? {} : { hostname: options.hostname }),
+    }),
+  );
+  return new Promise<NodeServer>((resolve, reject) => {
+    const failed = (error: Error): void => {
+      server.close();
+      reject(error);
+    };
+    server.net.once('error', failed);
+    server.net.listen(options.port, options.hostname, () => {
+      server.net.removeListener('error', failed);
+      resolve(server);
+    });
+  });
+}
+
+/**
+ * Wraps a streaming body so the trailers are queued on the Node response
+ * after its last chunk and before node-server ends the stream (M139b §3.3).
+ * A rejecting trailers promise errors the stream, which resets it rather than
+ * ending it as if it had succeeded.
+ *
+ * @param body - The response body
+ * @param trailers - The trailers, resolving once the body ends
+ * @param addTrailers - The Node response's `addTrailers`
+ * @returns The wrapping stream
+ */
+export function streamWithTrailers(
+  body: ReadableStream<Uint8Array>,
+  trailers: Promise<Headers>,
+  addTrailers: (headers: Readonly<Record<string, string>>) => void,
+): ReadableStream<Uint8Array> {
+  const reader = body.getReader();
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      const next = await reader.read();
+      if (!next.done) {
+        controller.enqueue(next.value);
+        return;
+      }
+      const fields: Record<string, string> = {};
+      (await trailers).forEach((value, name) => {
+        fields[name] = value;
+      });
+      if (Object.keys(fields).length > 0) addTrailers(fields);
+      controller.close();
+    },
+    cancel(reason) {
+      return reader.cancel(reason);
+    },
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Content-type parity
@@ -267,6 +396,11 @@ export class NodeHttpServerHandle {
   readonly #maxBodyBytes: number | undefined;
   readonly #reportError: ((record: Readonly<Record<string, unknown>>) => void) | undefined;
   /**
+   * The listener's scheme: `https` only when this adapter terminates TLS. A
+   * served request's URL is rewritten to it (V12-51).
+   */
+  readonly #scheme: 'http' | 'https';
+  /**
    * Distinct handshake-failure messages already reported through this handle.
    * One `ws`-absent refusal per upgrade is the same fault; a client must not be
    * able to make the log grow by reconnecting, so a message reports once, and
@@ -278,6 +412,8 @@ export class NodeHttpServerHandle {
     this.#coordinator = new NodeUpgradeCoordinator(wsModule);
     this.#maxBodyBytes = options?.maxBodyBytes;
     this.#reportError = options?.reportError;
+    const http2 = options?.http2;
+    this.#scheme = http2 !== undefined && http2 !== true ? 'https' : 'http';
   }
 
   /**
@@ -351,6 +487,7 @@ export class NodeHttpServerHandle {
       request,
       this.#maxBodyBytes,
       incoming.socket?.remoteAddress,
+      { scheme: this.#scheme },
     );
     return this.#handleUpgradePipeline(incoming, frameworkRequest, socket, head);
   }
@@ -449,11 +586,22 @@ export class NodeHttpServerHandle {
    */
   createFetchHandler(): NodeFetchCallback {
     return (request: Request, env?: NodeFetchEnv): Response | Promise<Response> => {
-      const frameworkRequest = mapWebRequestToFrameworkRequest(
-        request,
-        this.#maxBodyBytes,
-        env?.incoming?.socket?.remoteAddress,
-      );
+      // Served requests only: an in-process `fetch` (no `env`) owns its URL
+      // and has no connection to carry trailers.
+      const frameworkRequest =
+        env === undefined
+          ? mapWebRequestToFrameworkRequest(request, this.#maxBodyBytes)
+          : mapWebRequestToFrameworkRequest(
+              request,
+              this.#maxBodyBytes,
+              peerAddressOf(env.incoming),
+              {
+                scheme: this.#scheme,
+                responseTrailers:
+                  env.incoming?.httpVersion === '2.0' &&
+                  typeof env.outgoing?.addTrailers === 'function',
+              },
+            );
 
       if (!this.#handler) {
         return new Response('Handler not set', { status: 500 });
@@ -499,8 +647,23 @@ export class NodeHttpServerHandle {
     }
 
     const snapshot = frameworkResponse.snapshot();
-    if (env?.outgoing !== undefined && lacksNativeContentType(snapshot)) {
-      suppressDefaultContentType(env.outgoing);
+    const outgoing = env?.outgoing;
+    if (outgoing !== undefined && lacksNativeContentType(snapshot)) {
+      suppressDefaultContentType(outgoing);
+    }
+    // Trailers only where the request said they reach the client — an HTTP/2
+    // stream, whose node-server response is the one with `addTrailers`.
+    if (
+      snapshot.streaming &&
+      snapshot.trailers !== undefined &&
+      frameworkRequest.responseTrailers === true &&
+      outgoing?.addTrailers !== undefined
+    ) {
+      const addTrailers = outgoing.addTrailers.bind(outgoing);
+      return mapSnapshotToWebResponse(
+        snapshot,
+        streamWithTrailers(snapshot.body, snapshot.trailers, addTrailers),
+      );
     }
     return mapSnapshotToWebResponse(snapshot);
   }
@@ -542,10 +705,12 @@ export function isNodeHttpServerHandle(handle: ServerHandle): handle is NodeHttp
 export class NodeHttpAdapter implements IHttpAdapter {
   #host: NodeServeHost;
   #handle: NodeHttpServerHandle;
+  readonly #http2: true | Http2TlsOptions | undefined;
 
   constructor(host?: NodeServeHost, wsModule?: WsModuleLike, options?: HttpAdapterOptions) {
     this.#host = host ?? defaultNodeServeHost;
     this.#handle = new NodeHttpServerHandle(wsModule, options);
+    this.#http2 = options?.http2;
   }
 
   setHandler(handler: (request: IRequest) => IResponse | Promise<IResponse>): void {
@@ -566,6 +731,7 @@ export class NodeHttpAdapter implements IHttpAdapter {
       fetch: fetchHandler,
       port,
       ...(hostname !== undefined && { hostname }),
+      ...(this.#http2 !== undefined && { http2: this.#http2 }),
     });
     this.#handle.server = server;
     // WebSocket upgrades never reach the fetch callback on Node — they arrive

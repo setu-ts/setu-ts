@@ -129,6 +129,8 @@ class FrameworkRequest implements IRequest {
   readonly url: string;
   readonly path: string;
   readonly ip?: string;
+  // Always assigned, so h1 and h2 requests share one hidden class.
+  readonly responseTrailers: boolean;
 
   readonly #raw: Request;
   #body: Promise<Uint8Array> | undefined;
@@ -144,6 +146,7 @@ class FrameworkRequest implements IRequest {
     path: string,
     maxBodyBytes?: number,
     peerAddress?: string,
+    responseTrailers = false,
   ) {
     // The single-write guard over `user`, `tenant` and `locale` lives on this
     // class's prototype, installed by the first construction (idempotent after
@@ -157,6 +160,7 @@ class FrameworkRequest implements IRequest {
     this.url = url;
     this.path = path;
     this.#maxBodyBytes = maxBodyBytes;
+    this.responseTrailers = responseTrailers;
     const ip = normalizePeerAddress(peerAddress);
     if (ip !== undefined) this.ip = ip;
   }
@@ -438,6 +442,39 @@ export function extractPath(url: string): string {
 }
 
 /**
+ * What the adapter knows about the connection a request arrived on, and the
+ * request itself cannot be trusted to say (M139b §3.4–§3.5).
+ */
+export interface ListenerTransport {
+  /**
+   * The scheme of the listener — `https` only when the adapter terminated TLS.
+   * The request's own URL is rewritten to it: over cleartext HTTP/2 the scheme
+   * comes from the client's `:scheme`, and over HTTP/1.1 an absolute-form
+   * request line sets it, so either way a client could claim `https` on a
+   * plain connection (V12-51). Omitted, the URL is used as given — the
+   * Workers platform and in-process callers own theirs.
+   */
+  readonly scheme?: 'http' | 'https';
+  /** Whether the response to this request can carry trailers. */
+  readonly responseTrailers?: boolean;
+}
+
+/**
+ * Replaces a URL's scheme with the listener's, leaving authority, path and
+ * query untouched. The common case — the URL already carries the listener's
+ * scheme — is one `startsWith` and no allocation.
+ *
+ * @param url - An absolute request URL
+ * @param scheme - The listener's scheme
+ * @returns The URL under the listener's scheme
+ */
+export function withListenerScheme(url: string, scheme: 'http' | 'https'): string {
+  if (url.startsWith(scheme) && url.startsWith('://', scheme.length)) return url;
+  const separator = url.indexOf('://');
+  return separator === -1 ? url : `${scheme}${url.slice(separator)}`;
+}
+
+/**
  * Maps a web-standard `Request` to the framework's `IRequest`.
  *
  * Body access is memoized-lazy — see {@linkcode FrameworkRequest}, so the
@@ -453,20 +490,25 @@ export function extractPath(url: string): string {
  *   header can disable. `RuntimePlugin({ maxBodyBytes })` is what threads it
  *   here.
  * @param peerAddress - Optional socket peer supplied by the runtime host
+ * @param transport - What the adapter knows about the connection
  * @returns The framework request
  */
 export function mapWebRequestToFrameworkRequest(
   request: Request,
   maxBodyBytes?: number,
   peerAddress?: string,
+  transport?: ListenerTransport,
 ): IRequest {
+  const scheme = transport?.scheme;
+  const url = scheme === undefined ? request.url : withListenerScheme(request.url, scheme);
   return new FrameworkRequest(
     request,
     request.method.toUpperCase() as HttpMethod,
-    request.url,
-    extractPath(request.url),
+    url,
+    extractPath(url),
     maxBodyBytes,
     peerAddress,
+    transport?.responseTrailers === true,
   );
 }
 
@@ -534,9 +576,14 @@ const NULL_BODY_STATUSES: ReadonlySet<number> = new Set([204, 205, 304]);
  * leaking.
  *
  * @param snapshot - The response snapshot
+ * @param streamBody - A stream to send in place of a streaming snapshot's own
+ *   body — an adapter that wraps the body (to write trailers) passes it here
  * @returns A web-standard `Response`
  */
-export function mapSnapshotToWebResponse(snapshot: ResponseSnapshot): Response {
+export function mapSnapshotToWebResponse(
+  snapshot: ResponseSnapshot,
+  streamBody?: ReadableStream<Uint8Array>,
+): Response {
   const { status, body, streaming } = snapshot;
   // Consult the kernel's typed init protocol before public `headers`: reading
   // that live view materializes a framework Headers object, while the common
@@ -551,7 +598,7 @@ export function mapSnapshotToWebResponse(snapshot: ResponseSnapshot): Response {
     // the stream is already errored or locked, which must not replace a valid
     // response with a throw, so the rejection is swallowed.
     if (streaming && body !== null) {
-      void body.cancel().catch(() => {});
+      void (streamBody ?? body).cancel().catch(() => {});
     }
     return new Response(null, { status, headers });
   }
@@ -560,7 +607,7 @@ export function mapSnapshotToWebResponse(snapshot: ResponseSnapshot): Response {
     // Pass the ReadableStream straight through — the web fetch model pumps it
     // lazily on every platform (Node/Deno/Bun/Workers) with no buffer-then-send.
     // ReadableStream<Uint8Array> is a valid BodyInit, so no cast needed.
-    return new Response(body, { status, headers });
+    return new Response(streamBody ?? body, { status, headers });
   }
 
   // Buffered path — unchanged from M23.
