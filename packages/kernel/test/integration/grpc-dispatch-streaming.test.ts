@@ -149,7 +149,7 @@ describe('M139b §3.1 — RPC replies', () => {
     const app = await started(grpc);
     body.push('first');
     // Buffered, `dispatch` would wait for a body that is never closed.
-    const response = await within(app.dispatch(new Request(URL_BASE, { method: 'POST' })));
+    const response = await within(app.dispatch!(new Request(URL_BASE, { method: 'POST' })));
     const reader = response.body!.getReader();
     expect(decoder.decode((await within(reader.read())).value)).toBe('first');
     body.push('second');
@@ -198,7 +198,7 @@ describe('M139b §3.1 — RPC replies', () => {
       handleRpc: () => Promise.reject(new Error('must not dispatch')),
     });
     const app = await started(grpc);
-    const response = await app.dispatch(new Request(URL_BASE, { method: 'POST' }));
+    const response = await app.dispatch!(new Request(URL_BASE, { method: 'POST' }));
     expect(response.headers.get('grpc-status')).toBe('12');
     expect(response.headers.getSetCookie()).toEqual(['a=1', 'b=2']);
     expect(await response.text()).toBe('');
@@ -291,7 +291,7 @@ describe('M139b §3.2 — RPC request bodies', () => {
     const app = await started(echoFirstChunk(true));
     // The body never closes: buffering it would never resolve.
     const response = await within(
-      app.dispatch(
+      app.dispatch!(
         new Request(URL_BASE, {
           method: 'POST',
           body: body.stream,
@@ -305,7 +305,7 @@ describe('M139b §3.2 — RPC request bodies', () => {
   it('a non-streaming procedure is buffered', async () => {
     const grpc = echoFirstChunk(false);
     const app = await started(grpc);
-    const response = await app.dispatch(
+    const response = await app.dispatch!(
       new Request(URL_BASE, { method: 'POST', body: 'whole body' }),
     );
     expect(await response.text()).toBe('whole body');
@@ -320,7 +320,7 @@ describe('M139b §3.2 — RPC request bodies', () => {
       }),
     });
     const app = await started(grpc);
-    const response = await app.dispatch(new Request(URL_BASE, { method: 'POST', body: 'b' }));
+    const response = await app.dispatch!(new Request(URL_BASE, { method: 'POST', body: 'b' }));
     expect(await response.text()).toBe('b');
   });
 
@@ -339,7 +339,7 @@ describe('M139b §3.2 — RPC request bodies', () => {
     const grpc = echoFirstChunk(true);
     app.register(grpc);
     await app.start();
-    const response = await app.dispatch(
+    const response = await app.dispatch!(
       new Request(URL_BASE, { method: 'POST', body: 'already read' }),
     );
     expect(await response.text()).toBe('already read');
@@ -359,7 +359,7 @@ describe('M139b §3.2 — RPC request bodies', () => {
         }),
       );
       const controller = new AbortController();
-      await app.dispatch(
+      await app.dispatch!(
         new Request(URL_BASE, { method: 'POST', body: 'x', signal: controller.signal }),
       );
       expect(seenSignal!.aborted).toBe(false);

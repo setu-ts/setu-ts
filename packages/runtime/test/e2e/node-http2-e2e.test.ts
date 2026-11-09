@@ -200,7 +200,8 @@ describeNode('NodeHttpAdapter http2: { key, cert } (TLS)', () => {
     const { port } = await start(TLS);
     const body = await new Promise<string>((resolve, reject) => {
       const request = httpsRequest(
-        { host: 'localhost', port, path: '/f', ca: TLS.cert, ALPNProtocols: ['http/1.1'] },
+        // Node's https client offers no h2, so the server falls back to HTTP/1.1.
+        { host: 'localhost', port, path: '/f', ca: TLS.cert },
         (response) => {
           let text = '';
           response.on('data', (chunk: Uint8Array) => (text += new TextDecoder().decode(chunk)));

@@ -83,6 +83,7 @@ function buildStreamService(
   const runtime = createFakeConnectRuntime({ services: [definition] });
   buildConnectRouter({
     connectRuntime: runtime,
+    readMaxBytes: 4 * 1024 * 1024,
     basePath: '/grpc',
     reflection: false,
     health: false,

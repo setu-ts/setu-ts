@@ -109,7 +109,7 @@ function service(options: GrpcPluginOptions = {}, connect = runtime()): GrpcServ
     embeddedDescriptors: { healthBase64: btoa('h'), reflectionBase64: btoa('r') },
     options,
     healthService: undefined,
-    resolveLogger: undefined,
+    // resolveLogger omitted: no logging.
   });
 }
 
