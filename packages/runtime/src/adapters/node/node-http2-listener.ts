@@ -9,16 +9,22 @@
  * connection and hands it to an HTTP/2 server when they are the HTTP/2
  * client preface, and to an HTTP/1.1 server at the first byte that is not.
  *
- * Three measured facts shape it:
+ * Four measured facts shape it:
  *
- * - A `net.Socket` whose first bytes were read and `unshift`ed back cannot be
- *   re-emitted into `node:http2`: HTTP/2 reads the native handle, never the
- *   replayed bytes, and the client sees "the connection is draining". The
- *   HTTP/2 side therefore receives a JS `Duplex` that replays them; HTTP/1.1
- *   takes the socket itself.
- * - Node gives an HTTP/2 server fed a JS stream a wrapper socket with no peer,
- *   so the client address is recorded per session (from the synchronous
- *   `session` event) and stamped on each request under {@linkcode PEER_ADDRESS}.
+ * - On Node, the bytes read are `unshift`ed back and the socket ITSELF is
+ *   handed to either server, left paused for HTTP/2: Node's HTTP/2 session
+ *   reads a socket's buffered bytes on the tick after it takes the handle
+ *   (`setupHandle`, nodejs/node#35475), and a `resume()` first would emit
+ *   them to no listener. Measured under ghz, this hand-off costs nothing
+ *   (connect-node behind it 9.1k rps, plain h2c 9.1-9.4k).
+ * - Bun's `node:http2` does not read buffered bytes, so there the HTTP/2 side
+ *   receives a JS `Duplex` that replays them ({@linkcode replayingDuplex}).
+ *   That is slow on Node — every byte crosses a JS stream (1.5k rps against
+ *   6.1k for the same app over TLS) — which is why Node does not use it.
+ * - An HTTP/2 server fed a JS stream sees a wrapper socket with no peer, so on
+ *   the replay path the client address is recorded per session (from the
+ *   synchronous `session` event) and stamped on each request under
+ *   {@linkcode PEER_ADDRESS}. On the Node path the socket reports its own.
  * - A socket with no `error` listener crashes the process when its client
  *   hangs up mid-write (EPIPE on Node, "Protocol error" on Bun). Every socket
  *   and every replay stream gets one.
@@ -37,6 +43,7 @@ import { createServer as createHttp2Server, createSecureServer } from 'node:http
 import type { Http2ServerRequest, Http2ServerResponse, Http2Session } from 'node:http2';
 import { Duplex } from 'node:stream';
 
+import { detectRuntime } from '../../detector/runtime-detector.ts';
 import { PEER_ADDRESS } from './node-peer.ts';
 
 /**
@@ -106,6 +113,11 @@ export type SharedRequestListener = (
 export interface CleartextHttp2Options {
   /** Overrides {@linkcode PREFACE_TIMEOUT_MS}; tests only. */
   readonly prefaceTimeoutMs?: number;
+  /**
+   * Hands HTTP/2 connections over through {@linkcode replayingDuplex} rather
+   * than the socket itself. Defaults to `true` on Bun only; tests force both.
+   */
+  readonly replay?: boolean;
 }
 
 /**
@@ -218,6 +230,7 @@ export function createCleartextHttp2Server(
   options?: CleartextHttp2Options,
 ): CleartextHttp2Server {
   const timeoutMs = options?.prefaceTimeoutMs ?? PREFACE_TIMEOUT_MS;
+  const replay = options?.replay ?? detectRuntime() === 'bun';
   const http1 = createHttpServer(listener);
   const peers = new WeakMap<Http2Session, string | undefined>();
   // Set immediately around the synchronous `emit('connection')` below; the
@@ -253,6 +266,12 @@ export function createCleartextHttp2Server(
         socket.unshift(head);
         http1.emit('connection', socket);
         socket.resume();
+        return;
+      }
+      if (!replay) {
+        // Stays paused: the session reads the unshifted bytes next tick.
+        socket.unshift(head);
+        http2.emit('connection', socket);
         return;
       }
       pendingPeer = socket.remoteAddress;

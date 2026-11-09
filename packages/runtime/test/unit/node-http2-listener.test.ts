@@ -16,7 +16,10 @@ import {
   PREFACE_TIMEOUT_MS,
   replayingDuplex,
 } from '../../src/adapters/node/node-http2-listener.ts';
-import type { CleartextHttp2Server } from '../../src/adapters/node/node-http2-listener.ts';
+import type {
+  CleartextHttp2Options,
+  CleartextHttp2Server,
+} from '../../src/adapters/node/node-http2-listener.ts';
 import { PEER_ADDRESS, peerAddressOf } from '../../src/adapters/node/node-peer.ts';
 
 const PREFACE = 'PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n';
@@ -31,14 +34,18 @@ afterEach(() => {
   server = undefined;
 });
 
-/** Starts a listener answering `<httpVersion> <recorded peer>`. */
-async function start(prefaceTimeoutMs?: number): Promise<{ port: number }> {
-  server = createCleartextHttp2Server(
-    (incoming, outgoing) => {
-      outgoing.end(`${incoming.httpVersion} ${peerAddressOf(incoming as never) ?? 'none'}`);
-    },
-    prefaceTimeoutMs === undefined ? undefined : { prefaceTimeoutMs },
-  );
+/**
+ * Starts a listener answering `<httpVersion> <recorded peer> <socket's own peer>`:
+ * the second address is what `peerAddressOf` resolves, the third what the
+ * request's socket reports by itself.
+ */
+async function start(options?: CleartextHttp2Options): Promise<{ port: number }> {
+  server = createCleartextHttp2Server((incoming, outgoing) => {
+    outgoing.end(
+      `${incoming.httpVersion} ${peerAddressOf(incoming as never) ?? 'none'} ` +
+        `${incoming.socket?.remoteAddress ?? 'none'}`,
+    );
+  }, options);
   const net = server.net;
   await new Promise<void>((resolve) => net.listen(0, '127.0.0.1', resolve));
   return { port: (server.address() as AddressInfo).port };
@@ -101,38 +108,16 @@ describe('createCleartextHttp2Server', () => {
     expect(server.address()).toBeNull();
   });
 
-  it('serves HTTP/1.1 and h2c on one port, recording the h2c peer', async () => {
-    const { port } = await start();
-    const h1 = await (await fetch(`http://127.0.0.1:${port}/`)).text();
-    expect(h1).toBe('1.1 127.0.0.1');
-    expect(await h2Get(port)).toMatch(/^2\.0 (::ffff:)?127\.0\.0\.1$/);
-  });
-
-  it('routes a preface that arrives split across chunks to HTTP/2', async () => {
-    const { port } = await start();
-    const socket = await raw(port);
-    const received = new Promise<Uint8Array>((resolve) =>
-      socket.once('data', (chunk: Uint8Array) => resolve(chunk)),
-    );
-    socket.write(bytes(PREFACE.slice(0, 7)));
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    socket.write(new Uint8Array([...bytes(PREFACE.slice(7)), ...EMPTY_SETTINGS]));
-    const first = await received;
-    // The server's first frame is its own SETTINGS (type 0x04).
-    expect(first[3]).toBe(4);
-    socket.destroy();
-  });
-
   it('routes at the first byte that differs from the preface', async () => {
     const { port } = await start();
     const socket = await raw(port);
     const done = drain(socket, performance.now());
     socket.end('GET /x HTTP/1.1\r\nHost: a\r\nConnection: close\r\n\r\n');
-    expect((await done).text).toMatch(/^HTTP\/1\.1 200[\s\S]*1\.1 127\.0\.0\.1$/);
+    expect((await done).text).toMatch(/^HTTP\/1\.1 200[\s\S]*1\.1 127\.0\.0\.1 127\.0\.0\.1$/);
   });
 
   it('closes a connection that never finishes the preface, at the bound', async () => {
-    const { port } = await start(150);
+    const { port } = await start({ prefaceTimeoutMs: 150 });
     const socket = await raw(port);
     const started = performance.now();
     const done = drain(socket, started);
@@ -145,23 +130,6 @@ describe('createCleartextHttp2Server', () => {
 
   it('keeps the default bound at 10 s', () => {
     expect(PREFACE_TIMEOUT_MS).toBe(10_000);
-  });
-
-  it('survives clients that vanish before and after routing', async () => {
-    const { port } = await start();
-    const early = await raw(port);
-    early.write('P');
-    early.destroy();
-
-    const session = http2Connect(`http://127.0.0.1:${port}`);
-    session.on('error', () => undefined);
-    const stream = session.request({ ':path': '/' });
-    stream.on('error', () => undefined);
-    session.destroy();
-
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(await (await fetch(`http://127.0.0.1:${port}/`)).text()).toBe('1.1 127.0.0.1');
-    expect(await h2Get(port)).toMatch(/^2\.0 /);
   });
 
   it('forwards upgrade to the HTTP/1.1 side', async () => {
@@ -185,6 +153,59 @@ describe('createCleartextHttp2Server', () => {
     server!.close();
     server = undefined;
     await expect(raw(port)).rejects.toThrow();
+  });
+});
+
+describe.each([false, true])('the HTTP/2 hand-off, replay %s', (replay) => {
+  it('serves HTTP/1.1 and h2c on one port, with the real h2c peer', async () => {
+    const { port } = await start({ replay });
+    const h1 = await (await fetch(`http://127.0.0.1:${port}/`)).text();
+    expect(h1).toBe('1.1 127.0.0.1 127.0.0.1');
+    const [version, recorded, own] = (await h2Get(port)).split(' ');
+    expect(version).toBe('2.0');
+    expect(recorded).toMatch(/^(::ffff:)?127\.0\.0\.1$/);
+    // The socket itself is handed over without replay, so it knows its peer;
+    // the replay stream's wrapper socket does not, hence the recorded one.
+    expect(own === 'none').toBe(replay);
+  });
+
+  it('routes a preface that arrives split across chunks to HTTP/2', async () => {
+    const { port } = await start({ replay });
+    const socket = await raw(port);
+    const received = new Promise<Uint8Array>((resolve) =>
+      socket.once('data', (chunk: Uint8Array) => resolve(chunk)),
+    );
+    socket.write(bytes(PREFACE.slice(0, 7)));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    socket.write(new Uint8Array([...bytes(PREFACE.slice(7)), ...EMPTY_SETTINGS]));
+    const first = await received;
+    // The server's first frame is its own SETTINGS (type 0x04).
+    expect(first[3]).toBe(4);
+    socket.destroy();
+  });
+
+  it('survives clients that vanish before and after routing', async () => {
+    const { port } = await start({ replay });
+    const early = await raw(port);
+    early.write('P');
+    early.destroy();
+
+    const session = http2Connect(`http://127.0.0.1:${port}`);
+    session.on('error', () => undefined);
+    const stream = session.request({ ':path': '/' });
+    stream.on('error', () => undefined);
+    session.destroy();
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(await (await fetch(`http://127.0.0.1:${port}/`)).text()).toBe('1.1 127.0.0.1 127.0.0.1');
+    expect(await h2Get(port)).toMatch(/^2\.0 /);
+  });
+});
+
+describe('the default HTTP/2 hand-off', () => {
+  it('hands Node the socket itself, not the replay stream', async () => {
+    const { port } = await start();
+    expect((await h2Get(port)).split(' ')[2]).toMatch(/^(::ffff:)?127\.0\.0\.1$/);
   });
 });
 
