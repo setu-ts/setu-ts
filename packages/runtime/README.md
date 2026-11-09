@@ -155,8 +155,10 @@ shown which protocol it speaks within 10 s is closed. With `{ key, cert }` (PEM)
 | Workers | ignored: the edge terminates HTTP/2 and HTTP/3           | ignored                |
 
 On Bun the option swaps `Bun.serve` for the Node adapter, so WebSockets there need the optional `ws`
-peer, as on Node. `close()` sends `GOAWAY` to every open HTTP/2 session, so a client that keeps its
-session open cannot hold the listener past shutdown.
+peer, as on Node. As on Node, `@hono/node-server` then installs its own `Request` and `Response`
+globals, which a native `Bun.serve` server started later in the same process does not accept: run
+one listener kind per process. `close()` sends `GOAWAY` to every open HTTP/2 session, so a client
+that keeps its session open cannot hold the listener past shutdown.
 
 An HTTP/2 request on the Node adapter carries `IRequest.responseTrailers: true`, and a streamed
 response's trailers (`IResponse.stream(body, { trailers })`) are written after its last chunk. That
