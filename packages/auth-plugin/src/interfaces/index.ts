@@ -719,6 +719,8 @@ export interface RequireAuthOptions {
   /**
    * Require the credential source recorded by this plugin's authentication.
    * Default 'any'. An unset source fails closed for 'cookie' and 'header'.
+   * A strategy must declare its `credential` to satisfy either restriction;
+   * an undeclared strategy can satisfy only 'any'.
    * Applications replacing principals must update CREDENTIAL_SOURCE_STATE_KEY
    * too, or use 'any'. Header strategies take precedence over session cookies.
    * @since 0.13.0

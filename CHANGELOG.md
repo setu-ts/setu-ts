@@ -17,11 +17,13 @@ All notable changes to this project are documented here. The format follows
   token minted `envelopes:read` for an admin passed every admin route. Such a token reaches routes
   guarded by `requireScopes`, which is unchanged; sessions and tokens with no scope claim are
   unaffected. Authorization diagnostics record the refusal as the new `AuthorizationDecisionReason`
-  `token-confined`; scoped RBAC reports it with the same name. **Migration:** guard token routes
-  with `requireScopes`, or sign browsers in with a session. An application whose identity provider
-  stamps every access token with scopes (`openid profile`) and authorizes those tokens by role sets
-  `confineScopedTokens: false` to keep the 0.12 behaviour. `requirePolicy` is not capped. A consumer
-  switching exhaustively on `AuthorizationDecisionReason` needs a `token-confined` case.
+  `token-confined`; scoped RBAC reports it with the same name. A `scope` or `scp` claim that is
+  present but malformed counts as an empty scope list, so it confines rather than escapes.
+  **Migration:** guard token routes with `requireScopes`, or sign browsers in with a session. An
+  application whose identity provider stamps every access token with scopes (`openid profile`) and
+  authorizes those tokens by role sets `confineScopedTokens: false` to keep the 0.12 behaviour.
+  `requirePolicy` is not capped. A consumer switching exhaustively on `AuthorizationDecisionReason`
+  needs a `token-confined` case.
 - **BREAKING — a JWT without a subject is refused (M139a, `@setu-ts/auth-plugin`, V12-18).** The JWT
   strategy refuses a verified token whose `sub` is missing, not a string or empty. Before, every
   such token authenticated as one shared principal, `'unknown'`, so grants, idempotency records and
@@ -35,7 +37,8 @@ All notable changes to this project are documented here. The format follows
   authenticated with that kind of credential (`'any'` is the default). A mismatch, or a request
   whose credential kind was never recorded, is answered as unauthenticated: `401`, or the
   `signInPage` redirect. Header strategies run first, so a request carrying a bearer token and a
-  session cookie counts as `'header'`.
+  session cookie counts as `'header'`; a caller-supplied strategy that declares no `credential`
+  satisfies only `'any'`.
 - **Tokens bound to the tenant (M139a, `@setu-ts/auth-plugin`, V12-19).** `jwt.tenantClaim` and a
   per-issuer `tenantClaim` name the claim that carries the tenant id. When set, a token whose
   verified claim differs from `request.tenant.id` is refused, and so is a token carrying the claim

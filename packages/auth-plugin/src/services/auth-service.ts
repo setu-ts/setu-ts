@@ -29,20 +29,21 @@ export class AuthService implements IAuthService {
   }
 
   /**
-   * The one strategy loop, returning the first match WITH the credential source of the
-   * strategy that produced it (`strategy.credential`, absent treated as `'cookie'` —
-   * fail closed). Internal to the plugin: `authMiddleware` records the source under
+   * The one strategy loop, returning the first match with only the credential source
+   * declared by that strategy. An undeclared `credential` stays `undefined`: a strategy
+   * must declare it to satisfy a `requireAuth` credential restriction. Internal to the
+   * plugin: `authMiddleware` records a declared source under
    * `CREDENTIAL_SOURCE_STATE_KEY` so form CSRF can exempt only header-credential
    * authentication; a replaced `IAuthService` without this method simply records no
    * source and every request stays verified.
    */
   async authenticateWithSource(
     request: IRequest,
-  ): Promise<{ principal: IPrincipal; credential: 'header' | 'cookie' } | null> {
+  ): Promise<{ principal: IPrincipal; credential: 'header' | 'cookie' | undefined } | null> {
     for (const strategy of this.strategies) {
       const principal = await strategy.authenticate(request);
       if (principal !== null) {
-        return { principal, credential: strategy.credential ?? 'cookie' };
+        return { principal, credential: strategy.credential };
       }
     }
     return null;

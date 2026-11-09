@@ -89,7 +89,11 @@ app.router.post('/auth/login', async (ctx) => {
   const jwt = ctx.services.get<IJwtService>('jwt');
   const { username, password } = await ctx.request.json<{ username: string; password: string }>();
 
-  const principal = await auth.verifyCredentials({ identifier: username, secret: password });
+  // Pass the request: under multi-tenancy, local.verify scopes the lookup by request.tenant.
+  const principal = await auth.verifyCredentials(
+    { identifier: username, secret: password },
+    ctx.request,
+  );
   if (!principal) {
     return ctx.response.status(401).json({ error: 'Invalid credentials' });
   }
@@ -186,7 +190,9 @@ its subject holds. Decorated `@Roles`/`@Permissions` routes and direct `hasRole`
 answer, because the cap lives in the authorization services. Such a token reaches only routes
 guarded by `requireScopes`, so issuing a narrow token cannot widen it to its subject's whole role. A
 session principal and a token with no scope claim are unaffected. Authorization diagnostics record
-the refusal as `token-confined`.
+the refusal as `token-confined`. A `scope` or `scp` claim that is present but malformed (a
+JSON-array `scope`, a number, an `scp` array with a non-string entry) counts as an empty scope list:
+the token is confined and satisfies no `requireScopes`, rather than passing as an unscoped token.
 
 This is the default from 0.13.0 (`confineScopedTokens: true`). An application whose identity
 provider stamps every access token with scopes such as `openid profile`, and that authorizes those
@@ -717,9 +723,10 @@ guard is built. A request authenticated by the other kind is treated as signed o
 recorded. Header strategies run before session strategies, so a request carrying both a bearer token
 and a session cookie counts as `'header'`, and a `'cookie'` route refuses it. When the plugin
 recorded nothing — a replaced `IAuthService`, or application middleware that set the principal —
-both `'cookie'` and `'header'` refuse; middleware that swaps the principal must also set
-`CREDENTIAL_SOURCE_STATE_KEY`, or the route uses `'any'`. `delegation` is checked after the
-credential.
+both `'cookie'` and `'header'` refuse. A strategy you pass in `strategies` counts only if it
+declares `credential: 'header'` or `'cookie'`; one that declares neither satisfies only `'any'`.
+Middleware that swaps the principal must also set `CREDENTIAL_SOURCE_STATE_KEY`, or the route uses
+`'any'`. `delegation` is checked after the credential.
 
 ### Binding tokens to the tenant
 
@@ -866,7 +873,11 @@ import { safeReturnTo } from '@setu-ts/auth-plugin';
 app.router.post('/login', async (ctx) => {
   const { username, password } = await ctx.request.json<{ username: string; password: string }>();
   const auth = ctx.services.get<IAuthService>(CAPABILITIES.AUTH);
-  const principal = await auth.verifyCredentials({ identifier: username, secret: password });
+  // Pass the request: under multi-tenancy, local.verify scopes the lookup by request.tenant.
+  const principal = await auth.verifyCredentials(
+    { identifier: username, secret: password },
+    ctx.request,
+  );
   if (!principal) {
     return ctx.response.status(401).json({ error: 'Invalid credentials' });
   }

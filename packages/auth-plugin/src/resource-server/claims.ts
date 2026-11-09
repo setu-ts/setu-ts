@@ -35,21 +35,25 @@ function unique(values: readonly string[]): readonly string[] {
  *
  * `scope` wins when present: it alone is read, as a space-delimited string
  * (RFC 9068 §2.2.3), and `scp` is ignored. Otherwise `scp` is read as a string
- * split the same way, or as an array of strings. Any other shape — including a
- * non-string entry in the `scp` array — yields `undefined` rather than a
- * partial list, so a malformed claim can never grant access to a subset of the
- * scopes the route requires.
+ * split the same way, or as an array of strings. A present but malformed claim
+ * yields `[]`: a non-string `scope`, or an `scp` that is neither a string nor an
+ * all-string array, grants no scopes and keeps the token confined. `undefined`
+ * is reserved for claims with neither a `scope` key nor an `scp` key. No partial
+ * list is returned for a malformed array.
  *
  * @param claims - Verified token claims
- * @returns The scopes, deduplicated and in claim order, or `undefined` when
- *   the claim is absent or malformed
+ * @returns The scopes, deduplicated and in claim order; `[]` for a present but
+ *   malformed claim, or `undefined` only when both scope claims are absent
  */
 export function parseScopeClaim(
   claims: Readonly<Record<string, unknown>>,
 ): readonly string[] | undefined {
   if ('scope' in claims) {
     const scope = claims.scope;
-    return typeof scope === 'string' ? unique(splitScopeString(scope)) : undefined;
+    return typeof scope === 'string' ? unique(splitScopeString(scope)) : [];
+  }
+  if (!('scp' in claims)) {
+    return undefined;
   }
   const scp = claims.scp;
   if (typeof scp === 'string') {
@@ -58,7 +62,7 @@ export function parseScopeClaim(
   if (Array.isArray(scp) && scp.every((entry): entry is string => typeof entry === 'string')) {
     return unique(scp);
   }
-  return undefined;
+  return [];
 }
 
 /** The `act` parse outcome: absent, malformed, or a usable actor. */

@@ -178,7 +178,7 @@ describe('JwtStrategy', () => {
     expect(principal?.claims?.scope).toBe('tools:read tools:list');
   });
 
-  it('fills scopes from scp and refuses a malformed one', async () => {
+  it('audit F1 keeps malformed scp authenticated with empty scopes', async () => {
     const token = await jwt.sign({ sub: 'user123', scp: ['tools:read'] });
     const principal = await strategy.authenticate(
       createRequest({ authorization: `Bearer ${token}` }),
@@ -190,7 +190,7 @@ describe('JwtStrategy', () => {
       createRequest({ authorization: `Bearer ${malformed}` }),
     );
     expect(noScopes).not.toBeNull();
-    expect(noScopes?.scopes).toBeUndefined();
+    expect(noScopes?.scopes).toEqual([]);
   });
 
   it('fills the actor from the outermost act claim', async () => {

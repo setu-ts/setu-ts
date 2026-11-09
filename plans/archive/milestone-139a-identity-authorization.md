@@ -14,18 +14,18 @@ id (V12-11). Form CSRF answers an MCP client's first anonymous call with `403`, 
 receives the `401` discovery challenge (V12-35). And `http://<name>.localhost` is refused as a
 non-loopback URL (V12-34).
 
-The milestone ships in a **patch** (`0.12.x`). Every behaviour change that could break a caller is
-opt-in (`requireAuth({ credentials })`, `confineScopedTokens`, `jwt.tenantClaim`, the issuer
-`tenantClaim`). The two fixes that are not opt-in only refuse defective input: a JWT with no usable
-`sub` (RFC 9068 §2.2 makes `sub` REQUIRED), and widening loopback to `*.localhost`. The default flip
-of `confineScopedTokens` is recorded for `0.13.0` (§9).
+The milestone ships in the **minor `0.13.0`** (maintainer, 2026-11-09), which may carry breaking
+changes with CHANGELOG migration text. Two changes break a caller, and both are BREAKING entries:
+`confineScopedTokens` defaults to `true` (§3.4), and a JWT with no usable `sub` is refused (§3.1).
+`requireAuth({ credentials })`, `jwt.tenantClaim` and the issuer `tenantClaim` are opt-in. Widening
+loopback to `*.localhost` only accepts more.
 
 **Maintainer decisions (2026-11-09).** Each was put to the maintainer with framework evidence, and
 the recommended option was chosen in every case:
 
 | Row    | Decision                                                                                                          | Compared with                                                                                                                                                                                                                                                          |
 | ------ | ----------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| V12-37 | Per-route `requireAuth({ credentials })`, plus an opt-in `confineScopedTokens` cap; default in `0.13.0`           | ASP.NET `[Authorize(AuthenticationSchemes=…)]` (per-endpoint scheme); DRF per-view `authentication_classes`; Sanctum and Passport give a token the user's full gates and leave confinement to the app; Spring Resource Server caps authorities at `SCOPE_*` by default |
+| V12-37 | Per-route `requireAuth({ credentials })`, plus a `confineScopedTokens` cap, default `true` in `0.13.0`            | ASP.NET `[Authorize(AuthenticationSchemes=…)]` (per-endpoint scheme); DRF per-view `authentication_classes`; Sanctum and Passport give a token the user's full gates and leave confinement to the app; Spring Resource Server caps authorities at `SCOPE_*` by default |
 | V12-19 | Opt-in `jwt.tenantClaim` and per-issuer `tenantClaim`; `local.verify` and `verifyCredentials` receive the request | Entra ("check `tid` matches"); Auth0 Organizations (an unvalidatable `org_id` makes the token invalid); Spring multitenancy ships no tenant comparison; Django `authenticate(request, **credentials)`                                                                  |
 | V12-35 | mcp-plugin marks its own POST path CSRF-exempt through a `common` state key                                       | ASP.NET `.DisableAntiforgery()` per bearer endpoint; MCP 2025-06-18 authorization requires `401` + `WWW-Authenticate` for a request without a token                                                                                                                    |
 
@@ -43,8 +43,6 @@ Decided without a question, on the evidence:
   and `CHANGELOG.md` text for every changed surface; the full-stack template's login; the status
   flip.
 - **NOT this milestone:**
-  - Making `confineScopedTokens` the default. That is breaking and ships in `0.13.0` with M139b and
-    M139g (§9).
   - OpenAPI security derived from `requireAuth({ credentials })`. It belongs to M139e's docs batch
     and its follow-up, because `RouteSecurityMetadata` has no credential member today.
   - V12-36, the quota read API. It is M139c.
@@ -90,10 +88,9 @@ Decided without a question, on the evidence:
 - **Why:** RFC 9068 §2.2 makes `sub` REQUIRED. A shared `'unknown'` id merges every such caller's
   grants, idempotency records and ownership. `null` means anonymous, as for any other invalid token,
   so guarded routes answer `401`.
-- **Versioning:** this is the one non-opt-in refusal in a patch, and it is deliberate. An app that
-  mints service tokens without `sub` stops authenticating them. The CHANGELOG records it under
-  **Security**, not BREAKING, with migration text: put the client id in `sub` (RFC 9068 §2.2 does
-  this for client-credentials tokens). The PR description names it for the maintainer.
+- **Versioning:** an app that mints service tokens without `sub` stops authenticating them. The
+  CHANGELOG records it as **BREAKING** in `0.13.0`, with migration text: put the client id in `sub`
+  (RFC 9068 §2.2 does this for client-credentials tokens).
 - **Test home:** `test/unit/jwt-strategy.test.ts`: a table with `sub` missing, `42`, `''`, `null`
   and `['a']`, each giving `null`, and a `sub: 'u1'` control giving the principal.
 
@@ -113,8 +110,9 @@ Decided without a question, on the evidence:
   match. The check reads only the verified payload, because the multi-tenancy `jwt` resolver reads
   an **unverified** claim. Accepting an unbound token on a tenant-less request keeps platform hosts
   working. Refusing a bound one there closes the case where a tenant admin's token reaches platform
-  routes with its `admin` role. It ships opt-in because the versioning policy forbids a breaking
-  change in a patch.
+  routes with its `admin` role. It stays opt-in in `0.13.0` (maintainer, 2026-11-09): there is no
+  standard claim name (Entra `tid`, Auth0 `org_id`), so a default name would refuse valid tokens
+  from most issuers.
 - **Test home:** `jwt-strategy.test.ts` and `issuer-strategy.test.ts`, each a table: a matching
   claim gives the principal; a different, missing or non-string claim gives `null`; no
   `request.tenant` gives the principal for an unbound token and `null` for a bound one; no
@@ -142,7 +140,7 @@ Decided without a question, on the evidence:
   integration test in `tenant-binding.test.ts` has a `verify` that scopes by tenant: the same email
   and password sign in on `acme` and get `null` on `globex`.
 
-### 3.4 V12-37 — per-route credential restriction and an opt-in scope cap
+### 3.4 V12-37 — per-route credential restriction and a default-on scope cap
 
 - **Decision (route):** `RequireAuthOptions.credentials?: 'any' | 'cookie' | 'header'`, default
   `'any'`. Any other value is refused when the guard is built (`AuthPluginConfigurationError`). With
@@ -151,9 +149,9 @@ Decided without a question, on the evidence:
   request as unauthenticated: `401`, or the `signInPage` redirect for a navigation. An unset source
   (a replaced `IAuthService`) never matches, so the check fails closed. `delegation` is checked
   after the credential.
-- **Decision (cap):** add `AuthPluginOptions.confineScopedTokens?: boolean`, default `false`. When
-  `true`, a principal whose `scopes` is an array is refused by the following, with `scopes` alone
-  satisfying none of them:
+- **Decision (cap):** add `AuthPluginOptions.confineScopedTokens?: boolean`, default **`true`**
+  (maintainer, 2026-11-09). When on, a principal whose `scopes` is an array is refused by the
+  following, with `scopes` alone satisfying none of them:
   - **RBAC:** `RbacService.hasRole`, `hasPermission`, `hasAnyRole` and `hasAllPermissions` return
     `false`. This covers the four guards and DecoratorPlugin's `@Roles` / `@Permissions`.
   - **Scoped RBAC:** `ScopedEvaluator.allows` returns `false` with a new `DenyReason`,
@@ -167,8 +165,8 @@ Decided without a question, on the evidence:
 - **Why:** the route option is the ASP.NET and DRF mechanism. The cap gives Spring's guarantee — a
   delegated token cannot widen to its subject's role — without taking roles away from a first-party
   token that carries no `scope` claim. Putting the cap in the two services, not the guards, gives
-  one implementation for every entry point (guards, decorators, programmatic `hasRole`). It is
-  opt-in for the patch; the default flips in `0.13.0` (§9).
+  one implementation for every entry point (guards, decorators, programmatic `hasRole`). It is on by
+  default because `0.13.0` is a minor; `confineScopedTokens: false` restores the old behaviour.
 - **Test home:** `guards.test.ts` holds a table of every `credentials` value against source
   `'header'`, `'cookie'` and unset, plus the refusal of `'bearer'`. A test in
   `require-auth-sign-in-page.test.ts` shows a bearer request on a `credentials: 'cookie'` page being
@@ -176,10 +174,10 @@ Decided without a question, on the evidence:
   off, `scopes` `undefined`, `[]` or `['x']`. The integration test
   `test/integration/scoped-token-confinement.test.ts` is the V12-37 reproduction: an admin token
   minted with `scope: 'envelopes:read'` gets `403` from a `requireScopedPermission` and a
-  `requireRole('admin')` route with the cap on and `200` with it off. It gets `200` on a
-  `requireScopes('envelopes:read')` route with the cap on or off, and a session-signed-in admin
-  keeps `200` with the cap on. The same file also covers a decorated `@Roles('admin')` route — the
-  two entry points under the non-default configuration.
+  `requireRole('admin')` route with the option omitted (the default) and with `true`, and `200` with
+  `false`. It gets `200` on a `requireScopes('envelopes:read')` route with the cap on or off, and a
+  session-signed-in admin keeps `200` with the cap on. The same file also covers a decorated
+  `@Roles('admin')` route — the two entry points under the non-default configuration.
 
 ### 3.5 V12-11 — the template login regenerates the session
 
@@ -275,6 +273,9 @@ parameter, and `LocalOptions.verify` an optional third. A two-parameter implemen
 satisfies both. `AuthorizationDecisionReason` widens an output union by `'token-confined'`; a
 consumer switching on it exhaustively without a default needs a case. That is recorded as a
 CHANGELOG note, not a BREAKING entry, following the precedent of the M98 reason widenings.
+**Breaking for callers** (behaviour, ships in minor 0.13.0): `confineScopedTokens` defaults to
+`true`, and a JWT without a usable `sub` is refused. Each is a BREAKING CHANGELOG entry with
+migration text.
 
 | Exported symbol                                                    | Kind               | Consumer / real code path that READS it                                                                                   |
 | ------------------------------------------------------------------ | ------------------ | ------------------------------------------------------------------------------------------------------------------------- |
@@ -292,7 +293,7 @@ CHANGELOG note, not a BREAKING entry, following the precedent of the M98 reason 
 | Option                         | Consumer                         | Behavior (per implementation)                                                                                                                                                                                                                                  |
 | ------------------------------ | -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `requireAuth({ credentials })` | `guards/index.ts` `requireAuth`  | `'any'` (default) keeps today's behaviour. `'cookie'` and `'header'` admit only a principal whose recorded credential source matches; a mismatch or an unset source gives `401` (or the sign-in redirect). Any other value is refused when the guard is built. |
-| `confineScopedTokens`          | `RbacService`; `ScopedEvaluator` | `false` (default) keeps today's behaviour. `true` makes a principal with array `scopes` fail every role, permission and scoped check. `requireScopes` and `requirePolicy` are unaffected. A non-boolean is refused at registration.                            |
+| `confineScopedTokens`          | `RbacService`; `ScopedEvaluator` | `true` (default) makes a principal with array `scopes` fail every role, permission and scoped check. `false` keeps the `0.12` behaviour. `requireScopes` and `requirePolicy` are unaffected. A non-boolean is refused at registration.                         |
 | `jwt.tenantClaim`              | `JwtStrategy`                    | Unset: no comparison. Set: when `request.tenant` exists, the verified claim must be a string equal to `tenant.id`, or the token gives `null`. `''` or a non-string is refused at registration.                                                                 |
 | `issuers[].tenantClaim`        | `IssuerStrategy`                 | Same rule as `jwt.tenantClaim`, on `outcome.claims` before `toPrincipal`. Validated in `compileIssuers`.                                                                                                                                                       |
 
@@ -319,7 +320,7 @@ CHANGELOG note, not a BREAKING entry, following the precedent of the M98 reason 
 | `packages/auth-plugin/src/scoped/scoped-policy.ts`, `scoped/model.ts`, `scoped/options.ts` | The cap in `ScopedEvaluator`, the `'token-confined'` `DenyReason`, and the compiled flag.                                                                                                                                                                                                                                                                                                                                                                                             |
 | `packages/auth-plugin/src/services/auth-service.ts`                                        | Forward `request` from `verifyCredentials` to `LocalStrategy.verify`.                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `packages/auth-plugin/src/plugin/auth-plugin.ts`                                           | Validate `confineScopedTokens` and `jwt.tenantClaim`, and pass them on.                                                                                                                                                                                                                                                                                                                                                                                                               |
-| `packages/auth-plugin/src/interfaces/index.ts`                                             | The option types and the `LocalOptions.verify` signature, with JSDoc carrying `@since` of the next patch.                                                                                                                                                                                                                                                                                                                                                                             |
+| `packages/auth-plugin/src/interfaces/index.ts`                                             | The option types and the `LocalOptions.verify` signature, with JSDoc carrying `@since 0.13.0` on new members only.                                                                                                                                                                                                                                                                                                                                                                    |
 | `packages/session-plugin/src/csrf/exclude.ts`                                              | Honour `CSRF_EXEMPT_STATE_KEY`; rename `BEARER_EXEMPT_STATE_KEY` to `NO_COMMIT_STATE_KEY`.                                                                                                                                                                                                                                                                                                                                                                                            |
 | `packages/session-plugin/src/middleware/session-middleware.ts`                             | Read the renamed key.                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `packages/mcp-plugin/src/plugin/mcp-plugin.ts`                                             | Register the `mcp-csrf-exempt` middleware.                                                                                                                                                                                                                                                                                                                                                                                                                                            |
@@ -370,7 +371,7 @@ pnpm test:coverage common auth-plugin session-plugin mcp-plugin cli   # per-file
 pnpm run test:deno-lane
 pnpm run ci:local            # on the final commit (cli shard boots scaffolds)
 pnpm run release:publish --dry-run
-pnpm run release:verify <next patch>
+pnpm run release:verify <current tree version>
 ```
 
 The PR also needs a **committed-tree security audit** (ROADMAP: M139a is security-audited). It
@@ -457,9 +458,8 @@ Completed 2026-11-09, before implementation, against the source cited in §1.
   request.** That is the intended fail-closed behaviour. The JSDoc and README say so, and a test
   pins it.
 - **`confineScopedTokens` on an app whose OIDC access tokens carry `scope: 'openid profile'` takes
-  roles away from those users.** The option is opt-in in this patch, and the README names the case
-  and the remedy: map scopes to `requireScopes` routes, or use a session. The `0.13.0` default flip
-  must carry the same note in its BREAKING entry.
+  roles away from those users.** The README and the BREAKING entry name the case and the remedy: map
+  scopes to `requireScopes` routes, use a session, or set `confineScopedTokens: false`.
 - **Renaming the internal session-plugin key misses a reader.** Grep both names before the rename
   lands; the session-middleware test pins the no-commit behaviour.
 - **The MCP marker's path comparison drifts from the route's path.** Both read `resolved.path`, and
@@ -467,9 +467,6 @@ Completed 2026-11-09, before implementation, against the source cited in §1.
 
 ## 9. Out of scope
 
-- **`confineScopedTokens` as the default.** It is breaking, so it ships in `0.13.0`. This PR adds a
-  line to the ROADMAP's M139 sequence paragraph that names it as part of the `0.13.0` batch with
-  M139b and M139g.
 - **`RouteSecurityMetadata` naming the credential restriction for OpenAPI.** It belongs to M139e or
   a later docs/contract letter. Today `requireAuth({ credentials })` documents a route as
   authenticated without saying which scheme.

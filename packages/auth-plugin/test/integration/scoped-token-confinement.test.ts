@@ -103,3 +103,46 @@ describe('M139a scoped token confinement through public entry points', () => {
     }
   });
 });
+
+describe('audit F1 malformed scopes remain confined', () => {
+  it.each([{ scope: ['envelopes:read'] }, { scope: 42 }, { scp: ['envelopes:read', 1] }])(
+    'authenticates but refuses role and scope access for %j',
+    async (claims) => {
+      const app = createApplication({
+        plugins: [
+          RuntimePlugin(),
+          AuthPlugin({
+            jwt: { secret: 'audit-f1-secret' },
+            rbac: { roles: { admin: { permissions: ['*'] } } },
+          }),
+        ],
+      });
+      app.router.get('/authenticated', {
+        middleware: [requireAuth()],
+        handler: (ctx) => ctx.response.json({ id: ctx.request.user?.id }),
+      });
+      app.router.get('/role', {
+        middleware: [requireRole('admin')],
+        handler: (ctx) => ctx.response.json({ reached: true }),
+      });
+      app.router.get('/scope', {
+        middleware: [requireScopes('envelopes:read')],
+        handler: (ctx) => ctx.response.json({ reached: true }),
+      });
+      await app.start();
+      try {
+        const token = await app.services
+          .get<IJwtService>(CAPABILITIES.JWT)
+          .sign({ sub: 'admin', roles: ['admin'], ...claims });
+        const headers = { authorization: `Bearer ${token}` };
+        const authenticated = await app.inject({ method: 'GET', url: '/authenticated', headers });
+        expect(authenticated.statusCode).toBe(200);
+        expect(authenticated.json()).toEqual({ id: 'admin' });
+        expect((await app.inject({ method: 'GET', url: '/scope', headers })).statusCode).toBe(403);
+        expect((await app.inject({ method: 'GET', url: '/role', headers })).statusCode).toBe(403);
+      } finally {
+        await app.stop();
+      }
+    },
+  );
+});

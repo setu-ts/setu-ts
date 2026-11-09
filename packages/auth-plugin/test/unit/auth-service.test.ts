@@ -43,7 +43,7 @@ describe('AuthService', () => {
       expect(result).toEqual({ principal, credential: 'cookie' });
     });
 
-    it('treats a strategy without a credential as cookie (fail closed)', async () => {
+    it('audit F2 reports an undeclared credential as undefined', async () => {
       const principal: IPrincipal = { id: 'p3' };
       const strategies: IAuthStrategy[] = [
         { name: 's1', authenticate: () => Promise.resolve(principal) },
@@ -51,7 +51,7 @@ describe('AuthService', () => {
       const service = new AuthService(strategies, new LocalStrategy(() => Promise.resolve(null)));
 
       const result = await service.authenticateWithSource(createRequest());
-      expect(result).toEqual({ principal, credential: 'cookie' });
+      expect(result).toEqual({ principal, credential: undefined });
     });
 
     it('returns null when nothing matches', async () => {

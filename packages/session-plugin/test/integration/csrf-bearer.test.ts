@@ -284,3 +284,50 @@ describe('verifyCsrfToken applies the same bearer rule', () => {
     }
   });
 });
+
+it('audit F2 verifies form CSRF when a custom header strategy declares no credential', async () => {
+  const { CREDENTIAL_SOURCE_STATE_KEY } = await import('@setu-ts/common');
+  const app = createApplication({
+    plugins: [
+      RuntimePlugin(),
+      SessionPlugin({ secret: SECRET, cookie: { secure: false }, csrf: {} }),
+      AuthPlugin({
+        strategies: [
+          {
+            name: 'undeclared-header',
+            authenticate: (request) =>
+              Promise.resolve(
+                request.headers.get('authorization') === 'Bearer custom'
+                  ? { id: 'custom-user' }
+                  : null,
+              ),
+          },
+        ],
+      }),
+    ],
+  });
+  let principalId: string | undefined;
+  let source: unknown = 'not observed';
+  let handled = false;
+  app.middleware.add(
+    async (ctx, next) => {
+      principalId = ctx.request.user?.id;
+      source = ctx.state.get(CREDENTIAL_SOURCE_STATE_KEY);
+      await next();
+    },
+    { priority: 310 },
+  );
+  app.router.post('/form', (ctx) => {
+    handled = true;
+    return ctx.response.json({ ok: true });
+  });
+  await app.start();
+  try {
+    expect(await post(app, '/form', { authorization: 'Bearer custom' })).toBe(403);
+    expect(principalId).toBe('custom-user');
+    expect(source).toBeUndefined();
+    expect(handled).toBe(false);
+  } finally {
+    await app.stop();
+  }
+});
