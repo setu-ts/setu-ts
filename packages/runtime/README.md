@@ -132,8 +132,12 @@ every long-lived stream.
 ### HTTP/2
 
 ```typescript
+import { readFileSync } from 'node:fs';
+
 RuntimePlugin({ http2: true }); // cleartext: h2c and HTTP/1.1 on one port
-RuntimePlugin({ http2: { key: env.TLS_KEY, cert: env.TLS_CERT } }); // TLS, ALPN h2 or HTTP/1.1
+RuntimePlugin({
+  http2: { key: readFileSync('tls/key.pem', 'utf8'), cert: readFileSync('tls/cert.pem', 'utf8') },
+}); // TLS, ALPN h2 or HTTP/1.1
 ```
 
 With `http2: true`, each new connection is classified by its first bytes: the HTTP/2 client preface

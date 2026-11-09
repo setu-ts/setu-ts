@@ -151,7 +151,7 @@ const READMES: Readonly<Record<string, number>> = {
   // M102: +1 for the component-template example rendered through the view engine.
   'packages/mail-plugin/README.md': 3,
   'packages/metrics-plugin/README.md': 2,
-  'packages/runtime/README.md': 3,
+  'packages/runtime/README.md': 4,
   // M98n: +1 for the devtool-gated observed-fetch composition.
   'packages/sdk/README.md': 15,
   'packages/telemetry-plugin/README.md': 2,
