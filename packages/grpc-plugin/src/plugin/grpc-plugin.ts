@@ -35,6 +35,17 @@ const PLUGIN_NAME = 'grpc-plugin';
  * @param options - See {@linkcode GrpcPluginOptions}.
  */
 export function GrpcPlugin(options: GrpcPluginOptions = {}): IPlugin {
+  const readMaxBytes = options.readMaxBytes;
+  // Connect's own range. Checked here so a misconfiguration fails at startup
+  // rather than on the first request (Connect validates lazily).
+  if (
+    readMaxBytes !== undefined &&
+    (!Number.isInteger(readMaxBytes) || readMaxBytes < 1 || readMaxBytes > 0xffffffff)
+  ) {
+    throw new TypeError(
+      `GrpcPlugin: readMaxBytes must be an integer from 1 to 4294967295, received ${String(readMaxBytes)}`,
+    );
+  }
   return {
     name: PLUGIN_NAME,
     version: VERSION,

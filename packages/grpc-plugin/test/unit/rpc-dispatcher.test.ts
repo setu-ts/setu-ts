@@ -5,21 +5,45 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import type { RpcTransport } from '@setu-ts/common';
 import {
   DEFAULT_BASE_PATH,
   dispatchRequest,
+  streamingSides,
   isWithinBasePath,
   normalizeBasePath,
 } from '../../src/transports/rpc-dispatcher.ts';
+import type { DispatchEntry } from '../../src/transports/rpc-dispatcher.ts';
 
-/** A dispatch map whose handler records that it ran. */
-function mapWith(...paths: string[]): Map<string, (r: Request) => Promise<Response>> {
+/** A dispatch map whose entries answer `handled:<path>` (Connect) or `native:<path>`. */
+function mapWith(...paths: string[]): Map<string, DispatchEntry> {
   return new Map(
     paths.map((path) => [
       path,
-      () => Promise.resolve(new Response(`handled:${path}`, { status: 200 })),
+      {
+        fetch: () => Promise.resolve(new Response(`handled:${path}`, { status: 200 })),
+        native: () =>
+          Promise.resolve({
+            response: new Response(`native:${path}`),
+            streaming: true,
+            trailers: Promise.resolve(new Headers({ 'grpc-status': '0' })),
+          }),
+        streamsRequest: false,
+        streamsResponse: path.endsWith('Stream'),
+      },
     ]),
   );
+}
+
+/** The response of a dispatch, as the pre-M139b tests read it; `null` falls through. */
+async function dispatchResponse(
+  request: Request,
+  map: Map<string, DispatchEntry>,
+  basePath: string,
+  transport?: RpcTransport,
+): Promise<Response | null> {
+  const reply = await dispatchRequest(request, map, basePath, transport);
+  return reply?.response ?? null;
 }
 
 describe('normalizeBasePath', () => {
@@ -71,7 +95,7 @@ describe('isWithinBasePath', () => {
 describe('dispatchRequest', () => {
   it('dispatches an exact requestPath match', async () => {
     const map = mapWith('/grpc/pkg.Svc/Method');
-    const response = await dispatchRequest(
+    const response = await dispatchResponse(
       new Request('http://x/grpc/pkg.Svc/Method', { method: 'POST' }),
       map,
       '/grpc',
@@ -81,7 +105,7 @@ describe('dispatchRequest', () => {
   });
 
   it('returns null for a path outside the prefix so Hono handles it', async () => {
-    const result = await dispatchRequest(
+    const result = await dispatchResponse(
       new Request('http://x/users', { method: 'GET' }),
       mapWith('/grpc/pkg.Svc/Method'),
       '/grpc',
@@ -92,7 +116,7 @@ describe('dispatchRequest', () => {
   it('returns null for an application/json POST outside the prefix', async () => {
     // Connect's real unary content types include application/json, so
     // media-type sniffing would hijack this request. Detection is prefix-only.
-    const result = await dispatchRequest(
+    const result = await dispatchResponse(
       new Request('http://x/api/users', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -105,7 +129,7 @@ describe('dispatchRequest', () => {
   });
 
   it('returns null for a prefix-adjacent path rather than 404-ing it', async () => {
-    const result = await dispatchRequest(
+    const result = await dispatchResponse(
       new Request('http://x/grpcfoo', { method: 'GET' }),
       mapWith('/grpc/pkg.Svc/Method'),
       '/grpc',
@@ -114,7 +138,7 @@ describe('dispatchRequest', () => {
   });
 
   it('answers 404 for an unknown procedure inside the prefix', async () => {
-    const response = await dispatchRequest(
+    const response = await dispatchResponse(
       new Request('http://x/grpc/pkg.Svc/Missing', { method: 'POST' }),
       mapWith('/grpc/pkg.Svc/Method'),
       '/grpc',
@@ -126,9 +150,9 @@ describe('dispatchRequest', () => {
     // At the root, "unknown procedure" is indistinguishable from "ordinary
     // application route" — 404-ing would take the whole application down.
     const map = mapWith('/pkg.Svc/Method');
-    expect(await dispatchRequest(new Request('http://x/users'), map, '')).toBeNull();
+    expect(await dispatchResponse(new Request('http://x/users'), map, '')).toBeNull();
 
-    const hit = await dispatchRequest(
+    const hit = await dispatchResponse(
       new Request('http://x/pkg.Svc/Method', { method: 'POST' }),
       map,
       '',
@@ -137,7 +161,7 @@ describe('dispatchRequest', () => {
   });
 
   it('ignores the query string when matching', async () => {
-    const response = await dispatchRequest(
+    const response = await dispatchResponse(
       new Request('http://x/grpc/pkg.Svc/Method?trace=1', { method: 'POST' }),
       mapWith('/grpc/pkg.Svc/Method'),
       '/grpc',
@@ -149,7 +173,7 @@ describe('dispatchRequest', () => {
 describe('dispatchRequest — native gRPC refusal (M70i §3.3)', () => {
   it('refuses a matched native application/grpc request with Trailers-Only UNIMPLEMENTED', async () => {
     const map = mapWith('/pkg.Svc/Method');
-    const response = await dispatchRequest(
+    const response = await dispatchResponse(
       new Request('http://x/pkg.Svc/Method', {
         method: 'POST',
         headers: { 'content-type': 'application/grpc' },
@@ -168,7 +192,7 @@ describe('dispatchRequest — native gRPC refusal (M70i §3.3)', () => {
   it('refuses native +proto and +json at a non-root base path too', async () => {
     const map = mapWith('/grpc/pkg.Svc/Method');
     for (const contentType of ['application/grpc+proto', 'application/grpc+json']) {
-      const response = await dispatchRequest(
+      const response = await dispatchResponse(
         new Request('http://x/grpc/pkg.Svc/Method', {
           method: 'POST',
           headers: { 'content-type': contentType },
@@ -191,7 +215,7 @@ describe('dispatchRequest — native gRPC refusal (M70i §3.3)', () => {
       'application/grpc-web+proto',
       'application/json',
     ]) {
-      const response = await dispatchRequest(
+      const response = await dispatchResponse(
         new Request('http://x/pkg.Svc/Method', {
           method: 'POST',
           headers: { 'content-type': contentType },
@@ -210,7 +234,7 @@ describe('dispatchRequest — native gRPC refusal (M70i §3.3)', () => {
     // base falls through to Hono, and under a prefix answers the plain 404.
     const map = mapWith('/pkg.Svc/Method');
     expect(
-      await dispatchRequest(
+      await dispatchResponse(
         new Request('http://x/no.Such/Method', {
           method: 'POST',
           headers: { 'content-type': 'application/grpc' },
@@ -221,7 +245,7 @@ describe('dispatchRequest — native gRPC refusal (M70i §3.3)', () => {
       ),
     ).toBeNull();
 
-    const miss = await dispatchRequest(
+    const miss = await dispatchResponse(
       new Request('http://x/grpc/no.Such/Method', {
         method: 'POST',
         headers: { 'content-type': 'application/grpc' },
@@ -231,5 +255,73 @@ describe('dispatchRequest — native gRPC refusal (M70i §3.3)', () => {
       '/grpc',
     );
     expect(miss?.status).toBe(404);
+  });
+});
+
+describe('dispatchRequest — M139b replies', () => {
+  it('serves native gRPC through the trailers path when the transport carries them', async () => {
+    const reply = await dispatchRequest(
+      new Request('http://x/pkg.Svc/Method', {
+        method: 'POST',
+        headers: { 'content-type': 'application/grpc' },
+      }),
+      mapWith('/pkg.Svc/Method'),
+      '',
+      { trailers: true },
+    );
+    expect(await reply!.response.text()).toBe('native:/pkg.Svc/Method');
+    expect((await reply!.trailers!).get('grpc-status')).toBe('0');
+  });
+
+  it('refuses native gRPC on a transport without trailers, as a buffered reply', async () => {
+    const reply = await dispatchRequest(
+      new Request('http://x/pkg.Svc/Method', {
+        method: 'POST',
+        headers: { 'content-type': 'application/grpc' },
+      }),
+      mapWith('/pkg.Svc/Method'),
+      '',
+      { trailers: false },
+    );
+    expect(reply!.response.headers.get('grpc-status')).toBe('12');
+    expect(reply!.streaming).toBe(false);
+  });
+
+  it('marks a Connect reply streaming exactly when the procedure streams its response', async () => {
+    const map = mapWith('/pkg.Svc/Method', '/pkg.Svc/Stream');
+    const unary = await dispatchRequest(
+      new Request('http://x/pkg.Svc/Method', { method: 'POST' }),
+      map,
+      '',
+    );
+    const stream = await dispatchRequest(
+      new Request('http://x/pkg.Svc/Stream', { method: 'POST' }),
+      map,
+      '',
+    );
+    expect(unary!.streaming).toBe(false);
+    expect(stream!.streaming).toBe(true);
+  });
+
+  it('answers a 404 reply under a non-root base path', async () => {
+    const reply = await dispatchRequest(
+      new Request('http://x/grpc/pkg.Svc/Nope', { method: 'POST' }),
+      mapWith('/grpc/pkg.Svc/Method'),
+      '/grpc',
+    );
+    expect(reply!.response.status).toBe(404);
+    expect(reply!.streaming).toBe(false);
+  });
+});
+
+describe('streamingSides', () => {
+  it.each([
+    ['unary', false, false],
+    ['server_streaming', false, true],
+    ['client_streaming', true, false],
+    ['bidi_streaming', true, true],
+    [undefined, false, false],
+  ] as const)('%s → request %s, response %s', (kind, request, response) => {
+    expect(streamingSides(kind)).toEqual({ streamsRequest: request, streamsResponse: response });
   });
 });

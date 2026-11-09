@@ -14,9 +14,13 @@ import type {
   IHealthService,
   ILogger,
   RpcFetchHandler,
+  RpcReply,
+  RpcTransport,
 } from '@setu-ts/common';
 import type { ConnectRuntime } from '../interfaces/connect-runtime.ts';
 import type { GrpcPluginOptions } from '../interfaces/index.ts';
+import { DEFAULT_READ_MAX_BYTES } from '../interfaces/index.ts';
+import type { DispatchEntry } from '../transports/rpc-dispatcher.ts';
 import {
   DEFAULT_BASE_PATH,
   dispatchRequest,
@@ -71,7 +75,7 @@ export class GrpcService implements IGrpcService {
   readonly #healthService: IHealthService | undefined;
   readonly #resolveLogger: (() => ILogger | undefined) | undefined;
 
-  #dispatchMap: Map<string, (request: Request) => Promise<Response>> | null = null;
+  #dispatchMap: Map<string, DispatchEntry> | null = null;
   #closed = false;
   /**
    * Procedure paths the router served before shutdown. Retained so a drained
@@ -175,11 +179,16 @@ export class GrpcService implements IGrpcService {
    * Deciding this from headers costs nothing: the content type is all the
    * answer depends on, and the path check is the same `claims` already made.
    *
+   * Since M139b a native request is NOT refused when the transport carries
+   * trailers (an HTTP/2 connection to an adapter that writes them): it is
+   * served, with its status in real trailers.
+   *
    * @param request - The native fetch request, body untouched
+   * @param transport - What the connection can carry; absent means no trailers
    * @returns The Trailers-Only refusal, or `null` to dispatch normally
    * @since 0.6.0
    */
-  refuses(request: Request): Response | null {
+  refuses(request: Request, transport?: RpcTransport): Response | null {
     if (!isNativeGrpcContentType(request.headers.get('content-type'))) {
       return null;
     }
@@ -199,7 +208,22 @@ export class GrpcService implements IGrpcService {
     if (this.#closed) {
       return new Response('Service Unavailable', { status: 503 });
     }
-    return trailersOnlyUnimplemented();
+    return transport?.trailers === true ? null : trailersOnlyUnimplemented();
+  }
+
+  /**
+   * Whether the procedure a request names streams its request messages — a
+   * client-streaming or bidirectional method (M139b §3.2). The kernel then
+   * hands the dispatch the unread body, so the call progresses while the
+   * client is still sending; each message is bounded by `readMaxBytes`.
+   *
+   * @param request - The native fetch request, body untouched
+   * @returns `true` for a client-streaming or bidirectional procedure
+   * @since 0.13.0
+   */
+  streamsRequest(request: Request): boolean {
+    if (this.#closed) return false;
+    return this.#buildDispatchMap().get(new URL(request.url).pathname)?.streamsRequest === true;
   }
 
   /**
@@ -210,8 +234,24 @@ export class GrpcService implements IGrpcService {
    * {@linkcode GrpcService.claims} first.
    */
   handleRequest(request: Request): Promise<Response> {
-    return Promise.resolve(this.#dispatch(request)).then(
-      (response) => response ?? new Response('Not Found', { status: 404 }),
+    return this.handleRpc(request, { trailers: false }).then((reply) => reply.response);
+  }
+
+  /**
+   * Handles an RPC with knowledge of the transport (M139b): the reply says
+   * whether its body streams, and carries trailers for a native call on a
+   * connection that delivers them. {@linkcode GrpcService.handleRequest} is
+   * this with `{ trailers: false }`, so the two cannot disagree.
+   *
+   * @param request - The native fetch request
+   * @param transport - What the connection can carry
+   * @returns The reply; a `404` reply for a path no procedure serves
+   * @since 0.13.0
+   */
+  handleRpc(request: Request, transport: RpcTransport): Promise<RpcReply> {
+    return Promise.resolve(this.#dispatch(request, transport)).then(
+      (reply) =>
+        reply ?? { response: new Response('Not Found', { status: 404 }), streaming: false },
     );
   }
 
@@ -227,7 +267,8 @@ export class GrpcService implements IGrpcService {
    * {@linkcode GrpcService} is published surface (AI_GUIDELINES §9.2).
    */
   createFetchHandler(): RpcFetchHandler {
-    return (request: Request): Promise<Response | null> => Promise.resolve(this.#dispatch(request));
+    return (request: Request): Promise<Response | null> =>
+      Promise.resolve(this.#dispatch(request)).then((reply) => reply?.response ?? null);
   }
 
   /**
@@ -268,7 +309,7 @@ export class GrpcService implements IGrpcService {
    * Built on demand because `addService` may be called after `register()`, and
    * cached until the next `addService` invalidates it.
    */
-  #buildDispatchMap(): Map<string, (request: Request) => Promise<Response>> {
+  #buildDispatchMap(): Map<string, DispatchEntry> {
     this.#dispatchMap ??= buildConnectRouter({
       connectRuntime: this.#connectRuntime,
       basePath: this.#basePath,
@@ -279,20 +320,24 @@ export class GrpcService implements IGrpcService {
       healthService: this.#healthService,
       resolveLogger: this.#resolveLogger,
       interceptors: this.#options.interceptors,
+      readMaxBytes: this.#options.readMaxBytes ?? DEFAULT_READ_MAX_BYTES,
     }).dispatchMap;
     return this.#dispatchMap;
   }
 
   /** Resolves a request against the dispatch map, building the router on demand. */
-  #dispatch(request: Request): Response | Promise<Response | null> | null {
+  #dispatch(
+    request: Request,
+    transport?: RpcTransport,
+  ): RpcReply | Promise<RpcReply | null> | null {
     if (this.#closed) {
       // Claim only paths this server actually served; ordinary application
       // routes must keep answering while the app drains.
       const path = new URL(request.url).pathname;
       return this.#servedPaths.has(path)
-        ? new Response('Service Unavailable', { status: 503 })
+        ? { response: new Response('Service Unavailable', { status: 503 }), streaming: false }
         : null;
     }
-    return dispatchRequest(request, this.#buildDispatchMap(), this.#basePath);
+    return dispatchRequest(request, this.#buildDispatchMap(), this.#basePath, transport);
   }
 }

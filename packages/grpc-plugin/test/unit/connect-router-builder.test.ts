@@ -51,6 +51,7 @@ function build(
     services: [],
     embeddedDescriptors,
     healthService: undefined,
+    readMaxBytes: 4 * 1024 * 1024,
     ...overrides,
   });
 }
@@ -177,10 +178,52 @@ describe('buildConnectRouter — dispatch map', () => {
       requestPaths: ['/pkg.Svc/Method'],
     });
     const { dispatchMap } = build(runtime);
-    const handler = dispatchMap.get('/grpc/pkg.Svc/Method')!;
-    const response = await handler(new Request('http://x/grpc/pkg.Svc/Method'));
+    const entry = dispatchMap.get('/grpc/pkg.Svc/Method')!;
+    const response = await entry.fetch(new Request('http://x/grpc/pkg.Svc/Method'));
 
     expect(await response.text()).toBe('handled:/pkg.Svc/Method');
+  });
+});
+
+describe('buildConnectRouter — M139b entries and read bound', () => {
+  it('forwards readMaxBytes to the router beside the interceptors', () => {
+    const runtime = createFakeConnectRuntime({ requestPaths: [] });
+    build(runtime, { readMaxBytes: 1024, interceptors: ['i'], health: false, reflection: false });
+    expect(runtime.routerOptions).toEqual([{ interceptors: ['i'], readMaxBytes: 1024 }]);
+  });
+
+  it('records which sides of each procedure stream', () => {
+    const runtime = createFakeConnectRuntime({
+      requestPaths: ['/p.S/Unary', '/p.S/Server', '/p.S/Client', '/p.S/Bidi', '/p.S/Bare'],
+      methodKinds: {
+        '/p.S/Unary': 'unary',
+        '/p.S/Server': 'server_streaming',
+        '/p.S/Client': 'client_streaming',
+        '/p.S/Bidi': 'bidi_streaming',
+      },
+    });
+    const { dispatchMap } = build(runtime, { health: false, reflection: false });
+    const sides = (path: string): [boolean, boolean] => {
+      const entry = dispatchMap.get(`/grpc${path}`)!;
+      return [entry.streamsRequest, entry.streamsResponse];
+    };
+    expect(sides('/p.S/Unary')).toEqual([false, false]);
+    expect(sides('/p.S/Server')).toEqual([false, true]);
+    expect(sides('/p.S/Client')).toEqual([true, false]);
+    expect(sides('/p.S/Bidi')).toEqual([true, true]);
+    expect(sides('/p.S/Bare')).toEqual([false, false]);
+  });
+
+  it('serves the native path through the universal handler, keeping its trailers', async () => {
+    const runtime = createFakeConnectRuntime({ requestPaths: ['/pkg.Svc/Method'] });
+    const { dispatchMap } = build(runtime, { health: false, reflection: false });
+    const reply = await dispatchMap
+      .get('/grpc/pkg.Svc/Method')!
+      .native(new Request('http://x/grpc/pkg.Svc/Method', { method: 'POST' }));
+    expect(reply.streaming).toBe(true);
+    expect(reply.response.headers.get('content-type')).toBe('application/grpc+proto');
+    expect(await reply.response.text()).toBe('universal:/pkg.Svc/Method');
+    expect((await reply.trailers!).get('grpc-status')).toBe('0');
   });
 });
 

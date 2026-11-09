@@ -28,6 +28,7 @@ import type {
   FileRegistryLike,
   ServiceDescriptorLike,
   UniversalHandlerLike,
+  UniversalServerResponseLike,
 } from '../interfaces/connect-runtime.ts';
 
 /** The four specifiers the runtime is assembled from, in load order. */
@@ -65,6 +66,8 @@ export interface ConnectProtocolModuleLike {
     handler: UniversalHandlerLike,
     options?: Record<string, unknown>,
   ): (request: Request) => Promise<Response>;
+  /** Converts a fetch `Request` into the universal request a handler takes. */
+  universalServerRequestFromFetch(request: Request, options: Record<string, unknown>): unknown;
 }
 
 /** Structural shape of `@bufbuild/protobuf`. */
@@ -123,6 +126,20 @@ export function adaptConnectModule(modules: ConnectModuleLike): ConnectRuntime {
       // bidi refusal, which would then fire even on transports that support
       // bidi (plan §3.5/§3.8).
       return protocol.createFetchHandler(handler);
+    },
+
+    handleUniversal(
+      handler: UniversalHandlerLike,
+      request: Request,
+    ): Promise<UniversalServerResponseLike> {
+      // A Connect `UniversalHandler` is a function carrying the descriptor
+      // fields this port reads; the structural type omits the call signature
+      // so hand-built test handlers need not be callable. `httpVersion` stays
+      // unset, as for `createFetchHandler`.
+      const call = handler as unknown as (
+        universal: unknown,
+      ) => Promise<UniversalServerResponseLike>;
+      return call(protocol.universalServerRequestFromFetch(request, {}));
     },
 
     reviveDescriptorSet(base64: string): FileRegistryLike {

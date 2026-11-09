@@ -128,6 +128,8 @@ export interface FakeConnectRuntimeOptions {
   readonly requestPaths?: readonly string[];
   /** Makes `reviveDescriptorSet` throw, standing in for corrupt bytes. */
   readonly reviveThrows?: boolean;
+  /** `methodKind` per request path; unlisted paths carry no `method` (unary). */
+  readonly methodKinds?: Readonly<Record<string, string>>;
 }
 
 /**
@@ -146,7 +148,12 @@ export function createFakeConnectRuntime(
   const router: ConnectRouterLike = {
     get handlers(): readonly UniversalHandlerLike[] {
       if (options.requestPaths !== undefined) {
-        return options.requestPaths.map((requestPath) => ({ requestPath }));
+        return options.requestPaths.map((requestPath) => {
+          const methodKind = options.methodKinds?.[requestPath];
+          return methodKind === undefined
+            ? { requestPath }
+            : { requestPath, method: { methodKind } };
+        });
       }
       return registered.map((r) => ({ requestPath: `/${r.definition.typeName}/Method` }));
     },
@@ -172,6 +179,22 @@ export function createFakeConnectRuntime(
         Promise.resolve(new Response(`handled:${handler.requestPath}`, { status: 200 }));
       // The real `createFetchHandler` returns Object.assign(fn, uHandler).
       return Object.assign(fetchHandler, handler);
+    },
+
+    handleUniversal(handler: UniversalHandlerLike, _request: Request) {
+      // One message, then the call's status in the trailer — the shape a
+      // native gRPC reply has once Connect's universal handler ends.
+      const trailer = new Headers();
+      async function* body(): AsyncGenerator<Uint8Array> {
+        yield new TextEncoder().encode(`universal:${handler.requestPath}`);
+        trailer.set('grpc-status', '0');
+      }
+      return Promise.resolve({
+        status: 200,
+        header: new Headers({ 'content-type': 'application/grpc+proto' }),
+        body: body(),
+        trailer,
+      });
     },
 
     reviveDescriptorSet(base64: string): FileRegistryLike {

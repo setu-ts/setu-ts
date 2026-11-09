@@ -60,4 +60,28 @@ export interface GrpcPluginOptions {
    * observes it. Absent: no application interceptors are installed.
    */
   interceptors?: readonly unknown[];
+
+  /**
+   * The largest request message a procedure accepts, in bytes. Defaults to
+   * 4 MiB, the default receive limit of
+   * grpc-go and grpc-js. Forwarded to Connect's `readMaxBytes`, which applies
+   * it per message on enveloped protocols (gRPC, gRPC-Web, Connect streaming)
+   * and to the whole body of a unary Connect request; a larger message is
+   * refused with `RESOURCE_EXHAUSTED`.
+   *
+   * This is the bound on a client- or bidi-streaming request, whose body the
+   * kernel streams to the procedure (M139b): `RuntimePlugin({ maxBodyBytes })`
+   * is a total, which would end every long-lived stream, so it bounds only the
+   * buffered bodies of unary and server-streaming calls. An integer from 1 to
+   * `0xffffffff`; anything else throws at `GrpcPlugin()`.
+   *
+   * @since 0.13.0
+   */
+  readMaxBytes?: number;
 }
+
+/**
+ * The default {@linkcode GrpcPluginOptions.readMaxBytes}: 4 MiB. Internal —
+ * not exported from the package barrel.
+ */
+export const DEFAULT_READ_MAX_BYTES: number = 4 * 1024 * 1024;

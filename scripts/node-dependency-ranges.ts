@@ -65,6 +65,7 @@ export const EXTERNAL_RANGES: Readonly<Record<string, string>> = {
   '@azure/storage-blob': '^12',
   '@bufbuild/protobuf': '^2.7.0',
   '@connectrpc/connect': '^2.1.2',
+  '@connectrpc/connect-node': '^2.1.2',
   '@google-cloud/bigtable': '^6',
   '@google-cloud/pubsub': '^6',
   '@google-cloud/secret-manager': '^5',

@@ -101,6 +101,25 @@ export interface FileRegistryLike {
 export interface UniversalHandlerLike {
   /** The procedure path without prefixes, e.g. `/pkg.Svc/Method`. */
   readonly requestPath: string;
+  /**
+   * The procedure's method descriptor. Only `methodKind` is read — to tell
+   * which procedures stream their request or their response (M139b). Absent
+   * on a hand-built handler, which is then treated as unary.
+   */
+  readonly method?: { readonly methodKind?: string };
+}
+
+/**
+ * A Connect `UniversalServerResponse`, seen structurally: what the universal
+ * handler produces before `createFetchHandler` turns it into a fetch
+ * `Response` — and drops its `trailer`, which native gRPC needs.
+ */
+export interface UniversalServerResponseLike {
+  readonly status: number;
+  readonly header?: Headers;
+  readonly body?: AsyncIterable<Uint8Array>;
+  /** Mutated by Connect as the call ends; read only after `body` is exhausted. */
+  readonly trailer?: Headers;
 }
 
 /** A Connect `ConnectRouter`, seen structurally. */
@@ -134,6 +153,16 @@ export interface ConnectRuntime {
    * themselves with no parallel bookkeeping.
    */
   createFetchHandler(handler: UniversalHandlerLike): (request: Request) => Promise<Response>;
+
+  /**
+   * Runs a request through a universal handler directly, keeping the
+   * response's trailers (M139b §3.6): `universalServerRequestFromFetch`, then
+   * the handler.
+   */
+  handleUniversal(
+    handler: UniversalHandlerLike,
+    request: Request,
+  ): Promise<UniversalServerResponseLike>;
 
   /**
    * Revives a base64 `FileDescriptorSet` into a `FileRegistry`.

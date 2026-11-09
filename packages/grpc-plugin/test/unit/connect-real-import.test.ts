@@ -37,6 +37,7 @@ describe('Connect real import', { skip: !available }, () => {
     const runtime = await loadConnectModule();
     expect(typeof runtime.createConnectRouter).toBe('function');
     expect(typeof runtime.createFetchHandler).toBe('function');
+    expect(typeof runtime.handleUniversal).toBe('function');
     expect(typeof runtime.reviveDescriptorSet).toBe('function');
     expect(typeof runtime.getService).toBe('function');
     expect(typeof runtime.serializeFileDescriptor).toBe('function');

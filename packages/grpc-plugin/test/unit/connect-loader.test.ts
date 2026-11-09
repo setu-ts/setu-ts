@@ -61,6 +61,7 @@ function createFakeModules(overrides: { fromBinaryThrows?: boolean } = {}): {
         calls.createFetchHandler.push(handler);
         return () => Promise.resolve(new Response('ok'));
       },
+      universalServerRequestFromFetch: (request, options) => ({ universal: request.url, options }),
     },
     protobuf: {
       createFileRegistry: (fdSet) => {
@@ -278,5 +279,25 @@ describe('DEFAULT_IMPORTERS — the guarded imports (M113d §3.1)', () => {
         vi.doUnmock(specifier);
       }
     }
+  });
+});
+
+describe('adaptConnectModule — handleUniversal (M139b)', () => {
+  it('converts the fetch request, leaves httpVersion unset, and calls the handler', async () => {
+    const { modules } = createFakeModules();
+    const seen: unknown[] = [];
+    const handler = Object.assign(
+      (universal: unknown) => {
+        seen.push(universal);
+        return Promise.resolve({ status: 200 });
+      },
+      { requestPath: '/p.S/M' },
+    );
+    const reply = await adaptConnectModule(modules).handleUniversal(
+      handler,
+      new Request('http://x/p.S/M'),
+    );
+    expect(reply.status).toBe(200);
+    expect(seen).toEqual([{ universal: 'http://x/p.S/M', options: {} }]);
   });
 });
