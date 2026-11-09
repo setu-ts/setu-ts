@@ -77,6 +77,8 @@ export interface CompiledScopedRbac {
   readonly limits: ReadonlyMap<string, CompiledLimit>;
   /** Whether the principal's own roles and permissions count in every scope. */
   readonly principalAuthorityIsGlobal: boolean;
+  /** Cap token principals at every scoped check. @since 0.13.0 */
+  readonly confineScopedTokens: boolean;
   /** The custom-role source, when configured. */
   readonly customRoles: IScopedRoleSource | RegistryFactory<IScopedRoleSource> | undefined;
   /** When grants are resolved. */
@@ -267,6 +269,7 @@ function compileLimits(
  * @param options - The `scopedRbac` option
  * @param rbac - The `rbac` option, whose roles are the catalogue
  * @param signInConfigured - Whether `signIn` is configured (required by `'sign-in'` timing)
+ * @param confineScopedTokens - Refuse token principals at scoped checks
  * @returns The compiled configuration
  * @throws {AuthPluginConfigurationError} On any refusal in plan §3.2/§3.13
  */
@@ -274,6 +277,7 @@ export function compileScopedRbac(
   options: ScopedRbacOptions,
   rbac: RbacConfig | undefined,
   signInConfigured: boolean,
+  confineScopedTokens = true,
 ): CompiledScopedRbac {
   if (typeof options !== 'object' || options === null) {
     refuse('must be an object');
@@ -356,6 +360,7 @@ export function compileScopedRbac(
     limits: compileLimits(options.grantableIn, roles),
     customRoles,
     principalAuthorityIsGlobal,
+    confineScopedTokens,
     timing,
     sourceTimeoutMs: bound('sourceTimeoutMs', options.sourceTimeoutMs, 1, 60_000, 2_000),
     maxGrants: bound('maxGrantsPerPrincipal', options.maxGrantsPerPrincipal, 1, 10_000, 256),

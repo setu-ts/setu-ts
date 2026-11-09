@@ -308,6 +308,14 @@ path listed in `csrf.exclude`**: the bearer rule is checked first, so a bearerâ†
 login route issues no cookie and logs nothing (V10-14). For such a route set `exemptBearer: false`,
 which commits the session as releases before 0.10.0 did.
 
+**An endpoint with its own browser protection can opt out in-process** (0.13.0). Middleware that
+runs before form CSRF (priority 325) may set `ctx.state.set(CSRF_EXEMPT_STATE_KEY, true)` (from
+`@setu-ts/common`) for a request it owns. Only the boolean `true` exempts. Like the bearer rule, the
+exempted request commits no session and sends no `Set-Cookie`. `McpPlugin` uses it for `POST` on its
+own path, which checks `Origin` against `allowedOrigins` itself, so an MCP client's first anonymous
+call gets the `401` discovery challenge instead of a CSRF `403`. Set it only for an exact route that
+enforces its own cross-site rule, never from anything the request carries.
+
 ### What `SameSite` does not separate
 
 `cookie.sameSite` defaults to `'lax'`, which is a real defence and a commonly misread one. It is

@@ -638,6 +638,9 @@ export async function action({ request, context }: { request: Request; context: 
   }
 
   const session = getSession(context);
+  // Rotate against session fixation. A real login uses authSession.signIn,
+  // which regenerates the session itself.
+  session.regenerate();
   session.set('userEmail', email);
 
   return redirect('/products');

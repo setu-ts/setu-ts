@@ -15,6 +15,8 @@ export interface JwtStrategyOptions {
   readonly jwtService: IJwtService;
   readonly header?: string;
   readonly scheme?: string;
+  /** Verified tenant claim; absent disables binding. @since 0.13.0 */
+  readonly tenantClaim?: string;
   readonly accessTokenRevocationStore?: IAccessTokenRevocationStore;
 }
 
@@ -27,10 +29,12 @@ export class JwtStrategy implements IAuthStrategy {
   private readonly jwtService: IJwtService;
   private readonly header: string;
   private readonly scheme: string;
+  private readonly tenantClaim: string | undefined;
   private readonly accessTokenRevocationStore: IAccessTokenRevocationStore | undefined;
 
   constructor(options: JwtStrategyOptions) {
     this.jwtService = options.jwtService;
+    this.tenantClaim = options.tenantClaim;
     this.header = options.header ?? 'authorization';
     // Lowercased once: the request's scheme is compared lowercased, so a
     // configured `'Token'` would otherwise refuse every token sent with it.
@@ -39,7 +43,7 @@ export class JwtStrategy implements IAuthStrategy {
   }
 
   /**
-   * Extract and verify JWT from Authorization header.
+   * Extract and verify JWT, refusing unusable subjects and tenant mismatches.
    */
   async authenticate(request: IRequest): Promise<IPrincipal | null> {
     const authHeader = request.headers.get(this.header);
@@ -74,7 +78,20 @@ export class JwtStrategy implements IAuthStrategy {
 
       // Map JWT claims to IPrincipal (conditionally include optional fields
       // via spread to satisfy exactOptionalPropertyTypes)
-      const id = this.getStringClaim(payload, 'sub');
+      const id = payload.sub;
+      if (typeof id !== 'string' || id.length === 0) {
+        return null;
+      }
+      if (this.tenantClaim !== undefined) {
+        const tenant = payload[this.tenantClaim];
+        if (
+          request.tenant === undefined
+            ? Object.hasOwn(payload, this.tenantClaim)
+            : typeof tenant !== 'string' || tenant !== request.tenant.id
+        ) {
+          return null;
+        }
+      }
       const roles = this.getArrayClaim(payload, 'roles');
       const permissions = this.getArrayClaim(payload, 'permissions');
       const scopes = parseScopeClaim(payload);
@@ -100,14 +117,6 @@ export class JwtStrategy implements IAuthStrategy {
       // Invalid token - return null (don't throw)
       return null;
     }
-  }
-
-  /**
-   * Extract a string claim from payload.
-   */
-  private getStringClaim(payload: Record<string, unknown>, key: string): string {
-    const value = payload[key];
-    return typeof value === 'string' ? value : 'unknown';
   }
 
   /**

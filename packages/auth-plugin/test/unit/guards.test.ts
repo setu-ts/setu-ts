@@ -585,3 +585,38 @@ describe('guards with an attached authorization observer (M98h)', () => {
     expect(decision.steps).toHaveLength(2);
   });
 });
+
+describe('M139a credential restrictions', () => {
+  for (const credentials of [undefined, 'any', 'cookie', 'header'] as const) {
+    for (const source of [undefined, 'cookie', 'header'] as const) {
+      it(`${credentials ?? 'default'} with source ${source ?? 'unset'}`, async () => {
+        const { ctx, response } = createContext({ user: { id: 'u1' } });
+        if (source !== undefined) ctx.state.set('auth-plugin:credential-source', source);
+        const next = createNext();
+        await requireAuth(credentials === undefined ? {} : { credentials })(ctx, next.next);
+        const allowed =
+          credentials === undefined || credentials === 'any' || credentials === source;
+        expect(next.calls).toBe(allowed ? 1 : 0);
+        expect(response.status).toBe(allowed ? 200 : 401);
+      });
+    }
+  }
+  it.each(['bearer', null, 42, '', false])(
+    'refuses an unknown credential value %j',
+    (credentials) => {
+      expect(() =>
+        requireAuth({ credentials } as unknown as Parameters<typeof requireAuth>[0]),
+      ).toThrow(AuthPluginConfigurationError);
+    },
+  );
+  it('checks credentials before delegation', async () => {
+    const { ctx, response } = createContext({
+      user: { id: 'u1', actor: { id: 'agent', claims: {} } },
+    });
+    ctx.state.set('auth-plugin:credential-source', 'header');
+    const next = createNext();
+    await requireAuth({ credentials: 'cookie', delegation: 'forbid' })(ctx, next.next);
+    expect(response.status).toBe(401);
+    expect(next.calls).toBe(0);
+  });
+});

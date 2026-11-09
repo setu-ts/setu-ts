@@ -171,6 +171,14 @@ for inner CSRF checks after the outer Origin check. Every present Origin must be
 in `allowedOrigins`, including same-origin browser UIs. The request's Host-derived origin supplies
 no trust. A missing Origin is accepted for non-browser clients.
 
+Beside the session plugin's form CSRF (the full-stack template turns it on), the plugin marks `POST`
+on its own path as exempt, through `CSRF_EXEMPT_STATE_KEY` at priority 320. So an anonymous call
+reaches the route, and a guarded tool answers `401` with
+`WWW-Authenticate: Bearer resource_metadata="…"`, which an MCP client needs to start discovery,
+instead of a CSRF `403`. The `Origin` check above is what protects that path from a cross-site
+browser, and the exempted request commits no session. Inner tool requests have their own paths and
+are verified by form CSRF as usual.
+
 Dispatch pins the tool's registered pattern: a path argument cannot select a static sibling or
 re-enter the MCP endpoint.
 

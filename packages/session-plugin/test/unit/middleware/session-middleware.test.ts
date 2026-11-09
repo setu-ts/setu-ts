@@ -241,3 +241,16 @@ describe('sessionMiddleware', () => {
     });
   });
 });
+
+it('M139a never commits a session on an explicitly exempted request', async () => {
+  const { middleware } = await makeMiddleware();
+  const { ctx, response } = makeContext();
+  await middleware(ctx, async () => {
+    ctx.state.set('session-plugin:csrf-exempt', true);
+    const { applyCsrfExemption } = await import('../../../src/csrf/exclude.ts');
+    const { resolveCsrfConfig } = await import('../../../src/options.ts');
+    expect(applyCsrfExemption(ctx, resolveCsrfConfig({}), [])).toBe(true);
+    (ctx.state.get(SESSION_STATE_KEY) as ISession).set('planted', 'value');
+  });
+  expect(response.headers.has('set-cookie')).toBe(false);
+});

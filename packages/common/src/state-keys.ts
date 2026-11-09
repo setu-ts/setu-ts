@@ -120,3 +120,10 @@ export const CREDENTIAL_SOURCE_STATE_KEY = 'auth-plugin:credential-source';
  * @since 0.12.0
  */
 export const REQUIRED_SCOPES_STATE_KEY = 'auth-plugin:required-scopes';
+
+/**
+ * In-process form-CSRF exemption. Only boolean true exempts verification and
+ * suppresses session commit. Set only for endpoints with their own protection.
+ * @since 0.13.0
+ */
+export const CSRF_EXEMPT_STATE_KEY = 'session-plugin:csrf-exempt';

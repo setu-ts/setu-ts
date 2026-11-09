@@ -88,6 +88,23 @@ tenant: localization's `tenantLocale` at 45, and any cache, rate-limit or featur
 [session tenant binding](https://github.com/setu-ts/setu-ts/blob/main/packages/session-plugin/README.md#tenant-binding)
 for the session check that also handles late resolution.
 
+### Identity bound to the tenant
+
+Resolving a tenant does not by itself stop one tenant's identity acting on another tenant's host.
+Bind each credential to it:
+
+- **Bearer tokens.** Set `tenantClaim` on auth-plugin's `jwt` option and on each `issuers` entry. A
+  token whose verified claim differs from the request's tenant is then refused, and so is a token
+  carrying the claim on a request with no tenant. See auth-plugin's
+  [Binding tokens to the tenant](https://github.com/setu-ts/setu-ts/blob/main/packages/auth-plugin/README.md#binding-tokens-to-the-tenant).
+- **Password sign-in.** `local.verify(identifier, secret, request)` and
+  `verifyCredentials(credentials, request)` receive the request. Pass `ctx.request` and look the
+  user up by `(request.tenant.id, identifier)`. A lookup by email alone lets a user of one tenant
+  sign in on another tenant's host, and the session is then sealed to that host's tenant while
+  carrying the other tenant's principal.
+- **Sessions.** The session plugin's tenant binding seals each session to the tenant that created
+  it.
+
 `ITenantRepository` offers `findAll()`, `findById`, `find(filter)`, `create`, `update`, and
 `delete`, plus `updateWhere(id, where, data)` and `deleteWhere(id, where)` when the configured store
 supports conditional writes (the shipped memory store and `createDatabaseTenantDataStore()` both do,

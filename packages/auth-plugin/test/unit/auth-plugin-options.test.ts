@@ -28,10 +28,12 @@ import manifest from '../../deno.json' with { type: 'json' };
 function createFakeContext(): {
   ctx: IPluginContext;
   onCloseHandlers: Array<() => Promise<void>>;
+  onInitHandlers: Array<() => void | Promise<void>>;
   registered: Map<string, unknown>;
   middlewareAdded: Array<{ fn: MiddlewareFunction; options?: MiddlewareOptions }>;
 } {
   const registered = new Map<string, unknown>();
+  const onInitHandlers: Array<() => void | Promise<void>> = [];
   const onCloseHandlers: Array<() => Promise<void>> = [];
   const middlewareAdded: Array<{ fn: MiddlewareFunction; options?: MiddlewareOptions }> = [];
 
@@ -92,7 +94,9 @@ function createFakeContext(): {
         onCloseHandlers.push(fn);
       },
       onRegister: () => {},
-      onInit: () => {},
+      onInit: (fn) => {
+        onInitHandlers.push(fn);
+      },
       onBootstrap: () => {},
       onRequest: () => {},
       onResponse: () => {},
@@ -105,7 +109,7 @@ function createFakeContext(): {
     app: null as unknown as IPluginContext['app'],
   };
 
-  return { ctx, onCloseHandlers, registered, middlewareAdded };
+  return { ctx, onCloseHandlers, onInitHandlers, registered, middlewareAdded };
 }
 
 describe('AuthPlugin', () => {
@@ -619,3 +623,53 @@ function formatPem(der: Uint8Array, label: string): string {
   lines.push(`-----END ${label}-----`);
   return lines.join('\n');
 }
+
+describe('M139a option validation', () => {
+  it.each([undefined, true, false])('wires confinement %j into both services', async (cap) => {
+    const { ctx, registered, onInitHandlers } = createFakeContext();
+    await AuthPlugin({
+      jwt: { secret: 'm139a-secret' },
+      ...(cap === undefined ? {} : { confineScopedTokens: cap }),
+      rbac: { roles: { admin: { permissions: ['read'] } } },
+      scopedRbac: {
+        sources: [{ kind: 'static', grants: [{ subject: 'u1', role: 'admin', scope: null }] }],
+      },
+    }).register(ctx);
+    for (const init of onInitHandlers) await init();
+    const user = { id: 'u1', roles: ['admin'], scopes: [] };
+    const rbac = registered.get(
+      CAPABILITIES.AUTHORIZATION,
+    ) as import('@setu-ts/common').IAuthorizationService;
+    const policies = registered.get(
+      CAPABILITIES.AUTHORIZATION_POLICIES,
+    ) as import('@setu-ts/common').IAuthorizationPolicyService;
+    expect(rbac.hasRole(user, 'admin')).toBe(cap === false);
+    expect(await policies.can(user, 'scoped-rbac', 'perm:read', { scope: null })).toBe(
+      cap === false,
+    );
+  });
+  it.each(['yes', null, 1])('refuses confineScopedTokens %j', (value) => {
+    expect(() =>
+      AuthPlugin({ confineScopedTokens: value } as unknown as Parameters<typeof AuthPlugin>[0]),
+    ).toThrow(AuthPluginConfigurationError);
+  });
+  it.each(['', 42, null])('refuses jwt.tenantClaim %j', (value) => {
+    expect(() =>
+      AuthPlugin({ jwt: { secret: 'secret', tenantClaim: value } } as unknown as Parameters<
+        typeof AuthPlugin
+      >[0]),
+    ).toThrow(AuthPluginConfigurationError);
+  });
+  it('wires JWT tenantClaim through registration', async () => {
+    const { ctx, registered } = createFakeContext();
+    await AuthPlugin({ jwt: { secret: 'secret', tenantClaim: 'tid' } }).register(ctx);
+    const jwt = registered.get(CAPABILITIES.JWT) as IJwtService;
+    const auth = registered.get(CAPABILITIES.AUTH) as IAuthService;
+    const token = await jwt.sign({ sub: 'u1', tid: 'acme' });
+    const request = {
+      headers: new Headers({ authorization: `Bearer ${token}` }),
+      tenant: { id: 'other' },
+    } as IRequest;
+    expect(await auth.authenticate(request)).toBeNull();
+  });
+});

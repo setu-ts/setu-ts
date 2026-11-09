@@ -220,3 +220,30 @@ describe('requireAuth signInPage validation', () => {
     }
   });
 });
+
+it('M139a redirects a bearer principal on a cookie-only page', async () => {
+  const { AuthPlugin } = await import('../../src/index.ts');
+  const { CAPABILITIES } = await import('@setu-ts/common');
+  const app = createApplication({
+    plugins: [RuntimePlugin(), AuthPlugin({ jwt: { secret: 'm139a-secret' } })],
+  });
+  app.router.get('/cookie-page', {
+    middleware: [requireAuth({ credentials: 'cookie', signInPage: '/login' })],
+    handler: (ctx) => ctx.response.json({ reached: true }),
+  });
+  await app.start();
+  try {
+    const jwt = app.services.get<import('@setu-ts/common').IJwtService>(CAPABILITIES.JWT);
+    const token = await jwt.sign({ sub: 'u1' });
+    const response = await app.fetch(
+      new Request('http://localhost/cookie-page', {
+        headers: { authorization: `Bearer ${token}`, accept: 'text/html' },
+      }),
+    );
+    expect(response.status).toBe(302);
+    expect(response.headers.get('location')).toBe('/login?returnTo=%2Fcookie-page');
+    await response.text();
+  } finally {
+    await app.stop();
+  }
+});

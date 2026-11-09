@@ -173,14 +173,18 @@ export interface IAuthService {
   authenticate(request: IRequest): Promise<IPrincipal | null>;
   /**
    * Verify credentials for a login flow (e.g., username/password).
+   * @param request - Optional request for application tenant-scoped lookups
    *
    * @param credentials - The credentials to verify
    * @returns The authenticated principal, or `null` if invalid
    */
-  verifyCredentials(credentials: {
-    readonly identifier: string;
-    readonly secret: string;
-  }): Promise<IPrincipal | null>;
+  verifyCredentials(
+    credentials: {
+      readonly identifier: string;
+      readonly secret: string;
+    },
+    /** Request for application tenant-scoped lookup. @since 0.13.0 */ request?: IRequest,
+  ): Promise<IPrincipal | null>;
 }
 
 /**

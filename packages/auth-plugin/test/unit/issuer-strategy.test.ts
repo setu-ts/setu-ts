@@ -265,3 +265,39 @@ describe('IssuerStrategy refusals', () => {
     expect(seen?.roles).toEqual(['a']);
   });
 });
+
+describe('M139a issuer tenant binding', () => {
+  it.each([
+    ['acme', 'acme', true],
+    ['globex', 'acme', false],
+    [undefined, 'acme', false],
+    [42, 'acme', false],
+    [null, 'acme', false],
+    [undefined, undefined, true],
+    ['acme', undefined, false],
+    [42, undefined, false],
+  ] as const)('checks verified tid %j on %j before mapping: %j', async (tid, tenant, allowed) => {
+    let mapped = 0;
+    const t = await setupStrategy({
+      issuer: {
+        tenantClaim: 'tid',
+        toPrincipal: () => {
+          mapped++;
+          return { id: 'u1' };
+        },
+      },
+    });
+    const token = await signToken(t.key, valid(tid === undefined ? {} : { tid }));
+    const req = request(`Bearer ${token}`);
+    if (tenant !== undefined) req.tenant = { id: tenant };
+    expect((await t.strategy.authenticate(req))?.id ?? null).toBe(allowed ? 'u1' : null);
+    expect(mapped).toBe(allowed ? 1 : 0);
+    expect(t.refusals).toEqual(allowed ? [] : ['tenant-mismatch']);
+  });
+  it('keeps tenant binding opt-in', async () => {
+    const t = await setupStrategy();
+    const req = request(`Bearer ${await signToken(t.key, valid({ tid: 'other' }))}`);
+    req.tenant = { id: 'acme' };
+    expect(await t.strategy.authenticate(req)).toEqual({ id: 'u1' });
+  });
+});

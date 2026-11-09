@@ -50,12 +50,16 @@ export class AuthService implements IAuthService {
 
   /**
    * Verify credentials for login flow (delegates to LocalStrategy).
+   * @param request - Optional request for application tenant-scoped lookup
    */
-  verifyCredentials(credentials: {
-    readonly identifier: string;
-    readonly secret: string;
-  }): Promise<IPrincipal | null> {
-    return this.localStrategy.verify(credentials.identifier, credentials.secret);
+  verifyCredentials(
+    credentials: {
+      readonly identifier: string;
+      readonly secret: string;
+    },
+    /** Request for application tenant-scoped lookup. @since 0.13.0 */ request?: IRequest,
+  ): Promise<IPrincipal | null> {
+    return this.localStrategy.verify(credentials.identifier, credentials.secret, request);
   }
 }
 
@@ -67,16 +71,28 @@ export class LocalStrategy {
   private readonly verifyCallback: (
     identifier: string,
     secret: string,
+    /** Request for application tenant-scoped lookup. @since 0.13.0 */ request?: IRequest,
   ) => Promise<IPrincipal | null>;
 
-  constructor(verifyCallback: (identifier: string, secret: string) => Promise<IPrincipal | null>) {
+  constructor(
+    verifyCallback: (
+      identifier: string,
+      secret: string,
+      /** Request for application tenant-scoped lookup. @since 0.13.0 */ request?: IRequest,
+    ) => Promise<IPrincipal | null>,
+  ) {
     this.verifyCallback = verifyCallback;
   }
 
   /**
    * Verify credentials by delegating to the app-supplied callback.
+   * @param request - Optional request for application tenant-scoped lookup
    */
-  verify(identifier: string, secret: string): Promise<IPrincipal | null> {
-    return this.verifyCallback(identifier, secret);
+  verify(
+    identifier: string,
+    secret: string,
+    /** Request for application tenant-scoped lookup. @since 0.13.0 */ request?: IRequest,
+  ): Promise<IPrincipal | null> {
+    return this.verifyCallback(identifier, secret, request);
   }
 }

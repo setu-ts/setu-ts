@@ -140,6 +140,18 @@ export class IssuerStrategy implements IAuthStrategy {
         this.#report(binding.issuer.name, 'act-malformed');
         return null;
       }
+      const tenantClaim = binding.issuer.tenantClaim;
+      if (tenantClaim !== undefined) {
+        const tenant = outcome.claims[tenantClaim];
+        if (
+          request.tenant === undefined
+            ? Object.hasOwn(outcome.claims, tenantClaim)
+            : typeof tenant !== 'string' || tenant !== request.tenant.id
+        ) {
+          this.#report(binding.issuer.name, 'tenant-mismatch');
+          return null;
+        }
+      }
       const principal = await binding.issuer.toPrincipal(outcome.claims);
       if (principal === null) {
         return null;

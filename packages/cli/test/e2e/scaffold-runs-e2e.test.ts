@@ -1247,6 +1247,16 @@ describe('a scaffolded full-stack project runs both middleware layers', () => {
       const project = `${root}/shop`;
       // The kernel layer, exactly as a developer adds it.
       expect(await run(['g', 'middleware', 'audit', '--dir', project])).toBe(0);
+      const auditPath = `${project}/src/middleware/audit.middleware.ts`;
+      const auditSource = await nodeFs.readFile(auditPath, 'utf8');
+      await nodeFs.writeFile(
+        auditPath,
+        "import { getSession } from '@setu-ts/session-plugin';\n" +
+          auditSource.replace(
+            "ctx.response.header('X-Audit', 'true');",
+            "ctx.response.header('X-Audit', 'true');\n    ctx.response.header('X-Session-Id', getSession(ctx).id);",
+          ),
+      );
       await useWorkspacePackages(project);
 
       const built = await runProcess(denoBinary(), {
@@ -1285,12 +1295,19 @@ describe('a scaffolded full-stack project runs both middleware layers', () => {
         });
         await submitted.body?.cancel();
         const signedIn = await get('/products', cookiesOf(submitted));
+        const planted = await get('/products', cookiesOf(loginPage));
+        await planted.body?.cancel();
 
         return {
           audit: [health, landing, anonymous, signedIn].map((r) => r.headers.get('x-audit')),
           landing: landing.status,
           anonymous: { status: anonymous.status, location: anonymous.headers.get('location') },
           submitted: submitted.status,
+          beforeCookie: cookiesOf(loginPage),
+          afterCookie: cookiesOf(submitted),
+          beforeId: loginPage.headers.get('x-session-id'),
+          afterId: submitted.headers.get('x-session-id'),
+          plantedStatus: planted.status,
           signedIn: { status: signedIn.status, body: await signedIn.text() },
         };
       });
@@ -1303,6 +1320,11 @@ describe('a scaffolded full-stack project runs both middleware layers', () => {
       // …while `/products` sends an anonymous visitor to sign in, before its loader runs.
       expect(result.anonymous).toEqual({ status: 302, location: '/login' });
       expect(result.submitted).toBe(302);
+      expect(result.beforeCookie).not.toBe('');
+      expect(result.afterCookie).not.toBe(result.beforeCookie);
+      expect(result.beforeId).not.toBeNull();
+      expect(result.afterId).not.toBe(result.beforeId);
+      expect(result.plantedStatus).toBe(302);
       // Signed in, the loader reads the user the route middleware put on the context.
       expect(result.signedIn.status).toBe(200);
       expect(result.signedIn.body).toContain('Signed in as');

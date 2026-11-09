@@ -13,7 +13,11 @@
  */
 
 import type { CompiledIssuer } from '../issuers/trusted-issuer.ts';
-import { compileIssuers, isAcceptableUrl } from '../issuers/trusted-issuer.ts';
+import {
+  compileIssuers,
+  isAcceptableUrl,
+  isAcceptableFetchUrl,
+} from '../issuers/trusted-issuer.ts';
 import { AuthPluginConfigurationError } from '../errors.ts';
 import type {
   MfaOptions,
@@ -176,7 +180,7 @@ function compileBase(
     refuse(name, 'onTokens must be a function');
   }
   if (typeof provider.redirectUri !== 'string' || !isAcceptableUrl(provider.redirectUri)) {
-    refuse(name, 'redirectUri must be https, or http on a loopback host');
+    refuse(name, 'redirectUri must be https, or http on a localhost name');
   }
   // The registered route and the value the provider matches against must be the
   // same string; a mismatch is a login that fails at the provider with an error
@@ -219,15 +223,15 @@ function compileOidc(
   base: Omit<CompiledProvider, 'kind'>,
 ): CompiledProvider {
   const name = base.name;
-  if (typeof provider.issuer !== 'string' || !isAcceptableUrl(provider.issuer)) {
-    refuse(name, 'issuer must be an https URL, or http on a loopback host');
+  if (typeof provider.issuer !== 'string' || !isAcceptableFetchUrl(provider.issuer)) {
+    refuse(name, 'issuer must be an https URL, or http on localhost, 127.0.0.1 or [::1]');
   }
   if (provider.rpInitiatedLogout !== undefined) {
     const post = provider.rpInitiatedLogout.postLogoutRedirectUri;
     if (typeof post !== 'string' || !isAcceptableUrl(post)) {
       refuse(
         name,
-        'rpInitiatedLogout.postLogoutRedirectUri must be https, or http on a loopback host',
+        'rpInitiatedLogout.postLogoutRedirectUri must be https, or http on a localhost name',
       );
     }
     if (
@@ -284,8 +288,14 @@ function compileOAuth2(
   const name = base.name;
   for (const field of ['authorizationEndpoint', 'tokenEndpoint', 'userinfoEndpoint'] as const) {
     const value = provider[field];
-    if (typeof value !== 'string' || !isAcceptableUrl(value)) {
-      refuse(name, `${field} must be https, or http on a loopback host`);
+    if (
+      typeof value !== 'string' ||
+      !(field === 'authorizationEndpoint' ? isAcceptableUrl(value) : isAcceptableFetchUrl(value))
+    ) {
+      refuse(
+        name,
+        `${field} must be https, or ${field === 'authorizationEndpoint' ? 'http on a localhost name' : 'http on localhost, 127.0.0.1 or [::1]'}`,
+      );
     }
   }
   const scopes = provider.scopes ?? [];

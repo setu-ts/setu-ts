@@ -91,6 +91,8 @@ export type DenyReason =
   | 'scope-unresolved'
   | 'scope-invalid'
   | 'tenant-mismatch'
+  /** A scoped token was refused by the confinement cap (added in 0.13.0). */
+  | 'token-confined'
   | 'scope-cycle'
   | 'scope-depth'
   | 'scope-nodes'

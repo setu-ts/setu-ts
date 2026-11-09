@@ -159,3 +159,19 @@ describe('AuthService', () => {
     });
   });
 });
+
+describe('M139a request forwarding', () => {
+  it.each([true, false])('forwards optional request: %j', async (supplied) => {
+    const request = supplied ? createRequest() : undefined;
+    const calls: unknown[][] = [];
+    const local = new LocalStrategy((...args) => {
+      calls.push(args);
+      return Promise.resolve({ id: 'u1' });
+    });
+    const service = new AuthService([], local);
+    expect(await service.verifyCredentials({ identifier: 'u1', secret: 'pw' }, request)).toEqual({
+      id: 'u1',
+    });
+    expect(calls).toEqual([['u1', 'pw', request]]);
+  });
+});

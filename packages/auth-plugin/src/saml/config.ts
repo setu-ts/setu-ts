@@ -71,7 +71,7 @@ export function compileSamlProvider(
     refuse(name, 'idp.entityId must be a non-empty string');
   }
   if (!isNonEmptyString(idp.ssoUrl) || !isAcceptableUrl(idp.ssoUrl)) {
-    refuse(name, 'idp.ssoUrl must be https, or http on a loopback host');
+    refuse(name, 'idp.ssoUrl must be https, or http on a localhost name');
   }
   // An empty certificate list verifies nothing — node-saml would refuse every
   // response, but only at the first login, with a message naming no option.
@@ -86,7 +86,7 @@ export function compileSamlProvider(
     refuse(name, 'needs a toPrincipal function');
   }
   if (!isNonEmptyString(provider.acsUrl) || !isAcceptableUrl(provider.acsUrl)) {
-    refuse(name, 'acsUrl must be https, or http on a loopback host');
+    refuse(name, 'acsUrl must be https, or http on a localhost name');
   }
   const acsPath = `${basePath}/${name}/acs`;
   // The route and the URL the IdP posts to (and the assertion's Recipient)

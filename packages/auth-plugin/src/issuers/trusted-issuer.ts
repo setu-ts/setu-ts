@@ -11,6 +11,7 @@
 import type { IPrincipal } from '@setu-ts/common';
 import type { IssuerAlgorithm, TrustedIssuer } from '../interfaces/index.ts';
 import { AuthPluginConfigurationError } from '../errors.ts';
+import { isLoopbackName, isLoopbackAddress } from '../utils/loopback.ts';
 import { SUPPORTED_ALGORITHMS } from './key-selection.ts';
 
 /** Resolved key-set timings, in milliseconds. */
@@ -24,6 +25,8 @@ export interface KeySetTimings {
 /** A validated issuer entry with every default applied. */
 export interface CompiledIssuer {
   readonly name: string;
+  /** Verified tenant claim, if configured. @since 0.13.0 */
+  readonly tenantClaim?: string;
   readonly issuer: string;
   /** One or more accepted `aud` values; a token must contain any of them. */
   readonly audiences: readonly string[];
@@ -51,10 +54,9 @@ const DEFAULT_TIMINGS: KeySetTimings = {
 const DEFAULT_CLOCK_TOLERANCE_SEC = 30;
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 const MAX_CLOCK_TOLERANCE_SEC = 300;
-const LOOPBACK_HOSTS: ReadonlySet<string> = new Set(['localhost', '127.0.0.1', '[::1]']);
 
 /**
- * Whether a URL is `https`, or `http` on a loopback host, written entirely in
+ * Whether a URL is `https`, or `http` on a localhost name or loopback address, written entirely in
  * printable ASCII (U+0021–U+007E). A URL with a space, a control character or a
  * non-ASCII code point is refused rather than normalized: the raw string is what
  * reaches a `Location` header, so an IDN host must be punycoded and a non-ASCII
@@ -64,6 +66,21 @@ const LOOPBACK_HOSTS: ReadonlySet<string> = new Set(['localhost', '127.0.0.1', '
  * @returns `true` when acceptable
  */
 export function isAcceptableUrl(value: string): boolean {
+  return acceptableUrl(value, isLoopbackName);
+}
+
+/**
+ * Accepts HTTPS or HTTP at literal loopback addresses and localhost, retaining
+ * the printable-ASCII rule. Server fetches must not rely on DNS for loopback.
+ * @param value - Candidate URL
+ * @returns Whether the server may fetch it
+ * @since 0.13.0
+ */
+export function isAcceptableFetchUrl(value: string): boolean {
+  return acceptableUrl(value, isLoopbackAddress);
+}
+
+function acceptableUrl(value: string, loopback: (hostname: string) => boolean): boolean {
   // `new URL` silently strips TAB/CR/LF and trims spaces, so a check on the
   // PARSED URL would pass a raw string that is then written verbatim into a
   // `Location` header — which `Headers` refuses, turning every login (and, on
@@ -84,7 +101,7 @@ export function isAcceptableUrl(value: string): boolean {
   if (url.protocol === 'https:') {
     return true;
   }
-  return url.protocol === 'http:' && LOOPBACK_HOSTS.has(url.hostname);
+  return url.protocol === 'http:' && loopback(url.hostname);
 }
 
 /**
@@ -196,6 +213,12 @@ export function compileIssuers(issuers: readonly TrustedIssuer[]): readonly Comp
       refuse(name, 'requireAccessTokenType must be a boolean');
     }
 
+    if (
+      entry.tenantClaim !== undefined &&
+      (typeof entry.tenantClaim !== 'string' || entry.tenantClaim.length === 0)
+    ) {
+      refuse(name, 'tenantClaim must be a non-empty string');
+    }
     const algorithms = entry.algorithms ?? SUPPORTED_ALGORITHMS;
     if (!Array.isArray(algorithms)) {
       refuse(name, 'algorithms must be an array');
@@ -227,13 +250,16 @@ export function compileIssuers(issuers: readonly TrustedIssuer[]): readonly Comp
     }
     if ('jwksUri' in entry.keys) {
       jwksUri = entry.keys.jwksUri;
-      if (typeof jwksUri !== 'string' || !isAcceptableUrl(jwksUri)) {
-        refuse(name, 'keys.jwksUri must be https, or http on a loopback host');
+      if (typeof jwksUri !== 'string' || !isAcceptableFetchUrl(jwksUri)) {
+        refuse(name, 'keys.jwksUri must be https, or http on localhost, 127.0.0.1 or [::1]');
       }
     } else if (entry.keys.discovery === true) {
       discoveryUrl = discoveryUrlFor(entry.issuer);
-      if (!isAcceptableUrl(discoveryUrl)) {
-        refuse(name, 'issuer must be an https URL, or http on a loopback host, for discovery');
+      if (!isAcceptableFetchUrl(discoveryUrl)) {
+        refuse(
+          name,
+          'issuer must be an https URL, or http on localhost, 127.0.0.1 or [::1], for discovery',
+        );
       }
     } else {
       refuse(name, 'keys must be { jwksUri } or { discovery: true }');
@@ -253,6 +279,7 @@ export function compileIssuers(issuers: readonly TrustedIssuer[]): readonly Comp
     }
     return {
       name,
+      ...(entry.tenantClaim === undefined ? {} : { tenantClaim: entry.tenantClaim }),
       issuer: entry.issuer,
       audiences,
       jwksUri,

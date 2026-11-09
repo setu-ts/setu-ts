@@ -294,7 +294,7 @@ CHANGELOG note, not a BREAKING entry, following the precedent of the M98 reason 
 | `requireAuth({ credentials })` | `guards/index.ts` `requireAuth`  | `'any'` (default) keeps today's behaviour. `'cookie'` and `'header'` admit only a principal whose recorded credential source matches; a mismatch or an unset source gives `401` (or the sign-in redirect). Any other value is refused when the guard is built. |
 | `confineScopedTokens`          | `RbacService`; `ScopedEvaluator` | `false` (default) keeps today's behaviour. `true` makes a principal with array `scopes` fail every role, permission and scoped check. `requireScopes` and `requirePolicy` are unaffected. A non-boolean is refused at registration.                            |
 | `jwt.tenantClaim`              | `JwtStrategy`                    | Unset: no comparison. Set: when `request.tenant` exists, the verified claim must be a string equal to `tenant.id`, or the token gives `null`. `''` or a non-string is refused at registration.                                                                 |
-| `trustedIssuers[].tenantClaim` | `IssuerStrategy`                 | Same rule as `jwt.tenantClaim`, on `outcome.claims` before `toPrincipal`. Validated in `compileIssuers`.                                                                                                                                                       |
+| `issuers[].tenantClaim`        | `IssuerStrategy`                 | Same rule as `jwt.tenantClaim`, on `outcome.claims` before `toPrincipal`. Validated in `compileIssuers`.                                                                                                                                                       |
 
 ## 5. Implementation files
 
@@ -431,10 +431,12 @@ Completed 2026-11-09, before implementation, against the source cited in §1.
   - **O6** After the template login, the session id differs from the pre-login id. An attacker's
     planted cookie is not authenticated.
   - **O7** No request header, query or body sets `CSRF_EXEMPT_STATE_KEY`. Only `POST` on the exact
-    MCP path is exempt: `/mcp/`, `/MCP`, `/mcp?x`, `/%6Dcp` and `/mcp/extra` are each probed, and
-    each still gets form CSRF, or does not reach the MCP route. A cross-site `Origin` on `/mcp`
-    still gets `403`. An exempted `/mcp` response carries no `Set-Cookie`. A tool call made with a
-    session cookie and no CSRF token is still refused on its inner request.
+    MCP path is exempt: `/mcp/`, `/MCP`, `/%6Dcp` and `/mcp/extra` are each probed, and each still
+    gets form CSRF, or does not reach the MCP route. A cross-site `Origin` on `/mcp` still gets
+    `403`. An exempted `/mcp` response carries no `Set-Cookie`. A tool call made with a session
+    cookie and no CSRF token is still refused on its inner request. A query string does not change
+    the path (`/mcp?x` is `/mcp`), so it is the MCP route and stays exempt by design, still behind
+    the Origin check.
   - **O8** The fetch-rule sites refuse `http://acme.localhost`. The name-rule sites refuse
     `http://localhost.evil.test`, `http://evil-localhost` and `http://127.0.0.2`.
 - **Committed-tree audit:** yes. The change crosses the authentication, authorization and tenancy

@@ -118,7 +118,10 @@ seconds and is at most 300 seconds.
 ## Strategies
 
 - **JwtStrategy** — passive bearer-token authentication. Extracts `Authorization: Bearer <token>`,
-  calls `IJwtService.verify`, and maps the claims to an `IPrincipal`.
+  calls `IJwtService.verify`, and maps the claims to an `IPrincipal`. A token whose `sub` is
+  missing, not a string or empty is refused (RFC 9068 §2.2 requires it), so no two callers can share
+  a principal id. With `jwt.tenantClaim`, the token is also bound to the request's tenant (see
+  [Binding tokens to the tenant](#binding-tokens-to-the-tenant)).
 - **IssuerStrategy** — passive bearer-token authentication for tokens an **outside identity
   provider** issued (Auth0, Entra ID, Google, Keycloak, Cognito). Configured by the `issuers`
   option, runs immediately after the JWT strategy, reads the same header and scheme, and verifies
@@ -173,6 +176,23 @@ authz.hasPermission(principal, 'users:write');
 authz.hasAnyRole(principal, ['admin', 'manager']);
 authz.hasAllPermissions(principal, ['users:read', 'users:write']);
 ```
+
+### Scoped tokens are confined
+
+A principal whose `scopes` is an array — a bearer token carrying a `scope` or `scp` claim, such as
+an agent token minted with `scope: 'envelopes:read'` — fails every role and permission check, and
+every scoped-RBAC check (`requireScopedRole`, `requireScopedPermission`), whatever roles or grants
+its subject holds. Decorated `@Roles`/`@Permissions` routes and direct `hasRole` calls give the same
+answer, because the cap lives in the authorization services. Such a token reaches only routes
+guarded by `requireScopes`, so issuing a narrow token cannot widen it to its subject's whole role. A
+session principal and a token with no scope claim are unaffected. Authorization diagnostics record
+the refusal as `token-confined`.
+
+This is the default from 0.13.0 (`confineScopedTokens: true`). An application whose identity
+provider stamps every access token with scopes such as `openid profile`, and that authorizes those
+tokens by role, either moves the routes to `requireScopes`, signs browsers in with a session, or
+sets `confineScopedTokens: false` to restore the 0.12 behaviour. `requirePolicy` is not capped: a
+policy receives the principal and can read `principal.scopes` itself.
 
 ## Authorization Policies
 
@@ -435,31 +455,33 @@ Workers application passes `new PasswordHasher(runtime, { iterations: 100_000 })
 
 ## Options
 
-| Option                           | Type                                                  | Default             | Description                                                                                                                                                                                                                                     |
-| -------------------------------- | ----------------------------------------------------- | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `jwt`                            | `JwtOptions`                                          | -                   | Optional JWT service and passive bearer strategy.                                                                                                                                                                                               |
-| `jwt.secret`                     | `string \| Uint8Array`                                | -                   | HS256 key. Required for HS256.                                                                                                                                                                                                                  |
-| `jwt.privateKey`                 | `string` (PEM)                                        | -                   | RS256 private key. Required for RS256.                                                                                                                                                                                                          |
-| `jwt.publicKey`                  | `string` (PEM)                                        | -                   | RS256 public key. Required for RS256.                                                                                                                                                                                                           |
-| `jwt.algorithm`                  | `'HS256' \| 'RS256'`                                  | inferred            | Inferred from which key material is provided.                                                                                                                                                                                                   |
-| `jwt.audience`                   | `string`                                              | -                   | Expected `aud`; enforced on verify.                                                                                                                                                                                                             |
-| `jwt.issuer`                     | `string`                                              | -                   | Expected `iss`; enforced on verify.                                                                                                                                                                                                             |
-| `jwt.header`                     | `string`                                              | `'authorization'`   | Header name for bearer extraction.                                                                                                                                                                                                              |
-| `jwt.scheme`                     | `string`                                              | `'bearer'`          | Token scheme prefix.                                                                                                                                                                                                                            |
-| `jwt.accessTokenRevocationStore` | `IAccessTokenRevocationStore`                         | -                   | Shared store that rejects revoked typed access tokens.                                                                                                                                                                                          |
-| `apiKey.header`                  | `string`                                              | `'X-API-Key'`       | Header holding the API key.                                                                                                                                                                                                                     |
-| `apiKey.validate`                | `(key) => Promise<IPrincipal \| null>`                | -                   | App-supplied API-key lookup.                                                                                                                                                                                                                    |
-| `local.verify`                   | `(identifier, secret) => Promise<IPrincipal \| null>` | -                   | App-supplied credential check.                                                                                                                                                                                                                  |
-| `rbac.roles`                     | `Record<string, RoleDefinition>`                      | -                   | Role → permissions + `inherits` hierarchy.                                                                                                                                                                                                      |
-| `policies`                       | `readonly PolicyDefinition[]`                         | `[]`                | Authorization policies from `definePolicy`, checked when `AuthPlugin(...)` is called (malformed or duplicate names refuse). The policy service is registered whether or not this is set. See [Authorization Policies](#authorization-policies). |
-| `scopedRbac`                     | `ScopedRbacOptions`                                   | -                   | Scoped RBAC: grant sources, scope inheritance, custom roles, timing and bounds. Requires `rbac`.                                                                                                                                                |
-| `session.toPrincipal`            | `(view: SessionView) => IPrincipal \| null`           | -                   | Maps the opened session to its principal; `null` continues the chain. Requires `SessionPlugin`.                                                                                                                                                 |
-| `strategies`                     | `readonly IAuthStrategy[]`                            | -                   | Caller-supplied strategies, appended after every built-in in declaration order.                                                                                                                                                                 |
-| `middleware`                     | `false \| AuthMiddlewareOption`                       | `{ priority: 300 }` | Move, exclude paths from, or disable the global authentication middleware.                                                                                                                                                                      |
-| `issuers`                        | `readonly TrustedIssuer[]`                            | -                   | Outside identity providers whose access tokens are accepted.                                                                                                                                                                                    |
-| `resourceServer`                 | `ResourceServerOptions`                               | -                   | M132 RFC 9728 protected-resource metadata and the `resource_metadata` challenge parameter.                                                                                                                                                      |
-| `http`                           | `IAuthHttp`                                           | `fetch`-based       | Outbound HTTP for issuer key sets, discovery documents, and the sign-in token exchange.                                                                                                                                                         |
-| `signIn`                         | `SignInConfig`                                        | -                   | Sign-in with outside providers; registers `IAuthSessionService`. Requires `SessionPlugin`.                                                                                                                                                      |
+| Option                           | Type                                                            | Default             | Description                                                                                                                                                                                                                                     |
+| -------------------------------- | --------------------------------------------------------------- | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `jwt`                            | `JwtOptions`                                                    | -                   | Optional JWT service and passive bearer strategy.                                                                                                                                                                                               |
+| `jwt.secret`                     | `string \| Uint8Array`                                          | -                   | HS256 key. Required for HS256.                                                                                                                                                                                                                  |
+| `jwt.privateKey`                 | `string` (PEM)                                                  | -                   | RS256 private key. Required for RS256.                                                                                                                                                                                                          |
+| `jwt.publicKey`                  | `string` (PEM)                                                  | -                   | RS256 public key. Required for RS256.                                                                                                                                                                                                           |
+| `jwt.algorithm`                  | `'HS256' \| 'RS256'`                                            | inferred            | Inferred from which key material is provided.                                                                                                                                                                                                   |
+| `jwt.audience`                   | `string`                                                        | -                   | Expected `aud`; enforced on verify.                                                                                                                                                                                                             |
+| `jwt.issuer`                     | `string`                                                        | -                   | Expected `iss`; enforced on verify.                                                                                                                                                                                                             |
+| `jwt.header`                     | `string`                                                        | `'authorization'`   | Header name for bearer extraction.                                                                                                                                                                                                              |
+| `jwt.scheme`                     | `string`                                                        | `'bearer'`          | Token scheme prefix.                                                                                                                                                                                                                            |
+| `jwt.accessTokenRevocationStore` | `IAccessTokenRevocationStore`                                   | -                   | Shared store that rejects revoked typed access tokens.                                                                                                                                                                                          |
+| `jwt.tenantClaim`                | `string`                                                        | -                   | Claim that binds a token to the request's tenant. See [Binding tokens to the tenant](#binding-tokens-to-the-tenant).                                                                                                                            |
+| `confineScopedTokens`            | `boolean`                                                       | `true`              | Refuse a principal carrying OAuth scopes at every role, permission and scoped-RBAC check. See [Scoped tokens are confined](#scoped-tokens-are-confined).                                                                                        |
+| `apiKey.header`                  | `string`                                                        | `'X-API-Key'`       | Header holding the API key.                                                                                                                                                                                                                     |
+| `apiKey.validate`                | `(key) => Promise<IPrincipal \| null>`                          | -                   | App-supplied API-key lookup.                                                                                                                                                                                                                    |
+| `local.verify`                   | `(identifier, secret, request?) => Promise<IPrincipal \| null>` | -                   | App-supplied credential check. `request` is the one passed to `verifyCredentials`; scope the user lookup by `request?.tenant?.id` under multi-tenancy.                                                                                          |
+| `rbac.roles`                     | `Record<string, RoleDefinition>`                                | -                   | Role → permissions + `inherits` hierarchy.                                                                                                                                                                                                      |
+| `policies`                       | `readonly PolicyDefinition[]`                                   | `[]`                | Authorization policies from `definePolicy`, checked when `AuthPlugin(...)` is called (malformed or duplicate names refuse). The policy service is registered whether or not this is set. See [Authorization Policies](#authorization-policies). |
+| `scopedRbac`                     | `ScopedRbacOptions`                                             | -                   | Scoped RBAC: grant sources, scope inheritance, custom roles, timing and bounds. Requires `rbac`.                                                                                                                                                |
+| `session.toPrincipal`            | `(view: SessionView) => IPrincipal \| null`                     | -                   | Maps the opened session to its principal; `null` continues the chain. Requires `SessionPlugin`.                                                                                                                                                 |
+| `strategies`                     | `readonly IAuthStrategy[]`                                      | -                   | Caller-supplied strategies, appended after every built-in in declaration order.                                                                                                                                                                 |
+| `middleware`                     | `false \| AuthMiddlewareOption`                                 | `{ priority: 300 }` | Move, exclude paths from, or disable the global authentication middleware.                                                                                                                                                                      |
+| `issuers`                        | `readonly TrustedIssuer[]`                                      | -                   | Outside identity providers whose access tokens are accepted.                                                                                                                                                                                    |
+| `resourceServer`                 | `ResourceServerOptions`                                         | -                   | M132 RFC 9728 protected-resource metadata and the `resource_metadata` challenge parameter.                                                                                                                                                      |
+| `http`                           | `IAuthHttp`                                                     | `fetch`-based       | Outbound HTTP for issuer key sets, discovery documents, and the sign-in token exchange.                                                                                                                                                         |
+| `signIn`                         | `SignInConfig`                                                  | -                   | Sign-in with outside providers; registers `IAuthSessionService`. Requires `SessionPlugin`.                                                                                                                                                      |
 
 At least one passive strategy must be configured through `jwt`, `issuers`, `apiKey`, `session`, or
 `strategies`; `local` alone is a login verifier and cannot authenticate a later request. For
@@ -516,9 +538,11 @@ AuthPlugin({
   continue; nothing else from an unverified token is used.
 - **Keys.** `keys` is `{ jwksUri }` or `{ discovery: true }`, which reads `jwks_uri` from
   `<issuer>/.well-known/openid-configuration` and requires that document's `issuer` to match. Both
-  URLs must be `https` (or `http` on a loopback host) and written in printable ASCII — punycode an
-  IDN host, percent-encode a non-ASCII path. Keys are filtered by `kty`, `crv`, `use`, `alg`,
-  `key_ops` and `kid`, so an encryption key in the same set is never used to verify a signature.
+  URLs must be `https` (or `http` on `localhost`, `127.0.0.1` or `[::1]`, never a `*.localhost`
+  subdomain, because the server fetches them and its resolver may not map such a name to loopback)
+  and written in printable ASCII — punycode an IDN host, percent-encode a non-ASCII path. Keys are
+  filtered by `kty`, `crv`, `use`, `alg`, `key_ops` and `kid`, so an encryption key in the same set
+  is never used to verify a signature.
 - **Algorithms.** RS256, PS256, ES256, ES384 and EdDSA (also spelled `Ed25519`), narrowed per issuer
   with `algorithms`. `none` and every `HS*` algorithm are refused before any key is looked up, so a
   token signed with HMAC using the provider's public key as the secret cannot pass.
@@ -604,6 +628,14 @@ any absent or empty member. `GET` on that path is unguarded, answers `200` `appl
 `Cache-Control: public, max-age=300` and `Access-Control-Allow-Origin: *`, and is fetched before a
 client has a token.
 
+`resource` and every `authorizationServers` entry must be `https`, or `http` on a localhost name:
+`localhost`, any subdomain of it (`http://acme.localhost:3000`, RFC 6761 §6.3), `127.0.0.1` or
+`[::1]`. The same rule applies to every URL the plugin only compares or hands to a browser: sign-in
+`redirectUri`, `postLogoutRedirectUri` and `authorizationEndpoint`, SAML `acsUrl` and `idp.ssoUrl`,
+and passkey origins. A URL the server fetches itself — a JWKS URL, a discovery issuer, a token or
+userinfo endpoint — accepts `http` only on `localhost`, `127.0.0.1` or `[::1]`, because the host's
+resolver need not map `acme.localhost` to loopback.
+
 With a bearer strategy (`jwt` or `issuers`) or `resourceServer` configured, the plugin adds a
 `WWW-Authenticate` header to a refused request: a `401` gets `Bearer` — with `error="invalid_token"`
 when a credential was sent in the header and scheme the bearer strategies read
@@ -664,6 +696,62 @@ rotation, carries the actor back as the `act` claim, so exchanging a delegated t
 self-issued one does not turn the agent into the user. The principal's OAuth scopes travel the same
 way, as the `scope` claim, so `requireScopes` still admits the exchanged token; a value that is not
 a scope token is dropped rather than split.
+
+### Restricting a route to one credential
+
+With `jwt`, `issuers` or `apiKey` configured, the global authentication middleware accepts a bearer
+credential on every route. `credentials` limits a route to the credential its callers should use:
+
+```typescript
+import { requireAuth } from '@setu-ts/auth-plugin';
+
+// Browser pages and form posts: a session only.
+app.router.post('/api/envelopes', { middleware: [requireAuth({ credentials: 'cookie' })], handler });
+// Agent and API routes: a header credential only.
+app.router.post('/api/agent/run', { middleware: [requireAuth({ credentials: 'header' })], handler });
+```
+
+`credentials` is `'any'` (the default), `'cookie'` or `'header'`; any other value throws when the
+guard is built. A request authenticated by the other kind is treated as signed out: `401`, or the
+`signInPage` redirect for a browser navigation. The kind is the one the plugin's own authentication
+recorded. Header strategies run before session strategies, so a request carrying both a bearer token
+and a session cookie counts as `'header'`, and a `'cookie'` route refuses it. When the plugin
+recorded nothing — a replaced `IAuthService`, or application middleware that set the principal —
+both `'cookie'` and `'header'` refuse; middleware that swaps the principal must also set
+`CREDENTIAL_SOURCE_STATE_KEY`, or the route uses `'any'`. `delegation` is checked after the
+credential.
+
+### Binding tokens to the tenant
+
+Under multi-tenancy, a token issued for one tenant must not act on another tenant's host. Name the
+claim that carries the tenant id, per source:
+
+```typescript
+import { AuthPlugin } from '@setu-ts/auth-plugin';
+
+AuthPlugin({
+  jwt: { secret: process.env.JWT_SECRET ?? '', tenantClaim: 'tenant' },
+  issuers: [
+    {
+      name: 'entra',
+      issuer: 'https://login.microsoftonline.com/organizations/v2.0',
+      audience: 'api://orders',
+      keys: { discovery: true },
+      tenantClaim: 'tid',
+      toPrincipal: (claims) =>
+        typeof claims.sub === 'string' ? { id: `entra|${claims.sub}` } : null,
+    },
+  ],
+});
+```
+
+With `tenantClaim` set and a tenant resolved for the request (`request.tenant`), the token is
+refused unless that claim, read from the verified token, is a string equal to the tenant's id. On a
+request with no tenant, a token without the claim is accepted and a token carrying it is refused, so
+a tenant's token never acts on a platform route. An issuer token refused this way is reported as
+`tenant-mismatch`, without the tenant id. There is no default claim name, because providers differ
+(`tid`, `org_id`); without `tenantClaim` nothing is compared. The multi-tenancy plugin's `jwt`
+resolver reads the claim unverified to choose the tenant; this check is what verifies it.
 
 ## Signing a user in
 
@@ -840,12 +928,18 @@ password. To sign in for real, give the starter's `auth` arm a password-only `si
 import type { IPrincipal } from '@setu-ts/common';
 import type { AuthPluginOptions } from '@setu-ts/auth-plugin';
 
-declare function findUser(email: string, password: string): Promise<IPrincipal | null>;
+declare function findUser(
+  tenantId: string | undefined,
+  email: string,
+  password: string,
+): Promise<IPrincipal | null>;
 
 // The `auth` arm of the options `createFullStackAppFromConfig` reads.
 export const auth: AuthPluginOptions = {
   signIn: { providers: [] },
-  local: { verify: (email, password) => findUser(email, password) },
+  // `request` is the one the sign-in service passes below. Under multi-tenancy, look the user up
+  // within the request's tenant, or one tenant's user can sign in on another tenant's host.
+  local: { verify: (email, password, request) => findUser(request?.tenant?.id, email, password) },
 };
 ```
 
@@ -877,7 +971,10 @@ export function accountService(ctx: IRequestContext): AccountService {
   return {
     async signIn(email, password) {
       const auth = ctx.services.get<IAuthService>(CAPABILITIES.AUTH);
-      const principal = await auth.verifyCredentials({ identifier: email, secret: password });
+      const principal = await auth.verifyCredentials(
+        { identifier: email, secret: password },
+        ctx.request,
+      );
       if (!principal) return false;
       const authSession = ctx.services.get<IAuthSessionService>(CAPABILITIES.AUTH_SESSION);
       await authSession.signIn(ctx, principal, { methods: ['pwd'] });

@@ -55,7 +55,7 @@ function compileAuthorizationServers(
   const servers: string[] = [];
   for (const entry of entries) {
     if (typeof entry !== 'string' || !isAcceptableUrl(entry)) {
-      refuse('authorizationServers entries must be https, or http on a loopback host');
+      refuse('authorizationServers entries must be https, or http on a localhost name');
     }
     servers.push(entry);
   }
@@ -96,7 +96,7 @@ export function compileResourceServer(
 ): CompiledResourceServer {
   const resource = options.resource;
   if (typeof resource !== 'string' || !isAcceptableUrl(resource)) {
-    refuse('resource must be https, or http on a loopback host');
+    refuse('resource must be https, or http on a localhost name');
   }
   const url = new URL(resource);
   if (url.search !== '' || url.hash !== '' || url.username !== '' || url.password !== '') {
