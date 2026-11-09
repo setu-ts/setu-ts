@@ -237,10 +237,8 @@ function withErrorLogging(
       (value as (...args: unknown[]) => unknown).bind(implementation),
       resolveLogger,
     );
-    if (wrapped !== value) {
-      out ??= { ...implementation };
-      out[key] = wrapped;
-    }
+    out ??= { ...implementation };
+    out[key] = wrapped;
   }
   return out ?? implementation;
 }

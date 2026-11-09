@@ -634,3 +634,57 @@ it('supplies iterator cancellation fallbacks when the producer has no cleanup me
   expect(errors).toHaveLength(1);
   expect(implementation['bidiStream']).toBe(42);
 });
+
+describe('gRPC handler wrapper — what it wraps', () => {
+  it('finds a method by its proto name when the descriptor has no local name', () => {
+    const { logger, errors } = makeCapturingLogger();
+    const definition = fakeService('example.Plain', ['Echo'], fakeFile('example/plain.proto'));
+    const runtime = createFakeConnectRuntime({ services: [definition] });
+    const implementation = {
+      Echo: () => {
+        throw new Error('plain failed');
+      },
+    };
+    buildConnectRouter({
+      connectRuntime: runtime,
+      readMaxBytes: 4 * 1024 * 1024,
+      basePath: '/grpc',
+      reflection: false,
+      health: false,
+      services: [{ definition, implementation }],
+      embeddedDescriptors,
+      healthService: undefined,
+      resolveLogger: () => logger,
+    });
+    const wrapped = runtime.registered[0].implementation as Record<string, () => unknown>;
+    expect(wrapped).not.toBe(implementation);
+    expect(() => wrapped.Echo()).toThrow('plain failed');
+    expect(errors[0].metadata?.procedure).toBe('example.Plain/Echo');
+  });
+
+  it('hands over the same implementation object when there is nothing to wrap', () => {
+    const { logger } = makeCapturingLogger();
+    const file = fakeFile('example/empty.proto');
+    const noMethods = { kind: 'service', typeName: 'example.NoMethods', file } as const;
+    const notAFunction = fakeService('example.Data', ['Value'], file);
+    const runtime = createFakeConnectRuntime({ services: [noMethods, notAFunction] });
+    const first = { extra: () => 1 };
+    const second = { Value: 42 };
+    buildConnectRouter({
+      connectRuntime: runtime,
+      readMaxBytes: 4 * 1024 * 1024,
+      basePath: '/grpc',
+      reflection: false,
+      health: false,
+      services: [
+        { definition: noMethods, implementation: first },
+        { definition: notAFunction, implementation: second },
+      ],
+      embeddedDescriptors,
+      healthService: undefined,
+      resolveLogger: () => logger,
+    });
+    expect(runtime.registered[0].implementation).toBe(first);
+    expect(runtime.registered[1].implementation).toBe(second);
+  });
+});
