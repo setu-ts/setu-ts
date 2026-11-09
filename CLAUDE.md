@@ -783,7 +783,7 @@ here.
   scoped tokens confined by default, `requireAuth({ credentials })`, `tenantClaim`, `sub` refusal,
   the request on `local.verify`, the template login's `regenerate()`, MCP exempt from form CSRF,
   `*.localhost` for non-fetched URLs; V12-37, V12-18, V12-19, V12-11, V12-35, V12-34; ships in
-  `0.13.0`) — complete (PR pending).
+  `0.13.0`) — complete (PR #576).
 - **Next milestone** — the remaining M139 letters.
 
 ## Verification (run before declaring any work done)
