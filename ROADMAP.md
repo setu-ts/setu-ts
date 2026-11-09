@@ -16976,25 +16976,30 @@ real Redis delivery after switching from memory; every changed file at the 90% p
 **Source:** the `0.12.0` CLI review and the Mohor e-sign build on published `0.12.0`
 (`smoke/V0120-REVIEW.md`, rows V12-1 … V12-38), the first gRPC load benchmark and its probes
 (2026-11-07, rows V12-39 and V12-40), plus five older rows no milestone named. Grouped in
-`smoke/OPEN-AFTER-0120.md`. Of the register's 131 rows not closed, 87 were claimed by M128–M131d and
-older fixes that are all in `0.12.0`, so the `0.12.0` regression run closes or reopens them; it runs
-first, and any regression it finds is sequenced before every letter below, as V11-10 led M131.
-V10-33 and V10-45 stay documented contracts. The remaining 44 rows (8 Medium, 36 Low, no High) are
-five letters. The gRPC letter, M139b, is a minor (`0.13.0`) because its request-body and trailer
-seams touch committed contracts; the plan names each break, per the versioning policy above.
+`smoke/OPEN-AFTER-0120.md`. The `0.12.0` row re-run (2026-11-09, `smoke/V0120-REGRESSION.md`)
+re-tested the 88 rows M128–M131d and older fixes claimed: 78 closed, and V10-33 and V10-45 closed as
+documented contracts. It left seven rows partial or open (X10-3, V8-3, V8-14, X3-3, X91-1, X93-3,
+X88-9) and filed V12-41 … V12-50, two of them regressions in `0.12.0` (V12-42, V12-47), which lead
+M139d. That makes 61 rows (1 High, 14 Medium, 46 Low) in seven letters. M139b and M139g are minors
+(`0.13.0`) because they touch committed contracts; each plan names its breaks, per the versioning
+policy above.
 
-| Letter    | Kind   | Shape                                                               | Rows                                                                                                                                          | Packages                                                                                                   |
-| --------- | ------ | ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| **M139a** | design | identity and authorization a token or a tenant can escape           | V12-37, V12-18, V12-19, V12-11, V12-35, V12-34                                                                                                | `auth-plugin`, `multi-tenancy-plugin`, `session-plugin`, `mcp-plugin`, `cli`                               |
-| **M139b** | design | gRPC over HTTP/2: streamed bodies, an HTTP/2 listener, trailers     | V12-39, V12-40                                                                                                                                | `common`, `kernel`, `runtime`, `grpc-plugin`, `apps/grpc-workspace`                                        |
-| **M139c** | fix    | AI-layer and data contracts with a missing half                     | V12-4, V12-9, V12-10, V12-36, V12-20, V12-21                                                                                                  | `agent-runs-plugin`, `vector-store-plugin`, `auth-plugin`, `multi-tenancy-plugin`, `mail-plugin`, `common` |
-| **M139d** | fix    | the CLI on a full-stack project: `add`, `build`, `check`, the brief | V12-1, V12-12, V12-2, V12-3, V12-25, V12-26, V12-27, V12-28, V12-30, V12-33, X91-9, V12-22, V12-23, V12-16 (CLI half), V12-31, V12-32, V12-24 | `cli`                                                                                                      |
-| **M139e** | docs   | documentation                                                       | V12-5, V12-6, V12-7, V12-8, V12-13, V12-14 (= V12-29), V12-15, V12-16 (card half), V12-17, V12-38, X93-4, X93-5, V9-29 remainder              | READMEs, agent cards, `docs/`, CHANGELOG, website                                                          |
+| Letter    | Kind   | Shape                                                               | Rows                                                                                                                                                                                                                       | Packages                                                                                                       |
+| --------- | ------ | ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| **M139a** | design | identity and authorization a token or a tenant can escape           | V12-37, V12-18, V12-19, V12-11, V12-35, V12-34                                                                                                                                                                             | `auth-plugin`, `multi-tenancy-plugin`, `session-plugin`, `mcp-plugin`, `cli`                                   |
+| **M139b** | design | gRPC over HTTP/2: streamed bodies, an HTTP/2 listener, trailers     | V12-39, V12-40                                                                                                                                                                                                             | `common`, `kernel`, `runtime`, `grpc-plugin`, `apps/grpc-workspace`                                            |
+| **M139c** | fix    | AI-layer and data contracts with a missing half                     | V12-4, V12-9, V12-10, V12-36, V12-20, V12-21                                                                                                                                                                               | `agent-runs-plugin`, `vector-store-plugin`, `auth-plugin`, `multi-tenancy-plugin`, `mail-plugin`, `common`     |
+| **M139d** | fix    | the CLI on a full-stack project: `add`, `build`, `check`, the brief | V12-42, V12-47, V12-46, V8-14, X91-1, V12-1, V12-12, V12-2, V12-3, V12-25, V12-26, V12-27, V12-28, V12-30, V12-33, X91-9, V12-22, V12-23, V12-16 (CLI half), V12-31, V12-32, V12-24, X93-3, V12-43, V12-44, V12-45, V12-48 | `cli`, `create`, `kernel`                                                                                      |
+| **M139e** | docs   | documentation                                                       | V12-5, V12-6, V12-7, V12-8, V12-13, V12-14 (= V12-29), V12-15, V12-16 (card half), V12-17, V12-38, X93-4, X93-5, V9-29 remainder                                                                                           | READMEs, agent cards, `docs/`, CHANGELOG, website                                                              |
+| **M139f** | fix    | health and failure signals that mislead the operator                | X10-3, V8-3, X3-3, X88-9, V12-50, V12-49                                                                                                                                                                                   | `service-discovery-plugin`, `database-plugin`, `realtime-backplane-plugin`, `queue-plugin`, `scheduler-plugin` |
+| **M139g** | design | capability lookups typed by their token                             | V12-41                                                                                                                                                                                                                     | `common`, `kernel`                                                                                             |
 
-**Sequence.** The regression run first. M139a next: it is the only letter that crosses a trust
-boundary, and it is **security-audited** before it merges. M139b, M139c and M139d can start beside
-it; M139b's gate includes a paired benchmark rerun, which never runs beside a suite. M139e batches
-the documentation last, after the code letters change what the docs must say.
+**Sequence.** The regression run is done. M139d's two regressions (V12-42, V12-47) go first, as
+V11-10 led M131. M139a next: it is the only letter that crosses a trust boundary, and it is
+**security-audited** before it merges. M139b, M139c, M139d, M139f and M139g can start beside it;
+M139b's gate includes a paired benchmark rerun, which never runs beside a suite, and M139g ships
+with M139b in `0.13.0`. M139e batches the documentation last, after the code letters change what the
+docs must say.
 
 ### Milestone 139a: Identity and Authorization a Token or a Tenant Can Escape
 
@@ -17106,8 +17111,18 @@ cross-member pair against the 2026-11-07 numbers; every changed file at the 90% 
 
 ### Milestone 139d: The CLI on a Full-Stack Project
 
-**Package(s):** `cli`
+**Package(s):** `cli`; `create` (X93-3); `kernel` (V8-14's message)
 
+- **Regressions in `0.12.0`, first:** V12-42 — on a full-stack project
+  `g route|controller --module m` mounts at `/<m>/<name>` while modules mount at `/api/<m>`, so the
+  CLI guide's recipe (`g module api`, `g route products --module api`) passes every gate and fails
+  at startup with `RouteRegistrationError`; V12-47 — the generated `instrumentation.mjs` registers
+  the import-in-the-middle hook with no include list and fails to wrap the app's `.tsx` views.
+- **V12-46** — the full-stack `handleError` logs a page 500 as one line with no stack, location or
+  request id.
+- **V8-14** — the kernel's duplicate-plugin error advises `{ override: true }`, not the starter's
+  option, when a starter-composed project registers a plugin the starter bundles.
+- **X91-1** — same-named controller adoption is still refused on a full-stack project.
 - **V12-1** — a fresh `setu new --agents` fails its own `format:check`.
 - **V12-12** — `setu build` cannot ship a worker-pool task module.
 - **`setu add`:** V12-2 (`mcp` neither registers nor prints the line), V12-3 (full-stack never
@@ -17117,7 +17132,10 @@ cross-member pair against the 2026-11-07 numbers; every changed file at the 90% 
   `--queue redis` full-stack project), X91-9 (`messaging`/`queue` write no `REDIS_URL`).
 - **Generated text and gates:** V12-22, V12-23 (the full-stack brief), V12-16 (barrel comments),
   V12-31 (`g middleware` JSDoc), V12-32 (W001 on the scaffold's own config), V12-24 (no plain
-  startup line).
+  startup line), V12-43 (the Workers config says the devtool is Deno-only), V12-44 (the devtool
+  entry says the connector did not start after closing it), V12-45 (`k8s/README.md` omits
+  `--pull-secret`), V12-48 (a taken `VITE_PORT` is an uncaught Vite stack), X93-3 (the
+  example-download refusal reads one level of the cause chain).
 
 ### Milestone 139e: Documentation
 
@@ -17131,6 +17149,40 @@ cross-member pair against the 2026-11-07 numbers; every changed file at the 90% 
   V9-29 remainder.
 - **Changelog and site:** X93-4, X93-5; check first whether M131d's release check already fixed
   X93-4.
+
+### Milestone 139f: Health and Failure Signals That Mislead the Operator
+
+**Package(s):** `service-discovery-plugin`, `database-plugin`, `realtime-backplane-plugin`,
+`queue-plugin`, `scheduler-plugin`; six plugin READMEs (V12-49)
+
+Each row passed its earlier fix's own check on `0.12.0` and still tells the operator the wrong
+thing.
+
+- **X10-3** — in-cluster Kubernetes discovery on Deno with an untrusted API-server CA: the TLS cause
+  is logged only when an application request hits it; a pod that only fails its readiness probe logs
+  nothing, and the message says "could not resolve … nothing cached".
+- **V8-3** — a saturated pool with `connectionTimeoutMillis` reads as an unreachable database: the
+  pool reports `waiting = 0`, so the saturation rule never fires and `/ready` is 503 while
+  PostgreSQL is up.
+- **X3-3** — a short backplane partition drops every frame in 3 of 8 runs, the publish resolving
+  without error, while the README promises late delivery; the plan decides between delivery that
+  survives the reconnect race and a README that says frames can be lost.
+- **X88-9** — the queue's outage line is logged at `error` and recovery is silent, because the
+  plugin hands the service only an `error` method.
+- **V12-50** — a connection dropped under a statement is logged as a driver-bound timeout.
+- **V12-49** — READMEs say to alert on `data.<field>` without naming
+  `HealthPlugin({ details: true })`, without which `/health` omits `data`.
+
+### Milestone 139g: Capability Lookups Typed by Their Token
+
+**Package(s):** `common`, `kernel`. Targets `0.13.0` with M139b: it changes the committed
+`IServiceRegistry` contract.
+
+- **V12-41** — `services.get<T>(CAPABILITIES.X)` takes its type from the caller, so a wrong pairing
+  compiles and fails at run time, and `get` ignores the type a `serviceToken<T>()` carries. Ship a
+  capability-to-interface map in `common`, open to module augmentation for plugin tokens, and
+  `get`/`getAll` overloads that infer the type from a `CAPABILITIES` value or a `ServiceToken<T>`;
+  the explicit type argument stays for third-party string tokens.
 
 ---
 
@@ -17405,9 +17457,11 @@ cross-member pair against the 2026-11-07 numbers; every changed file at the 90% 
 | 137b      | ⬜     | common + openapi-plugin + auth-plugin + decorator-plugin — derived 401/403/415/429 and idempotency headers, declared response headers, opt-in Problem Details schema                                                                                                                      |
 | 137c      | ⬜     | common + validation-plugin + openapi-plugin + sdk — form bodies and file uploads in the document and the generated client                                                                                                                                                                 |
 | 138       | ✅     | cli — workspace broker and per-member RPC style: a CLI-owned transport module per member, `setu workspace broker` and `setu workspace rpc`; PR #568                                                                                                                                       |
-| 139       | ⬜     | the `v0.12.0` smoke closeout — the `0.12.0` regression run first, then five letters (0.13.0)                                                                                                                                                                                              |
+| 139       | ⬜     | the `v0.12.0` smoke closeout — the `0.12.0` row re-run done, then seven letters (0.13.0)                                                                                                                                                                                                  |
 | 139a      | ⬜     | auth-plugin + multi-tenancy + session + mcp + cli — identity and authorization a token or a tenant can escape                                                                                                                                                                             |
 | 139b      | ⬜     | common + kernel + runtime + grpc-plugin — gRPC over HTTP/2: streamed RPC bodies, an HTTP/2 listener that keeps HTTP/1.1, response trailers and native gRPC on Node and Bun                                                                                                                |
 | 139c      | ⬜     | agent-runs + vector-store + auth + multi-tenancy + mail + common — AI-layer and data contracts with a missing half                                                                                                                                                                        |
 | 139d      | ⬜     | cli — the CLI on a full-stack project: `add`, `build`, `check`, the brief                                                                                                                                                                                                                 |
 | 139e      | ⬜     | docs — documentation                                                                                                                                                                                                                                                                      |
+| 139f      | ⬜     | service-discovery + database + realtime-backplane + queue + scheduler — health and failure signals that mislead the operator                                                                                                                                                              |
+| 139g      | ⬜     | common + kernel — capability lookups typed by their token (0.13.0)                                                                                                                                                                                                                        |
