@@ -186,6 +186,7 @@ export type {
   NextFunction,
   ResponseSnapshot,
   ResponseSnapshotInit,
+  StreamOptions,
   RouteDefinition,
   RouteHandler,
   RouteResponseMetadata,
@@ -699,6 +700,8 @@ export type {
 export type {
   GrpcServiceDefinition,
   GrpcServingStatus,
+  RpcReply,
+  RpcTransport,
   IGrpcService,
   RpcFetchHandler,
 } from './services/grpc.ts';

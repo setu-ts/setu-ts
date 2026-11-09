@@ -49,7 +49,7 @@ import type {
   StartOptions,
   WebSocketUpgradeDecision,
 } from '@setu-ts/common';
-import type { IGrpcService } from '@setu-ts/common';
+import type { IGrpcService, RpcReply, RpcTransport } from '@setu-ts/common';
 
 import { MiddlewarePipeline } from '../pipeline/middleware-pipeline.ts';
 import { executeChain } from '../pipeline/execute-chain.ts';
@@ -1789,6 +1789,7 @@ class Application implements IKernelApplication {
             this.#registry,
             complete,
           ),
+          response.streamOptions,
         );
       }
       return response;
@@ -1800,6 +1801,7 @@ class Application implements IKernelApplication {
       // the event loop.
       response.stream(
         guardEmptyChunks(streamed, this.#registry.get<IRuntimeServices>(CAPABILITIES.RUNTIME)),
+        response.streamOptions,
       );
     }
     const cleanups = handle.takeDeferred();
@@ -1826,7 +1828,10 @@ class Application implements IKernelApplication {
       this.#inFlight--;
       this.#completeRequest(ctx, outcome);
     };
-    response.stream(wrapDeferredStream(body, cleanups, this.#registry, complete));
+    response.stream(
+      wrapDeferredStream(body, cleanups, this.#registry, complete),
+      response.streamOptions,
+    );
     return response;
   }
 
@@ -2017,49 +2022,97 @@ class Application implements IKernelApplication {
     // plugin's to know (an exact-match set — `startsWith('application/grpc')`
     // would also claim `application/grpc-web+proto`, the format that works),
     // and §2.2 forbids importing it to find out.
-    const refusal = grpcService.refuses?.(raw) ?? null;
+    //
+    // What the connection can carry, from the adapter's own flag — never from
+    // request input. Native `application/grpc` needs trailers, so the plugin
+    // refuses it unless this says they reach the client.
+    const transport: RpcTransport = { trailers: ctx.request.responseTrailers === true };
+    const refusal = grpcService.refuses?.(raw, transport) ?? null;
     if (refusal !== null) {
-      await this.#sendRpcResponse(ctx, refusal);
+      await this.#sendRpcResponse(ctx, { response: refusal, streaming: false });
       return true;
     }
 
-    // Reconstruct a web Request from the mapped IRequest. Trailers do not
-    // survive the round trip — M49 records that native gRPC-binary trailers
-    // work on no runtime this plugin runs on.
-    //
-    // This read is what bounds the dispatch to requests whose body ENDS.
-    // Since M87 the mapping is lazy, so the body is still unread here and the
-    // buffering is this line's own doing, not something already spent — the
-    // comment that used to say otherwise predated that change. Passing `raw`
-    // straight through would preserve streaming, but only while nothing in
-    // the pipeline has read the body, and the kernel cannot see whether
-    // anything has; that is left as a named limitation rather than a guess.
-    const bodyBytes = await ctx.request.bytes();
-    const grpcRequest = new Request(ctx.request.url, {
-      method: ctx.request.method,
-      headers: ctx.request.headers,
-      // A `Uint8Array` is a valid `BodyInit`, but its backing `ArrayBufferLike`
-      // is not narrowed to `ArrayBuffer` under this compiler configuration.
-      ...(bodyBytes.length > 0 ? { body: bodyBytes as unknown as BodyInit } : {}),
-    });
-
-    const response = await grpcService.handleRequest(grpcRequest);
-    await this.#sendRpcResponse(ctx, response);
+    const grpcRequest = await this.#rpcRequest(ctx, raw, grpcService);
+    const reply: RpcReply =
+      grpcService.handleRpc !== undefined
+        ? await grpcService.handleRpc(grpcRequest, transport)
+        : // An implementor that predates `handleRpc` says nothing about the
+          // procedure kind, so it keeps exactly the write it had: buffered.
+          // Streaming it instead would make `inject()` — which refuses a
+          // streaming body — throw on calls that answered before.
+          { response: await grpcService.handleRequest(grpcRequest), streaming: false };
+    await this.#sendRpcResponse(ctx, reply);
     return true;
   }
 
   /**
-   * Writes an RPC {@linkcode Response} onto the framework response.
+   * Builds the web `Request` an RPC is dispatched with (M139b §3.2).
+   *
+   * A client-streaming or bidirectional procedure whose body nothing in the
+   * pipeline has read gets the UNREAD body stream, so the call makes progress
+   * while the client is still sending — bidi and server reflection need that.
+   * `raw.bodyUsed` is the consumed flag: every `IRequest` body read either goes
+   * through `raw` (the runtime mapping) or leaves `raw` intact (`inject()`),
+   * and on Node it is a flag check that does not materialize the request.
+   *
+   * Everything else is buffered through `ctx.request.bytes()`, which is what
+   * keeps the runtime's `maxBodyBytes` bounding unary and server-streaming
+   * bodies; a streamed body is bounded per message by the service instead (a
+   * total would end every long-lived stream).
+   *
+   * Both forms carry the raw request's `signal`, so a client that goes away
+   * cancels the call — before replies streamed, a server stream that never
+   * ended could not outlive its client; now it could.
+   *
+   * @param ctx - The live request context
+   * @param raw - The undisturbed native request
+   * @param grpcService - The resolved service
+   * @returns The request to dispatch
+   */
+  async #rpcRequest(
+    ctx: IRequestContext,
+    raw: Request,
+    grpcService: IGrpcService,
+  ): Promise<Request> {
+    const base = {
+      method: ctx.request.method,
+      headers: ctx.request.headers,
+      signal: raw.signal,
+    };
+    if (grpcService.streamsRequest?.(raw) === true && !raw.bodyUsed && raw.body !== null) {
+      // `duplex` is required by fetch for a stream body but absent from the DOM
+      // `RequestInit` this package compiles against.
+      const init: RequestInit & { duplex: 'half' } = { ...base, body: raw.body, duplex: 'half' };
+      return new Request(ctx.request.url, init);
+    }
+    const bodyBytes = await ctx.request.bytes();
+    return new Request(ctx.request.url, {
+      ...base,
+      // A `Uint8Array` is a valid `BodyInit`, but its backing `ArrayBufferLike`
+      // is not narrowed to `ArrayBuffer` under this compiler configuration.
+      ...(bodyBytes.length > 0 ? { body: bodyBytes as unknown as BodyInit } : {}),
+    });
+  }
+
+  /**
+   * Writes an RPC reply onto the framework response (M139b §3.1).
    *
    * One implementation for both exits — the header-only refusal and a
    * dispatched reply — so a refusal cannot come to carry different headers or
    * a different status mapping from an ordinary answer.
    *
+   * A reply that streams, or carries trailers, is written as a stream, so each
+   * message reaches the client as it is produced (V12-39: this used to read
+   * the whole body first, holding a server stream back until it ended and a
+   * stream that never ends forever). A single response message is buffered,
+   * which is the cheaper write on every adapter.
+   *
    * @param ctx - The request context whose response is written
-   * @param response - The RPC response to copy across
+   * @param reply - The RPC reply to copy across
    */
-  async #sendRpcResponse(ctx: IRequestContext, response: Response): Promise<void> {
-    const snapshot = await response.arrayBuffer();
+  async #sendRpcResponse(ctx: IRequestContext, reply: RpcReply): Promise<void> {
+    const { response, trailers } = reply;
     const builder = ctx.response as ResponseBuilder;
     builder.status(response.status);
     // `appendHeader`, not `header`: `header` delegates to `Headers.set`, and a
@@ -2069,7 +2122,16 @@ class Application implements IKernelApplication {
     for (const [key, value] of response.headers.entries()) {
       builder.appendHeader(key, value);
     }
-    builder.send(new Uint8Array(snapshot));
+    const body = response.body;
+    if (body === null) {
+      builder.send();
+      return;
+    }
+    if (reply.streaming || trailers !== undefined) {
+      builder.stream(body, trailers === undefined ? undefined : { trailers });
+      return;
+    }
+    builder.send(new Uint8Array(await response.arrayBuffer()));
   }
 
   /**

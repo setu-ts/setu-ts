@@ -162,8 +162,10 @@ the benchmark's own `setu.mjs`/`trailers.mjs`. Versions: Node 24.22.1, Bun 1.4.4
 
   The kernel computes `transport = { trailers: ctx.request.responseTrailers === true }` and passes
   it to `refuses` and `handleRpc`. When an implementor has no `handleRpc`, the kernel calls
-  `handleRequest` and treats it as `{ response, streaming: true }`. That is correct for any
-  procedure kind, just unoptimized for unary.
+  `handleRequest` and treats it as `{ response, streaming: false }` — exactly today's buffered
+  write. Streaming it would make `inject()`, which throws on a streaming body (`application.ts`
+  `inject`), fail on calls that answered before; a third-party implementor opts into streaming by
+  adding `handleRpc`.
 
   In grpc-plugin, `handleRequest(request)` is `handleRpc(request, { trailers: false })` returning
   `.response`: one implementation, two entry points.

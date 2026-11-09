@@ -70,6 +70,41 @@ export interface GrpcServiceDefinition<TMethod = unknown> {
 export type GrpcServingStatus = 'unknown' | 'serving' | 'not-serving' | 'service-unknown';
 
 /**
+ * What the connection an RPC arrived on can carry, as the kernel tells
+ * {@linkcode IGrpcService.refuses} and {@linkcode IGrpcService.handleRpc}.
+ * @since 0.13.0
+ */
+export interface RpcTransport {
+  /**
+   * Whether HTTP trailers on the response reach the client. Native
+   * `application/grpc` reports its status in trailers, so it can be served
+   * only when this is `true`.
+   */
+  readonly trailers: boolean;
+}
+
+/**
+ * An RPC reply as {@linkcode IGrpcService.handleRpc} returns it.
+ * @since 0.13.0
+ */
+export interface RpcReply {
+  /** The status, headers and body to write. */
+  readonly response: Response;
+  /**
+   * Whether the body must be written as it is produced. `false` for a single
+   * response message (a unary or client-streaming procedure), which the kernel
+   * may buffer; `true` for a server-streaming or bidirectional one.
+   */
+  readonly streaming: boolean;
+  /**
+   * Trailers to send after the body, resolving once it ends. Set only when the
+   * transport reported `trailers: true`. A reply with trailers is always
+   * streamed.
+   */
+  readonly trailers?: Promise<Headers>;
+}
+
+/**
  * The service contract that applications use to register gRPC/Connect services.
  * Provided by the `grpc-plugin` under the `CAPABILITIES.GRPC` token.
  *
@@ -155,10 +190,13 @@ export interface IGrpcService {
    * previous behaviour exactly, buffering included.
    *
    * @param request - The native fetch request, body untouched
+   * @param transport - What the connection can carry, computed by the kernel
+   *   from `IRequest.responseTrailers` (since 0.13.0). Absent from a
+   *   caller that predates it, which means "no trailers".
    * @returns The refusal to answer with, or `null` to dispatch normally
    * @since 0.6.0
    */
-  refuses?(request: Request): Response | null;
+  refuses?(request: Request, transport?: RpcTransport): Response | null;
 
   /**
    * Handles an incoming RPC request directly.
@@ -175,6 +213,45 @@ export interface IGrpcService {
    * @returns The gRPC/Connect response
    */
   handleRequest(request: Request): Promise<Response>;
+
+  /**
+   * Handles an RPC with knowledge of the transport, returning the response
+   * together with what the kernel needs to write it: whether its body is a
+   * stream, and the trailers to send after it.
+   *
+   * The kernel prefers this over {@linkcode IGrpcService.handleRequest} when
+   * present. An implementor without it is dispatched through `handleRequest`
+   * and its reply is always streamed, which is correct for every procedure
+   * kind. `handleRequest` should be this method with `{ trailers: false }`, so
+   * the two entry points cannot disagree.
+   *
+   * @param request - The native fetch request
+   * @param transport - What the connection can carry
+   * @returns The reply to write
+   * @since 0.13.0
+   */
+  handleRpc?(request: Request, transport: RpcTransport): Promise<RpcReply>;
+
+  /**
+   * Whether the procedure a request names takes a STREAM of request messages
+   * (client-streaming or bidirectional), decided from the request line and
+   * headers alone.
+   *
+   * The kernel calls this before reading the body. When it returns `true` and
+   * nothing in the pipeline has read the body yet, the kernel hands the
+   * unread body stream to the dispatch instead of buffering it, so the call
+   * can make progress while the client is still sending. Every other request
+   * is buffered as before, under the runtime's `maxBodyBytes`. A streamed body
+   * is not bounded by `maxBodyBytes` (a total would end every long-lived
+   * stream); the implementor bounds it per message.
+   *
+   * Optional; absent means "never stream the request".
+   *
+   * @param request - The native fetch request, body untouched
+   * @returns `true` for a client-streaming or bidirectional procedure
+   * @since 0.13.0
+   */
+  streamsRequest?(request: Request): boolean;
 
   /**
    * Whether gRPC dispatch is available.
