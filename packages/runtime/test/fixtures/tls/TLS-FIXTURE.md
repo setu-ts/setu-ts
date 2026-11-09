@@ -11,5 +11,9 @@ Regenerate with:
 ```bash
 openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes \
   -keyout localhost-key.pem -out localhost-cert.pem -days 36500 \
-  -subj /CN=localhost -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
+  -subj /CN=localhost -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
+  -addext "basicConstraints=critical,CA:FALSE"
 ```
+
+`CA:FALSE` matters: Deno's TLS client (rustls) refuses a self-signed certificate that is also a CA
+(`CaUsedAsEndEntity`), which is what `openssl req -x509` produces by default.
