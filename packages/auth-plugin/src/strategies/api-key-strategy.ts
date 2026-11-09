@@ -12,8 +12,11 @@ import type { IAuthStrategy, IPrincipal, IRequest } from '@setu-ts/common';
 export interface ApiKeyStrategyOptions {
   /** Header name for API key (default: 'X-API-Key'). */
   readonly header?: string;
-  /** Callback to validate the API key and return a principal. */
-  readonly validate: (key: string) => Promise<IPrincipal | null>;
+  /**
+   * Callback to validate the API key and return a principal. `request` (0.13.0) is the request
+   * being authenticated, so a multi-tenant application can bind the key to `request.tenant`.
+   */
+  readonly validate: (key: string, request?: IRequest) => Promise<IPrincipal | null>;
 }
 
 /**
@@ -23,7 +26,7 @@ export class ApiKeyStrategy implements IAuthStrategy {
   readonly name = 'api-key';
   readonly credential = 'header' as const;
   private readonly header: string;
-  private readonly validate: (key: string) => Promise<IPrincipal | null>;
+  private readonly validate: (key: string, request?: IRequest) => Promise<IPrincipal | null>;
 
   constructor(options: ApiKeyStrategyOptions) {
     this.header = options.header ?? 'X-API-Key';
@@ -40,7 +43,7 @@ export class ApiKeyStrategy implements IAuthStrategy {
     }
 
     try {
-      return await this.validate(key);
+      return await this.validate(key, request);
     } catch {
       // Validation error - return null (don't throw)
       return null;

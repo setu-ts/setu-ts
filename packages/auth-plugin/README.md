@@ -132,7 +132,7 @@ seconds and is at most 300 seconds.
   against the provider's published key set. See
   [Accepting tokens from an identity provider](#accepting-tokens-from-an-identity-provider).
 - **ApiKeyStrategy** — passive API-key authentication. Reads the key from a configurable header
-  (default `X-API-Key`) and calls the app-supplied `apiKey.validate(key)` callback.
+  (default `X-API-Key`) and calls the app-supplied `apiKey.validate(key, request)` callback.
 - **SessionStrategy** — passive cookie-session authentication. Reads the session cookie through
   `ISessionService.fromHeaders` and maps the opened `SessionView` to an `IPrincipal` through the
   required `session.toPrincipal` callback; it returns `null` when no session opened or the session
@@ -476,7 +476,7 @@ Workers application passes `new PasswordHasher(runtime, { iterations: 100_000 })
 | `jwt.tenantClaim`                | `string`                                                        | -                   | Claim that binds a token to the request's tenant. See [Binding tokens to the tenant](#binding-tokens-to-the-tenant).                                                                                                                            |
 | `confineScopedTokens`            | `boolean`                                                       | `true`              | Refuse a principal carrying OAuth scopes at every role, permission and scoped-RBAC check. See [Scoped tokens are confined](#scoped-tokens-are-confined).                                                                                        |
 | `apiKey.header`                  | `string`                                                        | `'X-API-Key'`       | Header holding the API key.                                                                                                                                                                                                                     |
-| `apiKey.validate`                | `(key) => Promise<IPrincipal \| null>`                          | -                   | App-supplied API-key lookup.                                                                                                                                                                                                                    |
+| `apiKey.validate`                | `(key, request?) => Promise<IPrincipal \| null>`                | -                   | App-supplied API-key lookup. `request` (0.13.0) lets a multi-tenant application bind the key to `request.tenant`.                                                                                                                               |
 | `local.verify`                   | `(identifier, secret, request?) => Promise<IPrincipal \| null>` | -                   | App-supplied credential check. `request` is the one passed to `verifyCredentials`; scope the user lookup by `request?.tenant?.id` under multi-tenancy.                                                                                          |
 | `rbac.roles`                     | `Record<string, RoleDefinition>`                                | -                   | Role → permissions + `inherits` hierarchy.                                                                                                                                                                                                      |
 | `policies`                       | `readonly PolicyDefinition[]`                                   | `[]`                | Authorization policies from `definePolicy`, checked when `AuthPlugin(...)` is called (malformed or duplicate names refuse). The policy service is registered whether or not this is set. See [Authorization Policies](#authorization-policies). |
@@ -764,13 +764,16 @@ tenant id. There is no default claim name, because providers differ (`tid`, `org
 
 `tenantClaim` binds **bearer tokens only**: it verifies the tenant when the JWT or issuer strategy
 is what authenticated the request. An API key, a custom strategy or a session is not compared
-against it. Sessions are sealed to their tenant by the session plugin's tenant binding; an API key's
-`validate` must bind the key to `request.tenant` itself. This matters most with the multi-tenancy
-plugin's `jwt` resolver, which reads the tenant from an **unverified** bearer token: a forged bearer
-can choose the tenant while a valid API key authenticates the request, and nothing verifies that
-tenant. With that resolver, either accept only bearer tokens on tenant routes
-(`requireAuth({ credentials: 'header' })` does not distinguish an API key from a bearer, so do not
-configure `apiKey` beside it), or bind every other credential to the tenant yourself.
+against it. A session is sealed to the tenant that created it by the session plugin's tenant
+binding, which is on by default (`tenantBinding: false` turns it off) and compares only when both
+the session and the request carry a tenant. An API key's `validate(key, request)` receives the
+request and must bind the key to `request.tenant` itself; a custom strategy must do the same in its
+`authenticate(request)`. This matters most with the multi-tenancy plugin's `jwt` resolver, which
+reads the tenant from an **unverified** bearer token: a forged bearer can choose the tenant while a
+valid API key authenticates the request, and nothing verifies that tenant. With that resolver,
+either accept only bearer tokens on tenant routes (`requireAuth({ credentials: 'header' })` does not
+distinguish an API key from a bearer, so do not configure `apiKey` beside it), or bind every other
+credential to the tenant yourself.
 
 ## Signing a user in
 

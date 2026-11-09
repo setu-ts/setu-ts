@@ -49,9 +49,10 @@ All notable changes to this project are documented here. The format follows
 - **The request reaches the password check (M139a, #576, `@setu-ts/common`, `@setu-ts/auth-plugin`,
   V12-19).** `IAuthService.verifyCredentials(credentials, request?)` and
   `local.verify(identifier, secret, request?)` take an optional request, so a multi-tenant
-  application can look the user up within `request.tenant`. The auth README's full-stack sign-in
-  recipe passes `ctx.request`; the multi-tenancy README explains why a lookup by email alone lets a
-  user sign in on another tenant's host. Existing callbacks and implementations still type-check.
+  application can look the user up within `request.tenant`; `apiKey.validate(key, request?)` gets it
+  too, so a key can be bound to its tenant. The auth README's full-stack sign-in recipe passes
+  `ctx.request`; the multi-tenancy README explains why a lookup by email alone lets a user sign in
+  on another tenant's host. Existing callbacks and implementations still type-check.
 - **`CSRF_EXEMPT_STATE_KEY` (M139a, #576, `@setu-ts/common`, `@setu-ts/session-plugin`).**
   In-process middleware that runs before form CSRF may set this flag to `true` for an exact route
   that enforces its own cross-site rule; form CSRF then skips the request and commits no session for
@@ -64,7 +65,14 @@ All notable changes to this project are documented here. The format follows
   authentication could send the `401` with `WWW-Authenticate: Bearer resource_metadata="…"` that an
   MCP client needs to start discovery. `McpPlugin` now marks `POST` on its own path exempt through
   `CSRF_EXEMPT_STATE_KEY`; the route's `Origin` check still refuses a cross-site browser, and tool
-  calls are still verified by form CSRF on their inner requests.
+  calls are still verified by form CSRF on their inner requests. The session plugin commits no
+  session for a request carrying the marker, even without form CSRF. `McpPlugin({ path })` now
+  refuses a path ending in `/`: the router lets `/x/` reach a route registered as `/x`, so such a
+  path could share its request path with an application route that the exemption would then cover.
+- **Issuer principals keep their mapped scopes (M139a, #576, `@setu-ts/auth-plugin`).** When an
+  issuer's `toPrincipal` returned an object whose `scopes` was inherited or non-enumerable, the
+  strategy's object spread dropped them, so a scoped token escaped `confineScopedTokens`. The mapped
+  scopes are now read once and written back.
 - **`*.localhost` URLs (M139a, #576, `@setu-ts/auth-plugin`, V12-34).** `resource`,
   `authorizationServers`, sign-in redirect and authorization URLs, SAML `acsUrl` and `idp.ssoUrl`,
   and passkey origins accept `http` on any `*.localhost` name (RFC 6761 §6.3), so

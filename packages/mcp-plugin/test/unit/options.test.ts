@@ -43,6 +43,7 @@ describe('MCP options', () => {
     { allowedOrigins: null },
     { path: 'mcp' },
     { path: '//evil' },
+    { path: '/mcp/' },
     { path: '/mcp?x' },
     { path: '/bad path' },
     { allowedOrigins: 'bad' },

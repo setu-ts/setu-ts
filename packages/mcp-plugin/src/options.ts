@@ -68,6 +68,11 @@ export function resolveOptions(options: McpPluginOptions): ResolvedOptions {
     !/[?#\s]/.test(value) &&
     !value.startsWith('//');
   if (!validPath(path)) fail('MCP path must be an absolute route path.');
+  // No trailing slash: the router lets `/x/` also reach a route registered as `/x`, so an endpoint
+  // at `/mcp/` could share its request path with an application `POST /mcp`. The form-CSRF exemption
+  // marker matches the endpoint's exact path; without a trailing slash that path can only reach this
+  // plugin's own static route (a second static `POST` route there is a duplicate registration).
+  if (path.length > 1 && path.endsWith('/')) fail('MCP path must not end with a slash.');
   const declarations = options.tools === undefined ? [] : options.tools;
   if (!Array.isArray(declarations)) fail('MCP tools must be an array.');
   const names = new Set<string>();

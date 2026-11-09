@@ -68,9 +68,13 @@ export interface ApiKeyOptions {
   readonly header?: string;
   /**
    * Callback to validate the API key and return a principal.
-   * Return `null` if the key is invalid.
+   * Return `null` if the key is invalid. Under multi-tenancy, bind the key to
+   * `request.tenant`: `tenantClaim` covers bearer tokens only.
+   * @param key - The key from the configured header
+   * @param request - The request being authenticated
+   * @returns The principal, or `null` when the key is invalid
    */
-  readonly validate: (key: string) => Promise<IPrincipal | null>;
+  readonly validate: (key: string, request?: IRequest) => Promise<IPrincipal | null>;
 }
 
 /**

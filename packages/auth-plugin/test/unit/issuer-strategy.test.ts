@@ -84,6 +84,19 @@ describe('IssuerStrategy resource-server mapping', () => {
     });
   });
 
+  it('keeps mapped scopes the spread would drop (inherited or non-enumerable)', async () => {
+    const inherited = Object.create({ scopes: ['app:scope'] }) as { id: string };
+    inherited.id = 'u-inherited';
+    const hidden = { id: 'u-hidden' };
+    Object.defineProperty(hidden, 'scopes', { value: ['app:scope'], enumerable: false });
+    for (const mapped of [inherited, hidden]) {
+      const t = await setupStrategy({ issuer: { toPrincipal: () => mapped } });
+      const token = await signToken(t.key, valid({ scope: 'token:scope' }));
+      const principal = await t.strategy.authenticate(request(`Bearer ${token}`));
+      expect(principal?.scopes).toEqual(['app:scope']);
+    }
+  });
+
   it('refuses a malformed act before the application maps claims', async () => {
     let mapped = false;
     const t = await setupStrategy({

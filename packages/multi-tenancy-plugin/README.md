@@ -105,8 +105,11 @@ Bind each credential to it:
   user up by `(request.tenant.id, identifier)`. A lookup by email alone lets a user of one tenant
   sign in on another tenant's host, and the session is then sealed to that host's tenant while
   carrying the other tenant's principal.
-- **Sessions.** The session plugin's tenant binding seals each session to the tenant that created
-  it.
+- **API keys.** `apiKey.validate(key, request)` receives the request: look the key up within
+  `request.tenant`. `tenantClaim` does not cover API keys.
+- **Sessions.** The session plugin's tenant binding, on by default, seals each session to the tenant
+  that created it. It compares only when both the session and the request carry a tenant, and
+  `tenantBinding: false` turns it off.
 
 `ITenantRepository` offers `findAll()`, `findById`, `find(filter)`, `create`, `update`, and
 `delete`, plus `updateWhere(id, where, data)` and `deleteWhere(id, where)` when the configured store

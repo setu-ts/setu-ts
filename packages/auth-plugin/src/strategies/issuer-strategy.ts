@@ -157,7 +157,11 @@ export class IssuerStrategy implements IAuthStrategy {
         return null;
       }
       // The application's own mapping wins: only fill a member it left absent.
-      const scopes = principal.scopes === undefined ? parseScopeClaim(outcome.claims) : undefined;
+      // Read once and written back explicitly: a mapper may return an object whose
+      // `scopes` is inherited or non-enumerable, which the spread below would drop,
+      // turning a scoped token into an unconfined one.
+      const mappedScopes = principal.scopes;
+      const scopes = mappedScopes === undefined ? parseScopeClaim(outcome.claims) : mappedScopes;
       return {
         ...principal,
         ...(scopes === undefined ? {} : { scopes }),

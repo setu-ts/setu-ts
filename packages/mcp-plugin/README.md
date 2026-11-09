@@ -120,7 +120,7 @@ that is empty. Both sources pass through the same schema, binding and retry chec
 | Option           | Default                                  | Behavior                                                                                                    |
 | ---------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | `tools`          | `[]`                                     | Optional declarations merged with route markers; together they must yield at least one tool                 |
-| `path`           | `/mcp`                                   | POST endpoint; GET and DELETE answer 405 with `Allow: POST`                                                 |
+| `path`           | `/mcp`                                   | POST endpoint; GET and DELETE answer 405 with `Allow: POST`. Must not end with `/` (refused at startup)     |
 | `serverInfo`     | `{ name: 'setu-mcp', version: VERSION }` | MCP server identity                                                                                         |
 | `instructions`   | absent                                   | Server instructions                                                                                         |
 | `allowedOrigins` | `[]`                                     | Allowed HTTP(S) origins, including same-origin browser UIs, without a trailing slash or path                |
