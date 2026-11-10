@@ -15,6 +15,7 @@ import type {
   GrpcServiceDefinition,
   IServiceDiscovery,
   ITelemetryService,
+  RuntimePlatform,
   ServiceInstance,
 } from '@setu-ts/common';
 
@@ -120,7 +121,9 @@ const CONNECT_NODE_REFUSED = 'http/2 stream closed with error code REFUSED_STREA
  * server that has sent `GOAWAY` while shutting down does to a stream already on
  * the wire. connect-node maps the reset code to `Unavailable` when it reads it,
  * but reports the stream-error event Node raises for the same refusal as
- * `Internal`; the cause chain names it either way.
+ * `Internal`; the cause chain names it either way. A stream that could not be
+ * opened because the session had already received `GOAWAY`
+ * (`ERR_HTTP2_GOAWAY_SESSION`) is the same case: the request never left.
  *
  * @param error - The call's error
  * @returns `true` when some error in the cause chain is that refusal
@@ -140,6 +143,9 @@ export function isRefusedStream(error: unknown): boolean {
       if (code === 'ERR_HTTP2_STREAM_ERROR' && message.includes('NGHTTP2_REFUSED_STREAM')) {
         return true;
       }
+      // The stream was never opened: the session had already received GOAWAY
+      // (seen on Bun, whose node:http2 races the session manager's reconnect).
+      if (code === 'ERR_HTTP2_GOAWAY_SESSION') return true;
       if (message.includes(CONNECT_NODE_REFUSED)) return true;
     }
     current = cause;
@@ -149,7 +155,12 @@ export function isRefusedStream(error: unknown): boolean {
 
 /** A refused stream, carrying the `Unavailable` error the caller will see. */
 class RefusedStream {
-  constructor(readonly error: Error) {}
+  // A field, not a parameter property: the sources run through type stripping,
+  // which accepts only erasable syntax.
+  readonly error: Error;
+  constructor(error: Error) {
+    this.error = error;
+  }
 }
 
 /** What a client needs from the plugin. */
@@ -164,7 +175,18 @@ export interface GrpcClientDeps {
   readonly telemetry: () => ITelemetryService | undefined;
   /** Per-target defaults from `GrpcPluginOptions.clients`. */
   readonly targets: Readonly<Record<string, GrpcClientOptions>>;
+  /** The runtime platform, when a runtime capability reports one. */
+  readonly platform?: () => RuntimePlatform | undefined;
 }
+
+/**
+ * Why a client is refused on Cloudflare Workers, measured on `workerd`
+ * (2026-11-11): connect-node loads, but an HTTP/2 call rejects `Internal`
+ * ("The http2.connect method is not implemented") and an HTTP/1.1 call hangs
+ * until its deadline. Refused where it is asked for, with the alternatives.
+ */
+export const WORKERS_REFUSAL =
+  "grpc client: not available on Cloudflare Workers — its transport, @connectrpc/connect-node, needs node:http2, which workerd does not implement; call the service with Connect's @connectrpc/connect-web transport, or through a service binding";
 
 /** One cached transport and the session under it. */
 interface OriginEntry {
@@ -205,6 +227,7 @@ export class GrpcClients {
     target: string,
     options: GrpcClientOptions = {},
   ): unknown {
+    if (this.#deps.platform?.() === 'cloudflare-workers') throw new TypeError(WORKERS_REFUSAL);
     validateClientOptions(options, 'grpc client');
     const base = targetBase(target);
     if (base === undefined && this.#deps.discovery() === undefined) {

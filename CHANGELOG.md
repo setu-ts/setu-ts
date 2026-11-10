@@ -42,7 +42,9 @@ All notable changes to this project are documented here. The format follows
   `grpcClientProvider(token, definition, target, options?)` is the same client as a DI provider:
   `@Module({ providers })` now also takes factory entries (`ModuleFactoryProvider` in
   `@setu-ts/common`: `{ provide, useFactory, inject?, scope? }`), so a decorated class `@Inject`s
-  the client. Ships in 0.13.0.
+  the client. The client runs on Node and Bun; on Cloudflare Workers it refuses with a `TypeError`
+  where it is asked for, and on Deno it is not yet safe, because Deno's Node-style HTTP clients can
+  crash the process when their peer goes away. Ships in 0.13.0.
 
 ### Changed
 

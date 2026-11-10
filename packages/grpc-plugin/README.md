@@ -121,8 +121,12 @@ const billing = grpcClient(app.services, BillingService, 'billing');
   (`no instance of "billing" is available`), when the connection fails, and after the application
   stops (`the gRPC client is closed`); `DeadlineExceeded` past the deadline; otherwise the server's
   code. A missing `@connectrpc/connect-node` rejects the call with `GrpcRuntimeLoadError`.
-- **Runtimes.** Node, Bun and Deno. Cloudflare Workers have no connect-node, so a Worker's call
-  rejects with that load error.
+- **Runtimes.** Node and Bun. On Cloudflare Workers `grpcClient()` throws a `TypeError` where it is
+  called: connect-node loads there, but `workerd` implements no `node:http2` client, and an HTTP/1.1
+  call hangs until its deadline (measured on `workerd`). **Not on Deno yet:** Deno's own Node-style
+  HTTP clients can crash the Deno process natively (`free(): invalid pointer`, a segmentation fault)
+  when the server they are connected to goes away — measured with connect-node alone and no Setu
+  code, so it is a Deno defect, but a Setu member on Deno would die when a member it calls restarts.
 
 A workspace member generated with `--depends-on` a gRPC member gets this wiring from the CLI.
 
@@ -226,15 +230,15 @@ are left to Connect's automatic `unimplemented` responder.
 
 - **What each runtime serves** (since `0.13.0`):
 
-  | Runtime and listener                                             | Connect, gRPC-Web | Server streams as sent | Client and bidi streaming     | Native gRPC, reflection via `grpcurl`      |
-  | ---------------------------------------------------------------- | ----------------- | ---------------------- | ----------------------------- | ------------------------------------------ |
-  | Node, default (HTTP/1.1)                                         | yes               | yes                    | client yes, bidi no           | refused                                    |
-  | Node, `RuntimePlugin({ http2: true })`                           | yes, h1 and h2c   | yes                    | yes over HTTP/2               | yes over HTTP/2                            |
-  | Node, `RuntimePlugin({ http2: { key, cert } })`                  | yes, h1 and h2    | yes                    | yes over HTTP/2               | yes over HTTP/2                            |
-  | Bun, default (`Bun.serve`)                                       | yes               | yes                    | client yes, bidi no           | refused                                    |
-  | Bun with `http2` (served by `node:http2`)                        | as Node           | yes                    | as Node                       | as Node                                    |
-  | Deno (`Deno.serve`, h1 and h2c; TLS with `http2: { key, cert }`) | yes               | yes                    | yes over HTTP/2               | refused — `Deno.serve` writes no trailers  |
-  | Cloudflare Workers                                               | yes               | yes                    | client yes; bidi not verified | refused — no trailers on a Worker response |
+  | Runtime and listener                                             | Connect, gRPC-Web | Server streams as sent | Client and bidi streaming                                    | Native gRPC, reflection via `grpcurl`      |
+  | ---------------------------------------------------------------- | ----------------- | ---------------------- | ------------------------------------------------------------ | ------------------------------------------ |
+  | Node, default (HTTP/1.1)                                         | yes               | yes                    | client yes, bidi no                                          | refused                                    |
+  | Node, `RuntimePlugin({ http2: true })`                           | yes, h1 and h2c   | yes                    | yes over HTTP/2                                              | yes over HTTP/2                            |
+  | Node, `RuntimePlugin({ http2: { key, cert } })`                  | yes, h1 and h2    | yes                    | yes over HTTP/2                                              | yes over HTTP/2                            |
+  | Bun, default (`Bun.serve`)                                       | yes               | yes                    | client yes, bidi no                                          | refused                                    |
+  | Bun with `http2` (served by `node:http2`)                        | as Node           | yes                    | as Node                                                      | as Node                                    |
+  | Deno (`Deno.serve`, h1 and h2c; TLS with `http2: { key, cert }`) | yes               | yes                    | yes over HTTP/2                                              | refused — `Deno.serve` writes no trailers  |
+  | Cloudflare Workers                                               | yes               | yes                    | client yes; bidi half-duplex only (full duplex not verified) | refused — no trailers on a Worker response |
 
   Native gRPC reports each call's status in HTTP/2 trailers, so it is served only where the adapter
   can write them: the Node adapter on an HTTP/2 connection (`IRequest.responseTrailers`). On the
@@ -253,8 +257,10 @@ are left to Connect's automatic `unimplemented` responder.
   time a whole call in a Connect interceptor (`interceptors`). `Application.inject()` reaches unary
   and client-streaming procedures, whose replies are buffered; a server-streaming or bidi reply is a
   stream, which `inject()` refuses — use `app.fetch()` with a web `Request` and read the body.
-- **Clients on Workers**: `grpcClient()` calls through `@connectrpc/connect-node`, which Workers do
-  not have; a Worker calling another service uses Connect's own `connect-web` transport directly.
+- **Clients on Workers and Deno**: on Workers `grpcClient()` refuses with a `TypeError`; call
+  another service with Connect's own `@connectrpc/connect-web` transport, or a service binding. On
+  Deno the client is not safe to use until Deno's `node:http2` client stops crashing when its peer
+  goes away (see [Calling another service](#calling-another-service)).
 
 <!-- version:history -->
 

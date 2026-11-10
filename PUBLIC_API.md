@@ -15819,7 +15819,10 @@ grpc.addService(AnotherDefinition, anotherImpl);
   `'grpc-web'`, default `'connect'`), `httpVersion` (`'2'` | `'1.1'`, default `'2'`; `'grpc'` needs
   `'2'`), `timeoutMs` (1–2147483647, default `5000`); per-call options override
   `GrpcPluginOptions.clients[target]`, which overrides the defaults. The transport is
-  `@connectrpc/connect-node`, an optional peer loaded on the first call; Workers have none.
+  `@connectrpc/connect-node`, an optional peer loaded on the first call. On Cloudflare Workers the
+  client refuses with a `TypeError` at `grpcClient()`/`client()` (`workerd` has no `node:http2`
+  client; HTTP/1.1 calls hang). On Deno it is not safe yet: Deno's Node-style HTTP clients can crash
+  the process natively when their peer goes away (a Deno defect, reproduced without Setu).
   `grpcClientProvider(provide, definition, target, options?)` returns the same client as a
   `ModuleFactoryProvider` (`inject: [CAPABILITIES.GRPC]`, `scope: 'singleton'`) for
   `@Module({ providers })`, so a decorated class takes it with `@Inject(provide)`; its options and

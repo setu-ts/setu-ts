@@ -448,6 +448,15 @@ The TLS mode imports `node:http2` the same way.
   and sends a **unary** call once more on a fresh pick — gRPC's transparent retry (gRFC A6), safe
   because the server never saw it. A streaming call is not retried: its input may already be
   consumed.
+- **Decision — runtimes (measured 2026-11-11):** Node and Bun pass the client driver (unary over
+  Connect, native gRPC, gRPC-Web and HTTP/1.1; every streaming kind; deadline, cancellation,
+  failover, close). Bun reports a stream it could not open after `GOAWAY` as
+  `ERR_HTTP2_GOAWAY_SESSION`, which is treated as unsent, like `REFUSED_STREAM`. On Workers the
+  client is refused with a `TypeError` naming the alternatives (`workerd`: HTTP/2 `Internal`
+  "http2.connect method is not implemented", HTTP/1.1 hangs to its deadline). On Deno 2.9.6 the
+  process crashes natively in its `node:http2`/`node:http` client when the peer goes away (5 of 6
+  runs against a Deno server, also with connect-node alone), so Deno is documented as not yet safe
+  for the client; serving on Deno is unaffected.
 - **Decision — trace propagation:** when `CAPABILITIES.TELEMETRY` resolves to a service with
   `activeSpanContext`, an interceptor sets `traceparent` from it with `contextToTraceparent`, unless
   the call already carries one.

@@ -17,6 +17,7 @@ import {
   MAX_CLIENT_ORIGINS,
   targetBase,
   validateClientOptions,
+  WORKERS_REFUSAL,
 } from '../../src/client/grpc-client.ts';
 import type { GrpcClientDeps } from '../../src/client/grpc-client.ts';
 import { grpcClient } from '../../src/client/grpc-client-helper.ts';
@@ -294,6 +295,16 @@ describe('GrpcClients', () => {
     expect(c.client({ ...BILLING }, 'http://h:1')).not.toBe(one);
   });
 
+  it('refuses on Cloudflare Workers, where connect-node cannot call, and nowhere else', () => {
+    const { clients: workers, node } = clients({ platform: () => 'cloudflare-workers' });
+    expect(() => workers.client(BILLING, 'http://h:1')).toThrow(new TypeError(WORKERS_REFUSAL));
+    expect(node.built).toHaveLength(0);
+    for (const platform of ['node', 'bun', 'deno', undefined] as const) {
+      const { clients: other } = clients({ platform: () => platform });
+      expect(() => other.client(BILLING, 'http://h:1')).not.toThrow();
+    }
+  });
+
   it('refuses a service name when no discovery is registered', () => {
     const { clients: c } = clients();
     expect(() => c.client(BILLING, 'billing')).toThrow(
@@ -528,6 +539,15 @@ describe('refused streams (REFUSED_STREAM)', () => {
       'another reset',
       Object.assign(new Error('NGHTTP2_CANCEL'), { code: 'ERR_HTTP2_STREAM_ERROR' }),
       false,
+    ],
+    [
+      'a stream that could not open after GOAWAY (Bun)',
+      new Error('[internal] New streams cannot be created after receiving a GOAWAY', {
+        cause: Object.assign(new Error('New streams cannot be created after receiving a GOAWAY'), {
+          code: 'ERR_HTTP2_GOAWAY_SESSION',
+        }),
+      }),
+      true,
     ],
     ['not an object', 'REFUSED_STREAM', false],
     [

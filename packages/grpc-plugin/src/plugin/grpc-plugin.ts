@@ -13,6 +13,7 @@ import type {
   ILogger,
   IPlugin,
   IPluginContext,
+  IRuntimeServices,
   IServiceDiscovery,
   ITelemetryService,
 } from '@setu-ts/common';
@@ -109,6 +110,7 @@ export function GrpcPlugin(options: GrpcPluginOptions = {}): IPlugin {
         loadNode: () => loadConnectNode(),
         discovery: () => optional<IServiceDiscovery>(CAPABILITIES.SERVICE_DISCOVERY),
         telemetry: () => optional<ITelemetryService>(CAPABILITIES.TELEMETRY),
+        platform: () => optional<IRuntimeServices>(CAPABILITIES.RUNTIME)?.platform(),
         targets: options.clients ?? {},
       });
 
