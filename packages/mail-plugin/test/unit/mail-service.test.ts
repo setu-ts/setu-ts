@@ -38,6 +38,7 @@ describe('MailService.send', () => {
         1,
         ...Array.from({ length: 32 }, (_, i) => `x${String.fromCharCode(i)}y`),
         'x\x7fy',
+        ...Array.from({ length: 32 }, (_, i) => `x${String.fromCharCode(0x80 + i)}y`),
       ].map((value): [string, unknown] => ['filename', value]),
       ...[null, 1, {}, []].map((value): [string, unknown] => ['content', value]),
       ...[
@@ -76,6 +77,20 @@ describe('MailService.send', () => {
       }
     }
     expect(provider.sent).toHaveLength(0);
+  });
+  it('M139c accepts a filename just past the C1 range and with non-ASCII letters', async () => {
+    const provider = new RecordingProvider();
+    const svc = new MailService(provider, new TemplateEngine({ file: { text: 'body' } }), {
+      defaultFrom: 'nondefault@x.com',
+    });
+    for (const filename of ['r\u00e9sum\u00e9.pdf', 'x\u00a0y', 'x\u00ffy']) {
+      await svc.send({
+        to: 'to@x.com',
+        subject: 'file',
+        attachments: [{ filename, content: 'x' }],
+      });
+    }
+    expect(provider.sent).toHaveLength(3);
   });
   it('M139c refuses a non-array attachment list and a non-object attachment through both entry points', async () => {
     const provider = new RecordingProvider();

@@ -63,7 +63,8 @@ await mailer.send({
 `send` and `sendTemplate` both check every attachment before the provider runs, and refuse with a
 `TypeError` that names the attachment's index and field, never its content:
 
-- `filename`: 1–255 UTF-16 code units, well-formed, with no control character (CR and LF included);
+- `filename`: 1–255 UTF-16 code units, well-formed, with no control character (C0, DEL and C1 —
+  U+0000–U+001F and U+007F–U+009F — CR and LF included);
 - `contentType`: a `type/subtype` with no parameters, and not `message/*` or `multipart/*` in any
   letter case;
 - `contentId`: 1–255 characters, each a letter, a digit or one of ``!#$%&'*+/=?^_`{|}~.@-``, so no

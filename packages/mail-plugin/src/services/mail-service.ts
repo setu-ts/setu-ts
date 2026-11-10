@@ -69,7 +69,8 @@ function resolveAttachments(value: unknown): ResolvedAttachment[] {
       !filename.isWellFormed() ||
       Array.from(filename).some((character) => {
         const code = character.charCodeAt(0);
-        return code < 0x20 || code === 0x7f;
+        // C0, DEL and C1 (U+0080–U+009F, NEL included) are all refused.
+        return code < 0x20 || (code >= 0x7f && code <= 0x9f);
       })
     )
       refuse('filename');
