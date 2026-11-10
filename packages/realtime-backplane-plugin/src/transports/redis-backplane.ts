@@ -577,24 +577,39 @@ function waitForReady(
   timeoutMs: number,
   cancel: AbortSignal,
 ): Promise<void> {
-  if (client.status === undefined || !CONNECTING_STATUSES.has(client.status)) {
-    return Promise.resolve();
-  }
+  const status = client.status;
+  if (status === undefined || !CONNECTING_STATUSES.has(status)) return Promise.resolve();
   return withDeadline(
     (signal) =>
-      new Promise<void>((resolve) => {
-        const onReady = (): void => {
+      new Promise<void>((resolve, reject) => {
+        const detach = (): void => {
           client.off('ready', onReady);
+          client.off('end', onEnd);
           cancel.removeEventListener('abort', onReady);
+        };
+        const onReady = (): void => {
+          detach();
           resolve();
         };
+        // A publisher whose retries are exhausted ends and never becomes ready:
+        // fail the open now instead of waiting out the bound (or forever at 0).
+        const onEnd = (): void => {
+          detach();
+          reject(
+            new BackendUnavailableError('realtime-backplane-plugin: redis transport', {
+              cause: new Error('the publisher connection ended before it was ready'),
+            }),
+          );
+        };
         client.on('ready', onReady);
-        signal.addEventListener('abort', () => client.off('ready', onReady), { once: true });
+        client.on('end', onEnd);
+        signal.addEventListener('abort', detach, { once: true });
         cancel.addEventListener('abort', onReady, { once: true });
-        // `withDeadline` runs this body a microtask later, so a close() can abort
-        // `cancel` before the listener exists; that listener would never fire
-        // (M139f re-audit N3).
-        if (cancel.aborted) onReady();
+        // `withDeadline` runs this body a microtask later: a close() may already
+        // have aborted `cancel` (M139f re-audit N3), and the status may have
+        // moved since `waitForReady` read it.
+        if (cancel.aborted || client.status === 'ready') onReady();
+        else if (client.status === 'end') onEnd();
       }),
     {
       timeoutMs,

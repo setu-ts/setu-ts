@@ -322,7 +322,9 @@ and Consul providers therefore report reachable and allow `/ready` to return 200
 warm-cache outage also reports `up`, keeping serving replicas in rotation. `data.degraded` still
 signals a failed refresh serving stale data; `data.reachable` exposes backend reachability.
 `/health` includes `data` only with `HealthPlugin({ details: true })`; the default body carries each
-check's `status` alone.
+check's `status` alone. Detailed reports expose every indicator's data, so protect the health
+endpoints when they carry it
+([Statuses](https://github.com/setu-ts/setu-ts/blob/main/packages/health-plugin/README.md#statuses)).
 
 The discovery service caches reachability for 5 s, coalesces concurrent reads, and bounds each probe
 at 2 s; a hung or rejecting probe reports `false`. Consul and Kubernetes probe requests carry an

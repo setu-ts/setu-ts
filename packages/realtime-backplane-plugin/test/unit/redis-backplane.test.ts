@@ -1600,6 +1600,67 @@ describe('RedisBackplane owned publisher readiness (M139f X3-3)', () => {
     }
   });
 
+  it('fails the open when the publisher ends while it waits, even unbounded', async () => {
+    const { module, clients } = connectingModule();
+    const backplane = new RedisBackplane(
+      { transport: 'redis', url: 'redis://localhost:6379', module, commandTimeoutMs: 0 },
+      'node-a',
+      'realtime',
+    );
+    const connecting = backplane.connect().then(
+      () => undefined,
+      (thrown: unknown) => thrown,
+    );
+    await setImmediate();
+    const publisher = clients[0]!;
+    publisher.status = 'end';
+    publisher.emitEvent('end');
+    const error = await connecting;
+    expect(error).toBeInstanceOf(BackendUnavailableError);
+    expect(((error as Error).cause as Error).message).toBe(
+      'the publisher connection ended before it was ready',
+    );
+    expect(clients.map((client) => client.quitCount)).toEqual([1, 1]);
+    expect(publisher.eventListeners.get('ready')).toHaveLength(0);
+    expect(publisher.eventListeners.get('end')).toHaveLength(0);
+  });
+
+  it.each(['ready', 'end'] as const)(
+    're-reads the status once its listeners exist: %s without an event',
+    async (later) => {
+      const clients: FakeRedisClient[] = [];
+      const module: IRedisModule = {
+        create: (): IRedisBackplaneClient => {
+          const client = new FakeRedisClient();
+          if (clients.length === 0) {
+            // `waitForReady` reads `connecting` and starts the wait; every later
+            // read — the re-check in the wait's body — sees the new status.
+            let reads = 0;
+            Object.defineProperty(client, 'status', {
+              get: () => (reads++ === 0 ? 'connecting' : later),
+            });
+          } else {
+            Object.assign(client, { status: 'ready' });
+          }
+          clients.push(client);
+          return client;
+        },
+      };
+      const backplane = new RedisBackplane(
+        { transport: 'redis', url: 'redis://localhost:6379', module, commandTimeoutMs: 0 },
+        'node-a',
+        'realtime',
+      );
+      const outcome = await backplane.connect().then(
+        () => 'resolved',
+        () => 'rejected',
+      );
+      expect(outcome).toBe(later === 'ready' ? 'resolved' : 'rejected');
+      expect(clients[0]!.eventListeners.get('end') ?? []).toHaveLength(0);
+      await backplane.close();
+    },
+  );
+
   it('does not wait on an injected pair, whatever its status', async () => {
     const client = Object.assign(new FakeRedisClient(), { status: 'connecting' });
     const subscriber = Object.assign(new FakeRedisClient(), { status: 'connecting' });

@@ -179,7 +179,7 @@ while a connection is down is **lost, never delivered late**:
   timeout, so `close()` can take about three of them (≈45 s at the default); lower
   `commandTimeoutMs` if that exceeds your shutdown grace period.
 - **A timed-out publish may still be sent.** A publish rejected by the command timeout was already
-  written to a connection that looked healthy, and can reach Redis afterwards (measured against a
+  written to a connection that looked healthy, and can reach Redis afterward (measured against a
   paused server). A caller that retries a rejected publish may therefore deliver that frame twice;
   consumers that cannot tolerate a duplicate need their own de-duplication. A publish refused while
   the connection is down was never written.
@@ -205,7 +205,9 @@ MIT
 The `realtime-backplane` indicator reports `up`, including fan-out outages. Local request delivery
 still works. `data.reachable: false` (in `/health` only with `HealthPlugin({ details: true })`)
 exposes an unreachable backend; a transport without a probe reports `'unknown'`. `/ready` therefore
-remains 200 for this shared dependency condition.
+remains 200 for this shared dependency condition. Detailed reports expose every indicator's data, so
+protect the health endpoints when they carry it
+([Statuses](https://github.com/setu-ts/setu-ts/blob/main/packages/health-plugin/README.md#statuses)).
 
 `data` reports `{ transport, origin, reachable }`, where `reachable` is `true`, `false`, or
 `'unknown'`.

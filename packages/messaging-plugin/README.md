@@ -2012,4 +2012,7 @@ Inbox parked rows and all six outbox reasons keep the indicator `up` and `/ready
 inbox `data.parked` / `data.reasons` and outbox `data.reasons` (`oldest-pending-age`, `failed-rows`,
 `failed-scan-cap`, `blocked-key-cap`, `store-write-failing`, `relay-overlap`). `/health` includes
 `data` only with `HealthPlugin({ details: true })`; the default body carries each check's `status`
-alone. Lifecycle and unreachable-store `down` arms remain.
+alone. Detailed reports expose every indicator's data, so protect the health endpoints when they
+carry it
+([Statuses](https://github.com/setu-ts/setu-ts/blob/main/packages/health-plugin/README.md#statuses)).
+Lifecycle and unreachable-store `down` arms remain.
