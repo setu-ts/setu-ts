@@ -1,23 +1,25 @@
-import { createClient, type Client } from '@connectrpc/connect';
-import { createConnectTransport } from '@connectrpc/connect-node';
+import type { Client } from '@connectrpc/connect';
+import type { IServiceRegistry } from '@setu-ts/common';
+import { grpcClient } from '@setu-ts/grpc-plugin';
 import { BillingService } from '@grpc-workspace/contracts';
 
-/** The orders view of billing's `Quote` procedure — the real Connect client, or a test fake. */
+/** The orders view of billing's `Quote` procedure — the plugin's client, or a test fake. */
 export type BillingClient = Client<typeof BillingService>;
 
-/** How long orders waits for billing before answering 503. */
-export const BILLING_TIMEOUT_MS = 5_000;
-
 /**
- * Builds a Connect client for billing at the URL discovery resolved, with a deadline.
+ * Billing's client, from the `GrpcPlugin` this member registers for calling only
+ * (`src/transport/index.ts`, rendered by the CLI from `dependsOn`).
  *
- * Connect protocol over HTTP/2: billing serves `RuntimePlugin({ http2: true })`, so
- * the transport speaks HTTP/2 with prior knowledge to its `http://` URL and keeps
- * one session open for every call, as a grpc-js client would.
+ * The plugin owns everything about the call: each one resolves `billing`
+ * through service discovery and reports the outcome back (an instance that
+ * refuses connections is ejected), every call to one instance shares one HTTP/2
+ * session, a call has a 5 s deadline, and the active trace travels as
+ * `traceparent`. The same arguments return the same client, so asking per
+ * request costs a lookup.
+ *
+ * @param services - The application's service registry
+ * @returns The client
  */
-export function createBillingClient(baseUrl: string): BillingClient {
-  return createClient(
-    BillingService,
-    createConnectTransport({ baseUrl, httpVersion: '2', defaultTimeoutMs: BILLING_TIMEOUT_MS }),
-  );
+export function billingClient(services: IServiceRegistry): BillingClient {
+  return grpcClient(services, BillingService, 'billing');
 }

@@ -42,7 +42,7 @@ import {
 } from './manifest.ts';
 import { PROTO_OUT_DIR } from './proto-toolchain.ts';
 import { renderTransportSection, TRANSPORT_README_MARKERS } from './root-files.ts';
-import { rpcSpec, type RpcStyle } from './rpc.ts';
+import { GRPC_CALLER_CLIENTS, GRPC_PLUGIN, grpcTargets, rpcSpec, type RpcStyle } from './rpc.ts';
 import { workspaceProfile } from './runtime-profile.ts';
 import { type BrokerName, brokerSpec } from './transport.ts';
 import {
@@ -144,6 +144,7 @@ function moduleInput(manifest: WorkspaceManifest, context: MemberContext): Trans
   return {
     broker: brokerSpec(manifest.broker, manifest.redisClient),
     rpc: rpcSpec(context.member.rpc),
+    grpcTargets: grpcTargets(manifest.members, context.member.name),
     host: context.host,
     profile: workspaceProfile(manifest.runtime),
     messaging: context.installed.has('messaging-plugin'),
@@ -395,8 +396,10 @@ function neededEntries(
       : []),
     ...(shape.queue && broker.queueArgs !== undefined ? (broker.queueClients ?? []) : []),
     ...(rpc.clients ?? []),
+    ...((input.grpcTargets ?? []).length === 0 ? [] : GRPC_CALLER_CLIENTS),
   ].filter((name, index, all) => all.indexOf(name) === index);
-  const framework = rpc.plugin === undefined ? [] : [rpc.plugin.pkg];
+  const framework =
+    rpc.plugin === undefined && (input.grpcTargets ?? []).length === 0 ? [] : [GRPC_PLUGIN.pkg];
   if (input.profile.manifestKind === 'deno') {
     return {
       imports: {
@@ -500,9 +503,14 @@ export async function planTransportChange(
   const profile = workspaceProfile(next.runtime);
   const before = brokerSpec(manifest.broker, manifest.redisClient);
   const after = brokerSpec(next.broker, next.redisClient);
+  // An RPC change reaches the member and every member that calls it: a caller's
+  // module registers the plugin's client for its gRPC targets (M139b §3.12).
   const affected =
     change.kind === 'rpc'
-      ? next.members.filter((member) => member.name === change.member)
+      ? next.members.filter(
+          (member) =>
+            member.name === change.member || (member.dependsOn ?? []).includes(change.member),
+        )
       : next.members;
 
   const files: GeneratedFile[] = [];

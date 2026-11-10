@@ -451,6 +451,7 @@ package fits the plugin architecture.
 | `GraphqlFormattedError`               | interface |
 | `GraphqlOperationContext`             | interface |
 | `GraphqlRequestParams`                | interface |
+| `GrpcClientOptions`                   | interface |
 | `GrpcServiceDefinition`               | interface |
 | `HandlerResult`                       | interface |
 | `HealthCheckResult`                   | interface |

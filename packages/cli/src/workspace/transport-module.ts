@@ -21,7 +21,7 @@
 import { reindentLiteral, wrapPluginArgs } from '../templates/plugin-args.ts';
 import { starterOptionLiteral } from '../templates/broker.ts';
 import { NODE_REDIS_FACTORY, NODE_REDIS_MODULE_PATH } from '../templates/node-redis.ts';
-import type { RpcSpec } from './rpc.ts';
+import { GRPC_PLUGIN, type RpcSpec } from './rpc.ts';
 import type { WorkspaceRuntimeProfile } from './runtime-profile.ts';
 import { renderConnection, type BrokerSpec } from './transport.ts';
 
@@ -50,6 +50,12 @@ export interface TransportModuleInput {
   readonly brokerUrl?: string;
   /** The member's own RPC style. */
   readonly rpc: RpcSpec;
+  /**
+   * The gRPC members this member calls (`grpcTargets`, M139b §3.12). Non-empty,
+   * the module registers the plugin's client for them — with `serve: false`
+   * when the member does not serve gRPC itself.
+   */
+  readonly grpcTargets?: readonly string[];
   /** A plugin list (`createApplication`) or a starter factory (full-stack). */
   readonly host: TransportHostKind;
   /** The member's runtime, which decides how the environment is read. */
@@ -161,6 +167,59 @@ export function ${name}(${parameter}): ${type} {
 `;
 }
 
+/** The path every gRPC member serves under; its callers' clients use the same. */
+const GRPC_MOUNT = '/grpc';
+
+/**
+ * The `GrpcPlugin(...)` call for a member, or `undefined` when it neither serves
+ * nor calls gRPC (M139b §3.12).
+ *
+ * @param serving - The member's own gRPC wiring, when it serves
+ * @param targets - The gRPC members it calls
+ * @returns The call's source
+ */
+function grpcPluginCall(serving: boolean, targets: readonly string[]): string | undefined {
+  if (!serving && targets.length === 0) return undefined;
+  const clients =
+    targets.length === 0
+      ? ''
+      : `clients: { ${targets.map((name) => `${objectKey(name)}: { basePath: '${GRPC_MOUNT}' }`).join(', ')} }`;
+  const parts = [serving ? `basePath: '${GRPC_MOUNT}'` : 'serve: false', clients].filter(
+    (part) => part !== '',
+  );
+  return `${GRPC_PLUGIN.symbol}({ ${parts.join(', ')} })`;
+}
+
+/**
+ * A member name as an object key: bare when it is an identifier, quoted when it
+ * has a hyphen.
+ *
+ * @param name - The member name
+ * @returns The key's source
+ */
+function objectKey(name: string): string {
+  return /^[A-Za-z_$][\w$]*$/.test(name) ? name : `'${name}'`;
+}
+
+/**
+ * The plugins function's doc sentence.
+ *
+ * @param serving - Whether the member serves gRPC
+ * @param targets - The gRPC members it calls
+ * @returns The sentence's tail
+ */
+function pluginsDoc(serving: boolean, targets: readonly string[]): string {
+  const calls = targets.map((name) => `\`${name}\``).join(', ');
+  if (serving && targets.length > 0) {
+    return `\`${GRPC_PLUGIN.symbol}\`, mounted under \`${GRPC_MOUNT}\`, with clients for ${calls}`;
+  }
+  if (serving) return `\`${GRPC_PLUGIN.symbol}\`, mounted under \`${GRPC_MOUNT}\``;
+  if (targets.length > 0) {
+    return `\`${GRPC_PLUGIN.symbol}\` for calling ${calls} only — this member serves no gRPC`;
+  }
+  return 'none for HTTP, which every template already serves';
+}
+
 /**
  * Renders a member's `src/transport/index.ts`.
  *
@@ -170,7 +229,9 @@ export function ${name}(${parameter}): ${type} {
 export function renderTransportModule(input: TransportModuleInput): string {
   const shape = transportModuleShape(input);
   const factory = input.host === 'app-factory';
-  const grpc = input.rpc.plugin;
+  const serving = input.rpc.plugin !== undefined;
+  const targets = input.grpcTargets ?? [];
+  const grpc = grpcPluginCall(serving, targets);
   const messaging = shape.messaging ? optionLiteral(input.broker.messagingArgs, input) : undefined;
   const queue = shape.queue ? optionLiteral(input.broker.queueArgs, input) : undefined;
   const usesNodeRedis =
@@ -192,7 +253,9 @@ export function renderTransportModule(input: TransportModuleInput): string {
     ...(!factory && shape.queue
       ? ["import type { QueuePluginOptions } from '@setu-ts/queue-plugin';"]
       : []),
-    ...(grpc === undefined ? [] : [`import { ${grpc.symbol} } from '@setu-ts/${grpc.pkg}';`]),
+    ...(grpc === undefined
+      ? []
+      : [`import { ${GRPC_PLUGIN.symbol} } from '@setu-ts/${GRPC_PLUGIN.pkg}';`]),
     ...(usesNodeRedis
       ? [
           `import { ${NODE_REDIS_FACTORY} } from '../${NODE_REDIS_MODULE_PATH.replace(/^src\//, '')}';`,
@@ -226,23 +289,23 @@ export function renderTransportModule(input: TransportModuleInput): string {
           ),
         ]),
     `/**
- * The plugins this member's RPC style adds: ${grpc === undefined ? 'none for HTTP, which every template already serves' : `\`${grpc.symbol}\`, mounted under \`/grpc\``}.
+ * The plugins this member's RPC style adds: ${pluginsDoc(serving, targets)}.
  *
  * @returns The plugins to register
  */
 export function ${TRANSPORT_EXPORTS.plugins}(): readonly IPlugin[] {
-  return [${grpc === undefined ? '' : `${grpc.symbol}(${grpc.args ?? ''})`}];
+  return [${grpc ?? ''}];
 }
 `,
     ...(shape.csrf
       ? [
           `/**
- * The paths form CSRF must not guard: ${grpc === undefined ? 'none' : 'the gRPC mount, whose callers are not browser forms'}.
+ * The paths form CSRF must not guard: ${serving ? 'the gRPC mount, whose callers are not browser forms' : 'none'}.
  *
  * @returns The exclusions
  */
 export function ${TRANSPORT_EXPORTS.csrf}(): readonly RegExp[] {
-  return [${grpc === undefined ? '' : "new RegExp('^/grpc(?:/|$)')"}];
+  return [${serving ? "new RegExp('^/grpc(?:/|$)')" : ''}];
 }
 `,
         ]

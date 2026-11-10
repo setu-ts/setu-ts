@@ -21,6 +21,9 @@ drain as every other route. No adapter seam is involved: `GrpcService.available`
 - Server reflection (v1, default ON), reachable over Connect and gRPC-Web everywhere, and from stock
   `grpcurl`/`grpcui` wherever native gRPC is served
 - gRPC Health v1 service bridged to M20 health plugin (default ON)
+- A client for calling other services (`grpcClient`): targets resolved through service discovery per
+  call, one HTTP/2 session per instance, a default deadline and trace propagation — see
+  [Calling another service](#calling-another-service)
 - Zero runtime dependencies in the source — Connect-ES is loaded lazily behind a structural facade
 - Module loading works on Node, Deno, Bun, and Cloudflare Workers without modification
 
@@ -37,6 +40,9 @@ npm i @connectrpc/connect @bufbuild/protobuf
 # Bun
 bun add @connectrpc/connect @bufbuild/protobuf
 ```
+
+A member that calls other services also needs `@connectrpc/connect-node` (the client's transport),
+loaded on the first call, never by a member that only serves.
 
 ## Usage
 
@@ -67,6 +73,56 @@ const app = createApplication({
 await app.start({ port: 3000 });
 ```
 
+## Calling another service
+
+Register the plugin with `serve: false` in a member that only calls (it then claims no request and
+serves no procedure, health or reflection service), name each target's mount in `clients`, and ask
+for a typed client with `grpcClient()`:
+
+```typescript
+import type { DescService } from '@bufbuild/protobuf';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { GrpcPlugin, grpcClient } from '@setu-ts/grpc-plugin';
+
+// The generated descriptor of the service billing serves (illustrative stand-in).
+declare const BillingService: DescService;
+
+const app = createApplication({
+  plugins: [
+    RuntimePlugin(),
+    GrpcPlugin({ serve: false, clients: { billing: { basePath: '/grpc' } } }),
+  ],
+});
+await app.start({ port: 3000 });
+
+// In a handler: the same arguments return the same client, so this is a lookup.
+const billing = grpcClient(app.services, BillingService, 'billing');
+```
+
+- **Target.** A service name resolves through `CAPABILITIES.SERVICE_DISCOVERY` on every call (a name
+  with no discovery registered throws a `TypeError` at `grpcClient()`); an absolute `http(s)://` URL
+  is used as is. After each call the client reports to discovery — `failure` for `Unavailable` (a
+  refused, reset or closed connection), `success` otherwise — so an instance that refuses
+  connections is ejected.
+- **Connections.** One HTTP/2 session per instance, shared by every call to it and closed with the
+  application. At most 64 instance origins keep a session; the least recently used is closed first.
+- **Defaults.** The Connect protocol, binary, over HTTP/2, with a 5 s deadline. Per target in
+  `clients`, or per client in `grpcClient()`'s options: `basePath`, `protocol` (`'connect'`,
+  `'grpc'`, `'grpc-web'`), `httpVersion` (`'2'`, `'1.1'`; native gRPC needs `'2'`) and `timeoutMs`
+  (1 to 2147483647). A call's own `{ timeoutMs }` still overrides. An option out of range throws a
+  `TypeError` at `GrpcPlugin()` or `grpcClient()`.
+- **Tracing.** With telemetry registered, each call carries the active span as `traceparent`, unless
+  the call sets its own.
+- **Failures** reject with Connect's `ConnectError`: `Unavailable` when discovery knows no instance
+  (`no instance of "billing" is available`), when the connection fails, and after the application
+  stops (`the gRPC client is closed`); `DeadlineExceeded` past the deadline; otherwise the server's
+  code. A missing `@connectrpc/connect-node` rejects the call with `GrpcRuntimeLoadError`.
+- **Runtimes.** Node, Bun and Deno. Cloudflare Workers have no connect-node, so a Worker's call
+  rejects with that load error.
+
+A workspace member generated with `--depends-on` a gRPC member gets this wiring from the CLI.
+
 ## Options
 
 The `GrpcPlugin` accepts optional configuration:
@@ -82,6 +138,11 @@ The `GrpcPlugin` accepts optional configuration:
   (`createConnectRouter({ interceptors })`). Composed after the built-in handler-error logging, so a
   handler throw is logged before an application interceptor observes it. Absent: none installed
   (defaults to `[]`)
+- `serve`: Whether the plugin serves gRPC (defaults to `true`). `false` registers it for calling
+  only: no request is claimed and no procedure, health or reflection service is served; `services`
+  must then be empty. Not a boolean → `TypeError` at `GrpcPlugin()`
+- `clients`: Per-target client defaults, keyed by the target passed to `grpcClient()` — see
+  [Calling another service](#calling-another-service)
 - `readMaxBytes`: The largest request message a procedure accepts, in bytes (defaults to 4 MiB, the
   receive limit grpc-go and grpc-js default to). Connect applies it per message on gRPC, gRPC-Web
   and Connect streaming, and to the whole body of a unary Connect request; a larger message is
@@ -125,7 +186,7 @@ are left to Connect's automatic `unimplemented` responder.
 
 | Error                  | Thrown when                                                                                                                                                                                                        |
 | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `GrpcRuntimeLoadError` | Any of the four Connect/Protobuf-ES specifiers cannot be imported                                                                                                                                                  |
+| `GrpcRuntimeLoadError` | A Connect/Protobuf-ES specifier cannot be imported at registration, or `@connectrpc/connect-node` on a client's first call                                                                                         |
 | `GrpcDescriptorError`  | An embedded descriptor set cannot be decoded or lacks its expected service                                                                                                                                         |
 | `GrpcUnavailableError` | **Deprecated — never thrown since M70a.** Retained as published surface only; gRPC dispatch no longer depends on any adapter capability, so `handleRequest` is always serviceable and `available` is always `true` |
 
@@ -166,8 +227,8 @@ are left to Connect's automatic `unimplemented` responder.
   time a whole call in a Connect interceptor (`interceptors`). `Application.inject()` reaches unary
   and client-streaming procedures, whose replies are buffered; a server-streaming or bidi reply is a
   stream, which `inject()` refuses — use `app.fetch()` with a web `Request` and read the body.
-- **No client SDK**: This plugin only provides server-side gRPC serving. Client-side gRPC calls are
-  handled by generated Connect/gRPC client code in the application.
+- **Clients on Workers**: `grpcClient()` calls through `@connectrpc/connect-node`, which Workers do
+  not have; a Worker calling another service uses Connect's own `connect-web` transport directly.
 
 <!-- version:history -->
 
@@ -218,6 +279,7 @@ base64 -w0 < reflection.binpb  # 2332 chars
 | Export                  | Kind      |
 | ----------------------- | --------- |
 | `adaptConnectModule`    | function  |
+| `grpcClient`            | function  |
 | `GrpcPlugin`            | function  |
 | `GrpcDescriptorError`   | class     |
 | `GrpcRuntimeLoadError`  | class     |
@@ -225,6 +287,7 @@ base64 -w0 < reflection.binpb  # 2332 chars
 | `GrpcUnavailableError`  | class     |
 | `CAPABILITIES`          | const     |
 | `ConnectModuleLike`     | interface |
+| `GrpcClientOptions`     | interface |
 | `GrpcPluginOptions`     | interface |
 | `GrpcServiceDefinition` | interface |
 | `IGrpcService`          | interface |

@@ -13500,7 +13500,7 @@ reaches `redactors[<string>]`):
 | Scoped RBAC            | `SCOPED_RBAC_POLICY`, `scopedPermissionAbility`, `scopedRoleAbility`, `isScopeType`, `MAX_SCOPE_ID_LENGTH`, `ScopeRef`, `ScopedGrant`, `GrantQuery`, `IGrantSource`, `IScopedRoleSource`, `ScopedRoleDefinition`, `ScopedRbacTarget`, `ScopeSource`, `scopeFromTenant`, `scopeFromParam` — the M110b contracts AuthPlugin's built-in `scoped-rbac` policy evaluates and DecoratorPlugin/DatabasePlugin name without importing AuthPlugin. A scope type is lowercase kebab-case (`isScopeType`); an id is non-empty and at most `MAX_SCOPE_ID_LENGTH` (256) UTF-16 code units, refused rather than truncated. `GrantQuery` is `{ kind: 'chain', scopes }` (the check's scope and those it inherits from, plus global grants) or `{ kind: 'all' }` (sign-in timing only). `scopeFromParam` and `scopeFromTenant` resolve `undefined` for an absent, empty or over-long id, which leaves the scope unresolved and the check DENIES (never a global check)                                          |
 | Service discovery      | `IServiceDiscovery`, `ServiceInstance`, `PickOptions`, `LoadBalanceStrategy`, `ServiceOutcome`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | DNS                    | `IDnsResolver`, `SrvRecord`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| gRPC                   | `IGrpcService`, `GrpcServiceDefinition`, `GrpcServingStatus`, `RpcFetchHandler`, `RpcTransport`, `RpcCall`, `RpcReply`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| gRPC                   | `IGrpcService`, `GrpcServiceDefinition`, `GrpcServingStatus`, `GrpcClientOptions`, `RpcFetchHandler`, `RpcTransport`, `RpcCall`, `RpcReply`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | Cloudflare             | `splitWorkerEnv`, `SplitWorkerEnv`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | View rendering         | `IViewEngine`, `Component` — the view port (`render(component, props): string \| Promise<string>`) and the structural component type it renders, named by `@Render` and `renderView` (M92)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | Localization           | `ILocalizer`, `LocalizationMessage`, `PluralForms`, `MessageCatalogue` — the localization port (`t(key, values?)`, `locale`, `locales`, `forLocale(tag)`) served under `CAPABILITIES.LOCALIZATION`, and the catalogue shape: a string with `{name}` placeholders or a CLDR plural record with `other` required (M103)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
@@ -15667,6 +15667,8 @@ GrpcPlugin({
   services: [], // initial service definitions
   connectModule: undefined, // inject for testing; otherwise lazy-loaded
   interceptors: [], // default — application Connect interceptors
+  serve: true, // default — false registers the plugin for calling only (since 0.13.0)
+  clients: {}, // per-target client defaults for grpcClient() (since 0.13.0)
 });
 ```
 
@@ -15704,8 +15706,10 @@ grpc.addService(AnotherDefinition, anotherImpl);
 | `reflection`    | `boolean`                                | `true`  | Register `grpc.reflection.v1.ServerReflection`. Bidi streaming — requires HTTP/2 or in-process fetch.                                                                                                                                                                        |
 | `health`        | `boolean`                                | `true`  | Register `grpc.health.v1.Health` (`Check` only), bridged to the M20 health plugin.                                                                                                                                                                                           |
 | `services`      | `Array<{ definition, implementation? }>` | `[]`    | Initial services to register at startup. The recommended registration path: the capability does not exist before `start()`.                                                                                                                                                  |
-| `connectModule` | `ConnectRuntime`                         | omitted | Injected Connect runtime for tests; omitted triggers lazy `import()` of four npm specifiers.                                                                                                                                                                                 |
+| `connectModule` | `ConnectRuntime`                         | omitted | Injected Connect runtime for tests; omitted triggers lazy `import()` of three npm specifiers at registration (and `@connectrpc/connect-node` on a client's first call).                                                                                                      |
 | `interceptors`  | `readonly unknown[]`                     | `[]`    | Application Connect interceptors, forwarded to Connect router construction (`createConnectRouter({ interceptors })`). Composed after the built-in handler-error logging, so a handler throw is logged before an application interceptor observes it. Absent: none installed. |
+| `serve`         | `boolean`                                | `true`  | `false` registers the capability for calling only: no request is claimed and no procedure, health or reflection service is served; `services` must then be empty. Not a boolean → `TypeError` at `GrpcPlugin()`. Since `0.13.0`.                                             |
+| `clients`       | `Record<string, GrpcClientOptions>`      | `{}`    | Per-target client defaults, keyed by the `target` passed to `grpcClient()`. Each entry is validated at `GrpcPlugin()`. Since `0.13.0`.                                                                                                                                       |
 
 > Native gRPC-binary requests (`application/grpc`, `+proto`, `+json`) are refused with a
 > Trailers-Only `UNIMPLEMENTED` (`grpc-status: 12`). No runtime the plugin loads on exposes the
@@ -15716,12 +15720,14 @@ grpc.addService(AnotherDefinition, anotherImpl);
 | Export                 | Kind     | Purpose                                                                                       |
 | ---------------------- | -------- | --------------------------------------------------------------------------------------------- |
 | `GrpcPlugin`           | function | Plugin factory — registers `IGrpcService` under `CAPABILITIES.GRPC`                           |
+| `grpcClient`           | function | `grpcClient(services, definition, target, options?)`: a typed Connect `Client` (`0.13.0`)     |
 | `GrpcService`          | class    | The `IGrpcService` implementation; exported so tests can compose it without subclassing       |
 | `adaptConnectModule`   | function | Structural adaptation of raw Connect/Protobuf modules into the internal `ConnectRuntime` port |
 | `GrpcUnavailableError` | class    | **Deprecated** — nothing throws it since M70a; `handleRequest` needs no adapter capability    |
-| `GrpcRuntimeLoadError` | class    | Thrown by `loadConnectModule` when any of the four npm specifiers cannot be imported          |
+| `GrpcRuntimeLoadError` | class    | A Connect/Protobuf-ES specifier, or connect-node on a client's first call, cannot be imported |
 | `GrpcDescriptorError`  | class    | Thrown when an embedded descriptor set cannot be decoded or lacks its expected service        |
-| `GrpcPluginOptions`    | type     | The factory parameter shape; `readMaxBytes` (`@since 0.13.0`) bounds each request message     |
+| `GrpcPluginOptions`    | type     | The factory parameter shape; `readMaxBytes`, `serve`, `clients` are `@since 0.13.0`           |
+| `GrpcClientOptions`    | type     | Re-exported from `@setu-ts/common`: `basePath`, `protocol`, `httpVersion`, `timeoutMs`        |
 | `ConnectModuleLike`    | type     | The four-module bundle `adaptConnectModule` accepts                                           |
 
 > `ConnectRuntime` and the structural Connect facades are **not** exported. They are an internal
@@ -15767,10 +15773,11 @@ grpc.addService(AnotherDefinition, anotherImpl);
   client-streaming work on every runtime.
 - **RPC replies stream, request streams reach the procedure (M139b, `0.13.0`).** `RpcTransport`
   (`{ readonly trailers: boolean; readonly signal?: AbortSignal }`) and `RpcReply`
-  (`{ status, headers, body: Uint8Array | ReadableStream<Uint8Array> | null, streaming, trailers? }`)
-  and `RpcCall` (`{ method, url, path, headers, body: Uint8Array | ReadableStream<Uint8Array> }`)
-  are exported from `@setu-ts/common`: plain fields, because building a fetch `Request` and
-  `Response` per RPC was the largest share of an RPC's CPU. The kernel computes the transport from
+  (`{ status, headers, body: Uint8Array | ReadableStream<Uint8Array> | null, trailers? }` — the
+  kernel writes a stream body as a stream and anything else whole) and `RpcCall`
+  (`{ method, url, path, headers, body: Uint8Array | ReadableStream<Uint8Array> }`) are exported
+  from `@setu-ts/common`: plain fields, because building a fetch `Request` and `Response` per RPC
+  was the largest share of an RPC's CPU. The kernel computes the transport from
   `IRequest.responseTrailers`, passes it to `IGrpcService.refuses?(request, transport?)` and to the
   optional `IGrpcService.handleRpc?(call, transport): Promise<RpcReply>`, builds the call from
   `ctx.request` (so a header a middleware set is seen), and writes a stream body through
@@ -15785,6 +15792,21 @@ grpc.addService(AnotherDefinition, anotherImpl);
   as the call's signal on every path. `GrpcService.handleRequest(request)` turns the request into an
   `RpcCall`, runs the same dispatch with `{ trailers: false }`, and turns the reply back into a
   `Response`.
+- **The plugin calls as well as serves (M139b §3.12, `0.13.0`).**
+  `grpcClient(services, definition, target, options?)` resolves `IGrpcService` and calls the
+  optional `IGrpcService.client?(definition, target, options?): unknown`, returning Connect's typed
+  `Client`. A `target` that is a service name resolves through `CAPABILITIES.SERVICE_DISCOVERY` on
+  every call, and the client reports each outcome (`failure` for `Unavailable`, `success` otherwise)
+  so a refusing instance is ejected; an absolute `http(s)://` URL is used as is. A name with no
+  discovery registered throws `TypeError` at `grpcClient()`. Calls share one HTTP/2 session per
+  instance (64 origins at most, least recently used closed first), have a 5 s deadline, carry the
+  active span as `traceparent` when telemetry is registered, and reject with
+  `ConnectError(Unavailable)` when no instance is known or after the application stops.
+  `GrpcClientOptions` (`common`): `basePath` (`''`), `protocol` (`'connect'` | `'grpc'` |
+  `'grpc-web'`, default `'connect'`), `httpVersion` (`'2'` | `'1.1'`, default `'2'`; `'grpc'` needs
+  `'2'`), `timeoutMs` (1–2147483647, default `5000`); per-call options override
+  `GrpcPluginOptions.clients[target]`, which overrides the defaults. The transport is
+  `@connectrpc/connect-node`, an optional peer loaded on the first call; Workers have none.
 - **Native gRPC is served where trailers reach the client (M139b).** On the Node adapter over HTTP/2
   — `RuntimePlugin({ http2 })` on Node or Bun — a native `application/grpc` call runs through
   Connect's universal handler and its status is written as real HTTP/2 trailers, so `grpcurl`, `ghz`

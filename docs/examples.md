@@ -623,8 +623,8 @@ curl -X POST localhost:3411/orders -H 'content-type: application/json' \
 ```
 
 An unknown SKU, or a quantity below one, answers `400`. With billing stopped, `POST /orders` answers
-`503`: over fetch, a refused connection reaches the Connect client as code `Unknown` caused by a
-`TypeError`, and orders maps that and `Unavailable` to "billing is unavailable".
+`503`: the plugin's client reports a refused connection, and a billing no instance of which is
+known, as `Unavailable`, and orders maps that and `DeadlineExceeded` to "billing is unavailable".
 
 **Read, in order:**
 
@@ -639,8 +639,9 @@ An unknown SKU, or a quantity below one, answers `400`. With billing stopped, `P
 - [`apps/orders/src/clients/billing.client.ts`](../apps/grpc-workspace/apps/orders/src/clients/billing.client.ts)
   and
   [`apps/orders/src/services/orders.service.ts`](../apps/grpc-workspace/apps/orders/src/services/orders.service.ts)
-  — the Connect client, the address from `discovery.resolveUrl('billing', '/grpc')`, and the error
-  mapping.
+  — billing's client from `grpcClient(services, BillingService, 'billing')`, which the
+  `GrpcPlugin({ serve: false, clients })` in orders' generated `src/transport/index.ts` provides,
+  and the error mapping.
 - [`apps/orders/src/controllers/orders.controller.ts`](../apps/grpc-workspace/apps/orders/src/controllers/orders.controller.ts)
   — the flat function controller: `POST /orders` validates the line items and creates the order.
 - [`smoke.ts`](../apps/grpc-workspace/smoke.ts) — starts billing and orders as separate processes

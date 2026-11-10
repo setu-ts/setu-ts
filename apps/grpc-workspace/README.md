@@ -47,12 +47,17 @@ reason). In short:
   `GrpcPlugin` itself, in `src/transport/index.ts`. The plugins barrel registers it. billing's
   `setu.config.ts` differs from the generated one in one line: `RuntimePlugin({ http2: true })`, so
   billing serves HTTP/2 and HTTP/1.1 on its one port.
-- **orders** is an HTTP member: it adds `@connectrpc/connect` and `@connectrpc/connect-node`, which
-  an HTTP member does not ship, and a client in `src/clients/billing.client.ts` that calls billing
-  over one reused HTTP/2 connection. It has one feature, so it stays flat, as a new service does
-  until its first `setu generate module`: the generated `src/controllers/orders.controller.ts`,
-  `src/services/orders.service.ts` and `src/shared/schemas/orders.schemas.ts` now create, list and
-  read orders, quoting each new one through billing. Its tests use a fake billing.
+- **orders** is an HTTP member that depends on billing, so its CLI-owned `src/transport/index.ts`
+  registers `GrpcPlugin({ serve: false, clients: { billing: { basePath: '/grpc' } } })` — the
+  plugin's client, serving nothing — and its `package.json` declares the plugin and Connect's client
+  packages; the generator writes both from `--depends-on billing`. `src/clients/billing.client.ts`
+  is one line, `grpcClient(services, BillingService, 'billing')`: discovery picks an instance per
+  call and hears how it went, calls share one HTTP/2 session per instance, each has a 5 s deadline,
+  and the active trace travels as `traceparent`. It has one feature, so it stays flat, as a new
+  service does until its first `setu generate module`: the generated
+  `src/controllers/orders.controller.ts`, `src/services/orders.service.ts` and
+  `src/shared/schemas/orders.schemas.ts` now create, list and read orders, quoting each new one
+  through billing. Its tests use a fake billing.
 - **In this repository**, framework packages are `workspace:^`, the library is linked with
   `workspace:*`, each member's `tsconfig.json` extends the repository's `tsconfig.apps.json`, member
   `check` is `tsc` only (`setu check` runs in the conformance test), `eslint.config.js` is named

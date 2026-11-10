@@ -294,6 +294,41 @@ describe('setu workspace rpc', () => {
     expect(ws.read('apps/orders/buf.gen.yaml')).toBe('# mine\n');
   });
 
+  it('gives a member that depends on a gRPC member its client, and takes it away again (M139b §3.12)', async () => {
+    const ws = await workspace({ members: [['billing', 'microservice', 'grpc']] });
+    const orders = await ws.run([
+      'g',
+      'app',
+      'orders',
+      '--template',
+      'microservice',
+      '--depends-on',
+      'billing',
+    ]);
+    expect(orders.code, orders.err).toBe(0);
+    expect(ws.read('apps/orders/src/transport/index.ts')).toContain(
+      "return [GrpcPlugin({ serve: false, clients: { billing: { basePath: '/grpc' } } })];",
+    );
+    expect(JSON.parse(ws.read('apps/orders/deno.json'))).toMatchObject({
+      imports: {
+        '@setu-ts/grpc-plugin': expect.any(String),
+        '@connectrpc/connect': expect.any(String),
+        '@connectrpc/connect-node': expect.any(String),
+        '@bufbuild/protobuf': expect.any(String),
+      },
+    });
+    // The caller gets no proto toolchain: it serves nothing.
+    expect(() => ws.read('apps/orders/buf.gen.yaml')).toThrow();
+
+    // billing stops serving gRPC: its caller's module loses the client with it.
+    expect((await ws.run(['workspace', 'rpc', 'billing', 'http'])).code).toBe(0);
+    expect(ws.read('apps/orders/src/transport/index.ts')).toContain('  return [];');
+    expect((await ws.run(['workspace', 'rpc', 'billing', 'grpc'])).code).toBe(0);
+    expect(ws.read('apps/orders/src/transport/index.ts')).toContain(
+      "GrpcPlugin({ serve: false, clients: { billing: { basePath: '/grpc' } } })",
+    );
+  });
+
   it('changes nothing when the member already has the style', async () => {
     const ws = await workspace();
     const result = await ws.run(['workspace', 'rpc', 'orders', 'http']);

@@ -6,7 +6,7 @@ import type { IServiceDiscovery } from '@setu-ts/common';
 import { HttpError } from '@setu-ts/exceptions';
 import { createTestApp, overrideCapability } from '@setu-ts/testing';
 import { createApp } from '../setu.config.ts';
-import { createBillingClient, type BillingClient } from '../src/clients/billing.client.ts';
+import type { BillingClient } from '../src/clients/billing.client.ts';
 import { createOrders } from '../src/services/orders.service.ts';
 import { startFakeBilling } from './support/fake-billing.ts';
 
@@ -29,12 +29,17 @@ function fakeQuote(
   } as unknown as BillingClient;
 }
 
+/** Discovery answering billing with the one instance at `baseUrl`, or with none. */
 function fakeDiscovery(baseUrl: string | null): IServiceDiscovery {
+  const url = baseUrl === null ? null : new URL(baseUrl);
+  const instance =
+    url === null
+      ? null
+      : { id: 'billing-0', serviceName: 'billing', host: url.hostname, port: Number(url.port) };
   return {
-    resolve: () => Promise.resolve([]),
-    pick: () => Promise.resolve(null),
-    resolveUrl: (_serviceName, path) =>
-      Promise.resolve(baseUrl === null ? null : `${baseUrl}${path ?? ''}`),
+    resolve: () => Promise.resolve(instance === null ? [] : [instance]),
+    pick: () => Promise.resolve(instance),
+    resolveUrl: () => Promise.resolve(null),
     report: () => {},
     watch: () => Promise.resolve(() => {}),
   };
@@ -68,15 +73,6 @@ describe('orders', () => {
     assert.ok(unavailable instanceof HttpError);
     assert.deepStrictEqual((unavailable as HttpError).statusCode, 503);
     assert.deepStrictEqual((unavailable as HttpError).message, 'billing is unavailable.');
-
-    // A refused connection, through the real HTTP/2 client: connect-node reports
-    // it as `Unavailable`. Port 1 on loopback has no listener.
-    const refused = await createOrders(
-      { items: [...ITEMS] },
-      createBillingClient('http://127.0.0.1:1/grpc'),
-    ).catch((error: unknown) => error);
-    assert.ok(refused instanceof HttpError);
-    assert.deepStrictEqual((refused as HttpError).statusCode, 503);
 
     const late = await createOrders(
       { items: [...ITEMS] },
@@ -205,6 +201,29 @@ describe('orders', () => {
       const unavailableProblem = unavailable.json<{ detail?: string }>();
       assert.deepStrictEqual(unavailableProblem.detail, 'billing is unavailable.');
       assert.ok(!body.includes('the fake billing is off'));
+
+      // A refused connection, through the plugin's real HTTP/2 client: it is
+      // `Unavailable`, so a 503. Port 1 on loopback has no listener.
+      const refusing = await createTestApp({
+        app: await createApp(),
+        overrides: [
+          overrideCapability(CAPABILITIES.SERVICE_DISCOVERY, fakeDiscovery('http://127.0.0.1:1')),
+        ],
+      });
+      try {
+        const refused = await refusing.inject({
+          method: 'POST',
+          url: '/orders',
+          body: { items: [...ITEMS] },
+        });
+        assert.deepStrictEqual(refused.statusCode, 503);
+        assert.deepStrictEqual(
+          refused.json<{ detail?: string }>().detail,
+          'billing is unavailable.',
+        );
+      } finally {
+        await refusing.stop();
+      }
     } finally {
       await app.stop();
       await reachable.stop();

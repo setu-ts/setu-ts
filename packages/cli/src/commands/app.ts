@@ -70,7 +70,14 @@ import type { PortProbe } from '../workspace/port-probe.ts';
 import { withWorkspaceMember } from '../workspace/member-host.ts';
 import { planRootNodeModulesDir, ROOT_MANIFEST } from '../workspace/root-manifest.ts';
 import { BROKERS, type BrokerSpec, brokerSpec } from '../workspace/transport.ts';
-import { RPC_ALIASES, RPC_STYLES, getRpc, rpcSpec, type RpcStyle } from '../workspace/rpc.ts';
+import {
+  RPC_ALIASES,
+  RPC_STYLES,
+  getRpc,
+  grpcTargets,
+  rpcSpec,
+  type RpcStyle,
+} from '../workspace/rpc.ts';
 import { memberTransportModule } from '../workspace/rewire.ts';
 import {
   allocateDevtoolPort,
@@ -341,9 +348,8 @@ function planMember(
     rpcSpec(next.members.find((member) => member.name === name)?.rpc),
     name,
     profile,
-    // Omitted rather than passed as `undefined`: `exactOptionalPropertyTypes` is
-    // on, and the parameter is optional.
-    ...((next.brokerUrl === undefined ? [] : [next.brokerUrl]) as [string?]),
+    next.brokerUrl,
+    grpcTargets(next.members, name),
   );
   // A starter factory owns its construction, and kernel diagnostics reach the
   // constructor only — refused here, before anything is planned, because the

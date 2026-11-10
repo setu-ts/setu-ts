@@ -42,6 +42,16 @@ interface StreamClient {
   serverStream(request: { prefix: string }): AsyncIterable<{ message: string }>;
 }
 
+/** The error a call rejects with; a call that answers fails the test. */
+function failure(call: Promise<unknown>): Promise<ConnectError> {
+  return call.then(
+    () => {
+      throw new Error('the call answered');
+    },
+    (error: unknown) => ConnectError.from(error),
+  );
+}
+
 const apps: IKernelApplication[] = [];
 afterEach(async () => {
   for (const app of apps.splice(0)) await app.stop();
@@ -178,7 +188,7 @@ describeNode('grpcClient — a member calling another through the plugin', () =>
     const caller = await startCaller([]);
     const { echo } = await definitions();
     const client = grpcClient(caller.services, echo as never, 'echo') as unknown as EchoClient;
-    const none = await client.echo({ message: 'x' }).catch((e: unknown) => ConnectError.from(e));
+    const none = await failure(client.echo({ message: 'x' }));
     expect([Code[none.code], none.rawMessage]).toEqual([
       'Unavailable',
       'no instance of "echo" is available',
@@ -195,7 +205,7 @@ describeNode('grpcClient — a member calling another through the plugin', () =>
     );
     await caller.stop();
     apps.splice(apps.indexOf(caller), 1);
-    const closed = await url.echo({ message: 'x' }).catch((e: unknown) => ConnectError.from(e));
+    const closed = await failure(url.echo({ message: 'x' }));
     expect([Code[closed.code], closed.rawMessage]).toEqual([
       'Unavailable',
       'the gRPC client is closed',

@@ -78,6 +78,12 @@ export interface RpcSpec {
 /** The style a member gets when `--rpc` is not given, and what an absent manifest field means. */
 export const DEFAULT_RPC: RpcStyle = 'http';
 
+/**
+ * The plugin a gRPC member registers to serve, and a caller registers for its
+ * client (M139b §3.12). The transport module renders its arguments.
+ */
+export const GRPC_PLUGIN: Wiring = { pkg: 'grpc-plugin', symbol: 'GrpcPlugin' };
+
 const RPC_SPECS: Readonly<Record<RpcStyle, RpcSpec>> = {
   ['http']: {
     name: 'http',
@@ -95,7 +101,8 @@ const RPC_SPECS: Readonly<Record<RpcStyle, RpcSpec>> = {
     // descriptors from buf/protoc handed to `grpc.addService`, which the CLI
     // emits a toolchain for rather than generating itself.
     description: 'The member co-serves Connect/gRPC on its own port, alongside HTTP',
-    plugin: { pkg: 'grpc-plugin', symbol: 'GrpcPlugin', args: "{ basePath: '/grpc' }" },
+    // The call itself — mount and clients — is rendered by the transport module.
+    plugin: GRPC_PLUGIN,
     // The health service needs none of this — the plugin carries that descriptor
     // itself. Serving the member's OWN protos needs a compiler, so the toolchain
     // ships instead of the descriptors.
@@ -137,3 +144,34 @@ export function rpcSpec(name: RpcStyle | undefined): RpcSpec {
  * `tcp` and quietly giving them HTTP under another name.
  */
 export const RPC_ALIASES: Readonly<Record<string, RpcStyle>> = { tcp: 'http' };
+
+/**
+ * The packages a member that CALLS a gRPC member needs: the plugin's client is
+ * Connect's, over connect-node's HTTP/2 transport (M139b §3.12).
+ */
+export const GRPC_CALLER_CLIENTS: readonly string[] = [
+  '@connectrpc/connect',
+  '@connectrpc/connect-node',
+  '@bufbuild/protobuf',
+];
+
+/**
+ * The members a member calls over gRPC: those its `dependsOn` names whose RPC
+ * style is `grpc`, sorted so the rendered module does not depend on list order.
+ *
+ * @param members - Every workspace member
+ * @param name - The calling member
+ * @returns The target names, possibly empty
+ */
+export function grpcTargets(
+  members: readonly {
+    readonly name: string;
+    readonly rpc?: RpcStyle;
+    readonly dependsOn?: readonly string[];
+  }[],
+  name: string,
+): readonly string[] {
+  const member = members.find((entry) => entry.name === name);
+  const grpc = new Set(members.filter((entry) => entry.rpc === 'grpc').map((entry) => entry.name));
+  return [...new Set(member?.dependsOn ?? [])].filter((target) => grpc.has(target)).sort();
+}

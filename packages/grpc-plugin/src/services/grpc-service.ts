@@ -314,11 +314,6 @@ export class GrpcService implements IGrpcService {
   }
 
   /**
-   * Releases the built router and its handlers. Afterwards the plugin's own
-   * procedures answer `503` instead of rebuilding a router for an application
-   * that is shutting down, while every other path falls through untouched.
-   */
-  /**
    * A client for a service another process serves (§3.12). See
    * {@linkcode IGrpcService.client}.
    *
@@ -338,6 +333,12 @@ export class GrpcService implements IGrpcService {
     return this.#clients.client(definition, target, options);
   }
 
+  /**
+   * Releases the built router and its handlers. Afterwards the plugin's own
+   * procedures answer `503` instead of rebuilding a router for an application
+   * that is shutting down, while every other path falls through untouched.
+   * Every client's sessions close too, and later calls are refused.
+   */
   close(): void {
     this.#clients?.close();
     if (this.#closed) {

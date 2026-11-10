@@ -33,7 +33,7 @@ const MAY_DIFFER: Readonly<Record<string, string>> = {
   'apps/billing/package.json':
     'framework ranges become workspace:^, the contracts library is linked, check is tsc only, lint names lint.config.js, the per-member buf toolchain is removed',
   'apps/orders/package.json':
-    'as billing, plus @connectrpc/connect and @connectrpc/connect-node: an http member ships no Connect client',
+    'as billing: framework ranges become workspace:^, the contracts library is linked, check is tsc only, lint names lint.config.js',
   'libs/contracts/package.json':
     'the library owns the contract: @bufbuild/protobuf, check, and proto:gen through a pinned npx buf',
   'apps/billing/tsconfig.json':
@@ -87,7 +87,8 @@ const ADDED: Readonly<Record<string, string>> = {
   'libs/contracts/src/gen/billing/v1/billing_pb.ts': 'protoc-gen-es output, committed',
   'apps/billing/test/billing.test.ts':
     'Quote over Connect: a priced SKU, and unknown ones including inherited object names',
-  'apps/orders/src/clients/billing.client.ts': 'the Connect client for billing',
+  'apps/orders/src/clients/billing.client.ts':
+    "billing's typed client, through the GrpcPlugin the generated transport module registers",
   'apps/orders/test/orders.test.ts': 'tests the orders service and routes against a fake billing',
   'apps/orders/test/e2e/orders.e2e.test.ts':
     'creates and reads an order against a fake billing server',

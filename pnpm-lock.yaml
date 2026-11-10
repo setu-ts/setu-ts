@@ -794,6 +794,9 @@ importers:
 
   apps/grpc-workspace/apps/orders:
     dependencies:
+      '@bufbuild/protobuf':
+        specifier: ^2.7.0
+        version: 2.16.0
       '@connectrpc/connect':
         specifier: ^2.1.2
         version: 2.3.0(@bufbuild/protobuf@2.16.0)
@@ -818,6 +821,9 @@ importers:
       '@setu-ts/exceptions':
         specifier: workspace:^
         version: link:../../../../packages/exceptions
+      '@setu-ts/grpc-plugin':
+        specifier: workspace:^
+        version: link:../../../../packages/grpc-plugin
       '@setu-ts/health-plugin':
         specifier: workspace:^
         version: link:../../../../packages/health-plugin

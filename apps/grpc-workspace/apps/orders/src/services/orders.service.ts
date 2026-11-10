@@ -1,8 +1,6 @@
 import { Code, ConnectError } from '@connectrpc/connect';
-import { CAPABILITIES } from '@setu-ts/common';
-import type { IServiceDiscovery, IServiceRegistry } from '@setu-ts/common';
 import { badRequest, serviceUnavailable } from '@setu-ts/exceptions';
-import { createBillingClient, type BillingClient } from '../clients/billing.client.ts';
+import type { BillingClient } from '../clients/billing.client.ts';
 import type {
   CreateOrdersBody,
   ListOrdersQuery,
@@ -33,34 +31,10 @@ export function getOrders(id: string): OrdersResponse | undefined {
 }
 
 /**
- * One client per billing URL. Each Connect HTTP/2 transport owns its own
- * session, so a client built per request would open a new connection for every
- * call. Discovery yields a handful of instance URLs, so the map stays small.
- */
-const billingClients = new Map<string, BillingClient>();
-
-/**
- * Resolves the billing client for a request. A `null` resolve — no billing
- * instance is configured, or discovery has ejected them all — answers `503`; the error carries no upstream
- * detail.
- */
-export async function resolveBillingClient(services: IServiceRegistry): Promise<BillingClient> {
-  const discovery = services.get<IServiceDiscovery>(CAPABILITIES.SERVICE_DISCOVERY);
-  const baseUrl = await discovery.resolveUrl('billing', '/grpc');
-  if (baseUrl === null) throw serviceUnavailable('billing is unavailable.');
-  let client = billingClients.get(baseUrl);
-  if (client === undefined) {
-    client = createBillingClient(baseUrl);
-    billingClients.set(baseUrl, client);
-  }
-  return client;
-}
-
-/**
  * Whether a billing call failed because billing could not be reached in time.
- * A server-side outage, and a refused or reset connection, are `Unavailable` —
- * connect-node's HTTP/2 transport reports a connection failure that way — and a
- * call past the client's deadline is `DeadlineExceeded`. Anything else (`Unknown`
+ * No billing instance known to discovery, a server-side outage, and a refused
+ * or reset connection are all `Unavailable` — the plugin's client reports each
+ * that way — and a call past the client's deadline is `DeadlineExceeded`. Anything else (`Unknown`
  * from a bug, say) is not an outage and stays a 500.
  */
 function isUnreachable(error: unknown): boolean {
