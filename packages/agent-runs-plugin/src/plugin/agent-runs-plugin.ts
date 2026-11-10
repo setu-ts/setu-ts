@@ -108,7 +108,7 @@ export function AgentRunsPlugin(options: AgentRunsPluginOptions): IPlugin {
       const idempotency = ctx.services.get<IIdempotencyService>(CAPABILITIES.IDEMPOTENCY);
       if (idempotency.transactional !== true)
         throw new TypeError(
-          'Agent runs: register IdempotencyPlugin with a transactional store (transactional: { store: createDatabaseIdempotencyStore() }) before this plugin.',
+          'Agent runs: register IdempotencyPlugin with a transactional store (transactional: { store: createDatabaseIdempotencyStore(), purge: { schedule: false } }, or register a scheduler) before this plugin.',
         );
       let timer: TimerHandle | undefined;
       // eslint-disable-next-line prefer-const -- Failed startup closes before service construction.

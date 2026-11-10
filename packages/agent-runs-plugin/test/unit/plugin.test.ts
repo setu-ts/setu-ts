@@ -35,7 +35,7 @@ describe('AgentRunsPlugin', () => {
       });
       try {
         await expect(app.start()).rejects.toThrow(
-          'Agent runs: register IdempotencyPlugin with a transactional store (transactional: { store: createDatabaseIdempotencyStore() }) before this plugin.',
+          'Agent runs: register IdempotencyPlugin with a transactional store (transactional: { store: createDatabaseIdempotencyStore(), purge: { schedule: false } }, or register a scheduler) before this plugin.',
         );
         expect(app.services.has(CAPABILITIES.AGENT_RUNS)).toBe(false);
       } finally {

@@ -173,6 +173,24 @@ describe('DatabaseTenantDataStore (M101c, V8-8)', () => {
     for (const uow of [null, undefined, 0, '', {}, { getRepository: 1 }])
       expect(() => store.withUnitOfWork(uow as never)).toThrow(TypeError);
   });
+  it("M139c drops another tenant's rows a repository returns despite the filter", async () => {
+    // FakeRepository.findAll ignores `where`, standing in for a repository (or a unit
+    // of work's repository) that does not apply the tenant filter.
+    const rows = [
+      { id: 'own', tenant_id: 'a' },
+      { id: 'foreign', tenant_id: 'b' },
+      { id: 'untagged' },
+    ];
+    for (const bound of [false, true]) {
+      const { store: parent } = storeWith(rows);
+      const repo = new FakeRepository(rows);
+      const store = bound ? parent.withUnitOfWork({ getRepository: () => repo }) : parent;
+      expect(await store.findAll('a', 'Patient')).toEqual([{ id: 'own', tenant_id: 'a' }]);
+      expect(await store.find('a', 'Patient', { id: 'foreign' })).toEqual([
+        { id: 'own', tenant_id: 'a' },
+      ]);
+    }
+  });
   it('M139c bound and unbound views share all tenant guards and the parent column', async () => {
     for (const bound of [false, true]) {
       const { store: parent, service } = storeWith([]);

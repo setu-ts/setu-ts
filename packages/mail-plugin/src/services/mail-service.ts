@@ -40,6 +40,8 @@ type ResolvedAttachment = NonNullable<OutgoingMail['attachments']>[number];
 
 /** Header-safe MIME type without parameters. */
 const CONTENT_TYPE = /^[A-Za-z0-9!#$&^_.+-]+\/[A-Za-z0-9!#$&^_.+-]+$/;
+/** Composite types: a provider embeds them as nested MIME structure, not as a file. */
+const COMPOSITE_TYPE = /^(?:message|multipart)\//i;
 /** Header-safe content id: no angle brackets, whitespace or controls. */
 const CONTENT_ID = /^[A-Za-z0-9!#$%&'*+/=?^_`{|}~.@-]+$/;
 
@@ -74,7 +76,9 @@ function resolveAttachments(value: unknown): ResolvedAttachment[] {
     if (!(content instanceof Uint8Array) && typeof content !== 'string') refuse('content');
     if (
       contentType !== undefined &&
-      (typeof contentType !== 'string' || !CONTENT_TYPE.test(contentType))
+      (typeof contentType !== 'string' ||
+        !CONTENT_TYPE.test(contentType) ||
+        COMPOSITE_TYPE.test(contentType))
     )
       refuse('contentType');
     if (

@@ -117,6 +117,20 @@ function assertEqualityFilter(filter: Readonly<Record<string, unknown>>): void {
 const DEFAULT_TENANT_COLUMN = 'tenant_id';
 
 /**
+ * Keeps only the tenant's rows. The query already filters by the tenant column;
+ * this re-check means a repository (or a unit of work's repository) that ignores
+ * the filter still cannot hand back another tenant's rows, as the single-row
+ * paths already refuse.
+ */
+function ownedRows(
+  rows: readonly Record<string, unknown>[],
+  column: string,
+  tenantId: string,
+): readonly Record<string, unknown>[] {
+  return rows.filter((row) => row[column] === tenantId);
+}
+
+/**
  * An `ITenantDataStore` over `IDatabaseService`, isolating tenants by a
  * column stamped on every row.
  *
@@ -252,7 +266,7 @@ export class DatabaseTenantDataStore implements ITenantDataStore {
   async findAll<E>(tenantId: string, entity: string): Promise<readonly E[]> {
     const col = this.#column(entity);
     const rows = await this.#repo(entity).findAll({ where: { [col]: tenantId } });
-    return rows as unknown as readonly E[];
+    return ownedRows(rows, col, tenantId) as unknown as readonly E[];
   }
 
   /**
@@ -284,7 +298,7 @@ export class DatabaseTenantDataStore implements ITenantDataStore {
     assertEqualityFilter(filter);
     // The tenant column is spread LAST so a caller's filter cannot override it.
     const rows = await this.#repo(entity).findAll({ where: { ...filter, [col]: tenantId } });
-    return rows as unknown as readonly E[];
+    return ownedRows(rows, col, tenantId) as unknown as readonly E[];
   }
 
   async create<E>(

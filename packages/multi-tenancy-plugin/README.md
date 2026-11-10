@@ -185,7 +185,9 @@ deleted. Only a store with `withUnitOfWork` can join a transaction. `createDatab
 has it; `MemoryTenantDataStore` does not, so passing a unit of work with it throws
 `TenantUnitOfWorkUnsupportedError` (status hint 500). On a deferred-write transaction (Cloudflare
 D1) writes are buffered until commit, so a read or an update inside the transaction does not see a
-row the same transaction created.
+row the same transaction created. The memory database's transaction repositories have no conditional
+writes, so `updateWhere` and `deleteWhere` through a unit of work refuse there with
+`conditional-write` (501); pass the unit of work only to the plain reads and writes on that adapter.
 
 ## Which tenants exist
 

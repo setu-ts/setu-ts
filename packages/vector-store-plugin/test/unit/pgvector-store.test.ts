@@ -133,7 +133,8 @@ describe('PgVectorStore', () => {
   it.each(['source_index', 'vector_index'] as const)(
     'M139c names the expected %s shape and fails closed',
     async (column) => {
-      for (const value of [false, null]) {
+      // A string 'f' from a driver's boolean parser must fail closed, not read as truthy.
+      for (const value of [false, null, undefined, 'f', 'false', 't', 1]) {
         const h = await opened((rendered) =>
           rendered.text.includes('FROM pg_attribute')
             ? {
@@ -174,6 +175,8 @@ describe('PgVectorStore', () => {
       'i.indkey[0] = a.attnum',
       "m.amname = 'hnsw'",
       "o.opcname = 'vector_cosine_ops'",
+      'i.indisvalid AND i.indpred IS NULL) AS source_index',
+      'i.indisvalid AND i.indpred IS NULL) AS vector_index',
     ])
       expect(query.text).toContain(sql);
     expect(query.params).toEqual(['vs_documents_src', 'vs_documents_hnsw', 'vs_documents']);

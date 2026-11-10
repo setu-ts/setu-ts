@@ -265,6 +265,8 @@ it.skipIf(!PGVECTOR_URL)(
         'other-column',
         'other-method',
         'reversed-source',
+        'partial-vector',
+        'partial-source',
       ]) {
         await admin.query(`DROP TABLE IF EXISTS ${table} CASCADE`);
         await admin.query(`DROP TABLE IF EXISTS ${table}_other CASCADE`);
@@ -273,6 +275,16 @@ it.skipIf(!PGVECTOR_URL)(
         if (shape === 'reversed-source') {
           await admin.query(`DROP INDEX ${table}_src`);
           await admin.query(`CREATE INDEX ${table}_src ON ${table} (source_id, scope)`);
+        } else if (shape === 'partial-source') {
+          await admin.query(`DROP INDEX ${table}_src`);
+          await admin.query(
+            `CREATE INDEX ${table}_src ON ${table} (scope, source_id) WHERE scope = 'a'`,
+          );
+        } else if (shape === 'partial-vector') {
+          await admin.query(`DROP INDEX ${table}_hnsw`);
+          await admin.query(
+            `CREATE INDEX ${table}_hnsw ON ${table} USING hnsw (embedding vector_cosine_ops) WHERE scope = 'a'`,
+          );
         } else {
           await admin.query(`DROP INDEX ${table}_hnsw`);
           if (shape === 'other-table') {

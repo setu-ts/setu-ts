@@ -136,7 +136,11 @@ contract lives there.
 - **Why:** the row's failure is a caller who splits the document because of the cap. Raising the cap
   to a size a long document fits in (5,000 × ~800 characters ≈ 4 M characters), while keeping each
   statement inside pgvector's parameter budget, removes the need to split. 5,000 rather than more
-  bounds the vectors one call holds in memory (5,000 × 2,000 dimensions = 10 M numbers).
+  bounds the vectors one call holds in memory. pgvector indexes at most 2,000 dimensions (5,000 ×
+  2,000 = 10 M numbers), but memory and Qdrant collections allow 4,096, so one maximal call holds
+  about 20 M numbers. The security audit measured about twice the input in heap on the memory
+  adapter (556 MB for a 164 MB input). That is accepted: the caller already holds the vectors, and
+  `upsert` stays at 500.
 - **Test home:**
   - `validation.test.ts`: 5,000 is accepted by replace, and 5,001 and an `upsert` of 501 are
     refused.

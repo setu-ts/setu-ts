@@ -210,9 +210,10 @@ export class PgVectorStore implements IVectorStoreAdapter {
         `pgvector: '${table}' stores ${row.dimensions}-dimension vectors; collection '${spec.name}' declares ${spec.dimensions}.`,
       );
     }
-    if (!row.source_index || !row.vector_index) {
+    // Only a real boolean true passes: a driver returning 'f' must not read as present.
+    if (row.source_index !== true || row.vector_index !== true) {
       throw new VectorCollectionMismatchError(
-        `pgvector: '${table}' is missing its ${!row.vector_index ? 'HNSW' : 'source'} index: expected ${!row.vector_index ? `${table}_hnsw ON ${table} USING hnsw (embedding vector_cosine_ops)` : `${table}_src ON ${table} (scope, source_id)`}.`,
+        `pgvector: '${table}' is missing its ${row.vector_index !== true ? 'HNSW' : 'source'} index: expected ${row.vector_index !== true ? `${table}_hnsw ON ${table} USING hnsw (embedding vector_cosine_ops)` : `${table}_src ON ${table} (scope, source_id)`}.`,
       );
     }
     if (!row.source_version && this.#ensure === 'create') {

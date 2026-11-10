@@ -49,6 +49,11 @@ describe('MailService.send', () => {
         'text/\nplain',
         'text/\x00plain',
         'text/\x7fplain',
+        // Composite types embed as nested MIME structure, not as a file.
+        'message/rfc822',
+        'MESSAGE/rfc822',
+        'multipart/mixed',
+        'Multipart/alternative',
       ].map((value): [string, unknown] => ['contentType', value]),
       ...[
         '',
