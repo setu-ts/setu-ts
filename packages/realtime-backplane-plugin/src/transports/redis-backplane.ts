@@ -562,15 +562,18 @@ const CONNECTING_STATUSES: ReadonlySet<string> = new Set(['connecting', 'connect
  * bounded by `timeoutMs` (`0` is unbounded, as for `commandTimeoutMs`). Any
  * other status resolves at once: `ready`; no `status` at all (a custom
  * module's client cannot be observed); `wait`, which never becomes ready
- * unless something calls `connect()`; and a closed client, whose publish then
- * fails on its own. An aborted `cancel` signal (a `close()`) also resolves the
- * wait, so the open's generation check retires the pair (M139f audit L1).
+ * unless something calls `connect()`; and `close`, whose publish then fails on
+ * its own. An `end`ed publisher will never be ready, so it rejects — already
+ * `end` when the wait would start, or emitting `'end'` during it. An aborted
+ * `cancel` signal (a `close()`) also resolves the wait, so the open's
+ * generation check retires the pair (M139f audit L1).
  *
  * @param client - The owned publisher
  * @param timeoutMs - The bound, in milliseconds
  * @param cancel - Aborted by `close()`
  * @returns Resolves once the client is ready, or once `cancel` is aborted
- * @throws {BackendUnavailableError} (as a rejection) when the bound passes first
+ * @throws {BackendUnavailableError} (as a rejection) when the bound passes
+ *   first, or when the publisher is or becomes `end`
  */
 function waitForReady(
   client: IRedisBackplaneClient,
@@ -578,6 +581,7 @@ function waitForReady(
   cancel: AbortSignal,
 ): Promise<void> {
   const status = client.status;
+  if (status === 'end') return Promise.reject(publisherEnded());
   if (status === undefined || !CONNECTING_STATUSES.has(status)) return Promise.resolve();
   return withDeadline(
     (signal) =>
@@ -595,11 +599,7 @@ function waitForReady(
         // fail the open now instead of waiting out the bound (or forever at 0).
         const onEnd = (): void => {
           detach();
-          reject(
-            new BackendUnavailableError('realtime-backplane-plugin: redis transport', {
-              cause: new Error('the publisher connection ended before it was ready'),
-            }),
-          );
+          reject(publisherEnded());
         };
         client.on('ready', onReady);
         client.on('end', onEnd);
@@ -619,4 +619,16 @@ function waitForReady(
         }),
     },
   );
+}
+
+/**
+ * The refusal for a publisher that ended before it was ready: its retries are
+ * spent, so it never will be (M139f).
+ *
+ * @returns The error the open rejects with
+ */
+function publisherEnded(): BackendUnavailableError {
+  return new BackendUnavailableError('realtime-backplane-plugin: redis transport', {
+    cause: new Error('the publisher connection ended before it was ready'),
+  });
 }

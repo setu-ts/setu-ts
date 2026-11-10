@@ -1494,7 +1494,35 @@ describe('RedisBackplane owned publisher readiness (M139f X3-3)', () => {
     expect(clients.map((client) => client.quitCount)).toEqual([1, 1]);
   });
 
-  it.each(['ready', 'wait', 'end'])(
+  it('fails the open when the built publisher has already ended (M139f re-audit L-4.1)', async () => {
+    const clients: FakeRedisClient[] = [];
+    const module: IRedisModule = {
+      create: (): IRedisBackplaneClient => {
+        const client = Object.assign(new FakeRedisClient(), {
+          status: clients.length === 0 ? 'end' : 'ready',
+        });
+        clients.push(client);
+        return client;
+      },
+    };
+    const backplane = new RedisBackplane(
+      { transport: 'redis', url: 'redis://localhost:6379', module, commandTimeoutMs: 0 },
+      'node-a',
+      'realtime',
+    );
+    const error: unknown = await backplane.connect().then(
+      () => undefined,
+      (thrown: unknown) => thrown,
+    );
+    expect(error).toBeInstanceOf(BackendUnavailableError);
+    expect(((error as Error).cause as Error).message).toBe(
+      'the publisher connection ended before it was ready',
+    );
+    expect(clients.map((client) => client.quitCount)).toEqual([1, 1]);
+    await expect(backplane.publish(FRAME)).rejects.toThrow();
+  });
+
+  it.each(['ready', 'wait', 'close'])(
     'does not wait on a built publisher whose status is %s',
     async (status) => {
       const clients: FakeRedisClient[] = [];
