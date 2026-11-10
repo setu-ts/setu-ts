@@ -1565,6 +1565,41 @@ describe('RedisBackplane owned publisher readiness (M139f X3-3)', () => {
     expect(clients[0]!.eventListeners.get('ready')).toHaveLength(0);
   });
 
+  it('settles for a close() at every microtask around the wait start (M139f re-audit N3)', async () => {
+    for (let delay = 0; delay <= 14; delay++) {
+      const clients: Array<FakeRedisClient & { status: string }> = [];
+      let release: (() => void) | undefined;
+      const module: IRedisModule = {
+        create: (): IRedisBackplaneClient => {
+          const client = Object.assign(new FakeRedisClient(), {
+            status: clients.length === 0 ? 'reconnecting' : 'ready',
+          });
+          if (clients.length === 1) release = client.holdSubscribe();
+          clients.push(client);
+          return client;
+        },
+      };
+      const backplane = new RedisBackplane(
+        { transport: 'redis', url: 'redis://localhost:6379', module, commandTimeoutMs: 0 },
+        'node-a',
+        'realtime',
+      );
+      let settled = false;
+      const connecting = backplane.connect().then(() => {
+        settled = true;
+      });
+      await setImmediate();
+      release!();
+      for (let tick = 0; tick < delay; tick++) await Promise.resolve();
+      await backplane.close();
+      await setImmediate();
+      expect(settled, `close() after ${delay} microtask(s)`).toBe(true);
+      await connecting;
+      expect(clients.map((client) => client.quitCount)).toEqual([1, 1]);
+      expect(clients[0]!.eventListeners.get('ready')).toHaveLength(0);
+    }
+  });
+
   it('does not wait on an injected pair, whatever its status', async () => {
     const client = Object.assign(new FakeRedisClient(), { status: 'connecting' });
     const subscriber = Object.assign(new FakeRedisClient(), { status: 'connecting' });

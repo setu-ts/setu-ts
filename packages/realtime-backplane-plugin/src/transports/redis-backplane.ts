@@ -591,6 +591,10 @@ function waitForReady(
         client.on('ready', onReady);
         signal.addEventListener('abort', () => client.off('ready', onReady), { once: true });
         cancel.addEventListener('abort', onReady, { once: true });
+        // `withDeadline` runs this body a microtask later, so a close() can abort
+        // `cancel` before the listener exists; that listener would never fire
+        // (M139f re-audit N3).
+        if (cancel.aborted) onReady();
       }),
     {
       timeoutMs,
