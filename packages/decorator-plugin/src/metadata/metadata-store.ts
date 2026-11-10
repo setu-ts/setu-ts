@@ -20,6 +20,7 @@ import type {
   IMetadataStore,
   IPipelineBehavior,
   MiddlewareFunction,
+  ModuleFactoryProvider,
   PolicyDefinition,
   ProcessOptions,
   RouteMcpToolMetadata,
@@ -162,8 +163,11 @@ export interface ServiceMetadata {
 export interface ModuleMetadata {
   /** Controller classes this module contributes. */
   readonly controllers: readonly Constructor[];
-  /** Provider classes this module contributes. */
-  readonly providers: readonly Constructor[];
+  /**
+   * Providers this module contributes: classes, and factory entries naming
+   * their own token (`ModuleFactoryProvider`, since 0.13.0).
+   */
+  readonly providers: readonly (Constructor | ModuleFactoryProvider)[];
   /** Imported module classes, expanded before this module's own entries. */
   readonly imports: readonly Constructor[];
 }

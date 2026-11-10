@@ -607,6 +607,7 @@ package fits the plugin architecture.
 | `MetricConfig`                        | interface |
 | `MetricOptions`                       | interface |
 | `MiddlewareOptions`                   | interface |
+| `ModuleFactoryProvider`               | interface |
 | `None`                                | interface |
 | `NormalizedQuery`                     | interface |
 | `NotificationMessage`                 | interface |

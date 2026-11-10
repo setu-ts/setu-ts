@@ -36,7 +36,7 @@ export { GrpcPlugin } from './plugin/grpc-plugin.ts';
 export { GrpcService } from './services/grpc-service.ts';
 
 // The calling side (M139b §3.12)
-export { grpcClient } from './client/grpc-client-helper.ts';
+export { grpcClient, grpcClientProvider } from './client/grpc-client-helper.ts';
 
 // Re-export errors
 export {

@@ -2053,6 +2053,12 @@ importers:
       '@connectrpc/connect-node':
         specifier: ^2.1.2
         version: 2.3.0(@bufbuild/protobuf@2.16.0)(@connectrpc/connect@2.3.0(@bufbuild/protobuf@2.16.0))
+      '@setu-ts/decorator-plugin':
+        specifier: workspace:^
+        version: link:../decorator-plugin
+      '@setu-ts/di-plugin':
+        specifier: workspace:^
+        version: link:../di-plugin
       '@setu-ts/health-plugin':
         specifier: workspace:^
         version: link:../health-plugin

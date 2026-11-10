@@ -261,6 +261,7 @@ export type {
   InjectionToken,
   ContainerToken,
   InjectEntry,
+  ModuleFactoryProvider,
 } from './container.ts';
 export { createToken } from './container.ts';
 

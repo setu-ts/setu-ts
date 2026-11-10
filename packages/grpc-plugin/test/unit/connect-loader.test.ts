@@ -13,6 +13,7 @@ import { readFileSync } from 'node:fs';
  */
 
 import { describe, expect, it, vi } from 'vitest';
+import { importConnectNode } from '../../src/client/connect-node-loader.ts';
 import {
   adaptConnectModule,
   type ConnectImporters,
@@ -282,3 +283,49 @@ class FakeConnectError extends Error {
     this.code = code;
   }
 }
+
+describe('adaptConnectModule — the client side (M139b §3.12)', () => {
+  it('builds clients with createClient and classifies Unavailable by code', () => {
+    const { modules } = createFakeModules();
+    const runtime = adaptConnectModule(modules);
+    const transport = { unary: () => Promise.resolve(1), stream: () => Promise.resolve(2) };
+    expect(runtime.createClient('svc', transport)).toEqual({ service: 'svc', transport });
+    const unavailable = runtime.unavailable('down');
+    expect(unavailable).toBeInstanceOf(FakeConnectError);
+    expect([unavailable.message, (unavailable as FakeConnectError).code]).toEqual(['down', 14]);
+    expect(runtime.isUnavailable(unavailable)).toBe(true);
+    expect(runtime.isUnavailable(new FakeConnectError('bad', 3))).toBe(false);
+    expect(runtime.isUnavailable(new Error('down'))).toBe(false);
+    const cause = new Error('refused');
+    expect((runtime.unavailable('again', cause) as Error & { cause?: unknown }).cause).toBe(cause);
+  });
+});
+
+describe('importConnectNode — the guarded import (M113d §3.1)', () => {
+  it('keeps the specifier a literal awaited import()', () => {
+    const source = readFileSync(
+      new URL('../../src/client/connect-node-loader.ts', import.meta.url),
+      'utf8',
+    );
+    expect(source).toContain("return await import('@connectrpc/connect-node');");
+  });
+
+  it('rejects with OptionalDependencyUnavailableError when the package is absent', async () => {
+    // No resetModules: the import() inside importConnectNode runs at call time,
+    // so the mock reaches the module instance coverage measures.
+    vi.doMock('@connectrpc/connect-node', () => {
+      throw new Error('Cannot find package');
+    });
+    try {
+      const caught = (await importConnectNode().catch((e: unknown) => e)) as Error & {
+        dependency: string;
+      };
+      expect([caught.name, caught.dependency]).toEqual([
+        'OptionalDependencyUnavailableError',
+        '@connectrpc/connect-node',
+      ]);
+    } finally {
+      vi.doUnmock('@connectrpc/connect-node');
+    }
+  });
+});

@@ -57,16 +57,10 @@ function fakeNode(outcome: () => Promise<unknown> = () => Promise.resolve('ok'))
     (options: Record<string, unknown>): ClientTransportLike => {
       const entry: Built = { kind, options, calls: [] };
       built.push(entry);
-      // Runs the transport's interceptors over a header object, as Connect does.
-      const intercepted = async (header: HeadersInit | undefined): Promise<Headers> => {
-        const request = { header: new Headers(header) };
-        const interceptors = options['interceptors'] as Array<
-          (next: (r: typeof request) => Promise<unknown>) => (r: typeof request) => Promise<unknown>
-        >;
-        let chain = (r: typeof request): Promise<unknown> => Promise.resolve(r);
-        for (const interceptor of [...interceptors].reverse()) chain = interceptor(chain);
-        await chain(request);
-        return request.header;
+      // The client sets traceparent on the call's own headers; there is no interceptor.
+      const intercepted = (header: HeadersInit | undefined): Promise<Headers> => {
+        expect(options['interceptors']).toBeUndefined();
+        return Promise.resolve(new Headers(header));
       };
       return {
         async unary(_method, _signal, _timeoutMs, header) {

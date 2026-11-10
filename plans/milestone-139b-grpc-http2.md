@@ -477,6 +477,36 @@ The TLS mode imports `node:http2` the same way.
   boots and quotes through the plugin client); the example's own tests and
   `test/grpc-workspace-example.test.ts`.
 
+### 3.13 The client by injection (2026-11-10)
+
+- **Problem:** with the DI container and decorators, a class should take the client by injection, as
+  a NestJS class takes `ClientGrpc`. `@Module({ providers })` took classes only (`Constructor[]`),
+  so a value no class constructs had no declarative home; registering it from a plugin's
+  `register()` was both clumsy and late for the container's boot-time graph check.
+- **Decision — `common`:** `ModuleFactoryProvider<T> extends FactoryProvider<T>` with
+  `provide: string | InjectionToken<T>` and `scope?`. In `common` because grpc-plugin returns it and
+  no plugin imports another.
+- **Decision — `decorator-plugin`:** `ModuleOptions.providers` takes
+  `(Constructor | ModuleFactoryProvider)[]`. Factory entries register before every class, so a class
+  can inject one. With a container: `container.register(provide, { useFactory, inject? }, scope?)`,
+  skipped when the token is already registered (a test override keeps its place). Without one: the
+  factory runs once with dependencies read from the service registry, string tokens only; a typed
+  token (entry or dependency) or a missing required dependency is a `TypeError` naming the provider.
+  `@Inject` names string tokens, so a class injects an entry provided under a string; a
+  `createToken` token suits `container.resolve`.
+- **Decision — `grpc-plugin`:** `grpcClientProvider(provide, definition, target, options?)` returns
+  `{ provide, useFactory: (grpc) => client, inject: [CAPABILITIES.GRPC], scope: 'singleton' }`. It
+  and `grpcClient()` share one function that asks `IGrpcService.client`, so the container's client
+  is the plugin's cached client for the same arguments. Options and target are validated when it is
+  called, not on first injection.
+- **Decision — CLI:** none. The CLI cannot know an application's service descriptor, and a
+  class-based caller already gets the client-only `GrpcPlugin` from its transport module.
+- **Test home:** decorator-plugin `module-factory-providers.test.ts` (real `DiContainer`: injected
+  into a class, typed token, override kept, scope; registry mode: built once, optional dependency,
+  existing value kept, the three refusals); grpc-plugin `grpc-client-di-e2e.test.ts` (a decorated
+  service injects the client, a route calls a real server through it, the container's client is
+  `grpcClient()`'s; options refused at declaration).
+
 ## 4. Exported surface — every symbol names its consumer
 
 **Breaking for implementors:** none — every new member is optional (`stream`'s new parameter is
@@ -503,6 +533,8 @@ not `maxBodyBytes`) ship in minor `0.13.0` with M139g, under "Changed".
 | `GrpcClientOptions`                         | type (`common`)          | `IGrpcService.client`, `GrpcPluginOptions.clients`; read by grpc-plugin's client merge              |
 | `IGrpcService.client`                       | member (`common`)        | grpc-plugin `grpcClient()`; implemented by `GrpcService.client`                                     |
 | `grpcClient`                                | function (`grpc-plugin`) | orders `createOrders` in the example; the CLI's generated call sites                                |
+| `ModuleFactoryProvider`                     | type (`common`)          | `ModuleOptions.providers` (decorator-plugin `registerFactory`); returned by `grpcClientProvider`    |
+| `grpcClientProvider`                        | function (`grpc-plugin`) | an application's `@Module({ providers })`; the DI e2e test                                          |
 | `GrpcPluginOptions.serve`                   | option (`grpc-plugin`)   | `GrpcService.claims`, plugin `register` (no dispatch map, health or reflection when `false`)        |
 | `GrpcPluginOptions.clients`                 | option (`grpc-plugin`)   | client option merge, per target                                                                     |
 

@@ -38,7 +38,11 @@ All notable changes to this project are documented here. The format follows
   registers the plugin for calling only. `@connectrpc/connect-node` is a new optional peer, loaded
   on a client's first call. A workspace member generated with `--depends-on` a gRPC member now gets
   that client-only `GrpcPlugin` and its packages from the CLI, and `setu workspace rpc` re-renders
-  the members that call the one it changes. Ships in 0.13.0.
+  the members that call the one it changes.
+  `grpcClientProvider(token, definition, target, options?)` is the same client as a DI provider:
+  `@Module({ providers })` now also takes factory entries (`ModuleFactoryProvider` in
+  `@setu-ts/common`: `{ provide, useFactory, inject?, scope? }`), so a decorated class `@Inject`s
+  the client. Ships in 0.13.0.
 
 ### Changed
 

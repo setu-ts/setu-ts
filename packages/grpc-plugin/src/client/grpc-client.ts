@@ -172,29 +172,19 @@ interface OriginEntry {
   readonly session: Http2SessionLike | undefined;
 }
 
-/** A Connect interceptor, seen structurally. */
-type Interceptor = (
-  next: (request: { readonly header: Headers }) => Promise<unknown>,
-) => (request: { readonly header: Headers }) => Promise<unknown>;
-
 /** Every client of one plugin instance, their transports and their sessions. */
 export class GrpcClients {
   readonly #deps: GrpcClientDeps;
   readonly #clients = new WeakMap<object, Map<string, unknown>>();
   readonly #origins = new Map<string, OriginEntry>();
-  readonly #trace: Interceptor;
-  #node: Promise<ConnectNodeModuleLike> | undefined;
+  /** The connect-node import while it loads; then {@linkcode GrpcClients.#node}. */
+  #loading: Promise<ConnectNodeModuleLike> | undefined;
+  /** connect-node once loaded, so a call no longer waits on the import's promise. */
+  #node: ConnectNodeModuleLike | undefined;
   #closed = false;
 
   constructor(deps: GrpcClientDeps) {
     this.#deps = deps;
-    this.#trace = (next) => (request) => {
-      if (!request.header.has('traceparent')) {
-        const value = this.#traceparent();
-        if (value !== null) request.header.set('traceparent', value);
-      }
-      return next(request);
-    };
   }
 
   /** How many origins hold a transport; for tests and the bound. */
@@ -259,14 +249,21 @@ export class GrpcClients {
     return {
       // A unary call can be sent again: its input is one message. A streaming
       // call's input may already be consumed, so it is never retried.
-      unary: (method, signal, timeoutMs, header, input, contextValues) =>
-        this.#call(target, base, options, true, (transport) =>
-          transport.unary(method, signal, timeoutMs, header, input, contextValues),
-        ),
-      stream: (method, signal, timeoutMs, header, input, contextValues) =>
-        this.#call(target, base, options, false, (transport) =>
-          transport.stream(method, signal, timeoutMs, header, input, contextValues),
-        ),
+      // The trace header is set on the call's own headers, not through a Connect
+      // interceptor: an interceptor is one more async layer on every call, even
+      // one with no active span to carry.
+      unary: (method, signal, timeoutMs, header, input, contextValues) => {
+        const traced = this.#withTraceparent(header);
+        return this.#call(target, base, options, true, (transport) =>
+          transport.unary(method, signal, timeoutMs, traced, input, contextValues),
+        );
+      },
+      stream: (method, signal, timeoutMs, header, input, contextValues) => {
+        const traced = this.#withTraceparent(header);
+        return this.#call(target, base, options, false, (transport) =>
+          transport.stream(method, signal, timeoutMs, traced, input, contextValues),
+        );
+      },
     };
   }
 
@@ -315,7 +312,8 @@ export class GrpcClients {
       }
       origin = instanceOrigin(instance);
     }
-    const transport = await this.#transport(`${origin}${options.basePath}`, options);
+    const pending = this.#transport(`${origin}${options.basePath}`, options);
+    const transport = pending instanceof Promise ? await pending : pending;
     try {
       const result = await run(transport);
       this.#report(discovery, instance, 'success');
@@ -349,8 +347,24 @@ export class GrpcClients {
     }
   }
 
-  async #transport(url: string, options: ResolvedClientOptions): Promise<ClientTransportLike> {
-    const node = await (this.#node ??= this.#deps.loadNode());
+  /** The transport for an origin: synchronous once connect-node has loaded. */
+  #transport(
+    url: string,
+    options: ResolvedClientOptions,
+  ): ClientTransportLike | Promise<ClientTransportLike> {
+    if (this.#node !== undefined) return this.#transportFrom(this.#node, url, options);
+    return (this.#loading ??= this.#deps.loadNode()).then((node) => {
+      this.#node = node;
+      return this.#transportFrom(node, url, options);
+    });
+  }
+
+  #transportFrom(
+    node: ConnectNodeModuleLike,
+    url: string,
+    options: ResolvedClientOptions,
+  ): ClientTransportLike {
+    // Closed while discovery picked: open no session the close cannot reach.
     if (this.#closed) throw this.#deps.runtime.unavailable('the gRPC client is closed');
     const key = `${options.protocol}|${options.httpVersion}|${options.timeoutMs}|${url}`;
     const hit = this.#origins.get(key);
@@ -366,7 +380,6 @@ export class GrpcClients {
       httpVersion: options.httpVersion,
       useBinaryFormat: true,
       defaultTimeoutMs: options.timeoutMs,
-      interceptors: [this.#trace],
       ...(session === undefined ? {} : { sessionManager: session }),
     };
     const transport =
@@ -382,6 +395,18 @@ export class GrpcClients {
       oldest.session?.abort();
     }
     return transport;
+  }
+
+  /**
+   * The call's headers with the active span's `traceparent` added, unless it
+   * already carries one. Unchanged — no copy — when there is no span.
+   */
+  #withTraceparent(header: HeadersInit | undefined): HeadersInit | undefined {
+    const value = this.#traceparent();
+    if (value === null) return header;
+    const headers = new Headers(header);
+    if (!headers.has('traceparent')) headers.set('traceparent', value);
+    return headers;
   }
 
   /** The active span as a `traceparent`, or `null` when there is none. */

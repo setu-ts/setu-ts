@@ -126,6 +126,29 @@ const billing = grpcClient(app.services, BillingService, 'billing');
 
 A workspace member generated with `--depends-on` a gRPC member gets this wiring from the CLI.
 
+With `DiPlugin` and decorators, take the client by injection instead: `grpcClientProvider()` is the
+same client as an `@Module` provider entry, registered under a token a class `@Inject`s (`@Inject`
+names string tokens).
+
+```typescript
+import { Inject, Injectable, Module } from '@setu-ts/decorator-plugin';
+import { grpcClient, grpcClientProvider } from '@setu-ts/grpc-plugin';
+
+declare const BillingService: Parameters<typeof grpcClient>[1];
+
+export const BILLING = 'billing.client';
+
+@Injectable({ token: 'orders' })
+@Inject(BILLING)
+export class OrdersService {
+  // Connect's `Client<typeof BillingService>`, as grpcClient() types it.
+  constructor(private readonly billing: ReturnType<typeof grpcClient<typeof BillingService>>) {}
+}
+
+@Module({ providers: [OrdersService, grpcClientProvider(BILLING, BillingService, 'billing')] })
+export class OrdersModule {}
+```
+
 ## Options
 
 The `GrpcPlugin` accepts optional configuration:
@@ -283,6 +306,7 @@ base64 -w0 < reflection.binpb  # 2332 chars
 | ----------------------- | --------- |
 | `adaptConnectModule`    | function  |
 | `grpcClient`            | function  |
+| `grpcClientProvider`    | function  |
 | `GrpcPlugin`            | function  |
 | `GrpcDescriptorError`   | class     |
 | `GrpcRuntimeLoadError`  | class     |
