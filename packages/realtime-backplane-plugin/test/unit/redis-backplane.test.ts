@@ -1536,6 +1536,35 @@ describe('RedisBackplane owned publisher readiness (M139f X3-3)', () => {
     await expect(backplane.publish(FRAME)).rejects.toThrow();
   });
 
+  it('does not start a wait after a close() that landed during SUBSCRIBE (M139f re-audit N2)', async () => {
+    const clients: Array<FakeRedisClient & { status: string }> = [];
+    let release: (() => void) | undefined;
+    const module: IRedisModule = {
+      create: (): IRedisBackplaneClient => {
+        const client = Object.assign(new FakeRedisClient(), {
+          status: clients.length === 0 ? 'reconnecting' : 'ready',
+        });
+        if (clients.length === 1) release = client.holdSubscribe();
+        clients.push(client);
+        return client;
+      },
+    };
+    const backplane = new RedisBackplane(
+      { transport: 'redis', url: 'redis://localhost:6379', module, commandTimeoutMs: 0 },
+      'node-a',
+      'realtime',
+    );
+    const connecting = backplane.connect();
+    await setImmediate();
+    await backplane.close();
+    release!();
+    // SUBSCRIBE completes after the close; the publisher never becomes ready,
+    // yet the open settles and releases both connections.
+    await connecting;
+    expect(clients.map((client) => client.quitCount)).toEqual([1, 1]);
+    expect(clients[0]!.eventListeners.get('ready')).toHaveLength(0);
+  });
+
   it('does not wait on an injected pair, whatever its status', async () => {
     const client = Object.assign(new FakeRedisClient(), { status: 'connecting' });
     const subscriber = Object.assign(new FakeRedisClient(), { status: 'connecting' });

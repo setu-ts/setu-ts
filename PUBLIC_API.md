@@ -12978,8 +12978,10 @@ identical repeats, and one `info` on recovery, under the source `service-discove
 `DiscoveryProvider.isHealthy?()` may reject with that reason instead of resolving `false`; the
 service counts a rejection as unreachable, and the Kubernetes provider rejects this way. A
 cold-resolve `DiscoveryUnavailableError` message now ends with the cause; its public `503` detail is
-unchanged. A service-account token holding anything but visible ASCII is refused with a fixed
-`DiscoveryUnavailableError` that never contains the token, before any request is built.
+unchanged. A Kubernetes service-account token or Consul ACL token holding anything but visible ASCII
+is refused with a fixed `DiscoveryUnavailableError` that never contains the token, before any
+request is built; as a configuration fault it passes through unbranded, so a cold resolve that needs
+it answers `500`.
 
 | Status | Meaning                                                                                                                                                                              |
 | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |

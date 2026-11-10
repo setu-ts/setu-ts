@@ -295,41 +295,43 @@ reporter parameter.
 
 ## 5. Implementation files
 
-| File                                                                                                 | Purpose            |
-| ---------------------------------------------------------------------------------------------------- | ------------------ |
-| `packages/service-discovery-plugin/src/providers/kubernetes-provider.ts`                             | §3.1.1             |
-| `packages/service-discovery-plugin/src/services/service-discovery-service.ts`                        | §3.1.2, §3.1.4     |
-| `packages/service-discovery-plugin/src/plugin/service-discovery-plugin.ts`                           | §3.1.3             |
-| `packages/service-discovery-plugin/src/interfaces/index.ts`                                          | §3.1.5 JSDoc       |
-| `packages/database-plugin/src/errors/classify.ts`                                                    | §3.2.1, §3.5.1, C2 |
-| `packages/database-plugin/src/health/database-capacity.ts`                                           | §3.2.2             |
-| `packages/database-plugin/src/adapters/drizzle/drizzle-adapter.ts`                                   | §3.2.3             |
-| `packages/database-plugin/src/plugin/database-plugin.ts`                                             | §3.2.4             |
-| `packages/database-plugin/src/services/database-service.ts`                                          | §3.5.2             |
-| `packages/realtime-backplane-plugin/src/transports/redis-backplane.ts`                               | §3.3.1, §3.3.3     |
-| `packages/realtime-backplane-plugin/src/interfaces/index.ts`                                         | §3.3.2, C1 JSDoc   |
-| `packages/queue-plugin/src/plugin/queue-plugin.ts`                                                   | §3.4               |
-| READMEs (§3.6, C1–C3), `docs/health-indicators.md` (C5), `PUBLIC_API.md` (C6), `CHANGELOG.md` (§3.7) | docs               |
+| File                                                                                                 | Purpose                                                                                                             |
+| ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `packages/service-discovery-plugin/src/providers/kubernetes-provider.ts`                             | §3.1.1                                                                                                              |
+| `packages/service-discovery-plugin/src/http/header-token.ts`                                         | `headerSafeToken`, the shared credential check (security audit M1, re-audit N1); `consul-provider.ts` also calls it |
+| `packages/service-discovery-plugin/src/services/service-discovery-service.ts`                        | §3.1.2, §3.1.4                                                                                                      |
+| `packages/service-discovery-plugin/src/plugin/service-discovery-plugin.ts`                           | §3.1.3                                                                                                              |
+| `packages/service-discovery-plugin/src/interfaces/index.ts`                                          | §3.1.5 JSDoc                                                                                                        |
+| `packages/database-plugin/src/errors/classify.ts`                                                    | §3.2.1, §3.5.1, C2                                                                                                  |
+| `packages/database-plugin/src/health/database-capacity.ts`                                           | §3.2.2                                                                                                              |
+| `packages/database-plugin/src/adapters/drizzle/drizzle-adapter.ts`                                   | §3.2.3                                                                                                              |
+| `packages/database-plugin/src/plugin/database-plugin.ts`                                             | §3.2.4                                                                                                              |
+| `packages/database-plugin/src/services/database-service.ts`                                          | §3.5.2                                                                                                              |
+| `packages/realtime-backplane-plugin/src/transports/redis-backplane.ts`                               | §3.3.1, §3.3.3                                                                                                      |
+| `packages/realtime-backplane-plugin/src/interfaces/index.ts`                                         | §3.3.2, C1 JSDoc                                                                                                    |
+| `packages/queue-plugin/src/plugin/queue-plugin.ts`                                                   | §3.4                                                                                                                |
+| READMEs (§3.6, C1–C3), `docs/health-indicators.md` (C5), `PUBLIC_API.md` (C6), `CHANGELOG.md` (§3.7) | docs                                                                                                                |
 
 `src/index.ts` changes in no package.
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
-| Test file                                                                                | src covered                                         | Key assertions                                               |
-| ---------------------------------------------------------------------------------------- | --------------------------------------------------- | ------------------------------------------------------------ |
-| `service-discovery-plugin/test/unit/providers/kubernetes-health.test.ts`                 | `kubernetes-provider.ts`                            | §3.1 test home                                               |
-| `service-discovery-plugin/test/unit/service-discovery-service.test.ts`                   | `service-discovery-service.ts`                      | §3.1; constructed with a recording `ConnectionErrorReporter` |
-| `service-discovery-plugin/test/integration/readiness.test.ts`                            | `service-discovery-plugin.ts`                       | one `warn` with the cause, one `info` on recovery            |
-| `database-plugin/test/unit/classify-driver-error.test.ts`                                | `classify.ts`                                       | §3.2, §3.5                                                   |
-| `database-plugin/test/unit/database-pool-capacity.test.ts`                               | `database-capacity.ts`                              | reader absent, throws or true                                |
-| `database-plugin/test/unit/drizzle-adapter-probe-saturation.test.ts`                     | `drizzle-adapter.ts`                                | flag set, rethrown, then cleared                             |
-| `database-plugin/test/integration/pool-saturation-health.test.ts`                        | `database-plugin.ts`                                | `up` with progress; `degraded` without progress              |
-| `database-plugin/test/unit/database-service.test.ts`                                     | `database-service.ts`                               | two timeout messages                                         |
-| `realtime-backplane-plugin/test/unit/redis-backplane.test.ts`                            | `redis-backplane.ts`                                | §3.3                                                         |
-| `realtime-backplane-plugin/test/unit/redis-module.test.ts`                               | `redis-module.ts` (unchanged; options pass-through) | `create` forwards `enableOfflineQueue`                       |
-| `realtime-backplane-plugin/test/integration/outage-real.test.ts` (guarded `REDIS_URL`)   | real path                                           | a short pause drops frames, nothing arrives late             |
-| `queue-plugin/test/integration/queue-plugin-logger-ordering.test.ts`                     | `queue-plugin.ts`                                   | §3.4                                                         |
-| `database-plugin/test/integration/real-drizzle-adapter.test.ts` (guarded `POSTGRES_URL`) | real path                                           | §3.2                                                         |
+| Test file                                                                                                           | src covered                                         | Key assertions                                                                |
+| ------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `service-discovery-plugin/test/unit/providers/kubernetes-health.test.ts`                                            | `kubernetes-provider.ts`                            | §3.1 test home                                                                |
+| `service-discovery-plugin/test/unit/header-token.test.ts`, `consul-provider.test.ts`, `kubernetes-provider.test.ts` | `header-token.ts`, `consul-provider.ts`             | every non-visible-ASCII class refused with the fixed message, no request sent |
+| `service-discovery-plugin/test/unit/service-discovery-service.test.ts`                                              | `service-discovery-service.ts`                      | §3.1; constructed with a recording `ConnectionErrorReporter`                  |
+| `service-discovery-plugin/test/integration/readiness.test.ts`                                                       | `service-discovery-plugin.ts`                       | one `warn` with the cause, one `info` on recovery                             |
+| `database-plugin/test/unit/classify-driver-error.test.ts`                                                           | `classify.ts`                                       | §3.2, §3.5                                                                    |
+| `database-plugin/test/unit/database-pool-capacity.test.ts`                                                          | `database-capacity.ts`                              | reader absent, throws or true                                                 |
+| `database-plugin/test/unit/drizzle-adapter-probe-saturation.test.ts`                                                | `drizzle-adapter.ts`                                | flag set, rethrown, then cleared                                              |
+| `database-plugin/test/integration/pool-saturation-health.test.ts`                                                   | `database-plugin.ts`                                | `up` with progress; `degraded` without progress                               |
+| `database-plugin/test/unit/database-service.test.ts`                                                                | `database-service.ts`                               | two timeout messages                                                          |
+| `realtime-backplane-plugin/test/unit/redis-backplane.test.ts`                                                       | `redis-backplane.ts`                                | §3.3                                                                          |
+| `realtime-backplane-plugin/test/unit/redis-module.test.ts`                                                          | `redis-module.ts` (unchanged; options pass-through) | `create` forwards `enableOfflineQueue`                                        |
+| `realtime-backplane-plugin/test/integration/outage-real.test.ts` (guarded `REDIS_URL`)                              | real path                                           | a short pause drops frames, nothing arrives late                              |
+| `queue-plugin/test/integration/queue-plugin-logger-ordering.test.ts`                                                | `queue-plugin.ts`                                   | §3.4                                                                          |
+| `database-plugin/test/integration/real-drizzle-adapter.test.ts` (guarded `POSTGRES_URL`)                            | real path                                           | §3.2                                                                          |
 
 `test/health-indicator-audit.test.ts` (root tooling, unchanged) is the gate for C5: it fails when a
 pinned line no longer holds the `ctx.health.register(...)` call.

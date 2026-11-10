@@ -270,7 +270,10 @@ export class RedisBackplane implements IRealtimeBackplane {
       await subscriber.subscribe(this.#topic);
       // A publisher without an offline queue refuses every command until it is
       // ready, so the pair is not handed out before then.
-      if (owned) {
+      // A close() that landed while SUBSCRIBE was in flight has already moved
+      // the generation; the check below retires the pair, so do not start a
+      // wait nothing can cancel (M139f re-audit N2).
+      if (owned && generation === this.#generation) {
         const readyWait = new AbortController();
         this.#readyWait = readyWait;
         try {

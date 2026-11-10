@@ -6,6 +6,7 @@
 import type { IRuntimeServices, ServiceInstance, Unsubscribe } from '@setu-ts/common';
 import type { DiscoveryProvider, IDiscoveryHttp } from '../interfaces/index.ts';
 import { DiscoveryUnavailableError } from '../errors.ts';
+import { headerSafeToken } from '../http/header-token.ts';
 import { watchKubernetesService } from './kubernetes-watch.ts';
 
 /** Where the projected service-account token is mounted in every pod. */
@@ -302,19 +303,8 @@ export function isMissingFile(error: unknown): boolean {
 }
 
 /**
- * Characters a service-account token may hold: visible ASCII, which every JWT
- * and opaque Kubernetes token is.
- */
-const TOKEN_CHARACTERS = /^[\x21-\x7e]*$/;
-
-/**
- * Builds the `Authorization` value, refusing a token `fetch` would reject.
- *
- * `fetch` refuses a header value with a control character by quoting the whole
- * value in its error (`Headers.append: "Bearer <token>" is an invalid header
- * value`), and that message reaches the readiness log and the cold-resolve
- * error. The token is checked here instead, with a message that never holds it
- * (M139f audit M1).
+ * Builds the `Authorization` value through {@linkcode headerSafeToken}, so a
+ * token `fetch` would reject never reaches its error (M139f audit M1).
  *
  * @param token - The configured or projected token
  * @returns `Bearer <token>`
@@ -322,11 +312,9 @@ const TOKEN_CHARACTERS = /^[\x21-\x7e]*$/;
  *   visible ASCII
  */
 function bearer(token: string): string {
-  if (!TOKEN_CHARACTERS.test(token)) {
-    throw new DiscoveryUnavailableError(
-      'The Kubernetes service-account token contains a character an HTTP header cannot carry; ' +
-        'check the token option or the projected token file.',
-    );
-  }
-  return `Bearer ${token}`;
+  return `Bearer ${headerSafeToken(
+    token,
+    'The Kubernetes service-account token contains a character an HTTP header cannot carry; ' +
+      'check the token option or the projected token file.',
+  )}`;
 }
