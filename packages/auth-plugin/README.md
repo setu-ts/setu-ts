@@ -1888,6 +1888,13 @@ before storage. Windows are epoch-aligned positive integer milliseconds, `utc-da
 Usage expires at the window's end plus one day; settlement after a boundary still charges its old
 window.
 
+`usage(key)` reads the current window without charging it. It returns
+`{ used, limit, remaining, windowEndsAt }`: `limit` and `remaining` are `undefined` for an unlimited
+key, `remaining` never goes below zero, and `windowEndsAt` is the window's end in epoch
+milliseconds. It checks the key and resolves the limit exactly as `reserve` does, so a budget meter
+built on it cannot disagree with what the quota admits. A custom `IQuotaStore` implements
+`read(key, windowId)`, answering `0` for a window it has no counter for.
+
 Use `new MemoryQuotaStore(runtime)` for one process, or `new RedisQuotaStore({ client, namespace })`
 for a shared budget. `IQuotaRedisClient` requires ioredis-style `eval(script, numkeys, ...args)` and
 `quit()`; node-redis can use common's `fromNodeRedis` adapter. The namespace must be non-empty and
@@ -2082,6 +2089,7 @@ MIT
 | `PolicyDenial`                      | type      |
 | `QuotaOptions`                      | type      |
 | `QuotaReservation`                  | type      |
+| `QuotaUsage`                        | type      |
 | `RecoveryCodesResult`               | type      |
 | `RecoveryVerifyResult`              | type      |
 | `RefreshPrincipal`                  | type      |

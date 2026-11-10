@@ -20,14 +20,15 @@ export function registerOrderRoutes(router: IRouterApi): void {
 
 ## Verify credentials and sign
 
-Configure `local.verify` first.
+Configure `local.verify(identifier, secret, request)` first.
 
 ```ts
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IAuthService, IJwtService } from '@setu-ts/common';
 
 const auth = ctx.services.get<IAuthService>(CAPABILITIES.AUTH);
-const principal = await auth.verifyCredentials(await ctx.request.json<{ identifier: string; secret: string }>());
+const body = await ctx.request.json<{ identifier: string; secret: string }>();
+const principal = await auth.verifyCredentials(body, ctx.request);
 if (principal === null) {
   ctx.response.status(401).json({ error: 'Invalid credentials' });
 } else {
@@ -44,14 +45,14 @@ if (principal === null) {
 - `requireAuth({ signInPage })` redirects anonymous browser navigations with `returnTo`, except that
   page itself; APIs keep 401.
 - Tokens expire at `exp`. `local` needs a passive strategy for later requests.
+- A JWT needs a string `sub`. Scoped tokens fail role/permission guards (`confineScopedTokens`).
+- `requireAuth({ credentials: 'header' })` restricts the credential kind; `tenantClaim` refuses
+  another tenant's token.
 
 ## Other options
 
 - `apiKey`, `session`, `issuers` and `strategies` supply passive auth.
-- `requireScopes` (ALL-of OAuth scopes) and `resourceServer` (RFC 9728) serve token APIs.
+- `requireScopes` (ALL-of) and `resourceServer` (RFC 9728) serve token APIs.
 - `definePolicy` and `requirePolicy` evaluate policies; scoped guards use `scopedRbac`.
-- `signIn.mfa` and `signIn.passkeys` add factors; `createQuota` adds weighted budgets.
-- `signIn` with `providers: []` is password-only. A `signIn.sessionStamp` mismatch revokes the
-  session when the session strategy next checks its cookie (a valid bearer token wins first); reader
-  faults only suspend. Move stamps forward only: restoring an old value revives unpresented sessions
-  and copied cookie sessions. `fromHeaders` only suspends.
+- `signIn.mfa`/`signIn.passkeys` add factors; `createQuota` budgets (read with `quota.usage(key)`).
+- `signIn` with `providers: []` is password-only; advancing `signIn.sessionStamp` revokes sessions.

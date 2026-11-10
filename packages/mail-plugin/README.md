@@ -37,6 +37,41 @@ await mailer.sendTemplate('welcome', { to: 'ada@example.com', subject: 'Welcome'
 });
 ```
 
+## Attachments
+
+`attachments` takes in-memory files. `content` is a `Uint8Array`, or a string sent as UTF-8 text. A
+`contentId` makes the attachment inline, for a `cid:` reference in `html`:
+
+```typescript
+import type { IMailer } from '@setu-ts/common';
+
+declare const mailer: IMailer;
+declare const invoicePdf: Uint8Array;
+declare const logoPng: Uint8Array;
+
+await mailer.send({
+  to: 'ada@example.com',
+  subject: 'Your invoice',
+  html: '<img src="cid:logo"> <p>Your invoice is attached.</p>',
+  attachments: [
+    { filename: 'invoice.pdf', content: invoicePdf, contentType: 'application/pdf' },
+    { filename: 'logo.png', content: logoPng, contentType: 'image/png', contentId: 'logo' },
+  ],
+});
+```
+
+`send` and `sendTemplate` both check every attachment before the provider runs, and refuse with a
+`TypeError` that names the attachment's index and field, never its content:
+
+- `filename`: 1–255 characters, well-formed, with no control character (CR and LF included);
+- `contentType`: a `type/subtype` with no parameters;
+- `contentId`: 1–255 characters, with no angle brackets or whitespace.
+
+SMTP, SES and SendGrid send the attachments; `LogProvider` logs each one's filename, type and size,
+never the bytes. There is no framework size limit: the provider refuses an oversized message (SES at
+40 MB, SendGrid at 30 MB, SMTP at the server's own limit). SES needs an `@aws-sdk/client-sesv2`
+release whose `SendEmailCommand` accepts `Content.Simple.Attachments`.
+
 ## Options
 
 | Option      | Type                                     | Default | Description                                                                                                                                  |

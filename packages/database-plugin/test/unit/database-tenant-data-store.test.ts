@@ -167,6 +167,83 @@ function storeWith(
 }
 
 describe('DatabaseTenantDataStore (M101c, V8-8)', () => {
+  it('M139c refuses malformed units of work before binding', () => {
+    const { store } = storeWith();
+    expect(typeof store.withUnitOfWork).toBe('function');
+    for (const uow of [null, undefined, 0, '', {}, { getRepository: 1 }])
+      expect(() => store.withUnitOfWork(uow as never)).toThrow(TypeError);
+  });
+  it('M139c bound and unbound views share all tenant guards and the parent column', async () => {
+    for (const bound of [false, true]) {
+      const { store: parent, service } = storeWith([]);
+      const repo = new FakeRepository([
+        { id: 'own', org_id: 'a', version: 1 },
+        { id: 'foreign', org_id: 'b', version: 1 },
+      ]);
+      const requested: string[] = [];
+      const store = bound
+        ? parent.withUnitOfWork({
+            getRepository: (entity) => {
+              requested.push(entity);
+              return repo;
+            },
+          })
+        : parent;
+      if (!bound) service.repos.set('Patient', repo);
+      // Adopt after binding: the view reads its parent's current column.
+      parent.useIsolation({ kind: 'column', getTenantColumn: () => 'org_id' });
+      if (bound) {
+        expect(store).not.toHaveProperty('useIsolation');
+        expect(store).not.toHaveProperty('close');
+      }
+      await store.findAll('a', 'Patient');
+      expect(repo.calls.at(-1)!.arg).toEqual({ where: { org_id: 'a' } });
+      await store.find('a', 'Patient', { org_id: 'b' });
+      expect(repo.calls.at(-1)!.arg).toEqual({ where: { org_id: 'a' } });
+      expect(await store.findById('a', 'Patient', 'foreign')).toBeNull();
+      expect(await store.create('a', 'Patient', { org_id: 'b' })).toEqual({
+        id: 'new',
+        org_id: 'a',
+      });
+      expect(await store.update('a', 'Patient', 'foreign', { x: 1 })).toBeNull();
+      expect(await store.update('a', 'Patient', 'own', { org_id: 'b' })).toMatchObject({
+        org_id: 'a',
+      });
+      expect(await store.update('a', 'Patient', 'own', { org_id: 'b', x: 1 })).toMatchObject({
+        org_id: 'a',
+        x: 1,
+      });
+      expect(repo.calls.at(-1)!.arg).toEqual({ id: 'own', data: { x: 1 } });
+      expect(await store.delete('a', 'Patient', 'foreign')).toBe(false);
+      const conditional: IRepository<Record<string, unknown>, EntityKey> = repo;
+      conditional.updateWhere = (id, where, data) => {
+        expect(where).toEqual({ version: 1, org_id: 'a' });
+        expect(data).toEqual({ x: 2 });
+        const row = repo.rows.get(String(id));
+        return Promise.resolve(row?.org_id === 'a' ? { ...row, ...data } : null);
+      };
+      conditional.deleteWhere = (id, where) => {
+        expect(where).toEqual({ version: 1, org_id: 'a' });
+        return Promise.resolve(repo.rows.get(String(id))?.org_id === 'a');
+      };
+      expect(
+        await store.updateWhere?.('a', 'Patient', 'foreign', { version: 1 }, { x: 2 }),
+      ).toBeNull();
+      expect(
+        await store.updateWhere?.('a', 'Patient', 'own', { version: 1 }, { x: 2, org_id: 'b' }),
+      ).toMatchObject({ org_id: 'a', x: 2 });
+      expect(await store.deleteWhere?.('a', 'Patient', 'foreign', { version: 1 })).toBe(false);
+      expect(await store.deleteWhere?.('a', 'Patient', 'own', { version: 1 })).toBe(true);
+      await expect(store.deleteWhere?.('a', 'Patient', 'own', { org_id: 'b' })).rejects.toThrow(
+        'must not name',
+      );
+      if (bound) {
+        expect(requested.length).toBeGreaterThan(10);
+        expect(new Set(requested)).toEqual(new Set(['Patient']));
+        expect(service.repos.get('Patient')!.calls).toHaveLength(0);
+      }
+    }
+  });
   for (const column of ['tenant_id', 'org_id']) {
     it(`conditional writes forward the ${column} predicate, strip its payload and avoid a pre-read`, async () => {
       const { store, repo } = storeWith([{ id: '1', [column]: 'a', name: 'old' }], column);

@@ -77,6 +77,11 @@ carry the same `sourceId`. Re-running an ingestion with the same chunk ids leave
 document that shrank leaves no stale chunk behind. A record id already used by another source in the
 scope is reassigned to this source; it never leaves the tenant.
 
+One call replaces the WHOLE source and takes at most 5,000 records, so write a document in one call:
+a second call for the same source deletes every record the first one wrote. On pgvector the call is
+one transaction. Qdrant has no transactions, so a failed call can leave part of it written; retry
+the whole call.
+
 Pass `{ version }` as a fifth argument when submissions of one source can be processed out of order,
 as queue retries can be. The version is a non-negative safe integer that grows with each newer
 submission, such as the time the submission was accepted. The write is refused with

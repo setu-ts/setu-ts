@@ -13,7 +13,11 @@ import pg from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { QdrantClient } from '@qdrant/js-client-rest';
 import { VectorizeVectorStore } from '@setu-ts/cloudflare-plugin';
-import { VectorOperationUnsupportedError, VectorVersionConflictError } from '@setu-ts/common';
+import {
+  VectorCollectionMismatchError,
+  VectorOperationUnsupportedError,
+  VectorVersionConflictError,
+} from '@setu-ts/common';
 import type {
   IRuntimeServices,
   IVectorStoreAdapter,
@@ -188,6 +192,120 @@ const ARMS: readonly Arm[] = [
     },
   },
 ];
+
+for (const arm of ARMS.filter((a) => !a.refuses.has('replaceSource'))) {
+  it.skipIf(!arm.enabled)(
+    `M139c ${arm.name}: 1200 then 700 records read back, with scope isolation`,
+    async () => {
+      const store = await storeFor(await arm.create());
+      const records = (n: number): VectorRecord[] =>
+        Array.from({ length: n }, (_, i) => ({
+          id: `large-${i}`,
+          sourceId: 'large',
+          vector: QUERY,
+          metadata: { year: Math.floor(i / 40) },
+        }));
+      const readAll = async (scope: string) => {
+        const rows: VectorMatch[] = [];
+        // Every bucket fits topK, so this counts all records via the public query surface.
+        for (let year = 0; year < 30; year++)
+          rows.push(
+            ...(await store.query(COLLECTION, scope, {
+              vector: QUERY,
+              topK: 50,
+              filter: { field: 'year', op: 'eq', value: year },
+            })),
+          );
+        return rows.map((r) => r.id).sort();
+      };
+      try {
+        await store.replaceSource(COLLECTION, 'large-b', 'large', records(1200));
+        await store.replaceSource(COLLECTION, 'large-a', 'large', records(1200));
+        expect(await readAll('large-a')).toEqual(
+          records(1200)
+            .map((r) => r.id)
+            .sort(),
+        );
+        await store.replaceSource(COLLECTION, 'large-a', 'large', records(700));
+        expect(await readAll('large-a')).toEqual(
+          records(700)
+            .map((r) => r.id)
+            .sort(),
+        );
+        expect(await readAll('large-b')).toEqual(
+          records(1200)
+            .map((r) => r.id)
+            .sort(),
+        );
+      } finally {
+        await store.deleteScope(COLLECTION, 'large-a');
+        await store.deleteScope(COLLECTION, 'large-b');
+        await arm.cleanup?.();
+      }
+    },
+  );
+}
+
+it.skipIf(!PGVECTOR_URL)(
+  'M139c real pgvector refuses wrong index shapes in verify and create modes',
+  async () => {
+    const admin = new pg.Pool({ connectionString: PGVECTOR_URL });
+    const name = `shape_${RUN}`;
+    const spec = { name, dimensions: 4 };
+    const table = `vs_${name}`;
+    const db = drizzle(admin) as unknown as PgVectorDatabase;
+    const create = new PgVectorStore({ db });
+    const verify = new PgVectorStore({ db, ensure: 'verify' });
+    try {
+      await create.open(runtime);
+      await verify.open(runtime);
+      for (const shape of [
+        'l2',
+        'other-table',
+        'other-column',
+        'other-method',
+        'reversed-source',
+      ]) {
+        await admin.query(`DROP TABLE IF EXISTS ${table} CASCADE`);
+        await admin.query(`DROP TABLE IF EXISTS ${table}_other CASCADE`);
+        await create.ensureCollection(spec);
+        await verify.ensureCollection(spec);
+        if (shape === 'reversed-source') {
+          await admin.query(`DROP INDEX ${table}_src`);
+          await admin.query(`CREATE INDEX ${table}_src ON ${table} (source_id, scope)`);
+        } else {
+          await admin.query(`DROP INDEX ${table}_hnsw`);
+          if (shape === 'other-table') {
+            await admin.query(`CREATE TABLE ${table}_other (embedding vector(4))`);
+            await admin.query(
+              `CREATE INDEX ${table}_hnsw ON ${table}_other USING hnsw (embedding vector_cosine_ops)`,
+            );
+          } else if (shape === 'l2')
+            await admin.query(
+              `CREATE INDEX ${table}_hnsw ON ${table} USING hnsw (embedding vector_l2_ops)`,
+            );
+          else if (shape === 'other-column') {
+            await admin.query(`ALTER TABLE ${table} ADD COLUMN other_embedding vector(4)`);
+            await admin.query(
+              `CREATE INDEX ${table}_hnsw ON ${table} USING hnsw (other_embedding vector_cosine_ops)`,
+            );
+          } else
+            await admin.query(
+              `CREATE INDEX ${table}_hnsw ON ${table} USING ivfflat (embedding vector_cosine_ops) WITH (lists = 1)`,
+            );
+        }
+        for (const store of [verify, create])
+          await expect(store.ensureCollection(spec)).rejects.toBeInstanceOf(
+            VectorCollectionMismatchError,
+          );
+      }
+    } finally {
+      await admin.query(`DROP TABLE IF EXISTS ${table} CASCADE`);
+      await admin.query(`DROP TABLE IF EXISTS ${table}_other CASCADE`);
+      await admin.end();
+    }
+  },
+);
 
 const collections = resolveCollections([
   { name: COLLECTION, dimensions: 4, filterable: FILTERABLE },

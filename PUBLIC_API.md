@@ -555,15 +555,24 @@ database, not the opaque `DrizzleDatabase` given to `DatabasePlugin`) and
 built-in adapter takes `onClose` and never closes a client it did not create. `drizzle-orm@0.45.2`
 is an optional peer, loaded lazily only by `PgVectorStore`.
 
-Limits, enforced by the service before any adapter call: `topK` 1–50, 500 records per write, 1,000
-ids per delete, 64-byte scope, 256-byte record or source id, 8 KiB content, 64-byte string metadata
-or filter value, 100 values per `in`, `and` depth 4 and 32 clauses per filter. `replaceSource`
-writes the source's new records and then deletes its stale records in the same scope. memory,
-pgvector and Qdrant set `versionedReplace`: pgvector keeps the version in a `source_version bigint`
-column (added by `ensure: 'create'`, required by `ensure: 'verify'`) and checks it under the
-source's advisory lock; Qdrant needs server 1.16 or later, checked once through the facade's
-`versionInfo()`, and writes with a conditional `update_filter` upsert and a `count` check, so
-`QdrantClientLike` also requires `count` and `versionInfo`.
+Limits, enforced by the service before any adapter call: `topK` 1–50, 500 records per `upsert`,
+1,000 ids per delete, 64-byte scope, 256-byte record or source id, 8 KiB content, 64-byte string
+metadata or filter value, 100 values per `in`, `and` depth 4 and 32 clauses per filter.
+`replaceSource` writes the source's new records and then deletes its stale records in the same
+scope.
+
+From `0.13.0`, `upsert` takes at most 500 records and `replaceSource` at most 5,000. One
+`replaceSource` call replaces the WHOLE source, so a source is never written across calls; an
+adapter receives all of it and writes it in slices of at most 500 before the stale delete (one
+transaction on pgvector). `PgVectorStore`'s `ensureCollection` checks the two indexes' shape, not
+only their names: `vs_<name>_src` on `(scope, source_id)` and `vs_<name>_hnsw`
+`USING hnsw (embedding vector_cosine_ops)`, both on the collection's table. Anything else is
+`VectorCollectionMismatchError` in either `ensure` mode. memory, pgvector and Qdrant set
+`versionedReplace`: pgvector keeps the version in a `source_version bigint` column (added by
+`ensure: 'create'`, required by `ensure: 'verify'`) and checks it under the source's advisory lock;
+Qdrant needs server 1.16 or later, checked once through the facade's `versionInfo()`, and writes
+with a conditional `update_filter` upsert and a `count` check, so `QdrantClientLike` also requires
+`count` and `versionInfo`.
 
 `VectorizeVectorStore` (in `@setu-ts/cloudflare-plugin`) serves one collection, the first it is
 ensured for: Vectorize record ids are unique per index, so a second collection on the same adapter
@@ -3780,7 +3789,8 @@ app.router.post('/auth/logout', async (ctx) => {
 
 Auth-plugin exports `createQuota`, `MemoryQuotaStore`, `RedisQuotaStore`, `QuotaExceededError`,
 `QuotaStoreUnavailableError`, `respondQuotaExceeded`, and types `IQuota`, `QuotaOptions`,
-`QuotaReservation`, `IQuotaStore`, `IQuotaRedisClient`. They register no plugin or capability token.
+`QuotaReservation`, `QuotaUsage`, `IQuotaStore`, `IQuotaRedisClient`. They register no plugin or
+capability token.
 
 ```typescript
 type QuotaReservation = { readonly key: string; readonly windowId: string; readonly amount: number };
@@ -3791,12 +3801,20 @@ type QuotaOptions = {
   readonly window: number | 'utc-day' | 'utc-month';
   readonly runtime: IRuntimeServices;
 };
+type QuotaUsage = {
+  readonly used: number;
+  readonly limit: number | undefined;
+  readonly remaining: number | undefined;
+  readonly windowEndsAt: number;
+};
 interface IQuota {
+  usage(key: string): Promise<QuotaUsage>; // since 0.13.0
   reserve(key: string, amount: number): Promise<QuotaReservation>;
   settle(reservation: QuotaReservation, actual: number): Promise<void>;
   release(reservation: QuotaReservation): Promise<void>;
 }
 interface IQuotaStore {
+  read(key: string, windowId: string): Promise<number>; // since 0.13.0
   reserve(key: string, windowId: string, amount: number, limit: number | undefined, expireAt: number): Promise<{ admitted: boolean; used: number }>;
   adjust(key: string, windowId: string, delta: number, expireAt: number): Promise<void>;
   close?(): Promise<void>;
@@ -3806,6 +3824,12 @@ interface IQuotaRedisClient {
   quit(): Promise<unknown>;
 }
 ```
+
+`usage(key)` (since `0.13.0`) reads the current window without charging it, through the same key
+check and limit resolution as `reserve`: `used`, the resolved `limit` and `remaining`
+(`max(0, limit - used)`; both `undefined` when unlimited) and `windowEndsAt` in epoch milliseconds.
+`IQuotaStore.read` answers `0` for an absent or expired window; `RedisQuotaStore` wraps a failure or
+malformed reply in `QuotaStoreUnavailableError`. Both members are required.
 
 `createQuota(options: QuotaOptions): IQuota` validates a non-empty `[a-z0-9-]+` policy name,
 positive safe integer millisecond window or UTC calendar window, and non-negative safe integer
@@ -9205,6 +9229,16 @@ app.router.post('/users', async (ctx) => {
 - `ISmtpTransport`, `ISesClient`, `IMailHttp` — structural injection types.
 - `IMailer`, `MailMessage` — re-exported from `@setu-ts/common`.
 
+`MailMessage.attachments?: readonly MailAttachment[]` (since `0.13.0`, `MailAttachment` in
+`@setu-ts/common`) takes `{ filename, content: Uint8Array | string, contentType?, contentId? }`;
+string content is UTF-8 text and a `contentId` makes the attachment inline. `MailService` validates
+every attachment for `send` and `sendTemplate` alike and refuses with a `TypeError` naming the index
+and field: `filename` 1–255 characters with no C0 control or DEL, `contentType` a parameter-free
+`type/subtype`, `contentId` 1–255 header-safe characters with no angle brackets. Providers then
+receive `OutgoingMail.attachments` with `content` as `Uint8Array`. SMTP sends base64 with
+`encoding: 'base64'`, SES `Content.Simple.Attachments`, SendGrid `attachments`; `LogProvider` logs
+filename, type and byte count only.
+
 ### Notes
 
 <!-- version:history -->
@@ -9596,6 +9630,15 @@ const repo = tenancy.getRepositoryFor<{ id: string }>(payload.tenantId, 'Order')
 await repo.create({ id: 'ord-1' });
 ```
 
+**Both entry points take an optional unit of work** (since `0.13.0`):
+`getRepository(ctx, entity, unitOfWork?)` and `getRepositoryFor(tenantId, entity, unitOfWork?)`,
+where `ITenantUnitOfWork` (`@setu-ts/common`) is `{ getRepository(entity: string): unknown }`, which
+`@setu-ts/database-plugin`'s `IUnitOfWork` satisfies. The repository then reads and writes through
+the transaction with every tenant guard intact. The store must implement the optional
+`ITenantDataStore.withUnitOfWork(unitOfWork)`: `DatabaseTenantDataStore` does (a malformed unit of
+work is a `TypeError`), `MemoryTenantDataStore` does not, and the call then throws
+`TenantUnitOfWorkUnsupportedError` (status hint 500).
+
 **Which tenants exist — the `tenants` option** (since `0.12.0`). Without it, any id a resolver
 returns is the tenant. With it, the tenant middleware checks the FIRST resolved id before the
 request carries it (the resolver chain is not re-entered on a miss), and the registry's tenant — its
@@ -9652,33 +9695,34 @@ handler that lets it escape answers `503` through `errorHandler`.
 
 ### Exports
 
-| Symbol                                                                                                                                | Kind        | Description                                                                                    |
-| ------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ---------------------------------------------------------------------------------------------- |
-| `MultiTenancyPlugin`                                                                                                                  | function    | Plugin factory — registers `IMultiTenancyService` under `CAPABILITIES.MULTI_TENANCY`           |
-| `tenantMiddleware`                                                                                                                    | function    | Middleware factory — resolve tenant, set `ctx.request.tenant`, short-circuit when required     |
-| `getTenantCachePrefix`                                                                                                                | function    | Accessor reading the tenant cache prefix from `ctx.state`                                      |
-| `TENANT_CACHE_PREFIX_STATE_KEY`                                                                                                       | const       | Module-level key constant (`'multi-tenancy-plugin:cache-prefix'`)                              |
-| `SubdomainResolver`                                                                                                                   | class       | Resolves tenant from URL host subdomain                                                        |
-| `HeaderResolver`                                                                                                                      | class       | Resolves tenant from configurable HTTP header                                                  |
-| `PathResolver`                                                                                                                        | class       | Resolves tenant from configurable path segment index                                           |
-| `JwtResolver`                                                                                                                         | class       | Resolves tenant from JWT claim (uses unverified decode)                                        |
-| `ColumnPerTenant`                                                                                                                     | class       | Column-per-tenant isolation strategy (default)                                                 |
-| `SchemaPerTenant`                                                                                                                     | class       | Schema-per-tenant isolation strategy                                                           |
-| `DatabasePerTenant`                                                                                                                   | class       | Database-per-tenant isolation strategy                                                         |
-| `MemoryTenantDataStore`                                                                                                               | class       | Zero-dependency in-process default store with cross-tenant isolation                           |
-| `TenantDataStoreNotReadyError`                                                                                                        | class       | Thrown by `getRepository`/`getRepositoryFor` before a factory `dataStore` resolves in `onInit` |
-| `TenantNotResolvedError`                                                                                                              | class       | Thrown by `getRepository` when tenant has not been resolved                                    |
-| `TenantRegistryUnavailableError`                                                                                                      | class       | Thrown by `lookupTenant` on a registry fault (cause: the registry's error); 503 status hint    |
-| `TenantRegistryCacheOptions`                                                                                                          | interface   | The `tenantCache` option shape (`ttlMs`, `maxEntries`, `maxBytes`)                             |
-| `MultiTenancyPluginOptions`                                                                                                           | interface   | The argument type of `MultiTenancyPlugin(...)`                                                 |
-| `ResolverConfig`                                                                                                                      | type        | The `resolver` option's type — discriminant string, custom resolver, or chain                  |
-| `DatabaseStrategyKind`                                                                                                                | type        | The `database` option's discriminant strings                                                   |
-| `SubdomainResolverOptions`, `HeaderResolverOptions`, `PathResolverOptions`, `JwtResolverOptions`                                      | interfaces  | Per-resolver option shapes, also the resolver constructors' argument types                     |
-| `TenantCacheOptions`                                                                                                                  | interface   | The `cache` option shape (`prefix`, `separator`)                                               |
-| `MemoryTenantDataStoreOptions`                                                                                                        | interface   | `MemoryTenantDataStore` constructor options (`generateId`)                                     |
-| `ITenantDataStore`                                                                                                                    | interface   | Internal port for tenant-scoped CRUD (app injection seam)                                      |
-| `ITenantIsolationStrategy`                                                                                                            | type        | Discriminated union with `'column' \| 'schema' \| 'database'` arms; narrow on `kind`           |
-| Re-exported from common: `IMultiTenancyService`, `ITenantRepository`, `ITenant`, `ITenantRegistry`, `ITenantResolver`, `CAPABILITIES` | types/const | Convenience re-exports — canonical definitions stay in `@setu-ts/common`                       |
+| Symbol                                                                                                                                | Kind        | Description                                                                                                                     |
+| ------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `MultiTenancyPlugin`                                                                                                                  | function    | Plugin factory — registers `IMultiTenancyService` under `CAPABILITIES.MULTI_TENANCY`                                            |
+| `tenantMiddleware`                                                                                                                    | function    | Middleware factory — resolve tenant, set `ctx.request.tenant`, short-circuit when required                                      |
+| `getTenantCachePrefix`                                                                                                                | function    | Accessor reading the tenant cache prefix from `ctx.state`                                                                       |
+| `TENANT_CACHE_PREFIX_STATE_KEY`                                                                                                       | const       | Module-level key constant (`'multi-tenancy-plugin:cache-prefix'`)                                                               |
+| `SubdomainResolver`                                                                                                                   | class       | Resolves tenant from URL host subdomain                                                                                         |
+| `HeaderResolver`                                                                                                                      | class       | Resolves tenant from configurable HTTP header                                                                                   |
+| `PathResolver`                                                                                                                        | class       | Resolves tenant from configurable path segment index                                                                            |
+| `JwtResolver`                                                                                                                         | class       | Resolves tenant from JWT claim (uses unverified decode)                                                                         |
+| `ColumnPerTenant`                                                                                                                     | class       | Column-per-tenant isolation strategy (default)                                                                                  |
+| `SchemaPerTenant`                                                                                                                     | class       | Schema-per-tenant isolation strategy                                                                                            |
+| `DatabasePerTenant`                                                                                                                   | class       | Database-per-tenant isolation strategy                                                                                          |
+| `MemoryTenantDataStore`                                                                                                               | class       | Zero-dependency in-process default store with cross-tenant isolation                                                            |
+| `TenantDataStoreNotReadyError`                                                                                                        | class       | Thrown by `getRepository`/`getRepositoryFor` before a factory `dataStore` resolves in `onInit`                                  |
+| `TenantNotResolvedError`                                                                                                              | class       | Thrown by `getRepository` when tenant has not been resolved                                                                     |
+| `TenantUnitOfWorkUnsupportedError`                                                                                                    | class       | Thrown by `getRepository`/`getRepositoryFor` when a unit of work is passed and the store has no `withUnitOfWork` (since 0.13.0) |
+| `TenantRegistryUnavailableError`                                                                                                      | class       | Thrown by `lookupTenant` on a registry fault (cause: the registry's error); 503 status hint                                     |
+| `TenantRegistryCacheOptions`                                                                                                          | interface   | The `tenantCache` option shape (`ttlMs`, `maxEntries`, `maxBytes`)                                                              |
+| `MultiTenancyPluginOptions`                                                                                                           | interface   | The argument type of `MultiTenancyPlugin(...)`                                                                                  |
+| `ResolverConfig`                                                                                                                      | type        | The `resolver` option's type — discriminant string, custom resolver, or chain                                                   |
+| `DatabaseStrategyKind`                                                                                                                | type        | The `database` option's discriminant strings                                                                                    |
+| `SubdomainResolverOptions`, `HeaderResolverOptions`, `PathResolverOptions`, `JwtResolverOptions`                                      | interfaces  | Per-resolver option shapes, also the resolver constructors' argument types                                                      |
+| `TenantCacheOptions`                                                                                                                  | interface   | The `cache` option shape (`prefix`, `separator`)                                                                                |
+| `MemoryTenantDataStoreOptions`                                                                                                        | interface   | `MemoryTenantDataStore` constructor options (`generateId`)                                                                      |
+| `ITenantDataStore`                                                                                                                    | interface   | Internal port for tenant-scoped CRUD (app injection seam)                                                                       |
+| `ITenantIsolationStrategy`                                                                                                            | type        | Discriminated union with `'column' \| 'schema' \| 'database'` arms; narrow on `kind`                                            |
+| Re-exported from common: `IMultiTenancyService`, `ITenantRepository`, `ITenant`, `ITenantRegistry`, `ITenantResolver`, `CAPABILITIES` | types/const | Convenience re-exports — canonical definitions stay in `@setu-ts/common`                                                        |
 
 ### Notes
 
@@ -13473,11 +13517,11 @@ reaches `redactors[<string>]`):
 | Audit                  | `IAuditLogger`, `AuditEntry`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | Resilience             | `ICircuitBreaker`, `CircuitState`, `IResilienceService`, `WrapOptions`, `CircuitBreakerPolicy`, `RetryPolicy`, `BulkheadPolicy`, `BackoffStrategy`, `ResilientCall`, `HardenedCall`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | Storage                | `IStorage`, `SignedUrlOptions`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| Mail                   | `IMailer`, `MailMessage`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Mail                   | `IMailer`, `MailMessage`, `MailAttachment` (since 0.13.0)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | Notifications          | `INotifier` (with optional `sendSettled?`), `NotificationMessage`, `ChannelSendResult`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | Errors                 | `IErrorResponder`, `ErrorResponseInit`, `ProblemTypeInit`, `ErrorResponderTarget`, `SerializedError`, `AuthorizationFailure` — the request-scoped error responder seam (including the optional registered problem type), standard authorization refusals, and the pure error serializer (M70f)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | Feature flags          | `IFeatureFlags`, `FlagContext`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| Multi-tenancy          | `IMultiTenancyService`, `ITenantRepository`, `ITenantResolver`, `ITenant`, `ITenantRegistry` (since 0.12.0; `IMultiTenancyService.lookupTenant` likewise)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Multi-tenancy          | `IMultiTenancyService`, `ITenantRepository`, `ITenantUnitOfWork` (since 0.13.0), `ITenantResolver`, `ITenant`, `ITenantRegistry` (since 0.12.0; `IMultiTenancyService.lookupTenant` likewise)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | SSR                    | `ISsrService`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | SSE                    | `ISseService`, `ISseConnection`, `SseChannel`, `SseMessage`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | Realtime backplane     | `IRealtimeBackplane`, `RealtimeFrame`, `RealtimeFrameHandler`, `RealtimeFrameKind`, `EncodedPayload`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
@@ -14053,6 +14097,10 @@ makes the key global. Do not join parts with a separator that can appear inside 
 identities can collide. The default TTL is 86,400,000 ms, bounded to an integer from 60,000 to
 2,592,000,000 ms. `IdempotentWithinResult<R>` carries `value: R` and `replayed: boolean`; value is
 the JSON round trip on both paths, so dates become strings and JSON-omitted members are absent.
+
+`IIdempotencyService.transactional: boolean` (required, since `0.13.0`) is `true` exactly when the
+provider was configured with a transactional store. It reports configuration from registration on,
+not readiness; `AgentRunsPlugin` reads it in `register` and refuses to start without it.
 
 The new `IIdempotencyService` contract includes two **required** tier-C members:
 

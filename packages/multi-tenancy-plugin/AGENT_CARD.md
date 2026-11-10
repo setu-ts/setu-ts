@@ -39,15 +39,15 @@ export function registerOrderRoutes(router: IRouterApi): void {
 
 - The middleware runs at priority 40 and sets `ctx.request.tenant`; unresolved required tenants
   answer `rejectionStatus` (default 400) before the handler.
-- `subdomain.baseDomain` constrains hosts; without it, the first label of a multi-label host is
-  used.
+- `subdomain.baseDomain` constrains hosts; otherwise a multi-label host's first label is used.
 - `getRepository` throws `TenantNotResolvedError` without a resolved tenant.
 - The default store is process-local memory. Isolation strategy names do not create schemas or
   databases: that needs an injected store implementing the selected strategy.
-- The JWT resolver decodes an unverified claim; use authentication that separately verifies it.
+- The JWT resolver reads an unverified claim; bind verified tokens with auth's `tenantClaim`.
 - `getRepositoryFor` trusts its explicit tenant id; HTTP routes should use the resolved context.
-- With `tenants`, an unlisted id answers 404 and a registry fault 503 before the handler. Without it
-  any resolved id is the tenant, and `lookupTenant` admits any non-empty string id.
+- A third argument, `db.transaction`'s unit of work, joins the transaction (database store only).
+- With `tenants`, an unlisted id answers 404 and a registry fault 503. Without it any resolved id is
+  the tenant.
 
 ## Other options
 

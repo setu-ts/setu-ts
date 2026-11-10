@@ -1,6 +1,6 @@
 # Milestone 139c — AI-layer and data contracts with a missing half (`agent-runs-plugin` + `idempotency-plugin` + `vector-store-plugin` + `auth-plugin` + `multi-tenancy-plugin` + `database-plugin` + `mail-plugin` + `common`)
 
-> **Status:** Planning. Branch: `feat/m139c-ai-data-contracts`. `develop` and `main` are protected,
+> **Status:** Complete. Branch: `feat/m139c-ai-data-contracts`. `develop` and `main` are protected,
 > so all work, including fixes, stays on this one branch until it merges through a single PR into
 > `develop`.
 

@@ -3,6 +3,23 @@ import { MemoryQuotaStore } from '../../src/index.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 
 describe('MemoryQuotaStore', () => {
+  it('M139c reads without charging, isolates keys/windows, and expires at the boundary', async () => {
+    const runtime = createFakeRuntime(0);
+    const store = new MemoryQuotaStore(runtime);
+    expect(await store.read('a:b', 'c')).toBe(0);
+    await store.reserve('a:b', 'c', 40, 100, 1000);
+    await store.adjust('a:b', 'c', -10, 1000);
+    for (const [key, window, expected] of [
+      ['a:b', 'c', 30],
+      ['a', 'b:c', 0],
+      ['other', 'c', 0],
+      ['a:b', 'd', 0],
+    ] as const)
+      expect(await store.read(key, window)).toBe(expected);
+    expect(await store.read('a:b', 'c')).toBe(30);
+    runtime.setNow(1000);
+    expect(await store.read('a:b', 'c')).toBe(0);
+  });
   it('keeps a colon-bearing key apart from a colon-bearing window', async () => {
     // Joined with a plain colon, both pairs would address `a:b:c`.
     const store = new MemoryQuotaStore(createFakeRuntime(0));

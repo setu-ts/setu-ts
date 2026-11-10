@@ -32,8 +32,36 @@ All notable changes to this project are documented here. The format follows
   records and ownership keyed by the principal id were shared across their callers. **Migration:**
   put a subject in every token you mint; for a service token, the client id (RFC 9068 §2.2).
 
+- **BREAKING — `IIdempotencyService.transactional` is a required member (M139c, PR pending,
+  `@setu-ts/common`, `@setu-ts/idempotency-plugin`, `@setu-ts/agent-runs-plugin`, V12-4).** It is
+  `true` exactly when the provider was configured with a transactional store. `AgentRunsPlugin` now
+  reads it in `register` and refuses to start without one; before, the application booted healthy
+  and every tool-calling run failed at its first tool call. **Migration:** a custom
+  `IIdempotencyService` adds the member; an application registering `AgentRunsPlugin` passes
+  `IdempotencyPlugin({ transactional: { store: createDatabaseIdempotencyStore() } })`.
+- **BREAKING — quotas can be read (M139c, PR pending, `@setu-ts/auth-plugin`, V12-36).**
+  `IQuota.usage(key)` returns `{ used, limit, remaining, windowEndsAt }` from the counter `reserve`
+  charges, without charging it, so a budget meter needs no second ledger. `IQuotaStore` gains a
+  required `read(key, windowId)`, implemented by `MemoryQuotaStore` and `RedisQuotaStore`.
+  **Migration:** a custom `IQuotaStore` implements `read`, answering `0` for an absent or expired
+  window; a custom `IQuota` implements `usage`.
+
 ### Added
 
+- **Tenant repositories join a transaction (M139c, PR pending, `@setu-ts/common`,
+  `@setu-ts/multi-tenancy-plugin`, `@setu-ts/database-plugin`, V12-20).** `getRepository` and
+  `getRepositoryFor` take an optional third argument, the unit of work `db.transaction` hands out
+  (`ITenantUnitOfWork`). `DatabaseTenantDataStore` implements the new optional
+  `ITenantDataStore.withUnitOfWork` with every tenant guard intact; a store without it throws
+  `TenantUnitOfWorkUnsupportedError`.
+- **Mail attachments (M139c, PR pending, `@setu-ts/common`, `@setu-ts/mail-plugin`, V12-21).**
+  `MailMessage.attachments` takes in-memory files (`Uint8Array` or UTF-8 text), inline with a
+  `contentId`. SMTP, SES and SendGrid send them; `LogProvider` logs their names and sizes only.
+  `send` and `sendTemplate` refuse a filename, content type or content id that could break a header.
+- **Whole-source replacement up to 5,000 records (M139c, PR pending, `@setu-ts/vector-store-plugin`,
+  V12-9).** One `replaceSource` call takes 5,000 records (`upsert` stays at 500), written in slices
+  of 500 inside pgvector's one transaction. Before, a source over 500 records could not be held: a
+  second call deleted the first call's records.
 - **One credential per route (M139a, #576, `@setu-ts/auth-plugin`, V12-37).**
   `requireAuth({ credentials: 'cookie' | 'header' })` admits only a principal the plugin
   authenticated with that kind of credential (`'any'` is the default). A mismatch, or a request
@@ -60,6 +88,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **pgvector `ensure: 'verify'` checks what the indexes are (M139c, PR pending,
+  `@setu-ts/vector-store-plugin`, V12-10).** `ensureCollection` now requires `vs_<name>_src` on
+  `(scope, source_id)` and `vs_<name>_hnsw` as `USING hnsw (embedding vector_cosine_ops)`, both on
+  the collection's table, and names the expected definition when one differs. Before, an index of
+  the right name passed whatever it was, so an L2 index served cosine queries.
+- **Agent cards describe the M139a behaviour (M139c, PR pending).** The auth, multi-tenancy and MCP
+  `AGENT_CARD.md` files, which `setu agents` briefs point agents at, now state scoped-token
+  confinement, the `sub` requirement, `requireAuth({ credentials })`, `tenantClaim`, the request on
+  `local.verify`, and the MCP path's form-CSRF exemption.
 - **MCP discovery behind form CSRF (M139a, #576, `@setu-ts/mcp-plugin`, V12-35).** In a full-stack
   app, an anonymous `POST /mcp` was answered `403 CSRF token validation failed` before
   authentication could send the `401` with `WWW-Authenticate: Bearer resource_metadata="…"` that an

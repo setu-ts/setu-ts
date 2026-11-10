@@ -50,6 +50,7 @@ import type {
   IServiceRegistry,
   ITenantDataStore,
   ITenantIsolationStrategy,
+  ITenantUnitOfWork,
   RegistryFactory,
   WritePrecondition,
 } from '@setu-ts/common';
@@ -126,6 +127,8 @@ const DEFAULT_TENANT_COLUMN = 'tenant_id';
  * @since 0.9.0
  */
 export class DatabaseTenantDataStore implements ITenantDataStore {
+  #parent: DatabaseTenantDataStore | undefined;
+  #unitOfWork: ITenantUnitOfWork | undefined;
   readonly #service: IDatabaseService;
   /** The column named by the constructor's `tenantColumn`, if any. */
   readonly #configuredColumn: string | undefined;
@@ -150,11 +153,42 @@ export class DatabaseTenantDataStore implements ITenantDataStore {
   }
 
   /**
+   * Binds the existing operations to transaction repositories; column resolution
+   * remains with this parent. The view owns no isolation or lifecycle hooks.
+   * @param unitOfWork - Transaction repository source
+   * @returns A tenant-isolated transaction view
+   * @throws {TypeError} When getRepository is not a function
+   * @since 0.13.0
+   */
+  withUnitOfWork(unitOfWork: ITenantUnitOfWork): ITenantDataStore {
+    if (
+      unitOfWork === null ||
+      typeof unitOfWork !== 'object' ||
+      typeof unitOfWork.getRepository !== 'function'
+    )
+      throw new TypeError('DatabaseTenantDataStore: unit of work requires getRepository().');
+    const bound = new DatabaseTenantDataStore(this.#service);
+    bound.#parent = this;
+    bound.#unitOfWork = unitOfWork;
+    return {
+      findAll: bound.findAll.bind(bound),
+      findById: bound.findById.bind(bound),
+      find: bound.find.bind(bound),
+      create: bound.create.bind(bound),
+      update: bound.update.bind(bound),
+      delete: bound.delete.bind(bound),
+      updateWhere: bound.updateWhere.bind(bound),
+      deleteWhere: bound.deleteWhere.bind(bound),
+    };
+  }
+
+  /**
    * The effective tenant column: a `'column'` strategy's column if one was
    * handed to {@linkcode useIsolation}, else the configured `tenantColumn`,
    * else `'tenant_id'`.
    */
   #column(entity: string): string {
+    if (this.#parent !== undefined) return this.#parent.#column(entity);
     const cached = this.#fields.get(entity);
     if (cached !== undefined) return cached;
     const column = this.#configuredTenantColumn();
@@ -170,6 +204,7 @@ export class DatabaseTenantDataStore implements ITenantDataStore {
   }
 
   #configuredTenantColumn(): string {
+    if (this.#parent !== undefined) return this.#parent.#configuredTenantColumn();
     if (this.#resolvedColumn !== undefined) return this.#resolvedColumn;
     if (this.#configuredColumn !== undefined) return this.#configuredColumn;
     return DEFAULT_TENANT_COLUMN;
@@ -206,6 +241,11 @@ export class DatabaseTenantDataStore implements ITenantDataStore {
   #repo(
     entity: string,
   ): import('../interfaces/index.ts').IRepository<Record<string, unknown>, EntityKey> {
+    if (this.#unitOfWork !== undefined)
+      return this.#unitOfWork.getRepository(entity) as import('../interfaces/index.ts').IRepository<
+        Record<string, unknown>,
+        EntityKey
+      >;
     return this.#service.getRepository<Record<string, unknown>, EntityKey>(entity);
   }
 

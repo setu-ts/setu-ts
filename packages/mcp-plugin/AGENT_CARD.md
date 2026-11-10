@@ -32,7 +32,8 @@ Description defaults to description, then summary. Names: 1–64 ASCII letters, 
   1–600000: it aborts the inner request and cancels the response reader. Deadline:
   `The tool timed out.`; client abort: `The tool failed.`. A hung route stays in flight until it
   settles or the kernel drain cap.
-- Every present Origin, including same-origin UIs, must be in `allowedOrigins`; it reaches CSRF.
+- Every present Origin, including same-origin UIs, must be in `allowedOrigins`; the POST path skips
+  form CSRF.
 - Tool output is untrusted model input; prompt-injection defence belongs to the agent host.
 
 Alternatively `tools?` lists exact method/path bindings. A route cannot be both marked and listed,

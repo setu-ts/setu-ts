@@ -41,6 +41,7 @@ import {
   upsertStatement,
 } from './pgvector-sql.ts';
 import type { SqlTag, Statement } from './pgvector-sql.ts';
+import { MAX_RECORDS_PER_CALL } from '../../services/limits.ts';
 
 /** HNSW indexes `vector` columns of at most this many dimensions. */
 const MAX_INDEXED_DIMENSIONS = 2000;
@@ -211,7 +212,7 @@ export class PgVectorStore implements IVectorStoreAdapter {
     }
     if (!row.source_index || !row.vector_index) {
       throw new VectorCollectionMismatchError(
-        `pgvector: '${table}' is missing its ${!row.vector_index ? 'HNSW' : 'source'} index.`,
+        `pgvector: '${table}' is missing its ${!row.vector_index ? 'HNSW' : 'source'} index: expected ${!row.vector_index ? `${table}_hnsw ON ${table} USING hnsw (embedding vector_cosine_ops)` : `${table}_src ON ${table} (scope, source_id)`}.`,
       );
     }
     if (!row.source_version && this.#ensure === 'create') {
@@ -258,8 +259,16 @@ export class PgVectorStore implements IVectorStoreAdapter {
             );
           }
         }
-        if (records.length > 0) {
-          await tx.execute(upsertStatement(sql, spec, scope, records, version));
+        for (let start = 0; start < records.length; start += MAX_RECORDS_PER_CALL) {
+          await tx.execute(
+            upsertStatement(
+              sql,
+              spec,
+              scope,
+              records.slice(start, start + MAX_RECORDS_PER_CALL),
+              version,
+            ),
+          );
         }
         await tx.execute(
           deleteStaleStatement(

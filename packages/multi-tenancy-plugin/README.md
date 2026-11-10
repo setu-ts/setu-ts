@@ -159,6 +159,34 @@ A **`register()` warning** fires when a non-`'column-per-tenant'` strategy is se
 `dataStore` is injected: the default memory store cannot deliver physical isolation, so the
 selection is flagged rather than silently logical-only.
 
+## Transactions
+
+Pass the unit of work as the third argument to `getRepository` or `getRepositoryFor`, and the tenant
+repository joins that transaction:
+
+```typescript
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IMultiTenancyService, IRequestContext } from '@setu-ts/common';
+import type { IDatabaseService } from '@setu-ts/database-plugin';
+
+export async function placeOrder(ctx: IRequestContext): Promise<void> {
+  const db = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+  const tenancy = ctx.services.get<IMultiTenancyService>(CAPABILITIES.MULTI_TENANCY);
+  await db.transaction(async (uow) => {
+    await tenancy.getRepository(ctx, 'Order', uow).create({ id: 'o-1', total: 40 });
+    await tenancy.getRepository(ctx, 'OrderLine', uow).create({ id: 'l-1', orderId: 'o-1' });
+  });
+}
+```
+
+Both writes commit or roll back together, and each keeps every tenant guard: the tenant column is
+stamped on create and stripped from updates, and another tenant's row is never read, updated or
+deleted. Only a store with `withUnitOfWork` can join a transaction. `createDatabaseTenantDataStore`
+has it; `MemoryTenantDataStore` does not, so passing a unit of work with it throws
+`TenantUnitOfWorkUnsupportedError` (status hint 500). On a deferred-write transaction (Cloudflare
+D1) writes are buffered until commit, so a read or an update inside the transaction does not see a
+row the same transaction created.
+
 ## Which tenants exist
 
 Without `tenants`, any id a resolver returns is the tenant — a typo looks like an empty site and
@@ -290,41 +318,42 @@ middleware publishes the active prefix under `TENANT_CACHE_PREFIX_STATE_KEY`, re
 
 ## Exports
 
-| Export                           | Kind      |
-| -------------------------------- | --------- |
-| `getTenantCachePrefix`           | function  |
-| `MultiTenancyPlugin`             | function  |
-| `tenantMiddleware`               | function  |
-| `ColumnPerTenant`                | class     |
-| `DatabasePerTenant`              | class     |
-| `HeaderResolver`                 | class     |
-| `JwtResolver`                    | class     |
-| `MemoryTenantDataStore`          | class     |
-| `PathResolver`                   | class     |
-| `SchemaPerTenant`                | class     |
-| `SubdomainResolver`              | class     |
-| `TenantDataStoreNotReadyError`   | class     |
-| `TenantNotResolvedError`         | class     |
-| `TenantRegistryUnavailableError` | class     |
-| `CAPABILITIES`                   | const     |
-| `TENANT_CACHE_PREFIX_STATE_KEY`  | const     |
-| `HeaderResolverOptions`          | interface |
-| `IMultiTenancyService`           | interface |
-| `ITenant`                        | interface |
-| `ITenantDataStore`               | interface |
-| `ITenantRegistry`                | interface |
-| `ITenantRepository`              | interface |
-| `ITenantResolver`                | interface |
-| `JwtResolverOptions`             | interface |
-| `MemoryTenantDataStoreOptions`   | interface |
-| `MultiTenancyPluginOptions`      | interface |
-| `PathResolverOptions`            | interface |
-| `SubdomainResolverOptions`       | interface |
-| `TenantCacheOptions`             | interface |
-| `TenantRegistryCacheOptions`     | interface |
-| `DatabaseStrategyKind`           | type      |
-| `ITenantIsolationStrategy`       | type      |
-| `ResolverConfig`                 | type      |
+| Export                             | Kind      |
+| ---------------------------------- | --------- |
+| `getTenantCachePrefix`             | function  |
+| `MultiTenancyPlugin`               | function  |
+| `tenantMiddleware`                 | function  |
+| `ColumnPerTenant`                  | class     |
+| `DatabasePerTenant`                | class     |
+| `HeaderResolver`                   | class     |
+| `JwtResolver`                      | class     |
+| `MemoryTenantDataStore`            | class     |
+| `PathResolver`                     | class     |
+| `SchemaPerTenant`                  | class     |
+| `SubdomainResolver`                | class     |
+| `TenantDataStoreNotReadyError`     | class     |
+| `TenantNotResolvedError`           | class     |
+| `TenantRegistryUnavailableError`   | class     |
+| `TenantUnitOfWorkUnsupportedError` | class     |
+| `CAPABILITIES`                     | const     |
+| `TENANT_CACHE_PREFIX_STATE_KEY`    | const     |
+| `HeaderResolverOptions`            | interface |
+| `IMultiTenancyService`             | interface |
+| `ITenant`                          | interface |
+| `ITenantDataStore`                 | interface |
+| `ITenantRegistry`                  | interface |
+| `ITenantRepository`                | interface |
+| `ITenantResolver`                  | interface |
+| `JwtResolverOptions`               | interface |
+| `MemoryTenantDataStoreOptions`     | interface |
+| `MultiTenancyPluginOptions`        | interface |
+| `PathResolverOptions`              | interface |
+| `SubdomainResolverOptions`         | interface |
+| `TenantCacheOptions`               | interface |
+| `TenantRegistryCacheOptions`       | interface |
+| `DatabaseStrategyKind`             | type      |
+| `ITenantIsolationStrategy`         | type      |
+| `ResolverConfig`                   | type      |
 
 Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.
