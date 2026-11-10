@@ -108,10 +108,15 @@ export interface IRedisModule {
    * {@linkcode RedisBackplaneOptions.commandTimeoutMs} is not `0`. Optional
    * so an existing caller and a module that ignores it both still type-check;
    * such a module's clients are unbounded. Passed by the transport since
-   * 0.8.0.
+   * 0.8.0. `enableOfflineQueue` is `false` on the publisher (since 0.13.0), so
+   * a frame published while disconnected is refused rather than delivered
+   * late; a module that ignores it type-checks, but its publisher then queues.
    * @returns The client
    */
-  create(url: string, options?: { readonly commandTimeout?: number }): IRedisBackplaneClient;
+  create(
+    url: string,
+    options?: { readonly commandTimeout?: number; readonly enableOfflineQueue?: boolean },
+  ): IRedisBackplaneClient;
 }
 
 /**
@@ -228,10 +233,9 @@ export interface RedisBackplaneOptions extends BackplaneCommonOptions {
    * (a paused or partitioned host that sends no reset) never settles a
    * publish: the caller's promise hangs, the WebSocket and SSE consumers never
    * log the failure, and an observed publish is never recorded. A
-   * disconnected server is unaffected — `ioredis` already rejects its queued
-   * commands when `maxRetriesPerRequest` exhausts (about 10 s on its default
-   * backoff), which is below the default, so a short partition is still
-   * buffered and delivered late.
+   * disconnected server is unaffected: since 0.13.0 the publisher this
+   * transport builds has no offline queue, so a publish while it reconnects is
+   * refused at once and the frame is lost, never delivered late.
    *
    * Read only on the lazy `ioredis` path: an injected `client` /
    * `subscriber` pair keeps whatever timeout it was constructed with.

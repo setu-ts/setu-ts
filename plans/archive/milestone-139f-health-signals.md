@@ -1,6 +1,6 @@
 # Milestone 139f — Health and failure signals that mislead the operator (`service-discovery-plugin` + `database-plugin` + `realtime-backplane-plugin` + `queue-plugin` + `scheduler-plugin` docs)
 
-> **Status:** Planning. Branch: `feat/m139f-health-signals`. `develop` and `main` are protected, so
+> **Status:** Complete. Branch: `feat/m139f-health-signals`. `develop` and `main` are protected, so
 > all work, including fixes, stays on this one branch until it merges through a single PR into
 > `develop`.
 
@@ -128,11 +128,10 @@ the default `/health` body omits.
      `(current !== undefined && isSaturated(current)) || probeHitAcquireTimeout(adapter)`. The
      existing progress condition still applies. With progress, it reports `up` +
      `reachable: 'unknown'`. A hung database (no progress) still reports `degraded`.
-  5. The acquire-timeout evidence counts **with or without `poolStats`**: the message alone proves
-     the pool was full, and the progress count does not depend on `poolStats`. This reverses the
-     documented "without `poolStats` a pool connection timeout reports `degraded`" for the pg
-     acquire timeout only; a new-connection timeout and an unanswered probe still report `degraded`
-     (C3).
+  5. The flag's seam is attached **only with `poolStats`**, beside the capacity and progress seams
+     (`drizzle-adapter.ts:264-271`). The progress count, which tells a saturated pool from a hung
+     database, exists only there. Without `poolStats`, an acquire timeout keeps the documented
+     `degraded`.
 - **Why:** pg-pool raises that exact message only when a checkout waited for a busy pool and timed
   out (§1), and it removes the waiter before rejecting. So `waiting` is 0 by the time anything reads
   it. The message itself is the saturation proof. When `connectionTimeoutMillis` is 2 s or more, the
@@ -145,9 +144,9 @@ the default `/health` body omits.
   - `test/unit/drizzle-adapter-probe-saturation.test.ts`: a fake pool rejecting with the pool anchor
     sets the flag and rethrows; a later successful probe clears it.
   - `test/integration/pool-saturation-health.test.ts`: `waiting: 0`, an acquire-timeout probe and
-    progressing queries give `up`/`'unknown'`; the same with no progress gives `degraded`; the
-    acquire timeout with no `poolStats` callback and progressing queries gives `up`; a
-    new-connection timeout gives `degraded`.
+    progressing queries give `up`/`'unknown'`; the same with no progress gives `degraded`; a
+    new-connection timeout gives `degraded`; with no `poolStats`, an acquire timeout gives
+    `degraded`.
   - A guarded real-pg row in `test/integration/real-drizzle-adapter.test.ts` (guard `POSTGRES_URL`,
     line 821, skipped when absent) runs `max: 1`, `connectionTimeoutMillis: 500`, one held
     connection plus progressing queries, and expects `up`.
@@ -163,14 +162,17 @@ the default `/health` body omits.
      same way as `commandTimeout`: a module that ignores the field still type-checks, but its
      publisher then queues. `adaptRedisModule` passes the options through unchanged.
   3. `#open` waits for the owned publisher to be ready before it records the pair:
-     - it resolves at once when `status === 'ready'`, and also when `status` is `undefined` (a
-       custom module's client that cannot report readiness is not waited on, or a
-       `commandTimeoutMs: 0` open would hang forever);
-     - otherwise it waits for one `'ready'` event (through `on`/`off`), concurrently with
-       `subscriber.subscribe`;
+     - it waits only while the publisher is on its way to ready (ioredis `connecting`, `connect` or
+       `reconnecting`); any other status resolves at once — `ready`, no `status` (a custom module's
+       client cannot be observed, and a `commandTimeoutMs: 0` open would hang), `wait` (never ready
+       unless something calls `connect()`) and a closed client;
+     - while connecting it waits for one `'ready'` event (through `on`/`off`), after
+       `subscriber.subscribe` has resolved, so a failed subscribe never leaves a ready-listener
+       behind;
      - the wait is bounded by `commandTimeoutMs` when non-zero, and rejects with
        `BackendUnavailableError('realtime-backplane-plugin: redis transport')` when the bound
-       passes;
+       passes. The bound uses `common`'s `withDeadline`, whose ambient-timer default exists for a
+       caller with no runtime, which the transport is;
      - a rejection runs the existing cleanup path (discard both, detach). An injected pair is not
        waited on.
   4. A publish while the publisher is disconnected now rejects at once with the
@@ -192,9 +194,9 @@ the default `/health` body omits.
     frame (X3-FINDINGS).
 - **Test home:**
   - `test/unit/redis-backplane.test.ts`: `create` receives `enableOfflineQueue: false` for the
-    publisher and not for the subscriber; open resolves at once when the status is `ready` or
-    `undefined`, waits for `'ready'` otherwise, and rejects at the `commandTimeoutMs` bound with
-    cleanup; an injected pair is not waited on.
+    publisher and not for the subscriber; open resolves at once when the status is `ready`, `wait`,
+    `end` or `undefined`, waits for `'ready'` otherwise, and rejects at the `commandTimeoutMs` bound
+    with cleanup; an injected pair is not waited on.
   - `test/unit/redis-module.test.ts`: options pass through.
   - Guarded real Redis, `test/integration/outage-real.test.ts`: frames published during a pause
     shorter than 11 s are not delivered after recovery, and each publish rejects within 1 s. This
@@ -206,10 +208,10 @@ the default `/health` body omits.
   `ILogger`. Nothing else changes. `#loopFailed` already prefers `warn`, and `#loopRecovered`
   already logs when `info` exists.
 - **Why:** the state machine shipped in M131a. Only the wiring was missing.
-- **Test home:** `test/unit/queue-plugin.test.ts`: with a registered recording logger, a failing
-  recurring loop logs one `warn`, repeats stay silent, and the first success logs one `info`; the
-  queue logs nothing at `error` for that loop. Drive it through the plugin, not the service, so
-  `resolveLogger` is on the path.
+- **Test home:** `test/integration/queue-plugin-logger-ordering.test.ts`: with a registered
+  recording logger, a failing recurring loop logs one `warn`, repeats stay silent, and the first
+  success logs one `info`; the queue logs nothing at `error` for that loop. Drive it through the
+  plugin, not the service, so `resolveLogger` is on the path.
 
 ### 3.5 V12-50: a connection lost mid-call has its own message
 
@@ -326,7 +328,7 @@ reporter parameter.
 | `realtime-backplane-plugin/test/unit/redis-backplane.test.ts`                            | `redis-backplane.ts`                                | §3.3                                                         |
 | `realtime-backplane-plugin/test/unit/redis-module.test.ts`                               | `redis-module.ts` (unchanged; options pass-through) | `create` forwards `enableOfflineQueue`                       |
 | `realtime-backplane-plugin/test/integration/outage-real.test.ts` (guarded `REDIS_URL`)   | real path                                           | a short pause drops frames, nothing arrives late             |
-| `queue-plugin/test/unit/queue-plugin.test.ts`                                            | `queue-plugin.ts`                                   | §3.4                                                         |
+| `queue-plugin/test/integration/queue-plugin-logger-ordering.test.ts`                     | `queue-plugin.ts`                                   | §3.4                                                         |
 | `database-plugin/test/integration/real-drizzle-adapter.test.ts` (guarded `POSTGRES_URL`) | real path                                           | §3.2                                                         |
 
 `test/health-indicator-audit.test.ts` (root tooling, unchanged) is the gate for C5: it fails when a

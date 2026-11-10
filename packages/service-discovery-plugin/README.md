@@ -207,6 +207,11 @@ inside the process — point the runtime at the mounted CA bundle:
 
 The `http` option is the alternative: supply your own `IDiscoveryHttp` over a TLS-configured client.
 
+Without the CA the pod never becomes ready, and since 0.13.0 the readiness probe says why: the first
+failure logs one `warn` under `service-discovery-plugin: kubernetes` naming the cause (Deno's
+`UnknownIssuer`, or the API server's HTTP status), repeats log at `debug`, and the recovery logs one
+`info`. A cold resolve's `DiscoveryUnavailableError` message ends with the same cause.
+
 Service-account tokens are re-read from disk (memoized for 60 s) rather than read once at startup,
 because Kubernetes rotates projected tokens roughly hourly — a token captured at registration stops
 working while the pod is still healthy.
@@ -246,10 +251,10 @@ Registered as `service-discovery`. Since M70c it composes three facts:
 - `isHealthy()` — the provider's reachability probe (Consul `GET /v1/status/leader`, Kubernetes a
   `limit=1` EndpointSlice LIST).
 
-| Status | Meaning                                                                                                                                                                              |
-| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `up`   | The provider is reachable, or has resolved at least one service before. A name never cached still fails while the backend is down, so alert on `data.degraded` and `data.reachable`. |
-| `down` | The provider has never resolved and is unreachable.                                                                                                                                  |
+| Status | Meaning                                                                                                                                                                                                                                         |
+| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `up`   | The provider is reachable, or has resolved at least one service before. A name never cached still fails while the backend is down, so alert on `data.degraded` and `data.reachable` (in `/health` only with `HealthPlugin({ details: true })`). |
+| `down` | The provider has never resolved and is unreachable.                                                                                                                                                                                             |
 
 `data` reports
 `{ provider, cachedServices, watchedServices, ejectedInstances, degraded, reachable, everResolved }`.
@@ -316,6 +321,8 @@ Provider reachability probes are invoked as methods, retaining their receiver. H
 and Consul providers therefore report reachable and allow `/ready` to return 200. Since M113o, a
 warm-cache outage also reports `up`, keeping serving replicas in rotation. `data.degraded` still
 signals a failed refresh serving stale data; `data.reachable` exposes backend reachability.
+`/health` includes `data` only with `HealthPlugin({ details: true })`; the default body carries each
+check's `status` alone.
 
 The discovery service caches reachability for 5 s, coalesces concurrent reads, and bounds each probe
 at 2 s; a hung or rejecting probe reports `false`. Consul and Kubernetes probe requests carry an

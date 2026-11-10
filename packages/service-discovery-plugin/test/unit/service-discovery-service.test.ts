@@ -6,7 +6,8 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { httpStatusHintOf } from '@setu-ts/common';
+import { describeError, httpStatusHintOf } from '@setu-ts/common';
+import type { ConnectionErrorReporter } from '@setu-ts/common';
 import { ServiceDiscoveryService } from '../../src/services/service-discovery-service.ts';
 import { createProvider } from '../../src/providers/provider-factory.ts';
 import { resolveOptions, type ServiceDiscoveryPluginOptions } from '../../src/options.ts';
@@ -329,5 +330,103 @@ describe('ServiceDiscoveryService — M70c everResolved', () => {
     await service.resolve('billing'); // serves stale, sets degraded
     expect(service.degraded).toBe(true);
     expect(service.everResolved).toBe(true);
+  });
+});
+
+describe('ServiceDiscoveryService — M139f X10-3 probe reasons and the cold-resolve cause', () => {
+  /** A reporter that records what the service hands it. */
+  function recordingReporter(): {
+    reporter: ConnectionErrorReporter;
+    reports: unknown[];
+    recoveries: number;
+  } {
+    const record = { reports: [] as unknown[], recoveries: 0 };
+    return {
+      reporter: {
+        report: (error) => record.reports.push(error),
+        recovered: () => {
+          record.recoveries++;
+        },
+      },
+      get reports() {
+        return record.reports;
+      },
+      get recoveries() {
+        return record.recoveries;
+      },
+    };
+  }
+
+  function serviceWith(
+    isHealthy: (() => Promise<boolean>) | undefined,
+    reporter: ConnectionErrorReporter,
+  ): ServiceDiscoveryService {
+    const provider = createFakeProvider([a]);
+    const runtime = createFakeRuntime();
+    const resolved = resolveOptions({
+      provider: 'static',
+      services: {},
+    } as ServiceDiscoveryPluginOptions);
+    return new ServiceDiscoveryService(
+      isHealthy === undefined ? provider : { ...provider, isHealthy },
+      runtime,
+      resolved,
+      reporter,
+    );
+  }
+
+  it('reports a rejecting probe with its own error and answers false', async () => {
+    const tls = new Error('invalid peer certificate: UnknownIssuer');
+    const record = recordingReporter();
+    const service = serviceWith(() => Promise.reject(tls), record.reporter);
+    expect(await service.isHealthy()).toBe(false);
+    expect(record.reports).toEqual([tls]);
+    expect(record.recoveries).toBe(0);
+  });
+
+  it('reports a probe that resolves false with a reason naming the provider', async () => {
+    const record = recordingReporter();
+    const service = serviceWith(() => Promise.resolve(false), record.reporter);
+    expect(await service.isHealthy()).toBe(false);
+    expect(record.reports).toHaveLength(1);
+    expect((record.reports[0] as Error).message).toBe(
+      'fake discovery backend reported unreachable',
+    );
+  });
+
+  it('tells the reporter about a healthy probe so it can log a recovery', async () => {
+    const record = recordingReporter();
+    const service = serviceWith(() => Promise.resolve(true), record.reporter);
+    expect(await service.isHealthy()).toBe(true);
+    expect(record.reports).toEqual([]);
+    expect(record.recoveries).toBe(1);
+  });
+
+  it('reports nothing for a provider with no probe', async () => {
+    const record = recordingReporter();
+    const service = serviceWith(undefined, record.reporter);
+    expect(await service.isHealthy()).toBe(true);
+    expect(record.reports).toEqual([]);
+    expect(record.recoveries).toBe(0);
+  });
+
+  it('names the cause in a cold-resolve error and keeps the public 503 detail', async () => {
+    const { service, provider } = setup();
+    const cause = new TypeError('fetch failed', { cause: new Error('UnknownIssuer') });
+    provider.failWith(cause);
+    const error = await service.resolve('orders').then(
+      () => undefined,
+      (thrown: unknown) => thrown,
+    );
+    expect(error).toBeInstanceOf(DiscoveryUnavailableError);
+    expect((error as Error).message).toBe(
+      `Service discovery could not resolve 'orders' and has nothing cached: ${describeError(cause)}`,
+    );
+    // The TLS reason itself, not only the generic fetch failure, is in the line.
+    expect((error as Error).message).toContain('UnknownIssuer');
+    expect(httpStatusHintOf(error)).toMatchObject({
+      status: 503,
+      detail: 'Service discovery is temporarily unavailable.',
+    });
   });
 });

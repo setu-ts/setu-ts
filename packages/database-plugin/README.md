@@ -1490,7 +1490,9 @@ own, enforced by the driver that owns the connection; on node-postgres a query t
 `query_timeout` rejects with the driver's `Query read timeout`, and the timed-out client is released
 with the error and removed from the pool, so the bound does not leak a connection. A call that hits
 the bound is answered `504 Gateway Timeout` with `DatabaseTimeoutError`; the statement may have run,
-so a write's outcome is unknown and a retry of a write must be idempotent.
+so a write's outcome is unknown and a retry of a write must be idempotent. A connection lost under a
+statement is answered the same way for the same reason, but its message says the connection closed
+before the call completed, so the log does not claim a bound fired (since 0.13.0).
 
 | Adapter                  | The driver's own call bound                                                                                                                  | Status               |
 | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- |
@@ -1526,27 +1528,31 @@ The rows are the whole decision. **Since M101a** a saturated pool is not an outa
 adapter's `poolStats` reports every connection busy with callers waiting (`idle === 0` and
 `waiting > 0`), the probe queues no `SELECT 1` behind the callers it would be measuring, and the
 indicator reports `up` with `reachable: 'unknown'` and the snapshot in `data.capacity` — failing
-`/ready` there would pull every saturated replica out of rotation at once. A full pool is ALSO what
-a hung database looks like (every connection stuck on a server that never answers, callers piling
-up), so the row additionally requires that a query through the adapter completed within the last 10
-seconds. The indicator samples the adapter's completed-query count on each poll, so a hang is
-detected at most one poll interval plus that window after the last completion; a saturated pool
-whose queries have all stopped completing reports `degraded` and `/ready` answers 503. Only queries
-the adapter runs are counted (`query()`, repositories, the Unit of Work's data sources): once
-`getDrizzleDatabase` or `getDrizzleTransaction` has handed out the native instance, its queries
-bypass the adapter, so progress is unobservable and a saturated pool keeps reading `up` — the
-indicator cannot then tell a hang from load. Queries the application runs on its own Drizzle
-instance are not counted either; an application that queries mainly that way should expect a busy
-pool to read `degraded`. That row needs `poolStats`: without it the indicator cannot tell saturation
-from trouble, so a pool connection timeout or a probe that does not answer reports `degraded`. A
-pool connection timeout used to report `down` (it answered `false`); it is now `degraded`, because
-the database never answered either way. A probe that **exists and did not answer** inside the
-2-second bound is evidence of trouble and reports `degraded` — never `up`, which is the claim that
-let a stopped database keep taking traffic (X51-1: the indicator used to read the lifecycle
-`isReady()`, which only says `connect()` once succeeded). An adapter that ships **no probe** is the
-opposite case: a probe that was never written is evidence of nothing, so the payload omits
-`reachable` and the status is today's — mapping a missing probe to `degraded` would fail `/ready`
-for every healthy Cosmos, Bigtable and DynamoDB application on upgrade.
+`/ready` there would pull every saturated replica out of rotation at once. **Since 0.13.0** a probe
+that timed out waiting for a pool client (node-postgres's `timeout exceeded when trying to connect`)
+is the same evidence: pg-pool removes the timed-out waiter before it rejects, so with
+`connectionTimeoutMillis` under the 2-second probe bound the snapshot already reads `waiting: 0`. A
+new-connection handshake timeout does not count. A full pool is ALSO what a hung database looks like
+(every connection stuck on a server that never answers, callers piling up), so the row additionally
+requires that a query through the adapter completed within the last 10 seconds. The indicator
+samples the adapter's completed-query count on each poll, so a hang is detected at most one poll
+interval plus that window after the last completion; a saturated pool whose queries have all stopped
+completing reports `degraded` and `/ready` answers 503. Only queries the adapter runs are counted
+(`query()`, repositories, the Unit of Work's data sources): once `getDrizzleDatabase` or
+`getDrizzleTransaction` has handed out the native instance, its queries bypass the adapter, so
+progress is unobservable and a saturated pool keeps reading `up` — the indicator cannot then tell a
+hang from load. Queries the application runs on its own Drizzle instance are not counted either; an
+application that queries mainly that way should expect a busy pool to read `degraded`. That row
+needs `poolStats`: without it the indicator cannot tell saturation from trouble, so a pool
+connection timeout or a probe that does not answer reports `degraded`. A pool connection timeout
+used to report `down` (it answered `false`); without `poolStats` it is now `degraded`, because the
+database never answered either way. A probe that **exists and did not answer** inside the 2-second
+bound is evidence of trouble and reports `degraded` — never `up`, which is the claim that let a
+stopped database keep taking traffic (X51-1: the indicator used to read the lifecycle `isReady()`,
+which only says `connect()` once succeeded). An adapter that ships **no probe** is the opposite
+case: a probe that was never written is evidence of nothing, so the payload omits `reachable` and
+the status is today's — mapping a missing probe to `degraded` would fail `/ready` for every healthy
+Cosmos, Bigtable and DynamoDB application on upgrade.
 
 Shipped probes: MongoDB (`db.command({ ping: 1 })` through the optional `IMongoDatabase.command?`
 facade member), Prisma and Drizzle (`SELECT 1`; Drizzle omits the probe for instances without

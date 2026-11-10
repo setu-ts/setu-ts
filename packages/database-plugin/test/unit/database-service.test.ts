@@ -483,6 +483,34 @@ describe('M113g driver timeout interception', () => {
     expect(bare.name).toBe('DatabaseTimeoutError');
     expect(bare.cause).toBeUndefined();
   });
+
+  // M139f V12-50: both are outcome-unknown 504s, but only one is a bound.
+  for (const [cause, message] of [
+    ['Query read timeout', 'The database did not answer within the driver call bound.'],
+    [
+      'Connection terminated unexpectedly',
+      'The database connection closed before the call completed; the outcome is unknown.',
+    ],
+  ] as const) {
+    it(`logs "${message}" for ${cause}, still a 504 DatabaseTimeoutError`, async () => {
+      const adapter = new MemoryAdapter();
+      const source = adapter.createDataSource('Entity');
+      source.findById = () =>
+        Promise.reject(new Error('Failed query: select 1', { cause: new Error(cause) }));
+      const service = new DatabaseService(adapter, () => source, 'drizzle');
+      const error: unknown = await service
+        .getRepository('Entity')
+        .findById('id')
+        .catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(DatabaseTimeoutError);
+      expect((error as Error).message).toBe(message);
+      expect(httpStatusHintOf(error)).toEqual({
+        status: 504,
+        title: 'Gateway Timeout',
+        detail: 'The database did not answer in time.',
+      });
+    });
+  }
 });
 
 it('M119e resolves the internal entity field member without widening the portable port', async () => {

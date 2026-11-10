@@ -242,7 +242,9 @@ running after its slot is released (see Sizing).
 The status is `up` even when `data.available` is false: registering this plugin on Cloudflare
 Workers is deliberate, and the absence of threads does not stop the app serving requests. Every
 `run()` still rejects with `WorkerPoolUnavailableError` on that runtime, and `data.reason` explains
-why. Alert on `data.available` when workers are required by your application.
+why. Alert on `data.available` when workers are required by your application. `/health` includes
+`data` only with `HealthPlugin({ details: true })`; the default body carries each check's `status`
+alone.
 
 The pool counters are DATA, never a threshold. `failed` is cumulative, so any status derived from it
 would need a failure rate this plugin cannot choose on an application's behalf; watch it through the

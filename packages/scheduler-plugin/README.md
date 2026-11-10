@@ -172,7 +172,8 @@ The `scheduler` indicator reports `up` while the scheduler is connected and `dow
 Its `data` includes `connected` and `lock: { reachable }`, where `reachable` is `true`, `false`, or
 `'unknown'`. A shared lock outage stops job fires while request serving can continue, so
 reachability does not change lifecycle status or remove the replica from readiness. Alert on
-`data.lock.reachable` to detect lock outages.
+`data.lock.reachable` to detect lock outages. `/health` includes `data` only with
+`HealthPlugin({ details: true })`; the default body carries each check's `status` alone.
 
 `IDistributedLock.isHealthy?(): Promise<boolean | undefined>` is optional: an absent probe, an
 `undefined` answer, or a probe that does not settle within 2 s reports `'unknown'`. The indicator

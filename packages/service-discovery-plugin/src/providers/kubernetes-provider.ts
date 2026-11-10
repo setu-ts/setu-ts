@@ -206,6 +206,13 @@ export class KubernetesProvider implements DiscoveryProvider {
    * existing seam. This is the probe that makes X10-3 visible: an `UnknownIssuer`
    * TLS rejection surfaces here as `down`. 2xx means the API is reachable.
    * The runtime aborts the request after 2 s, including a hung response body.
+   *
+   * M139f X10-3: a failure rejects with its reason instead of resolving
+   * `false`, so the service can log what is wrong (the TLS cause, the HTTP
+   * status) rather than only that something is.
+   *
+   * @returns `true` when the API server answered 2xx
+   * @throws {Error} The fetch rejection, the abort, or a non-2xx status
    */
   async isHealthy(): Promise<boolean> {
     const controller = new AbortController();
@@ -218,9 +225,10 @@ export class KubernetesProvider implements DiscoveryProvider {
         headers: { Authorization: await this.authHeader() },
         signal: controller.signal,
       });
-      return response.ok;
-    } catch {
-      return false;
+      if (!response.ok) {
+        throw new Error(`Kubernetes EndpointSlice probe failed with HTTP ${response.status}`);
+      }
+      return true;
     } finally {
       this.#runtime.clearTimeout(timer);
     }

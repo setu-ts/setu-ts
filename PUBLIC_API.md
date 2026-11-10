@@ -1892,14 +1892,18 @@ Capacity is data, not policy: no threshold is applied, and the snapshot changes 
 the last 10 seconds; with none, a full pool is a hung database and reports `degraded`; once
 `getDrizzleDatabase`/`getDrizzleTransaction` has handed out the native instance, whose queries
 bypass the adapter, progress is unobservable and a saturated pool reads `up`) — saturation, not an
-outage, so `/ready` does not pull every saturated replica at once. Without `poolStats` that row
-cannot be read, so a pool connection timeout or an unanswered probe reports `degraded` (a pool
-connection timeout reported `down` before M101a: the database never answered either way).
-Caller-facing pool-timeout status mapping is M90f. A snapshot the callback returns in a malformed
-shape is dropped exactly like an absent one — a broken reading is never published as a number. A
-callback that throws, or one whose counters violate the documented shape (a negative count, or
-`idle` exceeding `total`, which counts idle + in use), is dropped the same way: capacity is omitted
-for that poll and the indicator's own lifecycle and reachability answer stands.
+outage, so `/ready` does not pull every saturated replica at once. **Since 0.13.0** a probe that
+timed out waiting for a pool client (node-postgres's `timeout exceeded when trying to connect`)
+counts as the same saturation evidence. pg-pool removes the timed-out waiter before it rejects, so
+with `connectionTimeoutMillis` under the 2-second probe bound the snapshot already reads
+`waiting: 0`. A new-connection handshake timeout does not count. Without `poolStats` that row cannot
+be read, so a pool connection timeout or an unanswered probe reports `degraded` (a pool connection
+timeout reported `down` before M101a: the database never answered either way). Caller-facing
+pool-timeout status mapping is M90f. A snapshot the callback returns in a malformed shape is dropped
+exactly like an absent one — a broken reading is never published as a number. A callback that
+throws, or one whose counters violate the documented shape (a negative count, or `idle` exceeding
+`total`, which counts idle + in use), is dropped the same way: capacity is omitted for that poll and
+the indicator's own lifecycle and reachability answer stands.
 
 **Since M95b** the payload also carries `reachable` whenever the adapter carries a liveness probe
 (the optional `IDatabaseAdapter.isHealthy?()`): `true` — the backend answered; `false` — `down`; a
@@ -2957,7 +2961,10 @@ rethrown unchanged.
 `0.11.0` X94 outage cells, each mapped by one rule: a server verdict that the statement did not run,
 or a refusal before anything was sent, is `DatabaseUnavailableError` (`503`, "the request was not
 applied"); a connection lost under an in-flight statement, with no verdict, is
-`DatabaseTimeoutError` (`504`, outcome unknown — a retried write must be idempotent).
+`DatabaseTimeoutError` (`504`, outcome unknown — a retried write must be idempotent). Since 0.13.0
+its message says so — "The database connection closed before the call completed; the outcome is
+unknown." — instead of the driver-call-bound sentence, which is kept for a bound that fired; the
+class, status and public detail are the same.
 
 | Driver        | Signal                                                                                                                                                                                               | Answer   |
 | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
@@ -5128,15 +5135,17 @@ The memory, messaging, and Redis transports retain the most recent 100 subscribe
   `decodeFrameData`, in `@setu-ts/common` because three packages need the identical shape). An
   `SseMessage` is already JSON-serializable and travels as its JSON encoding.
 - **Delivery is at-most-once** and inherits the transport's guarantees. Frames are not persisted or
-  replayed. On `'redis'` a SHORT partition buffers rather than drops: ioredis's default
-  `enableOfflineQueue: true` holds publishes issued while disconnected and flushes them on
-  reconnect, so frames arrive LATE (measured ~6 s) until the `maxRetriesPerRequest` budget (default
-  20, ~11 s) exhausts and the buffered commands reject with a `warn` per frame. A connection that
-  stays open while the server answers nothing (paused, or partitioned with no reset) triggers no
-  reconnect; its publish rejects after `commandTimeoutMs` (default 15 s, above that budget) rather
-  than never settling. A publish before `connect()` or after `close()` rejects rather than
-  resolving. Beyond `commandTimeoutMs`, ioredis defaults are not configurable through this plugin;
-  inject a `client`/`subscriber` pair to change them.
+  replayed. On `'redis'` a frame published while a connection is down is lost, never delivered late:
+  since 0.13.0 the publisher connection the plugin builds has no offline queue
+  (`enableOfflineQueue: false`, passed through `IRedisModule.create`'s options), so a publish while
+  it reconnects is refused at once (a `503`-class fault, one `warn` per frame in each consumer). A
+  peer whose subscriber has not yet re-subscribed misses frames too. A connection that stays open
+  while the server answers nothing (paused, or partitioned with no reset) triggers no reconnect; its
+  publish rejects after `commandTimeoutMs` (default 15 s) rather than never settling. A publish
+  before `connect()` or after `close()` rejects rather than resolving. An injected
+  `client`/`subscriber` pair keeps its own settings: create the publisher with
+  `enableOfflineQueue: false` (ioredis) or `disableOfflineQueue: true` (node-redis) for the same
+  behaviour.
 - **`RoomBroadcastOptions.except` is honored cluster-wide.** It names a live connection object,
   which means nothing in another process — but connection IDs come from `runtime.uuid()` and are
   therefore globally unique, so `RealtimeFrame.exceptId` carries the ID and every replica skips the
@@ -12961,6 +12970,14 @@ Since M70c the indicator composes three facts. `everResolved` is `false` until t
 provider read, so a backend that was never reached is `down`, not `up` (the X10-3 fix). `degraded`
 means a stale cache is being served. `isHealthy()` is the cached reachability probe (Consul
 `/v1/status/leader`, Kubernetes a `limit=1` EndpointSlice LIST).
+
+Since 0.13.0 a failing probe logs its reason through the application logger: one `warn` naming the
+cause when the failure starts (a Deno `UnknownIssuer` TLS rejection, an HTTP status), `debug` for
+identical repeats, and one `info` on recovery, under the source `service-discovery-plugin: <kind>`.
+`DiscoveryProvider.isHealthy?()` may reject with that reason instead of resolving `false`; the
+service counts a rejection as unreachable, and the Kubernetes provider rejects this way. A
+cold-resolve `DiscoveryUnavailableError` message now ends with the cause; its public `503` detail is
+unchanged.
 
 | Status | Meaning                                                                                                                                                                              |
 | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |

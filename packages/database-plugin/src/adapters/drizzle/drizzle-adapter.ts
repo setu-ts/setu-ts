@@ -38,12 +38,17 @@ import {
 } from '@setu-ts/common';
 import {
   DATABASE_POOL_CAPACITY,
+  DATABASE_PROBE_ACQUIRE_TIMEOUT,
   DATABASE_QUERY_PROGRESS,
   isSaturated,
   PoolSaturatedProbeSkipped,
   readPoolCapacity,
 } from '../../health/database-capacity.ts';
-import { isUnansweredConnect, isValueTypeRefusal } from '../../errors/classify.ts';
+import {
+  isPoolAcquireTimeout,
+  isUnansweredConnect,
+  isValueTypeRefusal,
+} from '../../errors/classify.ts';
 import { scrubDriverError } from '../../errors/scrub.ts';
 import { renderDiagnosticName } from '../../errors/diagnostic-name.ts';
 import type { DataSource } from '../../repositories/base-repository.ts';
@@ -237,6 +242,8 @@ export class DrizzleAdapter implements IDatabaseAdapter {
    * bypass {@link #completedQueries}, so from then on progress is unobservable.
    */
   #nativeHandleIssued = false;
+  /** Whether the last reachability probe timed out waiting for a pool client (M139f V8-3). */
+  #probeAcquireTimedOut = false;
 
   private _db: DrizzleInstance | null = null;
   private _configuredDatabase: DrizzleDatabaseIdentity | null = null;
@@ -269,6 +276,7 @@ export class DrizzleAdapter implements IDatabaseAdapter {
       seams[DATABASE_POOL_CAPACITY] = poolStats;
       seams[DATABASE_QUERY_PROGRESS] = () =>
         this.#nativeHandleIssued ? null : this.#completedQueries;
+      seams[DATABASE_PROBE_ACQUIRE_TIMEOUT] = () => this.#probeAcquireTimedOut;
     }
     // The typed-query seam (M70j) is attached here rather than declared as a
     // computed-key method for the same TS9038 reason recorded on the capacity
@@ -426,6 +434,7 @@ export class DrizzleAdapter implements IDatabaseAdapter {
    * saturated pool (`up`, `reachable: 'unknown'`) from an unanswered probe.
    */
   async #probeWithRawQuery(): Promise<boolean> {
+    this.#probeAcquireTimedOut = false;
     const capacity = readPoolCapacity(this);
     if (capacity !== undefined && isSaturated(capacity)) {
       throw new PoolSaturatedProbeSkipped();
@@ -435,6 +444,7 @@ export class DrizzleAdapter implements IDatabaseAdapter {
       return true;
     } catch (error) {
       if (isUnansweredConnect(error)) {
+        this.#probeAcquireTimedOut = isPoolAcquireTimeout(error);
         throw error;
       }
       return false;

@@ -2010,5 +2010,6 @@ Every export and option is documented in
 
 Inbox parked rows and all six outbox reasons keep the indicator `up` and `/ready` at 200. Alert on
 inbox `data.parked` / `data.reasons` and outbox `data.reasons` (`oldest-pending-age`, `failed-rows`,
-`failed-scan-cap`, `blocked-key-cap`, `store-write-failing`, `relay-overlap`). Lifecycle and
-unreachable-store `down` arms remain.
+`failed-scan-cap`, `blocked-key-cap`, `store-write-failing`, `relay-overlap`). `/health` includes
+`data` only with `HealthPlugin({ details: true })`; the default body carries each check's `status`
+alone. Lifecycle and unreachable-store `down` arms remain.

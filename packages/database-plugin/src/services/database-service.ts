@@ -41,7 +41,7 @@ import {
   UnsupportedMigrationError,
   UnsupportedRawQueryError,
 } from '../errors.ts';
-import { classifyDriverError } from '../errors/classify.ts';
+import { classifyDriverError, isConnectionLostMidCall } from '../errors/classify.ts';
 import { refusalErrorOf } from '../errors/refusal.ts';
 import { scrubDriverError } from '../errors/scrub.ts';
 
@@ -101,6 +101,14 @@ function classifiedOrOriginal(
   error = scrubDriverError(error);
   if (kind === 'duplicate') return duplicateKeyError(error, entity);
   if (kind === 'timeout') {
+    // M139f V12-50: a connection lost under a statement is also outcome-unknown
+    // (504), but no bound fired, so the log must not say one did.
+    if (isConnectionLostMidCall(error, adapterType)) {
+      return new DatabaseTimeoutError(
+        'The database connection closed before the call completed; the outcome is unknown.',
+        { cause: error },
+      );
+    }
     return new DatabaseTimeoutError('The database did not answer within the driver call bound.', {
       cause: error,
     });

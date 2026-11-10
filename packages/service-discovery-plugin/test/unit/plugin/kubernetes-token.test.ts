@@ -10,6 +10,9 @@ describe('Kubernetes token startup guidance (V10-44)', () => {
         it(`file=${present}, explicit=${explicit}, logger=${logger}`, async () => {
           const stats: string[] = [];
           const warnings: string[] = [];
+          // M139f X10-3: the readiness probe's own failure line, told apart by
+          // the reporter's `source` field.
+          const probeWarnings: string[] = [];
           const fs = {
             stat: (path: string) => {
               stats.push(path);
@@ -28,7 +31,16 @@ describe('Kubernetes token startup guidance (V10-44)', () => {
               },
             },
             lifecycle: { onClose: () => {}, onBootstrap: () => {}, onStopping: () => {} },
-            ...(logger ? { logger: { warn: (message: string) => warnings.push(message) } } : {}),
+            ...(logger
+              ? {
+                  logger: {
+                    warn: (message: string, metadata?: Record<string, unknown>) =>
+                      (metadata?.['source'] === undefined ? warnings : probeWarnings).push(message),
+                    debug: () => {},
+                    info: () => {},
+                  },
+                }
+              : {}),
           } as unknown as IPluginContext;
           await ServiceDiscoveryPlugin({
             provider: 'kubernetes',
@@ -51,6 +63,13 @@ describe('Kubernetes token startup guidance (V10-44)', () => {
           await health?.();
           expect(stats).toHaveLength(explicit ? 0 : 1);
           expect(warnings).toHaveLength(!present && !explicit && logger ? 1 : 0);
+          // Without an explicit token the probe must read the file, which this
+          // fake file system cannot: it fails and says so once (M139f X10-3),
+          // never echoing the API server or a token.
+          expect(probeWarnings).toHaveLength(!explicit && logger ? 1 : 0);
+          for (const message of probeWarnings) {
+            expect(message).not.toContain('CANARY');
+          }
         });
       }
     }

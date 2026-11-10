@@ -46,6 +46,7 @@ import { BigtableAdapter } from '../adapters/bigtable/bigtable-adapter.ts';
 import type { IDatabaseAdapter } from '@setu-ts/common';
 import {
   isSaturated,
+  probeHitAcquireTimeout,
   QUERY_PROGRESS_UNOBSERVABLE,
   QueryProgressTracker,
   readPoolCapacity,
@@ -286,9 +287,13 @@ export function DatabasePlugin(options?: DatabasePluginOptions): IPlugin {
           const completed = readQueryProgress(adapter);
           progress.observe(completed, now);
           const current = readPoolCapacity(adapter);
+          // M139f V8-3: pg-pool drops a timed-out waiter before rejecting it,
+          // so with `connectionTimeoutMillis` under the probe bound `waiting`
+          // already reads 0; the probe's own acquire timeout is the evidence.
+          const saturated =
+            (current !== undefined && isSaturated(current)) || probeHitAcquireTimeout(adapter);
           if (
-            current !== undefined &&
-            isSaturated(current) &&
+            saturated &&
             (completed === QUERY_PROGRESS_UNOBSERVABLE || progress.progressedWithin(now))
           ) {
             return { status: 'up', data: { ...data, reachable: 'unknown' } };

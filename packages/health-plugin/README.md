@@ -148,7 +148,8 @@ remains 200.
 
 Use `degraded` when this replica should stop taking traffic. A shared problem that does not stop
 request serving belongs in the indicator's `data`: draining every replica would remove healthy
-serving capacity. Alert on those data fields.
+serving capacity. Alert on those data fields, which `/health` includes only with `details: true`
+([Options](#options)).
 
 ## Readiness membership
 

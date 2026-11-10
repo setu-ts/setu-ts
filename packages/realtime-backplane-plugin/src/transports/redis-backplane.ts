@@ -5,7 +5,13 @@
  * @since 0.2.0
  */
 
-import { dispatchRealtimeFrame, toBackendFault, watchConnection } from '@setu-ts/common';
+import {
+  BackendUnavailableError,
+  dispatchRealtimeFrame,
+  toBackendFault,
+  watchConnection,
+  withDeadline,
+} from '@setu-ts/common';
 import type { ConnectionWatch } from '@setu-ts/common';
 import type {
   IRealtimeBackplane,
@@ -229,7 +235,12 @@ export class RedisBackplane implements IRealtimeBackplane {
       owned = true;
       const clientOptions =
         this.#commandTimeoutMs === 0 ? {} : { commandTimeout: this.#commandTimeoutMs };
-      publisher = module.create(url, clientOptions);
+      // M139f X3-3: no offline queue on the publisher, so a frame published
+      // while disconnected is refused at once (and warned about by the
+      // consumer) instead of being held and delivered seconds late — or lost
+      // anyway to the reconnect race. The subscriber keeps the default: it must
+      // queue SUBSCRIBE until ready, and ioredis resubscribes it on reconnect.
+      publisher = module.create(url, { ...clientOptions, enableOfflineQueue: false });
       watches.push(watchConnection(publisher, reporter));
       try {
         subscriber = module.create(url, clientOptions);
@@ -255,6 +266,9 @@ export class RedisBackplane implements IRealtimeBackplane {
     subscriber.on('message', listener);
     try {
       await subscriber.subscribe(this.#topic);
+      // A publisher without an offline queue refuses every command until it is
+      // ready, so the pair is not handed out before then.
+      if (owned) await waitForReady(publisher, this.#commandTimeoutMs);
     } catch (error) {
       subscriber.off('message', listener);
       // Detached only after the owned connections are discarded, as close()
@@ -518,4 +532,48 @@ export class RedisBackplane implements IRealtimeBackplane {
     // M98l: counted only after the parse, shape and own-origin filters.
     realtimeObserverOf(this)?.observe('backplane-receive', delivered);
   }
+}
+
+/** The ioredis statuses of a connection that is on its way to `ready`. */
+const CONNECTING_STATUSES: ReadonlySet<string> = new Set(['connecting', 'connect', 'reconnecting']);
+
+/**
+ * Waits for an owned publisher, created without an offline queue, to reach
+ * `ready` (M139f X3-3).
+ *
+ * Only a client that is on its way to `ready` — ioredis's `connecting`,
+ * `connect` or `reconnecting` — is waited on, for its first `'ready'` event,
+ * bounded by `timeoutMs` (`0` is unbounded, as for `commandTimeoutMs`). Any
+ * other status resolves at once: `ready`; no `status` at all (a custom
+ * module's client cannot be observed); `wait`, which never becomes ready
+ * unless something calls `connect()`; and a closed client, whose publish then
+ * fails on its own.
+ *
+ * @param client - The owned publisher
+ * @param timeoutMs - The bound, in milliseconds
+ * @returns Resolves once the client is ready
+ * @throws {BackendUnavailableError} (as a rejection) when the bound passes first
+ */
+function waitForReady(client: IRedisBackplaneClient, timeoutMs: number): Promise<void> {
+  if (client.status === undefined || !CONNECTING_STATUSES.has(client.status)) {
+    return Promise.resolve();
+  }
+  return withDeadline(
+    (signal) =>
+      new Promise<void>((resolve) => {
+        const onReady = (): void => {
+          client.off('ready', onReady);
+          resolve();
+        };
+        client.on('ready', onReady);
+        signal.addEventListener('abort', () => client.off('ready', onReady), { once: true });
+      }),
+    {
+      timeoutMs,
+      onTimeout: () =>
+        new BackendUnavailableError('realtime-backplane-plugin: redis transport', {
+          cause: new Error(`the publisher was not ready within ${timeoutMs} ms`),
+        }),
+    },
+  );
 }
