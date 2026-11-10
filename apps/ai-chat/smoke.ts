@@ -673,6 +673,7 @@ describe('AI SDK recipes through Setu (Node)', () => {
                 return memory.reserve(key, window, amount, limit, expiry);
               },
               adjust: (...args) => memory.adjust(...args),
+              read: (...args) => memory.read(...args),
             },
           });
           const abort = new AbortController();
