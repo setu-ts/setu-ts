@@ -789,7 +789,7 @@ here.
   and data contracts with a missing half: agent-runs refuses without a transactional store,
   5,000-record `replaceSource`, pgvector index-shape verify, `quota.usage`, tenant repositories in a
   unit of work, mail attachments; V12-4, V12-9, V12-10, V12-36, V12-20, V12-21; ships in `0.13.0`) —
-  complete (PR pending).
+  complete (PR #578).
 - **Next milestone** — the remaining M139 letters.
 
 ## Verification (run before declaring any work done)
