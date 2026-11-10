@@ -153,7 +153,7 @@ the benchmark's own `setu.mjs`/`trailers.mjs`. Versions: Node 24.22.1, Bun 1.4.4
   false; a body over `maxBodyBytes` on a unary call still 413s; aborting the raw request's signal
   aborts `transport.signal` on BOTH paths and not the dispatched request's). `connect-real-import`
   proves a handed signal cancels a real Connect call through both entry points. `grpc-plugin`
-  `grpc-service.test.ts` (`streamsRequest` per kind) and `connect-router-builder.test.ts`
+  `grpc-http2-service.test.ts` (`streamsRequest` per kind) and `connect-router-builder.test.ts`
   (`readMaxBytes` reaches the router, default and configured).
 
 ### 3.3 The trailers seam and `IGrpcService`
@@ -201,9 +201,9 @@ the benchmark's own `setu.mjs`/`trailers.mjs`. Versions: Node 24.22.1, Bun 1.4.4
   `IResponse` implementor still satisfies the interfaces). `kernel` `response.test.ts`
   (`stream(body, { trailers })` → snapshot carries the same promise; plain `stream(body)` → no
   `trailers` key). `grpc-dispatch-streaming.test.ts` (transport bit true/false reaches `refuses` and
-  `handleRpc`; legacy implementor). grpc-plugin `native-grpc-reply.test.ts`, `grpc-service.test.ts`
-  (both entry points under a non-default config: `basePath: '/rpc'`, `readMaxBytes: 1024`, identical
-  responses), `grpc-binary-refusal.test.ts`.
+  `handleRpc`; legacy implementor). grpc-plugin `grpc-http2-service.test.ts` (both entry points
+  under a non-default config: `basePath: '/rpc'`, `readMaxBytes: 1024`, identical responses),
+  `grpc-binary-refusal.test.ts`.
 
 ### 3.4 `RuntimePlugin({ http2 })` — the listener
 
@@ -380,10 +380,90 @@ The TLS mode imports `node:http2` the same way.
 - **Test home:** `grpc-dispatch-streaming.test.ts` (an `RpcCall` reaches `handleRpc` with the
   middleware-edited header, bytes for unary and the unread stream for a streaming procedure; each
   `RpcReply` body kind is written correctly; a refusal and a legacy `handleRequest` reply still
-  answer). grpc-plugin `rpc-dispatcher.test.ts`, `grpc-service.test.ts` (both entry points under
-  `basePath: '/rpc'`, identical status, headers and body), `native-grpc-reply.test.ts`,
+  answer). grpc-plugin `rpc-dispatcher.test.ts`, `grpc-http2-service.test.ts` (both entry points
+  under `basePath: '/rpc'`, identical status, headers and body), `rpc-call.test.ts`,
   `connect-loader.test.ts`, `connect-real-import.test.ts` (a real unary, server-streaming and
   client-streaming call through the universal path).
+
+### 3.12 The calling side: a gRPC client owned by the plugin (2026-11-10)
+
+- **Problem:** `grpc-plugin` only served. A member calling another built a raw Connect client by
+  hand (`apps/grpc-workspace/apps/orders/src/clients/billing.client.ts`), so every application
+  re-implemented connection reuse (the example opened a session per request until `4fcd7b5d0`),
+  discovery lookup on every call, the deadline, session shutdown and trace propagation, and the
+  framework could not change the client underneath. The maintainer's direction (2026-11-10): the
+  plugin serves and calls, and ships in M139b.
+- **Decision — contract (`common/services/grpc.ts`):**
+  - `GrpcClientOptions { basePath?, protocol?: 'connect' | 'grpc' | 'grpc-web', httpVersion?: '2' | '1.1', timeoutMs? }`.
+  - `IGrpcService.client?(definition: GrpcServiceDefinition, target: string, options?: GrpcClientOptions): unknown`
+    — optional, so an implementor written before it still conforms. `unknown` because `common` names
+    no Connect type; the plugin's typed helper narrows it.
+- **Decision — plugin surface (`grpc-plugin`):**
+  - `grpcClient(services, definition, target, options?)` returns Connect's `Client<TDef>`: it
+    resolves `IGrpcService` under `CAPABILITIES.GRPC` and calls `client()`. A registry without
+    `client` (another implementor) → `TypeError` naming the missing member.
+  - `GrpcPluginOptions.serve` (default `true`). `false` registers the capability for calling only:
+    `claims()` is `false` for every request, no dispatch map, no health or reflection service, so a
+    REST member pays nothing per request for a gRPC mount it does not have.
+  - `GrpcPluginOptions.clients: Record<target, GrpcClientOptions>` — per-target defaults, so the CLI
+    can write billing's `basePath` into orders' config and the call site names only the target.
+    Per-call `options` override the per-target entry, which overrides the defaults.
+  - Validated at `GrpcPlugin()`: `basePath` empty or starting with `/` and not ending with `/`;
+    `protocol` and `httpVersion` in their sets; `timeoutMs` an integer 1…2 147 483 647. A bad value
+    → `TypeError` naming the option and target. The same validation runs for per-call options.
+- **Decision — defaults:** `protocol: 'connect'`, `httpVersion: '2'`, binary format,
+  `timeoutMs: 5000`, `basePath: ''`. Connect over HTTP/2 is the measured cheapest path through a
+  Connect server (2026-11-10: native gRPC from grpc-js cost billing 183 µs against 67 µs); a
+  deadline is bounded by default because an unbounded call is the M101a "calls that hang" defect. A
+  per-call `{ timeoutMs }` (Connect's call option) still overrides.
+- **Decision — target and instance choice:** `target` is an absolute `http(s)://` URL (fixed origin)
+  or a logical service name resolved through `IServiceDiscovery` on every call (`pick(target)`), so
+  load balancing and ejection work per call. A name with no discovery capability → `TypeError` at
+  `client()`. `pick` returning `null` → the call rejects with
+  `ConnectError(Code.Unavailable, 'no instance of "<target>" is available')`. After each call the
+  client reports to discovery: `failure` when the call failed with `Unavailable` (connection
+  refused, reset, GOAWAY — the instance's fault), `success` otherwise, including application errors
+  such as `InvalidArgument` (the instance answered).
+- **Decision — transport and connections:** one delegating Connect `Transport` per `client()` call;
+  per origin a cached connect-node transport (`createConnectTransport` / `createGrpcTransport` /
+  `createGrpcWebTransport`) sharing one `Http2SessionManager` per origin for HTTP/2. Client objects
+  are cached per (definition, target, effective options) so `grpcClient()` per request costs a map
+  lookup. Origins are bounded at 64 per plugin; the least recently used origin's session is aborted
+  when a 65th arrives (instances churn under discovery).
+- **Decision — loading:** `@connectrpc/connect-node` is a new optional peer, imported lazily on the
+  first call (a serving-only member never loads it), through the existing loader with a literal
+  awaited `import()` in its own `try` (M113d). Missing → the call rejects with
+  `GrpcRuntimeLoadError` naming `npm install @connectrpc/connect-node`. Workers have no
+  connect-node; a Workers caller gets that error — calling over service bindings is out of scope
+  (§9).
+- **Decision — trace propagation:** when `CAPABILITIES.TELEMETRY` resolves to a service with
+  `activeSpanContext`, an interceptor sets `traceparent` from it with `contextToTraceparent`, unless
+  the call already carries one.
+- **Decision — lifecycle:** the plugin's `onClose` aborts every session; a call after close rejects
+  with `ConnectError(Code.Unavailable, 'the gRPC client is closed')` and opens nothing.
+- **Decision — CLI:** the transport module of a member whose `dependsOn` names an `rpc: "grpc"`
+  member renders `GrpcPlugin({ serve: false, clients: { billing: { basePath: '/grpc' } } })` (a gRPC
+  member that also calls gets `GrpcPlugin({ basePath: '/grpc', clients: … })`). The planner
+  re-renders every member after `setu workspace rpc`, `generate app` and `setu sync`, so a target
+  switching style updates its callers.
+- **Decision — example:** orders registers `GrpcPlugin({ serve: false, clients })` through its
+  transport module; `src/clients/billing.client.ts` and the per-URL map go; `createOrders` takes
+  `grpcClient(services, BillingService, 'billing')`. The app's own error mapping (InvalidArgument →
+  400, Unavailable/DeadlineExceeded → 503) stays: it is the workspace's contract, not the plugin's.
+  `apps/grpc`'s `echo.client.ts` is the smoke's outside caller, not a member, and is unchanged.
+- **Also (dead surface found in verification):** `RpcReply.streaming` is set by every producer and
+  read by nothing — the kernel branches on the body's type. It is removed before release (it is new
+  in 0.13.0).
+- **Test home:** grpc-plugin `grpc-client.test.ts` (option merge and validation; target URL vs name;
+  `pick` per call and `report` per outcome; null pick → `Unavailable`; cache hit per key; origin
+  bound evicts and aborts the oldest; `traceparent` set, kept when present, absent without
+  telemetry; close aborts sessions and refuses later calls; missing connect-node → load error);
+  `grpc-plugin.test.ts` (`serve: false` claims nothing and registers no services; option
+  validation); `connect-real-import.test.ts` (the real connect-node load, a unary and a
+  server-streaming call through `grpcClient` against a real `GrpcPlugin` over h2c, discovery
+  ejection after a refused instance); CLI `transport-module.test.ts` and the workspace e2e (orders
+  boots and quotes through the plugin client); the example's own tests and
+  `test/grpc-workspace-example.test.ts`.
 
 ## 4. Exported surface — every symbol names its consumer
 
@@ -392,22 +472,27 @@ optional, so an implementation with one parameter still conforms; `refuses`'s ne
 likewise). Behavior changes (RPC replies stream; a streamed request is bounded by `readMaxBytes`,
 not `maxBodyBytes`) ship in minor `0.13.0` with M139g, under "Changed".
 
-| Exported symbol                             | Kind                   | Consumer / real code path that READS it                                                             |
-| ------------------------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------- |
-| `IRequest.responseTrailers`                 | member (`common`)      | kernel `#tryGrpc` builds `RpcTransport` from it; set by `fetch-mapping` for the Node adapter        |
-| `StreamOptions`                             | type (`common`)        | `IResponse.stream`'s parameter; written by kernel `#sendRpcResponse`                                |
-| `IResponse.stream(body, options?)`          | member change          | kernel `ResponseBuilder`, testing `MockResponse`; called by `#sendRpcResponse`                      |
-| `ResponseSnapshot` streaming `trailers`     | member (`common`)      | Node adapter `#finishFetch` writes them with `outgoing.addTrailers` after the last chunk            |
-| `RpcTransport`                              | type (`common`)        | kernel → `IGrpcService.refuses` / `handleRpc`; grpc-plugin `rpc-dispatcher` branches on `.trailers` |
-| `RpcCall`                                   | type (`common`)        | kernel `#rpcCall` builds it; grpc-plugin's dispatch core reads every field                          |
-| `RpcReply`                                  | type (`common`)        | kernel `#sendRpcResponse` branches on `.body` and `.trailers`                                       |
-| `IGrpcService.handleRpc`                    | member (`common`)      | kernel `#tryGrpc`; `GrpcService.handleRequest` delegates to it                                      |
-| `IGrpcService.streamsRequest`               | member (`common`)      | kernel `#tryGrpc` request-body decision                                                             |
-| `IGrpcService.refuses(request, transport?)` | member change          | kernel `#tryGrpc`; `GrpcService.refuses` refuses native only when `!transport?.trailers`            |
-| `RuntimeOptions.http2`                      | option (`runtime`)     | `RuntimePlugin` → `HttpAdapterOptions.http2` → Node/Deno adapters; Bun adapter selection            |
-| `Http2TlsOptions`                           | type (`runtime`)       | `RuntimeOptions.http2`; Node `serverOptions`, Deno `serve` options                                  |
-| `HttpAdapterOptions.http2`                  | member (`runtime`)     | `NodeHttpAdapter.listen`, `DenoHttpAdapter.listen`                                                  |
-| `GrpcPluginOptions.readMaxBytes`            | option (`grpc-plugin`) | `connect-router-builder` → `createConnectRouter({ readMaxBytes })`                                  |
+| Exported symbol                             | Kind                     | Consumer / real code path that READS it                                                             |
+| ------------------------------------------- | ------------------------ | --------------------------------------------------------------------------------------------------- |
+| `IRequest.responseTrailers`                 | member (`common`)        | kernel `#tryGrpc` builds `RpcTransport` from it; set by `fetch-mapping` for the Node adapter        |
+| `StreamOptions`                             | type (`common`)          | `IResponse.stream`'s parameter; written by kernel `#sendRpcResponse`                                |
+| `IResponse.stream(body, options?)`          | member change            | kernel `ResponseBuilder`, testing `MockResponse`; called by `#sendRpcResponse`                      |
+| `ResponseSnapshot` streaming `trailers`     | member (`common`)        | Node adapter `#finishFetch` writes them with `outgoing.addTrailers` after the last chunk            |
+| `RpcTransport`                              | type (`common`)          | kernel → `IGrpcService.refuses` / `handleRpc`; grpc-plugin `rpc-dispatcher` branches on `.trailers` |
+| `RpcCall`                                   | type (`common`)          | kernel `#rpcCall` builds it; grpc-plugin's dispatch core reads every field                          |
+| `RpcReply`                                  | type (`common`)          | kernel `#sendRpcResponse` branches on `.body` and `.trailers`                                       |
+| `IGrpcService.handleRpc`                    | member (`common`)        | kernel `#tryGrpc`; `GrpcService.handleRequest` delegates to it                                      |
+| `IGrpcService.streamsRequest`               | member (`common`)        | kernel `#tryGrpc` request-body decision                                                             |
+| `IGrpcService.refuses(request, transport?)` | member change            | kernel `#tryGrpc`; `GrpcService.refuses` refuses native only when `!transport?.trailers`            |
+| `RuntimeOptions.http2`                      | option (`runtime`)       | `RuntimePlugin` → `HttpAdapterOptions.http2` → Node/Deno adapters; Bun adapter selection            |
+| `Http2TlsOptions`                           | type (`runtime`)         | `RuntimeOptions.http2`; Node `serverOptions`, Deno `serve` options                                  |
+| `HttpAdapterOptions.http2`                  | member (`runtime`)       | `NodeHttpAdapter.listen`, `DenoHttpAdapter.listen`                                                  |
+| `GrpcPluginOptions.readMaxBytes`            | option (`grpc-plugin`)   | `connect-router-builder` → `createConnectRouter({ readMaxBytes })`                                  |
+| `GrpcClientOptions`                         | type (`common`)          | `IGrpcService.client`, `GrpcPluginOptions.clients`; read by grpc-plugin's client merge              |
+| `IGrpcService.client`                       | member (`common`)        | grpc-plugin `grpcClient()`; implemented by `GrpcService.client`                                     |
+| `grpcClient`                                | function (`grpc-plugin`) | orders `createOrders` in the example; the CLI's generated call sites                                |
+| `GrpcPluginOptions.serve`                   | option (`grpc-plugin`)   | `GrpcService.claims`, plugin `register` (no dispatch map, health or reflection when `false`)        |
+| `GrpcPluginOptions.clients`                 | option (`grpc-plugin`)   | client option merge, per target                                                                     |
 
 Internal, not barrel-exported: `node-http2-listener.ts` (`createHttp2Listener`), `nativeGrpcReply`,
 the dispatch-map entry shape, the 10 s preface constant.
@@ -419,6 +504,12 @@ the dispatch-map entry shape, the 10 s preface constant.
 | `RuntimeOptions.http2: true`       | Node / Bun adapter; Deno; Workers         | Node, Bun: shared-port h2c + HTTP/1.1 listener. Deno: no change (already both). Workers: ignored, documented, tested                                               |
 | `RuntimeOptions.http2: {key,cert}` | Node / Bun adapter; Deno adapter; Workers | Node, Bun: TLS, ALPN `h2` + `http/1.1`. Deno: `Deno.serve({ cert, key })`. Workers: ignored. Empty `key` or `cert` → `TypeError` at `RuntimePlugin()` construction |
 | `GrpcPluginOptions.readMaxBytes`   | Connect router                            | Default 4 MiB; per message, and whole unary Connect body; an integer outside 1…`0xffffffff` → `TypeError` at `GrpcPlugin()` construction (Connect's own range)     |
+| `GrpcPluginOptions.serve`          | `GrpcService`, plugin `register`          | Default `true`. `false`: `claims()` false for every request; no dispatch map, health or reflection service; `client()` works. Non-boolean → `TypeError`            |
+| `GrpcPluginOptions.clients`        | client option merge                       | Per-target `GrpcClientOptions`; each validated at `GrpcPlugin()` as in §3.12                                                                                       |
+| `GrpcClientOptions.basePath`       | client transport `baseUrl`                | Default `''`; appended to the target's origin                                                                                                                      |
+| `GrpcClientOptions.protocol`       | client transport factory                  | Default `'connect'`; `'grpc'` → `createGrpcTransport`; `'grpc-web'` → `createGrpcWebTransport`                                                                     |
+| `GrpcClientOptions.httpVersion`    | client transport                          | Default `'2'` (shared `Http2SessionManager` per origin); `'1.1'` → no session manager                                                                              |
+| `GrpcClientOptions.timeoutMs`      | client transport `defaultTimeoutMs`       | Default `5000`; per-call `{ timeoutMs }` overrides                                                                                                                 |
 
 ## 5. Implementation files
 
@@ -447,6 +538,10 @@ the dispatch-map entry shape, the 10 s preface constant.
 | `packages/grpc-plugin/src/transports/native-grpc-reply.ts` (new)                                                           | universal response → `ReadableStream` + trailers promise                                                           |
 | `packages/grpc-plugin/src/transports/rpc-call.ts` (new)                                                                    | §3.11 conversions: `RpcCall` ↔ universal request, universal response → `RpcReply`, fetch edges for `handleRequest` |
 | `packages/grpc-plugin/src/services/grpc-service.ts`                                                                        | `handleRpc`, `streamsRequest`, `refuses(transport)`, `handleRequest` delegation                                    |
+| `packages/grpc-plugin/src/client/grpc-client.ts` (new)                                                                     | §3.12: option merge and validation, delegating transport, origin cache, trace interceptor, close                   |
+| `packages/grpc-plugin/src/client/grpc-client-helper.ts` (new)                                                              | §3.12: exported `grpcClient()` typed over Connect's `Client`                                                       |
+| `packages/cli/src/workspace/transport-module.ts` + planner                                                                 | §3.12: client-only `GrpcPlugin` for members that depend on a gRPC member                                           |
+| `apps/grpc-workspace/apps/orders/**`                                                                                       | §3.12: plugin client; `billing.client.ts` removed                                                                  |
 | `packages/grpc-plugin/src/plugin/grpc-plugin.ts`                                                                           | `readMaxBytes` validation                                                                                          |
 | `packages/grpc-plugin/package.json`                                                                                        | devDependency `@connectrpc/connect-node` (test client only; §16.3 approval asked in the PR)                        |
 | `apps/grpc-workspace/apps/billing/setu.config.ts`, `apps/orders/src/clients/billing.client.ts`, `apps/orders/package.json` | §3.7                                                                                                               |
@@ -455,31 +550,33 @@ the dispatch-map entry shape, the 10 s preface constant.
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
-| Test file                                                                               | src covered                                      | Key assertions (and the signature each call type-checks against)                                                                                                                                                                                      |
-| --------------------------------------------------------------------------------------- | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `common/test/unit/grpc-contract.test.ts` (extend)                                       | `services/grpc.ts`, `http.ts` (types)            | `expectTypeOf`: a 0.12-shape implementor (no `handleRpc`, `refuses(request)`, `stream(body)`) is assignable to `IGrpcService` / `IResponse`                                                                                                           |
-| `kernel/test/integration/grpc-dispatch-streaming.test.ts` (new)                         | `application.ts` `#tryGrpc`, `#sendRpcResponse`  | §3.1 deadlock-if-buffered stream; unary buffered; refusal; §3.2 four body cases + 413; §3.3 transport bit both ways; legacy `handleRequest`-only implementor                                                                                          |
-| `kernel/test/unit/response.test.ts` (extend)                                            | `context/response.ts`                            | `stream(body, { trailers })` → same promise on snapshot; `stream(body)` → no `trailers` key                                                                                                                                                           |
-| `testing/test/unit/mock-context.test.ts` (extend)                                       | `mock-context.ts`                                | trailers recorded                                                                                                                                                                                                                                     |
-| `runtime/test/unit/fetch-mapping.test.ts` (extend)                                      | `fetch-mapping.ts`                               | §3.5 scheme table; `responseTrailers` set only when the adapter says so                                                                                                                                                                               |
-| `runtime/test/unit/node-http2-listener.test.ts` (new)                                   | `node-http2-listener.ts`                         | §3.4 routing (split preface, first differing byte, exact 24), timeout, error before and after routing, close                                                                                                                                          |
-| `runtime/test/e2e/node-http2-listener-e2e.test.ts` (new)                                | `node-http-adapter.ts`, `node-http2-listener.ts` | both modes on real sockets: h1, h2c/h2, `fetch`, `ws` upgrade, stall closed, reset survives, trailers on the wire (raw `http2.connect` reads `trailers` event), V12-51 both paths                                                                     |
-| `runtime/test/unit/node-http-adapter.test.ts` (extend)                                  | `node-http-adapter.ts`                           | fake host receives `createServer`/`serverOptions` for TLS; trailers written only for h2 `outgoing` with `addTrailers`; rejected trailers promise errors the stream; `http2` unset never imports the listener module (spy on the injected loader seam) |
-| `runtime/test/unit/deno-http-adapter.test.ts` (extend) + Deno lane                      | `deno-http-adapter.ts`                           | `cert`/`key` reach the fake host; scheme; real `Deno.serve` TLS answers h2 and h1                                                                                                                                                                     |
-| `runtime/test/unit/bun-http-adapter.test.ts` (extend)                                   | `bun-http-adapter.ts`                            | scheme `'http'` on a lying request                                                                                                                                                                                                                    |
-| `runtime/test/unit/cf-http-adapter.test.ts` (extend)                                    | (Workers path)                                   | `http2` ignored                                                                                                                                                                                                                                       |
-| `runtime/test/unit/runtime-plugin.test.ts` (extend)                                     | `runtime-plugin.ts`                              | Bun + `http2` → Node adapter; validation `TypeError`s; option threaded                                                                                                                                                                                |
-| `grpc-plugin/test/unit/grpc-service.test.ts` (extend)                                   | `grpc-service.ts`                                | `streamsRequest` per kind; both entry points identical under non-default config                                                                                                                                                                       |
-| `grpc-plugin/test/unit/rpc-dispatcher.test.ts` (extend)                                 | `rpc-dispatcher.ts`                              | native + trailers → universal path; native without → refusal; Connect/gRPC-Web unchanged                                                                                                                                                              |
-| `grpc-plugin/test/unit/native-grpc-reply.test.ts` (new)                                 | `native-grpc-reply.ts`                           | chunks pass through; trailers resolve after the last chunk; empty trailer; iterator throw rejects                                                                                                                                                     |
-| `grpc-plugin/test/unit/rpc-call.test.ts` (new)                                          | `rpc-call.ts`                                    | body iterable per shape; signal only when handed; single reply gathered, chunks joined, no body → `null`; cancel returns the iterator; fetch edges round-trip                                                                                         |
-| `grpc-plugin/test/unit/connect-router-builder.test.ts` (extend)                         | `connect-router-builder.ts`                      | `readMaxBytes` default and configured reach the fake router; entries carry `kind`                                                                                                                                                                     |
-| `grpc-plugin/test/unit/connect-loader.test.ts` + `connect-real-import.test.ts` (extend) | `connect-loader.ts`, `connect-runtime.ts`        | adapter maps `universalServerRequestFromFetch`; real import resolves it                                                                                                                                                                               |
-| `grpc-plugin/test/unit/grpc-plugin.test.ts` (extend)                                    | `grpc-plugin.ts`                                 | `readMaxBytes` range validation                                                                                                                                                                                                                       |
-| `grpc-plugin/test/unit/grpc-binary-refusal.test.ts` (keep)                              | `grpc-binary-refusal.ts`                         | unchanged assertions                                                                                                                                                                                                                                  |
-| `grpc-plugin/test/e2e/grpc-native-h2-e2e.test.ts` (new)                                 | end to end                                       | §3.6 list                                                                                                                                                                                                                                             |
-| `grpc-plugin/test/e2e/grpc-streaming-e2e.test.ts` (extend)                              | end to end                                       | Connect server stream over HTTP/1.1: first message arrives before the second is produced                                                                                                                                                              |
-| example tests + `test/grpc-workspace-example.test.ts`                                   | `apps/grpc-workspace`                            | orders → billing over HTTP/2; 503 on billing down; gate declares the config diff                                                                                                                                                                      |
+| Test file                                                                               | src covered                                             | Key assertions (and the signature each call type-checks against)                                                                                                                                                                                      |
+| --------------------------------------------------------------------------------------- | ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `common/test/unit/grpc-contract.test.ts` (extend)                                       | `services/grpc.ts`, `http.ts` (types)                   | `expectTypeOf`: a 0.12-shape implementor (no `handleRpc`, `refuses(request)`, `stream(body)`) is assignable to `IGrpcService` / `IResponse`                                                                                                           |
+| `kernel/test/integration/grpc-dispatch-streaming.test.ts` (new)                         | `application.ts` `#tryGrpc`, `#sendRpcResponse`         | §3.1 deadlock-if-buffered stream; unary buffered; refusal; §3.2 four body cases + 413; §3.3 transport bit both ways; legacy `handleRequest`-only implementor                                                                                          |
+| `kernel/test/unit/response.test.ts` (extend)                                            | `context/response.ts`                                   | `stream(body, { trailers })` → same promise on snapshot; `stream(body)` → no `trailers` key                                                                                                                                                           |
+| `testing/test/unit/mock-context.test.ts` (extend)                                       | `mock-context.ts`                                       | trailers recorded                                                                                                                                                                                                                                     |
+| `runtime/test/unit/fetch-mapping.test.ts` (extend)                                      | `fetch-mapping.ts`                                      | §3.5 scheme table; `responseTrailers` set only when the adapter says so                                                                                                                                                                               |
+| `runtime/test/unit/node-http2-listener.test.ts` (new)                                   | `node-http2-listener.ts`                                | §3.4 routing (split preface, first differing byte, exact 24), timeout, error before and after routing, close                                                                                                                                          |
+| `runtime/test/e2e/node-http2-listener-e2e.test.ts` (new)                                | `node-http-adapter.ts`, `node-http2-listener.ts`        | both modes on real sockets: h1, h2c/h2, `fetch`, `ws` upgrade, stall closed, reset survives, trailers on the wire (raw `http2.connect` reads `trailers` event), V12-51 both paths                                                                     |
+| `runtime/test/unit/node-http-adapter.test.ts` (extend)                                  | `node-http-adapter.ts`                                  | fake host receives `createServer`/`serverOptions` for TLS; trailers written only for h2 `outgoing` with `addTrailers`; rejected trailers promise errors the stream; `http2` unset never imports the listener module (spy on the injected loader seam) |
+| `runtime/test/unit/deno-http-adapter.test.ts` (extend) + Deno lane                      | `deno-http-adapter.ts`                                  | `cert`/`key` reach the fake host; scheme; real `Deno.serve` TLS answers h2 and h1                                                                                                                                                                     |
+| `runtime/test/unit/bun-http-adapter.test.ts` (extend)                                   | `bun-http-adapter.ts`                                   | scheme `'http'` on a lying request                                                                                                                                                                                                                    |
+| `runtime/test/unit/cf-http-adapter.test.ts` (extend)                                    | (Workers path)                                          | `http2` ignored                                                                                                                                                                                                                                       |
+| `runtime/test/unit/runtime-plugin.test.ts` (extend)                                     | `runtime-plugin.ts`                                     | Bun + `http2` → Node adapter; validation `TypeError`s; option threaded                                                                                                                                                                                |
+| `grpc-plugin/test/unit/grpc-http2-service.test.ts` (new)                                | `grpc-service.ts`                                       | `streamsRequest` per kind; both entry points identical under non-default config                                                                                                                                                                       |
+| `grpc-plugin/test/unit/rpc-dispatcher.test.ts` (extend)                                 | `rpc-dispatcher.ts`                                     | native + trailers → universal path; native without → refusal; Connect/gRPC-Web unchanged                                                                                                                                                              |
+| `grpc-plugin/test/unit/grpc-http2-service.test.ts` (same file)                          | `native-grpc-reply.ts`                                  | chunks pass through; trailers resolve after the last chunk; empty trailer; iterator throw rejects                                                                                                                                                     |
+| `grpc-plugin/test/unit/rpc-call.test.ts` (new)                                          | `rpc-call.ts`                                           | body iterable per shape; signal only when handed; single reply gathered, chunks joined, no body → `null`; cancel returns the iterator; fetch edges round-trip                                                                                         |
+| `grpc-plugin/test/unit/connect-router-builder.test.ts` (extend)                         | `connect-router-builder.ts`                             | `readMaxBytes` default and configured reach the fake router; entries carry `kind`                                                                                                                                                                     |
+| `grpc-plugin/test/unit/connect-loader.test.ts` + `connect-real-import.test.ts` (extend) | `connect-loader.ts`, `connect-runtime.ts`               | adapter maps `universalServerRequestFromFetch`; real import resolves it                                                                                                                                                                               |
+| `grpc-plugin/test/unit/grpc-client.test.ts` (new)                                       | `client/grpc-client.ts`, `client/grpc-client-helper.ts` | §3.12 list: merge, validation, URL vs name, pick and report, null pick, cache, origin bound, traceparent, close, load error                                                                                                                           |
+| `cli/test/unit/transport-module.test.ts` (extend) + workspace e2e                       | `transport-module.ts`                                   | client-only `GrpcPlugin` rendered from `dependsOn`; orders boots and quotes through it                                                                                                                                                                |
+| `grpc-plugin/test/unit/grpc-plugin.test.ts` (extend)                                    | `grpc-plugin.ts`                                        | `readMaxBytes` range validation                                                                                                                                                                                                                       |
+| `grpc-plugin/test/unit/grpc-binary-refusal.test.ts` (keep)                              | `grpc-binary-refusal.ts`                                | unchanged assertions                                                                                                                                                                                                                                  |
+| `grpc-plugin/test/e2e/grpc-native-h2-e2e.test.ts` (new)                                 | end to end                                              | §3.6 list                                                                                                                                                                                                                                             |
+| `grpc-plugin/test/e2e/grpc-streaming-e2e.test.ts` (extend)                              | end to end                                              | Connect server stream over HTTP/1.1: first message arrives before the second is produced                                                                                                                                                              |
+| example tests + `test/grpc-workspace-example.test.ts`                                   | `apps/grpc-workspace`                                   | orders → billing over HTTP/2; 503 on billing down; gate declares the config diff                                                                                                                                                                      |
 
 Bun package suites are a recorded smoke (AI_GUIDELINES §4.5): the e2e listener test and
 `grpc-native-h2-e2e` are also run under Bun once, by hand, and recorded in the PR.
