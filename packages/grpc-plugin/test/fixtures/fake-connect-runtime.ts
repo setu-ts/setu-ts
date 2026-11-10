@@ -14,6 +14,7 @@
  */
 
 import type {
+  ClientTransportLike,
   ConnectRouterLike,
   ConnectRuntime,
   EnumDescriptorLike,
@@ -232,5 +233,24 @@ export function createFakeConnectRuntime(
       serializedFiles.push(file.proto.name);
       return new TextEncoder().encode(`fd:${file.proto.name}`);
     },
+
+    // The client side (§3.12): a client is the pair it was built from, and an
+    // `Unavailable` error is a `FakeUnavailableError`.
+    createClient(service: unknown, transport: ClientTransportLike): unknown {
+      return { service, transport };
+    },
+
+    unavailable(message: string): Error {
+      return new FakeUnavailableError(message);
+    },
+
+    isUnavailable(error: unknown): boolean {
+      return error instanceof FakeUnavailableError;
+    },
   };
+}
+
+/** The fake runtime's `Unavailable` error. */
+export class FakeUnavailableError extends Error {
+  readonly code = 14;
 }

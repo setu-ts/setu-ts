@@ -2138,7 +2138,6 @@ class Application implements IKernelApplication {
       status: response.status,
       headers: response.headers,
       body: response.body === null ? null : new Uint8Array(await response.arrayBuffer()),
-      streaming: false,
     };
   }
 

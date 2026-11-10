@@ -288,7 +288,7 @@ describe('dispatchRpc — M139b replies', () => {
       '',
       { trailers: true },
     );
-    expect(reply!.streaming).toBe(true);
+    expect(reply!.body).toBeInstanceOf(ReadableStream);
     expect(await responseFromReply(reply!).text()).toBe('handled:/pkg.Svc/Method');
     expect((await reply!.trailers!).get('grpc-status')).toBe('0');
   });
@@ -305,7 +305,7 @@ describe('dispatchRpc — M139b replies', () => {
     );
     expect(reply!.headers.get('grpc-status')).toBe('12');
     expect(reply!.body).toBeNull();
-    expect(reply!.streaming).toBe(false);
+    expect(reply!.body).not.toBeInstanceOf(ReadableStream);
   });
 
   it('marks a Connect reply streaming exactly when the procedure streams its response', async () => {
@@ -320,10 +320,10 @@ describe('dispatchRpc — M139b replies', () => {
       map,
       '',
     );
-    expect(unary!.streaming).toBe(false);
+    expect(unary!.body).not.toBeInstanceOf(ReadableStream);
     expect(unary!.body).toEqual(new TextEncoder().encode('handled:/pkg.Svc/Method'));
     expect(unary!.headers.get('x-handled')).toBe('yes');
-    expect(stream!.streaming).toBe(true);
+    expect(stream!.body).toBeInstanceOf(ReadableStream);
     expect(stream!.body).toBeInstanceOf(ReadableStream);
     expect(stream!.trailers).toBeUndefined();
   });
@@ -336,7 +336,7 @@ describe('dispatchRpc — M139b replies', () => {
     );
     expect(reply!.status).toBe(404);
     expect(await responseFromReply(reply!).text()).toBe('Not Found');
-    expect(reply!.streaming).toBe(false);
+    expect(reply!.body).not.toBeInstanceOf(ReadableStream);
   });
 });
 
@@ -414,7 +414,7 @@ describe('dispatchRpc — the universal request (M139b §3.11)', () => {
     );
     expect('signal' in seen[0]!).toBe(false);
     expect(reply!.body).toBeNull();
-    expect(reply!.streaming).toBe(false);
+    expect(reply!.body).not.toBeInstanceOf(ReadableStream);
   });
 
   it('matches on the call path, not on the URL', async () => {

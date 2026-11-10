@@ -63,7 +63,6 @@ export function nativeGrpcReply(universal: UniversalServerResponseLike): RpcRepl
     status: universal.status,
     headers: universal.header ?? new Headers(),
     body,
-    streaming: true,
     trailers,
   };
 }

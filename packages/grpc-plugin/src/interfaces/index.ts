@@ -4,6 +4,8 @@
  * @module
  */
 
+import type { GrpcClientOptions } from '@setu-ts/common';
+
 import type { ConnectRuntime } from './connect-runtime.ts';
 
 /**
@@ -79,6 +81,26 @@ export interface GrpcPluginOptions {
    * @since 0.13.0
    */
   readMaxBytes?: number;
+
+  /**
+   * Whether this plugin serves gRPC (M139b §3.12). Default `true`. `false`
+   * registers the capability for calling only: no request is claimed, and no
+   * procedure, health or reflection service is served, so a member that only
+   * calls others pays nothing per request. `services` must then be empty.
+   */
+  serve?: boolean;
+
+  /**
+   * Per-target client defaults (M139b §3.12), keyed by the `target` passed to
+   * `grpcClient()` or `IGrpcService.client()`: a service name or a URL.
+   * Per-call options override an entry; an entry overrides the defaults.
+   *
+   * @example
+   * ```typescript
+   * GrpcPlugin({ serve: false, clients: { billing: { basePath: '/grpc' } } });
+   * ```
+   */
+  clients?: Readonly<Record<string, GrpcClientOptions>>;
 }
 
 /**

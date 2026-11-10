@@ -13,11 +13,15 @@ import type {
   ILogger,
   IPlugin,
   IPluginContext,
+  IServiceDiscovery,
+  ITelemetryService,
 } from '@setu-ts/common';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import { GrpcService } from '../services/grpc-service.ts';
 import type { GrpcPluginOptions } from '../interfaces/index.ts';
 import { loadConnectModule } from '../transports/connect-loader.ts';
+import { GrpcClients, validateClientOptions } from '../client/grpc-client.ts';
+import { loadConnectNode } from '../client/connect-node-loader.ts';
 import { EmbeddedDescriptors } from '../descriptors/embedded-descriptors.ts';
 import { VERSION } from '../version.ts';
 
@@ -46,10 +50,24 @@ export function GrpcPlugin(options: GrpcPluginOptions = {}): IPlugin {
       `GrpcPlugin: readMaxBytes must be an integer from 1 to 4294967295, received ${String(readMaxBytes)}`,
     );
   }
+  if (options.serve !== undefined && typeof options.serve !== 'boolean') {
+    throw new TypeError(`GrpcPlugin: serve must be a boolean, received ${String(options.serve)}`);
+  }
+  if (options.serve === false && (options.services?.length ?? 0) > 0) {
+    throw new TypeError('GrpcPlugin: serve: false serves nothing, so services must be empty');
+  }
+  for (const [target, clientOptions] of Object.entries(options.clients ?? {})) {
+    validateClientOptions(clientOptions, `GrpcPlugin: clients[${JSON.stringify(target)}]`);
+  }
   return {
     name: PLUGIN_NAME,
     version: VERSION,
-    optionalDependencies: ['logger', CAPABILITIES.HEALTH],
+    optionalDependencies: [
+      'logger',
+      CAPABILITIES.HEALTH,
+      CAPABILITIES.SERVICE_DISCOVERY,
+      CAPABILITIES.TELEMETRY,
+    ],
     provides: [CAPABILITIES.GRPC],
     priority: PLUGIN_PRIORITY.NORMAL,
 
@@ -77,12 +95,30 @@ export function GrpcPlugin(options: GrpcPluginOptions = {}): IPlugin {
         }
       };
 
+      // Resolved per call, as the logger is: a capability registered later is
+      // still seen, and a broken registry degrades to "none" (§3.12).
+      const optional = <T extends object>(token: string): T | undefined => {
+        try {
+          return ctx.services.has(token) ? ctx.services.get<T>(token) : undefined;
+        } catch {
+          return undefined;
+        }
+      };
+      const clients = new GrpcClients({
+        runtime: connectRuntime,
+        loadNode: () => loadConnectNode(),
+        discovery: () => optional<IServiceDiscovery>(CAPABILITIES.SERVICE_DISCOVERY),
+        telemetry: () => optional<ITelemetryService>(CAPABILITIES.TELEMETRY),
+        targets: options.clients ?? {},
+      });
+
       const grpcService = new GrpcService({
         connectRuntime,
         embeddedDescriptors: EmbeddedDescriptors,
         options,
         healthService,
         resolveLogger,
+        clients,
       });
 
       ctx.services.register<IGrpcService>(CAPABILITIES.GRPC, grpcService);

@@ -188,4 +188,42 @@ export interface ConnectRuntime {
    * payload of a reflection `file_descriptor_response`.
    */
   serializeFileDescriptor(file: FileDescriptorLike): Uint8Array;
+
+  /**
+   * Builds a Connect client for a service over a transport (§3.12) —
+   * `@connectrpc/connect`'s `createClient`.
+   */
+  createClient(service: unknown, transport: ClientTransportLike): unknown;
+
+  /**
+   * A Connect `Unavailable` error, which is what a client caller already
+   * handles for an unreachable server (§3.12).
+   */
+  unavailable(message: string): Error;
+
+  /** Whether an error is a Connect error with code `Unavailable`. */
+  isUnavailable(error: unknown): boolean;
+}
+
+/**
+ * A Connect client `Transport`, seen structurally: what `createClient` calls
+ * for every unary and streaming method (§3.12).
+ */
+export interface ClientTransportLike {
+  unary(
+    method: unknown,
+    signal: AbortSignal | undefined,
+    timeoutMs: number | undefined,
+    header: HeadersInit | undefined,
+    input: unknown,
+    contextValues?: unknown,
+  ): Promise<unknown>;
+  stream(
+    method: unknown,
+    signal: AbortSignal | undefined,
+    timeoutMs: number | undefined,
+    header: HeadersInit | undefined,
+    input: AsyncIterable<unknown>,
+    contextValues?: unknown,
+  ): Promise<unknown>;
 }

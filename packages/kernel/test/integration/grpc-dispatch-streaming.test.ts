@@ -40,13 +40,12 @@ interface Seen {
 /** A reply with the given body: text, bytes, a stream, or none. */
 function reply(
   body: string | Uint8Array | ReadableStream<Uint8Array> | null,
-  options: { streaming?: boolean; headers?: HeadersInit; trailers?: Promise<Headers> } = {},
+  options: { headers?: HeadersInit; trailers?: Promise<Headers> } = {},
 ): RpcReply {
   return {
     status: 200,
     headers: new Headers(options.headers),
     body: typeof body === 'string' ? encoder.encode(body) : body,
-    streaming: options.streaming ?? body instanceof ReadableStream,
     ...(options.trailers === undefined ? {} : { trailers: options.trailers }),
   };
 }
@@ -256,7 +255,7 @@ describe('M139b §3.3 — the transport bit and trailers', () => {
     const trailers = Promise.resolve(new Headers({ 'grpc-status': '0' }));
     const grpc = grpcPlugin({
       handleRpc: (): Promise<RpcReply> =>
-        Promise.resolve(reply(new Response('payload').body, { streaming: false, trailers })),
+        Promise.resolve(reply(new Response('payload').body, { trailers })),
     });
     const adapter = capturingAdapter();
     await started(adapter, grpc);

@@ -698,6 +698,7 @@ export type {
 
 // gRPC contracts
 export type {
+  GrpcClientOptions,
   GrpcServiceDefinition,
   GrpcServingStatus,
   RpcCall,

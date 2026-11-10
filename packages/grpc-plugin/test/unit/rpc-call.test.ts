@@ -51,7 +51,7 @@ describe('rpc-call conversions', () => {
     const joined = await replyFromUniversal({ status: 200, body: chunks([1], [2, 3]) }, false);
     expect([...(joined.body as Uint8Array)]).toEqual([1, 2, 3]);
     const none = await replyFromUniversal({ status: 204, header: new Headers({ a: 'b' }) }, true);
-    expect(none).toMatchObject({ status: 204, body: null, streaming: false });
+    expect(none).toMatchObject({ status: 204, body: null });
     expect(none.headers.get('a')).toBe('b');
   });
 
@@ -65,7 +65,7 @@ describe('rpc-call conversions', () => {
       }
     }
     const reply = await replyFromUniversal({ status: 200, body: forever() }, true);
-    expect(reply.streaming).toBe(true);
+    expect(reply.body).toBeInstanceOf(ReadableStream);
     const reader = (reply.body as ReadableStream<Uint8Array>).getReader();
     expect([...(await reader.read()).value!]).toEqual([9]);
     await reader.cancel();

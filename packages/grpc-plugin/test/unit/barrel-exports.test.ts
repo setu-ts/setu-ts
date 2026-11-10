@@ -63,6 +63,7 @@ describe('grpc-plugin barrel', () => {
       'GrpcService',
       'GrpcUnavailableError',
       'adaptConnectModule',
+      'grpcClient',
     ]);
   });
 });

@@ -9,6 +9,7 @@
  */
 
 import type {
+  GrpcClientOptions,
   GrpcServiceDefinition,
   IGrpcService,
   IHealthService,
@@ -19,6 +20,7 @@ import type {
   RpcTransport,
 } from '@setu-ts/common';
 import type { ConnectRuntime } from '../interfaces/connect-runtime.ts';
+import type { GrpcClients } from '../client/grpc-client.ts';
 import type { GrpcPluginOptions } from '../interfaces/index.ts';
 import { DEFAULT_READ_MAX_BYTES } from '../interfaces/index.ts';
 import type { DispatchEntry } from '../transports/rpc-dispatcher.ts';
@@ -48,6 +50,11 @@ export interface GrpcServiceOptions {
    * log handler failures (X7-5).
    */
   readonly resolveLogger?: () => ILogger | undefined;
+  /**
+   * The plugin's clients (§3.12). Absent, `client()` throws: a service built
+   * without the plugin has no transports to call with.
+   */
+  readonly clients?: GrpcClients;
 }
 
 /**
@@ -77,6 +84,9 @@ export class GrpcService implements IGrpcService {
   readonly #options: GrpcPluginOptions;
   readonly #healthService: IHealthService | undefined;
   readonly #resolveLogger: (() => ILogger | undefined) | undefined;
+  readonly #clients: GrpcClients | undefined;
+  /** `GrpcPluginOptions.serve`: `false` serves nothing and claims nothing (§3.12). */
+  readonly #serve: boolean;
 
   #dispatchMap: Map<string, DispatchEntry> | null = null;
   #closed = false;
@@ -100,6 +110,8 @@ export class GrpcService implements IGrpcService {
     this.#options = init.options;
     this.#healthService = init.healthService;
     this.#resolveLogger = init.resolveLogger;
+    this.#clients = init.clients;
+    this.#serve = init.options.serve ?? true;
     this.#basePath = normalizeBasePath(init.options.basePath ?? DEFAULT_BASE_PATH);
 
     for (const entry of init.options.services ?? []) {
@@ -149,6 +161,7 @@ export class GrpcService implements IGrpcService {
    * @since 0.3.0
    */
   claims(request: Request): boolean {
+    if (!this.#serve) return false;
     const path = new URL(request.url).pathname;
     if (!isWithinBasePath(path, this.#basePath)) {
       return false;
@@ -305,7 +318,28 @@ export class GrpcService implements IGrpcService {
    * procedures answer `503` instead of rebuilding a router for an application
    * that is shutting down, while every other path falls through untouched.
    */
+  /**
+   * A client for a service another process serves (§3.12). See
+   * {@linkcode IGrpcService.client}.
+   *
+   * @param definition - The service descriptor
+   * @param target - An absolute URL, or a service name known to discovery
+   * @param options - Overrides for this client
+   * @returns The Connect client
+   * @throws {TypeError} When an option is out of range, the target is a name
+   *   with no discovery registered, or this service was built without clients
+   */
+  client(definition: GrpcServiceDefinition, target: string, options?: GrpcClientOptions): unknown {
+    if (this.#clients === undefined) {
+      throw new TypeError(
+        'GrpcService: this service was built without clients; register GrpcPlugin',
+      );
+    }
+    return this.#clients.client(definition, target, options);
+  }
+
   close(): void {
+    this.#clients?.close();
     if (this.#closed) {
       // Idempotent: a second call must not wipe the served-path set captured by
       // the first, which would silently turn every 503 into a fall-through.
@@ -339,6 +373,11 @@ export class GrpcService implements IGrpcService {
    * cached until the next `addService` invalidates it.
    */
   #buildDispatchMap(): Map<string, DispatchEntry> {
+    if (!this.#serve) {
+      // Calling only: no procedures, and no health or reflection service.
+      this.#dispatchMap ??= new Map();
+      return this.#dispatchMap;
+    }
     this.#dispatchMap ??= buildConnectRouter({
       connectRuntime: this.#connectRuntime,
       basePath: this.#basePath,

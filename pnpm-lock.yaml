@@ -2056,6 +2056,9 @@ importers:
       '@setu-ts/runtime':
         specifier: workspace:^
         version: link:../runtime
+      '@setu-ts/service-discovery-plugin':
+        specifier: workspace:^
+        version: link:../service-discovery-plugin
       '@types/node':
         specifier: ^24
         version: 24.19.2

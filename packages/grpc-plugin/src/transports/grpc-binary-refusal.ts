@@ -94,6 +94,5 @@ export function trailersOnlyUnimplementedReply(): RpcReply {
     status: 200,
     headers: new Headers(TRAILERS_ONLY_UNIMPLEMENTED_HEADERS),
     body: null,
-    streaming: false,
   };
 }

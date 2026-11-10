@@ -1,0 +1,322 @@
+/**
+ * The calling side of the plugin (M139b §3.12). Internal — reached through
+ * `GrpcService.client` and the exported `grpcClient()`.
+ *
+ * A client is Connect's own `createClient` over a delegating transport. Each
+ * call picks the target's origin — fixed for a URL target, through service
+ * discovery for a name — runs on a transport cached for that origin (one HTTP/2
+ * session per origin), and reports its outcome back to discovery.
+ *
+ * @module
+ */
+import { contextToTraceparent } from '@setu-ts/common';
+import type {
+  GrpcClientOptions,
+  GrpcServiceDefinition,
+  IServiceDiscovery,
+  ITelemetryService,
+  ServiceInstance,
+} from '@setu-ts/common';
+
+import type { ClientTransportLike, ConnectRuntime } from '../interfaces/connect-runtime.ts';
+import type { ConnectNodeModuleLike, Http2SessionLike } from './connect-node-loader.ts';
+
+/** Every option, resolved. */
+type ResolvedClientOptions = Required<GrpcClientOptions>;
+
+/** The defaults §3.12 settles on. */
+export const CLIENT_DEFAULTS: ResolvedClientOptions = {
+  basePath: '',
+  protocol: 'connect',
+  httpVersion: '2',
+  timeoutMs: 5000,
+};
+
+/** How many origins keep a transport (and session) before the oldest is closed. */
+export const MAX_CLIENT_ORIGINS = 64;
+
+const PROTOCOLS: ReadonlySet<string> = new Set(['connect', 'grpc', 'grpc-web']);
+const HTTP_VERSIONS: ReadonlySet<string> = new Set(['2', '1.1']);
+const SCHEME = /^[a-z][a-z0-9+.-]*:\/\//i;
+
+/**
+ * Checks client options, so a misconfiguration fails where it is written.
+ *
+ * @param options - The options
+ * @param where - Who passed them, for the message
+ * @throws {TypeError} Naming the first option out of range
+ */
+export function validateClientOptions(options: GrpcClientOptions, where: string): void {
+  const { basePath, protocol, httpVersion, timeoutMs } = options;
+  if (
+    basePath !== undefined &&
+    (typeof basePath !== 'string' ||
+      (basePath !== '' && (!basePath.startsWith('/') || basePath.endsWith('/'))))
+  ) {
+    throw new TypeError(
+      `${where}: basePath must be '' or start with '/' and not end with one, received ${JSON.stringify(basePath)}`,
+    );
+  }
+  if (protocol !== undefined && !PROTOCOLS.has(protocol)) {
+    throw new TypeError(
+      `${where}: protocol must be 'connect', 'grpc' or 'grpc-web', received ${JSON.stringify(protocol)}`,
+    );
+  }
+  if (httpVersion !== undefined && !HTTP_VERSIONS.has(httpVersion)) {
+    throw new TypeError(
+      `${where}: httpVersion must be '2' or '1.1', received ${JSON.stringify(httpVersion)}`,
+    );
+  }
+  if (
+    timeoutMs !== undefined &&
+    (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 2_147_483_647)
+  ) {
+    throw new TypeError(
+      `${where}: timeoutMs must be an integer from 1 to 2147483647, received ${String(timeoutMs)}`,
+    );
+  }
+  if (protocol === 'grpc' && httpVersion === '1.1') {
+    throw new TypeError(`${where}: protocol 'grpc' needs httpVersion '2'`);
+  }
+}
+
+/**
+ * A URL target's base, or `undefined` for a service name.
+ *
+ * @param target - The target
+ * @returns The origin plus any path, without a trailing slash
+ * @throws {TypeError} For an empty target or a URL that is not `http(s)`
+ */
+export function targetBase(target: string): string | undefined {
+  if (typeof target !== 'string' || target === '') {
+    throw new TypeError('grpc client: target must be a URL or a service name');
+  }
+  if (!SCHEME.test(target)) return undefined;
+  const url = new URL(target);
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new TypeError(`grpc client: target URL must be http or https, received ${url.protocol}`);
+  }
+  return `${url.origin}${url.pathname.replace(/\/+$/, '')}`;
+}
+
+/**
+ * An instance's origin, as the discovery plugin formats it (IPv6 bracketed).
+ *
+ * @param instance - The instance
+ * @returns `scheme://host:port`
+ */
+export function instanceOrigin(instance: ServiceInstance): string {
+  const scheme = instance.secure === true ? 'https' : 'http';
+  const host = instance.host.includes(':') ? `[${instance.host}]` : instance.host;
+  return `${scheme}://${host}:${instance.port}`;
+}
+
+/** What a client needs from the plugin. */
+export interface GrpcClientDeps {
+  /** The Connect runtime: `createClient` and its errors. */
+  readonly runtime: ConnectRuntime;
+  /** Loads `@connectrpc/connect-node` on the first call. */
+  readonly loadNode: () => Promise<ConnectNodeModuleLike>;
+  /** Service discovery, resolved when used, or `undefined` when none is registered. */
+  readonly discovery: () => IServiceDiscovery | undefined;
+  /** Telemetry, resolved when used, or `undefined` when none is registered. */
+  readonly telemetry: () => ITelemetryService | undefined;
+  /** Per-target defaults from `GrpcPluginOptions.clients`. */
+  readonly targets: Readonly<Record<string, GrpcClientOptions>>;
+}
+
+/** One cached transport and the session under it. */
+interface OriginEntry {
+  readonly transport: ClientTransportLike;
+  readonly session: Http2SessionLike | undefined;
+}
+
+/** A Connect interceptor, seen structurally. */
+type Interceptor = (
+  next: (request: { readonly header: Headers }) => Promise<unknown>,
+) => (request: { readonly header: Headers }) => Promise<unknown>;
+
+/** Every client of one plugin instance, their transports and their sessions. */
+export class GrpcClients {
+  readonly #deps: GrpcClientDeps;
+  readonly #clients = new WeakMap<object, Map<string, unknown>>();
+  readonly #origins = new Map<string, OriginEntry>();
+  readonly #trace: Interceptor;
+  #node: Promise<ConnectNodeModuleLike> | undefined;
+  #closed = false;
+
+  constructor(deps: GrpcClientDeps) {
+    this.#deps = deps;
+    this.#trace = (next) => (request) => {
+      if (!request.header.has('traceparent')) {
+        const value = this.#traceparent();
+        if (value !== null) request.header.set('traceparent', value);
+      }
+      return next(request);
+    };
+  }
+
+  /** How many origins hold a transport; for tests and the bound. */
+  get originCount(): number {
+    return this.#origins.size;
+  }
+
+  /**
+   * The client for a service at a target, cached per options.
+   *
+   * @param definition - The service descriptor
+   * @param target - A URL or a service name
+   * @param options - Per-client overrides
+   * @returns The Connect client
+   */
+  client(
+    definition: GrpcServiceDefinition,
+    target: string,
+    options: GrpcClientOptions = {},
+  ): unknown {
+    validateClientOptions(options, 'grpc client');
+    const base = targetBase(target);
+    if (base === undefined && this.#deps.discovery() === undefined) {
+      throw new TypeError(
+        `grpc client: "${target}" is a service name, but no service discovery is registered; register ServiceDiscoveryPlugin or pass a URL`,
+      );
+    }
+    const resolved: ResolvedClientOptions = {
+      ...CLIENT_DEFAULTS,
+      ...this.#deps.targets[target],
+      ...options,
+    };
+    validateClientOptions(resolved, 'grpc client');
+    const key = `${target}\u0000${resolved.basePath}\u0000${resolved.protocol}\u0000${resolved.httpVersion}\u0000${resolved.timeoutMs}`;
+    let byKey = this.#clients.get(definition);
+    if (byKey === undefined) {
+      byKey = new Map();
+      this.#clients.set(definition, byKey);
+    }
+    const cached = byKey.get(key);
+    if (cached !== undefined) return cached;
+    const created = this.#deps.runtime.createClient(
+      definition,
+      this.#delegate(target, base, resolved),
+    );
+    byKey.set(key, created);
+    return created;
+  }
+
+  /** Closes every session; later calls reject as `Unavailable`. */
+  close(): void {
+    this.#closed = true;
+    for (const entry of this.#origins.values()) entry.session?.abort();
+    this.#origins.clear();
+  }
+
+  #delegate(
+    target: string,
+    base: string | undefined,
+    options: ResolvedClientOptions,
+  ): ClientTransportLike {
+    return {
+      unary: (method, signal, timeoutMs, header, input, contextValues) =>
+        this.#call(target, base, options, (transport) =>
+          transport.unary(method, signal, timeoutMs, header, input, contextValues),
+        ),
+      stream: (method, signal, timeoutMs, header, input, contextValues) =>
+        this.#call(target, base, options, (transport) =>
+          transport.stream(method, signal, timeoutMs, header, input, contextValues),
+        ),
+    };
+  }
+
+  async #call(
+    target: string,
+    base: string | undefined,
+    options: ResolvedClientOptions,
+    run: (transport: ClientTransportLike) => Promise<unknown>,
+  ): Promise<unknown> {
+    const { runtime } = this.#deps;
+    if (this.#closed) throw runtime.unavailable('the gRPC client is closed');
+    let origin = base;
+    let instance: ServiceInstance | undefined;
+    let discovery: IServiceDiscovery | undefined;
+    if (origin === undefined) {
+      discovery = this.#deps.discovery();
+      if (discovery === undefined) {
+        throw runtime.unavailable(`no service discovery to resolve "${target}"`);
+      }
+      instance = (await discovery.pick(target)) ?? undefined;
+      if (instance === undefined) {
+        throw runtime.unavailable(`no instance of "${target}" is available`);
+      }
+      origin = instanceOrigin(instance);
+    }
+    const transport = await this.#transport(`${origin}${options.basePath}`, options);
+    try {
+      const result = await run(transport);
+      this.#report(discovery, instance, 'success');
+      return result;
+    } catch (error) {
+      this.#report(discovery, instance, runtime.isUnavailable(error) ? 'failure' : 'success');
+      throw error;
+    }
+  }
+
+  /** Reports an outcome; a failing report never changes the call's. */
+  #report(
+    discovery: IServiceDiscovery | undefined,
+    instance: ServiceInstance | undefined,
+    outcome: 'success' | 'failure',
+  ): void {
+    if (discovery === undefined || instance === undefined) return;
+    try {
+      discovery.report(instance, outcome);
+    } catch {
+      // Discovery's bookkeeping is advisory; the call already has its answer.
+    }
+  }
+
+  async #transport(url: string, options: ResolvedClientOptions): Promise<ClientTransportLike> {
+    const node = await (this.#node ??= this.#deps.loadNode());
+    if (this.#closed) throw this.#deps.runtime.unavailable('the gRPC client is closed');
+    const key = `${options.protocol}|${options.httpVersion}|${options.timeoutMs}|${url}`;
+    const hit = this.#origins.get(key);
+    if (hit !== undefined) {
+      // Least recently used last out: move a hit to the end.
+      this.#origins.delete(key);
+      this.#origins.set(key, hit);
+      return hit.transport;
+    }
+    const session = options.httpVersion === '2' ? new node.Http2SessionManager(url) : undefined;
+    const transportOptions: Record<string, unknown> = {
+      baseUrl: url,
+      httpVersion: options.httpVersion,
+      useBinaryFormat: true,
+      defaultTimeoutMs: options.timeoutMs,
+      interceptors: [this.#trace],
+      ...(session === undefined ? {} : { sessionManager: session }),
+    };
+    const transport =
+      options.protocol === 'grpc'
+        ? node.createGrpcTransport(transportOptions)
+        : options.protocol === 'grpc-web'
+          ? node.createGrpcWebTransport(transportOptions)
+          : node.createConnectTransport(transportOptions);
+    this.#origins.set(key, { transport, session });
+    if (this.#origins.size > MAX_CLIENT_ORIGINS) {
+      const [oldestKey, oldest] = this.#origins.entries().next().value as [string, OriginEntry];
+      this.#origins.delete(oldestKey);
+      oldest.session?.abort();
+    }
+    return transport;
+  }
+
+  /** The active span as a `traceparent`, or `null` when there is none. */
+  #traceparent(): string | null {
+    try {
+      const context = this.#deps.telemetry()?.activeSpanContext?.();
+      return context === undefined ? null : contextToTraceparent(context);
+    } catch {
+      // Telemetry must not fail a call it only annotates.
+      return null;
+    }
+  }
+}

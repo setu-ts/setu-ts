@@ -133,7 +133,7 @@ describe('Connect real import', { skip: !available }, () => {
       '',
     );
     expect(reply!.status).toBe(200);
-    expect(reply!.streaming).toBe(false);
+    expect(reply!.body).not.toBeInstanceOf(ReadableStream);
     expect(reply!.body).toBeInstanceOf(Uint8Array);
     // Real Protobuf-ES JSON encoding renders the enum by name.
     expect(JSON.parse(new TextDecoder().decode(reply!.body as Uint8Array))).toEqual({
@@ -154,7 +154,7 @@ describe('Connect real import', { skip: !available }, () => {
       '',
     );
     expect(reply!.status).toBe(200);
-    expect(reply!.streaming).toBe(true);
+    expect(reply!.body).toBeInstanceOf(ReadableStream);
     const text = new TextDecoder().decode(
       new Uint8Array(await new Response(reply!.body as ReadableStream<Uint8Array>).arrayBuffer()),
     );

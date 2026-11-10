@@ -86,12 +86,12 @@ export async function replyFromUniversal(
 ): Promise<RpcReply> {
   const headers = universal.header ?? new Headers();
   if (universal.body === undefined) {
-    return { status: universal.status, headers, body: null, streaming: false };
+    return { status: universal.status, headers, body: null };
   }
   if (streaming) {
-    return { status: universal.status, headers, body: iterableStream(universal.body), streaming };
+    return { status: universal.status, headers, body: iterableStream(universal.body) };
   }
-  return { status: universal.status, headers, body: await gather(universal.body), streaming };
+  return { status: universal.status, headers, body: await gather(universal.body) };
 }
 
 async function gather(body: AsyncIterable<Uint8Array>): Promise<Uint8Array> {
@@ -148,7 +148,6 @@ export function textReply(status: number, text: string): RpcReply {
     status,
     headers: new Headers({ 'content-type': 'text/plain;charset=UTF-8' }),
     body: new TextEncoder().encode(text),
-    streaming: false,
   };
 }
 

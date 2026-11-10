@@ -22,6 +22,7 @@
 import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 import { GrpcDescriptorError, GrpcRuntimeLoadError } from '../errors/grpc-errors.ts';
 import type {
+  ClientTransportLike,
   ConnectRouterLike,
   ConnectRuntime,
   FileDescriptorLike,
@@ -56,6 +57,12 @@ const INSTALL_COMMANDS: Record<keyof typeof SPECIFIERS, string> = {
 /** Structural shape of `@connectrpc/connect`. */
 export interface ConnectCoreModuleLike {
   createConnectRouter(options?: Record<string, unknown>): ConnectRouterLike;
+  /** `createClient(service, transport)` (§3.12). */
+  createClient(service: unknown, transport: ClientTransportLike): unknown;
+  /** The `ConnectError` class. */
+  ConnectError: new (message: string, code: number) => Error & { readonly code: number };
+  /** The `Code` enum; only `Unavailable` is read. */
+  Code: { readonly Unavailable: number };
 }
 
 /** Structural shape of `@bufbuild/protobuf`. */
@@ -139,6 +146,15 @@ export function adaptConnectModule(modules: ConnectModuleLike): ConnectRuntime {
 
     serializeFileDescriptor(file: FileDescriptorLike): Uint8Array {
       return protobuf.toBinary(wkt.FileDescriptorProtoSchema, file.proto);
+    },
+    createClient(service: unknown, transport: ClientTransportLike): unknown {
+      return connect.createClient(service, transport);
+    },
+    unavailable(message: string): Error {
+      return new connect.ConnectError(message, connect.Code.Unavailable);
+    },
+    isUnavailable(error: unknown): boolean {
+      return error instanceof connect.ConnectError && error.code === connect.Code.Unavailable;
     },
   };
 }

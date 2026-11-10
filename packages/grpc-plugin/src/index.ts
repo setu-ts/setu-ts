@@ -35,6 +35,9 @@ export { GrpcPlugin } from './plugin/grpc-plugin.ts';
 // Re-export the service class
 export { GrpcService } from './services/grpc-service.ts';
 
+// The calling side (M139b §3.12)
+export { grpcClient } from './client/grpc-client-helper.ts';
+
 // Re-export errors
 export {
   GrpcDescriptorError,
@@ -56,6 +59,7 @@ export type { GrpcPluginOptions } from './interfaces/index.ts';
 
 // Re-export common contracts for convenience
 export type {
+  GrpcClientOptions,
   GrpcServiceDefinition,
   GrpcServingStatus,
   IGrpcService,

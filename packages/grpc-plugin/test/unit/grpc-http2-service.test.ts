@@ -42,7 +42,7 @@ describe('nativeGrpcReply', () => {
       body: body(),
       trailer,
     });
-    expect(reply.streaming).toBe(true);
+    expect(reply.body).toBeInstanceOf(ReadableStream);
     expect(reply.headers.get('content-type')).toBe('application/grpc+proto');
     expect(await responseFromReply(reply).text()).toBe('ab');
     expect(trailerSetBeforeEnd).toBe(true);
@@ -153,8 +153,8 @@ describe('GrpcService — M139b', () => {
         trailers: false,
       },
     );
-    expect(unary.streaming).toBe(false);
-    expect(server.streaming).toBe(true);
+    expect(unary.body).not.toBeInstanceOf(ReadableStream);
+    expect(server.body).toBeInstanceOf(ReadableStream);
   });
 
   it('serves native gRPC with trailers when the transport carries them, refuses otherwise', async () => {
@@ -188,7 +188,7 @@ describe('GrpcService — M139b', () => {
       },
     );
     expect(reply.status).toBe(503);
-    expect(reply.streaming).toBe(false);
+    expect(reply.body).not.toBeInstanceOf(ReadableStream);
     expect((await grpc.handleRequest(new Request('http://x/p.S/Unary'))).status).toBe(503);
     expect(await grpc.createFetchHandler()(new Request('http://x/elsewhere'))).toBeNull();
   });
