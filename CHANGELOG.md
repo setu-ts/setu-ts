@@ -46,14 +46,14 @@ All notable changes to this project are documented here. The format follows
   `RedisQuotaStore`. **Migration:** a custom `IQuotaStore` implements `read`, answering `0` for an
   absent or expired window; a custom `IQuota` implements `usage`.
 
-- **A Redis backplane frame published while disconnected is lost, never delivered late (M139f, PR
-  pending, `@setu-ts/realtime-backplane-plugin`, X3-3).** The publisher connection the plugin builds
-  now has no offline queue, so a publish while it reconnects is refused at once (`503`, one `warn`
-  per frame in the WebSocket and SSE consumers) instead of being held and flushed seconds later, or
-  lost anyway to the reconnect race. `IRedisModule.create`'s options gain `enableOfflineQueue`. With
-  an injected pair, create the ioredis publisher with `enableOfflineQueue: false` or the node-redis
+- **A Redis backplane frame published while disconnected is lost, never delivered late (M139f, #579
+  `@setu-ts/realtime-backplane-plugin`, X3-3).** The publisher connection the plugin builds now has
+  no offline queue, so a publish while it reconnects is refused at once (`503`, one `warn` per frame
+  in the WebSocket and SSE consumers) instead of being held and flushed seconds later, or lost
+  anyway to the reconnect race. `IRedisModule.create`'s options gain `enableOfflineQueue`. With an
+  injected pair, create the ioredis publisher with `enableOfflineQueue: false` or the node-redis
   client with `disableOfflineQueue: true` for the same behaviour.
-- **`KubernetesProvider.isHealthy()` rejects with the reason (M139f, PR pending,
+- **`KubernetesProvider.isHealthy()` rejects with the reason (M139f, #579,
   `@setu-ts/service-discovery-plugin`, X10-3).** A failed probe rejects with the fetch error, the
   abort, or `Kubernetes EndpointSlice probe failed with HTTP <status>` instead of resolving `false`.
   The plugin's indicator is unchanged; a caller of the provider directly must handle the rejection.
@@ -136,26 +136,26 @@ All notable changes to this project are documented here. The format follows
   The generated `app/routes/_auth/login.tsx` calls `session.regenerate()` before writing the
   signed-in user, so a session id planted before login no longer carries into the signed-in session.
   Projects already generated should add the same call.
-- **A failing discovery readiness probe logs why (M139f, PR pending,
-  `@setu-ts/service-discovery-plugin`, X10-3).** One `warn` names the cause when the failure starts
-  (a Deno `UnknownIssuer` without `DENO_CERT`, an HTTP status), repeats log at `debug`, and the
-  recovery at `info`. A cold-resolve error message ends with the same cause; the `503` body is
-  unchanged. A Kubernetes service-account token or Consul ACL token holding anything but visible
-  ASCII is refused with a fixed message before any request, so `fetch`'s error, which quotes the
-  whole header value, can no longer carry the token into a log. The refusal is a configuration
-  fault, so a request that needs a cold resolve answers `500`, not `503`.
-- **A pg pool acquire timeout reads as saturation (M139f, PR pending, `@setu-ts/database-plugin`,
-  V8-3).** With `poolStats`, a probe that timed out waiting for a pool client keeps the indicator
-  `up` (`reachable: 'unknown'`) while queries are completing, where `connectionTimeoutMillis` under
-  the 2-second probe bound used to fail `/ready` while PostgreSQL was up.
-- **A queue loop outage logs at `warn` and its recovery at `info` (M139f, PR pending,
+- **A failing discovery readiness probe logs why (M139f, #579, `@setu-ts/service-discovery-plugin`,
+  X10-3).** One `warn` names the cause when the failure starts (a Deno `UnknownIssuer` without
+  `DENO_CERT`, an HTTP status), repeats log at `debug`, and the recovery at `info`. A cold-resolve
+  error message ends with the same cause; the `503` body is unchanged. A Kubernetes service-account
+  token or Consul ACL token holding anything but visible ASCII is refused with a fixed message
+  before any request, so `fetch`'s error, which quotes the whole header value, can no longer carry
+  the token into a log. The refusal is a configuration fault, so a request that needs a cold resolve
+  answers `500`, not `503`.
+- **A pg pool acquire timeout reads as saturation (M139f, #579, `@setu-ts/database-plugin`, V8-3).**
+  With `poolStats`, a probe that timed out waiting for a pool client keeps the indicator `up`
+  (`reachable: 'unknown'`) while queries are completing, where `connectionTimeoutMillis` under the
+  2-second probe bound used to fail `/ready` while PostgreSQL was up.
+- **A queue loop outage logs at `warn` and its recovery at `info` (M139f, #579,
   `@setu-ts/queue-plugin`, X88-9).** The plugin now passes the logger's `warn` and `info`, so the
   M131a state tracker no longer falls back to `error` and the recovery line is written.
-- **A connection lost under a statement says so (M139f, PR pending, `@setu-ts/database-plugin`,
-  V12-50).** It is still a `504` `DatabaseTimeoutError`, but its message no longer claims the driver
-  call bound fired.
-- **Alerting advice names `HealthPlugin({ details: true })` (M139f, PR pending, V12-49).** Seven
-  READMEs that say to alert on a `data.<field>` now say the default `/health` body omits `data`.
+- **A connection lost under a statement says so (M139f, #579, `@setu-ts/database-plugin`, V12-50).**
+  It is still a `504` `DatabaseTimeoutError`, but its message no longer claims the driver call bound
+  fired.
+- **Alerting advice names `HealthPlugin({ details: true })` (M139f, #579, V12-49).** Seven READMEs
+  that say to alert on a `data.<field>` now say the default `/health` body omits `data`.
 
 ## [0.12.0] — 2026-11-07
 
