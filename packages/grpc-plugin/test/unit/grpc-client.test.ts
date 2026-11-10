@@ -16,6 +16,7 @@ import {
   instanceOrigin,
   isRefusedStream,
   MAX_CLIENT_ORIGINS,
+  MAX_CLIENTS_PER_DEFINITION,
   targetBase,
   validateClientOptions,
   WORKERS_REFUSAL,
@@ -43,7 +44,11 @@ const BILLING: GrpcServiceDefinition = { typeName: 'billing.v1.BillingService', 
 interface Built {
   readonly kind: 'connect' | 'grpc' | 'grpc-web';
   readonly options: Record<string, unknown>;
-  readonly calls: Array<{ kind: 'unary' | 'stream'; header: Headers }>;
+  readonly calls: Array<{
+    kind: 'unary' | 'stream';
+    header: Headers;
+    timeoutMs: number | undefined;
+  }>;
 }
 
 /** A recording stand-in for `@connectrpc/connect-node`. */
@@ -67,12 +72,12 @@ function fakeNode(outcome: () => Promise<unknown> = () => Promise.resolve('ok'))
         return Promise.resolve(new Headers(header));
       };
       return {
-        async unary(_method, _signal, _timeoutMs, header) {
-          entry.calls.push({ kind: 'unary', header: await intercepted(header) });
+        async unary(_method, _signal, timeoutMs, header) {
+          entry.calls.push({ kind: 'unary', header: await intercepted(header), timeoutMs });
           return outcome();
         },
-        async stream(_method, _signal, _timeoutMs, header) {
-          entry.calls.push({ kind: 'stream', header: await intercepted(header) });
+        async stream(_method, _signal, timeoutMs, header) {
+          entry.calls.push({ kind: 'stream', header: await intercepted(header), timeoutMs });
           return outcome();
         },
       };
@@ -140,9 +145,9 @@ const instance = (
 });
 
 /** Calls a client's unary method the way Connect's `createClient` would. */
-function call(client: unknown, header?: HeadersInit): Promise<unknown> {
+function call(client: unknown, header?: HeadersInit, timeoutMs?: number): Promise<unknown> {
   const { transport } = client as { transport: ClientTransportLike };
-  return transport.unary({}, undefined, undefined, header, {});
+  return transport.unary({}, undefined, timeoutMs, header, {});
 }
 
 function callStream(client: unknown): Promise<unknown> {
@@ -633,5 +638,61 @@ describe('refused streams (REFUSED_STREAM)', () => {
     const error = await callStream(c.client(BILLING, 'http://h:1')).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(FakeUnavailableError);
     expect(calls).toBe(1);
+  });
+});
+
+describe('review fixes (M139b)', () => {
+  it('a discovery backend failure rejects as Unavailable, keeping the cause', async () => {
+    const backend = new Error('consul: connection refused');
+    const discovery = { pick: () => Promise.reject(backend) } as unknown as IServiceDiscovery;
+    const { clients: c, node } = clients({ discovery: () => discovery });
+    const error = (await call(c.client(BILLING, 'billing')).catch((e: unknown) => e)) as Error;
+    expect(error).toEqual(new FakeUnavailableError('could not resolve "billing"'));
+    expect(node.built).toHaveLength(0);
+  });
+
+  it(`keeps at most ${MAX_CLIENTS_PER_DEFINITION} clients per definition, evicting the least recently used`, () => {
+    const { clients: c } = clients();
+    const first = c.client(BILLING, 'http://t0:1');
+    const second = c.client(BILLING, 'http://t1:1');
+    for (let i = 2; i < MAX_CLIENTS_PER_DEFINITION; i++) c.client(BILLING, `http://t${i}:1`);
+    expect(c.client(BILLING, 'http://t0:1')).toBe(first); // a hit: now the most recent
+    c.client(BILLING, `http://t${MAX_CLIENTS_PER_DEFINITION}:1`); // one past the bound
+    expect(c.client(BILLING, 'http://t0:1')).toBe(first);
+    expect(c.client(BILLING, 'http://t1:1')).not.toBe(second); // evicted, so rebuilt
+  });
+
+  it('retries a refused call with what is left of its deadline, and not at all once it is spent', async () => {
+    let now = 1000;
+    const results: Array<() => Promise<unknown>> = [
+      () => {
+        now += 30;
+        return Promise.reject(nodeRefusal());
+      },
+      () => Promise.resolve('ok'),
+    ];
+    const node = fakeNode(() => results.shift()!());
+    const { clients: c } = clients({ clock: () => now }, node);
+    expect(await call(c.client(BILLING, 'http://h:1'), undefined, 100)).toBe('ok');
+    expect(node.built[0]!.calls.map((x) => x.timeoutMs)).toEqual([100, 70]);
+
+    const spent = fakeNode(() => {
+      now += 200;
+      return Promise.reject(nodeRefusal());
+    });
+    const { clients: d } = clients({ clock: () => now }, spent);
+    const error = await call(d.client(BILLING, 'http://h:1'), undefined, 100).catch(
+      (e: unknown) => e,
+    );
+    expect(error).toBeInstanceOf(FakeUnavailableError);
+    expect(spent.built[0]!.calls).toHaveLength(1);
+
+    const unbounded = fakeNode(() =>
+      results.length > 0 ? results.shift()!() : Promise.resolve('ok'),
+    );
+    results.push(() => Promise.reject(nodeRefusal()));
+    const { clients: e } = clients({}, unbounded);
+    expect(await call(e.client(BILLING, 'http://h:1'))).toBe('ok');
+    expect(unbounded.built[0]!.calls.map((x) => x.timeoutMs)).toEqual([undefined, undefined]);
   });
 });

@@ -465,6 +465,13 @@ The TLS mode imports `node:http2` the same way.
   stops a client sending past its window before the server reads. So the client's sessions get
   `maxSessionMemory: 64` (`CLIENT_MAX_SESSION_MEMORY_MB`; with 10 the plugin's client lost 6 of 16)
   and the server keeps Node's default: a server-side setting with no measurable effect is not added.
+- **Decision — review fixes (2026-11-11):** a discovery backend that fails rejects the call as
+  `Unavailable` (`could not resolve "<target>"`, cause kept), not with the backend's own error; each
+  definition caches at most 256 clients (least recently used evicted); the refused-stream retry gets
+  what is left of the call's deadline, measured on the runtime's monotonic clock, and none once it
+  is spent; and `setu workspace rpc <member> http` applies the orphan check to every caller whose
+  gRPC targets it empties, refusing while that caller's code imports the plugin or resolves
+  `CAPABILITIES.GRPC`, unless `--force`.
 - **Decision — trace propagation:** when `CAPABILITIES.TELEMETRY` resolves to a service with
   `activeSpanContext`, an interceptor sets `traceparent` from it with `contextToTraceparent`, unless
   the call already carries one.

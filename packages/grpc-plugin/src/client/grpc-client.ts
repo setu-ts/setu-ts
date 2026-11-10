@@ -43,6 +43,13 @@ export const CLIENT_DEFAULTS: ResolvedClientOptions = {
  */
 export const CLIENT_MAX_SESSION_MEMORY_MB = 64;
 
+/**
+ * How many clients one service definition keeps cached; the least recently used
+ * goes first. A target built from request data would otherwise add a client
+ * per distinct value, forever.
+ */
+export const MAX_CLIENTS_PER_DEFINITION = 256;
+
 /** How many origins keep a transport (and session) before the oldest is closed. */
 export const MAX_CLIENT_ORIGINS = 64;
 
@@ -187,6 +194,11 @@ export interface GrpcClientDeps {
   readonly targets: Readonly<Record<string, GrpcClientOptions>>;
   /** The runtime platform, when a runtime capability reports one. */
   readonly platform?: () => RuntimePlatform | undefined;
+  /**
+   * A monotonic clock in milliseconds, for what is left of a deadline. The
+   * plugin passes the runtime's `hrtime`; absent, `performance.now`.
+   */
+  readonly clock?: () => number;
 }
 
 /**
@@ -258,12 +270,20 @@ export class GrpcClients {
       this.#clients.set(definition, byKey);
     }
     const cached = byKey.get(key);
-    if (cached !== undefined) return cached;
+    if (cached !== undefined) {
+      // Least recently used last out: move a hit to the end.
+      byKey.delete(key);
+      byKey.set(key, cached);
+      return cached;
+    }
     const created = this.#deps.runtime.createClient(
       definition,
       this.#delegate(target, base, resolved),
     );
     byKey.set(key, created);
+    if (byKey.size > MAX_CLIENTS_PER_DEFINITION) {
+      byKey.delete(byKey.keys().next().value as string);
+    }
     return created;
   }
 
@@ -287,14 +307,26 @@ export class GrpcClients {
       // one with no active span to carry.
       unary: (method, signal, timeoutMs, header, input, contextValues) => {
         const traced = this.#withTraceparent(header);
-        return this.#call(target, base, options, true, (transport) =>
-          transport.unary(method, signal, timeoutMs, traced, input, contextValues),
+        return this.#call(
+          target,
+          base,
+          options,
+          true,
+          (transport, timeout) =>
+            transport.unary(method, signal, timeout, traced, input, contextValues),
+          timeoutMs,
         );
       },
       stream: (method, signal, timeoutMs, header, input, contextValues) => {
         const traced = this.#withTraceparent(header);
-        return this.#call(target, base, options, false, (transport) =>
-          transport.stream(method, signal, timeoutMs, traced, input, contextValues),
+        return this.#call(
+          target,
+          base,
+          options,
+          false,
+          (transport, timeout) =>
+            transport.stream(method, signal, timeout, traced, input, contextValues),
+          timeoutMs,
         );
       },
     };
@@ -309,17 +341,25 @@ export class GrpcClients {
     base: string | undefined,
     options: ResolvedClientOptions,
     retryable: boolean,
-    run: (transport: ClientTransportLike) => Promise<unknown>,
+    run: (transport: ClientTransportLike, timeoutMs: number | undefined) => Promise<unknown>,
+    timeoutMs: number | undefined,
   ): Promise<unknown> {
+    const now = this.#deps.clock ?? (() => performance.now());
+    const started = now();
     try {
-      return await this.#attempt(target, base, options, run);
+      return await this.#attempt(target, base, options, (transport) => run(transport, timeoutMs));
     } catch (error) {
-      if (retryable && error instanceof RefusedStream) {
-        return this.#attempt(target, base, options, run).catch((again: unknown) => {
+      if (!(error instanceof RefusedStream)) throw error;
+      // The retry gets what is left of the call's deadline, never a fresh one;
+      // with nothing left, the refusal is the answer.
+      const remaining =
+        timeoutMs === undefined ? undefined : timeoutMs - Math.ceil(now() - started);
+      if (!retryable || (remaining !== undefined && remaining <= 0)) throw error.error;
+      return this.#attempt(target, base, options, (transport) => run(transport, remaining)).catch(
+        (again: unknown) => {
           throw again instanceof RefusedStream ? again.error : again;
-        });
-      }
-      throw error instanceof RefusedStream ? error.error : error;
+        },
+      );
     }
   }
 
@@ -339,7 +379,12 @@ export class GrpcClients {
       if (discovery === undefined) {
         throw runtime.unavailable(`no service discovery to resolve "${target}"`);
       }
-      instance = (await discovery.pick(target)) ?? undefined;
+      // A backend that fails (and has nothing cached) is an unreachable
+      // dependency, reported the way every other one is: Unavailable.
+      instance =
+        (await discovery.pick(target).catch((cause: unknown) => {
+          throw runtime.unavailable(`could not resolve "${target}"`, cause);
+        })) ?? undefined;
       if (instance === undefined) {
         throw runtime.unavailable(`no instance of "${target}" is available`);
       }

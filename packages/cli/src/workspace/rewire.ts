@@ -562,6 +562,25 @@ export async function planTransportChange(
         ],
       );
     }
+    // A caller whose gRPC targets this change empties loses the plugin's client
+    // with them (M139b §3.12), so code still calling it is orphaned the same way.
+    if (
+      change.kind === 'rpc' &&
+      member.name !== change.member &&
+      grpcTargets(manifest.members, member.name).length > 0 &&
+      grpcTargets(next.members, member.name).length === 0
+    ) {
+      patterns.push(
+        [
+          /['"]@setu-ts\/grpc-plugin['"]/,
+          `imports the gRPC plugin, whose client this member will no longer register once ${change.member} stops serving gRPC`,
+        ],
+        [
+          /\bCAPABILITIES\.GRPC\b/,
+          `resolves the gRPC service, which this member will no longer register`,
+        ],
+      );
+    }
     orphaned.push(...(await orphans(fs, dir, context, patterns)));
 
     files.push({

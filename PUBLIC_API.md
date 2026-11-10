@@ -15813,10 +15813,12 @@ grpc.addService(AnotherDefinition, anotherImpl);
   64 MB (`maxSessionMemory`; Node's 10 MB default reset streams with several 1 MB replies in
   flight). Calls share one HTTP/2 session per instance (64 origins at most, least recently used
   closed first), have a 5 s deadline, carry the active span as `traceparent` when telemetry is
-  registered, and reject with `ConnectError(Unavailable)` when no instance is known or after the
-  application stops. A stream the server refused (`REFUSED_STREAM`, never processed — a server
-  shutting down) is reported as the instance's failure and rejects as `Unavailable`; a unary call is
-  first sent once more on a fresh pick. `GrpcClientOptions` (`common`): `basePath` (`''`),
+  registered, and reject with `ConnectError(Unavailable)` when no instance is known, when the
+  discovery backend fails (`could not resolve "<target>"`, cause kept), or after the application
+  stops. Each definition caches at most 256 clients (least recently used evicted). A stream the
+  server refused (`REFUSED_STREAM`, never processed — a server shutting down) is reported as the
+  instance's failure and rejects as `Unavailable`; a unary call is first sent once more on a fresh
+  pick, within what is left of its deadline. `GrpcClientOptions` (`common`): `basePath` (`''`),
   `protocol` (`'connect'` | `'grpc'` | `'grpc-web'`, default `'connect'`), `httpVersion` (`'2'` |
   `'1.1'`, default `'2'`; `'grpc'` needs `'2'`), `timeoutMs` (1–2147483647, default `5000`);
   per-call options override `GrpcPluginOptions.clients[target]`, which overrides the defaults. The

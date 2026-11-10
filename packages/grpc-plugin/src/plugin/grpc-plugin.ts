@@ -111,6 +111,8 @@ export function GrpcPlugin(options: GrpcPluginOptions = {}): IPlugin {
         discovery: () => optional<IServiceDiscovery>(CAPABILITIES.SERVICE_DISCOVERY),
         telemetry: () => optional<ITelemetryService>(CAPABILITIES.TELEMETRY),
         platform: () => optional<IRuntimeServices>(CAPABILITIES.RUNTIME)?.platform(),
+        clock: () =>
+          optional<IRuntimeServices>(CAPABILITIES.RUNTIME)?.hrtime() ?? performance.now(),
         targets: options.clients ?? {},
       });
 

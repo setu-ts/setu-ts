@@ -329,6 +329,34 @@ describe('setu workspace rpc', () => {
     );
   });
 
+  it("refuses to take a caller's gRPC client away while its code still uses it (M139b review)", async () => {
+    const ws = await workspace({ members: [['billing', 'microservice', 'grpc']] });
+    const added = await ws.run([
+      'g',
+      'app',
+      'orders',
+      '--template',
+      'microservice',
+      '--depends-on',
+      'billing',
+    ]);
+    expect(added.code, added.err).toBe(0);
+    await ws.write(
+      'apps/orders/src/clients/billing.client.ts',
+      "import { grpcClient } from '@setu-ts/grpc-plugin';\nexport const make = grpcClient;\n",
+    );
+    const refused = await ws.run(['workspace', 'rpc', 'billing', 'http']);
+    expect(refused.code).not.toBe(0);
+    expect(refused.err).toContain('apps/orders/src/clients/billing.client.ts');
+    expect(refused.err).toContain('once billing stops serving gRPC');
+    // Nothing was written: orders still registers the client.
+    expect(ws.read('apps/orders/src/transport/index.ts')).toContain('GrpcPlugin({ serve: false');
+
+    const forced = await ws.run(['workspace', 'rpc', 'billing', 'http', '--force']);
+    expect(forced.code, forced.err).toBe(0);
+    expect(ws.read('apps/orders/src/transport/index.ts')).toContain('  return [];');
+  });
+
   it('changes nothing when the member already has the style', async () => {
     const ws = await workspace();
     const result = await ws.run(['workspace', 'rpc', 'orders', 'http']);

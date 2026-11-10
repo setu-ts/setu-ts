@@ -117,12 +117,17 @@ const billing = grpcClient(app.services, BillingService, 'billing');
   the call sets its own.
 - **Rolling restarts.** A server shutting down refuses a call already on the wire (HTTP/2
   `REFUSED_STREAM`, never processed). The client reports that instance's failure and sends a unary
-  call once more on another pick, so a restart costs no failed unary calls; a refused streaming call
-  rejects as `Unavailable`.
+  call once more on another pick, within what is left of the call's deadline, so a restart costs no
+  failed unary calls; a refused streaming call rejects as `Unavailable`.
+- **Caching.** The same arguments return the same client; each service definition keeps at most 256
+  clients, the least recently used dropped first, so a target built from request data cannot grow
+  the cache without bound.
 - **Failures** reject with Connect's `ConnectError`: `Unavailable` when discovery knows no instance
-  (`no instance of "billing" is available`), when the connection fails, and after the application
-  stops (`the gRPC client is closed`); `DeadlineExceeded` past the deadline; otherwise the server's
-  code. A missing `@connectrpc/connect-node` rejects the call with `GrpcRuntimeLoadError`.
+  (`no instance of "billing" is available`) or the discovery backend fails
+  (`could not resolve "billing"`, the backend's error as `cause`), when the connection fails, and
+  after the application stops (`the gRPC client is closed`); `DeadlineExceeded` past the deadline;
+  otherwise the server's code. A missing `@connectrpc/connect-node` rejects the call with
+  `GrpcRuntimeLoadError`.
 - **Runtimes.** Node and Bun. On Cloudflare Workers `grpcClient()` throws a `TypeError` where it is
   called: connect-node loads there, but `workerd` implements no `node:http2` client, and an HTTP/1.1
   call hangs until its deadline (measured on `workerd`). **Not on Deno yet:** Deno's own Node-style
