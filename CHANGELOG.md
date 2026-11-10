@@ -40,11 +40,11 @@ All notable changes to this project are documented here. The format follows
   `IIdempotencyService` adds the member; an application registering `AgentRunsPlugin` passes
   `IdempotencyPlugin({ transactional: { store: createDatabaseIdempotencyStore() } })`.
 - **BREAKING — quotas can be read (M139c, PR pending, `@setu-ts/auth-plugin`, V12-36).**
-  `IQuota.usage(key)` returns `{ used, limit, remaining, windowEndsAt }` from the counter `reserve`
-  charges, without charging it, so a budget meter needs no second ledger. `IQuotaStore` gains a
-  required `read(key, windowId)`, implemented by `MemoryQuotaStore` and `RedisQuotaStore`.
-  **Migration:** a custom `IQuotaStore` implements `read`, answering `0` for an absent or expired
-  window; a custom `IQuota` implements `usage`.
+  `IQuota.usage(key)` returns a `QuotaUsage`, `{ used, limit, remaining, windowEndsAt }`, from the
+  counter `reserve` charges, without charging it, so a budget meter needs no second ledger.
+  `IQuotaStore` gains a required `read(key, windowId)`, implemented by `MemoryQuotaStore` and
+  `RedisQuotaStore`. **Migration:** a custom `IQuotaStore` implements `read`, answering `0` for an
+  absent or expired window; a custom `IQuota` implements `usage`.
 
 ### Added
 
@@ -55,9 +55,10 @@ All notable changes to this project are documented here. The format follows
   `ITenantDataStore.withUnitOfWork` with every tenant guard intact; a store without it throws
   `TenantUnitOfWorkUnsupportedError`.
 - **Mail attachments (M139c, PR pending, `@setu-ts/common`, `@setu-ts/mail-plugin`, V12-21).**
-  `MailMessage.attachments` takes in-memory files (`Uint8Array` or UTF-8 text), inline with a
-  `contentId`. SMTP, SES and SendGrid send them; `LogProvider` logs their names and sizes only.
-  `send` and `sendTemplate` refuse a filename, content type or content id that could break a header.
+  `MailMessage.attachments` takes `MailAttachment` in-memory files (`Uint8Array` or UTF-8 text),
+  inline with a `contentId`. SMTP, SES and SendGrid send them; `LogProvider` logs their names and
+  sizes only. `send` and `sendTemplate` refuse a filename, content type or content id that could
+  break a header.
 - **Whole-source replacement up to 5,000 records (M139c, PR pending, `@setu-ts/vector-store-plugin`,
   V12-9).** One `replaceSource` call takes 5,000 records (`upsert` stays at 500), written in slices
   of 500 inside pgvector's one transaction. Before, a source over 500 records could not be held: a
