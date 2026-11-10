@@ -64,12 +64,14 @@ the default `/health` body omits.
 
 ## 2. Committed-doc conflicts — resolved here, shipped as named doc deliverables
 
-| #   | Conflict                                                                                                                                                                                                    | Resolution (picked side)                                                                                          | Doc deliverable (same PR)                                                                                                       |
-| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| C1  | The backplane README (lines 154-166) and `PUBLIC_API.md` (5130-5139) promise a short partition is "buffered and delivered LATE, not dropped"; the 0.12.0 run dropped every frame in 3 of 8 short partitions | §3.3 makes the code drop deterministically; the docs say frames published while disconnected are lost, never late | Backplane README "Limitations"; the `commandTimeoutMs` JSDoc (`interfaces/index.ts:229-233`); `PUBLIC_API.md` backplane section |
-| C2  | `DriverErrorClass` JSDoc (`classify.ts:46`) says `'timeout'` means "the driver call bound elapsed"; the classifier also returns it for a connection lost mid-statement                                      | Code stays; the JSDoc names both                                                                                  | `classify.ts` JSDoc (internal) and the database README's 504 paragraph (1415-1418, 1486-1494)                                   |
-| C3  | Database README 1541-1543 says a pool connection timeout reports `degraded`                                                                                                                                 | §3.2 reports a pg acquire timeout with progressing queries as `up` (`reachable: 'unknown'`)                       | Database README saturation paragraph                                                                                            |
-| C4  | Seven READMEs say to alert on `data.<field>`; the default `/health` body has no `data`                                                                                                                      | §3.6                                                                                                              | Each README sentence                                                                                                            |
+| #   | Conflict                                                                                                                                                                                                                                                                                                                           | Resolution (picked side)                                                                                          | Doc deliverable (same PR)                                                                                                                                         |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| C1  | The backplane README (lines 154-166) and `PUBLIC_API.md` (5130-5139) promise a short partition is "buffered and delivered LATE, not dropped"; the 0.12.0 run dropped every frame in 3 of 8 short partitions                                                                                                                        | §3.3 makes the code drop deterministically; the docs say frames published while disconnected are lost, never late | Backplane README "Limitations"; the `commandTimeoutMs` JSDoc (`interfaces/index.ts:229-233`); `PUBLIC_API.md` backplane section                                   |
+| C2  | `DriverErrorClass` JSDoc (`classify.ts:46`) says `'timeout'` means "the driver call bound elapsed"; the classifier also returns it for a connection lost mid-statement                                                                                                                                                             | Code stays; the JSDoc names both                                                                                  | `classify.ts` JSDoc (internal) and the database README's 504 paragraph (1415-1418, 1486-1494)                                                                     |
+| C3  | Database README 1541-1543 says a pool connection timeout reports `degraded`                                                                                                                                                                                                                                                        | §3.2 reports a pg acquire timeout with progressing queries as `up` (`reachable: 'unknown'`)                       | Database README saturation paragraph                                                                                                                              |
+| C5  | `docs/health-indicators.md` pins `database-plugin.ts:306`, `service-discovery-plugin.ts:122`, `queue-plugin.ts:350` and `realtime-backplane-plugin.ts:157`, checked by `test/health-indicator-audit.test.ts`; the database row says a pool connection timeout is `degraded`, and the discovery row says nothing of the probe's log | Line numbers follow the code; the database row names §3.2, the discovery row names §3.1's `warn`/`info`           | `docs/health-indicators.md` rows 6 and 11, and every pinned line that moves                                                                                       |
+| C6  | `PUBLIC_API.md:1896` repeats C3, and `PUBLIC_API.md:5130-5139` repeats C1                                                                                                                                                                                                                                                          | Same sides as C1 and C3                                                                                           | `PUBLIC_API.md`: the database saturation paragraph, the backplane partition paragraph and `IRedisModule.create`, and the `DiscoveryProvider.isHealthy?` rejection |
+| C4  | Seven READMEs say to alert on `data.<field>`; the default `/health` body has no `data`                                                                                                                                                                                                                                             | §3.6                                                                                                              | Each README sentence                                                                                                                                              |
 
 ## 3. Design decisions
 
@@ -126,6 +128,11 @@ the default `/health` body omits.
      `(current !== undefined && isSaturated(current)) || probeHitAcquireTimeout(adapter)`. The
      existing progress condition still applies. With progress, it reports `up` +
      `reachable: 'unknown'`. A hung database (no progress) still reports `degraded`.
+  5. The acquire-timeout evidence counts **with or without `poolStats`**: the message alone proves
+     the pool was full, and the progress count does not depend on `poolStats`. This reverses the
+     documented "without `poolStats` a pool connection timeout reports `degraded`" for the pg
+     acquire timeout only; a new-connection timeout and an unanswered probe still report `degraded`
+     (C3).
 - **Why:** pg-pool raises that exact message only when a checkout waited for a busy pool and timed
   out (§1), and it removes the waiter before rejecting. So `waiting` is 0 by the time anything reads
   it. The message itself is the saturation proof. When `connectionTimeoutMillis` is 2 s or more, the
@@ -138,7 +145,9 @@ the default `/health` body omits.
   - `test/unit/drizzle-adapter-probe-saturation.test.ts`: a fake pool rejecting with the pool anchor
     sets the flag and rethrows; a later successful probe clears it.
   - `test/integration/pool-saturation-health.test.ts`: `waiting: 0`, an acquire-timeout probe and
-    progressing queries give `up`/`'unknown'`; the same with no progress gives `degraded`.
+    progressing queries give `up`/`'unknown'`; the same with no progress gives `degraded`; the
+    acquire timeout with no `poolStats` callback and progressing queries gives `up`; a
+    new-connection timeout gives `degraded`.
   - A guarded real-pg row in `test/integration/real-drizzle-adapter.test.ts` (guard `POSTGRES_URL`,
     line 821, skipped when absent) runs `max: 1`, `connectionTimeoutMillis: 500`, one held
     connection plus progressing queries, and expects `up`.
@@ -154,7 +163,9 @@ the default `/health` body omits.
      same way as `commandTimeout`: a module that ignores the field still type-checks, but its
      publisher then queues. `adaptRedisModule` passes the options through unchanged.
   3. `#open` waits for the owned publisher to be ready before it records the pair:
-     - it resolves at once when `status === 'ready'`;
+     - it resolves at once when `status === 'ready'`, and also when `status` is `undefined` (a
+       custom module's client that cannot report readiness is not waited on, or a
+       `commandTimeoutMs: 0` open would hang forever);
      - otherwise it waits for one `'ready'` event (through `on`/`off`), concurrently with
        `subscriber.subscribe`;
      - the wait is bounded by `commandTimeoutMs` when non-zero, and rejects with
@@ -181,9 +192,9 @@ the default `/health` body omits.
     frame (X3-FINDINGS).
 - **Test home:**
   - `test/unit/redis-backplane.test.ts`: `create` receives `enableOfflineQueue: false` for the
-    publisher and not for the subscriber; open resolves at once when the status is `ready`, waits
-    for `'ready'` otherwise, and rejects at the `commandTimeoutMs` bound with cleanup; an injected
-    pair is not waited on.
+    publisher and not for the subscriber; open resolves at once when the status is `ready` or
+    `undefined`, waits for `'ready'` otherwise, and rejects at the `commandTimeoutMs` bound with
+    cleanup; an injected pair is not waited on.
   - `test/unit/redis-module.test.ts`: options pass through.
   - Guarded real Redis, `test/integration/outage-real.test.ts`: frames published during a pause
     shorter than 11 s are not delivered after recovery, and each publish rejects within 1 s. This
@@ -203,12 +214,16 @@ the default `/health` body omits.
 ### 3.5 V12-50: a connection lost mid-call has its own message
 
 - **Decision:**
-  1. `classify.ts` gains an internal `isConnectionLostMidCall(error): boolean`. It is true for the
-     same chain members that make `'timeout'` a connection loss: `PG_TERMINATED_ANCHOR` (no string
-     code), `PROTOCOL_CONNECTION_LOST`, and MariaDB `45009` under the `mysql-adapter` namespace. It
-     reuses the existing constants and the chain walk.
+  1. `classify.ts` gains an internal
+     `isConnectionLostMidCall(error: unknown, adapterType?: DatabaseAdapterType): boolean`, with the
+     same signature as `classifyDriverError` (`classify.ts:193-196`). It is true for the chain
+     members that make `'timeout'` a connection loss: `PG_TERMINATED_ANCHOR` (no string code),
+     `PROTOCOL_CONNECTION_LOST`, and MariaDB `45009`. The `45009` case counts only where
+     `classifyStructured` would see the `mysql-adapter` namespace, which is derived from
+     `adapterType` (`classify.ts:276,454-499`). It reuses the existing constants, the chain walk and
+     that namespace derivation; it does not copy them.
   2. In `classifiedOrOriginal`, the `'timeout'` branch picks the message:
-     - connection lost:
+     - connection lost (`isConnectionLostMidCall(error, adapterType)`):
        `'The database connection closed before the call completed; the outcome is unknown.'`;
      - otherwise: the existing bound sentence. The class (`DatabaseTimeoutError`), the 504 hint and
        the public detail are unchanged.
@@ -239,6 +254,22 @@ the default `/health` body omits.
 - **Why:** this is the documented default (`health-plugin.ts:315-323`).
 - **Test home:** none. These are documentation only, checked by `check:docs`.
 
+### 3.7 CHANGELOG entries
+
+- **Decision:** under Unreleased:
+  - **Changed:** X3-3. Frames published while disconnected are dropped, never delivered late. An
+    injected ioredis pair should set `enableOfflineQueue: false` on its publisher, and a node-redis
+    pair should set `disableOfflineQueue: true`.
+  - **Changed:** `KubernetesProvider.isHealthy()` (an exported class) rejects with the reason
+    instead of resolving `false`.
+  - **Fixed:** X10-3, V8-3, X88-9, V12-50 and V12-49, one entry each, citing the row and "M139f, PR
+    pending".
+  - Neither Changed entry is BREAKING, because no type changes. `docs/upgrading.md` has no `0.13.0`
+    section yet; M139e writes it from these entries.
+- **Why:** both are behaviour changes a caller can observe, so they belong under Changed with their
+  upgrade step.
+- **Test home:** `check:docs` (changelog coverage).
+
 ## 4. Exported surface — every symbol names its consumer
 
 **Breaking for implementors:** none. `IRedisModule.create` gains an optional option field, which
@@ -262,21 +293,21 @@ reporter parameter.
 
 ## 5. Implementation files
 
-| File                                                                          | Purpose            |
-| ----------------------------------------------------------------------------- | ------------------ |
-| `packages/service-discovery-plugin/src/providers/kubernetes-provider.ts`      | §3.1.1             |
-| `packages/service-discovery-plugin/src/services/service-discovery-service.ts` | §3.1.2, §3.1.4     |
-| `packages/service-discovery-plugin/src/plugin/service-discovery-plugin.ts`    | §3.1.3             |
-| `packages/service-discovery-plugin/src/interfaces/index.ts`                   | §3.1.5 JSDoc       |
-| `packages/database-plugin/src/errors/classify.ts`                             | §3.2.1, §3.5.1, C2 |
-| `packages/database-plugin/src/health/database-capacity.ts`                    | §3.2.2             |
-| `packages/database-plugin/src/adapters/drizzle/drizzle-adapter.ts`            | §3.2.3             |
-| `packages/database-plugin/src/plugin/database-plugin.ts`                      | §3.2.4             |
-| `packages/database-plugin/src/services/database-service.ts`                   | §3.5.2             |
-| `packages/realtime-backplane-plugin/src/transports/redis-backplane.ts`        | §3.3.1, §3.3.3     |
-| `packages/realtime-backplane-plugin/src/interfaces/index.ts`                  | §3.3.2, C1 JSDoc   |
-| `packages/queue-plugin/src/plugin/queue-plugin.ts`                            | §3.4               |
-| READMEs (§3.6, C1–C3), `PUBLIC_API.md`, `CHANGELOG.md`                        | docs               |
+| File                                                                                                 | Purpose            |
+| ---------------------------------------------------------------------------------------------------- | ------------------ |
+| `packages/service-discovery-plugin/src/providers/kubernetes-provider.ts`                             | §3.1.1             |
+| `packages/service-discovery-plugin/src/services/service-discovery-service.ts`                        | §3.1.2, §3.1.4     |
+| `packages/service-discovery-plugin/src/plugin/service-discovery-plugin.ts`                           | §3.1.3             |
+| `packages/service-discovery-plugin/src/interfaces/index.ts`                                          | §3.1.5 JSDoc       |
+| `packages/database-plugin/src/errors/classify.ts`                                                    | §3.2.1, §3.5.1, C2 |
+| `packages/database-plugin/src/health/database-capacity.ts`                                           | §3.2.2             |
+| `packages/database-plugin/src/adapters/drizzle/drizzle-adapter.ts`                                   | §3.2.3             |
+| `packages/database-plugin/src/plugin/database-plugin.ts`                                             | §3.2.4             |
+| `packages/database-plugin/src/services/database-service.ts`                                          | §3.5.2             |
+| `packages/realtime-backplane-plugin/src/transports/redis-backplane.ts`                               | §3.3.1, §3.3.3     |
+| `packages/realtime-backplane-plugin/src/interfaces/index.ts`                                         | §3.3.2, C1 JSDoc   |
+| `packages/queue-plugin/src/plugin/queue-plugin.ts`                                                   | §3.4               |
+| READMEs (§3.6, C1–C3), `docs/health-indicators.md` (C5), `PUBLIC_API.md` (C6), `CHANGELOG.md` (§3.7) | docs               |
 
 `src/index.ts` changes in no package.
 
@@ -297,6 +328,9 @@ reporter parameter.
 | `realtime-backplane-plugin/test/integration/outage-real.test.ts` (guarded `REDIS_URL`)   | real path                                           | a short pause drops frames, nothing arrives late             |
 | `queue-plugin/test/unit/queue-plugin.test.ts`                                            | `queue-plugin.ts`                                   | §3.4                                                         |
 | `database-plugin/test/integration/real-drizzle-adapter.test.ts` (guarded `POSTGRES_URL`) | real path                                           | §3.2                                                         |
+
+`test/health-indicator-audit.test.ts` (root tooling, unchanged) is the gate for C5: it fails when a
+pinned line no longer holds the `ctx.health.register(...)` call.
 
 Every changed test that proves a fix is run once without the fix and must fail.
 
