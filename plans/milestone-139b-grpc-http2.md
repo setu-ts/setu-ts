@@ -124,11 +124,14 @@ the benchmark's own `setu.mjs`/`trailers.mjs`. Versions: Node 24.22.1, Bun 1.4.4
   `DescMethod.methodKind` from the router handler, kept in the dispatch map entry. The kernel
   streams the body only when `streamsRequest(raw) === true` **and** `raw.bodyUsed === false`. It
   then builds
-  `new Request(ctx.request.url, { method, headers: ctx.request.headers, body: raw.body, signal: raw.signal, duplex: 'half' })`.
+  `new Request(ctx.request.url, { method, headers: ctx.request.headers, body: raw.body, duplex: 'half' })`.
   Every other case keeps today's `ctx.request.bytes()` path, so the runtime's `maxBodyBytes` still
-  bounds unary and server-streaming bodies. The buffered path's reconstructed `Request` gains
-  `signal: raw.signal` too: today it carries none, and once replies stream, a server stream that
-  never ends (a watch) would otherwise outlive its client. `duplex` is not in the DOM `RequestInit`
+  bounds unary and server-streaming bodies. Neither `Request` carries `raw.signal`: the kernel puts
+  it on `RpcTransport.signal` (§3.3), and the plugin hands it to Connect's universal request as the
+  call's signal. Today the dispatch carries none, and once replies stream, a server stream that
+  never ends (a watch) would otherwise outlive its client. Corrected 2026-11-10: the first build put
+  `signal: raw.signal` on the `Request`, and undici following it cost 8–11% of unary throughput
+  (5-pass A/B: 90.1% of 0.12.0 with it, 97.7% without). `duplex` is not in the DOM `RequestInit`
   type the kernel compiles against, so the kernel declares a local
   `RequestInit & { duplex?: 'half' }`; it must not pull in `@types/node`.
   - **Bound for streamed bodies:** `GrpcPluginOptions.readMaxBytes`, default `4 * 1024 * 1024`,
@@ -143,13 +146,15 @@ the benchmark's own `setu.mjs`/`trailers.mjs`. Versions: Node 24.22.1, Bun 1.4.4
   - Gating on the procedure kind keeps unary and server-streaming requests on the bounded,
     benchmarked path. Only procedures whose body is a stream pay for `raw.body` materialization.
   - 4 MiB matches the default per-message receive limit of grpc-go and grpc-js.
-  - `signal` forwards client cancellation to the handler on both paths.
+  - The transport signal forwards client cancellation to every call, unary included, as Hono,
+    connect-node, grpc-js and ASP.NET Core do; it costs a property on a plain object.
 - **Test home:** `grpc-dispatch-streaming.test.ts` (streamed when undisturbed and kind is streaming;
   buffered after middleware read `ctx.request.bytes()`; buffered when `streamsRequest` is absent or
   false; a body over `maxBodyBytes` on a unary call still 413s; aborting the raw request's signal
-  aborts the dispatched request's signal on BOTH paths). `grpc-plugin` `grpc-service.test.ts`
-  (`streamsRequest` per kind) and `connect-router-builder.test.ts` (`readMaxBytes` reaches the
-  router, default and configured).
+  aborts `transport.signal` on BOTH paths and not the dispatched request's). `connect-real-import`
+  proves a handed signal cancels a real Connect call through both entry points. `grpc-plugin`
+  `grpc-service.test.ts` (`streamsRequest` per kind) and `connect-router-builder.test.ts`
+  (`readMaxBytes` reaches the router, default and configured).
 
 ### 3.3 The trailers seam and `IGrpcService`
 
@@ -159,7 +164,8 @@ the benchmark's own `setu.mjs`/`trailers.mjs`. Versions: Node 24.22.1, Bun 1.4.4
   - `StreamOptions { readonly trailers?: Promise<Headers> }`.
   - `IResponse.stream(body, options?: StreamOptions)`.
   - The streaming `ResponseSnapshot` arm gains `readonly trailers?: Promise<Headers>`.
-  - `RpcTransport { readonly trailers: boolean }`.
+  - `RpcTransport { readonly trailers: boolean; readonly signal?: AbortSignal }` — `signal` added
+    2026-11-10 (§3.2).
   - `RpcReply { readonly response: Response; readonly streaming: boolean; readonly trailers?: Promise<Headers> }`.
   - `IGrpcService.handleRpc?(request, transport): Promise<RpcReply>`.
   - `IGrpcService.refuses?(request, transport?)`.

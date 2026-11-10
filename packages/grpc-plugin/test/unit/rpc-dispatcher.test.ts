@@ -325,3 +325,48 @@ describe('streamingSides', () => {
     expect(streamingSides(kind)).toEqual({ streamsRequest: request, streamsResponse: response });
   });
 });
+
+describe('dispatchRequest — the transport signal (M139b)', () => {
+  function recordingEntry(seen: { fetch: unknown[]; native: unknown[] }): DispatchEntry {
+    return {
+      fetch: (_request, signal) => {
+        seen.fetch.push(signal);
+        return Promise.resolve(new Response('ok'));
+      },
+      native: (_request, signal) => {
+        seen.native.push(signal);
+        return Promise.resolve({ response: new Response('ok'), streaming: true });
+      },
+      streamsRequest: false,
+      streamsResponse: false,
+    };
+  }
+
+  it.each([
+    ['application/connect+proto', 'fetch'],
+    ['application/grpc', 'native'],
+  ] as const)('hands a %s call the signal (%s entry point)', async (contentType, side) => {
+    const seen = { fetch: [] as unknown[], native: [] as unknown[] };
+    const signal = new AbortController().signal;
+    await dispatchRequest(
+      new Request('http://x/pkg.Svc/M', {
+        method: 'POST',
+        headers: { 'content-type': contentType },
+      }),
+      new Map([['/pkg.Svc/M', recordingEntry(seen)]]),
+      '',
+      { trailers: true, signal },
+    );
+    expect(seen[side]).toEqual([signal]);
+  });
+
+  it('hands no signal when the transport is absent', async () => {
+    const seen = { fetch: [] as unknown[], native: [] as unknown[] };
+    await dispatchRequest(
+      new Request('http://x/pkg.Svc/M', { method: 'POST' }),
+      new Map([['/pkg.Svc/M', recordingEntry(seen)]]),
+      '',
+    );
+    expect(seen.fetch).toEqual([undefined]);
+  });
+});

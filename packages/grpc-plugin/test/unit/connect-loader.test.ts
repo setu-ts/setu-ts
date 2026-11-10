@@ -62,6 +62,8 @@ function createFakeModules(overrides: { fromBinaryThrows?: boolean } = {}): {
         return () => Promise.resolve(new Response('ok'));
       },
       universalServerRequestFromFetch: (request, options) => ({ universal: request.url, options }),
+      universalServerResponseToFetch: (response) =>
+        new Response('from-universal', { status: response.status }),
     },
     protobuf: {
       createFileRegistry: (fdSet) => {
@@ -299,5 +301,56 @@ describe('adaptConnectModule — handleUniversal (M139b)', () => {
     );
     expect(reply.status).toBe(200);
     expect(seen).toEqual([{ universal: 'http://x/p.S/M', options: {} }]);
+  });
+
+  it('puts a handed signal on the universal request in place of the request own', async () => {
+    const { modules } = createFakeModules();
+    const seen: unknown[] = [];
+    const handler = Object.assign(
+      (universal: unknown) => {
+        seen.push(universal);
+        return Promise.resolve({ status: 200 });
+      },
+      { requestPath: '/p.S/M' },
+    );
+    const signal = new AbortController().signal;
+    await adaptConnectModule(modules).handleUniversal(
+      handler,
+      new Request('http://x/p.S/M'),
+      signal,
+    );
+    expect(seen).toEqual([{ universal: 'http://x/p.S/M', options: {}, signal }]);
+  });
+});
+
+describe('adaptConnectModule — createFetchHandler with a signal (M139b)', () => {
+  function universalHandler(seen: unknown[]): ReturnType<typeof Object.assign> {
+    return Object.assign(
+      (universal: unknown) => {
+        seen.push(universal);
+        return Promise.resolve({ status: 201 });
+      },
+      { requestPath: '/p.S/M' },
+    );
+  }
+
+  it('without a signal, uses the protocol fetch handler as built', async () => {
+    const { modules } = createFakeModules();
+    const seen: unknown[] = [];
+    const fetchHandler = adaptConnectModule(modules).createFetchHandler(universalHandler(seen));
+    const response = await fetchHandler(new Request('http://x/p.S/M'));
+    expect(await response.text()).toBe('ok');
+    expect(seen).toEqual([]);
+  });
+
+  it('with a signal, runs the universal handler and converts its response', async () => {
+    const { modules } = createFakeModules();
+    const seen: unknown[] = [];
+    const signal = new AbortController().signal;
+    const fetchHandler = adaptConnectModule(modules).createFetchHandler(universalHandler(seen));
+    const response = await fetchHandler(new Request('http://x/p.S/M'), signal);
+    expect(response.status).toBe(201);
+    expect(await response.text()).toBe('from-universal');
+    expect(seen).toEqual([{ universal: 'http://x/p.S/M', options: {}, signal }]);
   });
 });

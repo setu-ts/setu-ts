@@ -68,6 +68,8 @@ export interface ConnectProtocolModuleLike {
   ): (request: Request) => Promise<Response>;
   /** Converts a fetch `Request` into the universal request a handler takes. */
   universalServerRequestFromFetch(request: Request, options: Record<string, unknown>): unknown;
+  /** Converts a universal response into a fetch `Response`. */
+  universalServerResponseToFetch(response: UniversalServerResponseLike): Response;
 }
 
 /** Structural shape of `@bufbuild/protobuf`. */
@@ -112,6 +114,27 @@ function decodeBase64(base64: string): Uint8Array {
 export function adaptConnectModule(modules: ConnectModuleLike): ConnectRuntime {
   const { connect, protocol, protobuf, wkt } = modules;
 
+  /**
+   * Runs a request through a universal handler. A Connect `UniversalHandler`
+   * is a function carrying the descriptor fields this port reads; the
+   * structural type omits the call signature so hand-built test handlers need
+   * not be callable. `httpVersion` stays unset, as for `createFetchHandler`.
+   * The transport's signal replaces the request's own: the universal request
+   * is a plain object, so swapping it costs nothing per call.
+   */
+  function handleUniversal(
+    handler: UniversalHandlerLike,
+    request: Request,
+    signal: AbortSignal | undefined,
+  ): Promise<UniversalServerResponseLike> {
+    const call = handler as unknown as (universal: unknown) => Promise<UniversalServerResponseLike>;
+    const universal = protocol.universalServerRequestFromFetch(request, {}) as Record<
+      string,
+      unknown
+    >;
+    return call(signal === undefined ? universal : { ...universal, signal });
+  }
+
   return {
     createConnectRouter(options?: Record<string, unknown>): ConnectRouterLike {
       // The facade's `options` parameter is forwarded, not dropped (M70f §3.7):
@@ -120,26 +143,28 @@ export function adaptConnectModule(modules: ConnectModuleLike): ConnectRuntime {
       return connect.createConnectRouter(options);
     },
 
-    createFetchHandler(handler: UniversalHandlerLike): (request: Request) => Promise<Response> {
+    createFetchHandler(
+      handler: UniversalHandlerLike,
+    ): (request: Request, signal?: AbortSignal) => Promise<Response> {
       // `httpVersion` is deliberately left unset: IHttpAdapter surfaces no
       // negotiated HTTP version, and the only behavior it gates is Connect's
       // bidi refusal, which would then fire even on transports that support
       // bidi (plan §3.5/§3.8).
-      return protocol.createFetchHandler(handler);
+      const fetchHandler = protocol.createFetchHandler(handler);
+      return (request, signal) =>
+        signal === undefined
+          ? fetchHandler(request)
+          : handleUniversal(handler, request, signal).then((universal) =>
+              protocol.universalServerResponseToFetch(universal),
+            );
     },
 
     handleUniversal(
       handler: UniversalHandlerLike,
       request: Request,
+      signal?: AbortSignal,
     ): Promise<UniversalServerResponseLike> {
-      // A Connect `UniversalHandler` is a function carrying the descriptor
-      // fields this port reads; the structural type omits the call signature
-      // so hand-built test handlers need not be callable. `httpVersion` stays
-      // unset, as for `createFetchHandler`.
-      const call = handler as unknown as (
-        universal: unknown,
-      ) => Promise<UniversalServerResponseLike>;
-      return call(protocol.universalServerRequestFromFetch(request, {}));
+      return handleUniversal(handler, request, signal);
     },
 
     reviveDescriptorSet(base64: string): FileRegistryLike {

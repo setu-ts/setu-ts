@@ -173,7 +173,8 @@ export function buildConnectRouter(options: BuildConnectRouterOptions): {
   for (const handler of router.handlers) {
     dispatchMap.set(normalizedBase + handler.requestPath, {
       fetch: connectRuntime.createFetchHandler(handler),
-      native: (request) => connectRuntime.handleUniversal(handler, request).then(nativeGrpcReply),
+      native: (request, signal) =>
+        connectRuntime.handleUniversal(handler, request, signal).then(nativeGrpcReply),
       ...streamingSides(handler.method?.methodKind),
     });
   }

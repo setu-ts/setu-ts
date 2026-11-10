@@ -15766,17 +15766,20 @@ grpc.addService(AnotherDefinition, anotherImpl);
   real HTTP/1.1 socket, bidi calls fail at the transport. Unary, server-streaming, and
   client-streaming work on every runtime.
 - **RPC replies stream, request streams reach the procedure (M139b, `0.13.0`).** `RpcTransport`
-  (`{ readonly trailers: boolean }`) and `RpcReply` (`{ response, streaming, trailers? }`) are
-  exported from `@setu-ts/common`. The kernel computes the transport from
-  `IRequest.responseTrailers`, passes it to `IGrpcService.refuses?(request, transport?)` and to the
-  optional `IGrpcService.handleRpc?(request, transport): Promise<RpcReply>`, and writes a reply that
-  streams or carries trailers through `IResponse.stream` (V12-39: replies were read whole first). An
+  (`{ readonly trailers: boolean; readonly signal?: AbortSignal }`) and `RpcReply`
+  (`{ response, streaming, trailers? }`) are exported from `@setu-ts/common`. The kernel computes
+  the transport from `IRequest.responseTrailers`, passes it to
+  `IGrpcService.refuses?(request, transport?)` and to the optional
+  `IGrpcService.handleRpc?(request, transport): Promise<RpcReply>`, and writes a reply that streams
+  or carries trailers through `IResponse.stream` (V12-39: replies were read whole first). An
   implementor without `handleRpc` keeps the buffered write. The optional
   `IGrpcService.streamsRequest?(request): boolean` names client- and bidi-streaming procedures; for
   those, when nothing in the pipeline read the body (`raw.bodyUsed === false`), the kernel hands the
   unread body stream to the dispatch, and the plugin bounds each message with
-  `GrpcPluginOptions.readMaxBytes` (default 4 MiB) instead of `maxBodyBytes`. Both dispatched forms
-  carry the raw request's `signal`. `GrpcService.handleRequest` is
+  `GrpcPluginOptions.readMaxBytes` (default 4 MiB) instead of `maxBodyBytes`. The raw request's
+  `signal` travels on `RpcTransport.signal`, not on the dispatched `Request` (following it from a
+  freshly built `Request` cost about 8% of unary throughput on Node); the plugin hands it to Connect
+  as the call's signal on every path. `GrpcService.handleRequest` is
   `handleRpc(request, { trailers: false })`.
 - **Native gRPC is served where trailers reach the client (M139b).** On the Node adapter over HTTP/2
   — `RuntimePlugin({ http2 })` on Node or Bun — a native `application/grpc` call runs through

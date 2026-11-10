@@ -34,9 +34,9 @@ All notable changes to this project are documented here. The format follows
   them to the first message. Unary replies stay buffered. A client- or bidi-streaming call whose
   body nothing read gets the unread body, bounded per message by `readMaxBytes` rather than
   `RuntimePlugin({ maxBodyBytes })`; unary and server-streaming bodies keep the `maxBodyBytes`
-  bound. Both forms carry the client's abort signal. An `IGrpcService` without `handleRpc` keeps the
-  buffered write. The `grpc-workspace` example calls billing over one HTTP/2 connection with
-  `@connectrpc/connect-node`.
+  bound. The client's abort signal reaches every call, unary included, on the new
+  `RpcTransport.signal`. An `IGrpcService` without `handleRpc` keeps the buffered write. The
+  `grpc-workspace` example calls billing over one HTTP/2 connection with `@connectrpc/connect-node`.
 
 ### Fixed
 

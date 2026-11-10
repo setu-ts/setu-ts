@@ -23,10 +23,13 @@ import { isNativeGrpcContentType, trailersOnlyUnimplemented } from './grpc-binar
  * native-gRPC path, and which sides of the call stream.
  */
 export interface DispatchEntry {
-  /** Connect, gRPC-Web — and anything else `createFetchHandler` serves. */
-  readonly fetch: (request: Request) => Promise<Response>;
+  /**
+   * Connect, gRPC-Web — and anything else `createFetchHandler` serves. A
+   * `signal` replaces the request's own as the call's cancellation signal.
+   */
+  readonly fetch: (request: Request, signal?: AbortSignal) => Promise<Response>;
   /** Native `application/grpc` with trailers, for a connection that carries them. */
-  readonly native: (request: Request) => Promise<RpcReply>;
+  readonly native: (request: Request, signal?: AbortSignal) => Promise<RpcReply>;
   /** `true` for a client-streaming or bidirectional procedure. */
   readonly streamsRequest: boolean;
   /** `true` for a server-streaming or bidirectional procedure. */
@@ -111,7 +114,7 @@ export function isWithinBasePath(requestPath: string, basePath: string): boolean
  * @param request - The native fetch request.
  * @param dispatchMap - Entries keyed by `basePath + requestPath`.
  * @param basePath - An already-normalized base path.
- * @param transport - What the connection can carry (M139b). Absent means no
+ * @param transport - What the connection can carry, and the client's signal (M139b). Absent means no
  *   trailers.
  * @returns The RPC reply; a Trailers-Only `UNIMPLEMENTED` refusal for a matched
  *   native `application/grpc` request on a connection without trailers; a
@@ -146,11 +149,11 @@ export function dispatchRequest(
   if (entry !== undefined) {
     if (isNativeGrpcContentType(request.headers.get('content-type'))) {
       return transport?.trailers === true
-        ? entry.native(request)
+        ? entry.native(request, transport.signal)
         : Promise.resolve({ response: trailersOnlyUnimplemented(), streaming: false });
     }
     return entry
-      .fetch(request)
+      .fetch(request, transport?.signal)
       .then((response) => ({ response, streaming: entry.streamsResponse }));
   }
 

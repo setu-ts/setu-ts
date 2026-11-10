@@ -212,8 +212,10 @@ describe('M139b §3.3 — the transport bit and trailers', () => {
     });
     const app = await started(grpc);
     await app.inject({ method: 'POST', url: '/pkg.Svc/Method' });
-    expect(grpc.seen.refuseTransports).toEqual([{ trailers: false }]);
-    expect(grpc.seen.transports).toEqual([{ trailers: false }]);
+    expect(grpc.seen.refuseTransports).toEqual([
+      { trailers: false, signal: expect.any(AbortSignal) },
+    ]);
+    expect(grpc.seen.transports).toEqual([{ trailers: false, signal: expect.any(AbortSignal) }]);
   });
 
   it('an adapter-flagged request reports trailers, and the reply keeps them through the kernel', async () => {
@@ -227,8 +229,10 @@ describe('M139b §3.3 — the transport bit and trailers', () => {
     const response = await adapter.handler()(
       new TrailerCapableRequest(new Request(URL_BASE, { method: 'POST' })),
     );
-    expect(grpc.seen.refuseTransports).toEqual([{ trailers: true }]);
-    expect(grpc.seen.transports).toEqual([{ trailers: true }]);
+    expect(grpc.seen.refuseTransports).toEqual([
+      { trailers: true, signal: expect.any(AbortSignal) },
+    ]);
+    expect(grpc.seen.transports).toEqual([{ trailers: true, signal: expect.any(AbortSignal) }]);
     const snapshot = response.snapshot();
     // A reply with trailers is streamed even when it is a single message, and
     // the kernel's empty-chunk guard re-wraps the body without dropping them.
@@ -346,14 +350,16 @@ describe('M139b §3.2 — RPC request bodies', () => {
   });
 
   it.each([true, false])(
-    'the dispatched request carries the client signal (streamed body: %s)',
+    'the client signal travels on the transport, not the dispatched request (streamed body: %s)',
     async (streams) => {
-      let seenSignal: AbortSignal | undefined;
+      let transportSignal: AbortSignal | undefined;
+      let requestSignal: AbortSignal | undefined;
       const app = await started(
         grpcPlugin({
           streamsRequest: () => streams,
-          handleRpc: (request) => {
-            seenSignal = request.signal;
+          handleRpc: (request, transport) => {
+            transportSignal = transport.signal;
+            requestSignal = request.signal;
             return Promise.resolve({ response: new Response('ok'), streaming: false });
           },
         }),
@@ -362,9 +368,12 @@ describe('M139b §3.2 — RPC request bodies', () => {
       await app.dispatch!(
         new Request(URL_BASE, { method: 'POST', body: 'x', signal: controller.signal }),
       );
-      expect(seenSignal!.aborted).toBe(false);
+      expect(transportSignal!.aborted).toBe(false);
       controller.abort();
-      expect(seenSignal!.aborted).toBe(true);
+      expect(transportSignal!.aborted).toBe(true);
+      // Following a signal costs a freshly built Request ~8% of unary
+      // throughput on Node, so the dispatched request does not.
+      expect(requestSignal!.aborted).toBe(false);
     },
   );
 });

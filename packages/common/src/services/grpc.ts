@@ -81,6 +81,15 @@ export interface RpcTransport {
    * only when this is `true`.
    */
   readonly trailers: boolean;
+
+  /**
+   * Aborts when the client goes away: the raw request's `signal`. A service
+   * uses it as the call's cancellation signal in place of the dispatched
+   * request's own, which the kernel leaves unset — following a signal from a
+   * freshly built `Request` costs about 8% of unary throughput on Node.
+   * Absent: the dispatched request's own signal applies.
+   */
+  readonly signal?: AbortSignal;
 }
 
 /**

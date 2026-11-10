@@ -148,20 +148,23 @@ export interface ConnectRuntime {
   createConnectRouter(options?: Record<string, unknown>): ConnectRouterLike;
 
   /**
-   * Adapts a Connect `UniversalHandler` into a fetch handler. The result
-   * retains `requestPath`, so the dispatch map is built from the handlers
-   * themselves with no parallel bookkeeping.
+   * Adapts a Connect `UniversalHandler` into a fetch handler. A `signal` replaces the
+   * request's own as the call's cancellation signal (`RpcTransport.signal`).
    */
-  createFetchHandler(handler: UniversalHandlerLike): (request: Request) => Promise<Response>;
+  createFetchHandler(
+    handler: UniversalHandlerLike,
+  ): (request: Request, signal?: AbortSignal) => Promise<Response>;
 
   /**
    * Runs a request through a universal handler directly, keeping the
    * response's trailers (M139b §3.6): `universalServerRequestFromFetch`, then
-   * the handler.
+   * the handler. A `signal` replaces the request's own, as for
+   * {@linkcode ConnectRuntime.createFetchHandler}.
    */
   handleUniversal(
     handler: UniversalHandlerLike,
     request: Request,
+    signal?: AbortSignal,
   ): Promise<UniversalServerResponseLike>;
 
   /**

@@ -55,12 +55,51 @@ describe('Connect real import', { skip: !available }, () => {
     const handler = router.handlers.find((h) => h.requestPath.includes('Check'))!;
     expect(handler.requestPath).toBe('/grpc.health.v1.Health/Check');
 
-    const fetchHandler = runtime.createFetchHandler(handler);
-    // Connect returns Object.assign(fn, uHandler), so requestPath survives.
-    expect((fetchHandler as unknown as { requestPath: string }).requestPath).toBe(
-      '/grpc.health.v1.Health/Check',
-    );
+    expect(typeof runtime.createFetchHandler(handler)).toBe('function');
   });
+
+  // Connect aborts a call's own signal once the call ends, so the abort is
+  // observed from inside the handler. Without the signal handed beside the
+  // request (the control), the same abort does not reach the call.
+  it.each([
+    ['fetch', true],
+    ['universal', true],
+    ['fetch', false],
+    ['universal', false],
+  ] as const)(
+    'a signal handed beside the request cancels the real call (%s, handed: %s)',
+    async (path, handed) => {
+      const runtime = await loadConnectModule();
+      const registry = runtime.reviveDescriptorSet(EmbeddedDescriptors.healthBase64);
+      const health = runtime.getService(registry, 'grpc.health.v1.Health')!;
+      const controller = new AbortController();
+      let before: boolean | undefined;
+      let after: boolean | undefined;
+      const router = runtime.createConnectRouter();
+      router.service(health, {
+        check: (_request: unknown, context: { signal: AbortSignal }) => {
+          before = context.signal.aborted;
+          controller.abort();
+          after = context.signal.aborted;
+          return { status: 1 };
+        },
+      });
+      const handler = router.handlers.find((h) => h.requestPath.includes('Check'))!;
+      const request = new Request('http://localhost/grpc.health.v1.Health/Check', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{}',
+      });
+      const signal = handed ? controller.signal : undefined;
+      const status =
+        path === 'fetch'
+          ? (await runtime.createFetchHandler(handler)(request, signal)).status
+          : (await runtime.handleUniversal(handler, request, signal)).status;
+      expect(status).toBe(200);
+      expect(before).toBe(false);
+      expect(after).toBe(handed);
+    },
+  );
 
   it('serves a real unary Check over the real fetch handler', async () => {
     const runtime = await loadConnectModule();
