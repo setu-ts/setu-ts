@@ -111,6 +111,47 @@ export function instanceOrigin(instance: ServiceInstance): string {
   return `${scheme}://${host}:${instance.port}`;
 }
 
+/** connect-node's message for a `REFUSED_STREAM` reset code (`connectErrorFromH2ResetCode`). */
+const CONNECT_NODE_REFUSED = 'http/2 stream closed with error code REFUSED_STREAM (0x7)';
+
+/**
+ * Whether a call failed because the server refused its HTTP/2 stream
+ * (`REFUSED_STREAM`, RFC 9113 §8.7): the server did not process it, which a
+ * server that has sent `GOAWAY` while shutting down does to a stream already on
+ * the wire. connect-node maps the reset code to `Unavailable` when it reads it,
+ * but reports the stream-error event Node raises for the same refusal as
+ * `Internal`; the cause chain names it either way.
+ *
+ * @param error - The call's error
+ * @returns `true` when some error in the cause chain is that refusal
+ */
+export function isRefusedStream(error: unknown): boolean {
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && typeof current === 'object' && current !== null; depth++) {
+    const { message, code, cause } = current as {
+      message?: unknown;
+      code?: unknown;
+      cause?: unknown;
+    };
+    if (typeof message === 'string') {
+      // Node's stream error for the refusal, and connect-node's reading of the
+      // reset code: exactly these two, so a server's own error message that
+      // happens to name the code is never taken for a refusal and retried.
+      if (code === 'ERR_HTTP2_STREAM_ERROR' && message.includes('NGHTTP2_REFUSED_STREAM')) {
+        return true;
+      }
+      if (message.includes(CONNECT_NODE_REFUSED)) return true;
+    }
+    current = cause;
+  }
+  return false;
+}
+
+/** A refused stream, carrying the `Unavailable` error the caller will see. */
+class RefusedStream {
+  constructor(readonly error: Error) {}
+}
+
 /** What a client needs from the plugin. */
 export interface GrpcClientDeps {
   /** The Connect runtime: `createClient` and its errors. */
@@ -216,18 +257,43 @@ export class GrpcClients {
     options: ResolvedClientOptions,
   ): ClientTransportLike {
     return {
+      // A unary call can be sent again: its input is one message. A streaming
+      // call's input may already be consumed, so it is never retried.
       unary: (method, signal, timeoutMs, header, input, contextValues) =>
-        this.#call(target, base, options, (transport) =>
+        this.#call(target, base, options, true, (transport) =>
           transport.unary(method, signal, timeoutMs, header, input, contextValues),
         ),
       stream: (method, signal, timeoutMs, header, input, contextValues) =>
-        this.#call(target, base, options, (transport) =>
+        this.#call(target, base, options, false, (transport) =>
           transport.stream(method, signal, timeoutMs, header, input, contextValues),
         ),
     };
   }
 
+  /**
+   * Runs one call, retrying a unary call once when the server refused its
+   * stream (see {@linkcode isRefusedStream}).
+   */
   async #call(
+    target: string,
+    base: string | undefined,
+    options: ResolvedClientOptions,
+    retryable: boolean,
+    run: (transport: ClientTransportLike) => Promise<unknown>,
+  ): Promise<unknown> {
+    try {
+      return await this.#attempt(target, base, options, run);
+    } catch (error) {
+      if (retryable && error instanceof RefusedStream) {
+        return this.#attempt(target, base, options, run).catch((again: unknown) => {
+          throw again instanceof RefusedStream ? again.error : again;
+        });
+      }
+      throw error instanceof RefusedStream ? error.error : error;
+    }
+  }
+
+  async #attempt(
     target: string,
     base: string | undefined,
     options: ResolvedClientOptions,
@@ -255,6 +321,15 @@ export class GrpcClients {
       this.#report(discovery, instance, 'success');
       return result;
     } catch (error) {
+      if (isRefusedStream(error)) {
+        // The server never processed it: the instance's fault, and safe to send again.
+        this.#report(discovery, instance, 'failure');
+        throw new RefusedStream(
+          runtime.isUnavailable(error)
+            ? (error as Error)
+            : runtime.unavailable(`"${target}" refused the call before processing it`, error),
+        );
+      }
       this.#report(discovery, instance, runtime.isUnavailable(error) ? 'failure' : 'success');
       throw error;
     }

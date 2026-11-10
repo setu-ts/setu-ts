@@ -60,7 +60,13 @@ export interface ConnectCoreModuleLike {
   /** `createClient(service, transport)` (§3.12). */
   createClient(service: unknown, transport: ClientTransportLike): unknown;
   /** The `ConnectError` class. */
-  ConnectError: new (message: string, code: number) => Error & { readonly code: number };
+  ConnectError: new (
+    message: string,
+    code: number,
+    metadata?: undefined,
+    outgoingDetails?: undefined,
+    cause?: unknown,
+  ) => Error & { readonly code: number };
   /** The `Code` enum; only `Unavailable` is read. */
   Code: { readonly Unavailable: number };
 }
@@ -150,8 +156,14 @@ export function adaptConnectModule(modules: ConnectModuleLike): ConnectRuntime {
     createClient(service: unknown, transport: ClientTransportLike): unknown {
       return connect.createClient(service, transport);
     },
-    unavailable(message: string): Error {
-      return new connect.ConnectError(message, connect.Code.Unavailable);
+    unavailable(message: string, cause?: unknown): Error {
+      return new connect.ConnectError(
+        message,
+        connect.Code.Unavailable,
+        undefined,
+        undefined,
+        cause,
+      );
     },
     isUnavailable(error: unknown): boolean {
       return error instanceof connect.ConnectError && error.code === connect.Code.Unavailable;

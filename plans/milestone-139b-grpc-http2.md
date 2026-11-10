@@ -436,6 +436,18 @@ The TLS mode imports `node:http2` the same way.
   `GrpcRuntimeLoadError` naming `npm install @connectrpc/connect-node`. Workers have no
   connect-node; a Workers caller gets that error — calling over service bindings is out of scope
   (§9).
+- **Decision — refused streams (found by the scenario suite, 2026-11-10):** a server that has sent
+  `GOAWAY` while shutting down refuses a stream already on the wire with `REFUSED_STREAM`, which RFC
+  9113 §8.7 defines as "not processed" and gRPC maps to `UNAVAILABLE`. connect-node reads the reset
+  code as `Unavailable`, but reports Node's stream-error event for the same refusal as `Internal`:
+  measured, the first call after an instance stopped answered `Internal`, was reported to discovery
+  as a success, and the next call went to the dead instance again. The client therefore recognises
+  the refusal by its two exact shapes (Node's `ERR_HTTP2_STREAM_ERROR` naming
+  `NGHTTP2_REFUSED_STREAM` anywhere in the cause chain, and connect-node's reset-code message),
+  reports it as the instance's failure, rejects it as `Unavailable` with the original as `cause`,
+  and sends a **unary** call once more on a fresh pick — gRPC's transparent retry (gRFC A6), safe
+  because the server never saw it. A streaming call is not retried: its input may already be
+  consumed.
 - **Decision — trace propagation:** when `CAPABILITIES.TELEMETRY` resolves to a service with
   `activeSpanContext`, an interceptor sets `traceparent` from it with `contextToTraceparent`, unless
   the call already carries one.

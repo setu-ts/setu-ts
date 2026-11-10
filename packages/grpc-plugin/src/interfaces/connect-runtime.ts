@@ -198,8 +198,11 @@ export interface ConnectRuntime {
   /**
    * A Connect `Unavailable` error, which is what a client caller already
    * handles for an unreachable server (§3.12).
+   *
+   * @param message - The error message
+   * @param cause - The error it replaces, kept as its `cause`
    */
-  unavailable(message: string): Error;
+  unavailable(message: string, cause?: unknown): Error;
 
   /** Whether an error is a Connect error with code `Unavailable`. */
   isUnavailable(error: unknown): boolean;

@@ -15801,8 +15801,10 @@ grpc.addService(AnotherDefinition, anotherImpl);
   discovery registered throws `TypeError` at `grpcClient()`. Calls share one HTTP/2 session per
   instance (64 origins at most, least recently used closed first), have a 5 s deadline, carry the
   active span as `traceparent` when telemetry is registered, and reject with
-  `ConnectError(Unavailable)` when no instance is known or after the application stops.
-  `GrpcClientOptions` (`common`): `basePath` (`''`), `protocol` (`'connect'` | `'grpc'` |
+  `ConnectError(Unavailable)` when no instance is known or after the application stops. A stream the
+  server refused (`REFUSED_STREAM`, never processed — a server shutting down) is reported as the
+  instance's failure and rejects as `Unavailable`; a unary call is first sent once more on a fresh
+  pick. `GrpcClientOptions` (`common`): `basePath` (`''`), `protocol` (`'connect'` | `'grpc'` |
   `'grpc-web'`, default `'connect'`), `httpVersion` (`'2'` | `'1.1'`, default `'2'`; `'grpc'` needs
   `'2'`), `timeoutMs` (1–2147483647, default `5000`); per-call options override
   `GrpcPluginOptions.clients[target]`, which overrides the defaults. The transport is

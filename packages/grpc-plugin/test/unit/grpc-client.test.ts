@@ -13,6 +13,7 @@ import {
   CLIENT_DEFAULTS,
   GrpcClients,
   instanceOrigin,
+  isRefusedStream,
   MAX_CLIENT_ORIGINS,
   targetBase,
   validateClientOptions,
@@ -497,5 +498,118 @@ describe('grpcClient', () => {
     expect(() => service.client(BILLING, 'billing')).toThrow(
       new TypeError('GrpcService: this service was built without clients; register GrpcPlugin'),
     );
+  });
+});
+
+/** Node's error for a stream the server refused, as connect-node wraps it. */
+function nodeRefusal(): Error {
+  const node = Object.assign(new Error('Stream closed with error code NGHTTP2_REFUSED_STREAM'), {
+    code: 'ERR_HTTP2_STREAM_ERROR',
+  });
+  return Object.assign(
+    new Error('[internal] Stream closed with error code NGHTTP2_REFUSED_STREAM'),
+    {
+      cause: node,
+    },
+  );
+}
+
+describe('refused streams (REFUSED_STREAM)', () => {
+  it.each([
+    ['Node stream error in the cause chain', nodeRefusal(), true],
+    [
+      "connect-node's reset-code reading",
+      new FakeUnavailableError(
+        '[unavailable] http/2 stream closed with error code REFUSED_STREAM (0x7)',
+      ),
+      true,
+    ],
+    [
+      'the same text without the stream-error code',
+      new Error('Stream closed with error code NGHTTP2_REFUSED_STREAM'),
+      false,
+    ],
+    ['a server error naming the code', new Error('REFUSED_STREAM'), false],
+    [
+      'another reset',
+      Object.assign(new Error('NGHTTP2_CANCEL'), { code: 'ERR_HTTP2_STREAM_ERROR' }),
+      false,
+    ],
+    ['not an object', 'REFUSED_STREAM', false],
+    [
+      'a cycle deeper than five',
+      (() => {
+        const e: { message: string; cause?: unknown } = { message: 'x' };
+        e.cause = e;
+        return e;
+      })(),
+      false,
+    ],
+  ])('%s → %s', (_label, error, expected) => {
+    expect(isRefusedStream(error)).toBe(expected);
+  });
+
+  it('retries a refused unary call once on a fresh pick, reporting the refusal as a failure', async () => {
+    const discovery = fakeDiscovery([instance('a', 1), instance('b', 2)]);
+    const results: Array<() => Promise<unknown>> = [
+      () => Promise.reject(nodeRefusal()),
+      () => Promise.resolve('ok'),
+    ];
+    const node = fakeNode(() => results.shift()!());
+    const { clients: c } = clients({ discovery: () => discovery }, node);
+    expect(await call(c.client(BILLING, 'billing'))).toBe('ok');
+    expect(discovery.reports).toEqual([
+      ['a', 'failure'],
+      ['b', 'success'],
+    ]);
+  });
+
+  it('a second refusal rejects as Unavailable, keeping the original as its cause', async () => {
+    const discovery = fakeDiscovery([instance('a', 1)]);
+    const refusal = nodeRefusal();
+    const node = fakeNode(() => Promise.reject(refusal));
+    const { clients: c } = clients({ discovery: () => discovery }, node);
+    const error = (await call(c.client(BILLING, 'billing')).catch((e: unknown) => e)) as Error;
+    expect(error).toBeInstanceOf(FakeUnavailableError);
+    expect(error.message).toBe('"billing" refused the call before processing it');
+    expect(discovery.reports).toEqual([
+      ['a', 'failure'],
+      ['a', 'failure'],
+    ]);
+  });
+
+  it("keeps connect-node's own Unavailable reading as is, and fails the retry with a different error as that error", async () => {
+    const reading = new FakeUnavailableError(
+      '[unavailable] http/2 stream closed with error code REFUSED_STREAM (0x7)',
+    );
+    const other = new Error('InvalidArgument');
+    const results: Array<() => Promise<unknown>> = [
+      () => Promise.reject(reading),
+      () => Promise.reject(other),
+    ];
+    const { clients: c } = clients(
+      {},
+      fakeNode(() => results.shift()!()),
+    );
+    expect(await call(c.client(BILLING, 'http://h:1')).catch((e: unknown) => e)).toBe(other);
+
+    const twice = [() => Promise.reject(reading), () => Promise.reject(reading)];
+    const { clients: d } = clients(
+      {},
+      fakeNode(() => twice.shift()!()),
+    );
+    expect(await call(d.client(BILLING, 'http://h:1')).catch((e: unknown) => e)).toBe(reading);
+  });
+
+  it('never retries a streaming call', async () => {
+    let calls = 0;
+    const node = fakeNode(() => {
+      calls++;
+      return Promise.reject(nodeRefusal());
+    });
+    const { clients: c } = clients({}, node);
+    const error = await callStream(c.client(BILLING, 'http://h:1')).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(FakeUnavailableError);
+    expect(calls).toBe(1);
   });
 });

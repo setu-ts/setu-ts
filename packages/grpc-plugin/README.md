@@ -113,6 +113,10 @@ const billing = grpcClient(app.services, BillingService, 'billing');
   `TypeError` at `GrpcPlugin()` or `grpcClient()`.
 - **Tracing.** With telemetry registered, each call carries the active span as `traceparent`, unless
   the call sets its own.
+- **Rolling restarts.** A server shutting down refuses a call already on the wire (HTTP/2
+  `REFUSED_STREAM`, never processed). The client reports that instance's failure and sends a unary
+  call once more on another pick, so a restart costs no failed unary calls; a refused streaming call
+  rejects as `Unavailable`.
 - **Failures** reject with Connect's `ConnectError`: `Unavailable` when discovery knows no instance
   (`no instance of "billing" is available`), when the connection fails, and after the application
   stops (`the gRPC client is closed`); `DeadlineExceeded` past the deadline; otherwise the server's
