@@ -19,6 +19,49 @@ import type { QdrantClientLike } from '../../src/adapters/qdrant/qdrant-store.ts
 import { translate } from '../../src/adapters/qdrant/qdrant-filter.ts';
 
 const runtime = { subtle: globalThis.crypto.subtle } as IRuntimeServices;
+
+it.each([undefined, 7])(
+  'M139c slices Qdrant replacements before count/delete (version %s)',
+  async (version) => {
+    const client = recordingClient();
+    const store = new QdrantVectorStore({ client });
+    await store.open(runtime);
+    const records = Array.from({ length: 1201 }, (_, i) => ({
+      id: `r${i}`,
+      sourceId: 'source',
+      vector: [1, 0, 0],
+    }));
+    await store.replaceSource(spec, 'tenant-a', 'source', records, version);
+    const calls = client.calls.filter((c) => c.method === 'upsert');
+    const bodies = calls.map(
+      (c) => c.body as { points: { payload: Record<string, unknown> }[]; update_filter?: unknown },
+    );
+    expect(bodies.map((b) => b.points.length)).toEqual([500, 500, 201]);
+    for (const body of bodies) {
+      for (const point of body.points) {
+        expect(point.payload['scope']).toBe('tenant-a');
+      }
+      if (version === undefined) expect(body).not.toHaveProperty('update_filter');
+      else
+        expect(body.update_filter).toEqual({
+          must_not: [
+            {
+              must: [
+                { key: 'source_id', match: { value: 'source' } },
+                { key: 'source_version', range: { gt: version } },
+              ],
+            },
+          ],
+        });
+    }
+    expect(client.calls.filter((c) => c.method === 'delete')).toHaveLength(1);
+    expect(client.calls.at(-1)!.method).toBe('delete');
+    expect(JSON.stringify(client.calls.at(-1)!.body)).toContain('tenant-a');
+    expect(client.calls.filter((c) => c.method === 'count')).toHaveLength(
+      version === undefined ? 0 : 1,
+    );
+  },
+);
 const spec: VectorCollectionSpec = Object.freeze({
   name: 'documents',
   dimensions: 3,

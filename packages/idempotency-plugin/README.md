@@ -198,6 +198,9 @@ scope and namespace are never stored — only their derived hashes.
 Configure it with `IdempotencyPlugin({ transactional: { store } })`, where `store` is
 `createDatabaseIdempotencyStore()` from `@setu-ts/database-plugin` (or any
 `ITransactionalIdempotencyStore`). The store is resolved and `verify()`d at `onInit`.
+`idempotency.transactional` is `true` exactly when the option was given, from registration on: it
+reports configuration, not readiness, so a plugin that needs `within` can refuse at its own
+`register` (AgentRunsPlugin does).
 
 The default purge is scheduled, so the example registers `SchedulerPlugin()`. Without
 `CAPABILITIES.SCHEDULER`, startup rejects with `IdempotencyConfigurationError`. Alternatively set

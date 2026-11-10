@@ -9,6 +9,7 @@ import { createClockRuntime } from '../fixtures/clock-runtime.ts';
 it('brands both entry points and shares non-default configuration behavior', async () => {
   const runtime = createClockRuntime();
   const service = new IdempotencyService({
+    transactionalConfigured: false,
     store: new MemoryIdempotencyStore(),
     runtime,
     logger: () => undefined,

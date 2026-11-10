@@ -74,6 +74,30 @@ function ctxWithTenant(id?: string): IRequestContext {
 }
 
 describe('VectorStoreService', () => {
+  it('M139c keeps upsert at 500 and sends one complete 5000-record replacement', async () => {
+    const adapter = recordingAdapter();
+    const service = new VectorStoreService(adapter, collections, 'required');
+    const records = Array.from({ length: 5000 }, (_, i) => ({
+      id: `r${i}`,
+      sourceId: 'source',
+      vector: [1, 0, 0],
+    }));
+    await expect(service.upsert('documents', 'a', records.slice(0, 501))).rejects.toThrow(
+      'at most 500',
+    );
+    expect(adapter.calls).toHaveLength(0);
+    await service.replaceSource('documents', 'a', 'source', records);
+    expect(adapter.calls).toHaveLength(1);
+    expect(adapter.calls[0]!.method).toBe('replaceSource');
+    expect(adapter.calls[0]!.args[3]).toEqual(records.map((r) => ({ ...r, metadata: {} })));
+    await expect(
+      service.replaceSource('documents', 'a', 'source', [
+        ...records,
+        { ...records[0]!, id: 'extra' },
+      ]),
+    ).rejects.toThrow('at most 5000');
+    expect(adapter.calls).toHaveLength(1);
+  });
   it('passes validated copies and the frozen spec to the adapter', async () => {
     const adapter = recordingAdapter();
     const service = new VectorStoreService(adapter, collections, 'required');

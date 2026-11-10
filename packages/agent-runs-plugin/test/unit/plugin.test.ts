@@ -13,6 +13,36 @@ import { MockServiceRegistry } from '@setu-ts/testing';
 import { AgentRunsPlugin } from '../../src/index.ts';
 import { definition, harness } from '../fixtures/harness.ts';
 describe('AgentRunsPlugin', () => {
+  it.each(['plain plugin', 'missing member'])(
+    'M139c refuses startup with %s before registering agent runs',
+    async (kind) => {
+      const app = createApplication({
+        plugins: [
+          RuntimePlugin(),
+          DatabasePlugin({ type: 'memory' }),
+          kind === 'plain plugin'
+            ? IdempotencyPlugin()
+            : {
+                name: 'old-idempotency',
+                version: '1',
+                provides: [CAPABILITIES.IDEMPOTENCY],
+                register(ctx) {
+                  ctx.services.register(CAPABILITIES.IDEMPOTENCY, {});
+                },
+              },
+          AgentRunsPlugin({ store: createDatabaseAgentRunStore(), definitions: [definition()] }),
+        ],
+      });
+      try {
+        await expect(app.start()).rejects.toThrow(
+          'Agent runs: register IdempotencyPlugin with a transactional store (transactional: { store: createDatabaseIdempotencyStore(), purge: { schedule: false } }, or register a scheduler) before this plugin.',
+        );
+        expect(app.services.has(CAPABILITIES.AGENT_RUNS)).toBe(false);
+      } finally {
+        await app.stop();
+      }
+    },
+  );
   it('runs the sweep timer and masks its error with or without a logger', async () => {
     const h = await harness();
     try {

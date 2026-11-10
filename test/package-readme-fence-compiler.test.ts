@@ -65,7 +65,7 @@ const READMES: Readonly<Record<string, number>> = {
   'packages/messaging-plugin/README.md': 17,
   // M89c: the tenant-in-a-behaviour recipe (`getRepositoryFor`) is the one new
   // fence — gated so it cannot ship uncompilable.
-  'packages/multi-tenancy-plugin/README.md': 6,
+  'packages/multi-tenancy-plugin/README.md': 7,
   'packages/scheduler-plugin/README.md': 3,
   // M90i: +1 for the trace-propagation example.
   'packages/queue-plugin/README.md': 10,
@@ -149,7 +149,7 @@ const READMES: Readonly<Record<string, number>> = {
   'packages/kernel/README.md': 3,
   'packages/logger-plugin/README.md': 4,
   // M102: +1 for the component-template example rendered through the view engine.
-  'packages/mail-plugin/README.md': 3,
+  'packages/mail-plugin/README.md': 4,
   'packages/metrics-plugin/README.md': 2,
   'packages/runtime/README.md': 3,
   // M98n: +1 for the devtool-gated observed-fetch composition.

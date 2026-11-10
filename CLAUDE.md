@@ -784,6 +784,12 @@ here.
   the request on `local.verify`, the template login's `regenerate()`, MCP exempt from form CSRF,
   `*.localhost` for non-fetched URLs; V12-37, V12-18, V12-19, V12-11, V12-35, V12-34; ships in
   `0.13.0`) — complete (PR #576).
+- **Milestone 139c** (`agent-runs-plugin` + `idempotency-plugin` + `vector-store-plugin` +
+  `auth-plugin` + `multi-tenancy-plugin` + `database-plugin` + `mail-plugin` + `common` — AI-layer
+  and data contracts with a missing half: agent-runs refuses without a transactional store,
+  5,000-record `replaceSource`, pgvector index-shape verify, `quota.usage`, tenant repositories in a
+  unit of work, mail attachments; V12-4, V12-9, V12-10, V12-36, V12-20, V12-21; ships in `0.13.0`) —
+  complete (PR #578).
 - **Next milestone** — the remaining M139 letters.
 
 ## Verification (run before declaring any work done)

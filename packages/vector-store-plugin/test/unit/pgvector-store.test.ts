@@ -95,6 +95,92 @@ async function opened(respond: Responder = healthy(), ensure?: 'create' | 'verif
 }
 
 describe('PgVectorStore', () => {
+  it.each([undefined, 7])(
+    'M139c slices a replacement under one lock and transaction (version %s)',
+    async (version) => {
+      const h = await opened();
+      const records = Array.from({ length: 1201 }, (_, i) => ({
+        id: `r${i}`,
+        sourceId: 'source',
+        vector: [1, 0, 0],
+      }));
+      h.statements.length = 0;
+      await h.store.replaceSource(spec, 'tenant-a', 'source', records, version);
+      const writes = h.statements.filter((s) => s.text.startsWith('INSERT'));
+      expect(writes.map((s) => s.params.length / 7)).toEqual([500, 500, 201]);
+      expect(writes.flatMap((s) => s.params.filter((_, i) => i % 7 === 1))).toEqual(
+        records.map((r) => r.id),
+      );
+      for (const s of writes) {
+        expect(s.inTransaction).toBe(true);
+        expect(s.params.filter((_, i) => i % 7 === 0)).toEqual(
+          Array(s.params.length / 7).fill('tenant-a'),
+        );
+        expect(s.params.filter((_, i) => i % 7 === 6)).toEqual(
+          Array(s.params.length / 7).fill(version ?? null),
+        );
+      }
+      expect(h.transactions()).toBe(1);
+      expect(h.statements[0]!.text).toContain('pg_advisory_xact_lock');
+      expect(h.statements.at(-1)!.params).toEqual([
+        'tenant-a',
+        'source',
+        JSON.stringify(records.map((r) => r.id)),
+      ]);
+      expect(h.statements.filter((s) => s.text.startsWith('DELETE'))).toHaveLength(1);
+    },
+  );
+  it.each(['source_index', 'vector_index'] as const)(
+    'M139c names the expected %s shape and fails closed',
+    async (column) => {
+      // A string 'f' from a driver's boolean parser must fail closed, not read as truthy.
+      for (const value of [false, null, undefined, 'f', 'false', 't', 1]) {
+        const h = await opened((rendered) =>
+          rendered.text.includes('FROM pg_attribute')
+            ? {
+                rows: [
+                  {
+                    dimensions: 3,
+                    source_index: true,
+                    vector_index: true,
+                    source_version: true,
+                    [column]: value,
+                  },
+                ],
+              }
+            : healthy()(rendered),
+        );
+        await expect(h.store.ensureCollection(spec)).rejects.toThrow(
+          column === 'source_index'
+            ? 'expected vs_documents_src ON vs_documents (scope, source_id).'
+            : 'expected vs_documents_hnsw ON vs_documents USING hnsw (embedding vector_cosine_ops).',
+        );
+      }
+    },
+  );
+  it('M139c describes index table, ordered key columns, access method and cosine opclass', async () => {
+    const h = await opened();
+    await h.store.ensureCollection(spec);
+    const query = h.statements.find((s) => s.text.includes('AS dimensions'))!;
+    for (const sql of [
+      'FROM pg_index',
+      'JOIN pg_class',
+      'JOIN pg_am',
+      'JOIN pg_opclass',
+      'i.indrelid = a.attrelid',
+      'i.indnkeyatts = 2',
+      "s.attname = 'scope'",
+      "t.attname = 'source_id'",
+      'i.indnkeyatts = 1',
+      'i.indkey[0] = a.attnum',
+      "m.amname = 'hnsw'",
+      "o.opcname = 'vector_cosine_ops'",
+      'i.indisvalid AND i.indpred IS NULL) AS source_index',
+      'i.indisvalid AND i.indpred IS NULL) AS vector_index',
+    ])
+      expect(query.text).toContain(sql);
+    expect(query.params).toEqual(['vs_documents_src', 'vs_documents_hnsw', 'vs_documents']);
+  });
   it('gives the app-owned pool an error listener at open, reporting through the logger (audit F1)', async () => {
     const { EventEmitter } = await import('node:events');
     const pool = new EventEmitter();
@@ -182,12 +268,14 @@ describe('PgVectorStore', () => {
     const { store, statements } = await opened();
     statements.length = 0;
     await store.ensureCollection(spec);
-    expect(statements.map((s) => s.text)).toEqual([
+    expect(statements.slice(0, 3).map((s) => s.text)).toEqual([
       'CREATE TABLE IF NOT EXISTS "vs_documents" (scope text NOT NULL, id text NOT NULL, source_id text, content text, metadata jsonb NOT NULL DEFAULT \'{}\'::jsonb, embedding vector(3) NOT NULL, source_version bigint, PRIMARY KEY (scope, id))',
       'CREATE INDEX IF NOT EXISTS "vs_documents_src" ON "vs_documents" (scope, source_id)',
       'CREATE INDEX IF NOT EXISTS "vs_documents_hnsw" ON "vs_documents" USING hnsw (embedding vector_cosine_ops)',
-      "SELECT a.atttypmod AS dimensions, to_regclass($1) IS NOT NULL AS source_index, to_regclass($2) IS NOT NULL AS vector_index, EXISTS (SELECT 1 FROM pg_attribute v WHERE v.attrelid = a.attrelid AND v.attname = 'source_version' AND NOT v.attisdropped) AS source_version FROM pg_attribute a WHERE a.attrelid = to_regclass($3) AND a.attname = 'embedding' AND NOT a.attisdropped",
     ]);
+    expect(statements).toHaveLength(4);
+    expect(statements[3]!.text).toContain('FROM pg_index');
+    expect(statements[3]!.text).toContain('AS source_version');
     expect(statements[3]!.params).toEqual([
       'vs_documents_src',
       'vs_documents_hnsw',

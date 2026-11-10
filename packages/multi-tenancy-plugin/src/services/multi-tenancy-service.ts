@@ -4,8 +4,12 @@
  * @module
  */
 import type { IRequestContext, ITenant, ITenantRepository, Option } from '@setu-ts/common';
-import type { IMultiTenancyService, ITenantDataStore } from '@setu-ts/common';
-import { TenantDataStoreNotReadyError, TenantNotResolvedError } from '../errors.ts';
+import type { IMultiTenancyService, ITenantDataStore, ITenantUnitOfWork } from '@setu-ts/common';
+import {
+  TenantDataStoreNotReadyError,
+  TenantNotResolvedError,
+  TenantUnitOfWorkUnsupportedError,
+} from '../errors.ts';
 import { TenantCheck } from '../registry/tenant-check.ts';
 import { TenantRepository } from '../repositories/tenant-repository.ts';
 
@@ -65,11 +69,14 @@ export class MultiTenancyService implements IMultiTenancyService {
   }
 
   /** The bound store; throws when it is not bound yet. */
-  private requireStore(): ITenantDataStore {
+  private requireStore(unitOfWork?: ITenantUnitOfWork): ITenantDataStore {
     if (this.store === null) {
       throw new TenantDataStoreNotReadyError();
     }
-    return this.store;
+    if (unitOfWork === undefined) return this.store;
+    if (this.store.withUnitOfWork === undefined)
+      throw new TenantUnitOfWorkUnsupportedError(this.store.constructor.name);
+    return this.store.withUnitOfWork(unitOfWork);
   }
 
   /** Return the tenant resolved for this request context, or `undefined`. */
@@ -80,10 +87,12 @@ export class MultiTenancyService implements IMultiTenancyService {
   /**
    * Create a tenant-scoped repository for the given entity type.
    * Throws `TenantNotResolvedError` if no tenant is resolved.
+   * @param unitOfWork - Optional transaction scope; requires store support (since 0.13.0)
    */
   getRepository<Entity, Id = string>(
     ctx: IRequestContext,
     entity: string,
+    unitOfWork?: ITenantUnitOfWork,
   ): ITenantRepository<Entity, Id> {
     const tenant = ctx.request.tenant;
     if (!tenant) {
@@ -91,7 +100,7 @@ export class MultiTenancyService implements IMultiTenancyService {
         'Tenant not resolved: set ctx.request.tenant via middleware, or call getRepository only after resolution.',
       );
     }
-    return new TenantRepository<Entity, Id>(this.requireStore(), tenant.id, entity);
+    return new TenantRepository<Entity, Id>(this.requireStore(unitOfWork), tenant.id, entity);
   }
 
   /**
@@ -99,12 +108,14 @@ export class MultiTenancyService implements IMultiTenancyService {
    * ctx-free entry point for non-HTTP work (an ingress behaviour, a queue
    * processor, a scheduled job). The id is trusted input; on the HTTP path
    * use `getRepository`, which reads the middleware-resolved tenant.
+   * @param unitOfWork - Optional transaction scope; requires store support (since 0.13.0)
    */
   getRepositoryFor<Entity, Id = string>(
     tenantId: string,
     entity: string,
+    unitOfWork?: ITenantUnitOfWork,
   ): ITenantRepository<Entity, Id> {
-    return new TenantRepository<Entity, Id>(this.requireStore(), tenantId, entity);
+    return new TenantRepository<Entity, Id>(this.requireStore(unitOfWork), tenantId, entity);
   }
 
   /**

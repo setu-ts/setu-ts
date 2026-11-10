@@ -19,6 +19,68 @@ function setup(overrides: Partial<QuotaOptions> = {}) {
 }
 
 describe('createQuota', () => {
+  it.each(['utc-day', 'utc-month', 1000] as const)(
+    'M139c reads settled usage and a new %s window without charging',
+    async (window) => {
+      const { quota, runtime, store } = setup({ limit: 100, window });
+      const reserve = vi.spyOn(store, 'reserve');
+      await quota.settle(await quota.reserve('tenant', 40), 30);
+      const end = window === 1000 ? Math.ceil(runtime.now() / 1000) * 1000 : Date.UTC(2026, 1, 1);
+      expect(await quota.usage('tenant')).toEqual({
+        used: 30,
+        limit: 100,
+        remaining: 70,
+        windowEndsAt: end,
+      });
+      expect(await quota.usage('other')).toMatchObject({ used: 0, remaining: 100 });
+      expect(await quota.usage('tenant')).toMatchObject({ used: 30 });
+      expect(reserve).toHaveBeenCalledOnce();
+      runtime.setNow(end);
+      expect(await quota.usage('tenant')).toMatchObject({ used: 0, remaining: 100 });
+    },
+  );
+  it('M139c resolves callback limits, clamps remaining and shares policy/key storage', async () => {
+    let limit: number | undefined = 100;
+    const callback = vi.fn((key: string) => {
+      expect(key).toBe('tenant');
+      return Promise.resolve(limit);
+    });
+    const { quota, options } = setup({ limit: callback });
+    await quota.reserve('tenant', 40);
+    limit = 10;
+    expect(await quota.usage('tenant')).toMatchObject({ used: 40, limit: 10, remaining: 0 });
+    limit = undefined;
+    expect(await quota.usage('tenant')).toMatchObject({
+      used: 40,
+      limit: undefined,
+      remaining: undefined,
+    });
+    expect(callback).toHaveBeenCalledTimes(3);
+    expect(await createQuota({ ...options, name: 'other' }).usage('tenant')).toMatchObject({
+      used: 0,
+    });
+    limit = -1;
+    await expect(quota.usage('tenant')).rejects.toThrow(TypeError);
+    const error = new Error('limit lookup failed');
+    await expect(
+      createQuota({ ...options, limit: () => Promise.reject(error) }).usage('tenant'),
+    ).rejects.toBe(error);
+  });
+  it('M139c uses one key refusal table through reserve and usage before storage', async () => {
+    const { quota, store } = setup();
+    const read = vi.spyOn(store, 'read');
+    const reserve = vi.spyOn(store, 'reserve');
+    for (const key of ['', 'x'.repeat(513), 'é'.repeat(257), '\ud800', null, 1]) {
+      for (const call of [() => quota.reserve(key as string, 0), () => quota.usage(key as string)])
+        await expect(call()).rejects.toThrow(
+          'Quota key must be well-formed, non-empty and at most 512 UTF-8 bytes',
+        );
+    }
+    expect(read).not.toHaveBeenCalled();
+    expect(reserve).not.toHaveBeenCalled();
+    await quota.reserve('é'.repeat(256), 1);
+    expect(await quota.usage('é'.repeat(256))).toMatchObject({ used: 1 });
+  });
   it('admits at the boundary, refuses above it, and freezes receipts', async () => {
     const { quota } = setup();
     const receipt = await quota.reserve('tenant', 10);
@@ -53,7 +115,10 @@ describe('createQuota', () => {
     const adjust = vi.fn<IQuotaStore['adjust']>().mockResolvedValue();
     const { quota, options } = setup();
     const foreign = await quota.reserve('tenant', 10);
-    const other = createQuota({ ...options, store: { reserve: vi.fn(), adjust } });
+    const other = createQuota({
+      ...options,
+      store: { read: vi.fn().mockResolvedValue(0), reserve: vi.fn(), adjust },
+    });
     for (const receipt of [
       foreign,
       { ...foreign },
@@ -73,7 +138,10 @@ describe('createQuota', () => {
         .fn<IQuotaStore['reserve']>()
         .mockResolvedValue({ admitted: true, used: 0 });
       const adjust = vi.fn<IQuotaStore['adjust']>().mockResolvedValue();
-      const quota = createQuota({ ...options, store: { reserve, adjust } });
+      const quota = createQuota({
+        ...options,
+        store: { read: vi.fn().mockResolvedValue(0), reserve, adjust },
+      });
       await expect(quota.reserve('tenant', amount)).rejects.toThrow(TypeError);
       expect(reserve).not.toHaveBeenCalled();
       const receipt = await quota.reserve('tenant', 1);
@@ -82,10 +150,11 @@ describe('createQuota', () => {
       expect(() => createQuota({ ...options, limit: amount })).toThrow(TypeError);
       reserve.mockClear();
       await expect(
-        createQuota({ ...options, store: { reserve, adjust }, limit: () => amount }).reserve(
-          'tenant',
-          1,
-        ),
+        createQuota({
+          ...options,
+          store: { read: vi.fn().mockResolvedValue(0), reserve, adjust },
+          limit: () => amount,
+        }).reserve('tenant', 1),
       ).rejects.toThrow(TypeError);
       expect(reserve).not.toHaveBeenCalled();
     },
@@ -110,13 +179,17 @@ describe('createQuota', () => {
       () => Promise.reject(fault),
     ]) {
       await expect(
-        createQuota({ ...options, store: { reserve, adjust }, limit }).reserve('tenant', 1),
+        createQuota({
+          ...options,
+          store: { read: vi.fn().mockResolvedValue(0), reserve, adjust },
+          limit,
+        }).reserve('tenant', 1),
       ).rejects.toBe(fault);
     }
     expect(reserve).not.toHaveBeenCalled();
     const quota = createQuota({
       ...options,
-      store: { reserve, adjust },
+      store: { read: vi.fn().mockResolvedValue(0), reserve, adjust },
       limit: async (key) => {
         expect(key).toBe('tenant');
         return undefined;

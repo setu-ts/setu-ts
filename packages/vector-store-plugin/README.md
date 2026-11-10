@@ -212,6 +212,11 @@ that source's other records in the scope. Every record must carry `sourceId`. A 
 ids therefore leaves one copy, and a shorter document leaves no stale chunk. A record id already
 used by another source in the same scope is reassigned to this source.
 
+One call replaces the WHOLE source and takes at most 5,000 records, so write a document in one call:
+a second call for the same source deletes every record the first one wrote. On pgvector the call is
+one transaction. Qdrant has no transactions, so a failed call can leave part of it written; retry
+the whole call.
+
 Pass `{ version }` as a fifth argument when submissions of one source can be processed out of order,
 as queue retries can be. The version is a non-negative safe integer that grows with each newer
 submission, such as the time the submission was accepted. The write is refused with
@@ -227,20 +232,21 @@ every record of one tenant in the collection, for offboarding.
 
 ## Limits
 
-| Limit                                | Value             |
-| ------------------------------------ | ----------------- |
-| Dimensions per collection            | 4,096             |
-| Filterable fields per collection     | 10                |
-| Matches per query (`topK`)           | 50                |
-| Records per `upsert`/`replaceSource` | 500               |
-| Ids per `delete`                     | 1,000             |
-| Scope                                | 64 UTF-8 bytes    |
-| Record or source id                  | 256 UTF-8 bytes   |
-| Record `content`                     | 8,192 UTF-8 bytes |
-| String metadata or filter value      | 64 UTF-8 bytes    |
-| Values in one `in` clause            | 100               |
-| `and` nesting depth                  | 4                 |
-| Clauses in one filter                | 32                |
+| Limit                            | Value             |
+| -------------------------------- | ----------------- |
+| Dimensions per collection        | 4,096             |
+| Filterable fields per collection | 10                |
+| Matches per query (`topK`)       | 50                |
+| Records per `upsert`             | 500               |
+| Records per `replaceSource`      | 5,000             |
+| Ids per `delete`                 | 1,000             |
+| Scope                            | 64 UTF-8 bytes    |
+| Record or source id              | 256 UTF-8 bytes   |
+| Record `content`                 | 8,192 UTF-8 bytes |
+| String metadata or filter value  | 64 UTF-8 bytes    |
+| Values in one `in` clause        | 100               |
+| `and` nesting depth              | 4                 |
+| Clauses in one filter            | 32                |
 
 Every limit is enforced by the service before the adapter sees the call, and is the tightest of the
 four backends so a request behaves the same everywhere. A vector must have exactly the collection's
@@ -284,7 +290,18 @@ export const plugin = VectorStorePlugin({
 key and an HNSW cosine index. `ensure: 'create'` (default) creates missing objects;
 `ensure: 'verify'` only checks them and refuses a missing table, for applications whose migrations
 own the DDL (concurrent replica start-up can race on `CREATE`). Both modes check the `vector`
-extension version and the column's dimensions.
+extension version, the column's dimensions and the two indexes. A migration must create them with
+these names and shapes:
+
+```sql
+CREATE INDEX vs_documents_src ON vs_documents (scope, source_id);
+CREATE INDEX vs_documents_hnsw ON vs_documents USING hnsw (embedding vector_cosine_ops);
+```
+
+An index with the right name but another table, columns, access method or operator class (an L2
+`vector_l2_ops` HNSW index, say) is refused with `VectorCollectionMismatchError` naming the expected
+definition. `ensure: 'create'` does not replace such an index either, so it refuses it too. Every
+collection uses cosine distance.
 
 Every query runs in a transaction with `hnsw.ef_search` raised to at least 40 and
 `hnsw.iterative_scan = strict_order`, so filtered searches keep recall and results stay in distance
@@ -400,7 +417,7 @@ stale ones yourself, or give each tenant group its own index.
 | `VectorDimensionError`            | A vector has the wrong length, a component that is not finite as a float32, or zero norm | 400         |
 | `VectorRecordError`               | A record, id, metadata value, batch, `topK` or `minScore` is invalid                     | 400         |
 | `VectorCollectionUnknownError`    | A call names a collection the plugin was not configured with                             | 500         |
-| `VectorCollectionMismatchError`   | An existing collection's dimensions or metric disagree                                   | —           |
+| `VectorCollectionMismatchError`   | An existing collection's dimensions, `source_version` column or index shape disagree     | —           |
 | `VectorOperationUnsupportedError` | The backend cannot perform the operation or support the declaration                      | 501         |
 
 `VectorCollectionMismatchError` and a refused declaration fail registration, so the application does

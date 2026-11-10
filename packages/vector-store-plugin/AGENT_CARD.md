@@ -33,13 +33,13 @@ startup rather than the first request.
   `topK` is 1–50 and an adapter may return fewer.
 - Filters use `eq`, `in`, `gt`, `gte`, `lt`, `lte` and `and` over declared `filterable` fields.
   Ranges need a `number` field; string values are at most 64 UTF-8 bytes; `in` takes 1–100 values;
-  `and` nests at most 4 deep, 32 clauses total. No `or`, substring match or negation. Anything else
-  throws `VectorFilterError` naming the clause — never dropped.
-- Limits: 4,096 dimensions, 10 filterable fields, 500 records per write, 1,000 ids per delete,
-  64-byte scope, 256-byte ids, 8 KiB content.
+  `and` nests at most 4 deep, 32 clauses total. No `or`, substring match or negation; anything else
+  throws `VectorFilterError`.
+- Limits: 4,096 dimensions, 10 filterable fields, 500 records per `upsert`, 5,000 per
+  `replaceSource` (one call = the whole source), 1,000 ids per delete, 64-byte scope, 256-byte ids,
+  8 KiB content.
 - Adapters: `MemoryVectorStore`, `PgVectorStore`, `QdrantVectorStore`; `VectorizeVectorStore` is in
   `@setu-ts/cloudflare-plugin` and refuses `replaceSource` and `deleteScope` by name.
-- The store does not embed text. Build vectors with the AI SDK and pass them in; keep one model per
-  collection.
+- The store does not embed text: pass AI SDK vectors in, one model per collection.
 
 See the README for adapter setup, the errors table and the full capability matrix.

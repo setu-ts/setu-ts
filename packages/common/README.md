@@ -585,6 +585,7 @@ package fits the plugin architecture.
 | `ITenantRegistry`                     | interface |
 | `ITenantRepository`                   | interface |
 | `ITenantResolver`                     | interface |
+| `ITenantUnitOfWork`                   | interface |
 | `ITraceDiagnosticsSource`             | interface |
 | `ITransaction`                        | interface |
 | `ITransactionalIdempotencyStore`      | interface |
@@ -601,6 +602,7 @@ package fits the plugin architecture.
 | `IWorkerPool`                         | interface |
 | `JwtSignOptions`                      | interface |
 | `LocalDiagnosticsListenerOptions`     | interface |
+| `MailAttachment`                      | interface |
 | `MailMessage`                         | interface |
 | `MaskOptions`                         | interface |
 | `MessageMetadata`                     | interface |

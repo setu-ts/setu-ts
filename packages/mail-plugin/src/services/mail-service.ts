@@ -35,6 +35,71 @@ export interface MailServiceOptions {
   probeTiming?: ProbeTiming;
 }
 
+/** The attachment shape every provider receives: validated, text encoded to bytes. */
+type ResolvedAttachment = NonNullable<OutgoingMail['attachments']>[number];
+
+/** Header-safe MIME type without parameters. */
+const CONTENT_TYPE = /^[A-Za-z0-9!#$&^_.+-]+\/[A-Za-z0-9!#$&^_.+-]+$/;
+/** Composite types: a provider embeds them as nested MIME structure, not as a file. */
+const COMPOSITE_TYPE = /^(?:message|multipart)\//i;
+/** Header-safe content id: no angle brackets, whitespace or controls. */
+const CONTENT_ID = /^[A-Za-z0-9!#$%&'*+/=?^_`{|}~.@-]+$/;
+
+/**
+ * Validates attachments and encodes text content to UTF-8 bytes. A refusal names
+ * the attachment's index and field, never its content.
+ *
+ * @param value - The message's `attachments`
+ * @returns The attachments every provider receives
+ * @throws {TypeError} When the list or an attachment is invalid
+ */
+function resolveAttachments(value: unknown): ResolvedAttachment[] {
+  if (!Array.isArray(value)) throw new TypeError('Mail attachments must be an array');
+  return value.map((attachment: unknown, index): ResolvedAttachment => {
+    const refuse = (field: string): never => {
+      throw new TypeError(`Mail attachment ${index}: invalid ${field}`);
+    };
+    if (attachment === null || typeof attachment !== 'object' || Array.isArray(attachment))
+      refuse('attachment');
+    const { filename, content, contentType, contentId } = attachment as Record<string, unknown>;
+    if (
+      typeof filename !== 'string' ||
+      filename.length < 1 ||
+      filename.length > 255 ||
+      !filename.isWellFormed() ||
+      Array.from(filename).some((character) => {
+        const code = character.charCodeAt(0);
+        // C0, DEL and C1 (U+0080–U+009F, NEL included) are all refused.
+        return code < 0x20 || (code >= 0x7f && code <= 0x9f);
+      })
+    )
+      refuse('filename');
+    if (!(content instanceof Uint8Array) && typeof content !== 'string') refuse('content');
+    if (
+      contentType !== undefined &&
+      (typeof contentType !== 'string' ||
+        !CONTENT_TYPE.test(contentType) ||
+        COMPOSITE_TYPE.test(contentType))
+    )
+      refuse('contentType');
+    if (
+      contentId !== undefined &&
+      (typeof contentId !== 'string' ||
+        contentId.length < 1 ||
+        contentId.length > 255 ||
+        !CONTENT_ID.test(contentId))
+    )
+      refuse('contentId');
+    return {
+      filename: filename as string,
+      content:
+        typeof content === 'string' ? new TextEncoder().encode(content) : (content as Uint8Array),
+      ...(contentType === undefined ? {} : { contentType: contentType as string }),
+      ...(contentId === undefined ? {} : { contentId: contentId as string }),
+    };
+  });
+}
+
 /** Reachability outcome cache lifetime, in milliseconds. */
 const PROBE_TTL_MS = 5000;
 
@@ -44,8 +109,8 @@ const PROBE_TIMEOUT_MS = 2000;
 /**
  * Mailer backed by a pluggable provider and a template engine.
  *
- * `send` and `sendTemplate` both funnel through the single {@link MailService.send}
- * path, so the default-`from` resolution and provider dispatch live in one place.
+ * `send` and `sendTemplate` both resolve the envelope and validate attachments
+ * through `#resolve` before dispatching to the provider.
  *
  * @since 0.1.0
  */
@@ -137,13 +202,18 @@ export class MailService implements IMailer {
     return this.#probe();
   }
 
-  /** Resolves `from` and asserts a sender is present. */
+  /** Resolves the sender and validates/encodes attachments for every provider. */
   #resolve(message: MailMessage): OutgoingMail {
     const from = message.from ?? this.#defaultFrom;
     if (from === undefined) {
       throw new Error('MailMessage requires a "from" address or a configured default');
     }
-    return { ...message, from };
+    const { attachments, ...envelope } = message;
+    return {
+      ...envelope,
+      from,
+      ...(attachments === undefined ? {} : { attachments: resolveAttachments(attachments) }),
+    };
   }
 }
 
