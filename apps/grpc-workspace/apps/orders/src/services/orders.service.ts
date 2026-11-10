@@ -33,6 +33,13 @@ export function getOrders(id: string): OrdersResponse | undefined {
 }
 
 /**
+ * One client per billing URL. Each Connect HTTP/2 transport owns its own
+ * session, so a client built per request would open a new connection for every
+ * call. Discovery yields a handful of instance URLs, so the map stays small.
+ */
+const billingClients = new Map<string, BillingClient>();
+
+/**
  * Resolves the billing client for a request. A `null` resolve — no billing
  * instance is configured, or discovery has ejected them all — answers `503`; the error carries no upstream
  * detail.
@@ -41,7 +48,12 @@ export async function resolveBillingClient(services: IServiceRegistry): Promise<
   const discovery = services.get<IServiceDiscovery>(CAPABILITIES.SERVICE_DISCOVERY);
   const baseUrl = await discovery.resolveUrl('billing', '/grpc');
   if (baseUrl === null) throw serviceUnavailable('billing is unavailable.');
-  return createBillingClient(baseUrl);
+  let client = billingClients.get(baseUrl);
+  if (client === undefined) {
+    client = createBillingClient(baseUrl);
+    billingClients.set(baseUrl, client);
+  }
+  return client;
 }
 
 /**
