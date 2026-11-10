@@ -105,7 +105,9 @@ const billing = grpcClient(app.services, BillingService, 'billing');
   refused, reset or closed connection), `success` otherwise — so an instance that refuses
   connections is ejected.
 - **Connections.** One HTTP/2 session per instance, shared by every call to it and closed with the
-  application. At most 64 instance origins keep a session; the least recently used is closed first.
+  application. Each session may buffer 64 MB (Node's `maxSessionMemory`; its default of 10 MB reset
+  streams once sixteen 1 MB replies were in flight on one connection). At most 64 instance origins
+  keep a session; the least recently used is closed first.
 - **Defaults.** The Connect protocol, binary, over HTTP/2, with a 5 s deadline. Per target in
   `clients`, or per client in `grpcClient()`'s options: `basePath`, `protocol` (`'connect'`,
   `'grpc'`, `'grpc-web'`), `httpVersion` (`'2'`, `'1.1'`; native gRPC needs `'2'`) and `timeoutMs`

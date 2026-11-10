@@ -457,6 +457,14 @@ The TLS mode imports `node:http2` the same way.
   process crashes natively in its `node:http2`/`node:http` client when the peer goes away (5 of 6
   runs against a Deno server, also with connect-node alone), so Deno is documented as not yet safe
   for the client; serving on Deno is unaffected.
+- **Decision — session memory (measured 2026-11-11):** with sixteen 1 MB messages in flight on one
+  connection, streams were reset with `ENHANCE_YOUR_CALM`. The cap that bit was the **client's**
+  session (`maxSessionMemory`, Node's default 10 MB): a raw `node:http2` client at the default lost
+  6 of 16 against Setu's server, the same client at 64 lost none, and the server's own cap at 10 was
+  never reached — not even with a handler that waits before reading — because HTTP/2 flow control
+  stops a client sending past its window before the server reads. So the client's sessions get
+  `maxSessionMemory: 64` (`CLIENT_MAX_SESSION_MEMORY_MB`; with 10 the plugin's client lost 6 of 16)
+  and the server keeps Node's default: a server-side setting with no measurable effect is not added.
 - **Decision — trace propagation:** when `CAPABILITIES.TELEMETRY` resolves to a service with
   `activeSpanContext`, an interceptor sets `traceparent` from it with `contextToTraceparent`, unless
   the call already carries one.

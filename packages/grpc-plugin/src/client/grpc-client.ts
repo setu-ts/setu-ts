@@ -33,6 +33,16 @@ export const CLIENT_DEFAULTS: ResolvedClientOptions = {
   timeoutMs: 5000,
 };
 
+/**
+ * How much one client HTTP/2 session may buffer, in megabytes (Node's
+ * `maxSessionMemory`, default 10). Measured 2026-11-11: with sixteen 1 MB
+ * replies in flight on one session, a client at the default reset streams
+ * with `ENHANCE_YOUR_CALM`; the cap that bit was the client's, since HTTP/2
+ * flow control already bounds what a client can make a server buffer. 64
+ * holds sixteen replies at the plugin's 4 MiB `readMaxBytes`.
+ */
+export const CLIENT_MAX_SESSION_MEMORY_MB = 64;
+
 /** How many origins keep a transport (and session) before the oldest is closed. */
 export const MAX_CLIENT_ORIGINS = 64;
 
@@ -397,7 +407,12 @@ export class GrpcClients {
       this.#origins.set(key, hit);
       return hit.transport;
     }
-    const session = options.httpVersion === '2' ? new node.Http2SessionManager(url) : undefined;
+    const session =
+      options.httpVersion === '2'
+        ? new node.Http2SessionManager(url, undefined, {
+            maxSessionMemory: CLIENT_MAX_SESSION_MEMORY_MB,
+          })
+        : undefined;
     const transportOptions: Record<string, unknown> = {
       baseUrl: url,
       httpVersion: options.httpVersion,

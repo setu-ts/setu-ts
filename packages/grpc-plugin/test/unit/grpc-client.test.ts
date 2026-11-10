@@ -11,6 +11,7 @@ import type {
 
 import {
   CLIENT_DEFAULTS,
+  CLIENT_MAX_SESSION_MEMORY_MB,
   GrpcClients,
   instanceOrigin,
   isRefusedStream,
@@ -50,9 +51,11 @@ function fakeNode(outcome: () => Promise<unknown> = () => Promise.resolve('ok'))
   module: ConnectNodeModuleLike;
   built: Built[];
   sessions: Array<{ url: string; aborted: boolean }>;
+  sessionOptionsSeen: Array<Record<string, unknown> | undefined>;
 } {
   const built: Built[] = [];
   const sessions: Array<{ url: string; aborted: boolean }> = [];
+  const sessionOptionsSeen: Array<Record<string, unknown> | undefined> = [];
   const factory =
     (kind: Built['kind']) =>
     (options: Record<string, unknown>): ClientTransportLike => {
@@ -77,15 +80,18 @@ function fakeNode(outcome: () => Promise<unknown> = () => Promise.resolve('ok'))
   return {
     built,
     sessions,
+    sessionOptionsSeen,
     module: {
       createConnectTransport: factory('connect'),
       createGrpcTransport: factory('grpc'),
       createGrpcWebTransport: factory('grpc-web'),
       Http2SessionManager: class {
         readonly #entry: { url: string; aborted: boolean };
-        constructor(url: string) {
+        // connect-node's arity: (url, pingOptions?, http2SessionOptions?).
+        constructor(url: string, ...rest: [unknown?, Record<string, unknown>?]) {
           this.#entry = { url, aborted: false };
           sessions.push(this.#entry);
+          sessionOptionsSeen.push(rest[1]);
         }
         abort(): void {
           this.#entry.aborted = true;
@@ -251,6 +257,8 @@ describe('GrpcClients', () => {
     });
     expect(node.built[0]!.options['sessionManager']).toBeDefined();
     expect(node.sessions).toEqual([{ url: 'http://127.0.0.1:3410', aborted: false }]);
+    expect(node.sessionOptionsSeen).toEqual([{ maxSessionMemory: CLIENT_MAX_SESSION_MEMORY_MB }]);
+    expect(CLIENT_MAX_SESSION_MEMORY_MB).toBe(64);
     expect(CLIENT_DEFAULTS).toEqual({
       basePath: '',
       protocol: 'connect',

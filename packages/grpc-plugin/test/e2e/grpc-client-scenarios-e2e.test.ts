@@ -481,6 +481,24 @@ describeNode('grpcClient scenarios', () => {
     }
   });
 
+  it('sixteen 1 MB calls in flight on one session all answer (the client session cap)', async () => {
+    const { port } = await startServer(fresh());
+    const caller = await startCaller([{ id: 'b', port }]);
+    const billing = grpcClient(caller.services, SVC.echo, 'billing', {
+      protocol: 'grpc',
+    }) as unknown as Echo;
+    const big = 'x'.repeat(1024 * 1024);
+    const outcomes = await Promise.all(
+      Array.from({ length: 16 }, () =>
+        billing.echo({ message: big }).then(
+          (r) => r.response.length,
+          (e: unknown) => ConnectError.from(e).rawMessage,
+        ),
+      ),
+    );
+    expect(outcomes).toEqual(Array.from({ length: 16 }, () => 'echo: '.length + big.length));
+  });
+
   it("a message over the server's readMaxBytes is refused as ResourceExhausted", async () => {
     const { port } = await startServer(fresh(), { readMaxBytes: 64 });
     const caller = await startCaller([{ id: 'b', port }]);

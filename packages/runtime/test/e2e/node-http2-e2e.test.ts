@@ -15,7 +15,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 
 import { setUpgradeIntent } from '@setu-ts/common';
-import type { IRequest, ServerHandle } from '@setu-ts/common';
+import type { IRequest, IResponse, ServerHandle } from '@setu-ts/common';
 import { createTestContext } from '@setu-ts/testing';
 
 import { NodeHttpAdapter } from '../../src/index.ts';
@@ -49,7 +49,7 @@ async function start(http2: true | typeof TLS): Promise<Running> {
   // attaches its `upgrade` listener only then. The decision itself is the
   // handler's (`setUpgradeIntent` below), so this router never decides.
   adapter.setUpgradeRouter(() => Promise.resolve(null));
-  adapter.setHandler((request: IRequest) => {
+  adapter.setHandler((request: IRequest): IResponse | Promise<IResponse> => {
     const { response } = createTestContext();
     if (request.headers.get('upgrade') === 'websocket') {
       setUpgradeIntent(request, {
@@ -62,6 +62,18 @@ async function start(http2: true | typeof TLS): Promise<Running> {
       });
       response.status(101).send();
       return response;
+    }
+    if (request.path === '/bulk') {
+      // Buffers the request body and answers with as many bytes, so a client
+      // with several large requests in flight fills the session's memory.
+      // It waits before reading, as a busy handler would, so the uploads sit in
+      // the server's session meanwhile.
+      return new Promise((resolve) => setTimeout(resolve, 300))
+        .then(() => request.bytes())
+        .then((body) => {
+          response.send(new Uint8Array(body.length));
+          return response;
+        });
     }
     if (request.path === '/trailers') {
       response.stream(new Response('streamed').body!, {
@@ -217,6 +229,61 @@ describeNode('NodeHttpAdapter http2: { key, cert } (TLS)', () => {
   it('keeps WebSocket upgrades', async () => {
     const { port } = await start(TLS);
     expect(await wsOpens(`wss://localhost:${port}/ws`)).toBe(true);
+  });
+});
+
+/** Sends `count` uploads of `bytes` at once on one session; resolves each reply's status and size. */
+function bulk(session: ClientHttp2Session, count: number, bytes: number): Promise<string[]> {
+  const payload = new Uint8Array(bytes);
+  return Promise.all(
+    Array.from(
+      { length: count },
+      () =>
+        new Promise<string>((resolve) => {
+          const stream = session.request({ ':method': 'POST', ':path': '/bulk' });
+          let status = 0;
+          let size = 0;
+          stream.on('response', (headers) => (status = Number(headers[':status'])));
+          stream.on('data', (chunk: Uint8Array) => (size += chunk.length));
+          stream.on('end', () => resolve(`${status} ${size}`));
+          stream.on('error', (error: Error & { code?: string }) => resolve(error.message));
+          stream.end(payload);
+        }),
+    ),
+  );
+}
+
+describeNode('NodeHttpAdapter http2 session memory (M139b)', () => {
+  // Measured 2026-11-11: sixteen 1 MB exchanges reset with ENHANCE_YOUR_CALM
+  // came from the CLIENT's session cap (Node's 10 MB default), not the
+  // server's. HTTP/2 flow control stops a client sending more than its window
+  // before the server reads, so even a handler that waits before reading keeps
+  // the server under its cap. This guards the large-exchange path; the client
+  // cap is raised so only the server is exercised.
+  const expected = Array.from({ length: 16 }, () => `200 ${1024 * 1024}`);
+
+  it('serves sixteen 1 MB exchanges in flight on one cleartext session', async () => {
+    const { port } = await start(true);
+    // The client's own cap is raised too, so only the server's is under test.
+    const session = http2Connect(`http://127.0.0.1:${port}`, { maxSessionMemory: 64 });
+    try {
+      expect(await bulk(session, 16, 1024 * 1024)).toEqual(expected);
+    } finally {
+      session.close();
+    }
+  });
+
+  it('serves sixteen 1 MB exchanges in flight on one TLS session', async () => {
+    const { port } = await start(TLS);
+    const session = http2Connect(`https://localhost:${port}`, {
+      ca: TLS.cert,
+      maxSessionMemory: 64,
+    });
+    try {
+      expect(await bulk(session, 16, 1024 * 1024)).toEqual(expected);
+    } finally {
+      session.close();
+    }
   });
 });
 

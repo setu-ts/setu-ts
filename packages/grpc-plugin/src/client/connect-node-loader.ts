@@ -30,7 +30,11 @@ export interface ConnectNodeModuleLike {
   createConnectTransport(options: Record<string, unknown>): ClientTransportLike;
   createGrpcTransport(options: Record<string, unknown>): ClientTransportLike;
   createGrpcWebTransport(options: Record<string, unknown>): ClientTransportLike;
-  Http2SessionManager: new (url: string) => Http2SessionLike;
+  Http2SessionManager: new (
+    url: string,
+    pingOptions?: Record<string, unknown>,
+    sessionOptions?: Record<string, unknown>,
+  ) => Http2SessionLike;
 }
 
 /** Imports the module; injectable so a test can drive the failure. */

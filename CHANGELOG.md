@@ -31,14 +31,15 @@ All notable changes to this project are documented here. The format follows
   on every call and reports each outcome back, so an instance that refuses connections is ejected;
   an absolute URL is used as is. A unary call the server refused before processing it (HTTP/2
   `REFUSED_STREAM`, as a server shutting down does) is sent once more on a fresh pick, so a rolling
-  restart costs no failed unary calls. Calls share one HTTP/2 session per instance, have a 5 s
-  deadline, carry the active span as `traceparent`, and are refused with `Unavailable` once the
-  application stops. `GrpcClientOptions` (`basePath`, `protocol`, `httpVersion`, `timeoutMs`) can be
-  set per target in the new `GrpcPluginOptions.clients`, and `GrpcPluginOptions.serve: false`
-  registers the plugin for calling only. `@connectrpc/connect-node` is a new optional peer, loaded
-  on a client's first call. A workspace member generated with `--depends-on` a gRPC member now gets
-  that client-only `GrpcPlugin` and its packages from the CLI, and `setu workspace rpc` re-renders
-  the members that call the one it changes.
+  restart costs no failed unary calls. Calls share one HTTP/2 session per instance, allowed to
+  buffer 64 MB rather than Node's 10 MB (which reset streams with several 1 MB replies in flight),
+  have a 5 s deadline, carry the active span as `traceparent`, and are refused with `Unavailable`
+  once the application stops. `GrpcClientOptions` (`basePath`, `protocol`, `httpVersion`,
+  `timeoutMs`) can be set per target in the new `GrpcPluginOptions.clients`, and
+  `GrpcPluginOptions.serve: false` registers the plugin for calling only. `@connectrpc/connect-node`
+  is a new optional peer, loaded on a client's first call. A workspace member generated with
+  `--depends-on` a gRPC member now gets that client-only `GrpcPlugin` and its packages from the CLI,
+  and `setu workspace rpc` re-renders the members that call the one it changes.
   `grpcClientProvider(token, definition, target, options?)` is the same client as a DI provider:
   `@Module({ providers })` now also takes factory entries (`ModuleFactoryProvider` in
   `@setu-ts/common`: `{ provide, useFactory, inject?, scope? }`), so a decorated class `@Inject`s
