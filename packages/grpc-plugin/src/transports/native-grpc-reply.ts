@@ -3,9 +3,8 @@
  *
  * The native wire format ends every call with its status in HTTP/2 trailers.
  * Connect's universal handler produces them — `UniversalServerResponse.trailer`
- * — but `createFetchHandler` builds a fetch `Response`, which has nowhere to
- * put them, and drops them. This module keeps the universal response and
- * hands the kernel the body and the trailers separately, as an `RpcReply`; the
+ * — and a fetch `Response` has nowhere to put them. This module hands the
+ * kernel the body and the trailers separately, as an `RpcReply`; the
  * runtime adapter writes the trailers after the last chunk where the
  * connection can carry them.
  *
@@ -61,10 +60,9 @@ export function nativeGrpcReply(universal: UniversalServerResponseLike): RpcRepl
     },
   });
   return {
-    response: new Response(body, {
-      status: universal.status,
-      ...(universal.header === undefined ? {} : { headers: universal.header }),
-    }),
+    status: universal.status,
+    headers: universal.header ?? new Headers(),
+    body,
     streaming: true,
     trailers,
   };

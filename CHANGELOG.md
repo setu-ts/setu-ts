@@ -18,7 +18,7 @@ All notable changes to this project are documented here. The format follows
   set (WebSockets then need `ws`); Deno passes TLS to `Deno.serve`; Workers ignore it. Closing sends
   `GOAWAY` to open HTTP/2 sessions. Common gains `IRequest.responseTrailers`, `StreamOptions` for
   `IResponse.stream(body, { trailers })`, a `trailers` member on the streaming `ResponseSnapshot`,
-  and `RpcTransport`/`RpcReply` with the optional `IGrpcService.handleRpc` and
+  and `RpcTransport`, `RpcCall` and `RpcReply` with the optional `IGrpcService.handleRpc` and
   `IGrpcService.streamsRequest` members; `refuses` takes an optional transport. The Node adapter
   writes trailers on HTTP/2, and `GrpcPlugin` serves native `application/grpc` there, so `grpcurl`,
   `ghz` and grpc-go clients — and reflection through `grpcurl` — reach Setu directly; HTTP/1.1, Deno
@@ -35,8 +35,11 @@ All notable changes to this project are documented here. The format follows
   body nothing read gets the unread body, bounded per message by `readMaxBytes` rather than
   `RuntimePlugin({ maxBodyBytes })`; unary and server-streaming bodies keep the `maxBodyBytes`
   bound. The client's abort signal reaches every call, unary included, on the new
-  `RpcTransport.signal`. An `IGrpcService` without `handleRpc` keeps the buffered write. The
-  `grpc-workspace` example calls billing over one HTTP/2 connection with `@connectrpc/connect-node`.
+  `RpcTransport.signal`. The kernel and `GrpcPlugin` now pass each call and reply as plain fields
+  (`RpcCall`, `RpcReply`) instead of building a fetch `Request` and `Response` per RPC, which lifts
+  Connect unary throughput on Node. An `IGrpcService` without `handleRpc` keeps the buffered write.
+  The `grpc-workspace` example calls billing over one HTTP/2 connection with
+  `@connectrpc/connect-node`.
 
 ### Fixed
 

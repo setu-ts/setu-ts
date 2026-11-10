@@ -6,7 +6,8 @@
  *
  * - `DescFile.name` has NO `.proto` suffix while `proto.name` retains it, so a
  *   fixture that used one name for both would hide the filename-keying bug.
- * - `createFetchHandler`'s result retains `requestPath`.
+ * - A universal handler answers a native `application/grpc` call with its
+ *   status in the trailer, and any other call with its status in the body.
  * - `getService` returns `undefined` for an absent service rather than throwing.
  *
  * Not shipped to consumers.
@@ -22,6 +23,7 @@ import type {
   MessageDescriptorLike,
   ServiceDescriptorLike,
   UniversalHandlerLike,
+  UniversalServerRequestLike,
 } from '../../src/interfaces/connect-runtime.ts';
 
 /** Builds a fake message descriptor. */
@@ -118,6 +120,8 @@ export interface FakeConnectRuntime extends ConnectRuntime {
   readonly revived: string[];
   /** Options handed to `createConnectRouter`, in call order. */
   readonly routerOptions: Record<string, unknown>[];
+  /** Universal requests handed to `handleUniversal`, in call order. */
+  readonly universalRequests: UniversalServerRequestLike[];
 }
 
 /** Options for {@linkcode createFakeConnectRuntime}. */
@@ -143,6 +147,7 @@ export function createFakeConnectRuntime(
   const serializedFiles: string[] = [];
   const revived: string[] = [];
   const routerOptions: Record<string, unknown>[] = [];
+  const universalRequests: UniversalServerRequestLike[] = [];
   const byName = new Map((options.services ?? []).map((s) => [s.typeName, s]));
 
   const router: ConnectRouterLike = {
@@ -168,20 +173,28 @@ export function createFakeConnectRuntime(
     serializedFiles,
     revived,
     routerOptions,
+    universalRequests,
 
     createConnectRouter(options?: Record<string, unknown>) {
       routerOptions.push(options ?? {});
       return router;
     },
 
-    createFetchHandler(handler: UniversalHandlerLike) {
-      const fetchHandler = (_request: Request): Promise<Response> =>
-        Promise.resolve(new Response(`handled:${handler.requestPath}`, { status: 200 }));
-      // The real `createFetchHandler` returns Object.assign(fn, uHandler).
-      return Object.assign(fetchHandler, handler);
-    },
-
-    handleUniversal(handler: UniversalHandlerLike, _request: Request) {
+    handleUniversal(handler: UniversalHandlerLike, request: UniversalServerRequestLike) {
+      universalRequests.push(request);
+      if (
+        !/^application\/grpc(\+(proto|json))?(;|$)/.test(request.header.get('content-type') ?? '')
+      ) {
+        // Connect and gRPC-Web: the status travels in the body.
+        const text = async function* (): AsyncGenerator<Uint8Array> {
+          yield new TextEncoder().encode(`handled:${handler.requestPath}`);
+        };
+        return Promise.resolve({
+          status: 200,
+          header: new Headers({ 'content-type': 'text/plain;charset=UTF-8' }),
+          body: text(),
+        });
+      }
       // One message, then the call's status in the trailer — the shape a
       // native gRPC reply has once Connect's universal handler ends.
       const trailer = new Headers();

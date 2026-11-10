@@ -49,7 +49,7 @@ import type {
   StartOptions,
   WebSocketUpgradeDecision,
 } from '@setu-ts/common';
-import type { IGrpcService, RpcReply, RpcTransport } from '@setu-ts/common';
+import type { IGrpcService, RpcCall, RpcReply, RpcTransport } from '@setu-ts/common';
 
 import { MiddlewarePipeline } from '../pipeline/middleware-pipeline.ts';
 import { executeChain } from '../pipeline/execute-chain.ts';
@@ -2037,25 +2037,27 @@ class Application implements IKernelApplication {
     };
     const refusal = grpcService.refuses?.(raw, transport) ?? null;
     if (refusal !== null) {
-      await this.#sendRpcResponse(ctx, { response: refusal, streaming: false });
+      this.#sendRpcResponse(ctx, await this.#replyFromResponse(refusal));
       return true;
     }
 
-    const grpcRequest = await this.#rpcRequest(ctx, raw, grpcService);
+    const body = await this.#rpcBody(ctx, raw, grpcService);
     const reply: RpcReply =
       grpcService.handleRpc !== undefined
-        ? await grpcService.handleRpc(grpcRequest, transport)
-        : // An implementor that predates `handleRpc` says nothing about the
-          // procedure kind, so it keeps exactly the write it had: buffered.
-          // Streaming it instead would make `inject()` — which refuses a
-          // streaming body — throw on calls that answered before.
-          { response: await grpcService.handleRequest(grpcRequest), streaming: false };
-    await this.#sendRpcResponse(ctx, reply);
+        ? await grpcService.handleRpc(this.#rpcCall(ctx, body), transport)
+        : // An implementor that predates `handleRpc` takes a fetch `Request`
+          // and says nothing about the procedure kind, so it keeps exactly the
+          // write it had: buffered. Streaming it instead would make `inject()`
+          // — which refuses a streaming body — throw on calls that answered.
+          await this.#replyFromResponse(
+            await grpcService.handleRequest(this.#rpcFetchRequest(ctx, body)),
+          );
+    this.#sendRpcResponse(ctx, reply);
     return true;
   }
 
   /**
-   * Builds the web `Request` an RPC is dispatched with (M139b §3.2).
+   * Reads the body an RPC is dispatched with (M139b §3.2).
    *
    * A client-streaming or bidirectional procedure whose body nothing in the
    * pipeline has read gets the UNREAD body stream, so the call makes progress
@@ -2069,74 +2071,113 @@ class Application implements IKernelApplication {
    * bodies; a streamed body is bounded per message by the service instead (a
    * total would end every long-lived stream).
    *
-   * Neither form carries the raw request's `signal`: it travels on
-   * `RpcTransport.signal` instead, so a client that goes away still cancels
-   * the call (a streamed reply that never ends would otherwise outlive its
-   * client) without the cost of a `Request` following another signal.
-   *
    * @param ctx - The live request context
    * @param raw - The undisturbed native request
    * @param grpcService - The resolved service
-   * @returns The request to dispatch
+   * @returns The whole body, or the unread stream
    */
-  async #rpcRequest(
+  #rpcBody(
     ctx: IRequestContext,
     raw: Request,
     grpcService: IGrpcService,
-  ): Promise<Request> {
-    const base = { method: ctx.request.method, headers: ctx.request.headers };
+  ): Promise<Uint8Array | ReadableStream<Uint8Array>> {
     if (grpcService.streamsRequest?.(raw) === true && !raw.bodyUsed && raw.body !== null) {
+      return Promise.resolve(raw.body);
+    }
+    return ctx.request.bytes();
+  }
+
+  /**
+   * The RPC handed to `IGrpcService.handleRpc` (M139b §3.11): plain fields, so
+   * no fetch `Request` is built per call — that construction, its header copy
+   * and its body stream were the largest share of the RPC path's CPU.
+   * `headers` is the mapped request's, so a header a middleware set is seen.
+   * The client's `signal` travels on `RpcTransport` (§3.2).
+   *
+   * @param ctx - The live request context
+   * @param body - The body from {@linkcode #rpcBody}
+   * @returns The call
+   */
+  #rpcCall(ctx: IRequestContext, body: Uint8Array | ReadableStream<Uint8Array>): RpcCall {
+    const { method, url, path, headers } = ctx.request;
+    return { method, url, path, headers, body };
+  }
+
+  /**
+   * The fetch `Request` for an implementor without `handleRpc`, as before.
+   *
+   * @param ctx - The live request context
+   * @param body - The body from {@linkcode #rpcBody}
+   * @returns The request
+   */
+  #rpcFetchRequest(ctx: IRequestContext, body: Uint8Array | ReadableStream<Uint8Array>): Request {
+    const base = { method: ctx.request.method, headers: ctx.request.headers };
+    if (body instanceof ReadableStream) {
       // `duplex` is required by fetch for a stream body but absent from the DOM
       // `RequestInit` this package compiles against.
-      const init: RequestInit & { duplex: 'half' } = { ...base, body: raw.body, duplex: 'half' };
+      const init: RequestInit & { duplex: 'half' } = { ...base, body, duplex: 'half' };
       return new Request(ctx.request.url, init);
     }
-    const bodyBytes = await ctx.request.bytes();
     return new Request(ctx.request.url, {
       ...base,
       // A `Uint8Array` is a valid `BodyInit`, but its backing `ArrayBufferLike`
       // is not narrowed to `ArrayBuffer` under this compiler configuration.
-      ...(bodyBytes.length > 0 ? { body: bodyBytes as unknown as BodyInit } : {}),
+      ...(body.length > 0 ? { body: body as unknown as BodyInit } : {}),
     });
+  }
+
+  /**
+   * Turns a fetch `Response` — a header-only refusal, or the reply of an
+   * implementor without `handleRpc` — into the buffered reply it always was.
+   *
+   * @param response - The response
+   * @returns The reply
+   */
+  async #replyFromResponse(response: Response): Promise<RpcReply> {
+    return {
+      status: response.status,
+      headers: response.headers,
+      body: response.body === null ? null : new Uint8Array(await response.arrayBuffer()),
+      streaming: false,
+    };
   }
 
   /**
    * Writes an RPC reply onto the framework response (M139b §3.1).
    *
-   * One implementation for both exits — the header-only refusal and a
-   * dispatched reply — so a refusal cannot come to carry different headers or
-   * a different status mapping from an ordinary answer.
+   * One implementation for every exit — a refusal, a legacy reply and a
+   * dispatched one — so none can come to carry different headers or a
+   * different status mapping from another.
    *
-   * A reply that streams, or carries trailers, is written as a stream, so each
-   * message reaches the client as it is produced (V12-39: this used to read
-   * the whole body first, holding a server stream back until it ended and a
-   * stream that never ends forever). A single response message is buffered,
-   * which is the cheaper write on every adapter.
+   * A stream body is written as a stream, so each message reaches the client
+   * as it is produced (V12-39: this used to read the whole body first, holding
+   * a server stream back until it ended and a stream that never ends forever).
+   * A single response message arrives whole and is sent as-is, which is the
+   * cheaper write on every adapter.
    *
    * @param ctx - The request context whose response is written
    * @param reply - The RPC reply to copy across
    */
-  async #sendRpcResponse(ctx: IRequestContext, reply: RpcReply): Promise<void> {
-    const { response, trailers } = reply;
+  #sendRpcResponse(ctx: IRequestContext, reply: RpcReply): void {
+    const { body, trailers } = reply;
     const builder = ctx.response as ResponseBuilder;
-    builder.status(response.status);
+    builder.status(reply.status);
     // `appendHeader`, not `header`: `header` delegates to `Headers.set`, and a
     // Trailers-Only refusal or a Connect reply can carry repeated headers —
     // `Set-Cookie` above all, which `Headers.entries()` yields once per value
     // rather than comma-joining. Setting per entry would keep only the last.
-    for (const [key, value] of response.headers.entries()) {
+    for (const [key, value] of reply.headers.entries()) {
       builder.appendHeader(key, value);
     }
-    const body = response.body;
     if (body === null) {
       builder.send();
       return;
     }
-    if (reply.streaming || trailers !== undefined) {
+    if (body instanceof ReadableStream) {
       builder.stream(body, trailers === undefined ? undefined : { trailers });
       return;
     }
-    builder.send(new Uint8Array(await response.arrayBuffer()));
+    builder.send(body);
   }
 
   /**

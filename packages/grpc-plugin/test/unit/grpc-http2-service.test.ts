@@ -12,6 +12,10 @@ import type { GrpcServiceDefinition } from '@setu-ts/common';
 import { GrpcPlugin } from '../../src/plugin/grpc-plugin.ts';
 import { GrpcService } from '../../src/services/grpc-service.ts';
 import { nativeGrpcReply } from '../../src/transports/native-grpc-reply.ts';
+import { callFromRequest, responseFromReply } from '../../src/transports/rpc-call.ts';
+
+/** A fetch `Request` as the kernel's call. */
+const rpc = (request: Request) => callFromRequest(request, false);
 import type { GrpcPluginOptions } from '../../src/interfaces/index.ts';
 import {
   createFakeConnectRuntime,
@@ -39,15 +43,15 @@ describe('nativeGrpcReply', () => {
       trailer,
     });
     expect(reply.streaming).toBe(true);
-    expect(reply.response.headers.get('content-type')).toBe('application/grpc+proto');
-    expect(await reply.response.text()).toBe('ab');
+    expect(reply.headers.get('content-type')).toBe('application/grpc+proto');
+    expect(await responseFromReply(reply).text()).toBe('ab');
     expect(trailerSetBeforeEnd).toBe(true);
     expect((await reply.trailers!).get('grpc-status')).toBe('0');
   });
 
   it('a bodyless, trailerless response gives an empty body and empty trailers', async () => {
     const reply = nativeGrpcReply({ status: 200 });
-    expect(await reply.response.text()).toBe('');
+    expect(await responseFromReply(reply).text()).toBe('');
     expect([...(await reply.trailers!).keys()]).toEqual([]);
   });
 
@@ -57,7 +61,7 @@ describe('nativeGrpcReply', () => {
       throw new Error('transport broke');
     }
     const reply = nativeGrpcReply({ status: 200, body: body() });
-    await expect(reply.response.text()).rejects.toThrow('transport broke');
+    await expect(responseFromReply(reply).text()).rejects.toThrow('transport broke');
     await expect(reply.trailers).rejects.toThrow('transport broke');
   });
 
@@ -73,14 +77,14 @@ describe('nativeGrpcReply', () => {
       }),
     };
     const reply = nativeGrpcReply({ status: 200, body });
-    await reply.response.body!.cancel('client left');
+    await (reply.body as ReadableStream<Uint8Array>).cancel('client left');
     expect(returned).toBe(true);
     await expect(reply.trailers).rejects.toBe('client left');
   });
 
   it('a cancelled body without an iterator still rejects the trailers', async () => {
     const reply = nativeGrpcReply({ status: 200 });
-    await reply.response.body!.cancel('gone');
+    await (reply.body as ReadableStream<Uint8Array>).cancel('gone');
     await expect(reply.trailers).rejects.toBe('gone');
   });
 });
@@ -123,22 +127,32 @@ describe('GrpcService — M139b', () => {
       const viaRequest = await grpc.handleRequest(
         new Request(`http://x${path}`, { method: 'POST' }),
       );
-      const viaRpc = await grpc.handleRpc(new Request(`http://x${path}`, { method: 'POST' }), {
-        trailers: false,
-      });
-      expect(viaRpc.response.status).toBe(viaRequest.status);
-      expect(await viaRpc.response.text()).toBe(await viaRequest.text());
+      const viaRpc = await grpc.handleRpc(
+        await rpc(new Request(`http://x${path}`, { method: 'POST' })),
+        {
+          trailers: false,
+        },
+      );
+      expect(viaRpc.status).toBe(viaRequest.status);
+      expect(await responseFromReply(viaRpc).text()).toBe(await viaRequest.text());
+      expect([...viaRpc.headers]).toEqual([...viaRequest.headers]);
     }
   });
 
   it('reports streaming replies exactly for response-streaming procedures', async () => {
     const grpc = service();
-    const unary = await grpc.handleRpc(new Request('http://x/p.S/Unary', { method: 'POST' }), {
-      trailers: false,
-    });
-    const server = await grpc.handleRpc(new Request('http://x/p.S/Server', { method: 'POST' }), {
-      trailers: false,
-    });
+    const unary = await grpc.handleRpc(
+      await rpc(new Request('http://x/p.S/Unary', { method: 'POST' })),
+      {
+        trailers: false,
+      },
+    );
+    const server = await grpc.handleRpc(
+      await rpc(new Request('http://x/p.S/Server', { method: 'POST' })),
+      {
+        trailers: false,
+      },
+    );
     expect(unary.streaming).toBe(false);
     expect(server.streaming).toBe(true);
   });
@@ -150,8 +164,8 @@ describe('GrpcService — M139b', () => {
       grpc.refuses(native('http://x/p.S/Unary'), { trailers: false })?.headers.get('grpc-status'),
     ).toBe('12');
     expect(grpc.refuses(native('http://x/p.S/Unary'))?.headers.get('grpc-status')).toBe('12');
-    const reply = await grpc.handleRpc(native('http://x/p.S/Unary'), { trailers: true });
-    expect(await reply.response.text()).toBe('universal:/p.S/Unary');
+    const reply = await grpc.handleRpc(await rpc(native('http://x/p.S/Unary')), { trailers: true });
+    expect(await responseFromReply(reply).text()).toBe('universal:/p.S/Unary');
     expect((await reply.trailers!).get('grpc-status')).toBe('0');
   });
 
@@ -167,10 +181,13 @@ describe('GrpcService — M139b', () => {
   it('a closed service answers its own procedures 503 through both entry points', async () => {
     const grpc = service();
     grpc.close();
-    const reply = await grpc.handleRpc(new Request('http://x/p.S/Unary', { method: 'POST' }), {
-      trailers: true,
-    });
-    expect(reply.response.status).toBe(503);
+    const reply = await grpc.handleRpc(
+      await rpc(new Request('http://x/p.S/Unary', { method: 'POST' })),
+      {
+        trailers: true,
+      },
+    );
+    expect(reply.status).toBe(503);
     expect(reply.streaming).toBe(false);
     expect((await grpc.handleRequest(new Request('http://x/p.S/Unary'))).status).toBe(503);
     expect(await grpc.createFetchHandler()(new Request('http://x/elsewhere'))).toBeNull();

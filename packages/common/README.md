@@ -665,6 +665,7 @@ package fits the plugin architecture.
 | `RouteSchema`                         | interface |
 | `RouteSecurityMetadata`               | interface |
 | `RouteValidationMetadata`             | interface |
+| `RpcCall`                             | interface |
 | `RpcReply`                            | interface |
 | `RpcTransport`                        | interface |
 | `ScheduledJob`                        | interface |

@@ -1,10 +1,10 @@
 /**
- * Connect runtime loader — the inject-or-lazy seam over the four Connect-ES /
+ * Connect runtime loader — the inject-or-lazy seam over the three Connect-ES /
  * Protobuf-ES specifiers (AI_GUIDELINES §12.2).
  *
  * The split is deliberate: {@linkcode adaptConnectModule} is a PURE adapter over
  * already-imported modules, so every branch is unit-testable with a hand-built
- * fake, while {@linkcode loadConnectModule} owns the four real `import()` calls
+ * fake, while {@linkcode loadConnectModule} owns the three real `import()` calls
  * behind a guarded real-import test. There is no global hook and no no-op
  * fallback runtime — a missing dependency throws {@linkcode GrpcRuntimeLoadError}
  * naming the specifier, rather than degrading into a router that silently
@@ -28,13 +28,13 @@ import type {
   FileRegistryLike,
   ServiceDescriptorLike,
   UniversalHandlerLike,
+  UniversalServerRequestLike,
   UniversalServerResponseLike,
 } from '../interfaces/connect-runtime.ts';
 
-/** The four specifiers the runtime is assembled from, in load order. */
+/** The three specifiers the runtime is assembled from, in load order. */
 const SPECIFIERS = {
   connect: '@connectrpc/connect',
-  protocol: '@connectrpc/connect/protocol',
   protobuf: '@bufbuild/protobuf',
   wkt: '@bufbuild/protobuf/wkt',
 } as const;
@@ -48,8 +48,6 @@ const SPECIFIERS = {
 const INSTALL_COMMANDS: Record<keyof typeof SPECIFIERS, string> = {
   connect:
     'deno add npm:@connectrpc/connect@^2.1.2 · npm i @connectrpc/connect · bun add @connectrpc/connect',
-  protocol:
-    'deno add npm:@connectrpc/connect@^2.1.2 · npm i @connectrpc/connect · bun add @connectrpc/connect',
   protobuf:
     'deno add npm:@bufbuild/protobuf@^2.7.0 · npm i @bufbuild/protobuf · bun add @bufbuild/protobuf',
   wkt: 'deno add npm:@bufbuild/protobuf@^2.7.0 · npm i @bufbuild/protobuf · bun add @bufbuild/protobuf',
@@ -58,18 +56,6 @@ const INSTALL_COMMANDS: Record<keyof typeof SPECIFIERS, string> = {
 /** Structural shape of `@connectrpc/connect`. */
 export interface ConnectCoreModuleLike {
   createConnectRouter(options?: Record<string, unknown>): ConnectRouterLike;
-}
-
-/** Structural shape of `@connectrpc/connect/protocol`. */
-export interface ConnectProtocolModuleLike {
-  createFetchHandler(
-    handler: UniversalHandlerLike,
-    options?: Record<string, unknown>,
-  ): (request: Request) => Promise<Response>;
-  /** Converts a fetch `Request` into the universal request a handler takes. */
-  universalServerRequestFromFetch(request: Request, options: Record<string, unknown>): unknown;
-  /** Converts a universal response into a fetch `Response`. */
-  universalServerResponseToFetch(response: UniversalServerResponseLike): Response;
 }
 
 /** Structural shape of `@bufbuild/protobuf`. */
@@ -85,10 +71,9 @@ export interface ProtobufWktModuleLike {
   FileDescriptorProtoSchema: unknown;
 }
 
-/** The four modules the runtime is adapted from. */
+/** The three modules the runtime is adapted from. */
 export interface ConnectModuleLike {
   connect: ConnectCoreModuleLike;
-  protocol: ConnectProtocolModuleLike;
   protobuf: ProtobufModuleLike;
   wkt: ProtobufWktModuleLike;
 }
@@ -108,32 +93,11 @@ function decodeBase64(base64: string): Uint8Array {
  * {@linkcode ConnectRuntime} port. Pure — it performs no I/O, so unit tests
  * drive it with a fake module bundle.
  *
- * @param modules - The four modules of {@linkcode ConnectModuleLike}.
+ * @param modules - The three modules of {@linkcode ConnectModuleLike}.
  * @returns The internal runtime port every other module consumes.
  */
 export function adaptConnectModule(modules: ConnectModuleLike): ConnectRuntime {
-  const { connect, protocol, protobuf, wkt } = modules;
-
-  /**
-   * Runs a request through a universal handler. A Connect `UniversalHandler`
-   * is a function carrying the descriptor fields this port reads; the
-   * structural type omits the call signature so hand-built test handlers need
-   * not be callable. `httpVersion` stays unset, as for `createFetchHandler`.
-   * The transport's signal replaces the request's own: the universal request
-   * is a plain object, so swapping it costs nothing per call.
-   */
-  function handleUniversal(
-    handler: UniversalHandlerLike,
-    request: Request,
-    signal: AbortSignal | undefined,
-  ): Promise<UniversalServerResponseLike> {
-    const call = handler as unknown as (universal: unknown) => Promise<UniversalServerResponseLike>;
-    const universal = protocol.universalServerRequestFromFetch(request, {}) as Record<
-      string,
-      unknown
-    >;
-    return call(signal === undefined ? universal : { ...universal, signal });
-  }
+  const { connect, protobuf, wkt } = modules;
 
   return {
     createConnectRouter(options?: Record<string, unknown>): ConnectRouterLike {
@@ -143,28 +107,17 @@ export function adaptConnectModule(modules: ConnectModuleLike): ConnectRuntime {
       return connect.createConnectRouter(options);
     },
 
-    createFetchHandler(
-      handler: UniversalHandlerLike,
-    ): (request: Request, signal?: AbortSignal) => Promise<Response> {
-      // `httpVersion` is deliberately left unset: IHttpAdapter surfaces no
-      // negotiated HTTP version, and the only behavior it gates is Connect's
-      // bidi refusal, which would then fire even on transports that support
-      // bidi (plan §3.5/§3.8).
-      const fetchHandler = protocol.createFetchHandler(handler);
-      return (request, signal) =>
-        signal === undefined
-          ? fetchHandler(request)
-          : handleUniversal(handler, request, signal).then((universal) =>
-              protocol.universalServerResponseToFetch(universal),
-            );
-    },
-
     handleUniversal(
       handler: UniversalHandlerLike,
-      request: Request,
-      signal?: AbortSignal,
+      request: UniversalServerRequestLike,
     ): Promise<UniversalServerResponseLike> {
-      return handleUniversal(handler, request, signal);
+      // A Connect `UniversalHandler` is a function carrying the descriptor
+      // fields this port reads; the structural type omits the call signature
+      // so hand-built test handlers need not be callable.
+      const call = handler as unknown as (
+        universal: UniversalServerRequestLike,
+      ) => Promise<UniversalServerResponseLike>;
+      return call(request);
     },
 
     reviveDescriptorSet(base64: string): FileRegistryLike {
@@ -191,17 +144,16 @@ export function adaptConnectModule(modules: ConnectModuleLike): ConnectRuntime {
 }
 
 /**
- * A zero-argument dynamic import for one of the four runtime modules. The
+ * A zero-argument dynamic import for one of the three runtime modules. The
  * zero-argument shape is deliberate: a specifier reaching `import()` through a
  * parameter is invisible to static analysis, so the literal must sit at the
  * `import()` call itself.
  */
 export type ConnectImporter = () => Promise<unknown>;
 
-/** The four importers the runtime is assembled from, keyed like {@linkcode SPECIFIERS}. */
+/** The three importers the runtime is assembled from, keyed like {@linkcode SPECIFIERS}. */
 export interface ConnectImporters {
   connect: ConnectImporter;
-  protocol: ConnectImporter;
   protobuf: ConnectImporter;
   wkt: ConnectImporter;
 }
@@ -219,16 +171,6 @@ export const DEFAULT_IMPORTERS: ConnectImporters = {
       return await import('@connectrpc/connect');
     } catch (error) {
       throw new OptionalDependencyUnavailableError('@connectrpc/connect', {
-        requiredBy: '@setu-ts/grpc-plugin',
-        cause: error,
-      });
-    }
-  },
-  protocol: async () => {
-    try {
-      return await import('@connectrpc/connect/protocol');
-    } catch (error) {
-      throw new OptionalDependencyUnavailableError('@connectrpc/connect/protocol', {
         requiredBy: '@setu-ts/grpc-plugin',
         cause: error,
       });
@@ -257,7 +199,7 @@ export const DEFAULT_IMPORTERS: ConnectImporters = {
 };
 
 /**
- * Lazily imports the four Connect/Protobuf-ES specifiers and adapts them into
+ * Lazily imports the three Connect/Protobuf-ES specifiers and adapts them into
  * the internal runtime port.
  *
  * @param importers - Per-key importer overrides; each key not supplied takes
@@ -282,7 +224,6 @@ export async function loadConnectModule(
 
   return adaptConnectModule({
     connect: loaded.connect as ConnectCoreModuleLike,
-    protocol: loaded.protocol as ConnectProtocolModuleLike,
     protobuf: loaded.protobuf as ProtobufModuleLike,
     wkt: loaded.wkt as ProtobufWktModuleLike,
   });

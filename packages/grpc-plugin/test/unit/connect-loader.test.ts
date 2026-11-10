@@ -26,7 +26,6 @@ import type { FileRegistryLike } from '../../src/interfaces/connect-runtime.ts';
 /** Records every call the adapter makes into the fake modules. */
 interface Calls {
   createConnectRouter: number;
-  createFetchHandler: unknown[];
   fromBinary: unknown[];
   toBinary: unknown[];
   createFileRegistry: unknown[];
@@ -38,7 +37,6 @@ function createFakeModules(overrides: { fromBinaryThrows?: boolean } = {}): {
 } {
   const calls: Calls = {
     createConnectRouter: 0,
-    createFetchHandler: [],
     fromBinary: [],
     toBinary: [],
     createFileRegistry: [],
@@ -55,15 +53,6 @@ function createFakeModules(overrides: { fromBinaryThrows?: boolean } = {}): {
         calls.createConnectRouter++;
         return { handlers: [], service: () => undefined };
       },
-    },
-    protocol: {
-      createFetchHandler: (handler) => {
-        calls.createFetchHandler.push(handler);
-        return () => Promise.resolve(new Response('ok'));
-      },
-      universalServerRequestFromFetch: (request, options) => ({ universal: request.url, options }),
-      universalServerResponseToFetch: (response) =>
-        new Response('from-universal', { status: response.status }),
     },
     protobuf: {
       createFileRegistry: (fdSet) => {
@@ -96,26 +85,6 @@ describe('adaptConnectModule', () => {
     const { modules, calls } = createFakeModules();
     adaptConnectModule(modules).createConnectRouter();
     expect(calls.createConnectRouter).toBe(1);
-  });
-
-  it('delegates createFetchHandler to the protocol subpath, not the core module', () => {
-    const { modules, calls } = createFakeModules();
-    const handler = { requestPath: '/pkg.Svc/Method' };
-    adaptConnectModule(modules).createFetchHandler(handler);
-    expect(calls.createFetchHandler).toEqual([handler]);
-  });
-
-  it('leaves httpVersion unset so Connect does not refuse bidi streams', () => {
-    // Connect refuses a bidi method with 505 when httpVersion starts with '1.'.
-    // The plugin cannot know the negotiated version, so it must pass no option.
-    const { modules } = createFakeModules();
-    let received: unknown = 'not-called';
-    modules.protocol.createFetchHandler = (_handler, options) => {
-      received = options;
-      return () => Promise.resolve(new Response('ok'));
-    };
-    adaptConnectModule(modules).createFetchHandler({ requestPath: '/x/Y' });
-    expect(received).toBeUndefined();
   });
 
   it('revives a descriptor set through fromBinary then createFileRegistry', () => {
@@ -153,18 +122,12 @@ describe('adaptConnectModule', () => {
 });
 
 describe('loadConnectModule', () => {
-  /** The four specifiers in load order. */
-  const SPECIFIERS = [
-    '@connectrpc/connect',
-    '@connectrpc/connect/protocol',
-    '@bufbuild/protobuf',
-    '@bufbuild/protobuf/wkt',
-  ];
+  /** The three specifiers in load order. */
+  const SPECIFIERS = ['@connectrpc/connect', '@bufbuild/protobuf', '@bufbuild/protobuf/wkt'];
 
   /** The specifier each importer key loads, in load order. */
   const SPECIFIER_BY_KEY: Record<keyof ConnectImporters, string> = {
     connect: '@connectrpc/connect',
-    protocol: '@connectrpc/connect/protocol',
     protobuf: '@bufbuild/protobuf',
     wkt: '@bufbuild/protobuf/wkt',
   };
@@ -174,7 +137,6 @@ describe('loadConnectModule', () => {
     const { modules } = createFakeModules();
     const byKey: Record<keyof ConnectImporters, unknown> = {
       connect: modules.connect,
-      protocol: modules.protocol,
       protobuf: modules.protobuf,
       wkt: modules.wkt,
     };
@@ -189,10 +151,10 @@ describe('loadConnectModule', () => {
     return importers;
   }
 
-  it('assembles a runtime when all four specifiers resolve', async () => {
+  it('assembles a runtime when all three specifiers resolve', async () => {
     const runtime = await loadConnectModule(importersFailing('none'));
     expect(typeof runtime.createConnectRouter).toBe('function');
-    expect(typeof runtime.createFetchHandler).toBe('function');
+    expect(typeof runtime.handleUniversal).toBe('function');
     expect(typeof runtime.reviveDescriptorSet).toBe('function');
     expect(typeof runtime.getService).toBe('function');
     expect(typeof runtime.serializeFileDescriptor).toBe('function');
@@ -258,7 +220,6 @@ describe('DEFAULT_IMPORTERS — the guarded imports (M113d §3.1)', () => {
     const { DEFAULT_IMPORTERS } = await import('../../src/transports/connect-loader.ts');
     const cases: ReadonlyArray<[keyof typeof DEFAULT_IMPORTERS, string]> = [
       ['connect', '@connectrpc/connect'],
-      ['protocol', '@connectrpc/connect/protocol'],
       ['protobuf', '@bufbuild/protobuf'],
       ['wkt', '@bufbuild/protobuf/wkt'],
     ];
@@ -284,73 +245,27 @@ describe('DEFAULT_IMPORTERS — the guarded imports (M113d §3.1)', () => {
   });
 });
 
-describe('adaptConnectModule — handleUniversal (M139b)', () => {
-  it('converts the fetch request, leaves httpVersion unset, and calls the handler', async () => {
+describe('adaptConnectModule — handleUniversal (M139b §3.11)', () => {
+  it('hands the universal request to the handler as-is and returns its response', async () => {
     const { modules } = createFakeModules();
     const seen: unknown[] = [];
     const handler = Object.assign(
-      (universal: unknown) => {
-        seen.push(universal);
-        return Promise.resolve({ status: 200 });
-      },
-      { requestPath: '/p.S/M' },
-    );
-    const reply = await adaptConnectModule(modules).handleUniversal(
-      handler,
-      new Request('http://x/p.S/M'),
-    );
-    expect(reply.status).toBe(200);
-    expect(seen).toEqual([{ universal: 'http://x/p.S/M', options: {} }]);
-  });
-
-  it('puts a handed signal on the universal request in place of the request own', async () => {
-    const { modules } = createFakeModules();
-    const seen: unknown[] = [];
-    const handler = Object.assign(
-      (universal: unknown) => {
-        seen.push(universal);
-        return Promise.resolve({ status: 200 });
-      },
-      { requestPath: '/p.S/M' },
-    );
-    const signal = new AbortController().signal;
-    await adaptConnectModule(modules).handleUniversal(
-      handler,
-      new Request('http://x/p.S/M'),
-      signal,
-    );
-    expect(seen).toEqual([{ universal: 'http://x/p.S/M', options: {}, signal }]);
-  });
-});
-
-describe('adaptConnectModule — createFetchHandler with a signal (M139b)', () => {
-  function universalHandler(seen: unknown[]): ReturnType<typeof Object.assign> {
-    return Object.assign(
       (universal: unknown) => {
         seen.push(universal);
         return Promise.resolve({ status: 201 });
       },
       { requestPath: '/p.S/M' },
     );
-  }
-
-  it('without a signal, uses the protocol fetch handler as built', async () => {
-    const { modules } = createFakeModules();
-    const seen: unknown[] = [];
-    const fetchHandler = adaptConnectModule(modules).createFetchHandler(universalHandler(seen));
-    const response = await fetchHandler(new Request('http://x/p.S/M'));
-    expect(await response.text()).toBe('ok');
-    expect(seen).toEqual([]);
-  });
-
-  it('with a signal, runs the universal handler and converts its response', async () => {
-    const { modules } = createFakeModules();
-    const seen: unknown[] = [];
-    const signal = new AbortController().signal;
-    const fetchHandler = adaptConnectModule(modules).createFetchHandler(universalHandler(seen));
-    const response = await fetchHandler(new Request('http://x/p.S/M'), signal);
-    expect(response.status).toBe(201);
-    expect(await response.text()).toBe('from-universal');
-    expect(seen).toEqual([{ universal: 'http://x/p.S/M', options: {}, signal }]);
+    const request = {
+      httpVersion: '',
+      method: 'POST',
+      url: 'http://x/p.S/M',
+      header: new Headers(),
+      body: (async function* () {})(),
+    };
+    const reply = await adaptConnectModule(modules).handleUniversal(handler, request);
+    expect(reply.status).toBe(201);
+    expect(seen).toEqual([request]);
+    expect(seen[0]).toBe(request);
   });
 });

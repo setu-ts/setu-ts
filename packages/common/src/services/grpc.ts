@@ -93,16 +93,46 @@ export interface RpcTransport {
 }
 
 /**
+ * An RPC as the kernel hands it to {@linkcode IGrpcService.handleRpc}: plain
+ * fields rather than a fetch `Request`, which costs a copy of every header and
+ * a body stream per call to build (M139b).
+ * @since 0.13.0
+ */
+export interface RpcCall {
+  /** The request method. */
+  readonly method: string;
+  /** The absolute request URL. */
+  readonly url: string;
+  /** The request path, without the query string. */
+  readonly path: string;
+  /** The request headers, including any a middleware set. */
+  readonly headers: Headers;
+  /**
+   * The whole request body, or — for a client-streaming or bidirectional
+   * procedure whose body nothing in the pipeline read — the unread body
+   * stream (see {@linkcode IGrpcService.streamsRequest}).
+   */
+  readonly body: Uint8Array | ReadableStream<Uint8Array>;
+}
+
+/**
  * An RPC reply as {@linkcode IGrpcService.handleRpc} returns it.
  * @since 0.13.0
  */
 export interface RpcReply {
-  /** The status, headers and body to write. */
-  readonly response: Response;
+  /** The HTTP status. */
+  readonly status: number;
+  /** The response headers. A repeated header keeps every value. */
+  readonly headers: Headers;
+  /**
+   * The body: the whole of it for a single response message, a stream for a
+   * reply written as it is produced, or `null` for none.
+   */
+  readonly body: Uint8Array | ReadableStream<Uint8Array> | null;
   /**
    * Whether the body must be written as it is produced. `false` for a single
-   * response message (a unary or client-streaming procedure), which the kernel
-   * may buffer; `true` for a server-streaming or bidirectional one.
+   * response message (a unary or client-streaming procedure); `true` for a
+   * server-streaming or bidirectional one, whose body is then a stream.
    */
   readonly streaming: boolean;
   /**
@@ -224,22 +254,22 @@ export interface IGrpcService {
   handleRequest(request: Request): Promise<Response>;
 
   /**
-   * Handles an RPC with knowledge of the transport, returning the response
+   * Handles an RPC with knowledge of the transport, returning the reply
    * together with what the kernel needs to write it: whether its body is a
    * stream, and the trailers to send after it.
    *
    * The kernel prefers this over {@linkcode IGrpcService.handleRequest} when
    * present. An implementor without it is dispatched through `handleRequest`
-   * and its reply is always streamed, which is correct for every procedure
-   * kind. `handleRequest` should be this method with `{ trailers: false }`, so
-   * the two entry points cannot disagree.
+   * and its reply is buffered, as before. `handleRequest` should run the same
+   * dispatch with `{ trailers: false }`, so the two entry points cannot
+   * disagree.
    *
-   * @param request - The native fetch request
-   * @param transport - What the connection can carry
+   * @param call - The RPC, built by the kernel from the live request
+   * @param transport - What the connection can carry, and the client's signal
    * @returns The reply to write
    * @since 0.13.0
    */
-  handleRpc?(request: Request, transport: RpcTransport): Promise<RpcReply>;
+  handleRpc?(call: RpcCall, transport: RpcTransport): Promise<RpcReply>;
 
   /**
    * Whether the procedure a request names takes a STREAM of request messages

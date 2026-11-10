@@ -5,34 +5,53 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import type { RpcTransport } from '@setu-ts/common';
+import type { RpcReply, RpcTransport } from '@setu-ts/common';
 import {
   DEFAULT_BASE_PATH,
-  dispatchRequest,
+  dispatchRpc,
   streamingSides,
   isWithinBasePath,
   normalizeBasePath,
 } from '../../src/transports/rpc-dispatcher.ts';
 import type { DispatchEntry } from '../../src/transports/rpc-dispatcher.ts';
+import type { UniversalServerRequestLike } from '../../src/interfaces/connect-runtime.ts';
+import { callFromRequest, responseFromReply } from '../../src/transports/rpc-call.ts';
 
-/** A dispatch map whose entries answer `handled:<path>` (Connect) or `native:<path>`. */
+async function* chunks(text: string): AsyncIterable<Uint8Array> {
+  yield new TextEncoder().encode(text);
+}
+
+/**
+ * A dispatch map whose universal handlers answer `handled:<path>`, with a
+ * `grpc-status: 0` trailer that only the native path carries through.
+ */
 function mapWith(...paths: string[]): Map<string, DispatchEntry> {
   return new Map(
     paths.map((path) => [
       path,
       {
-        fetch: () => Promise.resolve(new Response(`handled:${path}`, { status: 200 })),
-        native: () =>
+        handle: () =>
           Promise.resolve({
-            response: new Response(`native:${path}`),
-            streaming: true,
-            trailers: Promise.resolve(new Headers({ 'grpc-status': '0' })),
+            status: 200,
+            header: new Headers({ 'x-handled': 'yes' }),
+            body: chunks(`handled:${path}`),
+            trailer: new Headers({ 'grpc-status': '0' }),
           }),
         streamsRequest: false,
         streamsResponse: path.endsWith('Stream'),
       },
     ]),
   );
+}
+
+/** A dispatch of a fetch `Request`, as `handleRequest` makes it. */
+async function dispatchReply(
+  request: Request,
+  map: Map<string, DispatchEntry>,
+  basePath: string,
+  transport?: RpcTransport,
+): Promise<RpcReply | null> {
+  return dispatchRpc(await callFromRequest(request, false), map, basePath, transport);
 }
 
 /** The response of a dispatch, as the pre-M139b tests read it; `null` falls through. */
@@ -42,8 +61,8 @@ async function dispatchResponse(
   basePath: string,
   transport?: RpcTransport,
 ): Promise<Response | null> {
-  const reply = await dispatchRequest(request, map, basePath, transport);
-  return reply?.response ?? null;
+  const reply = await dispatchReply(request, map, basePath, transport);
+  return reply === null ? null : responseFromReply(reply);
 }
 
 describe('normalizeBasePath', () => {
@@ -92,7 +111,7 @@ describe('isWithinBasePath', () => {
   });
 });
 
-describe('dispatchRequest', () => {
+describe('dispatchRpc', () => {
   it('dispatches an exact requestPath match', async () => {
     const map = mapWith('/grpc/pkg.Svc/Method');
     const response = await dispatchResponse(
@@ -170,7 +189,7 @@ describe('dispatchRequest', () => {
   });
 });
 
-describe('dispatchRequest — native gRPC refusal (M70i §3.3)', () => {
+describe('dispatchRpc — native gRPC refusal (M70i §3.3)', () => {
   it('refuses a matched native application/grpc request with Trailers-Only UNIMPLEMENTED', async () => {
     const map = mapWith('/pkg.Svc/Method');
     const response = await dispatchResponse(
@@ -258,9 +277,9 @@ describe('dispatchRequest — native gRPC refusal (M70i §3.3)', () => {
   });
 });
 
-describe('dispatchRequest — M139b replies', () => {
+describe('dispatchRpc — M139b replies', () => {
   it('serves native gRPC through the trailers path when the transport carries them', async () => {
-    const reply = await dispatchRequest(
+    const reply = await dispatchReply(
       new Request('http://x/pkg.Svc/Method', {
         method: 'POST',
         headers: { 'content-type': 'application/grpc' },
@@ -269,12 +288,13 @@ describe('dispatchRequest — M139b replies', () => {
       '',
       { trailers: true },
     );
-    expect(await reply!.response.text()).toBe('native:/pkg.Svc/Method');
+    expect(reply!.streaming).toBe(true);
+    expect(await responseFromReply(reply!).text()).toBe('handled:/pkg.Svc/Method');
     expect((await reply!.trailers!).get('grpc-status')).toBe('0');
   });
 
   it('refuses native gRPC on a transport without trailers, as a buffered reply', async () => {
-    const reply = await dispatchRequest(
+    const reply = await dispatchReply(
       new Request('http://x/pkg.Svc/Method', {
         method: 'POST',
         headers: { 'content-type': 'application/grpc' },
@@ -283,33 +303,39 @@ describe('dispatchRequest — M139b replies', () => {
       '',
       { trailers: false },
     );
-    expect(reply!.response.headers.get('grpc-status')).toBe('12');
+    expect(reply!.headers.get('grpc-status')).toBe('12');
+    expect(reply!.body).toBeNull();
     expect(reply!.streaming).toBe(false);
   });
 
   it('marks a Connect reply streaming exactly when the procedure streams its response', async () => {
     const map = mapWith('/pkg.Svc/Method', '/pkg.Svc/Stream');
-    const unary = await dispatchRequest(
+    const unary = await dispatchReply(
       new Request('http://x/pkg.Svc/Method', { method: 'POST' }),
       map,
       '',
     );
-    const stream = await dispatchRequest(
+    const stream = await dispatchReply(
       new Request('http://x/pkg.Svc/Stream', { method: 'POST' }),
       map,
       '',
     );
     expect(unary!.streaming).toBe(false);
+    expect(unary!.body).toEqual(new TextEncoder().encode('handled:/pkg.Svc/Method'));
+    expect(unary!.headers.get('x-handled')).toBe('yes');
     expect(stream!.streaming).toBe(true);
+    expect(stream!.body).toBeInstanceOf(ReadableStream);
+    expect(stream!.trailers).toBeUndefined();
   });
 
   it('answers a 404 reply under a non-root base path', async () => {
-    const reply = await dispatchRequest(
+    const reply = await dispatchReply(
       new Request('http://x/grpc/pkg.Svc/Nope', { method: 'POST' }),
       mapWith('/grpc/pkg.Svc/Method'),
       '/grpc',
     );
-    expect(reply!.response.status).toBe(404);
+    expect(reply!.status).toBe(404);
+    expect(await responseFromReply(reply!).text()).toBe('Not Found');
     expect(reply!.streaming).toBe(false);
   });
 });
@@ -326,47 +352,85 @@ describe('streamingSides', () => {
   });
 });
 
-describe('dispatchRequest — the transport signal (M139b)', () => {
-  function recordingEntry(seen: { fetch: unknown[]; native: unknown[] }): DispatchEntry {
-    return {
-      fetch: (_request, signal) => {
-        seen.fetch.push(signal);
-        return Promise.resolve(new Response('ok'));
-      },
-      native: (_request, signal) => {
-        seen.native.push(signal);
-        return Promise.resolve({ response: new Response('ok'), streaming: true });
-      },
-      streamsRequest: false,
-      streamsResponse: false,
-    };
+describe('dispatchRpc — the universal request (M139b §3.11)', () => {
+  function recordingMap(seen: UniversalServerRequestLike[]): Map<string, DispatchEntry> {
+    return new Map([
+      [
+        '/pkg.Svc/M',
+        {
+          handle: (request) => {
+            seen.push(request);
+            return Promise.resolve({ status: 200 });
+          },
+          streamsRequest: false,
+          streamsResponse: false,
+        },
+      ],
+    ]);
   }
 
-  it.each([
-    ['application/connect+proto', 'fetch'],
-    ['application/grpc', 'native'],
-  ] as const)('hands a %s call the signal (%s entry point)', async (contentType, side) => {
-    const seen = { fetch: [] as unknown[], native: [] as unknown[] };
-    const signal = new AbortController().signal;
-    await dispatchRequest(
-      new Request('http://x/pkg.Svc/M', {
+  it.each(['application/connect+proto', 'application/grpc'])(
+    'hands a %s call the transport signal and the call fields',
+    async (contentType) => {
+      const seen: UniversalServerRequestLike[] = [];
+      const signal = new AbortController().signal;
+      const headers = new Headers({ 'content-type': contentType });
+      const reply = await dispatchRpc(
+        {
+          method: 'POST',
+          url: 'http://x/pkg.Svc/M?q=1',
+          path: '/pkg.Svc/M',
+          headers,
+          body: new Uint8Array([7]),
+        },
+        recordingMap(seen),
+        '',
+        { trailers: true, signal },
+      );
+      expect(seen).toHaveLength(1);
+      expect(seen[0]!.signal).toBe(signal);
+      expect(seen[0]!.header).toBe(headers);
+      expect(seen[0]!.url).toBe('http://x/pkg.Svc/M?q=1');
+      expect(seen[0]!.httpVersion).toBe('');
+      const body: number[] = [];
+      for await (const chunk of seen[0]!.body) body.push(...chunk);
+      expect(body).toEqual([7]);
+      expect(reply!.status).toBe(200);
+    },
+  );
+
+  it('hands no signal when the transport is absent, and a bodyless reply is null', async () => {
+    const seen: UniversalServerRequestLike[] = [];
+    const reply = await dispatchRpc(
+      {
         method: 'POST',
-        headers: { 'content-type': contentType },
-      }),
-      new Map([['/pkg.Svc/M', recordingEntry(seen)]]),
+        url: 'http://x/pkg.Svc/M',
+        path: '/pkg.Svc/M',
+        headers: new Headers(),
+        body: new Uint8Array(),
+      },
+      recordingMap(seen),
       '',
-      { trailers: true, signal },
     );
-    expect(seen[side]).toEqual([signal]);
+    expect('signal' in seen[0]!).toBe(false);
+    expect(reply!.body).toBeNull();
+    expect(reply!.streaming).toBe(false);
   });
 
-  it('hands no signal when the transport is absent', async () => {
-    const seen = { fetch: [] as unknown[], native: [] as unknown[] };
-    await dispatchRequest(
-      new Request('http://x/pkg.Svc/M', { method: 'POST' }),
-      new Map([['/pkg.Svc/M', recordingEntry(seen)]]),
+  it('matches on the call path, not on the URL', async () => {
+    const seen: UniversalServerRequestLike[] = [];
+    const reply = await dispatchRpc(
+      {
+        method: 'POST',
+        url: 'http://x/elsewhere',
+        path: '/pkg.Svc/M',
+        headers: new Headers(),
+        body: new Uint8Array(),
+      },
+      recordingMap(seen),
       '',
     );
-    expect(seen.fetch).toEqual([undefined]);
+    expect(reply).not.toBeNull();
+    expect(seen).toHaveLength(1);
   });
 });

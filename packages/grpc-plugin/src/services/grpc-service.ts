@@ -13,6 +13,7 @@ import type {
   IGrpcService,
   IHealthService,
   ILogger,
+  RpcCall,
   RpcFetchHandler,
   RpcReply,
   RpcTransport,
@@ -23,11 +24,12 @@ import { DEFAULT_READ_MAX_BYTES } from '../interfaces/index.ts';
 import type { DispatchEntry } from '../transports/rpc-dispatcher.ts';
 import {
   DEFAULT_BASE_PATH,
-  dispatchRequest,
+  dispatchRpc,
   isWithinBasePath,
   normalizeBasePath,
 } from '../transports/rpc-dispatcher.ts';
 import { buildConnectRouter, type ServiceEntry } from '../transports/connect-router-builder.ts';
+import { callFromRequest, responseFromReply, textReply } from '../transports/rpc-call.ts';
 import type { EmbeddedDescriptors } from '../descriptors/embedded-descriptors.ts';
 import {
   isNativeGrpcContentType,
@@ -134,7 +136,7 @@ export class GrpcService implements IGrpcService {
    * contains every path, so a prefix test would claim the entire application.
    * The kernel consults `claims` before route matching, so that would 404 every
    * ordinary route. At the root this therefore claims only paths it can
-   * actually serve, mirroring the asymmetry `dispatchRequest` already
+   * actually serve, mirroring the asymmetry `dispatchRpc` already
    * documents — "not a known procedure" and "an ordinary application route"
    * are indistinguishable there, so both fall through.
    *
@@ -233,26 +235,28 @@ export class GrpcService implements IGrpcService {
    * Returns a 404 response when the request does not match any registered
    * service path. Callers routing traffic should consult
    * {@linkcode GrpcService.claims} first.
+   *
+   * The same dispatch as {@linkcode GrpcService.handleRpc} with
+   * `{ trailers: false }`: the request becomes an `RpcCall` and the reply a
+   * `Response`, so the two entry points cannot disagree.
    */
   handleRequest(request: Request): Promise<Response> {
-    return this.handleRpc(request, { trailers: false }).then((reply) => reply.response);
+    return this.#handleFetch(request).then((response) => response ?? notFoundResponse());
   }
 
   /**
    * Handles an RPC with knowledge of the transport (M139b): the reply says
    * whether its body streams, and carries trailers for a native call on a
-   * connection that delivers them. {@linkcode GrpcService.handleRequest} is
-   * this with `{ trailers: false }`, so the two cannot disagree.
+   * connection that delivers them.
    *
-   * @param request - The native fetch request
-   * @param transport - What the connection can carry
+   * @param call - The call, as the kernel built it from the live request
+   * @param transport - What the connection can carry, and the client's signal
    * @returns The reply; a `404` reply for a path no procedure serves
    * @since 0.13.0
    */
-  handleRpc(request: Request, transport: RpcTransport): Promise<RpcReply> {
-    return Promise.resolve(this.#dispatch(request, transport)).then(
-      (reply) =>
-        reply ?? { response: new Response('Not Found', { status: 404 }), streaming: false },
+  handleRpc(call: RpcCall, transport: RpcTransport): Promise<RpcReply> {
+    return Promise.resolve(this.#dispatch(call, transport)).then(
+      (reply) => reply ?? textReply(404, 'Not Found'),
     );
   }
 
@@ -268,8 +272,32 @@ export class GrpcService implements IGrpcService {
    * {@linkcode GrpcService} is published surface (AI_GUIDELINES §9.2).
    */
   createFetchHandler(): RpcFetchHandler {
-    return (request: Request): Promise<Response | null> =>
-      Promise.resolve(this.#dispatch(request)).then((reply) => reply?.response ?? null);
+    return (request: Request): Promise<Response | null> => this.#handleFetch(request);
+  }
+
+  /**
+   * A fetch `Request` through the dispatch, with no trailers: `null` when the
+   * request falls through. The body is read only for a request that is
+   * dispatched, so a fall-through request keeps its body for whoever is next.
+   */
+  async #handleFetch(request: Request): Promise<Response | null> {
+    if (this.#fallsThrough(new URL(request.url).pathname)) {
+      return null;
+    }
+    const call = await callFromRequest(request, this.streamsRequest(request));
+    const reply = await this.#dispatch(call, { trailers: false });
+    return reply === null ? null : responseFromReply(reply);
+  }
+
+  /**
+   * Whether `#dispatch` answers `null` for this path, decided without the
+   * body: outside the base path, a non-procedure at the root, or — once
+   * closed — a path this server never served.
+   */
+  #fallsThrough(path: string): boolean {
+    if (this.#closed) return !this.#servedPaths.has(path);
+    if (!isWithinBasePath(path, this.#basePath)) return true;
+    return this.#basePath === '' && !this.#buildDispatchMap().has(path);
   }
 
   /**
@@ -326,19 +354,18 @@ export class GrpcService implements IGrpcService {
     return this.#dispatchMap;
   }
 
-  /** Resolves a request against the dispatch map, building the router on demand. */
-  #dispatch(
-    request: Request,
-    transport?: RpcTransport,
-  ): RpcReply | Promise<RpcReply | null> | null {
+  /** Resolves a call against the dispatch map, building the router on demand. */
+  #dispatch(call: RpcCall, transport?: RpcTransport): RpcReply | Promise<RpcReply | null> | null {
     if (this.#closed) {
       // Claim only paths this server actually served; ordinary application
       // routes must keep answering while the app drains.
-      const path = new URL(request.url).pathname;
-      return this.#servedPaths.has(path)
-        ? { response: new Response('Service Unavailable', { status: 503 }), streaming: false }
-        : null;
+      return this.#servedPaths.has(call.path) ? textReply(503, 'Service Unavailable') : null;
     }
-    return dispatchRequest(request, this.#buildDispatchMap(), this.#basePath, transport);
+    return dispatchRpc(call, this.#buildDispatchMap(), this.#basePath, transport);
   }
+}
+
+/** The `404` `handleRequest` answers for a path no procedure serves. */
+function notFoundResponse(): Response {
+  return new Response('Not Found', { status: 404 });
 }

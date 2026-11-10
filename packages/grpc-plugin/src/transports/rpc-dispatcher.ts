@@ -14,22 +14,23 @@
  * @module
  */
 
-import type { RpcReply, RpcTransport } from '@setu-ts/common';
+import type { RpcCall, RpcReply, RpcTransport } from '@setu-ts/common';
 
-import { isNativeGrpcContentType, trailersOnlyUnimplemented } from './grpc-binary-refusal.ts';
+import type {
+  UniversalServerRequestLike,
+  UniversalServerResponseLike,
+} from '../interfaces/connect-runtime.ts';
+import { isNativeGrpcContentType, trailersOnlyUnimplementedReply } from './grpc-binary-refusal.ts';
+import { nativeGrpcReply } from './native-grpc-reply.ts';
+import { replyFromUniversal, textReply, universalRequest } from './rpc-call.ts';
 
 /**
- * One procedure in the dispatch map (M139b): its Connect fetch handler, its
- * native-gRPC path, and which sides of the call stream.
+ * One procedure in the dispatch map (M139b): its universal handler, and which
+ * sides of the call stream.
  */
 export interface DispatchEntry {
-  /**
-   * Connect, gRPC-Web — and anything else `createFetchHandler` serves. A
-   * `signal` replaces the request's own as the call's cancellation signal.
-   */
-  readonly fetch: (request: Request, signal?: AbortSignal) => Promise<Response>;
-  /** Native `application/grpc` with trailers, for a connection that carries them. */
-  readonly native: (request: Request, signal?: AbortSignal) => Promise<RpcReply>;
+  /** Runs a universal request through the procedure's universal handler. */
+  readonly handle: (request: UniversalServerRequestLike) => Promise<UniversalServerResponseLike>;
   /** `true` for a client-streaming or bidirectional procedure. */
   readonly streamsRequest: boolean;
   /** `true` for a server-streaming or bidirectional procedure. */
@@ -109,60 +110,56 @@ export function isWithinBasePath(requestPath: string, basePath: string): boolean
 }
 
 /**
- * Dispatches a request against the RPC handler map.
+ * Dispatches a call against the RPC handler map.
  *
- * @param request - The native fetch request.
+ * @param call - The call, as the kernel or `handleRequest` built it.
  * @param dispatchMap - Entries keyed by `basePath + requestPath`.
  * @param basePath - An already-normalized base path.
- * @param transport - What the connection can carry, and the client's signal (M139b). Absent means no
- *   trailers.
+ * @param transport - What the connection can carry, and the client's signal
+ *   (M139b). Absent means no trailers and no signal.
  * @returns The RPC reply; a Trailers-Only `UNIMPLEMENTED` refusal for a matched
- *   native `application/grpc` request on a connection without trailers; a
- *   `404` for an unknown procedure inside a non-root `basePath`; or `null` to
- *   fall through to Hono.
+ *   native `application/grpc` call on a connection without trailers; a `404`
+ *   for an unknown procedure inside a non-root `basePath`; or `null` to fall
+ *   through to Hono.
  *
  * A miss under a ROOT base path falls through rather than answering `404` —
  * at the root, "not a known procedure" is indistinguishable from "an ordinary
  * application route", and 404-ing would take the whole application down.
  *
- * A MATCHED native request is served through the universal handler, with its
- * status in real trailers, when `transport.trailers` is `true` — an HTTP/2
- * connection to an adapter that writes them. Anywhere else it is refused with
- * a Trailers-Only `UNIMPLEMENTED` BEFORE the handler is invoked: a reply whose
- * status cannot reach the client is one no conformant client can interpret.
- * Connect and gRPC-Web pass through untouched; their status travels in the
- * body.
+ * Every matched call runs through the procedure's universal handler, with a
+ * universal request built straight from the call (§3.11). A native call is
+ * served with its status in real trailers when `transport.trailers` is `true`
+ * — an HTTP/2 connection to an adapter that writes them. Anywhere else it is
+ * refused with a Trailers-Only `UNIMPLEMENTED` BEFORE the handler is invoked:
+ * a reply whose status cannot reach the client is one no conformant client can
+ * interpret. Connect and gRPC-Web report their status in the body.
  */
-export function dispatchRequest(
-  request: Request,
+export function dispatchRpc(
+  call: RpcCall,
   dispatchMap: DispatchMap,
   basePath: string,
   transport?: RpcTransport,
 ): Promise<RpcReply | null> | null {
-  const requestPath = new URL(request.url).pathname;
-
-  if (!isWithinBasePath(requestPath, basePath)) {
+  if (!isWithinBasePath(call.path, basePath)) {
     return null;
   }
 
-  const entry = dispatchMap.get(requestPath);
+  const entry = dispatchMap.get(call.path);
   if (entry !== undefined) {
-    if (isNativeGrpcContentType(request.headers.get('content-type'))) {
+    const universal = universalRequest(call, transport?.signal);
+    if (isNativeGrpcContentType(call.headers.get('content-type'))) {
       return transport?.trailers === true
-        ? entry.native(request, transport.signal)
-        : Promise.resolve({ response: trailersOnlyUnimplemented(), streaming: false });
+        ? entry.handle(universal).then(nativeGrpcReply)
+        : Promise.resolve(trailersOnlyUnimplementedReply());
     }
     return entry
-      .fetch(request, transport?.signal)
-      .then((response) => ({ response, streaming: entry.streamsResponse }));
+      .handle(universal)
+      .then((response) => replyFromUniversal(response, entry.streamsResponse));
   }
 
   if (basePath === '') {
     return null;
   }
 
-  return Promise.resolve({
-    response: new Response('Not Found', { status: 404 }),
-    streaming: false,
-  });
+  return Promise.resolve(textReply(404, 'Not Found'));
 }

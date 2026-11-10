@@ -19,6 +19,8 @@
  * @module
  */
 
+import type { RpcReply } from '@setu-ts/common';
+
 /**
  * The exact set of content types that ARE native gRPC. The check is an exact
  * essence match — deliberately NOT `startsWith('application/grpc')`, which
@@ -57,6 +59,16 @@ export function isNativeGrpcContentType(contentType: string | null): boolean {
   return NATIVE_GRPC_MEDIA_TYPES.has(essence);
 }
 
+/** The Trailers-Only refusal's headers, shared by its two forms. */
+const TRAILERS_ONLY_UNIMPLEMENTED_HEADERS: Readonly<Record<string, string>> = {
+  'content-type': 'application/grpc',
+  'grpc-status': '12',
+  'grpc-message':
+    'native gRPC (application/grpc) is not supported by this server; ' +
+    'use Connect (application/connect+json or application/connect+proto) ' +
+    'or gRPC-Web (application/grpc-web+json or application/grpc-web+proto)',
+};
+
 /**
  * Builds the Trailers-Only refusal for a native `application/grpc` request.
  *
@@ -69,15 +81,19 @@ export function isNativeGrpcContentType(contentType: string | null): boolean {
  * @returns The refusal {@linkcode Response}.
  */
 export function trailersOnlyUnimplemented(): Response {
-  return new Response(null, {
+  return new Response(null, { status: 200, headers: TRAILERS_ONLY_UNIMPLEMENTED_HEADERS });
+}
+
+/**
+ * The same refusal as an `RpcReply`, for the dispatch path (M139b §3.11).
+ *
+ * @returns The refusal reply.
+ */
+export function trailersOnlyUnimplementedReply(): RpcReply {
+  return {
     status: 200,
-    headers: {
-      'content-type': 'application/grpc',
-      'grpc-status': '12',
-      'grpc-message':
-        'native gRPC (application/grpc) is not supported by this server; ' +
-        'use Connect (application/connect+json or application/connect+proto) ' +
-        'or gRPC-Web (application/grpc-web+json or application/grpc-web+proto)',
-    },
-  });
+    headers: new Headers(TRAILERS_ONLY_UNIMPLEMENTED_HEADERS),
+    body: null,
+    streaming: false,
+  };
 }

@@ -700,6 +700,7 @@ export type {
 export type {
   GrpcServiceDefinition,
   GrpcServingStatus,
+  RpcCall,
   RpcReply,
   RpcTransport,
   IGrpcService,

@@ -17,7 +17,6 @@
 
 import { normalizeBasePath, streamingSides } from './rpc-dispatcher.ts';
 import type { DispatchEntry } from './rpc-dispatcher.ts';
-import { nativeGrpcReply } from './native-grpc-reply.ts';
 import {
   buildReflectionRegistry,
   reviveServiceDescriptor,
@@ -172,9 +171,7 @@ export function buildConnectRouter(options: BuildConnectRouterOptions): {
   const dispatchMap = new Map<string, DispatchEntry>();
   for (const handler of router.handlers) {
     dispatchMap.set(normalizedBase + handler.requestPath, {
-      fetch: connectRuntime.createFetchHandler(handler),
-      native: (request, signal) =>
-        connectRuntime.handleUniversal(handler, request, signal).then(nativeGrpcReply),
+      handle: (request) => connectRuntime.handleUniversal(handler, request),
       ...streamingSides(handler.method?.methodKind),
     });
   }

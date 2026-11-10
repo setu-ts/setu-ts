@@ -14,6 +14,7 @@ import type {
   IPlugin,
   IRequest,
   IResponse,
+  RpcCall,
   RpcReply,
   RpcTransport,
 } from '@setu-ts/common';
@@ -30,12 +31,29 @@ const decoder = new TextDecoder();
 interface Seen {
   transports: RpcTransport[];
   refuseTransports: (RpcTransport | undefined)[];
+  /** Fetch requests handed to `handleRequest` (an implementor without `handleRpc`). */
   requests: Request[];
+  /** Calls handed to `handleRpc`. */
+  calls: RpcCall[];
+}
+
+/** A reply with the given body: text, bytes, a stream, or none. */
+function reply(
+  body: string | Uint8Array | ReadableStream<Uint8Array> | null,
+  options: { streaming?: boolean; headers?: HeadersInit; trailers?: Promise<Headers> } = {},
+): RpcReply {
+  return {
+    status: 200,
+    headers: new Headers(options.headers),
+    body: typeof body === 'string' ? encoder.encode(body) : body,
+    streaming: options.streaming ?? body instanceof ReadableStream,
+    ...(options.trailers === undefined ? {} : { trailers: options.trailers }),
+  };
 }
 
 /** A structural `IGrpcService` double claiming every path. */
 function grpcPlugin(service: Partial<IGrpcService>): IPlugin & { seen: Seen } {
-  const seen: Seen = { transports: [], refuseTransports: [], requests: [] };
+  const seen: Seen = { transports: [], refuseTransports: [], requests: [], calls: [] };
   const full = {
     available: true,
     addService: () => undefined,
@@ -55,10 +73,10 @@ function grpcPlugin(service: Partial<IGrpcService>): IPlugin & { seen: Seen } {
     },
     ...(full.handleRpc !== undefined
       ? {
-          handleRpc: (request: Request, transport: RpcTransport) => {
-            seen.requests.push(request);
+          handleRpc: (call: RpcCall, transport: RpcTransport) => {
+            seen.calls.push(call);
             seen.transports.push(transport);
-            return full.handleRpc!(request, transport);
+            return full.handleRpc!(call, transport);
           },
         }
       : {}),
@@ -144,7 +162,7 @@ describe('M139b §3.1 — RPC replies', () => {
   it('a streaming reply reaches the client message by message (V12-39)', async () => {
     const body = manualStream();
     const grpc = grpcPlugin({
-      handleRpc: () => Promise.resolve({ response: new Response(body.stream), streaming: true }),
+      handleRpc: () => Promise.resolve(reply(body.stream)),
     });
     const app = await started(grpc);
     body.push('first');
@@ -160,11 +178,7 @@ describe('M139b §3.1 — RPC replies', () => {
 
   it('a single response message is buffered, so inject() still reads it', async () => {
     const grpc = grpcPlugin({
-      handleRpc: () =>
-        Promise.resolve({
-          response: new Response('unary', { headers: { 'x-a': '1' } }),
-          streaming: false,
-        }),
+      handleRpc: () => Promise.resolve(reply('unary', { headers: { 'x-a': '1' } })),
     });
     const app = await started(grpc);
     const response = await app.inject({ method: 'POST', url: '/pkg.Svc/Method' });
@@ -182,6 +196,26 @@ describe('M139b §3.1 — RPC replies', () => {
     expect(response.statusCode).toBe(201);
     expect(response.body).toBe('legacy');
     expect(grpc.seen.requests).toHaveLength(1);
+  });
+
+  it('a bodyless reply is written bodyless', async () => {
+    const grpc = grpcPlugin({
+      handleRpc: () => Promise.resolve(reply(null, { headers: { 'grpc-status': '5' } })),
+    });
+    const app = await started(grpc);
+    const response = await app.dispatch!(new Request(URL_BASE, { method: 'POST' }));
+    expect(response.headers.get('grpc-status')).toBe('5');
+    expect(await response.text()).toBe('');
+  });
+
+  it('a reply header repeated by the service keeps every value', async () => {
+    const headers = new Headers();
+    headers.append('set-cookie', 'a=1');
+    headers.append('set-cookie', 'b=2');
+    const grpc = grpcPlugin({ handleRpc: () => Promise.resolve(reply('x', { headers })) });
+    const app = await started(grpc);
+    const response = await app.dispatch!(new Request(URL_BASE, { method: 'POST' }));
+    expect(response.headers.getSetCookie()).toEqual(['a=1', 'b=2']);
   });
 
   it('a header-only refusal is written bodyless, with every repeated header kept', async () => {
@@ -208,7 +242,7 @@ describe('M139b §3.1 — RPC replies', () => {
 describe('M139b §3.3 — the transport bit and trailers', () => {
   it('a request without the adapter flag reports no trailers to refuses and handleRpc', async () => {
     const grpc = grpcPlugin({
-      handleRpc: () => Promise.resolve({ response: new Response('x'), streaming: false }),
+      handleRpc: () => Promise.resolve(reply('x')),
     });
     const app = await started(grpc);
     await app.inject({ method: 'POST', url: '/pkg.Svc/Method' });
@@ -222,7 +256,7 @@ describe('M139b §3.3 — the transport bit and trailers', () => {
     const trailers = Promise.resolve(new Headers({ 'grpc-status': '0' }));
     const grpc = grpcPlugin({
       handleRpc: (): Promise<RpcReply> =>
-        Promise.resolve({ response: new Response('payload'), streaming: false, trailers }),
+        Promise.resolve(reply(new Response('payload').body, { streaming: false, trailers })),
     });
     const adapter = capturingAdapter();
     await started(adapter, grpc);
@@ -259,8 +293,7 @@ describe('M139b §3.3 — the transport bit and trailers', () => {
     });
     app.register(
       grpcPlugin({
-        handleRpc: () =>
-          Promise.resolve({ response: new Response('p'), streaming: true, trailers }),
+        handleRpc: () => Promise.resolve(reply(new Response('p').body, { trailers })),
       }),
     );
     await app.start();
@@ -278,13 +311,10 @@ describe('M139b §3.2 — RPC request bodies', () => {
   function echoFirstChunk(streams: boolean): IPlugin & { seen: Seen } {
     return grpcPlugin({
       streamsRequest: () => streams,
-      handleRpc: async (request) => {
-        const reader = request.body!.getReader();
-        const first = await reader.read();
-        return {
-          response: new Response(first.value ?? new Uint8Array()),
-          streaming: false,
-        };
+      handleRpc: async (call) => {
+        if (!(call.body instanceof ReadableStream)) return reply(call.body);
+        const first = await call.body.getReader().read();
+        return reply(first.value ?? new Uint8Array());
       },
     });
   }
@@ -313,15 +343,15 @@ describe('M139b §3.2 — RPC request bodies', () => {
       new Request(URL_BASE, { method: 'POST', body: 'whole body' }),
     );
     expect(await response.text()).toBe('whole body');
-    expect(grpc.seen.requests[0]!.headers.get('content-type')).toBe('text/plain;charset=UTF-8');
+    const call = grpc.seen.calls[0]!;
+    expect(call.body).toBeInstanceOf(Uint8Array);
+    expect(call.headers.get('content-type')).toBe('text/plain;charset=UTF-8');
+    expect(call).toMatchObject({ method: 'POST', url: URL_BASE, path: '/pkg.Svc/Method' });
   });
 
   it('an implementor without streamsRequest is buffered', async () => {
     const grpc = grpcPlugin({
-      handleRpc: async (request) => ({
-        response: new Response(await request.text()),
-        streaming: false,
-      }),
+      handleRpc: (call) => Promise.resolve(reply(call.body as Uint8Array)),
     });
     const app = await started(grpc);
     const response = await app.dispatch!(new Request(URL_BASE, { method: 'POST', body: 'b' }));
@@ -350,17 +380,17 @@ describe('M139b §3.2 — RPC request bodies', () => {
   });
 
   it.each([true, false])(
-    'the client signal travels on the transport, not the dispatched request (streamed body: %s)',
+    'the client signal travels on the transport, not on the call (streamed body: %s)',
     async (streams) => {
       let transportSignal: AbortSignal | undefined;
-      let requestSignal: AbortSignal | undefined;
+      let seenCall: RpcCall | undefined;
       const app = await started(
         grpcPlugin({
           streamsRequest: () => streams,
-          handleRpc: (request, transport) => {
+          handleRpc: (call, transport) => {
             transportSignal = transport.signal;
-            requestSignal = request.signal;
-            return Promise.resolve({ response: new Response('ok'), streaming: false });
+            seenCall = call;
+            return Promise.resolve(reply('ok'));
           },
         }),
       );
@@ -371,9 +401,28 @@ describe('M139b §3.2 — RPC request bodies', () => {
       expect(transportSignal!.aborted).toBe(false);
       controller.abort();
       expect(transportSignal!.aborted).toBe(true);
-      // Following a signal costs a freshly built Request ~8% of unary
-      // throughput on Node, so the dispatched request does not.
-      expect(requestSignal!.aborted).toBe(false);
+      // The call is plain fields: no fetch Request, and so no signal to follow.
+      expect(seenCall).not.toBeInstanceOf(Request);
+      expect('signal' in seenCall!).toBe(false);
     },
   );
+
+  it('a header a middleware set reaches the call', async () => {
+    const app = createApplication({ plugins: [runtimePlugin()] });
+    app.register({
+      name: 'sets-header',
+      version: '1.0.0',
+      register(ctx) {
+        ctx.middleware.add(async (c, next) => {
+          c.request.headers.set('x-tenant', 't1');
+          await next();
+        });
+      },
+    });
+    const grpc = grpcPlugin({ handleRpc: () => Promise.resolve(reply('ok')) });
+    app.register(grpc);
+    await app.start();
+    await app.dispatch!(new Request(URL_BASE, { method: 'POST' }));
+    expect(grpc.seen.calls[0]!.headers.get('x-tenant')).toBe('t1');
+  });
 });

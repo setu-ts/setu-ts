@@ -110,9 +110,24 @@ export interface UniversalHandlerLike {
 }
 
 /**
- * A Connect `UniversalServerResponse`, seen structurally: what the universal
- * handler produces before `createFetchHandler` turns it into a fetch
- * `Response` — and drops its `trailer`, which native gRPC needs.
+ * A Connect `UniversalServerRequest`, seen structurally: what a universal
+ * handler takes. The plugin builds it directly from the kernel's `RpcCall`
+ * (M139b §3.11), with no fetch `Request` in between.
+ */
+export interface UniversalServerRequestLike {
+  /** Left empty: no adapter reports the negotiated HTTP version (plan §3.5/§3.8). */
+  readonly httpVersion: string;
+  readonly method: string;
+  readonly url: string;
+  readonly header: Headers;
+  readonly body: AsyncIterable<Uint8Array>;
+  /** The call's cancellation signal; absent means none. */
+  readonly signal?: AbortSignal;
+}
+
+/**
+ * A Connect `UniversalServerResponse`, seen structurally: status, headers, the
+ * body as an iterable, and the `trailer` native gRPC needs.
  */
 export interface UniversalServerResponseLike {
   readonly status: number;
@@ -148,23 +163,11 @@ export interface ConnectRuntime {
   createConnectRouter(options?: Record<string, unknown>): ConnectRouterLike;
 
   /**
-   * Adapts a Connect `UniversalHandler` into a fetch handler. A `signal` replaces the
-   * request's own as the call's cancellation signal (`RpcTransport.signal`).
-   */
-  createFetchHandler(
-    handler: UniversalHandlerLike,
-  ): (request: Request, signal?: AbortSignal) => Promise<Response>;
-
-  /**
-   * Runs a request through a universal handler directly, keeping the
-   * response's trailers (M139b §3.6): `universalServerRequestFromFetch`, then
-   * the handler. A `signal` replaces the request's own, as for
-   * {@linkcode ConnectRuntime.createFetchHandler}.
+   * Runs a universal request through a universal handler (M139b §3.11).
    */
   handleUniversal(
     handler: UniversalHandlerLike,
-    request: Request,
-    signal?: AbortSignal,
+    request: UniversalServerRequestLike,
   ): Promise<UniversalServerResponseLike>;
 
   /**
