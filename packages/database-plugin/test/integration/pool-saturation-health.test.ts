@@ -212,6 +212,28 @@ describe('M139f V8-3: a pg acquire timeout under the probe bound is saturation',
     }
   });
 
+  it('stays degraded when poolStats cannot be read, even with progress unobservable', async () => {
+    for (const poolStats of [
+      () => {
+        throw new Error('pool closed');
+      },
+      () => ({ total: -1, idle: 0, waiting: 0 }) as DatabasePoolCapacity,
+    ]) {
+      const booted = await boot(poolStats);
+      try {
+        const service = booted.app.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+        await service.getRepository('Tenant').findAll();
+        booted.failWith(ACQUIRE);
+        const { ready, database } = await read(booted.app);
+
+        expect(database?.status).toBe('degraded');
+        expect(ready).toBe(503);
+      } finally {
+        await booted.stop();
+      }
+    }
+  });
+
   it('stays degraded without poolStats, as documented', async () => {
     const booted = await boot();
     try {

@@ -290,8 +290,11 @@ export function DatabasePlugin(options?: DatabasePluginOptions): IPlugin {
           // M139f V8-3: pg-pool drops a timed-out waiter before rejecting it,
           // so with `connectionTimeoutMillis` under the probe bound `waiting`
           // already reads 0; the probe's own acquire timeout is the evidence.
+          // Both forms need a readable snapshot: a `poolStats` callback that
+          // throws or returns a malformed shape is "no capacity", which the
+          // documented rule reads as `degraded`.
           const saturated =
-            (current !== undefined && isSaturated(current)) || probeHitAcquireTimeout(adapter);
+            current !== undefined && (isSaturated(current) || probeHitAcquireTimeout(adapter));
           if (
             saturated &&
             (completed === QUERY_PROGRESS_UNOBSERVABLE || progress.progressedWithin(now))
