@@ -46,7 +46,7 @@ All notable changes to this project are documented here. The format follows
   `RedisQuotaStore`. **Migration:** a custom `IQuotaStore` implements `read`, answering `0` for an
   absent or expired window; a custom `IQuota` implements `usage`.
 
-- **A Redis backplane frame published while disconnected is lost, never delivered late (M139f, #579
+- **A Redis backplane frame published while disconnected is lost, never delivered late (M139f, #579,
   `@setu-ts/realtime-backplane-plugin`, X3-3).** The publisher connection the plugin builds now has
   no offline queue, so a publish while it reconnects is refused at once (`503`, one `warn` per frame
   in the WebSocket and SSE consumers) instead of being held and flushed seconds later, or lost
