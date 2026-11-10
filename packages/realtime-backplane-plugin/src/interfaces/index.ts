@@ -237,6 +237,10 @@ export interface RedisBackplaneOptions extends BackplaneCommonOptions {
    * transport builds has no offline queue, so a publish while it reconnects is
    * refused at once and the frame is lost, never delivered late.
    *
+   * The same bound limits how long `connect()` waits for the built publisher
+   * to become ready (since 0.13.0); with `0` that wait ends only when the
+   * publisher is ready or `close()` is called.
+   *
    * Read only on the lazy `ioredis` path: an injected `client` /
    * `subscriber` pair keeps whatever timeout it was constructed with.
    *

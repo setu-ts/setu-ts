@@ -5141,11 +5141,12 @@ The memory, messaging, and Redis transports retain the most recent 100 subscribe
   it reconnects is refused at once (a `503`-class fault, one `warn` per frame in each consumer). A
   peer whose subscriber has not yet re-subscribed misses frames too. A connection that stays open
   while the server answers nothing (paused, or partitioned with no reset) triggers no reconnect; its
-  publish rejects after `commandTimeoutMs` (default 15 s) rather than never settling. A publish
-  before `connect()` or after `close()` rejects rather than resolving. An injected
-  `client`/`subscriber` pair keeps its own settings: create the publisher with
-  `enableOfflineQueue: false` (ioredis) or `disableOfflineQueue: true` (node-redis) for the same
-  behaviour.
+  publish rejects after `commandTimeoutMs` (default 15 s) rather than never settling. The same bound
+  limits how long `connect()` waits for the built publisher to become ready; with `0` that wait ends
+  only when the publisher is ready or `close()` is called. A publish before `connect()` or after
+  `close()` rejects rather than resolving. An injected `client`/`subscriber` pair keeps its own
+  settings: create the publisher with `enableOfflineQueue: false` (ioredis) or
+  `disableOfflineQueue: true` (node-redis) for the same behaviour.
 - **`RoomBroadcastOptions.except` is honored cluster-wide.** It names a live connection object,
   which means nothing in another process — but connection IDs come from `runtime.uuid()` and are
   therefore globally unique, so `RealtimeFrame.exceptId` carries the ID and every replica skips the
@@ -12977,7 +12978,8 @@ identical repeats, and one `info` on recovery, under the source `service-discove
 `DiscoveryProvider.isHealthy?()` may reject with that reason instead of resolving `false`; the
 service counts a rejection as unreachable, and the Kubernetes provider rejects this way. A
 cold-resolve `DiscoveryUnavailableError` message now ends with the cause; its public `503` detail is
-unchanged.
+unchanged. A service-account token holding anything but visible ASCII is refused with a fixed
+`DiscoveryUnavailableError` that never contains the token, before any request is built.
 
 | Status | Meaning                                                                                                                                                                              |
 | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |

@@ -81,6 +81,8 @@ export class RedisBackplane implements IRealtimeBackplane {
    * holding a reference to shut them down.
    */
   #generation = 0;
+  /** Ends an open's pending publisher-ready wait when `close()` lands (M139f audit L1). */
+  #readyWait: AbortController | undefined;
 
   /**
    * M70c: present only when both connections expose `status` and `ping`; the
@@ -268,7 +270,15 @@ export class RedisBackplane implements IRealtimeBackplane {
       await subscriber.subscribe(this.#topic);
       // A publisher without an offline queue refuses every command until it is
       // ready, so the pair is not handed out before then.
-      if (owned) await waitForReady(publisher, this.#commandTimeoutMs);
+      if (owned) {
+        const readyWait = new AbortController();
+        this.#readyWait = readyWait;
+        try {
+          await waitForReady(publisher, this.#commandTimeoutMs, readyWait.signal);
+        } finally {
+          if (this.#readyWait === readyWait) this.#readyWait = undefined;
+        }
+      }
     } catch (error) {
       subscriber.off('message', listener);
       // Detached only after the owned connections are discarded, as close()
@@ -434,6 +444,9 @@ export class RedisBackplane implements IRealtimeBackplane {
     // has not published its connections yet, so this is what tells it to retire
     // them rather than arrive after the shutdown.
     this.#generation++;
+    // A pending publisher-ready wait ends now, so the open reaches its
+    // generation check and retires the pair — even with `commandTimeoutMs: 0`.
+    this.#readyWait?.abort();
     this.#handlers.clear();
     const subscriber = this.#subscriber;
     const publisher = this.#publisher;
@@ -547,14 +560,20 @@ const CONNECTING_STATUSES: ReadonlySet<string> = new Set(['connecting', 'connect
  * other status resolves at once: `ready`; no `status` at all (a custom
  * module's client cannot be observed); `wait`, which never becomes ready
  * unless something calls `connect()`; and a closed client, whose publish then
- * fails on its own.
+ * fails on its own. An aborted `cancel` signal (a `close()`) also resolves the
+ * wait, so the open's generation check retires the pair (M139f audit L1).
  *
  * @param client - The owned publisher
  * @param timeoutMs - The bound, in milliseconds
- * @returns Resolves once the client is ready
+ * @param cancel - Aborted by `close()`
+ * @returns Resolves once the client is ready, or once `cancel` is aborted
  * @throws {BackendUnavailableError} (as a rejection) when the bound passes first
  */
-function waitForReady(client: IRedisBackplaneClient, timeoutMs: number): Promise<void> {
+function waitForReady(
+  client: IRedisBackplaneClient,
+  timeoutMs: number,
+  cancel: AbortSignal,
+): Promise<void> {
   if (client.status === undefined || !CONNECTING_STATUSES.has(client.status)) {
     return Promise.resolve();
   }
@@ -563,10 +582,12 @@ function waitForReady(client: IRedisBackplaneClient, timeoutMs: number): Promise
       new Promise<void>((resolve) => {
         const onReady = (): void => {
           client.off('ready', onReady);
+          cancel.removeEventListener('abort', onReady);
           resolve();
         };
         client.on('ready', onReady);
         signal.addEventListener('abort', () => client.off('ready', onReady), { once: true });
+        cancel.addEventListener('abort', onReady, { once: true });
       }),
     {
       timeoutMs,

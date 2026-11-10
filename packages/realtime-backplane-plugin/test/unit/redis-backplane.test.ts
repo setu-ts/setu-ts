@@ -1517,6 +1517,25 @@ describe('RedisBackplane owned publisher readiness (M139f X3-3)', () => {
     },
   );
 
+  it('ends an unbounded wait on close() and retires the pair (M139f audit L1)', async () => {
+    const { module, clients } = connectingModule();
+    const backplane = new RedisBackplane(
+      { transport: 'redis', url: 'redis://localhost:6379', module, commandTimeoutMs: 0 },
+      'node-a',
+      'realtime',
+    );
+    const connecting = backplane.connect();
+    await setImmediate();
+    expect(clients[0]!.eventListeners.get('ready')).toHaveLength(2);
+
+    await backplane.close();
+    // The open sees it was superseded and releases both connections itself.
+    await connecting;
+    expect(clients.map((client) => client.quitCount)).toEqual([1, 1]);
+    expect(clients[0]!.eventListeners.get('ready')).toHaveLength(0);
+    await expect(backplane.publish(FRAME)).rejects.toThrow();
+  });
+
   it('does not wait on an injected pair, whatever its status', async () => {
     const client = Object.assign(new FakeRedisClient(), { status: 'connecting' });
     const subscriber = Object.assign(new FakeRedisClient(), { status: 'connecting' });

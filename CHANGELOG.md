@@ -140,7 +140,9 @@ All notable changes to this project are documented here. The format follows
   `@setu-ts/service-discovery-plugin`, X10-3).** One `warn` names the cause when the failure starts
   (a Deno `UnknownIssuer` without `DENO_CERT`, an HTTP status), repeats log at `debug`, and the
   recovery at `info`. A cold-resolve error message ends with the same cause; the `503` body is
-  unchanged.
+  unchanged. A service-account token with a character an HTTP header cannot carry is refused with a
+  fixed message before any request, so `fetch`'s error, which quotes the whole `Bearer` value, can
+  no longer carry the token into a log.
 - **A pg pool acquire timeout reads as saturation (M139f, PR pending, `@setu-ts/database-plugin`,
   V8-3).** With `poolStats`, a probe that timed out waiting for a pool client keeps the indicator
   `up` (`reachable: 'unknown'`) while queries are completing, where `connectionTimeoutMillis` under
