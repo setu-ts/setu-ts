@@ -80,13 +80,12 @@ serves no procedure, health or reflection service), name each target's mount in 
 for a typed client with `grpcClient()`:
 
 ```typescript
-import type { DescService } from '@bufbuild/protobuf';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { GrpcPlugin, grpcClient } from '@setu-ts/grpc-plugin';
 
 // The generated descriptor of the service billing serves (illustrative stand-in).
-declare const BillingService: DescService;
+declare const BillingService: Parameters<typeof grpcClient>[1];
 
 const app = createApplication({
   plugins: [
