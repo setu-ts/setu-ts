@@ -93,7 +93,10 @@ All notable changes to this project are documented here. The format follows
   `@setu-ts/vector-store-plugin`, V12-10).** `ensureCollection` now requires `vs_<name>_src` on
   `(scope, source_id)` and `vs_<name>_hnsw` as `USING hnsw (embedding vector_cosine_ops)`, both on
   the collection's table, and names the expected definition when one differs. Before, an index of
-  the right name passed whatever it was, so an L2 index served cosine queries.
+  the right name passed whatever it was, so an L2 index served cosine queries. **Upgrade:** both
+  `ensure: 'verify'` and `ensure: 'create'` now refuse such an index at startup with
+  `VectorCollectionMismatchError`, and `CREATE INDEX IF NOT EXISTS` does not replace it: drop the
+  index and recreate it with the definition the error names.
 - **Agent cards describe the M139a behaviour (M139c, #578).** The auth, multi-tenancy and MCP
   `AGENT_CARD.md` files, which `setu agents` briefs point agents at, now state scoped-token
   confinement, the `sub` requirement, `requireAuth({ credentials })`, `tenantClaim`, the request on

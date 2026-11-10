@@ -232,20 +232,21 @@ every record of one tenant in the collection, for offboarding.
 
 ## Limits
 
-| Limit                                | Value             |
-| ------------------------------------ | ----------------- |
-| Dimensions per collection            | 4,096             |
-| Filterable fields per collection     | 10                |
-| Matches per query (`topK`)           | 50                |
-| Records per `upsert`/`replaceSource` | 500               |
-| Ids per `delete`                     | 1,000             |
-| Scope                                | 64 UTF-8 bytes    |
-| Record or source id                  | 256 UTF-8 bytes   |
-| Record `content`                     | 8,192 UTF-8 bytes |
-| String metadata or filter value      | 64 UTF-8 bytes    |
-| Values in one `in` clause            | 100               |
-| `and` nesting depth                  | 4                 |
-| Clauses in one filter                | 32                |
+| Limit                            | Value             |
+| -------------------------------- | ----------------- |
+| Dimensions per collection        | 4,096             |
+| Filterable fields per collection | 10                |
+| Matches per query (`topK`)       | 50                |
+| Records per `upsert`             | 500               |
+| Records per `replaceSource`      | 5,000             |
+| Ids per `delete`                 | 1,000             |
+| Scope                            | 64 UTF-8 bytes    |
+| Record or source id              | 256 UTF-8 bytes   |
+| Record `content`                 | 8,192 UTF-8 bytes |
+| String metadata or filter value  | 64 UTF-8 bytes    |
+| Values in one `in` clause        | 100               |
+| `and` nesting depth              | 4                 |
+| Clauses in one filter            | 32                |
 
 Every limit is enforced by the service before the adapter sees the call, and is the tightest of the
 four backends so a request behaves the same everywhere. A vector must have exactly the collection's

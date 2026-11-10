@@ -63,9 +63,11 @@ await mailer.send({
 `send` and `sendTemplate` both check every attachment before the provider runs, and refuse with a
 `TypeError` that names the attachment's index and field, never its content:
 
-- `filename`: 1–255 characters, well-formed, with no control character (CR and LF included);
-- `contentType`: a `type/subtype` with no parameters;
-- `contentId`: 1–255 characters, with no angle brackets or whitespace.
+- `filename`: 1–255 UTF-16 code units, well-formed, with no control character (CR and LF included);
+- `contentType`: a `type/subtype` with no parameters, and not `message/*` or `multipart/*` in any
+  letter case;
+- `contentId`: 1–255 characters, each a letter, a digit or one of ``!#$%&'*+/=?^_`{|}~.@-``, so no
+  angle brackets, whitespace, quotes or non-ASCII.
 
 SMTP, SES and SendGrid send the attachments; `LogProvider` logs each one's filename, type and size,
 never the bytes. There is no framework size limit: the provider refuses an oversized message (SES at
