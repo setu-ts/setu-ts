@@ -107,6 +107,24 @@ describe('createProvider — kubernetes API server resolution', () => {
     expect(http.calls[0].url).toContain('https://10.96.0.1:443/apis/discovery.k8s.io/v1');
   });
 
+  it('refuses an in-cluster address that does not parse (V12-52)', () => {
+    const runtime = createFakeRuntime({
+      env: {
+        KUBERNETES_SERVICE_HOST: 'u:canary-pw-52@10.96.0.1',
+        KUBERNETES_SERVICE_PORT: '99999',
+      },
+    });
+    const options = { provider: 'kubernetes', namespace: 'default', token: 't' } as const;
+    let caught: unknown;
+    try {
+      createProvider(options, resolveOptions(options), runtime);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(DiscoveryUnavailableError);
+    expect(String(caught)).not.toContain('canary');
+  });
+
   it('defaults the port to 443 when only the host is set', async () => {
     const http = createFakeHttp([{ text: '{"items":[]}' }]);
     const runtime = createFakeRuntime({ env: { KUBERNETES_SERVICE_HOST: '10.96.0.1' } });
@@ -272,5 +290,39 @@ describe('createProvider — optional options reach the provider', () => {
     const [only] = await provider.resolve('billing');
     expect(queried).toBe('_grpc._tcp.billing.mesh');
     expect(only.secure).toBe(true);
+  });
+});
+
+describe('createProvider — URL credentials (V12-52)', () => {
+  it('refuses a consul address with userinfo, without naming it', () => {
+    const options = { provider: 'consul', address: 'http://ops:canary-pw-52@consul:8500' } as const;
+    expect(() => createProvider(options, resolveOptions(options), createFakeRuntime())).toThrow(
+      new DiscoveryUnavailableError(
+        'The Consul address must be an absolute URL without credentials ' +
+          '(user:password@host); pass the ACL token through the token option.',
+      ),
+    );
+  });
+
+  it('refuses a kubernetes apiServer with userinfo, without naming it', () => {
+    const options = {
+      provider: 'kubernetes',
+      namespace: 'default',
+      apiServer: 'https://kuser:canary-pw-52@api',
+      token: 't',
+    } as const;
+    let caught: unknown;
+    try {
+      createProvider(options, resolveOptions(options), createFakeRuntime());
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(DiscoveryUnavailableError);
+    expect((caught as Error).message).toBe(
+      'The Kubernetes API server URL (apiServer, or KUBERNETES_SERVICE_HOST and ' +
+        'KUBERNETES_SERVICE_PORT) must be an absolute URL without credentials ' +
+        '(user:password@host); pass the service-account token through the token option.',
+    );
+    expect(String(caught)).not.toContain('canary');
   });
 });
