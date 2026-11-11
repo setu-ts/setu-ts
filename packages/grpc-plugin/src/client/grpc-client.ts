@@ -282,16 +282,22 @@ interface OriginEntry {
   readonly session: Http2SessionLike | undefined;
   /** Calls holding the transport: taken at lookup, released when the call ends. */
   calls: number;
-  /** Evicted: close the session once {@linkcode OriginEntry.calls} reaches zero. */
-  retired: boolean;
+}
+
+/** How a streaming call ends besides its messages: its signal and its deadline. */
+interface StreamEnd {
+  readonly signal: AbortSignal | undefined;
+  readonly deadlineMs: number;
 }
 
 /**
  * A stream response whose message iterable calls `release` once, when it
- * ends, fails, or is abandoned through `return()`/`throw()`. A response with no
- * iterable releases at once.
+ * ends, fails, or is abandoned through `return()`/`throw()` — or, for a stream
+ * the application never reads to an end, when the call's signal aborts or its
+ * deadline passes: connect-node has cancelled the HTTP/2 stream by then. A
+ * response with no iterable releases at once.
  */
-function releasingAtEnd(response: unknown, release: () => void): unknown {
+function releasingAtEnd(response: unknown, release: () => void, end: StreamEnd): unknown {
   const message = (response as { message?: unknown } | null)?.message as
     AsyncIterable<unknown> | undefined;
   if (typeof message?.[Symbol.asyncIterator] !== 'function') {
@@ -302,8 +308,15 @@ function releasingAtEnd(response: unknown, release: () => void): unknown {
   const finish = (): void => {
     if (released) return;
     released = true;
+    clearTimeout(timer);
+    end.signal?.removeEventListener('abort', finish);
     release();
   };
+  // Armed when the headers arrive, so it fires no earlier than the deadline.
+  const timer = setTimeout(finish, end.deadlineMs);
+  (timer as { unref?: () => void }).unref?.();
+  if (end.signal?.aborted === true) finish();
+  else end.signal?.addEventListener('abort', finish, { once: true });
   return {
     ...(response as object),
     message: {
@@ -433,7 +446,7 @@ export class GrpcClients {
           target,
           base,
           options,
-          'unary',
+          undefined,
           (transport, timeout) =>
             transport.unary(method, signal, timeout, traced, input, contextValues),
           timeoutMs,
@@ -445,7 +458,7 @@ export class GrpcClients {
           target,
           base,
           options,
-          'stream',
+          { signal, deadlineMs: timeoutMs ?? options.timeoutMs },
           (transport, timeout) =>
             transport.stream(method, signal, timeout, traced, input, contextValues),
           timeoutMs,
@@ -456,20 +469,21 @@ export class GrpcClients {
 
   /**
    * Runs one call, retrying a unary call once when the server refused its
-   * stream (see {@linkcode isRefusedStream}).
+   * stream (see {@linkcode isRefusedStream}). `stream` is set for a streaming
+   * call, and says how it ends besides its messages.
    */
   async #call(
     target: string,
     base: string | undefined,
     options: ResolvedClientOptions,
-    kind: 'unary' | 'stream',
+    stream: StreamEnd | undefined,
     run: (transport: ClientTransportLike, timeoutMs: number | undefined) => Promise<unknown>,
     timeoutMs: number | undefined,
   ): Promise<unknown> {
     const now = this.#deps.clock ?? (() => performance.now());
     const started = now();
     try {
-      return await this.#attempt(target, base, options, kind, (transport) =>
+      return await this.#attempt(target, base, options, stream, (transport) =>
         run(transport, timeoutMs),
       );
     } catch (error) {
@@ -478,8 +492,8 @@ export class GrpcClients {
       // the client's configured one the transport applied — never a fresh one;
       // with nothing left, the refusal is the answer.
       const remaining = (timeoutMs ?? options.timeoutMs) - Math.ceil(now() - started);
-      if (kind !== 'unary' || remaining <= 0) throw error.error;
-      return this.#attempt(target, base, options, kind, (transport) =>
+      if (stream !== undefined || remaining <= 0) throw error.error;
+      return this.#attempt(target, base, options, stream, (transport) =>
         run(transport, remaining),
       ).catch((again: unknown) => {
         throw again instanceof RefusedStream ? again.error : again;
@@ -491,7 +505,7 @@ export class GrpcClients {
     target: string,
     base: string | undefined,
     options: ResolvedClientOptions,
-    kind: 'unary' | 'stream',
+    stream: StreamEnd | undefined,
     run: (transport: ClientTransportLike) => Promise<unknown>,
   ): Promise<unknown> {
     const { runtime } = this.#deps;
@@ -523,10 +537,10 @@ export class GrpcClients {
     try {
       const result = await run(entry.transport);
       this.#report(discovery, instance, 'success');
-      if (kind === 'unary') return result;
+      if (stream === undefined) return result;
       // A stream's call ends with its messages, not with its headers.
       held = false;
-      return releasingAtEnd(result, () => this.#release(entry));
+      return releasingAtEnd(result, () => this.#release(entry), stream);
     } catch (error) {
       if (isRefusedStream(error)) {
         // The server never processed it: the instance's fault, and safe to send again.
@@ -616,7 +630,7 @@ export class GrpcClients {
         : options.protocol === 'grpc-web'
           ? node.createGrpcWebTransport(transportOptions)
           : node.createConnectTransport(transportOptions);
-    const entry: OriginEntry = { transport, session, calls: 1, retired: false };
+    const entry: OriginEntry = { transport, session, calls: 1 };
     this.#origins.set(key, entry);
     if (this.#origins.size > MAX_CLIENT_ORIGINS) {
       const [oldestKey, oldest] = this.#origins.entries().next().value as [string, OriginEntry];
@@ -629,15 +643,14 @@ export class GrpcClients {
   /**
    * Closes an evicted entry's session without failing its calls: with calls
    * still on it, it drains and closes when the last one ends (each is bounded
-   * by its deadline; a stream the application abandons without `return()`
-   * holds it until {@linkcode GrpcClients.close}).
+   * by its deadline: a stream ends with its last message, a `return()` or
+   * `throw()`, its signal's abort, or its deadline, whichever comes first).
    */
   #retire(entry: OriginEntry): void {
     if (entry.calls === 0) {
       entry.session?.abort();
       return;
     }
-    entry.retired = true;
     if (entry.session !== undefined) this.#draining.add(entry);
   }
 

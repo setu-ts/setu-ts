@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { CAPABILITIES } from '@setu-ts/common';
 import type {
   GrpcServiceDefinition,
@@ -659,6 +659,41 @@ describe('GrpcClients', () => {
     fail = true;
     await expect(broken.next()).rejects.toThrow('stream broke');
     expect(session(1003).aborted).toBe(true);
+    c.close();
+  });
+
+  it('releases a stream dropped unread at its abort or its deadline', async () => {
+    const message: AsyncIterable<unknown> = {
+      [Symbol.asyncIterator]: () => ({ next: () => new Promise<never>(() => {}) }),
+    };
+    const node = fakeNode(() => Promise.resolve({ message }));
+    const { clients: c } = clients({}, node);
+    const session = (port: number) => node.sessions.find((s) => s.url === `http://h:${port}`)!;
+    const open = (port: number, signal: AbortSignal | undefined, timeoutMs?: number) => {
+      const { transport } = c.client(
+        BILLING,
+        `http://h:${port}`,
+        timeoutMs === undefined ? {} : { timeoutMs },
+      ) as {
+        transport: ClientTransportLike;
+      };
+      return transport.stream({}, signal, undefined, undefined, (async function* () {})());
+    };
+    const aborts = new AbortController();
+    const spy = vi.spyOn(aborts.signal, 'removeEventListener');
+    await open(1000, aborts.signal); // never iterated
+    await open(1001, AbortSignal.abort()); // aborted before the headers came back
+    await open(1002, undefined, 30); // the client's deadline
+    for (let i = 0; i < MAX_CLIENT_ORIGINS; i++)
+      await call(c.client(BILLING, `http://h:${2000 + i}`));
+    expect(session(1000).aborted).toBe(false);
+    expect(session(1001).aborted).toBe(true);
+    expect(session(1002).aborted).toBe(false);
+    aborts.abort();
+    expect(session(1000).aborted).toBe(true);
+    expect(spy).toHaveBeenCalledWith('abort', expect.any(Function));
+    await new Promise((ok) => setTimeout(ok, 60));
+    expect(session(1002).aborted).toBe(true);
     c.close();
   });
 
