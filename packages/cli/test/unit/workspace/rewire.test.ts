@@ -399,34 +399,52 @@ describe('setu workspace rpc', () => {
     expect(result.out).toContain('orders is already http; nothing changed');
   });
 
-  for (const runtime of ['node', 'deno'] as const) {
-    it(`gives a full-stack member the queue package and jobs seam on a Redis switch (V12-60, ${runtime})`, async () => {
+  for (const [runtime, broker] of [
+    ['node', 'redis'],
+    ['deno', 'redis'],
+    ['node', 'rabbitmq'],
+  ] as const) {
+    it(`gives a full-stack member the queue package on a ${broker} switch (V12-60, ${runtime})`, async () => {
       const ws = await workspace({ runtime, members: [['web', 'full-stack']] });
       const manifest = runtime === 'node' ? 'apps/web/package.json' : 'apps/web/deno.json';
       const member = `${ROOT}/apps/web`;
-      // On the memory broker the member has neither, so `setu g job` refuses.
+      // On the memory broker the member has no queue package, so `setu g job` refuses.
       expect((await ws.run(['g', 'job', 'sync'], member)).code).not.toBe(0);
 
-      const switched = await ws.run(['workspace', 'broker', 'redis']);
+      const switched = await ws.run(['workspace', 'broker', broker]);
       expect(switched.code, switched.err).toBe(0);
       expect(ws.read(manifest)).toContain('@setu-ts/queue-plugin');
-      expect(ws.fs.read(`${member}/src/jobs/index.ts`)).toContain('QUEUE_PROCESSORS');
+      // No seam is pre-created: a barrel the config does not read yet would fail
+      // the member's own gate before any job exists (review of c333e06d0).
+      expect(() => ws.fs.read(`${member}/src/jobs/index.ts`)).toThrow();
+      expect((await ws.run(['check'], member)).code).toBe(0);
       // The config stays the developer's: the planner names the lines instead.
+      expect(switched.out).toContain('setu.E006');
       expect(switched.out).toContain('processors: [...QUEUE_PROCESSORS]');
       expect(ws.read('apps/web/setu.config.ts')).not.toContain('QUEUE_PROCESSORS');
 
       const job = await ws.run(['g', 'job', 'sync'], member);
       expect(job.code, job.err).toBe(0);
-      const barrel = ws.fs.read(`${member}/src/jobs/index.ts`);
-      expect(barrel).toContain('sync');
+      expect(ws.fs.read(`${member}/src/jobs/index.ts`)).toContain('sync');
+      // Exactly what the note said: E006 until the config takes the two lines.
+      const unwired = await ws.run(['check'], member);
+      expect(unwired.code).not.toBe(0);
+      expect(unwired.err + unwired.out).toContain('setu.E006');
+      const config = ws.read('apps/web/setu.config.ts');
+      await ws.write(
+        'apps/web/setu.config.ts',
+        `import { QUEUE_PROCESSORS } from './src/jobs/index.ts';\n${config.replace(
+          /queue: \{ /,
+          'queue: { processors: [...QUEUE_PROCESSORS], ',
+        )}`,
+      );
+      const wired = await ws.run(['check'], member);
+      expect(wired.code, wired.err + wired.out).toBe(0);
 
-      // Leaving Redis keeps the package without calling it unused, and a later
-      // switch back never overwrites the seam `setu g job` has filled.
+      // Leaving the queue broker keeps the package without calling it unused.
       const back = await ws.run(['workspace', 'broker', 'memory']);
       expect(back.code, back.err).toBe(0);
       expect(back.out).not.toContain('@setu-ts/queue-plugin');
-      expect((await ws.run(['workspace', 'broker', 'redis'])).code).toBe(0);
-      expect(ws.fs.read(`${member}/src/jobs/index.ts`)).toBe(barrel);
     });
   }
 

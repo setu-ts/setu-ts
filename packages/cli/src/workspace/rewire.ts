@@ -10,12 +10,14 @@
  * 1. CLI-owned, rewritten: each member's `src/transport/index.ts`, the manifest,
  *    the Compose stack, the Kubernetes objects, and the README's marked section.
  * 2. Merged, never removed: the member manifest gains the packages the new
- *    choice loads; packages no longer needed are listed, not deleted.
+ *    choice loads (a full-stack member on a broker that backs a queue gains
+ *    `@setu-ts/queue-plugin`); packages no longer needed are listed, not deleted.
  * 3. Create-only: the proto toolchain and the node-redis helper.
  * 4. User-owned: `setu.config.ts` and all other source. The planner checks the
  *    config CALLS the module, and refuses — writing nothing — when it does not,
  *    printing the lines to add. That refusal is also the migration path for a
- *    member made before the module existed.
+ *    member made before the module existed. A config that does not yet pass
+ *    its queue the generated job processors is told the lines in a note.
  *
  * @module
  */
@@ -387,9 +389,12 @@ function mergeManifest(
 const QUEUE_PACKAGE = 'queue-plugin';
 
 /**
- * Whether a member under these inputs gets the queue package and the jobs seam,
- * as generating it does (`member-host.ts`, M139d V12-33): a full-stack member on
- * a broker that backs a queue. Switching to one later does the same (V12-60).
+ * Whether a member under these inputs needs the queue package, as generating it
+ * on that broker gives it (`member-host.ts`, M139d V12-33): a full-stack member on
+ * a broker that backs a queue (Redis, RabbitMQ). Switching to one later merges the
+ * package so `setu g job` works (V12-60). The jobs seam is NOT pre-created: the
+ * config is the developer's, and a barrel it does not read yet would fail
+ * `setu check` with setu.E006 before any job exists; `setu g job` writes it.
  *
  * @param input - The module's inputs
  * @returns `true` when the member needs them
@@ -659,10 +664,6 @@ export async function planTransportChange(
     const shape = transportModuleShape(input);
     const created = [
       ...(input.rpc.memberFiles?.(member.name, profile.manifestKind === 'deno') ?? []),
-      // The jobs seam `setu g job` writes into; create-only, like the toolchain.
-      ...(needsQueueSeam(input)
-        ? [{ path: JOBS_SEAM.barrel, contents: JOBS_SEAM.renderBarrel({}), managed: true }]
-        : []),
       ...(after.redisClient === 'node-redis' && (shape.messaging || shape.queue)
         ? [nodeRedisModuleFile()]
         : []),
@@ -682,8 +683,8 @@ export async function planTransportChange(
         .filter(([section]) => section === 'dependencies' || section === 'imports')
         .flatMap(([, map]) => Object.keys(map));
     const nowNeeded = new Set(names(neededEntries(input)));
-    // The starter registers the queue on every broker, and the jobs seam still
-    // imports the package, so leaving a Redis-backed broker never orphans it.
+    // The starter registers the queue on every broker, and a jobs seam imports
+    // the package, so leaving a broker that backs a queue never orphans it.
     const left = names(neededEntries(previousInput)).filter(
       (name) => !nowNeeded.has(name) && name !== `@setu-ts/${QUEUE_PACKAGE}`,
     );
@@ -693,14 +694,15 @@ export async function planTransportChange(
       );
     }
     // The config is the developer's: the planner never writes it, so a member that
-    // does not yet hand its jobs to the queue is told the two lines that do.
+    // does not yet hand its jobs to the queue is told the two lines that do, and
+    // that `setu check` requires them once `setu g job` has written a job.
     if (
       needsQueueSeam(input) &&
       config !== undefined &&
       strictlyReferencedOutsideImports(config, QUEUE_PROCESSORS_EXPORT) !== true
     ) {
       notes.push(
-        `${escapeName(joinPath(context.root, CONFIG_FILE))}: to run the jobs \`setu g job\` writes, import { ${QUEUE_PROCESSORS_EXPORT} } from './src/jobs/index.ts' and start its queue option with processors: [...${QUEUE_PROCESSORS_EXPORT}],`,
+        `${escapeName(joinPath(context.root, CONFIG_FILE))}: once \`setu g job\` writes a job, \`setu check\` reports setu.E006 until this file imports { ${QUEUE_PROCESSORS_EXPORT} } from './${JOBS_SEAM.barrel}' and starts its queue option with processors: [...${QUEUE_PROCESSORS_EXPORT}],`,
       );
     }
     if (previous.rpc === 'grpc' && member.rpc !== 'grpc') {
