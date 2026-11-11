@@ -218,28 +218,28 @@ working while the pod is still healthy.
 
 ## Options
 
-| Option             | Arms               | Default                      | Notes                                         |
-| ------------------ | ------------------ | ---------------------------- | --------------------------------------------- |
-| `provider`         | all                | —                            | Discriminant; always explicit                 |
-| `cacheTtlMs`       | all                | `30_000`                     | `0` disables caching                          |
-| `strategy`         | all                | `'round-robin'`              | Overridable per `pick()` call                 |
-| `ejection`         | all                | see above                    | `false` disables                              |
-| `selfRegistration` | consul (+ custom)  | —                            | Throws on the other arms                      |
-| `watchIntervalMs`  | static, dns        | `30_000`                     | Absent from the push-based arms               |
-| `services`         | static             | —                            | Unknown name resolves to `[]`                 |
-| `address`          | consul             | —                            | Agent base URL                                |
-| `token`            | consul, kubernetes | — / projected token file     | Consul: `X-Consul-Token`; Kubernetes: bearer  |
-| `datacenter`       | consul             | —                            | Sent as `?dc=`                                |
-| `waitSeconds`      | consul             | `30`                         | Clamped to Consul's maximum of `600`          |
-| `namespace`        | kubernetes         | —                            | Required                                      |
-| `apiServer`        | kubernetes         | in-cluster env               | Required outside a cluster                    |
-| `portName`         | kubernetes         | —                            | Required when a service exposes several ports |
-| `mode`             | dns                | —                            | `'srv'` or `'a'`                              |
-| `domainTemplate`   | dns                | `'{service}.service.consul'` | `{service}` is substituted                    |
-| `port`             | dns (`'a'` only)   | —                            | Mandatory: address records carry no port      |
-| `secure`           | consul, k8s, dns   | `false`                      | Decides the `https` scheme                    |
-| `http`             | consul, kubernetes | `fetch`                      | Injectable transport                          |
-| `discovery`        | custom             | —                            | Your `DiscoveryProvider`, used as supplied    |
+| Option             | Arms               | Default                      | Notes                                                                 |
+| ------------------ | ------------------ | ---------------------------- | --------------------------------------------------------------------- |
+| `provider`         | all                | —                            | Discriminant; always explicit                                         |
+| `cacheTtlMs`       | all                | `30_000`                     | `0` disables caching                                                  |
+| `strategy`         | all                | `'round-robin'`              | Overridable per `pick()` call                                         |
+| `ejection`         | all                | see above                    | `false` disables                                                      |
+| `selfRegistration` | consul (+ custom)  | —                            | Throws on the other arms                                              |
+| `watchIntervalMs`  | static, dns        | `30_000`                     | Absent from the push-based arms                                       |
+| `services`         | static             | —                            | Unknown name resolves to `[]`                                         |
+| `address`          | consul             | —                            | Agent base URL; credentials in it are refused at startup, use `token` |
+| `token`            | consul, kubernetes | — / projected token file     | Consul: `X-Consul-Token`; Kubernetes: bearer                          |
+| `datacenter`       | consul             | —                            | Sent as `?dc=`                                                        |
+| `waitSeconds`      | consul             | `30`                         | Clamped to Consul's maximum of `600`                                  |
+| `namespace`        | kubernetes         | —                            | Required                                                              |
+| `apiServer`        | kubernetes         | in-cluster env               | Required outside a cluster; credentials in it are refused at startup  |
+| `portName`         | kubernetes         | —                            | Required when a service exposes several ports                         |
+| `mode`             | dns                | —                            | `'srv'` or `'a'`                                                      |
+| `domainTemplate`   | dns                | `'{service}.service.consul'` | `{service}` is substituted                                            |
+| `port`             | dns (`'a'` only)   | —                            | Mandatory: address records carry no port                              |
+| `secure`           | consul, k8s, dns   | `false`                      | Decides the `https` scheme                                            |
+| `http`             | consul, kubernetes | `fetch`                      | Injectable transport                                                  |
+| `discovery`        | custom             | —                            | Your `DiscoveryProvider`, used as supplied                            |
 
 ## Health indicator
 

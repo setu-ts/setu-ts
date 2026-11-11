@@ -150,3 +150,35 @@ function FakeLoggerPlugin(onWarn: (message: string) => void) {
     },
   };
 }
+
+describe('a Consul address with credentials (V12-52)', () => {
+  it('fails start() with a fixed message and sends nothing', async () => {
+    const http = createFakeHttp([{ text: '' }]);
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        ServiceDiscoveryPlugin({
+          provider: 'consul',
+          address: 'http://ops:canary-pw-52@consul:8500',
+          http,
+          selfRegistration: SELF,
+        }),
+      ],
+    });
+
+    let caught: unknown;
+    try {
+      await app.start();
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    const chain: string[] = [];
+    for (let link: unknown = caught; link instanceof Error; link = link.cause) {
+      chain.push(String(link), link.message, link.stack ?? '');
+    }
+    expect(chain.join('\n')).toContain('The Consul address must not include credentials');
+    expect(chain.join('\n')).not.toContain('canary');
+    expect(http.calls).toHaveLength(0);
+  });
+});

@@ -1586,10 +1586,12 @@ describe('RedisBackplane owned publisher readiness (M139f X3-3)', () => {
     await setImmediate();
     await backplane.close();
     release!();
-    // SUBSCRIBE completes after the close; the publisher never becomes ready,
-    // yet the open settles and releases both connections.
+    // SUBSCRIBE completes after the close; since V12-53 the close already
+    // cancelled it, so no ready wait starts and both connections are
+    // force-closed rather than sent a QUIT.
     await connecting;
-    expect(clients.map((client) => client.quitCount)).toEqual([1, 1]);
+    expect(clients.map((client) => client.disconnectCount)).toEqual([1, 1]);
+    expect(clients.map((client) => client.quitCount)).toEqual([0, 0]);
     expect(clients[0]!.eventListeners.get('ready')).toHaveLength(0);
   });
 
@@ -1623,7 +1625,9 @@ describe('RedisBackplane owned publisher readiness (M139f X3-3)', () => {
       await setImmediate();
       expect(settled, `close() after ${delay} microtask(s)`).toBe(true);
       await connecting;
-      expect(clients.map((client) => client.quitCount)).toEqual([1, 1]);
+      // Released exactly once each: a QUIT after the SUBSCRIBE settled, or a
+      // forced close when the close() cancelled it (V12-53).
+      expect(clients.map((client) => client.quitCount + client.disconnectCount)).toEqual([1, 1]);
       expect(clients[0]!.eventListeners.get('ready')).toHaveLength(0);
     }
   });
@@ -1701,5 +1705,228 @@ describe('RedisBackplane owned publisher readiness (M139f X3-3)', () => {
     // Only the connection watch listens for `'ready'`; nothing waited on it.
     expect(client.eventListeners.get('ready')).toHaveLength(1);
     await backplane.close();
+  });
+});
+
+describe('RedisBackplane close() during a SUBSCRIBE that never answers (V12-53)', () => {
+  /** A module whose subscriber (the second client) holds SUBSCRIBE until released. */
+  function hangingModule(): {
+    module: IRedisModule;
+    clients: FakeRedisClient[];
+    release: () => void;
+  } {
+    const clients: FakeRedisClient[] = [];
+    let release = (): void => undefined;
+    return {
+      clients,
+      release: () => release(),
+      module: {
+        create: (): IRedisBackplaneClient => {
+          const client = Object.assign(new FakeRedisClient(), { status: 'ready' });
+          if (clients.length === 1) release = client.holdSubscribe();
+          clients.push(client);
+          return client;
+        },
+      },
+    };
+  }
+
+  it('settles the open and force-closes the owned pair, even unbounded', async () => {
+    const { module, clients } = hangingModule();
+    const backplane = new RedisBackplane(
+      { transport: 'redis', url: 'redis://localhost:6379', module, commandTimeoutMs: 0 },
+      'node-a',
+      'realtime',
+    );
+    let settled = false;
+    const connecting = backplane.connect().then(() => {
+      settled = true;
+    });
+    await setImmediate();
+    expect(settled).toBe(false);
+
+    await backplane.close();
+    await setImmediate();
+    expect(settled).toBe(true);
+    await connecting;
+    // Disconnected, not QUIT: the host that never answered SUBSCRIBE would not
+    // answer QUIT either.
+    expect(clients.map((client) => client.disconnectCount)).toEqual([1, 1]);
+    expect(clients.map((client) => client.quitCount)).toEqual([0, 0]);
+    expect(clients[1]!.eventListeners.get('message') ?? []).toHaveLength(0);
+    expect(clients[0]!.eventListeners.get('error') ?? []).toHaveLength(0);
+  });
+
+  it('settles for a close() at every microtask around the SUBSCRIBE', async () => {
+    for (let delay = 0; delay <= 10; delay++) {
+      const { module, clients } = hangingModule();
+      const backplane = new RedisBackplane(
+        { transport: 'redis', url: 'redis://localhost:6379', module, commandTimeoutMs: 0 },
+        'node-a',
+        'realtime',
+      );
+      let settled = false;
+      const connecting = backplane.connect().then(() => {
+        settled = true;
+      });
+      for (let tick = 0; tick < delay; tick++) await Promise.resolve();
+      await backplane.close();
+      await setImmediate();
+      expect(settled, `close() after ${delay} microtask(s)`).toBe(true);
+      await connecting;
+      expect(clients.map((client) => client.disconnectCount)).toEqual([1, 1]);
+    }
+  });
+
+  it('leaves an injected pair connected and removes only its listeners', async () => {
+    const client = Object.assign(new FakeRedisClient(), { status: 'ready' });
+    const subscriber = Object.assign(new FakeRedisClient(), { status: 'ready' });
+    subscriber.holdSubscribe();
+    const backplane = new RedisBackplane(
+      { transport: 'redis', client, subscriber, commandTimeoutMs: 0 },
+      'node-a',
+      'realtime',
+    );
+    const connecting = backplane.connect();
+    await setImmediate();
+    await backplane.close();
+    await connecting;
+    expect([client.disconnectCount, subscriber.disconnectCount]).toEqual([0, 0]);
+    expect([client.quitCount, subscriber.quitCount]).toEqual([0, 0]);
+    expect(subscriber.eventListeners.get('message') ?? []).toHaveLength(0);
+    expect(subscriber.eventListeners.get('error') ?? []).toHaveLength(0);
+  });
+
+  it('handles a SUBSCRIBE that rejects after the close', async () => {
+    const { module, clients, release } = hangingModule();
+    const backplane = new RedisBackplane(
+      { transport: 'redis', url: 'redis://localhost:6379', module, commandTimeoutMs: 0 },
+      'node-a',
+      'realtime',
+    );
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown): void => {
+      unhandled.push(reason);
+    };
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      const connecting = backplane.connect();
+      await setImmediate();
+      const subscriber = clients[1]!;
+      subscriber.failSubscribe = new Error('Connection is closed.');
+      await backplane.close();
+      await connecting;
+      release();
+      await setImmediate();
+      await setImmediate();
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+  });
+
+  it('a disconnect-less owned client gets a QUIT nothing waits on', async () => {
+    const clients: FakeRedisClient[] = [];
+    const module: IRedisModule = {
+      create: (): IRedisBackplaneClient => {
+        const client = Object.assign(new FakeRedisClient(), { status: 'ready' });
+        // An adapter without ioredis's synchronous close, whose QUIT fails.
+        Object.defineProperty(client, 'disconnect', { value: undefined });
+        client.failQuit = new Error('no answer');
+        if (clients.length === 1) client.holdSubscribe();
+        clients.push(client);
+        return client;
+      },
+    };
+    const backplane = new RedisBackplane(
+      { transport: 'redis', url: 'redis://localhost:6379', module, commandTimeoutMs: 0 },
+      'node-a',
+      'realtime',
+    );
+    const connecting = backplane.connect();
+    await setImmediate();
+    await backplane.close();
+    await connecting;
+    expect(clients.map((client) => client.quitCount)).toEqual([1, 1]);
+  });
+
+  it('cancels at once when the close() landed before SUBSCRIBE was sent', async () => {
+    let connected = (): void => undefined;
+    const client = Object.assign(new FakeRedisClient(), {
+      status: 'wait',
+      connect: () =>
+        new Promise<void>((resolve) => {
+          connected = resolve;
+        }),
+    });
+    const subscriber = Object.assign(new FakeRedisClient(), { status: 'ready' });
+    subscriber.holdSubscribe();
+    const backplane = new RedisBackplane(
+      { transport: 'redis', client, subscriber, commandTimeoutMs: 0 },
+      'node-a',
+      'realtime',
+    );
+    const connecting = backplane.connect();
+    await setImmediate();
+    // The open is still in the injected client's connect(); close() lands now,
+    // before any SUBSCRIBE exists to cancel.
+    await backplane.close();
+    connected();
+    await connecting;
+    expect(subscriber.eventListeners.get('message') ?? []).toHaveLength(0);
+  });
+
+  it("a cancelled open does not clear the next open's wait", async () => {
+    const clients: FakeRedisClient[] = [];
+    const module: IRedisModule = {
+      create: (): IRedisBackplaneClient => {
+        const client = Object.assign(new FakeRedisClient(), { status: 'ready' });
+        // Every subscriber (each second client) holds SUBSCRIBE.
+        if (clients.length % 2 === 1) client.holdSubscribe();
+        clients.push(client);
+        return client;
+      },
+    };
+    const backplane = new RedisBackplane(
+      { transport: 'redis', url: 'redis://localhost:6379', module, commandTimeoutMs: 0 },
+      'node-a',
+      'realtime',
+    );
+    const first = backplane.connect();
+    await setImmediate();
+    const closing = backplane.close();
+    // Started before the first open's cleanup runs, so its wait is the newer one.
+    const second = backplane.connect();
+    await closing;
+    await first;
+    await setImmediate();
+    expect(clients).toHaveLength(4);
+    // The second open is still waiting, and a close() must still cancel it.
+    await backplane.close();
+    await second;
+    expect(clients.map((client) => client.disconnectCount)).toEqual([1, 1, 1, 1]);
+  });
+
+  it('swallows a disconnect that throws', async () => {
+    const clients: FakeRedisClient[] = [];
+    const module: IRedisModule = {
+      create: (): IRedisBackplaneClient => {
+        const client = Object.assign(new FakeRedisClient(), { status: 'ready' });
+        client.failDisconnect = new Error('already closed');
+        if (clients.length === 1) client.holdSubscribe();
+        clients.push(client);
+        return client;
+      },
+    };
+    const backplane = new RedisBackplane(
+      { transport: 'redis', url: 'redis://localhost:6379', module, commandTimeoutMs: 0 },
+      'node-a',
+      'realtime',
+    );
+    const connecting = backplane.connect();
+    await setImmediate();
+    await backplane.close();
+    await expect(connecting).resolves.toBeUndefined();
+    expect(clients.map((client) => client.disconnectCount)).toEqual([1, 1]);
   });
 });

@@ -81,8 +81,12 @@ export class RedisBackplane implements IRealtimeBackplane {
    * holding a reference to shut them down.
    */
   #generation = 0;
-  /** Ends an open's pending publisher-ready wait when `close()` lands (M139f audit L1). */
-  #readyWait: AbortController | undefined;
+  /**
+   * Ends an open's pending SUBSCRIBE (V12-53) or publisher-ready wait (M139f
+   * audit L1) when `close()` lands. The two are sequential, so one field holds
+   * whichever is in flight.
+   */
+  #openWait: AbortController | undefined;
 
   /**
    * M70c: present only when both connections expose `status` and `ping`; the
@@ -267,7 +271,20 @@ export class RedisBackplane implements IRealtimeBackplane {
 
     subscriber.on('message', listener);
     try {
-      await subscriber.subscribe(this.#topic);
+      // V12-53: with `commandTimeoutMs: 0` a SUBSCRIBE to a host that never
+      // answers would hold this open forever, so close() can cancel it; a
+      // close() that already landed cancels it at once (as N2 does for the
+      // ready wait below). With a bound the SUBSCRIBE settles within it, and
+      // the generation check below retires the pair with UNSUBSCRIBE and QUIT.
+      if (!(await this.#subscribe(subscriber, generation))) {
+        // The host has not answered SUBSCRIBE, so it would not answer
+        // UNSUBSCRIBE or QUIT either: force-close what we own, and leave an
+        // injected pair to its owner with only our listeners removed.
+        subscriber.off('message', listener);
+        if (owned) forceClose([subscriber, publisher]);
+        detachAll();
+        return;
+      }
       // A publisher without an offline queue refuses every command until it is
       // ready, so the pair is not handed out before then.
       // A close() that landed while SUBSCRIBE was in flight has already moved
@@ -275,11 +292,11 @@ export class RedisBackplane implements IRealtimeBackplane {
       // wait nothing can cancel (M139f re-audit N2).
       if (owned && generation === this.#generation) {
         const readyWait = new AbortController();
-        this.#readyWait = readyWait;
+        this.#openWait = readyWait;
         try {
           await waitForReady(publisher, this.#commandTimeoutMs, readyWait.signal);
         } finally {
-          if (this.#readyWait === readyWait) this.#readyWait = undefined;
+          if (this.#openWait === readyWait) this.#openWait = undefined;
         }
       }
     } catch (error) {
@@ -312,6 +329,30 @@ export class RedisBackplane implements IRealtimeBackplane {
     this.#listener = listener;
     this.#watches = watches;
     this.#installProbe(publisher, subscriber);
+  }
+
+  /**
+   * Sends SUBSCRIBE; with `commandTimeoutMs: 0`, a `close()` cancels the wait
+   * (V12-53).
+   *
+   * @param subscriber - The subscriber-mode connection
+   * @param generation - The open attempt's generation
+   * @returns `false` when `close()` cancelled the wait, `true` otherwise
+   * @throws Whatever SUBSCRIBE rejected with, when it settles first
+   */
+  async #subscribe(subscriber: IRedisBackplaneClient, generation: number): Promise<boolean> {
+    if (this.#commandTimeoutMs !== 0) {
+      await subscriber.subscribe(this.#topic);
+      return true;
+    }
+    const subscribeWait = new AbortController();
+    this.#openWait = subscribeWait;
+    if (generation !== this.#generation) subscribeWait.abort();
+    try {
+      return await settledUnlessCancelled(subscriber.subscribe(this.#topic), subscribeWait.signal);
+    } finally {
+      if (this.#openWait === subscribeWait) this.#openWait = undefined;
+    }
   }
 
   /**
@@ -447,9 +488,9 @@ export class RedisBackplane implements IRealtimeBackplane {
     // has not published its connections yet, so this is what tells it to retire
     // them rather than arrive after the shutdown.
     this.#generation++;
-    // A pending publisher-ready wait ends now, so the open reaches its
-    // generation check and retires the pair — even with `commandTimeoutMs: 0`.
-    this.#readyWait?.abort();
+    // A pending SUBSCRIBE or publisher-ready wait ends now, so the open retires
+    // the pair — even with `commandTimeoutMs: 0` (V12-53, M139f audit L1).
+    this.#openWait?.abort();
     this.#handlers.clear();
     const subscriber = this.#subscriber;
     const publisher = this.#publisher;
@@ -627,6 +668,56 @@ function waitForReady(
  *
  * @returns The error the open rejects with
  */
+/**
+ * Waits for `pending` unless `cancel` aborts first (V12-53).
+ *
+ * The abort listener is attached before `cancel.aborted` is read, so an abort
+ * at any point wins. A rejection that arrives after the abort is handled here
+ * (settling an already-settled promise is a no-op), so it never surfaces as an
+ * unhandled rejection.
+ *
+ * @param pending - The command in flight
+ * @param cancel - Aborted by `close()`
+ * @returns `true` when `pending` resolved, `false` when `cancel` aborted first
+ * @throws Whatever `pending` rejected with, when it settles first
+ */
+function settledUnlessCancelled(pending: Promise<unknown>, cancel: AbortSignal): Promise<boolean> {
+  return new Promise<boolean>((resolve, reject) => {
+    const onAbort = (): void => resolve(false);
+    cancel.addEventListener('abort', onAbort, { once: true });
+    pending.then(
+      () => {
+        cancel.removeEventListener('abort', onAbort);
+        resolve(true);
+      },
+      (error: unknown) => {
+        cancel.removeEventListener('abort', onAbort);
+        reject(error);
+      },
+    );
+    if (cancel.aborted) onAbort();
+  });
+}
+
+/**
+ * Closes connections at once, without the QUIT a host that never answered
+ * SUBSCRIBE would not answer either (V12-53). `disconnect()` is ioredis's
+ * synchronous close, which also rejects the pending SUBSCRIBE; a client
+ * without it gets a QUIT that nothing waits on.
+ *
+ * @param clients - Connections this backplane built
+ */
+function forceClose(clients: readonly IRedisBackplaneClient[]): void {
+  for (const client of clients) {
+    try {
+      if (typeof client.disconnect === 'function') client.disconnect();
+      else client.quit().catch(() => undefined);
+    } catch {
+      // Best-effort: the backplane is closing and has no caller to inform.
+    }
+  }
+}
+
 function publisherEnded(): BackendUnavailableError {
   return new BackendUnavailableError('realtime-backplane-plugin: redis transport', {
     cause: new Error('the publisher connection ended before it was ready'),

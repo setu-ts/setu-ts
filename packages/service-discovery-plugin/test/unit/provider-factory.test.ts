@@ -274,3 +274,36 @@ describe('createProvider — optional options reach the provider', () => {
     expect(only.secure).toBe(true);
   });
 });
+
+describe('createProvider — URL credentials (V12-52)', () => {
+  it('refuses a consul address with userinfo, without naming it', () => {
+    const options = { provider: 'consul', address: 'http://ops:canary-pw-52@consul:8500' } as const;
+    expect(() => createProvider(options, resolveOptions(options), createFakeRuntime())).toThrow(
+      new DiscoveryUnavailableError(
+        'The Consul address must not include credentials (user:password@host); ' +
+          'pass the ACL token through the token option.',
+      ),
+    );
+  });
+
+  it('refuses a kubernetes apiServer with userinfo, without naming it', () => {
+    const options = {
+      provider: 'kubernetes',
+      namespace: 'default',
+      apiServer: 'https://kuser:canary-pw-52@api',
+      token: 't',
+    } as const;
+    let caught: unknown;
+    try {
+      createProvider(options, resolveOptions(options), createFakeRuntime());
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(DiscoveryUnavailableError);
+    expect((caught as Error).message).toBe(
+      'The Kubernetes apiServer must not include credentials (user:password@host); ' +
+        'pass the service-account token through the token option.',
+    );
+    expect(String(caught)).not.toContain('canary');
+  });
+});
