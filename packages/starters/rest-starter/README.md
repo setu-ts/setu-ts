@@ -127,8 +127,8 @@ defaults, except `runtime` and `httpSecurity`, which carry the body bound below:
 `{ maxBodyBytes: 1_048_576 }`, which bounds the body read — chunked bodies included — and answers
 `413` past it; the same value becomes `httpSecurity.requestSize.maxBodySize` unless you set
 `requestSize.maxBodySize` (or `enabled: false`) yourself, so a declared oversize body is refused
-before anything is read. The bound covers bodies the kernel reads; `GrpcPlugin` handles the native
-request itself and is not bounded by it. Raise it for uploads:
+before anything is read. A client- or bidi-streaming gRPC call is streamed rather than buffered, so
+`GrpcPlugin({ readMaxBytes })` bounds it per message instead. Raise it for uploads:
 
 ```typescript
 createRestApp({ runtime: { maxBodyBytes: 10 * 1024 * 1024 } });

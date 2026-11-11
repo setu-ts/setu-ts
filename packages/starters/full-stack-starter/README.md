@@ -405,8 +405,8 @@ HTTP-security plugin keeps its own `no-referrer` default.
 ## Request body limit
 
 Like the REST and microservice starters, a full-stack application refuses a request body over 1 MiB
-with `413` (since 0.13.0), whether declared or chunked, for every request the kernel reads. A gRPC
-service registered with `GrpcPlugin` handles the native request itself and is not bounded by it.
+with `413` (since 0.13.0), whether declared or chunked. A client- or bidi-streaming gRPC call is
+streamed rather than buffered, so `GrpcPlugin({ readMaxBytes })` bounds it per message instead.
 Raise the limit for upload routes with the `runtime` arm, which works the same through
 `createFullStackAppFromConfig`:
 
