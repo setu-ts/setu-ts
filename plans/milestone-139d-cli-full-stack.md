@@ -440,6 +440,49 @@ One Unreleased entry per row (Fixed for the defects; Added for multi-package `ad
 `--provider`/`--type`/`--adapter`/`--dialect`/`--yes`, task builds). V12-42's entry says a
 `--module` route on functional full-stack now mounts at `/api/<m>/<name>`.
 
+### 3.24 Review round 1 amendments (supersede the sections they name)
+
+The code review of `5349c4072` found defects, four of them in this plan's own design. Where this
+section and an earlier one disagree, this section holds.
+
+- **§3.5:** only `listen()` failures get the `VITE_PORT` message; a `createServer` failure (a
+  `vite.config.ts` or plugin error) prints a plain `Startup failed: <describeError>` and exits 1.
+- **§3.8 discovery and rewrite agree:** the rewrite plugin is the source of truth. Any task literal
+  `onLoad` rewrites whose target is not among the built task entries fails the build by file and
+  line (a target outside the project is refused the same way). Build inputs are read with a plain
+  file read, not the 1 MiB inspection reader, and neither discovery nor `onLoad` applies
+  `assertInsideProject` to files it only scans, so a large or symlinked source no longer fails a
+  project. The scanner skips template-literal contents and regex literals, and refuses a `.task.ts`
+  occurrence only in a `new URL(` or `import` position.
+- **§3.9 `args` is removed:** no zero-config wiring needs arguments, so `IPluginWiring.args` and the
+  `wiring` parameter on `withPluginWiring` are deleted; the `mcp-plugin` registration line is a
+  fixed string. The unreachable `backendLine` branch inside the messaging/queue arm goes too.
+- **§3.10:** the factory insert is refused (today's guidance printed) whenever the plugin's
+  arguments come from a transport or workspace arm, since those reference the starter callback's
+  `config`; and when the insert succeeds, the "Register it after the factory returns" note is not
+  printed.
+- **§3.12:** on a project whose tsconfig has `jsx: "react-jsx"` with no `jsxImportSource` and a
+  React dependency, `add view` leaves compilerOptions alone and prints the pragma note; on
+  full-stack, `--module` is refused by name.
+- **§3.13:** on a starter-composed project, a backend choice prints the starter arm form
+  (`mail: { provider: 'smtp', options: { … } }`, `database: { type: …, options: … }`), never a
+  second plugin registration.
+- **§3.14:** `drizzle.config.ts` and `prisma.config.ts` load the env file `setu.config.ts` declares
+  (`envFileDeclaration`, default `.env`) with `process.loadEnvFile` when that file exists, so the
+  `db:*` scripts see `DATABASE_URL` as the app's other scripts do. The schema hint names the README
+  section for the chosen arm.
+- **§3.17:** the section ends with exactly one newline in every write path: `spliceBrief` consumes
+  the line terminator after `BRIEF_END` when it replaces a section and adds none after a section
+  that already ends with one.
+- **§3.18 heading:** "Provided by `@setu-ts/<starter>`: configure its option in setu.config.ts
+  (`setu add <name>` edits that option where it supports the starter); never register a second
+  instance." The "never `setu add`" wording was wrong: `setu add queue` and `setu add messaging`
+  write the starter's own option, and Rule 12 says so.
+- **§3.19 V12-43:** the Workers JSDoc is one sentence wrapped under 100 columns.
+- **§3.21 regex rule:** a `/` after `!` (a TypeScript non-null assertion may precede division) and
+  after `)` (a control head's `)` may precede a regex) is undecidable and stops; `default` and
+  `extends` join the keywords after which a regex follows.
+
 ## 4. Exported surface — every symbol names its consumer
 
 **Breaking for implementors:** none. No exported symbol of any package changes; the kernel change is
