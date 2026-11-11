@@ -101,8 +101,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
-- **A discovery backend URL with credentials is refused at startup
-  (`@setu-ts/service-discovery-plugin`, V12-52).** A Consul `address` or Kubernetes `apiServer` with
+- **A discovery backend URL with credentials is refused at startup (#580,
+  `@setu-ts/service-discovery-plugin`, V12-52).** A Consul `address` or Kubernetes `apiServer` with
   userinfo (`http://user:pass@host`) never worked with the default HTTP transport, because `fetch`
   refuses such a URL, and its refusal named the whole URL: the password reached the
   self-registration start error and the `cause` of a resolve error. The provider now refuses it
@@ -111,12 +111,12 @@ All notable changes to this project are documented here. The format follows
   or a stray space after `user:pass@` made `fetch` quote it too). **Upgrade:** an application whose
   custom `http` option accepted such an address moves the credential out of the URL, into `token` or
   into its transport.
-- **`close()` ends a backplane SUBSCRIBE that never answers (`@setu-ts/realtime-backplane-plugin`,
-  V12-53).** With `commandTimeoutMs: 0`, an open whose SUBSCRIBE went unanswered held on forever and
-  `close()` did not release it. `close()` now cancels the wait, and an open that a `close()`
-  overtakes during the publisher-ready wait no longer waits on UNSUBSCRIBE or QUIT: the connections
-  the backplane built are force-closed, and an injected pair is left connected and is not left
-  subscribed. With a bound, nothing changes.
+- **`close()` ends a backplane SUBSCRIBE that never answers (#580,
+  `@setu-ts/realtime-backplane-plugin`, V12-53).** With `commandTimeoutMs: 0`, an open whose
+  SUBSCRIBE went unanswered held on forever and `close()` did not release it. `close()` now cancels
+  the wait, and an open that a `close()` overtakes during the publisher-ready wait no longer waits
+  on UNSUBSCRIBE or QUIT: the connections the backplane built are force-closed, and an injected pair
+  is left connected and is not left subscribed. With a bound, nothing changes.
 - **pgvector `ensure: 'verify'` checks what the indexes are (M139c, #578,
   `@setu-ts/vector-store-plugin`, V12-10).** `ensureCollection` now requires `vs_<name>_src` on
   `(scope, source_id)` and `vs_<name>_hnsw` as `USING hnsw (embedding vector_cosine_ops)`, both on
