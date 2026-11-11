@@ -106,5 +106,13 @@ describe('check-only reference mask', () => {
     ])
       expect(referencedOutsideImports(source, 'CachePlugin'), source).not.toBe(true);
     expect(referencedOutsideImports('const a = [...typeof /x/];', 'CachePlugin')).toBe(false);
+    for (const source of [
+      'const a = [.../*c*/typeof /CachePlugin/];',
+      'const a = [... /* x. */ typeof /CachePlugin/];',
+    ])
+      expect(referencedOutsideImports(source, 'CachePlugin'), source).not.toBe(true);
+    expect(
+      referencedOutsideImports('const h = env /* c */ .default / 2; "CachePlugin";', 'CachePlugin'),
+    ).toBe(false);
   });
 });

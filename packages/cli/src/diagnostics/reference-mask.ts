@@ -157,9 +157,11 @@ export function referenceDiagnosis(
       // it divides; only a keyword in code position may precede a regex (audit F1).
       // A spread's `...` also ends in `.`, and what follows it is an expression,
       // so only a single `.` or `?.` names a property (re-audit F6).
+      // Walked over `text`, where comments are already blanked, so a comment
+      // between `...` and the keyword cannot hide the spread (re-audit F7).
       let before = start - 1;
-      while (before >= 0 && /\s/.test(source[before]!)) before--;
-      const property = previous === '.' && source[before - 1] !== '.';
+      while (before >= 0 && /\s/.test(text[before]!)) before--;
+      const property = previous === '.' && text[before - 1] !== '.';
       previous = property ? 'value' : source.slice(start, i + 1);
     } else if (/[0-9]/.test(c)) previous = 'value';
     else if (!/\s/.test(c)) previous = c;
