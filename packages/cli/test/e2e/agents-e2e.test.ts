@@ -31,7 +31,7 @@ async function verify(project: string, member = false): Promise<readonly string[
   const installed = await detectPlugins(fs, project);
   const agentPackages = [...installed].filter((pkg) => !TOOLING_PACKAGES.has(pkg));
   const before = text.split('## Not installed')[0];
-  const rows = [...before.matchAll(/^\| @setu-ts\/([\w-]+) \|/gm)].map((m) => m[1]);
+  const rows = [...before.matchAll(/^- @setu-ts\/([\w-]+) — /gm)].map((m) => m[1]);
   expect(installed.has('cli')).toBe(true);
   expect(rows).not.toContain('cli');
   expect(rows.sort()).toEqual(agentPackages.sort());
