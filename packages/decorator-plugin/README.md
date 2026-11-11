@@ -263,7 +263,11 @@ schema and a description the declaration does not carry.
   `@Get`/`@Post`/`@Put`/`@Patch`/`@Delete`/`@Head`/`@Options`
 - **Parameters** — `@Params(...)`, taking the sources `Body`, `Query`, `Param`, `Header`, `Cookie`,
   `CurrentUser`, `Ctx`, `Service` (a DI service from the request's scope), `Custom`
-- **Modules** — `@Module({ controllers, providers, imports })`
+- **Modules** — `@Module({ controllers, providers, imports })`; `providers` takes classes and
+  factory entries (`{ provide, useFactory, inject?, scope? }`, since 0.13.0) for a value no class
+  constructs — a gRPC client from `grpcClientProvider()`, say. Entries register before classes, so a
+  class `@Inject`s one by its (string) token. With `DiPlugin` the entry is a container provider;
+  without it the factory runs once against the service registry, with string tokens only
 - **Non-HTTP ingress** — `@Processor`, `@Cron`, `@Every`, `@OnEvent`, `@Subscribe`,
   `@CommandHandler`, `@QueryHandler`, `@Gateway` (+ `@OnOpen`/`@OnMessage`/`@OnClose`)
 - **Injection** — `@Injectable`, `@Inject`, `@Optional`

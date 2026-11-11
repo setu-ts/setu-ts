@@ -67,6 +67,7 @@ import { DISCOVERY_SPECIFIER, SERVICE_PORT_EXPORT } from '../workspace/discovery
 import {
   allocateDevtoolPort,
   devtoolRangeStart,
+  manifestProblemDetail,
   MAX_PORT,
   MEMBERS_DIR,
   readPortFlag,
@@ -429,6 +430,8 @@ export async function runDevtoolCommand(
         }),` +
         ` so the devtool cannot tell whether this is a workspace. Fix or remove the manifest first.`,
     );
+    const detail = manifestProblemDetail(read.problem);
+    if (detail !== undefined) deps.error(detail);
     return EXIT_ERROR;
   }
   return enableStandalone(dir, memberName, requestedPort.port, args, deps);

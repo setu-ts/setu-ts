@@ -144,7 +144,7 @@ Every ✅ row is a package in this repository with 90%+ test coverage on branch,
 | Feature           | Status | Package                    | Description                                                               |
 | ----------------- | ------ | -------------------------- | ------------------------------------------------------------------------- |
 | Service discovery | ✅     | `service-discovery-plugin` | Static, Consul, Kubernetes, DNS-SRV; balancing, watch, ejection           |
-| gRPC              | ✅     | `grpc-plugin`              | Co-serve gRPC, Connect, and gRPC-Web on the same port                     |
+| gRPC              | ✅     | `grpc-plugin`              | Co-serve gRPC, Connect, and gRPC-Web on one port, and call other services |
 | Cloudflare        | ✅     | `cloudflare-plugin`        | Worker bindings; KV cache, R2 storage, D1, Queues, messaging, KV sessions |
 | Static files      | ✅     | `static-plugin`            | ETag, Range, precompressed sidecars, SPA fallback, streaming              |
 

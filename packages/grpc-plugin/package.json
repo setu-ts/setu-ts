@@ -1,7 +1,7 @@
 {
   "name": "@setu-ts/grpc-plugin",
   "version": "0.12.0",
-  "description": "Co-serve gRPC, Connect, and gRPC-Web on the same port as ordinary routes",
+  "description": "Co-serve gRPC, Connect, and gRPC-Web on the same port as ordinary routes, and call other services",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/setu-ts/setu-ts.git",
@@ -41,7 +41,8 @@
   },
   "peerDependencies": {
     "@bufbuild/protobuf": "^2.7.0",
-    "@connectrpc/connect": "^2.1.2"
+    "@connectrpc/connect": "^2.1.2",
+    "@connectrpc/connect-node": "^2.1.2"
   },
   "peerDependenciesMeta": {
     "@bufbuild/protobuf": {
@@ -49,14 +50,21 @@
     },
     "@connectrpc/connect": {
       "optional": true
+    },
+    "@connectrpc/connect-node": {
+      "optional": true
     }
   },
   "devDependencies": {
     "@bufbuild/protobuf": "^2.7.0",
     "@connectrpc/connect": "^2.1.2",
+    "@connectrpc/connect-node": "^2.1.2",
+    "@setu-ts/decorator-plugin": "workspace:^",
+    "@setu-ts/di-plugin": "workspace:^",
     "@setu-ts/health-plugin": "workspace:^",
     "@setu-ts/kernel": "workspace:^",
     "@setu-ts/runtime": "workspace:^",
+    "@setu-ts/service-discovery-plugin": "workspace:^",
     "@types/node": "^24",
     "typescript": "6.0.3",
     "vitest": "5.0.3"

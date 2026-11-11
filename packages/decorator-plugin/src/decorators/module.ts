@@ -9,7 +9,7 @@
  */
 import '../metadata/symbol-metadata.ts';
 
-import type { Constructor } from '@setu-ts/common';
+import type { Constructor, ModuleFactoryProvider } from '@setu-ts/common';
 
 import { classDecorator } from '../metadata/context-bridge.ts';
 import type { SetuClassDecorator } from '../metadata/context-bridge.ts';
@@ -25,8 +25,13 @@ import type { SetuClassDecorator } from '../metadata/context-bridge.ts';
 export interface ModuleOptions {
   /** Controller classes this module contributes. */
   readonly controllers?: readonly Constructor[];
-  /** Provider classes this module contributes. */
-  readonly providers?: readonly Constructor[];
+  /**
+   * Providers this module contributes: classes, and — since 0.13.0 — factory
+   * entries that name their own token (`{ provide, useFactory, inject?, scope? }`),
+   * for a value no class constructs. A factory entry is registered before the
+   * classes, so a class can inject it.
+   */
+  readonly providers?: readonly (Constructor | ModuleFactoryProvider)[];
   /** Other modules that this module includes. */
   readonly imports?: readonly Constructor[];
 }

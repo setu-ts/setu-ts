@@ -12,6 +12,7 @@
 import type { IPlugin } from '@setu-ts/common';
 import type { MessagingPluginOptions } from '@setu-ts/messaging-plugin';
 import type { QueuePluginOptions } from '@setu-ts/queue-plugin';
+import { GrpcPlugin } from '@setu-ts/grpc-plugin';
 
 /**
  * The memory broker's `MessagingPlugin` options.
@@ -32,10 +33,10 @@ export function queueOptions(): QueuePluginOptions {
 }
 
 /**
- * The plugins this member's RPC style adds: none for HTTP, which every template already serves.
+ * The plugins this member's RPC style adds: `GrpcPlugin` for calling `billing` only — this member serves no gRPC.
  *
  * @returns The plugins to register
  */
 export function transportPlugins(): readonly IPlugin[] {
-  return [];
+  return [GrpcPlugin({ serve: false, clients: { billing: { basePath: '/grpc' } } })];
 }

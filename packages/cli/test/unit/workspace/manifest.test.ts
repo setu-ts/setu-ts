@@ -3,6 +3,7 @@ import { createFakeFs } from '../../fixtures/fake-fs.ts';
 import {
   allocatePort,
   isUsablePort,
+  manifestProblemDetail,
   MAX_PORT,
   MIN_PORT,
   readWorkspaceManifest,
@@ -11,6 +12,7 @@ import {
   WORKSPACE_VERSION,
   type WorkspaceManifest,
 } from '../../../src/workspace/manifest.ts';
+import { escapeName } from '../../../src/utils/names.ts';
 
 /**
  * Seeds a workspace root holding the given manifest text.
@@ -228,6 +230,30 @@ describe('readWorkspaceManifest', () => {
       expect(result).toEqual({ ok: false, problem: { kind: 'malformed' } });
     });
   }
+
+  describe('a member name', () => {
+    for (const name of ['Orders_V2', 'a--b', '123', 'billing\u000ax']) {
+      it(`refuses ${JSON.stringify(name)} by name, and the detail suggests a rename where one exists`, async () => {
+        const result = await read(
+          JSON.stringify({
+            version: WORKSPACE_VERSION,
+            basePort: 3000,
+            members: [{ name, port: 3000 }],
+          }),
+        );
+        expect(result).toEqual({ ok: false, problem: { kind: 'invalid-member-name', name } });
+        if (result.ok) return;
+        const detail = manifestProblemDetail(result.problem) ?? '';
+        expect(detail).toContain(`Its member "${escapeName(name)}" is not a name`);
+        expect(detail).not.toContain('\n');
+        expect(detail.includes('for example to')).toBe(name !== '123');
+      });
+    }
+
+    it('gives no detail for a problem the generic refusal explains', () => {
+      expect(manifestProblemDetail({ kind: 'malformed' })).toBeUndefined();
+    });
+  });
 
   describe('a member rpc', () => {
     it('reads grpc, and normalizes a spelled-out http to absent', async () => {

@@ -9,7 +9,11 @@ import {
   readExistingText,
   resolveDir,
 } from '../utils/file-writer.ts';
-import { readWorkspaceManifest, WORKSPACE_MANIFEST } from '../workspace/manifest.ts';
+import {
+  manifestProblemDetail,
+  readWorkspaceManifest,
+  WORKSPACE_MANIFEST,
+} from '../workspace/manifest.ts';
 import { EXIT_ERROR, EXIT_OK } from '../constants.ts';
 import { escapeName } from '../utils/names.ts';
 import { isMissingPath } from '../utils/filesystem-errors.ts';
@@ -96,6 +100,8 @@ export async function forEachProject(
     deps.error(
       `Cannot read ${escapeName(joinPath(dir, WORKSPACE_MANIFEST))}: ${read.problem.kind}`,
     );
+    const detail = manifestProblemDetail(read.problem);
+    if (detail !== undefined) deps.error(detail);
     return EXIT_ERROR;
   }
   let code: number = EXIT_OK;

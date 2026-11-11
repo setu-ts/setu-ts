@@ -45,4 +45,24 @@ export interface HttpAdapterOptions {
    * @since 0.10.0
    */
   readonly reportError?: (record: Readonly<Record<string, unknown>>) => void;
+
+  /**
+   * Serve HTTP/2 beside HTTP/1.1 on the same port. Supplied by `RuntimePlugin`
+   * from {@linkcode RuntimeOptions.http2}; see there for each runtime.
+   * @since 0.13.0
+   */
+  readonly http2?: true | Http2TlsOptions;
+}
+
+/**
+ * TLS material for `RuntimePlugin({ http2: { key, cert } })`: HTTP/2 over TLS,
+ * negotiated by ALPN, with HTTP/1.1 on the same port for clients that do not
+ * offer `h2`.
+ * @since 0.13.0
+ */
+export interface Http2TlsOptions {
+  /** The private key, PEM-encoded. Never logged or reported. */
+  readonly key: string;
+  /** The certificate chain, PEM-encoded. */
+  readonly cert: string;
 }

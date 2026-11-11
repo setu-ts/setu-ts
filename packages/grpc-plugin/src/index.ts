@@ -1,9 +1,11 @@
 /**
  * @module
  *
- * gRPC plugin for Setu-TS — enables co-serving of Connect and gRPC-Web
- * protocols (native `application/grpc` is refused with a Trailers-Only
- * `UNIMPLEMENTED`) on the same port as ordinary Hono routes. The plugin
+ * gRPC plugin for Setu-TS — enables co-serving of Connect, gRPC-Web and, where
+ * the connection carries HTTP/2 trailers (Node and Bun with
+ * `RuntimePlugin({ http2 })`), native `application/grpc` on the same port as
+ * ordinary Hono routes; elsewhere native gRPC is refused with a Trailers-Only
+ * `UNIMPLEMENTED`. The plugin
  * registers an {@linkcode IGrpcService} under `CAPABILITIES.GRPC`; since M70a
  * the kernel dispatches RPC from its terminal handler after the middleware
  * pipeline, so no HTTP-adapter interceptor is involved.
@@ -33,6 +35,9 @@ export { GrpcPlugin } from './plugin/grpc-plugin.ts';
 // Re-export the service class
 export { GrpcService } from './services/grpc-service.ts';
 
+// The calling side (M139b §3.12)
+export { grpcClient, grpcClientProvider } from './client/grpc-client-helper.ts';
+
 // Re-export errors
 export {
   GrpcDescriptorError,
@@ -54,6 +59,7 @@ export type { GrpcPluginOptions } from './interfaces/index.ts';
 
 // Re-export common contracts for convenience
 export type {
+  GrpcClientOptions,
   GrpcServiceDefinition,
   GrpcServingStatus,
   IGrpcService,

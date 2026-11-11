@@ -2,10 +2,11 @@
  * Native gRPC-binary refusal (M70i §3.3).
  *
  * The native `application/grpc` wire format signals completion in HTTP/2
- * **trailers**. The Fetch `Response` has no trailer mechanism, and the whole
- * framework serves through Hono's `fetch` entry point (M23), so no runtime
- * adapter can emit trailers. A native client pointed at this server therefore
- * never gets a legal response.
+ * **trailers**. Since M139b they are written where the adapter can — the Node
+ * adapter on an HTTP/2 connection — and native calls are served there. Every
+ * other connection (HTTP/1.1, Deno, Workers, `inject()`) has no trailer
+ * mechanism, so a native client pointed at it would never get a legal
+ * response; this refusal is what it gets instead.
  *
  * M70i repairs the default `basePath` to the root (§3.2), which makes the
  * server **reachable** by native clients for the first time — so the number
@@ -17,6 +18,8 @@
  *
  * @module
  */
+
+import type { RpcReply } from '@setu-ts/common';
 
 /**
  * The exact set of content types that ARE native gRPC. The check is an exact
@@ -56,6 +59,16 @@ export function isNativeGrpcContentType(contentType: string | null): boolean {
   return NATIVE_GRPC_MEDIA_TYPES.has(essence);
 }
 
+/** The Trailers-Only refusal's headers, shared by its two forms. */
+const TRAILERS_ONLY_UNIMPLEMENTED_HEADERS: Readonly<Record<string, string>> = {
+  'content-type': 'application/grpc',
+  'grpc-status': '12',
+  'grpc-message':
+    'native gRPC (application/grpc) is not supported by this server; ' +
+    'use Connect (application/connect+json or application/connect+proto) ' +
+    'or gRPC-Web (application/grpc-web+json or application/grpc-web+proto)',
+};
+
 /**
  * Builds the Trailers-Only refusal for a native `application/grpc` request.
  *
@@ -68,15 +81,18 @@ export function isNativeGrpcContentType(contentType: string | null): boolean {
  * @returns The refusal {@linkcode Response}.
  */
 export function trailersOnlyUnimplemented(): Response {
-  return new Response(null, {
+  return new Response(null, { status: 200, headers: TRAILERS_ONLY_UNIMPLEMENTED_HEADERS });
+}
+
+/**
+ * The same refusal as an `RpcReply`, for the dispatch path (M139b §3.11).
+ *
+ * @returns The refusal reply.
+ */
+export function trailersOnlyUnimplementedReply(): RpcReply {
+  return {
     status: 200,
-    headers: {
-      'content-type': 'application/grpc',
-      'grpc-status': '12',
-      'grpc-message':
-        'native gRPC (application/grpc) is not supported by this server; ' +
-        'use Connect (application/connect+json or application/connect+proto) ' +
-        'or gRPC-Web (application/grpc-web+json or application/grpc-web+proto)',
-    },
-  });
+    headers: new Headers(TRAILERS_ONLY_UNIMPLEMENTED_HEADERS),
+    body: null,
+  };
 }
