@@ -113,6 +113,14 @@ class FakeRedisClient implements IRedisBackplaneClient {
   off(event: string, listener: (channel: string, message: string) => void): void {
     if (event === 'message') {
       this.#listeners = this.#listeners.filter((l) => l !== listener);
+      return;
+    }
+    const list = this.eventListeners.get(event);
+    if (list !== undefined) {
+      this.eventListeners.set(
+        event,
+        list.filter((l) => l !== (listener as unknown as (value: unknown) => void)),
+      );
     }
   }
 
@@ -619,7 +627,7 @@ describe('RedisBackplane', () => {
   });
 
   it('bounds both built clients with the default command timeout', async () => {
-    const options: Array<{ readonly commandTimeout?: number } | undefined> = [];
+    const options: Array<Parameters<IRedisModule['create']>[1]> = [];
     const module: IRedisModule = {
       create: (_url, clientOptions): IRedisBackplaneClient => {
         options.push(clientOptions);
@@ -634,8 +642,10 @@ describe('RedisBackplane', () => {
 
     await backplane.connect();
 
+    // Publisher first, without an offline queue (M139f X3-3); the subscriber
+    // keeps the default.
     expect(options).toEqual([
-      { commandTimeout: DEFAULT_REDIS_COMMAND_TIMEOUT_MS },
+      { commandTimeout: DEFAULT_REDIS_COMMAND_TIMEOUT_MS, enableOfflineQueue: false },
       { commandTimeout: DEFAULT_REDIS_COMMAND_TIMEOUT_MS },
     ]);
     await backplane.close();
@@ -646,7 +656,7 @@ describe('RedisBackplane', () => {
       [250, { commandTimeout: 250 }],
       [0, {}],
     ] as const) {
-      const options: Array<{ readonly commandTimeout?: number } | undefined> = [];
+      const options: Array<Parameters<IRedisModule['create']>[1]> = [];
       const module: IRedisModule = {
         create: (_url, clientOptions): IRedisBackplaneClient => {
           options.push(clientOptions);
@@ -659,7 +669,7 @@ describe('RedisBackplane', () => {
         'realtime',
       );
       await backplane.connect();
-      expect(options).toEqual([expected, expected]);
+      expect(options).toEqual([{ ...expected, enableOfflineQueue: false }, expected]);
       await backplane.close();
     }
   });
@@ -1411,6 +1421,285 @@ describe('RedisBackplane connection-error reporting', () => {
     // a built one's, so the error/ready listeners are attached to the pair.
     expect(client.eventListeners.has('error')).toBe(true);
     expect(subscriber.eventListeners.has('error')).toBe(true);
+    await backplane.close();
+  });
+});
+
+describe('RedisBackplane owned publisher readiness (M139f X3-3)', () => {
+  /** A module whose publisher starts `connecting` and the subscriber `ready`. */
+  function connectingModule(): {
+    module: IRedisModule;
+    clients: Array<FakeRedisClient & { status: string }>;
+  } {
+    const clients: Array<FakeRedisClient & { status: string }> = [];
+    return {
+      clients,
+      module: {
+        create: (): IRedisBackplaneClient => {
+          const client = Object.assign(new FakeRedisClient(), {
+            status: clients.length === 0 ? 'connecting' : 'ready',
+          });
+          clients.push(client);
+          return client;
+        },
+      },
+    };
+  }
+
+  it('waits for the publisher to be ready before the pair is handed out', async () => {
+    const { module, clients } = connectingModule();
+    const backplane = new RedisBackplane(
+      { transport: 'redis', url: 'redis://localhost:6379', module, commandTimeoutMs: 0 },
+      'node-a',
+      'realtime',
+    );
+    let open = false;
+    const connecting = backplane.connect().then(() => {
+      open = true;
+    });
+    await setImmediate();
+    expect(open).toBe(false);
+    const publisher = clients[0]!;
+    // The connection watch's own `'ready'` listener, plus the open's wait.
+    expect(publisher.eventListeners.get('ready')).toHaveLength(2);
+
+    publisher.status = 'ready';
+    publisher.emitEvent('ready');
+    await connecting;
+    expect(open).toBe(true);
+    // The wait's one-shot listener is gone once it fired; the watch's stays.
+    expect(publisher.eventListeners.get('ready')).toHaveLength(1);
+    await backplane.publish(FRAME);
+    expect(publisher.published).toHaveLength(1);
+    await backplane.close();
+  });
+
+  it('refuses the open at the command timeout and closes both connections', async () => {
+    const { module, clients } = connectingModule();
+    const backplane = new RedisBackplane(
+      { transport: 'redis', url: 'redis://localhost:6379', module, commandTimeoutMs: 20 },
+      'node-a',
+      'realtime',
+    );
+    const error: unknown = await backplane.connect().then(
+      () => undefined,
+      (thrown: unknown) => thrown,
+    );
+    expect(error).toBeInstanceOf(BackendUnavailableError);
+    expect((error as Error).message).toContain('realtime-backplane-plugin: redis transport');
+    expect(((error as Error).cause as Error).message).toBe(
+      'the publisher was not ready within 20 ms',
+    );
+    expect(clients[0]!.eventListeners.get('ready')).toHaveLength(0);
+    expect(clients.map((client) => client.quitCount)).toEqual([1, 1]);
+  });
+
+  it('fails the open when the built publisher has already ended (M139f re-audit L-4.1)', async () => {
+    const clients: FakeRedisClient[] = [];
+    const module: IRedisModule = {
+      create: (): IRedisBackplaneClient => {
+        const client = Object.assign(new FakeRedisClient(), {
+          status: clients.length === 0 ? 'end' : 'ready',
+        });
+        clients.push(client);
+        return client;
+      },
+    };
+    const backplane = new RedisBackplane(
+      { transport: 'redis', url: 'redis://localhost:6379', module, commandTimeoutMs: 0 },
+      'node-a',
+      'realtime',
+    );
+    const error: unknown = await backplane.connect().then(
+      () => undefined,
+      (thrown: unknown) => thrown,
+    );
+    expect(error).toBeInstanceOf(BackendUnavailableError);
+    expect(((error as Error).cause as Error).message).toBe(
+      'the publisher connection ended before it was ready',
+    );
+    expect(clients.map((client) => client.quitCount)).toEqual([1, 1]);
+    await expect(backplane.publish(FRAME)).rejects.toThrow();
+  });
+
+  it.each(['ready', 'wait', 'close'])(
+    'does not wait on a built publisher whose status is %s',
+    async (status) => {
+      const clients: FakeRedisClient[] = [];
+      const module: IRedisModule = {
+        create: (): IRedisBackplaneClient => {
+          const client = Object.assign(new FakeRedisClient(), { status });
+          clients.push(client);
+          return client;
+        },
+      };
+      const backplane = new RedisBackplane(
+        { transport: 'redis', url: 'redis://localhost:6379', module, commandTimeoutMs: 0 },
+        'node-a',
+        'realtime',
+      );
+      await backplane.connect();
+      // Only the connection watch listens; the open added no wait.
+      expect(clients[0]!.eventListeners.get('ready')).toHaveLength(1);
+      await backplane.close();
+    },
+  );
+
+  it('ends an unbounded wait on close() and retires the pair (M139f audit L1)', async () => {
+    const { module, clients } = connectingModule();
+    const backplane = new RedisBackplane(
+      { transport: 'redis', url: 'redis://localhost:6379', module, commandTimeoutMs: 0 },
+      'node-a',
+      'realtime',
+    );
+    const connecting = backplane.connect();
+    await setImmediate();
+    expect(clients[0]!.eventListeners.get('ready')).toHaveLength(2);
+
+    await backplane.close();
+    // The open sees it was superseded and releases both connections itself.
+    await connecting;
+    expect(clients.map((client) => client.quitCount)).toEqual([1, 1]);
+    expect(clients[0]!.eventListeners.get('ready')).toHaveLength(0);
+    await expect(backplane.publish(FRAME)).rejects.toThrow();
+  });
+
+  it('does not start a wait after a close() that landed during SUBSCRIBE (M139f re-audit N2)', async () => {
+    const clients: Array<FakeRedisClient & { status: string }> = [];
+    let release: (() => void) | undefined;
+    const module: IRedisModule = {
+      create: (): IRedisBackplaneClient => {
+        const client = Object.assign(new FakeRedisClient(), {
+          status: clients.length === 0 ? 'reconnecting' : 'ready',
+        });
+        if (clients.length === 1) release = client.holdSubscribe();
+        clients.push(client);
+        return client;
+      },
+    };
+    const backplane = new RedisBackplane(
+      { transport: 'redis', url: 'redis://localhost:6379', module, commandTimeoutMs: 0 },
+      'node-a',
+      'realtime',
+    );
+    const connecting = backplane.connect();
+    await setImmediate();
+    await backplane.close();
+    release!();
+    // SUBSCRIBE completes after the close; the publisher never becomes ready,
+    // yet the open settles and releases both connections.
+    await connecting;
+    expect(clients.map((client) => client.quitCount)).toEqual([1, 1]);
+    expect(clients[0]!.eventListeners.get('ready')).toHaveLength(0);
+  });
+
+  it('settles for a close() at every microtask around the wait start (M139f re-audit N3)', async () => {
+    for (let delay = 0; delay <= 14; delay++) {
+      const clients: Array<FakeRedisClient & { status: string }> = [];
+      let release: (() => void) | undefined;
+      const module: IRedisModule = {
+        create: (): IRedisBackplaneClient => {
+          const client = Object.assign(new FakeRedisClient(), {
+            status: clients.length === 0 ? 'reconnecting' : 'ready',
+          });
+          if (clients.length === 1) release = client.holdSubscribe();
+          clients.push(client);
+          return client;
+        },
+      };
+      const backplane = new RedisBackplane(
+        { transport: 'redis', url: 'redis://localhost:6379', module, commandTimeoutMs: 0 },
+        'node-a',
+        'realtime',
+      );
+      let settled = false;
+      const connecting = backplane.connect().then(() => {
+        settled = true;
+      });
+      await setImmediate();
+      release!();
+      for (let tick = 0; tick < delay; tick++) await Promise.resolve();
+      await backplane.close();
+      await setImmediate();
+      expect(settled, `close() after ${delay} microtask(s)`).toBe(true);
+      await connecting;
+      expect(clients.map((client) => client.quitCount)).toEqual([1, 1]);
+      expect(clients[0]!.eventListeners.get('ready')).toHaveLength(0);
+    }
+  });
+
+  it('fails the open when the publisher ends while it waits, even unbounded', async () => {
+    const { module, clients } = connectingModule();
+    const backplane = new RedisBackplane(
+      { transport: 'redis', url: 'redis://localhost:6379', module, commandTimeoutMs: 0 },
+      'node-a',
+      'realtime',
+    );
+    const connecting = backplane.connect().then(
+      () => undefined,
+      (thrown: unknown) => thrown,
+    );
+    await setImmediate();
+    const publisher = clients[0]!;
+    publisher.status = 'end';
+    publisher.emitEvent('end');
+    const error = await connecting;
+    expect(error).toBeInstanceOf(BackendUnavailableError);
+    expect(((error as Error).cause as Error).message).toBe(
+      'the publisher connection ended before it was ready',
+    );
+    expect(clients.map((client) => client.quitCount)).toEqual([1, 1]);
+    expect(publisher.eventListeners.get('ready')).toHaveLength(0);
+    expect(publisher.eventListeners.get('end')).toHaveLength(0);
+  });
+
+  it.each(['ready', 'end'] as const)(
+    're-reads the status once its listeners exist: %s without an event',
+    async (later) => {
+      const clients: FakeRedisClient[] = [];
+      const module: IRedisModule = {
+        create: (): IRedisBackplaneClient => {
+          const client = new FakeRedisClient();
+          if (clients.length === 0) {
+            // `waitForReady` reads `connecting` and starts the wait; every later
+            // read — the re-check in the wait's body — sees the new status.
+            let reads = 0;
+            Object.defineProperty(client, 'status', {
+              get: () => (reads++ === 0 ? 'connecting' : later),
+            });
+          } else {
+            Object.assign(client, { status: 'ready' });
+          }
+          clients.push(client);
+          return client;
+        },
+      };
+      const backplane = new RedisBackplane(
+        { transport: 'redis', url: 'redis://localhost:6379', module, commandTimeoutMs: 0 },
+        'node-a',
+        'realtime',
+      );
+      const outcome = await backplane.connect().then(
+        () => 'resolved',
+        () => 'rejected',
+      );
+      expect(outcome).toBe(later === 'ready' ? 'resolved' : 'rejected');
+      expect(clients[0]!.eventListeners.get('end') ?? []).toHaveLength(0);
+      await backplane.close();
+    },
+  );
+
+  it('does not wait on an injected pair, whatever its status', async () => {
+    const client = Object.assign(new FakeRedisClient(), { status: 'connecting' });
+    const subscriber = Object.assign(new FakeRedisClient(), { status: 'connecting' });
+    const backplane = new RedisBackplane(
+      { transport: 'redis', client, subscriber, commandTimeoutMs: 0 },
+      'node-a',
+      'realtime',
+    );
+    await backplane.connect();
+    // Only the connection watch listens for `'ready'`; nothing waited on it.
+    expect(client.eventListeners.get('ready')).toHaveLength(1);
     await backplane.close();
   });
 });

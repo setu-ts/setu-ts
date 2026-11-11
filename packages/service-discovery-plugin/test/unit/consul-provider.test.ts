@@ -10,6 +10,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { ConsulProvider } from '../../src/providers/consul-provider.ts';
+import { DiscoveryUnavailableError } from '../../src/errors.ts';
 import { createFakeHttp, createFakeRuntime, type FakeHttp } from '../fixtures/fakes.ts';
 
 function setup(
@@ -251,5 +252,39 @@ describe('ConsulProvider — self registration', () => {
 
   it('reports the backend id', () => {
     expect(setup().provider.kind).toBe('consul');
+  });
+});
+
+describe('ConsulProvider — ACL token characters (M139f re-audit N1)', () => {
+  const REFUSAL =
+    'The Consul ACL token contains a character an HTTP header cannot carry; check the token option.';
+
+  it('refuses a token with a control character on every request path, without echoing it', async () => {
+    const { provider, http } = setup({ token: 'acl-canary-consul\nx' });
+    for (const call of [
+      () => provider.resolve('billing'),
+      () => provider.watch('billing', () => {}),
+      () =>
+        provider.registerSelf({
+          serviceName: 'billing',
+          id: 'billing-1',
+          address: '10.0.0.1',
+          port: 8080,
+        }),
+    ]) {
+      const error: unknown = await call().then(
+        () => undefined,
+        (thrown: unknown) => thrown,
+      );
+      expect(error).toBeInstanceOf(DiscoveryUnavailableError);
+      expect((error as Error).message).toBe(REFUSAL);
+    }
+    expect(http.calls).toHaveLength(0);
+  });
+
+  it('still sends a visible-ASCII token unchanged', async () => {
+    const { provider, http } = setup({ token: 'acl-0123-ok' });
+    await provider.resolve('billing');
+    expect(new Headers(http.calls[0]?.init?.headers).get('X-Consul-Token')).toBe('acl-0123-ok');
   });
 });

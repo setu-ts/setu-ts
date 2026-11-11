@@ -151,24 +151,24 @@ approved development dataset: counts aggregate every tenant using the instance.
 IDs come from `runtime.uuid()` and are globally unique, so the frame carries the excluded ID and
 each replica skips the matching member.
 
-Delivery is at-most-once and inherits the transport's guarantees — and the guarantee has a shape
-worth knowing. On `'redis'`, ioredis's own defaults govern what a partition does:
+Delivery is at-most-once and inherits the transport's guarantees. On `'redis'`, a frame published
+while a connection is down is **lost, never delivered late**:
 
-- **A short partition (up to roughly 11 seconds): frames are buffered and delivered LATE, not
-  dropped.** The publisher connection is created with ioredis's default `enableOfflineQueue: true`,
-  so publishes issued while disconnected are held and flushed on reconnect. The receiving side sees
-  stale ops seconds after the fact — measured at ~5.9 s in this framework's two-replica exercise —
-  which an application told "frames during a partition are missed" will not defend against. A
-  collaborative board should treat out-of-order late arrivals as possible.
-- **A longer partition: the buffered commands reject** when ioredis's `maxRetriesPerRequest` budget
-  (default 20 retries, ~11 s on the default backoff) exhausts, and both consumers log one `warn` per
-  dropped frame.
+- **A dropped connection: the publish is refused at once.** Since 0.13.0 the publisher connection
+  this plugin builds has no offline queue (`enableOfflineQueue: false`), so a publish while it is
+  reconnecting rejects immediately with a `503`-class fault, and the WebSocket and SSE consumers
+  each log one `warn` per lost frame. Earlier releases held the publish in ioredis's offline queue
+  and flushed it on reconnect, seconds late (about 6 s measured), and a reconnect race could still
+  lose it, so the outcome was unpredictable. A frame that arrives seconds stale, after newer local
+  state, is worse for a realtime board than no frame.
+- **A peer that is reconnecting misses frames** published before its subscriber has re-subscribed;
+  the publisher cannot know that it has not. Treat any partition as a gap: a client that needs every
+  operation re-reads state on reconnect.
 - **A silent connection: the publish rejects after `commandTimeoutMs`** (default 15 s). A host that
   stops answering without closing the socket — paused, or partitioned with no reset — triggers no
   reconnect, so no retry budget applies; before this bound such a publish never settled, so neither
-  consumer logged it and an observed publish was never recorded. The default sits above the ~11 s
-  retry budget, so the two partition cases above behave as described; lowering it below that budget
-  makes a dropped connection reject sooner too.
+  consumer logged it and an observed publish was never recorded. Lower it to bound a silent publish
+  sooner.
 - **A publish before `connect()` or after `close()` rejects** rather than resolving, so a frame sent
   nowhere reads as a failure. Earlier releases resolved it without sending.
 - **`close()` during an outage still releases both connections.** Each step runs even when an
@@ -178,17 +178,18 @@ worth knowing. On `'redis'`, ioredis's own defaults govern what a partition does
   connections reconnecting behind it. Against a silent server each step waits out the command
   timeout, so `close()` can take about three of them (≈45 s at the default); lower
   `commandTimeoutMs` if that exceeds your shutdown grace period.
-- **A timed-out publish may still be sent.** A publish rejected by the command timeout can already
-  be written to, or queued for, the connection, and reach Redis afterwards — measured at the default
-  against a paused server, and with a lowered `commandTimeoutMs` against a stopped one. A caller
-  that retries a rejected publish may therefore deliver that frame twice; consumers that cannot
-  tolerate a duplicate need their own de-duplication. Against a server that refuses connections, the
-  default's retry budget rejects the queued publish first and it is discarded.
+- **A timed-out publish may still be sent.** A publish rejected by the command timeout was already
+  written to a connection that looked healthy, and can reach Redis afterward (measured against a
+  paused server). A caller that retries a rejected publish may therefore deliver that frame twice;
+  consumers that cannot tolerate a duplicate need their own de-duplication. A publish refused while
+  the connection is down was never written.
 
-Frames are never persisted or replayed beyond that buffer. `commandTimeoutMs` is the only ioredis
-setting reachable through this plugin's options, and applies only on the lazy path — an application
-that needs different behaviour, or injects its own `client`/`subscriber` pair, configures those
-clients directly.
+Frames are never persisted or replayed. `commandTimeoutMs` is the only ioredis setting reachable
+through this plugin's options, and applies only on the lazy path — an application that needs
+different behaviour, or injects its own `client`/`subscriber` pair, configures those clients
+directly. To keep the lost-not-late behaviour with an injected pair, create the ioredis publisher
+with `enableOfflineQueue: false`, or a node-redis client with `disableOfflineQueue: true`; a client
+that queues delivers late as described above.
 
 ## Documentation
 
@@ -202,8 +203,11 @@ MIT
 ## Health indicator
 
 The `realtime-backplane` indicator reports `up`, including fan-out outages. Local request delivery
-still works. `data.reachable: false` exposes an unreachable backend; a transport without a probe
-reports `'unknown'`. `/ready` therefore remains 200 for this shared dependency condition.
+still works. `data.reachable: false` (in `/health` only with `HealthPlugin({ details: true })`)
+exposes an unreachable backend; a transport without a probe reports `'unknown'`. `/ready` therefore
+remains 200 for this shared dependency condition. Detailed reports expose every indicator's data, so
+protect the health endpoints when they carry it
+([Statuses](https://github.com/setu-ts/setu-ts/blob/main/packages/health-plugin/README.md#statuses)).
 
 `data` reports `{ transport, origin, reachable }`, where `reachable` is `true`, `false`, or
 `'unknown'`.

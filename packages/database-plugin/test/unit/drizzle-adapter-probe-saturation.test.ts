@@ -19,8 +19,10 @@ import {
   type DrizzleQueryHandleProvider,
 } from '../../src/query/drizzle-query.ts';
 import {
+  DATABASE_PROBE_ACQUIRE_TIMEOUT,
   DATABASE_QUERY_PROGRESS,
   isSaturated,
+  probeHitAcquireTimeout,
   PoolSaturatedProbeSkipped,
   QUERY_PROGRESS_UNOBSERVABLE,
   QUERY_PROGRESS_WINDOW_MS,
@@ -314,3 +316,89 @@ for (const message of ['Connection terminated due to connection timeout', 'Query
     expect(await service.reachability()).toBeUndefined();
   });
 }
+
+describe('M139f V8-3: the probe remembers a pool acquire timeout', () => {
+  const idle = (): DatabasePoolCapacity => ({ total: 1, idle: 0, waiting: 0 });
+
+  it('sets the flag on the pool anchor, rethrows, and clears it on the next probe', async () => {
+    let fail = true;
+    const { adapter } = makeAdapter(
+      () => (fail ? Promise.reject(new Error(POOL_TIMEOUT)) : Promise.resolve({ rows: [] })),
+      idle,
+    );
+    await adapter.connect();
+    expect(probeHitAcquireTimeout(adapter)).toBe(false);
+
+    // pg-proxy wraps the driver error as `Failed query`; the anchor is its cause.
+    await expect(adapter.isHealthy!()).rejects.toThrow('Failed query');
+    expect(probeHitAcquireTimeout(adapter)).toBe(true);
+
+    fail = false;
+    expect(await adapter.isHealthy!()).toBe(true);
+    expect(probeHitAcquireTimeout(adapter)).toBe(false);
+  });
+
+  it('ignores an older probe that times out after a newer probe began', async () => {
+    const pending: Array<(error: Error) => void> = [];
+    const { adapter } = makeAdapter(
+      () => new Promise((_resolve, reject) => pending.push(reject)),
+      idle,
+    );
+    await adapter.connect();
+
+    const older = adapter.isHealthy!();
+    const newer = adapter.isHealthy!();
+    await Promise.resolve();
+    expect(pending).toHaveLength(2);
+
+    pending[0]!(new Error(POOL_TIMEOUT));
+    await expect(older).rejects.toThrow('Failed query');
+    expect(probeHitAcquireTimeout(adapter)).toBe(false);
+
+    pending[1]!(new Error(POOL_TIMEOUT));
+    await expect(newer).rejects.toThrow('Failed query');
+    expect(probeHitAcquireTimeout(adapter)).toBe(true);
+  });
+
+  it('does not set the flag for a new-connection handshake timeout', async () => {
+    const { adapter } = makeAdapter(
+      () => Promise.reject(new Error('Connection terminated due to connection timeout')),
+      idle,
+    );
+    await adapter.connect();
+    await expect(adapter.isHealthy!()).rejects.toThrow('Failed query');
+    expect(probeHitAcquireTimeout(adapter)).toBe(false);
+  });
+
+  it('exposes no flag without poolStats, so the documented degraded reading stands', async () => {
+    const { adapter } = makeAdapter(() => Promise.reject(new Error(POOL_TIMEOUT)));
+    await adapter.connect();
+    await expect(adapter.isHealthy!()).rejects.toThrow('Failed query');
+    expect(probeHitAcquireTimeout(adapter)).toBe(false);
+  });
+});
+
+describe('probeHitAcquireTimeout', () => {
+  const withReader = (reader: unknown): IDatabaseAdapter =>
+    ({ [DATABASE_PROBE_ACQUIRE_TIMEOUT]: reader }) as unknown as IDatabaseAdapter;
+
+  it('is false for an adapter without the seam', () => {
+    expect(probeHitAcquireTimeout({} as IDatabaseAdapter)).toBe(false);
+  });
+
+  it('is true only for a reader returning true', () => {
+    expect(probeHitAcquireTimeout(withReader(() => true))).toBe(true);
+    expect(probeHitAcquireTimeout(withReader(() => 'true'))).toBe(false);
+    expect(probeHitAcquireTimeout(withReader(() => false))).toBe(false);
+  });
+
+  it('is false for a reader that throws', () => {
+    expect(
+      probeHitAcquireTimeout(
+        withReader(() => {
+          throw new Error('closed');
+        }),
+      ),
+    ).toBe(false);
+  });
+});

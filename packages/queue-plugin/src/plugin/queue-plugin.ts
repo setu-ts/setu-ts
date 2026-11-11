@@ -503,5 +503,11 @@ function resolveLogger(ctx: IPluginContext): QueueLogger | undefined {
     return undefined;
   }
   const logger = ctx.services.get<ILogger>(CAPABILITIES.LOGGER);
-  return { error: (message, metadata) => logger.error(message, metadata) };
+  // M139f X88-9: `warn` and `info` too, so a loop outage starts at `warn` and
+  // its recovery is logged at `info` instead of an `error` with no recovery.
+  return {
+    error: (message, metadata) => logger.error(message, metadata),
+    warn: (message, metadata) => logger.warn(message, metadata),
+    info: (message, metadata) => logger.info(message, metadata),
+  };
 }

@@ -5,7 +5,13 @@
  * @since 0.2.0
  */
 
-import { dispatchRealtimeFrame, toBackendFault, watchConnection } from '@setu-ts/common';
+import {
+  BackendUnavailableError,
+  dispatchRealtimeFrame,
+  toBackendFault,
+  watchConnection,
+  withDeadline,
+} from '@setu-ts/common';
 import type { ConnectionWatch } from '@setu-ts/common';
 import type {
   IRealtimeBackplane,
@@ -75,6 +81,8 @@ export class RedisBackplane implements IRealtimeBackplane {
    * holding a reference to shut them down.
    */
   #generation = 0;
+  /** Ends an open's pending publisher-ready wait when `close()` lands (M139f audit L1). */
+  #readyWait: AbortController | undefined;
 
   /**
    * M70c: present only when both connections expose `status` and `ping`; the
@@ -229,7 +237,12 @@ export class RedisBackplane implements IRealtimeBackplane {
       owned = true;
       const clientOptions =
         this.#commandTimeoutMs === 0 ? {} : { commandTimeout: this.#commandTimeoutMs };
-      publisher = module.create(url, clientOptions);
+      // M139f X3-3: no offline queue on the publisher, so a frame published
+      // while disconnected is refused at once (and warned about by the
+      // consumer) instead of being held and delivered seconds late — or lost
+      // anyway to the reconnect race. The subscriber keeps the default: it must
+      // queue SUBSCRIBE until ready, and ioredis resubscribes it on reconnect.
+      publisher = module.create(url, { ...clientOptions, enableOfflineQueue: false });
       watches.push(watchConnection(publisher, reporter));
       try {
         subscriber = module.create(url, clientOptions);
@@ -255,6 +268,20 @@ export class RedisBackplane implements IRealtimeBackplane {
     subscriber.on('message', listener);
     try {
       await subscriber.subscribe(this.#topic);
+      // A publisher without an offline queue refuses every command until it is
+      // ready, so the pair is not handed out before then.
+      // A close() that landed while SUBSCRIBE was in flight has already moved
+      // the generation; the check below retires the pair, so do not start a
+      // wait nothing can cancel (M139f re-audit N2).
+      if (owned && generation === this.#generation) {
+        const readyWait = new AbortController();
+        this.#readyWait = readyWait;
+        try {
+          await waitForReady(publisher, this.#commandTimeoutMs, readyWait.signal);
+        } finally {
+          if (this.#readyWait === readyWait) this.#readyWait = undefined;
+        }
+      }
     } catch (error) {
       subscriber.off('message', listener);
       // Detached only after the owned connections are discarded, as close()
@@ -420,6 +447,9 @@ export class RedisBackplane implements IRealtimeBackplane {
     // has not published its connections yet, so this is what tells it to retire
     // them rather than arrive after the shutdown.
     this.#generation++;
+    // A pending publisher-ready wait ends now, so the open reaches its
+    // generation check and retires the pair — even with `commandTimeoutMs: 0`.
+    this.#readyWait?.abort();
     this.#handlers.clear();
     const subscriber = this.#subscriber;
     const publisher = this.#publisher;
@@ -518,4 +548,87 @@ export class RedisBackplane implements IRealtimeBackplane {
     // M98l: counted only after the parse, shape and own-origin filters.
     realtimeObserverOf(this)?.observe('backplane-receive', delivered);
   }
+}
+
+/** The ioredis statuses of a connection that is on its way to `ready`. */
+const CONNECTING_STATUSES: ReadonlySet<string> = new Set(['connecting', 'connect', 'reconnecting']);
+
+/**
+ * Waits for an owned publisher, created without an offline queue, to reach
+ * `ready` (M139f X3-3).
+ *
+ * Only a client that is on its way to `ready` — ioredis's `connecting`,
+ * `connect` or `reconnecting` — is waited on, for its first `'ready'` event,
+ * bounded by `timeoutMs` (`0` is unbounded, as for `commandTimeoutMs`). Any
+ * other status resolves at once: `ready`; no `status` at all (a custom
+ * module's client cannot be observed); `wait`, which never becomes ready
+ * unless something calls `connect()`; and `close`, whose publish then fails on
+ * its own. An `end`ed publisher will never be ready, so it rejects — already
+ * `end` when the wait would start, or emitting `'end'` during it. An aborted
+ * `cancel` signal (a `close()`) also resolves the wait, so the open's
+ * generation check retires the pair (M139f audit L1).
+ *
+ * @param client - The owned publisher
+ * @param timeoutMs - The bound, in milliseconds
+ * @param cancel - Aborted by `close()`
+ * @returns Resolves once the client is ready, or once `cancel` is aborted
+ * @throws {BackendUnavailableError} (as a rejection) when the bound passes
+ *   first, or when the publisher is or becomes `end`
+ */
+function waitForReady(
+  client: IRedisBackplaneClient,
+  timeoutMs: number,
+  cancel: AbortSignal,
+): Promise<void> {
+  const status = client.status;
+  if (status === 'end') return Promise.reject(publisherEnded());
+  if (status === undefined || !CONNECTING_STATUSES.has(status)) return Promise.resolve();
+  return withDeadline(
+    (signal) =>
+      new Promise<void>((resolve, reject) => {
+        const detach = (): void => {
+          client.off('ready', onReady);
+          client.off('end', onEnd);
+          cancel.removeEventListener('abort', onReady);
+        };
+        const onReady = (): void => {
+          detach();
+          resolve();
+        };
+        // A publisher whose retries are exhausted ends and never becomes ready:
+        // fail the open now instead of waiting out the bound (or forever at 0).
+        const onEnd = (): void => {
+          detach();
+          reject(publisherEnded());
+        };
+        client.on('ready', onReady);
+        client.on('end', onEnd);
+        signal.addEventListener('abort', detach, { once: true });
+        cancel.addEventListener('abort', onReady, { once: true });
+        // `withDeadline` runs this body a microtask later: a close() may already
+        // have aborted `cancel` (M139f re-audit N3), and the status may have
+        // moved since `waitForReady` read it.
+        if (cancel.aborted || client.status === 'ready') onReady();
+        else if (client.status === 'end') onEnd();
+      }),
+    {
+      timeoutMs,
+      onTimeout: () =>
+        new BackendUnavailableError('realtime-backplane-plugin: redis transport', {
+          cause: new Error(`the publisher was not ready within ${timeoutMs} ms`),
+        }),
+    },
+  );
+}
+
+/**
+ * The refusal for a publisher that ended before it was ready: its retries are
+ * spent, so it never will be (M139f).
+ *
+ * @returns The error the open rejects with
+ */
+function publisherEnded(): BackendUnavailableError {
+  return new BackendUnavailableError('realtime-backplane-plugin: redis transport', {
+    cause: new Error('the publisher connection ended before it was ready'),
+  });
 }

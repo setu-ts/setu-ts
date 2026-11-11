@@ -10,7 +10,7 @@ import type {
   IPluginContext,
   IServiceDiscovery,
 } from '@setu-ts/common';
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
+import { CAPABILITIES, createConnectionErrorReporter, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type { DiscoveryProvider, SelfRegistration } from '../interfaces/index.ts';
 import type { ServiceDiscoveryPluginOptions } from '../options.ts';
 import { resolveOptions } from '../options.ts';
@@ -73,7 +73,13 @@ export function ServiceDiscoveryPlugin(options: ServiceDiscoveryPluginOptions): 
         throw new SelfRegistrationNotSupportedError(options.provider);
       }
 
-      const service = new ServiceDiscoveryService(provider, ctx.runtime, resolved);
+      // M139f X10-3: a probe failure's reason reaches the log once per outage
+      // (`warn`), repeats at `debug`, and the recovery at `info`.
+      const reporter = createConnectionErrorReporter({
+        source: `service-discovery-plugin: ${provider.kind}`,
+        logger: () => ctx.logger,
+      });
+      const service = new ServiceDiscoveryService(provider, ctx.runtime, resolved, reporter);
       ctx.services.register<IServiceDiscovery>(CAPABILITIES.SERVICE_DISCOVERY, service);
 
       if (registration !== undefined) {

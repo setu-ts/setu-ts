@@ -484,9 +484,10 @@ into every pod at the fixed service-account path:
 - Node: `NODE_EXTRA_CA_CERTS=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt`
 
 A reader who gets the RBAC above right but omits the CA still fails — on a TLS error rather than a
-`403`, which is easy to misread as a permissions problem. The `http` option is the alternative:
-supply your own `IDiscoveryHttp` over a TLS-configured client. The full in-cluster setup, including
-token rotation, is documented in the
+`403`, which is easy to misread as a permissions problem. The readiness probe logs that cause once
+at `warn` (`service-discovery-plugin: kubernetes`), so a pod that never becomes ready says why. The
+`http` option is the alternative: supply your own `IDiscoveryHttp` over a TLS-configured client. The
+full in-cluster setup, including token rotation, is documented in the
 [service-discovery plugin](../packages/service-discovery-plugin/README.md#kubernetes-in-cluster-tls).
 
 > **Scope.** These are the platform objects. Resolving a name to instances, load-balancing across

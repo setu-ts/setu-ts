@@ -790,6 +790,12 @@ here.
   5,000-record `replaceSource`, pgvector index-shape verify, `quota.usage`, tenant repositories in a
   unit of work, mail attachments; V12-4, V12-9, V12-10, V12-36, V12-20, V12-21; ships in `0.13.0`) —
   complete (PR #578).
+- **Milestone 139f** (`service-discovery-plugin` + `database-plugin` + `realtime-backplane-plugin`
+  - `queue-plugin` + READMEs — health and failure signals that mislead the operator: the discovery
+    probe logs its cause, a pg acquire timeout reads as saturation, the backplane publisher drops
+    rather than delivers late, queue outages at `warn`/`info`, a lost connection named as one, and
+    `details: true` in alerting advice; X10-3, V8-3, X3-3, X88-9, V12-50, V12-49; ships in `0.13.0`)
+    — complete (PR #579).
 - **Next milestone** — the remaining M139 letters.
 
 ## Verification (run before declaring any work done)
