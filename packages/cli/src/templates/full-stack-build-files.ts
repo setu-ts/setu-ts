@@ -10,6 +10,7 @@
  * @module
  */
 
+import type { TargetRuntime } from '../constants.ts';
 import type { EntryPort } from './project-files.ts';
 import type { GeneratedFile } from '../utils/file-writer.ts';
 import { TAILWIND_RANGE } from './ui-tokens.ts';
@@ -350,7 +351,10 @@ export const FULL_STACK_CHECK_TASK: Readonly<Record<string, string>> = {
  * @returns The full-stack development entry file
  * @since 0.12.0
  */
-export function renderFullStackDevEntry(port?: EntryPort): {
+export function renderFullStackDevEntry(
+  port?: EntryPort,
+  targetRuntime: TargetRuntime = 'node',
+): {
   readonly path: string;
   readonly contents: string;
 } {
@@ -358,7 +362,7 @@ export function renderFullStackDevEntry(port?: EntryPort): {
     path: 'dev.ts',
     contents: `import * as vite from 'vite';
 import { createRequestHandler, RouterContextProvider, type ServerBuild } from 'react-router';
-import { CAPABILITIES, describeError, type ILogger } from '@setu-ts/common';
+import { CAPABILITIES, describeError, type ILogger, type IRuntimeServices } from '@setu-ts/common';
 import { viteDevExternals } from '@setu-ts/react-router-plugin';
 import { createRuntimeServices } from '@setu-ts/runtime';
 import { createApp } from './setu.config.ts';
@@ -374,14 +378,16 @@ import { frameworkPackages, workspaceLibraries } from './vite.config.ts';${port 
  * production entry runs the built output.
  */
 const BASE = '/__vite/';
-const runtime = createRuntimeServices();
+const runtime: IRuntimeServices = createRuntimeServices();
 const port = ${port === undefined ? `Number(runtime.env.PORT ?? '3000')` : port.symbol};
 const vitePort = ${port === undefined ? `Number(runtime.env.VITE_PORT ?? '5173')` : 'VITE_PORT'};
 
 // A file module always has a directory; the fallback only satisfies the type.
 const root = import.meta.dirname ?? '.';
 
-const viteServer = await vite.createServer({
+let server: vite.ViteDevServer | undefined;
+try {
+  server = await vite.createServer({
   root,
   configFile: \`\${root}/vite.config.ts\`,
   base: BASE,
@@ -401,7 +407,14 @@ const viteServer = await vite.createServer({
     resolve: (specifier) => import.meta.resolve(specifier),
   })],
 });
-await viteServer.listen();
+  await server.listen();
+} catch (error: unknown) {
+  await server?.close();
+  console.error(\`Startup failed: Vite could not listen on \${vitePort} (VITE_PORT): \${describeError(error)}\`);
+  console.error('${port === undefined ? 'Choose another VITE_PORT in the environment.' : 'Choose another Vite port in setu.workspace.json.'}');
+  runtime.exit(1);
+}
+const viteServer = server;
 
 // Re-read on every request, so an edited route is served without a restart.
 const loadServerBuild = async (): Promise<ServerBuild> =>
@@ -440,7 +453,7 @@ async function boot() {
   });
 
   await app.start({ port });
-  return app;
+${targetRuntime === 'deno' ? '' : '  console.log(`Listening on http://localhost:${port}/`);\n'}  return app;
 }
 
 const app = await boot().catch(async (error: unknown) => {

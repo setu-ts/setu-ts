@@ -144,6 +144,7 @@ function fullStackArgs(context: AppFactoryRenderContext): string {
             // which the plugin binds to this request. The keys come from
             // contextKeyFor(), so the copy of context-keys.server.ts inlined into
             // the server build resolves to the same key objects this module holds.
+            context.set(requestIdContext, ctx.id);
             context.set(sessionContext, getSession(ctx));
             context.set(csrfContext, getCsrfToken(ctx));
           },
@@ -181,7 +182,10 @@ function fullStackArgs(context: AppFactoryRenderContext): string {
  * winning.
  */
 const FULL_STACK_LOCAL_IMPORTS: readonly LocalImport[] = [
-  { symbols: ['csrfContext', 'sessionContext'], from: './app/server/context-keys.server.ts' },
+  {
+    symbols: ['csrfContext', 'requestIdContext', 'sessionContext'],
+    from: './app/server/context-keys.server.ts',
+  },
   // Modular from the start (M130 §3.4): the template ships src/modules/, and
   // `setu g module` adds to the barrel this import reads.
   { symbols: [REGISTER_MODULES_EXPORT], from: './src/modules/index.ts' },
@@ -245,6 +249,7 @@ export const FULL_STACK_TEMPLATE: TemplateDefinition = {
     { path: '/api/products', purpose: 'the products module API, the same service the page reads' },
   ],
   packageImports: [
+    { pkg: 'exceptions' },
     // The annotation that restores excess-property checking on the resolver
     // (X5-2). A type-only import, so it costs the generated project nothing at
     // runtime.

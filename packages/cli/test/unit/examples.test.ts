@@ -258,6 +258,29 @@ describe('example scaffolding', () => {
     expect(h.err.text()).toContain('npx @setu-ts/cli new demo --template rest');
     expect(h.fs.writes).toEqual([]);
   });
+  it('X93-3 reads the deepest proxy cause, masks credentials, and terminates cycles', async () => {
+    const deepest = Object.assign(
+      new Error('proxy refused https://alice:password@proxy.example/.'),
+      { code: 'ECONNRESET' },
+    );
+    const proxy = Object.assign(new Error('proxy connection failed', { cause: deepest }), {
+      code: 'EWRAPPER',
+    });
+    const cycle = new Error('cycle.');
+    cycle.cause = cycle;
+    for (const [cause, expected] of [
+      [
+        new Error('fetch failed', { cause: proxy }),
+        'Cause: proxy refused https://***@proxy.example/ (code ECONNRESET).',
+      ],
+      [new Error('fetch failed', { cause: cycle }), 'Cause: cycle.'],
+    ] as const) {
+      const h = harness({}, () => Promise.reject(cause));
+      expect(await h.run(['new', 'demo', '--example', 'minimal'])).toBe(1);
+      expect(h.err.text()).toContain(expected);
+      expect(h.err.text()).not.toContain('password');
+    }
+  });
   it('names a refused connection from its first attempt, and a nested cause with no code', async () => {
     const refused = Object.assign(
       new AggregateError([new Error('connect ECONNREFUSED 127.0.0.1:443')], ''),

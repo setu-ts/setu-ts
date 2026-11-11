@@ -52,7 +52,12 @@ function resolvePackages(): Record<string, string> | undefined {
         telemetry.resolve('@opentelemetry/sdk-trace-base'),
         '@opentelemetry/sdk-trace-base',
       ),
+      '@opentelemetry/instrumentation-http': dirOf(
+        telemetry.resolve('@opentelemetry/instrumentation-http'),
+        '@opentelemetry/instrumentation-http',
+      ),
       ioredis: dirOf(queue.resolve('ioredis'), 'ioredis'),
+      tsx: dirOf(createRequire(nodePath.join(packages, 'cli/package.json')).resolve('tsx'), 'tsx'),
     };
   } catch {
     return undefined;
@@ -64,6 +69,7 @@ const MAIN = `import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const sdk = require('@opentelemetry/sdk-trace-base');
 const { IORedisInstrumentation } = require('@opentelemetry/instrumentation-ioredis');
+const { HttpInstrumentation } = require('@opentelemetry/instrumentation-http');
 const exporter = new sdk.InMemorySpanExporter();
 const provider = new sdk.BasicTracerProvider({
   spanProcessors: [new sdk.SimpleSpanProcessor(exporter)],
@@ -71,6 +77,14 @@ const provider = new sdk.BasicTracerProvider({
 const instrumentation = new IORedisInstrumentation({ requireParentSpan: false });
 instrumentation.setTracerProvider(provider);
 instrumentation.enable();
+const httpInstrumentation = new HttpInstrumentation();
+httpInstrumentation.setTracerProvider(provider);
+httpInstrumentation.enable();
+await import('./view.tsx');
+const http = await import('node:http');
+await new Promise((resolve) => {
+  http.get('http://127.0.0.1:1', (res) => { res.resume(); res.on('end', resolve); }).on('error', resolve);
+});
 const { default: Redis } = await import('ioredis');
 const client = new Redis({
   port: 1,
@@ -106,16 +120,26 @@ describe('REAL: the generated preload instruments a lazily imported ioredis', ()
           TELEMETRY_PRELOAD_CONTENTS,
         );
         await nodeFs.writeFile(nodePath.join(dir, 'main.mjs'), MAIN);
+        await nodeFs.writeFile(
+          nodePath.join(dir, 'view.tsx'),
+          'export function View() { return <div>Local view</div>; }\n',
+        );
         const start = async (flags: readonly string[]) => {
-          const { stdout } = await run(process.execPath, [...flags, 'main.mjs'], { cwd: dir });
+          const { stdout, stderr } = await run(
+            process.execPath,
+            ['--import', 'tsx', ...flags, 'main.mjs'],
+            { cwd: dir },
+          );
+          expect(stderr).not.toContain('failed to wrap');
           return JSON.parse(stdout.trim()) as { wrapped: boolean; spans: string[] };
         };
         const withPreload = await start(TELEMETRY_PRELOAD_FLAG.split(' '));
         expect(withPreload.wrapped).toBe(true);
         expect(withPreload.spans).toContain('get');
+        expect(withPreload.spans).toContain('GET');
         const without = await start([]);
         expect(without.wrapped).toBe(false);
-        expect(without.spans).toEqual([]);
+        expect(without.spans).not.toContain('get');
       } finally {
         await nodeFs.rm(dir, { recursive: true, force: true });
       }

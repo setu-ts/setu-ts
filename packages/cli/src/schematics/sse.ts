@@ -8,6 +8,7 @@ import {
   routeRegistrarSymbol,
   withControllerArtifact,
 } from '../seams/http.ts';
+import { moduleRouteBase } from './module-route-base.ts';
 import { generatorMode } from '../utils/generator-mode.ts';
 import { renderModuleIndex } from '../seams/modules.ts';
 import { deriveNames } from '../utils/names.ts';
@@ -33,7 +34,7 @@ export function generateSse(
       ? [{ path: `src/hooks/use-${names.kebab}.ts`, contents: renderHook(names) }]
       : [];
   const module = options.targetModule;
-  const path = `/${module === undefined ? '' : `${module}/`}sse/${names.kebab}`;
+  const path = `${module === undefined ? '' : moduleRouteBase(module, options.plugins)}/sse/${names.kebab}`;
   const controller = classBased
     ? renderClassController(names, path)
     : renderFunctionalController(names, path);

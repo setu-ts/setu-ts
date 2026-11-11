@@ -103,7 +103,7 @@ const REACT_ROUTER_NOTE = commentLines(
     'API routes as well as SSR pages. For logic that belongs to a group of pages — ' +
     'redirecting to /login, putting the signed-in user on the loader context — export ' +
     'a `middleware` array from the route module instead. A project scaffolded with ' +
-    '`--template full-stack` has a worked example in app/middleware/, and its README ' +
+    '`--template full-stack` has a worked example in app/server/require-user.server.ts, and its README ' +
     'explains the split.',
 );
 

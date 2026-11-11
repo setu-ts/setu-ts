@@ -502,7 +502,7 @@ export async function runAdoptCommand(args: ParsedArgs, deps: AdoptDependencies)
         if (plugins.has('react-router-plugin')) {
           const devPath = joinPath(memberDir, 'dev.ts');
           const source = await readExistingText(deps.fs, devPath);
-          const standalone = renderFullStackDevEntry();
+          const standalone = renderFullStackDevEntry(undefined, profile.runtime);
           const formattedStandalone = await formatForTarget(
             [standalone],
             profile.runtime,
@@ -518,10 +518,13 @@ export async function runAdoptCommand(args: ParsedArgs, deps: AdoptDependencies)
                 [
                   {
                     path: devPath,
-                    contents: renderFullStackDevEntry({
-                      symbol: SERVICE_PORT_EXPORT,
-                      from: DISCOVERY_SPECIFIER,
-                    }).contents,
+                    contents: renderFullStackDevEntry(
+                      {
+                        symbol: SERVICE_PORT_EXPORT,
+                        from: DISCOVERY_SPECIFIER,
+                      },
+                      profile.runtime,
+                    ).contents,
                     managed: true,
                   },
                 ],

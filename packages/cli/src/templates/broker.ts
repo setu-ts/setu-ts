@@ -11,6 +11,7 @@
  *
  * @module
  */
+import { JOBS_SEAM } from '../seams/jobs.ts';
 import type { TargetRuntime } from '../constants.ts';
 import type { WorkspaceRuntimeProfile } from '../workspace/runtime-profile.ts';
 import {
@@ -176,9 +177,25 @@ export function withQueueArgs(
       withClientDependencies(
         {
           ...host,
+          extraFrameworkPackages: [...new Set([...host.extraFrameworkPackages, QUEUE_PACKAGE])],
+          files: host.files.some((file) => file.path === JOBS_SEAM.barrel)
+            ? host.files
+            : [
+                ...host.files,
+                { path: JOBS_SEAM.barrel, contents: JOBS_SEAM.renderBarrel({}), managed: true },
+              ],
+          localImports: host.localImports.some((entry) => entry.from === './src/jobs/index.ts')
+            ? host.localImports
+            : [
+                ...host.localImports,
+                { symbols: ['QUEUE_PROCESSORS'], from: './src/jobs/index.ts' },
+              ],
           appFactoryContext: {
             ...host.appFactoryContext,
-            queue: starterOptionLiteral(spec.queueArgs, spec, override),
+            queue: starterOptionLiteral(spec.queueArgs, spec, override).replace(
+              '{',
+              '{ processors: [...QUEUE_PROCESSORS],',
+            ),
           },
         },
         spec.queueClients ?? [],

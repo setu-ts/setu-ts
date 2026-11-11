@@ -1,7 +1,8 @@
 # @setu-ts/idempotency-plugin — replay keyed requests
 
 **Add it:** `setu add idempotency` adds it and inserts `IdempotencyPlugin()` into a recognized
-functional `setu.config.ts`. It provides `CAPABILITIES.IDEMPOTENCY` (`IIdempotencyService`).
+functional or full-stack `setu.config.ts`. It provides `CAPABILITIES.IDEMPOTENCY`
+(`IIdempotencyService`).
 
 ## Replay a retried payment request
 

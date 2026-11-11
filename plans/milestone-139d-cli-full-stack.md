@@ -24,91 +24,91 @@ the brief does the wrong thing. The two regressions (V12-42, V12-47) go first.
   (`exceptions`), V12-33 (`g job` on a `--queue redis` full-stack project).
 - **Generated text and gates:** V12-1 (an `--agents` scaffold fails its own `format:check`), V12-22,
   V12-23 (the full-stack brief), V12-16 (barrel headers), V12-31 (`g middleware` JSDoc), V12-32
-  (W001 on ordinary literals), V12-43, V12-45, X91-1 (same-named adoption on full-stack), X93-3
-  (the download cause chain).
+  (W001 on ordinary literals), V12-43, V12-45, X91-1 (same-named adoption on full-stack), X93-3 (the
+  download cause chain).
 
 - **In scope:** the rows above, their tests, CHANGELOG entries, and the docs each row's behaviour
   change touches (`docs/cli.md`, `packages/cli/README.md`, the AGENT_CARDs named in §3, the
   worker-pool README).
 - **NOT this milestone:**
   - **X91-9** is already fixed: PR #537 (`c1b7f52dc`, CHANGELOG `[0.12.0]`) writes `REDIS_URL` and
-    prints a headed `Connection:` line (`packages/cli/src/commands/add.ts:2105-2181`). It is
-    dropped from M139d and closes on a published re-run (C1).
-  - **A `setu check` finding for an installed but unregistered plugin** (V12-2's side note): no
-    such finding exists for any plugin (`packages/cli/src/diagnostics/ids.ts:5-28`). Registered as
-    its own DEFECTS row, not built here.
-  - **The documentation batch** (M139e), apart from the doc lines this milestone's behaviour
-    changes make false.
+    prints a headed `Connection:` line (`packages/cli/src/commands/add.ts:2105-2181`). It is dropped
+    from M139d and closes on a published re-run (C1).
+  - **A `setu check` finding for an installed but unregistered plugin** (V12-2's side note): no such
+    finding exists for any plugin (`packages/cli/src/diagnostics/ids.ts:5-28`). Registered as its
+    own DEFECTS row, not built here.
+  - **The documentation batch** (M139e), apart from the doc lines this milestone's behaviour changes
+    make false.
 
 ## 1. Contracts verified from SOURCE (not names)
 
-| Reference                          | Source (file:line)                                                                                               | Verified surface / fact                                                                                                                                                                       |
-| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Full-stack module mount            | `packages/cli/src/schematics/module-full-stack.ts:161`                                                           | a module's own routes mount at `router.group('/api/${kebab}')`; the scaffold's products module owns `/api/products` (`templates/full-stack-module-files.ts:109`)                              |
-| `--module` route/controller mount  | `schematics/http-module.ts:28`, `schematics/controller.ts:37`, `schematics/sse.ts:36`                            | mounts at `/<m>/<name>` (SSE `/<m>/sse/<name>`) on every template                                                                                                                             |
-| Page-shadow base                   | `commands/generate.ts:497-502`, refusal text `:516-517`                                                          | computes `/api/<name>` for `module`, `/<m>/<name>` otherwise; the refusal recommends the colliding recipe                                                                                     |
-| Class-based full-stack module      | `schematics/module.ts:48-56`, `templates/module-files.ts:250`                                                    | full-stack module shape only when `!classBased`; class-based mounts at `@Controller('/<name>')`                                                                                               |
-| Telemetry preload                  | `templates/telemetry-preload.ts`; written at `templates/project-files.ts:2315`                                   | `register('@opentelemetry/instrumentation/hook.mjs', import.meta.url)` with no options                                                                                                        |
-| iitm `register` data               | `node_modules/.pnpm/import-in-the-middle@3.5.3/.../create-hook.mjs:140-160, 390-406, 447-457, 719-723`           | `initialize(data)` applies `data.include`/`exclude` (bare specifier, file URL, RegExp); builtins also match `node:` forms; `onWrapFailure` prints the warning                                  |
-| Telemetry instrumentation kinds    | `packages/telemetry-plugin/src/interfaces/index.ts:44`, `plugin/telemetry-plugin.ts:65-68`                       | `http`, `fetch`, `ioredis`, `redis`, `amqplib`, `kafkajs`; fetch uses `diagnostics_channel` (no hook)                                                                                         |
-| `handleError` template             | `templates/full-stack-app-files.ts:161-171`                                                                      | logs `error('SSR request failed', { path, error: describeError(error) })`                                                                                                                     |
-| `describeError`                    | `packages/common/src/errors/describe-error.ts:51`                                                                | one line `name: message (classifiers) <- cause…`, URL userinfo masked, no stack                                                                                                               |
-| `IRequestContext.id`               | `packages/common/src/http.ts:383`                                                                                | `readonly id: string`, the id logger-plugin's request logger uses                                                                                                                             |
-| `maskUrlUserinfo`                  | `packages/common/src/index.ts:379`                                                                               | exported; masks `user:pass@` in URLs inside a string                                                                                                                                          |
-| Load context                       | `packages/react-router-plugin/src/handler/load-context.ts:28-35`; template arm `templates/full-stack.ts:141-149`  | sets services, resolver, user only; the template's `populateLoadContext` adds session and CSRF keys                                                                                           |
-| Entry renderers                    | `templates/project-files.ts:691-728` (`serveEntry`), `templates/full-stack-build-files.ts:384-450`               | nothing printed after `app.start`; Vite `createServer`/`listen` run outside `boot()`'s `.catch`                                                                                               |
-| `IApplication.start`               | `packages/common/src/plugin.ts:422-427, 467`                                                                     | `start(options?: { port?, hostname? }): Promise<void>`; no address returned                                                                                                                   |
-| Deno banner                        | `packages/runtime/src/adapters/deno/deno-http-adapter.ts:101-103`                                                | Deno prints its own listening line unless `onListen` is passed                                                                                                                                |
-| Vite strict port                   | `node_modules/.pnpm/vite@8.3.5…/dist/node/chunks/node.js:14641-14670`                                            | `strictPort` throws `Error('Port N is already in use')`, no `code`                                                                                                                            |
-| Devtool boot text                  | `devtool/dev-entry.ts:148-156`, recognition `:197-219`                                                           | prints "…The connector did not start." for every boot failure; `devEntryVariants` recognises CLI renderings by exact text                                                                     |
-| Duplicate plugin error             | `packages/kernel/src/registry/plugin-resolver.ts:106-117`                                                        | throws `Error("Duplicate plugin name '<n>'. To replace a plugin, register the replacement's services with { override: true } …")`                                                             |
-| `setu build` entries               | `commands/build.ts:163-165, 186-200`                                                                             | entries `main.ts` + `src/migrations/run.ts`; esbuild `bundle`, `esm`, `node22`, `outdir: 'dist'`, `outbase: '.'`                                                                              |
-| esbuild and `new URL`              | probe, esbuild 0.28                                                                                              | `new URL('./src/tasks/a.task.ts', import.meta.url)` is left verbatim; an extra entry `src/tasks/a.task.ts` emits `dist/src/tasks/a.task.js`                                                   |
-| Node worker host                   | `packages/runtime/src/adapters/node/node-worker-host.ts:63-65`                                                   | `new Worker(new URL(specifier))` for `file:` URLs; no extension mapping                                                                                                                       |
-| `ZERO_CONFIG_WIRINGS`              | `commands/add.ts:293-327`; `registrationLine` `:380-427`; `withPluginWiring` `:1180-1236`                        | `{ symbol }` only; emits `${symbol}()`; no mcp arm; returns `undefined` on a starter config (`:1205`)                                                                                         |
-| `McpPlugin`                        | `packages/mcp-plugin/src/plugin/mcp-plugin.ts:38`                                                                | `McpPlugin(options: McpPluginOptions)`: a required argument, every field optional                                                                                                             |
-| Full-stack config shape            | `templates/full-stack.ts:272-276`, `templates/seam.ts:193-196`                                                   | after `createFullStackAppFromConfig(...)`: `registerModules(...)` then `for (const generated of GENERATED_PLUGINS) app.register(generated);` in every full-stack scaffold                      |
-| Starter arms                       | `utils/starter-arms.ts:22-74` (`STARTER_ARMS`, `FULL_STACK_ARMS` `:48-62`)                                       | package → starter option arm, for every starter                                                                                                                                               |
-| One-package refusal                | `commands/add.ts:1600-1607`                                                                                      | `add takes one package; got N` exit 2                                                                                                                                                         |
-| View setup                         | `commands/add.ts:2217-2239`; `commands/add-view.ts:55-246`                                                       | refuses a modular project without `--module`; always plans examples, controller, Tailwind, StaticPlugin                                                                                       |
-| `Prompter`                         | `packages/cli/src/prompt.ts:40`; `cli.ts:276-282`                                                                | `select` prompt; `new` receives `deps.ask`, `add` does not                                                                                                                                    |
-| Client ranges                      | `templates/client-dependencies.ts:21-52`                                                                         | `CLIENT_RANGES` pins Redis/broker clients; `withPeerDependencies` (`add.ts:1882`) writes them                                                                                                 |
-| Backend peers                      | `packages/mail-plugin/package.json`, `database-plugin/package.json`, `vector-store-plugin/package.json`          | all `optional: true`; mail smtp `nodemailer`, ses `@aws-sdk/client-sesv2`; database drizzle `drizzle-orm`, mongodb, dynamodb, cosmos, bigtable SDKs; vector-store pgvector `drizzle-orm`      |
-| Mail provider option               | `packages/mail-plugin/src/interfaces/index.ts:39, 231-235`                                                       | `provider?: 'log' \| 'smtp' \| 'ses' \| 'sendgrid'`                                                                                                                                           |
-| `withClientScripts`                | `commands/add.ts:1086-1130`                                                                                      | writes `client` scripts only when absent and logs `left … unchanged`                                                                                                                          |
-| drizzle-kit CLI                    | orm.drizzle.team docs (generate, migrate, config file); `npm view drizzle-kit version` = `0.31.11`               | `drizzle-kit generate`, `drizzle-kit migrate`; `drizzle.config.ts` default path; `defineConfig` from `drizzle-kit`; `dialect` + `schema` required; postgres `dbCredentials: { url }`          |
-| Prisma 7 config                    | `packages/database-plugin/test/fixtures/prisma.config.ts`; README `:764-772`; `npm view prisma dist-tags`        | datasource `url` lives in `prisma.config.ts` (P1012 in schema); `latest` is `8.0.0-rc.33`, `prev` `7.10.1`, so pin `^7.10.0`                                                                  |
-| `exceptions` not addable           | `commands/add.ts:178-262` (`ADDABLE`); rule `agents/rules.ts:78-83`                                              | absent from `ADDABLE`; Rule `errors` `applies: () => true`                                                                                                                                    |
-| Full-stack package imports         | `templates/full-stack.ts:240-258`; `frameworkPackages` `templates/project-files.ts:1132-1158`                    | no `exceptions`; a no-symbol entry is pinned but not imported                                                                                                                                 |
-| Queue arm on full-stack            | `templates/broker.ts:173-188`; `seams/jobs.ts:44-53`; `commands/generate.ts:377-405`; `schematics/job.ts:65-70`  | sets the redis literal only; job seam gated on `queue-plugin`; `g job` refuses without the package; the job imports a type from `@setu-ts/queue-plugin`                                       |
-| Workspace member queue             | `packages/cli/src/workspace/member-host.ts:155-198`                                                              | sets `queue: { ...queueOptions(config) }` without the package                                                                                                                                 |
-| Brief rendering                    | `agents/render.ts:25, 103-104, 115-116, 131, 153-154`; check `commands/agents.ts:236-240`                        | no blank line around markers; padded-less tables; `--check` compares bytes                                                                                                                    |
-| Deno fmt settings                  | `templates/root-settings.ts:31-36`                                                                               | no `proseWrap`, so `deno fmt` defaults to `always`                                                                                                                                            |
-| Brief budget                       | `packages/cli/test/unit/agents/budget.test.ts`                                                                   | 13312-byte cap; full brief 12877 bytes unformatted, 19040 once Prettier pads tables                                                                                                           |
-| Installed set                      | `agents/facts.ts:79`; `utils/plugin-detector.ts:61-79`; `agents/not-installed.ts:35-44`                         | direct deps only; every `ADDABLE` not in it is "Not installed"                                                                                                                                |
-| Rule 11                            | `agents/rules.ts:118, 124`                                                                                       | "Loaders use service context keys from setu.config.ts"; scaffold uses `getService(context, TOKEN)` (`templates/full-stack-app-files.ts:569`)                                                  |
-| Barrel headers                     | `seams/jobs.ts:14, 24-26`; `seams/plugins.ts:49-51, 63`; `seams/seam-spec.ts:284-301`                            | fixed text naming `QueuePlugin(...)` and `createApplication({ plugins })`                                                                                                                     |
-| Middleware JSDoc                   | `schematics/middleware.ts:100-107`                                                                               | names `app/middleware/`; the example is `app/server/require-user.server.ts`                                                                                                                   |
-| W001 lexer                         | `devtool/sources.ts:550-646`; `diagnostics/wiring.ts:10-31`; `diagnostics/modules.ts:66`; `diagnose.ts:313-330`  | stops on the first backtick, `/`, `\`, non-ASCII, computed access; one stop makes the whole file unclassifiable                                                                               |
-| Strict-mask consumers              | `utils/modular-registration.ts:89`, `module-declaration.ts:96`, `module-switch.ts:223`, `starter-arms.ts:87`     | automatic edits and the devtool rely on the strict lexer                                                                                                                                      |
-| Workers devtool comment            | `templates/project-files.ts:617-618`; `runtime/src/diagnostics/local-diagnostics-listener.ts:15-19, 51-58`       | comment says "Deno-only"; the listener supports Deno and Node                                                                                                                                 |
-| k8s README flags                   | `workspace/k8s.ts:313-315`; `commands/workspace-ops.ts:99, 116`                                                  | flag list omits `--pull-secret <name>` (repeatable)                                                                                                                                           |
-| Adoption on full-stack             | `utils/module-switch.ts:314-320`; `generate.ts:602`; `seams/modules.ts:98-108`                                   | any same-named adoption refused on full-stack; the index registers the service only when the scan admits `<m>.token.ts`                                                                      |
-| Download cause                     | `examples/new.ts:37-50, 176`; `packages/create/src/bin.ts`                                                       | reads `cause.cause` only, appends `.`; `create` only calls `runMain(['new', …])`                                                                                                              |
-| undici proxy 403 chain             | measured, Node 24.22.1 / undici 7.30.1                                                                           | `TypeError fetch failed` → `DOMException Request was cancelled.` → `RequestAbortedError Proxy response (403) !== 200 when HTTP Tunneling` (`UND_ERR_ABORTED`)                                 |
-| X91-9 already fixed                | `commands/add.ts:2105-2181`; CHANGELOG `[0.12.0]` (PR #537)                                                      | headed `Connection: REDIS_URL …`, written to the declared env file and its example                                                                                                            |
+| Reference                         | Source (file:line)                                                                                               | Verified surface / fact                                                                                                                                                                  |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Full-stack module mount           | `packages/cli/src/schematics/module-full-stack.ts:161`                                                           | a module's own routes mount at `router.group('/api/${kebab}')`; the scaffold's products module owns `/api/products` (`templates/full-stack-module-files.ts:109`)                         |
+| `--module` route/controller mount | `schematics/http-module.ts:28`, `schematics/controller.ts:37`, `schematics/sse.ts:36`                            | mounts at `/<m>/<name>` (SSE `/<m>/sse/<name>`) on every template                                                                                                                        |
+| Page-shadow base                  | `commands/generate.ts:497-502`, refusal text `:516-517`                                                          | computes `/api/<name>` for `module`, `/<m>/<name>` otherwise; the refusal recommends the colliding recipe                                                                                |
+| Class-based full-stack module     | `schematics/module.ts:48-56`, `templates/module-files.ts:250`                                                    | full-stack module shape only when `!classBased`; class-based mounts at `@Controller('/<name>')`                                                                                          |
+| Telemetry preload                 | `templates/telemetry-preload.ts`; written at `templates/project-files.ts:2315`                                   | `register('@opentelemetry/instrumentation/hook.mjs', import.meta.url)` with no options                                                                                                   |
+| iitm `register` data              | `node_modules/.pnpm/import-in-the-middle@3.5.3/.../create-hook.mjs:140-160, 390-406, 447-457, 719-723`           | `initialize(data)` applies `data.include`/`exclude` (bare specifier, file URL, RegExp); builtins also match `node:` forms; `onWrapFailure` prints the warning                            |
+| Telemetry instrumentation kinds   | `packages/telemetry-plugin/src/interfaces/index.ts:44`, `plugin/telemetry-plugin.ts:65-68`                       | `http`, `fetch`, `ioredis`, `redis`, `amqplib`, `kafkajs`; fetch uses `diagnostics_channel` (no hook)                                                                                    |
+| `handleError` template            | `templates/full-stack-app-files.ts:161-171`                                                                      | logs `error('SSR request failed', { path, error: describeError(error) })`                                                                                                                |
+| `describeError`                   | `packages/common/src/errors/describe-error.ts:51`                                                                | one line `name: message (classifiers) <- cause…`, URL userinfo masked, no stack                                                                                                          |
+| `IRequestContext.id`              | `packages/common/src/http.ts:383`                                                                                | `readonly id: string`, the id logger-plugin's request logger uses                                                                                                                        |
+| `maskUrlUserinfo`                 | `packages/common/src/index.ts:379`                                                                               | exported; masks `user:pass@` in URLs inside a string                                                                                                                                     |
+| Load context                      | `packages/react-router-plugin/src/handler/load-context.ts:28-35`; template arm `templates/full-stack.ts:141-149` | sets services, resolver, user only; the template's `populateLoadContext` adds session and CSRF keys                                                                                      |
+| Entry renderers                   | `templates/project-files.ts:691-728` (`serveEntry`), `templates/full-stack-build-files.ts:384-450`               | nothing printed after `app.start`; Vite `createServer`/`listen` run outside `boot()`'s `.catch`                                                                                          |
+| `IApplication.start`              | `packages/common/src/plugin.ts:422-427, 467`                                                                     | `start(options?: { port?, hostname? }): Promise<void>`; no address returned                                                                                                              |
+| Deno banner                       | `packages/runtime/src/adapters/deno/deno-http-adapter.ts:101-103`                                                | Deno prints its own listening line unless `onListen` is passed                                                                                                                           |
+| Vite strict port                  | `node_modules/.pnpm/vite@8.3.5…/dist/node/chunks/node.js:14641-14670`                                            | `strictPort` throws `Error('Port N is already in use')`, no `code`                                                                                                                       |
+| Devtool boot text                 | `devtool/dev-entry.ts:148-156`, recognition `:197-219`                                                           | prints "…The connector did not start." for every boot failure; `devEntryVariants` recognises CLI renderings by exact text                                                                |
+| Duplicate plugin error            | `packages/kernel/src/registry/plugin-resolver.ts:106-117`                                                        | throws `Error("Duplicate plugin name '<n>'. To replace a plugin, register the replacement's services with { override: true } …")`                                                        |
+| `setu build` entries              | `commands/build.ts:163-165, 186-200`                                                                             | entries `main.ts` + `src/migrations/run.ts`; esbuild `bundle`, `esm`, `node22`, `outdir: 'dist'`, `outbase: '.'`                                                                         |
+| esbuild and `new URL`             | probe, esbuild 0.28                                                                                              | `new URL('./src/tasks/a.task.ts', import.meta.url)` is left verbatim; an extra entry `src/tasks/a.task.ts` emits `dist/src/tasks/a.task.js`                                              |
+| Node worker host                  | `packages/runtime/src/adapters/node/node-worker-host.ts:63-65`                                                   | `new Worker(new URL(specifier))` for `file:` URLs; no extension mapping                                                                                                                  |
+| `ZERO_CONFIG_WIRINGS`             | `commands/add.ts:293-327`; `registrationLine` `:380-427`; `withPluginWiring` `:1180-1236`                        | `{ symbol }` only; emits `${symbol}()`; no mcp arm; returns `undefined` on a starter config (`:1205`)                                                                                    |
+| `McpPlugin`                       | `packages/mcp-plugin/src/plugin/mcp-plugin.ts:38`                                                                | `McpPlugin(options: McpPluginOptions)`: a required argument, every field optional                                                                                                        |
+| Full-stack config shape           | `templates/full-stack.ts:272-276`, `templates/seam.ts:193-196`                                                   | after `createFullStackAppFromConfig(...)`: `registerModules(...)` then `for (const generated of GENERATED_PLUGINS) app.register(generated);` in every full-stack scaffold                |
+| Starter arms                      | `utils/starter-arms.ts:22-74` (`STARTER_ARMS`, `FULL_STACK_ARMS` `:48-62`)                                       | package → starter option arm, for every starter                                                                                                                                          |
+| One-package refusal               | `commands/add.ts:1600-1607`                                                                                      | `add takes one package; got N` exit 2                                                                                                                                                    |
+| View setup                        | `commands/add.ts:2217-2239`; `commands/add-view.ts:55-246`                                                       | refuses a modular project without `--module`; always plans examples, controller, Tailwind, StaticPlugin                                                                                  |
+| `Prompter`                        | `packages/cli/src/prompt.ts:40`; `cli.ts:276-282`                                                                | `select` prompt; `new` receives `deps.ask`, `add` does not                                                                                                                               |
+| Client ranges                     | `templates/client-dependencies.ts:21-52`                                                                         | `CLIENT_RANGES` pins Redis/broker clients; `withPeerDependencies` (`add.ts:1882`) writes them                                                                                            |
+| Backend peers                     | `packages/mail-plugin/package.json`, `database-plugin/package.json`, `vector-store-plugin/package.json`          | all `optional: true`; mail smtp `nodemailer`, ses `@aws-sdk/client-sesv2`; database drizzle `drizzle-orm`, mongodb, dynamodb, cosmos, bigtable SDKs; vector-store pgvector `drizzle-orm` |
+| Mail provider option              | `packages/mail-plugin/src/interfaces/index.ts:39, 231-235`                                                       | `provider?: 'log' \| 'smtp' \| 'ses' \| 'sendgrid'`                                                                                                                                      |
+| `withClientScripts`               | `commands/add.ts:1086-1130`                                                                                      | writes `client` scripts only when absent and logs `left … unchanged`                                                                                                                     |
+| drizzle-kit CLI                   | orm.drizzle.team docs (generate, migrate, config file); `npm view drizzle-kit version` = `0.31.11`               | `drizzle-kit generate`, `drizzle-kit migrate`; `drizzle.config.ts` default path; `defineConfig` from `drizzle-kit`; `dialect` + `schema` required; postgres `dbCredentials: { url }`     |
+| Prisma 7 config                   | `packages/database-plugin/test/fixtures/prisma.config.ts`; README `:764-772`; `npm view prisma dist-tags`        | datasource `url` lives in `prisma.config.ts` (P1012 in schema); `latest` is `8.0.0-rc.33`, `prev` `7.10.1`, so pin `^7.10.0`                                                             |
+| `exceptions` not addable          | `commands/add.ts:178-262` (`ADDABLE`); rule `agents/rules.ts:78-83`                                              | absent from `ADDABLE`; Rule `errors` `applies: () => true`                                                                                                                               |
+| Full-stack package imports        | `templates/full-stack.ts:240-258`; `frameworkPackages` `templates/project-files.ts:1132-1158`                    | no `exceptions`; a no-symbol entry is pinned but not imported                                                                                                                            |
+| Queue arm on full-stack           | `templates/broker.ts:173-188`; `seams/jobs.ts:44-53`; `commands/generate.ts:377-405`; `schematics/job.ts:65-70`  | sets the redis literal only; job seam gated on `queue-plugin`; `g job` refuses without the package; the job imports a type from `@setu-ts/queue-plugin`                                  |
+| Workspace member queue            | `packages/cli/src/workspace/member-host.ts:155-198`                                                              | sets `queue: { ...queueOptions(config) }` without the package                                                                                                                            |
+| Brief rendering                   | `agents/render.ts:25, 103-104, 115-116, 131, 153-154`; check `commands/agents.ts:236-240`                        | no blank line around markers; padded-less tables; `--check` compares bytes                                                                                                               |
+| Deno fmt settings                 | `templates/root-settings.ts:31-36`                                                                               | no `proseWrap`, so `deno fmt` defaults to `always`                                                                                                                                       |
+| Brief budget                      | `packages/cli/test/unit/agents/budget.test.ts`                                                                   | 13312-byte cap; full brief 12877 bytes unformatted, 19040 once Prettier pads tables                                                                                                      |
+| Installed set                     | `agents/facts.ts:79`; `utils/plugin-detector.ts:61-79`; `agents/not-installed.ts:35-44`                          | direct deps only; every `ADDABLE` not in it is "Not installed"                                                                                                                           |
+| Rule 11                           | `agents/rules.ts:118, 124`                                                                                       | "Loaders use service context keys from setu.config.ts"; scaffold uses `getService(context, TOKEN)` (`templates/full-stack-app-files.ts:569`)                                             |
+| Barrel headers                    | `seams/jobs.ts:14, 24-26`; `seams/plugins.ts:49-51, 63`; `seams/seam-spec.ts:284-301`                            | fixed text naming `QueuePlugin(...)` and `createApplication({ plugins })`                                                                                                                |
+| Middleware JSDoc                  | `schematics/middleware.ts:100-107`                                                                               | names `app/middleware/`; the example is `app/server/require-user.server.ts`                                                                                                              |
+| W001 lexer                        | `devtool/sources.ts:550-646`; `diagnostics/wiring.ts:10-31`; `diagnostics/modules.ts:66`; `diagnose.ts:313-330`  | stops on the first backtick, `/`, `\`, non-ASCII, computed access; one stop makes the whole file unclassifiable                                                                          |
+| Strict-mask consumers             | `utils/modular-registration.ts:89`, `module-declaration.ts:96`, `module-switch.ts:223`, `starter-arms.ts:87`     | automatic edits and the devtool rely on the strict lexer                                                                                                                                 |
+| Workers devtool comment           | `templates/project-files.ts:617-618`; `runtime/src/diagnostics/local-diagnostics-listener.ts:15-19, 51-58`       | comment says "Deno-only"; the listener supports Deno and Node                                                                                                                            |
+| k8s README flags                  | `workspace/k8s.ts:313-315`; `commands/workspace-ops.ts:99, 116`                                                  | flag list omits `--pull-secret <name>` (repeatable)                                                                                                                                      |
+| Adoption on full-stack            | `utils/module-switch.ts:314-320`; `generate.ts:602`; `seams/modules.ts:98-108`                                   | any same-named adoption refused on full-stack; the index registers the service only when the scan admits `<m>.token.ts`                                                                  |
+| Download cause                    | `examples/new.ts:37-50, 176`; `packages/create/src/bin.ts`                                                       | reads `cause.cause` only, appends `.`; `create` only calls `runMain(['new', …])`                                                                                                         |
+| undici proxy 403 chain            | measured, Node 24.22.1 / undici 7.30.1                                                                           | `TypeError fetch failed` → `DOMException Request was cancelled.` → `RequestAbortedError Proxy response (403) !== 200 when HTTP Tunneling` (`UND_ERR_ABORTED`)                            |
+| X91-9 already fixed               | `commands/add.ts:2105-2181`; CHANGELOG `[0.12.0]` (PR #537)                                                      | headed `Connection: REDIS_URL …`, written to the declared env file and its example                                                                                                       |
 
 ## 2. Committed-doc conflicts — resolved here, shipped as named doc deliverables
 
-| #   | Conflict                                                                                                                          | Resolution (picked side)                                                    | Doc deliverable (same PR)                                                                                                  |
-| --- | --------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| C1  | ROADMAP M139d lists X91-9; the source and CHANGELOG `[0.12.0]` show it fixed by #537                                              | the source; X91-9 leaves M139d and closes on a published re-run             | ROADMAP M139d section: drop X91-9 with a "fixed in 0.12.0 by #537" note                                                    |
-| C2  | `docs/cli.md:416-418, 620` and the `generate.ts:516-517` refusal give the colliding `g module api` + `g route … --module api` recipe | §3.1's mount                                                                | `docs/cli.md` recipe and mount sentence; the refusal text; `packages/cli/README.md` where it states route paths            |
-| C3  | `packages/cli/README.md:830` says "twelve" zero-config providers; `ZERO_CONFIG_WIRINGS` has 20 (21 with mcp)                      | the source                                                                  | README count, plus the full-stack insertion sentence from §3.10                                                            |
-| C4  | worker-pool, idempotency, view and mcp AGENT_CARDs say `add` inserts only into a functional `setu.config.ts`                      | §3.10: full-stack inserts too                                               | the four cards' *Add it* lines                                                                                             |
-| C5  | `worker-pool-plugin/README.md:76-79` and its AGENT_CARD give a task specifier that `setu build` cannot ship                       | §3.8                                                                        | worker-pool README "Building with `setu build`", AGENT_CARD, `docs/cli.md` build section, `apps/worker-pool/README.md`     |
-| C6  | `docs/cli.md:229-230` quotes "The connector did not start."                                                                       | §3.6's wording                                                              | `docs/cli.md`                                                                                                              |
-| C7  | `database-plugin/AGENT_CARD.md:3-4` says add `DatabasePlugin(...)`, duplicating the starter's on a starter-composed project       | the starter arm                                                             | one sentence on the card: with a starter, set its `database` option                                                        |
+| #   | Conflict                                                                                                                             | Resolution (picked side)                                        | Doc deliverable (same PR)                                                                                              |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| C1  | ROADMAP M139d lists X91-9; the source and CHANGELOG `[0.12.0]` show it fixed by #537                                                 | the source; X91-9 leaves M139d and closes on a published re-run | ROADMAP M139d section: drop X91-9 with a "fixed in 0.12.0 by #537" note                                                |
+| C2  | `docs/cli.md:416-418, 620` and the `generate.ts:516-517` refusal give the colliding `g module api` + `g route … --module api` recipe | §3.1's mount                                                    | `docs/cli.md` recipe and mount sentence; the refusal text; `packages/cli/README.md` where it states route paths        |
+| C3  | `packages/cli/README.md:830` says "twelve" zero-config providers; `ZERO_CONFIG_WIRINGS` has 20 (21 with mcp)                         | the source                                                      | README count, plus the full-stack insertion sentence from §3.10                                                        |
+| C4  | worker-pool, idempotency, view and mcp AGENT_CARDs say `add` inserts only into a functional `setu.config.ts`                         | §3.10: full-stack inserts too                                   | the four cards' _Add it_ lines                                                                                         |
+| C5  | `worker-pool-plugin/README.md:76-79` and its AGENT_CARD give a task specifier that `setu build` cannot ship                          | §3.8                                                            | worker-pool README "Building with `setu build`", AGENT_CARD, `docs/cli.md` build section, `apps/worker-pool/README.md` |
+| C6  | `docs/cli.md:229-230` quotes "The connector did not start."                                                                          | §3.6's wording                                                  | `docs/cli.md`                                                                                                          |
+| C7  | `database-plugin/AGENT_CARD.md:3-4` says add `DatabasePlugin(...)`, duplicating the starter's on a starter-composed project          | the starter arm                                                 | one sentence on the card: with a starter, set its `database` option                                                    |
 
 ## 3. Design decisions
 
@@ -139,8 +139,8 @@ the brief does the wrong thing. The two regressions (V12-42, V12-47) go first.
   instrumentation hooks.
 - **Why:** with no include list import-in-the-middle wraps every ESM import, including the app's
   `.tsx` views it cannot parse. The dynamic `createAddHookMessageChannel` form would need
-  `import-in-the-middle` as a direct project dependency and an acknowledgement after telemetry-plugin
-  registers its hooks, which the preload cannot wait for.
+  `import-in-the-middle` as a direct project dependency and an acknowledgement after
+  telemetry-plugin registers its hooks, which the preload cannot wait for.
 - **Test home:** `test/integration/telemetry-preload-real.test.ts` (guarded real test): import a
   local `.tsx` and assert no `failed to wrap` on stderr; keep the `ioredis` positive control; add an
   `http` span positive control. `test/unit/telemetry-preload.test.ts` for the text and the data
@@ -163,9 +163,9 @@ the brief does the wrong thing. The two regressions (V12-42, V12-47) go first.
 
 - **Decision:** templates only, no kernel change. After a successful `boot()`, `serveEntry`,
   `renderFullStackDevEntry` and the devtool `renderEntry` print
-  `Listening on http://localhost:<port>/` with `console.log`. The line is not emitted on Deno,
-  whose runtime already prints its own banner; the full-stack dev entry has its runtime threaded in
-  for that.
+  `Listening on http://localhost:<port>/` with `console.log`. The line is not emitted on Deno, whose
+  runtime already prints its own banner; the full-stack dev entry has its runtime threaded in for
+  that.
 - **Why:** every generated entry binds a known non-zero port, so the address is known at render
   time; an `onListen` contract would change `common`, `kernel` and `runtime` for a line the
   templates can print.
@@ -198,10 +198,10 @@ the brief does the wrong thing. The two regressions (V12-42, V12-47) go first.
 
 - **Decision:** kernel-only wording:
   `Duplicate plugin name '<n>': it is registered twice. A starter (createRestApp, createMicroserviceApp, createFullStackApp, createFullStackAppFromConfig) may already include it; configure it through the starter's option instead of registering it again. To replace a plugin's services, register them with { override: true } under a different plugin name.`
-  The stale literal in `packages/multi-tenancy-plugin/test/unit/multi-tenancy-plugin.test.ts:426-431`
-  is updated.
-- **Why:** the kernel cannot know which starter registered a plugin without a provenance contract
-  in `common`, which is too much for one message.
+  The stale literal in
+  `packages/multi-tenancy-plugin/test/unit/multi-tenancy-plugin.test.ts:426-431` is updated.
+- **Why:** the kernel cannot know which starter registered a plugin without a provenance contract in
+  `common`, which is too much for one message.
 - **Test home:** `packages/kernel/test/unit/plugin-resolver.test.ts:89-91` (assert the starter
   sentence).
 
@@ -213,43 +213,49 @@ the brief does the wrong thing. The two regressions (V12-42, V12-47) go first.
   each literal to the `.js` path relative to the bundle that contains it. esbuild runs `onLoad` once
   per module per build, and `setu.config.ts` is bundled into both `dist/main.js` and
   `dist/src/migrations/run.js` (the runner boots the app), so one rewrite cannot be right for both:
-  `setu build` therefore runs one esbuild build per application entry (`main.ts`; the migrations
-  runner when present), each with its own rewrite base, plus the task entries in the `main.ts`
-  build. All outputs stay in memory and pass the existing development-import gate before `dist/` is
-  replaced, as today. A `*.task.ts` reference that
-  is not a string literal fails the build with a message naming the file and line. `--dry-run`
-  lists the task outputs. Bun and Deno images run source, so nothing changes there; `setu build` is
-  Node-only.
+  `setu build` therefore runs one esbuild build per entry: `main.ts`, the migrations runner when
+  present, and each task module (a task can reference another task through a shared helper), each
+  build with its own rewrite base, which is that entry's output directory. All outputs stay in
+  memory and pass the existing development-import gate before `dist/` is replaced, as today. A
+  `*.task.ts` reference that is not a string literal fails the build with a message naming the file
+  and line. `--dry-run` lists the task outputs. Bun and Deno images run source, so nothing changes
+  there; `setu build` is Node-only.
 - **Why:** the source specifier stays identical in development and production, the way Vite treats
   workers, and the README example keeps working.
 - **Test home:** `test/unit/build-command.test.ts` (injected `deps.bundle`: entries include the
   task, rewritten text, non-literal refusal, dry-run listing); `test/e2e/build-e2e.test.ts` (a
   scaffold running a task through `WorkerPoolPlugin` after `setu build`).
 
-### 3.9 V12-2: `add mcp` wires `McpPlugin({})`
+### 3.9 V12-2: `add mcp` prints `McpPlugin({})` and when it can boot
 
-- **Decision:** `IPluginWiring` gains `args?: string`; `['mcp-plugin', { symbol: 'McpPlugin', args: '{}' }]`
-  joins `ZERO_CONFIG_WIRINGS`; `registrationLine`, `withPluginWiring` and §3.10's insert use
-  `args` (default empty). The mcp AGENT_CARD says `add` wires it.
-- **Why:** `McpPlugin` takes a required options argument, so `McpPlugin()` would not type-check.
-- **Test home:** `test/unit/commands/add.test.ts` (`describe('withPluginWiring')`);
-  `test/integration/zero-config-wirings.test.ts` (generalised to `[factory, args]`, boots
-  `McpPlugin({})`).
+- **Decision:** `IPluginWiring` gains `args?: string` (default empty), used by `registrationLine`,
+  `withPluginWiring` and §3.10's insert. `mcp-plugin` is NOT in `ZERO_CONFIG_WIRINGS`:
+  `registrationLine` gains an `mcp-plugin` arm printing `McpPlugin({})` with the note that the app
+  boots with it only once at least one route is marked with `mcpTool()` or `@McpTool()`. The mcp
+  AGENT_CARD says the same.
+- **Why:** `McpPlugin` takes a required options argument, so `McpPlugin()` would not type-check; and
+  `packages/mcp-plugin/src/compile/discovery.ts:53-54` throws
+  `MCP requires at least one tool at bootstrap.`, so inserting it into an app with no marked route
+  would break the app's next start.
+- **Test home:** `test/unit/commands/add.test.ts` (`add mcp` changes no config and prints
+  `McpPlugin({})` with the tool note; `args` drives `withPluginWiring` for a fixture wiring);
+  `test/integration/zero-config-wirings.test.ts` (generalised to `[factory, args]`; mcp not in the
+  table).
 
 ### 3.10 V12-3: full-stack inserts a zero-config plugin after the factory
 
 - **Decision:** `withFactoryRegistration(source, bare, args)` in `add.ts`, used when the config
   composes `createFullStackAppFromConfig` and the starter does not own the arm. It finds exactly one
-  masked-code match of the CLI-emitted `for (const generated of GENERATED_PLUGINS) app.register(generated);`
-  inside the factory and inserts `app.register(<Symbol>(<args>));` on its own line above it at the
-  same indent, with the import. It reuses the existing refusals (provider binding, specifier count,
-  existing reference, barrel import plan); any doubt prints today's guidance. C3 and C4 update the
-  README and cards.
+  masked-code match of the CLI-emitted
+  `for (const generated of GENERATED_PLUGINS) app.register(generated);` inside the factory and
+  inserts `app.register(<Symbol>(<args>));` on its own line above it at the same indent, with the
+  import. It reuses the existing refusals (provider binding, specifier count, existing reference,
+  barrel import plan); any doubt prints today's guidance. C3 and C4 update the README and cards.
 - **Why:** the loop is a single CLI-emitted anchor in every full-stack config; the factory call has
   no `plugins` option.
-- **Test home:** `test/unit/commands/starter-wiring-output.test.ts` (scaffold full-stack, `add
-  worker-pool`, the line and import inserted, output type-checks; storage keeps the arm guidance);
-  `test/unit/commands/add.test.ts` (alias, existing use, two loop lines → guidance).
+- **Test home:** `test/unit/commands/starter-wiring-output.test.ts` (scaffold full-stack,
+  `add worker-pool`, the line and import inserted, output type-checks; storage keeps the arm
+  guidance); `test/unit/commands/add.test.ts` (alias, existing use, two loop lines → guidance).
 
 ### 3.11 V12-25: `setu add` takes several packages (maintainer's choice)
 
@@ -259,8 +265,8 @@ the brief does the wrong thing. The two regressions (V12-42, V12-47) go first.
   package it fits. The body becomes `addOne(bare, …)`, run in the given order, each re-reading the
   disk; each package's output is headed `@setu-ts/<pkg>:`; one `Next:` install command and one
   agents hint print at the end. On a failure it stops and reports
-  `added a, b; stopped at c; d not attempted`. `--dry-run` previews each package against the disk
-  as it stands.
+  `added a, b; stopped at c; d not attempted`. `--dry-run` previews each package against the disk as
+  it stands.
 - **Why:** `add` is idempotent, so re-running after a stop is safe.
 - **Test home:** `test/unit/positional-refusal.test.ts` and the X18-1 case in
   `test/unit/commands/add.test.ts` (now "adds both"); new cases for a misapplied flag and an unknown
@@ -282,15 +288,16 @@ the brief does the wrong thing. The two regressions (V12-42, V12-47) go first.
 ### 3.13 V12-27: `add mail|database|vector-store` records the chosen backend's peer
 
 - **Decision:** flags named after each plugin's option: `--provider` (mail:
-  `log|smtp|ses|sendgrid`), `--type` (database: `memory|drizzle|prisma|mongodb|dynamodb|cosmos|bigtable`),
-  `--adapter` (vector-store: `memory|pgvector|qdrant`). On a TTY with no flag, `add` asks through
-  `Prompter.select` (`AddCommandDependencies` gains an optional `ask`, supplied by `src/main.ts`
-  only when stdin is a terminal, exactly as `new` receives it, and threaded through `cli.ts`); without a TTY, or
-  with `--yes`, the default arm is used (`log`, `memory`, `memory`). A `BACKEND_PEERS` table
-  (plugin → arm → peers) feeds `peerPackages`; ranges come from new `CLIENT_RANGES` entries, and a
-  unit test asserts each equals the plugin's own `peerDependencies`. `add` never writes backend
-  config: it prints the arm's registration line (added to `test/fixtures/registration-lines.ts` so
-  it type-checks) and names app-side packages that are not plugin peers (`pg`, `@prisma/client`,
+  `log|smtp|ses|sendgrid`), `--type` (database:
+  `memory|drizzle|prisma|mongodb|dynamodb|cosmos|bigtable`), `--adapter` (vector-store:
+  `memory|pgvector|qdrant`). On a TTY with no flag, `add` asks through `Prompter.select`
+  (`AddCommandDependencies` gains an optional `ask`, supplied by `src/main.ts` only when stdin is a
+  terminal, exactly as `new` receives it, and threaded through `cli.ts`); without a TTY, or with
+  `--yes`, the default arm is used (`log`, `memory`, `memory`). A `BACKEND_PEERS` table (plugin →
+  arm → peers) feeds `peerPackages`; ranges come from new `CLIENT_RANGES` entries, and a unit test
+  asserts each equals the plugin's own `peerDependencies`. `add` never writes backend config: it
+  prints the arm's registration line (added to `test/fixtures/registration-lines.ts` so it
+  type-checks) and names app-side packages that are not plugin peers (`pg`, `@prisma/client`,
   `@prisma/adapter-pg`) in the printed install command without recording them. For mail a bare
   `MailPlugin()` is inserted only for `log`.
 - **Why:** the maintainer's proposed fix; every non-default arm needs app-owned objects or
@@ -302,10 +309,11 @@ the brief does the wrong thing. The two regressions (V12-42, V12-47) go first.
 ### 3.14 V12-28: `add database` writes migration scripts for its backend
 
 - **Decision:** `withDatabaseScripts`, modelled on `withClientScripts`, never overwrites a script.
-  - **drizzle** (Node, Bun): scripts `db:generate: drizzle-kit generate`, `db:migrate: drizzle-kit migrate`;
-    devDependency `drizzle-kit` `^0.31.11`; a create-only `drizzle.config.ts` using `defineConfig`
-    from `drizzle-kit` with `dialect` from `--dialect postgresql|mysql|sqlite` (default
-    `postgresql`), `schema: './src/database/schema.ts'`, `out: './drizzle'` and
+  - **drizzle** (Node, Bun): scripts `db:generate: drizzle-kit generate`,
+    `db:migrate: drizzle-kit migrate`; devDependency `drizzle-kit` `^0.31.11`; a create-only
+    `drizzle.config.ts` using `defineConfig` from `drizzle-kit` with `dialect` from
+    `--dialect postgresql|mysql|sqlite` (default `postgresql`),
+    `schema: './src/database/schema.ts'`, `out: './drizzle'` and
     `dbCredentials: { url: process.env.DATABASE_URL ?? '' }`.
   - **prisma:** scripts `db:generate: prisma generate`, `db:migrate: prisma migrate dev`,
     `db:deploy: prisma migrate deploy`; devDependency `prisma` `^7.10.0`; a create-only
@@ -341,8 +349,8 @@ the brief does the wrong thing. The two regressions (V12-42, V12-47) go first.
   in the arm (the same literal `setu add queue` writes). Workspace full-stack members get the same
   in `workspace/member-host.ts`. `g job` is unchanged.
 - **Why:** relaxing `g job` alone would generate an import that resolves only by hoisting.
-- **Test home:** `test/unit/broker-flags.test.ts` (manifest, `src/jobs/index.ts`, processors);
-  a `generate job` case after `new --queue redis`; `test/unit/full-stack-options-typecheck.test.ts`;
+- **Test home:** `test/unit/broker-flags.test.ts` (manifest, `src/jobs/index.ts`, processors); a
+  `generate job` case after `new --queue redis`; `test/unit/full-stack-options-typecheck.test.ts`;
   `test/e2e/full-stack-broker-e2e.test.ts` gains a `g job` step and boot.
 
 ### 3.17 V12-1: the brief survives the project's formatter
@@ -364,7 +372,7 @@ the brief does the wrong thing. The two regressions (V12-42, V12-47) go first.
 - **Decision:** packages in the composing starter's `STARTER_ARMS` entry leave "Not installed" and
   are listed under one heading, "Provided by `@setu-ts/<starter>`: configure its option in
   setu.config.ts; never `setu add` or register a second instance. Some options are off until
-  configured.", which also states that a card's *Add it* line does not apply to them. Rule 4's gate
+  configured.", which also states that a card's _Add it_ line does not apply to them. Rule 4's gate
   counts only the remaining list.
 - **Why:** the starter registers them; `setu add` already uses `STARTER_ARMS` for the same purpose.
 - **Test home:** `test/unit/agents/render-brief.test.ts` (full-stack: `queue` under the starter
@@ -382,17 +390,17 @@ the brief does the wrong thing. The two regressions (V12-42, V12-47) go first.
   - **V12-31:** the middleware JSDoc names `app/server/require-user.server.ts`.
   - **V12-43:** the Workers config says the devtool's diagnostics listener runs only on Deno and
     Node.
-  - **V12-45:** `k8s/README.md` lists `--pull-secret <name>` (repeatable, an existing registry Secret
-    in the namespace).
+  - **V12-45:** `k8s/README.md` lists `--pull-secret <name>` (repeatable, an existing registry
+    Secret in the namespace).
 - **Test home:** `test/unit/agents/rule-blocks.test.ts`; `test/unit/seam-wiring.test.ts`;
   `test/unit/node-redis-cli.test.ts` deltas; `test/unit/schematics/middleware.test.ts:65`;
   `test/unit/config-module.test.ts`; `test/unit/k8s-manifest.test.ts:108-118`.
 
 ### 3.20 X91-1: controller-only adoption on full-stack
 
-- **Decision:** on full-stack, an adopted same-named controller is used and the generated
-  controller and its two tests are not written; `types`, `service`, `token`, `index` and the page
-  are. An adopted same-named service is still refused, with the reason (the token and index import
+- **Decision:** on full-stack, an adopted same-named controller is used and the generated controller
+  and its two tests are not written; `types`, `service`, `token`, `index` and the page are. An
+  adopted same-named service is still refused, with the reason (the token and index import
   `<P>Service` and `<camel>Service`). The CHANGELOG `[0.12.0]` explanation line gains an Unreleased
   counterpart.
 - **Test home:** `test/unit/generate-module-switch.test.ts:117-124` (split into the two cases);
@@ -403,14 +411,13 @@ the brief does the wrong thing. The two regressions (V12-42, V12-47) go first.
 
 - **Decision:** a new `diagnostics/reference-mask.ts` used only by `diagnostics/wiring.ts`,
   `diagnostics/modules.ts:66` and `diagnose.ts:313`. It masks template literals (substitutions
-  scanned as code with a brace-depth stack), regex literals (a regex after
-  `( , = : [ ! & | ? { ;`, `return`, `typeof` or at the start; division after an identifier,
-  number, `)` or `]`; a `/` after `}` is undecidable, since a block and an object literal both end
-  there) and escapes. It still stops, and W001 still fires, on `eval`, `Function`,
-  `require`, dynamic `import(`, `globalThis`, `self`, `window`, `Reflect`, `Proxy` and the
-  reflection identifiers, computed member access, a backslash in code, non-ASCII code, unterminated
-  source, and any regex-versus-division case the rule cannot decide. `devtool/sources.ts` and every
-  automatic edit keep the strict lexer unchanged.
+  scanned as code with a brace-depth stack), regex literals (a regex after `( , = : [ ! & | ? { ;`,
+  `return`, `typeof` or at the start; division after an identifier, number, `)` or `]`; a `/` after
+  `}` is undecidable, since a block and an object literal both end there) and escapes. It still
+  stops, and W001 still fires, on `eval`, `Function`, `require`, dynamic `import(`, `globalThis`,
+  `self`, `window`, `Reflect`, `Proxy` and the reflection identifiers, computed member access, a
+  backslash in code, non-ASCII code, unterminated source, and any regex-versus-division case the
+  rule cannot decide. `devtool/sources.ts` and every automatic edit keep the strict lexer unchanged.
 - **Why:** the strict lexer is security-audited and guards edits; a read-only check can be more
   tolerant without widening what is edited.
 - **Test home:** `test/unit/reference-mask.test.ts` (nested `${}`, a regex in an array, division, a
@@ -429,9 +436,9 @@ the brief does the wrong thing. The two regressions (V12-42, V12-47) go first.
 
 ### 3.23 CHANGELOG
 
-One Unreleased entry per row (Fixed for the defects; Added for multi-package `add`,
-`--plugin-only`, `--provider`/`--type`/`--adapter`/`--dialect`/`--yes`, task builds). V12-42's entry
-says a `--module` route on functional full-stack now mounts at `/api/<m>/<name>`.
+One Unreleased entry per row (Fixed for the defects; Added for multi-package `add`, `--plugin-only`,
+`--provider`/`--type`/`--adapter`/`--dialect`/`--yes`, task builds). V12-42's entry says a
+`--module` route on functional full-stack now mounts at `/api/<m>/<name>`.
 
 ## 4. Exported surface — every symbol names its consumer
 
@@ -444,69 +451,69 @@ an error message, and the CLI's changes are to generated output and commands.
 
 ### 4.1 Options — every option names its consumer
 
-| Option                       | Consumer                                        | Behavior (per implementation)                                     |
-| ---------------------------- | ----------------------------------------------- | ----------------------------------------------------------------- |
-| `setu add` several names     | `runAddCommand` → `addOne`                      | §3.11                                                             |
-| `--plugin-only`              | `add view` path                                 | §3.12; refused with any other package unless view is listed       |
-| `--provider`                 | `add mail` → `BACKEND_PEERS`, registration line | §3.13                                                             |
-| `--type`                     | `add database` → peers, §3.14 scripts           | §3.13, §3.14                                                      |
-| `--adapter`                  | `add vector-store` → peers                      | §3.13                                                             |
-| `--dialect`                  | `add database --type drizzle` config file       | §3.14; refused with any other type                                |
-| `--yes`                      | the §3.13 prompt                                | skips the prompt, takes the default arm                           |
-| `IPluginWiring.args`         | `registrationLine`, `withPluginWiring`, §3.10   | call arguments, default empty                                     |
+| Option                   | Consumer                                        | Behavior (per implementation)                                     |
+| ------------------------ | ----------------------------------------------- | ----------------------------------------------------------------- |
+| `setu add` several names | `runAddCommand` → `addOne`                      | §3.11                                                             |
+| `--plugin-only`          | `add view` path                                 | §3.12; refused with any other package unless view is listed       |
+| `--provider`             | `add mail` → `BACKEND_PEERS`, registration line | §3.13                                                             |
+| `--type`                 | `add database` → peers, §3.14 scripts           | §3.13, §3.14                                                      |
+| `--adapter`              | `add vector-store` → peers                      | §3.13                                                             |
+| `--dialect`              | `add database --type drizzle` config file       | §3.14; refused with any other type                                |
+| `--yes`                  | the §3.13 prompt                                | skips the prompt, takes the default arm                           |
+| `IPluginWiring.args`     | `registrationLine`, `withPluginWiring`, §3.10   | call arguments, default empty; read for every wiring that has one |
 
 ## 5. Implementation files
 
-| File                                                                                  | Purpose                                                        |
-| ------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
-| `packages/cli/src/schematics/module-route-base.ts` (new)                              | §3.1 helper                                                    |
-| `schematics/http-module.ts`, `controller.ts`, `sse.ts`, `module-full-stack.ts`        | §3.1 callers                                                   |
-| `commands/generate.ts`                                                                | §3.1 shadow base and refusal text                              |
-| `templates/telemetry-preload.ts`                                                      | §3.2                                                           |
-| `templates/full-stack-app-files.ts`, `templates/full-stack.ts`                        | §3.3, §3.15                                                    |
-| `templates/project-files.ts`                                                          | §3.4 (`serveEntry`), §3.19 V12-43                              |
-| `templates/full-stack-build-files.ts`                                                 | §3.4, §3.5                                                     |
-| `devtool/dev-entry.ts`                                                                | §3.4, §3.6                                                     |
-| `packages/kernel/src/registry/plugin-resolver.ts`                                     | §3.7                                                           |
-| `commands/build.ts`, `build/task-entries.ts` (new)                                    | §3.8 scan, extra entries, `onLoad` rewrite                     |
-| `commands/add.ts`, `commands/add-view.ts`, `commands/add-database.ts` (new)           | §3.9–§3.15                                                     |
-| `templates/client-dependencies.ts`                                                    | §3.13 ranges, §3.14 `drizzle-kit`, `prisma`                    |
-| `packages/cli/package.json`, `pnpm-lock.yaml`                                         | §3.14 test-only devDependency `drizzle-kit` `0.31.11` (published 2026-09-21) |
-| `packages/multi-tenancy-plugin/test/unit/multi-tenancy-plugin.test.ts`                | §3.7 stale duplicate-plugin literal (test only)                |
-| `constants.ts`, `flags.ts`, `cli.ts`                                                  | §3.11–§3.14 flags, `ask` for `add`                             |
-| `templates/broker.ts`, `workspace/member-host.ts`                                     | §3.16                                                          |
-| `agents/render.ts`, `agents/brief-file.ts`, `commands/agents.ts`                      | §3.17                                                          |
-| `templates/root-settings.ts`                                                          | §3.17 `proseWrap`                                              |
-| `agents/not-installed.ts`, `agents/rules.ts`                                          | §3.15, §3.18, §3.19 V12-23                                     |
-| `seams/jobs.ts`, `seams/plugins.ts`                                                   | §3.19 V12-16                                                   |
-| `schematics/middleware.ts`, `workspace/k8s.ts`                                        | §3.19 V12-31, V12-45                                           |
-| `utils/module-switch.ts`                                                              | §3.20                                                          |
-| `diagnostics/reference-mask.ts` (new), `diagnostics/wiring.ts`, `modules.ts`, `diagnose.ts` | §3.21                                                    |
-| `examples/new.ts`                                                                     | §3.22                                                          |
-| Docs: `docs/cli.md`, `packages/cli/README.md`, AGENT_CARDs, worker-pool README, `apps/worker-pool/README.md`, database README, ROADMAP, CHANGELOG | §2 C1–C7, §3.23 |
+| File                                                                                                                                              | Purpose                                                                      |
+| ------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `packages/cli/src/schematics/module-route-base.ts` (new)                                                                                          | §3.1 helper                                                                  |
+| `schematics/http-module.ts`, `controller.ts`, `sse.ts`, `module-full-stack.ts`                                                                    | §3.1 callers                                                                 |
+| `commands/generate.ts`                                                                                                                            | §3.1 shadow base and refusal text                                            |
+| `templates/telemetry-preload.ts`                                                                                                                  | §3.2                                                                         |
+| `templates/full-stack-app-files.ts`, `templates/full-stack.ts`                                                                                    | §3.3, §3.15                                                                  |
+| `templates/project-files.ts`                                                                                                                      | §3.4 (`serveEntry`), §3.19 V12-43                                            |
+| `templates/full-stack-build-files.ts`                                                                                                             | §3.4, §3.5                                                                   |
+| `devtool/dev-entry.ts`                                                                                                                            | §3.4, §3.6                                                                   |
+| `packages/kernel/src/registry/plugin-resolver.ts`                                                                                                 | §3.7                                                                         |
+| `commands/build.ts`, `build/task-entries.ts` (new)                                                                                                | §3.8 scan, extra entries, `onLoad` rewrite                                   |
+| `commands/add.ts`, `commands/add-view.ts`, `commands/add-database.ts` (new)                                                                       | §3.9–§3.15                                                                   |
+| `templates/client-dependencies.ts`                                                                                                                | §3.13 ranges, §3.14 `drizzle-kit`, `prisma`                                  |
+| `packages/cli/package.json`, `pnpm-lock.yaml`                                                                                                     | §3.14 test-only devDependency `drizzle-kit` `0.31.11` (published 2026-09-21) |
+| `packages/multi-tenancy-plugin/test/unit/multi-tenancy-plugin.test.ts`                                                                            | §3.7 stale duplicate-plugin literal (test only)                              |
+| `constants.ts`, `flags.ts`, `cli.ts`                                                                                                              | §3.11–§3.14 flags, `ask` for `add`                                           |
+| `templates/broker.ts`, `workspace/member-host.ts`                                                                                                 | §3.16                                                                        |
+| `agents/render.ts`, `agents/brief-file.ts`, `commands/agents.ts`                                                                                  | §3.17                                                                        |
+| `templates/root-settings.ts`                                                                                                                      | §3.17 `proseWrap`                                                            |
+| `agents/not-installed.ts`, `agents/rules.ts`                                                                                                      | §3.15, §3.18, §3.19 V12-23                                                   |
+| `seams/jobs.ts`, `seams/plugins.ts`                                                                                                               | §3.19 V12-16                                                                 |
+| `schematics/middleware.ts`, `workspace/k8s.ts`                                                                                                    | §3.19 V12-31, V12-45                                                         |
+| `utils/module-switch.ts`                                                                                                                          | §3.20                                                                        |
+| `diagnostics/reference-mask.ts` (new), `diagnostics/wiring.ts`, `modules.ts`, `diagnose.ts`                                                       | §3.21                                                                        |
+| `examples/new.ts`                                                                                                                                 | §3.22                                                                        |
+| Docs: `docs/cli.md`, `packages/cli/README.md`, AGENT_CARDs, worker-pool README, `apps/worker-pool/README.md`, database README, ROADMAP, CHANGELOG | §2 C1–C7, §3.23                                                              |
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
-| Test file                                                           | src covered                                         | Key assertions                                                 |
-| ------------------------------------------------------------------- | --------------------------------------------------- | -------------------------------------------------------------- |
-| `test/unit/generate-page-collisions.test.ts`                        | `module-route-base.ts`, `generate.ts`, schematics   | §3.1 paths on full-stack, REST, class-based full-stack         |
-| `test/e2e/full-stack-modules-e2e.test.ts`                           | §3.1                                                | boot answers `/api/articles/summary` and `/api/products`       |
-| `test/unit/telemetry-preload.test.ts`, `test/integration/telemetry-preload-real.test.ts` | `telemetry-preload.ts`            | §3.2 list as data; no wrap warning; ioredis and http controls  |
-| `test/unit/full-stack-template.test.ts`, `test/e2e/full-stack-wiring-e2e.test.ts` | `full-stack-app-files.ts`, `full-stack.ts` | §3.3, §3.15                                              |
-| `test/unit/start-scripts.test.ts`, `test/unit/templates/project-files.test.ts`, `test/e2e/scaffold-runs-e2e.test.ts` | `project-files.ts`, `full-stack-build-files.ts` | §3.4, §3.17 e2e |
-| dev-entry unit test, `test/e2e/full-stack-dev-ports-e2e.test.ts`    | `full-stack-build-files.ts`                         | §3.5                                                           |
-| `test/unit/dev-entry.test.ts`, `test/e2e/devtool-e2e.test.ts`       | `dev-entry.ts`                                      | §3.4, §3.6                                                     |
-| `packages/kernel/test/unit/plugin-resolver.test.ts`                 | `plugin-resolver.ts`                                | §3.7                                                           |
-| `test/unit/build-command.test.ts`, `test/unit/build-task-entries.test.ts`, `test/e2e/build-e2e.test.ts` | `build.ts`, `build/task-entries.ts` | §3.8                                                    |
-| `test/unit/commands/add.test.ts`, `test/integration/zero-config-wirings.test.ts`, `test/unit/commands/starter-wiring-output.test.ts`, `test/unit/positional-refusal.test.ts`, `test/unit/add-view.test.ts`, `test/unit/flags.test.ts` | `add.ts`, `add-view.ts`, `add-database.ts`, `flags.ts`, `constants.ts`, `cli.ts` | §3.9–§3.15 |
-| `test/unit/templates/client-dependencies.test.ts`                   | `client-dependencies.ts`                            | §3.13 range equality with each plugin's `peerDependencies`     |
-| `test/unit/broker-flags.test.ts`, `test/unit/full-stack-options-typecheck.test.ts`, `test/e2e/full-stack-broker-e2e.test.ts` | `broker.ts`, `member-host.ts` | §3.16                                                 |
-| `test/unit/agents/render-brief.test.ts`, `check-mode.test.ts`, `rule-blocks.test.ts`, `budget.test.ts`, `gather-facts.test.ts` | `render.ts`, `brief-file.ts`, `agents.ts`, `not-installed.ts`, `rules.ts`, `root-settings.ts` | §3.14, §3.15, §3.17–§3.19 |
-| `test/unit/seam-wiring.test.ts`, `test/unit/node-redis-cli.test.ts` | `seams/jobs.ts`, `seams/plugins.ts`, `k8s.ts`       | §3.19                                                          |
-| `test/unit/schematics/middleware.test.ts`, `test/unit/config-module.test.ts`, `test/unit/k8s-manifest.test.ts` | `middleware.ts`, `project-files.ts`, `k8s.ts` | §3.19                                                 |
-| `test/unit/generate-module-switch.test.ts`, `test/unit/generate-module-command.test.ts` | `module-switch.ts`               | §3.20                                                          |
-| `test/unit/reference-mask.test.ts`, `test/unit/check-wiring.test.ts`, `test/unit/check-command.test.ts` | `reference-mask.ts`, `wiring.ts`, `modules.ts`, `diagnose.ts` | §3.21                               |
-| `test/unit/examples.test.ts`                                        | `examples/new.ts`                                   | §3.22                                                          |
+| Test file                                                                                                                                                                                                                             | src covered                                                                                   | Key assertions                                                |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| `test/unit/generate-page-collisions.test.ts`                                                                                                                                                                                          | `module-route-base.ts`, `generate.ts`, schematics                                             | §3.1 paths on full-stack, REST, class-based full-stack        |
+| `test/e2e/full-stack-modules-e2e.test.ts`                                                                                                                                                                                             | §3.1                                                                                          | boot answers `/api/articles/summary` and `/api/products`      |
+| `test/unit/telemetry-preload.test.ts`, `test/integration/telemetry-preload-real.test.ts`                                                                                                                                              | `telemetry-preload.ts`                                                                        | §3.2 list as data; no wrap warning; ioredis and http controls |
+| `test/unit/full-stack-template.test.ts`, `test/e2e/full-stack-wiring-e2e.test.ts`                                                                                                                                                     | `full-stack-app-files.ts`, `full-stack.ts`                                                    | §3.3, §3.15                                                   |
+| `test/unit/start-scripts.test.ts`, `test/unit/templates/project-files.test.ts`, `test/e2e/scaffold-runs-e2e.test.ts`                                                                                                                  | `project-files.ts`, `full-stack-build-files.ts`                                               | §3.4, §3.17 e2e                                               |
+| dev-entry unit test, `test/e2e/full-stack-dev-ports-e2e.test.ts`                                                                                                                                                                      | `full-stack-build-files.ts`                                                                   | §3.5                                                          |
+| `test/unit/dev-entry.test.ts`, `test/e2e/devtool-e2e.test.ts`                                                                                                                                                                         | `dev-entry.ts`                                                                                | §3.4, §3.6                                                    |
+| `packages/kernel/test/unit/plugin-resolver.test.ts`                                                                                                                                                                                   | `plugin-resolver.ts`                                                                          | §3.7                                                          |
+| `test/unit/build-command.test.ts`, `test/unit/build-task-entries.test.ts`, `test/e2e/build-e2e.test.ts`                                                                                                                               | `build.ts`, `build/task-entries.ts`                                                           | §3.8                                                          |
+| `test/unit/commands/add.test.ts`, `test/integration/zero-config-wirings.test.ts`, `test/unit/commands/starter-wiring-output.test.ts`, `test/unit/positional-refusal.test.ts`, `test/unit/add-view.test.ts`, `test/unit/flags.test.ts` | `add.ts`, `add-view.ts`, `add-database.ts`, `flags.ts`, `constants.ts`, `cli.ts`              | §3.9–§3.15                                                    |
+| `test/unit/templates/client-dependencies.test.ts`                                                                                                                                                                                     | `client-dependencies.ts`                                                                      | §3.13 range equality with each plugin's `peerDependencies`    |
+| `test/unit/broker-flags.test.ts`, `test/unit/full-stack-options-typecheck.test.ts`, `test/e2e/full-stack-broker-e2e.test.ts`                                                                                                          | `broker.ts`, `member-host.ts`                                                                 | §3.16                                                         |
+| `test/unit/agents/render-brief.test.ts`, `check-mode.test.ts`, `rule-blocks.test.ts`, `budget.test.ts`, `gather-facts.test.ts`                                                                                                        | `render.ts`, `brief-file.ts`, `agents.ts`, `not-installed.ts`, `rules.ts`, `root-settings.ts` | §3.14, §3.15, §3.17–§3.19                                     |
+| `test/unit/seam-wiring.test.ts`, `test/unit/node-redis-cli.test.ts`                                                                                                                                                                   | `seams/jobs.ts`, `seams/plugins.ts`, `k8s.ts`                                                 | §3.19                                                         |
+| `test/unit/schematics/middleware.test.ts`, `test/unit/config-module.test.ts`, `test/unit/k8s-manifest.test.ts`                                                                                                                        | `middleware.ts`, `project-files.ts`, `k8s.ts`                                                 | §3.19                                                         |
+| `test/unit/generate-module-switch.test.ts`, `test/unit/generate-module-command.test.ts`                                                                                                                                               | `module-switch.ts`                                                                            | §3.20                                                         |
+| `test/unit/reference-mask.test.ts`, `test/unit/check-wiring.test.ts`, `test/unit/check-command.test.ts`                                                                                                                               | `reference-mask.ts`, `wiring.ts`, `modules.ts`, `diagnose.ts`                                 | §3.21                                                         |
+| `test/unit/examples.test.ts`                                                                                                                                                                                                          | `examples/new.ts`                                                                             | §3.22                                                         |
 
 Every row's new test must fail without its fix; the hand-back records each mutation.
 
@@ -547,8 +554,8 @@ pnpm run release:verify 0.12.0
   once on the final commit, checking first that no other suite or M139b's benchmark is running.
 - **§3.8's rewrite misses a task form.** → Only the literal form is supported, and every other
   `*.task.ts` reference fails the build by name.
-- **§3.17 changes a brief already on disk.** → The writer's normalised comparison leaves a
-  formatted file alone.
+- **§3.17 changes a brief already on disk.** → The writer's normalised comparison leaves a formatted
+  file alone.
 
 ## 9. Out of scope
 

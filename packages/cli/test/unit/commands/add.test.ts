@@ -1,5 +1,6 @@
 import { cliInvocation } from '../../../src/templates/project-files.ts';
 import * as nodeFs from 'node:fs/promises';
+import * as ts from 'typescript';
 /**
  * Tests for `setu add <plugin>` (D3).
  *
@@ -29,7 +30,208 @@ import { COMMAND_HANDLER_SEAM } from '../../../src/seams/cqrs.ts';
 import { runCli } from '../../../src/cli.ts';
 import { CLIENT_RANGES } from '../../../src/templates/client-dependencies.ts';
 import { SWAGGER_UI_DIST_VERSION } from '../../../src/templates/swagger-version.ts';
+import { BACKEND_PEERS } from '../../../src/commands/add.ts';
 import { BROKERS, brokerSpec } from '../../../src/workspace/transport.ts';
+
+describe('M139d add request and backend contracts', () => {
+  it('V12-30 adds exceptions without importing or registering a plugin', async () => {
+    const h = harness({
+      '/app/package.json': '{}',
+      '/app/setu.config.ts': CLASS_BASED_INGRESS_CONFIG,
+    });
+    expect(await h.run(['exceptions'])).toBe(0);
+    expect(h.read('/app/package.json')).toContain('@setu-ts/exceptions');
+    expect(h.read('/app/setu.config.ts')).toBe(CLASS_BASED_INGRESS_CONFIG);
+  });
+  it('V12-27 defaults to log or memory without a terminal and --yes skips the question', async () => {
+    for (const yes of [false, true]) {
+      const fs = createFakeFs({
+        '/app/package.json': '{}',
+        '/app/setu.config.ts': CLASS_BASED_INGRESS_CONFIG,
+      });
+      const deps = {
+        fs,
+        cwd: '/app',
+        now: () => 0,
+        log: () => {},
+        error: () => {},
+        ...(yes ? { ask: { select: () => Promise.reject(new Error('must not ask')) } } : {}),
+      };
+      expect(
+        await runCli(['add', 'mail', 'database', 'vector-store', ...(yes ? ['--yes'] : [])], deps),
+      ).toBe(0);
+      expect(fs.read('/app/setu.config.ts')).toContain('MailPlugin()');
+      for (const peer of ['nodemailer', 'drizzle-orm', 'drizzle-kit'])
+        expect(fs.read('/app/package.json')).not.toContain(peer);
+    }
+  });
+  const drizzleTypes = ts.resolveModuleName(
+    'drizzle-kit',
+    `${process.cwd()}/packages/cli/package.json`,
+    { moduleResolution: ts.ModuleResolutionKind.NodeNext },
+    ts.sys,
+  ).resolvedModule;
+  it('type-checks each generated drizzle dialect against the installed defineConfig types', async () => {
+    expect(drizzleTypes?.resolvedFileName).toBeDefined();
+    for (const dialect of ['postgresql', 'mysql', 'sqlite']) {
+      const h = harness({ '/app/package.json': '{}' });
+      expect(await h.run(['database', '--type', 'drizzle', '--dialect', dialect])).toBe(0);
+      const file = `${process.cwd()}/packages/cli/.tmp/drizzle.config.mts`;
+      const source = h.read('/app/drizzle.config.ts');
+      const options: ts.CompilerOptions = {
+        strict: true,
+        noEmit: true,
+        skipLibCheck: true,
+        target: ts.ScriptTarget.ESNext,
+        module: ts.ModuleKind.NodeNext,
+        moduleResolution: ts.ModuleResolutionKind.NodeNext,
+        types: ['node'],
+      };
+      const host = ts.createCompilerHost(options);
+      const getSource = host.getSourceFile;
+      host.getSourceFile = (path, languageVersion, onError, create) =>
+        path === file
+          ? ts.createSourceFile(file, source, ts.ScriptTarget.ESNext, true)
+          : getSource(path, languageVersion, onError, create);
+      const program = ts.createProgram([file], options, host);
+      expect(
+        ts
+          .getPreEmitDiagnostics(program)
+          .map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n')),
+      ).toEqual([]);
+    }
+  });
+  it('validates every name, alias and flag before the first write', async () => {
+    for (const args of [
+      ['cache', 'unknown'],
+      ['cache', '@setu-ts/cache-plugin'],
+      ['cache', '--provider', 'smtp'],
+      ['cache', 'mail', '--provider', 'bad'],
+    ]) {
+      const h = harness({ '/app/package.json': '{}' });
+      expect(await h.run(args)).toBe(2);
+      expect(h.fs.writes).toEqual([]);
+    }
+  });
+  it('reports exactly where a multi-add stopped after an I/O failure', async () => {
+    const h = harness({ '/app/package.json': '{}' });
+    const write = h.fs.writeFile;
+    let writes = 0;
+    h.fs.writeFile = (path, data) =>
+      ++writes === 2 ? Promise.reject(new Error('disk full')) : write(path, data);
+    expect(await h.run(['common', 'exceptions', 'sdk'])).toBe(1);
+    expect(h.err.join('\n')).toContain('added common; stopped at exceptions; sdk not attempted');
+  });
+  it('supports a modular view capability without creating controllers or CSS', async () => {
+    const h = harness({ '/app/package.json': '{}', '/app/src/modules/orders/index.ts': '' });
+    expect(await h.run(['view', '--plugin-only'])).toBe(0);
+    expect(
+      h.fs.writes.every((file) => !file.includes('/views/') && !file.includes('/controllers/')),
+    ).toBe(true);
+    expect(await h.run(['view', '--plugin-only', '--module', 'orders'])).toBe(2);
+  });
+  for (const [bare, backend] of Object.entries(BACKEND_PEERS)) {
+    for (const [arm, peers] of Object.entries(backend.arms)) {
+      for (const deno of [false, true])
+        it(`records ${bare} ${arm} peers on ${deno ? 'Deno' : 'npm'}`, async () => {
+          const file = deno ? 'deno.json' : 'package.json';
+          const h = harness({ [`/app/${file}`]: '{}' });
+          expect(
+            await runCli(['add', bare, `--${backend.flag}`, arm], {
+              fs: h.fs,
+              cwd: '/app',
+              now: () => 0,
+              log: (line) => h.out.push(line),
+              error: (line) => h.err.push(line),
+            }),
+            h.err.join('\n'),
+          ).toBe(0);
+          if (!['memory', 'log'].includes(arm)) {
+            const printed = h.out.find((line) => line.startsWith('  In setu.config.ts: '));
+            expect(printed).toBeDefined();
+            expect(
+              await nodeFs.readFile(
+                new URL('../../fixtures/registration-lines.ts', import.meta.url),
+                'utf8',
+              ),
+            ).toContain(printed!.slice('  In setu.config.ts: '.length));
+          }
+          const manifest = JSON.parse(h.read(`/app/${file}`)) as Record<
+            string,
+            Record<string, string>
+          >;
+          for (const peer of peers)
+            expect(manifest[deno ? 'imports' : 'dependencies']?.[peer]).toBe(
+              deno ? `npm:${peer}@${CLIENT_RANGES[peer]}` : CLIENT_RANGES[peer],
+            );
+          if (bare === 'database-plugin' && arm === 'prisma')
+            expect(manifest[deno ? 'imports' : 'dependencies']).not.toHaveProperty(
+              '@prisma/client',
+            );
+        });
+    }
+  }
+  it('asks once when allowed; --yes takes the default without asking', async () => {
+    const fs = createFakeFs({ '/app/package.json': '{}' });
+    let asked = 0;
+    const deps = {
+      fs,
+      cwd: '/app',
+      now: () => 0,
+      log: () => {},
+      error: () => {},
+      ask: {
+        select: () => {
+          asked++;
+          return Promise.resolve({ kind: 'answer' as const, value: 'smtp' });
+        },
+      },
+    };
+    expect(await runCli(['add', 'mail'], deps)).toBe(0);
+    expect(asked).toBe(1);
+    expect(fs.read('/app/package.json')).toContain('nodemailer');
+    expect(await runCli(['add', 'mail', '--yes'], deps)).toBe(0);
+    expect(asked).toBe(1);
+  });
+  it('keeps hand-pinned peers and adds schema tooling only once', async () => {
+    const h = harness({
+      '/app/package.json':
+        '{"dependencies":{"drizzle-orm":"custom"},"scripts":{"db:migrate":"custom migrate"}}',
+    });
+    expect(await h.run(['database', '--type', 'drizzle', '--dialect', 'mysql'])).toBe(0);
+    const manifest = JSON.parse(h.read('/app/package.json')) as {
+      dependencies: Record<string, string>;
+      devDependencies: Record<string, string>;
+      scripts: Record<string, string>;
+    };
+    expect(manifest.dependencies['drizzle-orm']).toBe('custom');
+    expect(manifest.devDependencies['drizzle-kit']).toBe('^0.31.11');
+    expect(manifest.scripts['db:generate']).toBe('drizzle-kit generate');
+    expect(manifest.scripts['db:migrate']).toBe('custom migrate');
+    expect(h.read('/app/drizzle.config.ts')).toContain("dialect: 'mysql'");
+    await h.fs.writeFile('/app/drizzle.config.ts', new TextEncoder().encode('// user config'));
+    expect(await h.run(['database', '--type', 'drizzle'])).toBe(0);
+    expect(h.read('/app/drizzle.config.ts')).toBe('// user config');
+    expect(await h.run(['database', '--type', 'mongodb', '--dialect', 'mysql'])).toBe(2);
+  });
+  it('writes Prisma 7 config and deploy scripts without writing either schema', async () => {
+    const h = harness({ '/app/package.json': '{}' });
+    expect(await h.run(['database', '--type', 'prisma'])).toBe(0);
+    expect(h.read('/app/prisma.config.ts')).toContain("schema: './prisma/schema.prisma'");
+    expect(h.read('/app/package.json')).toContain('prisma migrate deploy');
+    expect(h.fs.has('/app/prisma/schema.prisma')).toBe(false);
+    expect(h.fs.has('/app/src/database/schema.ts')).toBe(false);
+  });
+  it('prints Deno schema scripts without writing them; mongodb has none', async () => {
+    const h = harness({ '/app/deno.json': '{}' });
+    expect(await h.run(['database', '--type', 'drizzle'])).toBe(0);
+    expect(h.out.join('\n')).toContain('db:generate: drizzle-kit generate');
+    expect(h.read('/app/deno.json')).not.toContain('db:generate');
+    const mongo = harness({ '/app/package.json': '{}' });
+    expect(await mongo.run(['database', '--type', 'mongodb'])).toBe(0);
+    expect(mongo.read('/app/package.json')).not.toContain('db:generate');
+  });
+});
 
 describe('setu add openapi Swagger UI dependency (M129)', () => {
   for (const runtime of ['node', 'deno', 'bun', 'cloudflare-workers'] as const) {
@@ -296,7 +498,7 @@ export function createApp(): IKernelApplication {
             // `add queue` wires the starter's queue arm with the job barrel on every
             // broker; only Redis also selects a queue backend, in the module.
             expect(config).toContain('processors: [...QUEUE_PROCESSORS]');
-            expect(config).toContain('...queueOptions(config),');
+            expect(config).toContain('...queueOptions(config)');
             expect(module.includes("adapter: 'redis'")).toBe(transport === 'redis');
           } else {
             // Generated with the workspace transport, so a re-add finds it already set.
@@ -1523,6 +1725,37 @@ describe('withDependency', () => {
 });
 
 describe('withPluginWiring', () => {
+  it('V12-3 refuses ambiguous full-stack loop edits and preserves an aliased binding', async () => {
+    const { withFactoryRegistration } = await import('../../../src/commands/add.ts');
+    const fs = createFakeFs();
+    const deps = { fs, cwd: '/', log: () => {}, error: () => {} };
+    expect(await runNewCommand(parseArgs(['shop', '--template', 'full-stack']), deps)).toBe(0);
+    const source = fs.read('/shop/setu.config.ts');
+    const loop = 'for (const generated of GENERATED_PLUGINS) app.register(generated);';
+    expect(
+      withFactoryRegistration(source.replace(loop, `${loop}\n  ${loop}`), 'worker-pool-plugin'),
+    ).toBeUndefined();
+    const alias = `import { WorkerPoolPlugin as Pool } from '@setu-ts/worker-pool-plugin';\n${source}`;
+    expect(withFactoryRegistration(alias, 'worker-pool-plugin')).toContain('app.register(Pool());');
+    expect(
+      withFactoryRegistration(
+        alias.replace(loop, `app.register(Pool());\n  ${loop}`),
+        'worker-pool-plugin',
+      ),
+    ).toBeUndefined();
+  });
+  it('V12-2 reads fixture wiring arguments when inserting a safe provider', () => {
+    const wiring = { symbol: 'WorkerPoolPlugin', args: '{}' };
+    expect(
+      withPluginWiring(
+        CLASS_BASED_INGRESS_CONFIG,
+        'worker-pool-plugin',
+        undefined,
+        undefined,
+        wiring,
+      ),
+    ).toContain('WorkerPoolPlugin({}),');
+  });
   // Codex review (M111d): an npm-target scaffold is Prettier-formatted, which
   // puts a short plugin array on ONE line — so an anchor matched only as its own
   // line left `setu new demo` → `setu add cache` writing the dependency and
@@ -2225,18 +2458,14 @@ describe('runAddCommand', () => {
     expect(await h.run([])).toBe(2);
   });
 
-  it('refuses a second positional with exit 2, writing nothing (X18-1)', async () => {
-    // X18-1: five requested packages used to report `updated deno.json` and
-    // exit 0 with one added — the contract is singular and exceeding it is a
-    // usage error, like every other misapplied input to this CLI.
+  it('adds every requested package (X18-1)', async () => {
     const h = harness({ '/app/deno.json': DENO_MANIFEST });
-
-    expect(await h.run(['auth', 'cache', 'logger'])).toBe(2);
-
-    expect(h.err.join('\n')).toContain('takes one package; got 3');
-    expect(h.err.join('\n')).toContain('Run it once per package');
-    // The manifest is untouched: refused, not partially applied.
-    expect(h.read('/app/deno.json')).toBe(DENO_MANIFEST);
+    expect(await h.run(['auth', 'cache', 'logger'])).toBe(0);
+    const imports = (JSON.parse(h.read('/app/deno.json')) as { imports: Record<string, string> })
+      .imports;
+    for (const name of ['auth', 'cache', 'logger'])
+      expect(imports[`@setu-ts/${name}-plugin`]).toBeDefined();
+    expect(h.out.filter((line) => line === 'Next:')).toHaveLength(1);
   });
 
   it('keeps the one-positional form unchanged', async () => {
@@ -3071,6 +3300,18 @@ describe('starter handler-arm wiring', () => {
 });
 
 describe('M133 setu add mcp', () => {
+  it('V12-2 leaves the config unchanged and prints the required options and marked-route prerequisite', async () => {
+    const h = harness({
+      '/app/package.json': '{}',
+      '/app/setu.config.ts': CLASS_BASED_INGRESS_CONFIG,
+    });
+    expect(await h.run(['mcp'])).toBe(0);
+    expect(h.read('/app/setu.config.ts')).toBe(CLASS_BASED_INGRESS_CONFIG);
+    expect(h.out.join('\n')).toContain('McpPlugin({})');
+    expect(h.out.join('\n')).toContain(
+      'boots with it only once at least one route is marked with mcpTool() or @McpTool()',
+    );
+  });
   it('adds the package and SDK optional peer to npm without inventing zero-config registration', async () => {
     const h = harness({
       '/app/package.json': JSON.stringify({ type: 'module', dependencies: {} }),

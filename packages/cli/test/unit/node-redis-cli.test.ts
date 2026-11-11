@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { TELEMETRY_PRELOAD_CONTENTS } from '../../src/templates/telemetry-preload.ts';
 import { VERSION } from '../../src/version.ts';
 import baseline from '../fixtures/redis-develop-outputs.json' with { type: 'json' };
 import { redisDefaultOutputs } from '../fixtures/redis-default-outputs.ts';
@@ -294,6 +295,25 @@ describe('node-redis CLI', () => {
         );
         contents = JSON.stringify(manifest, null, 2) + '\n';
       }
+      // M139d deliberate deltas: startup banners, scoped preload, prose preservation,
+      // and the deploy flag. Barrel wording is captured explicitly in the fixture.
+      if (runtime !== 'deno' && path.endsWith('/main.ts'))
+        contents = contents.replace(
+          /( {2}await app.start\(\{ port: (.+) \}\);\n)/,
+          (_line, start: string, port: string) =>
+            `${start}  console.log(\`Listening on http://localhost:\${${port}}/\`);\n`,
+        );
+      if (path.endsWith('/instrumentation.mjs')) contents = TELEMETRY_PRELOAD_CONTENTS;
+      if (runtime === 'deno' && /\/deno\.json$/.test(path)) {
+        const manifest = JSON.parse(contents) as { fmt?: Record<string, unknown> };
+        if (manifest.fmt) manifest.fmt = { proseWrap: 'preserve', ...manifest.fmt };
+        contents = JSON.stringify(manifest, null, 2) + '\n';
+      }
+      if (path.endsWith('/k8s/README.md'))
+        contents = contents.replace(
+          '`--build-arg`, `--network`.',
+          '`--build-arg`, `--network`, and `--pull-secret <name>` (repeatable; an existing registry\nSecret in the namespace).',
+        );
       const file = path.slice(path.indexOf('/work/') + '/work/app/'.length);
       expected[path] = (
         await formatForTarget([{ path: file, contents }], runtime, '/work/app', () => {})

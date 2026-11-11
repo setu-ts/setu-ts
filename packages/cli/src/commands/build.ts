@@ -1,4 +1,5 @@
 /** Production bundles for individual Node services. Never loads the application. @module */
+import { discoverTasks, taskRewritePlugin } from '../build/task-entries.ts';
 import { build } from 'esbuild';
 import type { BuildOptions, BuildResult, Metafile } from 'esbuild';
 import type { IFileSystem } from '@setu-ts/common';
@@ -169,9 +170,11 @@ export async function runBuildCommand(args: ParsedArgs, deps: IBuildDependencies
       manifest,
       libraries.map((library) => library.manifest),
     );
-    const outputs = entries.map((entry) => `dist/${entry.replace(/\.ts$/, '.js')}`);
+    const tasks = await discoverTasks(deps.fs, dir, entries);
+    const allEntries = [...entries, ...tasks];
+    const outputs = allEntries.map((entry) => `dist/${entry.replace(/\.ts$/, '.js')}`);
     if (args.flags['dry-run'] === true) {
-      for (const [index, entry] of entries.entries()) deps.log(`${entry} -> ${outputs[index]}`);
+      for (const [index, entry] of allEntries.entries()) deps.log(`${entry} -> ${outputs[index]}`);
       deps.log(`externals: ${external.join(', ')}`);
       return EXIT_OK;
     }
@@ -183,28 +186,36 @@ export async function runBuildCommand(args: ParsedArgs, deps: IBuildDependencies
     // touched, so a refused build or a failed bundle leaves the last good output in
     // place (a write that fails after the removal can leave dist/ incomplete)
     // — Vite's emptyOutDir empties on write the same way (M120 audit F5).
-    const result = await (deps.bundle ?? build)({
-      absWorkingDir: dir,
-      entryPoints: entries,
-      bundle: true,
-      platform: 'node',
-      format: 'esm',
-      target: 'node22',
-      sourcemap: true,
-      outdir: 'dist',
-      outbase: '.',
-      logLevel: 'silent',
-      external,
-      metafile: true,
-      write: false,
-    });
-    const errors = developmentImports(result.metafile!, dir, manifest, libraries);
+    const results: BuildResult[] = [];
+    for (const entry of allEntries) {
+      results.push(
+        await (deps.bundle ?? build)({
+          absWorkingDir: dir,
+          entryPoints: [entry],
+          plugins: [taskRewritePlugin(deps.fs, dir, entry)],
+          bundle: true,
+          platform: 'node',
+          format: 'esm',
+          target: 'node22',
+          sourcemap: true,
+          outdir: 'dist',
+          outbase: '.',
+          logLevel: 'silent',
+          external,
+          metafile: true,
+          write: false,
+        }),
+      );
+    }
+    const errors = results.flatMap((result) =>
+      developmentImports(result.metafile!, dir, manifest, libraries),
+    );
     if (errors.length > 0) {
       for (const error of errors) deps.error(escapeTerminalControls(error));
       return EXIT_ERROR;
     }
     if (await exists(deps.fs, dist)) await deps.fs.rm(dist, { recursive: true });
-    for (const file of result.outputFiles!) {
+    for (const file of results.flatMap((result) => result.outputFiles!)) {
       await assertInsideProject(deps.fs, dir, file.path);
       await deps.fs.mkdir(resolveDir(file.path, '..'), { recursive: true });
       await deps.fs.writeFile(file.path, file.contents);

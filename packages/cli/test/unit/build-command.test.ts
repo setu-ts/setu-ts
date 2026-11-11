@@ -1,4 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
+import { build } from 'esbuild';
+import { resolve } from 'node:path';
 import type { BuildOptions, BuildResult, Metafile } from 'esbuild';
 import { bundleExternals, runBuildCommand } from '../../src/commands/build.ts';
 import { runCli } from '../../src/cli.ts';
@@ -7,6 +9,113 @@ import * as diagnostics from '../../src/diagnostics/diagnose.ts';
 import { CHECK_FINDINGS } from '../fixtures/check-findings.ts';
 
 afterEach(() => vi.restoreAllMocks());
+
+it('V12-12 includes task entries and lists their outputs without writing', async () => {
+  const h = harness({
+    '/app/main.ts': "import './setu.config.ts';",
+    '/app/setu.config.ts':
+      "const task = new URL('./src/tasks/hash.task.ts', import.meta.url); void task;",
+    '/app/src/tasks/hash.task.ts': 'export const hash = 1;',
+  });
+  expect(await h.run({ 'dry-run': true }), h.error.text()).toBe(0);
+  expect(h.log.text()).toContain('src/tasks/hash.task.ts -> dist/src/tasks/hash.task.js');
+  expect(await h.run(), h.error.text()).toBe(0);
+  expect(h.bundle.mock.calls.map(([options]) => options.entryPoints)).toEqual([
+    ['main.ts'],
+    ['src/tasks/hash.task.ts'],
+  ]);
+  expect(h.bundle.mock.calls[0]?.[0].plugins?.[0]?.name).toBe('setu-worker-tasks');
+});
+
+it('V12-12 relocates a shared helper separately for main, migrations and task outputs', async () => {
+  const h = harness({
+    '/app/main.ts':
+      "import { target } from './shared.ts'; console.log(target, new URL('./src/tasks/a.task.ts', import.meta.url));",
+    '/app/src/migrations/run.ts': "import { target } from '../../shared.ts'; console.log(target);",
+    '/app/src/tasks/a.task.ts': "import { target } from '../../shared.ts'; console.log(target);",
+    '/app/shared.ts':
+      "export const target = new URL('./src/tasks/b.task.ts', import.meta.url).href;",
+    '/app/src/tasks/b.task.ts': 'console.log(1);',
+  });
+  expect(await h.run({ 'dry-run': true }), h.error.text()).toBe(0);
+  for (const entry of ['main', 'src/migrations/run', 'src/tasks/a.task', 'src/tasks/b.task'])
+    expect(h.log.text()).toContain(`${entry}.ts -> dist/${entry}.js`);
+  expect(h.fs.writes).toEqual([]);
+  h.bundle.mockImplementation((options) =>
+    build({
+      ...options,
+      plugins: [
+        ...(options.plugins ?? []),
+        {
+          name: 'fake-files',
+          setup(api) {
+            api.onResolve({ filter: /.*/ }, ({ path, resolveDir }) => ({
+              path: resolve(resolveDir || '/app', path),
+            }));
+          },
+        },
+      ],
+    }),
+  );
+  expect(await h.run(), h.error.text()).toBe(0);
+  expect(h.fs.read('/app/dist/src/tasks/a.task.js')).toContain('new URL("./b.task.js"');
+  expect(h.fs.read('/app/dist/main.js')).toContain('new URL("./src/tasks/b.task.js"');
+  expect(h.fs.read('/app/dist/src/migrations/run.js')).toContain('new URL("../tasks/b.task.js"');
+  expect(h.bundle.mock.calls.map(([options]) => options.entryPoints)).toEqual([
+    ['main.ts'],
+    ['src/migrations/run.ts'],
+    ['src/tasks/a.task.ts'],
+    ['src/tasks/b.task.ts'],
+  ]);
+});
+
+it.each(['development import', 'bundle failure'])(
+  'V12-12 keeps every output in memory when a task build has a %s',
+  async (failure) => {
+    const h = harness({
+      '/app/main.ts': "console.log(new URL('./hash.task.ts', import.meta.url));",
+      '/app/hash.task.ts': '',
+      '/app/src/migrations/run.ts': '',
+      '/app/package.json': '{"devDependencies":{"dev-only":"*"}}',
+      '/app/dist/main.js': 'previous build',
+    });
+    const original = h.bundle.getMockImplementation()!;
+    h.bundle.mockImplementation(async (options) => {
+      expect(options.write).toBe(false);
+      expect(h.fs.read('/app/dist/main.js')).toBe('previous build');
+      const result = await original(options);
+      if (JSON.stringify(options.entryPoints) !== '["hash.task.ts"]') return result;
+      if (failure === 'bundle failure') throw new Error('task build failed');
+      return {
+        ...result,
+        metafile: {
+          inputs: {
+            'hash.task.ts': {
+              bytes: 1,
+              imports: [{ path: 'dev-only', kind: 'import-statement', external: true }],
+            },
+          },
+          outputs: {},
+        },
+      };
+    });
+    const remove = vi.spyOn(h.fs, 'rm');
+    expect(await h.run(), h.error.text()).toBe(1);
+    expect(h.error.text()).toContain(
+      failure === 'bundle failure' ? 'task build failed' : 'runtime import of devDependency',
+    );
+    expect(h.fs.read('/app/dist/main.js')).toBe('previous build');
+    expect(h.fs.writes).toEqual([]);
+    expect(remove).not.toHaveBeenCalled();
+  },
+);
+
+it('V12-12 refuses nonliteral task references before touching dist', async () => {
+  const h = harness({ '/app/main.ts': '\nnew URL(`./src/${name}.task.ts`, import.meta.url);' });
+  expect(await h.run()).toBe(1);
+  expect(h.error.text()).toContain('main.ts:2: worker task references must use');
+  expect(h.fs.writes).toEqual([]);
+});
 
 function harness(seed: Record<string, string> = {}, meta: Metafile = { inputs: {}, outputs: {} }) {
   const fs = createFakeFs({ '/app/package.json': '{}', '/app/main.ts': '', ...seed });
@@ -117,7 +226,7 @@ it('writes a bundle with the production options and removes old real dist first'
   expect(h.bundle).toHaveBeenCalledWith(
     expect.objectContaining({
       absWorkingDir: '/app',
-      entryPoints: ['main.ts', 'src/migrations/run.ts'],
+      entryPoints: ['main.ts'],
       bundle: true,
       platform: 'node',
       format: 'esm',

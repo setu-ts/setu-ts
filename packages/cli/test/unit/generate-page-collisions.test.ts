@@ -43,6 +43,27 @@ function harness(
 }
 
 describe('generation refuses kernel routes that shadow React Router pages', () => {
+  it.each([
+    [['react-router-plugin'], '/api/articles'],
+    [[], '/articles'],
+    [['react-router-plugin', 'decorator-plugin'], '/articles'],
+  ] as const)('uses the module base for %j', async (plugins, base) => {
+    const h = harness([...plugins, 'sse-plugin']);
+    expect(await h.run(['g', 'module', 'articles'])).toBe(0);
+    for (const schematic of ['route', 'controller', 'sse']) {
+      expect(await h.run(['g', schematic, schematic, '--module', 'articles']), h.err.text()).toBe(
+        0,
+      );
+      expect(h.fs.read(`/app/src/modules/articles/${schematic}.controller.ts`)).toContain(
+        `${base}/${schematic === 'sse' ? 'sse/' : ''}${schematic}`,
+      );
+    }
+  });
+  it('checks the class-based full-stack module at /products', async () => {
+    const h = harness(['react-router-plugin', 'decorator-plugin']);
+    expect(await h.run(['g', 'module', 'products'])).toBe(1);
+    expect(h.err.text()).toContain('/products and /products/:id');
+  });
   it('X87-1 refuses a shadowing route in an npm member using the hoisted binary', async () => {
     const fs = createFakeFs({
       '/work/package.json': '{"workspaces":["apps/*"]}',
@@ -111,7 +132,7 @@ describe('generation refuses kernel routes that shadow React Router pages', () =
         expect(h.err.text()).toContain('app/routes/_app/products._index.tsx');
         expect(h.err.text()).toContain('/products and /products/:id would take precedence');
         expect(h.err.text()).toContain(
-          `setu g module api (with --adopt-controllers if the project has controllers), then setu g ${schematic} products --module api (which yields /api/products)`,
+          `setu g module orders (with --adopt-controllers if the project has controllers), then setu g ${schematic} products --module orders (which yields /api/orders/products)`,
         );
       });
     }
@@ -124,15 +145,15 @@ describe('generation refuses kernel routes that shadow React Router pages', () =
     expect(await h.run(['g', 'controller', 'orders'])).toBe(1);
     expect(h.err.text()).toContain('app/routes/_app/orders.tsx');
     expect(h.err.text()).toContain(
-      'setu g module api (with --adopt-controllers if the project has controllers), then setu g controller orders --module api (which yields /api/orders)',
+      'setu g module orders (with --adopt-controllers if the project has controllers), then setu g controller orders --module orders (which yields /api/orders/orders)',
     );
     expect(h.err.text()).not.toContain('products');
   });
-  it('allows /api/products in an existing api module', async () => {
+  it('mounts a module route below its full-stack base', async () => {
     const h = harness();
     expect(await h.run(['g', 'module', 'api'])).toBe(0);
     expect(await h.run(['g', 'route', 'products', '--module', 'api'])).toBe(0);
-    expect(h.fs.read('/app/src/modules/api/products.controller.ts')).toContain('/api/products');
+    expect(h.fs.read('/app/src/modules/api/products.controller.ts')).toContain('/api/api/products');
   });
   it('continues with a notice naming the paths to inspect when the CLI fails', async () => {
     const h = harness(undefined, () =>

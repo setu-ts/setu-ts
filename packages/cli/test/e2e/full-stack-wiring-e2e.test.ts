@@ -93,6 +93,10 @@ it(
         expect(source).toContain(before);
         await nodeFs.writeFile(file, source.replace(before!, after!));
       }
+      await nodeFs.writeFile(
+        `${project}/app/routes/_auth/failure.tsx`,
+        `export function loader() { throw new Error('SSR canary https://user:secret-password@example.com/'); }\nexport default function Failure() { return null; }\n`,
+      );
       const built = await npmRun(project, 'build');
       expect(built.code, built.output).toBe(0);
       const probe = `import { createApp } from './setu.config.ts';
@@ -116,6 +120,9 @@ try {
   const response = await app.fetch(new Request('http://localhost/'));
   const html = await response.text();
   if (response.status !== 200 || !html.includes('<html')) throw new Error('SSR did not boot');
+  const failed = await app.fetch(new Request('http://localhost/failure'));
+  await failed.text();
+  if (failed.status !== 500) throw new Error('throwing loader did not fail');
   console.log('FULL_STACK_WIRING_READBACK=' + JSON.stringify({ command, query, received, processed, page: response.status }));
 } finally { await app.stop(); }
 `;
@@ -125,6 +132,11 @@ try {
       const result = await runIn(project, 'node', ['--import', 'tsx', 'wiring-probe.ts']);
       expect(result.code, result.output).toBe(0);
       expect(result.output).toContain('FULL_STACK_WIRING_READBACK=');
+      expect(result.output).toContain('SSR request failed');
+      expect(result.output).toContain('requestId');
+      expect(result.output).toContain('stack');
+      expect(result.output).toContain('https://***@example.com/');
+      expect(result.output).not.toContain('secret-password');
       console.log(result.output);
     } finally {
       await overlay.close();

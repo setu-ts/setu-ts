@@ -175,7 +175,9 @@ for (const target of ['deno', 'bun'] as const) {
     `g module --page keeps a ${target} full-stack project formatted, checked and tested`,
     { timeout: 900_000 },
     async () => {
-      expect(await run(['new', 'shop', '--runtime', target, '--template', 'full-stack'])).toBe(0);
+      expect(
+        await run(['new', 'shop', '--runtime', target, '--template', 'full-stack', '--agents']),
+      ).toBe(0);
       const project = `${root}/shop`;
       expect(await run(['g', 'module', 'articles', '--page', '--dir', project])).toBe(0);
       const overlay = await startOverlay();
@@ -191,6 +193,7 @@ for (const target of ['deno', 'bun'] as const) {
           overlay,
         );
         expect(install.code, install.output).toBe(0);
+        expect(await run(['agents', '--check', '--strict', '--dir', project])).toBe(0);
         const task = (name: string): string[] =>
           target === 'deno' ? ['task', name] : ['run', name];
         const checked = await runIn(project, target, task('check'), overlay);
@@ -694,12 +697,17 @@ try {
   });
 
   it('boots a Node REST scaffold with self-hosted Swagger assets', async () => {
-    expect(await run(['new', '--runtime', 'node', 'shop', '--template', 'rest'])).toBe(0);
+    expect(await run(['new', '--runtime', 'node', 'shop', '--template', 'rest', '--agents'])).toBe(
+      0,
+    );
     const project = `${root}/shop`;
     const overlay = await startOverlay();
     try {
       const installed = await npmInstall(project, overlay);
       expect(installed.code, installed.output).toBe(0);
+      const formatting = await npmRun(project, 'format:check');
+      expect(formatting.code, formatting.output).toBe(0);
+      expect(await run(['agents', '--check', '--strict', '--dir', project])).toBe(0);
       const readme = await nodeFs.readFile(`${project}/README.md`, 'utf8');
       const command = readme
         .split('\n')
@@ -726,7 +734,7 @@ try {
       // M113h §3.9: Node used to boot silently. The kernel announces the bound
       // port, the opt-in request logger reports a normal request, and the
       // generated `excludePaths` keeps a probe's line out of the log.
-      expect(booted.output).toContain('Server listening');
+      expect(booted.output).toContain('Listening on http://localhost:');
       expect(booted.output).toContain('"msg":"request completed"');
       expect(booted.output).toContain('"path":"/"');
       expect(booted.output).not.toContain('"/health"');
@@ -1484,7 +1492,9 @@ describe('styled scaffolds (M123)', () => {
   }
   for (const target of ['node', 'bun', 'deno', 'cloudflare-workers'] as const) {
     it(`builds full-stack token and shell CSS on ${target}`, { timeout: 900_000 }, async () => {
-      expect(await run(['new', 'shop', '--runtime', target, '--template', 'full-stack'])).toBe(0);
+      expect(
+        await run(['new', 'shop', '--runtime', target, '--template', 'full-stack', '--agents']),
+      ).toBe(0);
       const project = `${root}/shop`;
       const formatted =
         target === 'deno'

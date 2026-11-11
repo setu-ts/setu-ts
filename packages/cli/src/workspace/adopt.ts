@@ -579,5 +579,10 @@ export function rewriteEntryPort(
     `\nimport { ${symbol} } from '${specifier}';` +
     entry.slice(afterImport);
 
-  return withImport.replace(binding[0], `await app.start({ port: ${symbol} });`);
+  return withImport
+    .replace(binding[0], `await app.start({ port: ${symbol} });`)
+    .replace(
+      /console\.log\(`Listening on http:\/\/localhost:\$\{Number\(runtime\.env\.PORT \?\? (['"])3000\1\)\}\/`\);/,
+      `console.log(\`Listening on http://localhost:\${${symbol}}/\`);`,
+    );
 }

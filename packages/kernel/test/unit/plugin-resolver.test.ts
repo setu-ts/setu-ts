@@ -88,7 +88,9 @@ describe('resolvePluginOrder', () => {
     const runtime = plugin('runtime', { provides: [CAPABILITIES.RUNTIME] });
     const a = plugin('dup');
     const b = plugin('dup');
-    expect(() => resolvePluginOrder([runtime, a, b])).toThrow("Duplicate plugin name 'dup'");
+    expect(() => resolvePluginOrder([runtime, a, b])).toThrow(
+      "A starter (createRestApp, createMicroserviceApp, createFullStackApp, createFullStackAppFromConfig) may already include it; configure it through the starter's option",
+    );
   });
 
   it('should allow optional dependencies when absent', () => {

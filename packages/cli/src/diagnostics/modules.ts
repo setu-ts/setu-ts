@@ -1,5 +1,5 @@
 /** Feature activation uses the generator's original import-stripped rule. @module */
-import { maskSourceCode } from '../devtool/sources.ts';
+import { referenceMask } from './reference-mask.ts';
 import { MODULES_EXPORT } from '../schematics/module-barrel.ts';
 import { registerModuleSymbol } from '../seams/modules.ts';
 import { deriveNames } from '../utils/names.ts';
@@ -63,7 +63,7 @@ function modulesList(code: string): string | undefined {
 
 /** Whether the activation barrel calls a registrar or lists a class in MODULES. */
 export function moduleActive(source: string, symbol: string, mode: GeneratorMode): boolean {
-  const code = withoutImports(maskSourceCode(source));
+  const code = withoutImports(referenceMask(source));
   if (code === undefined) return false;
   if (mode !== 'class-based') return new RegExp(`\\b${symbol}\\s*\\(`).test(code);
   const listed = modulesList(code);

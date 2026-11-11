@@ -44,6 +44,34 @@ function readScripts(h: ReturnType<typeof harness>, file: string): Record<string
 }
 
 describe('generated local start scripts load .env (M131a X88-2)', () => {
+  it.each(['node', 'bun', 'deno'] as const)(
+    'V12-24 prints a startup banner on %s only when needed',
+    async (runtime) => {
+      const h = harness();
+      expect(await h.run(['new', 'svc', '--template', 'full-stack', '--runtime', runtime])).toBe(0);
+      for (const file of ['main.ts', 'dev.ts']) {
+        const entry = h.fs.read(`/work/svc/${file}`);
+        expect(entry.includes('Listening on http://localhost:')).toBe(runtime !== 'deno');
+        if (runtime !== 'deno')
+          expect(entry.indexOf('Listening on')).toBeGreaterThan(entry.indexOf('await app.start'));
+      }
+    },
+  );
+  it('V12-48 catches Vite setup failures and names the standalone or workspace remedy', async () => {
+    const { renderFullStackDevEntry } =
+      await import('../../src/templates/full-stack-build-files.ts');
+    for (const port of [undefined, { symbol: 'PORT', from: './src/discovery/index.ts' }]) {
+      const entry = renderFullStackDevEntry(port).contents;
+      expect(entry).toContain('try {\n  server = await vite.createServer');
+      expect(entry).toContain('await server?.close();');
+      expect(entry).toContain(
+        'Startup failed: Vite could not listen on ${vitePort} (VITE_PORT): ${describeError(error)}',
+      );
+      expect(entry).toContain(
+        port === undefined ? 'Choose another VITE_PORT' : 'setu.workspace.json',
+      );
+    }
+  });
   it('Node local scripts carry --env-file-if-exists=.env; production does not', async () => {
     const h = harness();
     await h.run(['new', 'svc', '--template', 'rest', '--runtime', 'node']);

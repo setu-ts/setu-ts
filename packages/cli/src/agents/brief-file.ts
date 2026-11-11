@@ -15,9 +15,16 @@ export function briefSection(source: string): { start: number; end: number } | u
   return { start: begins[0].index, end: ends[0].index + BRIEF_END.length };
 }
 
+/** Whitespace-insensitive freshness, shared by checking and writing. */
+export function normalizeBrief(source: string): string {
+  return source.replace(/\s+/g, ' ').trim();
+}
+
 /** Replace only the section; preserve every byte outside its markers. */
 export function spliceBrief(source: string, section: string): string {
   const range = briefSection(source);
   if (range === undefined) return section + '\n' + (source === '' ? '' : '\n' + source);
+  if (normalizeBrief(source.slice(range.start, range.end)) === normalizeBrief(section))
+    return source;
   return source.slice(0, range.start) + section + source.slice(range.end);
 }

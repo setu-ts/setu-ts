@@ -1,11 +1,38 @@
 import { describe, expect, it } from 'vitest';
-import { renderBrief } from '../../../src/agents/render.ts';
+import { renderBrief, renderWorkspaceRoot } from '../../../src/agents/render.ts';
+import { format } from 'prettier';
+import { PRETTIER_OPTIONS } from '../../../src/templates/npm-tooling.ts';
 import { agentFacts } from '../../fixtures/agent-facts.ts';
 import { gatherFacts } from '../../../src/agents/facts.ts';
 import { runCli } from '../../../src/cli.ts';
 import { createFakeFs } from '../../fixtures/fake-fs.ts';
 
 describe('project brief rendering', () => {
+  it('V12-1 survives real Prettier with the scaffold options', async () => {
+    const fs = createFakeFs();
+    const deps = { fs, cwd: '/work', now: () => 0, log: () => {}, error: () => {} };
+    expect(await runCli(['new', 'shop', '--template', 'full-stack'], deps)).toBe(0);
+    const brief = renderBrief(await gatherFacts(fs, '/work/shop'));
+    const workspace = renderWorkspaceRoot(
+      {
+        version: 2,
+        runtime: 'node',
+        basePort: 3000,
+        broker: 'memory',
+        members: [{ name: 'shop', port: 3000 }],
+      },
+      '0.12.0',
+    );
+    for (const text of [brief, workspace])
+      expect(await format(text, { ...PRETTIER_OPTIONS, parser: 'markdown' })).toBe(text);
+  });
+  it('V12-22 lists starter-provided queue separately from Not installed', () => {
+    const text = renderBrief(agentFacts({ installed: new Set(['full-stack-starter']) }));
+    const [provided, absent] = text.split('## Not installed');
+    expect(provided).toContain('Provided by `@setu-ts/full-stack-starter`');
+    expect(provided).toContain('`@setu-ts/queue-plugin`');
+    expect(absent).not.toContain('`@setu-ts/queue-plugin`');
+  });
   it('V11-9 renders lint/format glosses and runtime-specific verification instructions', () => {
     for (const runtime of ['node', 'bun', 'deno'] as const) {
       const text = renderBrief(
@@ -125,9 +152,9 @@ describe('project brief rendering', () => {
     const text = renderBrief(
       agentFacts({ installed: new Set(['kernel', 'cache-plugin', 'third.party_2', ...bad]) }),
     );
-    expect(text).toContain('| @setu-ts/kernel |');
-    expect(text).toContain('| @setu-ts/cache-plugin |');
-    expect(text).toContain('| @setu-ts/third.party_2 |');
+    expect(text).toContain('- @setu-ts/kernel —');
+    expect(text).toContain('- @setu-ts/cache-plugin —');
+    expect(text).toContain('- @setu-ts/third.party_2 —');
     for (const pkg of bad) expect(text).not.toContain(`@setu-ts/${pkg}`);
     expect(text).not.toContain('CANARY-INSTR');
   });

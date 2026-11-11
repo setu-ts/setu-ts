@@ -270,7 +270,11 @@ describe('runAppCommand', () => {
         // The config calls the CLI-owned module; the module carries the options.
         const config = h.fs.read('/ws/apps/shop/setu.config.ts');
         expect(config).toContain('messaging: messagingOptions(config),');
-        expect(config).toContain('queue: { ...queueOptions(config) },');
+        expect(config).toContain(
+          ['redis', 'rabbitmq'].includes(transport)
+            ? 'queue: { processors: [...QUEUE_PROCESSORS], ...queueOptions(config) },'
+            : 'queue: { ...queueOptions(config) },',
+        );
         const module = h.fs.read('/ws/apps/shop/src/transport/index.ts');
         expect(module).toContain('config.get<string>(');
         expect(module.includes('adapter:')).toBe(['redis', 'rabbitmq'].includes(transport));

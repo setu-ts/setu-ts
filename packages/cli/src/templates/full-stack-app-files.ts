@@ -105,10 +105,11 @@ export function ErrorBoundary() {
 
 const entryServerModule = `import { renderToReadableStream } from 'react-dom/server';
 import { type EntryContext, isRouteErrorResponse, ServerRouter } from 'react-router';
-import { CAPABILITIES, describeError, type ILogger } from '@setu-ts/common';
+import { CAPABILITIES, describeError, maskUrlUserinfo, type ILogger } from '@setu-ts/common';
 import { getService } from '@setu-ts/react-router-plugin';
 
 import type { AppLoadContext } from '~/lib/load-context.ts';
+import { requestIdContext } from '~/server/context-keys.server.ts';
 
 /**
  * Server entry.
@@ -166,7 +167,9 @@ export function handleError(
   if (isRouteErrorResponse(error) && error.status === 404) return;
   getService<ILogger>(context, CAPABILITIES.LOGGER).error('SSR request failed', {
     path: new URL(request.url).pathname,
+    requestId: context.get(requestIdContext),
     error: describeError(error),
+    ...(error instanceof Error && error.stack ? { stack: maskUrlUserinfo(error.stack) } : {}),
   });
 }
 `;
@@ -232,6 +235,9 @@ export interface CurrentUser {
   /** The address the user signed in with. */
   readonly email: string;
 }
+
+/** The kernel request id, for correlating SSR failures with request logs. */
+export const requestIdContext = contextKeyFor<string | null>('app.request-id', null);
 
 /** The session for the current request; set in \`setu.config.ts\`. */
 export const sessionContext = contextKeyFor<ISession | null>('app.session', null);

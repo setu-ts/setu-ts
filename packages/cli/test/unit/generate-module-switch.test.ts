@@ -114,15 +114,32 @@ describe('X91-1 same-named adoption', () => {
     expect(await h.run(['module', 'orders', '--adopt-controllers']), h.err.text()).toBe(0);
     expect(h.err.text()).not.toContain('full-stack module');
   });
-  it('refuses full-stack same-named adoption before any move', async () => {
+  it('adopts a full-stack same-named controller and keeps its generated service and token', async () => {
     const h = scaffold(FULL_STACK_TEMPLATE, {
       'src/controllers/orders.controller.ts': 'export function registerOrdersRoutes() {}',
     });
     for (const file of projectFiles('svc', 'node', resolveHost(FULL_STACK_TEMPLATE, 'node')))
       if (file.path.startsWith('src/modules/')) await h.fs.rm(`/app/${file.path}`);
+    expect(await h.run(['module', 'orders', '--adopt-controllers', '--page']), h.err.text()).toBe(
+      0,
+    );
+    expect(h.fs.has('/app/app/routes/_app/orders._index.tsx')).toBe(true);
+    expect(h.fs.read('/app/src/modules/orders/orders.controller.ts')).toBe(
+      'export function registerOrdersRoutes() {}',
+    );
+    for (const suffix of ['service', 'token', 'types'])
+      expect(h.fs.has(`/app/src/modules/orders/orders.${suffix}.ts`)).toBe(true);
+    for (const suffix of ['test', 'e2e.test'])
+      expect(h.fs.has(`/app/src/modules/orders/orders.${suffix}.ts`)).toBe(false);
+  });
+  it('still refuses a full-stack same-named service, naming the generated imports', async () => {
+    const h = scaffold(FULL_STACK_TEMPLATE, {
+      'src/services/orders.service.ts': 'export function describeOrders() { return {}; }',
+    });
+    for (const file of projectFiles('svc', 'node', resolveHost(FULL_STACK_TEMPLATE, 'node')))
+      if (file.path.startsWith('src/modules/')) await h.fs.rm(`/app/${file.path}`);
     expect(await h.run(['module', 'orders', '--adopt-controllers'])).toBe(1);
-    expect(h.err.text()).toContain('full-stack module');
-    expect(h.err.text()).toContain('generated service factory and token');
+    expect(h.err.text()).toContain('token and index import OrdersService and ordersService');
     expect(h.fs.writes).toEqual([]);
   });
 });

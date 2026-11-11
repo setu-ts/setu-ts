@@ -12,6 +12,7 @@
  * @module
  */
 
+import { JOBS_SEAM } from '../seams/jobs.ts';
 import type { ResolvedHost } from '../templates/project-files.ts';
 import { DISCOVERY_SPECIFIER, SERVICE_ENDPOINTS_EXPORT } from './discovery-module.ts';
 import { workspaceProfile, type WorkspaceRuntimeProfile } from './runtime-profile.ts';
@@ -159,7 +160,7 @@ function withTransportModule(
           appFactoryContext: {
             ...host.appFactoryContext,
             messaging: `${TRANSPORT_EXPORTS.messaging}(config)`,
-            queue: `{ ...${TRANSPORT_EXPORTS.queue}(config) }`,
+            queue: `{ ${broker.connection !== undefined && broker.queueArgs !== undefined ? 'processors: [...QUEUE_PROCESSORS], ' : ''}...${TRANSPORT_EXPORTS.queue}(config) }`,
             csrfExclude: `${TRANSPORT_EXPORTS.csrf}()`,
           },
           setupCalls: [
@@ -177,7 +178,13 @@ function withTransportModule(
           ),
           pluginSpreads: [`...${TRANSPORT_EXPORTS.plugins}()`, ...host.pluginSpreads],
         }),
-    localImports: [...host.localImports, { symbols, from: TRANSPORT_SPECIFIER }],
+    localImports: [
+      ...host.localImports,
+      { symbols, from: TRANSPORT_SPECIFIER },
+      ...(factory && broker.connection !== undefined && broker.queueArgs !== undefined
+        ? [{ symbols: ['QUEUE_PROCESSORS'], from: './src/jobs/index.ts' }]
+        : []),
+    ],
     files: [
       ...host.files.filter(
         (file) =>
@@ -185,6 +192,12 @@ function withTransportModule(
           (nodeRedis.length === 0 || file.path !== NODE_REDIS_MODULE_PATH),
       ),
       { path: TRANSPORT_MODULE, contents: renderTransportModule(input), managed: true },
+      ...(factory &&
+      broker.connection !== undefined &&
+      broker.queueArgs !== undefined &&
+      !host.files.some((file) => file.path === JOBS_SEAM.barrel)
+        ? [{ path: JOBS_SEAM.barrel, contents: JOBS_SEAM.renderBarrel({}), managed: true }]
+        : []),
       ...nodeRedis,
       ...(rpc.memberFiles?.(member, onDeno) ?? []),
     ],
@@ -195,6 +208,9 @@ function withTransportModule(
       : { transportNotes: [...(host.transportNotes ?? []), note] }),
     extraFrameworkPackages: [
       ...host.extraFrameworkPackages,
+      ...(factory && broker.connection !== undefined && broker.queueArgs !== undefined
+        ? [QUEUE_PACKAGE]
+        : []),
       ...(rpc.plugin === undefined ? [] : [rpc.plugin.pkg]),
     ],
     // Each manifest kind gets only its own half: a Deno member's tasks and import

@@ -425,8 +425,7 @@ describe('multi tenancy plugin', () => {
       if (seen.has(plug.name)) {
         expect(() => {
           throw new Error(
-            `Duplicate plugin name '${plug.name}'. To replace a plugin, register the ` +
-              `replacement's services with { override: true } instead of reusing the name.`,
+            `Duplicate plugin name '${plug.name}': it is registered twice. A starter (createRestApp, createMicroserviceApp, createFullStackApp, createFullStackAppFromConfig) may already include it; configure it through the starter's option instead of registering it again. To replace a plugin's services, register them with { override: true } under a different plugin name.`,
           );
         }).toThrow(Error);
         return; // confirmed throw path reachable

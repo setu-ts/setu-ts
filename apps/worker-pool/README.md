@@ -23,3 +23,8 @@ therefore stay as they are; no unused job or health-indicator barrel is added.
 
 Read the [example deep dive](../../docs/examples.md#worker-pool) for the concept and source
 walkthrough.
+
+For a Node production build, `setu build` bundles the literal
+`new URL('./spin.task.ts', import.meta.url)` and `fill.task.ts` targets into `dist/src/tasks/` and
+relocates their URLs for each output. Keep source specifiers unchanged for development. Dynamic task
+paths are refused; Deno and Bun run source.

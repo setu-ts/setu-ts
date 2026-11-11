@@ -62,8 +62,8 @@ describe('middleware schematic', () => {
     // Compared as prose: where the comment wraps is not the property under test.
     const prose = withRouter!.contents.replace(/\n \* /g, ' ');
     expect(prose).toContain('export a `middleware` array from the route module');
-    expect(prose).toContain('app/middleware/');
+    expect(prose).toContain('app/server/require-user.server.ts');
     expect(file.contents).not.toContain('route module');
-    expect(file.contents).not.toContain('app/middleware/');
+    expect(file.contents).not.toContain('app/server/require-user.server.ts');
   });
 });

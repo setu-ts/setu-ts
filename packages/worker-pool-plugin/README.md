@@ -42,7 +42,7 @@ A task module is an ES module **your application owns**. It registers its handle
 level with `defineWorkerTask` from the runtime package's `./worker` subpath:
 
 ```typescript
-// tasks/resize-image.ts — runs on a worker thread
+// tasks/resize-image.task.ts — runs on a worker thread
 import { defineWorkerTask } from '@setu-ts/runtime/worker';
 
 // Whatever CPU-bound work belongs on a thread; your application owns it.
@@ -75,7 +75,7 @@ const imageBytes = new Uint8Array([137, 80, 78, 71]);
 
 const pool = app.services.get<IWorkerPool>(CAPABILITIES.WORKER_POOL);
 const thumb = await pool.run<Uint8Array, Uint8Array>(
-  new URL('./tasks/resize-image.ts', import.meta.url).href,
+  new URL('./tasks/resize-image.task.ts', import.meta.url).href,
   imageBytes,
 );
 ```
@@ -307,3 +307,11 @@ drifts.
 
 Every export and option is documented in
 [PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#workerpoolplugin-setu-tsworker-pool-plugin).
+
+## Building with `setu build`
+
+On Node, keep task specifiers as literal `new URL('./tasks/resize-image.task.ts', import.meta.url)`
+expressions. `setu build` bundles each referenced `*.task.ts` into `dist/` and rewrites the URL to
+its emitted `.js` path relative to each application output, including the migration runner. Dynamic
+task paths are refused with the file and line; `--dry-run` lists task outputs. Development uses the
+same `.task.ts` specifier through the source loader. Deno and Bun run source directly.

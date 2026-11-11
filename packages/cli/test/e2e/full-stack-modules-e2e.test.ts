@@ -60,6 +60,11 @@ it(
       ).toBe(0);
       expect(await nodeFs.readFile(`${project}/setu.config.ts`, 'utf8')).toBe(configBefore);
 
+      expect(
+        await cli(['g', 'route', 'summary', '--module', 'articles', '--dir', project]),
+        output.join('\n'),
+      ).toBe(0);
+
       // The project's own gates: setu check is part of `check`.
       const checked = await npmRun(project, 'check');
       expect(checked.code, checked.output).toBe(0);
@@ -73,6 +78,9 @@ it(
       expect(e2e.code, e2e.output).toBe(0);
 
       const { result, output: serverOutput } = await withNodeServer(project, async (origin) => {
+        const summary = await fetch(`${origin}/api/articles/summary`);
+        expect(summary.status).toBe(200);
+        expect(await summary.json()).toEqual({ items: [] });
         // Sign in through /login, keeping the session cookie and CSRF token.
         const loginPage = await fetch(`${origin}/login`);
         const token = /name="_csrf"\s+value="([^"]+)"/.exec(await loginPage.text())?.[1] ?? '';

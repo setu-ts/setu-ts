@@ -161,15 +161,13 @@ describe('setu generate — an unwired decorator barrel is reported', () => {
   it('reports when the config cannot be classified', async () => {
     const h = harness({
       '/app/deno.json': CLASS_BASED,
-      '/app/setu.config.ts': 'const note = `APP_SERVICES`;\nexport const plugins = [];\n',
+      '/app/setu.config.ts': 'const note = globalThis;\nexport const plugins = [];\n',
     });
 
     expect(await h.run(['service', 'billing'])).toBe(0);
 
     expect(h.err.lines).toHaveLength(1);
-    expect(h.err.text()).toContain(
-      'could not classify setu.config.ts at line 1 (`template literal`)',
-    );
+    expect(h.err.text()).toContain('could not classify setu.config.ts at line 1 (`globalThis`)');
     expect(h.err.text()).toContain('APP_SERVICES');
     expect(h.err.text()).not.toContain('does not reference');
   });

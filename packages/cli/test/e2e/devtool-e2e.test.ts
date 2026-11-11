@@ -44,7 +44,7 @@ import {
 import { tmpdir } from 'node:os';
 import { eventually, launchGroup, liveProcesses } from '../fixtures/process-group.ts';
 import { createDiagnosticsClient } from '../../../diagnostics-plugin/src/index.ts';
-import { createConnection } from 'node:net';
+import { createConnection, createServer } from 'node:net';
 
 const runtime = createNodeRuntimeServices();
 const fs: IFileSystem = runtime.fs!;
@@ -903,3 +903,45 @@ const snapshot = await client.snapshot();`,
     }
   });
 });
+
+it(
+  'V12-44 names an application bind failure after connector startup',
+  { timeout: 120_000 },
+  async () => {
+    const appPort = await unusedPort();
+    const devtoolPort = await unusedPort();
+    const occupant = createServer();
+    await new Promise<void>((resolve, reject) => {
+      occupant.once('error', reject);
+      occupant.listen(appPort, resolve);
+    });
+    try {
+      expect(
+        await run([
+          'new',
+          '--runtime',
+          'deno',
+          'taken',
+          '--devtool',
+          '--devtool-port',
+          String(devtoolPort),
+        ]),
+      ).toBe(0);
+      const project = `${root}/taken`;
+      await useWorkspacePackages(project);
+      const result = await denoRun(project, ['task', 'dev'], {
+        ...credentials().env,
+        PORT: String(appPort),
+      });
+      expect(result.code, result.output).toBe(1);
+      expect(result.output).toContain(
+        'The application did not start, and the connector is not running.',
+      );
+      expect(result.output).not.toContain('The connector did not start.');
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        occupant.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
+  },
+);

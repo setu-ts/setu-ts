@@ -5,6 +5,7 @@
  */
 
 import { formatForTarget } from '../utils/prettier-format.ts';
+import { moduleRouteBase } from '../schematics/module-route-base.ts';
 import type { IFileSystem } from '@setu-ts/common';
 import { diagnoseProject, type ProjectDiagnosis } from '../diagnostics/diagnose.ts';
 import { refuseDuplicateNames, renderGenerateFindings } from '../diagnostics/render.ts';
@@ -498,8 +499,8 @@ export async function runGenerateCommand(
     // and its page of the same name never collide.
     const base =
       schematicName === 'module'
-        ? `/api/${names.kebab}`
-        : `/${module === undefined ? '' : `${module}/`}${names.kebab}`;
+        ? moduleRouteBase(names.kebab, installed)
+        : `${module === undefined ? '' : moduleRouteBase(module, installed)}/${names.kebab}`;
     const pages = await readPagePaths(dir, deps.runCommand ?? createCommandRunner(), deps.fs);
     if (!pages.ok) {
       deps.error(
@@ -513,8 +514,8 @@ export async function runGenerateCommand(
         );
         deps.error(
           schematicName === 'module'
-            ? `Choose another module name: a full-stack module's routes are mounted at /api/<module name>.`
-            : `Choose another name, or place the ${schematicName} in a module: setu g module api (with --adopt-controllers if the project has controllers), then setu g ${schematicName} ${names.kebab} --module api (which yields /api/${names.kebab}).`,
+            ? `Choose another module name: this project's module routes are mounted at ${moduleRouteBase('<module name>', installed)}.`
+            : `Choose another name, or place the ${schematicName} in a module: setu g module orders (with --adopt-controllers if the project has controllers), then setu g ${schematicName} ${names.kebab} --module orders (which yields ${moduleRouteBase('orders', installed)}/${names.kebab}).`,
         );
         return EXIT_ERROR;
       }

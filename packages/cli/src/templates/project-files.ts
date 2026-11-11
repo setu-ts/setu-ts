@@ -615,7 +615,7 @@ ${factoryPluginLines}${middlewareLines}${setupLines}
     ...(devtool?.diagnostics !== undefined ? { diagnostics: devtool.diagnostics } : {}),`;
   const devtoolDoc = onWorkers
     ? `\n * @param _devtool - Accepted for one signature on every target; the devtool is` +
-      `\n * Deno-only, so a Workers project never supplies it and nothing here reads it.`
+      `\n * The diagnostics listener runs only on Deno and Node, so a Workers project never supplies it and nothing here reads it.`
     : `\n * @param devtool - The development-only composition — the diagnostics plugin and` +
       `\n * the kernel diagnostics option — supplied by \`main.dev.ts\` alone. The SECOND` +
       `\n * parameter deliberately: \`setu commands\` passes its inert discovery env as the` +
@@ -720,7 +720,7 @@ const runtime = createRuntimeServices();
 async function boot() {
   const app = await ${CONFIG_EXPORT}(${serverBuild ? 'undefined, undefined, { serverBuild }' : ''});
   await app.start({ port: ${portExpression} });
-  return app;
+${runtime === 'deno' ? '' : `  console.log(\`Listening on http://localhost:\${${portExpression}}/\`);\n`}  return app;
 }
 
 const app = await boot().catch((error: unknown) => {
@@ -2459,8 +2459,8 @@ ${host.wranglerToml}`,
     files.push({
       path: devEntry.path,
       contents:
-        port !== undefined && devEntry.path === 'dev.ts'
-          ? renderFullStackDevEntry(port).contents
+        devEntry.path === 'dev.ts'
+          ? renderFullStackDevEntry(port, runtime).contents
           : devEntry.contents,
     });
   }

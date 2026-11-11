@@ -273,13 +273,7 @@ export async function runCli(argv: readonly string[], rawDeps: CliDependencies):
         });
 
       case 'add':
-        return await runAddCommand(rest, {
-          fs: deps.fs,
-          cwd: deps.cwd,
-          log: deps.log,
-          error: deps.error,
-          ...(deps.interrupt === undefined ? {} : { interrupt: deps.interrupt }),
-        });
+        return await runAddCommand(rest, deps);
 
       case 'build':
         return await runBuildCommand(rest, deps);

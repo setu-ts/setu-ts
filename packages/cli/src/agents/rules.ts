@@ -78,7 +78,7 @@ export const RULE_BLOCKS: readonly IRuleBlock[] = [
   {
     id: 'errors',
     packages: ['exceptions'],
-    applies: () => true,
+    applies: (f) => f.installed.has('exceptions'),
     text: 'Use `notFound`, `badRequest`, `unauthorized` factories from `@setu-ts/exceptions`. Preserve the project’s error-handler config; it can render RFC 9457 Problem Details.',
   },
   {
@@ -115,13 +115,13 @@ export const RULE_BLOCKS: readonly IRuleBlock[] = [
     id: 'full-stack',
     packages: ['react-router-plugin'],
     applies: (f) => f.installed.has('react-router-plugin') && f.runtime !== 'cloudflare-workers',
-    text: 'Routes: app/routes/. Loaders use service context keys from setu.config.ts; no module-level caches. Dev: start:dev (Vite in-process; no build). Production: Node build then start; Deno start builds; Bun build then start. Style: Tailwind, app/components/ui/, cn. Kernel routes beat pages (setu generate refuses collisions); prefix APIs /api/.',
+    text: 'Routes: app/routes/. Loaders resolve services with `getService(context, TOKEN)` from `@setu-ts/react-router-plugin`; context keys carry only non-service values such as the session and CSRF token. No module-level caches. Dev: start:dev (Vite in-process; no build). Production: Node build then start; Deno start builds; Bun build then start. Style: Tailwind, app/components/ui/, cn. Kernel routes beat pages (setu generate refuses collisions); prefix APIs /api/.',
   },
   {
     id: 'full-stack-workers',
     packages: ['react-router-plugin'],
     applies: (f) => f.installed.has('react-router-plugin') && f.runtime === 'cloudflare-workers',
-    text: 'Routes: app/routes/. Loaders use service context keys from setu.config.ts; no module-level caches. Develop: dev script (wrangler dev builds client and server first; no in-process Vite loop). Ship: deploy script. Style: Tailwind, app/components/ui/, cn. Kernel routes beat pages (setu generate refuses collisions); prefix APIs with /api/.',
+    text: 'Routes: app/routes/. Loaders resolve services with `getService(context, TOKEN)` from `@setu-ts/react-router-plugin`; context keys carry only non-service values such as the session and CSRF token. No module-level caches. Develop: dev script (wrangler dev builds client and server first; no in-process Vite loop). Ship: deploy script. Style: Tailwind, app/components/ui/, cn. Kernel routes beat pages (setu generate refuses collisions); prefix APIs with /api/.',
   },
   {
     id: 'messaging',

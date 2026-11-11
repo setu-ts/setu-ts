@@ -13,12 +13,25 @@ import {
 import { resolveHost } from '../../../src/templates/project-files.ts';
 import { getTemplate } from '../../../src/templates/registry.ts';
 import { SWAGGER_UI_DIST_VERSION } from '../../../src/templates/swagger-version.ts';
+import { readFile } from 'node:fs/promises';
+import { BACKEND_PEERS } from '../../../src/commands/add.ts';
 
 describe('CLIENT_RANGES', () => {
+  it('V12-27 backend peer ranges equal each owning plugin manifest', async () => {
+    for (const [pkg, backend] of Object.entries(BACKEND_PEERS)) {
+      const manifest = JSON.parse(
+        await readFile(new URL(`../../../../${pkg}/package.json`, import.meta.url), 'utf8'),
+      ) as { peerDependencies: Record<string, string> };
+      for (const peer of new Set(Object.values(backend.arms).flat()))
+        expect(CLIENT_RANGES[peer], `${pkg}: ${peer}`).toBe(manifest.peerDependencies[peer]);
+    }
+  });
   // A project installs the client the plugin will `import()`; a range outside
   // the plugin's own peer range is a version the plugin was never built against.
   it('uses framework ranges except reviewed OpenTelemetry bounds and the Swagger integrity pin', () => {
     const otel: Readonly<Record<string, string>> = {
+      'drizzle-kit': '^0.31.11',
+      prisma: '^7.10.0',
       '@opentelemetry/api': '~1.9.0',
       '@opentelemetry/sdk-trace-base': '^2.9.0',
       '@opentelemetry/resources': '^2.9.0',

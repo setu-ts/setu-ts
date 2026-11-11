@@ -68,6 +68,10 @@ export type TemplateName = (typeof TEMPLATES)[number];
  * which flags take a value.
  */
 export const VALUE_FLAGS: ReadonlySet<string> = new Set([
+  'provider',
+  'type',
+  'adapter',
+  'dialect',
   'output',
   'input',
   'factory',

@@ -221,7 +221,7 @@ describe('withWorkspaceMember — the transport module', () => {
     expect(member.plugins).toEqual([]);
     expect(member.appFactoryContext).toMatchObject({
       messaging: 'messagingOptions(config)',
-      queue: '{ ...queueOptions(config) }',
+      queue: '{ processors: [...QUEUE_PROCESSORS], ...queueOptions(config) }',
       csrfExclude: 'csrfExclusions()',
     });
     expect(member.setupCalls[0]).toBe(

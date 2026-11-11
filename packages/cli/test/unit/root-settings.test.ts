@@ -41,6 +41,7 @@ describe('root manifest settings', () => {
     // this a fresh scaffold fails `deno fmt --check` on files the CLI itself
     // just wrote.
     expect(rootManifestSettings()['fmt']).toEqual({
+      proseWrap: 'preserve',
       lineWidth: 100,
       indentWidth: 2,
       singleQuote: true,

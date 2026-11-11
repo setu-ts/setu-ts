@@ -9,16 +9,20 @@ import {
 } from '../../../../../test/fixtures/snippets/agent-card-checks.ts';
 
 describe('composition-specific rule blocks', () => {
-  const always = [
-    'verify',
-    'generate',
-    'services',
-    'add-first',
-    'time',
-    'errors',
-    'config',
-    'imports',
-  ];
+  it('V12-30 gives error-factory advice only with a direct exceptions dependency', () => {
+    const rule = RULE_BLOCKS.find((entry) => entry.id === 'errors')!;
+    expect(rule.applies(agentFacts())).toBe(false);
+    expect(rule.applies(agentFacts({ installed: new Set(['exceptions']) }))).toBe(true);
+  });
+  it('V12-23 resolves loader services through getService in both full-stack rules', () => {
+    for (const id of ['full-stack', 'full-stack-workers']) {
+      const text = RULE_BLOCKS.find((entry) => entry.id === id)!.text;
+      expect(text).toContain('getService(context, TOKEN)');
+      expect(text).toContain('@setu-ts/react-router-plugin');
+      expect(text).toContain('context keys carry only non-service values');
+    }
+  });
+  const always = ['verify', 'generate', 'services', 'add-first', 'time', 'config', 'imports'];
   for (const [runtime, style, plugins, expected] of [
     ['node', 'functional', [], ['functional', 'node-tests']],
     ['bun', 'class-based', ['decorator-plugin', 'di-plugin'], ['class-based', 'bun-tests']],

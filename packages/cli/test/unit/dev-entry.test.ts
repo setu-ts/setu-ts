@@ -168,7 +168,7 @@ it('M131b 3.2 catches creation and startup failures', () => {
   expect(entry).toContain('async function boot()');
   expect(entry).toContain('const app = await boot().catch((error: unknown) => {');
   expect(entry).toContain(
-    'setu devtool: startup failed: ${describeError(error)}. The connector did not start.',
+    'setu devtool: startup failed: ${describeError(error)}. The application did not start, and the connector is not running.',
   );
   expect(entry.indexOf('async function boot()')).toBeLessThan(
     entry.indexOf('const app = await createApp'),

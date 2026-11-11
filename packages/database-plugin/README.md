@@ -756,6 +756,9 @@ and the `'bigtable'` arm its `BigtableAdapterOptions` — see
 | `transactionTimeout` | `number` (ms)             | `30000` | Prisma only. Raises Prisma's ~5 s interactive-transaction default, which is too short for a full Unit of Work. Unread by Memory and Drizzle.                         |
 | `url`                | `string`                  | —       | **Deprecated and unread by Prisma** — a v7 client carries its own connection configuration; see below. The `'mongodb'` arm reads it as the driver connection string. |
 
+Schema migrations use the scripts `setu add database --type drizzle|prisma` adds; data migrations
+use `setu g migration` and `src/migrations/run.ts`. The schema files remain application-owned.
+
 ### Prisma 7 setup
 
 Generate and construct the client in the application, then pass it as `options.prismaClient`: a

@@ -12,8 +12,63 @@ import {
 import { workspaceProfile } from '../../src/workspace/runtime-profile.ts';
 import { resolveHost } from '../../src/templates/project-files.ts';
 import { getTemplate } from '../../src/templates/registry.ts';
+import { runCli } from '../../src/cli.ts';
 
 import type { PortProbe } from '../../src/workspace/port-probe.ts';
+
+it('V12-33 full-stack redis queues declare the package and processors so g job succeeds', async () => {
+  const h = harness();
+  expect(
+    await h.run(['shop', '--template', 'full-stack', '--runtime', 'node', '--queue', 'redis']),
+  ).toBe(0);
+  expect(h.fs.read('/work/shop/package.json')).toContain('@setu-ts/queue-plugin');
+  expect(h.fs.read('/work/shop/setu.config.ts')).toContain('processors: [...QUEUE_PROCESSORS]');
+  expect(h.fs.has('/work/shop/src/jobs/index.ts')).toBe(true);
+  expect(
+    await runCli(['g', 'job', 'digest'], {
+      fs: h.fs,
+      cwd: '/work/shop',
+      now: () => 0,
+      log: () => {},
+      error: () => {},
+    }),
+  ).toBe(0);
+});
+
+it('V12-33 workspace queues declare processors and repeated overlays keep one barrel', async () => {
+  const fs = createFakeFs();
+  const probes: number[] = [];
+  const deps = {
+    fs,
+    cwd: '/work',
+    now: () => 0,
+    log: () => {},
+    error: () => {},
+    interrupt: new AbortController().signal,
+    portAvailable: (port: number) => {
+      probes.push(port);
+      return Promise.resolve(true);
+    },
+  };
+  expect(await runCli(['new', 'ws', '--workspace', '--broker', 'redis'], deps)).toBe(0);
+  expect(
+    await runCli(['g', 'app', 'portal', '--template', 'full-stack', '--dir', '/work/ws'], deps),
+  ).toBe(0);
+  expect(probes).toContain(3000);
+  expect(fs.read('/work/ws/apps/portal/package.json')).toContain('@setu-ts/queue-plugin');
+  expect(fs.read('/work/ws/apps/portal/setu.config.ts')).toContain(
+    'processors: [...QUEUE_PROCESSORS]',
+  );
+  const spec = brokerSpec('redis');
+  const host = resolveHost(getTemplate('full-stack')!, 'node');
+  const once = withQueueArgs(host, spec, workspaceProfile('node'));
+  const twice = withQueueArgs(once, spec, workspaceProfile('node'));
+  expect(twice.files.filter((file) => file.path === 'src/jobs/index.ts')).toHaveLength(1);
+  expect(twice.localImports.filter((entry) => entry.from === './src/jobs/index.ts')).toHaveLength(
+    1,
+  );
+  expect(twice.extraFrameworkPackages.filter((pkg) => pkg === 'queue-plugin')).toHaveLength(1);
+});
 
 interface Harness {
   readonly fs: ReturnType<typeof createFakeFs>;
@@ -353,6 +408,21 @@ describe('the transport note carried by both overlay arms', () => {
 
     expect(afterBroker.plugins.some((wiring) => wiring.pkg === 'messaging-plugin')).toBe(true);
     expect(afterQueue.plugins.some((wiring) => wiring.pkg === 'queue-plugin')).toBe(true);
+  });
+
+  it('V12-33 keeps full-stack job generation independent of optional client metadata', () => {
+    const profile = workspaceProfile('node');
+    const host = resolveHost(getTemplate('full-stack')!, 'node');
+    const configured = withQueueArgs(withBrokerArgs(host, spec, profile), spec, profile);
+    expect(configured.extraFrameworkPackages).toContain('queue-plugin');
+    expect(configured.files.some((file) => file.path === 'src/jobs/index.ts')).toBe(true);
+    expect(configured.appFactoryContext?.queue).toContain('processors: [...QUEUE_PROCESSORS]');
+
+    // These overlays must not invent plugin wiring in a host that has neither
+    // the composing starter nor either plugin: there is no consumer for an arm.
+    const empty = { ...resolveHost(getTemplate('rest')!, 'node'), plugins: [] };
+    expect(withBrokerArgs(empty, spec, profile)).toBe(empty);
+    expect(withQueueArgs(empty, spec, profile)).toBe(empty);
   });
 });
 

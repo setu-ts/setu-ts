@@ -1,7 +1,7 @@
 # @setu-ts/worker-pool-plugin — run CPU work on threads
 
 **Add it:** `setu add worker-pool` adds it and inserts `WorkerPoolPlugin()` into a recognized
-functional `setu.config.ts`. It provides `CAPABILITIES.WORKER_POOL` (`IWorkerPool`).
+functional or full-stack `setu.config.ts`. It provides `CAPABILITIES.WORKER_POOL` (`IWorkerPool`).
 
 ## Submit an existing task from a route
 
@@ -17,7 +17,7 @@ export function registerThumbnailRoutes(router: IRouterApi): void {
     handler: async (ctx) => {
       const pool = ctx.services.get<IWorkerPool>(CAPABILITIES.WORKER_POOL);
       const image = await pool.run<Uint8Array, Uint8Array>(
-        new URL('./tasks/resize-image.ts', import.meta.url).href,
+        new URL('./tasks/resize-image.task.ts', import.meta.url).href,
         await ctx.request.bytes(),
         { timeoutMs: 15_000 },
       );
@@ -58,3 +58,11 @@ ctx.response.json(pools);
   overload and deadlines.
 
 <!-- card-allow: Infinity -->
+
+## Building with `setu build`
+
+On Node, keep task specifiers as literal `new URL('./tasks/resize-image.task.ts', import.meta.url)`
+expressions. `setu build` bundles each referenced `*.task.ts` into `dist/` and rewrites the URL to
+its emitted `.js` path relative to each application output, including the migration runner. Dynamic
+task paths are refused with the file and line; `--dry-run` lists task outputs. Development uses the
+same `.task.ts` specifier through the source loader. Deno and Bun run source directly.

@@ -15,6 +15,8 @@
  * @module
  */
 
+import { withDatabaseScripts, databaseConfig } from './add-database.ts';
+import type { Prompter } from '../prompt.ts';
 import { planViewSetup, VIEWS_CONTROLLER } from './add-view.ts';
 import { diagnoseProject } from '../diagnostics/diagnose.ts';
 import {
@@ -133,6 +135,7 @@ import {
 
 /** What `runAddCommand` reaches the outside world through. */
 export interface AddCommandDependencies {
+  readonly ask?: Prompter;
   /** The filesystem all reads and writes go through. */
   readonly fs: IFileSystem;
   /** The working directory a relative `--dir` resolves against (absolute). */
@@ -187,6 +190,7 @@ export const ADDABLE: ReadonlyMap<string, IAddablePackage> = new Map([
   ['decorator', { pkg: 'decorator-plugin' }],
   ['di', { pkg: 'di-plugin' }],
   ['events', { pkg: 'events-plugin' }],
+  ['exceptions', { pkg: 'exceptions' }],
   ['feature-flags', { pkg: 'feature-flags-plugin' }],
   ['graphql', { pkg: 'graphql-plugin' }],
   ['grpc', { pkg: 'grpc-plugin' }],
@@ -293,6 +297,7 @@ export const RUNTIME_RESTRICTIONS: ReadonlyMap<
 interface IPluginWiring {
   /** Factory exported by the provider package. */
   readonly symbol: string;
+  readonly args?: string;
 }
 
 /**
@@ -379,7 +384,8 @@ export function addSeam(bare: string, installed: ReadonlySet<string>): AddSeam |
 /** The concrete registration to show when configuration belongs to the application. */
 function registrationLine(bare: string): string | undefined {
   const zero = ZERO_CONFIG_WIRINGS.get(bare);
-  if (zero !== undefined) return `${zero.symbol}()`;
+  if (zero !== undefined) return `${zero.symbol}(${zero.args ?? ''})`;
+  if (bare === 'mcp-plugin') return 'McpPlugin({})';
   // `rbac` is what registers the authorization service a generated guard asks;
   // without it every permission check answers 501.
   if (bare === 'auth-plugin') {
@@ -545,6 +551,10 @@ function printWiringNote(
   seam?: AddSeam,
   transportArgs?: string,
 ): void {
+  if (bare === 'mcp-plugin')
+    log(
+      '  The app boots with it only once at least one route is marked with mcpTool() or @McpTool().',
+    );
   const starter = source === undefined ? undefined : composingStarter(source);
   if (starter !== undefined) {
     const arm = starter.arms.get(bare);
@@ -1163,6 +1173,7 @@ function providerBinding(source: string, bare: string, symbol: string): string |
  * @param seam - The generated-artifact seam the provider consumes, if any: the
  * call then carries its options and the barrel imports are added
  * @param args - Explicit options for a classified insertion (including StaticPlugin); takes precedence over seam args
+ * @param wiring - Safe provider metadata; defaults to the command's provider table
  * @returns The updated config, or `undefined` when it is not an eligible
  * generated config or needs no change
  */
@@ -1171,14 +1182,45 @@ export function withPluginWiring(
   bare: string,
   seam?: AddSeam,
   args?: string,
+  wiring: IPluginWiring | undefined = ZERO_CONFIG_WIRINGS.get(bare),
+): string | undefined {
+  return withRegistration(source, bare, seam, args, false, wiring);
+}
+
+/** Inserts a zero-config provider above the full-stack generated-plugin loop. */
+export function withFactoryRegistration(
+  source: string,
+  bare: string,
+  args?: string,
+): string | undefined {
+  return withRegistration(source, bare, undefined, args, true);
+}
+
+function withRegistration(
+  source: string,
+  bare: string,
+  seam?: AddSeam,
+  args?: string,
+  factoryMode = false,
+  wiring: IPluginWiring | undefined = ZERO_CONFIG_WIRINGS.get(bare),
 ): string | undefined {
   const provider =
-    ZERO_CONFIG_WIRINGS.get(bare) ??
+    wiring ??
     (bare === 'static-plugin' && args !== undefined ? { symbol: 'StaticPlugin' } : undefined);
   if (provider === undefined) return undefined;
 
-  const anchor = '...(devtool?.plugins ?? [])';
-  const scope = factoryScope(source);
+  const anchor = factoryMode
+    ? 'for (const generated of GENERATED_PLUGINS) app.register(generated);'
+    : '...(devtool?.plugins ?? [])';
+  // The full-stack scaffold is async. Preserve offsets while presenting its
+  // explicit Promise annotation to the existing strict factory recognizer.
+  const scope = factoryScope(
+    factoryMode
+      ? source
+          .replace(/^export async function createApp/m, 'export function createApp      ')
+          .replace(': Promise<IKernelApplication>', ': IKernelApplication         ')
+      : source,
+  );
   const code = scope?.code.slice(scope.start, scope.end);
   // The spread as an ARRAY ELEMENT: followed by `,` or `]`, on its own line (the
   // CLI's Deno rendering) or inline (Prettier's rendering of a short array, which
@@ -1187,7 +1229,13 @@ export function withPluginWiring(
   const anchors =
     code === undefined
       ? []
-      : [...code.matchAll(/\.\.\.\(devtool\?\.plugins \?\? \[\]\)(?=[ \t]*(?:,|\]))/g)];
+      : [
+          ...code.matchAll(
+            factoryMode
+              ? /for \(const generated of GENERATED_PLUGINS\) app\.register\(generated\);/g
+              : /\.\.\.\(devtool\?\.plugins \?\? \[\]\)(?=[ \t]*(?:,|\]))/g,
+          ),
+        ];
   const anchorMatch = anchors.length === 1 ? anchors[0]! : null;
   if (code === undefined || anchorMatch === null || code.split(anchor).length !== 2) {
     return undefined;
@@ -1202,7 +1250,13 @@ export function withPluginWiring(
     return undefined;
   }
   // A starter registers plugins this file never names (audit round 6).
-  if (composingStarter(source) !== undefined) return undefined;
+  const starter = composingStarter(source);
+  if (
+    factoryMode
+      ? starter?.symbol !== 'createFullStackAppFromConfig' || starter.arms.has(bare)
+      : starter !== undefined
+  )
+    return undefined;
   const factory = importedBinding ?? provider.symbol;
   // Any reference anywhere in the file, not only a call in the factory body: a
   // plugin built at module scope, through an alias, an optional call or `.call`, and
@@ -1238,10 +1292,14 @@ export function withPluginWiring(
   // CLI; an npm target's Prettier pass agrees); inline it joins the array where it
   // stands.
   const ownLine = before.trim() === '';
-  const callArgs = args ?? seam?.args ?? '';
+  const callArgs = args ?? seam?.args ?? provider.args ?? '';
   const call = ownLine
     ? renderPluginCall(factory, callArgs, before.length)
     : `${factory}(${callArgs})`;
+  if (factoryMode) {
+    if (!ownLine) return undefined;
+    return `${withImport.slice(0, insertion)}app.register(${factory}(${callArgs}));\n${before}${withImport.slice(insertion)}`;
+  }
   return `${withImport.slice(0, insertion)}${call},${ownLine ? `\n${before}` : ' '}${withImport.slice(insertion)}`;
 }
 
@@ -1580,9 +1638,198 @@ async function reportManifestRefusal(
  * @param deps - Filesystem, working directory, and output sinks
  * @returns `0` on success, `1` on a runtime error, `2` on a usage error
  */
+/** Optional peers loaded by each selected backend; app-owned clients are advised separately. */
+export const BACKEND_PEERS: Readonly<
+  Record<
+    string,
+    { readonly flag: string; readonly arms: Readonly<Record<string, readonly string[]>> }
+  >
+> = {
+  'mail-plugin': {
+    flag: 'provider',
+    arms: { log: [], smtp: ['nodemailer'], ses: ['@aws-sdk/client-sesv2'], sendgrid: [] },
+  },
+  'database-plugin': {
+    flag: 'type',
+    arms: {
+      memory: [],
+      drizzle: ['drizzle-orm'],
+      prisma: [],
+      mongodb: ['mongodb'],
+      dynamodb: ['@aws-sdk/client-dynamodb'],
+      cosmos: ['@azure/cosmos'],
+      bigtable: ['@google-cloud/bigtable'],
+    },
+  },
+  'vector-store-plugin': {
+    flag: 'adapter',
+    arms: { memory: [], pgvector: ['drizzle-orm'], qdrant: [] },
+  },
+};
+
+function backendRegistration(bare: string, arm: string): string | undefined {
+  if (bare === 'mail-plugin' && arm !== 'log')
+    return `MailPlugin({ provider: '${arm}', options: {} })`;
+  if (bare === 'database-plugin') {
+    const options: Readonly<Record<string, string>> = {
+      drizzle: '{ drizzleInstance, drizzleTables }',
+      prisma: '{ prismaClient }',
+      mongodb: '{ url: databaseUrl, collections: {} }',
+      dynamodb: '{ region, entities: {} }',
+      cosmos: '{ endpoint, key, database, containers: {} }',
+      bigtable: '{ projectId, instance, tables: {} }',
+    };
+    if (options[arm]) return `DatabasePlugin({ type: '${arm}', options: ${options[arm]} })`;
+  }
+  if (bare === 'vector-store-plugin' && arm !== 'memory')
+    return `VectorStorePlugin({ adapter: new ${arm === 'pgvector' ? 'PgVectorStore({ db })' : 'QdrantVectorStore({ client })'}, collections: [{ name: 'documents', dimensions: 768 }] })`;
+  return undefined;
+}
+
+function appBackendPackages(bare: string, arm: string): readonly string[] {
+  if (bare === 'database-plugin' && arm === 'prisma')
+    return ['@prisma/client', '@prisma/adapter-pg', 'pg'];
+  return (bare === 'database-plugin' && arm === 'drizzle') ||
+    (bare === 'vector-store-plugin' && arm === 'pgvector')
+    ? ['pg']
+    : [];
+}
+
+/** Package-specific flags are validated for the complete request before any write. */
+const ADD_FLAG_PACKAGES: Readonly<Record<string, readonly string[]>> = {
+  module: ['view-plugin'],
+  'plugin-only': ['view-plugin'],
+  broker: ['messaging-plugin'],
+  queue: ['queue-plugin'],
+  store: ['cache-plugin', 'idempotency-plugin'],
+  lock: ['scheduler-plugin'],
+  backplane: ['realtime-backplane-plugin'],
+  'redis-client': [
+    'messaging-plugin',
+    'queue-plugin',
+    'cache-plugin',
+    'idempotency-plugin',
+    'scheduler-plugin',
+    'realtime-backplane-plugin',
+  ],
+  provider: ['mail-plugin'],
+  type: ['database-plugin'],
+  adapter: ['vector-store-plugin'],
+  dialect: ['database-plugin'],
+};
+
+/** Adds validated packages in order, stopping after the first failed write. */
 export async function runAddCommand(
   args: ParsedArgs,
   deps: AddCommandDependencies,
+): Promise<number> {
+  if (args.flags.help === true || args.flags.h === true || args.positionals.length === 0)
+    return addOne(args, deps);
+  const packages: string[] = [];
+  for (const name of args.positionals) {
+    const bare = resolveAddablePackage(name);
+    if (bare === undefined) {
+      // Keep the dedicated diagnostics guidance from the single-package command.
+      if (args.positionals.length === 1) return addOne(args, deps);
+      deps.error(`"${escapeName(name)}" is not a Setu-TS package this command can add.`);
+      return EXIT_USAGE;
+    }
+    if (packages.includes(bare)) {
+      deps.error(`Duplicate package: @setu-ts/${bare}.`);
+      return EXIT_USAGE;
+    }
+    packages.push(bare);
+  }
+  for (const [flag, applicable] of Object.entries(ADD_FLAG_PACKAGES)) {
+    if (args.flags[flag] !== undefined && !packages.some((pkg) => applicable.includes(pkg))) {
+      if (flag === 'module') {
+        deps.error('--module applies only to `setu add view`, which writes a controller.');
+        return EXIT_USAGE;
+      }
+      deps.error(
+        `--${flag} applies only to setu add ${applicable.map((pkg) => pkg.replace(/-plugin$/, '')).join(' or ')}.`,
+      );
+      return EXIT_USAGE;
+    }
+  }
+  const selectedFlags = { ...args.flags };
+  for (const bare of packages) {
+    const backend = BACKEND_PEERS[bare];
+    if (backend === undefined) continue;
+    if (
+      selectedFlags[backend.flag] === undefined &&
+      args.flags.yes !== true &&
+      args.flags.y !== true &&
+      deps.ask !== undefined
+    ) {
+      const answer = await deps.ask.select(
+        `Choose the ${backend.flag} for ${bare}`,
+        Object.keys(backend.arms).map((value) => ({ value, label: value })),
+      );
+      if (answer.kind === 'cancelled') return EXIT_INTERRUPTED;
+      if (answer.kind === 'answer') selectedFlags[backend.flag] = answer.value;
+    }
+  }
+  const requests = packages.map((bare) => ({
+    positionals: [bare],
+    flags: Object.fromEntries(
+      Object.entries(selectedFlags).filter(
+        ([flag]) =>
+          ADD_FLAG_PACKAGES[flag] === undefined || ADD_FLAG_PACKAGES[flag]!.includes(bare),
+      ),
+    ),
+  }));
+  if (requests.length === 1) {
+    deps.log(`@setu-ts/${packages[0]}:`);
+    return addOne(requests[0]!, deps);
+  }
+  for (const request of requests) {
+    const code = await addOne(
+      { ...request, flags: { ...request.flags, 'dry-run': true } },
+      { ...deps, log: () => {} },
+      false,
+    );
+    if (code !== EXIT_OK) return code;
+  }
+  const added: string[] = [];
+  for (const [index, request] of requests.entries()) {
+    deps.log(`@setu-ts/${packages[index]}:`);
+    const code = await addOne(request, deps, false);
+    if (code !== EXIT_OK) {
+      deps.error(
+        `added ${added.join(', ') || 'none'}; stopped at ${packages[index]}; ${packages.slice(index + 1).join(', ') || 'none'} not attempted`,
+      );
+      return code;
+    }
+    added.push(packages[index]!);
+  }
+  if (args.flags['dry-run'] !== true) {
+    const dir = resolveDir(deps.cwd, stringFlag(args.flags, 'dir'));
+    const runtime = await detectTargetRuntime(deps.fs, dir);
+    const appPackages = [
+      ...new Set(
+        requests.flatMap((request, index) => {
+          const bare = packages[index]!;
+          const backend = BACKEND_PEERS[bare];
+          const arm = backend === undefined ? '' : request.flags[backend.flag];
+          return appBackendPackages(
+            bare,
+            typeof arm === 'string' ? arm : (Object.keys(backend?.arms ?? {})[0] ?? ''),
+          );
+        }),
+      ),
+    ];
+    deps.log('Next:');
+    deps.log(`  ${installCommand(runtime, appPackages)}`);
+    await reportAgentsHint(deps, dir, runtime);
+  }
+  return EXIT_OK;
+}
+
+async function addOne(
+  args: ParsedArgs,
+  deps: AddCommandDependencies,
+  summary = true,
 ): Promise<number> {
   if (args.flags['help'] === true || args.flags['h'] === true) {
     printAddHelp(deps.log);
@@ -1596,16 +1843,6 @@ export async function runAddCommand(
     return EXIT_USAGE;
   }
 
-  // X18-1: the contract is singular, and exceeding it used to be silent —
-  // five requested packages reported `updated deno.json` and exited 0 with one
-  // added. Refused by name, like every other misapplied input to this CLI.
-  if (args.positionals.length > 1) {
-    deps.error(
-      `${PROGRAM_NAME} add takes one package; got ${args.positionals.length}. Run it once per package.`,
-    );
-    return EXIT_USAGE;
-  }
-
   const diagnostics = requested === 'diagnostics' || requested === '@setu-ts/diagnostics-plugin';
   const bare = diagnostics ? 'diagnostics-plugin' : resolveAddablePackage(requested);
   if (bare === undefined) {
@@ -1614,6 +1851,31 @@ export async function runAddCommand(
     return EXIT_USAGE;
   }
 
+  const backend = BACKEND_PEERS[bare];
+  const backendFlag = backend === undefined ? undefined : args.flags[backend.flag];
+  const backendArm =
+    typeof backendFlag === 'string' ? backendFlag : (Object.keys(backend?.arms ?? {})[0] ?? '');
+  if (
+    backend !== undefined &&
+    backendFlag !== undefined &&
+    (typeof backendFlag !== 'string' || !Object.hasOwn(backend.arms, backendFlag))
+  ) {
+    deps.error(
+      `Unknown --${backend.flag}: ${String(backendFlag)}. Expected ${Object.keys(backend.arms).join(', ')}.`,
+    );
+    return EXIT_USAGE;
+  }
+  const dialectFlag = args.flags.dialect;
+  if (
+    dialectFlag !== undefined &&
+    (backendArm !== 'drizzle' ||
+      typeof dialectFlag !== 'string' ||
+      !['postgresql', 'mysql', 'sqlite'].includes(dialectFlag))
+  ) {
+    deps.error('--dialect requires database --type drizzle and postgresql, mysql or sqlite.');
+    return EXIT_USAGE;
+  }
+  const backendLine = backendRegistration(bare, backendArm);
   const dir = resolveDir(deps.cwd, stringFlag(args.flags, 'dir'));
   const specifier = `@setu-ts/${bare}`;
 
@@ -1645,6 +1907,10 @@ export async function runAddCommand(
     return EXIT_USAGE;
   }
   const moduleFlag = args.flags['module'];
+  if (args.flags['plugin-only'] === true && moduleFlag !== undefined) {
+    deps.error('--plugin-only cannot be combined with --module.');
+    return EXIT_USAGE;
+  }
   if (moduleFlag !== undefined && bare !== 'view-plugin') {
     deps.error('--module applies only to `setu add view`, which writes a controller.');
     return EXIT_USAGE;
@@ -1843,6 +2109,7 @@ export async function runAddCommand(
   const transportArgs = transport?.args;
   const peerPackages = [
     ...peerPackagesFor(bare, runtime),
+    ...(backend?.arms[backendArm] ?? []).map((name) => ({ name, range: CLIENT_RANGES[name]! })),
     ...telemetryPackagesFor(bare, runtime, inferredClient),
     ...(transport?.clients ?? []).map((name) => ({ name, range: CLIENT_RANGES[name]! })),
   ];
@@ -1895,6 +2162,9 @@ export async function runAddCommand(
     // deno.json exists for plugin gating, and tasks there would never run.
     if (bare === 'sdk' && (target.file === 'package.json') === (runtime !== 'deno')) {
       updated = withClientScripts(updated ?? source, target.file, runtime, deps.log) ?? updated;
+    }
+    if (bare === 'database-plugin' && (target.file === 'package.json') === (runtime !== 'deno')) {
+      updated = withDatabaseScripts(updated ?? source, backendArm, runtime, deps.log) ?? updated;
     }
     if (updated === undefined) continue;
     edits.push({ path, contents: updated });
@@ -2029,16 +2299,19 @@ export async function runAddCommand(
     // An import map that points a framework name elsewhere makes the configuration's
     // imports mean something its text does not say: no automatic wiring then.
     configRetargeted = await frameworkImportsRetargeted(deps.fs, dir);
-    const wired = configRetargeted
-      ? undefined
-      : composingStarter(config)?.arms.has(bare) === true
-        ? withStarterWiring(config, bare, artifactSeam, transportArgs)
-        : withPluginWiring(
-            config,
-            bare,
-            seam,
-            transportArgs === undefined ? undefined : seam?.args,
-          );
+    const wired =
+      configRetargeted || (bare === 'mail-plugin' && backendArm !== 'log')
+        ? undefined
+        : composingStarter(config)?.arms.has(bare) === true
+          ? withStarterWiring(config, bare, artifactSeam, transportArgs)
+          : starter
+            ? withFactoryRegistration(config, bare, transportArgs)
+            : withPluginWiring(
+                config,
+                bare,
+                seam,
+                transportArgs === undefined ? undefined : seam?.args,
+              );
     // A member's options come from its transport module, which imports the
     // node-redis helper itself; the config only needs the module's export.
     const viaModule =
@@ -2179,6 +2452,22 @@ export async function runAddCommand(
     }
   }
 
+  if (bare === 'database-plugin' && runtime !== 'cloudflare-workers') {
+    const config = databaseConfig(
+      backendArm,
+      typeof dialectFlag === 'string' ? dialectFlag : 'postgresql',
+    );
+    if (config !== undefined) {
+      deps.log(
+        `Schema migrations expect ${config.schema}; create it using ${repositoryFileUrl('packages/database-plugin/README.md')} (Prisma 7 setup). Data migrations use setu g migration and src/migrations/run.ts.`,
+      );
+      const path = joinPath(dir, config.path);
+      if (runtime !== 'deno' && (await readExistingText(deps.fs, path)) === undefined) {
+        createOnlyPaths.add(path);
+        edits.push({ path, contents: config.contents });
+      }
+    }
+  }
   let existingSources: string | undefined;
   try {
     existingSources = new TextDecoder().decode(
@@ -2215,6 +2504,7 @@ export async function runAddCommand(
   }
 
   if (bare === 'view-plugin') {
+    const pluginOnly = args.flags['plugin-only'] === true || starter;
     // The example page is a controller, so it follows the controller rule: a
     // flat project keeps it in src/controllers/, a modular one in a module.
     const diagnosis = await diagnoseProject(deps.fs, dir, await detectPlugins(deps.fs, dir));
@@ -2225,7 +2515,7 @@ export async function runAddCommand(
       );
       return EXIT_ERROR;
     }
-    if (module === undefined && diagnosis.layout !== 'flat') {
+    if (!pluginOnly && module === undefined && diagnosis.layout !== 'flat') {
       deps.error(
         `This project uses modules; pass --module <name> to place the views controller (existing: ${diagnosis.modules.map(escapeName).join(', ')}).`,
       );
@@ -2290,6 +2580,7 @@ export async function runAddCommand(
     }
     const plan = planViewSetup({
       runtime,
+      pluginOnly,
       existing,
       // An earlier `setu add view` (0.10.0 wired only the plugin) or a hand
       // registration counts too, so re-running the command wires the example route.
@@ -2322,10 +2613,12 @@ export async function runAddCommand(
     deps.log(`${specifier} is already installed in ${escapeName(dir)}.`);
     for (const line of seamGapLines(configSource, bare, seam)) deps.log(line);
     if (bare === 'messaging-plugin' || bare === 'queue-plugin') {
-      printWiringNote(configSource, bare, deps.log, seam, transportArgs);
+      if (backendLine === undefined)
+        printWiringNote(configSource, bare, deps.log, seam, transportArgs);
+      else deps.log(`  In setu.config.ts: ${backendLine}`);
       printNodeRedisImportNote(configSource, transport?.clients ?? [], deps.log);
     }
-    if (args.flags['dry-run'] !== true) await reportAgentsHint(deps, dir, runtime);
+    if (summary && args.flags['dry-run'] !== true) await reportAgentsHint(deps, dir, runtime);
     return EXIT_OK;
   }
 
@@ -2377,8 +2670,10 @@ export async function runAddCommand(
     deps.log('added ws (the Node WebSocket server, an optional peer of @setu-ts/runtime)');
   }
   deps.log('');
-  deps.log('Next:');
-  deps.log(`  ${installCommand(runtime)}`);
+  if (summary) {
+    deps.log('Next:');
+    deps.log(`  ${installCommand(runtime, appBackendPackages(bare, backendArm))}`);
+  }
   // When this run wrote the transport into setu.config.ts, the guidance would ask
   // for the very option it just wrote (PR #519 review). Any other config edit —
   // a bare plugin insertion — still needs its note.
@@ -2391,8 +2686,12 @@ export async function runAddCommand(
       ? composingStarter(configSource)?.arms.get(bare)
       : undefined;
   if (wiredArm !== undefined) deps.log(`wired ${wiredArm} in setu.config.ts`);
-  if (!transportWritten && wiredArm === undefined)
+  if (backendLine !== undefined) deps.log(`  In setu.config.ts: ${backendLine}`);
+  else if (!transportWritten && wiredArm === undefined)
     printWiringNote(configSource, bare, deps.log, seam, transportArgs);
+  const appPackages = appBackendPackages(bare, backendArm);
+  if (appPackages.length > 0)
+    deps.log(`  App-owned clients (not plugin peers): ${appPackages.join(' ')}`);
   printNodeRedisImportNote(configSource, transport?.clients ?? [], deps.log);
   if (bare === 'telemetry-plugin' && runtime === 'node' && inferredClient !== undefined) {
     deps.log(
@@ -2416,7 +2715,7 @@ export async function runAddCommand(
   // Both notes concern a Deno start task's permission flags; on another target
   // they describe nothing the developer can act on.
   if (runtime === 'deno') printPermissionNote(specifier, deps.log);
-  await reportAgentsHint(deps, dir, runtime);
+  if (summary) await reportAgentsHint(deps, dir, runtime);
   return EXIT_OK;
 }
 
@@ -2521,7 +2820,12 @@ async function reportAgentsHint(
  * @param runtime - The detected target runtime
  * @returns The command to print
  */
-function installCommand(runtime: TargetRuntime): string {
+function installCommand(runtime: TargetRuntime, appPackages: readonly string[] = []): string {
+  if (appPackages.length > 0) {
+    if (runtime === 'deno')
+      return `deno add --min-dep-age 0 ${appPackages.map((name) => `npm:${name}`).join(' ')}`;
+    return `${runtime === 'bun' ? 'bun add' : 'npm install'} ${appPackages.join(' ')}`;
+  }
   switch (runtime) {
     case 'deno':
       // `--min-dep-age 0` for the same reason the generated manifest carries
@@ -2595,7 +2899,19 @@ function printPermissionNote(specifier: string, log: (message: string) => void):
  * @param log - Output sink
  */
 function printAddHelp(log: (message: string) => void): void {
-  log(`Usage: ${PROGRAM_NAME} add <plugin> [--dir <path>] [--dry-run] [--module <name>]`);
+  log(
+    `Usage: ${PROGRAM_NAME} add <plugin> [plugins...] [--dir <path>] [--dry-run] [--module <name>]`,
+  );
+  log(
+    '--plugin-only installs view without examples (the full-stack default); incompatible with --module.',
+  );
+  log(
+    '--provider log|smtp|ses|sendgrid selects mail; --type memory|drizzle|prisma|mongodb|dynamodb|cosmos|bigtable selects database.',
+  );
+  log(
+    '--adapter memory|pgvector|qdrant selects vector-store; --dialect postgresql|mysql|sqlite selects Drizzle schema tooling.',
+  );
+  log('--yes, -y takes backend defaults without prompting.');
   log('');
   log('Adds a Setu-TS package to this project, pinned to the version of the CLI');
   log("that added it — so a project's framework packages stay on one version.");

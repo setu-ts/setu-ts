@@ -24,9 +24,7 @@ it('classifies code and imports, masks strings/comments and refuses undecidable 
   expect(
     classifyWiring("// APP_CONTROLLERS\nconst label = 'APP_CONTROLLERS';", 'APP_CONTROLLERS'),
   ).toBe('unwired');
-  expect(classifyWiring('const label = `APP_CONTROLLERS`;', 'APP_CONTROLLERS')).toBe(
-    'unclassifiable',
-  );
+  expect(classifyWiring('const label = `APP_CONTROLLERS`;', 'APP_CONTROLLERS')).toBe('unwired');
 });
 
 it('classifies a config reading env by bracket access, still refusing a computed constructor', () => {
@@ -78,6 +76,17 @@ it('returns missing symbols only and names the starter decorators arm', () => {
     ),
   ).toMatchObject({ starter: 'createRestApp', outcome: 'unwired' });
   expect(wiringFinding('const x = `template`;', 'src/index.ts', ['A'], 'config')).toMatchObject({
-    outcome: 'unclassifiable',
+    outcome: 'unwired',
   });
+});
+
+it('V12-32 classifies template substitutions and regex arrays without counting text references', () => {
+  for (const source of [
+    'const base = `https://${host}`; use(APP_CONTROLLERS);',
+    'const patterns = [/a/, /b/]; use(APP_CONTROLLERS);',
+  ])
+    expect(classifyWiring(source, 'APP_CONTROLLERS')).toBe('wired');
+  expect(classifyWiring('const label = `APP_CONTROLLERS ${other}`;', 'APP_CONTROLLERS')).toBe(
+    'unwired',
+  );
 });
