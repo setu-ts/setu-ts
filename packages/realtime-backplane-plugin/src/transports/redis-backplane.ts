@@ -276,10 +276,11 @@ export class RedisBackplane implements IRealtimeBackplane {
       // close() that already landed cancels it at once (as N2 does for the
       // ready wait below). With a bound the SUBSCRIBE settles within it, and
       // the generation check below retires the pair with UNSUBSCRIBE and QUIT.
-      if (!(await this.#subscribe(subscriber, generation))) {
+      if (!(await this.#subscribe(subscriber, generation, owned))) {
         // The host has not answered SUBSCRIBE, so it would not answer
         // UNSUBSCRIBE or QUIT either: force-close what we own, and leave an
-        // injected pair to its owner with only our listeners removed.
+        // injected pair to its owner with only our listeners removed (and its
+        // subscription undone if SUBSCRIBE answers later).
         subscriber.off('message', listener);
         if (owned) forceClose([subscriber, publisher]);
         detachAll();
@@ -335,24 +336,46 @@ export class RedisBackplane implements IRealtimeBackplane {
    * Sends SUBSCRIBE; with `commandTimeoutMs: 0`, a `close()` cancels the wait
    * (V12-53).
    *
+   * With no bound, a `close()` that already landed sends nothing, and one that
+   * lands during the wait cancels it. An injected subscriber whose SUBSCRIBE
+   * answers after that is unsubscribed again, unless a newer open is using it,
+   * so the caller's connection is not left subscribed to the topic.
+   *
    * @param subscriber - The subscriber-mode connection
    * @param generation - The open attempt's generation
-   * @returns `false` when `close()` cancelled the wait, `true` otherwise
+   * @param owned - Whether this backplane built the connection
+   * @returns `false` when a `close()` cancelled the subscription, `true` otherwise
    * @throws Whatever SUBSCRIBE rejected with, when it settles first
    */
-  async #subscribe(subscriber: IRedisBackplaneClient, generation: number): Promise<boolean> {
+  async #subscribe(
+    subscriber: IRedisBackplaneClient,
+    generation: number,
+    owned: boolean,
+  ): Promise<boolean> {
     if (this.#commandTimeoutMs !== 0) {
       await subscriber.subscribe(this.#topic);
       return true;
     }
+    if (generation !== this.#generation) return false;
     const subscribeWait = new AbortController();
     this.#openWait = subscribeWait;
-    if (generation !== this.#generation) subscribeWait.abort();
+    const pending = subscriber.subscribe(this.#topic);
+    let subscribed: boolean;
     try {
-      return await settledUnlessCancelled(subscriber.subscribe(this.#topic), subscribeWait.signal);
+      subscribed = await settledUnlessCancelled(pending, subscribeWait.signal);
     } finally {
       if (this.#openWait === subscribeWait) this.#openWait = undefined;
     }
+    if (!subscribed && !owned) {
+      void pending.then(
+        () =>
+          this.#opening === undefined && this.#subscriber === undefined
+            ? this.#unsubscribeQuietly(subscriber)
+            : undefined,
+        () => undefined,
+      );
+    }
+    return subscribed;
   }
 
   /**

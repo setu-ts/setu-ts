@@ -68,7 +68,11 @@ class FakeRedisClient implements IRedisBackplaneClient {
     return Promise.resolve(1);
   }
 
+  /** How many times SUBSCRIBE was sent. */
+  subscribeCalls = 0;
+
   async subscribe(channel: string): Promise<unknown> {
+    this.subscribeCalls++;
     if (this.#gate !== undefined) {
       await this.#gate;
     }
@@ -1874,6 +1878,80 @@ describe('RedisBackplane close() during a SUBSCRIBE that never answers (V12-53)'
     connected();
     await connecting;
     expect(subscriber.eventListeners.get('message') ?? []).toHaveLength(0);
+    // Nothing was sent, so the caller's connection was never subscribed.
+    expect(subscriber.subscribeCalls).toBe(0);
+  });
+
+  it('unsubscribes an injected pair whose SUBSCRIBE answers after the close', async () => {
+    const client = Object.assign(new FakeRedisClient(), { status: 'ready' });
+    const subscriber = Object.assign(new FakeRedisClient(), { status: 'ready' });
+    const answer = subscriber.holdSubscribe();
+    const backplane = new RedisBackplane(
+      { transport: 'redis', client, subscriber, commandTimeoutMs: 0 },
+      'node-a',
+      'realtime',
+    );
+    const connecting = backplane.connect();
+    await setImmediate();
+    await backplane.close();
+    await connecting;
+    answer();
+    await setImmediate();
+    expect(subscriber.subscribed).toEqual([]);
+  });
+
+  it('ignores an injected SUBSCRIBE that fails after the close', async () => {
+    const client = Object.assign(new FakeRedisClient(), { status: 'ready' });
+    const subscriber = Object.assign(new FakeRedisClient(), { status: 'ready' });
+    const answer = subscriber.holdSubscribe();
+    const backplane = new RedisBackplane(
+      { transport: 'redis', client, subscriber, commandTimeoutMs: 0 },
+      'node-a',
+      'realtime',
+    );
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown): void => {
+      unhandled.push(reason);
+    };
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      const connecting = backplane.connect();
+      await setImmediate();
+      await backplane.close();
+      await connecting;
+      subscriber.failSubscribe = new Error('Connection is closed.');
+      answer();
+      await setImmediate();
+      await setImmediate();
+      expect(unhandled).toEqual([]);
+      expect(subscriber.subscribed).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+  });
+
+  it("leaves a newer open's subscription on the same injected pair alone", async () => {
+    const client = Object.assign(new FakeRedisClient(), { status: 'ready' });
+    const subscriber = Object.assign(new FakeRedisClient(), { status: 'ready' });
+    const answer = subscriber.holdSubscribe();
+    const backplane = new RedisBackplane(
+      { transport: 'redis', client, subscriber, commandTimeoutMs: 0 },
+      'node-a',
+      'realtime',
+    );
+    const first = backplane.connect();
+    await setImmediate();
+    await backplane.close();
+    await first;
+    // A second open on the same pair, waiting on the same unanswered SUBSCRIBE.
+    const second = backplane.connect();
+    await setImmediate();
+    answer();
+    await second;
+    await setImmediate();
+    // Both SUBSCRIBEs landed; the cancelled one must not undo the live one's.
+    expect(subscriber.subscribed).toEqual(['realtime', 'realtime']);
+    await backplane.close();
   });
 
   it("a cancelled open does not clear the next open's wait", async () => {

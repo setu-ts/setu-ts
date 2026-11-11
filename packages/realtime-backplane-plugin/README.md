@@ -180,8 +180,9 @@ while a connection is down is **lost, never delivered late**:
   `commandTimeoutMs` if that exceeds your shutdown grace period.
 - **`close()` ends an open still waiting on SUBSCRIBE.** With `commandTimeoutMs: 0` nothing bounds a
   SUBSCRIBE to a server that never answers, so `close()` cancels that wait and force-closes the
-  connections the backplane built (an injected pair is left connected); `connect()` then resolves
-  without a connection, as it does for any open a `close()` overtakes.
+  connections the backplane built (an injected pair is left connected, and unsubscribed again if its
+  SUBSCRIBE answers later); `connect()` then resolves without a connection, as it does for any open
+  a `close()` overtakes.
 - **A timed-out publish may still be sent.** A publish rejected by the command timeout was already
   written to a connection that looked healthy, and can reach Redis afterward (measured against a
   paused server). A caller that retries a rejected publish may therefore deliver that frame twice;
