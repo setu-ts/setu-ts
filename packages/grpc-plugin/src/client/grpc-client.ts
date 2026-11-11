@@ -298,6 +298,15 @@ function effectiveDeadline(timeoutMs: number | undefined, configured: number): n
 /** connect-node states in which a session holds no connection to close. */
 const ENDED: ReadonlySet<string> = new Set(['closed', 'error']);
 
+/** A session's state; one whose `state()` throws reads as still connected. */
+function stateOf(session: Http2SessionLike): string {
+  try {
+    return session.state();
+  } catch {
+    return 'open';
+  }
+}
+
 /** Every client of one plugin instance, their transports and their sessions. */
 export class GrpcClients {
   readonly #deps: GrpcClientDeps;
@@ -592,17 +601,19 @@ export class GrpcClients {
    * By then any connection it opened has either closed on its idle timer or
    * still has a stream; one still connected is looked at again a bound later.
    * The scan stops at the first entry too young to look at, so each entry
-   * costs one look per bound, not one per eviction.
+   * costs one look per bound, not one per eviction. A clock that is not a
+   * finite, forward-moving reading keeps every entry rather than dropping
+   * them, and a `state()` that throws reads as still connected.
    */
   #evict(session: Http2SessionLike): void {
     const now = (this.#deps.clock ?? (() => performance.now()))();
+    this.#evicted.set(session, now);
     for (const [evicted, at] of this.#evicted) {
-      if (now - at < CLIENT_IDLE_TIMEOUT_MS) break;
+      if (!(now - at >= CLIENT_IDLE_TIMEOUT_MS)) break;
       this.#evicted.delete(evicted);
       // Still connected: to the back, looked at again a bound from now.
-      if (!ENDED.has(evicted.state())) this.#evicted.set(evicted, now);
+      if (!ENDED.has(stateOf(evicted))) this.#evicted.set(evicted, now);
     }
-    this.#evicted.set(session, now);
   }
 
   /**

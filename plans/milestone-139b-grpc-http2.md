@@ -390,7 +390,8 @@ re-audit holds the tree against.
   default 4 MiB. Clients: 256 per definition. Origins: 64 cached sessions; an evicted session is
   forgotten, never closed by the client, and connect-node closes it after 60 s with no stream
   (`idleConnectionTimeoutMs`, under the server's 75 s), so evicted sessions are bounded by the
-  origins evicted in the last 60 s plus those with streams open, each stream by its deadline;
+  origins evicted in the last 60 s plus those with streams open, each stream by its deadline (an
+  entry leaves on a later eviction or `close()`, so after churn stops the set holds, not grows);
   `close()` closes the rest. Client session memory: 64 MB (the server keeps Node's default; §3.12).
   Retry: one, unary only, within what is left of the deadline.
 - **Obligations on the audit** (in addition to the eight above): 9. The retry resends only a call
@@ -440,6 +441,8 @@ re-audit holds the tree against.
   | E1  | Low      | A session looked up while connect-node loaded read `closed` at eviction, was pruned, then connected: `close()` missed it | Fixed: an evicted session is looked at only after the idle bound, when `closed` means closed                                |
   | E2  | Low      | A connection told to shut down with a stream on it is invisible to `state()`                                             | Accepted: after the bound, only a stream outliving 60 s on such a connection escapes `close()`, and it ends at its deadline |
   | E4  | Low      | The prune scanned every evicted session on every eviction                                                                | Fixed: the scan stops at the first entry younger than the bound; each entry is looked at once per bound                     |
+  | E5  | Low      | A clock that is not a finite reading hung or emptied the scan, and a throwing `state()` lost sessions from `close()`     | Fixed: a non-finite age keeps every entry, the new session is added first, a throwing `state()` reads as connected          |
+  | E6  | Low      | No test pinned the scan's stop, and the budget said entries leave after 60 s                                             | Fixed: a wall-time test fails the quadratic scan; the budget names when entries leave                                       |
 
   R1–L1 are from the re-audit at `fad19bed9`, which confirmed F1–F9 fixed; N1–L2 from the second
   re-audit at `843db7f6c`, which confirmed F1–F9, R2 and R3; T1–L4 from the third at `d3feea628`,
@@ -456,16 +459,17 @@ re-audit holds the tree against.
   Obligation 13 holds by construction: nothing the client runs closes a session a call is on. The
   final audit (`a6ef41edb`) found that the prune read `closed` as "connect-node closed it", which a
   session not yet connected also reads (E1); an evicted session is now looked at only once the idle
-  bound has passed since its eviction. **R1 is accepted** (maintainer decision, 2026-11-11, option
-  (c)). The budget "a silent open stream keeps the session" lets a client hold a connection with one
-  `HEADERS` frame and no `END_STREAM` to any route that reads its body (every unary gRPC method),
-  where the HTTP/1.1 listener's `requestTimeout` (300 s) would end the same unfinished request. It
-  is accepted as grpc-go accepts it: `MaxConnectionIdle` counts only time with no stream open, and
-  nothing bounds an open stream by default. The alternatives were rejected: a per-stream
-  request-half bound would have to exempt client- and bidi-streaming procedures, which the listener
-  cannot tell apart without knowing the route, and an inactivity bound on the request half would
-  also end a silent bidi stream. The cost is bounded per connection by HTTP/2's own stream limit and
-  recovers when the client disconnects; obligation 15 now says what is bounded.
+  bound has passed since its eviction. Its re-audit (`af25edd84`) found no Medium or higher; its two
+  Lows are E5 and E6. **R1 is accepted** (maintainer decision, 2026-11-11, option (c)). The budget
+  "a silent open stream keeps the session" lets a client hold a connection with one `HEADERS` frame
+  and no `END_STREAM` to any route that reads its body (every unary gRPC method), where the HTTP/1.1
+  listener's `requestTimeout` (300 s) would end the same unfinished request. It is accepted as
+  grpc-go accepts it: `MaxConnectionIdle` counts only time with no stream open, and nothing bounds
+  an open stream by default. The alternatives were rejected: a per-stream request-half bound would
+  have to exempt client- and bidi-streaming procedures, which the listener cannot tell apart without
+  knowing the route, and an inactivity bound on the request half would also end a silent bidi
+  stream. The cost is bounded per connection by HTTP/2's own stream limit and recovers when the
+  client disconnects; obligation 15 now says what is bounded.
 
 ### 3.11 RPC call and reply without fetch objects (2026-11-10)
 

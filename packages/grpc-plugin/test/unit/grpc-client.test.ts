@@ -59,8 +59,10 @@ function fakeNode(outcome: () => Promise<unknown> = () => Promise.resolve('ok'))
   sessions: Array<{ url: string; aborted: boolean }>;
   sessionOptionsSeen: Array<Record<string, unknown> | undefined>;
   pingOptionsSeen: Array<Record<string, unknown> | undefined>;
-  /** Each session's `state()`, by URL; absent reads as `'idle'`. */
+  /** Each session's `state()`, by URL; absent reads as `'idle'`, `'throw'` throws. */
   states: Map<string, string>;
+  /** How many times any session's `state()` was read. */
+  stateReads: { count: number };
   /** A call to a base URL here waits on its promise before answering. */
   gates: Map<string, Promise<unknown>>;
 } {
@@ -69,6 +71,7 @@ function fakeNode(outcome: () => Promise<unknown> = () => Promise.resolve('ok'))
   const sessionOptionsSeen: Array<Record<string, unknown> | undefined> = [];
   const pingOptionsSeen: Array<Record<string, unknown> | undefined> = [];
   const states = new Map<string, string>();
+  const stateReads = { count: 0 };
   const gates = new Map<string, Promise<unknown>>();
   const factory =
     (kind: Built['kind']) =>
@@ -99,6 +102,7 @@ function fakeNode(outcome: () => Promise<unknown> = () => Promise.resolve('ok'))
     sessionOptionsSeen,
     pingOptionsSeen,
     states,
+    stateReads,
     gates,
     module: {
       createConnectTransport: factory('connect'),
@@ -117,7 +121,10 @@ function fakeNode(outcome: () => Promise<unknown> = () => Promise.resolve('ok'))
           this.#entry.aborted = true;
         }
         state(): string {
-          return states.get(this.#entry.url) ?? 'idle';
+          stateReads.count++;
+          const state = states.get(this.#entry.url) ?? 'idle';
+          if (state === 'throw') throw new Error('state unreadable');
+          return state;
         }
       },
     },
@@ -590,6 +597,66 @@ describe('GrpcClients', () => {
     expect(aborted.has('http://h:1001')).toBe(false);
     expect(aborted.has('http://h:1002')).toBe(true);
     expect(aborted.has('http://h:1003')).toBe(true);
+  });
+
+  it('looks at each evicted session once per idle bound, not once per eviction', async () => {
+    let now = 0;
+    const { clients: c, node } = clients({ clock: () => now });
+    for (let port = 0; port < MAX_CLIENT_ORIGINS; port++)
+      await call(c.client(BILLING, `http://h:${1000 + port}`));
+    // Every evicted session stays connected; 400 evictions, one per second.
+    for (let i = 0; i < 400; i++) {
+      now = i * 1000;
+      await call(c.client(BILLING, `http://h:${2000 + i}`));
+    }
+    // The one evicted at i s is looked at 60 s later and every 60 s after, up to 399 s.
+    let looks = 0;
+    for (let i = 0; i < 400; i++) looks += Math.floor((399 - i) / 60);
+    expect(node.stateReads.count).toBe(looks);
+    c.close();
+    expect(node.sessions.every((s) => s.aborted)).toBe(true);
+  });
+
+  it('stops the scan at the first evicted session too young to look at', async () => {
+    let now = 0;
+    const { clients: c, node } = clients({ clock: () => now });
+    for (let port = 0; port < MAX_CLIENT_ORIGINS; port++)
+      await call(c.client(BILLING, `http://h:${1000 + port}`));
+    // 40,000 evictions inside one bound: a scan past the young entries would be quadratic.
+    const started = performance.now();
+    for (let i = 0; i < 40_000; i++) {
+      now = i;
+      await call(c.client(BILLING, `http://h:${10_000 + i}`));
+    }
+    expect(performance.now() - started).toBeLessThan(3_000);
+    expect(node.stateReads.count).toBe(0);
+    c.close();
+  });
+
+  it('keeps every evicted session when the clock is not a finite reading', async () => {
+    for (const reading of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+      const { clients: c, node } = clients({ clock: () => reading });
+      for (let port = 0; port < MAX_CLIENT_ORIGINS + 5; port++) {
+        node.states.set(`http://h:${1000 + port}`, 'closed');
+        await call(c.client(BILLING, `http://h:${1000 + port}`));
+      }
+      expect(node.stateReads.count).toBe(0);
+      c.close();
+      expect(node.sessions.every((s) => s.aborted)).toBe(true);
+    }
+  });
+
+  it('reads an evicted session whose state() throws as still connected', async () => {
+    let now = 0;
+    const { clients: c, node } = clients({ clock: () => now });
+    for (let port = 0; port < MAX_CLIENT_ORIGINS + 1; port++)
+      await call(c.client(BILLING, `http://h:${1000 + port}`));
+    node.states.set('http://h:1000', 'throw');
+    now = CLIENT_IDLE_TIMEOUT_MS;
+    await call(c.client(BILLING, 'http://h:3000'));
+    expect(node.stateReads.count).toBe(1);
+    c.close();
+    expect(node.sessions.every((s) => s.aborted)).toBe(true);
   });
 
   it('reaches sessions looked up while connect-node loads and connected after their eviction', async () => {
