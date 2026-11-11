@@ -80,11 +80,11 @@ export function referenceDiagnosis(
       continue;
     }
     if (c === '/') {
-      if (previous === '}') return stop('ambiguous / after }', i);
+      if (['}', '!', ')'].includes(previous)) return stop(`ambiguous / after ${previous}`, i);
       const regex =
         previous === '' ||
-        ['return', 'typeof'].includes(previous) ||
-        '(,=:[!&|?{;'.includes(previous);
+        ['return', 'typeof', 'default', 'extends'].includes(previous) ||
+        '(,=:[&|?{;'.includes(previous);
       if (regex) {
         const start = i;
         let bracket = false;
@@ -125,12 +125,7 @@ export function referenceDiagnosis(
             'else',
             'do',
           ].includes(previous) ||
-          !(
-            previous === 'value' ||
-            previous === ')' ||
-            previous === ']' ||
-            /^[A-Za-z_$][\w$]*$/.test(previous)
-          )
+          !(previous === 'value' || previous === ']' || /^[A-Za-z_$][\w$]*$/.test(previous))
         )
           return stop('ambiguous /', i);
         text[i] = '*'; // Same expression shape, accepted by the strict lexer.

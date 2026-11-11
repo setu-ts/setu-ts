@@ -297,7 +297,6 @@ export const RUNTIME_RESTRICTIONS: ReadonlyMap<
 interface IPluginWiring {
   /** Factory exported by the provider package. */
   readonly symbol: string;
-  readonly args?: string;
 }
 
 /**
@@ -384,7 +383,7 @@ export function addSeam(bare: string, installed: ReadonlySet<string>): AddSeam |
 /** The concrete registration to show when configuration belongs to the application. */
 function registrationLine(bare: string): string | undefined {
   const zero = ZERO_CONFIG_WIRINGS.get(bare);
-  if (zero !== undefined) return `${zero.symbol}(${zero.args ?? ''})`;
+  if (zero !== undefined) return `${zero.symbol}()`;
   if (bare === 'mcp-plugin') return 'McpPlugin({})';
   // `rbac` is what registers the authorization service a generated guard asks;
   // without it every permission check answers 501.
@@ -644,7 +643,11 @@ function printWiringNote(
     log(
       starter === undefined
         ? `  Register ${call} in setu.config.ts.`
-        : `  Register it after the factory returns: app.register(${call});`,
+        : transportArgs !== undefined && starter.symbol === 'createFullStackAppFromConfig'
+          ? // These options read the starter callback's `config`, which the code after
+            // the factory cannot see (M139d review H1).
+            `  Register ${call} where config is in scope; do not put it after the factory.`
+          : `  Register it after the factory returns: app.register(${call});`,
     );
     for (const item of seam?.imports ?? []) {
       log(`  Import ${item.symbols.join(', ')} from '${item.from}' for it.`);
@@ -1173,7 +1176,6 @@ function providerBinding(source: string, bare: string, symbol: string): string |
  * @param seam - The generated-artifact seam the provider consumes, if any: the
  * call then carries its options and the barrel imports are added
  * @param args - Explicit options for a classified insertion (including StaticPlugin); takes precedence over seam args
- * @param wiring - Safe provider metadata; defaults to the command's provider table
  * @returns The updated config, or `undefined` when it is not an eligible
  * generated config or needs no change
  */
@@ -1182,9 +1184,8 @@ export function withPluginWiring(
   bare: string,
   seam?: AddSeam,
   args?: string,
-  wiring: IPluginWiring | undefined = ZERO_CONFIG_WIRINGS.get(bare),
 ): string | undefined {
-  return withRegistration(source, bare, seam, args, false, wiring);
+  return withRegistration(source, bare, seam, args);
 }
 
 /** Inserts a zero-config provider above the full-stack generated-plugin loop. */
@@ -1202,10 +1203,9 @@ function withRegistration(
   seam?: AddSeam,
   args?: string,
   factoryMode = false,
-  wiring: IPluginWiring | undefined = ZERO_CONFIG_WIRINGS.get(bare),
 ): string | undefined {
   const provider =
-    wiring ??
+    ZERO_CONFIG_WIRINGS.get(bare) ??
     (bare === 'static-plugin' && args !== undefined ? { symbol: 'StaticPlugin' } : undefined);
   if (provider === undefined) return undefined;
 
@@ -1292,7 +1292,7 @@ function withRegistration(
   // CLI; an npm target's Prettier pass agrees); inline it joins the array where it
   // stands.
   const ownLine = before.trim() === '';
-  const callArgs = args ?? seam?.args ?? provider.args ?? '';
+  const callArgs = args ?? seam?.args ?? '';
   const call = ownLine
     ? renderPluginCall(factory, callArgs, before.length)
     : `${factory}(${callArgs})`;
@@ -1786,7 +1786,11 @@ export async function runAddCommand(
   for (const request of requests) {
     const code = await addOne(
       { ...request, flags: { ...request.flags, 'dry-run': true } },
-      { ...deps, log: () => {} },
+      {
+        ...deps,
+        log: () => {},
+        error: (line) => deps.error(`@setu-ts/${request.positionals[0]}: ${line}`),
+      },
       false,
     );
     if (code !== EXIT_OK) return code;
@@ -2305,7 +2309,9 @@ async function addOne(
         : composingStarter(config)?.arms.has(bare) === true
           ? withStarterWiring(config, bare, artifactSeam, transportArgs)
           : starter
-            ? withFactoryRegistration(config, bare, transportArgs)
+            ? transportArgs === undefined
+              ? withFactoryRegistration(config, bare)
+              : undefined
             : withPluginWiring(
                 config,
                 bare,
@@ -2456,10 +2462,16 @@ async function addOne(
     const config = databaseConfig(
       backendArm,
       typeof dialectFlag === 'string' ? dialectFlag : 'postgresql',
+      configText === undefined
+        ? ['.env']
+        : (() => {
+            const declaration = envFileDeclaration(configText);
+            return declaration.kind === 'paths' ? declaration.paths : ['.env'];
+          })(),
     );
     if (config !== undefined) {
       deps.log(
-        `Schema migrations expect ${config.schema}; create it using ${repositoryFileUrl('packages/database-plugin/README.md')} (Prisma 7 setup). Data migrations use setu g migration and src/migrations/run.ts.`,
+        `Schema migrations expect ${config.schema}; create it using ${repositoryFileUrl(`packages/database-plugin/README.md#${backendArm === 'drizzle' ? 'drizzle-pool-setup' : 'prisma-7-setup'}`)} (${backendArm === 'drizzle' ? 'Drizzle pool setup' : 'Prisma 7 setup'}). Data migrations use setu g migration and src/migrations/run.ts.`,
       );
       const path = joinPath(dir, config.path);
       if (runtime !== 'deno' && (await readExistingText(deps.fs, path)) === undefined) {
@@ -2505,6 +2517,12 @@ async function addOne(
 
   if (bare === 'view-plugin') {
     const pluginOnly = args.flags['plugin-only'] === true || starter;
+    if (starter && moduleFlag !== undefined) {
+      deps.error(
+        `--module ${escapeName(String(moduleFlag))} is not supported by full-stack add view; React Router owns pages.`,
+      );
+      return EXIT_USAGE;
+    }
     // The example page is a controller, so it follows the controller rule: a
     // flat project keeps it in src/controllers/, a modular one in a module.
     const diagnosis = await diagnoseProject(deps.fs, dir, await detectPlugins(deps.fs, dir));
@@ -2613,9 +2631,7 @@ async function addOne(
     deps.log(`${specifier} is already installed in ${escapeName(dir)}.`);
     for (const line of seamGapLines(configSource, bare, seam)) deps.log(line);
     if (bare === 'messaging-plugin' || bare === 'queue-plugin') {
-      if (backendLine === undefined)
-        printWiringNote(configSource, bare, deps.log, seam, transportArgs);
-      else deps.log(`  In setu.config.ts: ${backendLine}`);
+      printWiringNote(configSource, bare, deps.log, seam, transportArgs);
       printNodeRedisImportNote(configSource, transport?.clients ?? [], deps.log);
     }
     if (summary && args.flags['dry-run'] !== true) await reportAgentsHint(deps, dir, runtime);
@@ -2686,8 +2702,16 @@ async function addOne(
       ? composingStarter(configSource)?.arms.get(bare)
       : undefined;
   if (wiredArm !== undefined) deps.log(`wired ${wiredArm} in setu.config.ts`);
-  if (backendLine !== undefined) deps.log(`  In setu.config.ts: ${backendLine}`);
-  else if (!transportWritten && wiredArm === undefined)
+  if (backendLine !== undefined) {
+    const owner =
+      configSource === undefined ? undefined : composingStarter(configSource)?.arms.get(bare);
+    const value = backendLine.slice(backendLine.indexOf('(') + 1, -1);
+    deps.log(`  In setu.config.ts: ${owner === undefined ? backendLine : `${owner}: ${value}`}`);
+  } else if (
+    !transportWritten &&
+    wiredArm === undefined &&
+    !(configWired && starter && transportArgs === undefined)
+  )
     printWiringNote(configSource, bare, deps.log, seam, transportArgs);
   const appPackages = appBackendPackages(bare, backendArm);
   if (appPackages.length > 0)

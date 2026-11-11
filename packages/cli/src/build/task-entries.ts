@@ -1,12 +1,17 @@
 /** Worker task discovery and per-output URL relocation for Node bundles. @module */
 import type { IFileSystem } from '@setu-ts/common';
 import type { Plugin } from 'esbuild';
-import {
-  assertInsideProject,
-  dirName,
-  readExistingText,
-  resolveDir,
-} from '../utils/file-writer.ts';
+import { assertInsideProject, dirName, resolveDir } from '../utils/file-writer.ts';
+import { isMissingPath } from '../utils/filesystem-errors.ts';
+
+async function sourceText(fs: IFileSystem, file: string): Promise<string | undefined> {
+  try {
+    return new TextDecoder().decode(await fs.readFile(file));
+  } catch (error) {
+    if (isMissingPath(error)) return undefined;
+    throw error;
+  }
+}
 
 interface ITaskReference {
   readonly start: number;
@@ -20,10 +25,10 @@ export function taskReferences(source: string, file: string): readonly ITaskRefe
   const strings: { readonly start: number; readonly end: number }[] = [];
   const visible = source
     .replace(
-      /(['"])(?:\\.|(?!\1)[^\\])*?\1|\/\/[^\r\n]*|\/\*[\s\S]*?\*\//g,
+      /(['"])(?:\\.|(?!\1)[^\\])*?\1|`(?:\\.|[^`\\])*`|\/\/[^\r\n]*|\/\*[\s\S]*?\*\/|(?<=(?:^|[=(,:;[!&|?{}]|\breturn|\bdefault)\s*)\/(?:\\.|\[(?:\\.|[^\]\\])*\]|[^/\\\r\n[])+\/[dgimsuvy]*/g,
       (text: string, quote: string | undefined, offset: number) => {
         if (quote !== undefined) strings.push({ start: offset, end: offset + text.length });
-        return text.startsWith('/') ? text.replace(/[^\r\n]/g, ' ') : text;
+        return quote === undefined ? text.replace(/[^\r\n]/g, ' ') : text;
       },
     )
     .replace(/\b(?:import|export)\s+type\b[^;]*?\bfrom\s*(['"])[^'"]+\1\s*;?/g, (text) =>
@@ -40,8 +45,14 @@ export function taskReferences(source: string, file: string): readonly ITaskRefe
       target: resolveDir(dirName(file), match[2]!),
     });
   }
-  for (const match of visible.matchAll(/\.task\.ts/g)) {
-    if (!references.some((ref) => match.index >= ref.start && match.index < ref.end)) {
+  for (const match of visible.matchAll(
+    /\bnew\s+URL\s*\([^)]*\)|\bimport(?:\s*\([^)]*\)|[^;\r\n]*)/g,
+  )) {
+    if (strings.some((range) => match.index >= range.start && match.index < range.end)) continue;
+    if (
+      source.slice(match.index, match.index + match[0].length).includes('.task.ts') &&
+      !references.some((ref) => match.index === ref.start)
+    ) {
       throw new Error(
         `${file}:${visible.slice(0, match.index).split('\n').length}: worker task references must use new URL('<relative>.task.ts', import.meta.url).`,
       );
@@ -74,8 +85,7 @@ export async function discoverTasks(
     const file = pending.pop()!;
     if (visited.has(file)) continue;
     visited.add(file);
-    await assertInsideProject(fs, root, file);
-    const source = await readExistingText(fs, file);
+    const source = await sourceText(fs, file);
     if (source === undefined) continue; // esbuild reports missing imports.
     for (const ref of taskReferences(source, file)) {
       await assertInsideProject(fs, root, ref.target);
@@ -91,7 +101,7 @@ export async function discoverTasks(
         if (/\.[cm]?[jt]sx?$/.test(path)) pending.push(absolute);
         else {
           for (const suffix of ['.ts', '.tsx', '/index.ts']) {
-            if ((await readExistingText(fs, absolute + suffix)) !== undefined) {
+            if ((await sourceText(fs, absolute + suffix)) !== undefined) {
               pending.push(absolute + suffix);
               break;
             }
@@ -104,17 +114,37 @@ export async function discoverTasks(
 }
 
 /** Rewrites each task URL relative to its containing emitted bundle. */
-export function taskRewritePlugin(fs: IFileSystem, root: string, entry: string): Plugin {
+export function taskRewritePlugin(
+  fs: IFileSystem,
+  root: string,
+  entry: string,
+  tasks: readonly string[] = [],
+): Plugin {
+  const built = new Set(tasks.map((task) => resolveDir(root, task)));
   return {
     name: 'setu-worker-tasks',
     setup(build) {
       build.onLoad({ filter: /\.[cm]?[jt]sx?$/ }, async ({ path }) => {
-        const source = await readExistingText(fs, path);
+        // Dependencies are bundled as published: only the application's own
+        // sources can name a task, and esbuild loads everything else itself.
+        if (/[\\/]node_modules[\\/]/.test(path)) return undefined;
+        const source = await sourceText(fs, path);
         if (source === undefined) return undefined;
         const refs = taskReferences(source, path);
+        if (refs.length === 0) return undefined;
         const base = resolveDir(root, entry);
         let contents = source;
         for (const ref of [...refs].reverse()) {
+          const location = `${path}:${source.slice(0, ref.start).split('\n').length}`;
+          try {
+            await assertInsideProject(fs, root, ref.target);
+          } catch {
+            throw new Error(
+              `${location}: worker task target is outside the project: ${ref.target}.`,
+            );
+          }
+          if (!built.has(ref.target))
+            throw new Error(`${location}: worker task target was not built: ${ref.target}.`);
           const specifier = relativePath(dirName(base), ref.target).replace(/\.ts$/, '.js');
           contents = `${contents.slice(0, ref.start)}new URL('${specifier}', import.meta.url)${contents.slice(ref.end)}`;
         }

@@ -52,6 +52,11 @@ it('V12-12 relocates a shared helper separately for main, migrations and task ou
             api.onResolve({ filter: /.*/ }, ({ path, resolveDir }) => ({
               path: resolve(resolveDir || '/app', path),
             }));
+            // The fake fs stands in for the disk esbuild reads itself.
+            api.onLoad({ filter: /.*/ }, ({ path }) => ({
+              contents: h.fs.read(path),
+              loader: 'ts',
+            }));
           },
         },
       ],

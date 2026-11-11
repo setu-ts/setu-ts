@@ -386,6 +386,7 @@ const vitePort = ${port === undefined ? `Number(runtime.env.VITE_PORT ?? '5173')
 const root = import.meta.dirname ?? '.';
 
 let server: vite.ViteDevServer | undefined;
+let listening = false;
 try {
   server = await vite.createServer({
   root,
@@ -407,13 +408,18 @@ try {
     resolve: (specifier) => import.meta.resolve(specifier),
   })],
 });
+  listening = true;
   await server.listen();
 } catch (error: unknown) {
   await server?.close();
-  console.error(\`Startup failed: Vite could not listen on \${vitePort} (VITE_PORT): \${describeError(error)}\`);
-  console.error('${port === undefined ? 'Choose another VITE_PORT in the environment.' : 'Choose another Vite port in setu.workspace.json.'}');
+  if (listening) {
+    console.error(\`Startup failed: Vite could not listen on \${vitePort} (VITE_PORT): \${describeError(error)}\`);
+    console.error('${port === undefined ? 'Choose another VITE_PORT in the environment.' : 'Choose another Vite port in setu.workspace.json.'}');
+  } else console.error(\`Startup failed: \${describeError(error)}\`);
   runtime.exit(1);
 }
+
+
 const viteServer = server;
 
 // Re-read on every request, so an edited route is served without a restart.
@@ -480,4 +486,26 @@ for (const signal of ['SIGTERM', 'SIGINT'] as const) {
 }
 `,
   };
+}
+
+/** Current and recognition-only 0.12.0 standalone entries, for workspace adoption. */
+export function fullStackDevEntryVariants(
+  runtime: TargetRuntime,
+): readonly { path: string; contents: string }[] {
+  const current = renderFullStackDevEntry(undefined, runtime);
+  const start = current.contents.indexOf('let server: vite.ViteDevServer | undefined;');
+  const end =
+    current.contents.indexOf('const viteServer = server;') + 'const viteServer = server;'.length;
+  const argsStart =
+    current.contents.indexOf('await vite.createServer(', start) + 'await vite.createServer('.length;
+  const argsEnd = current.contents.indexOf('\n});', argsStart) + 2;
+  const legacy = (
+    current.contents.slice(0, start) +
+    `const viteServer = await vite.createServer(${current.contents.slice(argsStart, argsEnd)});\nawait viteServer.listen();` +
+    current.contents.slice(end)
+  )
+    .replace(', type IRuntimeServices', '')
+    .replace('const runtime: IRuntimeServices =', 'const runtime =')
+    .replace('  console.log(`Listening on http://localhost:${port}/`);\n', '');
+  return [current, { path: current.path, contents: legacy }];
 }

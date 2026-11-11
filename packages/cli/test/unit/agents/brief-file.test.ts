@@ -7,6 +7,15 @@ import {
 } from '../../../src/agents/brief-file.ts';
 
 describe('framework section ownership', () => {
+  it('H3 writes one final newline without growth across replacements', () => {
+    const first = `${begin}\n\none\n\n${end}\n`;
+    const next = `${begin}\n\ntwo\n\n${end}\n`;
+    expect(spliceBrief('', first)).toBe(first);
+    const once = spliceBrief(first, next);
+    expect(once).toBe(next);
+    expect(spliceBrief(once, first)).toBe(first);
+    expect(spliceBrief(first, first)).toBe(first);
+  });
   const section = `${begin}\nnew\n${end}`;
   it('creates or prepends, preserving all existing bytes', () => {
     expect(briefSection('personal')).toBeUndefined();

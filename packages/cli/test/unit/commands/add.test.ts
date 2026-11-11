@@ -34,6 +34,101 @@ import { BACKEND_PEERS } from '../../../src/commands/add.ts';
 import { BROKERS, brokerSpec } from '../../../src/workspace/transport.ts';
 
 describe('M139d add request and backend contracts', () => {
+  async function stack(runtime: 'node' | 'bun' = 'node') {
+    const h = harness();
+    expect(
+      await runNewCommand(parseArgs(['shop', '--template', 'full-stack', '--runtime', runtime]), {
+        fs: h.fs,
+        cwd: '/app',
+        log: () => {},
+        error: () => {},
+      }),
+    ).toBe(0);
+    return h;
+  }
+  it.each([{ flags: [] as string[] }, { flags: ['--redis-client', 'node-redis'] }])(
+    'H1 refuses factory transport insertion %j',
+    async ({ flags }) => {
+      const h = await stack();
+      const before = h.read('/app/shop/setu.config.ts');
+      expect(await h.run(['idempotency', '--store', 'redis', ...flags, '--dir', '/app/shop'])).toBe(
+        0,
+      );
+      expect(h.read('/app/shop/setu.config.ts')).toBe(before);
+      expect(h.out.join('\n')).toContain('where config is in scope');
+      expect(h.out.join('\n')).not.toContain('app.register(IdempotencyPlugin');
+    },
+  );
+  it('H1 refuses workspace-derived factory transport insertion', async () => {
+    const h = harness();
+    const deps = { fs: h.fs, cwd: '/app', now: () => 0, log: () => {}, error: () => {} };
+    expect(await runCli(['new', 'ws', '--workspace', '--broker', 'redis'], deps)).toBe(0);
+    expect(
+      await runCli(['g', 'app', 'portal', '--template', 'full-stack', '--dir', '/app/ws'], deps),
+    ).toBe(0);
+    const path = '/app/ws/apps/portal/setu.config.ts';
+    const before = h.read(path);
+    expect(await h.run(['idempotency', '--dir', '/app/ws/apps/portal'])).toBe(0);
+    expect(h.read(path)).toBe(before);
+    expect(h.out.join('\n')).toContain('where config is in scope');
+  });
+  it.each(['node', 'bun'] as const)(
+    'H2 leaves React JSX defaults unchanged on %s',
+    async (runtime) => {
+      const h = await stack(runtime);
+      const before = h.read('/app/shop/tsconfig.json');
+      expect(await h.run(['view', '--dir', '/app/shop'])).toBe(0);
+      expect(h.read('/app/shop/tsconfig.json')).toBe(before);
+      expect(h.out.join('\n')).toContain('@jsxImportSource hono/jsx');
+    },
+  );
+  it('M1 suppresses registration advice after successful factory insertion', async () => {
+    const h = await stack();
+    expect(await h.run(['worker-pool', '--dir', '/app/shop'])).toBe(0);
+    expect(h.read('/app/shop/setu.config.ts')).toContain('app.register(WorkerPoolPlugin());');
+    expect(h.out.join('\n')).not.toContain('Register it after the factory returns');
+  });
+  it.each([
+    ['mail', 'smtp', '--provider', 'MailPlugin', 'mail'],
+    ['database', 'drizzle', '--type', 'DatabasePlugin', 'database'],
+  ])('M2 prints the starter backend arm for %s', async (name, arm, flag, symbol, property) => {
+    const h = await stack();
+    expect(await h.run([name, flag, arm, '--dir', '/app/shop'])).toBe(0);
+    const output = h.out.join('\n');
+    expect(output).toContain(
+      `${property}: { ${property === 'mail' ? 'provider' : 'type'}: '${arm}'`,
+    );
+    expect(output).not.toContain(`${symbol}(`);
+  });
+  it('L5 refuses named modules on full-stack view', async () => {
+    const h = await stack();
+    expect(await h.run(['view', '--module', 'products', '--dir', '/app/shop'])).toBe(2);
+    expect(h.err.join('\n')).toContain('--module products');
+  });
+  it.each(['drizzle', 'prisma'])(
+    'L6 loads declared env files and links the %s setup',
+    async (arm) => {
+      const h = harness({
+        '/app/package.json': '{}',
+        '/app/setu.config.ts': "const options = {envFilePath: ['env/first.env', 'env/local.env']};",
+      });
+      expect(await h.run(['database', '--type', arm])).toBe(0);
+      const source = h.read(`/app/${arm}.config.ts`);
+      expect(source).toContain('process.loadEnvFile(file)');
+      expect(source).toContain('if (existsSync(file))');
+      expect(source).toContain('env/first.env');
+      expect(source).toContain('env/local.env');
+      expect(h.out.join('\n')).toContain(
+        arm === 'drizzle' ? '#drizzle-pool-setup' : '#prisma-7-setup',
+      );
+    },
+  );
+  it('L8 names the package in a multi-add preflight refusal', async () => {
+    const h = harness({ '/app/package.json': '{}' });
+    expect(await h.run(['cache', 'mail', '--provider', 'invalid'])).toBe(2);
+    expect(h.err.join('\n')).toContain('@setu-ts/mail-plugin:');
+    expect(h.fs.writes).toEqual([]);
+  });
   it('V12-30 adds exceptions without importing or registering a plugin', async () => {
     const h = harness({
       '/app/package.json': '{}',
@@ -1744,17 +1839,21 @@ describe('withPluginWiring', () => {
       ),
     ).toBeUndefined();
   });
-  it('V12-2 reads fixture wiring arguments when inserting a safe provider', () => {
-    const wiring = { symbol: 'WorkerPoolPlugin', args: '{}' };
-    expect(
-      withPluginWiring(
-        CLASS_BASED_INGRESS_CONFIG,
-        'worker-pool-plugin',
-        undefined,
-        undefined,
-        wiring,
-      ),
-    ).toContain('WorkerPoolPlugin({}),');
+  it('L4 removes unused wiring metadata and fixture injection', async () => {
+    const source = await nodeFs.readFile(
+      new URL('../../../src/commands/add.ts', import.meta.url),
+      'utf8',
+    );
+    const ast = ts.createSourceFile('add.ts', source, ts.ScriptTarget.Latest, true);
+    const helper = ast.statements.find(
+      (node) => ts.isFunctionDeclaration(node) && node.name?.text === 'withPluginWiring',
+    );
+    expect(helper && ts.isFunctionDeclaration(helper) && helper.parameters.length).toBe(4);
+    const wiring = ast.statements.find(
+      (node) => ts.isInterfaceDeclaration(node) && node.name.text === 'IPluginWiring',
+    );
+    expect(wiring && ts.isInterfaceDeclaration(wiring) && wiring.members.length).toBe(1);
+    expect(source).not.toContain('if (backendLine === undefined)');
   });
   // Codex review (M111d): an npm-target scaffold is Prettier-formatted, which
   // puts a short plugin array on ONE line — so an anchor matched only as its own

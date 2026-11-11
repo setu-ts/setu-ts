@@ -192,7 +192,7 @@ export async function runBuildCommand(args: ParsedArgs, deps: IBuildDependencies
         await (deps.bundle ?? build)({
           absWorkingDir: dir,
           entryPoints: [entry],
-          plugins: [taskRewritePlugin(deps.fs, dir, entry)],
+          plugins: [taskRewritePlugin(deps.fs, dir, entry, tasks)],
           bundle: true,
           platform: 'node',
           format: 'esm',

@@ -23,8 +23,14 @@ export function normalizeBrief(source: string): string {
 /** Replace only the section; preserve every byte outside its markers. */
 export function spliceBrief(source: string, section: string): string {
   const range = briefSection(source);
-  if (range === undefined) return section + '\n' + (source === '' ? '' : '\n' + source);
-  if (normalizeBrief(source.slice(range.start, range.end)) === normalizeBrief(section))
-    return source;
-  return source.slice(0, range.start) + section + source.slice(range.end);
+  const rendered = section.replace(/[\r\n]+$/, '');
+  if (range === undefined) return rendered + '\n' + (source === '' ? '' : '\n' + source);
+  const terminator = source.startsWith('\r\n', range.end) ? '\r\n' : '\n';
+  let suffix = source.slice(range.end).replace(/^\r?\n/, '');
+  if (/^[\r\n]*$/.test(suffix)) suffix = '';
+  const body =
+    normalizeBrief(source.slice(range.start, range.end)) === normalizeBrief(section)
+      ? source.slice(range.start, range.end)
+      : rendered;
+  return source.slice(0, range.start) + body + terminator + suffix;
 }

@@ -37,11 +37,11 @@ export const FETCH_TIMEOUT_MS = 30_000;
  */
 function nestedCause(cause: unknown): string {
   if (!(cause instanceof Error)) return '';
-  let current: unknown = cause.cause;
+  let current: unknown = cause;
   let message = '';
   let code: string | undefined;
   const seen = new Set<object>();
-  for (let depth = 0; depth < 8 && typeof current === 'object' && current !== null; depth++) {
+  for (let depth = 0; depth <= 8 && typeof current === 'object' && current !== null; depth++) {
     if (seen.has(current)) break;
     seen.add(current);
     const nested = current as {
@@ -49,12 +49,19 @@ function nestedCause(cause: unknown): string {
       readonly code?: unknown;
       readonly cause?: unknown;
     };
-    if (typeof nested.message === 'string' && nested.message.trim() !== '')
-      message = nested.message;
-    if (typeof nested.code === 'string') code = nested.code;
-    current =
-      nested.cause ??
-      (current instanceof AggregateError ? (current.errors[0] as unknown) : undefined);
+    try {
+      if (depth > 0) {
+        const value = nested.message;
+        const nestedCode = nested.code;
+        if (typeof value === 'string' && value.trim() !== '') message = value;
+        if (typeof nestedCode === 'string') code = nestedCode;
+      }
+      current =
+        nested.cause ??
+        (current instanceof AggregateError ? (current.errors[0] as unknown) : undefined);
+    } catch {
+      break;
+    }
   }
   const parts = [
     ...(message === '' ? [] : [escapeName(maskUrlUserinfo(message.replace(/\.$/, '')))]),

@@ -11,7 +11,9 @@ describe('project brief rendering', () => {
   it('V12-1 survives real Prettier with the scaffold options', async () => {
     const fs = createFakeFs();
     const deps = { fs, cwd: '/work', now: () => 0, log: () => {}, error: () => {} };
-    expect(await runCli(['new', 'shop', '--template', 'full-stack'], deps)).toBe(0);
+    expect(await runCli(['new', 'shop', '--template', 'full-stack', '--agents'], deps)).toBe(0);
+    const written = fs.read('/work/shop/AGENTS.md');
+    expect(await format(written, { ...PRETTIER_OPTIONS, parser: 'markdown' })).toBe(written);
     const brief = renderBrief(await gatherFacts(fs, '/work/shop'));
     const workspace = renderWorkspaceRoot(
       {
@@ -32,6 +34,10 @@ describe('project brief rendering', () => {
     expect(provided).toContain('Provided by `@setu-ts/full-stack-starter`');
     expect(provided).toContain('`@setu-ts/queue-plugin`');
     expect(absent).not.toContain('`@setu-ts/queue-plugin`');
+    expect(provided).toContain(
+      '(`setu add <name>` edits that option where it supports the starter); never register a second instance.',
+    );
+    expect(provided).not.toContain('never `setu add`');
   });
   it('V11-9 renders lint/format glosses and runtime-specific verification instructions', () => {
     for (const runtime of ['node', 'bun', 'deno'] as const) {

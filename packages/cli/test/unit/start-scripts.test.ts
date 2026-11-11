@@ -70,6 +70,15 @@ describe('generated local start scripts load .env (M131a X88-2)', () => {
       expect(entry).toContain(
         port === undefined ? 'Choose another VITE_PORT' : 'setu.workspace.json',
       );
+      // M139d review L1: only a listen() failure is a port problem; a config or
+      // plugin failure in createServer() gets the plain refusal.
+      expect(entry.indexOf('listening = true;')).toBeGreaterThan(
+        entry.indexOf('server = await vite.createServer'),
+      );
+      expect(entry.indexOf('listening = true;')).toBeLessThan(
+        entry.indexOf('await server.listen();'),
+      );
+      expect(entry).toContain('} else console.error(`Startup failed: ${describeError(error)}`);');
     }
   });
   it('Node local scripts carry --env-file-if-exists=.env; production does not', async () => {

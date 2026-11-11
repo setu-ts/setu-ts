@@ -614,8 +614,8 @@ ${factoryPluginLines}${middlewareLines}${setupLines}
     // being registered onto a finished application.
     ...(devtool?.diagnostics !== undefined ? { diagnostics: devtool.diagnostics } : {}),`;
   const devtoolDoc = onWorkers
-    ? `\n * @param _devtool - Accepted for one signature on every target; the devtool is` +
-      `\n * The diagnostics listener runs only on Deno and Node, so a Workers project never supplies it and nothing here reads it.`
+    ? `\n * @param _devtool - Accepted for one signature on every target; the diagnostics listener` +
+      `\n * runs only on Deno and Node, so Workers never supplies it and nothing here reads it.`
     : `\n * @param devtool - The development-only composition — the diagnostics plugin and` +
       `\n * the kernel diagnostics option — supplied by \`main.dev.ts\` alone. The SECOND` +
       `\n * parameter deliberately: \`setu commands\` passes its inert discovery env as the` +

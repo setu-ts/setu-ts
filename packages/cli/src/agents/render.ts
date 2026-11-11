@@ -126,7 +126,7 @@ export function renderBrief(facts: ProjectFacts, member = false): string {
   const starter = STARTER_ARMS.find((entry) => facts.installed.has(entry.pkg));
   if (starter !== undefined) {
     sections.push(
-      `\n## Provided by \`@setu-ts/${starter.pkg}\`: configure its option in setu.config.ts; never \`setu add\` or register a second instance. Some options are off until configured.\n`,
+      `\n## Provided by \`@setu-ts/${starter.pkg}\`: configure its option in setu.config.ts (\`setu add <name>\` edits that option where it supports the starter); never register a second instance.\n`,
       'A card’s _Add it_ line does not apply to these packages.\n',
     );
     for (const [pkg, arm] of starter.arms) sections.push(`- \`@setu-ts/${pkg}\` — \`${arm}\``);

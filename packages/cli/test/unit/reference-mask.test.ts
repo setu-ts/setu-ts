@@ -11,7 +11,6 @@ describe('check-only reference mask', () => {
     'const label = "escaped \\"use\\""; use();',
     'function test() { return /hello/; } use();',
     'const value = value / 2 / 3; use(value);',
-    'const value = (12) / 2; use(value);',
     'const value = [12] / 2; use(value);',
     String.raw`const value = /a\/b[\\]/gi; use(value);`,
     'const value = `escaped \\` tick ${use()}`;',
@@ -23,8 +22,21 @@ describe('check-only reference mask', () => {
   it('masks template text, regex bodies and comments without counting their identifiers', () => {
     expect(referenceMask('const label = `use`; const r = /use/; // use\n')).not.toContain('use');
   });
+  it('M4 masks regex bodies after default and extends', () => {
+    for (const text of [
+      'export default /APP_CONTROLLERS/;',
+      'class X extends /APP_CONTROLLERS/ {}',
+    ]) {
+      expect(referenceMask(text)).toBeDefined();
+      expect(referenceMask(text)).not.toContain('APP_CONTROLLERS');
+    }
+  });
   it.each([
     'eval',
+    'export default createRestApp({ workers: cores! / 2, controllers: APP_CONTROLLERS, t: ms / 1000 });',
+    'if (flag) /APP_CONTROLLERS/.test(s);',
+    'while (x) /APP_CONTROLLERS/g.exec(s);',
+    'const value = (12) / 2; use(value);',
     'Function',
     'require',
     'globalThis',

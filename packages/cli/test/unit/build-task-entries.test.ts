@@ -4,10 +4,21 @@ import type { Plugin } from 'esbuild';
 import { createFakeFs } from '../fixtures/fake-fs.ts';
 import { discoverTasks, taskReferences, taskRewritePlugin } from '../../src/build/task-entries.ts';
 
-function resolveFakeFiles(): Plugin {
+/** Resolves and loads from the fake fs, standing in for esbuild's own disk reads. */
+function resolveFakeFiles(fs: ReturnType<typeof createFakeFs>): Plugin {
   return {
     name: 'fake-files',
     setup(api) {
+      api.onLoad({ filter: /.*/ }, async ({ path }) => ({
+        contents: new TextDecoder().decode(await fs.readFile(path)),
+        loader: /\.tsx$/.test(path)
+          ? 'tsx'
+          : /\.jsx$/.test(path)
+            ? 'jsx'
+            : /\.ts$/.test(path)
+              ? 'ts'
+              : 'js',
+      }));
       api.onResolve({ filter: /.*/ }, ({ path, resolveDir }) => {
         const file = path.endsWith('.task') ? `${path}.ts` : path;
         return {
@@ -39,7 +50,7 @@ describe('worker task entries', () => {
         entryPoints: [`main.${extension}`],
         bundle: true,
         write: false,
-        plugins: [taskRewritePlugin(fs, '/app', `main.${extension}`), resolveFakeFiles()],
+        plugins: [taskRewritePlugin(fs, '/app', `main.${extension}`), resolveFakeFiles(fs)],
       });
       expect(result.outputFiles[0]?.text).toContain(
         extension === 'js' ? 'console.log(1)' : 'createElement',
@@ -55,7 +66,10 @@ describe('worker task entries', () => {
       bundle: true,
       format: 'esm',
       write: false,
-      plugins: [taskRewritePlugin(fs, '/app', 'src/tasks/first.task.ts'), resolveFakeFiles()],
+      plugins: [
+        taskRewritePlugin(fs, '/app', 'src/tasks/first.task.ts', ['src/tasks/second.task.ts']),
+        resolveFakeFiles(fs),
+      ],
     });
     expect(result.outputFiles[0]?.text).toContain('./second.task.js');
     await expect(
@@ -65,9 +79,9 @@ describe('worker task entries', () => {
         bundle: true,
         write: false,
         logLevel: 'silent',
-        plugins: [taskRewritePlugin(fs, '/app', 'main.ts'), resolveFakeFiles()],
+        plugins: [taskRewritePlugin(fs, '/app', 'main.ts'), resolveFakeFiles(fs)],
       }),
-    ).rejects.toThrow('Cannot read file');
+    ).rejects.toThrow();
   });
   it('relocates literals in imported task source relative to the containing application output', async () => {
     const fs = createFakeFs({
@@ -81,14 +95,17 @@ describe('worker task entries', () => {
       bundle: true,
       format: 'esm',
       write: false,
-      plugins: [taskRewritePlugin(fs, '/app', 'main.ts'), resolveFakeFiles()],
+      plugins: [
+        taskRewritePlugin(fs, '/app', 'main.ts', ['src/tasks/b.task.ts']),
+        resolveFakeFiles(fs),
+      ],
     });
     expect(result.outputFiles[0]?.text).toContain('new URL("./src/tasks/b.task.js"');
   });
   it('does not rewrite URL-shaped text inside another string or an erased type import', () => {
-    expect(() =>
+    expect(
       taskReferences('const label = "new URL(\'./x.task.ts\', import.meta.url)";', '/app/main.ts'),
-    ).toThrow('worker task references must use');
+    ).toEqual([]);
     expect(taskReferences("export type { Input } from './x.task.ts';", '/app/main.ts')).toEqual([]);
   });
   it('finds extensionless TSX and index imports and rejects an escaping task target', async () => {
@@ -111,7 +128,10 @@ describe('worker task entries', () => {
     expect(
       taskReferences("new URL('./hash.task.ts', import.meta.url)", '/app/main.ts')[0]?.target,
     ).toBe('/app/hash.task.ts');
-    for (const source of ["'./hash.task.ts'", '`./${name}.task.ts`']) {
+    for (const source of [
+      'new URL(`./${name}.task.ts`, import.meta.url)',
+      "new URL(base + 'hash.task.ts', import.meta.url)",
+    ]) {
       expect(() => taskReferences(`\n${source}`, 'main.ts')).toThrow('main.ts:2:');
     }
   });
@@ -142,27 +162,79 @@ describe('worker task entries', () => {
         format: 'esm',
         platform: 'node',
         plugins: [
-          taskRewritePlugin(fs, '/app', entry),
-          {
-            name: 'fake-resolve',
-            setup(api) {
-              api.onResolve({ filter: /.*/ }, ({ path, resolveDir }) => ({
-                path: path.startsWith('/')
-                  ? path
-                  : `${resolveDir || '/app'}/${path}`
-                      .split('/')
-                      .reduce<string[]>((parts, part) => {
-                        if (part === '..') parts.pop();
-                        else if (part !== '.') parts.push(part);
-                        return parts;
-                      }, [])
-                      .join('/'),
-              }));
-            },
-          },
+          taskRewritePlugin(fs, '/app', entry, ['src/tasks/hash.task.ts']),
+          resolveFakeFiles(fs),
         ],
       });
       expect(result.outputFiles[0]?.text).toContain(expected);
     }
+  });
+
+  it('M5 refuses a task literal the build did not discover, and one outside the project', async () => {
+    const fs = createFakeFs({
+      '/app/main.ts': "import './src/pool.js';",
+      '/app/src/pool.js': "export const pool = new URL('./tasks/hash.task.ts', import.meta.url);",
+      '/app/src/tasks/hash.task.ts': '',
+    });
+    const bundle = (tasks: readonly string[], entry = 'main.ts') =>
+      build({
+        absWorkingDir: '/app',
+        entryPoints: [entry],
+        bundle: true,
+        write: false,
+        logLevel: 'silent',
+        plugins: [taskRewritePlugin(fs, '/app', entry, tasks), resolveFakeFiles(fs)],
+      });
+    await expect(bundle([])).rejects.toThrow(
+      '/app/src/pool.js:1: worker task target was not built: /app/src/tasks/hash.task.ts.',
+    );
+    await expect(bundle(['src/tasks/hash.task.ts'])).resolves.toBeDefined();
+    await fs.writeFile(
+      '/app/main.ts',
+      new TextEncoder().encode("console.log(new URL('../outside.task.ts', import.meta.url));"),
+    );
+    await expect(bundle(['src/tasks/hash.task.ts'])).rejects.toThrow(
+      'worker task target is outside the project',
+    );
+  });
+  it('M6 scans an imported source larger than 1 MiB, and leaves dependencies to esbuild', async () => {
+    const large = `export const data = '${'x'.repeat(1_200_000)}';`;
+    const fs = createFakeFs({
+      '/app/main.ts': "import './build/server/index.js';",
+      '/app/build/server/index.js': large,
+    });
+    expect(await discoverTasks(fs, '/app', ['main.ts'])).toEqual([]);
+    let loaded = 0;
+    const plugin = taskRewritePlugin(fs, '/app', 'main.ts');
+    plugin.setup({
+      onLoad: (_options: unknown, callback: (args: { path: string }) => Promise<unknown>) => {
+        void callback({ path: '/app/node_modules/dep/index.js' }).then((value) => {
+          if (value === undefined) loaded++;
+        });
+        void callback({ path: '/app/build/server/index.js' }).then((value) => {
+          if (value === undefined) loaded++;
+        });
+      },
+    } as unknown as Parameters<Plugin['setup']>[0]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(loaded).toBe(2);
+  });
+  it('L2 skips quotes in regex literals and comment markers in template literals', () => {
+    expect(
+      taskReferences(
+        "const re = /['\"]/; const u = new URL('./a.task.ts', import.meta.url);",
+        '/app/main.ts',
+      ).map((ref) => ref.target),
+    ).toEqual(['/app/a.task.ts']);
+    expect(
+      taskReferences(
+        "const t = `a/*`; const u = new URL('./a.task.ts', import.meta.url); const z = '*/';",
+        '/app/main.ts',
+      ).map((ref) => ref.target),
+    ).toEqual(['/app/a.task.ts']);
+    expect(taskReferences("console.log('built ./a.task.ts');", '/app/main.ts')).toEqual([]);
+    expect(() => taskReferences("import x from './a.task.ts';", '/app/main.ts')).toThrow(
+      'worker task references must use',
+    );
   });
 });

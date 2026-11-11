@@ -281,6 +281,28 @@ describe('example scaffolding', () => {
       expect(h.err.text()).not.toContain('password');
     }
   });
+  it('L9 stops safely at throwing getters and revoked proxies', async () => {
+    const revoked = Proxy.revocable({}, {});
+    revoked.revoke();
+    for (const nested of [
+      Object.defineProperty({}, 'message', {
+        get() {
+          throw new Error('getter');
+        },
+      }),
+      Object.defineProperty({ message: 'safe' }, 'cause', {
+        get() {
+          throw new Error('getter');
+        },
+      }),
+      revoked.proxy,
+    ]) {
+      const h = harness({}, () => Promise.reject(new Error('fetch failed', { cause: nested })));
+      expect(await h.run(['new', 'demo', '--example', 'minimal'])).toBe(1);
+      expect(h.err.text()).toContain('Failed to fetch');
+      expect(h.fs.writes).toEqual([]);
+    }
+  });
   it('names a refused connection from its first attempt, and a nested cause with no code', async () => {
     const refused = Object.assign(
       new AggregateError([new Error('connect ECONNREFUSED 127.0.0.1:443')], ''),

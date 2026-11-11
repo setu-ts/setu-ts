@@ -68,12 +68,21 @@ export function withDatabaseScripts(
 export function databaseConfig(
   type: string,
   dialect: string,
+  envFiles: readonly string[] = ['.env'],
 ): { readonly path: string; readonly contents: string; readonly schema: string } | undefined {
+  const loadEnv = `import { existsSync } from 'node:fs';
+import process from 'node:process';
+
+for (const file of ${JSON.stringify(envFiles)}) {
+  if (existsSync(file)) process.loadEnvFile(file);
+}
+`;
   if (type === 'drizzle')
     return {
       path: 'drizzle.config.ts',
       schema: 'src/database/schema.ts',
       contents: `import { defineConfig } from 'drizzle-kit';
+${loadEnv}
 
 export default defineConfig({
   dialect: '${dialect}',
@@ -87,7 +96,7 @@ export default defineConfig({
     return {
       path: 'prisma.config.ts',
       schema: 'prisma/schema.prisma',
-      contents: `import process from 'node:process';
+      contents: `${loadEnv}
 
 export default {
   schema: './prisma/schema.prisma',
