@@ -705,8 +705,10 @@ function waitForReady(
 /**
  * Waits for `pending` unless `cancel` aborts first (V12-53).
  *
- * Its only caller creates `cancel` immediately before, so the signal is never
- * already aborted here. A rejection that arrives after the abort is handled here
+ * The signal can already be aborted on entry: the caller sends SUBSCRIBE
+ * first, and an injected client's `subscribe()` may run a `close()` before it
+ * returns. So `cancel.aborted` is read after the listener is attached, and an
+ * abort at any point wins. A rejection that arrives after the abort is handled here
  * (settling an already-settled promise is a no-op), so it never surfaces as an
  * unhandled rejection.
  *
@@ -729,6 +731,7 @@ function settledUnlessCancelled(pending: Promise<unknown>, cancel: AbortSignal):
         reject(error);
       },
     );
+    if (cancel.aborted) onAbort();
   });
 }
 

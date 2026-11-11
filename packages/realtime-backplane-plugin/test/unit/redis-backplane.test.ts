@@ -2000,6 +2000,33 @@ describe('RedisBackplane close() during a SUBSCRIBE that never answers (V12-53)'
     expect(subscriber.subscribed).toEqual([]);
   });
 
+  it('settles when an injected subscribe() runs close() before it returns', async () => {
+    const client = Object.assign(new FakeRedisClient(), { status: 'ready' });
+    const subscriber = Object.assign(new FakeRedisClient(), { status: 'ready' });
+    const errorListeners = subscriber.eventListeners.get('error')?.length ?? 0;
+    // Re-entrant: close() runs inside subscribe(), and the host never answers.
+    Object.assign(subscriber, {
+      subscribe: () => {
+        void backplane.close();
+        return new Promise(() => undefined);
+      },
+    });
+    // Read by the subscribe() above only when connect() calls it.
+    const backplane = new RedisBackplane(
+      { transport: 'redis', client, subscriber, commandTimeoutMs: 0 },
+      'node-a',
+      'realtime',
+    );
+    let settled = false;
+    void backplane.connect().then(() => {
+      settled = true;
+    });
+    await setImmediate();
+    expect(settled).toBe(true);
+    expect(subscriber.eventListeners.get('message') ?? []).toHaveLength(0);
+    expect(subscriber.eventListeners.get('error')?.length ?? 0).toBe(errorListeners);
+  });
+
   it('ignores an injected SUBSCRIBE that fails after the close', async () => {
     const client = Object.assign(new FakeRedisClient(), { status: 'ready' });
     const subscriber = Object.assign(new FakeRedisClient(), { status: 'ready' });
