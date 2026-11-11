@@ -51,7 +51,15 @@ export const CLIENT_MAX_SESSION_MEMORY_MB = 64;
  */
 export const MAX_CLIENTS_PER_DEFINITION = 256;
 
-/** How many origins keep a transport (and session) before the oldest is closed. */
+/**
+ * How long a client session may sit with no stream before connect-node closes
+ * it (its default is 15 minutes). Under the server's 75 s idle bound, so the
+ * client, which knows when it is about to send, closes first. It is what
+ * closes an evicted session: never while a stream is on it.
+ */
+export const CLIENT_IDLE_TIMEOUT_MS = 60_000;
+
+/** How many origins keep a transport (and session) before the oldest is forgotten. */
 export const MAX_CLIENT_ORIGINS = 64;
 
 const PROTOCOLS: ReadonlySet<string> = new Set(['connect', 'grpc', 'grpc-web']);
@@ -271,24 +279,10 @@ export interface GrpcClientDeps {
 export const WORKERS_REFUSAL =
   "grpc client: not available on Cloudflare Workers — its transport, @connectrpc/connect-node, needs node:http2, which workerd does not implement; call the service with Connect's @connectrpc/connect-web transport, or through a service binding";
 
-/**
- * One cached transport, the session under it, and the calls using it. The
- * count — not the session's `state()`, which describes only its current
- * connection and not one still draining after `GOAWAY` — decides when an
- * evicted session may close.
- */
+/** One cached transport and the session under it. */
 interface OriginEntry {
   readonly transport: ClientTransportLike;
   readonly session: Http2SessionLike | undefined;
-  /** Calls holding the transport: taken at lookup, released when the call ends. */
-  calls: number;
-}
-
-/** How a streaming call ends besides its messages: its signal and its deadline. */
-interface StreamEnd {
-  readonly signal: AbortSignal | undefined;
-  /** `undefined` for a call with no deadline (see {@linkcode effectiveDeadline}). */
-  readonly deadlineMs: number | undefined;
 }
 
 /**
@@ -301,72 +295,20 @@ function effectiveDeadline(timeoutMs: number | undefined, configured: number): n
   return timeoutMs <= 0 ? undefined : timeoutMs;
 }
 
-/**
- * A stream response whose message iterable calls `release` once, when it
- * ends, fails, or is abandoned through `return()`/`throw()` — or, for a stream
- * the application never reads to an end, when the call's signal aborts or its
- * deadline passes: connect-node has cancelled the HTTP/2 stream by then. A
- * response with no iterable releases at once.
- */
-function releasingAtEnd(response: unknown, release: () => void, end: StreamEnd): unknown {
-  const message = (response as { message?: unknown } | null)?.message as
-    AsyncIterable<unknown> | undefined;
-  if (typeof message?.[Symbol.asyncIterator] !== 'function') {
-    release();
-    return response;
-  }
-  let released = false;
-  const finish = (): void => {
-    if (released) return;
-    released = true;
-    clearTimeout(timer);
-    end.signal?.removeEventListener('abort', finish);
-    release();
-  };
-  // Armed when the headers arrive, so it fires no earlier than Connect's own
-  // deadline, which runs from the call's start. A call with no deadline has no
-  // timer: it ends with its messages, a return()/throw(), or its signal.
-  const timer = end.deadlineMs === undefined ? undefined : setTimeout(finish, end.deadlineMs);
-  (timer as { unref?: () => void } | undefined)?.unref?.();
-  if (end.signal?.aborted === true) finish();
-  else end.signal?.addEventListener('abort', finish, { once: true });
-  return {
-    ...(response as object),
-    message: {
-      [Symbol.asyncIterator](): AsyncIterator<unknown> {
-        const inner = message[Symbol.asyncIterator]();
-        return {
-          async next(): Promise<IteratorResult<unknown>> {
-            try {
-              const step = await inner.next();
-              if (step.done === true) finish();
-              return step;
-            } catch (error) {
-              finish();
-              throw error;
-            }
-          },
-          async return(value?: unknown): Promise<IteratorResult<unknown>> {
-            finish();
-            return (await inner.return?.(value)) ?? { done: true, value };
-          },
-          throw(error?: unknown): Promise<IteratorResult<unknown>> {
-            finish();
-            return inner.throw === undefined ? Promise.reject(error) : inner.throw(error);
-          },
-        };
-      },
-    },
-  };
-}
+/** connect-node states in which a session holds no connection to close. */
+const ENDED: ReadonlySet<string> = new Set(['closed', 'error']);
 
 /** Every client of one plugin instance, their transports and their sessions. */
 export class GrpcClients {
   readonly #deps: GrpcClientDeps;
   readonly #clients = new WeakMap<object, Map<string, unknown>>();
   readonly #origins = new Map<string, OriginEntry>();
-  /** Evicted entries with calls still in flight; each closes at its last call's end. */
-  readonly #draining = new Set<OriginEntry>();
+  /**
+   * Evicted sessions not yet closed. The client never closes one itself — a
+   * call may still be on it — connect-node does, once it has been idle for
+   * {@linkcode CLIENT_IDLE_TIMEOUT_MS}; `close()` closes whatever is left.
+   */
+  readonly #evicted = new Set<Http2SessionLike>();
   /** The connect-node import while it loads; then {@linkcode GrpcClients.#node}. */
   #loading: Promise<ConnectNodeModuleLike> | undefined;
   /** connect-node once loaded, so a call no longer waits on the import's promise. */
@@ -437,9 +379,9 @@ export class GrpcClients {
   close(): void {
     this.#closed = true;
     for (const entry of this.#origins.values()) entry.session?.abort();
-    for (const entry of this.#draining) entry.session?.abort();
+    for (const session of this.#evicted) session.abort();
     this.#origins.clear();
-    this.#draining.clear();
+    this.#evicted.clear();
   }
 
   #delegate(
@@ -459,7 +401,7 @@ export class GrpcClients {
           target,
           base,
           options,
-          undefined,
+          true,
           (transport, timeout) =>
             transport.unary(method, signal, timeout, traced, input, contextValues),
           timeoutMs,
@@ -471,7 +413,7 @@ export class GrpcClients {
           target,
           base,
           options,
-          { signal, deadlineMs: effectiveDeadline(timeoutMs, options.timeoutMs) },
+          false,
           (transport, timeout) =>
             transport.stream(method, signal, timeout, traced, input, contextValues),
           timeoutMs,
@@ -482,23 +424,20 @@ export class GrpcClients {
 
   /**
    * Runs one call, retrying a unary call once when the server refused its
-   * stream (see {@linkcode isRefusedStream}). `stream` is set for a streaming
-   * call, and says how it ends besides its messages.
+   * stream (see {@linkcode isRefusedStream}).
    */
   async #call(
     target: string,
     base: string | undefined,
     options: ResolvedClientOptions,
-    stream: StreamEnd | undefined,
+    unary: boolean,
     run: (transport: ClientTransportLike, timeoutMs: number | undefined) => Promise<unknown>,
     timeoutMs: number | undefined,
   ): Promise<unknown> {
     const now = this.#deps.clock ?? (() => performance.now());
     const started = now();
     try {
-      return await this.#attempt(target, base, options, stream, (transport) =>
-        run(transport, timeoutMs),
-      );
+      return await this.#attempt(target, base, options, (transport) => run(transport, timeoutMs));
     } catch (error) {
       if (!(error instanceof RefusedStream)) throw error;
       // The retry gets what is left of the call's deadline — the call's own, or
@@ -507,8 +446,8 @@ export class GrpcClients {
       // A call with no deadline is retried with none.
       const deadline = effectiveDeadline(timeoutMs, options.timeoutMs);
       const remaining = deadline === undefined ? undefined : deadline - Math.ceil(now() - started);
-      if (stream !== undefined || (remaining !== undefined && remaining <= 0)) throw error.error;
-      return this.#attempt(target, base, options, stream, (transport) =>
+      if (!unary || (remaining !== undefined && remaining <= 0)) throw error.error;
+      return this.#attempt(target, base, options, (transport) =>
         run(transport, remaining ?? timeoutMs),
       ).catch((again: unknown) => {
         throw again instanceof RefusedStream ? again.error : again;
@@ -520,7 +459,6 @@ export class GrpcClients {
     target: string,
     base: string | undefined,
     options: ResolvedClientOptions,
-    stream: StreamEnd | undefined,
     run: (transport: ClientTransportLike) => Promise<unknown>,
   ): Promise<unknown> {
     const { runtime } = this.#deps;
@@ -544,18 +482,12 @@ export class GrpcClients {
       }
       origin = instanceOrigin(instance);
     }
-    // The lookup takes the entry (counts this call on it) in the same turn that
-    // finds or creates it, so no eviction can close the session under the call.
     const pending = this.#transport(`${origin}${options.basePath}`, options);
-    const entry = pending instanceof Promise ? await pending : pending;
-    let held = true;
+    const transport = pending instanceof Promise ? await pending : pending;
     try {
-      const result = await run(entry.transport);
+      const result = await run(transport);
       this.#report(discovery, instance, 'success');
-      if (stream === undefined) return result;
-      // A stream's call ends with its messages, not with its headers.
-      held = false;
-      return releasingAtEnd(result, () => this.#release(entry), stream);
+      return result;
     } catch (error) {
       if (isRefusedStream(error)) {
         // The server never processed it: the instance's fault, and safe to send again.
@@ -573,16 +505,7 @@ export class GrpcClients {
       }
       this.#report(discovery, instance, runtime.isUnavailable(error) ? 'failure' : 'success');
       throw error;
-    } finally {
-      if (held) this.#release(entry);
     }
-  }
-
-  /** Ends one call on an entry; the last call on an evicted one closes its session. */
-  #release(entry: OriginEntry): void {
-    entry.calls--;
-    // Only a still-draining entry: close() has already closed the rest.
-    if (entry.calls === 0 && this.#draining.delete(entry)) entry.session?.abort();
   }
 
   /** Reports an outcome; a failing report never changes the call's. */
@@ -600,7 +523,10 @@ export class GrpcClients {
   }
 
   /** The transport for an origin: synchronous once connect-node has loaded. */
-  #transport(url: string, options: ResolvedClientOptions): OriginEntry | Promise<OriginEntry> {
+  #transport(
+    url: string,
+    options: ResolvedClientOptions,
+  ): ClientTransportLike | Promise<ClientTransportLike> {
     if (this.#node !== undefined) return this.#transportFrom(this.#node, url, options);
     return (this.#loading ??= this.#deps.loadNode()).then((node) => {
       this.#node = node;
@@ -612,7 +538,7 @@ export class GrpcClients {
     node: ConnectNodeModuleLike,
     url: string,
     options: ResolvedClientOptions,
-  ): OriginEntry {
+  ): ClientTransportLike {
     // Closed while discovery picked: open no session the close cannot reach.
     if (this.#closed) throw this.#deps.runtime.unavailable('the gRPC client is closed');
     const key = `${options.protocol}|${options.httpVersion}|${options.timeoutMs}|${url}`;
@@ -621,14 +547,15 @@ export class GrpcClients {
       // Least recently used last out: move a hit to the end.
       this.#origins.delete(key);
       this.#origins.set(key, hit);
-      hit.calls++;
-      return hit;
+      return hit.transport;
     }
     const session =
       options.httpVersion === '2'
-        ? new node.Http2SessionManager(url, undefined, {
-            maxSessionMemory: CLIENT_MAX_SESSION_MEMORY_MB,
-          })
+        ? new node.Http2SessionManager(
+            url,
+            { idleConnectionTimeoutMs: CLIENT_IDLE_TIMEOUT_MS },
+            { maxSessionMemory: CLIENT_MAX_SESSION_MEMORY_MB },
+          )
         : undefined;
     const transportOptions: Record<string, unknown> = {
       baseUrl: url,
@@ -645,28 +572,25 @@ export class GrpcClients {
         : options.protocol === 'grpc-web'
           ? node.createGrpcWebTransport(transportOptions)
           : node.createConnectTransport(transportOptions);
-    const entry: OriginEntry = { transport, session, calls: 1 };
-    this.#origins.set(key, entry);
+    this.#origins.set(key, { transport, session });
     if (this.#origins.size > MAX_CLIENT_ORIGINS) {
       const [oldestKey, oldest] = this.#origins.entries().next().value as [string, OriginEntry];
       this.#origins.delete(oldestKey);
-      this.#retire(oldest);
+      if (oldest.session !== undefined) this.#evict(oldest.session);
     }
-    return entry;
+    return transport;
   }
 
   /**
-   * Closes an evicted entry's session without failing its calls: with calls
-   * still on it, it drains and closes when the last one ends (each is bounded
-   * by its deadline: a stream ends with its last message, a `return()` or
-   * `throw()`, its signal's abort, or its deadline, whichever comes first).
+   * Forgets an evicted session without closing it: a call may still be on it,
+   * and connect-node closes it once idle. Sessions it has already closed are
+   * dropped here, so the set holds only those still connected.
    */
-  #retire(entry: OriginEntry): void {
-    if (entry.calls === 0) {
-      entry.session?.abort();
-      return;
+  #evict(session: Http2SessionLike): void {
+    for (const evicted of this.#evicted) {
+      if (ENDED.has(evicted.state())) this.#evicted.delete(evicted);
     }
-    if (entry.session !== undefined) this.#draining.add(entry);
+    this.#evicted.add(session);
   }
 
   /**

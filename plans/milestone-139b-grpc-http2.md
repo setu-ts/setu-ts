@@ -387,13 +387,11 @@ re-audit holds the tree against.
 - **Approved budgets.** Preface 10 s. HTTP/1.1 on the shared port: Node's `headersTimeout` 60 s and
   `requestTimeout` 300 s, as on the plain listener. An HTTP/2 session with no stream open: 75 s,
   then `GOAWAY` (a silent open stream keeps it). Request message and reply message: `readMaxBytes`,
-  default 4 MiB. Clients: 256 per definition. Origins: 64 cached sessions; an evicted session drains
-  and is never closed while a call holds it — each call is counted on its origin from the lookup
-  that finds it to its end (a stream's last message), and the last to end closes a drained session —
-  so draining sessions are bounded by the origins with calls in flight at once, each call by its
-  deadline; a stream also ends at its signal's abort or its deadline, so one dropped unread holds
-  its session no longer than its deadline (a call with Connect's `timeoutMs: 0`, no deadline, until
-  the application stops). Client session memory: 64 MB (the server keeps Node's default; §3.12).
+  default 4 MiB. Clients: 256 per definition. Origins: 64 cached sessions; an evicted session is
+  forgotten, never closed by the client, and connect-node closes it after 60 s with no stream
+  (`idleConnectionTimeoutMs`, under the server's 75 s), so evicted sessions are bounded by the
+  origins evicted in the last 60 s plus those with streams open, each stream by its deadline;
+  `close()` closes the rest. Client session memory: 64 MB (the server keeps Node's default; §3.12).
   Retry: one, unary only, within what is left of the deadline.
 - **Obligations on the audit** (in addition to the eight above): 9. The retry resends only a call
   the server provably did not process: Node's `ERR_HTTP2_STREAM_ERROR` naming
@@ -421,29 +419,39 @@ re-audit holds the tree against.
   | F5  | Low      | An HTTP/1.1 line claiming `HTTP/2.0` was offered trailers                       | Fixed: trailers only on an `Http2ServerRequest`'s stream                                     |
   | F6  | Low      | With no per-call deadline the retry got a fresh one                             | Fixed: the configured deadline counts (obligation 10)                                        |
   | F7  | Low      | Replies were unbounded (connect-node's 4 GiB default)                           | Fixed: `readMaxBytes` on every client transport (obligation 12)                              |
-  | F8  | Low      | Origin eviction cancelled calls in flight                                       | Fixed: an evicted session drains, closed when its last call ends (N1–N3, T1)                 |
+  | F8  | Low      | Origin eviction cancelled calls in flight                                       | Fixed: the client never closes an evicted session; connect-node closes it once idle (60 s)   |
   | F9  | Low      | A crafted member name injected code into generated files                        | Fixed: names refused at manifest read unless `generate app` could write them (obligation 17) |
   | F10 | Blocking | No design review for §3.11–§3.13                                                | This section, written after the code; the maintainer decides whether it stands               |
   | R1  | Medium   | A stream whose request half never ends keeps a session past the idle bound      | **Open — maintainer decision** (see below)                                                   |
-  | R2  | Low      | Draining-set overflow aborted busy sessions (64 + 64 budget)                    | Fixed: a busy session is never closed; the budget now reads so                               |
+  | R2  | Low      | Draining-set overflow aborted busy sessions (64 + 64 budget)                    | Superseded: no draining set (see the design change below)                                    |
   | R3  | Low      | A token in a URL target's query or fragment reached the refusal text            | Fixed: query and fragment refused unechoed; a URL target is named by its origin only         |
   | L1  | Low      | The idle-bound comment described a mechanism the code does not rely on          | Fixed: the comment says what the re-arm does                                                 |
-  | N1  | Low      | `state()` reads only the current connection, so a GOAWAY'd busy one was aborted | Fixed: calls are counted per origin; eviction and drain go by the count, not `state()`       |
-  | N2  | Low      | An eviction in the same turn as a call's lookup closed the session under it     | Fixed: the lookup itself counts the call                                                     |
-  | N3  | Low      | Sessions created while connect-node loaded escaped `close()`                    | Fixed: by the same count; every evicted session with a call is tracked                       |
+  | N1  | Low      | `state()` reads only the current connection, so a GOAWAY'd busy one was aborted | Superseded by the design change below                                                        |
+  | N2  | Low      | An eviction in the same turn as a call's lookup closed the session under it     | Superseded by the design change below                                                        |
+  | N3  | Low      | Sessions created while connect-node loaded escaped `close()`                    | Superseded by the design change below                                                        |
   | N4  | Low      | A non-URL target was echoed whole (CR/LF included) and reached discovery        | Fixed: a service-name grammar, refused unechoed; an unparsable URL refused unechoed          |
   | N5  | Low      | A `clients` key with credentials was echoed in an option error                  | Fixed: keys checked as targets; a URL key named by its origin                                |
   | L2  | Low      | The idle-bound comment said frames restart it                                   | Fixed: only stream activity does                                                             |
-  | T1  | Low      | A stream dropped unread, aborted or past its deadline held an evicted session   | Fixed: a stream also releases at its signal's abort and at its deadline                      |
-  | L3  | Low      | `OriginEntry.retired` was written and never read                                | Fixed: removed                                                                               |
+  | T1  | Low      | A stream dropped unread, aborted or past its deadline held an evicted session   | Superseded by the design change below                                                        |
+  | L3  | Low      | `OriginEntry.retired` was written and never read                                | Superseded by the design change below                                                        |
   | L4  | Low      | The F8 row described the replaced design                                        | Fixed: the row names the call count                                                          |
-  | U1  | Low      | A stream with Connect's `timeoutMs <= 0` (no deadline) was released at once     | Fixed: no deadline arms no timer; a no-deadline unary call is retried with none              |
+  | U1  | Low      | A stream with Connect's `timeoutMs <= 0` (no deadline) was released at once     | Superseded below; a no-deadline unary call is retried with none                              |
 
   R1–L1 are from the re-audit at `fad19bed9`, which confirmed F1–F9 fixed; N1–L2 from the second
   re-audit at `843db7f6c`, which confirmed F1–F9, R2 and R3; T1–L4 from the third at `d3feea628`,
-  which confirmed N1–N5 and L2; U1 from the fourth at `70884758d`, which confirmed T1–L4. **R1 is
-  open.** The budget "a silent open stream keeps the session" lets a client hold a connection with
-  one `HEADERS` frame and no `END_STREAM` to any route that reads its body (every unary gRPC
+  which confirmed N1–N5 and L2; U1 from the fourth at `70884758d`, which confirmed T1–L4.
+
+  **Design change after the fourth re-audit.** Four re-audits in a row each found a Low defect in
+  the previous round's fix, all in one place: deciding when the client may close a session it has
+  evicted, from information connect-node does not give reliably (`state()` describes only the
+  current connection; a stream's end is the application's). The client now never closes an evicted
+  session. It forgets it, and connect-node's own idle timer — which runs only while the session has
+  no stream and restarts when the last one closes — closes it after `CLIENT_IDLE_TIMEOUT_MS` (60 s).
+  The call count, the stream wrapper and its abort and deadline release are gone. What remains is a
+  set of evicted sessions for `close()` to reach, pruned of those connect-node has already closed.
+  Obligation 13 holds by construction: nothing the client runs closes a session a call is on. **R1
+  is open.** The budget "a silent open stream keeps the session" lets a client hold a connection
+  with one `HEADERS` frame and no `END_STREAM` to any route that reads its body (every unary gRPC
   method), where the HTTP/1.1 listener's `requestTimeout` (300 s) would end the same unfinished
   request. The options: (a) a per-stream request-half bound — reset a stream whose client has not
   finished sending within N s — with client- and bidi-streaming procedures exempt, which the

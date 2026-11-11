@@ -114,13 +114,12 @@ const billing = grpcClient(app.services, BillingService, 'billing');
 - **Connections.** One HTTP/2 session per instance, shared by every call to it and closed with the
   application. Each session may buffer 64 MB (Node's `maxSessionMemory`; its default of 10 MB reset
   streams once sixteen 1 MB replies were in flight on one connection). At most 64 instance origins
-  keep a session; the least recently used is dropped first, closed at once when no call is using it,
-  or else left to finish the calls on it and closed when the last one ends — never while a call is
-  on it. A streaming call ends with its last message, when the application stops reading
-  (`return()`/`throw()`), when its signal aborts, or at its deadline — whichever comes first — so a
-  stream the application drops unread holds its session no longer than its deadline (a call with
-  Connect's `timeoutMs: 0`, no deadline, until the application stops). Each reply message is bounded
-  by the plugin's `readMaxBytes`, as each request is.
+  keep a session; the least recently used is forgotten first, never closed by the client — a call
+  may still be on it. connect-node closes a session once it has had no stream for 60 s (its default
+  is 15 minutes), so an evicted session closes 60 s after its last stream ends, and the
+  application's stop closes whatever is left. A stream the application drops without cancelling it
+  stays open until its deadline (or, with Connect's `timeoutMs: 0`, until the application stops).
+  Each reply message is bounded by the plugin's `readMaxBytes`, as each request is.
 - **Defaults.** The Connect protocol, binary, over HTTP/2, with a 5 s deadline. Per target in
   `clients`, or per client in `grpcClient()`'s options: `basePath`, `protocol` (`'connect'`,
   `'grpc'`, `'grpc-web'`), `httpVersion` (`'2'`, `'1.1'`; native gRPC needs `'2'`) and `timeoutMs`

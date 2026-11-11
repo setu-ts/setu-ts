@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { CAPABILITIES } from '@setu-ts/common';
 import type {
   GrpcServiceDefinition,
@@ -11,6 +11,7 @@ import type {
 
 import {
   CLIENT_DEFAULTS,
+  CLIENT_IDLE_TIMEOUT_MS,
   CLIENT_MAX_SESSION_MEMORY_MB,
   GrpcClients,
   instanceOrigin,
@@ -57,12 +58,17 @@ function fakeNode(outcome: () => Promise<unknown> = () => Promise.resolve('ok'))
   built: Built[];
   sessions: Array<{ url: string; aborted: boolean }>;
   sessionOptionsSeen: Array<Record<string, unknown> | undefined>;
+  pingOptionsSeen: Array<Record<string, unknown> | undefined>;
+  /** Each session's `state()`, by URL; absent reads as `'idle'`. */
+  states: Map<string, string>;
   /** A call to a base URL here waits on its promise before answering. */
   gates: Map<string, Promise<unknown>>;
 } {
   const built: Built[] = [];
   const sessions: Array<{ url: string; aborted: boolean }> = [];
   const sessionOptionsSeen: Array<Record<string, unknown> | undefined> = [];
+  const pingOptionsSeen: Array<Record<string, unknown> | undefined> = [];
+  const states = new Map<string, string>();
   const gates = new Map<string, Promise<unknown>>();
   const factory =
     (kind: Built['kind']) =>
@@ -91,6 +97,8 @@ function fakeNode(outcome: () => Promise<unknown> = () => Promise.resolve('ok'))
     built,
     sessions,
     sessionOptionsSeen,
+    pingOptionsSeen,
+    states,
     gates,
     module: {
       createConnectTransport: factory('connect'),
@@ -99,13 +107,17 @@ function fakeNode(outcome: () => Promise<unknown> = () => Promise.resolve('ok'))
       Http2SessionManager: class {
         readonly #entry: { url: string; aborted: boolean };
         // connect-node's arity: (url, pingOptions?, http2SessionOptions?).
-        constructor(url: string, ...rest: [unknown?, Record<string, unknown>?]) {
+        constructor(url: string, ...rest: [Record<string, unknown>?, Record<string, unknown>?]) {
           this.#entry = { url, aborted: false };
           sessions.push(this.#entry);
+          pingOptionsSeen.push(rest[0]);
           sessionOptionsSeen.push(rest[1]);
         }
         abort(): void {
           this.#entry.aborted = true;
+        }
+        state(): string {
+          return states.get(this.#entry.url) ?? 'idle';
         }
       },
     },
@@ -494,18 +506,6 @@ describe('GrpcClients', () => {
     ]);
   });
 
-  it(`keeps at most ${MAX_CLIENT_ORIGINS} origins, closing the least recently used`, async () => {
-    const { clients: c, node } = clients();
-    const first = c.client(BILLING, 'http://h:0');
-    await call(first);
-    for (let port = 1; port < MAX_CLIENT_ORIGINS; port++)
-      await call(c.client(BILLING, `http://h:${port}`));
-    await call(first); // used again: now the most recent
-    await call(c.client(BILLING, `http://h:${MAX_CLIENT_ORIGINS}`));
-    expect(c.originCount).toBe(MAX_CLIENT_ORIGINS);
-    expect(node.sessions.filter((s) => s.aborted).map((s) => s.url)).toEqual(['http://h:1']);
-  });
-
   /** A gate a test opens by hand. */
   const gate = (): { promise: Promise<void>; open: () => void } => {
     let open!: () => void;
@@ -513,69 +513,27 @@ describe('GrpcClients', () => {
     return { promise, open };
   };
 
-  it('drains an evicted session with calls in flight, closing it at its last call', async () => {
+  it(`keeps at most ${MAX_CLIENT_ORIGINS} origins, forgetting the least recently used`, async () => {
     const { clients: c, node } = clients();
-    const aborted = (): string[] => node.sessions.filter((s) => s.aborted).map((s) => s.url);
-    const held = [gate(), gate()];
-    node.gates.set('http://h:1000', held[0]!.promise);
-    node.gates.set('http://h:1001', held[1]!.promise);
-    const busy = [
-      call(c.client(BILLING, 'http://h:1000')),
-      call(c.client(BILLING, 'http://h:1001')),
-      call(c.client(BILLING, 'http://h:1001')),
-    ];
-    for (let port = 2; port < MAX_CLIENT_ORIGINS + 3; port++)
+    const first = c.client(BILLING, 'http://h:1000');
+    await call(first);
+    for (let port = 1; port < MAX_CLIENT_ORIGINS; port++)
       await call(c.client(BILLING, `http://h:${1000 + port}`));
-    // h:1000 and h:1001 were evicted busy and drain; idle h:1002 closed at once.
-    expect(aborted()).toEqual(['http://h:1002']);
-    held[0]!.open();
-    await busy[0];
-    expect(aborted()).toEqual(['http://h:1000', 'http://h:1002']);
-    held[1]!.open();
-    await Promise.all(busy);
-    // Its second call ended last: only then did it close.
-    expect(aborted()).toEqual(['http://h:1000', 'http://h:1001', 'http://h:1002']);
+    await call(first); // used again: now the most recent
+    await call(c.client(BILLING, `http://h:${1000 + MAX_CLIENT_ORIGINS}`));
+    expect(c.originCount).toBe(MAX_CLIENT_ORIGINS);
+    // h:1001 was forgotten, not closed: connect-node closes it once idle.
+    expect(node.sessions.filter((s) => s.aborted)).toEqual([]);
+    expect(
+      node.pingOptionsSeen.every((o) => o?.['idleConnectionTimeoutMs'] === CLIENT_IDLE_TIMEOUT_MS),
+    ).toBe(true);
+    await call(c.client(BILLING, 'http://h:1001')); // a new session for it
+    expect(node.sessions.filter((s) => s.url === 'http://h:1001')).toHaveLength(2);
     c.close();
     expect(node.sessions.every((s) => s.aborted)).toBe(true);
   });
 
-  it('never closes a busy evicted session, however many drain at once', async () => {
-    const { clients: c, node } = clients();
-    await call(c.client(BILLING, 'http://h:999')); // connect-node loaded: lookups are synchronous
-    const held = gate();
-    const busy: Array<Promise<unknown>> = [];
-    for (let port = 0; port < MAX_CLIENT_ORIGINS * 3; port++) {
-      // Port 80 would normalize away, so the ports start at 1000.
-      node.gates.set(`http://h:${1000 + port}`, held.promise);
-      busy.push(call(c.client(BILLING, `http://h:${1000 + port}`)));
-    }
-    // 129 evicted: idle h:999 closed, the 128 with calls in flight were not.
-    expect(node.sessions.filter((s) => s.aborted).map((s) => s.url)).toEqual(['http://h:999']);
-    c.close();
-    // close() reaches the draining sessions as well as the cached ones.
-    expect(node.sessions.every((s) => s.aborted)).toBe(true);
-    held.open();
-    await Promise.all(busy);
-  });
-
-  it('counts a call from the lookup, so an eviction in the same turn cannot close it', async () => {
-    const { clients: c, node } = clients();
-    await call(c.client(BILLING, 'http://h:1000')); // warm, idle, the oldest
-    const held = gate();
-    node.gates.set('http://h:1000', held.promise);
-    const mine = call(c.client(BILLING, 'http://h:1000'));
-    const others = Array.from({ length: MAX_CLIENT_ORIGINS }, (_, i) =>
-      call(c.client(BILLING, `http://h:${2000 + i}`)),
-    );
-    await Promise.all(others);
-    const session = node.sessions.find((s) => s.url === 'http://h:1000')!;
-    expect(session.aborted).toBe(false);
-    held.open();
-    await expect(mine).resolves.toBe('ok');
-    expect(session.aborted).toBe(true);
-  });
-
-  it('tracks sessions created while connect-node loads, so close() reaches every one', async () => {
+  it('never closes an evicted session, whatever is on it; close() closes them all', async () => {
     const loaded = gate();
     const node = fakeNode();
     const { clients: c } = clients(
@@ -589,13 +547,19 @@ describe('GrpcClients', () => {
     );
     const held = gate();
     const busy: Array<Promise<unknown>> = [];
-    for (let port = 0; port < MAX_CLIENT_ORIGINS * 2; port++) {
+    // Started before connect-node loads, and on into the next turn, with calls held open.
+    for (let port = 0; port < MAX_CLIENT_ORIGINS * 3; port++) {
       node.gates.set(`http://h:${1000 + port}`, held.promise);
       busy.push(call(c.client(BILLING, `http://h:${1000 + port}`)));
     }
     loaded.open();
     await new Promise((ok) => setTimeout(ok, 0));
-    expect(node.sessions).toHaveLength(MAX_CLIENT_ORIGINS * 2);
+    // A busy one (h:1000) and one whose current connection reads idle while an
+    // older one finishes a call (h:1001): the client can tell neither, and closes neither.
+    node.states.set('http://h:1001', 'idle');
+    for (let port = 0; port < MAX_CLIENT_ORIGINS; port++)
+      await call(c.client(BILLING, `http://h:${5000 + port}`));
+    expect(node.sessions).toHaveLength(MAX_CLIENT_ORIGINS * 4);
     expect(node.sessions.filter((s) => s.aborted)).toEqual([]);
     c.close();
     expect(node.sessions.every((s) => s.aborted)).toBe(true);
@@ -603,164 +567,20 @@ describe('GrpcClients', () => {
     await Promise.all(busy);
   });
 
-  it('holds a streaming call until its messages end, fail, or are abandoned', async () => {
-    let fail = false;
-    const messages = (): AsyncIterable<unknown> => ({
-      [Symbol.asyncIterator]: () => {
-        let sent = 0;
-        return {
-          next: () =>
-            fail
-              ? Promise.reject(new Error('stream broke'))
-              : Promise.resolve(
-                  sent++ < 2 ? { done: false, value: sent } : { done: true, value: undefined },
-                ),
-        };
-      },
-    });
-    const node = fakeNode(() =>
-      Promise.resolve({ stream: true, header: 'h', message: messages() }),
-    );
-    const { clients: c } = clients({}, node);
-    const session = (port: number) => node.sessions.find((s) => s.url === `http://h:${port}`)!;
-    const evictAll = async (from: number): Promise<void> => {
-      for (let i = 0; i < MAX_CLIENT_ORIGINS; i++)
-        await callStream(c.client(BILLING, `http://h:${from + i}`));
-    };
-    const read = (response: unknown) =>
-      (response as { message: AsyncIterable<unknown> }).message[Symbol.asyncIterator]();
-
-    // Ends: the headers arrived, the messages had not; closed at the last message.
-    const ended = (await callStream(c.client(BILLING, 'http://h:1000'))) as { header: string };
-    expect(ended.header).toBe('h');
-    await evictAll(3000);
-    expect(session(1000).aborted).toBe(false);
-    const it = read(ended);
-    expect(await it.next()).toEqual({ done: false, value: 1 });
-    expect(session(1000).aborted).toBe(false);
-    await it.next();
-    expect(await it.next()).toEqual({ done: true, value: undefined });
-    expect(session(1000).aborted).toBe(true);
-
-    // Abandoned through return(), and through throw().
-    const left = read(await callStream(c.client(BILLING, 'http://h:1001')));
-    const thrown = read(await callStream(c.client(BILLING, 'http://h:1002')));
-    await evictAll(4000);
-    expect(await left.return!()).toEqual({ done: true, value: undefined });
-    expect(session(1001).aborted).toBe(true);
-    await expect(thrown.throw!(new Error('consumer quit'))).rejects.toThrow('consumer quit');
-    expect(session(1002).aborted).toBe(true);
-    // Released once: a second return() changes nothing.
-    await left.return!('again');
-
-    // Fails mid-stream.
-    const broken = read(await callStream(c.client(BILLING, 'http://h:1003')));
-    await evictAll(5000);
-    fail = true;
-    await expect(broken.next()).rejects.toThrow('stream broke');
-    expect(session(1003).aborted).toBe(true);
+  it('drops evicted sessions connect-node has already closed', async () => {
+    const { clients: c, node } = clients();
+    for (let port = 0; port < MAX_CLIENT_ORIGINS + 2; port++)
+      await call(c.client(BILLING, `http://h:${1000 + port}`));
+    // h:1000 and h:1001 are evicted; connect-node then closes one and errors the other.
+    node.states.set('http://h:1000', 'closed');
+    node.states.set('http://h:1001', 'error');
+    await call(c.client(BILLING, 'http://h:3000')); // the next eviction prunes them
     c.close();
-  });
-
-  it('releases a stream dropped unread at its abort or its deadline', async () => {
-    const message: AsyncIterable<unknown> = {
-      [Symbol.asyncIterator]: () => ({ next: () => new Promise<never>(() => {}) }),
-    };
-    const node = fakeNode(() => Promise.resolve({ message }));
-    const { clients: c } = clients({}, node);
-    const session = (port: number) => node.sessions.find((s) => s.url === `http://h:${port}`)!;
-    const open = (port: number, signal: AbortSignal | undefined, timeoutMs?: number) => {
-      const { transport } = c.client(
-        BILLING,
-        `http://h:${port}`,
-        timeoutMs === undefined ? {} : { timeoutMs },
-      ) as {
-        transport: ClientTransportLike;
-      };
-      return transport.stream({}, signal, undefined, undefined, (async function* () {})());
-    };
-    const aborts = new AbortController();
-    const spy = vi.spyOn(aborts.signal, 'removeEventListener');
-    await open(1000, aborts.signal); // never iterated
-    await open(1001, AbortSignal.abort()); // aborted before the headers came back
-    await open(1002, undefined, 30); // the client's deadline
-    for (let i = 0; i < MAX_CLIENT_ORIGINS; i++)
-      await call(c.client(BILLING, `http://h:${2000 + i}`));
-    expect(session(1000).aborted).toBe(false);
-    expect(session(1001).aborted).toBe(true);
-    expect(session(1002).aborted).toBe(false);
-    aborts.abort();
-    expect(session(1000).aborted).toBe(true);
-    expect(spy).toHaveBeenCalledWith('abort', expect.any(Function));
-    await new Promise((ok) => setTimeout(ok, 60));
-    expect(session(1002).aborted).toBe(true);
-    c.close();
-  });
-
-  it('holds a stream with no deadline until it ends, never on a timer', async () => {
-    const message: AsyncIterable<unknown> = {
-      [Symbol.asyncIterator]: () => ({ next: () => new Promise<never>(() => {}) }),
-    };
-    const node = fakeNode(() => Promise.resolve({ message }));
-    const { clients: c } = clients({}, node);
-    const session = (port: number) => node.sessions.find((s) => s.url === `http://h:${port}`)!;
-    const open = (port: number, timeoutMs: number) => {
-      const { transport } = c.client(BILLING, `http://h:${port}`) as {
-        transport: ClientTransportLike;
-      };
-      return transport.stream({}, undefined, timeoutMs, undefined, (async function* () {})());
-    };
-    const timers = vi.spyOn(globalThis, 'setTimeout');
-    const streams = [await open(1000, 0), await open(1001, -1)] as Array<{
-      message: AsyncIterable<unknown>;
-    }>;
-    // No release timer was armed for either (Node would warn at a negative delay).
-    expect(timers).not.toHaveBeenCalled();
-    timers.mockRestore();
-    for (let i = 0; i < MAX_CLIENT_ORIGINS; i++)
-      await call(c.client(BILLING, `http://h:${2000 + i}`));
-    await new Promise((ok) => setTimeout(ok, 20));
-    expect(session(1000).aborted).toBe(false);
-    expect(session(1001).aborted).toBe(false);
-    for (const stream of streams) await stream.message[Symbol.asyncIterator]().return!();
-    expect(session(1000).aborted).toBe(true);
-    expect(session(1001).aborted).toBe(true);
-    c.close();
-  });
-
-  it('passes return() and throw() through to the stream underneath', async () => {
-    const seen: string[] = [];
-    const message: AsyncIterable<unknown> = {
-      [Symbol.asyncIterator]: () => ({
-        next: () => Promise.resolve({ done: false, value: 1 }),
-        return: (value?: unknown) => {
-          seen.push('return');
-          return Promise.resolve({ done: true, value });
-        },
-        throw: () => {
-          seen.push('throw');
-          return Promise.resolve({ done: true, value: 'handled' });
-        },
-      }),
-    };
-    const node = fakeNode(() => Promise.resolve({ message }));
-    const { clients: c } = clients({}, node);
-    const response = (await callStream(c.client(BILLING, 'http://h:1'))) as {
-      message: AsyncIterable<unknown>;
-    };
-    const it = response.message[Symbol.asyncIterator]();
-    expect(await it.return!('v')).toEqual({ done: true, value: 'v' });
-    expect(await it.throw!(new Error('x'))).toEqual({ done: true, value: 'handled' });
-    expect(seen).toEqual(['return', 'throw']);
-  });
-
-  it('releases a stream response with no message iterable at once', async () => {
-    const node = fakeNode(() => Promise.resolve({ stream: true }));
-    const { clients: c } = clients({}, node);
-    await callStream(c.client(BILLING, 'http://h:1000'));
-    for (let i = 0; i < MAX_CLIENT_ORIGINS; i++)
-      await callStream(c.client(BILLING, `http://h:${2000 + i}`));
-    expect(node.sessions.find((s) => s.url === 'http://h:1000')!.aborted).toBe(true);
+    const aborted = new Set(node.sessions.filter((s) => s.aborted).map((s) => s.url));
+    expect(aborted.has('http://h:1000')).toBe(false);
+    expect(aborted.has('http://h:1001')).toBe(false);
+    // h:1002, evicted by that call and still connected, is closed.
+    expect(aborted.has('http://h:1002')).toBe(true);
   });
 
   it('close aborts every session and later calls reject without opening one', async () => {
