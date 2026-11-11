@@ -58,18 +58,18 @@ All notable changes to this project are documented here. The format follows
   abort, or `Kubernetes EndpointSlice probe failed with HTTP <status>` instead of resolving `false`.
   The plugin's indicator is unchanged; a caller of the provider directly must handle the rejection.
 
-- **gRPC replies stream; streamed request bodies reach the procedure (M139b, `@setu-ts/kernel`,
-  `@setu-ts/grpc-plugin`).** A server-streaming or bidi reply, or one with trailers, is written with
-  `IResponse.stream`, so middleware that inspects RPC replies now sees `streaming: true` for them,
-  `inject()` refuses them (use `app.fetch()`), and the request logger, metrics and telemetry time
-  them to the first message. Unary replies stay buffered. A client- or bidi-streaming call whose
-  body nothing read gets the unread body, bounded per message by `readMaxBytes` rather than
-  `RuntimePlugin({ maxBodyBytes })`; unary and server-streaming bodies keep the `maxBodyBytes`
-  bound. The client's abort signal reaches every call, unary included, on the new
-  `RpcTransport.signal`. The kernel and `GrpcPlugin` now pass each call and reply as plain fields
-  (`RpcCall`, `RpcReply`) instead of building a fetch `Request` and `Response` per RPC, which lifts
-  Connect unary throughput on Node. An `IGrpcService` without `handleRpc` keeps the buffered write.
-  The `grpc-workspace` example's orders member calls billing through `grpcClient`.
+- **gRPC replies stream; streamed request bodies reach the procedure (M139b, #581,
+  `@setu-ts/kernel`, `@setu-ts/grpc-plugin`).** A server-streaming or bidi reply, or one with
+  trailers, is written with `IResponse.stream`, so middleware that inspects RPC replies now sees
+  `streaming: true` for them, `inject()` refuses them (use `app.fetch()`), and the request logger,
+  metrics and telemetry time them to the first message. Unary replies stay buffered. A client- or
+  bidi-streaming call whose body nothing read gets the unread body, bounded per message by
+  `readMaxBytes` rather than `RuntimePlugin({ maxBodyBytes })`; unary and server-streaming bodies
+  keep the `maxBodyBytes` bound. The client's abort signal reaches every call, unary included, on
+  the new `RpcTransport.signal`. The kernel and `GrpcPlugin` now pass each call and reply as plain
+  fields (`RpcCall`, `RpcReply`) instead of building a fetch `Request` and `Response` per RPC, which
+  lifts Connect unary throughput on Node. An `IGrpcService` without `handleRpc` keeps the buffered
+  write. The `grpc-workspace` example's orders member calls billing through `grpcClient`.
 
 ### Added
 
@@ -112,7 +112,7 @@ All notable changes to this project are documented here. The format follows
   that enforces its own cross-site rule; form CSRF then skips the request and commits no session for
   it.
 
-- **HTTP/2 and native gRPC (M139b, `@setu-ts/runtime`, `@setu-ts/common`, `@setu-ts/kernel`,
+- **HTTP/2 and native gRPC (M139b, #581, `@setu-ts/runtime`, `@setu-ts/common`, `@setu-ts/kernel`,
   `@setu-ts/grpc-plugin`).** `RuntimePlugin({ http2: true })` serves cleartext HTTP/2 (h2c) and
   HTTP/1.1 on one port: each connection is classified by its first bytes, as `Deno.serve` and Go's
   unencrypted HTTP/2 do, so browsers, probes and WebSocket upgrades keep working beside gRPC
@@ -130,7 +130,7 @@ All notable changes to this project are documented here. The format follows
   reflection through `grpcurl` — reach Setu directly; HTTP/1.1, Deno and Workers keep the
   Trailers-Only `UNIMPLEMENTED`. `GrpcPluginOptions.readMaxBytes` (default 4 MiB) bounds each
   request message, and each reply message the plugin's clients receive. Ships in 0.13.0.
-- **`grpcClient`: the gRPC plugin calls other services as well as serving (M139b,
+- **`grpcClient`: the gRPC plugin calls other services as well as serving (M139b, #581,
   `@setu-ts/grpc-plugin`, `@setu-ts/common`, `@setu-ts/cli`).**
   `grpcClient(services, definition, target, options?)` returns a typed Connect client through the
   optional `IGrpcService.client`. A target that is a service name resolves through service discovery
@@ -229,16 +229,17 @@ All notable changes to this project are documented here. The format follows
 - **Alerting advice names `HealthPlugin({ details: true })` (M139f, #579, V12-49).** Seven READMEs
   that say to alert on a `data.<field>` now say the default `/health` body omits `data`.
 
-- **gRPC server streams arrived as one chunk at the end (V12-39, `@setu-ts/kernel`).** The kernel
-  read the whole Connect response before writing it, so five messages sent 500 ms apart reached the
-  client together at 2.5 s, and a stream that never ends delivered nothing while holding memory.
-- **The grpc-plugin README's HTTP/2 claim was not true on Node (V12-40, `@setu-ts/grpc-plugin`).**
-  Node served HTTP/1.1 only; `RuntimePlugin({ http2 })` makes Connect and gRPC-Web over HTTP/2 real,
-  and the README now states what each runtime serves.
-- **A client could choose the scheme of `request.url` (V12-51, `@setu-ts/runtime`).** Over cleartext
-  HTTP/2 the scheme came from the client's `:scheme` (Deno at `0.12.0`), and on Node an
-  absolute-form request line (`GET https://… HTTP/1.1`) set it, so `requestOriginOf` saw `https` on
-  a plain connection. Served requests now take the listener's scheme, `https` only under TLS.
+- **gRPC server streams arrived as one chunk at the end (M139b, #581, V12-39, `@setu-ts/kernel`).**
+  The kernel read the whole Connect response before writing it, so five messages sent 500 ms apart
+  reached the client together at 2.5 s, and a stream that never ends delivered nothing while holding
+  memory.
+- **The grpc-plugin README's HTTP/2 claim was not true on Node (M139b, #581, V12-40,
+  `@setu-ts/grpc-plugin`).** Node served HTTP/1.1 only; `RuntimePlugin({ http2 })` makes Connect and
+  gRPC-Web over HTTP/2 real, and the README now states what each runtime serves.
+- **A client could choose the scheme of `request.url` (M139b, #581, V12-51, `@setu-ts/runtime`).**
+  Over cleartext HTTP/2 the scheme came from the client's `:scheme` (Deno at `0.12.0`), and on Node
+  an absolute-form request line (`GET https://… HTTP/1.1`) set it, so `requestOriginOf` saw `https`
+  on a plain connection. Served requests now take the listener's scheme, `https` only under TLS.
 
 ## [0.12.0] — 2026-11-07
 

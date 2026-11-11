@@ -799,7 +799,7 @@ here.
 - **Milestone 139b** (`common` + `kernel` + `runtime` + `grpc-plugin` + `cli` — gRPC over HTTP/2:
   streamed RPC bodies and replies, an HTTP/2 listener beside HTTP/1.1 on Node and Bun, response
   trailers and native gRPC, `grpcClient` with refused-stream retry; V12-39, V12-40, V12-51; ships in
-  `0.13.0`) — complete (PR pending).
+  `0.13.0`) — complete (PR #581).
 - **Next milestone** — the remaining M139 letters.
 
 ## Verification (run before declaring any work done)
