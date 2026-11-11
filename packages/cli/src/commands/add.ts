@@ -15,6 +15,7 @@
  * @module
  */
 
+import { devtoolRuntimeRefusal } from '../devtool/planner.ts';
 import { withDatabaseScripts, databaseConfig } from './add-database.ts';
 import type { Prompter } from '../prompt.ts';
 import { planViewSetup, VIEWS_CONTROLLER } from './add-view.ts';
@@ -1919,7 +1920,10 @@ async function addOne(
   }
   if (diagnostics) {
     deps.error(
-      `\`@setu-ts/diagnostics-plugin\` is installed and wired by \`${cliInvocation(runtime)} devtool enable\`.`,
+      // Only a runtime the devtool supports gets a command; another is told why,
+      // in the devtool's own refusal, rather than sent to one that refuses.
+      devtoolRuntimeRefusal(runtime, 'enable') ??
+        `\`@setu-ts/diagnostics-plugin\` is installed and wired by \`${cliInvocation(runtime)} devtool enable\`.`,
     );
     return EXIT_USAGE;
   }
