@@ -67,6 +67,7 @@
     "@setu-ts/http-security-plugin": "workspace:^",
     "@setu-ts/kernel": "workspace:^",
     "@setu-ts/logger-plugin": "workspace:^",
+    "@setu-ts/mail-plugin": "workspace:^",
     "@setu-ts/messaging-plugin": "workspace:^",
     "@setu-ts/metrics-plugin": "workspace:^",
     "@setu-ts/multi-tenancy-plugin": "workspace:^",

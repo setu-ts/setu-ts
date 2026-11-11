@@ -32,7 +32,7 @@ describe('workspace briefs', () => {
         '1',
       );
       expect(text).not.toContain(value);
-      expect(text).toContain('| (not shown) | 3000 | orders, (not shown) |');
+      expect(text).toContain('- (not shown) — port: 3000; dependsOn: orders, (not shown);');
       expect(text).toContain('apps/(not shown)/AGENTS.md');
       expect(text).toContain('Endpoint override: (not shown).');
     },
@@ -99,9 +99,9 @@ describe('workspace briefs', () => {
       '`../../node_modules/@setu-ts/<package>/AGENT_CARD.md`',
     );
     expect(renderBrief(facts, true)).toContain(
-      '| ../../node_modules/@setu-ts/common/AGENT_CARD.md |',
+      '; ../../node_modules/@setu-ts/common/AGENT_CARD.md\n',
     );
     expect(renderBrief(facts)).toContain('`node_modules/@setu-ts/<package>/AGENT_CARD.md`');
-    expect(renderBrief(facts)).toContain('| node_modules/@setu-ts/common/AGENT_CARD.md |');
+    expect(renderBrief(facts)).toContain('; node_modules/@setu-ts/common/AGENT_CARD.md\n');
   });
 });

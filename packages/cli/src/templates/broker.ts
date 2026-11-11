@@ -192,10 +192,7 @@ export function withQueueArgs(
               ],
           appFactoryContext: {
             ...host.appFactoryContext,
-            queue: starterOptionLiteral(spec.queueArgs, spec, override).replace(
-              '{',
-              '{ processors: [...QUEUE_PROCESSORS],',
-            ),
+            queue: withQueueProcessors(starterOptionLiteral(spec.queueArgs, spec, override)),
           },
         },
         spec.queueClients ?? [],
@@ -549,4 +546,19 @@ export function redisClientRefusal(
   if (!selected)
     return '--redis-client requires a Redis arm: --broker redis, --queue redis, --store redis, --lock redis or --backplane redis.';
   return undefined;
+}
+
+/**
+ * Prefixes the generated processors to a starter queue literal, on its own line at
+ * the literal's indentation, so a Deno project (written as rendered) stays
+ * `deno fmt`-clean.
+ *
+ * @param literal - The starter option literal
+ * @returns The literal with `processors: [...QUEUE_PROCESSORS]` first
+ */
+function withQueueProcessors(literal: string): string {
+  const indent = /^\{\n([ \t]*)/.exec(literal)?.[1];
+  return indent === undefined
+    ? literal.replace('{', '{ processors: [...QUEUE_PROCESSORS],')
+    : literal.replace('{\n', `{\n${indent}processors: [...QUEUE_PROCESSORS],\n`);
 }

@@ -61,8 +61,5 @@ ctx.response.json(pools);
 
 ## Building with `setu build`
 
-On Node, keep task specifiers as literal `new URL('./tasks/resize-image.task.ts', import.meta.url)`
-expressions. `setu build` bundles each referenced `*.task.ts` into `dist/` and rewrites the URL to
-its emitted `.js` path relative to each application output, including the migration runner. Dynamic
-task paths are refused with the file and line; `--dry-run` lists task outputs. Development uses the
-same `.task.ts` specifier through the source loader. Deno and Bun run source directly.
+Keep task specifiers literal (`new URL('./tasks/x.task.ts', import.meta.url)`): `setu build` bundles
+each `*.task.ts` into `dist/` and rewrites the URL to the emitted `.js`; dynamic paths are refused.

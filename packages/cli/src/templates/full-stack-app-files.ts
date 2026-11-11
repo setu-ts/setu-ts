@@ -105,7 +105,7 @@ export function ErrorBoundary() {
 
 const entryServerModule = `import { renderToReadableStream } from 'react-dom/server';
 import { type EntryContext, isRouteErrorResponse, ServerRouter } from 'react-router';
-import { CAPABILITIES, describeError, maskUrlUserinfo, type ILogger } from '@setu-ts/common';
+import { CAPABILITIES, describeError, type ILogger, maskUrlUserinfo } from '@setu-ts/common';
 import { getService } from '@setu-ts/react-router-plugin';
 
 import type { AppLoadContext } from '~/lib/load-context.ts';

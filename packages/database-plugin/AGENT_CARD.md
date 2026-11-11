@@ -1,8 +1,7 @@
 # @setu-ts/database-plugin — repositories and transactions
 
-**Add it:** `setu add database` adds it; add `DatabasePlugin({ type: 'memory' })` to
-`setu.config.ts`. With a starter, set its `database` option instead of registering another plugin.
-It provides `CAPABILITIES.DATABASE` (`IDatabaseService`).
+**Add it:** `setu add database`; register `DatabasePlugin({ type: 'memory' })`, or set a starter's
+`database` option. Provides `CAPABILITIES.DATABASE` (`IDatabaseService`).
 
 ## Create and read an entity from routes
 
@@ -51,7 +50,7 @@ await db.transaction(async (uow) => {
 - The default adapter is memory and loses data when the process ends.
 - `findById` and `findOne` return `null` when absent.
 - Only unit-of-work repositories share its transaction; failure rolls back and rejects.
-- Unsupported transaction isolation levels reject rather than silently downgrading.
+- Unsupported transaction isolation levels reject rather than downgrading.
 - Raw `query` rejects on memory; `migrate` rejects on every current adapter.
 - Give a Drizzle `pg` Pool an `'error'` listener (README).
 

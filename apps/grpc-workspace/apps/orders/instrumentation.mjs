@@ -7,7 +7,20 @@
 import { register } from 'node:module';
 
 try {
-  register('@opentelemetry/instrumentation/hook.mjs', import.meta.url);
+  register('@opentelemetry/instrumentation/hook.mjs', import.meta.url, {
+    data: {
+      include: [
+        'http',
+        'https',
+        'ioredis',
+        'redis',
+        '@redis/client',
+        '@node-redis/client',
+        'amqplib',
+        'kafkajs',
+      ],
+    },
+  });
 } catch {
   // No instrumentation package: start without the hook.
 }

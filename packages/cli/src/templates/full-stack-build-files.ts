@@ -389,36 +389,37 @@ let server: vite.ViteDevServer | undefined;
 let listening = false;
 try {
   server = await vite.createServer({
-  root,
-  configFile: \`\${root}/vite.config.ts\`,
-  base: BASE,
-  // Vite's own port for the HMR socket on every runtime, never the app port:
-  // the app-port upgrade failed on Node and Deno and reloaded the page on Bun
-  // (X85-2, X85-3). An explicit host also makes strictPort refuse a second
-  // server: unhosted, one bound IPv4 and the other IPv6, and both started.
-  server: {
-    host: '127.0.0.1',
-    port: vitePort,
-    strictPort: true,
-    hmr: { host: 'localhost', port: vitePort, clientPort: vitePort },
-  },
-  plugins: [viteDevExternals({
-    packages: [...frameworkPackages, ...workspaceLibraries],
-    // Resolve with the runtime: routes share this entry's module and context-key identity.
-    resolve: (specifier) => import.meta.resolve(specifier),
-  })],
-});
+    root,
+    configFile: \`\${root}/vite.config.ts\`,
+    base: BASE,
+    // Vite's own port for the HMR socket on every runtime, never the app port:
+    // the app-port upgrade failed on Node and Deno and reloaded the page on Bun
+    // (X85-2, X85-3). An explicit host also makes strictPort refuse a second
+    // server: unhosted, one bound IPv4 and the other IPv6, and both started.
+    server: {
+      host: '127.0.0.1',
+      port: vitePort,
+      strictPort: true,
+      hmr: { host: 'localhost', port: vitePort, clientPort: vitePort },
+    },
+    plugins: [viteDevExternals({
+      packages: [...frameworkPackages, ...workspaceLibraries],
+      // Resolve with the runtime: routes share this entry's module and context-key identity.
+      resolve: (specifier) => import.meta.resolve(specifier),
+    })],
+  });
   listening = true;
   await server.listen();
 } catch (error: unknown) {
   await server?.close();
   if (listening) {
-    console.error(\`Startup failed: Vite could not listen on \${vitePort} (VITE_PORT): \${describeError(error)}\`);
+    console.error(
+      \`Startup failed: Vite could not listen on \${vitePort} (VITE_PORT): \${describeError(error)}\`,
+    );
     console.error('${port === undefined ? 'Choose another VITE_PORT in the environment.' : 'Choose another Vite port in setu.workspace.json.'}');
   } else console.error(\`Startup failed: \${describeError(error)}\`);
   runtime.exit(1);
 }
-
 
 const viteServer = server;
 
@@ -498,10 +499,12 @@ export function fullStackDevEntryVariants(
     current.contents.indexOf('const viteServer = server;') + 'const viteServer = server;'.length;
   const argsStart =
     current.contents.indexOf('await vite.createServer(', start) + 'await vite.createServer('.length;
-  const argsEnd = current.contents.indexOf('\n});', argsStart) + 2;
+  // The current options object sits one level deeper, inside the try block.
+  const argsEnd = current.contents.indexOf('\n  });', argsStart) + '\n  }'.length;
+  const args = current.contents.slice(argsStart, argsEnd).replace(/\n {2}/g, '\n');
   const legacy = (
     current.contents.slice(0, start) +
-    `const viteServer = await vite.createServer(${current.contents.slice(argsStart, argsEnd)});\nawait viteServer.listen();` +
+    `const viteServer = await vite.createServer(${args});\nawait viteServer.listen();` +
     current.contents.slice(end)
   )
     .replace(', type IRuntimeServices', '')

@@ -51,8 +51,8 @@ async function verify(project: string, member = false): Promise<readonly string[
   expect(text.split('## Not installed')[1]).not.toContain('`cache`');
   const missing: string[] = [];
   for (const pkg of agentPackages) {
-    const row = before.split('\n').find((line) => line.startsWith(`| @setu-ts/${pkg} |`))!;
-    const path = row.split('|').at(-2)!.trim();
+    const row = before.split('\n').find((line) => line.startsWith(`- @setu-ts/${pkg} — `))!;
+    const path = row.split('; ').at(-1)!.trim();
     expect(path).toBe(`${member ? '../../' : ''}node_modules/@setu-ts/${pkg}/AGENT_CARD.md`);
     try {
       expect((await stat(resolve(project, path))).isFile()).toBe(true);

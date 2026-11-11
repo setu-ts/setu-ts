@@ -5,6 +5,7 @@
 // `setu.config.ts` consumes it as:
 //
 //   QueuePlugin({ processors: [...QUEUE_PROCESSORS] })
+//   starter queue: { processors: [...QUEUE_PROCESSORS] }
 //
 // If you scaffolded this project before this seam existed, add those lines to
 // wire generated artifacts in.

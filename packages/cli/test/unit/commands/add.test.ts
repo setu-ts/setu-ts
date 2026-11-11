@@ -1,6 +1,7 @@
 import { cliInvocation } from '../../../src/templates/project-files.ts';
 import * as nodeFs from 'node:fs/promises';
 import * as ts from 'typescript';
+import type { Config as DrizzleKitConfig } from 'drizzle-kit';
 /**
  * Tests for `setu add <plugin>` (D3).
  *
@@ -168,7 +169,9 @@ describe('M139d add request and backend contracts', () => {
   ).resolvedModule;
   it('type-checks each generated drizzle dialect against the installed defineConfig types', async () => {
     expect(drizzleTypes?.resolvedFileName).toBeDefined();
-    for (const dialect of ['postgresql', 'mysql', 'sqlite']) {
+    // The dialects `--dialect` accepts are values of drizzle-kit's own union.
+    const dialects: readonly DrizzleKitConfig['dialect'][] = ['postgresql', 'mysql', 'sqlite'];
+    for (const dialect of dialects) {
       const h = harness({ '/app/package.json': '{}' });
       expect(await h.run(['database', '--type', 'drizzle', '--dialect', dialect])).toBe(0);
       const file = `${process.cwd()}/packages/cli/.tmp/drizzle.config.mts`;

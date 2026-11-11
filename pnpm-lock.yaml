@@ -1509,6 +1509,9 @@ importers:
       '@setu-ts/logger-plugin':
         specifier: workspace:^
         version: link:../logger-plugin
+      '@setu-ts/mail-plugin':
+        specifier: workspace:^
+        version: link:../mail-plugin
       '@setu-ts/messaging-plugin':
         specifier: workspace:^
         version: link:../messaging-plugin

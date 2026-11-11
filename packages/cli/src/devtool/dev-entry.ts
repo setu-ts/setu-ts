@@ -150,7 +150,7 @@ ${startupIndent}await app.start({ port: ${appPort} });${currentWording && runtim
 
 const app = await boot().catch((error: unknown) => {
   console.error(
-    \`setu devtool: startup failed: \${describeError(error)}. ${currentWording ? 'The application did not start, and the connector is not running.' : 'The connector did not start.'}\`,
+    ${currentWording ? '`setu devtool: startup failed: ${\n      describeError(error)\n    }. The application did not start, and the connector is not running.`' : '`setu devtool: startup failed: ${describeError(error)}. The connector did not start.`'},
   );
   return runtime.exit(1);
 });

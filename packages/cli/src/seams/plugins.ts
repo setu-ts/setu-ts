@@ -61,7 +61,8 @@ function renderPluginsBarrel(artifacts: SeamArtifacts): string {
 
   return assembleSeamBarrel(header, imports, [
     `/**\n` +
-      ` * Every generated plugin, spread into \`createApplication({ plugins })\` or registered by the full-stack \`app.register\` loop.\n` +
+      ` * Every generated plugin, spread into \`createApplication({ plugins })\` or registered\n` +
+      ` * by the full-stack \`app.register\` loop.\n` +
       ` *\n` +
       ` * Array position does not decide registration order: the kernel resolves plugins\n` +
       ` * by their declared \`dependencies\`, and a generated plugin declares none. Delete a\n` +
