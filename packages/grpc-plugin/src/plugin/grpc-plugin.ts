@@ -21,7 +21,7 @@ import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import { GrpcService } from '../services/grpc-service.ts';
 import type { GrpcPluginOptions } from '../interfaces/index.ts';
 import { loadConnectModule } from '../transports/connect-loader.ts';
-import { GrpcClients, validateClientOptions } from '../client/grpc-client.ts';
+import { GrpcClients, targetBase, validateClientOptions } from '../client/grpc-client.ts';
 import { loadConnectNode } from '../client/connect-node-loader.ts';
 import { EmbeddedDescriptors } from '../descriptors/embedded-descriptors.ts';
 import { VERSION } from '../version.ts';
@@ -58,7 +58,11 @@ export function GrpcPlugin(options: GrpcPluginOptions = {}): IPlugin {
     throw new TypeError('GrpcPlugin: serve: false serves nothing, so services must be empty');
   }
   for (const [target, clientOptions] of Object.entries(options.clients ?? {})) {
-    validateClientOptions(clientOptions, `GrpcPlugin: clients[${JSON.stringify(target)}]`);
+    // The key is a target like any other: refused (unechoed) where a call's
+    // would be, and named by its origin only, never its path.
+    const base = targetBase(target);
+    const label = base === undefined ? target : new URL(base).origin;
+    validateClientOptions(clientOptions, `GrpcPlugin: clients[${JSON.stringify(label)}]`);
   }
   return {
     name: PLUGIN_NAME,

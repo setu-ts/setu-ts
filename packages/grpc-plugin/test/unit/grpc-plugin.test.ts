@@ -268,6 +268,20 @@ describe('GrpcPlugin — calling side (M139b §3.12)', () => {
       { clients: { billing: { basePath: 'grpc' } } },
       'GrpcPlugin: clients["billing"]: basePath must be \'\' or start with \'/\' and not end with one, received "grpc"',
     ],
+    // A URL key is named by its origin only, never its path.
+    [
+      { clients: { 'http://billing:3410/s3cret-path': { timeoutMs: 0 } } },
+      'GrpcPlugin: clients["http://billing:3410"]: timeoutMs must be an integer from 1 to 2147483647, received 0',
+    ],
+    // A key is a target: refused the same way, unechoed.
+    [
+      { clients: { 'http://u:s3cret@billing': { timeoutMs: 0 } } },
+      'grpc client: a target must not carry credentials (user:password@); send them as call headers',
+    ],
+    [
+      { clients: { 'http://billing?token=s3cret': {} } },
+      'grpc client: a target URL must not carry a query or fragment; Connect never sends them',
+    ],
   ])('refuses %j at construction', (options, message) => {
     expect(() => GrpcPlugin(options as never)).toThrow(new TypeError(message));
   });

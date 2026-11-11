@@ -388,9 +388,12 @@ re-audit holds the tree against.
   `requestTimeout` 300 s, as on the plain listener. An HTTP/2 session with no stream open: 75 s,
   then `GOAWAY` (a silent open stream keeps it). Request message and reply message: `readMaxBytes`,
   default 4 MiB. Clients: 256 per definition. Origins: 64 cached sessions; an evicted session drains
-  and is never closed while busy, so draining sessions are bounded by the origins with calls in
-  flight at once, each call by its deadline. Client session memory: 64 MB (the server keeps Node's
-  default; §3.12). Retry: one, unary only, within what is left of the deadline.
+  and is never closed while a call holds it — each call is counted on its origin from the lookup
+  that finds it to its end (a stream's last message), and the last to end closes a drained session —
+  so draining sessions are bounded by the origins with calls in flight at once, each call by its
+  deadline; a stream the application abandons without `return()` holds its session until `close()`.
+  Client session memory: 64 MB (the server keeps Node's default; §3.12). Retry: one, unary only,
+  within what is left of the deadline.
 - **Obligations on the audit** (in addition to the eight above): 9. The retry resends only a call
   the server provably did not process: Node's `ERR_HTTP2_STREAM_ERROR` naming
   `NGHTTP2_REFUSED_STREAM`, connect-node's own reading of the reset code (its exact text with no
@@ -408,33 +411,40 @@ re-audit holds the tree against.
   target.
 - **Findings of the first audit, and their dispositions.**
 
-  | #   | Severity | Finding                                                                     | Disposition                                                                                  |
-  | --- | -------- | --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-  | F1  | Medium   | The retry matched the refusal text anywhere, so a server's error was resent | Fixed: connect-node's arm needs the exact `rawMessage` and empty metadata (obligation 9)     |
-  | F2  | Medium   | URL userinfo reached error text                                             | Fixed: a target with credentials is refused, unechoed (obligation 11)                        |
-  | F3  | Medium   | HTTP/1.1 on `http2: true` had no header or request timeout                  | Fixed: the outer server's `listening` is forwarded to the HTTP/1.1 server                    |
-  | F4  | Medium   | Idle HTTP/2 sessions were never closed                                      | Fixed: 75 s with no stream open, then `GOAWAY`, on both cleartext and TLS                    |
-  | F5  | Low      | An HTTP/1.1 line claiming `HTTP/2.0` was offered trailers                   | Fixed: trailers only on an `Http2ServerRequest`'s stream                                     |
-  | F6  | Low      | With no per-call deadline the retry got a fresh one                         | Fixed: the configured deadline counts (obligation 10)                                        |
-  | F7  | Low      | Replies were unbounded (connect-node's 4 GiB default)                       | Fixed: `readMaxBytes` on every client transport (obligation 12)                              |
-  | F8  | Low      | Origin eviction cancelled calls in flight                                   | Fixed: an evicted session drains, closed once idle; the draining set is bounded              |
-  | F9  | Low      | A crafted member name injected code into generated files                    | Fixed: names refused at manifest read unless `generate app` could write them (obligation 17) |
-  | F10 | Blocking | No design review for §3.11–§3.13                                            | This section, written after the code; the maintainer decides whether it stands               |
-  | R1  | Medium   | A stream whose request half never ends keeps a session past the idle bound  | **Open — maintainer decision** (see below)                                                   |
-  | R2  | Low      | Draining-set overflow aborted busy sessions (64 + 64 budget)                | Fixed: a busy session is never closed; the budget now reads so                               |
-  | R3  | Low      | A token in a URL target's query or fragment reached the refusal text        | Fixed: query and fragment refused unechoed; a URL target is named by its origin only         |
-  | L1  | Low      | The idle-bound comment described a mechanism the code does not rely on      | Fixed: the comment says what the re-arm does                                                 |
+  | #   | Severity | Finding                                                                         | Disposition                                                                                  |
+  | --- | -------- | ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+  | F1  | Medium   | The retry matched the refusal text anywhere, so a server's error was resent     | Fixed: connect-node's arm needs the exact `rawMessage` and empty metadata (obligation 9)     |
+  | F2  | Medium   | URL userinfo reached error text                                                 | Fixed: a target with credentials is refused, unechoed (obligation 11)                        |
+  | F3  | Medium   | HTTP/1.1 on `http2: true` had no header or request timeout                      | Fixed: the outer server's `listening` is forwarded to the HTTP/1.1 server                    |
+  | F4  | Medium   | Idle HTTP/2 sessions were never closed                                          | Fixed: 75 s with no stream open, then `GOAWAY`, on both cleartext and TLS                    |
+  | F5  | Low      | An HTTP/1.1 line claiming `HTTP/2.0` was offered trailers                       | Fixed: trailers only on an `Http2ServerRequest`'s stream                                     |
+  | F6  | Low      | With no per-call deadline the retry got a fresh one                             | Fixed: the configured deadline counts (obligation 10)                                        |
+  | F7  | Low      | Replies were unbounded (connect-node's 4 GiB default)                           | Fixed: `readMaxBytes` on every client transport (obligation 12)                              |
+  | F8  | Low      | Origin eviction cancelled calls in flight                                       | Fixed: an evicted session drains, closed once idle; the draining set is bounded              |
+  | F9  | Low      | A crafted member name injected code into generated files                        | Fixed: names refused at manifest read unless `generate app` could write them (obligation 17) |
+  | F10 | Blocking | No design review for §3.11–§3.13                                                | This section, written after the code; the maintainer decides whether it stands               |
+  | R1  | Medium   | A stream whose request half never ends keeps a session past the idle bound      | **Open — maintainer decision** (see below)                                                   |
+  | R2  | Low      | Draining-set overflow aborted busy sessions (64 + 64 budget)                    | Fixed: a busy session is never closed; the budget now reads so                               |
+  | R3  | Low      | A token in a URL target's query or fragment reached the refusal text            | Fixed: query and fragment refused unechoed; a URL target is named by its origin only         |
+  | L1  | Low      | The idle-bound comment described a mechanism the code does not rely on          | Fixed: the comment says what the re-arm does                                                 |
+  | N1  | Low      | `state()` reads only the current connection, so a GOAWAY'd busy one was aborted | Fixed: calls are counted per origin; eviction and drain go by the count, not `state()`       |
+  | N2  | Low      | An eviction in the same turn as a call's lookup closed the session under it     | Fixed: the lookup itself counts the call                                                     |
+  | N3  | Low      | Sessions created while connect-node loaded escaped `close()`                    | Fixed: by the same count; every evicted session with a call is tracked                       |
+  | N4  | Low      | A non-URL target was echoed whole (CR/LF included) and reached discovery        | Fixed: a service-name grammar, refused unechoed; an unparsable URL refused unechoed          |
+  | N5  | Low      | A `clients` key with credentials was echoed in an option error                  | Fixed: keys checked as targets; a URL key named by its origin                                |
+  | L2  | Low      | The idle-bound comment said frames restart it                                   | Fixed: only stream activity does                                                             |
 
-  R1–L1 are from the re-audit at `fad19bed9`, which confirmed F1–F9 fixed. **R1 is open.** The
-  budget "a silent open stream keeps the session" lets a client hold a connection with one `HEADERS`
-  frame and no `END_STREAM` to any route that reads its body (every unary gRPC method), where the
-  HTTP/1.1 listener's `requestTimeout` (300 s) would end the same unfinished request. The options:
-  (a) a per-stream request-half bound — reset a stream whose client has not finished sending within
-  N s — with client- and bidi-streaming procedures exempt, which the listener cannot tell apart
-  without knowing the route; (b) an inactivity bound on the request half, which a silent bidi stream
-  would also trip; (c) accept it and change obligation 15, as grpc-go does (`MaxConnectionIdle`
-  counts only time with no stream open, and nothing bounds an open stream by default). It recovers
-  when the client disconnects.
+  R1–L1 are from the re-audit at `fad19bed9`, which confirmed F1–F9 fixed; N1–L2 from the second
+  re-audit at `843db7f6c`, which confirmed F1–F9, R2 and R3. **R1 is open.** The budget "a silent
+  open stream keeps the session" lets a client hold a connection with one `HEADERS` frame and no
+  `END_STREAM` to any route that reads its body (every unary gRPC method), where the HTTP/1.1
+  listener's `requestTimeout` (300 s) would end the same unfinished request. The options: (a) a
+  per-stream request-half bound — reset a stream whose client has not finished sending within N s —
+  with client- and bidi-streaming procedures exempt, which the listener cannot tell apart without
+  knowing the route; (b) an inactivity bound on the request half, which a silent bidi stream would
+  also trip; (c) accept it and change obligation 15, as grpc-go does (`MaxConnectionIdle` counts
+  only time with no stream open, and nothing bounds an open stream by default). It recovers when the
+  client disconnects.
 
 ### 3.11 RPC call and reply without fetch objects (2026-11-10)
 
