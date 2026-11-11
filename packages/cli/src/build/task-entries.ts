@@ -49,8 +49,10 @@ export function taskReferences(source: string, file: string): readonly ITaskRefe
     });
   }
   for (const match of visible.matchAll(
-    // `import` the keyword only: not `importer`, and not `import.meta`.
-    /\bnew\s+URL\s*\([^)]*\)|\bimport\b(?!\s*\.)(?:\s*\([^)]*\)|[^;\r\n]*)/g,
+    // `import` the keyword only: not `importer`, and not the `import.meta.url` a
+    // literal carries (`import.meta.resolve('./x.task.ts')` is still refused). A
+    // static `from '….task.ts'`, an `export … from` or a wrapped import, is too.
+    /\bnew\s+URL\s*\([^)]*\)|\bimport\b(?!\s*\.\s*meta\s*\.\s*url\b)(?:\s*\([^)]*\)|[^;\r\n]*)|\bfrom\s*(['"])[^'"\r\n]*\.task\.ts\1/g,
   )) {
     if (strings.some((range) => match.index >= range.start && match.index < range.end)) continue;
     if (
@@ -77,27 +79,24 @@ function relativePath(from: string, to: string): string {
 }
 
 /**
- * The files esbuild tries for a relative import, in its order: the path as
- * written, a TypeScript sibling for a JavaScript extension (`./x.js` naming
- * `./x.ts`, which `moduleResolution: "bundler"` and the dev runner allow), and
- * for an extensionless path the `.ts`, `.tsx` and `/index.ts` forms.
+ * The files esbuild 0.28 tries for a relative import, in its order (measured):
+ * the path as written; for `.js`/`.jsx` the `.ts` then `.tsx` sibling (`.mjs`
+ * gives `.mts`, `.cjs` gives `.cts`), which `moduleResolution: "bundler"` and the
+ * dev runner allow; and for an extensionless path its default resolveExtensions
+ * order, then the directory index.
  */
 function moduleCandidates(absolute: string): readonly string[] {
   const script = /\.([cm]?)js(x?)$/.exec(absolute);
   if (script !== null) {
     const stem = absolute.slice(0, script.index);
-    const siblings =
-      script[1] === 'm'
-        ? ['.mts']
-        : script[1] === 'c'
-          ? ['.cts']
-          : script[2] === 'x'
-            ? ['.tsx', '.ts']
-            : ['.ts', '.tsx'];
+    const siblings = script[1] === 'm' ? ['.mts'] : script[1] === 'c' ? ['.cts'] : ['.ts', '.tsx'];
     return [absolute, ...siblings.map((extension) => stem + extension)];
   }
   if (/\.[cm]?tsx?$/.test(absolute)) return [absolute];
-  return ['.ts', '.tsx', '/index.ts'].map((suffix) => absolute + suffix);
+  // esbuild's default resolveExtensions order, then the directory index.
+  return ['.tsx', '.ts', '.jsx', '.js', '/index.tsx', '/index.ts', '/index.jsx', '/index.js'].map(
+    (suffix) => absolute + suffix,
+  );
 }
 
 /** The first candidate that exists, so a `.js` import of a `.ts` file is followed. */

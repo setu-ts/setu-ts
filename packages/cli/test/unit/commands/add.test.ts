@@ -1610,6 +1610,14 @@ describe('resolveAddablePackage', () => {
       expect(h.fs.writes).toEqual([]);
     });
   }
+  it('names the Node runner in the devtool guidance on a Node project (review round 2)', async () => {
+    for (const args of [['diagnostics'], ['diagnostics', 'cache']]) {
+      const h = harness({ '/app/package.json': '{}' });
+      expect(await h.run(args)).toBe(2);
+      expect(h.err.join('\n')).toContain(`npx @setu-ts/cli@${VERSION} devtool enable`);
+      expect(h.err.join('\n')).not.toContain('deno run');
+    }
+  });
   const inserted = [
     ['worker-pool', 'WorkerPoolPlugin'],
     ['secrets', 'SecretsPlugin'],

@@ -1731,15 +1731,12 @@ export async function runAddCommand(
     if (bare === undefined) {
       // Keep the dedicated diagnostics guidance from the single-package command.
       if (args.positionals.length === 1) return addOne(args, deps);
-      // The same guidance a lone `setu add diagnostics` gives, wherever it is listed.
+      // The same guidance a lone `setu add diagnostics` gives, wherever it is
+      // listed: the single-package path checks the target and names its runtime.
       if (name === 'diagnostics' || name === '@setu-ts/diagnostics-plugin')
-        deps.error(
-          `\`@setu-ts/diagnostics-plugin\` is installed and wired by \`${cliInvocation('deno')} devtool enable\`, not by setu add.`,
-        );
-      else {
-        deps.error(`"${escapeName(name)}" is not a Setu-TS package this command can add.`);
-        deps.error(`  Available: ${addableNames().join(', ')}`);
-      }
+        return addOne({ positionals: [name], flags: args.flags }, deps);
+      deps.error(`"${escapeName(name)}" is not a Setu-TS package this command can add.`);
+      deps.error(`  Available: ${addableNames().join(', ')}`);
       return EXIT_USAGE;
     }
     if (packages.includes(bare)) {
@@ -1914,7 +1911,7 @@ async function addOne(
   }
   if (diagnostics) {
     deps.error(
-      `\`@setu-ts/diagnostics-plugin\` is installed and wired by \`${cliInvocation('deno')} devtool enable\`.`,
+      `\`@setu-ts/diagnostics-plugin\` is installed and wired by \`${cliInvocation(runtime)} devtool enable\`.`,
     );
     return EXIT_USAGE;
   }

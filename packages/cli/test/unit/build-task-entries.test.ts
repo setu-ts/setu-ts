@@ -282,9 +282,28 @@ describe('worker task entries', () => {
     for (const refused of [
       "const m = await import('./a.task.ts');",
       "import x from './a.task.ts';",
+      "const href = import.meta.resolve('./a.task.ts');",
+      "pool.run(import.meta.resolve('./a.task.ts'), x);",
+      "export * from './a.task.ts';",
+      "export { run } from './a.task.ts';",
+      "import {\n  run,\n} from './a.task.ts';",
     ])
       expect(() => taskReferences(refused, '/app/main.ts'), refused).toThrow(
         'worker task references must use',
       );
+  });
+  it("follows esbuild's candidate order when two siblings exist (review round 2)", async () => {
+    const fs = createFakeFs({
+      '/app/main.ts': "import './v.jsx'; import './ext';",
+      '/app/v.ts': "new URL('./a.task.ts', import.meta.url);",
+      '/app/v.tsx': "new URL('./wrong.task.ts', import.meta.url);",
+      '/app/ext.tsx': "new URL('./b.task.ts', import.meta.url);",
+      '/app/ext.ts': "new URL('./wrong.task.ts', import.meta.url);",
+      '/app/a.task.ts': '',
+      '/app/b.task.ts': '',
+      '/app/wrong.task.ts': '',
+    });
+    // Measured against esbuild 0.28: `./v.jsx` loads v.ts, `./ext` loads ext.tsx.
+    expect(await discoverTasks(fs, '/app', ['main.ts'])).toEqual(['a.task.ts', 'b.task.ts']);
   });
 });
