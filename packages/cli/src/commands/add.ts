@@ -1734,7 +1734,15 @@ export async function runAddCommand(
       // The same guidance a lone `setu add diagnostics` gives, wherever it is
       // listed: the single-package path checks the target and names its runtime.
       if (name === 'diagnostics' || name === '@setu-ts/diagnostics-plugin')
-        return addOne({ positionals: [name], flags: args.flags }, deps);
+        return addOne(
+          {
+            positionals: [name],
+            // Only the target: another package's flags would be judged against
+            // diagnostics and refused with the wrong message.
+            flags: args.flags.dir === undefined ? {} : { dir: args.flags.dir },
+          },
+          deps,
+        );
       deps.error(`"${escapeName(name)}" is not a Setu-TS package this command can add.`);
       deps.error(`  Available: ${addableNames().join(', ')}`);
       return EXIT_USAGE;

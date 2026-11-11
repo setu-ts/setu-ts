@@ -287,6 +287,8 @@ describe('worker task entries', () => {
       "export * from './a.task.ts';",
       "export { run } from './a.task.ts';",
       "import {\n  run,\n} from './a.task.ts';",
+      "const href = import.meta.resolve(\n  './a.task.ts',\n);",
+      "pool.run(\n  import.meta.resolve(\n    './a.task.ts',\n  ),\n);",
     ])
       expect(() => taskReferences(refused, '/app/main.ts'), refused).toThrow(
         'worker task references must use',
@@ -305,5 +307,15 @@ describe('worker task entries', () => {
     });
     // Measured against esbuild 0.28: `./v.jsx` loads v.ts, `./ext` loads ext.tsx.
     expect(await discoverTasks(fs, '/app', ['main.ts'])).toEqual(['a.task.ts', 'b.task.ts']);
+  });
+  it('accepts a task literal after another import.meta property on the line (review round 3)', () => {
+    for (const source of [
+      "pool.run(import.meta.dirname, new URL('./a.task.ts', import.meta.url));",
+      "createPool(import.meta.env, new URL('./a.task.ts', import.meta.url));",
+    ])
+      expect(
+        taskReferences(source, '/app/main.ts').map((ref) => ref.target),
+        source,
+      ).toEqual(['/app/a.task.ts']);
   });
 });

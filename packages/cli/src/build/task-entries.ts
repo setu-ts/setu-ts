@@ -49,10 +49,10 @@ export function taskReferences(source: string, file: string): readonly ITaskRefe
     });
   }
   for (const match of visible.matchAll(
-    // `import` the keyword only: not `importer`, and not the `import.meta.url` a
-    // literal carries (`import.meta.resolve('./x.task.ts')` is still refused). A
-    // static `from '….task.ts'`, an `export … from` or a wrapped import, is too.
-    /\bnew\s+URL\s*\([^)]*\)|\bimport\b(?!\s*\.\s*meta\s*\.\s*url\b)(?:\s*\([^)]*\)|[^;\r\n]*)|\bfrom\s*(['"])[^'"\r\n]*\.task\.ts\1/g,
+    // `import` the keyword only (not `importer`, not any `import.meta`); a separate
+    // arm refuses `import.meta.resolve(…)`, Prettier-wrapped or not, and another a
+    // static `from '….task.ts'`: an `export … from` or a wrapped import.
+    /\bnew\s+URL\s*\([^)]*\)|\bimport\b(?!\s*\.)(?:\s*\([^)]*\)|[^;\r\n]*)|\bimport\s*\.\s*meta\s*\.\s*resolve\s*\([^)]*\)|\bfrom\s*(['"])[^'"\r\n]*\.task\.ts\1/g,
   )) {
     if (strings.some((range) => match.index >= range.start && match.index < range.end)) continue;
     if (

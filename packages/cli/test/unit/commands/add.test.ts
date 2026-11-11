@@ -1610,6 +1610,14 @@ describe('resolveAddablePackage', () => {
       expect(h.fs.writes).toEqual([]);
     });
   }
+  it("gives the devtool guidance despite another package's flags (review round 3)", async () => {
+    const h = harness({ '/app/package.json': '{}' });
+    expect(
+      await h.run(['diagnostics', 'database', '--type', 'drizzle', '--dialect', 'sqlite']),
+    ).toBe(2);
+    expect(h.err.join('\n')).toContain('devtool enable');
+    expect(h.err.join('\n')).not.toContain('--dialect requires');
+  });
   it('names the Node runner in the devtool guidance on a Node project (review round 2)', async () => {
     for (const args of [['diagnostics'], ['diagnostics', 'cache']]) {
       const h = harness({ '/app/package.json': '{}' });
