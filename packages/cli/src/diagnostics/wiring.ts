@@ -1,4 +1,5 @@
 /** Three-outcome config wiring inspection shared by the command renderers. @module */
+import { maskSourceCode } from '../devtool/sources.ts';
 import { referenceMask } from './reference-mask.ts';
 import { hostSeamSpecs, scanSeamSpecs } from '../seams/registry.ts';
 import { decoratorKeyFor, decoratorExportFor } from '../templates/seam.ts';
@@ -15,6 +16,17 @@ export function referencedOutsideImports(config: string, symbol: string): boolea
 /** Tests a call in code outside import declarations, matching module activation. */
 export function calledOutsideImports(config: string, symbol: string): boolean | undefined {
   const code = withoutImports(referenceMask(config));
+  return code === undefined ? undefined : new RegExp(`\\b${symbol}\\s*\\(`).test(code);
+}
+
+/**
+ * The same call test through the strict, audited lexer, for a decision that
+ * leads to an automatic edit (`setu workspace broker|rpc`): the tolerant
+ * reference mask may only decide what a read-only check reports (V12-32,
+ * M139d audit F2).
+ */
+export function strictlyCalledOutsideImports(config: string, symbol: string): boolean | undefined {
+  const code = withoutImports(maskSourceCode(config));
   return code === undefined ? undefined : new RegExp(`\\b${symbol}\\s*\\(`).test(code);
 }
 

@@ -21,7 +21,7 @@
  */
 
 import type { IFileSystem } from '@setu-ts/common';
-import { calledOutsideImports } from '../diagnostics/wiring.ts';
+import { strictlyCalledOutsideImports } from '../diagnostics/wiring.ts';
 import { maskComments } from '../devtool/sources.ts';
 import { CLIENT_RANGES } from '../templates/client-dependencies.ts';
 import { frameworkSpecifier } from '../templates/framework-specifier.ts';
@@ -249,7 +249,7 @@ function missingCalls(config: string | undefined, input: TransportModuleInput): 
   // planner cannot show the module is read, and writing it anyway could leave a
   // member on the old broker with nothing saying so.
   const missing = wanted.filter(
-    ([symbol]) => config === undefined || calledOutsideImports(config, symbol) !== true,
+    ([symbol]) => config === undefined || strictlyCalledOutsideImports(config, symbol) !== true,
   );
   if (missing.length === 0) return [];
   const imported = wanted.map(([symbol]) => symbol).join(', ');

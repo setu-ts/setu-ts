@@ -153,7 +153,9 @@ export function referenceDiagnosis(
     if (/[A-Za-z_$]/.test(c)) {
       const start = i;
       while (/[\w$]/.test(source[i + 1] ?? '')) i++;
-      previous = source.slice(start, i + 1);
+      // A property name (`env.default`, `mod?.return`) is a value, so a `/` after
+      // it divides; only a keyword in code position may precede a regex (audit F1).
+      previous = previous === '.' ? 'value' : source.slice(start, i + 1);
     } else if (/[0-9]/.test(c)) previous = 'value';
     else if (!/\s/.test(c)) previous = c;
   }

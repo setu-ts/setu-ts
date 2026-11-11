@@ -579,13 +579,35 @@ pnpm run release:verify 0.12.0
 
 ## 8a. Design security review
 
-- **Trust boundary:** §3.21 adds a lexer next to the security-audited devtool lexer. The new mask is
-  read-only (it decides a warning, never an edit), and the strict lexer and every automatic edit are
-  unchanged; the audit confirms both and probes the stop constructs.
+- **Assets:** the developer's source tree and `dist/` (what `setu build` reads and writes); the
+  credentials a URL, stack or error cause can carry into a log or the terminal; the correctness of
+  the edits the CLI makes to `setu.config.ts` and member configs.
+- **Attackers and inputs:** a hostile or merely unusual project file the CLI reads (a
+  `setu.config.ts` with exotic syntax or a crafted `envFilePath`, a task specifier pointing outside
+  the project, a symlinked source, a very large or semicolon-free source); hostile flag values and
+  package names on `setu add`; an error chain with throwing getters, cycles or credentials in a URL;
+  a hostile workspace display value reaching `AGENTS.md`.
+- **Trust boundary, the reference mask:** §3.21 adds a lexer next to the security-audited devtool
+  lexer. The new mask is read-only: it decides what `setu check` reports, never an edit. The strict
+  lexer is unchanged, and every automatic edit keeps it, including the `setu workspace broker|rpc`
+  decision whether a member reads its transport module, which calls `strictlyCalledOutsideImports`
+  (audit F2). A property named like a keyword is a value before `/` (audit F1).
+- **`setu build` (§3.8):** a task target outside the project, a symlinked target, a target that was
+  not built, and a non-literal task reference are each refused by file and line; every output path
+  passes `assertInsideProject`; the development-import gate runs over every entry's build before
+  `dist/` is replaced. Scan-only reads use a plain read with no size cap (a source is the
+  developer's own), and the scanner is linear on semicolon-free sources (audit F3).
 - **Data leaving the process:** §3.3 logs a stack and §3.22 prints a cause; both pass through
-  `maskUrlUserinfo`.
-- **Generated configs:** §3.14's config files read `DATABASE_URL` from the environment and contain
-  no credential.
+  `maskUrlUserinfo`, and the cause walk escapes terminal controls and stops at cycles, depth 8 and a
+  throwing getter or revoked Proxy.
+- **Generated configs:** §3.14's config files read `DATABASE_URL` from the environment, contain no
+  credential, and load only an `envFilePath` inside the project (anything else falls back to
+  `.env`).
+- **Accepted risk, audit F4:** `drizzle-kit` 0.31.11 (the `packages/cli` test devDependency and the
+  range `setu add database --type drizzle` pins) depends on `esbuild@0.18.20`, which carries
+  GHSA-67mh-4wv8-2f99 (moderate: the esbuild development server answers cross-origin requests).
+  drizzle-kit never starts esbuild's development server, the dependency is development-only, and
+  `pnpm run audit:ci` passes it; it is accepted until a drizzle-kit release drops `@esbuild-kit`.
 - **Audit:** a committed-tree security audit by a fresh Claude agent per
   `.roo/skills/security-audit/SKILL.md`, before the PR merges.
 

@@ -1,3 +1,4 @@
+import { calledOutsideImports } from '../../src/diagnostics/wiring.ts';
 import { describe, expect, it } from 'vitest';
 import { referenceMask, referenceDiagnosis } from '../../src/diagnostics/reference-mask.ts';
 import { maskSourceCode } from '../../src/devtool/sources.ts';
@@ -79,5 +80,20 @@ describe('check-only reference mask', () => {
     expect(referenceMask(source)).toBeUndefined();
     expect(referenceDiagnosis(source)).toHaveProperty('stop');
     expect(referenceMask('const x = `text ${' + source + '}`')).toBeUndefined();
+  });
+  it('reads a property named like a keyword as a value before / (M139d audit F1)', () => {
+    for (const name of ['default', 'extends', 'return', 'typeof']) {
+      expect(
+        calledOutsideImports(
+          `const h = env.${name} / 2; const s = "/ app.register(MailPlugin()) // ";`,
+          'MailPlugin',
+        ),
+        name,
+      ).toBe(false);
+      expect(
+        referenceMask(`const h = mod?.${name} / 2; eval('x'); const q = 1 / 3;`),
+        name,
+      ).toBeUndefined();
+    }
   });
 });

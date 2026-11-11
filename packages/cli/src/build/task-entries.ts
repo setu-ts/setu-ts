@@ -31,8 +31,10 @@ export function taskReferences(source: string, file: string): readonly ITaskRefe
         return quote === undefined ? text.replace(/[^\r\n]/g, ' ') : text;
       },
     )
-    .replace(/\b(?:import|export)\s+type\b[^;]*?\bfrom\s*(['"])[^'"]+\1\s*;?/g, (text) =>
-      text.replace(/[^\r\n]/g, ' '),
+    // Bounded to a type-only head, so a file without semicolons stays linear (audit F3).
+    .replace(
+      /\b(?:import|export)\s+type\s*(?:\{[^}]*\}|[\w$*,\s]+?)\s*\bfrom\s*(['"])[^'"]+\1\s*;?/g,
+      (text) => text.replace(/[^\r\n]/g, ' '),
     );
   const references: ITaskReference[] = [];
   const literal =

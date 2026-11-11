@@ -363,6 +363,19 @@ describe('refusing a member that does not read the module', () => {
     expect(result.err).toContain('...transportPlugins(),');
   });
 
+  it('decides through the strict lexer, which a template literal stops (M139d audit F2)', async () => {
+    const ws = await workspace();
+    // The module IS called; only the read-only check's tolerant mask could see
+    // that past the template literal, and an automatic edit must not rely on it.
+    const config = ws.read('apps/orders/setu.config.ts');
+    await ws.write('apps/orders/setu.config.ts', `${config}\nconst label = \`orders\`;\n`);
+    const before = ws.fs.writes.length;
+    const result = await ws.run(['workspace', 'broker', 'redis']);
+    expect(result.code).toBe(1);
+    expect(result.err).toContain('Nothing was written.');
+    expect(ws.fs.writes.length).toBe(before);
+  });
+
   it('refuses a member manifest that is not plain JSON, writing nothing', async () => {
     const ws = await workspace();
     const manifest = ws.read('apps/orders/deno.json');

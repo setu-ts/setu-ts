@@ -237,4 +237,13 @@ describe('worker task entries', () => {
       'worker task references must use',
     );
   });
+  it('scans a large file without semicolons in linear time (M139d audit F3)', () => {
+    const source = Array.from(
+      { length: 40_000 },
+      (_, i) => `export type T${i} = { a: string }`,
+    ).join('\n');
+    const started = performance.now();
+    expect(taskReferences(source, '/app/main.ts')).toEqual([]);
+    expect(performance.now() - started).toBeLessThan(1_000);
+  });
 });
