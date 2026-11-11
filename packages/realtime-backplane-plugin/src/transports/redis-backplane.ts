@@ -317,6 +317,17 @@ export class RedisBackplane implements IRealtimeBackplane {
       // hand two live connections to a closed backplane, where nothing holds a
       // reference to shut them down — so retire them here instead.
       subscriber.off('message', listener);
+      if (this.#commandTimeoutMs === 0) {
+        // Nothing bounds UNSUBSCRIBE or QUIT, and a host that went silent
+        // during the ready wait would hold this open forever (V12-53): close
+        // what we own at once, and do not wait on the caller's connection.
+        if (owned) forceClose([subscriber, publisher]);
+        else if (this.#opening === undefined && this.#subscriber === undefined) {
+          void this.#unsubscribeQuietly(subscriber);
+        }
+        detachAll();
+        return;
+      }
       await this.#unsubscribeQuietly(subscriber);
       if (owned) {
         await this.#discard([subscriber, publisher]);
@@ -694,8 +705,8 @@ function waitForReady(
 /**
  * Waits for `pending` unless `cancel` aborts first (V12-53).
  *
- * The abort listener is attached before `cancel.aborted` is read, so an abort
- * at any point wins. A rejection that arrives after the abort is handled here
+ * Its only caller creates `cancel` immediately before, so the signal is never
+ * already aborted here. A rejection that arrives after the abort is handled here
  * (settling an already-settled promise is a no-op), so it never surfaces as an
  * unhandled rejection.
  *
@@ -718,7 +729,6 @@ function settledUnlessCancelled(pending: Promise<unknown>, cancel: AbortSignal):
         reject(error);
       },
     );
-    if (cancel.aborted) onAbort();
   });
 }
 

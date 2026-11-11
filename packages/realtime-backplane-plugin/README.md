@@ -179,7 +179,8 @@ while a connection is down is **lost, never delivered late**:
   timeout, so `close()` can take about three of them (≈45 s at the default); lower
   `commandTimeoutMs` if that exceeds your shutdown grace period.
 - **`close()` ends an open still waiting on SUBSCRIBE.** With `commandTimeoutMs: 0` nothing bounds a
-  SUBSCRIBE to a server that never answers, so `close()` cancels that wait and force-closes the
+  SUBSCRIBE to a server that never answers, so `close()` cancels that wait (and an open it overtakes
+  later, during the publisher-ready wait, does not wait on UNSUBSCRIBE or QUIT) and force-closes the
   connections the backplane built (an injected pair is left connected, and unsubscribed again if its
   SUBSCRIBE answers later); `connect()` then resolves without a connection, as it does for any open
   a `close()` overtakes.

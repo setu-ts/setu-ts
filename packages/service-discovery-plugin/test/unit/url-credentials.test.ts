@@ -32,7 +32,21 @@ describe('credentialFreeUrl', () => {
     expect(credentialFreeUrl('https://consul:8500/', REFUSAL)).toBe('https://consul:8500/');
   });
 
-  it('returns an unparsable value unchanged for the request path to report', () => {
-    expect(credentialFreeUrl('not a url', REFUSAL)).toBe('not a url');
+  it.each([
+    ['an out-of-range port', 'http://u:canary-pw-52@host:99999'],
+    ['the scheme-relative form', '//u:canary-pw-52@host'],
+    ['an unclosed IPv6 bracket', 'http://u:canary-pw-52@[::1:8500'],
+    ['a space in the host', 'http://u:canary-pw-52@ho st:8500'],
+    ['a plain non-URL value', 'not a url'],
+  ])('refuses a value that does not parse (%s), naming none of it', (_label, url) => {
+    let caught: unknown;
+    try {
+      credentialFreeUrl(url, REFUSAL);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(DiscoveryUnavailableError);
+    expect((caught as Error).message).toBe(REFUSAL);
+    expect(String(caught)).not.toContain('canary');
   });
 });

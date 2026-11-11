@@ -14,22 +14,25 @@
 import { DiscoveryUnavailableError } from '../errors.ts';
 
 /**
- * Returns the URL unchanged when it carries no userinfo.
+ * Returns the URL unchanged when it parses and carries no userinfo.
  *
- * A value that does not parse as a URL is returned unchanged too: this check
- * is about credentials, and the request path reports an unparsable address.
+ * A value that does not parse is refused too: `fetch` would reject it with
+ * `Failed to parse URL from <url>`, quoting any credential it holds (an
+ * out-of-range port or a stray space after `user:pass@` is enough), and the
+ * scheme-relative form escapes `maskUrlUserinfo`, which looks for `://`.
  *
  * @param url - The configured backend base URL
  * @param refusal - The fixed message to throw; it must not contain the URL
  * @returns The URL
- * @throws {DiscoveryUnavailableError} When the URL has a username or password
+ * @throws {DiscoveryUnavailableError} When the URL does not parse, or has a
+ *   username or password
  */
 export function credentialFreeUrl(url: string, refusal: string): string {
   let parsed: URL;
   try {
     parsed = new URL(url);
   } catch {
-    return url;
+    throw new DiscoveryUnavailableError(refusal);
   }
   if (parsed.username !== '' || parsed.password !== '') {
     throw new DiscoveryUnavailableError(refusal);

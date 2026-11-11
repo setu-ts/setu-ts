@@ -107,6 +107,24 @@ describe('createProvider — kubernetes API server resolution', () => {
     expect(http.calls[0].url).toContain('https://10.96.0.1:443/apis/discovery.k8s.io/v1');
   });
 
+  it('refuses an in-cluster address that does not parse (V12-52)', () => {
+    const runtime = createFakeRuntime({
+      env: {
+        KUBERNETES_SERVICE_HOST: 'u:canary-pw-52@10.96.0.1',
+        KUBERNETES_SERVICE_PORT: '99999',
+      },
+    });
+    const options = { provider: 'kubernetes', namespace: 'default', token: 't' } as const;
+    let caught: unknown;
+    try {
+      createProvider(options, resolveOptions(options), runtime);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(DiscoveryUnavailableError);
+    expect(String(caught)).not.toContain('canary');
+  });
+
   it('defaults the port to 443 when only the host is set', async () => {
     const http = createFakeHttp([{ text: '{"items":[]}' }]);
     const runtime = createFakeRuntime({ env: { KUBERNETES_SERVICE_HOST: '10.96.0.1' } });
@@ -280,8 +298,8 @@ describe('createProvider — URL credentials (V12-52)', () => {
     const options = { provider: 'consul', address: 'http://ops:canary-pw-52@consul:8500' } as const;
     expect(() => createProvider(options, resolveOptions(options), createFakeRuntime())).toThrow(
       new DiscoveryUnavailableError(
-        'The Consul address must not include credentials (user:password@host); ' +
-          'pass the ACL token through the token option.',
+        'The Consul address must be an absolute URL without credentials ' +
+          '(user:password@host); pass the ACL token through the token option.',
       ),
     );
   });
@@ -301,8 +319,9 @@ describe('createProvider — URL credentials (V12-52)', () => {
     }
     expect(caught).toBeInstanceOf(DiscoveryUnavailableError);
     expect((caught as Error).message).toBe(
-      'The Kubernetes apiServer must not include credentials (user:password@host); ' +
-        'pass the service-account token through the token option.',
+      'The Kubernetes API server URL (apiServer, or KUBERNETES_SERVICE_HOST and ' +
+        'KUBERNETES_SERVICE_PORT) must be an absolute URL without credentials ' +
+        '(user:password@host); pass the service-account token through the token option.',
     );
     expect(String(caught)).not.toContain('canary');
   });

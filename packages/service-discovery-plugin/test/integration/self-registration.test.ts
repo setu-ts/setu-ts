@@ -177,7 +177,9 @@ describe('a Consul address with credentials (V12-52)', () => {
     for (let link: unknown = caught; link instanceof Error; link = link.cause) {
       chain.push(String(link), link.message, link.stack ?? '');
     }
-    expect(chain.join('\n')).toContain('The Consul address must not include credentials');
+    expect(chain.join('\n')).toContain(
+      'The Consul address must be an absolute URL without credentials',
+    );
     expect(chain.join('\n')).not.toContain('canary');
     expect(http.calls).toHaveLength(0);
   });

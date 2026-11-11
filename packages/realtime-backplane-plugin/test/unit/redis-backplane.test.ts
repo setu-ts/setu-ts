@@ -1561,11 +1561,111 @@ describe('RedisBackplane owned publisher readiness (M139f X3-3)', () => {
     expect(clients[0]!.eventListeners.get('ready')).toHaveLength(2);
 
     await backplane.close();
-    // The open sees it was superseded and releases both connections itself.
+    // The open sees it was superseded and releases both connections itself;
+    // with no bound it force-closes them rather than waiting on QUIT (V12-53).
     await connecting;
-    expect(clients.map((client) => client.quitCount)).toEqual([1, 1]);
+    expect(clients.map((client) => client.disconnectCount)).toEqual([1, 1]);
+    expect(clients.map((client) => client.quitCount)).toEqual([0, 0]);
     expect(clients[0]!.eventListeners.get('ready')).toHaveLength(0);
     await expect(backplane.publish(FRAME)).rejects.toThrow();
+  });
+
+  it("keeps a newer open's subscription on an injected pair, at any close() offset (V12-53)", async () => {
+    for (let delay = 0; delay <= 12; delay++) {
+      const client = Object.assign(new FakeRedisClient(), { status: 'ready' });
+      const subscriber = Object.assign(new FakeRedisClient(), { status: 'ready' });
+      // Redis keeps one subscription per channel per connection and applies
+      // commands in the order they are sent: model that, not the fake's list.
+      const server = new Set<string>();
+      const realSubscribe = subscriber.subscribe.bind(subscriber);
+      const realUnsubscribe = subscriber.unsubscribe.bind(subscriber);
+      Object.assign(subscriber, {
+        subscribe: (channel: string) => {
+          server.add(channel);
+          return realSubscribe(channel);
+        },
+        unsubscribe: (channel: string) => {
+          server.delete(channel);
+          return realUnsubscribe(channel);
+        },
+      });
+      const backplane = new RedisBackplane(
+        { transport: 'redis', client, subscriber, commandTimeoutMs: 0 },
+        'node-a',
+        'realtime',
+      );
+      const first = backplane.connect();
+      for (let tick = 0; tick < delay; tick++) await Promise.resolve();
+      const closing = backplane.close();
+      // A second open on the same pair starts before the first one retires.
+      const second = backplane.connect();
+      await first;
+      await second;
+      await closing;
+      await setImmediate();
+      // Whatever the offset, the live open keeps its subscription.
+      expect(server.has('realtime'), `offset ${delay}`).toBe(true);
+      await backplane.close();
+    }
+  });
+
+  it('retires the pair without waiting on a silent host after the ready wait (V12-53)', async () => {
+    const { module, clients } = connectingModule();
+    const backplane = new RedisBackplane(
+      { transport: 'redis', url: 'redis://localhost:6379', module, commandTimeoutMs: 0 },
+      'node-a',
+      'realtime',
+    );
+    const connecting = backplane.connect();
+    await setImmediate();
+    // SUBSCRIBE was answered; now the host goes silent.
+    for (const client of clients) {
+      Object.assign(client, {
+        unsubscribe: () => new Promise(() => undefined),
+        quit: () => new Promise(() => undefined),
+      });
+    }
+    let settled = false;
+    void connecting.then(() => {
+      settled = true;
+    });
+    await backplane.close();
+    await setImmediate();
+    expect(settled).toBe(true);
+    expect(clients.map((client) => client.disconnectCount)).toEqual([1, 1]);
+  });
+
+  it("never waits on an injected pair's UNSUBSCRIBE, at any close() offset (V12-53)", async () => {
+    for (let delay = 0; delay <= 10; delay++) {
+      const client = Object.assign(new FakeRedisClient(), { status: 'ready' });
+      const subscriber = Object.assign(new FakeRedisClient(), { status: 'ready' });
+      let unsubscribes = 0;
+      Object.assign(subscriber, {
+        unsubscribe: () => {
+          unsubscribes++;
+          return new Promise(() => undefined);
+        },
+      });
+      const backplane = new RedisBackplane(
+        { transport: 'redis', client, subscriber, commandTimeoutMs: 0 },
+        'node-a',
+        'realtime',
+      );
+      let settled = false;
+      const connecting = backplane.connect().then(() => {
+        settled = true;
+      });
+      for (let tick = 0; tick < delay; tick++) await Promise.resolve();
+      const closing = backplane.close();
+      await setImmediate();
+      expect(settled, `close() after ${delay} microtask(s)`).toBe(true);
+      await connecting;
+      // A close() after the open completed runs the ordinary close path, which
+      // waits on UNSUBSCRIBE; that one is bounded by the caller's own client.
+      void closing;
+      expect([client.disconnectCount, subscriber.disconnectCount]).toEqual([0, 0]);
+      expect(unsubscribes).toBeLessThanOrEqual(1);
+    }
   });
 
   it('does not start a wait after a close() that landed during SUBSCRIBE (M139f re-audit N2)', async () => {

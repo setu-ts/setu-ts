@@ -69,7 +69,7 @@ export function createProvider(
  * @throws {DiscoveryUnavailableError} If the `'dns'` arm is configured on a
  * runtime with no resolver, or the `'kubernetes'` arm cannot find an API
  * server or a way to read its token, or the Consul `address` or Kubernetes
- * `apiServer` carries URL credentials, which `fetch` refuses (V12-52)
+ * API server URL does not parse or carries URL credentials (V12-52)
  * @since 0.2.0
  */
 export function createProvider(
@@ -86,8 +86,8 @@ export function createProvider(
         {
           address: credentialFreeUrl(
             options.address,
-            'The Consul address must not include credentials (user:password@host); ' +
-              'pass the ACL token through the token option.',
+            'The Consul address must be an absolute URL without credentials ' +
+              '(user:password@host); pass the ACL token through the token option.',
           ),
           ...(options.token !== undefined ? { token: options.token } : {}),
           ...(options.datacenter !== undefined ? { datacenter: options.datacenter } : {}),
@@ -113,8 +113,9 @@ export function createProvider(
           namespace: options.namespace,
           apiServer: credentialFreeUrl(
             resolveApiServer(options, runtime),
-            'The Kubernetes apiServer must not include credentials (user:password@host); ' +
-              'pass the service-account token through the token option.',
+            'The Kubernetes API server URL (apiServer, or KUBERNETES_SERVICE_HOST and ' +
+              'KUBERNETES_SERVICE_PORT) must be an absolute URL without credentials ' +
+              '(user:password@host); pass the service-account token through the token option.',
           ),
           ...(options.token !== undefined ? { token: options.token } : {}),
           ...(options.portName !== undefined ? { portName: options.portName } : {}),
