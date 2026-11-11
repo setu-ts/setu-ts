@@ -155,7 +155,12 @@ export function referenceDiagnosis(
       while (/[\w$]/.test(source[i + 1] ?? '')) i++;
       // A property name (`env.default`, `mod?.return`) is a value, so a `/` after
       // it divides; only a keyword in code position may precede a regex (audit F1).
-      previous = previous === '.' ? 'value' : source.slice(start, i + 1);
+      // A spread's `...` also ends in `.`, and what follows it is an expression,
+      // so only a single `.` or `?.` names a property (re-audit F6).
+      let before = start - 1;
+      while (before >= 0 && /\s/.test(source[before]!)) before--;
+      const property = previous === '.' && source[before - 1] !== '.';
+      previous = property ? 'value' : source.slice(start, i + 1);
     } else if (/[0-9]/.test(c)) previous = 'value';
     else if (!/\s/.test(c)) previous = c;
   }

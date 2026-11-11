@@ -1,4 +1,4 @@
-import { calledOutsideImports } from '../../src/diagnostics/wiring.ts';
+import { calledOutsideImports, referencedOutsideImports } from '../../src/diagnostics/wiring.ts';
 import { describe, expect, it } from 'vitest';
 import { referenceMask, referenceDiagnosis } from '../../src/diagnostics/reference-mask.ts';
 import { maskSourceCode } from '../../src/devtool/sources.ts';
@@ -95,5 +95,16 @@ describe('check-only reference mask', () => {
         name,
       ).toBeUndefined();
     }
+  });
+  it('reads a keyword after a spread as a keyword, not a property (M139d re-audit F6)', () => {
+    expect(referencedOutsideImports('const a = [...typeof /CachePlugin/];', 'CachePlugin')).toBe(
+      false,
+    );
+    for (const source of [
+      'const a = [...void /CachePlugin/g];',
+      'const a = [...await /CachePlugin/];',
+    ])
+      expect(referencedOutsideImports(source, 'CachePlugin'), source).not.toBe(true);
+    expect(referencedOutsideImports('const a = [...typeof /x/];', 'CachePlugin')).toBe(false);
   });
 });
