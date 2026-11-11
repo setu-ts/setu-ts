@@ -164,7 +164,8 @@ All notable changes to this project are documented here. The format follows
   `setu devtool enable`. Commands that read a manifest only to find a workspace (`setu add`,
   `setu agents`) treat it, as before, as no workspace. Before, such a name reached generated source,
   YAML and shell commands unchecked. To restore a workspace, rename the member's entry and its
-  directory.
+  directory, and the old name wherever another member still uses it: its `dependsOn` list, its
+  generated discovery module, and code that calls the member by name.
 
 ### Fixed
 
