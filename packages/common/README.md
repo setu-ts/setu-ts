@@ -452,6 +452,7 @@ package fits the plugin architecture.
 | `GraphqlFormattedError`               | interface |
 | `GraphqlOperationContext`             | interface |
 | `GraphqlRequestParams`                | interface |
+| `GrpcClientOptions`                   | interface |
 | `GrpcServiceDefinition`               | interface |
 | `HandlerResult`                       | interface |
 | `HealthCheckResult`                   | interface |
@@ -609,6 +610,7 @@ package fits the plugin architecture.
 | `MetricConfig`                        | interface |
 | `MetricOptions`                       | interface |
 | `MiddlewareOptions`                   | interface |
+| `ModuleFactoryProvider`               | interface |
 | `None`                                | interface |
 | `NormalizedQuery`                     | interface |
 | `NotificationMessage`                 | interface |
@@ -668,6 +670,9 @@ package fits the plugin architecture.
 | `RouteSchema`                         | interface |
 | `RouteSecurityMetadata`               | interface |
 | `RouteValidationMetadata`             | interface |
+| `RpcCall`                             | interface |
+| `RpcReply`                            | interface |
+| `RpcTransport`                        | interface |
 | `ScheduledJob`                        | interface |
 | `ScheduleOptions`                     | interface |
 | `SchedulerDiagnosticsRecord`          | interface |
@@ -693,6 +698,7 @@ package fits the plugin architecture.
 | `StorageDiagnosticsRecord`            | interface |
 | `StorageDiagnosticsResponse`          | interface |
 | `StorageDiagnosticsSnapshot`          | interface |
+| `StreamOptions`                       | interface |
 | `SubscribeOptions`                    | interface |
 | `TaskPoolStats`                       | interface |
 | `TelemetryContext`                    | interface |

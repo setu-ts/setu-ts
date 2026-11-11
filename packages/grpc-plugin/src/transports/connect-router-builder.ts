@@ -15,7 +15,8 @@
  * @module
  */
 
-import { normalizeBasePath } from './rpc-dispatcher.ts';
+import { normalizeBasePath, streamingSides } from './rpc-dispatcher.ts';
+import type { DispatchEntry } from './rpc-dispatcher.ts';
 import {
   buildReflectionRegistry,
   reviveServiceDescriptor,
@@ -68,6 +69,12 @@ export interface BuildConnectRouterOptions {
    * interceptor observes it.
    */
   readonly interceptors?: readonly unknown[] | undefined;
+  /**
+   * The largest message a procedure accepts, in bytes, forwarded to
+   * `createConnectRouter({ readMaxBytes })` (M139b §3.2). Per message for
+   * enveloped protocols, and the whole body of a unary Connect request.
+   */
+  readonly readMaxBytes: number;
 }
 
 /**
@@ -78,7 +85,7 @@ export interface BuildConnectRouterOptions {
  * @throws {GrpcDescriptorError} If an embedded descriptor set is unusable.
  */
 export function buildConnectRouter(options: BuildConnectRouterOptions): {
-  dispatchMap: Map<string, (request: Request) => Promise<Response>>;
+  dispatchMap: Map<string, DispatchEntry>;
 } {
   const {
     connectRuntime,
@@ -90,6 +97,7 @@ export function buildConnectRouter(options: BuildConnectRouterOptions): {
     healthService,
     resolveLogger,
     interceptors,
+    readMaxBytes,
   } = options;
 
   const normalizedBase = normalizeBasePath(basePath);
@@ -97,7 +105,7 @@ export function buildConnectRouter(options: BuildConnectRouterOptions): {
   // built-in handler-error logging is innermost — it wraps each application
   // service's implementation — so a handler throw is logged before any
   // application interceptor observes it.
-  const router = connectRuntime.createConnectRouter({ interceptors });
+  const router = connectRuntime.createConnectRouter({ interceptors, readMaxBytes });
 
   // Application services first, so their names lead `list_services`.
   const serviceNames: string[] = [];
@@ -160,12 +168,12 @@ export function buildConnectRouter(options: BuildConnectRouterOptions): {
     router.service(reflectionDescriptor, createReflectionService(registry));
   }
 
-  const dispatchMap = new Map<string, (request: Request) => Promise<Response>>();
+  const dispatchMap = new Map<string, DispatchEntry>();
   for (const handler of router.handlers) {
-    dispatchMap.set(
-      normalizedBase + handler.requestPath,
-      connectRuntime.createFetchHandler(handler),
-    );
+    dispatchMap.set(normalizedBase + handler.requestPath, {
+      handle: (request) => connectRuntime.handleUniversal(handler, request),
+      ...streamingSides(handler.method?.methodKind),
+    });
   }
 
   return { dispatchMap };
@@ -227,10 +235,8 @@ function withErrorLogging(
       (value as (...args: unknown[]) => unknown).bind(implementation),
       resolveLogger,
     );
-    if (wrapped !== value) {
-      out ??= { ...implementation };
-      out[key] = wrapped;
-    }
+    out ??= { ...implementation };
+    out[key] = wrapped;
   }
   return out ?? implementation;
 }

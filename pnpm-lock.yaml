@@ -794,10 +794,13 @@ importers:
 
   apps/grpc-workspace/apps/orders:
     dependencies:
+      '@bufbuild/protobuf':
+        specifier: ^2.7.0
+        version: 2.16.0
       '@connectrpc/connect':
         specifier: ^2.1.2
         version: 2.3.0(@bufbuild/protobuf@2.16.0)
-      '@connectrpc/connect-web':
+      '@connectrpc/connect-node':
         specifier: ^2.1.2
         version: 2.3.0(@bufbuild/protobuf@2.16.0)(@connectrpc/connect@2.3.0(@bufbuild/protobuf@2.16.0))
       '@grpc-workspace/contracts':
@@ -818,6 +821,9 @@ importers:
       '@setu-ts/exceptions':
         specifier: workspace:^
         version: link:../../../../packages/exceptions
+      '@setu-ts/grpc-plugin':
+        specifier: workspace:^
+        version: link:../../../../packages/grpc-plugin
       '@setu-ts/health-plugin':
         specifier: workspace:^
         version: link:../../../../packages/health-plugin
@@ -2050,6 +2056,15 @@ importers:
       '@connectrpc/connect':
         specifier: ^2.1.2
         version: 2.3.0(@bufbuild/protobuf@2.16.0)
+      '@connectrpc/connect-node':
+        specifier: ^2.1.2
+        version: 2.3.0(@bufbuild/protobuf@2.16.0)(@connectrpc/connect@2.3.0(@bufbuild/protobuf@2.16.0))
+      '@setu-ts/decorator-plugin':
+        specifier: workspace:^
+        version: link:../decorator-plugin
+      '@setu-ts/di-plugin':
+        specifier: workspace:^
+        version: link:../di-plugin
       '@setu-ts/health-plugin':
         specifier: workspace:^
         version: link:../health-plugin
@@ -2059,6 +2074,9 @@ importers:
       '@setu-ts/runtime':
         specifier: workspace:^
         version: link:../runtime
+      '@setu-ts/service-discovery-plugin':
+        specifier: workspace:^
+        version: link:../service-discovery-plugin
       '@types/node':
         specifier: ^24
         version: 24.19.2
@@ -3852,6 +3870,13 @@ packages:
 
   '@cacheable/utils@2.5.0':
     resolution: {integrity: sha512-buipgOVDkkPXNR5+xBpDw7Zk2n1EvU7qBJCNUcL7rhQ//kfpOXPAvQ511Os0vpLYJ1pZnvudNytkQt2hst3wqA==}
+
+  '@connectrpc/connect-node@2.3.0':
+    resolution: {integrity: sha512-kcQgV4GqFIESsl0MOHInC9/wNYU4aJDvG1OfGR5Lq6/l0gqycSGqEk+fixXGcUtPLc8vJBgS4V1nTmWlh4o9gw==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      '@bufbuild/protobuf': ^2.7.0
+      '@connectrpc/connect': 2.3.0
 
   '@connectrpc/connect-web@2.3.0':
     resolution: {integrity: sha512-JPXOiWaVsj+ZwaXOQjwvhc0ORnkl0a1w36Qyl3j1WTuak6/VYyuWGl1Aq8I60gQfQRjsjLLFGr64tO0sjwstcg==}
@@ -8155,6 +8180,11 @@ snapshots:
     dependencies:
       hashery: 1.5.1
       keyv: 5.6.0
+
+  '@connectrpc/connect-node@2.3.0(@bufbuild/protobuf@2.16.0)(@connectrpc/connect@2.3.0(@bufbuild/protobuf@2.16.0))':
+    dependencies:
+      '@bufbuild/protobuf': 2.16.0
+      '@connectrpc/connect': 2.3.0(@bufbuild/protobuf@2.16.0)
 
   '@connectrpc/connect-web@2.3.0(@bufbuild/protobuf@2.16.0)(@connectrpc/connect@2.3.0(@bufbuild/protobuf@2.16.0))':
     dependencies:

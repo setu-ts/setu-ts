@@ -79,24 +79,30 @@ describe('project-controlled text stays on one output line', () => {
   for (const name of [FORGED, SEPARATOR]) {
     const label = JSON.stringify(name);
 
-    it(`reallocation success and dry-run lines escape the member path (${label})`, async () => {
+    // Since M139b (audit F9) a manifest member name must be one `generate app`
+    // could write, so this name is refused when the manifest is read: neither
+    // the reallocation nor the conflict refusal is reached, and the refusal
+    // itself stays on its own line.
+    it(`reallocation refuses a manifest carrying the name, on one line (${label})`, async () => {
       for (const dryRun of [false, true]) {
         const fs = workspace(name, { devtoolPort: 6500 });
-        const log = createRecorder();
+        const out = createRecorder();
         const argv = ['ports', '--reallocate', ...(dryRun ? ['--dry-run'] : [])];
         expect(
           await runWorkspaceCommand(parseArgs(argv), {
             fs,
             cwd: '/ws',
-            log: log.sink,
-            error: () => {},
+            log: out.sink,
+            error: out.sink,
           }),
-        ).toBe(0);
-        expectNoForgedLine(log);
+        ).not.toBe(0);
+        expect(out.text()).toContain('not a Setu workspace');
+        expect(out.text()).toContain('is not a name `generate app` could write');
+        expectNoForgedLine(out);
       }
     });
 
-    it(`the devtool-port conflict refusal escapes the member name (${label})`, async () => {
+    it(`devtool enable refuses a manifest carrying the name, on one line (${label})`, async () => {
       const fs = workspace(name, { devtoolPort: 6500 });
       const error = createRecorder();
       await runDevtoolCommand(parseArgs(['enable', name, '--devtool-port', '6501']), {
@@ -105,7 +111,8 @@ describe('project-controlled text stays on one output line', () => {
         log: () => {},
         error: error.sink,
       });
-      expect(error.text()).toContain('already uses devtool port 6500');
+      expect(error.text()).not.toContain('already uses devtool port 6500');
+      expect(error.text()).toContain('is not a name `generate app` could write');
       expectNoForgedLine(error);
     });
 

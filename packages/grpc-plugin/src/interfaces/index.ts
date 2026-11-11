@@ -4,6 +4,8 @@
  * @module
  */
 
+import type { GrpcClientOptions } from '@setu-ts/common';
+
 import type { ConnectRuntime } from './connect-runtime.ts';
 
 /**
@@ -19,8 +21,9 @@ export interface GrpcPluginOptions {
    * prefixed default puts every procedure at an address no such client asks
    * for. At the root, unknown paths fall through to Hono and only registered
    * procedure paths are claimed. This makes Connect and gRPC-Web reachable at
-   * their natural addresses; native `application/grpc` reaches the server too
-   * but is deliberately refused with a Trailers-Only `UNIMPLEMENTED`. Pass
+   * their natural addresses; native `application/grpc` is served there too where
+   * the connection carries trailers (Node and Bun with `RuntimePlugin({ http2 })`)
+   * and refused with a Trailers-Only `UNIMPLEMENTED` elsewhere. Pass
    * `'/grpc'` to restore the pre-M70i prefix.
    */
   basePath?: string;
@@ -60,4 +63,50 @@ export interface GrpcPluginOptions {
    * observes it. Absent: no application interceptors are installed.
    */
   interceptors?: readonly unknown[];
+
+  /**
+   * The largest request message a procedure accepts, in bytes. Defaults to
+   * 4 MiB, the default receive limit of
+   * grpc-go and grpc-js. Forwarded to Connect's `readMaxBytes`, which applies
+   * it per message on enveloped protocols (gRPC, gRPC-Web, Connect streaming)
+   * and to the whole body of a unary Connect request; a larger message is
+   * refused with `RESOURCE_EXHAUSTED`. The same bound applies to every reply
+   * message this plugin's clients receive (`grpcClient()`), where connect-node's
+   * own default would be 4 GiB.
+   *
+   * This is the bound on a client- or bidi-streaming request, whose body the
+   * kernel streams to the procedure (M139b): `RuntimePlugin({ maxBodyBytes })`
+   * is a total, which would end every long-lived stream, so it bounds only the
+   * buffered bodies of unary and server-streaming calls. An integer from 1 to
+   * `0xffffffff`; anything else throws at `GrpcPlugin()`.
+   *
+   * @since 0.13.0
+   */
+  readMaxBytes?: number;
+
+  /**
+   * Whether this plugin serves gRPC (M139b §3.12). Default `true`. `false`
+   * registers the capability for calling only: no request is claimed, and no
+   * procedure, health or reflection service is served, so a member that only
+   * calls others pays nothing per request. `services` must then be empty.
+   */
+  serve?: boolean;
+
+  /**
+   * Per-target client defaults (M139b §3.12), keyed by the `target` passed to
+   * `grpcClient()` or `IGrpcService.client()`: a service name or a URL.
+   * Per-call options override an entry; an entry overrides the defaults.
+   *
+   * @example
+   * ```typescript
+   * GrpcPlugin({ serve: false, clients: { billing: { basePath: '/grpc' } } });
+   * ```
+   */
+  clients?: Readonly<Record<string, GrpcClientOptions>>;
 }
+
+/**
+ * The default {@linkcode GrpcPluginOptions.readMaxBytes}: 4 MiB. Internal —
+ * not exported from the package barrel.
+ */
+export const DEFAULT_READ_MAX_BYTES: number = 4 * 1024 * 1024;

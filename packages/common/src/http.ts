@@ -109,6 +109,19 @@ export interface IRequest {
    */
   readonly raw?: Request;
   /**
+   * Whether the connection this request arrived on can carry HTTP trailers on
+   * its response.
+   *
+   * Set by the HTTP adapter, never from request input: `true` only for an
+   * HTTP/2 request served by an adapter that writes trailers (the Node
+   * adapter, and Bun with `RuntimePlugin({ http2 })`). Absent everywhere else —
+   * HTTP/1.1, Deno, Workers, `inject()` — which means trailers would be lost,
+   * so a producer that needs them (native `application/grpc`) must refuse.
+   *
+   * @since 0.13.0
+   */
+  readonly responseTrailers?: boolean;
+  /**
    * Reads and parses the body as JSON.
    *
    * @typeParam T - The expected body shape (validate before trusting)
@@ -306,11 +319,16 @@ export interface IResponse {
    * `new Response(streamBody, { status, headers })`, streaming is free on every
    * platform (Node via Hono, Deno, Bun, Cloudflare Workers) with no buffer-then-send.
    *
+   * Trailers are written only where {@linkcode IRequest.responseTrailers} is
+   * `true`; elsewhere an adapter drops them, so check that flag before relying
+   * on them.
+   *
    * @param body - A `ReadableStream` of `Uint8Array` chunks
+   * @param options - Optional trailers, sent after the last chunk (since 0.13.0)
    * @returns The handler result
    * @since 0.2.0
    */
-  stream(body: ReadableStream<Uint8Array>): HandlerResult;
+  stream(body: ReadableStream<Uint8Array>, options?: StreamOptions): HandlerResult;
   /**
    * Returns a snapshot of the current response state (status, headers, body).
    * Enables middleware to inspect the response after `next()` returns —
@@ -1103,6 +1121,23 @@ export interface RouteDefinition {
 }
 
 /**
+ * Options for {@linkcode IResponse.stream}.
+ * @since 0.13.0
+ */
+export interface StreamOptions {
+  /**
+   * HTTP trailers to send after the body's last chunk. A promise, because a
+   * streaming producer (a gRPC call above all) knows its trailers only once
+   * the body ends; it should resolve no later than the body closes. A
+   * rejection aborts the response.
+   *
+   * Sent only where {@linkcode IRequest.responseTrailers} is `true`; dropped
+   * elsewhere.
+   */
+  readonly trailers?: Promise<Headers>;
+}
+
+/**
  * Discriminated union representing the possible shapes of an {@linkcode IResponse} snapshot.
  * When `streaming` is `false`, `body` is a buffered `Uint8Array | string | null`.
  * When `streaming` is `true`, `body` is a live `ReadableStream<Uint8Array>`.
@@ -1128,6 +1163,14 @@ export type ResponseSnapshot =
       readonly status: number;
       readonly headers: Headers;
       readonly body: ReadableStream<Uint8Array>;
+      /**
+       * Trailers to send after the last chunk, from
+       * {@linkcode StreamOptions.trailers}. Absent when the producer supplied
+       * none. Written only by an adapter whose request carried
+       * {@linkcode IRequest.responseTrailers}.
+       * @since 0.13.0
+       */
+      readonly trailers?: Promise<Headers>;
       /**
        * Snapshot-local header input the runtime may pass to a native response
        * before it reads the lazy {@linkcode headers} view.

@@ -19,7 +19,7 @@ import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import { createLocalDiagnosticsListenerFactory } from '../diagnostics/local-diagnostics-listener.ts';
 
 import { detectRuntime } from '../detector/runtime-detector.ts';
-import type { HttpAdapterOptions } from '../adapters/shared/adapter-options.ts';
+import type { HttpAdapterOptions, Http2TlsOptions } from '../adapters/shared/adapter-options.ts';
 import type { RuntimeAdapterFactories } from '../adapters/shared/runtime-services-factory.ts';
 import { createRuntimeServices } from '../adapters/shared/runtime-services-factory.ts';
 import { DenoHttpAdapter } from '../adapters/deno/deno-http-adapter.ts';
@@ -115,6 +115,37 @@ export interface RuntimeOptions {
    * @since 0.5.0
    */
   maxBodyBytes?: number;
+  /**
+   * Serve HTTP/2 beside HTTP/1.1 on the application's port.
+   *
+   * - `true` — cleartext: HTTP/2 with prior knowledge (h2c, what gRPC clients
+   *   and service-to-service callers speak) and HTTP/1.1 on ONE port. Each new
+   *   connection is classified by its first bytes; one that has not shown
+   *   whether it speaks HTTP/2 within 10 s is closed.
+   * - `{ key, cert }` — TLS with ALPN: `h2` for clients that offer it,
+   *   HTTP/1.1 for the rest, on one port.
+   *
+   * Per runtime: **Node** serves both modes. **Bun** switches from `Bun.serve`
+   * to the Node adapter on `node:http2` while this is set, so WebSockets there
+   * need the optional `ws` peer, as on Node. **Deno** already answers h2c and
+   * HTTP/1.1 on one port, so `true` changes nothing; `{ key, cert }` passes
+   * them to `Deno.serve`. **Workers**: ignored — the edge terminates HTTP/2
+   * and HTTP/3, and there is no listener.
+   *
+   * HTTP/2 is what native gRPC needs: response trailers are written only on
+   * an HTTP/2 connection to the Node adapter, so that is where
+   * `GrpcPlugin` serves `application/grpc`.
+   *
+   * An empty `key` or `cert` throws here.
+   *
+   * @example
+   * ```typescript
+   * RuntimePlugin({ http2: true })
+   * RuntimePlugin({ http2: { key: env.TLS_KEY, cert: env.TLS_CERT } })
+   * ```
+   * @since 0.13.0
+   */
+  http2?: true | Http2TlsOptions;
 }
 
 /**
@@ -154,6 +185,7 @@ export function RuntimePlugin(options?: RuntimeOptions): IPlugin {
   const httpAdapters = options?.httpAdapters ?? defaultHttpAdapters;
   const workerEnv = options?.env;
   const maxBodyBytes = options?.maxBodyBytes;
+  const http2 = options?.http2;
 
   // Validated at FACTORY time, before an application exists: an
   // out-of-domain cap is a configuration mistake, and `NaN` in particular
@@ -169,6 +201,27 @@ export function RuntimePlugin(options?: RuntimeOptions): IPlugin {
         `note that 0 refuses every request carrying a body.`,
     );
   }
+
+  if (
+    http2 !== undefined &&
+    http2 !== true &&
+    (typeof http2.key !== 'string' ||
+      http2.key === '' ||
+      typeof http2.cert !== 'string' ||
+      http2.cert === '')
+  ) {
+    // The key itself is never echoed: this message can reach a log.
+    throw new TypeError(
+      'RuntimePlugin: http2 TLS options need a non-empty PEM `key` and `cert`; pass `true` ' +
+        'for cleartext HTTP/2.',
+    );
+  }
+
+  // Bun's own server speaks no HTTP/2; `node:http2` does on Bun, trailers and
+  // full duplex included (probed), so the Node adapter serves Bun while
+  // `http2` is set.
+  const adapterPlatform: RuntimePlatform =
+    platform === 'bun' && http2 !== undefined ? 'node' : platform;
 
   return {
     name: 'runtime',
@@ -224,15 +277,16 @@ export function RuntimePlugin(options?: RuntimeOptions): IPlugin {
           string,
           ((adapterOptions?: HttpAdapterOptions) => IHttpAdapter) | undefined
         >
-      )[platform];
+      )[adapterPlatform];
       if (httpAdapterFactory === undefined) {
-        throw new Error(`No HTTP adapter for platform: ${platform}`);
+        throw new Error(`No HTTP adapter for platform: ${adapterPlatform}`);
       }
       // `exactOptionalPropertyTypes`: omit the member entirely when unset, so
       // an adapter reading `options?.maxBodyBytes` sees the same `undefined`
       // either way and no caller can pass an explicit `undefined`.
       const httpAdapter = httpAdapterFactory({
         ...(maxBodyBytes === undefined ? {} : { maxBodyBytes }),
+        ...(http2 === undefined ? {} : { http2 }),
         reportError,
       });
       ctx.services.register(CAPABILITIES.HTTP_ADAPTER, httpAdapter);

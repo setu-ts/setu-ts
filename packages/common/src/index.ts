@@ -187,6 +187,7 @@ export type {
   NextFunction,
   ResponseSnapshot,
   ResponseSnapshotInit,
+  StreamOptions,
   RouteDefinition,
   RouteHandler,
   RouteResponseMetadata,
@@ -261,6 +262,7 @@ export type {
   InjectionToken,
   ContainerToken,
   InjectEntry,
+  ModuleFactoryProvider,
 } from './container.ts';
 export { createToken } from './container.ts';
 
@@ -699,8 +701,12 @@ export type {
 
 // gRPC contracts
 export type {
+  GrpcClientOptions,
   GrpcServiceDefinition,
   GrpcServingStatus,
+  RpcCall,
+  RpcReply,
+  RpcTransport,
   IGrpcService,
   RpcFetchHandler,
 } from './services/grpc.ts';

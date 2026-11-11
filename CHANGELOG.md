@@ -58,6 +58,20 @@ All notable changes to this project are documented here. The format follows
   abort, or `Kubernetes EndpointSlice probe failed with HTTP <status>` instead of resolving `false`.
   The plugin's indicator is unchanged; a caller of the provider directly must handle the rejection.
 
+- **gRPC replies stream; streamed request bodies reach the procedure (M139b, #581,
+  `@setu-ts/kernel`, `@setu-ts/grpc-plugin`).** A server-streaming or bidi reply, or one with
+  trailers, is written with `IResponse.stream`, so middleware that inspects RPC replies now sees
+  `streaming: true` for them, `inject()` refuses them (use `app.fetch()`), and the request logger,
+  metrics and telemetry time them to the first message. Connect and gRPC-Web unary replies stay
+  buffered; a native gRPC unary reply carries its status in trailers, so it streams too. A client-
+  or bidi-streaming call whose body nothing read gets the unread body, bounded per message by
+  `readMaxBytes` rather than `RuntimePlugin({ maxBodyBytes })`; unary and server-streaming bodies
+  keep the `maxBodyBytes` bound. The client's abort signal reaches every call, unary included, on
+  the new `RpcTransport.signal`. The kernel and `GrpcPlugin` now pass each call and reply as plain
+  fields (`RpcCall`, `RpcReply`) instead of building a fetch `Request` and `Response` per RPC, which
+  lifts Connect unary throughput on Node. An `IGrpcService` without `handleRpc` keeps the buffered
+  write. The `grpc-workspace` example's orders member calls billing through `grpcClient`.
+
 ### Added
 
 - **M139d (`@setu-ts/cli`, V12-25).** `setu add` accepts several validated package names, with
@@ -109,6 +123,60 @@ All notable changes to this project are documented here. The format follows
   In-process middleware that runs before form CSRF may set this flag to `true` for an exact route
   that enforces its own cross-site rule; form CSRF then skips the request and commits no session for
   it.
+
+- **HTTP/2 and native gRPC (M139b, #581, `@setu-ts/runtime`, `@setu-ts/common`, `@setu-ts/kernel`,
+  `@setu-ts/grpc-plugin`).** `RuntimePlugin({ http2: true })` serves cleartext HTTP/2 (h2c) and
+  HTTP/1.1 on one port: each connection is classified by its first bytes, as `Deno.serve` and Go's
+  unencrypted HTTP/2 do, so browsers, probes and WebSocket upgrades keep working beside gRPC
+  clients, and a connection that sends nothing for 10 s is closed.
+  `RuntimePlugin({ http2: { key, cert } })` serves HTTP/2 over TLS with ALPN and HTTP/1.1 on the
+  same port; `Http2TlsOptions` is its type. Bun is served by the Node adapter while the option is
+  set (WebSockets then need `ws`); Deno passes TLS to `Deno.serve`; Workers ignore it. Closing sends
+  `GOAWAY` to open HTTP/2 sessions, as does 75 s with no stream open on one, and HTTP/1.1 on the
+  shared port keeps `node:http`'s header and request timeouts. Common gains
+  `IRequest.responseTrailers`, `StreamOptions` for `IResponse.stream(body, { trailers })`, a
+  `trailers` member on the streaming `ResponseSnapshot`, and `RpcTransport`, `RpcCall` and
+  `RpcReply` with the optional `IGrpcService.handleRpc` and `IGrpcService.streamsRequest` members;
+  `refuses` takes an optional transport. The Node adapter writes trailers on HTTP/2, and
+  `GrpcPlugin` serves native `application/grpc` there, so `grpcurl`, `ghz` and grpc-go clients — and
+  reflection through `grpcurl` — reach Setu directly; HTTP/1.1, Deno and Workers keep the
+  Trailers-Only `UNIMPLEMENTED`. `GrpcPluginOptions.readMaxBytes` (default 4 MiB) bounds each
+  request message, and each reply message the plugin's clients receive. Ships in 0.13.0.
+- **`grpcClient`: the gRPC plugin calls other services as well as serving (M139b, #581,
+  `@setu-ts/grpc-plugin`, `@setu-ts/common`, `@setu-ts/cli`).**
+  `grpcClient(services, definition, target, options?)` returns a typed Connect client through the
+  optional `IGrpcService.client`. A target that is a service name resolves through service discovery
+  on every call and reports each outcome back, so an instance that refuses connections is ejected;
+  an absolute URL is used as is. A unary call the server refused before processing it (HTTP/2
+  `REFUSED_STREAM`, as a server shutting down does) is sent once more on a fresh pick, which spares
+  most unary calls during a rolling restart; a call whose retry is refused too (by the only
+  instance, say) still fails, and an error a server sent is never resent. A target carrying
+  credentials (`user:password@`), a query or a fragment, or a name outside the service-name grammar
+  (letters, digits, `.`, `_`, `-`), is refused without being repeated. Calls share one HTTP/2
+  session per instance, allowed to buffer 64 MB rather than Node's 10 MB (which reset streams with
+  several 1 MB replies in flight), have a 5 s deadline, carry the active span as `traceparent`, and
+  are refused with `Unavailable` once the application stops. `GrpcClientOptions` (`basePath`,
+  `protocol`, `httpVersion`, `timeoutMs`) can be set per target in the new
+  `GrpcPluginOptions.clients`, and `GrpcPluginOptions.serve: false` registers the plugin for calling
+  only. `@connectrpc/connect-node` is a new optional peer, loaded on a client's first call. A
+  workspace member generated with `--depends-on` a gRPC member now gets that client-only
+  `GrpcPlugin` and its packages from the CLI, and `setu workspace rpc` re-renders the members that
+  call the one it changes. `grpcClientProvider(token, definition, target, options?)` is the same
+  client as a DI provider: `@Module({ providers })` now also takes factory entries
+  (`ModuleFactoryProvider` in `@setu-ts/common`: `{ provide, useFactory, inject?, scope? }`), so a
+  decorated class `@Inject`s the client. The client runs on Node and Bun; on Cloudflare Workers it
+  refuses with a `TypeError` where it is asked for, and on Deno it is not yet safe, because Deno's
+  Node-style HTTP clients can crash the process when their peer goes away. Ships in 0.13.0.
+- **BREAKING — workspace member names are the ones `generate app` writes (M139b, #581,
+  `@setu-ts/cli`).** A `setu.workspace.json` member whose name is not its own lowercase kebab-case
+  form, or whose derived identifiers are unsafe (`Orders_V2`), is refused, with a message that names
+  the member and suggests a rename (`orders-v2`), by every command that refuses an unreadable
+  manifest: `generate app`, `generate library`, `setu workspace`, `setu check` and
+  `setu devtool enable`. Commands that read a manifest only to find a workspace (`setu add`,
+  `setu agents`) treat it, as before, as no workspace. Before, such a name reached generated source,
+  YAML and shell commands unchecked. To restore a workspace, rename the member's entry and its
+  directory, and the old name wherever another member still uses it: its `dependsOn` list, its
+  generated discovery module, and code that calls the member by name.
 
 ### Fixed
 
@@ -231,6 +299,18 @@ All notable changes to this project are documented here. The format follows
   fired.
 - **Alerting advice names `HealthPlugin({ details: true })` (M139f, #579, V12-49).** Seven READMEs
   that say to alert on a `data.<field>` now say the default `/health` body omits `data`.
+
+- **gRPC server streams arrived as one chunk at the end (M139b, #581, V12-39, `@setu-ts/kernel`).**
+  The kernel read the whole Connect response before writing it, so five messages sent 500 ms apart
+  reached the client together at 2.5 s, and a stream that never ends delivered nothing while holding
+  memory.
+- **The grpc-plugin README's HTTP/2 claim was not true on Node (M139b, #581, V12-40,
+  `@setu-ts/grpc-plugin`).** Node served HTTP/1.1 only; `RuntimePlugin({ http2 })` makes Connect and
+  gRPC-Web over HTTP/2 real, and the README now states what each runtime serves.
+- **A client could choose the scheme of `request.url` (M139b, #581, V12-51, `@setu-ts/runtime`).**
+  Over cleartext HTTP/2 the scheme came from the client's `:scheme` (Deno at `0.12.0`), and on Node
+  an absolute-form request line (`GET https://… HTTP/1.1`) set it, so `requestOriginOf` saw `https`
+  on a plain connection. Served requests now take the listener's scheme, `https` only under TLS.
 
 ## [0.12.0] — 2026-11-07
 

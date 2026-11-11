@@ -17,7 +17,7 @@ import type { ResolvedHost } from '../templates/project-files.ts';
 import { DISCOVERY_SPECIFIER, SERVICE_ENDPOINTS_EXPORT } from './discovery-module.ts';
 import { workspaceProfile, type WorkspaceRuntimeProfile } from './runtime-profile.ts';
 import type { BrokerSpec } from './transport.ts';
-import type { RpcSpec } from './rpc.ts';
+import { GRPC_CALLER_CLIENTS, GRPC_PLUGIN, type RpcSpec } from './rpc.ts';
 import { withClientDependencies } from '../templates/client-dependencies.ts';
 import { NODE_REDIS_MODULE_PATH, nodeRedisModuleFile } from '../templates/node-redis.ts';
 import {
@@ -52,6 +52,7 @@ const QUEUE_PACKAGE = 'queue-plugin';
  * @param member - The member's kebab-case name, which names its proto package
  * @param profile - The workspace's runtime profile
  * @param endpoint - The workspace's `brokerUrl`, when it set one
+ * @param targets - The gRPC members this member calls (M139b §3.12)
  * @returns The host reading both CLI-owned modules
  */
 export function withWorkspaceMember(
@@ -61,12 +62,14 @@ export function withWorkspaceMember(
   member: string,
   profile: WorkspaceRuntimeProfile = workspaceProfile('node'),
   endpoint?: string,
+  targets: readonly string[] = [],
 ): ResolvedHost {
   return withTransportModule(
     withDiscoveryMap(host),
     {
       broker,
       rpc,
+      grpcTargets: targets,
       host: host.appFactory === undefined ? 'plugin-list' : 'app-factory',
       profile,
       messaging: host.plugins.some((wiring) => wiring.pkg === MESSAGING_PACKAGE),
@@ -211,7 +214,9 @@ function withTransportModule(
       ...(factory && broker.connection !== undefined && broker.queueArgs !== undefined
         ? [QUEUE_PACKAGE]
         : []),
-      ...(rpc.plugin === undefined ? [] : [rpc.plugin.pkg]),
+      ...(rpc.plugin === undefined && (input.grpcTargets ?? []).length === 0
+        ? []
+        : [GRPC_PLUGIN.pkg]),
     ],
     // Each manifest kind gets only its own half: a Deno member's tasks and import
     // map, an npm member's scripts and devDependencies.
@@ -233,6 +238,7 @@ function withTransportModule(
         : []),
       ...(shape.queue && broker.queueArgs !== undefined ? (broker.queueClients ?? []) : []),
       ...(rpc.clients ?? []),
+      ...((input.grpcTargets ?? []).length === 0 ? [] : GRPC_CALLER_CLIENTS),
     ].filter((name, index, all) => all.indexOf(name) === index),
   );
 }

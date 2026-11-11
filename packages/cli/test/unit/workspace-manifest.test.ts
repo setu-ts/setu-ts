@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { IFileSystem } from '@setu-ts/common';
 
 import {
+  isMemberName,
   readWorkspaceManifest,
   renderWorkspaceManifest,
   WORKSPACE_VERSION,
@@ -135,5 +136,43 @@ describe('devtoolPort in the workspace manifest', () => {
     return readWorkspaceManifest(fsWith(files), '/ws').then((read) => {
       expect(read.ok).toBe(true);
     });
+  });
+});
+
+describe('member names in the workspace manifest (M139b audit F9)', () => {
+  /** Reads a one-member manifest under a name. */
+  async function readNamed(name: unknown): Promise<boolean> {
+    const source = JSON.stringify({
+      ...baseManifest([{ name: 'placeholder', port: 3000 }]),
+      members: [{ name, port: 3000 }],
+    });
+    return (await readWorkspaceManifest(fsWith({ '/ws/setu.workspace.json': source }), '/ws')).ok;
+  }
+
+  it.each(['billing', 'orders', 'api-gateway', 'svc2', 'a'])('accepts %s', async (name) => {
+    expect(await readNamed(name)).toBe(true);
+  });
+
+  it.each([
+    ['empty', ''],
+    ['a separator', 'a/b'],
+    ['a backslash', 'a\\b'],
+    ['a dot segment', '..'],
+    ['a single quote breaking an object key', "billing': (globalThis.CANARY = 1), '"],
+    ['a JSDoc terminator', 'billing */ globalThis.CANARY = 1; /*'],
+    ['a backtick', 'bill`ing'],
+    ['a space', 'bill ing'],
+    ['upper case (generate app writes kebab)', 'Billing'],
+    ['an underscore (generate app writes kebab)', 'bill_ing'],
+    ['a leading digit', '2fa'],
+    ['a Windows device name', 'con'],
+    ['not a string', 7],
+  ])('refuses %s', async (_label, name) => {
+    expect(await readNamed(name)).toBe(false);
+  });
+
+  it('isMemberName agrees with what generate app derives', () => {
+    expect(isMemberName('api-gateway')).toBe(true);
+    expect(isMemberName("x'y")).toBe(false);
   });
 });

@@ -9,10 +9,14 @@ import type {
   IResponse,
   ResponseSnapshot,
   ResponseSnapshotInit,
+  StreamOptions,
 } from '@setu-ts/common';
 
 /** Opaque brand — only the kernel constructs values of this type. */
 const HANDLER_RESULT: HandlerResult = { __handlerResult: true };
+
+/** Marks a trailers promise's rejection as observed; the adapter that writes it reports it. */
+function ignoreRejection(): void {}
 
 /** Internal immutable header sources for the common terminal response shapes. */
 const JSON_INIT = responseInit({ 'content-type': 'application/json; charset=utf-8' });
@@ -83,6 +87,7 @@ export class ResponseBuilder implements IResponse {
   #initHeaderName: string | undefined;
   #body: Uint8Array | string | ReadableStream<Uint8Array> | null = null;
   #streaming = false;
+  #trailers: Promise<Headers> | undefined;
   #ended = false;
 
   status(code: number): IResponse {
@@ -181,12 +186,21 @@ export class ResponseBuilder implements IResponse {
    * bytes progressively over a long-lived connection instead of buffering a
    * whole body before send.
    *
+   * Trailers, when given, replace any earlier ones; a call without them clears
+   * them. Their rejection is observed here so a producer whose trailers are
+   * never written (no adapter on this connection writes them) cannot raise an
+   * unhandled rejection.
+   *
    * @param body - A `ReadableStream` of `Uint8Array` chunks
+   * @param options - Optional trailers sent after the last chunk
    * @returns The handler result
    */
-  stream(body: ReadableStream<Uint8Array>): HandlerResult {
+  stream(body: ReadableStream<Uint8Array>, options?: StreamOptions): HandlerResult {
     this.#body = body;
     this.#streaming = true;
+    const trailers = options?.trailers;
+    if (trailers !== undefined) trailers.catch(ignoreRejection);
+    this.#trailers = trailers;
     this.#ended = true;
     return HANDLER_RESULT;
   }
@@ -203,6 +217,7 @@ export class ResponseBuilder implements IResponse {
         this,
         this.#status,
         this.#body as ReadableStream<Uint8Array>,
+        this.#trailers,
       );
     }
     return new BufferedResponseSnapshot(
@@ -225,6 +240,17 @@ export class ResponseBuilder implements IResponse {
    */
   get streamingBody(): ReadableStream<Uint8Array> | undefined {
     return this.#streaming ? (this.#body as ReadableStream<Uint8Array>) : undefined;
+  }
+
+  /**
+   * Stream options that reproduce this response's trailers, for kernel code
+   * that re-wraps the streaming body through {@linkcode ResponseBuilder.stream}
+   * and must not drop them.
+   * @returns `{ trailers }`, or `undefined` when there are none
+   * @internal
+   */
+  get streamOptions(): StreamOptions | undefined {
+    return this.#trailers === undefined ? undefined : { trailers: this.#trailers };
   }
 
   /**
@@ -311,11 +337,20 @@ class StreamingResponseSnapshot implements Extract<ResponseSnapshot, { readonly 
   readonly #response: ResponseBuilder;
   readonly status: number;
   readonly body: ReadableStream<Uint8Array>;
+  // `declare`: the key must be ABSENT, not `undefined`, when there are no
+  // trailers, so a class field initializer must not be emitted for it.
+  declare readonly trailers?: Promise<Headers>;
 
-  constructor(response: ResponseBuilder, status: number, body: ReadableStream<Uint8Array>) {
+  constructor(
+    response: ResponseBuilder,
+    status: number,
+    body: ReadableStream<Uint8Array>,
+    trailers: Promise<Headers> | undefined,
+  ) {
     this.#response = response;
     this.status = status;
     this.body = body;
+    if (trailers !== undefined) (this as { trailers?: Promise<Headers> }).trailers = trailers;
   }
 
   get responseInit(): ResponseSnapshotInit | undefined {

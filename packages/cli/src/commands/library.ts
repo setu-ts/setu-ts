@@ -45,7 +45,11 @@ import {
   BUNFIG_FILE,
   planBunWorkspaceLinker,
 } from '../workspace/library.ts';
-import { readWorkspaceManifest, WORKSPACE_MANIFEST } from '../workspace/manifest.ts';
+import {
+  manifestProblemDetail,
+  readWorkspaceManifest,
+  WORKSPACE_MANIFEST,
+} from '../workspace/manifest.ts';
 import { planRootWorkspaceGlob } from '../workspace/root-manifest.ts';
 import { workspaceProfile } from '../workspace/runtime-profile.ts';
 
@@ -144,6 +148,8 @@ export async function runLibraryCommand(
         deps.dir,
       )}, so this is not a Setu workspace.`,
     );
+    const detail = manifestProblemDetail(read.problem);
+    if (detail !== undefined) deps.error(detail);
     deps.error(
       `A library is resolved by the workspace, so it needs one: create it with ` +
         `\`${PROGRAM_NAME} new <name> --workspace\`.`,

@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { getRpc, RPC_ALIASES, RPC_STYLES, rpcSpec } from '../../../src/workspace/rpc.ts';
+import {
+  getRpc,
+  GRPC_CALLER_CLIENTS,
+  GRPC_PLUGIN,
+  grpcTargets,
+  RPC_ALIASES,
+  RPC_STYLES,
+  rpcSpec,
+} from '../../../src/workspace/rpc.ts';
 import {
   PROTO_DEV_DEPENDENCIES,
   PROTO_IMPORTS,
@@ -37,11 +45,8 @@ describe('the RPC-style registry', () => {
   // member gets is byte-identical to what a grpc workspace member got before.
   it('carries the gRPC plugin, its clients and the proto toolchain for grpc', () => {
     const grpc = rpcSpec('grpc');
-    expect(grpc.plugin).toEqual({
-      pkg: 'grpc-plugin',
-      symbol: 'GrpcPlugin',
-      args: "{ basePath: '/grpc' }",
-    });
+    expect(grpc.plugin).toBe(GRPC_PLUGIN);
+    expect(GRPC_PLUGIN).toEqual({ pkg: 'grpc-plugin', symbol: 'GrpcPlugin' });
     expect(grpc.clients).toEqual(['@connectrpc/connect', '@bufbuild/protobuf']);
     for (const onDeno of [true, false]) {
       expect(grpc.memberFiles?.('order-service', onDeno)).toEqual(
@@ -60,5 +65,31 @@ describe('the RPC-style registry', () => {
 
   it('gives every style a description for the help text', () => {
     for (const name of RPC_STYLES) expect(rpcSpec(name).description.length).toBeGreaterThan(10);
+  });
+});
+
+describe('grpcTargets (M139b §3.12)', () => {
+  const members = [
+    { name: 'orders', dependsOn: ['tax', 'billing', 'billing', 'catalog'] },
+    { name: 'billing', rpc: 'grpc' as const },
+    { name: 'tax', rpc: 'grpc' as const },
+    { name: 'catalog' },
+  ];
+
+  it('names the gRPC members a member depends on, once each, sorted', () => {
+    expect(grpcTargets(members, 'orders')).toEqual(['billing', 'tax']);
+  });
+
+  it('is empty for a member with no gRPC dependency, or one not in the list', () => {
+    expect(grpcTargets(members, 'billing')).toEqual([]);
+    expect(grpcTargets(members, 'nobody')).toEqual([]);
+  });
+
+  it('gives a caller the Connect client, its Node transport and Protobuf-ES', () => {
+    expect(GRPC_CALLER_CLIENTS).toEqual([
+      '@connectrpc/connect',
+      '@connectrpc/connect-node',
+      '@bufbuild/protobuf',
+    ]);
   });
 });

@@ -203,6 +203,29 @@ describe('withWorkspaceMember — the transport module', () => {
     expect(http.member.files.some((file) => file.path === 'buf.gen.yaml')).toBe(false);
   });
 
+  it('gives a member that calls a gRPC member the plugin client and its packages, no toolchain', () => {
+    const member = withWorkspaceMember(
+      hostOf('microservice'),
+      HTTP,
+      HTTP_RPC,
+      'orders',
+      workspaceProfile('deno'),
+      undefined,
+      ['billing'],
+    );
+    const module = member.files.find((file) => file.path === TRANSPORT_MODULE);
+    expect(module?.contents).toContain(
+      "return [GrpcPlugin({ serve: false, clients: { billing: { basePath: '/grpc' } } })];",
+    );
+    expect(member.extraFrameworkPackages).toEqual(['grpc-plugin']);
+    expect(member.extraDependencies).toMatchObject({
+      '@connectrpc/connect': '^2.1.2',
+      '@connectrpc/connect-node': '^2.1.2',
+      '@bufbuild/protobuf': '^2.7.0',
+    });
+    expect(member.files.some((file) => file.path === 'buf.gen.yaml')).toBe(false);
+  });
+
   it('gives an npm member the scripts and devDependencies half of the toolchain', () => {
     const member = withWorkspaceMember(
       resolveHost(getTemplate('microservice') ?? MINIMAL_HOST, 'node'),

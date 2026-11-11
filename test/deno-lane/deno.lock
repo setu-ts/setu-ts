@@ -3671,6 +3671,7 @@
       "jsr:@setu-ts/grpc-plugin@0.12.0": {
         "dependencies": [
           "npm:@bufbuild/protobuf@^2.7.0",
+          "npm:@connectrpc/connect-node@^2.1.2",
           "npm:@connectrpc/connect@^2.1.2",
           "npm:vitest@5.0.3"
         ]
