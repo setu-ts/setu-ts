@@ -1,6 +1,6 @@
 # Milestone 139d — The CLI on a full-stack project (`cli` + `kernel` message + docs)
 
-> **Status:** Planning. Branch: `feat/m139d-cli-full-stack`. `develop` and `main` are protected, so
+> **Status:** Complete. Branch: `feat/m139d-cli-full-stack`. `develop` and `main` are protected, so
 > all work, including fixes, stays on this one branch until it merges through a single PR into
 > `develop`.
 
