@@ -128,7 +128,8 @@ defaults, except `runtime` and `httpSecurity`, which carry the body bound below:
 `413` past it; the same value becomes `httpSecurity.requestSize.maxBodySize` unless you set
 `requestSize.maxBodySize` (or `enabled: false`) yourself, so a declared oversize body is refused
 before anything is read. A client- or bidi-streaming gRPC call is streamed rather than buffered, so
-`GrpcPlugin({ readMaxBytes })` bounds it per message instead. Raise it for uploads:
+`GrpcPlugin({ readMaxBytes })` bounds it per message instead (a `Content-Length` it declares is
+still checked). Raise it for uploads:
 
 ```typescript
 createRestApp({ runtime: { maxBodyBytes: 10 * 1024 * 1024 } });

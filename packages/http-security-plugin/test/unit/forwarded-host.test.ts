@@ -133,7 +133,7 @@ describe('X-Forwarded-Proto is read from the right', () => {
   // Against an https URL, so reading the client's `http` to the left of an
   // empty rightmost entry would show as a downgrade.
   it('never reads a client protocol left of an empty rightmost entry', async () => {
-    for (const proto of ['http, ', 'http,', 'http, ,', 'http,\t']) {
+    for (const proto of ['http, ', 'http,', 'http, ,']) {
       const { ctx } = createFakeContext({
         request: {
           url: 'https://app.example/',

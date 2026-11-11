@@ -286,7 +286,7 @@ React Router actions answer 400 behind TLS termination unless the proxy is trust
 TRUSTED_PROXIES to a comma-separated list of your proxies (for example, 10.0.0.0/8). This trusts
 their forwarded client IP and protocol headers. The public host stays the Host header the proxy
 sends; if your proxy rewrites Host and writes X-Forwarded-Host itself, also set
-ipSecurity: { trustForwardedHost: true } in setu.config.ts (never for a proxy that passes a
+\`ipSecurity: { trustForwardedHost: true }\` in setu.config.ts (never for a proxy that passes a
 client's X-Forwarded-Host through), as the deployment guide describes:
 ${siteUrl('docs/deployment/')}. Leave TRUSTED_PROXIES empty for direct access. List IPv4
 proxies as addresses or CIDRs, and IPv6 proxies as single addresses: an IPv6 CIDR is compared

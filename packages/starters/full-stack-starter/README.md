@@ -406,9 +406,9 @@ HTTP-security plugin keeps its own `no-referrer` default.
 
 Like the REST and microservice starters, a full-stack application refuses a request body over 1 MiB
 with `413` (since 0.13.0), whether declared or chunked. A client- or bidi-streaming gRPC call is
-streamed rather than buffered, so `GrpcPlugin({ readMaxBytes })` bounds it per message instead.
-Raise the limit for upload routes with the `runtime` arm, which works the same through
-`createFullStackAppFromConfig`:
+streamed rather than buffered, so `GrpcPlugin({ readMaxBytes })` bounds it per message instead (a
+`Content-Length` it declares is still checked). Raise the limit for upload routes with the `runtime`
+arm, which works the same through `createFullStackAppFromConfig`:
 
 ```typescript
 createFullStackApp({ runtime: { maxBodyBytes: 10 * 1024 * 1024 } });

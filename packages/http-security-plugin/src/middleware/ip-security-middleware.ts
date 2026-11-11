@@ -209,9 +209,9 @@ function compileTrustedProxy(entry: string): (candidate: string) => boolean {
  * `ipHeader`, or when `trustForwardedHost` is not a boolean, is `true` without
  * `trustProxy: true` and `trustedProxies`, or is `true` with
  * `forwardedHeader: 'forwarded'`
- * @throws {Error} When `trustedProxies` and `proxyHops` are both set, when
- * `proxyHops` is not a non-negative integer, or when a `trustedProxies` CIDR
- * width is malformed
+ * @throws {Error} Unless `enabled` is `false`: when `trustedProxies` and
+ * `proxyHops` are both set, when `proxyHops` is not a non-negative integer, or
+ * when a `trustedProxies` CIDR width is malformed
  */
 export function ipSecurityMiddleware(options: IpSecurityOptions = {}): MiddlewareFunction {
   const forwardedHeader =

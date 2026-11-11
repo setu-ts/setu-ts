@@ -12162,9 +12162,10 @@ Notes:
   `{ maxBodyBytes: Number.MAX_SAFE_INTEGER }`. Before 0.13.0 the starters read every body in full.
   The bound is a total over a buffered body, so it also bounds unary and server-streaming gRPC
   calls; a client- or bidi-streaming gRPC call is streamed instead and bounded per message by
-  `GrpcPlugin({ readMaxBytes })` (default 4 MiB). `runtime.platform` also drives the starter's own
-  platform choices (Swagger UI assets, the full-stack scheduler on Workers), so an override cannot
-  leave them disagreeing with `RuntimePlugin`.
+  `GrpcPlugin({ readMaxBytes })` (default 4 MiB), though a `Content-Length` it declares is still
+  checked against `requestSize`. `runtime.platform` also drives the starter's own platform choices
+  (Swagger UI assets, the full-stack scheduler on Workers), so an override cannot leave them
+  disagreeing with `RuntimePlugin`.
 
 ### Composing from configuration
 
