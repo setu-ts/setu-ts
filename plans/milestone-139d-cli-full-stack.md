@@ -494,16 +494,16 @@ an error message, and the CLI's changes are to generated output and commands.
 
 ### 4.1 Options — every option names its consumer
 
-| Option                   | Consumer                                        | Behavior (per implementation)                                     |
-| ------------------------ | ----------------------------------------------- | ----------------------------------------------------------------- |
-| `setu add` several names | `runAddCommand` → `addOne`                      | §3.11                                                             |
-| `--plugin-only`          | `add view` path                                 | §3.12; refused with any other package unless view is listed       |
-| `--provider`             | `add mail` → `BACKEND_PEERS`, registration line | §3.13                                                             |
-| `--type`                 | `add database` → peers, §3.14 scripts           | §3.13, §3.14                                                      |
-| `--adapter`              | `add vector-store` → peers                      | §3.13                                                             |
-| `--dialect`              | `add database --type drizzle` config file       | §3.14; refused with any other type                                |
-| `--yes`                  | the §3.13 prompt                                | skips the prompt, takes the default arm                           |
-| `IPluginWiring.args`     | `registrationLine`, `withPluginWiring`, §3.10   | call arguments, default empty; read for every wiring that has one |
+| Option                   | Consumer                                        | Behavior (per implementation)                               |
+| ------------------------ | ----------------------------------------------- | ----------------------------------------------------------- |
+| `setu add` several names | `runAddCommand` → `addOne`                      | §3.11                                                       |
+| `--plugin-only`          | `add view` path                                 | §3.12; refused with any other package unless view is listed |
+| `--provider`             | `add mail` → `BACKEND_PEERS`, registration line | §3.13                                                       |
+| `--type`                 | `add database` → peers, §3.14 scripts           | §3.13, §3.14                                                |
+| `--adapter`              | `add vector-store` → peers                      | §3.13                                                       |
+| `--dialect`              | `add database --type drizzle` config file       | §3.14; refused with any other type                          |
+| `--yes`                  | the §3.13 prompt                                | skips the prompt, takes the default arm                     |
+| `IPluginWiring.args`     | removed (§3.24)                                 | —                                                           |
 
 ## 5. Implementation files
 
