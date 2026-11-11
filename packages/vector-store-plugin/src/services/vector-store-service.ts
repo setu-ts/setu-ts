@@ -22,7 +22,7 @@ import type {
 } from '@setu-ts/common';
 import type { ResolvedCollection } from './collection-spec.ts';
 import { validateFilter } from './filter-validation.ts';
-import { MAX_TOP_K, shownName } from './limits.ts';
+import { MAX_RECORDS_PER_CALL, MAX_RECORDS_PER_REPLACE, MAX_TOP_K, shownName } from './limits.ts';
 import {
   validateId,
   validateIds,
@@ -79,7 +79,13 @@ export class VectorStoreService implements IVectorStore {
   async upsert(collection: string, scope: string, records: readonly VectorRecord[]): Promise<void> {
     const resolved = this.#collection(collection);
     const validScope = validateScope(scope);
-    const valid = validateRecords(records, resolved.spec.dimensions, resolved.fields);
+    const valid = validateRecords(
+      records,
+      resolved.spec.dimensions,
+      resolved.fields,
+      MAX_RECORDS_PER_CALL,
+      'upsert',
+    );
     if (valid.length === 0) return;
     await this.#adapter.upsert(resolved.spec, validScope, valid);
   }
@@ -95,7 +101,13 @@ export class VectorStoreService implements IVectorStore {
     const resolved = this.#collection(collection);
     const validScope = validateScope(scope);
     const validSource = validateId(sourceId, 'source id');
-    const valid = validateRecords(records, resolved.spec.dimensions, resolved.fields);
+    const valid = validateRecords(
+      records,
+      resolved.spec.dimensions,
+      resolved.fields,
+      MAX_RECORDS_PER_REPLACE,
+      'replaceSource',
+    );
     for (const record of valid) {
       if (record.sourceId !== validSource) {
         throw new VectorRecordError('every record passed to replaceSource must carry its sourceId');

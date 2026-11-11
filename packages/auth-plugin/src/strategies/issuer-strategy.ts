@@ -140,12 +140,28 @@ export class IssuerStrategy implements IAuthStrategy {
         this.#report(binding.issuer.name, 'act-malformed');
         return null;
       }
+      const tenantClaim = binding.issuer.tenantClaim;
+      if (tenantClaim !== undefined) {
+        const tenant = outcome.claims[tenantClaim];
+        if (
+          request.tenant === undefined
+            ? Object.hasOwn(outcome.claims, tenantClaim)
+            : typeof tenant !== 'string' || tenant !== request.tenant.id
+        ) {
+          this.#report(binding.issuer.name, 'tenant-mismatch');
+          return null;
+        }
+      }
       const principal = await binding.issuer.toPrincipal(outcome.claims);
       if (principal === null) {
         return null;
       }
       // The application's own mapping wins: only fill a member it left absent.
-      const scopes = principal.scopes === undefined ? parseScopeClaim(outcome.claims) : undefined;
+      // Read once and written back explicitly: a mapper may return an object whose
+      // `scopes` is inherited or non-enumerable, which the spread below would drop,
+      // turning a scoped token into an unconfined one.
+      const mappedScopes = principal.scopes;
+      const scopes = mappedScopes === undefined ? parseScopeClaim(outcome.claims) : mappedScopes;
       return {
         ...principal,
         ...(scopes === undefined ? {} : { scopes }),

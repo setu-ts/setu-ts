@@ -1028,6 +1028,8 @@ describe('M111b workflow lanes', () => {
     for (const i of [1, 2, 3]) {
       expect(node).toContain(`name: cli-blob-${i}`);
       expect(node).toContain(`path: .vitest-reports/cli/blob-${i}.json`);
+      // A failing shard must still upload its blob, or cli-coverage cannot name the failures.
+      expect(node).toContain(`if: always() && matrix.shard == 'cli-${i}'`);
     }
     expect(node.match(/include-hidden-files: true/g)).toHaveLength(3);
     expect(node.match(/if-no-files-found: error/g)).toHaveLength(3);

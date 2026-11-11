@@ -6,7 +6,111 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING — scoped tokens are confined by default (M139a, #576, `@setu-ts/auth-plugin`,
+  `@setu-ts/common`, V12-37).** `AuthPlugin({ confineScopedTokens })` defaults to `true`: a
+  principal whose `scopes` is an array (a bearer token carrying a `scope` or `scp` claim) fails
+  every role and permission check (`requireRole`, `requirePermission`, `requireAnyRole`,
+  `requireAllPermissions`, `@Roles`, `@Permissions`, direct `hasRole` calls) and every scoped-RBAC
+  check (`requireScopedRole`, `requireScopedPermission`), whatever its subject holds. Before, a
+  token minted `envelopes:read` for an admin passed every admin route. Such a token reaches routes
+  guarded by `requireScopes`, which is unchanged; sessions and tokens with no scope claim are
+  unaffected. Authorization diagnostics record the refusal as the new `AuthorizationDecisionReason`
+  `token-confined`; scoped RBAC reports it with the same name. A `scope` or `scp` claim that is
+  present but malformed counts as an empty scope list, so it confines rather than escapes.
+  **Migration:** guard token routes with `requireScopes`, or sign browsers in with a session. An
+  application whose identity provider stamps every access token with scopes (`openid profile`) and
+  authorizes those tokens by role sets `confineScopedTokens: false` to keep the 0.12 behaviour.
+  `requirePolicy` is not capped. A consumer switching exhaustively on `AuthorizationDecisionReason`
+  needs a `token-confined` case. The diagnostics connector's authorization pages can now carry that
+  reason, and a diagnostics client (such as a devtool) built on 0.12 refuses a page containing it:
+  upgrade the client together with the application.
+- **BREAKING — a JWT without a subject is refused (M139a, #576, `@setu-ts/auth-plugin`, V12-18).**
+  The JWT strategy refuses a verified token whose `sub` is missing, not a string or empty. Before,
+  every such token authenticated as one shared principal, `'unknown'`, so grants, idempotency
+  records and ownership keyed by the principal id were shared across their callers. **Migration:**
+  put a subject in every token you mint; for a service token, the client id (RFC 9068 §2.2).
+
+- **BREAKING — `IIdempotencyService.transactional` is a required member (M139c, #578,
+  `@setu-ts/common`, `@setu-ts/idempotency-plugin`, `@setu-ts/agent-runs-plugin`, V12-4).** It is
+  `true` exactly when the provider was configured with a transactional store. `AgentRunsPlugin` now
+  reads it in `register` and refuses to start without one; before, the application booted healthy
+  and every tool-calling run failed at its first tool call. **Migration:** a custom
+  `IIdempotencyService` adds the member; an application registering `AgentRunsPlugin` passes
+  `IdempotencyPlugin({ transactional: { store: createDatabaseIdempotencyStore() } })`.
+- **BREAKING — quotas can be read (M139c, #578, `@setu-ts/auth-plugin`, V12-36).**
+  `IQuota.usage(key)` returns a `QuotaUsage`, `{ used, limit, remaining, windowEndsAt }`, from the
+  counter `reserve` charges, without charging it, so a budget meter needs no second ledger.
+  `IQuotaStore` gains a required `read(key, windowId)`, implemented by `MemoryQuotaStore` and
+  `RedisQuotaStore`. **Migration:** a custom `IQuotaStore` implements `read`, answering `0` for an
+  absent or expired window; a custom `IQuota` implements `usage`.
+
+- **A Redis backplane frame published while disconnected is lost, never delivered late (M139f, #579,
+  `@setu-ts/realtime-backplane-plugin`, X3-3).** The publisher connection the plugin builds now has
+  no offline queue, so a publish while it reconnects is refused at once (`503`, one `warn` per frame
+  in the WebSocket and SSE consumers) instead of being held and flushed seconds later, or lost
+  anyway to the reconnect race. `IRedisModule.create`'s options gain `enableOfflineQueue`. With an
+  injected pair, create the ioredis publisher with `enableOfflineQueue: false` or the node-redis
+  client with `disableOfflineQueue: true` for the same behaviour.
+- **`KubernetesProvider.isHealthy()` rejects with the reason (M139f, #579,
+  `@setu-ts/service-discovery-plugin`, X10-3).** A failed probe rejects with the fetch error, the
+  abort, or `Kubernetes EndpointSlice probe failed with HTTP <status>` instead of resolving `false`.
+  The plugin's indicator is unchanged; a caller of the provider directly must handle the rejection.
+
+- **gRPC replies stream; streamed request bodies reach the procedure (M139b, `@setu-ts/kernel`,
+  `@setu-ts/grpc-plugin`).** A server-streaming or bidi reply, or one with trailers, is written with
+  `IResponse.stream`, so middleware that inspects RPC replies now sees `streaming: true` for them,
+  `inject()` refuses them (use `app.fetch()`), and the request logger, metrics and telemetry time
+  them to the first message. Unary replies stay buffered. A client- or bidi-streaming call whose
+  body nothing read gets the unread body, bounded per message by `readMaxBytes` rather than
+  `RuntimePlugin({ maxBodyBytes })`; unary and server-streaming bodies keep the `maxBodyBytes`
+  bound. The client's abort signal reaches every call, unary included, on the new
+  `RpcTransport.signal`. The kernel and `GrpcPlugin` now pass each call and reply as plain fields
+  (`RpcCall`, `RpcReply`) instead of building a fetch `Request` and `Response` per RPC, which lifts
+  Connect unary throughput on Node. An `IGrpcService` without `handleRpc` keeps the buffered write.
+  The `grpc-workspace` example's orders member calls billing through `grpcClient`.
+
 ### Added
+
+- **Tenant repositories join a transaction (M139c, #578, `@setu-ts/common`,
+  `@setu-ts/multi-tenancy-plugin`, `@setu-ts/database-plugin`, V12-20).** `getRepository` and
+  `getRepositoryFor` take an optional third argument, the unit of work `db.transaction` hands out
+  (`ITenantUnitOfWork`). `DatabaseTenantDataStore` implements the new optional
+  `ITenantDataStore.withUnitOfWork` with every tenant guard intact; a store without it throws
+  `TenantUnitOfWorkUnsupportedError`.
+- **Mail attachments (M139c, #578, `@setu-ts/common`, `@setu-ts/mail-plugin`, V12-21).**
+  `MailMessage.attachments` takes `MailAttachment` in-memory files (`Uint8Array` or UTF-8 text),
+  inline with a `contentId`. SMTP, SES and SendGrid send them; `LogProvider` logs their names and
+  sizes only. `send` and `sendTemplate` refuse a filename, content type or content id that could
+  break a header.
+- **Whole-source replacement up to 5,000 records (M139c, #578, `@setu-ts/vector-store-plugin`,
+  V12-9).** One `replaceSource` call takes 5,000 records (`upsert` stays at 500), written in slices
+  of 500 inside pgvector's one transaction. Before, a source over 500 records could not be held: a
+  second call deleted the first call's records.
+- **One credential per route (M139a, #576, `@setu-ts/auth-plugin`, V12-37).**
+  `requireAuth({ credentials: 'cookie' | 'header' })` admits only a principal the plugin
+  authenticated with that kind of credential (`'any'` is the default). A mismatch, or a request
+  whose credential kind was never recorded, is answered as unauthenticated: `401`, or the
+  `signInPage` redirect. Header strategies run first, so a request carrying a bearer token and a
+  session cookie counts as `'header'`; a caller-supplied strategy that declares no `credential`
+  satisfies only `'any'`.
+- **Tokens bound to the tenant (M139a, #576, `@setu-ts/auth-plugin`, V12-19).** `jwt.tenantClaim`
+  and a per-issuer `tenantClaim` name the claim that carries the tenant id. When set, a token whose
+  verified claim differs from `request.tenant.id` is refused, and so is a token carrying the claim
+  on a request with no tenant; an issuer token refused this way is reported as `tenant-mismatch`.
+  Opt-in, with no default claim name.
+- **The request reaches the password check (M139a, #576, `@setu-ts/common`, `@setu-ts/auth-plugin`,
+  V12-19).** `IAuthService.verifyCredentials(credentials, request?)` and
+  `local.verify(identifier, secret, request?)` take an optional request, so a multi-tenant
+  application can look the user up within `request.tenant`; `apiKey.validate(key, request?)` gets it
+  too, so a key can be bound to its tenant. The auth README's full-stack sign-in recipe passes
+  `ctx.request`; the multi-tenancy README explains why a lookup by email alone lets a user sign in
+  on another tenant's host. Existing callbacks and implementations still type-check.
+- **`CSRF_EXEMPT_STATE_KEY` (M139a, #576, `@setu-ts/common`, `@setu-ts/session-plugin`).**
+  In-process middleware that runs before form CSRF may set this flag to `true` for an exact route
+  that enforces its own cross-site rule; form CSRF then skips the request and commits no session for
+  it.
 
 - **HTTP/2 and native gRPC (M139b, `@setu-ts/runtime`, `@setu-ts/common`, `@setu-ts/kernel`,
   `@setu-ts/grpc-plugin`).** `RuntimePlugin({ http2: true })` serves cleartext HTTP/2 (h2c) and
@@ -51,22 +155,79 @@ All notable changes to this project are documented here. The format follows
   refuses with a `TypeError` where it is asked for, and on Deno it is not yet safe, because Deno's
   Node-style HTTP clients can crash the process when their peer goes away. Ships in 0.13.0.
 
-### Changed
-
-- **gRPC replies stream; streamed request bodies reach the procedure (M139b, `@setu-ts/kernel`,
-  `@setu-ts/grpc-plugin`).** A server-streaming or bidi reply, or one with trailers, is written with
-  `IResponse.stream`, so middleware that inspects RPC replies now sees `streaming: true` for them,
-  `inject()` refuses them (use `app.fetch()`), and the request logger, metrics and telemetry time
-  them to the first message. Unary replies stay buffered. A client- or bidi-streaming call whose
-  body nothing read gets the unread body, bounded per message by `readMaxBytes` rather than
-  `RuntimePlugin({ maxBodyBytes })`; unary and server-streaming bodies keep the `maxBodyBytes`
-  bound. The client's abort signal reaches every call, unary included, on the new
-  `RpcTransport.signal`. The kernel and `GrpcPlugin` now pass each call and reply as plain fields
-  (`RpcCall`, `RpcReply`) instead of building a fetch `Request` and `Response` per RPC, which lifts
-  Connect unary throughput on Node. An `IGrpcService` without `handleRpc` keeps the buffered write.
-  The `grpc-workspace` example's orders member calls billing through `grpcClient`.
-
 ### Fixed
+
+- **A discovery backend URL with credentials is refused at startup (#580,
+  `@setu-ts/service-discovery-plugin`, V12-52).** A Consul `address` or Kubernetes `apiServer` with
+  userinfo (`http://user:pass@host`) never worked with the default HTTP transport, because `fetch`
+  refuses such a URL, and its refusal named the whole URL: the password reached the
+  self-registration start error and the `cause` of a resolve error. The provider now refuses it
+  before any request with a fixed message that names the `token` option, whatever transport is
+  configured, and refuses the same way an address that does not parse as a URL (an out-of-range port
+  or a stray space after `user:pass@` made `fetch` quote it too). **Upgrade:** an application whose
+  custom `http` option accepted such an address moves the credential out of the URL, into `token` or
+  into its transport.
+- **`close()` ends a backplane SUBSCRIBE that never answers (#580,
+  `@setu-ts/realtime-backplane-plugin`, V12-53).** With `commandTimeoutMs: 0`, an open whose
+  SUBSCRIBE went unanswered held on forever and `close()` did not release it. `close()` now cancels
+  the wait, and an open that a `close()` overtakes during the publisher-ready wait no longer waits
+  on UNSUBSCRIBE or QUIT: the connections the backplane built are force-closed, and an injected pair
+  is left connected and is not left subscribed. With a bound, nothing changes.
+- **pgvector `ensure: 'verify'` checks what the indexes are (M139c, #578,
+  `@setu-ts/vector-store-plugin`, V12-10).** `ensureCollection` now requires `vs_<name>_src` on
+  `(scope, source_id)` and `vs_<name>_hnsw` as `USING hnsw (embedding vector_cosine_ops)`, both on
+  the collection's table, and names the expected definition when one differs. Before, an index of
+  the right name passed whatever it was, so an L2 index served cosine queries. **Upgrade:** both
+  `ensure: 'verify'` and `ensure: 'create'` now refuse such an index at startup with
+  `VectorCollectionMismatchError`, and `CREATE INDEX IF NOT EXISTS` does not replace it: drop the
+  index and recreate it with the definition the error names.
+- **Agent cards describe the M139a behaviour (M139c, #578).** The auth, multi-tenancy and MCP
+  `AGENT_CARD.md` files, which `setu agents` briefs point agents at, now state scoped-token
+  confinement, the `sub` requirement, `requireAuth({ credentials })`, `tenantClaim`, the request on
+  `local.verify`, and the MCP path's form-CSRF exemption.
+- **MCP discovery behind form CSRF (M139a, #576, `@setu-ts/mcp-plugin`, V12-35).** In a full-stack
+  app, an anonymous `POST /mcp` was answered `403 CSRF token validation failed` before
+  authentication could send the `401` with `WWW-Authenticate: Bearer resource_metadata="…"` that an
+  MCP client needs to start discovery. `McpPlugin` now marks `POST` on its own path exempt through
+  `CSRF_EXEMPT_STATE_KEY`; the route's `Origin` check still refuses a cross-site browser, and tool
+  calls are still verified by form CSRF on their inner requests. The session plugin commits no
+  session for a request carrying the marker, even without form CSRF. `McpPlugin({ path })` now
+  refuses a path ending in `/`: the router lets `/x/` reach a route registered as `/x`, so such a
+  path could share its request path with an application route that the exemption would then cover.
+- **Issuer principals keep their mapped scopes (M139a, #576, `@setu-ts/auth-plugin`).** When an
+  issuer's `toPrincipal` returned an object whose `scopes` was inherited or non-enumerable, the
+  strategy's object spread dropped them, so a scoped token escaped `confineScopedTokens`. The mapped
+  scopes are now read once and written back.
+- **`*.localhost` URLs (M139a, #576, `@setu-ts/auth-plugin`, V12-34).** `resource`,
+  `authorizationServers`, sign-in redirect and authorization URLs, SAML `acsUrl` and `idp.ssoUrl`,
+  and passkey origins accept `http` on any `*.localhost` name (RFC 6761 §6.3), so
+  `http://acme.localhost:3000` starts. URLs the server fetches (JWKS, discovery issuers, token and
+  userinfo endpoints) still accept `http` only on `localhost`, `127.0.0.1` or `[::1]`, and the
+  refusal says which rule applied.
+- **The full-stack template rotates the session at login (M139a, #576, `@setu-ts/cli`, V12-11).**
+  The generated `app/routes/_auth/login.tsx` calls `session.regenerate()` before writing the
+  signed-in user, so a session id planted before login no longer carries into the signed-in session.
+  Projects already generated should add the same call.
+- **A failing discovery readiness probe logs why (M139f, #579, `@setu-ts/service-discovery-plugin`,
+  X10-3).** One `warn` names the cause when the failure starts (a Deno `UnknownIssuer` without
+  `DENO_CERT`, an HTTP status), repeats log at `debug`, and the recovery at `info`. A cold-resolve
+  error message ends with the same cause; the `503` body is unchanged. A Kubernetes service-account
+  token or Consul ACL token holding anything but visible ASCII is refused with a fixed message
+  before any request, so `fetch`'s error, which quotes the whole header value, can no longer carry
+  the token into a log. The refusal is a configuration fault, so a request that needs a cold resolve
+  answers `500`, not `503`.
+- **A pg pool acquire timeout reads as saturation (M139f, #579, `@setu-ts/database-plugin`, V8-3).**
+  With `poolStats`, a probe that timed out waiting for a pool client keeps the indicator `up`
+  (`reachable: 'unknown'`) while queries are completing, where `connectionTimeoutMillis` under the
+  2-second probe bound used to fail `/ready` while PostgreSQL was up.
+- **A queue loop outage logs at `warn` and its recovery at `info` (M139f, #579,
+  `@setu-ts/queue-plugin`, X88-9).** The plugin now passes the logger's `warn` and `info`, so the
+  M131a state tracker no longer falls back to `error` and the recovery line is written.
+- **A connection lost under a statement says so (M139f, #579, `@setu-ts/database-plugin`, V12-50).**
+  It is still a `504` `DatabaseTimeoutError`, but its message no longer claims the driver call bound
+  fired.
+- **Alerting advice names `HealthPlugin({ details: true })` (M139f, #579, V12-49).** Seven READMEs
+  that say to alert on a `data.<field>` now say the default `/health` body omits `data`.
 
 - **gRPC server streams arrived as one chunk at the end (V12-39, `@setu-ts/kernel`).** The kernel
   read the whole Connect response before writing it, so five messages sent 500 ms apart reached the

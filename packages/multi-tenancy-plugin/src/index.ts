@@ -42,6 +42,7 @@ export { MemoryTenantDataStore } from './stores/memory-tenant-store.ts';
 
 // Errors.
 export {
+  TenantUnitOfWorkUnsupportedError,
   TenantDataStoreNotReadyError,
   TenantNotResolvedError,
   TenantRegistryUnavailableError,

@@ -155,6 +155,7 @@ export {
   CLIENT_IP_STATE_KEY,
   REQUEST_ORIGIN_STATE_KEY,
   CREDENTIAL_SOURCE_STATE_KEY,
+  CSRF_EXEMPT_STATE_KEY,
   SESSION_STATE_KEY,
   SESSION_TENANT_BINDING_STATE_KEY,
 } from './state-keys.ts';
@@ -453,12 +454,13 @@ export type {
   WrapOptions,
 } from './services/resilience.ts';
 export type { IStorage, PutObjectOptions, SignedUrlOptions } from './services/storage.ts';
-export type { IMailer, MailMessage } from './services/mail.ts';
+export type { IMailer, MailAttachment, MailMessage } from './services/mail.ts';
 export type { ChannelSendResult, INotifier, NotificationMessage } from './services/notification.ts';
 export type { FlagContext, IFeatureFlags } from './services/feature-flags.ts';
 export type {
   IMultiTenancyService,
   ITenant,
+  ITenantUnitOfWork,
   ITenantDataStore,
   ITenantIsolationStrategy,
   ITenantRegistry,

@@ -27,7 +27,9 @@ export function runs(model: LanguageModel) {
 
 Register `RuntimePlugin`, `DatabasePlugin` and
 `IdempotencyPlugin({ transactional: { store: createDatabaseIdempotencyStore(), purge: { schedule: false } } })`
-before this plugin. Scheduled idempotency purging instead needs a scheduler. The run plugin provides
+before this plugin. Without the `transactional` option the plugin refuses to start: `register`
+throws a `TypeError` naming the option, because every tool call runs inside `idempotency.within`.
+Scheduled idempotency purging instead needs a scheduler. The run plugin provides
 `CAPABILITIES.AGENT_RUNS` (`IAgentRunService`); no routes are installed automatically. See the
 [complete route guide](https://github.com/setu-ts/setu-ts/blob/main/docs/durable-runs.md) and
 [public API](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#durable-agent-runs-setu-tscommon--setu-tsagent-runs-plugin--setu-tsdatabase-plugin).

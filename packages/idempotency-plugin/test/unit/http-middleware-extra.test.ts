@@ -95,7 +95,13 @@ function streaming(): ResponseSnapshot {
 function middleware(store: IIdempotencyStore, options: IdempotentRouteOptions, logger?: ILogger) {
   const defaults = resolveDefaults(undefined);
   return createHttpMiddleware(
-    { store, runtime: createClockRuntime(), logger: () => logger, defaults },
+    {
+      transactionalConfigured: false,
+      store,
+      runtime: createClockRuntime(),
+      logger: () => logger,
+      defaults,
+    },
     resolveRouteOptions(options, defaults),
   );
 }

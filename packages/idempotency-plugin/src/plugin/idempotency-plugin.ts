@@ -84,6 +84,7 @@ export function IdempotencyPlugin(options?: IdempotencyPluginOptions): IPlugin {
           ? { state: (): undefined => undefined }
           : setupTransactional(ctx, transactional, logger, PURGE_JOB_NAME);
       const service = new IdempotencyService({
+        transactionalConfigured: transactional !== undefined,
         store,
         runtime: ctx.runtime,
         logger,

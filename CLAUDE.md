@@ -778,7 +778,29 @@ here.
   member that its config calls, `setu workspace broker` and `setu workspace rpc`, and one planner
   behind them, `generate app`, `setu sync` and a member's `setu add`) — complete (PR #568).
 - **Release `v0.12.0`** — cut 2026-11-07 (PR #571); 55 packages.
-- **Next milestone** — to be chosen after the `0.12.0` release.
+- **Milestone 139a** (`auth-plugin` + `common` + `session-plugin` + `mcp-plugin` +
+  `multi-tenancy-plugin` docs + `cli` — identity and authorization a token or a tenant can escape:
+  scoped tokens confined by default, `requireAuth({ credentials })`, `tenantClaim`, `sub` refusal,
+  the request on `local.verify`, the template login's `regenerate()`, MCP exempt from form CSRF,
+  `*.localhost` for non-fetched URLs; V12-37, V12-18, V12-19, V12-11, V12-35, V12-34; ships in
+  `0.13.0`) — complete (PR #576).
+- **Milestone 139c** (`agent-runs-plugin` + `idempotency-plugin` + `vector-store-plugin` +
+  `auth-plugin` + `multi-tenancy-plugin` + `database-plugin` + `mail-plugin` + `common` — AI-layer
+  and data contracts with a missing half: agent-runs refuses without a transactional store,
+  5,000-record `replaceSource`, pgvector index-shape verify, `quota.usage`, tenant repositories in a
+  unit of work, mail attachments; V12-4, V12-9, V12-10, V12-36, V12-20, V12-21; ships in `0.13.0`) —
+  complete (PR #578).
+- **Milestone 139f** (`service-discovery-plugin` + `database-plugin` + `realtime-backplane-plugin`
+  - `queue-plugin` + READMEs — health and failure signals that mislead the operator: the discovery
+    probe logs its cause, a pg acquire timeout reads as saturation, the backplane publisher drops
+    rather than delivers late, queue outages at `warn`/`info`, a lost connection named as one, and
+    `details: true` in alerting advice; X10-3, V8-3, X3-3, X88-9, V12-50, V12-49; ships in `0.13.0`)
+    — complete (PR #579).
+- **Milestone 139b** (`common` + `kernel` + `runtime` + `grpc-plugin` + `cli` — gRPC over HTTP/2:
+  streamed RPC bodies and replies, an HTTP/2 listener beside HTTP/1.1 on Node and Bun, response
+  trailers and native gRPC, `grpcClient` with refused-stream retry; V12-39, V12-40, V12-51; ships in
+  `0.13.0`) — complete (PR pending).
+- **Next milestone** — the remaining M139 letters.
 
 ## Verification (run before declaring any work done)
 

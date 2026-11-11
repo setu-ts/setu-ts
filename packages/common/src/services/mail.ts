@@ -5,6 +5,18 @@
  * @module
  */
 
+/** In-memory attachment; string content is UTF-8 text. @since 0.13.0 */
+export interface MailAttachment {
+  /** Well-formed filename, 1–255 characters, without C0 controls or DEL. @since 0.13.0 */
+  readonly filename: string;
+  /** Attachment bytes, or text to encode as UTF-8. @since 0.13.0 */
+  readonly content: Uint8Array | string;
+  /** MIME type without parameters. @since 0.13.0 */
+  readonly contentType?: string;
+  /** Header-safe id without angle brackets; makes the attachment inline. @since 0.13.0 */
+  readonly contentId?: string;
+}
+
 /**
  * An outgoing email message.
  *
@@ -25,6 +37,8 @@ export interface MailMessage {
   readonly cc?: readonly string[];
   /** Blind-carbon-copy recipients. */
   readonly bcc?: readonly string[];
+  /** In-memory attachments; a contentId supports HTML cid: references. @since 0.13.0 */
+  readonly attachments?: readonly MailAttachment[];
 }
 
 /**

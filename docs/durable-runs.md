@@ -139,7 +139,9 @@ PostgreSQL, `idle_in_transaction_session_timeout` ends a transaction left idle w
 on something else, and `statement_timeout` bounds a single SQL statement that is still running; the
 first covers a hung tool, the second only a slow query. Model deadlines (`timeouts.modelMs`) still
 fail with `execution-failed`. Configuration, store and oversized-result errors fail the run.
-Configure a transactional idempotency store as above.
+Configure a transactional idempotency store as above. Without the `transactional` option the plugin
+refuses to start: `register` throws a `TypeError` naming the option, because every tool call runs
+inside `idempotency.within`.
 
 ## Workers, bounds and storage
 

@@ -321,7 +321,15 @@ export function quotaRefusal(): MiddlewareFunction {
     catch (error) { if (error instanceof QuotaExceededError) respondQuotaExceeded(ctx, error); else throw error; }
   };
 }
+export async function budgetMeter(quota: IQuota, tenantId: string): Promise<{ used: number; remaining: number | undefined; resetsAt: string }> {
+  const { used, remaining, windowEndsAt } = await quota.usage(tenantId);
+  return { used, remaining, resetsAt: new Date(windowEndsAt).toISOString() };
+}
 ```
+
+`budgetMeter` reads the same counter `reserve` charges, so a page showing "40 000 of 200 000 tokens
+this month" needs no second ledger. `usage` never charges, and `remaining` is `undefined` for an
+unlimited key.
 
 For `redisQuota`, construct the injected client with a command bound: ioredis
 `new Redis(url, { commandTimeout: 15_000 })` or `fromNodeRedis(createClient({ url }))`, which bounds

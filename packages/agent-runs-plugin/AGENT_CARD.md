@@ -17,8 +17,9 @@ export function runs(model: LanguageModel) {
 }
 ```
 
-Register a database and transactional idempotency store before this plugin. Resolve the service in
-handlers: `start`, `respond`, `decide`, `cancel`, `get`; call `sweep` from cron on Workers.
+Register a database and transactional idempotency store before this plugin; without `transactional`,
+startup throws a TypeError. Resolve the service in handlers: `start`, `respond`, `decide`, `cancel`,
+`get`; call `sweep` from cron on Workers.
 
 - Model messages commit before tool execution. Tools sent to the SDK have no execution hooks.
 - Every holder write is fenced by a lease version; renewal runs before each model/tool call.

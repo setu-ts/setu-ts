@@ -363,6 +363,7 @@ package fits the plugin architecture.
 | `CAPABILITIES`                        | const     |
 | `CLIENT_IP_STATE_KEY`                 | const     |
 | `CREDENTIAL_SOURCE_STATE_KEY`         | const     |
+| `CSRF_EXEMPT_STATE_KEY`               | const     |
 | `DATA_CLASSIFICATIONS`                | const     |
 | `DEDUPLICATION_ID_HEADER`             | const     |
 | `DEFAULT_SECRET_FIELD_PATTERNS`       | const     |
@@ -585,6 +586,7 @@ package fits the plugin architecture.
 | `ITenantRegistry`                     | interface |
 | `ITenantRepository`                   | interface |
 | `ITenantResolver`                     | interface |
+| `ITenantUnitOfWork`                   | interface |
 | `ITraceDiagnosticsSource`             | interface |
 | `ITransaction`                        | interface |
 | `ITransactionalIdempotencyStore`      | interface |
@@ -601,6 +603,7 @@ package fits the plugin architecture.
 | `IWorkerPool`                         | interface |
 | `JwtSignOptions`                      | interface |
 | `LocalDiagnosticsListenerOptions`     | interface |
+| `MailAttachment`                      | interface |
 | `MailMessage`                         | interface |
 | `MaskOptions`                         | interface |
 | `MessageMetadata`                     | interface |

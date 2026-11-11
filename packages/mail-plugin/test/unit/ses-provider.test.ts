@@ -56,6 +56,83 @@ describe('validateSesClient', () => {
 });
 
 describe('toSesInput', () => {
+  it('M139c maps SES attachments field by field and omits the field when absent', () => {
+    const envelope = { from: 'from@x.com', to: 'to@x.com', subject: 'file' };
+    const plain = toSesInput(envelope) as { Content: { Simple: Record<string, unknown> } };
+    expect(plain.Content.Simple).not.toHaveProperty('Attachments');
+    const bytes = new Uint8Array([0, 255]);
+    const input = toSesInput({
+      ...envelope,
+      attachments: [
+        { filename: 'file', content: bytes },
+        { filename: 'inline', content: bytes, contentId: 'image@x', contentType: 'image/png' },
+      ],
+    }) as typeof plain;
+    expect(input.Content.Simple['Attachments']).toEqual([
+      { FileName: 'file', RawContent: bytes, ContentDisposition: 'ATTACHMENT' },
+      {
+        FileName: 'inline',
+        RawContent: bytes,
+        ContentDisposition: 'INLINE',
+        ContentId: 'image@x',
+        ContentType: 'image/png',
+      },
+    ]);
+  });
+  it('M139c real SES SDK serializes byte attachments through a fake HTTP handler', async (ctx) => {
+    const sdk = await import('@aws-sdk/client-sesv2').catch(() => undefined);
+    if (sdk === undefined) {
+      ctx.skip();
+      return;
+    }
+    let body: unknown;
+    const client = new sdk.SESv2Client({
+      region: 'us-east-1',
+      credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
+      requestHandler: {
+        handle(request: { body?: unknown }) {
+          body = request.body;
+          return Promise.resolve({
+            response: { statusCode: 200, headers: {}, body: new TextEncoder().encode('{}') },
+          });
+        },
+      },
+    });
+    try {
+      const input = toSesInput({
+        from: 'from@x.com',
+        to: 'to@x.com',
+        subject: 'file',
+        attachments: [
+          {
+            filename: 'inline',
+            content: new Uint8Array([0, 255]),
+            contentId: 'image@x',
+            contentType: 'image/png',
+          },
+        ],
+      }) as unknown as import('@aws-sdk/client-sesv2').SendEmailCommandInput;
+      const command = new sdk.SendEmailCommand(input);
+      expect(command.input.Content?.Simple?.Attachments?.[0]?.RawContent).toEqual(
+        new Uint8Array([0, 255]),
+      );
+      await client.send(command);
+      expect(
+        JSON.parse(body instanceof Uint8Array ? new TextDecoder().decode(body) : String(body))
+          .Content.Simple.Attachments,
+      ).toEqual([
+        {
+          FileName: 'inline',
+          RawContent: 'AP8=',
+          ContentDisposition: 'INLINE',
+          ContentId: 'image@x',
+          ContentType: 'image/png',
+        },
+      ]);
+    } finally {
+      client.destroy();
+    }
+  });
   it('maps recipients, cc/bcc, subject, and both bodies to the SES command shape', () => {
     const message: OutgoingMail = {
       from: 'me@x.com',

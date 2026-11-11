@@ -77,6 +77,11 @@ carry the same `sourceId`. Re-running an ingestion with the same chunk ids leave
 document that shrank leaves no stale chunk behind. A record id already used by another source in the
 scope is reassigned to this source; it never leaves the tenant.
 
+One call replaces the WHOLE source and takes at most 5,000 records, so write a document in one call:
+a second call for the same source deletes every record the first one wrote. On pgvector the call is
+one transaction. Qdrant has no transactions, so a failed call can leave part of it written; retry
+the whole call.
+
 Pass `{ version }` as a fifth argument when submissions of one source can be processed out of order,
 as queue retries can be. The version is a non-negative safe integer that grows with each newer
 submission, such as the time the submission was accepted. The write is refused with
@@ -228,20 +233,21 @@ without the field never matches a comparison on it.
 
 ## Limits
 
-| Limit                                | Value             |
-| ------------------------------------ | ----------------- |
-| Dimensions per collection            | 4,096             |
-| Filterable fields per collection     | 10                |
-| Matches per query (`topK`)           | 50                |
-| Records per `upsert`/`replaceSource` | 500               |
-| Ids per `delete`                     | 1,000             |
-| Scope                                | 64 UTF-8 bytes    |
-| Record or source id                  | 256 UTF-8 bytes   |
-| Record `content`                     | 8,192 UTF-8 bytes |
-| String metadata or filter value      | 64 UTF-8 bytes    |
-| Values in one `in` clause            | 100               |
-| `and` nesting depth                  | 4                 |
-| Clauses in one filter                | 32                |
+| Limit                            | Value             |
+| -------------------------------- | ----------------- |
+| Dimensions per collection        | 4,096             |
+| Filterable fields per collection | 10                |
+| Matches per query (`topK`)       | 50                |
+| Records per `upsert`             | 500               |
+| Records per `replaceSource`      | 5,000             |
+| Ids per `delete`                 | 1,000             |
+| Scope                            | 64 UTF-8 bytes    |
+| Record or source id              | 256 UTF-8 bytes   |
+| Record `content`                 | 8,192 UTF-8 bytes |
+| String metadata or filter value  | 64 UTF-8 bytes    |
+| Values in one `in` clause        | 100               |
+| `and` nesting depth              | 4                 |
+| Clauses in one filter            | 32                |
 
 The service enforces every limit before the adapter sees the call, and each value is the tightest of
 the four backends so a request behaves the same everywhere. A vector must have exactly the

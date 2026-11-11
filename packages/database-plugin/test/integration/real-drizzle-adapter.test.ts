@@ -29,6 +29,8 @@ import { RuntimePlugin } from '@setu-ts/runtime';
 import { HealthPlugin } from '@setu-ts/health-plugin';
 import { createDrizzleDatabase, DatabasePlugin, DatabaseService } from '../../src/index.ts';
 import { classifyDriverError } from '../../src/errors/classify.ts';
+import { describeError } from '@setu-ts/common';
+import { probeHitAcquireTimeout } from '../../src/health/database-capacity.ts';
 import {
   DatabaseTimeoutError,
   DatabaseUnavailableError,
@@ -1674,3 +1676,44 @@ it(
     }
   },
 );
+
+describe('DrizzleAdapter over live PostgreSQL — M139f V8-3 acquire timeout', () => {
+  it(
+    'a probe behind a full pool rejects with the acquire anchor, leaves waiting at 0, and sets the flag',
+    { skip: skipLivePg },
+    async () => {
+      const pool = new Pool({ connectionString: livePgUrl!, max: 1, connectionTimeoutMillis: 500 });
+      const options: DrizzleAdapterOptions = {
+        drizzleInstance: createDrizzleDatabase(nodePostgresDrizzle(pool), (database, work) =>
+          database.transaction(work),
+        ),
+        drizzleTables: { Account: pgAccounts },
+        poolStats: () => ({
+          total: pool.totalCount,
+          idle: pool.idleCount,
+          waiting: pool.waitingCount,
+        }),
+      };
+      const adapter = new DrizzleAdapter(options);
+      await adapter.connect();
+      const held = await pool.connect();
+      try {
+        const error: unknown = await adapter.isHealthy!().then(
+          () => undefined,
+          (thrown: unknown) => thrown,
+        );
+        // The real driver's text, wherever Drizzle puts it on the chain.
+        expect(describeError(error)).toContain('timeout exceeded when trying to connect');
+        // The premise of the fix: pg-pool removed the waiter before rejecting,
+        // so the counters alone no longer show saturation.
+        expect(pool.waitingCount).toBe(0);
+        expect(pool.idleCount).toBe(0);
+        expect(probeHitAcquireTimeout(adapter)).toBe(true);
+      } finally {
+        held.release();
+        await adapter.disconnect();
+        await pool.end();
+      }
+    },
+  );
+});

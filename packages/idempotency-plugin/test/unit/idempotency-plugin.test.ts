@@ -4,6 +4,8 @@
  * @module
  */
 import { describe, expect, it } from 'vitest';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
 import type {
   HealthCheckResult,
   IIdempotencyService,
@@ -52,6 +54,49 @@ function fakeContext(options: { failHealth?: boolean } = {}) {
 }
 
 describe('IdempotencyPlugin (M109a §3.14)', () => {
+  it.each([false, true])(
+    'M139c reports transactional configuration %s before onInit',
+    async (configured) => {
+      let verified = false;
+      const store = {
+        verify: () => {
+          verified = true;
+          return Promise.resolve();
+        },
+        find: () => Promise.resolve(undefined),
+        run: <T>() => Promise.reject<T>(new Error('not called')),
+        purge: () => Promise.resolve(0),
+      };
+      const app = createApplication({
+        plugins: [
+          RuntimePlugin(),
+          IdempotencyPlugin(
+            configured ? { transactional: { store, purge: { schedule: false } } } : {},
+          ),
+          {
+            name: 'observe-configuration',
+            version: '1',
+            dependencies: [CAPABILITIES.IDEMPOTENCY],
+            register(ctx) {
+              expect(verified).toBe(false);
+              expect(
+                ctx.services.get<IIdempotencyService>(CAPABILITIES.IDEMPOTENCY).transactional,
+              ).toBe(configured);
+            },
+          },
+        ],
+      });
+      try {
+        await app.start();
+        expect(app.services.get<IIdempotencyService>(CAPABILITIES.IDEMPOTENCY).transactional).toBe(
+          configured,
+        );
+        expect(verified).toBe(configured);
+      } finally {
+        await app.stop();
+      }
+    },
+  );
   it('declares its name, version and capability', () => {
     const plugin = IdempotencyPlugin();
     expect(plugin.name).toBe('idempotency-plugin');

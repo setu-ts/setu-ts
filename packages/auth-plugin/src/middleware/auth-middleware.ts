@@ -30,7 +30,7 @@ import {
 type AuthServiceWithSource = IAuthService & {
   authenticateWithSource: (
     request: IRequest,
-  ) => Promise<{ principal: IPrincipal; credential: 'header' | 'cookie' } | null>;
+  ) => Promise<{ principal: IPrincipal; credential: 'header' | 'cookie' | undefined } | null>;
 };
 
 /**

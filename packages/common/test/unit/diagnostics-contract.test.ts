@@ -487,12 +487,13 @@ describe('M98h authorization contracts', () => {
       'role-permission',
       'role-wildcard',
       'not-held',
+      'token-confined',
       'compound-satisfied',
       'compound-unsatisfied',
     ];
     expect(coverage).toHaveLength(4);
     expect(states).toHaveLength(5);
-    expect(reasons).toHaveLength(9);
+    expect(reasons).toHaveLength(10);
   });
 
   it('registers under the eager authorization-diagnostics capability token', () => {

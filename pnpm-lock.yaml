@@ -2379,6 +2379,9 @@ importers:
       '@setu-ts/runtime':
         specifier: workspace:^
         version: link:../runtime
+      '@setu-ts/session-plugin':
+        specifier: workspace:^
+        version: link:../session-plugin
       '@setu-ts/testing':
         specifier: workspace:^
         version: link:../testing

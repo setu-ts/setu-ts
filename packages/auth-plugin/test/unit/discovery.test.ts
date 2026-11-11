@@ -129,3 +129,50 @@ describe('discovery', () => {
     expect(await t.keySet.keys()).toEqual([KEY]);
   });
 });
+
+describe('M139a sign-in discovery endpoint classification', () => {
+  it.each([
+    ['authorization_endpoint', 'http://acme.localhost/authorize', 302],
+    ['token_endpoint', 'http://acme.localhost/token', 503],
+  ] as const)('classifies %s as browser or fetch', async (field, value, status) => {
+    const { buildSignInApp, discoveryDocument } = await import('../fixtures/sign-in-app.ts');
+    const { recordingLogger } = await import('../fixtures/scoped.ts');
+    const logger = recordingLogger();
+    const t = await buildSignInApp({ logger, discovery: discoveryDocument({ [field]: value }) });
+    try {
+      const result = await t.app.fetch(new Request('http://localhost/auth/idp/login'));
+      expect(result.status).toBe(status);
+      if (field === 'authorization_endpoint')
+        expect(result.headers.get('location')).toContain(value);
+      await result.text();
+      if (field === 'token_endpoint')
+        expect(
+          logger.records.some((record) => record.message.includes('discovery-endpoint-invalid')),
+        ).toBe(true);
+    } finally {
+      await t.app.stop();
+    }
+  });
+
+  it('M139a uses a localhost name as the discovered browser logout endpoint', async () => {
+    const { buildSignInApp, discoveryDocument, CookieJar, followLogin, callback } =
+      await import('../fixtures/sign-in-app.ts');
+    const t = await buildSignInApp({
+      discovery: discoveryDocument({ end_session_endpoint: 'http://acme.localhost/logout' }),
+      oidc: { rpInitiatedLogout: { postLogoutRedirectUri: 'http://localhost/signed-out' } },
+    });
+    try {
+      const jar = new CookieJar();
+      const params = await followLogin(t, jar);
+      const signedIn = await callback(t, jar, { code: 'c', state: params.get('state') ?? '' });
+      expect(signedIn.status).toBe(302);
+      await signedIn.text();
+      const result = await jar.fetch(t.app, '/auth/logout', { method: 'POST' });
+      expect(result.status).toBe(302);
+      expect(result.headers.get('location')).toContain('http://acme.localhost/logout?');
+      await result.text();
+    } finally {
+      await t.app.stop();
+    }
+  });
+});

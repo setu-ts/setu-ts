@@ -88,6 +88,29 @@ tenant: localization's `tenantLocale` at 45, and any cache, rate-limit or featur
 [session tenant binding](https://github.com/setu-ts/setu-ts/blob/main/packages/session-plugin/README.md#tenant-binding)
 for the session check that also handles late resolution.
 
+### Identity bound to the tenant
+
+Resolving a tenant does not by itself stop one tenant's identity acting on another tenant's host.
+Bind each credential to it:
+
+- **Bearer tokens.** Set `tenantClaim` on auth-plugin's `jwt` option and on each `issuers` entry. A
+  token whose verified claim differs from the request's tenant is then refused, and so is a token
+  carrying the claim on a request with no tenant. So the tenant must be resolved before
+  authentication runs (priority 300); the built-in resolvers run at 40. Do not combine `tenantClaim`
+  with the principal-derived resolver at priority 310 above: it resolves after authentication, so
+  every bound token would be refused. See auth-plugin's
+  [Binding tokens to the tenant](https://github.com/setu-ts/setu-ts/blob/main/packages/auth-plugin/README.md#binding-tokens-to-the-tenant).
+- **Password sign-in.** `local.verify(identifier, secret, request)` and
+  `verifyCredentials(credentials, request)` receive the request. Pass `ctx.request` and look the
+  user up by `(request.tenant.id, identifier)`. A lookup by email alone lets a user of one tenant
+  sign in on another tenant's host, and the session is then sealed to that host's tenant while
+  carrying the other tenant's principal.
+- **API keys.** `apiKey.validate(key, request)` receives the request: look the key up within
+  `request.tenant`. `tenantClaim` does not cover API keys.
+- **Sessions.** The session plugin's tenant binding, on by default, seals each session to the tenant
+  that created it. It compares only when both the session and the request carry a tenant, and
+  `tenantBinding: false` turns it off.
+
 `ITenantRepository` offers `findAll()`, `findById`, `find(filter)`, `create`, `update`, and
 `delete`, plus `updateWhere(id, where, data)` and `deleteWhere(id, where)` when the configured store
 supports conditional writes (the shipped memory store and `createDatabaseTenantDataStore()` both do,
@@ -135,6 +158,36 @@ You may also pass a custom `ITenantIsolationStrategy`.
 A **`register()` warning** fires when a non-`'column-per-tenant'` strategy is selected and no
 `dataStore` is injected: the default memory store cannot deliver physical isolation, so the
 selection is flagged rather than silently logical-only.
+
+## Transactions
+
+Pass the unit of work as the third argument to `getRepository` or `getRepositoryFor`, and the tenant
+repository joins that transaction:
+
+```typescript
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IMultiTenancyService, IRequestContext } from '@setu-ts/common';
+import type { IDatabaseService } from '@setu-ts/database-plugin';
+
+export async function placeOrder(ctx: IRequestContext): Promise<void> {
+  const db = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+  const tenancy = ctx.services.get<IMultiTenancyService>(CAPABILITIES.MULTI_TENANCY);
+  await db.transaction(async (uow) => {
+    await tenancy.getRepository(ctx, 'Order', uow).create({ id: 'o-1', total: 40 });
+    await tenancy.getRepository(ctx, 'OrderLine', uow).create({ id: 'l-1', orderId: 'o-1' });
+  });
+}
+```
+
+Both writes commit or roll back together, and each keeps every tenant guard: the tenant column is
+stamped on create and stripped from updates, and another tenant's row is never read, updated or
+deleted. Only a store with `withUnitOfWork` can join a transaction. `createDatabaseTenantDataStore`
+has it; `MemoryTenantDataStore` does not, so passing a unit of work with it throws
+`TenantUnitOfWorkUnsupportedError` (status hint 500). On a deferred-write transaction (Cloudflare
+D1) writes are buffered until commit, so a read or an update inside the transaction does not see a
+row the same transaction created. The memory database's transaction repositories have no conditional
+writes, so `updateWhere` and `deleteWhere` through a unit of work refuse there with
+`conditional-write` (501); pass the unit of work only to the plain reads and writes on that adapter.
 
 ## Which tenants exist
 
@@ -267,41 +320,42 @@ middleware publishes the active prefix under `TENANT_CACHE_PREFIX_STATE_KEY`, re
 
 ## Exports
 
-| Export                           | Kind      |
-| -------------------------------- | --------- |
-| `getTenantCachePrefix`           | function  |
-| `MultiTenancyPlugin`             | function  |
-| `tenantMiddleware`               | function  |
-| `ColumnPerTenant`                | class     |
-| `DatabasePerTenant`              | class     |
-| `HeaderResolver`                 | class     |
-| `JwtResolver`                    | class     |
-| `MemoryTenantDataStore`          | class     |
-| `PathResolver`                   | class     |
-| `SchemaPerTenant`                | class     |
-| `SubdomainResolver`              | class     |
-| `TenantDataStoreNotReadyError`   | class     |
-| `TenantNotResolvedError`         | class     |
-| `TenantRegistryUnavailableError` | class     |
-| `CAPABILITIES`                   | const     |
-| `TENANT_CACHE_PREFIX_STATE_KEY`  | const     |
-| `HeaderResolverOptions`          | interface |
-| `IMultiTenancyService`           | interface |
-| `ITenant`                        | interface |
-| `ITenantDataStore`               | interface |
-| `ITenantRegistry`                | interface |
-| `ITenantRepository`              | interface |
-| `ITenantResolver`                | interface |
-| `JwtResolverOptions`             | interface |
-| `MemoryTenantDataStoreOptions`   | interface |
-| `MultiTenancyPluginOptions`      | interface |
-| `PathResolverOptions`            | interface |
-| `SubdomainResolverOptions`       | interface |
-| `TenantCacheOptions`             | interface |
-| `TenantRegistryCacheOptions`     | interface |
-| `DatabaseStrategyKind`           | type      |
-| `ITenantIsolationStrategy`       | type      |
-| `ResolverConfig`                 | type      |
+| Export                             | Kind      |
+| ---------------------------------- | --------- |
+| `getTenantCachePrefix`             | function  |
+| `MultiTenancyPlugin`               | function  |
+| `tenantMiddleware`                 | function  |
+| `ColumnPerTenant`                  | class     |
+| `DatabasePerTenant`                | class     |
+| `HeaderResolver`                   | class     |
+| `JwtResolver`                      | class     |
+| `MemoryTenantDataStore`            | class     |
+| `PathResolver`                     | class     |
+| `SchemaPerTenant`                  | class     |
+| `SubdomainResolver`                | class     |
+| `TenantDataStoreNotReadyError`     | class     |
+| `TenantNotResolvedError`           | class     |
+| `TenantRegistryUnavailableError`   | class     |
+| `TenantUnitOfWorkUnsupportedError` | class     |
+| `CAPABILITIES`                     | const     |
+| `TENANT_CACHE_PREFIX_STATE_KEY`    | const     |
+| `HeaderResolverOptions`            | interface |
+| `IMultiTenancyService`             | interface |
+| `ITenant`                          | interface |
+| `ITenantDataStore`                 | interface |
+| `ITenantRegistry`                  | interface |
+| `ITenantRepository`                | interface |
+| `ITenantResolver`                  | interface |
+| `JwtResolverOptions`               | interface |
+| `MemoryTenantDataStoreOptions`     | interface |
+| `MultiTenancyPluginOptions`        | interface |
+| `PathResolverOptions`              | interface |
+| `SubdomainResolverOptions`         | interface |
+| `TenantCacheOptions`               | interface |
+| `TenantRegistryCacheOptions`       | interface |
+| `DatabaseStrategyKind`             | type      |
+| `ITenantIsolationStrategy`         | type      |
+| `ResolverConfig`                   | type      |
 
 Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.

@@ -18,7 +18,10 @@ import { describe, expect, it } from 'vitest';
 import type { TargetRuntime } from '../../src/constants.ts';
 import { FULL_STACK_TEMPLATE } from '../../src/templates/full-stack.ts';
 import { projectFiles, resolveHost } from '../../src/templates/project-files.ts';
-import { FULL_STACK_APP_FILES } from '../../src/templates/full-stack-app-files.ts';
+import {
+  FULL_STACK_APP_FILES,
+  FULL_STACK_README_SECTION,
+} from '../../src/templates/full-stack-app-files.ts';
 import {
   FULL_STACK_NPM_DEPENDENCIES,
   FULL_STACK_NPM_DEV_DEPENDENCIES,
@@ -794,4 +797,96 @@ describe('full-stack styling foundation (M123)', () => {
     );
     expect(contentsOf('app/app.css')).toContain('--primary:');
   });
+});
+
+it('M139a rotates the session before the template login raises privileges', () => {
+  const login = FULL_STACK_APP_FILES.find(
+    (file) => file.path === 'app/routes/_auth/login.tsx',
+  )!.contents;
+  const rotate = login.indexOf('session.regenerate()');
+  expect(rotate).toBeGreaterThanOrEqual(0);
+  expect(rotate).toBeLessThan(login.indexOf("session.set('userEmail'"));
+  expect(login).toContain('authSession.signIn');
+});
+
+it('renders workspace development ports for a full-stack member', () => {
+  const readme = FULL_STACK_README_SECTION('setu', 'node', true);
+  expect(readme).toContain('Application and Vite ports come from `setu.workspace.json`');
+});
+
+it('M139a executes the generated login with a real session and rotates its id', async () => {
+  const { transform } = await import('esbuild');
+  const { createApplication } = await import('@setu-ts/kernel');
+  const { RuntimePlugin } = await import('@setu-ts/runtime');
+  const { SessionPlugin, getSession } = await import('@setu-ts/session-plugin');
+  const login = contentsOf('app/routes/_auth/login.tsx');
+  const action = login.slice(
+    login.indexOf('export async function action('),
+    login.indexOf('export default function LoginRoute'),
+  );
+  const compiled = await transform(
+    `
+    const getSession = (context) => context.session;
+    const redirect = (path) => new Response(null, { status: 302, headers: { location: path } });
+    ${action}
+  `,
+    { loader: 'ts', format: 'esm' },
+  );
+  const module = (await import(`data:text/javascript;base64,${btoa(compiled.code)}`)) as {
+    action: (args: {
+      request: Request;
+      context: { session: import('@setu-ts/common').ISession };
+    }) => Promise<Response>;
+  };
+  const app = createApplication({
+    plugins: [
+      RuntimePlugin(),
+      SessionPlugin({
+        secret: 'm139a-session-secret-at-least-32-characters',
+        cookie: { secure: false },
+      }),
+    ],
+  });
+  const ids: string[] = [];
+  app.router.get('/before', (ctx) => {
+    const session = getSession(ctx);
+    ids.push(session.id);
+    session.set('preLogin', true);
+    return ctx.response.send();
+  });
+  app.router.post('/login', async (ctx) => {
+    const session = getSession(ctx);
+    expect(session.id).toBe(ids[0]);
+    const result = await module.action({
+      request: new Request('http://localhost/login', {
+        method: 'POST',
+        body: new URLSearchParams({ email: 'ada@example.com' }),
+      }),
+      context: { session },
+    });
+    ids.push(session.id);
+    expect(session.get('userEmail')).toBe('ada@example.com');
+    return ctx.response
+      .status(result.status)
+      .header('Location', result.headers.get('location') ?? '')
+      .send();
+  });
+  await app.start();
+  try {
+    const before = await app.fetch(new Request('http://localhost/before'));
+    const cookie = before.headers
+      .getSetCookie()
+      .map((line) => line.split(';')[0])
+      .join('; ');
+    await before.text();
+    const after = await app.fetch(
+      new Request('http://localhost/login', { method: 'POST', headers: { cookie } }),
+    );
+    expect(after.status).toBe(302);
+    expect(ids).toHaveLength(2);
+    expect(ids[1]).not.toBe(ids[0]);
+    await after.text();
+  } finally {
+    await app.stop();
+  }
 });

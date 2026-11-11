@@ -105,6 +105,11 @@ export function AgentRunsPlugin(options: AgentRunsPluginOptions): IPlugin {
     dependencies: [CAPABILITIES.RUNTIME, CAPABILITIES.IDEMPOTENCY],
     optionalDependencies: [CAPABILITIES.LOGGER],
     async register(ctx: IPluginContext): Promise<void> {
+      const idempotency = ctx.services.get<IIdempotencyService>(CAPABILITIES.IDEMPOTENCY);
+      if (idempotency.transactional !== true)
+        throw new TypeError(
+          'Agent runs: register IdempotencyPlugin with a transactional store (transactional: { store: createDatabaseIdempotencyStore(), purge: { schedule: false } }, or register a scheduler) before this plugin.',
+        );
       let timer: TimerHandle | undefined;
       // eslint-disable-next-line prefer-const -- Failed startup closes before service construction.
       let service: AgentRunService | undefined;
@@ -123,7 +128,7 @@ export function AgentRunsPlugin(options: AgentRunsPluginOptions): IPlugin {
         store,
         runtime: ctx.runtime,
         services: ctx.services,
-        idempotency: ctx.services.get<IIdempotencyService>(CAPABILITIES.IDEMPOTENCY),
+        idempotency,
         ai,
         definitions,
         options: bounds,

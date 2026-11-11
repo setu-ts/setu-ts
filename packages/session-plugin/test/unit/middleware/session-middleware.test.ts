@@ -241,3 +241,40 @@ describe('sessionMiddleware', () => {
     });
   });
 });
+
+it('M139a never commits a session on an explicitly exempted request', async () => {
+  const { middleware } = await makeMiddleware();
+  const { ctx, response } = makeContext();
+  await middleware(ctx, async () => {
+    ctx.state.set('session-plugin:csrf-exempt', true);
+    const { applyCsrfExemption } = await import('../../../src/csrf/exclude.ts');
+    const { resolveCsrfConfig } = await import('../../../src/options.ts');
+    expect(applyCsrfExemption(ctx, resolveCsrfConfig({}), [])).toBe(true);
+    (ctx.state.get(SESSION_STATE_KEY) as ISession).set('planted', 'value');
+  });
+  expect(response.headers.has('set-cookie')).toBe(false);
+});
+
+it('M139a commits no session for an exempted request even without form CSRF', async () => {
+  // No form-CSRF middleware runs here, so nothing sets the internal no-commit key:
+  // the in-process marker alone must keep the session from being committed.
+  const { middleware } = await makeMiddleware();
+  const { ctx, response } = makeContext();
+  await middleware(ctx, () => {
+    ctx.state.set('session-plugin:csrf-exempt', true);
+    (ctx.state.get(SESSION_STATE_KEY) as ISession).set('planted', 'value');
+    return Promise.resolve();
+  });
+  expect(response.headers.has('set-cookie')).toBe(false);
+});
+
+it('M139a still commits a session when the marker is anything but boolean true', async () => {
+  const { middleware } = await makeMiddleware();
+  const { ctx, response } = makeContext();
+  await middleware(ctx, () => {
+    ctx.state.set('session-plugin:csrf-exempt', 'true');
+    (ctx.state.get(SESSION_STATE_KEY) as ISession).set('kept', 'value');
+    return Promise.resolve();
+  });
+  expect(response.headers.has('set-cookie')).toBe(true);
+});

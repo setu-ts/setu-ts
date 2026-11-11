@@ -166,4 +166,7 @@ Every export and option is documented in
 
 On runtimes without a filesystem, `static-files` reports `up` with
 `data: { fs: false, detail: 'no file system on this runtime' }`, keeping `/ready` at 200. No static
-route is registered. Monitor `data.fs` if files are required.
+route is registered. Monitor `data.fs` if files are required. `/health` includes `data` only with
+`HealthPlugin({ details: true })`; the default body carries each check's `status` alone. Detailed
+reports expose every indicator's data, so protect the health endpoints when they carry it
+([Statuses](https://github.com/setu-ts/setu-ts/blob/main/packages/health-plugin/README.md#statuses)).

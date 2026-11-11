@@ -512,7 +512,8 @@ jobs:
         run: pnpm test:coverage --no-tooling cli --shard 1/3
 
       - uses: actions/upload-artifact@v4
-        if: matrix.shard == 'cli-1'
+        # always(): a failing shard's blob is what lets cli-coverage name the failing tests.
+        if: always() && matrix.shard == 'cli-1'
         with:
           name: cli-blob-1
           path: .vitest-reports/cli/blob-1.json
@@ -525,7 +526,8 @@ jobs:
         run: pnpm test:coverage --no-tooling cli --shard 2/3
 
       - uses: actions/upload-artifact@v4
-        if: matrix.shard == 'cli-2'
+        # always(): a failing shard's blob is what lets cli-coverage name the failing tests.
+        if: always() && matrix.shard == 'cli-2'
         with:
           name: cli-blob-2
           path: .vitest-reports/cli/blob-2.json
@@ -538,7 +540,8 @@ jobs:
         run: pnpm test:coverage --no-tooling cli --shard 3/3
 
       - uses: actions/upload-artifact@v4
-        if: matrix.shard == 'cli-3'
+        # always(): a failing shard's blob is what lets cli-coverage name the failing tests.
+        if: always() && matrix.shard == 'cli-3'
         with:
           name: cli-blob-3
           path: .vitest-reports/cli/blob-3.json

@@ -31,6 +31,7 @@ import {
   scopeCondition,
   scopedFilter,
 } from './qdrant-filter.ts';
+import { MAX_RECORDS_PER_CALL } from '../../services/limits.ts';
 
 const CLIENT_METHODS = [
   'collectionExists',
@@ -212,7 +213,7 @@ export class QdrantVectorStore implements IVectorStoreAdapter {
   /**
    * @inheritdoc
    *
-   * Qdrant has no transactions: the write and the stale-delete are two calls,
+   * Qdrant has no transactions: the write slices precede the stale-delete,
    * so two replacements of the SAME source must not run at once (one could
    * delete the other's records). Serialise them per source, e.g. one queue job
    * per document at a time, or pass a `version`.
@@ -234,7 +235,8 @@ export class QdrantVectorStore implements IVectorStoreAdapter {
     const source = [scopeCondition(scope), { key: SOURCE_KEY, match: { value: sourceId } }];
     const kept = await Promise.all(records.map((record) => this.#pointId(scope, record.id)));
     if (version === undefined) {
-      if (records.length > 0) await this.upsert(spec, scope, records);
+      for (let start = 0; start < records.length; start += MAX_RECORDS_PER_CALL)
+        await this.upsert(spec, scope, records.slice(start, start + MAX_RECORDS_PER_CALL));
       await this.#deleteSource(name, { must: source, ...notKept(kept) });
       return;
     }
@@ -243,9 +245,11 @@ export class QdrantVectorStore implements IVectorStoreAdapter {
     // are inserted, and a point of another source is reassigned as usual.
     const newer = { key: VERSION_KEY, range: { gt: version } };
     const newerOfSource = { must: [source[1], newer] };
-    if (records.length > 0) {
+    for (let start = 0; start < records.length; start += MAX_RECORDS_PER_CALL) {
       const points = await Promise.all(
-        records.map((record) => this.#point(scope, record, version)),
+        records
+          .slice(start, start + MAX_RECORDS_PER_CALL)
+          .map((record) => this.#point(scope, record, version)),
       );
       await this.#run(() =>
         this.#client.upsert(name, {

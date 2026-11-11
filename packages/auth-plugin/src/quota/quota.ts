@@ -14,6 +14,8 @@ export type QuotaReservation = {
 
 /** Atomic storage port for weighted quotas. @since 0.12.0 */
 export interface IQuotaStore {
+  /** Reads used units without charging; zero when absent or expired. @since 0.13.0 */
+  read(key: string, windowId: string): Promise<number>;
   /** Atomically admits and adds amount only if the limit permits it. */
   reserve(
     key: string,
@@ -44,6 +46,8 @@ export type QuotaOptions = {
 
 /** Reserves units before work, then reconciles actual usage once. @since 0.12.0 */
 export interface IQuota {
+  /** Reads the current window without charging. @since 0.13.0 */
+  usage(key: string): Promise<QuotaUsage>;
   /** Reserves units, or throws QuotaExceededError without charging. */
   reserve(key: string, amount: number): Promise<QuotaReservation>;
   /** Settles an issued receipt once; fabricated or foreign receipts throw TypeError. */
@@ -52,7 +56,39 @@ export interface IQuota {
   release(reservation: QuotaReservation): Promise<void>;
 }
 
+/** Current usage and epoch-millisecond reset time. @since 0.13.0 */
+export type QuotaUsage = {
+  /** Units already used in this window. @since 0.13.0 */
+  readonly used: number;
+  /** Resolved limit, or undefined for unlimited. @since 0.13.0 */
+  readonly limit: number | undefined;
+  /** Non-negative units left, or undefined for unlimited. @since 0.13.0 */
+  readonly remaining: number | undefined;
+  /** Epoch-millisecond end of this window. @since 0.13.0 */
+  readonly windowEndsAt: number;
+};
+
 const DAY_MS = 86_400_000;
+const encoder = new TextEncoder();
+
+function validateKey(key: string): void {
+  if (
+    typeof key !== 'string' ||
+    key.length === 0 ||
+    !key.isWellFormed() ||
+    encoder.encode(key).byteLength > 512
+  )
+    throw new TypeError('Quota key must be well-formed, non-empty and at most 512 UTF-8 bytes');
+}
+
+async function resolveLimit(
+  limit: QuotaOptions['limit'],
+  key: string,
+): Promise<number | undefined> {
+  const resolved = typeof limit === 'function' ? await limit(key) : limit;
+  if (resolved !== undefined) validateAmount(resolved);
+  return resolved;
+}
 
 function validateAmount(value: number): void {
   if (!Number.isSafeInteger(value) || value < 0) {
@@ -107,7 +143,6 @@ export function createQuota(options: QuotaOptions): IQuota {
   const issued = new WeakSet<QuotaReservation>();
   const settled = new WeakSet<QuotaReservation>();
   const expiries = new WeakMap<QuotaReservation, number>();
-  const encoder = new TextEncoder();
 
   async function settle(reservation: QuotaReservation, actual: number): Promise<void> {
     validateAmount(actual);
@@ -125,18 +160,22 @@ export function createQuota(options: QuotaOptions): IQuota {
   }
 
   return {
+    async usage(key): Promise<QuotaUsage> {
+      validateKey(key);
+      const resolvedLimit = await resolveLimit(limit, key);
+      const period = currentWindow(runtime.now(), window);
+      const used = await store.read(`${name}:${key}`, period.id);
+      return {
+        used,
+        limit: resolvedLimit,
+        remaining: resolvedLimit === undefined ? undefined : Math.max(0, resolvedLimit - used),
+        windowEndsAt: period.end,
+      };
+    },
     async reserve(key, amount): Promise<QuotaReservation> {
       validateAmount(amount);
-      if (
-        typeof key !== 'string' ||
-        key.length === 0 ||
-        !key.isWellFormed() ||
-        encoder.encode(key).byteLength > 512
-      ) {
-        throw new TypeError('Quota key must be well-formed, non-empty and at most 512 UTF-8 bytes');
-      }
-      const resolvedLimit = typeof limit === 'function' ? await limit(key) : limit;
-      if (resolvedLimit !== undefined) validateAmount(resolvedLimit);
+      validateKey(key);
+      const resolvedLimit = await resolveLimit(limit, key);
       const now = runtime.now();
       const period = currentWindow(now, window);
       const result = await store.reserve(

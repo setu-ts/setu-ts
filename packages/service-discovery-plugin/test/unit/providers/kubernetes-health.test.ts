@@ -19,17 +19,21 @@ describe('KubernetesProvider health (M70c)', () => {
     );
   });
 
-  it('is unreachable when the API answers non-2xx', async () => {
+  it('rejects with the status when the API answers non-2xx (M139f X10-3)', async () => {
     const http = createFakeHttp([{ status: 403, text: 'forbidden' }]);
     const provider = new KubernetesProvider(OPTIONS, http, createFakeRuntime());
-    expect(await provider.isHealthy()).toBe(false);
+    await expect(provider.isHealthy()).rejects.toThrow(
+      new Error('Kubernetes EndpointSlice probe failed with HTTP 403'),
+    );
   });
 
-  it('is unreachable on the TLS rejection shape X10-3 observed', async () => {
+  it('rejects with the original TLS error X10-3 observed, not a bare false', async () => {
     // An in-cluster API server whose CA plain fetch rejects: the transport
-    // throws, and the probe must surface that as `down`, not swallow it.
-    const http = createFakeHttp([{ error: new Error('UnknownIssuer') }]);
+    // throws, and the probe hands that exact error on so the service can log
+    // the cause instead of swallowing it.
+    const tls = new Error('UnknownIssuer');
+    const http = createFakeHttp([{ error: tls }]);
     const provider = new KubernetesProvider(OPTIONS, http, createFakeRuntime());
-    expect(await provider.isHealthy()).toBe(false);
+    await expect(provider.isHealthy()).rejects.toBe(tls);
   });
 });

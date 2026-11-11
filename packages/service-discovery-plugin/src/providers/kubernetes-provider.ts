@@ -6,6 +6,7 @@
 import type { IRuntimeServices, ServiceInstance, Unsubscribe } from '@setu-ts/common';
 import type { DiscoveryProvider, IDiscoveryHttp } from '../interfaces/index.ts';
 import { DiscoveryUnavailableError } from '../errors.ts';
+import { headerSafeToken } from '../http/header-token.ts';
 import { watchKubernetesService } from './kubernetes-watch.ts';
 
 /** Where the projected service-account token is mounted in every pod. */
@@ -109,15 +110,17 @@ export class KubernetesProvider implements DiscoveryProvider {
    * @returns The `Authorization` header value
    * @throws {DiscoveryUnavailableError} If the projected token file does not
    * exist (not running in a pod); configure token and apiServer explicitly.
-   * Any other read failure is rethrown unchanged.
+   * Any other read failure is rethrown unchanged. Also when the token holds a
+   * character an HTTP header value cannot carry, with a fixed message that
+   * never contains the token (M139f audit M1)
    */
   async authHeader(): Promise<string> {
     if (this.#options.token !== undefined) {
-      return `Bearer ${this.#options.token}`;
+      return bearer(this.#options.token);
     }
     const now = this.#runtime.hrtime();
     if (this.#cachedToken !== null && now - this.#cachedToken.stampMs < TOKEN_TTL_MS) {
-      return `Bearer ${this.#cachedToken.value}`;
+      return bearer(this.#cachedToken.value);
     }
     // `createProvider` refuses this configuration at startup, but this class is
     // exported, so a caller constructing it directly reaches here. Checking
@@ -146,8 +149,9 @@ export class KubernetesProvider implements DiscoveryProvider {
       );
     }
     const value = new TextDecoder().decode(bytes).trim();
+    const header = bearer(value);
     this.#cachedToken = { value, stampMs: now };
-    return `Bearer ${value}`;
+    return header;
   }
 
   /**
@@ -206,6 +210,13 @@ export class KubernetesProvider implements DiscoveryProvider {
    * existing seam. This is the probe that makes X10-3 visible: an `UnknownIssuer`
    * TLS rejection surfaces here as `down`. 2xx means the API is reachable.
    * The runtime aborts the request after 2 s, including a hung response body.
+   *
+   * M139f X10-3: a failure rejects with its reason instead of resolving
+   * `false`, so the service can log what is wrong (the TLS cause, the HTTP
+   * status) rather than only that something is.
+   *
+   * @returns `true` when the API server answered 2xx
+   * @throws {Error} The fetch rejection, the abort, or a non-2xx status
    */
   async isHealthy(): Promise<boolean> {
     const controller = new AbortController();
@@ -218,9 +229,10 @@ export class KubernetesProvider implements DiscoveryProvider {
         headers: { Authorization: await this.authHeader() },
         signal: controller.signal,
       });
-      return response.ok;
-    } catch {
-      return false;
+      if (!response.ok) {
+        throw new Error(`Kubernetes EndpointSlice probe failed with HTTP ${response.status}`);
+      }
+      return true;
     } finally {
       this.#runtime.clearTimeout(timer);
     }
@@ -288,4 +300,21 @@ export function isMissingFile(error: unknown): boolean {
     name === 'NotFound' ||
     (typeof message === 'string' && message.startsWith('ENOENT'))
   );
+}
+
+/**
+ * Builds the `Authorization` value through {@linkcode headerSafeToken}, so a
+ * token `fetch` would reject never reaches its error (M139f audit M1).
+ *
+ * @param token - The configured or projected token
+ * @returns `Bearer <token>`
+ * @throws {DiscoveryUnavailableError} When the token holds a character outside
+ *   visible ASCII
+ */
+function bearer(token: string): string {
+  return `Bearer ${headerSafeToken(
+    token,
+    'The Kubernetes service-account token contains a character an HTTP header cannot carry; ' +
+      'check the token option or the projected token file.',
+  )}`;
 }

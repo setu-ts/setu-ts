@@ -57,6 +57,7 @@
     "@setu-ts/idempotency-plugin": "workspace:^",
     "@setu-ts/kernel": "workspace:^",
     "@setu-ts/runtime": "workspace:^",
+    "@setu-ts/session-plugin": "workspace:^",
     "@setu-ts/testing": "workspace:^",
     "@setu-ts/validation-plugin": "workspace:^",
     "@types/node": "^24",

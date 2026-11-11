@@ -14,7 +14,7 @@ import { CREDENTIAL_SOURCE_STATE_KEY, SESSION_STATE_KEY } from '@setu-ts/common'
 
 import {
   applyCsrfExemption,
-  BEARER_EXEMPT_STATE_KEY,
+  NO_COMMIT_STATE_KEY,
   isBearerRequest,
   isCsrfExempt,
 } from '../../../src/csrf/exclude.ts';
@@ -166,18 +166,29 @@ describe('applyCsrfExemption marks only a bearer exemption (M113e, L4)', () => {
   it('marks a request the bearer rule exempts', () => {
     const state = stateFor('header', true);
     expect(applyCsrfExemption(ctx('/api', 'Bearer x', state), config, undefined)).toBe(true);
-    expect(state.get(BEARER_EXEMPT_STATE_KEY)).toBe(true);
+    expect(state.get(NO_COMMIT_STATE_KEY)).toBe(true);
   });
 
   it('does not mark a path exclusion', () => {
     const state = stateFor(undefined);
     expect(applyCsrfExemption(ctx('/rpc', undefined, state), config, ['/rpc'])).toBe(true);
-    expect(state.has(BEARER_EXEMPT_STATE_KEY)).toBe(false);
+    expect(state.has(NO_COMMIT_STATE_KEY)).toBe(false);
   });
 
   it('does not mark a request that is verified', () => {
     const state = stateFor('header', false);
     expect(applyCsrfExemption(ctx('/api', 'Bearer x', state), config, undefined)).toBe(false);
-    expect(state.has(BEARER_EXEMPT_STATE_KEY)).toBe(false);
+    expect(state.has(NO_COMMIT_STATE_KEY)).toBe(false);
+  });
+});
+
+describe('M139a explicit in-process CSRF flag', () => {
+  it.each([true, undefined, 'true', false])('honours only boolean true: %j', (flag) => {
+    const request = ctx('/mcp');
+    if (flag !== undefined) request.state.set('session-plugin:csrf-exempt', flag);
+    const config = resolveCsrfConfig({});
+    expect(isCsrfExempt(request, config, [])).toBe(flag === true);
+    expect(applyCsrfExemption(request, config, [])).toBe(flag === true);
+    expect(request.state.get(NO_COMMIT_STATE_KEY)).toBe(flag === true ? true : undefined);
   });
 });

@@ -6,6 +6,7 @@
  * @module
  */
 import type { IMailHttp, MailProvider, OutgoingMail } from '../interfaces/index.ts';
+import { toBase64 } from './encoding.ts';
 
 /** Default SendGrid v3 send endpoint. */
 const DEFAULT_ENDPOINT = 'https://api.sendgrid.com/v3/mail/send';
@@ -51,6 +52,17 @@ export function toSendGridBody(message: OutgoingMail): Record<string, unknown> {
     from: { email: message.from },
     subject: message.subject,
     content,
+    ...(message.attachments === undefined
+      ? {}
+      : {
+          attachments: message.attachments.map((attachment) => ({
+            content: toBase64(attachment.content),
+            filename: attachment.filename,
+            disposition: attachment.contentId === undefined ? 'attachment' : 'inline',
+            ...(attachment.contentType === undefined ? {} : { type: attachment.contentType }),
+            ...(attachment.contentId === undefined ? {} : { content_id: attachment.contentId }),
+          })),
+        }),
   };
 }
 
