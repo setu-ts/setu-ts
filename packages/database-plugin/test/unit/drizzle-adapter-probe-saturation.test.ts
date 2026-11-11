@@ -338,6 +338,28 @@ describe('M139f V8-3: the probe remembers a pool acquire timeout', () => {
     expect(probeHitAcquireTimeout(adapter)).toBe(false);
   });
 
+  it('ignores an older probe that times out after a newer probe began', async () => {
+    const pending: Array<(error: Error) => void> = [];
+    const { adapter } = makeAdapter(
+      () => new Promise((_resolve, reject) => pending.push(reject)),
+      idle,
+    );
+    await adapter.connect();
+
+    const older = adapter.isHealthy!();
+    const newer = adapter.isHealthy!();
+    await Promise.resolve();
+    expect(pending).toHaveLength(2);
+
+    pending[0]!(new Error(POOL_TIMEOUT));
+    await expect(older).rejects.toThrow('Failed query');
+    expect(probeHitAcquireTimeout(adapter)).toBe(false);
+
+    pending[1]!(new Error(POOL_TIMEOUT));
+    await expect(newer).rejects.toThrow('Failed query');
+    expect(probeHitAcquireTimeout(adapter)).toBe(true);
+  });
+
   it('does not set the flag for a new-connection handshake timeout', async () => {
     const { adapter } = makeAdapter(
       () => Promise.reject(new Error('Connection terminated due to connection timeout')),

@@ -244,6 +244,12 @@ export class DrizzleAdapter implements IDatabaseAdapter {
   #nativeHandleIssued = false;
   /** Whether the last reachability probe timed out waiting for a pool client (M139f V8-3). */
   #probeAcquireTimedOut = false;
+  /**
+   * The latest probe's token. A probe whose pool wait outlasts the health
+   * cache can settle after a newer probe began; only the latest may write
+   * {@link #probeAcquireTimedOut}.
+   */
+  #probeGeneration: object | null = null;
 
   private _db: DrizzleInstance | null = null;
   private _configuredDatabase: DrizzleDatabaseIdentity | null = null;
@@ -434,6 +440,8 @@ export class DrizzleAdapter implements IDatabaseAdapter {
    * saturated pool (`up`, `reachable: 'unknown'`) from an unanswered probe.
    */
   async #probeWithRawQuery(): Promise<boolean> {
+    const generation = {};
+    this.#probeGeneration = generation;
     this.#probeAcquireTimedOut = false;
     const capacity = readPoolCapacity(this);
     if (capacity !== undefined && isSaturated(capacity)) {
@@ -444,7 +452,9 @@ export class DrizzleAdapter implements IDatabaseAdapter {
       return true;
     } catch (error) {
       if (isUnansweredConnect(error)) {
-        this.#probeAcquireTimedOut = isPoolAcquireTimeout(error);
+        if (this.#probeGeneration === generation) {
+          this.#probeAcquireTimedOut = isPoolAcquireTimeout(error);
+        }
         throw error;
       }
       return false;
