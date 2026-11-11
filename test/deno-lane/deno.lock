@@ -2709,7 +2709,8 @@
       "integrity": "sha512-tB/a0shZL5UZWSwsoeyqfTszONTt4k2YS0tuQioMOD180+MbombYVgzDUYHlx+gejYK6rgf08n/2Df99WY0Sxg==",
       "dependencies": [
         "tweetnacl"
-      ]
+      ],
+      "deprecated": true
     },
     "node-addon-api@1.7.2": {
       "integrity": "sha512-ibPK3iA+vaY1eEjESkQkM0BbCqFOaZMiXRTtdB0u7b4djtY6JnsjvPdUHVMg6xQt3B8fpTTWHI9A+ADjM9frzg=="
@@ -3575,6 +3576,7 @@
       },
       "jsr:@setu-ts/cli@0.12.0": {
         "dependencies": [
+          "npm:drizzle-kit@0.31.11",
           "npm:esbuild@0.28",
           "npm:prettier@^3.9.10",
           "npm:tsx@^4.23.0",
