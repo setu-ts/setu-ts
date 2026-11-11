@@ -392,8 +392,9 @@ re-audit holds the tree against.
   that finds it to its end (a stream's last message), and the last to end closes a drained session —
   so draining sessions are bounded by the origins with calls in flight at once, each call by its
   deadline; a stream also ends at its signal's abort or its deadline, so one dropped unread holds
-  its session no longer than its deadline. Client session memory: 64 MB (the server keeps Node's
-  default; §3.12). Retry: one, unary only, within what is left of the deadline.
+  its session no longer than its deadline (a call with Connect's `timeoutMs: 0`, no deadline, until
+  the application stops). Client session memory: 64 MB (the server keeps Node's default; §3.12).
+  Retry: one, unary only, within what is left of the deadline.
 - **Obligations on the audit** (in addition to the eight above): 9. The retry resends only a call
   the server provably did not process: Node's `ERR_HTTP2_STREAM_ERROR` naming
   `NGHTTP2_REFUSED_STREAM`, connect-node's own reading of the reset code (its exact text with no
@@ -436,18 +437,20 @@ re-audit holds the tree against.
   | T1  | Low      | A stream dropped unread, aborted or past its deadline held an evicted session   | Fixed: a stream also releases at its signal's abort and at its deadline                      |
   | L3  | Low      | `OriginEntry.retired` was written and never read                                | Fixed: removed                                                                               |
   | L4  | Low      | The F8 row described the replaced design                                        | Fixed: the row names the call count                                                          |
+  | U1  | Low      | A stream with Connect's `timeoutMs <= 0` (no deadline) was released at once     | Fixed: no deadline arms no timer; a no-deadline unary call is retried with none              |
 
   R1–L1 are from the re-audit at `fad19bed9`, which confirmed F1–F9 fixed; N1–L2 from the second
   re-audit at `843db7f6c`, which confirmed F1–F9, R2 and R3; T1–L4 from the third at `d3feea628`,
-  which confirmed N1–N5 and L2. **R1 is open.** The budget "a silent open stream keeps the session"
-  lets a client hold a connection with one `HEADERS` frame and no `END_STREAM` to any route that
-  reads its body (every unary gRPC method), where the HTTP/1.1 listener's `requestTimeout` (300 s)
-  would end the same unfinished request. The options: (a) a per-stream request-half bound — reset a
-  stream whose client has not finished sending within N s — with client- and bidi-streaming
-  procedures exempt, which the listener cannot tell apart without knowing the route; (b) an
-  inactivity bound on the request half, which a silent bidi stream would also trip; (c) accept it
-  and change obligation 15, as grpc-go does (`MaxConnectionIdle` counts only time with no stream
-  open, and nothing bounds an open stream by default). It recovers when the client disconnects.
+  which confirmed N1–N5 and L2; U1 from the fourth at `70884758d`, which confirmed T1–L4. **R1 is
+  open.** The budget "a silent open stream keeps the session" lets a client hold a connection with
+  one `HEADERS` frame and no `END_STREAM` to any route that reads its body (every unary gRPC
+  method), where the HTTP/1.1 listener's `requestTimeout` (300 s) would end the same unfinished
+  request. The options: (a) a per-stream request-half bound — reset a stream whose client has not
+  finished sending within N s — with client- and bidi-streaming procedures exempt, which the
+  listener cannot tell apart without knowing the route; (b) an inactivity bound on the request half,
+  which a silent bidi stream would also trip; (c) accept it and change obligation 15, as grpc-go
+  does (`MaxConnectionIdle` counts only time with no stream open, and nothing bounds an open stream
+  by default). It recovers when the client disconnects.
 
 ### 3.11 RPC call and reply without fetch objects (2026-11-10)
 

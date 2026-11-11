@@ -118,8 +118,9 @@ const billing = grpcClient(app.services, BillingService, 'billing');
   or else left to finish the calls on it and closed when the last one ends — never while a call is
   on it. A streaming call ends with its last message, when the application stops reading
   (`return()`/`throw()`), when its signal aborts, or at its deadline — whichever comes first — so a
-  stream the application drops unread holds its session no longer than its deadline. Each reply
-  message is bounded by the plugin's `readMaxBytes`, as each request is.
+  stream the application drops unread holds its session no longer than its deadline (a call with
+  Connect's `timeoutMs: 0`, no deadline, until the application stops). Each reply message is bounded
+  by the plugin's `readMaxBytes`, as each request is.
 - **Defaults.** The Connect protocol, binary, over HTTP/2, with a 5 s deadline. Per target in
   `clients`, or per client in `grpcClient()`'s options: `basePath`, `protocol` (`'connect'`,
   `'grpc'`, `'grpc-web'`), `httpVersion` (`'2'`, `'1.1'`; native gRPC needs `'2'`) and `timeoutMs`

@@ -697,6 +697,37 @@ describe('GrpcClients', () => {
     c.close();
   });
 
+  it('holds a stream with no deadline until it ends, never on a timer', async () => {
+    const message: AsyncIterable<unknown> = {
+      [Symbol.asyncIterator]: () => ({ next: () => new Promise<never>(() => {}) }),
+    };
+    const node = fakeNode(() => Promise.resolve({ message }));
+    const { clients: c } = clients({}, node);
+    const session = (port: number) => node.sessions.find((s) => s.url === `http://h:${port}`)!;
+    const open = (port: number, timeoutMs: number) => {
+      const { transport } = c.client(BILLING, `http://h:${port}`) as {
+        transport: ClientTransportLike;
+      };
+      return transport.stream({}, undefined, timeoutMs, undefined, (async function* () {})());
+    };
+    const timers = vi.spyOn(globalThis, 'setTimeout');
+    const streams = [await open(1000, 0), await open(1001, -1)] as Array<{
+      message: AsyncIterable<unknown>;
+    }>;
+    // No release timer was armed for either (Node would warn at a negative delay).
+    expect(timers).not.toHaveBeenCalled();
+    timers.mockRestore();
+    for (let i = 0; i < MAX_CLIENT_ORIGINS; i++)
+      await call(c.client(BILLING, `http://h:${2000 + i}`));
+    await new Promise((ok) => setTimeout(ok, 20));
+    expect(session(1000).aborted).toBe(false);
+    expect(session(1001).aborted).toBe(false);
+    for (const stream of streams) await stream.message[Symbol.asyncIterator]().return!();
+    expect(session(1000).aborted).toBe(true);
+    expect(session(1001).aborted).toBe(true);
+    c.close();
+  });
+
   it('passes return() and throw() through to the stream underneath', async () => {
     const seen: string[] = [];
     const message: AsyncIterable<unknown> = {
@@ -1062,5 +1093,19 @@ describe('review fixes (M139b)', () => {
       FakeUnavailableError,
     );
     expect(configuredSpent.built[0]!.calls).toHaveLength(1);
+
+    // timeoutMs <= 0 is Connect's "no deadline": retried with none, however long it took.
+    for (const none of [0, -1]) {
+      const noDeadline = fakeNode(() =>
+        results.length > 0 ? results.shift()!() : Promise.resolve('ok'),
+      );
+      results.push(() => {
+        now += 10_000;
+        return Promise.reject(nodeRefusal());
+      });
+      const { clients: h } = clients({ clock: () => now }, noDeadline);
+      expect(await call(h.client(BILLING, 'http://h:1'), undefined, none)).toBe('ok');
+      expect(noDeadline.built[0]!.calls.map((x) => x.timeoutMs)).toEqual([none, none]);
+    }
   });
 });

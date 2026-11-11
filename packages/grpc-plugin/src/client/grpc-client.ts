@@ -287,7 +287,18 @@ interface OriginEntry {
 /** How a streaming call ends besides its messages: its signal and its deadline. */
 interface StreamEnd {
   readonly signal: AbortSignal | undefined;
-  readonly deadlineMs: number;
+  /** `undefined` for a call with no deadline (see {@linkcode effectiveDeadline}). */
+  readonly deadlineMs: number | undefined;
+}
+
+/**
+ * The deadline Connect applies to a call: its own `timeoutMs`, or the
+ * client's configured one when it sets none; a `timeoutMs` of zero or less is
+ * Connect's "no deadline", so `undefined`.
+ */
+function effectiveDeadline(timeoutMs: number | undefined, configured: number): number | undefined {
+  if (timeoutMs === undefined) return configured;
+  return timeoutMs <= 0 ? undefined : timeoutMs;
 }
 
 /**
@@ -312,9 +323,11 @@ function releasingAtEnd(response: unknown, release: () => void, end: StreamEnd):
     end.signal?.removeEventListener('abort', finish);
     release();
   };
-  // Armed when the headers arrive, so it fires no earlier than the deadline.
-  const timer = setTimeout(finish, end.deadlineMs);
-  (timer as { unref?: () => void }).unref?.();
+  // Armed when the headers arrive, so it fires no earlier than Connect's own
+  // deadline, which runs from the call's start. A call with no deadline has no
+  // timer: it ends with its messages, a return()/throw(), or its signal.
+  const timer = end.deadlineMs === undefined ? undefined : setTimeout(finish, end.deadlineMs);
+  (timer as { unref?: () => void } | undefined)?.unref?.();
   if (end.signal?.aborted === true) finish();
   else end.signal?.addEventListener('abort', finish, { once: true });
   return {
@@ -458,7 +471,7 @@ export class GrpcClients {
           target,
           base,
           options,
-          { signal, deadlineMs: timeoutMs ?? options.timeoutMs },
+          { signal, deadlineMs: effectiveDeadline(timeoutMs, options.timeoutMs) },
           (transport, timeout) =>
             transport.stream(method, signal, timeout, traced, input, contextValues),
           timeoutMs,
@@ -491,10 +504,12 @@ export class GrpcClients {
       // The retry gets what is left of the call's deadline — the call's own, or
       // the client's configured one the transport applied — never a fresh one;
       // with nothing left, the refusal is the answer.
-      const remaining = (timeoutMs ?? options.timeoutMs) - Math.ceil(now() - started);
-      if (stream !== undefined || remaining <= 0) throw error.error;
+      // A call with no deadline is retried with none.
+      const deadline = effectiveDeadline(timeoutMs, options.timeoutMs);
+      const remaining = deadline === undefined ? undefined : deadline - Math.ceil(now() - started);
+      if (stream !== undefined || (remaining !== undefined && remaining <= 0)) throw error.error;
       return this.#attempt(target, base, options, stream, (transport) =>
-        run(transport, remaining),
+        run(transport, remaining ?? timeoutMs),
       ).catch((again: unknown) => {
         throw again instanceof RefusedStream ? again.error : again;
       });
