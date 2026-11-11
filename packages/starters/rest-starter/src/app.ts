@@ -5,6 +5,8 @@ import { createApplication } from '@setu-ts/kernel';
 import type { IKernelApplication } from '@setu-ts/kernel';
 import type { IPlugin, RuntimePlatform } from '@setu-ts/common';
 import { detectRuntime, RuntimePlugin } from '@setu-ts/runtime';
+import type { RuntimeOptions } from '@setu-ts/runtime';
+import type { HttpSecurityPluginOptions } from '@setu-ts/http-security-plugin';
 import { ConfigPlugin } from '@setu-ts/config-plugin';
 import { LoggerPlugin } from '@setu-ts/logger-plugin';
 import { ValidationPlugin } from '@setu-ts/validation-plugin';
@@ -67,6 +69,45 @@ export function openApiOptionsFor(
 }
 
 /**
+ * The request-body bound every starter applies unless the application chooses
+ * another: 1 MiB, the same as `requestSizeMiddleware`'s default.
+ * @internal
+ */
+export const DEFAULT_STARTER_MAX_BODY_BYTES = 1_048_576;
+
+/**
+ * The options the starter constructs `RuntimePlugin` with: the default body
+ * bound, overridden by the caller's `runtime` arm.
+ * @internal
+ * @param options - The starter options
+ * @returns The runtime options, always carrying `maxBodyBytes`
+ */
+export function starterRuntimeOptions(
+  options: RestStarterOptions,
+): RuntimeOptions & { readonly maxBodyBytes: number } {
+  const maxBodyBytes = options.runtime?.maxBodyBytes ?? DEFAULT_STARTER_MAX_BODY_BYTES;
+  return { ...options.runtime, maxBodyBytes };
+}
+
+/**
+ * The options the starter constructs `HttpSecurityPlugin` with: the caller's,
+ * plus a declared-length check at the runtime body bound when the caller
+ * supplied no `requestSize`. The runtime bound covers chunked bodies; this
+ * check refuses a declared oversize body before anything is read.
+ * @internal
+ * @param options - The starter options
+ * @returns The HTTP security options
+ */
+export function starterHttpSecurityOptions(options: RestStarterOptions): HttpSecurityPluginOptions {
+  const security = options.httpSecurity;
+  if (security?.requestSize !== undefined) return security;
+  return {
+    ...security,
+    requestSize: { maxBodySize: starterRuntimeOptions(options).maxBodyBytes },
+  };
+}
+
+/**
  * Builds the REST plugin set for an already-detected platform. Internal:
  * taking the platform as a parameter is what lets a test reach the Workers
  * branch, since `detectRuntime()` never answers Workers under the suite.
@@ -82,7 +123,7 @@ export function composeRestPlugins(
 ): IPlugin[] {
   const plugins: IPlugin[] = [
     // Runtime must be first — the kernel requires it at start()
-    RuntimePlugin(),
+    RuntimePlugin(starterRuntimeOptions(options)),
 
     // Core infrastructure (always-on)
     ConfigPlugin(options.config),
@@ -92,7 +133,7 @@ export function composeRestPlugins(
     // (C3). `options.validation` spreads LAST so an explicit caller option —
     // including its own `errorFormat` — still wins.
     ValidationPlugin({ errorFormat: 'rfc9457', ...options.validation }),
-    HttpSecurityPlugin(options.httpSecurity),
+    HttpSecurityPlugin(starterHttpSecurityOptions(options)),
     HealthPlugin(options.health),
     MetricsPlugin(options.metrics),
     OpenApiPlugin(openApiOptionsFor(options.openapi, platform)),

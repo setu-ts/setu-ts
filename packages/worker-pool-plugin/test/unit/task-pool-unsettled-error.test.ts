@@ -12,7 +12,14 @@ import { createFakeContext } from '../fixtures/fake-context.ts';
 function setup(reporter?: (error: Error) => void) {
   const host = new FakeHost(2);
   const pool = new TaskPool(
-    { specifier: 'm', size: 1, maxQueue: 10, taskTimeoutMs: 0, startupTimeoutMs: 60_000 },
+    {
+      specifier: 'm',
+      label: 'm',
+      size: 1,
+      maxQueue: 10,
+      taskTimeoutMs: 0,
+      startupTimeoutMs: 60_000,
+    },
     host,
     createFakeRuntime(new FakeTimers()),
     new WorkerBudget(Infinity),

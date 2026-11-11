@@ -159,15 +159,17 @@ origin echoes nothing.
 The implicitly trusted own origins are the request URL origin, the public origin from
 `requestOriginOf(ctx)`, and, only when the browser sends `Sec-Fetch-Site: same-origin`, the
 validated leftmost `X-Forwarded-Proto`/`X-Forwarded-Host` candidate (falling back to the URL host).
-Thus `csrf: {}` accepts same-origin browser mutations behind a standard TLS-terminating proxy
-without extra configuration. The `Sec-Fetch-Site` gate is load-bearing: `X-Forwarded-*` are not
-forbidden request headers, and the CORS middleware echoes requested headers by default, so without
-it a script on any credentialed CORS origin could name its own host and pass. Browsers that do not
-send `Sec-Fetch-Site` fall back to the URL and published origins. A request whose `Sec-Fetch-Site`
-is present and anything but `same-origin` is checked against the URL origin and `trustedOrigins`
-only: a browser cannot send the target's real public origin cross-site, and a trusted proxy that
-passes a client's `X-Forwarded-Host` through would otherwise publish a host the attacker then
-matches. This comparison grants no proxy trust to IP resolution, cookies or public URLs.
+That candidate is only compared with the browser's `Origin`, never published, so it does not depend
+on `trustForwardedHost`. Thus `csrf: {}` accepts same-origin browser mutations behind a standard
+TLS-terminating proxy without extra configuration. The `Sec-Fetch-Site` gate is load-bearing:
+`X-Forwarded-*` are not forbidden request headers, and the CORS middleware echoes requested headers
+by default, so without it a script on any credentialed CORS origin could name its own host and pass.
+Browsers that do not send `Sec-Fetch-Site` fall back to the URL and published origins. A request
+whose `Sec-Fetch-Site` is present and anything but `same-origin` is checked against the URL origin
+and `trustedOrigins` only: a browser cannot send the target's real public origin cross-site, and a
+trusted proxy that passes a client's `X-Forwarded-Host` through would otherwise publish a host the
+attacker then matches. This comparison grants no proxy trust to IP resolution, cookies or public
+URLs.
 
 <!-- version:history -->
 
@@ -211,6 +213,10 @@ recipe is `exclude: ['/auth/<provider>/acs']` here AND in the session plugin's f
 | `enabled?`     | `boolean` | `true`      | Toggle size limiting                            |
 | `maxBodySize?` | `number`  | `1_048_576` | Maximum **declared** body size in bytes (1 MiB) |
 
+A `Content-Length` that is present but not plain decimal digits answers `400` (since 0.13.0; it used
+to pass through unbounded). `maxBodySize` itself must be a non-negative integer; `NaN` or `Infinity`
+throws `RangeError` when the middleware is built.
+
 `maxBodySize` bounds a declared `Content-Length` and nothing else — a chunked request declares none,
 and the body read happens inside the handler, after this middleware has returned. The bound no
 client can disable lives where the body is consumed: `RuntimePlugin({ maxBodyBytes })`. Set both,
@@ -219,14 +225,15 @@ and set `maxBodyBytes` to the same value or higher. See "Bounding the request bo
 
 ### IpSecurityOptions
 
-| Option             | Type                           | Default           | Description                                                             |
-| ------------------ | ------------------------------ | ----------------- | ----------------------------------------------------------------------- |
-| `enabled?`         | `boolean`                      | `true`            | Toggle IP resolution                                                    |
-| `trustProxy?`      | `boolean`                      | `false`           | Read IP from proxy header                                               |
-| `ipHeader?`        | `string`                       | `X-Forwarded-For` | Proxy header name                                                       |
-| `forwardedHeader?` | `'x-forwarded' \| 'forwarded'` | `'x-forwarded'`   | Read exactly one header family; `'forwarded'` conflicts with `ipHeader` |
-| `trustedProxies?`  | `readonly string[]`            | —                 | Proxy addresses or IPv4 CIDR blocks; resolves rightmost-untrusted       |
-| `proxyHops?`       | `number`                       | —                 | The nth entry from the right, when proxies have no fixed address        |
+| Option                | Type                           | Default           | Description                                                                  |
+| --------------------- | ------------------------------ | ----------------- | ---------------------------------------------------------------------------- |
+| `enabled?`            | `boolean`                      | `true`            | Toggle IP resolution                                                         |
+| `trustProxy?`         | `boolean`                      | `false`           | Read IP from proxy header                                                    |
+| `ipHeader?`           | `string`                       | `X-Forwarded-For` | Proxy header name                                                            |
+| `forwardedHeader?`    | `'x-forwarded' \| 'forwarded'` | `'x-forwarded'`   | Read exactly one header family; `'forwarded'` conflicts with `ipHeader`      |
+| `trustedProxies?`     | `readonly string[]`            | —                 | Proxy addresses or IPv4 CIDR blocks; resolves rightmost-untrusted            |
+| `proxyHops?`          | `number`                       | —                 | The nth entry from the right, when proxies have no fixed address             |
+| `trustForwardedHost?` | `boolean`                      | `false`           | Believe the rightmost `X-Forwarded-Host` (proxy must write it); since 0.13.0 |
 
 `trustedProxies` and `proxyHops` are **mutually exclusive** — supplying both throws at middleware
 construction. So does a `proxyHops` that is not a non-negative integer (`0` is the rightmost entry):
@@ -276,13 +283,19 @@ from `@setu-ts/common`. Forwarded origin components are believed only in `truste
 the request has a socket peer, that peer is trusted, and the selected client came from the forwarded
 chain. Leftmost, `proxyHops` and custom-`ipHeader` modes without `trustedProxies`, and any request
 with no peer (Workers, plain fetch), never publish a forwarded origin: nothing checked who wrote the
-headers. In the default family the leftmost `X-Forwarded-Proto` and `X-Forwarded-Host` are used, so
-the trusted proxy must overwrite both rather than pass a client's copy through (nginx forwards a
-client's `X-Forwarded-Host` unless told otherwise); with `Forwarded`, `proto` and `host` come from
-the selected client element. Only `http`/`https` protocols, and hosts that are DNS names (letters,
-digits, inner hyphens, no trailing dot) or bracketed IPv6 literals with an optional numeric port
-(the scheme default port is dropped), are accepted; rejected or absent components fall back to the
-request URL. Session `secure: 'auto'` and React Router loaders share this decision.
+headers. In the default family the protocol is the rightmost `X-Forwarded-Proto` entry, the one the
+nearest proxy wrote. The host comes from `X-Forwarded-Host` only with `trustForwardedHost: true`
+(since 0.13.0), and then from its rightmost entry; without it the host is the `Host` the proxy sent.
+A proxy that passes a client's `X-Forwarded-Host` through — Cloudflare Tunnel's cloudflared does,
+and nginx does unless told otherwise — would otherwise let the client choose the host of every
+absolute URL the application builds. Set `trustForwardedHost` only when the proxy next to the
+application overwrites or appends that header; it requires `trustProxy: true` and `trustedProxies`
+and conflicts with `forwardedHeader: 'forwarded'`. With `Forwarded`, `proto` and `host` come from
+the selected client element, which the trusted proxy wrote. Only `http`/`https` protocols, and hosts
+that are DNS names (letters, digits, inner hyphens, no trailing dot) or bracketed IPv6 literals with
+an optional numeric port (the scheme default port is dropped), are accepted; rejected or absent
+components fall back to the request URL. Session `secure: 'auto'` and React Router loaders share
+this decision.
 
 Workers and plain `adapter.fetch()` calls have no socket peer. On Cloudflare Workers use
 `ipSecurity: { trustProxy: true, ipHeader: 'CF-Connecting-IP' }`; Cloudflare overwrites that header.

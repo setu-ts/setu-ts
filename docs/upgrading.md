@@ -10,6 +10,26 @@ is the union of every section between the version you are on and the one you are
 `## Unreleased` holds entries written as their milestone landed, which is where the knowledge is;
 cutting a release renames that heading to the version and is a rename, not a recall.
 
+## Unreleased
+
+### `trustForwardedHost`, worker-pool labels and the starter body limit (`@setu-ts/http-security-plugin`, `@setu-ts/worker-pool-plugin`, `@setu-ts/rest-starter`)
+
+- **Behind a proxy, the public host is the `Host` header unless you opt in**
+  (`@setu-ts/http-security-plugin`). If your proxy rewrites `Host` to an internal name and puts the
+  public one in `X-Forwarded-Host`, add `trustForwardedHost: true` to `ipSecurity`; the table in
+  [deployment](deployment.md) lists common proxies. Leave it off behind Cloudflare Tunnel, which
+  passes a client's `X-Forwarded-Host` through. Nothing changes for `forwardedHeader: 'forwarded'`.
+- **Worker-pool dashboards** (`@setu-ts/worker-pool-plugin`). `task_module` values and the health
+  payload's pool name are now the module's file name (`resize-image`), not its URL, and the health
+  key is `task`, not `taskModule`. Update alert rules and dashboards that match the old values; set
+  `pools[<specifier>].label` for a name of your choosing.
+- **Starter applications refuse bodies over 1 MiB** (`@setu-ts/rest-starter`,
+  `@setu-ts/microservice-starter`, `@setu-ts/full-stack-starter`). Routes that accept larger bodies
+  (file uploads) raise the bound with `runtime: { maxBodyBytes: 10 * 1024 * 1024 }` in the starter
+  options or the `setu.config.ts` builder.
+- **A malformed `Content-Length` answers `400`** where `requestSize` is enabled. A correct client
+  never sends one; no change is needed unless a test sends one deliberately.
+
 ## 0.12.0
 
 ### Workspace broker and RPC style (M138, `@setu-ts/cli`)

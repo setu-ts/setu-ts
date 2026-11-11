@@ -78,7 +78,8 @@ const app = createApplication({
 ## Options
 
 `MicroserviceStarterOptions` **extends** `RestStarterOptions`, so every REST option above applies
-here unchanged. Four fields are added, one per plugin this tier registers on top:
+here unchanged. That includes the `runtime` arm and its 1 MiB default request-body bound. Four
+fields are added, one per plugin this tier registers on top:
 
 | Option       | Type                      | Omitted →                      |
 | ------------ | ------------------------- | ------------------------------ |

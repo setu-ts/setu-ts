@@ -100,6 +100,30 @@ export interface IpSecurityOptions {
    * @since 0.5.0
    */
   readonly proxyHops?: number;
+  /**
+   * Believe `X-Forwarded-Host` for the published public origin. Default `false`:
+   * the host is the request URL's, i.e. the `Host` header the trusted proxy sent.
+   *
+   * Set it only when the proxy adjacent to this application WRITES
+   * `X-Forwarded-Host` itself, overwriting or appending. A proxy that passes a
+   * client's copy through unchanged (Cloudflare Tunnel's cloudflared, for
+   * example) would otherwise let the client choose the host of every absolute
+   * URL the application builds — sign-in and password-reset links included.
+   * Nothing in the request can tell those proxies apart, so this is the
+   * operator's statement, the choice Django's `USE_X_FORWARDED_HOST` and
+   * ASP.NET Core's `ForwardedHeaders.XForwardedHost` make too.
+   *
+   * When `true`, the RIGHTMOST entry is read — the one the nearest trusted
+   * proxy wrote under both conventions — and a rightmost entry that fails
+   * validation keeps the URL host; entries further left are never read. Read
+   * only in `trustedProxies` mode with a trusted socket peer. Requires
+   * `trustProxy: true` and `trustedProxies`, and conflicts with
+   * `forwardedHeader: 'forwarded'` (whose `host=` comes from the proxy's own
+   * element); any other combination throws at construction.
+   *
+   * @since 0.13.0
+   */
+  readonly trustForwardedHost?: boolean;
 }
 
 /**
@@ -190,6 +214,21 @@ export function ipSecurityMiddleware(options: IpSecurityOptions = {}): Middlewar
   }
   if (forwardedHeader === 'forwarded' && options.ipHeader !== undefined) {
     throw new TypeError('ipSecurityMiddleware: forwardedHeader conflicts with ipHeader.');
+  }
+  const trustForwardedHost = options.trustForwardedHost ?? false;
+  if (trustForwardedHost) {
+    if (forwardedHeader === 'forwarded') {
+      throw new TypeError(
+        "ipSecurityMiddleware: trustForwardedHost conflicts with forwardedHeader: 'forwarded', " +
+          "whose host= is read from the trusted proxy's own element.",
+      );
+    }
+    if (options.trustProxy !== true || options.trustedProxies === undefined) {
+      throw new TypeError(
+        'ipSecurityMiddleware: trustForwardedHost requires trustProxy: true and trustedProxies; ' +
+          'a forwarded host is believed only after a trusted socket peer.',
+      );
+    }
   }
   const enabled = options.enabled ?? true;
 
@@ -291,7 +330,7 @@ export function ipSecurityMiddleware(options: IpSecurityOptions = {}): Middlewar
               forwardedElement?.host,
             );
           } else {
-            origin = xForwardedOrigin(ctx, origin);
+            origin = xForwardedOrigin(ctx, origin, 'nearest', trustForwardedHost);
           }
         }
       }
@@ -395,20 +434,60 @@ function examinedEntry(
 }
 
 /**
- * Validated leftmost X-Forwarded origin candidate. IP security believes it only
- * after a trusted socket peer; CSRF uses it only for a `Sec-Fetch-Site:
- * same-origin` browser request. The function itself decides no trust.
+ * Which entry of a comma-separated `X-Forwarded-*` header to read.
+ *
+ * - `'nearest'` — the rightmost, written by the proxy adjacent to the
+ *   application under both the overwrite and the append convention. IP
+ *   security reads this one, because it is the only entry a trusted peer is
+ *   known to vouch for.
+ * - `'outermost'` — the leftmost, the public value in an append chain. CSRF's
+ *   zero-configuration candidate reads this one: there the browser-owned
+ *   `Sec-Fetch-Site: same-origin` is the trust source, and the value is only
+ *   compared with the browser's own `Origin`, never published.
+ * @internal
+ */
+export type ForwardedEntry = 'nearest' | 'outermost';
+
+/**
+ * Validated X-Forwarded origin candidate. The function itself decides no
+ * trust: IP security calls it only after a trusted socket peer, with
+ * `'nearest'` and `readHost` set from `trustForwardedHost`; CSRF calls it only
+ * for a `Sec-Fetch-Site: same-origin` browser request.
  * @param ctx - The request carrying the headers
  * @param fallback - The URL-derived origin
+ * @param entry - Which header entry to read
+ * @param readHost - Whether `X-Forwarded-Host` may replace the URL host
  * @returns An origin with individually validated forwarded components
  * @internal
  */
-export function xForwardedOrigin(ctx: IRequestContext, fallback: RequestOrigin): RequestOrigin {
+export function xForwardedOrigin(
+  ctx: IRequestContext,
+  fallback: RequestOrigin,
+  entry: ForwardedEntry,
+  readHost: boolean,
+): RequestOrigin {
   return validatedForwardedOrigin(
     fallback,
-    ctx.request.headers.get('X-Forwarded-Proto')?.split(',')[0]?.trim(),
-    ctx.request.headers.get('X-Forwarded-Host')?.split(',')[0]?.trim(),
+    headerEntry(ctx.request.headers.get('X-Forwarded-Proto'), entry),
+    readHost ? headerEntry(ctx.request.headers.get('X-Forwarded-Host'), entry) : undefined,
   );
+}
+
+/**
+ * One comma-separated entry, trimmed; an empty entry is absent.
+ *
+ * `'nearest'` takes the LAST raw entry and never skips past it: skipping an
+ * empty trailing entry (`evil.example, `) would read the client's value to its
+ * left — the entry the trusted proxy did not write. `'outermost'` keeps the
+ * first non-empty entry, its released behaviour.
+ */
+function headerEntry(value: string | null, entry: ForwardedEntry): string | undefined {
+  if (value === null) return undefined;
+  if (entry === 'nearest') {
+    const last = value.slice(value.lastIndexOf(',') + 1).trim();
+    return last === '' ? undefined : last;
+  }
+  return parseForwardedChain(value)[0];
 }
 
 /** Validates components without deciding whether a proxy is trusted. */

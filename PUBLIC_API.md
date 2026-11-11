@@ -4238,32 +4238,40 @@ omits that header.
 Stateless Origin/Referer validation for unsafe methods (`POST`, `PUT`, `PATCH`, `DELETE`). The
 request's URL origin, `requestOriginOf(ctx).origin`, and — only when the request carries
 `Sec-Fetch-Site: same-origin` — the validated leftmost `X-Forwarded-Proto`/`X-Forwarded-Host`
-candidate (URL host when absent) are implicitly trusted. The gate is required: `X-Forwarded-*` are
-not forbidden request headers and the CORS middleware echoes requested headers by default, so a
-script on a credentialed CORS origin could otherwise name its own host; scripts cannot set
-`Sec-Fetch-Site`. A request whose `Sec-Fetch-Site` is present and anything but `same-origin` is
-checked against the URL origin and `trustedOrigins` only: a browser cannot send the target's real
-public origin cross-site, and a trusted proxy that passes a client's `X-Forwarded-Host` through
-would otherwise publish a host the attacker then matches. It does not grant proxy trust to other
-consumers. Since 0.11.0 (M119c) `Origin: null` passes when the request also carries
-`Sec-Fetch-Site: same-origin` — the pair a browser sends for a same-origin form POST under
-`Referrer-Policy: no-referrer`; `acceptNullOriginSameOrigin?: boolean` (default `true`; a
-non-boolean throws `TypeError` when the middleware is built) set to `false` restores the earlier
-refusal of every `null` origin. `trustedOrigins` adds further allowed origins. Both headers absent →
-pass through (non-browser clients). Optional `customHeader` requires that header on unsafe methods
-(403 when absent). `exclude` lists paths (exact string or `RegExp`) that skip the check entirely —
-checked before the method test, so an excluded path is never inspected. It is for a protocol
-endpoint whose own defences make the check redundant (the SAML ACS: its signed assertion, single-use
-request and binding cookie), not for an application form route. An origin allowlist cannot admit an
-IdP that serves `Referrer-Policy: no-referrer` (Keycloak does) — the browser posts with
-`Origin: null`, and `trustedOrigins: ['null']` admits every opaque-origin `POST` on every route — so
-the documented SAML recipe is `exclude: ['/auth/<provider>/acs']` here and in the session plugin's
-form CSRF.
+candidate (URL host when absent) are implicitly trusted. This candidate is compared with the
+browser's `Origin` and never published; its trust source is the browser-owned `Sec-Fetch-Site`, so
+it does not depend on `trustForwardedHost`, and it reads the leftmost entry, the public value in an
+append chain. The gate is required: `X-Forwarded-*` are not forbidden request headers and the CORS
+middleware echoes requested headers by default, so a script on a credentialed CORS origin could
+otherwise name its own host; scripts cannot set `Sec-Fetch-Site`. A request whose `Sec-Fetch-Site`
+is present and anything but `same-origin` is checked against the URL origin and `trustedOrigins`
+only: a browser cannot send the target's real public origin cross-site, and a trusted proxy that
+passes a client's `X-Forwarded-Host` through would otherwise publish a host the attacker then
+matches. It does not grant proxy trust to other consumers. Since 0.11.0 (M119c) `Origin: null`
+passes when the request also carries `Sec-Fetch-Site: same-origin` — the pair a browser sends for a
+same-origin form POST under `Referrer-Policy: no-referrer`; `acceptNullOriginSameOrigin?: boolean`
+(default `true`; a non-boolean throws `TypeError` when the middleware is built) set to `false`
+restores the earlier refusal of every `null` origin. `trustedOrigins` adds further allowed origins.
+Both headers absent → pass through (non-browser clients). Optional `customHeader` requires that
+header on unsafe methods (403 when absent). `exclude` lists paths (exact string or `RegExp`) that
+skip the check entirely — checked before the method test, so an excluded path is never inspected. It
+is for a protocol endpoint whose own defences make the check redundant (the SAML ACS: its signed
+assertion, single-use request and binding cookie), not for an application form route. An origin
+allowlist cannot admit an IdP that serves `Referrer-Policy: no-referrer` (Keycloak does) — the
+browser posts with `Origin: null`, and `trustedOrigins: ['null']` admits every opaque-origin `POST`
+on every route — so the documented SAML recipe is `exclude: ['/auth/<provider>/acs']` here and in
+the session plugin's form CSRF.
 
 #### Request Size (`requestSizeMiddleware`)
 
 Checks `Content-Length` against `maxBodySize` (default 1 MiB). Over limit → 413 short-circuit
-without reading body. Absent or malformed `Content-Length` → pass through.
+without reading body. A `Content-Length` that is present but not plain decimal digits (empty,
+signed, fractional, exponent, a comma list) → 400 short-circuit (since 0.13.0; earlier it passed
+through unbounded). Absent `Content-Length` (a chunked body) → pass through: the middleware cannot
+measure a body it has not read, so bound the read with `RuntimePlugin({ maxBodyBytes })`, set to
+this limit or higher. `maxBodySize` must be a non-negative integer; `NaN`, `Infinity`, a negative or
+a fraction throws `RangeError` when the middleware is built (since 0.13.0). The three starters set
+both (see `RestStarterOptions.runtime`).
 
 #### IP Security (`ipSecurityMiddleware`)
 
@@ -4296,15 +4304,25 @@ match a trusted proxy and are never returned as clients. The two header families
 The middleware publishes `{ protocol, host }` under `REQUEST_ORIGIN_STATE_KEY`. Forwarded values are
 believed only with `trustedProxies`, a socket peer present and trusted, and the selected client from
 the forwarded chain; leftmost, `proxyHops` and any request without a peer publish the URL origin.
-The values are the leftmost `X-Forwarded-Proto` and `X-Forwarded-Host` for the default family (the
-trusted proxy must overwrite both), or `proto` and `host` from the selected `Forwarded` element.
-Protocol must be `http` or `https` (case-insensitive); host must be a DNS name (letters, digits,
-inner hyphens, no trailing dot) or a bracketed IPv6 literal, with an optional numeric port (the
-scheme default port is dropped, as a browser `Origin` never carries it), at most 259 characters, and
-must round-trip through `new URL('http://' + host)` unchanged except for case. Rejected or absent
-components fall back to the URL. `requestOriginOf(ctx)` and `publicRequestUrl(ctx)` in common expose
-that decision to session `secure: 'auto'`, CSRF and the React Router bridge. Security-sensitive
-links should use a configured base URL. Workers has no peer; use `trustProxy: true` with
+For the default family the protocol is the RIGHTMOST `X-Forwarded-Proto` entry, the one the nearest
+proxy wrote. The host comes from `X-Forwarded-Host` only with
+`IpSecurityOptions.trustForwardedHost: true` (since 0.13.0, default `false`), and then from its
+rightmost entry; without it the host is the request URL's, i.e. the `Host` the proxy sent. A proxy
+that passes a client's `X-Forwarded-Host` through (Cloudflare Tunnel's cloudflared) would otherwise
+let the client choose the host of every absolute URL the application builds, and nothing in the
+request tells such a proxy from one that writes the header. Set `trustForwardedHost` only when the
+proxy adjacent to the application overwrites or appends `X-Forwarded-Host`. It requires
+`trustProxy: true` and `trustedProxies` and conflicts with `forwardedHeader: 'forwarded'`; each
+other combination throws `TypeError` at construction. A rejected rightmost entry keeps the URL
+value; entries further left are never read. For `forwardedHeader: 'forwarded'`, `proto` and `host`
+come from the selected `Forwarded` element, which the trusted proxy wrote. Protocol must be `http`
+or `https` (case-insensitive); host must be a DNS name (letters, digits, inner hyphens, no trailing
+dot) or a bracketed IPv6 literal, with an optional numeric port (the scheme default port is dropped,
+as a browser `Origin` never carries it), at most 259 characters, and must round-trip through
+`new URL('http://' + host)` unchanged except for case. Rejected or absent components fall back to
+the URL. `requestOriginOf(ctx)` and `publicRequestUrl(ctx)` in common expose that decision to
+session `secure: 'auto'`, CSRF and the React Router bridge. Security-sensitive links should use a
+configured base URL. Workers has no peer; use `trustProxy: true` with
 `ipHeader: 'CF-Connecting-IP'`, which Cloudflare overwrites; that header vouches for the client
 address only, and the public origin stays the request URL.
 
@@ -5701,7 +5719,7 @@ app.router.post('/thumbnail', async (ctx) => {
 | `defaultPoolSize`  | `number`                          | `availableParallelism()` | Workers per pool.                                                                                                                                         |
 | `maxQueue`         | `number`                          | `1024`                   | Pending-task bound per pool; exceeding it throws.                                                                                                         |
 | `taskTimeoutMs`    | `number`                          | `30000`                  | Per-task timeout; `0` disables; at most 2147483647. Timed-out worker dies.                                                                                |
-| `pools`            | `Record<string, TaskPoolOptions>` | `{}`                     | Per-module `{ size?, maxQueue?, taskTimeoutMs? }`.                                                                                                        |
+| `pools`            | `Record<string, TaskPoolOptions>` | `{}`                     | Per-module `{ size?, maxQueue?, taskTimeoutMs?, label? }`; `label` (since 0.13.0) is the pool's name on `/metrics` and `/health`.                         |
 | `host`             | `IWorkerHost`                     | `runtime.workers`        | Injected host, wins over the runtime's; for tests.                                                                                                        |
 
 ### Interface Reference
@@ -5839,10 +5857,21 @@ remain usable.
   app's responsibility (AI_GUIDELINES §12.2); the plugin consumes the module specifier as given.
 - Health indicator `worker-pool` reports `{ available, exitDetection, pools, budget }`; `budget` is
   `{ maxWorkers, workers }`, with the resolved bound (`null` for `Infinity`) and the sum of pool
-  slots.
+  slots. Each `pools` entry is `{ task, workers, busy, queued, completed, failed }`, where `task` is
+  the pool's task label (below), never its specifier (since 0.13.0; earlier the entry carried
+  `taskModule`, the specifier). `IWorkerPool.stats()` keeps the specifier: it is in-process.
+- **Task labels (since 0.13.0).** What leaves the process — the `task_module` metric label and the
+  health payload's `task` — is a label, not the specifier, which is normally
+  `new URL('./tasks/x.ts', import.meta.url).href`, a `file:` URL naming the machine's directories
+  and its user. The label is `TaskPoolOptions.label` when set (1–64 characters of letters, digits,
+  `_`, `.`, `-`, unique across pools; anything else throws `RangeError` at construction), otherwise
+  the module's last path segment without its extension, with other characters replaced by `_`, at
+  most 64 characters (`data:` and `blob:` URLs are `inline`). A derived label another specifier
+  already holds gets `_2`, `_3`, … and the plugin warns once naming `pools[<specifier>].label`.
+  Errors and warning logs keep the specifier, since an operator needs it to find the module.
 - **Metrics (opt-in by capability).** When `CAPABILITIES.METRICS` is registered, the plugin
-  publishes six series, all labelled `task_module`: gauges `worker_pool_workers`,
-  `worker_pool_busy_workers`, `worker_pool_queued_tasks`, and counters
+  publishes six series, all labelled `task_module` (the task label above): gauges
+  `worker_pool_workers`, `worker_pool_busy_workers`, `worker_pool_queued_tasks`, and counters
   `worker_pool_tasks_completed_total`, `worker_pool_tasks_failed_total` (also labelled `reason`:
   `handler`/`timeout`/`crash`/`clone`/`shutdown`) and `worker_pool_tasks_rejected_total` (`reason`:
   `queue_full`/`pool_closed`/`unavailable`). No plugin option enables them and none disables them —
@@ -12106,6 +12135,14 @@ Notes:
   until one was supplied. It is also genuinely optional: a token-authenticated API has no cookie.
 - **No arm sets a plugin's `name`.** Each registers on the bare capability token; register a second
   instance yourself on the returned app.
+- **Every tier bounds the request body at 1 MiB by default** (since 0.13.0). The `runtime` arm
+  (`RuntimeOptions` from `@setu-ts/runtime`) is spread over `{ maxBodyBytes: 1_048_576 }` and passed
+  to `RuntimePlugin`, which bounds the body READ — chunked bodies included — and answers 413 past
+  it. The same value becomes `httpSecurity.requestSize.maxBodySize` when the `httpSecurity` arm
+  supplies no `requestSize`, so a declared oversize body is refused before anything is read. An
+  explicit `requestSize`, `{ enabled: false }` included, is kept as given. Raise the bound for an
+  upload route with `runtime: { maxBodyBytes: 10 * 1024 * 1024 }`; an unbounded read is
+  `{ maxBodyBytes: Number.MAX_SAFE_INTEGER }`. Before 0.13.0 the starters read every body in full.
 
 ### Composing from configuration
 

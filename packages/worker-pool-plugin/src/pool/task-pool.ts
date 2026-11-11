@@ -34,6 +34,8 @@ import type { WorkerBudget } from './worker-budget.ts';
 export interface TaskPoolConfig {
   /** The task-module specifier this pool executes. */
   readonly specifier: string;
+  /** The pool's operator-facing label; never a path (see `task-label.ts`). */
+  readonly label: string;
   /** Maximum workers in the pool. */
   readonly size: number;
   /** Pending-queue bound. */
@@ -180,13 +182,13 @@ export class TaskPool {
    */
   run(input: unknown, timeoutMs?: number): Promise<unknown> {
     if (this.closed) {
-      this.collector?.taskRejected(this.config.specifier, 'pool_closed');
+      this.collector?.taskRejected(this.config.label, 'pool_closed');
       return Promise.reject(new WorkerPoolUnavailableError('Worker pool has been shut down'));
     }
     if (this.pending.length >= this.config.maxQueue) {
       // Counted as a REJECTION, not a failure: no `Task` exists yet, so this
       // never reaches `rejectTask` and `stats().failed` cannot see it either.
-      this.collector?.taskRejected(this.config.specifier, 'queue_full');
+      this.collector?.taskRejected(this.config.label, 'queue_full');
       return Promise.reject(new WorkerQueueFullError(this.config.specifier, this.config.maxQueue));
     }
     return new Promise<unknown>((resolve, reject) => {
@@ -571,7 +573,7 @@ export class TaskPool {
     this.clearTaskTimer(task);
     this.completedCount++;
     task.resolve(result);
-    this.collector?.taskCompleted(this.config.specifier);
+    this.collector?.taskCompleted(this.config.label);
   }
 
   /**
@@ -585,7 +587,7 @@ export class TaskPool {
     this.clearTaskTimer(task);
     this.failedCount++;
     task.reject(error);
-    this.collector?.taskFailed(this.config.specifier, reason);
+    this.collector?.taskFailed(this.config.label, reason);
   }
 
   /**
@@ -599,7 +601,7 @@ export class TaskPool {
    * reached only from one of those, so no transition escapes.
    */
   private syncMetrics(): void {
-    this.collector?.syncGauges(this.stats());
+    this.collector?.syncGauges(this.config.label, this.stats());
   }
 
   private clearTaskTimer(task: Task): void {

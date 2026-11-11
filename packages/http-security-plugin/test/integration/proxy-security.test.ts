@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { createApplication } from '@setu-ts/kernel';
 import { NodeHttpAdapter, RuntimePlugin } from '@setu-ts/runtime';
 import type { NodeServeHost } from '@setu-ts/runtime';
-import { CLIENT_IP_STATE_KEY, requestOriginOf } from '@setu-ts/common';
+import { CLIENT_IP_STATE_KEY, publicRequestUrl, requestOriginOf } from '@setu-ts/common';
 import { HttpSecurityPlugin } from '../../src/index.ts';
 
 describe('proxy security through a kernel application', () => {
@@ -48,6 +48,8 @@ describe('proxy security through a kernel application', () => {
               trustProxy: true,
               trustedProxies: ['10.0.0.0/8'],
               forwardedHeader: family,
+              // The proxy in this test writes X-Forwarded-Host itself.
+              ...(family === 'x-forwarded' ? { trustForwardedHost: true } : {}),
             },
             csrf: {},
           }),
@@ -146,10 +148,12 @@ describe('proxy security through a kernel application', () => {
     });
     app.router.post('/', (ctx) => ctx.response.text('accepted'));
     await app.start();
+    // A pass-through proxy forwards the public Host unchanged, so the request
+    // URL already names the public host; only the protocol is forwarded.
     const post = (origin: string, site: string | undefined, host: string | undefined) =>
       app.inject({
         method: 'POST',
-        url: 'http://internal/',
+        url: 'http://app.example/',
         ip: '10.0.0.5',
         headers: {
           Origin: origin,
@@ -172,6 +176,44 @@ describe('proxy security through a kernel application', () => {
       expect((await post('https://app.example', undefined, 'app.example')).statusCode).toBe(200);
     } finally {
       await app.stop();
+    }
+  });
+  // A trusted proxy that passes a client's X-Forwarded-Host through (Cloudflare
+  // Tunnel's cloudflared) let the client choose the host of every absolute URL
+  // the application built — the sign-in link in the Mohor audit.
+  it('never builds a public URL from a client X-Forwarded-Host unless opted in', async () => {
+    for (const trustForwardedHost of [false, true]) {
+      const app = createApplication({
+        plugins: [
+          RuntimePlugin(),
+          HttpSecurityPlugin({
+            ipSecurity: { trustProxy: true, trustedProxies: ['127.0.0.1'], trustForwardedHost },
+          }),
+        ],
+      });
+      app.router.get('/signin', (ctx) =>
+        ctx.response.json({ origin: requestOriginOf(ctx).origin, url: publicRequestUrl(ctx) }),
+      );
+      await app.start();
+      try {
+        const response = await app.inject({
+          method: 'GET',
+          url: 'http://app.example/signin?next=%2F',
+          ip: '127.0.0.1',
+          headers: {
+            'X-Forwarded-For': '203.0.113.7',
+            'X-Forwarded-Proto': 'https',
+            'X-Forwarded-Host': trustForwardedHost ? 'evil.example, pub.example' : 'evil.example',
+          },
+        });
+        expect(response.json(), String(trustForwardedHost)).toEqual(
+          trustForwardedHost
+            ? { origin: 'https://pub.example', url: 'https://pub.example/signin?next=%2F' }
+            : { origin: 'https://app.example', url: 'https://app.example/signin?next=%2F' },
+        );
+      } finally {
+        await app.stop();
+      }
     }
   });
   // M113n audit F1: `X-Forwarded-*` are not forbidden request headers, and the

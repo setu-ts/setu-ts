@@ -131,7 +131,12 @@ describe('WebSocket Origin check on a real listener', () => {
         plugins: [
           RuntimePlugin(),
           HttpSecurityPlugin({
-            ipSecurity: { trustProxy: true, trustedProxies: [trusted ? '127.0.0.1' : '10.9.9.9'] },
+            ipSecurity: {
+              trustProxy: true,
+              trustedProxies: [trusted ? '127.0.0.1' : '10.9.9.9'],
+              // This proxy writes X-Forwarded-Host itself.
+              trustForwardedHost: true,
+            },
           }),
           WebSocketPlugin({
             routes: [{ path: '/ws', handlers: {} }],
@@ -158,6 +163,31 @@ describe('WebSocket Origin check on a real listener', () => {
       }
     });
   }
+
+  // Without trustForwardedHost a trusted proxy contributes only the protocol:
+  // the public host stays the one the request was addressed to.
+  it('keeps the request host when the proxy is not trusted for X-Forwarded-Host', async () => {
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        HttpSecurityPlugin({ ipSecurity: { trustProxy: true, trustedProxies: ['127.0.0.1'] } }),
+        WebSocketPlugin({ routes: [{ path: '/ws', handlers: {} }] }),
+      ],
+    });
+    const port = await unusedPort();
+    await app.start({ port });
+    try {
+      const forwarded = {
+        'x-forwarded-for': '203.0.113.9',
+        'x-forwarded-host': 'public.example',
+        'x-forwarded-proto': 'https',
+      };
+      expect(await handshake(port, 'https://public.example', forwarded)).toBe(403);
+      expect(await handshake(port, `https://127.0.0.1:${port}`, forwarded)).toBe('upgraded');
+    } finally {
+      await app.stop();
+    }
+  });
 
   it('upgrades any origin with checkOrigin: false', async () => {
     const server = await serve({ checkOrigin: false });

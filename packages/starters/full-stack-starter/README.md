@@ -402,6 +402,16 @@ an opaque `Origin: null` that React Router refuses. An explicit referrer policy,
 `referrerPolicy: false`, or `headers: { enabled: false }` is preserved. Without `reactRouter`, the
 HTTP-security plugin keeps its own `no-referrer` default.
 
+## Request body limit
+
+Like the REST and microservice starters, a full-stack application refuses a request body over 1 MiB
+with `413` (since 0.13.0), whether declared or chunked. Raise it for upload routes with the
+`runtime` arm, which works the same through `createFullStackAppFromConfig`:
+
+```typescript
+createFullStackApp({ runtime: { maxBodyBytes: 10 * 1024 * 1024 } });
+```
+
 ## Exports
 
 | Export                            | Kind      |

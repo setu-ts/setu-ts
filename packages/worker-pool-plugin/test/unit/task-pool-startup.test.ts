@@ -19,7 +19,14 @@ function setup(limit = 1) {
   const host = new FakeHost(2);
   const make = (specifier: string, taskTimeoutMs = 0, injected: IWorkerHost = host) =>
     new TaskPool(
-      { specifier, size: 2, maxQueue: 100, taskTimeoutMs, startupTimeoutMs: STARTUP_MS },
+      {
+        specifier,
+        label: specifier,
+        size: 2,
+        maxQueue: 100,
+        taskTimeoutMs,
+        startupTimeoutMs: STARTUP_MS,
+      },
       injected,
       runtime,
       budget,
