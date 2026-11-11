@@ -205,6 +205,11 @@ All notable changes to this project are documented here. The format follows
   without registration and error-factory brief guidance requires it installed.
 - **M139d (`@setu-ts/cli`, V12-33).** Non-memory full-stack queue scaffolds declare the queue
   package and its processor barrel so generated jobs run.
+- **M139d (`@setu-ts/cli`, V12-60).** `setu workspace broker` moving a full-stack member to a broker
+  that backs a queue adds `@setu-ts/queue-plugin` to the member manifest and creates
+  `src/jobs/index.ts` when absent, so `setu g job` works there as on a member generated with that
+  broker; `setu.config.ts` stays the developer's, so the command prints the
+  `processors: [...QUEUE_PROCESSORS]` line to add until the config reads it.
 - **M139d (`@setu-ts/cli`, V12-1).** Agent briefs use formatter-stable lists and
   whitespace-normalized freshness; Deno preserves prose wrapping.
 - **M139d (`@setu-ts/cli`, V12-22).** Agent briefs distinguish starter-provided options from

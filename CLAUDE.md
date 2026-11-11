@@ -803,7 +803,7 @@ here.
 - **Milestone 139d** (`cli` + the `kernel` duplicate-plugin message — the CLI on a full-stack
   project: `--module` routes under `/api/<m>`, a scoped telemetry preload, `setu add` with several
   packages, backend peers and migration scripts, full-stack wiring, task builds in `setu build`, a
-  formatter-stable brief and a check-only reference mask; 26 V12/V8/X91/X93 rows, X91-9 already
+  formatter-stable brief and a check-only reference mask; 27 V12/V8/X91/X93 rows, X91-9 already
   fixed; ships in `0.13.0`) — complete (PR pending).
 - **Next milestone** — the remaining M139 letters.
 

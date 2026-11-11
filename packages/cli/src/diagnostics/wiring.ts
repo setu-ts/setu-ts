@@ -30,6 +30,15 @@ export function strictlyCalledOutsideImports(config: string, symbol: string): bo
   return code === undefined ? undefined : new RegExp(`\\b${symbol}\\s*\\(`).test(code);
 }
 
+/** The strict-lexer value-reference test, for a note an automatic edit prints. */
+export function strictlyReferencedOutsideImports(
+  config: string,
+  symbol: string,
+): boolean | undefined {
+  const code = withoutImports(maskSourceCode(config));
+  return code === undefined ? undefined : new RegExp(`\\b${symbol}\\b`).test(code);
+}
+
 /** Wiring requires a value use outside imports; registerModules requires a call. */
 export function classifyWiring(
   config: string,

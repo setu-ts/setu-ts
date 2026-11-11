@@ -399,6 +399,52 @@ describe('setu workspace rpc', () => {
     expect(result.out).toContain('orders is already http; nothing changed');
   });
 
+  for (const runtime of ['node', 'deno'] as const) {
+    it(`gives a full-stack member the queue package and jobs seam on a Redis switch (V12-60, ${runtime})`, async () => {
+      const ws = await workspace({ runtime, members: [['web', 'full-stack']] });
+      const manifest = runtime === 'node' ? 'apps/web/package.json' : 'apps/web/deno.json';
+      const member = `${ROOT}/apps/web`;
+      // On the memory broker the member has neither, so `setu g job` refuses.
+      expect((await ws.run(['g', 'job', 'sync'], member)).code).not.toBe(0);
+
+      const switched = await ws.run(['workspace', 'broker', 'redis']);
+      expect(switched.code, switched.err).toBe(0);
+      expect(ws.read(manifest)).toContain('@setu-ts/queue-plugin');
+      expect(ws.fs.read(`${member}/src/jobs/index.ts`)).toContain('QUEUE_PROCESSORS');
+      // The config stays the developer's: the planner names the lines instead.
+      expect(switched.out).toContain('processors: [...QUEUE_PROCESSORS]');
+      expect(ws.read('apps/web/setu.config.ts')).not.toContain('QUEUE_PROCESSORS');
+
+      const job = await ws.run(['g', 'job', 'sync'], member);
+      expect(job.code, job.err).toBe(0);
+      const barrel = ws.fs.read(`${member}/src/jobs/index.ts`);
+      expect(barrel).toContain('sync');
+
+      // Leaving Redis keeps the package without calling it unused, and a later
+      // switch back never overwrites the seam `setu g job` has filled.
+      const back = await ws.run(['workspace', 'broker', 'memory']);
+      expect(back.code, back.err).toBe(0);
+      expect(back.out).not.toContain('@setu-ts/queue-plugin');
+      expect((await ws.run(['workspace', 'broker', 'redis'])).code).toBe(0);
+      expect(ws.fs.read(`${member}/src/jobs/index.ts`)).toBe(barrel);
+    });
+  }
+
+  it('does not repeat the processors note once the config reads them (V12-60)', async () => {
+    const ws = await workspace({ runtime: 'node', members: [['web', 'full-stack']] });
+    const config = ws.read('apps/web/setu.config.ts');
+    await ws.write(
+      'apps/web/setu.config.ts',
+      `import { QUEUE_PROCESSORS } from './src/jobs/index.ts';\n${config.replace(
+        'queue: { ...queueOptions(config) }',
+        'queue: { processors: [...QUEUE_PROCESSORS], ...queueOptions(config) }',
+      )}`,
+    );
+    const switched = await ws.run(['workspace', 'broker', 'redis']);
+    expect(switched.code, switched.err).toBe(0);
+    expect(switched.out).not.toContain('start its queue option with processors');
+  });
+
   it('exempts the gRPC mount from form CSRF on a full-stack member', async () => {
     const ws = await workspace({ members: [['web', 'full-stack']] });
     expect((await ws.run(['workspace', 'rpc', 'web', 'grpc'])).code).toBe(0);

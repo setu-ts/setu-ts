@@ -21,7 +21,11 @@
  */
 
 import type { IFileSystem } from '@setu-ts/common';
-import { strictlyCalledOutsideImports } from '../diagnostics/wiring.ts';
+import {
+  strictlyCalledOutsideImports,
+  strictlyReferencedOutsideImports,
+} from '../diagnostics/wiring.ts';
+import { JOBS_SEAM, QUEUE_PROCESSORS_EXPORT } from '../seams/jobs.ts';
 import { maskComments } from '../devtool/sources.ts';
 import { CLIENT_RANGES } from '../templates/client-dependencies.ts';
 import { frameworkSpecifier } from '../templates/framework-specifier.ts';
@@ -379,6 +383,25 @@ function mergeManifest(
   return changed ? { contents: `${JSON.stringify(next, null, 2)}\n` } : {};
 }
 
+/** The framework package a full-stack member's Redis-backed queue needs. */
+const QUEUE_PACKAGE = 'queue-plugin';
+
+/**
+ * Whether a member under these inputs gets the queue package and the jobs seam,
+ * as generating it does (`member-host.ts`, M139d V12-33): a full-stack member on
+ * a broker that backs a queue. Switching to one later does the same (V12-60).
+ *
+ * @param input - The module's inputs
+ * @returns `true` when the member needs them
+ */
+function needsQueueSeam(input: TransportModuleInput): boolean {
+  return (
+    input.host === 'app-factory' &&
+    input.broker.connection !== undefined &&
+    input.broker.queueArgs !== undefined
+  );
+}
+
 /**
  * The packages and manifest entries a member needs under a manifest.
  *
@@ -398,8 +421,12 @@ function neededEntries(
     ...(rpc.clients ?? []),
     ...((input.grpcTargets ?? []).length === 0 ? [] : GRPC_CALLER_CLIENTS),
   ].filter((name, index, all) => all.indexOf(name) === index);
-  const framework =
-    rpc.plugin === undefined && (input.grpcTargets ?? []).length === 0 ? [] : [GRPC_PLUGIN.pkg];
+  const framework = [
+    ...(needsQueueSeam(input) ? [QUEUE_PACKAGE] : []),
+    ...(rpc.plugin === undefined && (input.grpcTargets ?? []).length === 0
+      ? []
+      : [GRPC_PLUGIN.pkg]),
+  ];
   if (input.profile.manifestKind === 'deno') {
     return {
       imports: {
@@ -632,6 +659,10 @@ export async function planTransportChange(
     const shape = transportModuleShape(input);
     const created = [
       ...(input.rpc.memberFiles?.(member.name, profile.manifestKind === 'deno') ?? []),
+      // The jobs seam `setu g job` writes into; create-only, like the toolchain.
+      ...(needsQueueSeam(input)
+        ? [{ path: JOBS_SEAM.barrel, contents: JOBS_SEAM.renderBarrel({}), managed: true }]
+        : []),
       ...(after.redisClient === 'node-redis' && (shape.messaging || shape.queue)
         ? [nodeRedisModuleFile()]
         : []),
@@ -651,10 +682,25 @@ export async function planTransportChange(
         .filter(([section]) => section === 'dependencies' || section === 'imports')
         .flatMap(([, map]) => Object.keys(map));
     const nowNeeded = new Set(names(neededEntries(input)));
-    const left = names(neededEntries(previousInput)).filter((name) => !nowNeeded.has(name));
+    // The starter registers the queue on every broker, and the jobs seam still
+    // imports the package, so leaving a Redis-backed broker never orphans it.
+    const left = names(neededEntries(previousInput)).filter(
+      (name) => !nowNeeded.has(name) && name !== `@setu-ts/${QUEUE_PACKAGE}`,
+    );
     if (left.length > 0) {
       notes.push(
         `${escapeName(context.root)}: its transport module no longer uses ${left.join(', ')}; left in its manifest, so remove what nothing else needs.`,
+      );
+    }
+    // The config is the developer's: the planner never writes it, so a member that
+    // does not yet hand its jobs to the queue is told the two lines that do.
+    if (
+      needsQueueSeam(input) &&
+      config !== undefined &&
+      strictlyReferencedOutsideImports(config, QUEUE_PROCESSORS_EXPORT) !== true
+    ) {
+      notes.push(
+        `${escapeName(joinPath(context.root, CONFIG_FILE))}: to run the jobs \`setu g job\` writes, import { ${QUEUE_PROCESSORS_EXPORT} } from './src/jobs/index.ts' and start its queue option with processors: [...${QUEUE_PROCESSORS_EXPORT}],`,
       );
     }
     if (previous.rpc === 'grpc' && member.rpc !== 'grpc') {
