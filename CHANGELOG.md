@@ -158,10 +158,13 @@ All notable changes to this project are documented here. The format follows
   Node-style HTTP clients can crash the process when their peer goes away. Ships in 0.13.0.
 - **BREAKING — workspace member names are the ones `generate app` writes (M139b, #581,
   `@setu-ts/cli`).** A `setu.workspace.json` member whose name is not its own lowercase kebab-case
-  form, or whose derived identifiers are unsafe (`Orders_V2`), is refused by every command that
-  reads the manifest, with a message that names the member and suggests a rename (`orders-v2`).
-  Before, such a name reached generated source, YAML and shell commands unchecked. To restore a
-  workspace, rename the member's entry and its directory.
+  form, or whose derived identifiers are unsafe (`Orders_V2`), is refused, with a message that names
+  the member and suggests a rename (`orders-v2`), by every command that refuses an unreadable
+  manifest: `generate app`, `generate library`, `setu workspace`, `setu check` and
+  `setu devtool enable`. Commands that read a manifest only to find a workspace (`setu add`,
+  `setu agents`) treat it, as before, as no workspace. Before, such a name reached generated source,
+  YAML and shell commands unchecked. To restore a workspace, rename the member's entry and its
+  directory.
 
 ### Fixed
 

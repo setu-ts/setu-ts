@@ -97,6 +97,7 @@ describe('project-controlled text stays on one output line', () => {
           }),
         ).not.toBe(0);
         expect(out.text()).toContain('not a Setu workspace');
+        expect(out.text()).toContain('is not a name `generate app` could write');
         expectNoForgedLine(out);
       }
     });
@@ -111,6 +112,7 @@ describe('project-controlled text stays on one output line', () => {
         error: error.sink,
       });
       expect(error.text()).not.toContain('already uses devtool port 6500');
+      expect(error.text()).toContain('is not a name `generate app` could write');
       expectNoForgedLine(error);
     });
 
