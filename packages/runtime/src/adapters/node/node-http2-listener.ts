@@ -120,8 +120,8 @@ export function trackHttp2Sessions(
     session.once('close', () => sessions.delete(session));
     let open = 0;
     // Fires once the session has seen no frame for the bound. With a stream
-    // open it does nothing — a silent server stream is not idle — and Node does
-    // not re-arm it, so the last stream to close starts the bound again.
+    // open it does nothing — a silent server stream is not idle — and the last
+    // stream to close restarts the bound, so it counts from that close.
     session.on('timeout', () => {
       if (open === 0) session.close();
     });

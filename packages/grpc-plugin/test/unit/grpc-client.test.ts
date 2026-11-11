@@ -252,6 +252,20 @@ describe('targetBase and instanceOrigin', () => {
     }
   });
 
+  it('refuses a URL target with a query or fragment, without echoing it', () => {
+    const refusal = new TypeError(
+      'grpc client: a target URL must not carry a query or fragment; Connect never sends them',
+    );
+    for (const target of [
+      'http://billing:3410/grpc?access_token=s3cret',
+      'http://billing:3410#s3cret',
+      'http://billing:3410?',
+      'http://billing:3410/#',
+    ]) {
+      expect(() => targetBase(target)).toThrow(refusal);
+    }
+  });
+
   it('refuses an empty target and a URL that is not http', () => {
     expect(() => targetBase('')).toThrow(
       new TypeError('grpc client: target must be a URL or a service name'),
@@ -481,14 +495,23 @@ describe('GrpcClients', () => {
     expect(node.sessions.every((s) => s.aborted)).toBe(true);
   });
 
-  it(`drains at most ${MAX_CLIENT_ORIGINS} evicted sessions, closing the oldest past it`, async () => {
+  it('never closes a busy evicted session, however many drain at once', async () => {
     const { clients: c, node } = clients();
     for (let port = 0; port < MAX_CLIENT_ORIGINS * 3; port++)
-      node.states.set(`http://h:${port}`, 'open');
-    for (let port = 0; port < MAX_CLIENT_ORIGINS * 2 + 1; port++)
-      await call(c.client(BILLING, `http://h:${port}`));
-    // 65 evicted, all busy: the first one past the drain bound is closed regardless.
-    expect(node.sessions.filter((s) => s.aborted).map((s) => s.url)).toEqual(['http://h:0']);
+      node.states.set(`http://h:${1000 + port}`, 'open');
+    for (let port = 0; port < MAX_CLIENT_ORIGINS * 3; port++)
+      await call(c.client(BILLING, `http://h:${1000 + port}`));
+    // 128 evicted, all with calls in flight: none is aborted.
+    expect(node.sessions.filter((s) => s.aborted)).toEqual([]);
+    // Once they settle, the next eviction closes every one of them.
+    for (let port = 0; port < MAX_CLIENT_ORIGINS * 2; port++)
+      node.states.set(`http://h:${1000 + port}`, 'idle');
+    await call(c.client(BILLING, 'http://h:9999'));
+    // Port 80 would normalize away, so the ports start at 1000.
+    // h:1128, evicted by that call, is still busy and drains.
+    expect(node.sessions.filter((s) => s.aborted)).toHaveLength(MAX_CLIENT_ORIGINS * 2);
+    c.close();
+    expect(node.sessions.every((s) => s.aborted)).toBe(true);
   });
 
   it('close aborts every session and later calls reject without opening one', async () => {
@@ -693,6 +716,16 @@ describe('refused streams (REFUSED_STREAM)', () => {
     const error = (await call(c.client(BILLING, 'billing')).catch((e: unknown) => e)) as Error;
     expect(error).toBeInstanceOf(FakeUnavailableError);
     expect(error.message).toBe('"billing" refused the call before processing it');
+
+    // A URL target is named by its origin, never its path.
+    const { clients: d } = clients(
+      {},
+      fakeNode(() => Promise.reject(nodeRefusal())),
+    );
+    const named = (await call(d.client(BILLING, 'http://h:1/secret-path')).catch(
+      (e: unknown) => e,
+    )) as Error;
+    expect(named.message).toBe('"http://h:1" refused the call before processing it');
     expect(discovery.reports).toEqual([
       ['a', 'failure'],
       ['a', 'failure'],

@@ -103,14 +103,15 @@ const billing = grpcClient(app.services, BillingService, 'billing');
   with no discovery registered throws a `TypeError` at `grpcClient()`); an absolute `http(s)://` URL
   is used as is. A target carrying credentials (`http://user:secret@host`, or `user:secret@host`)
   throws a `TypeError` that does not repeat it: send credentials as call headers, never in a target,
-  where every error naming the target would carry them. After each call the client reports to
-  discovery — `failure` for `Unavailable` (a refused, reset or closed connection), `success`
-  otherwise — so an instance that refuses connections is ejected.
+  where every error naming the target would carry them. So does a URL target with a query or
+  fragment, which Connect never sends; an error about a URL target names only its origin. After each
+  call the client reports to discovery — `failure` for `Unavailable` (a refused, reset or closed
+  connection), `success` otherwise — so an instance that refuses connections is ejected.
 - **Connections.** One HTTP/2 session per instance, shared by every call to it and closed with the
   application. Each session may buffer 64 MB (Node's `maxSessionMemory`; its default of 10 MB reset
   streams once sixteen 1 MB replies were in flight on one connection). At most 64 instance origins
   keep a session; the least recently used is dropped first, closed at once when idle, or else left
-  to finish the calls in flight on it (at most 64 such sessions; past that the oldest is closed).
+  to finish the calls in flight on it and closed at a later eviction — never while a call is on it.
   Each reply message is bounded by the plugin's `readMaxBytes`, as each request is.
 - **Defaults.** The Connect protocol, binary, over HTTP/2, with a 5 s deadline. Per target in
   `clients`, or per client in `grpcClient()`'s options: `basePath`, `protocol` (`'connect'`,

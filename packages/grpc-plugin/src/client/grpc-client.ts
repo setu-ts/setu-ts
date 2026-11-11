@@ -105,6 +105,10 @@ export function validateClientOptions(options: GrpcClientOptions, where: string)
   }
 }
 
+/** The refusal for a URL target with a query or fragment; it never echoes the target. */
+const QUERY_REFUSAL =
+  'grpc client: a target URL must not carry a query or fragment; Connect never sends them';
+
 /** The refusal for a target carrying credentials; it never echoes the target. */
 const USERINFO_REFUSAL =
   'grpc client: a target must not carry credentials (user:password@); send them as call headers';
@@ -132,6 +136,12 @@ export function targetBase(target: string): string | undefined {
     throw new TypeError(`grpc client: target URL must be http or https, received ${url.protocol}`);
   }
   if (url.username !== '' || url.password !== '') throw new TypeError(USERINFO_REFUSAL);
+  // A query or fragment is never sent (Connect builds each call's URL from the
+  // base), so one there is a mistake at best and a token at worst. Neither
+  // character can appear unencoded anywhere else in an http(s) URL.
+  if (target.includes('?') || target.includes('#')) {
+    throw new TypeError(QUERY_REFUSAL);
+  }
   return `${url.origin}${url.pathname.replace(/\/+$/, '')}`;
 }
 
@@ -445,7 +455,12 @@ export class GrpcClients {
         throw new RefusedStream(
           runtime.isUnavailable(error)
             ? (error as Error)
-            : runtime.unavailable(`"${target}" refused the call before processing it`, error),
+            : // A URL target is named by its origin only: its path is the
+              // application's, never echoed (a service name is not secret).
+              runtime.unavailable(
+                `"${base === undefined ? target : new URL(base).origin}" refused the call before processing it`,
+                error,
+              ),
         );
       }
       this.#report(discovery, instance, runtime.isUnavailable(error) ? 'failure' : 'success');
@@ -526,8 +541,7 @@ export class GrpcClients {
 
   /**
    * Closes an evicted session without failing its calls: one with streams in
-   * flight drains, and is closed at a later eviction once idle. The draining
-   * set is bounded as the cache is; past it, the oldest is closed regardless.
+   * flight drains, and is closed at a later eviction once idle.
    */
   #retire(session: Http2SessionLike): void {
     for (const draining of this.#draining) {
@@ -540,12 +554,10 @@ export class GrpcClients {
       session.abort();
       return;
     }
+    // Never closed while busy: a draining session holds only calls already in
+    // flight, each bounded by its deadline, so the set is bounded by the
+    // origins with calls in flight at once, and settles at the next eviction.
     this.#draining.add(session);
-    if (this.#draining.size > MAX_CLIENT_ORIGINS) {
-      const [oldest] = this.#draining;
-      this.#draining.delete(oldest as Http2SessionLike);
-      (oldest as Http2SessionLike).abort();
-    }
   }
 
   /**
