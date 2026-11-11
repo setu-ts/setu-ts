@@ -57,10 +57,13 @@ function fakeNode(outcome: () => Promise<unknown> = () => Promise.resolve('ok'))
   built: Built[];
   sessions: Array<{ url: string; aborted: boolean }>;
   sessionOptionsSeen: Array<Record<string, unknown> | undefined>;
+  /** Each session's `state()`, by URL; absent reads as `'idle'`. */
+  states: Map<string, string>;
 } {
   const built: Built[] = [];
   const sessions: Array<{ url: string; aborted: boolean }> = [];
   const sessionOptionsSeen: Array<Record<string, unknown> | undefined> = [];
+  const states = new Map<string, string>();
   const factory =
     (kind: Built['kind']) =>
     (options: Record<string, unknown>): ClientTransportLike => {
@@ -86,6 +89,7 @@ function fakeNode(outcome: () => Promise<unknown> = () => Promise.resolve('ok'))
     built,
     sessions,
     sessionOptionsSeen,
+    states,
     module: {
       createConnectTransport: factory('connect'),
       createGrpcTransport: factory('grpc'),
@@ -100,6 +104,9 @@ function fakeNode(outcome: () => Promise<unknown> = () => Promise.resolve('ok'))
         }
         abort(): void {
           this.#entry.aborted = true;
+        }
+        state(): string {
+          return states.get(this.#entry.url) ?? 'idle';
         }
       },
     },
@@ -231,6 +238,20 @@ describe('targetBase and instanceOrigin', () => {
     expect(targetBase('billing')).toBeUndefined();
   });
 
+  it('refuses a target carrying credentials, without echoing it', () => {
+    const refusal = new TypeError(
+      'grpc client: a target must not carry credentials (user:password@); send them as call headers',
+    );
+    for (const target of [
+      'http://user:s3cret@billing:3410',
+      'https://user@billing',
+      'http://:s3cret@billing',
+      'user:s3cret@billing',
+    ]) {
+      expect(() => targetBase(target)).toThrow(refusal);
+    }
+  });
+
   it('refuses an empty target and a URL that is not http', () => {
     expect(() => targetBase('')).toThrow(
       new TypeError('grpc client: target must be a URL or a service name'),
@@ -259,6 +280,7 @@ describe('GrpcClients', () => {
       httpVersion: '2',
       useBinaryFormat: true,
       defaultTimeoutMs: CLIENT_DEFAULTS.timeoutMs,
+      readMaxBytes: 4 * 1024 * 1024,
     });
     expect(node.built[0]!.options['sessionManager']).toBeDefined();
     expect(node.sessions).toEqual([{ url: 'http://127.0.0.1:3410', aborted: false }]);
@@ -285,6 +307,18 @@ describe('GrpcClients', () => {
     });
     expect(node.built[0]!.options['sessionManager']).toBeUndefined();
     expect(node.sessions).toEqual([]);
+  });
+
+  it("bounds every reply by the plugin's readMaxBytes, on all three transports", async () => {
+    const { clients: c, node } = clients({ readMaxBytes: 1024 });
+    await call(c.client(BILLING, 'http://h:1'));
+    await call(c.client(BILLING, 'http://h:1', { protocol: 'grpc' }));
+    await call(c.client(BILLING, 'http://h:1', { protocol: 'grpc-web' }));
+    expect(node.built.map((b) => [b.kind, b.options['readMaxBytes']])).toEqual([
+      ['connect', 1024],
+      ['grpc', 1024],
+      ['grpc-web', 1024],
+    ]);
   });
 
   it('builds a native gRPC transport for protocol grpc', async () => {
@@ -424,6 +458,39 @@ describe('GrpcClients', () => {
     expect(node.sessions.filter((s) => s.aborted).map((s) => s.url)).toEqual(['http://h:1']);
   });
 
+  it('drains an evicted session with calls in flight, closing it once idle', async () => {
+    const { clients: c, node } = clients();
+    const aborted = (): string[] => node.sessions.filter((s) => s.aborted).map((s) => s.url);
+    for (let port = 0; port < MAX_CLIENT_ORIGINS; port++)
+      await call(c.client(BILLING, `http://h:${port}`));
+    // Every state but idle/closed/error has a call in flight or about to start.
+    node.states.set('http://h:0', 'open');
+    node.states.set('http://h:1', 'verifying');
+    node.states.set('http://h:2', 'connecting');
+    node.states.set('http://h:3', 'error');
+    for (let port = MAX_CLIENT_ORIGINS; port < MAX_CLIENT_ORIGINS + 4; port++)
+      await call(c.client(BILLING, `http://h:${port}`));
+    expect(aborted()).toEqual(['http://h:3']);
+    node.states.set('http://h:0', 'idle');
+    node.states.set('http://h:1', 'closed');
+    await call(c.client(BILLING, 'http://h:999'));
+    // h:4 was idle and closed at once; h:0 and h:1 settled and closed at this eviction.
+    expect(aborted()).toEqual(['http://h:0', 'http://h:1', 'http://h:3', 'http://h:4']);
+    c.close();
+    expect(aborted()).toContain('http://h:2');
+    expect(node.sessions.every((s) => s.aborted)).toBe(true);
+  });
+
+  it(`drains at most ${MAX_CLIENT_ORIGINS} evicted sessions, closing the oldest past it`, async () => {
+    const { clients: c, node } = clients();
+    for (let port = 0; port < MAX_CLIENT_ORIGINS * 3; port++)
+      node.states.set(`http://h:${port}`, 'open');
+    for (let port = 0; port < MAX_CLIENT_ORIGINS * 2 + 1; port++)
+      await call(c.client(BILLING, `http://h:${port}`));
+    // 65 evicted, all busy: the first one past the drain bound is closed regardless.
+    expect(node.sessions.filter((s) => s.aborted).map((s) => s.url)).toEqual(['http://h:0']);
+  });
+
   it('close aborts every session and later calls reject without opening one', async () => {
     let release!: () => void;
     const gate = new Promise<void>((ok) => (release = ok));
@@ -532,16 +599,43 @@ function nodeRefusal(): Error {
   );
 }
 
+/** The refused-stream reset text connect-node writes when it reads the code. */
+const RESET_TEXT = 'http/2 stream closed with error code REFUSED_STREAM (0x7)';
+
+/**
+ * A ConnectError-shaped error with that text: connect-node's local reading
+ * carries no metadata; one a server sent carries the response headers.
+ */
+function connectNodeReading(
+  metadata: Headers = new Headers(),
+  rawMessage: string = RESET_TEXT,
+): Error {
+  return Object.assign(new FakeUnavailableError(`[unavailable] ${rawMessage}`), {
+    rawMessage,
+    metadata,
+  });
+}
+
 describe('refused streams (REFUSED_STREAM)', () => {
   it.each([
     ['Node stream error in the cause chain', nodeRefusal(), true],
+    ["connect-node's reset-code reading", connectNodeReading(), true],
     [
-      "connect-node's reset-code reading",
-      new FakeUnavailableError(
-        '[unavailable] http/2 stream closed with error code REFUSED_STREAM (0x7)',
-      ),
-      true,
+      'the same text sent by a server (it carries response headers)',
+      connectNodeReading(new Headers({ 'content-type': 'application/proto' })),
+      false,
     ],
+    [
+      'the text inside a longer server message',
+      connectNodeReading(new Headers(), `downstream said: ${RESET_TEXT}`),
+      false,
+    ],
+    [
+      'the text with no metadata at all',
+      Object.assign(new Error(`[unavailable] ${RESET_TEXT}`), { rawMessage: RESET_TEXT }),
+      false,
+    ],
+    ['the text as a plain message', new Error(RESET_TEXT), false],
     [
       'the same text without the stream-error code',
       new Error('Stream closed with error code NGHTTP2_REFUSED_STREAM'),
@@ -606,9 +700,7 @@ describe('refused streams (REFUSED_STREAM)', () => {
   });
 
   it("keeps connect-node's own Unavailable reading as is, and fails the retry with a different error as that error", async () => {
-    const reading = new FakeUnavailableError(
-      '[unavailable] http/2 stream closed with error code REFUSED_STREAM (0x7)',
-    );
+    const reading = connectNodeReading();
     const other = new Error('InvalidArgument');
     const results: Array<() => Promise<unknown>> = [
       () => Promise.reject(reading),
@@ -691,8 +783,33 @@ describe('review fixes (M139b)', () => {
       results.length > 0 ? results.shift()!() : Promise.resolve('ok'),
     );
     results.push(() => Promise.reject(nodeRefusal()));
-    const { clients: e } = clients({}, unbounded);
+    const { clients: e } = clients({ clock: () => now }, unbounded);
     expect(await call(e.client(BILLING, 'http://h:1'))).toBe('ok');
-    expect(unbounded.built[0]!.calls.map((x) => x.timeoutMs)).toEqual([undefined, undefined]);
+    // No per-call deadline: the configured one the transport applied, less what was used.
+    expect(unbounded.built[0]!.calls.map((x) => x.timeoutMs)).toEqual([
+      undefined,
+      CLIENT_DEFAULTS.timeoutMs,
+    ]);
+
+    const configured = fakeNode(() =>
+      results.length > 0 ? results.shift()!() : Promise.resolve('ok'),
+    );
+    results.push(() => {
+      now += 30;
+      return Promise.reject(nodeRefusal());
+    });
+    const { clients: f } = clients({ clock: () => now }, configured);
+    expect(await call(f.client(BILLING, 'http://h:1', { timeoutMs: 500 }))).toBe('ok');
+    expect(configured.built[0]!.calls.map((x) => x.timeoutMs)).toEqual([undefined, 470]);
+
+    const configuredSpent = fakeNode(() => {
+      now += 600;
+      return Promise.reject(nodeRefusal());
+    });
+    const { clients: g } = clients({ clock: () => now }, configuredSpent);
+    await expect(call(g.client(BILLING, 'http://h:1', { timeoutMs: 500 }))).rejects.toBeInstanceOf(
+      FakeUnavailableError,
+    );
+    expect(configuredSpent.built[0]!.calls).toHaveLength(1);
   });
 });

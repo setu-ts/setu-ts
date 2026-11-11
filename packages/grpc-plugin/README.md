@@ -101,13 +101,17 @@ const billing = grpcClient(app.services, BillingService, 'billing');
 
 - **Target.** A service name resolves through `CAPABILITIES.SERVICE_DISCOVERY` on every call (a name
   with no discovery registered throws a `TypeError` at `grpcClient()`); an absolute `http(s)://` URL
-  is used as is. After each call the client reports to discovery — `failure` for `Unavailable` (a
-  refused, reset or closed connection), `success` otherwise — so an instance that refuses
-  connections is ejected.
+  is used as is. A target carrying credentials (`http://user:secret@host`, or `user:secret@host`)
+  throws a `TypeError` that does not repeat it: send credentials as call headers, never in a target,
+  where every error naming the target would carry them. After each call the client reports to
+  discovery — `failure` for `Unavailable` (a refused, reset or closed connection), `success`
+  otherwise — so an instance that refuses connections is ejected.
 - **Connections.** One HTTP/2 session per instance, shared by every call to it and closed with the
   application. Each session may buffer 64 MB (Node's `maxSessionMemory`; its default of 10 MB reset
   streams once sixteen 1 MB replies were in flight on one connection). At most 64 instance origins
-  keep a session; the least recently used is closed first.
+  keep a session; the least recently used is dropped first, closed at once when idle, or else left
+  to finish the calls in flight on it (at most 64 such sessions; past that the oldest is closed).
+  Each reply message is bounded by the plugin's `readMaxBytes`, as each request is.
 - **Defaults.** The Connect protocol, binary, over HTTP/2, with a 5 s deadline. Per target in
   `clients`, or per client in `grpcClient()`'s options: `basePath`, `protocol` (`'connect'`,
   `'grpc'`, `'grpc-web'`), `httpVersion` (`'2'`, `'1.1'`; native gRPC needs `'2'`) and `timeoutMs`
@@ -117,8 +121,11 @@ const billing = grpcClient(app.services, BillingService, 'billing');
   the call sets its own.
 - **Rolling restarts.** A server shutting down refuses a call already on the wire (HTTP/2
   `REFUSED_STREAM`, never processed). The client reports that instance's failure and sends a unary
-  call once more on another pick, within what is left of the call's deadline, so a restart costs no
-  failed unary calls; a refused streaming call rejects as `Unavailable`.
+  call once more on another pick, within what is left of the call's deadline (its own, or the
+  configured one), so a restart costs no failed unary calls; a refused streaming call rejects as
+  `Unavailable`. Only the refusal itself is resent — Node's stream error, connect-node's own reading
+  of the reset code, or Bun's stream refused after `GOAWAY` — never an error a server sent, even one
+  whose message names `REFUSED_STREAM`: that server ran its handler.
 - **Caching.** The same arguments return the same client; each service definition keeps at most 256
   clients, the least recently used dropped first, so a target built from request data cannot grow
   the cache without bound.
@@ -180,10 +187,11 @@ The `GrpcPlugin` accepts optional configuration:
   must then be empty. Not a boolean → `TypeError` at `GrpcPlugin()`
 - `clients`: Per-target client defaults, keyed by the target passed to `grpcClient()` — see
   [Calling another service](#calling-another-service)
-- `readMaxBytes`: The largest request message a procedure accepts, in bytes (defaults to 4 MiB, the
-  receive limit grpc-go and grpc-js default to). Connect applies it per message on gRPC, gRPC-Web
-  and Connect streaming, and to the whole body of a unary Connect request; a larger message is
-  refused with `RESOURCE_EXHAUSTED`. It is the bound on a streamed request:
+- `readMaxBytes`: The largest request message a procedure accepts, and the largest reply message
+  this plugin's clients accept, in bytes (defaults to 4 MiB, the receive limit grpc-go and grpc-js
+  default to; connect-node's own client default is 4 GiB). Connect applies it per message on gRPC,
+  gRPC-Web and Connect streaming, and to the whole body of a unary Connect request; a larger message
+  is refused with `RESOURCE_EXHAUSTED`. It is the bound on a streamed request:
   `RuntimePlugin({ maxBodyBytes })` is a total, so it bounds only the buffered bodies of unary and
   server-streaming calls. An integer from 1 to `4294967295`; anything else throws at `GrpcPlugin()`
 

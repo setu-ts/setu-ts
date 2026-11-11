@@ -13,6 +13,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   classifyPreface,
   createCleartextHttp2Server,
+  HTTP2_IDLE_TIMEOUT_MS,
   PREFACE_TIMEOUT_MS,
   replayingDuplex,
 } from '../../src/adapters/node/node-http2-listener.ts';
@@ -146,6 +147,72 @@ describe('createCleartextHttp2Server', () => {
     );
     expect((await done).text).toMatch(/^HTTP\/1\.1 101/);
     expect(seen).toEqual(['websocket']);
+  });
+
+  it("runs node:http's header timeout on the HTTP/1.1 side, which never listens itself", async () => {
+    // The plain listener closes a request whose headers never finish at
+    // headersTimeout; node:http only starts that check on 'listening'.
+    const { port } = await start({
+      http1: { headersTimeout: 300, requestTimeout: 1_000, connectionsCheckingInterval: 50 },
+    });
+    const socket = await raw(port);
+    const started = performance.now();
+    const done = drain(socket, started);
+    socket.write('GET / HTTP/1.1\r\nHost: a\r\nX-Partial: ');
+    const { text, ms } = await done;
+    expect(text).toMatch(/^HTTP\/1\.1 408/);
+    expect(ms).toBeGreaterThanOrEqual(250);
+    expect(ms).toBeLessThan(2_000);
+  });
+
+  it('closes an HTTP/2 session idle with no stream open, with GOAWAY', async () => {
+    const { port } = await start({ idleTimeoutMs: 200 });
+    const socket = await raw(port);
+    const started = performance.now();
+    const chunks: Uint8Array[] = [];
+    socket.on('data', (chunk: Uint8Array) => chunks.push(chunk));
+    const done = drain(socket, started);
+    socket.write(new Uint8Array([...bytes(PREFACE), ...EMPTY_SETTINGS]));
+    const { ms } = await done;
+    expect(ms).toBeGreaterThanOrEqual(150);
+    expect(ms).toBeLessThan(2_000);
+    // Frame type 0x7 (GOAWAY) is somewhere in what the server sent.
+    const all = Uint8Array.from(chunks.flatMap((c) => [...c]));
+    let goaway = false;
+    for (let at = 0; at + 9 <= all.length;) {
+      const length = (all[at]! << 16) | (all[at + 1]! << 8) | all[at + 2]!;
+      if (all[at + 3] === 0x7) goaway = true;
+      at += 9 + length;
+    }
+    expect(goaway).toBe(true);
+  });
+
+  it('keeps an HTTP/2 session whose stream is open but silent past the idle bound', async () => {
+    server = createCleartextHttp2Server(() => undefined, { idleTimeoutMs: 150 });
+    const net = server.net;
+    await new Promise<void>((resolve) => net.listen(0, '127.0.0.1', resolve));
+    const { port } = server.address() as AddressInfo;
+    const session = http2Connect(`http://127.0.0.1:${port}`);
+    session.on('error', () => undefined);
+    let closed = false;
+    session.on('close', () => (closed = true));
+    session.on('goaway', () => (closed = true));
+    const stream = session.request({ ':path': '/held' });
+    stream.on('error', () => undefined);
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(closed).toBe(false);
+    stream.close();
+    // Once the stream is gone the session is idle, and the bound closes it.
+    await new Promise<void>((resolve) => {
+      if (closed) resolve();
+      session.once('goaway', () => resolve());
+      session.once('close', () => resolve());
+    });
+    expect(closed).toBe(true);
+  });
+
+  it('keeps the default idle bound at 75 s', () => {
+    expect(HTTP2_IDLE_TIMEOUT_MS).toBe(75_000);
   });
 
   it('stops accepting connections once closed', async () => {

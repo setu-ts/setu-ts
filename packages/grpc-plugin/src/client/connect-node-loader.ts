@@ -23,6 +23,8 @@ const INSTALL_COMMAND =
 export interface Http2SessionLike {
   /** Closes the session and fails the calls still on it. */
   abort(reason?: Error): void;
+  /** `'open'` while streams are in flight; `'idle'` once none are. */
+  state(): string;
 }
 
 /** What the client reads from `@connectrpc/connect-node`. */

@@ -70,7 +70,9 @@ export interface GrpcPluginOptions {
    * grpc-go and grpc-js. Forwarded to Connect's `readMaxBytes`, which applies
    * it per message on enveloped protocols (gRPC, gRPC-Web, Connect streaming)
    * and to the whole body of a unary Connect request; a larger message is
-   * refused with `RESOURCE_EXHAUSTED`.
+   * refused with `RESOURCE_EXHAUSTED`. The same bound applies to every reply
+   * message this plugin's clients receive (`grpcClient()`), where connect-node's
+   * own default would be 4 GiB.
    *
    * This is the bound on a client- or bidi-streaming request, whose body the
    * kernel streams to the procedure (M139b): `RuntimePlugin({ maxBodyBytes })`

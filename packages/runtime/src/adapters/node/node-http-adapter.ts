@@ -83,10 +83,26 @@ export interface NodeFetchEnv {
   readonly incoming?: {
     readonly socket?: { readonly remoteAddress?: string | undefined };
     readonly httpVersion?: string;
+    /** Present on `node:http2`'s compatibility request only: its stream. */
+    readonly stream?: unknown;
     readonly [PEER_ADDRESS]?: string | undefined;
   };
   /** The Node response the reply is written to. */
   readonly outgoing?: NodeOutgoing;
+}
+
+/**
+ * Whether a request arrived on an HTTP/2 stream, which alone can carry
+ * response trailers. Read from the request object `node:http2` builds — its
+ * `stream` — never from `httpVersion`, which an HTTP/1.1 request line sets
+ * (`POST / HTTP/2.0` parses as version 2.0 on `node:http`).
+ *
+ * @param incoming - node-server's incoming request, when served by it
+ * @returns `true` for an `Http2ServerRequest`
+ * @internal Exported for its tests only.
+ */
+export function isHttp2Stream(incoming: NodeFetchEnv['incoming']): boolean {
+  return typeof incoming?.stream === 'object' && incoming.stream !== null;
 }
 
 /**
@@ -607,9 +623,10 @@ export class NodeHttpServerHandle {
               peerAddressOf(env.incoming),
               {
                 scheme: this.#scheme,
+                // A real HTTP/2 stream, never the request line's version: an
+                // HTTP/1.1 request can claim `HTTP/2.0` and has no trailers.
                 responseTrailers:
-                  env.incoming?.httpVersion === '2.0' &&
-                  typeof env.outgoing?.addTrailers === 'function',
+                  isHttp2Stream(env.incoming) && typeof env.outgoing?.addTrailers === 'function',
               },
             );
 

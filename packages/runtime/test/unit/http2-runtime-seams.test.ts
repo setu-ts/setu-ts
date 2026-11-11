@@ -188,7 +188,7 @@ describe('Node adapter http2 seams', () => {
   it('an h2 request on a TLS listener: https scheme, trailers flag, trailers written', async () => {
     const queued: Record<string, string>[] = [];
     const env = {
-      incoming: { httpVersion: '2.0', socket: { remoteAddress: '10.0.0.9' } },
+      incoming: { httpVersion: '2.0', stream: {}, socket: { remoteAddress: '10.0.0.9' } },
       outgoing: { writeHead: () => undefined, addTrailers: (f: any) => queued.push(f) },
     };
     const { request, response } = await served(
@@ -216,8 +216,29 @@ describe('Node adapter http2 seams', () => {
     expect(queued).toEqual([]);
   });
 
+  it('an HTTP/1.1 request line claiming HTTP/2.0 is not offered trailers', async () => {
+    // node:http parses `POST / HTTP/2.0` as version 2.0, and its response has
+    // addTrailers: only an Http2ServerRequest's stream marks a real HTTP/2 request.
+    const queued: unknown[] = [];
+    const env = {
+      incoming: { httpVersion: '2.0', stream: null },
+      outgoing: { writeHead: () => undefined, addTrailers: (f: unknown) => queued.push(f) },
+    };
+    const { request, response } = await served({ http2: true }, 'http://h/a', env);
+    expect(request.responseTrailers).toBe(false);
+    await response.text();
+    expect(queued).toEqual([]);
+    const claimed = { ...env, incoming: { httpVersion: '2.0' } };
+    expect((await served({ http2: true }, 'http://h/a', claimed)).request.responseTrailers).toBe(
+      false,
+    );
+  });
+
   it('an h2 request whose response has no addTrailers is not offered trailers', async () => {
-    const env = { incoming: { httpVersion: '2.0' }, outgoing: { writeHead: () => undefined } };
+    const env = {
+      incoming: { httpVersion: '2.0', stream: {} },
+      outgoing: { writeHead: () => undefined },
+    };
     const { request } = await served({ http2: true }, 'http://h/a', env);
     expect(request.responseTrailers).toBe(false);
   });

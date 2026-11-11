@@ -114,6 +114,7 @@ export function GrpcPlugin(options: GrpcPluginOptions = {}): IPlugin {
         clock: () =>
           optional<IRuntimeServices>(CAPABILITIES.RUNTIME)?.hrtime() ?? performance.now(),
         targets: options.clients ?? {},
+        ...(readMaxBytes === undefined ? {} : { readMaxBytes }),
       });
 
       const grpcService = new GrpcService({

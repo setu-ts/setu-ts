@@ -45,7 +45,8 @@ import { targetBase, validateClientOptions } from './grpc-client.ts';
  * @param options - Overrides for this client
  * @returns The typed client
  * @throws {TypeError} When the registered gRPC service cannot make clients, an
- *   option is out of range, or `target` is a name and no discovery is registered
+ *   option is out of range, `target` carries credentials (`user:password@`), or
+ *   `target` is a name and no discovery is registered
  * @since 0.13.0
  */
 export function grpcClient<TService extends DescService>(
@@ -90,8 +91,8 @@ export function grpcClient<TService extends DescService>(
  * @param target - A service name known to discovery, or an absolute URL
  * @param options - Overrides for this client
  * @returns The provider entry
- * @throws {TypeError} When an option is out of range, or the target is empty or
- *   a URL that is not `http(s)`
+ * @throws {TypeError} When an option is out of range, or the target is empty, a
+ *   URL that is not `http(s)`, or carries credentials (`user:password@`)
  * @since 0.13.0
  */
 export function grpcClientProvider<TService extends DescService>(

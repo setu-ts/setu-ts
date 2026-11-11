@@ -346,6 +346,80 @@ The TLS mode imports `node:http2` the same way.
   inputs.
 - **Test home:** the audit record in the PR, with positive and negative controls.
 
+#### 3.10.1 Design security review (2026-11-11, written after implementation)
+
+The obligations above were all §3.10 held when §3.11–§3.13 were added, and they name no assets or
+attackers. The first committed-tree audit (commit `8f5b75a5c`) failed on that (its F10) and on nine
+findings below. **This review was written after the code, in response to that audit** — it is not a
+pre-implementation threat model, and the maintainer decides whether it stands as one. It is what the
+re-audit holds the tree against.
+
+- **Reviewed flow.**
+  1. _Serving_ (§3.4–§3.6): an accepted TCP socket → preface classification (bounded) → `node:http`
+     (HTTP/1.1) or a `node:http2` session (h2c, or TLS with ALPN) → node-server's request listener →
+     the kernel → `GrpcPlugin`'s Connect router → reply, with trailers on HTTP/2 only.
+  2. _Fast path_ (§3.11): `RpcCall` / `RpcReply` are in-process objects between the kernel and the
+     plugin. No new input crosses a boundary; the request's body and headers are those of flow 1.
+  3. _Calling_ (§3.12): application code → `grpcClient(services, definition, target, options)` →
+     `GrpcClients` → target (absolute URL, or a discovery pick each call) → a transport and HTTP/2
+     session cached per origin → connect-node → the remote server; its reply, error or reset comes
+     back to the caller, and a refused stream is sent once more.
+  4. _Injection_ (§3.13): `@Module({ providers })` factory entries run once at boot, against the
+     container or the registry.
+  5. _Generation_ (§3.12 CLI): `setu.workspace.json` → each caller's rendered
+     `src/transport/index.ts`.
+- **Assets.** The serving member's availability (sockets, sessions, memory, handler concurrency);
+  the TLS private key; credentials a caller holds (headers, and any it puts in a URL); **the
+  integrity of a call** — a unary RPC the server ran must never run again because the client guessed
+  it had not; the trace context; the capability registry (a factory must not displace an installed
+  capability); the integrity of generated source.
+- **Attackers.**
+  - **A1 — a network client** of a serving member: any bytes on the port, over h2c, HTTP/1.1 or TLS,
+    including half-open and idle connections.
+  - **A2 — anything answering at a target**: a hostile, compromised or merely failing server. It
+    chooses the reply size, error codes and text, headers, resets and `GOAWAY`.
+  - **A3 — an end user** of a caller whose input a downstream service echoes into its error text,
+    which then reaches the caller's client (indirect control of A2's error text).
+  - **A4 — whoever edits `setu.workspace.json`** (by hand or in a pull request); the CLI renders it
+    into code other members run.
+  - Out of scope: the application author choosing targets. A target built from request data is the
+    application's decision (no SSRF guard; the README says so), bounded only in what it can grow.
+- **Approved budgets.** Preface 10 s. HTTP/1.1 on the shared port: Node's `headersTimeout` 60 s and
+  `requestTimeout` 300 s, as on the plain listener. An HTTP/2 session with no stream open: 75 s,
+  then `GOAWAY` (a silent open stream keeps it). Request message and reply message: `readMaxBytes`,
+  default 4 MiB. Clients: 256 per definition. Origins: 64 cached sessions plus at most 64 draining.
+  Client session memory: 64 MB (the server keeps Node's default; §3.12). Retry: one, unary only,
+  within what is left of the deadline.
+- **Obligations on the audit** (in addition to the eight above): 9. The retry resends only a call
+  the server provably did not process: Node's `ERR_HTTP2_STREAM_ERROR` naming
+  `NGHTTP2_REFUSED_STREAM`, connect-node's own reading of the reset code (its exact text with no
+  response metadata), and Bun's `ERR_HTTP2_GOAWAY_SESSION` — never an error a server sent, whatever
+  its text (A2, A3). 10. The retry runs within what is left of the deadline — the call's own, or the
+  configured one the transport applied. 11. No credential in a target is accepted, so none reaches
+  error text (A3 makes error text reachable from outside). 12. Every reply message is bounded by
+  `readMaxBytes` (A2). 13. Every client cache is bounded, and eviction never fails a call in
+  flight. 14. `traceparent` comes only from a validated active span, never overrides the call's own,
+  and no other header is added. 15. HTTP/1.1 on `http2: true` is held to the plain listener's
+  timeouts, and an idle HTTP/2 session is closed (A1). 16. A factory provider cannot replace an
+  existing capability or token, and its refusals name only the declared tokens. 17. A manifest
+  member name is one `setu generate app` could write (kebab-case, identifier- and path-safe), so it
+  cannot inject source (A4); the orphan refusal covers callers. 18. The Workers refusal names no
+  target.
+- **Findings of the first audit, and their dispositions.**
+
+  | #   | Severity | Finding                                                                     | Disposition                                                                                  |
+  | --- | -------- | --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+  | F1  | Medium   | The retry matched the refusal text anywhere, so a server's error was resent | Fixed: connect-node's arm needs the exact `rawMessage` and empty metadata (obligation 9)     |
+  | F2  | Medium   | URL userinfo reached error text                                             | Fixed: a target with credentials is refused, unechoed (obligation 11)                        |
+  | F3  | Medium   | HTTP/1.1 on `http2: true` had no header or request timeout                  | Fixed: the outer server's `listening` is forwarded to the HTTP/1.1 server                    |
+  | F4  | Medium   | Idle HTTP/2 sessions were never closed                                      | Fixed: 75 s with no stream open, then `GOAWAY`, on both cleartext and TLS                    |
+  | F5  | Low      | An HTTP/1.1 line claiming `HTTP/2.0` was offered trailers                   | Fixed: trailers only on an `Http2ServerRequest`'s stream                                     |
+  | F6  | Low      | With no per-call deadline the retry got a fresh one                         | Fixed: the configured deadline counts (obligation 10)                                        |
+  | F7  | Low      | Replies were unbounded (connect-node's 4 GiB default)                       | Fixed: `readMaxBytes` on every client transport (obligation 12)                              |
+  | F8  | Low      | Origin eviction cancelled calls in flight                                   | Fixed: an evicted session drains, closed once idle; the draining set is bounded              |
+  | F9  | Low      | A crafted member name injected code into generated files                    | Fixed: names refused at manifest read unless `generate app` could write them (obligation 17) |
+  | F10 | Blocking | No design review for §3.11–§3.13                                            | This section, written after the code; the maintainer decides whether it stands               |
+
 ### 3.11 RPC call and reply without fetch objects (2026-11-10)
 
 - **Decision:** the kernel and the plugin exchange plain objects, not a fetch `Request` and

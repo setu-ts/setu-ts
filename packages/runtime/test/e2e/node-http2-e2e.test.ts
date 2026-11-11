@@ -167,6 +167,15 @@ describeNode('NodeHttpAdapter http2: true (cleartext, shared port)', () => {
     expect(h1).not.toContain('grpc-status');
   });
 
+  it('an HTTP/1.1 request line claiming HTTP/2.0 is offered no trailers', async () => {
+    // node:http parses the line as version 2.0, and its response has
+    // addTrailers: neither makes it an HTTP/2 stream.
+    const { port } = await start(true);
+    const reply = await rawHttp1(port, 'GET /c HTTP/2.0\r\nHost: a\r\nConnection: close\r\n\r\n');
+    expect(reply).toMatch(/ false$/);
+    expect(reply).not.toMatch(/ true$/);
+  });
+
   it('a client cannot choose the scheme (V12-51)', async () => {
     const { port } = await start(true);
     const session = http2Connect(`http://127.0.0.1:${port}`);

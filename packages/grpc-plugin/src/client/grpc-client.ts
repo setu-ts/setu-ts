@@ -19,6 +19,7 @@ import type {
   ServiceInstance,
 } from '@setu-ts/common';
 
+import { DEFAULT_READ_MAX_BYTES } from '../interfaces/index.ts';
 import type { ClientTransportLike, ConnectRuntime } from '../interfaces/connect-runtime.ts';
 import type { ConnectNodeModuleLike, Http2SessionLike } from './connect-node-loader.ts';
 
@@ -49,6 +50,12 @@ export const CLIENT_MAX_SESSION_MEMORY_MB = 64;
  * per distinct value, forever.
  */
 export const MAX_CLIENTS_PER_DEFINITION = 256;
+
+/**
+ * Session states with no call in flight or about to start (connect-node's
+ * `Http2SessionManager.state()`); `open`, `connecting` and `verifying` are not.
+ */
+const SETTLED: ReadonlySet<string> = new Set(['idle', 'closed', 'error']);
 
 /** How many origins keep a transport (and session) before the oldest is closed. */
 export const MAX_CLIENT_ORIGINS = 64;
@@ -98,22 +105,33 @@ export function validateClientOptions(options: GrpcClientOptions, where: string)
   }
 }
 
+/** The refusal for a target carrying credentials; it never echoes the target. */
+const USERINFO_REFUSAL =
+  'grpc client: a target must not carry credentials (user:password@); send them as call headers';
+
 /**
  * A URL target's base, or `undefined` for a service name.
  *
  * @param target - The target
  * @returns The origin plus any path, without a trailing slash
- * @throws {TypeError} For an empty target or a URL that is not `http(s)`
+ * @throws {TypeError} For an empty target, a URL that is not `http(s)`, or a
+ *   target carrying credentials
  */
 export function targetBase(target: string): string | undefined {
   if (typeof target !== 'string' || target === '') {
     throw new TypeError('grpc client: target must be a URL or a service name');
   }
-  if (!SCHEME.test(target)) return undefined;
+  // Credentials have no place in a target: connect-node would drop them, and
+  // every error that names the target would carry them. Refused unechoed.
+  if (!SCHEME.test(target)) {
+    if (target.includes('@')) throw new TypeError(USERINFO_REFUSAL);
+    return undefined;
+  }
   const url = new URL(target);
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
     throw new TypeError(`grpc client: target URL must be http or https, received ${url.protocol}`);
   }
+  if (url.username !== '' || url.password !== '') throw new TypeError(USERINFO_REFUSAL);
   return `${url.origin}${url.pathname.replace(/\/+$/, '')}`;
 }
 
@@ -163,11 +181,26 @@ export function isRefusedStream(error: unknown): boolean {
       // The stream was never opened: the session had already received GOAWAY
       // (seen on Bun, whose node:http2 races the session manager's reconnect).
       if (code === 'ERR_HTTP2_GOAWAY_SESSION') return true;
-      if (message.includes(CONNECT_NODE_REFUSED)) return true;
+      if (isLocalResetRefusal(current)) return true;
     }
     current = cause;
   }
   return false;
+}
+
+/**
+ * connect-node's own reading of a `REFUSED_STREAM` reset code: exactly its
+ * message, and no response metadata. A server's error that merely names the
+ * code always arrives with the response headers, so it never matches (a server
+ * that rethrows a downstream refusal ran its handler, and is not resent).
+ */
+function isLocalResetRefusal(error: object): boolean {
+  const { rawMessage, metadata } = error as { rawMessage?: unknown; metadata?: unknown };
+  return (
+    rawMessage === CONNECT_NODE_REFUSED &&
+    metadata instanceof Headers &&
+    metadata.keys().next().done === true
+  );
 }
 
 /** A refused stream, carrying the `Unavailable` error the caller will see. */
@@ -190,6 +223,11 @@ export interface GrpcClientDeps {
   readonly discovery: () => IServiceDiscovery | undefined;
   /** Telemetry, resolved when used, or `undefined` when none is registered. */
   readonly telemetry: () => ITelemetryService | undefined;
+  /**
+   * The largest reply message a call accepts, in bytes: the plugin's
+   * `readMaxBytes`. Absent, the 4 MiB default.
+   */
+  readonly readMaxBytes?: number;
   /** Per-target defaults from `GrpcPluginOptions.clients`. */
   readonly targets: Readonly<Record<string, GrpcClientOptions>>;
   /** The runtime platform, when a runtime capability reports one. */
@@ -221,6 +259,8 @@ export class GrpcClients {
   readonly #deps: GrpcClientDeps;
   readonly #clients = new WeakMap<object, Map<string, unknown>>();
   readonly #origins = new Map<string, OriginEntry>();
+  /** Evicted sessions with calls still in flight, closed once idle. */
+  readonly #draining = new Set<Http2SessionLike>();
   /** The connect-node import while it loads; then {@linkcode GrpcClients.#node}. */
   #loading: Promise<ConnectNodeModuleLike> | undefined;
   /** connect-node once loaded, so a call no longer waits on the import's promise. */
@@ -291,7 +331,9 @@ export class GrpcClients {
   close(): void {
     this.#closed = true;
     for (const entry of this.#origins.values()) entry.session?.abort();
+    for (const session of this.#draining) session.abort();
     this.#origins.clear();
+    this.#draining.clear();
   }
 
   #delegate(
@@ -350,11 +392,11 @@ export class GrpcClients {
       return await this.#attempt(target, base, options, (transport) => run(transport, timeoutMs));
     } catch (error) {
       if (!(error instanceof RefusedStream)) throw error;
-      // The retry gets what is left of the call's deadline, never a fresh one;
+      // The retry gets what is left of the call's deadline — the call's own, or
+      // the client's configured one the transport applied — never a fresh one;
       // with nothing left, the refusal is the answer.
-      const remaining =
-        timeoutMs === undefined ? undefined : timeoutMs - Math.ceil(now() - started);
-      if (!retryable || (remaining !== undefined && remaining <= 0)) throw error.error;
+      const remaining = (timeoutMs ?? options.timeoutMs) - Math.ceil(now() - started);
+      if (!retryable || remaining <= 0) throw error.error;
       return this.#attempt(target, base, options, (transport) => run(transport, remaining)).catch(
         (again: unknown) => {
           throw again instanceof RefusedStream ? again.error : again;
@@ -463,6 +505,8 @@ export class GrpcClients {
       httpVersion: options.httpVersion,
       useBinaryFormat: true,
       defaultTimeoutMs: options.timeoutMs,
+      // connect-node's own default is 4 GiB; bound replies as requests are.
+      readMaxBytes: this.#deps.readMaxBytes ?? DEFAULT_READ_MAX_BYTES,
       ...(session === undefined ? {} : { sessionManager: session }),
     };
     const transport =
@@ -475,9 +519,33 @@ export class GrpcClients {
     if (this.#origins.size > MAX_CLIENT_ORIGINS) {
       const [oldestKey, oldest] = this.#origins.entries().next().value as [string, OriginEntry];
       this.#origins.delete(oldestKey);
-      oldest.session?.abort();
+      if (oldest.session !== undefined) this.#retire(oldest.session);
     }
     return transport;
+  }
+
+  /**
+   * Closes an evicted session without failing its calls: one with streams in
+   * flight drains, and is closed at a later eviction once idle. The draining
+   * set is bounded as the cache is; past it, the oldest is closed regardless.
+   */
+  #retire(session: Http2SessionLike): void {
+    for (const draining of this.#draining) {
+      if (SETTLED.has(draining.state())) {
+        draining.abort();
+        this.#draining.delete(draining);
+      }
+    }
+    if (SETTLED.has(session.state())) {
+      session.abort();
+      return;
+    }
+    this.#draining.add(session);
+    if (this.#draining.size > MAX_CLIENT_ORIGINS) {
+      const [oldest] = this.#draining;
+      this.#draining.delete(oldest as Http2SessionLike);
+      (oldest as Http2SessionLike).abort();
+    }
   }
 
   /**

@@ -16,14 +16,16 @@ All notable changes to this project are documented here. The format follows
   `RuntimePlugin({ http2: { key, cert } })` serves HTTP/2 over TLS with ALPN and HTTP/1.1 on the
   same port; `Http2TlsOptions` is its type. Bun is served by the Node adapter while the option is
   set (WebSockets then need `ws`); Deno passes TLS to `Deno.serve`; Workers ignore it. Closing sends
-  `GOAWAY` to open HTTP/2 sessions. Common gains `IRequest.responseTrailers`, `StreamOptions` for
-  `IResponse.stream(body, { trailers })`, a `trailers` member on the streaming `ResponseSnapshot`,
-  and `RpcTransport`, `RpcCall` and `RpcReply` with the optional `IGrpcService.handleRpc` and
-  `IGrpcService.streamsRequest` members; `refuses` takes an optional transport. The Node adapter
-  writes trailers on HTTP/2, and `GrpcPlugin` serves native `application/grpc` there, so `grpcurl`,
-  `ghz` and grpc-go clients — and reflection through `grpcurl` — reach Setu directly; HTTP/1.1, Deno
-  and Workers keep the Trailers-Only `UNIMPLEMENTED`. `GrpcPluginOptions.readMaxBytes` (default 4
-  MiB) bounds each request message. Ships in 0.13.0.
+  `GOAWAY` to open HTTP/2 sessions, as does 75 s with no stream open on one, and HTTP/1.1 on the
+  shared port keeps `node:http`'s header and request timeouts. Common gains
+  `IRequest.responseTrailers`, `StreamOptions` for `IResponse.stream(body, { trailers })`, a
+  `trailers` member on the streaming `ResponseSnapshot`, and `RpcTransport`, `RpcCall` and
+  `RpcReply` with the optional `IGrpcService.handleRpc` and `IGrpcService.streamsRequest` members;
+  `refuses` takes an optional transport. The Node adapter writes trailers on HTTP/2, and
+  `GrpcPlugin` serves native `application/grpc` there, so `grpcurl`, `ghz` and grpc-go clients — and
+  reflection through `grpcurl` — reach Setu directly; HTTP/1.1, Deno and Workers keep the
+  Trailers-Only `UNIMPLEMENTED`. `GrpcPluginOptions.readMaxBytes` (default 4 MiB) bounds each
+  request message, and each reply message the plugin's clients receive. Ships in 0.13.0.
 - **`grpcClient`: the gRPC plugin calls other services as well as serving (M139b,
   `@setu-ts/grpc-plugin`, `@setu-ts/common`, `@setu-ts/cli`).**
   `grpcClient(services, definition, target, options?)` returns a typed Connect client through the
@@ -31,7 +33,8 @@ All notable changes to this project are documented here. The format follows
   on every call and reports each outcome back, so an instance that refuses connections is ejected;
   an absolute URL is used as is. A unary call the server refused before processing it (HTTP/2
   `REFUSED_STREAM`, as a server shutting down does) is sent once more on a fresh pick, so a rolling
-  restart costs no failed unary calls. Calls share one HTTP/2 session per instance, allowed to
+  restart costs no failed unary calls; an error a server sent is never resent. A target carrying
+  credentials (`user:password@`) is refused. Calls share one HTTP/2 session per instance, allowed to
   buffer 64 MB rather than Node's 10 MB (which reset streams with several 1 MB replies in flight),
   have a 5 s deadline, carry the active span as `traceparent`, and are refused with `Unavailable`
   once the application stops. `GrpcClientOptions` (`basePath`, `protocol`, `httpVersion`,

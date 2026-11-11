@@ -38,7 +38,12 @@
 import { createServer as createNetServer } from 'node:net';
 import type { Server as NetServer, Socket } from 'node:net';
 import { createServer as createHttpServer } from 'node:http';
-import type { IncomingMessage, Server as HttpServer, ServerResponse } from 'node:http';
+import type {
+  IncomingMessage,
+  Server as HttpServer,
+  ServerOptions as HttpServerOptions,
+  ServerResponse,
+} from 'node:http';
 import { createServer as createHttp2Server, createSecureServer } from 'node:http2';
 import type { Http2ServerRequest, Http2ServerResponse, Http2Session } from 'node:http2';
 import { Duplex } from 'node:stream';
@@ -81,22 +86,52 @@ export function classifyPreface(bytes: Uint8Array): PrefaceVerdict {
 }
 
 /**
+ * How long an HTTP/2 session with no open stream is kept (nginx's
+ * `keepalive_timeout` default). `node:http2` has no idle bound of its own: a
+ * client that sends the preface and `SETTINGS`, then nothing, would hold its
+ * session forever. A session with a stream open — a silent server stream
+ * included — is never closed by it.
+ */
+export const HTTP2_IDLE_TIMEOUT_MS = 75_000;
+
+/**
  * Closes, gracefully, every HTTP/2 session a server holds when the returned
  * function runs. An HTTP/2 server's own `close()` only stops new connections:
  * a client that keeps its session open (connect-node and grpc-js both do)
  * would otherwise hold the listener past shutdown. `session.close()` sends
  * GOAWAY and lets streams in flight finish.
  *
+ * Also closes, the same way, a session idle for
+ * {@linkcode HTTP2_IDLE_TIMEOUT_MS} with no stream open.
+ *
  * @param server - Any `node:http2` server
+ * @param idleTimeoutMs - Overrides {@linkcode HTTP2_IDLE_TIMEOUT_MS}; tests only
  * @returns Closes the sessions open at the time of the call
  */
-export function trackHttp2Sessions(server: {
-  on(event: 'session', listener: (session: Http2Session) => void): unknown;
-}): () => void {
+export function trackHttp2Sessions(
+  server: {
+    on(event: 'session', listener: (session: Http2Session) => void): unknown;
+  },
+  idleTimeoutMs: number = HTTP2_IDLE_TIMEOUT_MS,
+): () => void {
   const sessions = new Set<Http2Session>();
   server.on('session', (session) => {
     sessions.add(session);
     session.once('close', () => sessions.delete(session));
+    let open = 0;
+    // Fires once the session has seen no frame for the bound. With a stream
+    // open it does nothing — a silent server stream is not idle — and Node does
+    // not re-arm it, so the last stream to close starts the bound again.
+    session.on('timeout', () => {
+      if (open === 0) session.close();
+    });
+    session.setTimeout(idleTimeoutMs);
+    session.on('stream', (stream: { once(event: 'close', listener: () => void): unknown }) => {
+      open++;
+      stream.once('close', () => {
+        if (--open === 0 && !session.closed) session.setTimeout(idleTimeoutMs);
+      });
+    });
   });
   return () => {
     for (const session of sessions) session.close();
@@ -113,6 +148,14 @@ export type SharedRequestListener = (
 export interface CleartextHttp2Options {
   /** Overrides {@linkcode PREFACE_TIMEOUT_MS}; tests only. */
   readonly prefaceTimeoutMs?: number;
+  /** Overrides {@linkcode HTTP2_IDLE_TIMEOUT_MS}; tests only. */
+  readonly idleTimeoutMs?: number;
+  /**
+   * Options for the HTTP/1.1 side, `node:http`'s own (`headersTimeout`,
+   * `requestTimeout`, `connectionsCheckingInterval`); Node's defaults when
+   * absent, as on the plain listener. Tests only.
+   */
+  readonly http1?: HttpServerOptions;
   /**
    * Hands HTTP/2 connections over through {@linkcode replayingDuplex} rather
    * than the socket itself. Defaults to `true` on Bun only; tests force both.
@@ -131,11 +174,20 @@ export class CleartextHttp2Server {
   readonly #http2: ReturnType<typeof createHttp2Server>;
   readonly #closeSessions: () => void;
 
-  constructor(outer: NetServer, http1: HttpServer, http2: ReturnType<typeof createHttp2Server>) {
+  constructor(
+    outer: NetServer,
+    http1: HttpServer,
+    http2: ReturnType<typeof createHttp2Server>,
+    idleTimeoutMs: number = HTTP2_IDLE_TIMEOUT_MS,
+  ) {
     this.#outer = outer;
     this.#http1 = http1;
     this.#http2 = http2;
-    this.#closeSessions = trackHttp2Sessions(http2);
+    this.#closeSessions = trackHttp2Sessions(http2, idleTimeoutMs);
+    // The HTTP/1.1 server never listens itself, and `node:http` starts its
+    // `headersTimeout` / `requestTimeout` checks (and the connection list
+    // `closeIdleConnections` walks) on `listening`: forward the outer server's.
+    outer.on('listening', () => http1.emit('listening'));
   }
 
   /** The outer TCP server, for `listen`, `address` and bind errors. */
@@ -231,7 +283,7 @@ export function createCleartextHttp2Server(
 ): CleartextHttp2Server {
   const timeoutMs = options?.prefaceTimeoutMs ?? PREFACE_TIMEOUT_MS;
   const replay = options?.replay ?? detectRuntime() === 'bun';
-  const http1 = createHttpServer(listener);
+  const http1 = createHttpServer(options?.http1 ?? {}, listener);
   const peers = new WeakMap<Http2Session, string | undefined>();
   // Set immediately around the synchronous `emit('connection')` below; the
   // HTTP/2 server creates the session and emits `session` inside that call.
@@ -284,5 +336,5 @@ export function createCleartextHttp2Server(
     socket.on('data', onData);
     socket.on('close', () => clearTimeout(timer));
   });
-  return new CleartextHttp2Server(outer, http1, http2);
+  return new CleartextHttp2Server(outer, http1, http2, options?.idleTimeoutMs);
 }

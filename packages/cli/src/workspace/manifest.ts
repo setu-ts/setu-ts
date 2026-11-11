@@ -12,7 +12,7 @@
  */
 
 import type { IFileSystem } from '@setu-ts/common';
-import { escapeName } from '../utils/names.ts';
+import { deriveNames, escapeName, isIdentifierSafe } from '../utils/names.ts';
 
 import { isTargetRuntime, type TargetRuntime } from '../constants.ts';
 
@@ -288,6 +288,23 @@ export type WorkspaceManifestResult =
   | { readonly ok: false; readonly problem: WorkspaceManifestProblem };
 
 /**
+ * Whether a manifest member name is one `setu generate app` could have
+ * written: its own kebab form, and safe as an identifier and a path segment.
+ * A member name becomes a directory under `apps/` and is rendered into
+ * generated TypeScript (object keys, JSDoc) unquoted: a separator, a dot
+ * segment, a quote or a comment terminator would put a member's writes
+ * elsewhere or inject code into a caller's `src/transport/index.ts`.
+ *
+ * @param name - The parsed name
+ * @returns `true` when the name is safe to write and render
+ */
+export function isMemberName(name: string): boolean {
+  if (name === '') return false;
+  const names = deriveNames(name);
+  return names.kebab === name && isIdentifierSafe(names);
+}
+
+/**
  * Narrows one parsed `members` entry to the right SHAPE.
  *
  * The port's RANGE is checked by the caller rather than here, so that a
@@ -303,12 +320,7 @@ function toMember(value: unknown): WorkspaceMember | undefined {
   const name = record['name'];
   const port = record['port'];
   const dependsOn = record['dependsOn'];
-  if (typeof name !== 'string' || name === '') return undefined;
-  // A member name becomes one directory under apps/: a separator or a dot
-  // segment would put a member, and every write for it, somewhere else.
-  if (name.includes('/') || name.includes('\\') || name === '.' || name === '..') {
-    return undefined;
-  }
+  if (typeof name !== 'string' || !isMemberName(name)) return undefined;
   if (typeof port !== 'number') return undefined;
   if (
     dependsOn !== undefined &&
