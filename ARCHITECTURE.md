@@ -1632,7 +1632,7 @@ application registers `MessagingPlugin` **or** the Cloudflare `messaging` arm, n
 
 | Aspect               | Detail                                                                                                                                  |
 | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| **Purpose**          | Co-serve gRPC, Connect, and gRPC-Web on the same port as ordinary Hono routes                                                           |
+| **Purpose**          | Co-serve gRPC, Connect, and gRPC-Web on the same port as ordinary Hono routes, and call other services through `grpcClient`             |
 | **Responsibilities** | Connect-ES core + Protobuf-ES; reflection and health over embedded descriptors; RPC dispatch through the kernel pipeline              |
 | **Dependencies**     | `common`, `kernel`, `runtime`                                                                                                           |
 | **Public API**       | `GrpcPlugin()`; `IGrpcService`                                                                                                          |

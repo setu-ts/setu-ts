@@ -52,7 +52,9 @@ export function createApp(
 ): IKernelApplication {
   const app = createApplication({
     plugins: [
-      RuntimePlugin(),
+      // HTTP/2 beside HTTP/1.1 on one port: orders calls Quote over one reused
+      // HTTP/2 connection, while probes and browsers keep HTTP/1.1.
+      RuntimePlugin({ http2: true }),
       ConfigPlugin({ envFilePath: '.env', envFileOptional: true }),
       LoggerPlugin({
         requestLogging: true,

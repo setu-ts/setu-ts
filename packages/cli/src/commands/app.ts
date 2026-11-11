@@ -70,7 +70,14 @@ import type { PortProbe } from '../workspace/port-probe.ts';
 import { withWorkspaceMember } from '../workspace/member-host.ts';
 import { planRootNodeModulesDir, ROOT_MANIFEST } from '../workspace/root-manifest.ts';
 import { BROKERS, type BrokerSpec, brokerSpec } from '../workspace/transport.ts';
-import { RPC_ALIASES, RPC_STYLES, getRpc, rpcSpec, type RpcStyle } from '../workspace/rpc.ts';
+import {
+  RPC_ALIASES,
+  RPC_STYLES,
+  getRpc,
+  grpcTargets,
+  rpcSpec,
+  type RpcStyle,
+} from '../workspace/rpc.ts';
 import { memberTransportModule } from '../workspace/rewire.ts';
 import {
   allocateDevtoolPort,
@@ -87,6 +94,7 @@ import {
   WORKSPACE_VERSION,
   type WorkspaceManifest,
   type WorkspaceManifestProblem,
+  manifestProblemDetail,
 } from '../workspace/manifest.ts';
 import { describeReconcileFailure, reconcileMembers } from '../workspace/reconcile.ts';
 import { interruptionMessage } from '../utils/interruption.ts';
@@ -246,6 +254,11 @@ function reportNoWorkspace(
     );
     return EXIT_ERROR;
   }
+  const detail = manifestProblemDetail(problem);
+  if (detail !== undefined) {
+    error(`${escapeName(joinPath(dir, WORKSPACE_MANIFEST))} cannot be used. ${detail}`);
+    return EXIT_ERROR;
+  }
   error(`${escapeName(joinPath(dir, WORKSPACE_MANIFEST))} is not a readable workspace manifest.`);
   error(`It must be JSON carrying \`version\`, \`basePort\`, and a \`members\` array.`);
   return EXIT_ERROR;
@@ -341,9 +354,8 @@ function planMember(
     rpcSpec(next.members.find((member) => member.name === name)?.rpc),
     name,
     profile,
-    // Omitted rather than passed as `undefined`: `exactOptionalPropertyTypes` is
-    // on, and the parameter is optional.
-    ...((next.brokerUrl === undefined ? [] : [next.brokerUrl]) as [string?]),
+    next.brokerUrl,
+    grpcTargets(next.members, name),
   );
   // A starter factory owns its construction, and kernel diagnostics reach the
   // constructor only — refused here, before anything is planned, because the

@@ -66,6 +66,13 @@
       },
       {
         "kind": "property",
+        "name": "responseTrailers",
+        "readonly": true,
+        "optional": true,
+        "signature": "readonly responseTrailers?:boolean"
+      },
+      {
+        "kind": "property",
         "name": "signal",
         "readonly": false,
         "optional": true,
@@ -308,7 +315,7 @@
         "name": "stream",
         "readonly": false,
         "optional": false,
-        "signature": "stream(body:ReadableStream<Uint8Array>):HandlerResult"
+        "signature": "stream(body:ReadableStream<Uint8Array>,options?:StreamOptions):HandlerResult"
       },
       {
         "kind": "method",

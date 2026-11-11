@@ -9,12 +9,8 @@ import {
   OrdersResponse,
 } from '../shared/schemas/orders.schemas.ts';
 
-import {
-  createOrders,
-  getOrders,
-  listOrders,
-  resolveBillingClient,
-} from '../services/orders.service.ts';
+import { billingClient } from '../clients/billing.client.ts';
+import { createOrders, getOrders, listOrders } from '../services/orders.service.ts';
 
 const createBody = validateBody(CreateOrdersBody);
 const listQuery = validateQuery(ListOrdersQuery);
@@ -54,8 +50,9 @@ export function registerOrdersRoutes(router: IRouterApi, services?: IServiceRegi
         if (services === undefined) {
           throw new Error('registerOrdersRoutes needs the service registry.');
         }
-        const billing = await resolveBillingClient(services);
-        return ctx.response.status(201).json(await createOrders(createBody.value(ctx), billing));
+        return ctx.response
+          .status(201)
+          .json(await createOrders(createBody.value(ctx), billingClient(services)));
       },
     });
   });

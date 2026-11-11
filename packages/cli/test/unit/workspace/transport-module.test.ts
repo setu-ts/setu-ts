@@ -168,3 +168,38 @@ describe('the transport module', () => {
     expect(grpc).not.toContain('\\');
   });
 });
+
+describe('the transport module — gRPC callers (M139b §3.12)', () => {
+  it('registers the client only, serving nothing, for a member that calls gRPC members', () => {
+    const module = renderTransportModule(input({ grpcTargets: ['billing', 'tax-rates'] }));
+    expect(module).toContain("import { GrpcPlugin } from '@setu-ts/grpc-plugin';");
+    expect(module).toContain(
+      "  return [GrpcPlugin({ serve: false, clients: { billing: { basePath: '/grpc' }, 'tax-rates': { basePath: '/grpc' } } })];",
+    );
+    expect(module).toContain(
+      " * The plugins this member's RPC style adds: `GrpcPlugin` for calling `billing`, `tax-rates` only — this member serves no gRPC.",
+    );
+  });
+
+  it('adds the clients to a gRPC member that also calls, and exempts only its own mount', () => {
+    const module = renderTransportModule(
+      input({ host: 'app-factory', rpc: 'grpc', grpcTargets: ['billing'] }),
+    );
+    expect(module).toContain(
+      "  return [GrpcPlugin({ basePath: '/grpc', clients: { billing: { basePath: '/grpc' } } })];",
+    );
+    expect(module).toContain(
+      " * The plugins this member's RPC style adds: `GrpcPlugin`, mounted under `/grpc`, with clients for `billing`.",
+    );
+    expect(module).toContain("  return [new RegExp('^/grpc(?:/|$)')];");
+  });
+
+  it('a caller on an app-factory host exempts nothing from CSRF', () => {
+    const module = renderTransportModule(input({ host: 'app-factory', grpcTargets: ['billing'] }));
+    expect(module).toContain('export function csrfExclusions(): readonly RegExp[] {\n  return [];');
+  });
+
+  it('an empty target list renders as before', () => {
+    expect(renderTransportModule(input({ grpcTargets: [] }))).toBe(renderTransportModule(input()));
+  });
+});

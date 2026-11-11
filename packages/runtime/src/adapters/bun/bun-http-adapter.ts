@@ -209,10 +209,13 @@ export class BunHttpServerHandle {
       request: Request,
       server: BunServer,
     ): Response | undefined | Promise<Response | undefined> => {
+      // `Bun.serve` is configured without TLS here, so a served request is
+      // `http` whatever its request line claims (V12-51).
       const frameworkRequest = mapWebRequestToFrameworkRequest(
         request,
         this.#maxBodyBytes,
         server.requestIP?.(request)?.address,
+        { scheme: 'http' },
       );
 
       if (!this.#handler) {

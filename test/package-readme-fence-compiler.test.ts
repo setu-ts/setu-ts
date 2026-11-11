@@ -74,7 +74,7 @@ const READMES: Readonly<Record<string, number>> = {
   // really compile — it is the answer to "how do I keep this out of
   // production" and a broken one would be worse than none.
   'packages/diagnostics-plugin/README.md': 3,
-  'packages/grpc-plugin/README.md': 2,
+  'packages/grpc-plugin/README.md': 4,
   'packages/graphql-plugin/README.md': 6,
   // M70n: every README the documentation workstream touched, folded into this
   // gate rather than a second one (plan §3.16). Counts are pinned so a fence
@@ -151,7 +151,7 @@ const READMES: Readonly<Record<string, number>> = {
   // M102: +1 for the component-template example rendered through the view engine.
   'packages/mail-plugin/README.md': 4,
   'packages/metrics-plugin/README.md': 2,
-  'packages/runtime/README.md': 3,
+  'packages/runtime/README.md': 4,
   // M98n: +1 for the devtool-gated observed-fetch composition.
   'packages/sdk/README.md': 15,
   'packages/telemetry-plugin/README.md': 2,

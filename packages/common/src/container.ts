@@ -144,6 +144,31 @@ export interface ValueProvider<T> {
 export type Provider<T> = ClassProvider<T> | FactoryProvider<T> | ValueProvider<T>;
 
 /**
+ * A factory provider that names its own token: what `@Module({ providers })`
+ * takes beside classes, for a value no class constructs — a client handed out
+ * by a capability, for instance (M139b §3.13).
+ *
+ * @example
+ * ```typescript
+ * const BILLING = createToken<BillingClient>('billing.client');
+ * const entry: ModuleFactoryProvider<BillingClient> = {
+ *   provide: BILLING,
+ *   useFactory: (grpc: IGrpcService) => makeClient(grpc),
+ *   inject: [CAPABILITIES.GRPC],
+ * };
+ * ```
+ *
+ * @typeParam T - The provided value's type
+ * @since 0.13.0
+ */
+export interface ModuleFactoryProvider<T = unknown> extends FactoryProvider<T> {
+  /** The token the value is registered and injected under. */
+  readonly provide: string | InjectionToken<T>;
+  /** Lifecycle scope; the container's default when omitted. */
+  readonly scope?: ServiceScope;
+}
+
+/**
  * Options accepted when registering a provider.
  *
  * @since 0.1.0

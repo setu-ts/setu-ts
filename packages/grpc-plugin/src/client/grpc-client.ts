@@ -1,0 +1,655 @@
+/**
+ * The calling side of the plugin (M139b §3.12). Internal — reached through
+ * `GrpcService.client` and the exported `grpcClient()`.
+ *
+ * A client is Connect's own `createClient` over a delegating transport. Each
+ * call picks the target's origin — fixed for a URL target, through service
+ * discovery for a name — runs on a transport cached for that origin (one HTTP/2
+ * session per origin), and reports its outcome back to discovery.
+ *
+ * @module
+ */
+import { contextToTraceparent } from '@setu-ts/common';
+import type {
+  GrpcClientOptions,
+  GrpcServiceDefinition,
+  IServiceDiscovery,
+  ITelemetryService,
+  RuntimePlatform,
+  ServiceInstance,
+} from '@setu-ts/common';
+
+import { DEFAULT_READ_MAX_BYTES } from '../interfaces/index.ts';
+import type { ClientTransportLike, ConnectRuntime } from '../interfaces/connect-runtime.ts';
+import type { ConnectNodeModuleLike, Http2SessionLike } from './connect-node-loader.ts';
+
+/** Every option, resolved. */
+type ResolvedClientOptions = Required<GrpcClientOptions>;
+
+/** The defaults §3.12 settles on. */
+export const CLIENT_DEFAULTS: ResolvedClientOptions = {
+  basePath: '',
+  protocol: 'connect',
+  httpVersion: '2',
+  timeoutMs: 5000,
+};
+
+/**
+ * How much one client HTTP/2 session may buffer, in megabytes (Node's
+ * `maxSessionMemory`, default 10). Measured 2026-11-11: with sixteen 1 MB
+ * replies in flight on one session, a client at the default reset streams
+ * with `ENHANCE_YOUR_CALM`; the cap that bit was the client's, since HTTP/2
+ * flow control already bounds what a client can make a server buffer. 64
+ * holds sixteen replies at the plugin's 4 MiB `readMaxBytes`.
+ */
+export const CLIENT_MAX_SESSION_MEMORY_MB = 64;
+
+/**
+ * How many clients one service definition keeps cached; the least recently used
+ * goes first. A target built from request data would otherwise add a client
+ * per distinct value, forever.
+ */
+export const MAX_CLIENTS_PER_DEFINITION = 256;
+
+/**
+ * How long a client session may sit with no stream before connect-node closes
+ * it (its default is 15 minutes). Under the server's 75 s idle bound, so the
+ * client, which knows when it is about to send, closes first. It is what
+ * closes an evicted session: never while a stream is on it.
+ */
+export const CLIENT_IDLE_TIMEOUT_MS = 60_000;
+
+/** How many origins keep a transport (and session) before the oldest is forgotten. */
+export const MAX_CLIENT_ORIGINS = 64;
+
+const PROTOCOLS: ReadonlySet<string> = new Set(['connect', 'grpc', 'grpc-web']);
+const HTTP_VERSIONS: ReadonlySet<string> = new Set(['2', '1.1']);
+const SCHEME = /^[a-z][a-z0-9+.-]*:\/\//i;
+/**
+ * A service name: what a discovery backend names a service by (a DNS label,
+ * a Consul or Kubernetes name). Anything else — a malformed URL, a path, a
+ * query, whitespace or a control character — is refused before it can reach a
+ * discovery query, an error message or a log.
+ */
+const SERVICE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,252}$/;
+
+/**
+ * Checks client options, so a misconfiguration fails where it is written.
+ *
+ * @param options - The options
+ * @param where - Who passed them, for the message
+ * @throws {TypeError} Naming the first option out of range
+ */
+export function validateClientOptions(options: GrpcClientOptions, where: string): void {
+  const { basePath, protocol, httpVersion, timeoutMs } = options;
+  if (
+    basePath !== undefined &&
+    (typeof basePath !== 'string' ||
+      (basePath !== '' && (!basePath.startsWith('/') || basePath.endsWith('/'))))
+  ) {
+    throw new TypeError(
+      `${where}: basePath must be '' or start with '/' and not end with one, received ${JSON.stringify(basePath)}`,
+    );
+  }
+  if (protocol !== undefined && !PROTOCOLS.has(protocol)) {
+    throw new TypeError(
+      `${where}: protocol must be 'connect', 'grpc' or 'grpc-web', received ${JSON.stringify(protocol)}`,
+    );
+  }
+  if (httpVersion !== undefined && !HTTP_VERSIONS.has(httpVersion)) {
+    throw new TypeError(
+      `${where}: httpVersion must be '2' or '1.1', received ${JSON.stringify(httpVersion)}`,
+    );
+  }
+  if (
+    timeoutMs !== undefined &&
+    (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 2_147_483_647)
+  ) {
+    throw new TypeError(
+      `${where}: timeoutMs must be an integer from 1 to 2147483647, received ${String(timeoutMs)}`,
+    );
+  }
+  if (protocol === 'grpc' && httpVersion === '1.1') {
+    throw new TypeError(`${where}: protocol 'grpc' needs httpVersion '2'`);
+  }
+}
+
+/**
+ * The options that are set: a key present with `undefined` (from JavaScript, or
+ * options built from optional configuration) would otherwise spread over the
+ * default and pass validation, leaving no base path or no deadline.
+ *
+ * @param options - Per-target or per-call options
+ * @returns A copy without `undefined` values
+ */
+function definedOptions(options: GrpcClientOptions | undefined): GrpcClientOptions {
+  return Object.fromEntries(
+    Object.entries(options ?? {}).filter(([, value]) => value !== undefined),
+  );
+}
+
+/** The refusal for a URL target with a query or fragment; it never echoes the target. */
+const QUERY_REFUSAL =
+  'grpc client: a target URL must not carry a query or fragment; Connect never sends them';
+
+/** The refusal for a target that is neither a URL nor a service name; never echoes it. */
+const NAME_REFUSAL =
+  "grpc client: a target must be an http(s) URL or a service name (letters, digits, '.', '_' and '-', at most 253)";
+
+/** The refusal for a target carrying credentials; it never echoes the target. */
+const USERINFO_REFUSAL =
+  'grpc client: a target must not carry credentials (user:password@); send them as call headers';
+
+/**
+ * A URL target's base, or `undefined` for a service name.
+ *
+ * @param target - The target
+ * @returns The origin plus any path, without a trailing slash
+ * @throws {TypeError} For an empty target, a URL that is not `http(s)` or does
+ *   not parse, a URL with a query or fragment, a target carrying credentials,
+ *   or a name outside the service-name grammar; none of them echoes the target
+ */
+export function targetBase(target: string): string | undefined {
+  if (typeof target !== 'string' || target === '') {
+    throw new TypeError('grpc client: target must be a URL or a service name');
+  }
+  // Credentials have no place in a target: connect-node would drop them, and
+  // every error that names the target would carry them. Refused unechoed.
+  if (!SCHEME.test(target)) {
+    if (target.includes('@')) throw new TypeError(USERINFO_REFUSAL);
+    if (!SERVICE_NAME.test(target)) throw new TypeError(NAME_REFUSAL);
+    return undefined;
+  }
+  let url: URL;
+  try {
+    url = new URL(target);
+  } catch {
+    // The parser's own error carries the input; this one does not.
+    throw new TypeError('grpc client: the target URL does not parse');
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new TypeError(`grpc client: target URL must be http or https, received ${url.protocol}`);
+  }
+  if (url.username !== '' || url.password !== '') throw new TypeError(USERINFO_REFUSAL);
+  // A query or fragment is never sent (Connect builds each call's URL from the
+  // base), so one there is a mistake at best and a token at worst. Neither
+  // character can appear unencoded anywhere else in an http(s) URL.
+  if (target.includes('?') || target.includes('#')) {
+    throw new TypeError(QUERY_REFUSAL);
+  }
+  return `${url.origin}${url.pathname.replace(/\/+$/, '')}`;
+}
+
+/**
+ * An instance's origin, as the discovery plugin formats it (IPv6 bracketed).
+ *
+ * @param instance - The instance
+ * @returns `scheme://host:port`
+ */
+export function instanceOrigin(instance: ServiceInstance): string {
+  const scheme = instance.secure === true ? 'https' : 'http';
+  const host = instance.host.includes(':') ? `[${instance.host}]` : instance.host;
+  return `${scheme}://${host}:${instance.port}`;
+}
+
+/** connect-node's message for a `REFUSED_STREAM` reset code (`connectErrorFromH2ResetCode`). */
+const CONNECT_NODE_REFUSED = 'http/2 stream closed with error code REFUSED_STREAM (0x7)';
+
+/**
+ * Whether a call failed because the server refused its HTTP/2 stream
+ * (`REFUSED_STREAM`, RFC 9113 §8.7): the server did not process it, which a
+ * server that has sent `GOAWAY` while shutting down does to a stream already on
+ * the wire. connect-node maps the reset code to `Unavailable` when it reads it,
+ * but reports the stream-error event Node raises for the same refusal as
+ * `Internal`; the cause chain names it either way. A stream that could not be
+ * opened because the session had already received `GOAWAY`
+ * (`ERR_HTTP2_GOAWAY_SESSION`) is the same case: the request never left.
+ *
+ * @param error - The call's error
+ * @returns `true` when some error in the cause chain is that refusal
+ */
+export function isRefusedStream(error: unknown): boolean {
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && typeof current === 'object' && current !== null; depth++) {
+    const { message, code, cause } = current as {
+      message?: unknown;
+      code?: unknown;
+      cause?: unknown;
+    };
+    if (typeof message === 'string') {
+      // Node's stream error for the refusal, and connect-node's reading of the
+      // reset code: exactly these two, so a server's own error message that
+      // happens to name the code is never taken for a refusal and retried.
+      if (code === 'ERR_HTTP2_STREAM_ERROR' && message.includes('NGHTTP2_REFUSED_STREAM')) {
+        return true;
+      }
+      // The stream was never opened: the session had already received GOAWAY
+      // (seen on Bun, whose node:http2 races the session manager's reconnect).
+      if (code === 'ERR_HTTP2_GOAWAY_SESSION') return true;
+      if (isLocalResetRefusal(current)) return true;
+    }
+    current = cause;
+  }
+  return false;
+}
+
+/**
+ * connect-node's own reading of a `REFUSED_STREAM` reset code: exactly its
+ * message, and no response metadata. A server's error that merely names the
+ * code always arrives with the response headers, so it never matches (a server
+ * that rethrows a downstream refusal ran its handler, and is not resent).
+ */
+function isLocalResetRefusal(error: object): boolean {
+  const { rawMessage, metadata } = error as { rawMessage?: unknown; metadata?: unknown };
+  return (
+    rawMessage === CONNECT_NODE_REFUSED &&
+    metadata instanceof Headers &&
+    metadata.keys().next().done === true
+  );
+}
+
+/** A refused stream, carrying the `Unavailable` error the caller will see. */
+class RefusedStream {
+  // A field, not a parameter property: the sources run through type stripping,
+  // which accepts only erasable syntax.
+  readonly error: Error;
+  constructor(error: Error) {
+    this.error = error;
+  }
+}
+
+/** What a client needs from the plugin. */
+export interface GrpcClientDeps {
+  /** The Connect runtime: `createClient` and its errors. */
+  readonly runtime: ConnectRuntime;
+  /** Loads `@connectrpc/connect-node` on the first call. */
+  readonly loadNode: () => Promise<ConnectNodeModuleLike>;
+  /** Service discovery, resolved when used, or `undefined` when none is registered. */
+  readonly discovery: () => IServiceDiscovery | undefined;
+  /** Telemetry, resolved when used, or `undefined` when none is registered. */
+  readonly telemetry: () => ITelemetryService | undefined;
+  /**
+   * The largest reply message a call accepts, in bytes: the plugin's
+   * `readMaxBytes`. Absent, the 4 MiB default.
+   */
+  readonly readMaxBytes?: number;
+  /** Per-target defaults from `GrpcPluginOptions.clients`. */
+  readonly targets: Readonly<Record<string, GrpcClientOptions>>;
+  /** The runtime platform, when a runtime capability reports one. */
+  readonly platform?: () => RuntimePlatform | undefined;
+  /**
+   * A monotonic clock in milliseconds, for what is left of a deadline. The
+   * plugin passes the runtime's `hrtime`; absent, `performance.now`.
+   */
+  readonly clock?: () => number;
+}
+
+/**
+ * Why a client is refused on Cloudflare Workers, measured on `workerd`
+ * (2026-11-11): connect-node loads, but an HTTP/2 call rejects `Internal`
+ * ("The http2.connect method is not implemented") and an HTTP/1.1 call hangs
+ * until its deadline. Refused where it is asked for, with the alternatives.
+ */
+export const WORKERS_REFUSAL =
+  "grpc client: not available on Cloudflare Workers — its transport, @connectrpc/connect-node, needs node:http2, which workerd does not implement; call the service with Connect's @connectrpc/connect-web transport, or through a service binding";
+
+/** One cached transport and the session under it. */
+interface OriginEntry {
+  readonly transport: ClientTransportLike;
+  readonly session: Http2SessionLike | undefined;
+}
+
+/**
+ * The deadline Connect applies to a call: its own `timeoutMs`, or the
+ * client's configured one when it sets none; a `timeoutMs` of zero or less is
+ * Connect's "no deadline", so `undefined`.
+ */
+function effectiveDeadline(timeoutMs: number | undefined, configured: number): number | undefined {
+  if (timeoutMs === undefined) return configured;
+  return timeoutMs <= 0 ? undefined : timeoutMs;
+}
+
+/** connect-node states in which a session holds no connection to close. */
+const ENDED: ReadonlySet<string> = new Set(['closed', 'error']);
+
+/** A session's state; one whose `state()` throws reads as still connected. */
+function stateOf(session: Http2SessionLike): string {
+  try {
+    return session.state();
+  } catch {
+    return 'open';
+  }
+}
+
+/** Every client of one plugin instance, their transports and their sessions. */
+export class GrpcClients {
+  readonly #deps: GrpcClientDeps;
+  readonly #clients = new WeakMap<object, Map<string, unknown>>();
+  readonly #origins = new Map<string, OriginEntry>();
+  /**
+   * Evicted sessions, by when they were evicted (or last found still
+   * connected). The client never closes one itself — a call may still be on
+   * it — connect-node does, once it has been idle for
+   * {@linkcode CLIENT_IDLE_TIMEOUT_MS}; `close()` closes whatever is left.
+   */
+  readonly #evicted = new Map<Http2SessionLike, number>();
+  /** The connect-node import while it loads; then {@linkcode GrpcClients.#node}. */
+  #loading: Promise<ConnectNodeModuleLike> | undefined;
+  /** connect-node once loaded, so a call no longer waits on the import's promise. */
+  #node: ConnectNodeModuleLike | undefined;
+  #closed = false;
+
+  constructor(deps: GrpcClientDeps) {
+    this.#deps = deps;
+  }
+
+  /** How many origins hold a transport; for tests and the bound. */
+  get originCount(): number {
+    return this.#origins.size;
+  }
+
+  /**
+   * The client for a service at a target, cached per options.
+   *
+   * @param definition - The service descriptor
+   * @param target - A URL or a service name
+   * @param options - Per-client overrides
+   * @returns The Connect client
+   */
+  client(
+    definition: GrpcServiceDefinition,
+    target: string,
+    options: GrpcClientOptions = {},
+  ): unknown {
+    if (this.#deps.platform?.() === 'cloudflare-workers') throw new TypeError(WORKERS_REFUSAL);
+    validateClientOptions(options, 'grpc client');
+    const base = targetBase(target);
+    if (base === undefined && this.#deps.discovery() === undefined) {
+      throw new TypeError(
+        `grpc client: "${target}" is a service name, but no service discovery is registered; register ServiceDiscoveryPlugin or pass a URL`,
+      );
+    }
+    const resolved: ResolvedClientOptions = {
+      ...CLIENT_DEFAULTS,
+      ...definedOptions(this.#deps.targets[target]),
+      ...definedOptions(options),
+    };
+    validateClientOptions(resolved, 'grpc client');
+    const key = `${target}\u0000${resolved.basePath}\u0000${resolved.protocol}\u0000${resolved.httpVersion}\u0000${resolved.timeoutMs}`;
+    let byKey = this.#clients.get(definition);
+    if (byKey === undefined) {
+      byKey = new Map();
+      this.#clients.set(definition, byKey);
+    }
+    const cached = byKey.get(key);
+    if (cached !== undefined) {
+      // Least recently used last out: move a hit to the end.
+      byKey.delete(key);
+      byKey.set(key, cached);
+      return cached;
+    }
+    const created = this.#deps.runtime.createClient(
+      definition,
+      this.#delegate(target, base, resolved),
+    );
+    byKey.set(key, created);
+    if (byKey.size > MAX_CLIENTS_PER_DEFINITION) {
+      byKey.delete(byKey.keys().next().value as string);
+    }
+    return created;
+  }
+
+  /** Closes every session; later calls reject as `Unavailable`. */
+  close(): void {
+    this.#closed = true;
+    for (const entry of this.#origins.values()) entry.session?.abort();
+    for (const session of this.#evicted.keys()) session.abort();
+    this.#origins.clear();
+    this.#evicted.clear();
+  }
+
+  #delegate(
+    target: string,
+    base: string | undefined,
+    options: ResolvedClientOptions,
+  ): ClientTransportLike {
+    return {
+      // A unary call can be sent again: its input is one message. A streaming
+      // call's input may already be consumed, so it is never retried.
+      // The trace header is set on the call's own headers, not through a Connect
+      // interceptor: an interceptor is one more async layer on every call, even
+      // one with no active span to carry.
+      unary: (method, signal, timeoutMs, header, input, contextValues) => {
+        const traced = this.#withTraceparent(header);
+        return this.#call(
+          target,
+          base,
+          options,
+          true,
+          (transport, timeout) =>
+            transport.unary(method, signal, timeout, traced, input, contextValues),
+          timeoutMs,
+        );
+      },
+      stream: (method, signal, timeoutMs, header, input, contextValues) => {
+        const traced = this.#withTraceparent(header);
+        return this.#call(
+          target,
+          base,
+          options,
+          false,
+          (transport, timeout) =>
+            transport.stream(method, signal, timeout, traced, input, contextValues),
+          timeoutMs,
+        );
+      },
+    };
+  }
+
+  /**
+   * Runs one call, retrying a unary call once when the server refused its
+   * stream (see {@linkcode isRefusedStream}).
+   */
+  async #call(
+    target: string,
+    base: string | undefined,
+    options: ResolvedClientOptions,
+    unary: boolean,
+    run: (transport: ClientTransportLike, timeoutMs: number | undefined) => Promise<unknown>,
+    timeoutMs: number | undefined,
+  ): Promise<unknown> {
+    const now = this.#deps.clock ?? (() => performance.now());
+    const started = now();
+    try {
+      return await this.#attempt(target, base, options, (transport) => run(transport, timeoutMs));
+    } catch (error) {
+      if (!(error instanceof RefusedStream)) throw error;
+      // The retry gets what is left of the call's deadline — the call's own, or
+      // the client's configured one the transport applied — never a fresh one;
+      // with nothing left, the refusal is the answer.
+      // A call with no deadline is retried with none.
+      const deadline = effectiveDeadline(timeoutMs, options.timeoutMs);
+      const remaining = deadline === undefined ? undefined : deadline - Math.ceil(now() - started);
+      if (!unary || (remaining !== undefined && remaining <= 0)) throw error.error;
+      return this.#attempt(target, base, options, (transport) =>
+        run(transport, remaining ?? timeoutMs),
+      ).catch((again: unknown) => {
+        throw again instanceof RefusedStream ? again.error : again;
+      });
+    }
+  }
+
+  async #attempt(
+    target: string,
+    base: string | undefined,
+    options: ResolvedClientOptions,
+    run: (transport: ClientTransportLike) => Promise<unknown>,
+  ): Promise<unknown> {
+    const { runtime } = this.#deps;
+    if (this.#closed) throw runtime.unavailable('the gRPC client is closed');
+    let origin = base;
+    let instance: ServiceInstance | undefined;
+    let discovery: IServiceDiscovery | undefined;
+    if (origin === undefined) {
+      discovery = this.#deps.discovery();
+      if (discovery === undefined) {
+        throw runtime.unavailable(`no service discovery to resolve "${target}"`);
+      }
+      // A backend that fails (and has nothing cached) is an unreachable
+      // dependency, reported the way every other one is: Unavailable.
+      instance =
+        (await discovery.pick(target).catch((cause: unknown) => {
+          throw runtime.unavailable(`could not resolve "${target}"`, cause);
+        })) ?? undefined;
+      if (instance === undefined) {
+        throw runtime.unavailable(`no instance of "${target}" is available`);
+      }
+      origin = instanceOrigin(instance);
+    }
+    const pending = this.#transport(`${origin}${options.basePath}`, options);
+    const transport = pending instanceof Promise ? await pending : pending;
+    try {
+      const result = await run(transport);
+      this.#report(discovery, instance, 'success');
+      return result;
+    } catch (error) {
+      if (isRefusedStream(error)) {
+        // The server never processed it: the instance's fault, and safe to send again.
+        this.#report(discovery, instance, 'failure');
+        throw new RefusedStream(
+          runtime.isUnavailable(error)
+            ? (error as Error)
+            : // A URL target is named by its origin only: its path is the
+              // application's, never echoed (a service name is not secret).
+              runtime.unavailable(
+                `"${base === undefined ? target : new URL(base).origin}" refused the call before processing it`,
+                error,
+              ),
+        );
+      }
+      this.#report(discovery, instance, runtime.isUnavailable(error) ? 'failure' : 'success');
+      throw error;
+    }
+  }
+
+  /** Reports an outcome; a failing report never changes the call's. */
+  #report(
+    discovery: IServiceDiscovery | undefined,
+    instance: ServiceInstance | undefined,
+    outcome: 'success' | 'failure',
+  ): void {
+    if (discovery === undefined || instance === undefined) return;
+    try {
+      discovery.report(instance, outcome);
+    } catch {
+      // Discovery's bookkeeping is advisory; the call already has its answer.
+    }
+  }
+
+  /** The transport for an origin: synchronous once connect-node has loaded. */
+  #transport(
+    url: string,
+    options: ResolvedClientOptions,
+  ): ClientTransportLike | Promise<ClientTransportLike> {
+    if (this.#node !== undefined) return this.#transportFrom(this.#node, url, options);
+    return (this.#loading ??= this.#deps.loadNode()).then((node) => {
+      this.#node = node;
+      return this.#transportFrom(node, url, options);
+    });
+  }
+
+  #transportFrom(
+    node: ConnectNodeModuleLike,
+    url: string,
+    options: ResolvedClientOptions,
+  ): ClientTransportLike {
+    // Closed while discovery picked: open no session the close cannot reach.
+    if (this.#closed) throw this.#deps.runtime.unavailable('the gRPC client is closed');
+    const key = `${options.protocol}|${options.httpVersion}|${options.timeoutMs}|${url}`;
+    const hit = this.#origins.get(key);
+    if (hit !== undefined) {
+      // Least recently used last out: move a hit to the end.
+      this.#origins.delete(key);
+      this.#origins.set(key, hit);
+      return hit.transport;
+    }
+    const session =
+      options.httpVersion === '2'
+        ? new node.Http2SessionManager(
+            url,
+            { idleConnectionTimeoutMs: CLIENT_IDLE_TIMEOUT_MS },
+            { maxSessionMemory: CLIENT_MAX_SESSION_MEMORY_MB },
+          )
+        : undefined;
+    const transportOptions: Record<string, unknown> = {
+      baseUrl: url,
+      httpVersion: options.httpVersion,
+      useBinaryFormat: true,
+      defaultTimeoutMs: options.timeoutMs,
+      // connect-node's own default is 4 GiB; bound replies as requests are.
+      readMaxBytes: this.#deps.readMaxBytes ?? DEFAULT_READ_MAX_BYTES,
+      ...(session === undefined ? {} : { sessionManager: session }),
+    };
+    const transport =
+      options.protocol === 'grpc'
+        ? node.createGrpcTransport(transportOptions)
+        : options.protocol === 'grpc-web'
+          ? node.createGrpcWebTransport(transportOptions)
+          : node.createConnectTransport(transportOptions);
+    this.#origins.set(key, { transport, session });
+    if (this.#origins.size > MAX_CLIENT_ORIGINS) {
+      const [oldestKey, oldest] = this.#origins.entries().next().value as [string, OriginEntry];
+      this.#origins.delete(oldestKey);
+      if (oldest.session !== undefined) this.#evict(oldest.session);
+    }
+    return transport;
+  }
+
+  /**
+   * Forgets an evicted session without closing it: a call may still be on it,
+   * and connect-node closes it once idle. An entry is looked at only once
+   * {@linkcode CLIENT_IDLE_TIMEOUT_MS} has passed since it was evicted: a
+   * session reads `closed` both once connect-node has closed it and before it
+   * has first connected — a call that looked it up while connect-node loaded
+   * may connect it after its eviction — and only the first is safe to drop.
+   * By then any connection it opened has either closed on its idle timer or
+   * still has a stream; one still connected is looked at again a bound later.
+   * The scan stops at the first entry too young to look at, so each entry
+   * costs one look per bound, not one per eviction. A clock that is not a
+   * finite, forward-moving reading keeps every entry rather than dropping
+   * them, and a `state()` that throws reads as still connected.
+   */
+  #evict(session: Http2SessionLike): void {
+    const now = (this.#deps.clock ?? (() => performance.now()))();
+    this.#evicted.set(session, now);
+    for (const [evicted, at] of this.#evicted) {
+      if (!(now - at >= CLIENT_IDLE_TIMEOUT_MS)) break;
+      this.#evicted.delete(evicted);
+      // Still connected: to the back, looked at again a bound from now.
+      if (!ENDED.has(stateOf(evicted))) this.#evicted.set(evicted, now);
+    }
+  }
+
+  /**
+   * The call's headers with the active span's `traceparent` added, unless it
+   * already carries one. Unchanged — no copy — when there is no span.
+   */
+  #withTraceparent(header: HeadersInit | undefined): HeadersInit | undefined {
+    const value = this.#traceparent();
+    if (value === null) return header;
+    const headers = new Headers(header);
+    if (!headers.has('traceparent')) headers.set('traceparent', value);
+    return headers;
+  }
+
+  /** The active span as a `traceparent`, or `null` when there is none. */
+  #traceparent(): string | null {
+    try {
+      const context = this.#deps.telemetry()?.activeSpanContext?.();
+      return context === undefined ? null : contextToTraceparent(context);
+    } catch {
+      // Telemetry must not fail a call it only annotates.
+      return null;
+    }
+  }
+}

@@ -14,6 +14,7 @@ import type {
   ClassProvider,
   Component,
   Constructor,
+  ModuleFactoryProvider,
   DecoratorHandler,
   HttpMethod,
   IAuthorizationPolicyService,
@@ -150,9 +151,14 @@ function dedup(classes: readonly Constructor[]): Constructor[] {
 function flattenModules(
   modules: readonly Constructor[],
   ctx: IPluginContext,
-): { readonly controllers: Constructor[]; readonly providers: Constructor[] } {
+): {
+  readonly controllers: Constructor[];
+  readonly providers: Constructor[];
+  readonly factories: ModuleFactoryProvider[];
+} {
   const controllers: Constructor[] = [];
   const providers: Constructor[] = [];
+  const factories: ModuleFactoryProvider[] = [];
   const seen = new Set<Constructor>();
 
   const visit = (target: Constructor): void => {
@@ -169,12 +175,72 @@ function flattenModules(
     }
 
     for (const imported of meta.imports) visit(imported);
-    providers.push(...meta.providers);
+    for (const provider of meta.providers) {
+      if (typeof provider === 'function') providers.push(provider);
+      else factories.push(provider);
+    }
     controllers.push(...meta.controllers);
   };
 
   for (const target of modules) visit(target);
-  return { controllers, providers };
+  return { controllers, providers, factories };
+}
+
+/** A token as a message names it. */
+function providedName(token: ModuleFactoryProvider['provide']): string {
+  return typeof token === 'string' ? token : token.name;
+}
+
+/**
+ * Registers a module's factory entry (M139b §3.13), before any class so a
+ * class can inject it.
+ *
+ * With a DI container, the entry is a container provider under its own token:
+ * the container's boot-time graph check covers it, and a provider already
+ * registered under the token (a test override) keeps its place. Without one,
+ * the factory runs once against the service registry and the value is
+ * registered there, which needs string tokens throughout.
+ *
+ * @param ctx - The plugin context
+ * @param entry - The factory entry
+ * @throws {TypeError} Without a container, when the entry or one of its
+ *   dependencies is a typed token, or a required dependency is not registered
+ */
+function registerFactory(ctx: IPluginContext, entry: ModuleFactoryProvider): void {
+  const { provide, useFactory, inject, scope } = entry;
+  const container = ctx.container;
+  if (container !== undefined) {
+    if (container.has(provide)) return;
+    container.register(
+      provide,
+      { useFactory, ...(inject === undefined ? {} : { inject }) },
+      scope === undefined ? undefined : { scope },
+    );
+    return;
+  }
+  if (typeof provide !== 'string') {
+    throw new TypeError(
+      `@Module provider '${providedName(provide)}' is a typed token, which only a DI container resolves; register DiPlugin, or provide it under a string token`,
+    );
+  }
+  if (ctx.services.has(provide)) return;
+  const deps = (inject ?? []).map((dependency) => {
+    const optional = typeof dependency === 'object' && 'optional' in dependency;
+    const token: unknown = optional ? dependency.token : dependency;
+    if (typeof token !== 'string') {
+      throw new TypeError(
+        `@Module provider '${provide}' injects a typed token or a class, which only a DI container resolves; register DiPlugin`,
+      );
+    }
+    if (!ctx.services.has(token)) {
+      if (optional) return undefined;
+      throw new TypeError(
+        `@Module provider '${provide}' injects '${token}', which is not registered`,
+      );
+    }
+    return ctx.services.get<object>(token);
+  });
+  ctx.services.register<object>(provide, (useFactory as (...args: unknown[]) => object)(...deps));
 }
 
 /** Default capability token for a service without an explicit `@Injectable` token. */
@@ -1264,6 +1330,8 @@ export function DecoratorPlugin(options?: DecoratorPluginOptions): IPlugin {
       // half and warned "routes are not registered" for an `ingress` class whose
       // routes a module had registered.
       warnCrossFamilyMisregistration(ctx, controllers, ingress);
+
+      for (const entry of fromModules.factories) registerFactory(ctx, entry);
 
       const services = dedup([
         ...fromModules.providers,

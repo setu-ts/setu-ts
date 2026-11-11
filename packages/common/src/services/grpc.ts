@@ -70,6 +70,107 @@ export interface GrpcServiceDefinition<TMethod = unknown> {
 export type GrpcServingStatus = 'unknown' | 'serving' | 'not-serving' | 'service-unknown';
 
 /**
+ * What the connection an RPC arrived on can carry, as the kernel tells
+ * {@linkcode IGrpcService.refuses} and {@linkcode IGrpcService.handleRpc}.
+ * @since 0.13.0
+ */
+export interface RpcTransport {
+  /**
+   * Whether HTTP trailers on the response reach the client. Native
+   * `application/grpc` reports its status in trailers, so it can be served
+   * only when this is `true`.
+   */
+  readonly trailers: boolean;
+
+  /**
+   * Aborts when the client goes away: the raw request's `signal`. A service
+   * uses it as the call's cancellation signal in place of the dispatched
+   * request's own, which the kernel leaves unset — following a signal from a
+   * freshly built `Request` costs about 8% of unary throughput on Node.
+   * Absent: the dispatched request's own signal applies.
+   */
+  readonly signal?: AbortSignal;
+}
+
+/**
+ * An RPC as the kernel hands it to {@linkcode IGrpcService.handleRpc}: plain
+ * fields rather than a fetch `Request`, which costs a copy of every header and
+ * a body stream per call to build (M139b).
+ * @since 0.13.0
+ */
+export interface RpcCall {
+  /** The request method. */
+  readonly method: string;
+  /** The absolute request URL. */
+  readonly url: string;
+  /** The request path, without the query string. */
+  readonly path: string;
+  /** The request headers, including any a middleware set. */
+  readonly headers: Headers;
+  /**
+   * The whole request body, or — for a client-streaming or bidirectional
+   * procedure whose body nothing in the pipeline read — the unread body
+   * stream (see {@linkcode IGrpcService.streamsRequest}).
+   */
+  readonly body: Uint8Array | ReadableStream<Uint8Array>;
+}
+
+/**
+ * An RPC reply as {@linkcode IGrpcService.handleRpc} returns it.
+ * @since 0.13.0
+ */
+export interface RpcReply {
+  /** The HTTP status. */
+  readonly status: number;
+  /** The response headers. A repeated header keeps every value. */
+  readonly headers: Headers;
+  /**
+   * The body: the whole of it for a single response message (a unary or
+   * client-streaming procedure), a stream for a reply written as it is
+   * produced (server-streaming or bidirectional), or `null` for none. The
+   * kernel writes a stream as a stream and anything else whole.
+   */
+  readonly body: Uint8Array | ReadableStream<Uint8Array> | null;
+  /**
+   * Trailers to send after the body, resolving once it ends. Set only when the
+   * transport reported `trailers: true`. A reply with trailers is always
+   * streamed.
+   */
+  readonly trailers?: Promise<Headers>;
+}
+
+/**
+ * How a gRPC client reaches one target, as {@linkcode IGrpcService.client}
+ * takes it (M139b §3.12). Every member is optional; a per-call value overrides
+ * the plugin's per-target entry, which overrides the defaults below.
+ * @since 0.13.0
+ */
+export interface GrpcClientOptions {
+  /**
+   * The path the target serves gRPC under, appended to its origin: `'/grpc'`
+   * for a member mounted with `GrpcPlugin({ basePath: '/grpc' })`. Empty or
+   * starting with `/`, never ending with one. Default `''`.
+   */
+  readonly basePath?: string;
+  /**
+   * The wire protocol. `'connect'` (default) is the cheapest path through a
+   * Connect server; `'grpc'` is native gRPC, for a server that is not Connect;
+   * `'grpc-web'` for a server behind a gRPC-Web proxy.
+   */
+  readonly protocol?: 'connect' | 'grpc' | 'grpc-web';
+  /**
+   * `'2'` (default) multiplexes every call to one origin over one HTTP/2
+   * session; `'1.1'` uses HTTP/1.1 connections. Native gRPC needs `'2'`.
+   */
+  readonly httpVersion?: '2' | '1.1';
+  /**
+   * The deadline of each call, in milliseconds, unless the call passes its own
+   * `timeoutMs`. An integer from 1 to 2147483647. Default `5000`.
+   */
+  readonly timeoutMs?: number;
+}
+
+/**
  * The service contract that applications use to register gRPC/Connect services.
  * Provided by the `grpc-plugin` under the `CAPABILITIES.GRPC` token.
  *
@@ -138,8 +239,8 @@ export interface IGrpcService {
    *
    * The kernel calls this immediately after {@linkcode IGrpcService.claims}
    * and **before it reads the request body**. That ordering is the whole
-   * point. A native `application/grpc` request is refused whatever its body
-   * contains, and buffering first made the refusal unreachable for the case
+   * point. A native `application/grpc` request on a connection without
+   * trailers is refused whatever its body contains, and buffering first made the refusal unreachable for the case
    * that needs it most: a client-streaming or bidirectional call holds its
    * request stream OPEN, so the body read never resolves and the caller
    * receives no frames at all rather than the refusal (V5-5). `grpcurl` opens
@@ -155,10 +256,13 @@ export interface IGrpcService {
    * previous behaviour exactly, buffering included.
    *
    * @param request - The native fetch request, body untouched
+   * @param transport - What the connection can carry, computed by the kernel
+   *   from `IRequest.responseTrailers` (since 0.13.0). Absent from a
+   *   caller that predates it, which means "no trailers".
    * @returns The refusal to answer with, or `null` to dispatch normally
    * @since 0.6.0
    */
-  refuses?(request: Request): Response | null;
+  refuses?(request: Request, transport?: RpcTransport): Response | null;
 
   /**
    * Handles an incoming RPC request directly.
@@ -175,6 +279,69 @@ export interface IGrpcService {
    * @returns The gRPC/Connect response
    */
   handleRequest(request: Request): Promise<Response>;
+
+  /**
+   * Handles an RPC with knowledge of the transport, returning the reply
+   * together with what the kernel needs to write it: whether its body is a
+   * stream, and the trailers to send after it.
+   *
+   * The kernel prefers this over {@linkcode IGrpcService.handleRequest} when
+   * present. An implementor without it is dispatched through `handleRequest`
+   * and its reply is buffered, as before. `handleRequest` should run the same
+   * dispatch with `{ trailers: false }`, so the two entry points cannot
+   * disagree.
+   *
+   * @param call - The RPC, built by the kernel from the live request
+   * @param transport - What the connection can carry, and the client's signal
+   * @returns The reply to write
+   * @since 0.13.0
+   */
+  handleRpc?(call: RpcCall, transport: RpcTransport): Promise<RpcReply>;
+
+  /**
+   * Whether the procedure a request names takes a STREAM of request messages
+   * (client-streaming or bidirectional), decided from the request line and
+   * headers alone.
+   *
+   * The kernel calls this before reading the body. When it returns `true` and
+   * nothing in the pipeline has read the body yet, the kernel hands the
+   * unread body stream to the dispatch instead of buffering it, so the call
+   * can make progress while the client is still sending. Every other request
+   * is buffered as before, under the runtime's `maxBodyBytes`. A streamed body
+   * is not bounded by `maxBodyBytes` (a total would end every long-lived
+   * stream); the implementor bounds it per message.
+   *
+   * Optional; absent means "never stream the request".
+   *
+   * @param request - The native fetch request, body untouched
+   * @returns `true` for a client-streaming or bidirectional procedure
+   * @since 0.13.0
+   */
+  streamsRequest?(request: Request): boolean;
+
+  /**
+   * A client for a service another process serves (M139b §3.12).
+   *
+   * `target` is an absolute `http(s)://` URL, or a logical service name
+   * resolved through `CAPABILITIES.SERVICE_DISCOVERY` on every call — the
+   * client then reports each call's outcome back, so an instance that refuses
+   * connections is ejected. Connections are reused per origin and closed with
+   * the application. The same `(definition, target, options)` returns the same
+   * client, so asking per request costs a lookup.
+   *
+   * Returns `unknown` because this package names no Connect type; the grpc
+   * plugin's `grpcClient()` returns it typed. Optional for implementors written
+   * before it existed.
+   *
+   * @param definition - The service descriptor, as generated by Protobuf-ES
+   * @param target - An absolute URL, or a service name known to discovery
+   * @param options - Overrides for this client
+   * @returns The client
+   * @throws {TypeError} When an option is out of range, or `target` is a name
+   *   and no service discovery is registered
+   * @since 0.13.0
+   */
+  client?(definition: GrpcServiceDefinition, target: string, options?: GrpcClientOptions): unknown;
 
   /**
    * Whether gRPC dispatch is available.

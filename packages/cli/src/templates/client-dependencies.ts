@@ -23,6 +23,7 @@ export const CLIENT_RANGES: Readonly<Record<string, string>> = {
   '@azure/service-bus': '^7',
   '@bufbuild/protobuf': '^2.7.0',
   '@connectrpc/connect': '^2.1.2',
+  '@connectrpc/connect-node': '^2.1.2',
   '@google-cloud/pubsub': '^6',
   '@modelcontextprotocol/server': '^2.4.0',
   // OpenTelemetry 2.x peers require @opentelemetry/api <1.10.0.

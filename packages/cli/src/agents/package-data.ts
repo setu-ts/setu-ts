@@ -188,7 +188,8 @@ export const PACKAGE_DATA: ReadonlyMap<string, IPackageData> = new Map<string, I
   [
     'grpc-plugin',
     {
-      description: 'Co-serve gRPC, Connect, and gRPC-Web on the same port as ordinary routes',
+      description:
+        'Co-serve gRPC, Connect, and gRPC-Web on the same port as ordinary routes, and call other services',
       tokens: ['GRPC'],
     },
   ],

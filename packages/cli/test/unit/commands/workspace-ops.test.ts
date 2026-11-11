@@ -430,7 +430,18 @@ describe('setu workspace build', () => {
     expect(await vanished.run(['build'])).toBe(1);
     expect(vanished.err.join('\n')).toContain('apps/portal');
 
-    const badName = harness({ members: [{ name: 'Orders_V2', port: 3000 }] });
+    // A name generate app never writes is refused when the manifest is read.
+    const unwritable = harness({ members: [{ name: 'Orders_V2', port: 3000 }] });
+    expect(await unwritable.run(['build'])).toBe(1);
+    expect(unwritable.err.join('\n')).toContain('not a Setu workspace');
+    expect(unwritable.err.join('\n')).toContain(
+      'Its member "Orders_V2" is not a name `generate app` could write',
+    );
+    expect(unwritable.err.join('\n')).toContain('(for example to "orders-v2")');
+    expect(unwritable.calls).toEqual([]);
+
+    // A valid member name past Kubernetes' 63-character label limit reaches the image check.
+    const badName = harness({ members: [{ name: `a${'-b'.repeat(32)}`, port: 3000 }] });
     expect(await badName.run(['build'])).toBe(1);
     expect(badName.err.join('\n')).toContain('is not a valid image and Kubernetes name');
     expect(badName.calls).toEqual([]);

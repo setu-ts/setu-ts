@@ -101,6 +101,40 @@ export interface FileRegistryLike {
 export interface UniversalHandlerLike {
   /** The procedure path without prefixes, e.g. `/pkg.Svc/Method`. */
   readonly requestPath: string;
+  /**
+   * The procedure's method descriptor. Only `methodKind` is read — to tell
+   * which procedures stream their request or their response (M139b). Absent
+   * on a hand-built handler, which is then treated as unary.
+   */
+  readonly method?: { readonly methodKind?: string };
+}
+
+/**
+ * A Connect `UniversalServerRequest`, seen structurally: what a universal
+ * handler takes. The plugin builds it directly from the kernel's `RpcCall`
+ * (M139b §3.11), with no fetch `Request` in between.
+ */
+export interface UniversalServerRequestLike {
+  /** Left empty: no adapter reports the negotiated HTTP version (plan §3.5/§3.8). */
+  readonly httpVersion: string;
+  readonly method: string;
+  readonly url: string;
+  readonly header: Headers;
+  readonly body: AsyncIterable<Uint8Array>;
+  /** The call's cancellation signal; absent means none. */
+  readonly signal?: AbortSignal;
+}
+
+/**
+ * A Connect `UniversalServerResponse`, seen structurally: status, headers, the
+ * body as an iterable, and the `trailer` native gRPC needs.
+ */
+export interface UniversalServerResponseLike {
+  readonly status: number;
+  readonly header?: Headers;
+  readonly body?: AsyncIterable<Uint8Array>;
+  /** Mutated by Connect as the call ends; read only after `body` is exhausted. */
+  readonly trailer?: Headers;
 }
 
 /** A Connect `ConnectRouter`, seen structurally. */
@@ -129,11 +163,12 @@ export interface ConnectRuntime {
   createConnectRouter(options?: Record<string, unknown>): ConnectRouterLike;
 
   /**
-   * Adapts a Connect `UniversalHandler` into a fetch handler. The result
-   * retains `requestPath`, so the dispatch map is built from the handlers
-   * themselves with no parallel bookkeeping.
+   * Runs a universal request through a universal handler (M139b §3.11).
    */
-  createFetchHandler(handler: UniversalHandlerLike): (request: Request) => Promise<Response>;
+  handleUniversal(
+    handler: UniversalHandlerLike,
+    request: UniversalServerRequestLike,
+  ): Promise<UniversalServerResponseLike>;
 
   /**
    * Revives a base64 `FileDescriptorSet` into a `FileRegistry`.
@@ -153,4 +188,45 @@ export interface ConnectRuntime {
    * payload of a reflection `file_descriptor_response`.
    */
   serializeFileDescriptor(file: FileDescriptorLike): Uint8Array;
+
+  /**
+   * Builds a Connect client for a service over a transport (§3.12) —
+   * `@connectrpc/connect`'s `createClient`.
+   */
+  createClient(service: unknown, transport: ClientTransportLike): unknown;
+
+  /**
+   * A Connect `Unavailable` error, which is what a client caller already
+   * handles for an unreachable server (§3.12).
+   *
+   * @param message - The error message
+   * @param cause - The error it replaces, kept as its `cause`
+   */
+  unavailable(message: string, cause?: unknown): Error;
+
+  /** Whether an error is a Connect error with code `Unavailable`. */
+  isUnavailable(error: unknown): boolean;
+}
+
+/**
+ * A Connect client `Transport`, seen structurally: what `createClient` calls
+ * for every unary and streaming method (§3.12).
+ */
+export interface ClientTransportLike {
+  unary(
+    method: unknown,
+    signal: AbortSignal | undefined,
+    timeoutMs: number | undefined,
+    header: HeadersInit | undefined,
+    input: unknown,
+    contextValues?: unknown,
+  ): Promise<unknown>;
+  stream(
+    method: unknown,
+    signal: AbortSignal | undefined,
+    timeoutMs: number | undefined,
+    header: HeadersInit | undefined,
+    input: AsyncIterable<unknown>,
+    contextValues?: unknown,
+  ): Promise<unknown>;
 }

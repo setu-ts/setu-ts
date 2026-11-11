@@ -16980,14 +16980,14 @@ real Redis delivery after switching from memory; every changed file at the 90% p
 re-tested the 88 rows M128–M131d and older fixes claimed: 78 closed, and V10-33 and V10-45 closed as
 documented contracts. It left seven rows partial or open (X10-3, V8-3, V8-14, X3-3, X91-1, X93-3,
 X88-9) and filed V12-41 … V12-50, two of them regressions in `0.12.0` (V12-42, V12-47), which lead
-M139d. That makes 61 rows (1 High, 14 Medium, 46 Low) in seven letters. M139b and M139g are minors
-(`0.13.0`) because they touch committed contracts; each plan names its breaks, per the versioning
-policy above.
+M139d. That makes 62 rows (1 High, 14 Medium, 47 Low) in seven letters, V12-51 folded into M139b at
+its planning. M139b and M139g are minors (`0.13.0`) because they touch committed contracts; each
+plan names its breaks, per the versioning policy above.
 
 | Letter    | Kind   | Shape                                                               | Rows                                                                                                                                                                                                                       | Packages                                                                                                                                            |
 | --------- | ------ | ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **M139a** | design | identity and authorization a token or a tenant can escape           | V12-37, V12-18, V12-19, V12-11, V12-35, V12-34                                                                                                                                                                             | `auth-plugin`, `multi-tenancy-plugin`, `session-plugin`, `mcp-plugin`, `cli`                                                                        |
-| **M139b** | design | gRPC over HTTP/2: streamed bodies, an HTTP/2 listener, trailers     | V12-39, V12-40                                                                                                                                                                                                             | `common`, `kernel`, `runtime`, `grpc-plugin`, `apps/grpc-workspace`                                                                                 |
+| **M139b** | design | gRPC over HTTP/2: streamed bodies, an HTTP/2 listener, trailers     | V12-39, V12-40, V12-51                                                                                                                                                                                                     | `common`, `kernel`, `runtime`, `grpc-plugin`, `apps/grpc-workspace`                                                                                 |
 | **M139c** | fix    | AI-layer and data contracts with a missing half                     | V12-4, V12-9, V12-10, V12-36, V12-20, V12-21                                                                                                                                                                               | `agent-runs-plugin`, `idempotency-plugin`, `vector-store-plugin`, `auth-plugin`, `multi-tenancy-plugin`, `database-plugin`, `mail-plugin`, `common` |
 | **M139d** | fix    | the CLI on a full-stack project: `add`, `build`, `check`, the brief | V12-42, V12-47, V12-46, V8-14, X91-1, V12-1, V12-12, V12-2, V12-3, V12-25, V12-26, V12-27, V12-28, V12-30, V12-33, X91-9, V12-22, V12-23, V12-16 (CLI half), V12-31, V12-32, V12-24, X93-3, V12-43, V12-44, V12-45, V12-48 | `cli`, `create`, `kernel`                                                                                                                           |
 | **M139e** | docs   | documentation                                                       | V12-5, V12-6, V12-7, V12-8, V12-13, V12-14 (= V12-29), V12-15, V12-16 (card half), V12-17, V12-38, X93-4, X93-5, V9-29 remainder                                                                                           | READMEs, agent cards, `docs/`, CHANGELOG, website                                                                                                   |
@@ -16996,7 +16996,8 @@ policy above.
 
 **Sequence.** The regression run is done. M139d's two regressions (V12-42, V12-47) go first, as
 V11-10 led M131. M139a next: it is the only letter that crosses a trust boundary, and it is
-**security-audited** before it merges. M139b, M139c, M139d, M139f and M139g can start beside it;
+**security-audited** before it merges, and so is M139b, whose listener reads raw sockets, takes TLS
+material and decides the request scheme. M139b, M139c, M139d, M139f and M139g can start beside it;
 M139b's gate includes a paired benchmark rerun, which never runs beside a suite, and M139g ships
 with M139b in `0.13.0`. M139e batches the documentation last, after the code letters change what the
 docs must say.
@@ -17097,7 +17098,13 @@ on HTTP/1.1 and HTTP/2; a bidi call and a reflection request answered over HTTP/
 reaching unary and streaming procedures with `OK`, plus a non-zero `grpc-status` delivered in the
 trailers; HTTP/1.1, plain `fetch` and a WebSocket upgrade still served on the HTTP/2 port; the
 native refusal unchanged on Deno and Workers; a paired benchmark rerun of the unary pair and the
-cross-member pair against the 2026-11-07 numbers; every changed file at the 90% per-file bar.
+cross-member pair against the 2026-11-07 numbers; every changed file at the 90% per-file bar; a
+committed-tree security audit.
+
+**Folded in at planning (2026-11-09): V12-51.** Probing the listener found that a client chooses the
+scheme of `request.url`: over cleartext HTTP/2 from its `:scheme` (on Deno at `0.12.0` too), and on
+Node from an absolute-form request line. The adapters now take the scheme from their own listener,
+in the same change as the listener.
 
 ### Milestone 139c: AI-Layer and Data Contracts With a Missing Half
 
@@ -17464,7 +17471,7 @@ thing.
 | 138       | ✅     | cli — workspace broker and per-member RPC style: a CLI-owned transport module per member, `setu workspace broker` and `setu workspace rpc`; PR #568                                                                                                                                       |
 | 139       | ⬜     | the `v0.12.0` smoke closeout — the `0.12.0` row re-run done, then seven letters (0.13.0)                                                                                                                                                                                                  |
 | 139a      | ✅     | auth-plugin + multi-tenancy + session + mcp + cli — identity and authorization a token or a tenant can escape                                                                                                                                                                             |
-| 139b      | ⬜     | common + kernel + runtime + grpc-plugin — gRPC over HTTP/2: streamed RPC bodies, an HTTP/2 listener that keeps HTTP/1.1, response trailers and native gRPC on Node and Bun                                                                                                                |
+| 139b      | ✅     | common + kernel + runtime + grpc-plugin — gRPC over HTTP/2: streamed RPC bodies, an HTTP/2 listener that keeps HTTP/1.1, response trailers and native gRPC on Node and Bun                                                                                                                |
 | 139c      | ✅     | agent-runs + idempotency + vector-store + auth + multi-tenancy + database + mail + common — AI-layer and data contracts with a missing half                                                                                                                                               |
 | 139d      | ⬜     | cli — the CLI on a full-stack project: `add`, `build`, `check`, the brief                                                                                                                                                                                                                 |
 | 139e      | ⬜     | docs — documentation                                                                                                                                                                                                                                                                      |

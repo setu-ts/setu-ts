@@ -24,7 +24,7 @@ import {
   mapSnapshotToWebResponse,
   mapWebRequestToFrameworkRequest,
 } from '../shared/fetch-mapping.ts';
-import type { HttpAdapterOptions } from '../shared/adapter-options.ts';
+import type { HttpAdapterOptions, Http2TlsOptions } from '../shared/adapter-options.ts';
 import { UpgradeRouterStore } from '../shared/upgrade-router-store.ts';
 import { ABNORMAL_CLOSURE } from '../shared/web-socket-transport.ts';
 import type { DenoWebSocketUpgrade } from './deno-ws-upgrader.ts';
@@ -59,6 +59,14 @@ export interface DenoServeHost {
      * application adapter, which keeps the default banner.
      */
     onListen?: (address: { hostname: string; port: number }) => void;
+    /**
+     * TLS material. Given, `Deno.serve` terminates TLS and negotiates `h2` or
+     * HTTP/1.1 by ALPN (probed).
+     * @since 0.13.0
+     */
+    cert?: string;
+    /** The private key matching {@linkcode cert}. @since 0.13.0 */
+    key?: string;
   }): DenoServer;
   /**
    * Performs an RFC 6455 handshake on an inbound request.
@@ -101,6 +109,9 @@ export const defaultDenoServeHost: DenoServeHost = {
         // Passing `onListen` REPLACES Deno's own banner; omitting the key
         // keeps it, so the application adapter is unchanged.
         ...(options.onListen !== undefined ? { onListen: options.onListen } : {}),
+        ...(options.cert !== undefined && options.key !== undefined
+          ? { cert: options.cert, key: options.key }
+          : {}),
       },
       options.fetch,
     );
@@ -130,10 +141,13 @@ export class DenoHttpServerHandle {
   readonly #upgrades = new UpgradeRouterStore();
   #host: DenoServeHost;
   readonly #maxBodyBytes: number | undefined;
+  /** The listener's scheme: `https` only when this adapter terminates TLS. */
+  readonly #scheme: 'http' | 'https';
 
-  constructor(host: DenoServeHost, maxBodyBytes?: number) {
+  constructor(host: DenoServeHost, maxBodyBytes?: number, scheme: 'http' | 'https' = 'http') {
     this.#host = host;
     this.#maxBodyBytes = maxBodyBytes;
+    this.#scheme = scheme;
   }
 
   /**
@@ -190,11 +204,18 @@ export class DenoHttpServerHandle {
       request: Request,
       info?: { remoteAddr?: { hostname?: string } },
     ): Response | Promise<Response> => {
-      const frameworkRequest = mapWebRequestToFrameworkRequest(
-        request,
-        this.#maxBodyBytes,
-        info?.remoteAddr?.hostname,
-      );
+      // A served request (with `info`) takes the listener's scheme, never the
+      // client's `:scheme` or absolute-form target (V12-51); an in-process
+      // `fetch` owns its URL. Deno writes no trailers, so none are offered.
+      const frameworkRequest =
+        info === undefined
+          ? mapWebRequestToFrameworkRequest(request, this.#maxBodyBytes)
+          : mapWebRequestToFrameworkRequest(
+              request,
+              this.#maxBodyBytes,
+              info.remoteAddr?.hostname,
+              { scheme: this.#scheme },
+            );
 
       if (!this.#handler) {
         return new Response('Handler not set', { status: 500 });
@@ -277,9 +298,19 @@ export class DenoHttpAdapter implements IHttpAdapter {
   #host: DenoServeHost;
   #handle: DenoHttpServerHandle;
 
+  readonly #tls: Http2TlsOptions | undefined;
+
   constructor(host?: DenoServeHost, options?: HttpAdapterOptions) {
     this.#host = host ?? defaultDenoServeHost;
-    this.#handle = new DenoHttpServerHandle(this.#host, options?.maxBodyBytes);
+    const http2 = options?.http2;
+    // `http2: true` changes nothing here: `Deno.serve` already answers h2c
+    // and HTTP/1.1 on one port. TLS material is what it can use.
+    this.#tls = http2 !== undefined && http2 !== true ? http2 : undefined;
+    this.#handle = new DenoHttpServerHandle(
+      this.#host,
+      options?.maxBodyBytes,
+      this.#tls === undefined ? 'http' : 'https',
+    );
   }
 
   setHandler(handler: (request: IRequest) => IResponse | Promise<IResponse>): void {
@@ -304,6 +335,7 @@ export class DenoHttpAdapter implements IHttpAdapter {
     const server = this.#host.serve({
       port,
       ...(hostname !== undefined && { hostname }),
+      ...(this.#tls !== undefined && { cert: this.#tls.cert, key: this.#tls.key }),
       fetch: fetchHandler,
     });
     this.#handle.server = server;
