@@ -567,20 +567,59 @@ describe('GrpcClients', () => {
     await Promise.all(busy);
   });
 
-  it('drops evicted sessions connect-node has already closed', async () => {
-    const { clients: c, node } = clients();
-    for (let port = 0; port < MAX_CLIENT_ORIGINS + 2; port++)
+  it('drops an evicted session only once it has had the idle bound to close', async () => {
+    let now = 0;
+    const { clients: c, node } = clients({ clock: () => now });
+    for (let port = 0; port < MAX_CLIENT_ORIGINS + 3; port++)
       await call(c.client(BILLING, `http://h:${1000 + port}`));
-    // h:1000 and h:1001 are evicted; connect-node then closes one and errors the other.
+    // h:1000–h:1002 are evicted at 0: connect-node closes one, errors one, one stays connected.
     node.states.set('http://h:1000', 'closed');
     node.states.set('http://h:1001', 'error');
-    await call(c.client(BILLING, 'http://h:3000')); // the next eviction prunes them
+    node.states.set('http://h:1002', 'open');
+    now = CLIENT_IDLE_TIMEOUT_MS - 1;
+    await call(c.client(BILLING, 'http://h:3000')); // too young to look at
+    now = CLIENT_IDLE_TIMEOUT_MS;
+    node.states.set('http://h:1003', 'closed'); // evicted by the last call: too young to look at
+    await call(c.client(BILLING, 'http://h:3001')); // drops h:1000, h:1001; keeps h:1002
+    now = CLIENT_IDLE_TIMEOUT_MS * 2 - 2;
+    node.states.set('http://h:1002', 'closed');
+    await call(c.client(BILLING, 'http://h:3002')); // h:1002 was re-queued at the bound: too young
     c.close();
     const aborted = new Set(node.sessions.filter((s) => s.aborted).map((s) => s.url));
     expect(aborted.has('http://h:1000')).toBe(false);
     expect(aborted.has('http://h:1001')).toBe(false);
-    // h:1002, evicted by that call and still connected, is closed.
     expect(aborted.has('http://h:1002')).toBe(true);
+    expect(aborted.has('http://h:1003')).toBe(true);
+  });
+
+  it('reaches sessions looked up while connect-node loads and connected after their eviction', async () => {
+    const loaded = gate();
+    const node = fakeNode();
+    const { clients: c } = clients(
+      {
+        clock: () => 0,
+        loadNode: async () => {
+          await loaded.promise;
+          return node.module;
+        },
+      },
+      node,
+    );
+    const held = gate();
+    const busy: Array<Promise<unknown>> = [];
+    for (let port = 0; port < MAX_CLIENT_ORIGINS * 2 + 2; port++) {
+      const url = `http://h:${1000 + port}`;
+      // Not yet connected when evicted: connect-node reads such a session `closed` too.
+      node.states.set(url, 'closed');
+      node.gates.set(url, held.promise);
+      busy.push(call(c.client(BILLING, url)));
+    }
+    loaded.open();
+    await new Promise((ok) => setTimeout(ok, 0));
+    c.close();
+    expect(node.sessions.filter((s) => !s.aborted).map((s) => s.url)).toEqual([]);
+    held.open();
+    await Promise.all(busy);
   });
 
   it('close aborts every session and later calls reject without opening one', async () => {

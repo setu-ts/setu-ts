@@ -304,11 +304,12 @@ export class GrpcClients {
   readonly #clients = new WeakMap<object, Map<string, unknown>>();
   readonly #origins = new Map<string, OriginEntry>();
   /**
-   * Evicted sessions not yet closed. The client never closes one itself — a
-   * call may still be on it — connect-node does, once it has been idle for
+   * Evicted sessions, by when they were evicted (or last found still
+   * connected). The client never closes one itself — a call may still be on
+   * it — connect-node does, once it has been idle for
    * {@linkcode CLIENT_IDLE_TIMEOUT_MS}; `close()` closes whatever is left.
    */
-  readonly #evicted = new Set<Http2SessionLike>();
+  readonly #evicted = new Map<Http2SessionLike, number>();
   /** The connect-node import while it loads; then {@linkcode GrpcClients.#node}. */
   #loading: Promise<ConnectNodeModuleLike> | undefined;
   /** connect-node once loaded, so a call no longer waits on the import's promise. */
@@ -379,7 +380,7 @@ export class GrpcClients {
   close(): void {
     this.#closed = true;
     for (const entry of this.#origins.values()) entry.session?.abort();
-    for (const session of this.#evicted) session.abort();
+    for (const session of this.#evicted.keys()) session.abort();
     this.#origins.clear();
     this.#evicted.clear();
   }
@@ -583,14 +584,25 @@ export class GrpcClients {
 
   /**
    * Forgets an evicted session without closing it: a call may still be on it,
-   * and connect-node closes it once idle. Sessions it has already closed are
-   * dropped here, so the set holds only those still connected.
+   * and connect-node closes it once idle. An entry is looked at only once
+   * {@linkcode CLIENT_IDLE_TIMEOUT_MS} has passed since it was evicted: a
+   * session reads `closed` both once connect-node has closed it and before it
+   * has first connected — a call that looked it up while connect-node loaded
+   * may connect it after its eviction — and only the first is safe to drop.
+   * By then any connection it opened has either closed on its idle timer or
+   * still has a stream; one still connected is looked at again a bound later.
+   * The scan stops at the first entry too young to look at, so each entry
+   * costs one look per bound, not one per eviction.
    */
   #evict(session: Http2SessionLike): void {
-    for (const evicted of this.#evicted) {
-      if (ENDED.has(evicted.state())) this.#evicted.delete(evicted);
+    const now = (this.#deps.clock ?? (() => performance.now()))();
+    for (const [evicted, at] of this.#evicted) {
+      if (now - at < CLIENT_IDLE_TIMEOUT_MS) break;
+      this.#evicted.delete(evicted);
+      // Still connected: to the back, looked at again a bound from now.
+      if (!ENDED.has(evicted.state())) this.#evicted.set(evicted, now);
     }
-    this.#evicted.add(session);
+    this.#evicted.set(session, now);
   }
 
   /**
