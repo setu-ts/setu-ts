@@ -411,32 +411,32 @@ re-audit holds the tree against.
   Workers refusal names no target.
 - **Findings of the first audit, and their dispositions.**
 
-  | #   | Severity | Finding                                                                         | Disposition                                                                                  |
-  | --- | -------- | ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-  | F1  | Medium   | The retry matched the refusal text anywhere, so a server's error was resent     | Fixed: connect-node's arm needs the exact `rawMessage` and empty metadata (obligation 9)     |
-  | F2  | Medium   | URL userinfo reached error text                                                 | Fixed: a target with credentials is refused, unechoed (obligation 11)                        |
-  | F3  | Medium   | HTTP/1.1 on `http2: true` had no header or request timeout                      | Fixed: the outer server's `listening` is forwarded to the HTTP/1.1 server                    |
-  | F4  | Medium   | Idle HTTP/2 sessions were never closed                                          | Fixed: 75 s with no stream open, then `GOAWAY`, on both cleartext and TLS                    |
-  | F5  | Low      | An HTTP/1.1 line claiming `HTTP/2.0` was offered trailers                       | Fixed: trailers only on an `Http2ServerRequest`'s stream                                     |
-  | F6  | Low      | With no per-call deadline the retry got a fresh one                             | Fixed: the configured deadline counts (obligation 10)                                        |
-  | F7  | Low      | Replies were unbounded (connect-node's 4 GiB default)                           | Fixed: `readMaxBytes` on every client transport (obligation 12)                              |
-  | F8  | Low      | Origin eviction cancelled calls in flight                                       | Fixed: the client never closes an evicted session; connect-node closes it once idle (60 s)   |
-  | F9  | Low      | A crafted member name injected code into generated files                        | Fixed: names refused at manifest read unless `generate app` could write them (obligation 17) |
-  | F10 | Blocking | No design review for §3.11–§3.13                                                | This section, written after the code; the maintainer decides whether it stands               |
-  | R1  | Medium   | A stream whose request half never ends keeps a session past the idle bound      | Accepted (maintainer, 2026-11-11), as grpc-go does; obligation 15 amended                    |
-  | R2  | Low      | Draining-set overflow aborted busy sessions (64 + 64 budget)                    | Superseded: no draining set (see the design change below)                                    |
-  | R3  | Low      | A token in a URL target's query or fragment reached the refusal text            | Fixed: query and fragment refused unechoed; a URL target is named by its origin only         |
-  | L1  | Low      | The idle-bound comment described a mechanism the code does not rely on          | Fixed: the comment says what the re-arm does                                                 |
-  | N1  | Low      | `state()` reads only the current connection, so a GOAWAY'd busy one was aborted | Superseded by the design change below                                                        |
-  | N2  | Low      | An eviction in the same turn as a call's lookup closed the session under it     | Superseded by the design change below                                                        |
-  | N3  | Low      | Sessions created while connect-node loaded escaped `close()`                    | Superseded by the design change below                                                        |
-  | N4  | Low      | A non-URL target was echoed whole (CR/LF included) and reached discovery        | Fixed: a service-name grammar, refused unechoed; an unparsable URL refused unechoed          |
-  | N5  | Low      | A `clients` key with credentials was echoed in an option error                  | Fixed: keys checked as targets; a URL key named by its origin                                |
-  | L2  | Low      | The idle-bound comment said frames restart it                                   | Fixed: only stream activity does                                                             |
-  | T1  | Low      | A stream dropped unread, aborted or past its deadline held an evicted session   | Superseded by the design change below                                                        |
-  | L3  | Low      | `OriginEntry.retired` was written and never read                                | Superseded by the design change below                                                        |
-  | L4  | Low      | The F8 row described the replaced design                                        | Fixed: the row names the call count                                                          |
-  | U1  | Low      | A stream with Connect's `timeoutMs <= 0` (no deadline) was released at once     | Superseded below; a no-deadline unary call is retried with none                              |
+  | #   | Severity | Finding                                                                         | Disposition                                                                                                   |
+  | --- | -------- | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+  | F1  | Medium   | The retry matched the refusal text anywhere, so a server's error was resent     | Fixed: connect-node's arm needs the exact `rawMessage` and empty metadata (obligation 9)                      |
+  | F2  | Medium   | URL userinfo reached error text                                                 | Fixed: a target with credentials is refused, unechoed (obligation 11)                                         |
+  | F3  | Medium   | HTTP/1.1 on `http2: true` had no header or request timeout                      | Fixed: the outer server's `listening` is forwarded to the HTTP/1.1 server                                     |
+  | F4  | Medium   | Idle HTTP/2 sessions were never closed                                          | Fixed: 75 s with no stream open, then `GOAWAY`, on both cleartext and TLS                                     |
+  | F5  | Low      | An HTTP/1.1 line claiming `HTTP/2.0` was offered trailers                       | Fixed: trailers only on an `Http2ServerRequest`'s stream                                                      |
+  | F6  | Low      | With no per-call deadline the retry got a fresh one                             | Fixed: the configured deadline counts (obligation 10)                                                         |
+  | F7  | Low      | Replies were unbounded (connect-node's 4 GiB default)                           | Fixed: `readMaxBytes` on every client transport (obligation 12)                                               |
+  | F8  | Low      | Origin eviction cancelled calls in flight                                       | Fixed: the client never closes an evicted session; connect-node closes it once idle (60 s)                    |
+  | F9  | Low      | A crafted member name injected code into generated files                        | Fixed: names refused at manifest read unless `generate app` could write them (obligation 17)                  |
+  | F10 | Blocking | No design review for §3.11–§3.13                                                | Stands (maintainer decision, 2026-11-11): this section, written after the code and reviewed by four re-audits |
+  | R1  | Medium   | A stream whose request half never ends keeps a session past the idle bound      | Accepted (maintainer, 2026-11-11), as grpc-go does; obligation 15 amended                                     |
+  | R2  | Low      | Draining-set overflow aborted busy sessions (64 + 64 budget)                    | Superseded: no draining set (see the design change below)                                                     |
+  | R3  | Low      | A token in a URL target's query or fragment reached the refusal text            | Fixed: query and fragment refused unechoed; a URL target is named by its origin only                          |
+  | L1  | Low      | The idle-bound comment described a mechanism the code does not rely on          | Fixed: the comment says what the re-arm does                                                                  |
+  | N1  | Low      | `state()` reads only the current connection, so a GOAWAY'd busy one was aborted | Superseded by the design change below                                                                         |
+  | N2  | Low      | An eviction in the same turn as a call's lookup closed the session under it     | Superseded by the design change below                                                                         |
+  | N3  | Low      | Sessions created while connect-node loaded escaped `close()`                    | Superseded by the design change below                                                                         |
+  | N4  | Low      | A non-URL target was echoed whole (CR/LF included) and reached discovery        | Fixed: a service-name grammar, refused unechoed; an unparsable URL refused unechoed                           |
+  | N5  | Low      | A `clients` key with credentials was echoed in an option error                  | Fixed: keys checked as targets; a URL key named by its origin                                                 |
+  | L2  | Low      | The idle-bound comment said frames restart it                                   | Fixed: only stream activity does                                                                              |
+  | T1  | Low      | A stream dropped unread, aborted or past its deadline held an evicted session   | Superseded by the design change below                                                                         |
+  | L3  | Low      | `OriginEntry.retired` was written and never read                                | Superseded by the design change below                                                                         |
+  | L4  | Low      | The F8 row described the replaced design                                        | Fixed: the row names the call count                                                                           |
+  | U1  | Low      | A stream with Connect's `timeoutMs <= 0` (no deadline) was released at once     | Superseded below; a no-deadline unary call is retried with none                                               |
 
   R1–L1 are from the re-audit at `fad19bed9`, which confirmed F1–F9 fixed; N1–L2 from the second
   re-audit at `843db7f6c`, which confirmed F1–F9, R2 and R3; T1–L4 from the third at `d3feea628`,
