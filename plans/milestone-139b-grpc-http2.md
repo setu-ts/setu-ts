@@ -403,11 +403,12 @@ re-audit holds the tree against.
   `readMaxBytes` (A2). 13. Every client cache is bounded, and eviction never fails a call in
   flight. 14. `traceparent` comes only from a validated active span, never overrides the call's own,
   and no other header is added. 15. HTTP/1.1 on `http2: true` is held to the plain listener's
-  timeouts, and an idle HTTP/2 session is closed (A1). 16. A factory provider cannot replace an
-  existing capability or token, and its refusals name only the declared tokens. 17. A manifest
-  member name is one `setu generate app` could write (kebab-case, identifier- and path-safe), so it
-  cannot inject source (A4); the orphan refusal covers callers. 18. The Workers refusal names no
-  target.
+  timeouts, and an HTTP/2 session with no stream open is closed (A1); an open stream, silent or
+  unfinished, is not bounded by the listener (R1, accepted as grpc-go does). 16. A factory provider
+  cannot replace an existing capability or token, and its refusals name only the declared
+  tokens. 17. A manifest member name is one `setu generate app` could write (kebab-case, identifier-
+  and path-safe), so it cannot inject source (A4); the orphan refusal covers callers. 18. The
+  Workers refusal names no target.
 - **Findings of the first audit, and their dispositions.**
 
   | #   | Severity | Finding                                                                         | Disposition                                                                                  |
@@ -422,7 +423,7 @@ re-audit holds the tree against.
   | F8  | Low      | Origin eviction cancelled calls in flight                                       | Fixed: the client never closes an evicted session; connect-node closes it once idle (60 s)   |
   | F9  | Low      | A crafted member name injected code into generated files                        | Fixed: names refused at manifest read unless `generate app` could write them (obligation 17) |
   | F10 | Blocking | No design review for §3.11–§3.13                                                | This section, written after the code; the maintainer decides whether it stands               |
-  | R1  | Medium   | A stream whose request half never ends keeps a session past the idle bound      | **Open — maintainer decision** (see below)                                                   |
+  | R1  | Medium   | A stream whose request half never ends keeps a session past the idle bound      | Accepted (maintainer, 2026-11-11), as grpc-go does; obligation 15 amended                    |
   | R2  | Low      | Draining-set overflow aborted busy sessions (64 + 64 budget)                    | Superseded: no draining set (see the design change below)                                    |
   | R3  | Low      | A token in a URL target's query or fragment reached the refusal text            | Fixed: query and fragment refused unechoed; a URL target is named by its origin only         |
   | L1  | Low      | The idle-bound comment described a mechanism the code does not rely on          | Fixed: the comment says what the re-arm does                                                 |
@@ -450,15 +451,16 @@ re-audit holds the tree against.
   The call count, the stream wrapper and its abort and deadline release are gone. What remains is a
   set of evicted sessions for `close()` to reach, pruned of those connect-node has already closed.
   Obligation 13 holds by construction: nothing the client runs closes a session a call is on. **R1
-  is open.** The budget "a silent open stream keeps the session" lets a client hold a connection
-  with one `HEADERS` frame and no `END_STREAM` to any route that reads its body (every unary gRPC
-  method), where the HTTP/1.1 listener's `requestTimeout` (300 s) would end the same unfinished
-  request. The options: (a) a per-stream request-half bound — reset a stream whose client has not
-  finished sending within N s — with client- and bidi-streaming procedures exempt, which the
-  listener cannot tell apart without knowing the route; (b) an inactivity bound on the request half,
-  which a silent bidi stream would also trip; (c) accept it and change obligation 15, as grpc-go
-  does (`MaxConnectionIdle` counts only time with no stream open, and nothing bounds an open stream
-  by default). It recovers when the client disconnects.
+  is accepted** (maintainer decision, 2026-11-11, option (c)). The budget "a silent open stream
+  keeps the session" lets a client hold a connection with one `HEADERS` frame and no `END_STREAM` to
+  any route that reads its body (every unary gRPC method), where the HTTP/1.1 listener's
+  `requestTimeout` (300 s) would end the same unfinished request. It is accepted as grpc-go accepts
+  it: `MaxConnectionIdle` counts only time with no stream open, and nothing bounds an open stream by
+  default. The alternatives were rejected: a per-stream request-half bound would have to exempt
+  client- and bidi-streaming procedures, which the listener cannot tell apart without knowing the
+  route, and an inactivity bound on the request half would also end a silent bidi stream. The cost
+  is bounded per connection by HTTP/2's own stream limit and recovers when the client disconnects;
+  obligation 15 now says what is bounded.
 
 ### 3.11 RPC call and reply without fetch objects (2026-11-10)
 

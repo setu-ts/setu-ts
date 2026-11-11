@@ -160,8 +160,9 @@ globals, which a native `Bun.serve` server started later in the same process doe
 one listener kind per process. `close()` sends `GOAWAY` to every open HTTP/2 session, so a client
 that keeps its session open cannot hold the listener past shutdown. An HTTP/2 session with no stream
 open for 75 s is closed the same way (a stream open but silent, such as a server stream waiting for
-events, keeps it), and HTTP/1.1 on the shared port keeps `node:http`'s own `headersTimeout` (60 s)
-and `requestTimeout` (300 s), as on the plain listener.
+events, keeps it, as does a request whose body never ends — as in grpc-go, nothing bounds an open
+stream), and HTTP/1.1 on the shared port keeps `node:http`'s own `headersTimeout` (60 s) and
+`requestTimeout` (300 s), as on the plain listener.
 
 An HTTP/2 request on the Node adapter carries `IRequest.responseTrailers: true`, and a streamed
 response's trailers (`IResponse.stream(body, { trailers })`) are written after its last chunk. That
