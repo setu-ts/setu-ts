@@ -83,9 +83,11 @@ request tells the two kinds of proxy apart.
 | nginx with `proxy_set_header X-Forwarded-Host $host` and a rewritten `Host` | overwritten by the proxy              | `true`               |
 | a load balancer that rewrites `Host` and sets `X-Forwarded-Host`            | written by the proxy                  | `true`               |
 
-Behind a chain of appending proxies the rightmost entry is the innermost proxy's view; have that
-proxy overwrite `X-Forwarded-Host` with the public host, or switch to
-`forwardedHeader: 'forwarded'`.
+Behind a chain of appending proxies the rightmost entry is the innermost proxy's view, for
+`X-Forwarded-Proto` as well as `X-Forwarded-Host`: an outer proxy that terminates TLS and an inner
+one that appends send `X-Forwarded-Proto: https, http`, which publishes `http`. Have the inner proxy
+overwrite both headers with the values the outer one received (the public host, and the scheme the
+browser used), or switch to `forwardedHeader: 'forwarded'`.
 
 Every examined `X-Forwarded-For` or custom `ipHeader` entry must be an IP address; numeric ports are
 stripped from IPv4 and bracketed IPv6 entries. An unbracketed IPv6 entry never carries a port. An

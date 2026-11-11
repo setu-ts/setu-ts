@@ -104,6 +104,19 @@ describe('X-Forwarded-Host is opt-in', () => {
         trustForwardedHost: true,
       }),
     ).toThrow(/conflicts with forwardedHeader/);
+    // A non-boolean is refused rather than read for truthiness: the string
+    // 'false' from untyped configuration would otherwise trust the host.
+    for (const value of ['false', 'true', 0, 1, null]) {
+      expect(
+        () =>
+          ipSecurityMiddleware({
+            trustProxy: true,
+            trustedProxies: ['127.0.0.1'],
+            trustForwardedHost: value as unknown as boolean,
+          }),
+        String(value),
+      ).toThrow(/trustForwardedHost must be a boolean/);
+    }
     // `false` is the default and is accepted in every mode.
     expect(() => ipSecurityMiddleware({ trustForwardedHost: false })).not.toThrow();
   });
@@ -117,31 +130,22 @@ describe('X-Forwarded-Proto is read from the right', () => {
     ).toBe('https://app.example');
   });
 
+  // Against an https URL, so reading the client's `http` to the left of an
+  // empty rightmost entry would show as a downgrade.
   it('never reads a client protocol left of an empty rightmost entry', async () => {
-    for (const proto of ['http, ', 'http,', 'http, ,']) {
-      expect(
-        (
-          await originFor(
-            { 'X-Forwarded-For': '203.0.113.7', 'X-Forwarded-Proto': proto },
-            {},
-            '127.0.0.1',
-          )
-        ).origin,
-        proto,
-      ).toBe(URL_ORIGIN);
+    for (const proto of ['http, ', 'http,', 'http, ,', 'http,\t']) {
+      const { ctx } = createFakeContext({
+        request: {
+          url: 'https://app.example/',
+          headers: { 'X-Forwarded-For': '203.0.113.7', 'X-Forwarded-Proto': proto },
+          ip: '127.0.0.1',
+        },
+      });
+      await ipSecurityMiddleware({ trustProxy: true, trustedProxies: ['127.0.0.1'] })(ctx, () =>
+        Promise.resolve(),
+      );
+      expect(requestOriginOf(ctx).origin, JSON.stringify(proto)).toBe('https://app.example');
     }
-    // The positive control: a trusted https URL is not downgraded by it either.
-    const { ctx } = createFakeContext({
-      request: {
-        url: 'https://app.example/',
-        headers: { 'X-Forwarded-For': '203.0.113.7', 'X-Forwarded-Proto': 'http, ' },
-        ip: '127.0.0.1',
-      },
-    });
-    await ipSecurityMiddleware({ trustProxy: true, trustedProxies: ['127.0.0.1'] })(ctx, () =>
-      Promise.resolve(),
-    );
-    expect(requestOriginOf(ctx).origin).toBe('https://app.example');
   });
 
   it('keeps the URL protocol for a rightmost value that is not http or https', async () => {

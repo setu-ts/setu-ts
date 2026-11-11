@@ -19,6 +19,14 @@ cutting a release renames that heading to the version and is a rename, not a rec
   public one in `X-Forwarded-Host`, add `trustForwardedHost: true` to `ipSecurity`; the table in
   [deployment](deployment.md) lists common proxies. Leave it off behind Cloudflare Tunnel, which
   passes a client's `X-Forwarded-Host` through. Nothing changes for `forwardedHeader: 'forwarded'`.
+- **`X-Forwarded-Proto` is read from its rightmost entry** (`@setu-ts/http-security-plugin`), the
+  value the proxy next to the application wrote; it was the leftmost. Behind two trusted proxies
+  where the outer one terminates TLS and the inner one appends, the header arrives as `https, http`,
+  so the published origin turns from `https://` into `http://`: `secure: 'auto'` session cookies
+  lose `Secure`, `publicRequestUrl` builds `http://` links, and the WebSocket origin check refuses
+  `https://` pages. Have the inner proxy overwrite `X-Forwarded-Proto` with the scheme the outer one
+  received (nginx: `proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto` behind a
+  TLS-terminating outer proxy), or switch to `forwardedHeader: 'forwarded'`.
 - **Worker-pool dashboards** (`@setu-ts/worker-pool-plugin`). `task_module` values and the health
   payload's pool name are now the module's file name (`resize-image`), not its URL, and the health
   key is `task`, not `taskModule`. Update alert rules and dashboards that match the old values; set

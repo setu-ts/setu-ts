@@ -119,7 +119,9 @@ export interface IpSecurityOptions {
    * only in `trustedProxies` mode with a trusted socket peer. Requires
    * `trustProxy: true` and `trustedProxies`, and conflicts with
    * `forwardedHeader: 'forwarded'` (whose `host=` comes from the proxy's own
-   * element); any other combination throws at construction.
+   * element); any other combination throws at construction, and so does a
+   * value that is not a boolean (the string `'false'` from untyped
+   * configuration would otherwise read as `true`).
    *
    * @since 0.13.0
    */
@@ -203,6 +205,13 @@ function compileTrustedProxy(entry: string): (candidate: string) => boolean {
  *
  * @param options - IP security configuration
  * @returns A middleware function that resolves and publishes the client IP
+ * @throws {TypeError} When `forwardedHeader` is invalid or conflicts with
+ * `ipHeader`, or when `trustForwardedHost` is not a boolean, is `true` without
+ * `trustProxy: true` and `trustedProxies`, or is `true` with
+ * `forwardedHeader: 'forwarded'`
+ * @throws {Error} When `trustedProxies` and `proxyHops` are both set, when
+ * `proxyHops` is not a non-negative integer, or when a `trustedProxies` CIDR
+ * width is malformed
  */
 export function ipSecurityMiddleware(options: IpSecurityOptions = {}): MiddlewareFunction {
   const forwardedHeader =
@@ -215,7 +224,17 @@ export function ipSecurityMiddleware(options: IpSecurityOptions = {}): Middlewar
   if (forwardedHeader === 'forwarded' && options.ipHeader !== undefined) {
     throw new TypeError('ipSecurityMiddleware: forwardedHeader conflicts with ipHeader.');
   }
-  const trustForwardedHost = options.trustForwardedHost ?? false;
+  // Only an absent option defaults: `null` is refused with the other non-booleans.
+  const trustForwardedHost: unknown =
+    options.trustForwardedHost === undefined ? false : options.trustForwardedHost;
+  // A truthiness test would read the string 'false' from untyped configuration
+  // as an opt-in and trust a client-written host.
+  if (typeof trustForwardedHost !== 'boolean') {
+    throw new TypeError(
+      `ipSecurityMiddleware: trustForwardedHost must be a boolean, received ` +
+        `${typeof trustForwardedHost}.`,
+    );
+  }
   if (trustForwardedHost) {
     if (forwardedHeader === 'forwarded') {
       throw new TypeError(
@@ -476,18 +495,24 @@ export function xForwardedOrigin(
 /**
  * One comma-separated entry, trimmed; an empty entry is absent.
  *
- * `'nearest'` takes the LAST raw entry and never skips past it: skipping an
- * empty trailing entry (`evil.example, `) would read the client's value to its
- * left — the entry the trusted proxy did not write. `'outermost'` keeps the
- * first non-empty entry, its released behaviour.
+ * Neither choice skips an empty entry. `'nearest'` takes the LAST raw entry:
+ * skipping an empty trailing one (`evil.example, `) would read the client's
+ * value to its left, the entry the trusted proxy did not write. `'outermost'`
+ * takes the FIRST raw entry, its released behaviour, so `, evil.example` stays
+ * absent rather than becoming `evil.example`.
  */
 function headerEntry(value: string | null, entry: ForwardedEntry): string | undefined {
   if (value === null) return undefined;
+  let raw: string;
   if (entry === 'nearest') {
-    const last = value.slice(value.lastIndexOf(',') + 1).trim();
-    return last === '' ? undefined : last;
+    // Without a comma `lastIndexOf` is -1, so this is the whole value.
+    raw = value.slice(value.lastIndexOf(',') + 1);
+  } else {
+    const comma = value.indexOf(',');
+    raw = comma === -1 ? value : value.slice(0, comma);
   }
-  return parseForwardedChain(value)[0];
+  const trimmed = raw.trim();
+  return trimmed === '' ? undefined : trimmed;
 }
 
 /** Validates components without deciding whether a proxy is trusted. */

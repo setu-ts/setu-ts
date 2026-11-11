@@ -36,7 +36,9 @@ import type { RestStarterOptions } from './options.ts';
  * @returns Array of {@linkcode IPlugin} instances in registration order.
  */
 export function buildRestPlugins(options: RestStarterOptions = {}): IPlugin[] {
-  return composeRestPlugins(options, detectRuntime());
+  // The platform RuntimePlugin will run on: an explicit `runtime.platform`
+  // wins, so the starter's own platform choices agree with it.
+  return composeRestPlugins(options, options.runtime?.platform ?? detectRuntime());
 }
 
 /**
@@ -100,10 +102,20 @@ export function starterRuntimeOptions(
  */
 export function starterHttpSecurityOptions(options: RestStarterOptions): HttpSecurityPluginOptions {
   const security = options.httpSecurity;
-  if (security?.requestSize !== undefined) return security;
+  const requestSize = security?.requestSize;
+  // An explicit bound or an explicit opt-out is kept as given. A `requestSize`
+  // that names neither (`{}`, `{ enabled: true }`) takes the runtime bound
+  // rather than the middleware's own 1 MiB, which would refuse what a raised
+  // `runtime.maxBodyBytes` admits.
+  if (
+    security !== undefined &&
+    (requestSize?.maxBodySize !== undefined || requestSize?.enabled === false)
+  ) {
+    return security;
+  }
   return {
     ...security,
-    requestSize: { maxBodySize: starterRuntimeOptions(options).maxBodyBytes },
+    requestSize: { ...requestSize, maxBodySize: starterRuntimeOptions(options).maxBodyBytes },
   };
 }
 

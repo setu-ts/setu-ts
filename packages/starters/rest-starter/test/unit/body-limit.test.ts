@@ -32,6 +32,16 @@ describe('starter body limit', () => {
     });
   });
 
+  it('fills a requestSize that names no bound with the runtime bound', () => {
+    const runtime = { maxBodyBytes: 4 * 1_048_576 };
+    expect(starterHttpSecurityOptions({ runtime, httpSecurity: { requestSize: {} } })).toEqual({
+      requestSize: { maxBodySize: 4_194_304 },
+    });
+    expect(
+      starterHttpSecurityOptions({ runtime, httpSecurity: { requestSize: { enabled: true } } }),
+    ).toEqual({ requestSize: { enabled: true, maxBodySize: 4_194_304 } });
+  });
+
   it('keeps an explicit requestSize as given, disabled included', () => {
     for (const requestSize of [{ maxBodySize: 10 }, { enabled: false }]) {
       const httpSecurity = { requestSize };

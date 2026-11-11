@@ -126,8 +126,9 @@ defaults, except `runtime` and `httpSecurity`, which carry the body bound below:
 **The request body is bounded at 1 MiB by default** (since 0.13.0). `runtime` is spread over
 `{ maxBodyBytes: 1_048_576 }`, which bounds the body read — chunked bodies included — and answers
 `413` past it; the same value becomes `httpSecurity.requestSize.maxBodySize` unless you set
-`requestSize` yourself, so a declared oversize body is refused before anything is read. Raise it for
-uploads:
+`requestSize.maxBodySize` (or `enabled: false`) yourself, so a declared oversize body is refused
+before anything is read. The bound covers bodies the kernel reads; `GrpcPlugin` handles the native
+request itself and is not bounded by it. Raise it for uploads:
 
 ```typescript
 createRestApp({ runtime: { maxBodyBytes: 10 * 1024 * 1024 } });

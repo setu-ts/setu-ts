@@ -30,9 +30,11 @@ All notable changes to this project are documented here. The format follows
 - **BREAKING — the starters bound the request body at 1 MiB (`@setu-ts/rest-starter`,
   `@setu-ts/microservice-starter`, `@setu-ts/full-stack-starter`).** They called `RuntimePlugin()`
   with no body bound and offered no way to set one, so a fresh application parsed a body of any
-  size, declared or chunked. The new `runtime` arm is spread over `{ maxBodyBytes: 1_048_576 }`, and
-  the same value fills `httpSecurity.requestSize` unless the application sets its own.
-  **Migration:** routes that take larger bodies raise `runtime: { maxBodyBytes }`.
+  size, declared or chunked. The new `runtime` arm is spread over `{ maxBodyBytes: 1_048_576 }` (its
+  `platform` also drives the starters' own platform choices), and the same value fills
+  `httpSecurity.requestSize` unless the application sets its own bound. `GrpcPlugin`, which handles
+  the native request itself, is not bounded by it. **Migration:** routes that take larger bodies
+  raise `runtime: { maxBodyBytes }`.
 - **BREAKING — a malformed `Content-Length` is refused (`@setu-ts/http-security-plugin`).**
   `requestSizeMiddleware` treated a `Content-Length` that is not plain decimal digits as absent and
   let the body through unbounded; it now answers `400`. A `maxBodySize` that is not a non-negative

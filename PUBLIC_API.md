@@ -4313,10 +4313,11 @@ let the client choose the host of every absolute URL the application builds, and
 request tells such a proxy from one that writes the header. Set `trustForwardedHost` only when the
 proxy adjacent to the application overwrites or appends `X-Forwarded-Host`. It requires
 `trustProxy: true` and `trustedProxies` and conflicts with `forwardedHeader: 'forwarded'`; each
-other combination throws `TypeError` at construction. A rejected rightmost entry keeps the URL
-value; entries further left are never read. For `forwardedHeader: 'forwarded'`, `proto` and `host`
-come from the selected `Forwarded` element, which the trusted proxy wrote. Protocol must be `http`
-or `https` (case-insensitive); host must be a DNS name (letters, digits, inner hyphens, no trailing
+other combination, and a value that is not a boolean (the string `'false'` from untyped
+configuration), throws `TypeError` at construction. A rejected rightmost entry keeps the URL value;
+entries further left are never read. For `forwardedHeader: 'forwarded'`, `proto` and `host` come
+from the selected `Forwarded` element, which the trusted proxy wrote. Protocol must be `http` or
+`https` (case-insensitive); host must be a DNS name (letters, digits, inner hyphens, no trailing
 dot) or a bracketed IPv6 literal, with an optional numeric port (the scheme default port is dropped,
 as a browser `Origin` never carries it), at most 259 characters, and must round-trip through
 `new URL('http://' + host)` unchanged except for case. Rejected or absent components fall back to
@@ -12139,10 +12140,15 @@ Notes:
   (`RuntimeOptions` from `@setu-ts/runtime`) is spread over `{ maxBodyBytes: 1_048_576 }` and passed
   to `RuntimePlugin`, which bounds the body READ — chunked bodies included — and answers 413 past
   it. The same value becomes `httpSecurity.requestSize.maxBodySize` when the `httpSecurity` arm
-  supplies no `requestSize`, so a declared oversize body is refused before anything is read. An
-  explicit `requestSize`, `{ enabled: false }` included, is kept as given. Raise the bound for an
-  upload route with `runtime: { maxBodyBytes: 10 * 1024 * 1024 }`; an unbounded read is
+  supplies no bound of its own, so a declared oversize body is refused before anything is read. An
+  explicit `requestSize.maxBodySize` or `requestSize.enabled: false` is kept as given; a
+  `requestSize` that names neither (`{}`) takes the runtime bound. Raise the bound for an upload
+  route with `runtime: { maxBodyBytes: 10 * 1024 * 1024 }`; an unbounded read is
   `{ maxBodyBytes: Number.MAX_SAFE_INTEGER }`. Before 0.13.0 the starters read every body in full.
+  The bound covers bodies the kernel reads; a transport that handles the native request itself —
+  `GrpcPlugin` — is not bounded by it. `runtime.platform` also drives the starter's own platform
+  choices (Swagger UI assets, the full-stack scheduler on Workers), so an override cannot leave them
+  disagreeing with `RuntimePlugin`.
 
 ### Composing from configuration
 

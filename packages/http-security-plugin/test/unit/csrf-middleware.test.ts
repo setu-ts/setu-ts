@@ -168,6 +168,18 @@ describe('CSRF behind a proxy', () => {
       ).downstream,
     ).toBe(true);
   });
+  // The candidate reads the FIRST raw entry, as released: an empty leading
+  // entry is absent, never replaced by the client's value to its right.
+  it('never skips an empty leading forwarded entry', async () => {
+    const result = await check({
+      Origin: 'https://evil.example',
+      'X-Forwarded-Proto': 'https',
+      'X-Forwarded-Host': ', evil.example',
+      ...SAME_ORIGIN,
+    });
+    expect(result.downstream).toBe(false);
+    expect(result.statuses).toContain(403);
+  });
   it('ignores the forwarded candidate unless the browser reports same-origin', async () => {
     for (const site of [undefined, 'cross-site', 'same-site', 'none', '']) {
       const result = await check({

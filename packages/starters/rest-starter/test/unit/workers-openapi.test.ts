@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest';
 import type { IPlugin } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
-import { composeRestPlugins, openApiOptionsFor } from '../../src/app.ts';
+import { buildRestPlugins, composeRestPlugins, openApiOptionsFor } from '../../src/app.ts';
 
 /** Replaces the starter's detecting `RuntimePlugin()` with one forced to Workers. */
 function onWorkers(plugins: readonly IPlugin[]): IPlugin[] {
@@ -62,6 +62,22 @@ describe('rest-starter / OpenAPI assets per platform', () => {
     try {
       const docs = await app.fetch(new Request('http://localhost/docs'));
       expect(docs.status).toBe(200);
+      expect(await docs.text()).toContain('https://unpkg.com/swagger-ui-dist@5.33.3/');
+    } finally {
+      await app.stop();
+    }
+  });
+
+  // `runtime.platform` drives the starter's own platform choices too: without
+  // it the detected platform (Node here) would self-host Swagger UI, which
+  // cannot start on Workers.
+  it('boots on Workers from runtime.platform alone, choosing the CDN assets', async () => {
+    const app = createApplication({
+      plugins: buildRestPlugins({ runtime: { platform: 'cloudflare-workers' } }),
+    });
+    await app.start();
+    try {
+      const docs = await app.fetch(new Request('http://localhost/docs'));
       expect(await docs.text()).toContain('https://unpkg.com/swagger-ui-dist@5.33.3/');
     } finally {
       await app.stop();
