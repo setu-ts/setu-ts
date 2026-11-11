@@ -434,6 +434,10 @@ describe('setu workspace build', () => {
     const unwritable = harness({ members: [{ name: 'Orders_V2', port: 3000 }] });
     expect(await unwritable.run(['build'])).toBe(1);
     expect(unwritable.err.join('\n')).toContain('not a Setu workspace');
+    expect(unwritable.err.join('\n')).toContain(
+      'Its member "Orders_V2" is not a name `generate app` could write',
+    );
+    expect(unwritable.err.join('\n')).toContain('(for example to "orders-v2")');
     expect(unwritable.calls).toEqual([]);
 
     // A valid member name past Kubernetes' 63-character label limit reaches the image check.

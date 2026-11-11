@@ -280,7 +280,13 @@ export type WorkspaceManifestProblem =
    * quietly rebuilding a workspace with a different toolchain would rewrite every
    * member's manifest and its image.
    */
-  | { readonly kind: 'unknown-runtime'; readonly runtime: string };
+  | { readonly kind: 'unknown-runtime'; readonly runtime: string }
+  /**
+   * Well-formed, but a member's name is not one `generate app` could write
+   * (M139b): lowercase kebab-case whose derived identifiers are safe. Reported
+   * by name, so a workspace that used to accept it does not read as corrupt.
+   */
+  | { readonly kind: 'invalid-member-name'; readonly name: string };
 
 /** The result of reading a workspace manifest. */
 export type WorkspaceManifestResult =
@@ -302,6 +308,24 @@ export function isMemberName(name: string): boolean {
   if (name === '') return false;
   const names = deriveNames(name);
   return names.kebab === name && isIdentifierSafe(names);
+}
+
+/**
+ * The sentence naming a manifest problem the generic "not a workspace" refusal
+ * does not explain, for every command that reads the manifest.
+ *
+ * @param problem - Why the manifest could not be used
+ * @returns The sentence, or undefined when the generic refusal says enough
+ */
+export function manifestProblemDetail(problem: WorkspaceManifestProblem): string | undefined {
+  if (problem.kind !== 'invalid-member-name') return undefined;
+  const kebab = deriveNames(problem.name).kebab;
+  const rename = isMemberName(kebab) ? ` (for example to "${escapeName(kebab)}")` : '';
+  return (
+    `Its member "${escapeName(problem.name)}" is not a name \`generate app\` could write: ` +
+    'a member name is the lowercase kebab-case form of itself, and every name derived from it is ' +
+    `a safe identifier. Rename it${rename} in the manifest and on disk.`
+  );
 }
 
 /**
@@ -538,6 +562,13 @@ export async function readWorkspaceManifest(
 
   const members: WorkspaceMember[] = [];
   for (const entry of rawMembers) {
+    const rawName =
+      typeof entry === 'object' && entry !== null
+        ? (entry as Record<string, unknown>)['name']
+        : undefined;
+    if (typeof rawName === 'string' && rawName !== '' && !isMemberName(rawName)) {
+      return { ok: false, problem: { kind: 'invalid-member-name', name: rawName } };
+    }
     const parsedMember = toMember(entry);
     // A version-1 `grpc` transport meant every member co-served gRPC; version 2
     // records that on each member, so the mapping happens here, once.

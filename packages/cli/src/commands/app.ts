@@ -94,6 +94,7 @@ import {
   WORKSPACE_VERSION,
   type WorkspaceManifest,
   type WorkspaceManifestProblem,
+  manifestProblemDetail,
 } from '../workspace/manifest.ts';
 import { describeReconcileFailure, reconcileMembers } from '../workspace/reconcile.ts';
 import { interruptionMessage } from '../utils/interruption.ts';
@@ -251,6 +252,11 @@ function reportNoWorkspace(
       'Refused rather than defaulted: quietly moving every member off the bus this workspace ' +
         'asked for would leave services that cannot reach each other and nothing saying why.',
     );
+    return EXIT_ERROR;
+  }
+  const detail = manifestProblemDetail(problem);
+  if (detail !== undefined) {
+    error(`${escapeName(joinPath(dir, WORKSPACE_MANIFEST))} cannot be used. ${detail}`);
     return EXIT_ERROR;
   }
   error(`${escapeName(joinPath(dir, WORKSPACE_MANIFEST))} is not a readable workspace manifest.`);

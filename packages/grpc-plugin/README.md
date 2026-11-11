@@ -130,10 +130,11 @@ const billing = grpcClient(app.services, BillingService, 'billing');
 - **Rolling restarts.** A server shutting down refuses a call already on the wire (HTTP/2
   `REFUSED_STREAM`, never processed). The client reports that instance's failure and sends a unary
   call once more on another pick, within what is left of the call's deadline (its own, or the
-  configured one), so a restart costs no failed unary calls; a refused streaming call rejects as
-  `Unavailable`. Only the refusal itself is resent — Node's stream error, connect-node's own reading
-  of the reset code, or Bun's stream refused after `GOAWAY` — never an error a server sent, even one
-  whose message names `REFUSED_STREAM`: that server ran its handler.
+  configured one). That spares most unary calls during a restart; a call whose retry is refused too
+  (by the only instance, say) still fails, and a refused streaming call rejects as `Unavailable`.
+  Only the refusal itself is resent — Node's stream error, connect-node's own reading of the reset
+  code, or Bun's stream refused after `GOAWAY` — never an error a server sent, even one whose
+  message names `REFUSED_STREAM`: that server ran its handler.
 - **Caching.** The same arguments return the same client; each service definition keeps at most 256
   clients, the least recently used dropped first, so a target built from request data cannot grow
   the cache without bound.

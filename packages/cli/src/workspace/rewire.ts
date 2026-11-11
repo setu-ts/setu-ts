@@ -546,7 +546,12 @@ export async function planTransportChange(
         `reads ${oldVariable}, whose ${before.name} service the Compose stack will no longer start`,
       ]);
     }
-    if (change.kind === 'rpc' && previous.rpc === 'grpc' && change.rpc === 'http') {
+    if (
+      change.kind === 'rpc' &&
+      member.name === change.member &&
+      previous.rpc === 'grpc' &&
+      change.rpc === 'http'
+    ) {
       patterns.push(
         [
           /\bCAPABILITIES\.GRPC\b/,
@@ -564,22 +569,31 @@ export async function planTransportChange(
     }
     // A caller whose gRPC targets this change empties loses the plugin's client
     // with them (M139b §3.12), so code still calling it is orphaned the same way.
+    // A caller that serves gRPC itself keeps the plugin: only its client calls lose
+    // their target, and its own services still import the plugin and resolve it.
     if (
       change.kind === 'rpc' &&
       member.name !== change.member &&
       grpcTargets(manifest.members, member.name).length > 0 &&
       grpcTargets(next.members, member.name).length === 0
     ) {
-      patterns.push(
-        [
-          /['"]@setu-ts\/grpc-plugin['"]/,
-          `imports the gRPC plugin, whose client this member will no longer register once ${change.member} stops serving gRPC`,
-        ],
-        [
-          /\bCAPABILITIES\.GRPC\b/,
-          `resolves the gRPC service, which this member will no longer register`,
-        ],
-      );
+      if (member.rpc === 'grpc') {
+        patterns.push([
+          /\bgrpcClient(?:Provider)?\b/,
+          `calls ${change.member} over gRPC, which it will no longer serve`,
+        ]);
+      } else {
+        patterns.push(
+          [
+            /['"]@setu-ts\/grpc-plugin['"]/,
+            `imports the gRPC plugin, whose client this member will no longer register once ${change.member} stops serving gRPC`,
+          ],
+          [
+            /\bCAPABILITIES\.GRPC\b/,
+            `resolves the gRPC service, which this member will no longer register`,
+          ],
+        );
+      }
     }
     orphaned.push(...(await orphans(fs, dir, context, patterns)));
 

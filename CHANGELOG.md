@@ -62,8 +62,9 @@ All notable changes to this project are documented here. The format follows
   `@setu-ts/kernel`, `@setu-ts/grpc-plugin`).** A server-streaming or bidi reply, or one with
   trailers, is written with `IResponse.stream`, so middleware that inspects RPC replies now sees
   `streaming: true` for them, `inject()` refuses them (use `app.fetch()`), and the request logger,
-  metrics and telemetry time them to the first message. Unary replies stay buffered. A client- or
-  bidi-streaming call whose body nothing read gets the unread body, bounded per message by
+  metrics and telemetry time them to the first message. Connect and gRPC-Web unary replies stay
+  buffered; a native gRPC unary reply carries its status in trailers, so it streams too. A client-
+  or bidi-streaming call whose body nothing read gets the unread body, bounded per message by
   `readMaxBytes` rather than `RuntimePlugin({ maxBodyBytes })`; unary and server-streaming bodies
   keep the `maxBodyBytes` bound. The client's abort signal reaches every call, unary included, on
   the new `RpcTransport.signal`. The kernel and `GrpcPlugin` now pass each call and reply as plain
@@ -136,8 +137,9 @@ All notable changes to this project are documented here. The format follows
   optional `IGrpcService.client`. A target that is a service name resolves through service discovery
   on every call and reports each outcome back, so an instance that refuses connections is ejected;
   an absolute URL is used as is. A unary call the server refused before processing it (HTTP/2
-  `REFUSED_STREAM`, as a server shutting down does) is sent once more on a fresh pick, so a rolling
-  restart costs no failed unary calls; an error a server sent is never resent. A target carrying
+  `REFUSED_STREAM`, as a server shutting down does) is sent once more on a fresh pick, which spares
+  most unary calls during a rolling restart; a call whose retry is refused too (by the only
+  instance, say) still fails, and an error a server sent is never resent. A target carrying
   credentials (`user:password@`), a query or a fragment, or a name outside the service-name grammar
   (letters, digits, `.`, `_`, `-`), is refused without being repeated. Calls share one HTTP/2
   session per instance, allowed to buffer 64 MB rather than Node's 10 MB (which reset streams with
@@ -154,6 +156,12 @@ All notable changes to this project are documented here. The format follows
   decorated class `@Inject`s the client. The client runs on Node and Bun; on Cloudflare Workers it
   refuses with a `TypeError` where it is asked for, and on Deno it is not yet safe, because Deno's
   Node-style HTTP clients can crash the process when their peer goes away. Ships in 0.13.0.
+- **BREAKING — workspace member names are the ones `generate app` writes (M139b, #581,
+  `@setu-ts/cli`).** A `setu.workspace.json` member whose name is not its own lowercase kebab-case
+  form, or whose derived identifiers are unsafe (`Orders_V2`), is refused by every command that
+  reads the manifest, with a message that names the member and suggests a rename (`orders-v2`).
+  Before, such a name reached generated source, YAML and shell commands unchecked. To restore a
+  workspace, rename the member's entry and its directory.
 
 ### Fixed
 

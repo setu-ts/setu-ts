@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { CAPABILITIES } from '@setu-ts/common';
 import type {
+  GrpcClientOptions,
   GrpcServiceDefinition,
   IGrpcService,
   IServiceDiscovery,
@@ -374,6 +375,20 @@ describe('GrpcClients', () => {
     });
     expect(node.built[0]!.options['sessionManager']).toBeUndefined();
     expect(node.sessions).toEqual([]);
+  });
+
+  it('reads an option set to undefined as not set, per target and per call', async () => {
+    // JavaScript, or options built from optional configuration, can carry the key.
+    const unset = { basePath: undefined, timeoutMs: undefined } as unknown as GrpcClientOptions;
+    const { clients: c, node } = clients({
+      targets: { 'http://h:1': { ...unset, protocol: 'grpc-web' } as GrpcClientOptions },
+    });
+    await call(c.client(BILLING, 'http://h:1', unset));
+    expect(node.built[0]!.kind).toBe('grpc-web');
+    expect(node.built[0]!.options).toMatchObject({
+      baseUrl: 'http://h:1',
+      defaultTimeoutMs: 5000,
+    });
   });
 
   it("bounds every reply by the plugin's readMaxBytes, on all three transports", async () => {

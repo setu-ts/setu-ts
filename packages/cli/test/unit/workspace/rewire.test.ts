@@ -357,6 +357,41 @@ describe('setu workspace rpc', () => {
     expect(ws.read('apps/orders/src/transport/index.ts')).toContain('  return [];');
   });
 
+  it('lets a caller that serves gRPC keep its own services, but not its client calls (M139b review)', async () => {
+    const ws = await workspace({ members: [['billing', 'microservice', 'grpc']] });
+    const added = await ws.run([
+      'g',
+      'app',
+      'orders',
+      '--template',
+      'microservice',
+      '--depends-on',
+      'billing',
+      '--rpc',
+      'grpc',
+    ]);
+    expect(added.code, added.err).toBe(0);
+    // orders' own gRPC service: it imports the plugin and resolves it, and keeps both.
+    await ws.write(
+      'apps/orders/src/grpc/orders.service.ts',
+      "import { CAPABILITIES } from '@setu-ts/common';\nimport type { GrpcPluginOptions } from '@setu-ts/grpc-plugin';\nexport const token = CAPABILITIES.GRPC;\nexport type O = GrpcPluginOptions;\n",
+    );
+    await ws.write(
+      'apps/orders/src/clients/billing.client.ts',
+      "import { grpcClient } from '@setu-ts/grpc-plugin';\nexport const make = grpcClient;\n",
+    );
+    const refused = await ws.run(['workspace', 'rpc', 'billing', 'http']);
+    expect(refused.code).not.toBe(0);
+    expect(refused.err).toContain('apps/orders/src/clients/billing.client.ts');
+    expect(refused.err).toContain('calls billing over gRPC, which it will no longer serve');
+    expect(refused.err).not.toContain('orders.service.ts');
+
+    await ws.write('apps/orders/src/clients/billing.client.ts', 'export const make = null;\n');
+    const changed = await ws.run(['workspace', 'rpc', 'billing', 'http']);
+    expect(changed.code, changed.err).toBe(0);
+    expect(ws.read('apps/orders/src/transport/index.ts')).toContain('GrpcPlugin(');
+  });
+
   it('changes nothing when the member already has the style', async () => {
     const ws = await workspace();
     const result = await ws.run(['workspace', 'rpc', 'orders', 'http']);

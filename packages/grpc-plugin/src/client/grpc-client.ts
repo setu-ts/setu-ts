@@ -114,6 +114,20 @@ export function validateClientOptions(options: GrpcClientOptions, where: string)
   }
 }
 
+/**
+ * The options that are set: a key present with `undefined` (from JavaScript, or
+ * options built from optional configuration) would otherwise spread over the
+ * default and pass validation, leaving no base path or no deadline.
+ *
+ * @param options - Per-target or per-call options
+ * @returns A copy without `undefined` values
+ */
+function definedOptions(options: GrpcClientOptions | undefined): GrpcClientOptions {
+  return Object.fromEntries(
+    Object.entries(options ?? {}).filter(([, value]) => value !== undefined),
+  );
+}
+
 /** The refusal for a URL target with a query or fragment; it never echoes the target. */
 const QUERY_REFUSAL =
   'grpc client: a target URL must not carry a query or fragment; Connect never sends them';
@@ -357,8 +371,8 @@ export class GrpcClients {
     }
     const resolved: ResolvedClientOptions = {
       ...CLIENT_DEFAULTS,
-      ...this.#deps.targets[target],
-      ...options,
+      ...definedOptions(this.#deps.targets[target]),
+      ...definedOptions(options),
     };
     validateClientOptions(resolved, 'grpc client');
     const key = `${target}\u0000${resolved.basePath}\u0000${resolved.protocol}\u0000${resolved.httpVersion}\u0000${resolved.timeoutMs}`;
