@@ -1571,6 +1571,10 @@ describe('RedisBackplane owned publisher readiness (M139f X3-3)', () => {
   });
 
   it("keeps a newer open's subscription on an injected pair, at any close() offset (V12-53)", async () => {
+    // Only offsets where close() lands while the first open is in flight: once
+    // it has installed the pair, close() QUITs it, and the second open then
+    // runs on a closed connection.
+    let inFlight = 0;
     for (let delay = 0; delay <= 12; delay++) {
       const client = Object.assign(new FakeRedisClient(), { status: 'ready' });
       const subscriber = Object.assign(new FakeRedisClient(), { status: 'ready' });
@@ -1603,10 +1607,13 @@ describe('RedisBackplane owned publisher readiness (M139f X3-3)', () => {
       await second;
       await closing;
       await setImmediate();
+      if (subscriber.quitCount > 0) break;
+      inFlight = delay + 1;
       // Whatever the offset, the live open keeps its subscription.
       expect(server.has('realtime'), `offset ${delay}`).toBe(true);
       await backplane.close();
     }
+    expect(inFlight).toBeGreaterThan(1);
   });
 
   it('retires the pair without waiting on a silent host after the ready wait (V12-53)', async () => {
@@ -1857,7 +1864,7 @@ describe('RedisBackplane close() during a SUBSCRIBE that never answers (V12-53)'
     // answer QUIT either.
     expect(clients.map((client) => client.disconnectCount)).toEqual([1, 1]);
     expect(clients.map((client) => client.quitCount)).toEqual([0, 0]);
-    expect(clients[1]!.eventListeners.get('message') ?? []).toHaveLength(0);
+    expect(clients[1]!.listenerCount).toBe(0);
     expect(clients[0]!.eventListeners.get('error') ?? []).toHaveLength(0);
   });
 
@@ -1897,7 +1904,7 @@ describe('RedisBackplane close() during a SUBSCRIBE that never answers (V12-53)'
     await connecting;
     expect([client.disconnectCount, subscriber.disconnectCount]).toEqual([0, 0]);
     expect([client.quitCount, subscriber.quitCount]).toEqual([0, 0]);
-    expect(subscriber.eventListeners.get('message') ?? []).toHaveLength(0);
+    expect(subscriber.listenerCount).toBe(0);
     expect(subscriber.eventListeners.get('error') ?? []).toHaveLength(0);
   });
 
@@ -1977,7 +1984,7 @@ describe('RedisBackplane close() during a SUBSCRIBE that never answers (V12-53)'
     await backplane.close();
     connected();
     await connecting;
-    expect(subscriber.eventListeners.get('message') ?? []).toHaveLength(0);
+    expect(subscriber.listenerCount).toBe(0);
     // Nothing was sent, so the caller's connection was never subscribed.
     expect(subscriber.subscribeCalls).toBe(0);
   });
@@ -2023,8 +2030,14 @@ describe('RedisBackplane close() during a SUBSCRIBE that never answers (V12-53)'
     });
     await setImmediate();
     expect(settled).toBe(true);
-    expect(subscriber.eventListeners.get('message') ?? []).toHaveLength(0);
+    expect(subscriber.listenerCount).toBe(0);
     expect(subscriber.eventListeners.get('error')?.length ?? 0).toBe(errorListeners);
+
+    // The cancelled attempt is not memoized: a later connect() opens again.
+    Object.assign(subscriber, { subscribe: () => Promise.resolve(1) });
+    await backplane.connect();
+    expect(subscriber.listenerCount).toBe(1);
+    await backplane.close();
   });
 
   it('ignores an injected SUBSCRIBE that fails after the close', async () => {

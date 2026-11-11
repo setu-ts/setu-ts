@@ -175,7 +175,18 @@ export class RedisBackplane implements IRealtimeBackplane {
    * SUBSCRIBE rejected with
    */
   async connect(): Promise<void> {
-    const attempt = (this.#opening ??= this.#open());
+    let attempt = this.#opening;
+    if (attempt === undefined) {
+      const generation = this.#generation;
+      attempt = this.#open();
+      // #open() runs client calls before it first yields, and an injected
+      // client can call close() from inside one. That close() found no memo to
+      // clear, so memoizing the retired attempt now would make every later
+      // connect() reuse it and never reconnect.
+      if (generation === this.#generation && this.#opening === undefined) {
+        this.#opening = attempt;
+      }
+    }
     try {
       await attempt;
     } catch (error) {
