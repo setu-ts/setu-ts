@@ -68,7 +68,11 @@ describe('generated local start scripts load .env (M131a X88-2)', () => {
         'Startup failed: Vite could not listen on ${vitePort} (VITE_PORT): ${describeError(error)}',
       );
       expect(entry).toContain(
-        port === undefined ? 'Choose another VITE_PORT' : 'setu.workspace.json',
+        // listen() also runs plugin buildStart hooks, so the remedy is conditional
+        // rather than claiming every failure is a taken port (review residual).
+        port === undefined
+          ? 'If the port is taken, choose another VITE_PORT in the environment.'
+          : 'If the port is taken, choose another Vite port in setu.workspace.json.',
       );
       // M139d review L1: only a listen() failure is a port problem; a config or
       // plugin failure in createServer() gets the plain refusal.

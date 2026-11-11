@@ -17,7 +17,9 @@ import { deriveNames } from '../utils/names.ts';
  * Generates an SSE controller and a React hook in application source.
  *
  * With `--module` the controller is written into the module, served under
- * `/<module>/sse/<name>`, and registered like any other module controller.
+ * `/api/<module>/sse/<name>` on functional full-stack and `/<module>/sse/<name>`
+ * elsewhere (the module's own route base, V12-42), and registered like any other
+ * module controller.
  *
  * @param names - Naming forms derived from the user's input
  * @param options - Supplies the artifacts already present, for the barrel

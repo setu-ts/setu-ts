@@ -416,7 +416,7 @@ try {
     console.error(
       \`Startup failed: Vite could not listen on \${vitePort} (VITE_PORT): \${describeError(error)}\`,
     );
-    console.error('${port === undefined ? 'Choose another VITE_PORT in the environment.' : 'Choose another Vite port in setu.workspace.json.'}');
+    console.error('${port === undefined ? 'If the port is taken, choose another VITE_PORT in the environment.' : 'If the port is taken, choose another Vite port in setu.workspace.json.'}');
   } else console.error(\`Startup failed: \${describeError(error)}\`);
   runtime.exit(1);
 }

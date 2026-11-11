@@ -196,6 +196,9 @@ describe('worker task entries', () => {
     await expect(bundle(['src/tasks/hash.task.ts'])).rejects.toThrow(
       'worker task target is outside the project',
     );
+    await expect(bundle(['src/tasks/hash.task.ts'])).rejects.toThrow(
+      "setu build bundles only this project's own task files",
+    );
   });
   it('M6 scans an imported source larger than 1 MiB, and leaves dependencies to esbuild', async () => {
     const large = `export const data = '${'x'.repeat(1_200_000)}';`;
@@ -245,5 +248,43 @@ describe('worker task entries', () => {
     const started = performance.now();
     expect(taskReferences(source, '/app/main.ts')).toEqual([]);
     expect(performance.now() - started).toBeLessThan(1_000);
+  });
+  it('follows a .js import to its .ts sibling, as esbuild does (review finding 1)', async () => {
+    const fs = createFakeFs({
+      '/app/main.ts': "import { T } from './setu.config.js';",
+      '/app/setu.config.ts': "import { T } from './src/tasks/index.js'; export { T };",
+      '/app/src/tasks/index.ts':
+        "export const T = new URL('./a.task.ts', import.meta.url); import './view.jsx'; import './m.mjs';",
+      '/app/src/tasks/view.tsx': "new URL('./b.task.ts', import.meta.url);",
+      '/app/src/tasks/m.mts': "new URL('./c.task.ts', import.meta.url);",
+      '/app/src/tasks/a.task.ts': '',
+      '/app/src/tasks/b.task.ts': '',
+      '/app/src/tasks/c.task.ts': '',
+    });
+    expect(await discoverTasks(fs, '/app', ['main.ts'])).toEqual([
+      'src/tasks/a.task.ts',
+      'src/tasks/b.task.ts',
+      'src/tasks/c.task.ts',
+    ]);
+  });
+  it('accepts a Prettier-wrapped literal and an identifier starting with import (review finding 2)', () => {
+    const wrapped =
+      "const url = new URL(\n  './tasks/resize-image-for-thumbnails.task.ts',\n  import.meta.url,\n);";
+    expect(taskReferences(wrapped, '/app/main.ts').map((ref) => ref.target)).toEqual([
+      '/app/tasks/resize-image-for-thumbnails.task.ts',
+    ]);
+    expect(
+      taskReferences(
+        "importer.run(new URL('./a.task.ts', import.meta.url).href);",
+        '/app/main.ts',
+      ).map((ref) => ref.target),
+    ).toEqual(['/app/a.task.ts']);
+    for (const refused of [
+      "const m = await import('./a.task.ts');",
+      "import x from './a.task.ts';",
+    ])
+      expect(() => taskReferences(refused, '/app/main.ts'), refused).toThrow(
+        'worker task references must use',
+      );
   });
 });

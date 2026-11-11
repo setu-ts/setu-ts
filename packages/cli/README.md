@@ -614,8 +614,9 @@ project.
 ## Realtime starting points
 
 `setu generate sse <name>` writes an SSE controller under `src/controllers/`, or into a module with
-`--module`, where it is served at `/<module>/sse/<name>`. When the project already has both
-`@setu-ts/react-router-plugin` (and therefore React) and `@setu-ts/sdk`, it also writes an
+`--module`, where it is served at `/api/<module>/sse/<name>` on functional full-stack and
+`/<module>/sse/<name>` elsewhere, including class-based full-stack. When the project already has
+both `@setu-ts/react-router-plugin` (and therefore React) and `@setu-ts/sdk`, it also writes an
 application-local `src/hooks/use-<name>.ts` React hook that imports `createSseClient`. Add the SDK
 with `setu add sdk` before generating the hook. React belongs to the consuming application, never a
 published Setu package.

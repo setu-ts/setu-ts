@@ -1731,7 +1731,15 @@ export async function runAddCommand(
     if (bare === undefined) {
       // Keep the dedicated diagnostics guidance from the single-package command.
       if (args.positionals.length === 1) return addOne(args, deps);
-      deps.error(`"${escapeName(name)}" is not a Setu-TS package this command can add.`);
+      // The same guidance a lone `setu add diagnostics` gives, wherever it is listed.
+      if (name === 'diagnostics' || name === '@setu-ts/diagnostics-plugin')
+        deps.error(
+          `\`@setu-ts/diagnostics-plugin\` is installed and wired by \`${cliInvocation('deno')} devtool enable\`, not by setu add.`,
+        );
+      else {
+        deps.error(`"${escapeName(name)}" is not a Setu-TS package this command can add.`);
+        deps.error(`  Available: ${addableNames().join(', ')}`);
+      }
       return EXIT_USAGE;
     }
     if (packages.includes(bare)) {

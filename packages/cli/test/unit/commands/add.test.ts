@@ -211,6 +211,18 @@ describe('M139d add request and backend contracts', () => {
       expect(h.fs.writes).toEqual([]);
     }
   });
+  it('gives the devtool guidance for diagnostics in a multi-add, and lists the addable names', async () => {
+    for (const name of ['diagnostics', '@setu-ts/diagnostics-plugin']) {
+      const h = harness({ '/app/package.json': '{}' });
+      expect(await h.run([name, 'cache'])).toBe(2);
+      expect(h.err.join('\n')).toContain('devtool enable');
+      expect(h.err.join('\n')).not.toContain('is not a Setu-TS package');
+      expect(h.fs.writes).toEqual([]);
+    }
+    const h = harness({ '/app/package.json': '{}' });
+    expect(await h.run(['cache', 'unknown'])).toBe(2);
+    expect(h.err.join('\n')).toContain('Available: ');
+  });
   it('reports exactly where a multi-add stopped after an I/O failure', async () => {
     const h = harness({ '/app/package.json': '{}' });
     const write = h.fs.writeFile;

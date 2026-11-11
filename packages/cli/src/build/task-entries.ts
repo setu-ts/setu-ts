@@ -38,7 +38,8 @@ export function taskReferences(source: string, file: string): readonly ITaskRefe
     );
   const references: ITaskReference[] = [];
   const literal =
-    /\bnew\s+URL\(\s*(['"])(\.[^'"\\\r\n]*\.task\.ts)\1\s*,\s*import\.meta\.url\s*\)/g;
+    // Prettier wraps a long call one argument per line, with a trailing comma.
+    /\bnew\s+URL\(\s*(['"])(\.[^'"\\\r\n]*\.task\.ts)\1\s*,\s*import\.meta\.url\s*,?\s*\)/g;
   for (const match of visible.matchAll(literal)) {
     if (strings.some((range) => match.index >= range.start && match.index < range.end)) continue;
     references.push({
@@ -48,7 +49,8 @@ export function taskReferences(source: string, file: string): readonly ITaskRefe
     });
   }
   for (const match of visible.matchAll(
-    /\bnew\s+URL\s*\([^)]*\)|\bimport(?:\s*\([^)]*\)|[^;\r\n]*)/g,
+    // `import` the keyword only: not `importer`, and not `import.meta`.
+    /\bnew\s+URL\s*\([^)]*\)|\bimport\b(?!\s*\.)(?:\s*\([^)]*\)|[^;\r\n]*)/g,
   )) {
     if (strings.some((range) => match.index >= range.start && match.index < range.end)) continue;
     if (
@@ -72,6 +74,38 @@ function relativePath(from: string, to: string): string {
   }
   const path = [...left.map(() => '..'), ...right].join('/');
   return path.startsWith('.') ? path : `./${path}`;
+}
+
+/**
+ * The files esbuild tries for a relative import, in its order: the path as
+ * written, a TypeScript sibling for a JavaScript extension (`./x.js` naming
+ * `./x.ts`, which `moduleResolution: "bundler"` and the dev runner allow), and
+ * for an extensionless path the `.ts`, `.tsx` and `/index.ts` forms.
+ */
+function moduleCandidates(absolute: string): readonly string[] {
+  const script = /\.([cm]?)js(x?)$/.exec(absolute);
+  if (script !== null) {
+    const stem = absolute.slice(0, script.index);
+    const siblings =
+      script[1] === 'm'
+        ? ['.mts']
+        : script[1] === 'c'
+          ? ['.cts']
+          : script[2] === 'x'
+            ? ['.tsx', '.ts']
+            : ['.ts', '.tsx'];
+    return [absolute, ...siblings.map((extension) => stem + extension)];
+  }
+  if (/\.[cm]?tsx?$/.test(absolute)) return [absolute];
+  return ['.ts', '.tsx', '/index.ts'].map((suffix) => absolute + suffix);
+}
+
+/** The first candidate that exists, so a `.js` import of a `.ts` file is followed. */
+async function localModule(fs: IFileSystem, absolute: string): Promise<string | undefined> {
+  for (const candidate of moduleCandidates(absolute)) {
+    if ((await sourceText(fs, candidate)) !== undefined) return candidate;
+  }
+  return undefined;
 }
 
 /** Scans local modules reachable from the application entries, including nested tasks. */
@@ -99,16 +133,8 @@ export async function discoverTasks(
     )) {
       const path = imported[1]!;
       if (path.startsWith('.')) {
-        const absolute = resolveDir(dirName(file), path);
-        if (/\.[cm]?[jt]sx?$/.test(path)) pending.push(absolute);
-        else {
-          for (const suffix of ['.ts', '.tsx', '/index.ts']) {
-            if ((await sourceText(fs, absolute + suffix)) !== undefined) {
-              pending.push(absolute + suffix);
-              break;
-            }
-          }
-        }
+        const found = await localModule(fs, resolveDir(dirName(file), path));
+        if (found !== undefined) pending.push(found);
       }
     }
   }
@@ -142,7 +168,7 @@ export function taskRewritePlugin(
             await assertInsideProject(fs, root, ref.target);
           } catch {
             throw new Error(
-              `${location}: worker task target is outside the project: ${ref.target}.`,
+              `${location}: worker task target is outside the project: ${ref.target}. setu build bundles only this project's own task files; move the task into the project that runs it (a workspace library cannot ship one).`,
             );
           }
           if (!built.has(ref.target))

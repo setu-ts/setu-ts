@@ -82,8 +82,9 @@ All notable changes to this project are documented here. The format follows
   and `--yes` select optional peers and schema-tool configuration while preserving application-owned
   credentials and clients.
 - **M139d (`@setu-ts/cli`, V12-12).** `setu build` emits literal worker-pool task URL targets and
-  relocates their `.js` URLs separately for each entry bundle, including tasks and migrations;
-  dynamic task references are refused.
+  relocates their `.js` URLs separately for each entry bundle, including tasks and migrations; a
+  task reached through a `.js` import of a `.ts` source is found, a Prettier-wrapped literal is
+  accepted, and dynamic task references are refused.
 
 - **Tenant repositories join a transaction (M139c, #578, `@setu-ts/common`,
   `@setu-ts/multi-tenancy-plugin`, `@setu-ts/database-plugin`, V12-20).** `getRepository` and
