@@ -5,7 +5,11 @@
 import { describe, expect, it } from 'vitest';
 
 import { WorkerPoolService } from '../../src/services/worker-pool-service.ts';
-import { budgetLimitOf } from '../../src/services/worker-pool-service.ts';
+import {
+  budgetLimitOf,
+  setLabelCollisionReporter,
+  taskLabelOf,
+} from '../../src/services/worker-pool-service.ts';
 import { WorkerPoolUnavailableError } from '../../src/errors.ts';
 import { createFakeRuntime, FakeHost, FakeTimers } from '../fixtures/fakes.ts';
 
@@ -218,5 +222,26 @@ describe('WorkerPoolService — stats and shutdown', () => {
     await expect(a).rejects.toBeInstanceOf(WorkerPoolUnavailableError);
     await expect(b).rejects.toBeInstanceOf(WorkerPoolUnavailableError);
     expect(host.handles.every((h) => h.terminated)).toBe(true);
+  });
+});
+
+// Security audit finding 3: a logger that throws while reporting a renamed
+// label must not turn the Promise-returning run() into a synchronous throw.
+describe('WorkerPoolService — label collision reporting', () => {
+  it('keeps run() a rejected-or-resolved Promise when the reporter throws', async () => {
+    const host = new FakeHost(4);
+    const service = new WorkerPoolService({ host }, createFakeRuntime(new FakeTimers()));
+    setLabelCollisionReporter(service, () => {
+      throw new Error('logger down');
+    });
+    const first = service.run('file:///a/resize.ts', 1);
+    let second: Promise<unknown> | undefined;
+    expect(() => {
+      second = service.run('file:///b/resize.ts', 2);
+    }).not.toThrow();
+    expect(second).toBeInstanceOf(Promise);
+    expect(taskLabelOf(service, 'file:///b/resize.ts')).toBe('resize_2');
+    await service.shutdown();
+    await Promise.allSettled([first, second]);
   });
 });

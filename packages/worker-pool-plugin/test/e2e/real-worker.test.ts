@@ -204,11 +204,14 @@ describe('WorkerPoolPlugin — e2e on real worker threads', () => {
       // than a fake host: real spawn, real structured clone, real reply.
       const response = await app.inject({ method: 'GET', url: '/metrics' });
       const body = response.body as string;
-      expect(body).toContain(`${WORKER_POOL_METRICS.COMPLETED}{task_module="${echoTaskUrl}"} 1`);
+      expect(body).toContain(`${WORKER_POOL_METRICS.COMPLETED}{task_module="echo-task"} 1`);
       expect(body).toContain(
-        `${WORKER_POOL_METRICS.FAILED}{reason="handler",task_module="${errorTaskUrl}"} 1`,
+        `${WORKER_POOL_METRICS.FAILED}{reason="handler",task_module="error-task"} 1`,
       );
-      expect(body).toContain(`${WORKER_POOL_METRICS.WORKERS}{task_module="${echoTaskUrl}"} 1`);
+      expect(body).toContain(`${WORKER_POOL_METRICS.WORKERS}{task_module="echo-task"} 1`);
+      // The specifiers are real `file:` URLs naming this checkout; none reaches the scrape.
+      expect(body).not.toContain('file:');
+      expect(body).not.toContain(new URL('.', import.meta.url).pathname);
     } finally {
       await app.stop();
     }

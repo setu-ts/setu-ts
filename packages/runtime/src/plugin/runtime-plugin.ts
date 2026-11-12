@@ -89,8 +89,8 @@ export interface RuntimeOptions {
    *
    * The two knobs exist because the mapping runs before any plugin and there
    * is no channel between them: `mapWebRequestToFrameworkRequest` receives a
-   * `Request` and nothing else. Set both, and set this one to the same value
-   * or higher.
+   * `Request` and nothing else. Set both to the same value: a higher one here
+   * admits an undeclared body larger than `maxBodySize`.
    *
    * A body past the cap rejects with `RequestBodyTooLargeError`, branded with
    * a `413` status hint, so an application running `errorHandler` answers

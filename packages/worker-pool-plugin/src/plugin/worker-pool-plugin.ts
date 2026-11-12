@@ -17,6 +17,8 @@ import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type { WorkerPoolPluginOptions } from '../interfaces/index.ts';
 import {
   budgetLimitOf,
+  labelledStatsOf,
+  setLabelCollisionReporter,
   setUnsettledErrorReporter,
   WorkerPoolService,
 } from '../services/worker-pool-service.ts';
@@ -85,6 +87,13 @@ export function WorkerPoolPlugin(options?: WorkerPoolPluginOptions): IPlugin {
           { taskModule, error: error.message },
         );
       });
+      setLabelCollisionReporter(service, (taskModule, label) => {
+        ctx.logger?.warn(
+          'worker-pool: two task modules share a file name; this one is labelled ' +
+            `'${label}' on /metrics and /health. Set pools[<specifier>].label to name it.`,
+          { taskModule, label },
+        );
+      });
       ctx.services.register<IWorkerPool>(CAPABILITIES.WORKER_POOL, service);
 
       const host = options?.host ?? ctx.runtime.workers;
@@ -106,7 +115,9 @@ export function WorkerPoolPlugin(options?: WorkerPoolPluginOptions): IPlugin {
       // plugin cannot choose for an application (the M45b/M90b rule that
       // saturation is published, never judged).
       ctx.health.register('worker-pool', (): Promise<HealthCheckResult> => {
-        const pools = service.stats();
+        // Labelled, never the specifier: a `file:` URL names the machine's
+        // directories and the user, and this payload leaves the process.
+        const pools = labelledStatsOf(service);
         const limit = budgetLimitOf(service);
         return Promise.resolve({
           status: 'up',

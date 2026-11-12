@@ -100,6 +100,32 @@ export interface IpSecurityOptions {
    * @since 0.5.0
    */
   readonly proxyHops?: number;
+  /**
+   * Believe `X-Forwarded-Host` for the published public origin. Default `false`:
+   * the host is the request URL's, i.e. the `Host` header the trusted proxy sent.
+   *
+   * Set it only when the proxy adjacent to this application WRITES
+   * `X-Forwarded-Host` itself, overwriting or appending. A proxy that passes a
+   * client's copy through unchanged (Cloudflare Tunnel's cloudflared, for
+   * example) would otherwise let the client choose the host of every absolute
+   * URL the application builds — sign-in and password-reset links included.
+   * Nothing in the request can tell those proxies apart, so this is the
+   * operator's statement, the choice Django's `USE_X_FORWARDED_HOST` and
+   * ASP.NET Core's `ForwardedHeaders.XForwardedHost` make too.
+   *
+   * When `true`, the RIGHTMOST entry is read — the one the nearest trusted
+   * proxy wrote under both conventions — and a rightmost entry that fails
+   * validation keeps the URL host; entries further left are never read. Read
+   * only in `trustedProxies` mode with a trusted socket peer. Requires
+   * `trustProxy: true` and `trustedProxies`, and conflicts with
+   * `forwardedHeader: 'forwarded'` (whose `host=` comes from the proxy's own
+   * element); any other combination throws at construction, and so does a
+   * value that is not a boolean (the string `'false'` from untyped
+   * configuration would otherwise read as `true`).
+   *
+   * @since 0.13.0
+   */
+  readonly trustForwardedHost?: boolean;
 }
 
 /**
@@ -179,6 +205,13 @@ function compileTrustedProxy(entry: string): (candidate: string) => boolean {
  *
  * @param options - IP security configuration
  * @returns A middleware function that resolves and publishes the client IP
+ * @throws {TypeError} When `forwardedHeader` is invalid or conflicts with
+ * `ipHeader`, or when `trustForwardedHost` is not a boolean, is `true` without
+ * `trustProxy: true` and `trustedProxies`, or is `true` with
+ * `forwardedHeader: 'forwarded'`
+ * @throws {Error} Unless `enabled` is `false`: when `trustedProxies` and
+ * `proxyHops` are both set, when `proxyHops` is not a non-negative integer, or
+ * when a `trustedProxies` CIDR width is malformed
  */
 export function ipSecurityMiddleware(options: IpSecurityOptions = {}): MiddlewareFunction {
   const forwardedHeader =
@@ -190,6 +223,31 @@ export function ipSecurityMiddleware(options: IpSecurityOptions = {}): Middlewar
   }
   if (forwardedHeader === 'forwarded' && options.ipHeader !== undefined) {
     throw new TypeError('ipSecurityMiddleware: forwardedHeader conflicts with ipHeader.');
+  }
+  // Only an absent option defaults: `null` is refused with the other non-booleans.
+  const trustForwardedHost: unknown =
+    options.trustForwardedHost === undefined ? false : options.trustForwardedHost;
+  // A truthiness test would read the string 'false' from untyped configuration
+  // as an opt-in and trust a client-written host.
+  if (typeof trustForwardedHost !== 'boolean') {
+    throw new TypeError(
+      `ipSecurityMiddleware: trustForwardedHost must be a boolean, received ` +
+        `${typeof trustForwardedHost}.`,
+    );
+  }
+  if (trustForwardedHost) {
+    if (forwardedHeader === 'forwarded') {
+      throw new TypeError(
+        "ipSecurityMiddleware: trustForwardedHost conflicts with forwardedHeader: 'forwarded', " +
+          "whose host= is read from the trusted proxy's own element.",
+      );
+    }
+    if (options.trustProxy !== true || options.trustedProxies === undefined) {
+      throw new TypeError(
+        'ipSecurityMiddleware: trustForwardedHost requires trustProxy: true and trustedProxies; ' +
+          'a forwarded host is believed only after a trusted socket peer.',
+      );
+    }
   }
   const enabled = options.enabled ?? true;
 
@@ -291,7 +349,7 @@ export function ipSecurityMiddleware(options: IpSecurityOptions = {}): Middlewar
               forwardedElement?.host,
             );
           } else {
-            origin = xForwardedOrigin(ctx, origin);
+            origin = xForwardedOrigin(ctx, origin, 'nearest', trustForwardedHost);
           }
         }
       }
@@ -395,20 +453,66 @@ function examinedEntry(
 }
 
 /**
- * Validated leftmost X-Forwarded origin candidate. IP security believes it only
- * after a trusted socket peer; CSRF uses it only for a `Sec-Fetch-Site:
- * same-origin` browser request. The function itself decides no trust.
+ * Which entry of a comma-separated `X-Forwarded-*` header to read.
+ *
+ * - `'nearest'` — the rightmost, written by the proxy adjacent to the
+ *   application under both the overwrite and the append convention. IP
+ *   security reads this one, because it is the only entry a trusted peer is
+ *   known to vouch for.
+ * - `'outermost'` — the leftmost, the public value in an append chain. CSRF's
+ *   zero-configuration candidate reads this one: there the browser-owned
+ *   `Sec-Fetch-Site: same-origin` is the trust source, and the value is only
+ *   compared with the browser's own `Origin`, never published.
+ * @internal
+ */
+export type ForwardedEntry = 'nearest' | 'outermost';
+
+/**
+ * Validated X-Forwarded origin candidate. The function itself decides no
+ * trust: IP security calls it only after a trusted socket peer, with
+ * `'nearest'` and `readHost` set from `trustForwardedHost`; CSRF calls it only
+ * for a `Sec-Fetch-Site: same-origin` browser request.
  * @param ctx - The request carrying the headers
  * @param fallback - The URL-derived origin
+ * @param entry - Which header entry to read
+ * @param readHost - Whether `X-Forwarded-Host` may replace the URL host
  * @returns An origin with individually validated forwarded components
  * @internal
  */
-export function xForwardedOrigin(ctx: IRequestContext, fallback: RequestOrigin): RequestOrigin {
+export function xForwardedOrigin(
+  ctx: IRequestContext,
+  fallback: RequestOrigin,
+  entry: ForwardedEntry,
+  readHost: boolean,
+): RequestOrigin {
   return validatedForwardedOrigin(
     fallback,
-    ctx.request.headers.get('X-Forwarded-Proto')?.split(',')[0]?.trim(),
-    ctx.request.headers.get('X-Forwarded-Host')?.split(',')[0]?.trim(),
+    headerEntry(ctx.request.headers.get('X-Forwarded-Proto'), entry),
+    readHost ? headerEntry(ctx.request.headers.get('X-Forwarded-Host'), entry) : undefined,
   );
+}
+
+/**
+ * One comma-separated entry, trimmed; an empty entry is absent.
+ *
+ * Neither choice skips an empty entry. `'nearest'` takes the LAST raw entry:
+ * skipping an empty trailing one (`evil.example, `) would read the client's
+ * value to its left, the entry the trusted proxy did not write. `'outermost'`
+ * takes the FIRST raw entry, its released behaviour, so `, evil.example` stays
+ * absent rather than becoming `evil.example`.
+ */
+function headerEntry(value: string | null, entry: ForwardedEntry): string | undefined {
+  if (value === null) return undefined;
+  let raw: string;
+  if (entry === 'nearest') {
+    // Without a comma `lastIndexOf` is -1, so this is the whole value.
+    raw = value.slice(value.lastIndexOf(',') + 1);
+  } else {
+    const comma = value.indexOf(',');
+    raw = comma === -1 ? value : value.slice(0, comma);
+  }
+  const trimmed = raw.trim();
+  return trimmed === '' ? undefined : trimmed;
 }
 
 /** Validates components without deciding whether a proxy is trusted. */
@@ -419,11 +523,17 @@ function validatedForwardedOrigin(
 ): RequestOrigin {
   const candidate = proto?.toLowerCase();
   const protocol = candidate === 'http' || candidate === 'https' ? candidate : fallback.protocol;
-  let host = fallback.host;
   // A browser's `Origin` never carries the scheme's default port, so a proxy
   // writing `$host:$server_port` would otherwise publish an origin no
   // same-origin request matches (M113n audit round 3 observation).
   const defaultPort = protocol === 'https' ? ':443' : ':80';
+  // The retained URL host too: the URL parser drops only its OWN scheme's
+  // default port, so `Host: app.example:443` on an `http` URL keeps `:443`
+  // once a forwarded `https` is chosen. The URL host is already parsed, so
+  // dropping the suffix repairs nothing a client wrote.
+  let host = fallback.host.endsWith(defaultPort)
+    ? fallback.host.slice(0, -defaultPort.length)
+    : fallback.host;
   const candidateHost =
     forwardedHost?.endsWith(defaultPort) === true
       ? forwardedHost.slice(0, -defaultPort.length)

@@ -12,8 +12,9 @@
 import type { MetricOptions } from '@setu-ts/common';
 
 /**
- * Label carrying the pool's task-module specifier — the same string
- * `TaskPoolStats.taskModule` reports.
+ * Label carrying the pool's task label (`task-label.ts`): the module's file
+ * name or the configured `pools[specifier].label`, never the specifier itself,
+ * which is normally a `file:` URL naming the machine's directories.
  *
  * Cardinality is bounded by the number of task modules written in the
  * application's source, not by traffic, which is why it is safe to label by

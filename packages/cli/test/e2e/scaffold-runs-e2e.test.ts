@@ -561,7 +561,9 @@ for (const proxies of options) {
     const headers = { 'X-Forwarded-For': '203.0.113.9', 'X-Forwarded-Host': 'public.example', 'X-Forwarded-Proto': 'https' };
     const trusted = proxies === '127.0.0.1/32';
     const identity = await fetch(origin + '/identity-probe', { headers });
-    assert.deepEqual(await identity.json(), { ip: trusted ? '203.0.113.9' : '127.0.0.1', origin: trusted ? 'https://public.example' : origin });
+    // A trusted proxy contributes the protocol; X-Forwarded-Host needs trustForwardedHost,
+    // which the template does not set, so the host stays the one the request named.
+    assert.deepEqual(await identity.json(), { ip: trusted ? '203.0.113.9' : '127.0.0.1', origin: trusted ? 'https://127.0.0.1:' + port : origin });
     const page = await fetch(origin + '/login', { headers });
     assert.equal(page.status, 200);
     const token = /name="_csrf"\\s+value="([^"]+)"/.exec(await page.text())?.[1];
@@ -570,7 +572,9 @@ for (const proxies of options) {
     // The scaffold uses the session plugin's secure:true default on both paths.
     assert.equal(page.headers.getSetCookie().some((line) => /; Secure/i.test(line)), true);
     const action = await fetch(origin + '/login', { method: 'POST', redirect: 'manual', headers: {
-      ...headers, cookie, Origin: 'https://public.example', 'Sec-Fetch-Site': 'same-origin',
+      // V10-17 is TLS termination: the browser posts from the host it addressed, over https.
+      // X-Forwarded-Host stays in headers and is ignored without trustForwardedHost.
+      ...headers, cookie, Origin: 'https://127.0.0.1:' + port, 'Sec-Fetch-Site': 'same-origin',
     }, body: new URLSearchParams({ _csrf: token, email: 'ada@example.com' }) });
     assert.equal(action.status, trusted ? 302 : 400, String(proxies) + ': ' + await action.text());
     console.log('PROXY_CASE', JSON.stringify(proxies), action.status);

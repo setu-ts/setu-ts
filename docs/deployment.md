@@ -65,31 +65,51 @@ direct caller's forged headers cannot choose its client IP or public origin. The
 retained when no peer is available. IPv4 CIDR is supported; list native IPv6 proxies literally.
 `proxyHops` and the leftmost default retain header-only selection and never check the peer; use
 `trustedProxies` when proxy addresses are stable; only `trustedProxies` mode with a trusted socket
-peer publishes a forwarded origin. Configure the proxy to overwrite `X-Forwarded-Proto` and
-`X-Forwarded-Host` rather than pass a client's copy through, and restrict direct access to the
-application where possible.
+peer publishes a forwarded origin. Configure the proxy to overwrite `X-Forwarded-Proto` rather than
+pass a client's copy through, and restrict direct access to the application where possible.
+
+The public **host** is the `Host` header the proxy sent unless you set
+`ipSecurity: { trustForwardedHost: true }` (since 0.13.0). Set it only when the proxy next to the
+application writes `X-Forwarded-Host` itself; the rightmost entry is then read. A proxy that passes
+a client's `X-Forwarded-Host` through would otherwise let the client choose the host of every
+absolute URL the application builds, password-reset and sign-in links included, and nothing in the
+request tells the two kinds of proxy apart.
+
+| Proxy in front of the application                                           | `X-Forwarded-Host`                    | `trustForwardedHost` |
+| --------------------------------------------------------------------------- | ------------------------------------- | -------------------- |
+| Cloudflare Tunnel (cloudflared)                                             | passes the client's copy through      | leave `false`        |
+| ingress-nginx, Compose with no proxy                                        | `Host` already carries the public one | leave `false`        |
+| nginx with `proxy_set_header Host $host` (no `X-Forwarded-Host`)            | passes the client's copy through      | leave `false`        |
+| nginx with `proxy_set_header X-Forwarded-Host $host` and a rewritten `Host` | overwritten by the proxy              | `true`               |
+| a load balancer that rewrites `Host` and sets `X-Forwarded-Host`            | written by the proxy                  | `true`               |
+
+Behind a chain of appending proxies the rightmost entry is the innermost proxy's view, for
+`X-Forwarded-Proto` as well as `X-Forwarded-Host`: an outer proxy that terminates TLS and an inner
+one that appends send `X-Forwarded-Proto: https, http`, which publishes `http`. Have the inner proxy
+overwrite both headers with the values the outer one received (the public host, and the scheme the
+browser used), or switch to `forwardedHeader: 'forwarded'`.
 
 Every examined `X-Forwarded-For` or custom `ipHeader` entry must be an IP address; numeric ports are
 stripped from IPv4 and bracketed IPv6 entries. An unbracketed IPv6 entry never carries a port. An
 invalid entry stops resolution with `CLIENT_IP_STATE_KEY` set to `undefined`, never the socket peer,
 and leaves the origin as the URL origin.
 
-The default `forwardedHeader: 'x-forwarded'` uses `X-Forwarded-For`, the leftmost
-`X-Forwarded-Proto`, and the leftmost `X-Forwarded-Host`. Choose `forwardedHeader: 'forwarded'` when
-your proxy writes RFC 7239 `Forwarded`; this reads only that family and conflicts with `ipHeader`.
-Its `proto` and `host` come from the selected client's element. A malformed element is a boundary,
-not a void: the elements to its right were written by later hops and are still read, while the walk
-stops at the boundary and never continues left of it. An oversized field (over 8 KiB or 64 elements)
-is read from the right within those bounds instead of voiding the field, so a trusted proxy that
-appends its element still resolves the client behind a padded or malformed prefix. A trusted proxy
-that writes a comma inside a quoted value to the right of malformed input loses that element to the
-boundary and resolves no client (fail closed). A direct client keeps its own address, and a boundary
-with only trusted entries to its right yields no client rather than the proxy's own address. Unknown
-and obfuscated hops cannot be returned as clients, and a `proxyHops` header too short for the chain,
-or a chain of only trusted proxies, yields no client in either family; with `trustedProxies`, so
-does a trusted proxy that sends no forwarding header. Only `http`/`https` protocols, and DNS-name or
-bracketed-IPv6 hosts with an optional numeric port, are accepted; missing or rejected components use
-the request URL.
+The default `forwardedHeader: 'x-forwarded'` uses `X-Forwarded-For`, the rightmost
+`X-Forwarded-Proto`, and — only with `trustForwardedHost` — the rightmost `X-Forwarded-Host`. Choose
+`forwardedHeader: 'forwarded'` when your proxy writes RFC 7239 `Forwarded`; this reads only that
+family and conflicts with `ipHeader`. Its `proto` and `host` come from the selected client's
+element. A malformed element is a boundary, not a void: the elements to its right were written by
+later hops and are still read, while the walk stops at the boundary and never continues left of it.
+An oversized field (over 8 KiB or 64 elements) is read from the right within those bounds instead of
+voiding the field, so a trusted proxy that appends its element still resolves the client behind a
+padded or malformed prefix. A trusted proxy that writes a comma inside a quoted value to the right
+of malformed input loses that element to the boundary and resolves no client (fail closed). A direct
+client keeps its own address, and a boundary with only trusted entries to its right yields no client
+rather than the proxy's own address. Unknown and obfuscated hops cannot be returned as clients, and
+a `proxyHops` header too short for the chain, or a chain of only trusted proxies, yields no client
+in either family; with `trustedProxies`, so does a trusted proxy that sends no forwarding header.
+Only `http`/`https` protocols, and DNS-name or bracketed-IPv6 hosts with an optional numeric port,
+are accepted; missing or rejected components use the request URL.
 
 IP security publishes one public origin, believed only when a trusted socket peer was walked and the
 client came from the forwarded chain. `requestOriginOf(ctx)` and `publicRequestUrl(ctx)` from
@@ -107,8 +127,9 @@ client could choose its own address and origin.
 
 `csrf: {}` implicitly trusts the URL origin, that published public origin, and, when the browser
 sends `Sec-Fetch-Site: same-origin`, the validated leftmost `X-Forwarded-Proto`/`X-Forwarded-Host`
-candidate (URL host when absent). The gate matters because scripts can set `X-Forwarded-*` on a CORS
-request the server admits, and cannot set `Sec-Fetch-Site`. It grants no proxy trust to other
+candidate (URL host when absent); that candidate is only compared with the browser's `Origin`, so it
+does not need `trustForwardedHost`. The gate matters because scripts can set `X-Forwarded-*` on a
+CORS request the server admits, and cannot set `Sec-Fetch-Site`. It grants no proxy trust to other
 consumers. A request whose `Sec-Fetch-Site` is present and anything but `same-origin` is checked
 against the URL origin and `trustedOrigins` only: a browser cannot send the target's real public
 origin cross-site, and a trusted proxy that passes a client's `X-Forwarded-Host` through would

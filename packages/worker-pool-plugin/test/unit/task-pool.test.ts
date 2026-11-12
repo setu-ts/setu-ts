@@ -32,6 +32,7 @@ function makePool(
   const pool = new TaskPool(
     {
       specifier: SPEC,
+      label: SPEC,
       size: config?.size ?? 2,
       maxQueue: config?.maxQueue ?? 1024,
       taskTimeoutMs: config?.taskTimeoutMs ?? 0,

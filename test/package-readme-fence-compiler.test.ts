@@ -69,7 +69,7 @@ const READMES: Readonly<Record<string, number>> = {
   'packages/scheduler-plugin/README.md': 3,
   // M90i: +1 for the trace-propagation example.
   'packages/queue-plugin/README.md': 10,
-  'packages/worker-pool-plugin/README.md': 3,
+  'packages/worker-pool-plugin/README.md': 4,
   // M98b: +1 for the development-only composition example, which must
   // really compile — it is the answer to "how do I keep this out of
   // production" and a broken one would be worse than none.
@@ -119,9 +119,9 @@ const READMES: Readonly<Record<string, number>> = {
   'packages/realtime-backplane-plugin/README.md': 3,
   'packages/resilience-plugin/README.md': 2,
   'packages/react-router-plugin/README.md': 5,
-  'packages/starters/rest-starter/README.md': 7,
+  'packages/starters/rest-starter/README.md': 8,
   'packages/starters/microservice-starter/README.md': 6,
-  'packages/starters/full-stack-starter/README.md': 8,
+  'packages/starters/full-stack-starter/README.md': 9,
   // v0.6.0 follow-up: half of the package READMEs had never had a single fence
   // compiled — the list only ever grew when a milestone happened to touch a
   // README, so `kernel`, `runtime`, `sdk`, `exceptions` and `testing` sat

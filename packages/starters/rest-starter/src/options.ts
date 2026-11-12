@@ -5,6 +5,7 @@ import type { ConfigPluginOptions } from '@setu-ts/config-plugin';
 import type { LoggerPluginOptions } from '@setu-ts/logger-plugin';
 import type { ValidationPluginOptions } from '@setu-ts/validation-plugin';
 import type { HttpSecurityPluginOptions } from '@setu-ts/http-security-plugin';
+import type { RuntimeOptions } from '@setu-ts/runtime';
 import type { HealthPluginOptions } from '@setu-ts/health-plugin';
 import type { MetricsPluginOptions } from '@setu-ts/metrics-plugin';
 import type { OpenApiPluginOptions } from '@setu-ts/openapi-plugin';
@@ -75,6 +76,18 @@ export interface RealtimeArm {
  */
 export interface RestStarterOptions {
   /**
+   * Options for `RuntimePlugin`, spread over the starter's default of
+   * `{ maxBodyBytes: 1_048_576 }` (1 MiB). The body read is bounded by
+   * default, chunked bodies included: a starter application refuses a larger
+   * body with `413`. Raise it here for routes that take uploads; the same
+   * value becomes the default `httpSecurity.requestSize.maxBodySize`, so the
+   * declared-length check refuses early at the same bound. An unbounded read
+   * is `{ maxBodyBytes: Number.MAX_SAFE_INTEGER }`.
+   *
+   * @since 0.13.0
+   */
+  runtime?: RuntimeOptions;
+  /**
    * Options for {@linkcode ConfigPlugin}. Omitted → defaults.
    */
   config?: ConfigPluginOptions;
@@ -87,7 +100,10 @@ export interface RestStarterOptions {
    */
   validation?: ValidationPluginOptions;
   /**
-   * Options for {@linkcode HttpSecurityPlugin}. Omitted → defaults.
+   * Options for {@linkcode HttpSecurityPlugin}. Omitted → defaults, plus a
+   * `requestSize` check at the effective `runtime.maxBodyBytes` (1 MiB by
+   * default) when this arm supplies no `requestSize` of its own; an explicit
+   * `requestSize`, `{ enabled: false }` included, is kept as given.
    */
   httpSecurity?: HttpSecurityPluginOptions;
   /**

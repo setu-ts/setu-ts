@@ -57,6 +57,7 @@ describe('proxy peer and public origin (M113n)', () => {
     );
     return { ip: ctx.state.get(CLIENT_IP_STATE_KEY), origin: requestOriginOf(ctx) };
   }
+  const OPT_IN: IpSecurityOptions = { trustForwardedHost: true };
   const forged = {
     'X-Forwarded-For': '7.7.7.7',
     'X-Forwarded-Proto': 'https',
@@ -69,7 +70,13 @@ describe('proxy peer and public origin (M113n)', () => {
     expect((await inspect(forged, {}, '198.51.100.9')).origin.origin).toBe('http://internal:8080');
   });
   it('trusts header client and origin only after passing a trusted peer', async () => {
+    // X-Forwarded-Host is believed only on trustForwardedHost; the protocol
+    // is believed by default.
     expect(await inspect(forged, {}, '10.1.2.3')).toEqual({
+      ip: '7.7.7.7',
+      origin: { protocol: 'https', host: 'internal:8080', origin: 'https://internal:8080' },
+    });
+    expect(await inspect(forged, { trustForwardedHost: true }, '10.1.2.3')).toEqual({
       ip: '7.7.7.7',
       origin: { protocol: 'https', host: 'public.example', origin: 'https://public.example' },
     });
@@ -170,7 +177,7 @@ describe('proxy peer and public origin (M113n)', () => {
     for (const [proto, host, expected] of cases) {
       const { origin } = await inspect(
         { ...forged, 'X-Forwarded-Proto': proto, 'X-Forwarded-Host': host },
-        {},
+        { trustForwardedHost: true },
         '10.1.2.3',
       );
       expect(origin.origin, `${proto} ${host}`).toBe(expected);
@@ -199,7 +206,7 @@ describe('proxy peer and public origin (M113n)', () => {
       `${'a'.repeat(260)}`,
     ]) {
       expect(
-        (await inspect({ ...forged, 'X-Forwarded-Host': host }, {}, '10.1.2.3')).origin.host,
+        (await inspect({ ...forged, 'X-Forwarded-Host': host }, OPT_IN, '10.1.2.3')).origin.host,
         host,
       ).toBe('internal:8080');
     }
@@ -211,7 +218,7 @@ describe('proxy peer and public origin (M113n)', () => {
     ];
     for (const [host, expected] of accepted) {
       expect(
-        (await inspect({ ...forged, 'X-Forwarded-Host': host }, {}, '10.1.2.3')).origin.host,
+        (await inspect({ ...forged, 'X-Forwarded-Host': host }, OPT_IN, '10.1.2.3')).origin.host,
       ).toBe(expected);
     }
     expect(
@@ -244,7 +251,7 @@ describe('proxy peer and public origin (M113n)', () => {
       }
     }
   });
-  it('validates each forwarded origin component and uses leftmost entries', async () => {
+  it('validates each forwarded origin component and uses the rightmost entries', async () => {
     for (const host of [
       'evil.example/path',
       'user@evil.example',
@@ -255,7 +262,7 @@ describe('proxy peer and public origin (M113n)', () => {
       '',
     ]) {
       expect(
-        (await inspect({ ...forged, 'X-Forwarded-Host': host }, {}, '10.1.2.3')).origin.host,
+        (await inspect({ ...forged, 'X-Forwarded-Host': host }, OPT_IN, '10.1.2.3')).origin.host,
         host,
       ).toBe('internal:8080');
     }
@@ -269,10 +276,10 @@ describe('proxy peer and public origin (M113n)', () => {
         await inspect(
           {
             ...forged,
-            'X-Forwarded-Proto': 'HTTPS, http',
-            'X-Forwarded-Host': 'public.example:8443, internal',
+            'X-Forwarded-Proto': 'http, HTTPS',
+            'X-Forwarded-Host': 'evil.example, public.example:8443',
           },
-          {},
+          OPT_IN,
           '10.1.2.3',
         )
       ).origin.origin,
@@ -300,7 +307,9 @@ describe('proxy peer and public origin (M113n)', () => {
     expect(
       (await inspect(headers, { forwardedHeader: 'forwarded' }, '10.1.2.3')).origin.origin,
     ).toBe('http://rfc.example');
-    expect((await inspect(headers, {}, '10.1.2.3')).origin.origin).toBe('https://public.example');
+    expect((await inspect(headers, OPT_IN, '10.1.2.3')).origin.origin).toBe(
+      'https://public.example',
+    );
     expect(
       (await inspect(forged, { forwardedHeader: 'forwarded' }, '10.1.2.3')).origin.origin,
     ).toBe('http://internal:8080');

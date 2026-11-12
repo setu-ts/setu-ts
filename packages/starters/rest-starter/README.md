@@ -108,11 +108,12 @@ package while self-hosting fails startup with `OptionalDependencyUnavailableErro
 `RestStarterOptions` is one optional field per plugin. Every field is optional and `createRestApp()`
 with no arguments is valid.
 
-Eight fields configure a plugin the starter **always** registers — omitting one takes that plugin's
-defaults:
+Nine fields configure a plugin the starter **always** registers — omitting one takes that plugin's
+defaults, except `runtime` and `httpSecurity`, which carry the body bound below:
 
 | Option         | Type                        |
 | -------------- | --------------------------- |
+| `runtime`      | `RuntimeOptions`            |
 | `config`       | `ConfigPluginOptions`       |
 | `logger`       | `LoggerPluginOptions`       |
 | `validation`   | `ValidationPluginOptions`   |
@@ -121,6 +122,20 @@ defaults:
 | `metrics`      | `MetricsPluginOptions`      |
 | `openapi`      | `OpenApiPluginOptions`      |
 | `decorators`   | `DecoratorPluginOptions`    |
+
+**The request body is bounded at 1 MiB by default** (since 0.13.0). `runtime` is spread over
+`{ maxBodyBytes: 1_048_576 }`, which bounds the body read — chunked bodies included — and answers
+`413` past it; the same value becomes `httpSecurity.requestSize.maxBodySize` unless you set
+`requestSize.maxBodySize` (or `enabled: false`) yourself, so a declared oversize body is refused
+before anything is read. A client- or bidi-streaming gRPC call is streamed rather than buffered, so
+`GrpcPlugin({ readMaxBytes })` bounds it per message instead (a `Content-Length` it declares is
+still checked). Raise it for uploads:
+
+```typescript
+createRestApp({ runtime: { maxBodyBytes: 10 * 1024 * 1024 } });
+```
+
+The microservice and full-stack starters inherit this arm and default.
 
 The remaining seven are **gated arms** — supplying one registers a plugin that is otherwise absent,
 so the default composition never bundles something unusable:

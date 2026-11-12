@@ -61,7 +61,14 @@ function makePool(
 } {
   const host = new FakeHost(1);
   const pool = new TaskPool(
-    { specifier: SPEC, size: 1, maxQueue: 1024, taskTimeoutMs: 0, startupTimeoutMs: 60_000 },
+    {
+      specifier: SPEC,
+      label: SPEC,
+      size: 1,
+      maxQueue: 1024,
+      taskTimeoutMs: 0,
+      startupTimeoutMs: 60_000,
+    },
     host,
     createFakeRuntime(new FakeTimers()),
     new WorkerBudget(Infinity),
