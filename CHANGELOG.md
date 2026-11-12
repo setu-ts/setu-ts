@@ -234,7 +234,13 @@ All notable changes to this project are documented here. The format follows
   without a call in the config, exempts starter-owned arms, and supports check silences.
 - **V12-61 (`@setu-ts/cli`):** full-stack scaffolds expose a validated `TRUST_FORWARDED_HOST` switch
   alongside `TRUSTED_PROXIES`, with proxy guidance and safe defaults.
-
+- **`setu add graphql` and `setu add grpc` record their runtime peers (#584, `@setu-ts/cli`).**
+  `add graphql` now pins `graphql` and `add grpc` pins `@connectrpc/connect` and
+  `@bufbuild/protobuf`, in `package.json` or the Deno import map. Both are optional peers that no
+  package manager installs for you, so an app registering either plugin failed at start.
+- **Install hints name every package manager (#584, `@setu-ts/graphql-plugin`,
+  `@setu-ts/logger-plugin`).** The graphql runtime and Pino load errors told Node and Bun projects
+  to run `deno add`; they now list the npm, Bun and Deno commands, as the gRPC loader already did.
 - **M139d (#582, `@setu-ts/cli`, V12-42).** A `--module` route on functional full-stack now mounts
   at `/api/<m>/<name>`; controller, SSE and page-shadow bases use the same module mount.
 - **M139d (#582, `@setu-ts/cli`, V12-47).** The telemetry preload hooks only instrumented HTTP,

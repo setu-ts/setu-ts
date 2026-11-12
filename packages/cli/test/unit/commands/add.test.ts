@@ -3489,6 +3489,46 @@ describe('M133 setu add mcp', () => {
   });
 });
 
+// The graphql and gRPC plugins load their runtime lazily from an OPTIONAL peer,
+// which no package manager installs for the consumer: before these entries the
+// app failed at start with GraphqlRuntimeLoadError / the connect load error.
+describe('setu add graphql and grpc record their runtime peers', () => {
+  const CASES: readonly (readonly [name: string, peers: Readonly<Record<string, string>>])[] = [
+    ['graphql', { graphql: '^16' }],
+    ['grpc', { '@connectrpc/connect': '^2.1.2', '@bufbuild/protobuf': '^2.7.0' }],
+  ];
+  it.each(CASES)('%s on npm', async (name, peers) => {
+    const h = harness({
+      '/app/package.json': JSON.stringify({ type: 'module', dependencies: {} }),
+    });
+    expect(await h.run([name])).toBe(0);
+    const { dependencies } = JSON.parse(h.read('/app/package.json')) as {
+      dependencies: Record<string, string>;
+    };
+    expect(dependencies).toEqual({ [`@setu-ts/${name}-plugin`]: `^${VERSION}`, ...peers });
+    expect(h.out.join('\n')).toContain('npm install');
+  });
+  it.each(CASES)('%s on Deno', async (name, peers) => {
+    const h = harness({ '/app/deno.json': DENO_MANIFEST });
+    expect(await h.run([name])).toBe(0);
+    const { imports } = JSON.parse(h.read('/app/deno.json')) as { imports: Record<string, string> };
+    for (const [peer, range] of Object.entries(peers))
+      expect(imports[peer]).toBe(`npm:${peer}@${range}`);
+  });
+  it('both in one command', async () => {
+    const h = harness({
+      '/app/package.json': JSON.stringify({ type: 'module', dependencies: {} }),
+    });
+    expect(await h.run(['graphql', 'grpc'])).toBe(0);
+    const { dependencies } = JSON.parse(h.read('/app/package.json')) as {
+      dependencies: Record<string, string>;
+    };
+    expect(Object.keys(dependencies)).toEqual(
+      expect.arrayContaining(['graphql', '@connectrpc/connect', '@bufbuild/protobuf']),
+    );
+  });
+});
+
 it('setu add mcp installs the SDK peer for a Workers project', async () => {
   const h = harness({
     '/app/package.json': JSON.stringify({ scripts: { dev: 'wrangler dev' }, dependencies: {} }),

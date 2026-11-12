@@ -1,8 +1,10 @@
 # @setu-ts/grpc-plugin — Connect and gRPC-Web services
 
-**Add it:** `setu add grpc` adds it and prints `GrpcPlugin({ services: [] })` for `setu.config.ts`;
-install `@connectrpc/connect` and `@bufbuild/protobuf` too. It provides `CAPABILITIES.GRPC`
-(`IGrpcService`).
+**Add it:** `setu add grpc` adds it with its `@connectrpc/connect` and `@bufbuild/protobuf` peers,
+and prints `GrpcPlugin({ services: [] })` for `setu.config.ts`; an outbound client also needs
+`@connectrpc/connect-node`, and runs on Node and Bun only: on Cloudflare Workers `grpcClient()`
+throws a TypeError, and on Deno the client can crash the process when a peer goes away. It provides
+`CAPABILITIES.GRPC` (`IGrpcService`).
 
 ## Serve generated service descriptors
 

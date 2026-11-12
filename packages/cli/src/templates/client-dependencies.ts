@@ -25,6 +25,7 @@ export const CLIENT_RANGES: Readonly<Record<string, string>> = {
   '@connectrpc/connect': '^2.1.2',
   '@connectrpc/connect-node': '^2.1.2',
   '@google-cloud/pubsub': '^6',
+  graphql: '^16',
   '@modelcontextprotocol/server': '^2.4.0',
   // OpenTelemetry 2.x peers require @opentelemetry/api <1.10.0.
   '@opentelemetry/api': '~1.9.0',
