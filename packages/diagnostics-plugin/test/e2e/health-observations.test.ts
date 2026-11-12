@@ -118,12 +118,7 @@ describe('Health observations e2e (M98d canary)', () => {
       // The source (resolved under its capability) reports the minimized
       // snapshot: useful status present, canary absent. A single fresh check
       // leaves both observations current, so the inspector state is `ready`.
-      const source = app.services.get(CAPABILITIES.HEALTH_DIAGNOSTICS) as {
-        snapshot: (instanceId: string) => {
-          state: string;
-          observations: { indicatorAlias: string; state: string; status?: string }[];
-        };
-      };
+      const source = app.services.get(CAPABILITIES.HEALTH_DIAGNOSTICS);
       const sourceSnapshot = source.snapshot(instanceId);
       expect(sourceSnapshot.state).toBe('ready');
       expect(JSON.stringify(sourceSnapshot)).not.toContain(CANARY_DATA);

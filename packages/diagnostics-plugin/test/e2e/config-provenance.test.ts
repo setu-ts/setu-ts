@@ -148,9 +148,7 @@ describe('Configuration provenance e2e (M98e canary)', () => {
       });
 
       // The in-process source answers the same minimized projection.
-      const source = app.services.get(CAPABILITIES.CONFIG_DIAGNOSTICS) as {
-        snapshot: (instanceId: string) => { state: string; entries: unknown[] };
-      };
+      const source = app.services.get(CAPABILITIES.CONFIG_DIAGNOSTICS);
       const sourceSnapshot = source.snapshot(instanceId);
       expect(sourceSnapshot.state).toEqual('ready');
       expect(sourceSnapshot.entries.length).toEqual(3);
