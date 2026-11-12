@@ -17226,7 +17226,7 @@ maintainer's direction to keep the split to five.
 | **M140b** | fix    | Workers, Deno and Bun project output                           | V12-102, V12-103, V12-104, V12-105, V12-106, V12-107, V12-109, V12-118, V12-124, V12-80                                                                                                                                                      | `cli`                                  |
 | **M140c** | fix    | images, Compose, Kubernetes and gRPC between workspace members | V12-68, V12-110, V12-111, V12-113, V12-115, V12-116, V12-121, V12-122, V12-123                                                                                                                                                               | `cli`, `grpc-plugin`                   |
 | **M140d** | fix    | what the generators write, and the agent brief                 | V12-62, V12-65, V12-70, V12-73, V12-78, V12-79, V12-81, V12-82, V12-84, V12-85, V12-86, V12-87, V12-89, V12-90, V12-91, V12-92, V12-93, V12-94, V12-95, V12-96, V12-97, V12-98, V12-99, V12-100, V12-101, V12-125, V12-126, V12-127, V12-128 | `cli`                                  |
-| **M140e** | docs   | documentation the code letters change                          | package READMEs, agent cards, `docs/` and the website pages M140a–d change                                                                                                                                                                   | READMEs, agent cards, `docs/`, website |
+| **M140e** | docs   | documentation the code letters change                          | package READMEs, agent cards, `docs/` and the website pages M140a–d change; the full-stack sign-out recipe (V12-88's lever)                                                                                                                  | READMEs, agent cards, `docs/`, website |
 
 **Decisions (maintainer, 2026-11-13).** The eight rows that were earlier choices:
 
@@ -17251,9 +17251,12 @@ rotated at sign-in) and every row crosses a trust boundary, so it is **security-
 merges. M140b and M140c touch different files and can follow in either order. M140d builds on M139g
 (#585, merged 2026-11-13), because both change `add`'s zero-config wiring and `setu check`'s
 unregistered-plugin finding (V12-62 is W006's missing `validation-plugin` arm). M140e batches the
-documentation last; its plan decides whether it also takes M139e's open rows. Each code letter ships
-its own CHANGELOG entry and boots a scaffold of every template it changes, per the generated-output
-rule.
+documentation last; its plan decides whether it also takes M139e's open rows. It also takes V12-88's
+framework lever: auth-plugin's "In the full-stack template" recipe gains sign-out — a form action
+calling `IAuthSessionService.signOut` through the same request-bound module service — so the
+application has a pattern to follow, though the template itself stays without one. Each code letter
+ships its own CHANGELOG entry and boots a scaffold of every template it changes, per the
+generated-output rule.
 
 ---
 
