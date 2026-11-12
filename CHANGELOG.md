@@ -74,15 +74,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
-- **M139d (`@setu-ts/cli`, V12-25).** `setu add` accepts several validated package names, with
+- **M139d (#582, `@setu-ts/cli`, V12-25).** `setu add` accepts several validated package names, with
   ordered progress and one install command.
-- **M139d (`@setu-ts/cli`, V12-26).** `setu add view --plugin-only` installs the rendering
+- **M139d (#582, `@setu-ts/cli`, V12-26).** `setu add view --plugin-only` installs the rendering
   capability without example pages; this is the full-stack default.
-- **M139d (`@setu-ts/cli`, V12-27).** Backend flags `--provider`, `--type`, `--adapter`, `--dialect`
-  and `--yes` select optional peers and schema-tool configuration while preserving application-owned
-  credentials and clients.
-- **M139d (`@setu-ts/cli`, V12-12).** `setu build` emits literal worker-pool task URL targets and
-  relocates their `.js` URLs separately for each entry bundle, including tasks and migrations; a
+- **M139d (#582, `@setu-ts/cli`, V12-27).** Backend flags `--provider`, `--type`, `--adapter`,
+  `--dialect` and `--yes` select optional peers and schema-tool configuration while preserving
+  application-owned credentials and clients.
+- **M139d (#582, `@setu-ts/cli`, V12-12).** `setu build` emits literal worker-pool task URL targets
+  and relocates their `.js` URLs separately for each entry bundle, including tasks and migrations; a
   task reached through a `.js` import of a `.ts` source is found, a Prettier-wrapped literal is
   accepted, and dynamic task references are refused.
 
@@ -181,58 +181,59 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
-- **M139d (`@setu-ts/cli`, V12-42).** A `--module` route on functional full-stack now mounts at
-  `/api/<m>/<name>`; controller, SSE and page-shadow bases use the same module mount.
-- **M139d (`@setu-ts/cli`, V12-47).** The telemetry preload hooks only instrumented HTTP, Redis,
-  AMQP and Kafka modules, leaving application TSX views unwrapped.
-- **M139d (`@setu-ts/cli`, V12-46).** Full-stack SSR failures log the request id and a URL-masked
-  stack.
-- **M139d (`@setu-ts/cli`, V12-24).** Generated Node and Bun entries print a plain listening URL
-  after successful startup; Deno keeps its runtime banner.
-- **M139d (`@setu-ts/cli`, V12-48).** A Vite bind failure exits 1 with a named port and standalone
-  or workspace remedy.
-- **M139d (`@setu-ts/cli`, V12-44).** The devtool boot refusal says the application did not start
-  and the connector is not running.
-- **M139d (`@setu-ts/kernel`, V8-14).** The kernel duplicate-plugin message names starter-owned
-  options and distinguishes service replacement under another plugin name.
-- **M139d (`@setu-ts/cli`, V12-2).** `setu add mcp` preserves config and prints `McpPlugin({})` with
-  the requirement to mark at least one route with `mcpTool()` or `@McpTool()` before boot.
-- **M139d (`@setu-ts/cli`, V12-3).** Full-stack inserts zero-config plugins above its managed
+- **M139d (#582, `@setu-ts/cli`, V12-42).** A `--module` route on functional full-stack now mounts
+  at `/api/<m>/<name>`; controller, SSE and page-shadow bases use the same module mount.
+- **M139d (#582, `@setu-ts/cli`, V12-47).** The telemetry preload hooks only instrumented HTTP,
+  Redis, AMQP and Kafka modules, leaving application TSX views unwrapped.
+- **M139d (#582, `@setu-ts/cli`, V12-46).** Full-stack SSR failures log the request id and a
+  URL-masked stack.
+- **M139d (#582, `@setu-ts/cli`, V12-24).** Generated Node and Bun entries print a plain listening
+  URL after successful startup; Deno keeps its runtime banner.
+- **M139d (#582, `@setu-ts/cli`, V12-48).** A Vite bind failure exits 1 with a named port and
+  standalone or workspace remedy.
+- **M139d (#582, `@setu-ts/cli`, V12-44).** The devtool boot refusal says the application did not
+  start and the connector is not running.
+- **M139d (#582, `@setu-ts/kernel`, V8-14).** The kernel duplicate-plugin message names
+  starter-owned options and distinguishes service replacement under another plugin name.
+- **M139d (#582, `@setu-ts/cli`, V12-2).** `setu add mcp` preserves config and prints
+  `McpPlugin({})` with the requirement to mark at least one route with `mcpTool()` or `@McpTool()`
+  before boot.
+- **M139d (#582, `@setu-ts/cli`, V12-3).** Full-stack inserts zero-config plugins above its managed
   registration loop when the starter does not own them.
-- **M139d (`@setu-ts/cli`, V12-28).** Database adds preserve schema migration scripts and
+- **M139d (#582, `@setu-ts/cli`, V12-28).** Database adds preserve schema migration scripts and
   create-only Drizzle or Prisma 7 config files, without writing application schemas.
-- **M139d (`@setu-ts/cli`, V12-30).** Full-stack directly declares `exceptions`; it is addable
+- **M139d (#582, `@setu-ts/cli`, V12-30).** Full-stack directly declares `exceptions`; it is addable
   without registration and error-factory brief guidance requires it installed.
-- **M139d (`@setu-ts/cli`, V12-33).** Non-memory full-stack queue scaffolds declare the queue
+- **M139d (#582, `@setu-ts/cli`, V12-33).** Non-memory full-stack queue scaffolds declare the queue
   package and its processor barrel so generated jobs run.
-- **M139d (`@setu-ts/cli`, V12-60).** `setu workspace broker` moving a full-stack member to a broker
-  that backs a queue (Redis, RabbitMQ) adds `@setu-ts/queue-plugin` to the member manifest, so
-  `setu g job` works there as on a member generated with that broker. `setu.config.ts` stays the
+- **M139d (#582, `@setu-ts/cli`, V12-60).** `setu workspace broker` moving a full-stack member to a
+  broker that backs a queue (Redis, RabbitMQ) adds `@setu-ts/queue-plugin` to the member manifest,
+  so `setu g job` works there as on a member generated with that broker. `setu.config.ts` stays the
   developer's, so the command prints the `processors: [...QUEUE_PROCESSORS]` lines `setu check`
   requires once a job exists, until the config reads them.
-- **M139d (`@setu-ts/cli`, V12-1).** Agent briefs use formatter-stable lists and
+- **M139d (#582, `@setu-ts/cli`, V12-1).** Agent briefs use formatter-stable lists and
   whitespace-normalized freshness; Deno preserves prose wrapping.
-- **M139d (`@setu-ts/cli`, V12-22).** Agent briefs distinguish starter-provided options from
+- **M139d (#582, `@setu-ts/cli`, V12-22).** Agent briefs distinguish starter-provided options from
   packages that must be added.
-- **M139d (`@setu-ts/cli`, V12-23).** Full-stack brief rules resolve services with
+- **M139d (#582, `@setu-ts/cli`, V12-23).** Full-stack brief rules resolve services with
   `getService(context, TOKEN)` and reserve context keys for non-service values.
-- **M139d (`@setu-ts/cli`, V12-16).** Generated jobs and plugins barrel headers describe both
+- **M139d (#582, `@setu-ts/cli`, V12-16).** Generated jobs and plugins barrel headers describe both
   plugin-list and starter/full-stack registration forms.
-- **M139d (`@setu-ts/cli`, V12-31).** Generated middleware points to
+- **M139d (#582, `@setu-ts/cli`, V12-31).** Generated middleware points to
   `app/server/require-user.server.ts` for page middleware.
-- **M139d (`@setu-ts/cli`, V12-43).** Workers config comments identify both Deno and Node as
+- **M139d (#582, `@setu-ts/cli`, V12-43).** Workers config comments identify both Deno and Node as
   diagnostics-listener runtimes.
-- **M139d (`@setu-ts/cli`, V12-45).** Generated Kubernetes guidance documents repeatable
+- **M139d (#582, `@setu-ts/cli`, V12-45).** Generated Kubernetes guidance documents repeatable
   `--pull-secret <name>` for existing namespace Secrets.
-- **M139d (`@setu-ts/cli`, X91-1).** Full-stack can adopt a same-named controller while retaining
-  its generated service, token, types and page; the controller tests are omitted. Same-named
-  services remain refused because the token and index import the generated service types and
-  factory.
-- **M139d (`@setu-ts/cli`, V12-32).** Read-only wiring checks accept ordinary templates, regexes and
-  division while retaining stops on reflection, computed access, dynamic execution and ambiguous
-  syntax. Automatic edits keep the strict lexer.
-- **M139d (`@setu-ts/cli`, X93-3).** Example download refusals read the deepest bounded cause and
-  code, terminate cycles and mask URL credentials.
+- **M139d (#582, `@setu-ts/cli`, X91-1).** Full-stack can adopt a same-named controller while
+  retaining its generated service, token, types and page; the controller tests are omitted.
+  Same-named services remain refused because the token and index import the generated service types
+  and factory.
+- **M139d (#582, `@setu-ts/cli`, V12-32).** Read-only wiring checks accept ordinary templates,
+  regexes and division while retaining stops on reflection, computed access, dynamic execution and
+  ambiguous syntax. Automatic edits keep the strict lexer.
+- **M139d (#582, `@setu-ts/cli`, X93-3).** Example download refusals read the deepest bounded cause
+  and code, terminate cycles and mask URL credentials.
 
 - **A discovery backend URL with credentials is refused at startup (#580,
   `@setu-ts/service-discovery-plugin`, V12-52).** A Consul `address` or Kubernetes `apiServer` with
