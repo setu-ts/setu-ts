@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import * as runtimeDetector from '../../src/utils/runtime-detector.ts';
 import type { IFileSystem } from '@setu-ts/common';
@@ -14,7 +15,10 @@ import { WORKSPACE_MANIFEST } from '../../src/workspace/manifest.ts';
 import { DISCOVERY_MODULE } from '../../src/workspace/discovery-module.ts';
 import { COMPOSE_FILE, DOCKERFILE } from '../../src/workspace/compose.ts';
 import { InterruptedError } from '../../src/utils/interruption.ts';
-import { renderFullStackDevEntry } from '../../src/templates/full-stack-build-files.ts';
+import {
+  fullStackDevEntryVariants,
+  renderFullStackDevEntry,
+} from '../../src/templates/full-stack-build-files.ts';
 import { formatForTarget } from '../../src/utils/prettier-format.ts';
 
 it('prints no dev.ts note for a full-stack project without dev.ts (CodeRabbit #560)', async () => {
@@ -144,6 +148,33 @@ it('X87-2 X87-6 adoption records dev ports and rewrites only canonical entries a
       expect(h.fs.read('/work/svc/apps/web/dev.ts')).toContain('const vitePort = VITE_PORT;');
     }
   }
+});
+
+it('M139d review L7 rewrites a 0.12.0 full-stack dev.ts, recognised from its real rendering', async () => {
+  // Rendered by the 0.12.0 template (develop 4ec5eaa01), before M139d's Vite
+  // listen guard and startup line; the recognition variant must equal it.
+  const previous = readFileSync(
+    new URL('../fixtures/full-stack-dev-entry-0.12.0-node.txt', import.meta.url),
+    'utf8',
+  );
+  expect(fullStackDevEntryVariants('node')[1]!.contents).toBe(previous);
+  expect(fullStackDevEntryVariants('bun')[1]!.contents).toBe(
+    readFileSync(
+      new URL('../fixtures/full-stack-dev-entry-0.12.0-bun.txt', import.meta.url),
+      'utf8',
+    ),
+  );
+  const h = harness({
+    ...NODE_PROJECT,
+    '/work/svc/package.json': JSON.stringify({
+      dependencies: { '@setu-ts/react-router-plugin': '^0.12.0' },
+      scripts: { 'start:debug': 'node --inspect dev.ts' },
+    }),
+    '/work/svc/dev.ts': previous,
+  });
+  expect(await h.run(['--name', 'web'], new AbortController().signal), h.err.text()).toBe(0);
+  expect(h.fs.read('/work/svc/apps/web/dev.ts')).toContain('const vitePort = VITE_PORT;');
+  expect(h.out.text()).not.toContain('Set the two development port lines');
 });
 
 it('X87-2 refuses an exhausted development range before moving any project files', async () => {

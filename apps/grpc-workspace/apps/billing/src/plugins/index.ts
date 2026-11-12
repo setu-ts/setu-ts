@@ -5,6 +5,7 @@
 // `setu.config.ts` consumes it as:
 //
 //   createApplication({ plugins: [/* … */, ...GENERATED_PLUGINS] })
+//   full-stack: for (const generated of GENERATED_PLUGINS) app.register(generated);
 //
 // If you scaffolded this project before this seam existed, add those lines to
 // wire generated artifacts in.
@@ -14,7 +15,8 @@ import type { IPlugin } from '@setu-ts/common';
 import { BillingPlugin } from './billing.plugin.ts';
 
 /**
- * Every generated plugin, spread into `createApplication({ plugins })`.
+ * Every generated plugin, spread into `createApplication({ plugins })` or registered
+ * by the full-stack `app.register` loop.
  *
  * Array position does not decide registration order: the kernel resolves plugins
  * by their declared `dependencies`, and a generated plugin declares none. Delete a

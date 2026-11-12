@@ -59,7 +59,7 @@ const CONFIG_CLASS_NO_REGISTRAR = [
 ].join('\n');
 
 /** A config the source mask refuses to classify. */
-const CONFIG_UNCLASSIFIABLE = 'const message = `a template literal cannot be classified`;\n';
+const CONFIG_UNCLASSIFIABLE = 'const message = globalThis;\n';
 
 interface Harness {
   readonly fs: FakeFs;
@@ -260,7 +260,7 @@ describe('setu generate --module reports an inactive module', () => {
     const step = await runStep(h, ['service', 'pricing', '--module', 'orders']);
 
     expect(step.code).toBe(0);
-    expect(step.err).toContain('could not classify setu.config.ts at line 1 (`template literal`)');
+    expect(step.err).toContain('could not classify setu.config.ts at line 1 (`globalThis`)');
     expect(step.err).toContain('registerModules');
     expect(step.err).not.toContain(INACTIVE_HEADER);
   });
@@ -325,7 +325,7 @@ describe('setu generate --module reports an inactive module', () => {
     const barrel = h.fs.read('/app/src/modules/index.ts');
     await h.fs.writeFile(
       '/app/src/modules/index.ts',
-      new TextEncoder().encode(`${barrel}\nconst label = \`unclassifiable\`;\n`),
+      new TextEncoder().encode(`${barrel}\nconst label = globalThis;\n`),
     );
 
     const step = await runStep(h, ['route', 'summary', '--module', 'orders']);
@@ -395,7 +395,7 @@ describe('setu generate --module reports an inactive module', () => {
     const step = await runStep(h, ['service', 'pricing', '--module', 'orders']);
 
     expect(step.code).toBe(0);
-    expect(step.err).toContain('could not classify setu.config.ts at line 1 (`template literal`)');
+    expect(step.err).toContain('could not classify setu.config.ts at line 1 (`globalThis`)');
     // One line names both sites a class-based module needs (M131c review).
     const warnings = step.err.split('\n').filter((line) => line.includes('could not classify'));
     expect(warnings).toHaveLength(1);

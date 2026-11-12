@@ -67,6 +67,7 @@
     "@setu-ts/http-security-plugin": "workspace:^",
     "@setu-ts/kernel": "workspace:^",
     "@setu-ts/logger-plugin": "workspace:^",
+    "@setu-ts/mail-plugin": "workspace:^",
     "@setu-ts/messaging-plugin": "workspace:^",
     "@setu-ts/metrics-plugin": "workspace:^",
     "@setu-ts/multi-tenancy-plugin": "workspace:^",
@@ -86,6 +87,7 @@
     "@setu-ts/websocket-plugin": "workspace:^",
     "@types/deno": "2.7.0",
     "@types/node": "^24",
+    "drizzle-kit": "0.31.11",
     "typescript": "6.0.3",
     "vitest": "5.0.3"
   }

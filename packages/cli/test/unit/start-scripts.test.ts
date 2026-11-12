@@ -44,6 +44,47 @@ function readScripts(h: ReturnType<typeof harness>, file: string): Record<string
 }
 
 describe('generated local start scripts load .env (M131a X88-2)', () => {
+  it.each(['node', 'bun', 'deno'] as const)(
+    'V12-24 prints a startup banner on %s only when needed',
+    async (runtime) => {
+      const h = harness();
+      expect(await h.run(['new', 'svc', '--template', 'full-stack', '--runtime', runtime])).toBe(0);
+      for (const file of ['main.ts', 'dev.ts']) {
+        const entry = h.fs.read(`/work/svc/${file}`);
+        expect(entry.includes('Listening on http://localhost:')).toBe(runtime !== 'deno');
+        if (runtime !== 'deno')
+          expect(entry.indexOf('Listening on')).toBeGreaterThan(entry.indexOf('await app.start'));
+      }
+    },
+  );
+  it('V12-48 catches Vite setup failures and names the standalone or workspace remedy', async () => {
+    const { renderFullStackDevEntry } =
+      await import('../../src/templates/full-stack-build-files.ts');
+    for (const port of [undefined, { symbol: 'PORT', from: './src/discovery/index.ts' }]) {
+      const entry = renderFullStackDevEntry(port).contents;
+      expect(entry).toContain('try {\n  server = await vite.createServer');
+      expect(entry).toContain('await server?.close();');
+      expect(entry).toContain(
+        'Startup failed: Vite could not listen on ${vitePort} (VITE_PORT): ${describeError(error)}',
+      );
+      expect(entry).toContain(
+        // listen() also runs plugin buildStart hooks, so the remedy is conditional
+        // rather than claiming every failure is a taken port (review residual).
+        port === undefined
+          ? 'If the port is taken, choose another VITE_PORT in the environment.'
+          : 'If the port is taken, choose another Vite port in setu.workspace.json.',
+      );
+      // M139d review L1: only a listen() failure is a port problem; a config or
+      // plugin failure in createServer() gets the plain refusal.
+      expect(entry.indexOf('listening = true;')).toBeGreaterThan(
+        entry.indexOf('server = await vite.createServer'),
+      );
+      expect(entry.indexOf('listening = true;')).toBeLessThan(
+        entry.indexOf('await server.listen();'),
+      );
+      expect(entry).toContain('} else console.error(`Startup failed: ${describeError(error)}`);');
+    }
+  });
   it('Node local scripts carry --env-file-if-exists=.env; production does not', async () => {
     const h = harness();
     await h.run(['new', 'svc', '--template', 'rest', '--runtime', 'node']);

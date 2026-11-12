@@ -800,6 +800,11 @@ here.
   streamed RPC bodies and replies, an HTTP/2 listener beside HTTP/1.1 on Node and Bun, response
   trailers and native gRPC, `grpcClient` with refused-stream retry; V12-39, V12-40, V12-51; ships in
   `0.13.0`) — complete (PR #581).
+- **Milestone 139d** (`cli` + the `kernel` duplicate-plugin message — the CLI on a full-stack
+  project: `--module` routes under `/api/<m>`, a scoped telemetry preload, `setu add` with several
+  packages, backend peers and migration scripts, full-stack wiring, task builds in `setu build`, a
+  formatter-stable brief and a check-only reference mask; 27 V12/V8/X91/X93 rows, X91-9 already
+  fixed; ships in `0.13.0`) — complete (PR #582).
 - **Next milestone** — the remaining M139 letters.
 
 ## Verification (run before declaring any work done)

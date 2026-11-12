@@ -70,7 +70,9 @@ it('renders both transport options after logger on every starter-composed templa
       ),
     );
     expect(connected).toContain("messaging: {\n          broker: 'redis-streams'");
-    expect(connected).toContain("queue: {\n          adapter: 'redis'");
+    expect(connected.replace(/\s+/g, ' ')).toContain(
+      "queue: { processors: [...QUEUE_PROCESSORS], adapter: 'redis'",
+    );
     expect(connected.indexOf('messaging:')).toBeGreaterThan(connected.indexOf('logger:'));
     expect(connected.indexOf('queue:')).toBeGreaterThan(connected.indexOf('messaging:'));
   }
@@ -86,9 +88,21 @@ it('passes the same static server-build module from every socket entry', () => {
     expect(config.compilerOptions.allowJs).toBe(true);
     return files.find((file) => file.path === 'main.ts')!.contents;
   });
-  expect(new Set(entries).size).toBe(1);
+  expect(entries[0]).toContain('Listening on http://localhost:');
+  expect(entries[1]).toContain('Listening on http://localhost:');
+  expect(entries[2]).not.toContain('Listening on http://localhost:');
   expect(entries[0]).toContain("import * as serverBuild from './build/server/index.js'");
   expect(entries[0]).toContain('createApp(undefined, undefined, { serverBuild })');
+});
+
+it('V12-30 declares exceptions directly without an unused config import', () => {
+  const files = projectFiles('probe', 'node', resolveHost(FULL_STACK_TEMPLATE, 'node'));
+  expect(files.find((file) => file.path === 'package.json')?.contents).toContain(
+    '@setu-ts/exceptions',
+  );
+  expect(files.find((file) => file.path === 'setu.config.ts')?.contents).not.toContain(
+    "from '@setu-ts/exceptions'",
+  );
 });
 
 /** Every path the template emits. */
@@ -345,6 +359,15 @@ describe('full-stack template | what the plugins own is NOT reimplemented', () =
     expect(entry).toContain('if (isRouteErrorResponse(error) && error.status === 404) return;');
     expect(entry).toContain('getService<ILogger>(context, CAPABILITIES.LOGGER).error(');
     expect(entry).toContain('error: describeError(error)');
+    expect(entry).toContain('requestId: context.get(requestIdContext)');
+    const config = projectFiles('shop', 'node', resolveHost(FULL_STACK_TEMPLATE, 'node')).find(
+      (file) => file.path === 'setu.config.ts',
+    )!.contents;
+    expect(config).toContain('context.set(requestIdContext, ctx.id)');
+    expect(entry).toContain('stack: maskUrlUserinfo(error.stack).slice(0, 8192)');
+    expect(contentsOf('app/server/context-keys.server.ts')).toContain(
+      "contextKeyFor<string | null>('app.request-id', null)",
+    );
   });
 
   it('gives the login form an action, so its CSRF token is actually consumed', () => {

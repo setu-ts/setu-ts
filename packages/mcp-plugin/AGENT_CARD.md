@@ -1,7 +1,7 @@
 # @setu-ts/mcp-plugin — route tools for agents
 
-**Add it:** `setu add mcp` installs this package and the optional server SDK peer. Register
-`McpPlugin({})` in `setu.config.ts`; no capability token is provided.
+**Add it:** `setu add mcp` installs this package and its server SDK peer. Register `McpPlugin({})`
+once a route is marked as a tool: it refuses to boot with none.
 
 ## Mark a route
 

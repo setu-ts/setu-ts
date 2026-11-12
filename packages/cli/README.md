@@ -403,12 +403,12 @@ jobs outside a queue-owning starter remain ungated.
 Generating a route, controller or module checks React Router's resolved page tree with the project's
 installed `react-router routes --json`. A kernel group that would take precedence over an existing
 page is refused, naming the page file. For example, `setu g route products` conflicts with the
-scaffold's `/products` page. Use another name, or run `setu g module api` (with
-`--adopt-controllers` when the project already has controllers) followed by
-`setu g route products --module api` to serve `/api/products`. If the local route-tree command is
-unavailable or takes over 15 seconds, generation continues with a notice naming the paths to check
-by hand. This executes the project's route configuration. `setu check` remains a file-reading wiring
-gate: it does not execute React Router or detect a page added after a kernel route.
+scaffold's `/products` page. Run `setu g module orders` for `/api/orders`, followed by
+`setu g route summary --module orders` for `/api/orders/summary` (use `--adopt-controllers` when
+switching a project with flat controllers). If the local route-tree command is unavailable or takes
+over 15 seconds, generation continues with a notice naming the paths to check by hand. This executes
+the project's route configuration. `setu check` remains a file-reading wiring gate: it does not
+execute React Router or detect a page added after a kernel route.
 
 ### Plugin awareness
 
@@ -585,13 +585,14 @@ repository), `<name>.schemas.ts` (only when `validation-plugin` is installed), a
 also `MODULES` for `DecoratorPlugin({ modules })`.
 
 `--module <name>` writes into an existing module. A module-scoped controller mounts at
-`/<module>/<name>`, and a static path such as `/invoices/summary` outranks `GET /invoices/:id`, so
-an `id` equal to `summary` is unreachable through `/:id`. The module's `index.ts` registers its
-function controllers. In a class-based module, a generated class controller or service is added to
-the `controllers` or `providers` array of `<module>.module.ts`, as the NestJS CLI does, when that
-array is a plain literal; otherwise the declaration is left alone and the line to add is printed. A
-module-scoped service is registered under the token `<module>.<name>-service`. Every other schematic
-is app-wide and refuses the flag.
+`/api/<module>/<name>` on functional full-stack and `/<module>/<name>` elsewhere, including
+class-based full-stack. SSE adds `/sse/` before the name. A static `/api/invoices/summary` outranks
+`GET /api/invoices/:id`, so an `id` equal to `summary` is unreachable through `/:id`. The module's
+`index.ts` registers its function controllers. In a class-based module, a generated class controller
+or service is added to the `controllers` or `providers` array of `<module>.module.ts`, as the NestJS
+CLI does, when that array is a plain literal; otherwise the declaration is left alone and the line
+to add is printed. A module-scoped service is registered under the token `<module>.<name>-service`.
+Every other schematic is app-wide and refuses the flag.
 
 `setu generate schema <name>` (requires `validation-plugin`) writes
 `src/shared/schemas/<name>.schemas.ts` — or `src/modules/<module>/<name>.schemas.ts` with `--module`
@@ -613,8 +614,9 @@ project.
 ## Realtime starting points
 
 `setu generate sse <name>` writes an SSE controller under `src/controllers/`, or into a module with
-`--module`, where it is served at `/<module>/sse/<name>`. When the project already has both
-`@setu-ts/react-router-plugin` (and therefore React) and `@setu-ts/sdk`, it also writes an
+`--module`, where it is served at `/api/<module>/sse/<name>` on functional full-stack and
+`/<module>/sse/<name>` elsewhere, including class-based full-stack. When the project already has
+both `@setu-ts/react-router-plugin` (and therefore React) and `@setu-ts/sdk`, it also writes an
 application-local `src/hooks/use-<name>.ts` React hook that imports `createSseClient`. Add the SDK
 with `setu add sdk` before generating the hook. React belongs to the consuming application, never a
 published Setu package.
@@ -827,10 +829,11 @@ without the selected broker's service, it prints the service block to add.
 Use `setu new <name> --template full-stack` or `setu generate app <name> --template full-stack` in a
 workspace to create the frontend and build setup.
 
-Adding one of the twelve safe zero-configuration providers wires its emitted plugin-list anchor in
-either style. Starter compositions instead name their option arm; configure that arm to avoid a
-duplicate registration. In a functional project, `events`, `cqrs`, `health` and `metrics` are
-registered with the generated-artifact barrel they consume, for example
+Adding one of the 20 safe zero-configuration providers wires its emitted plugin-list anchor in
+either style. Full-stack inserts zero-config plugins the starter does not own above its generated
+plugin loop. Starter-owned plugins name their option arm; configure that arm to avoid a duplicate
+registration. In a functional project, `events`, `cqrs`, `health` and `metrics` are registered with
+the generated-artifact barrel they consume, for example
 `EventsPlugin({ handlers: EVENT_HANDLERS })`, and an empty barrel is created when absent, so a
 handler a later `setu generate` writes is live. Class-based projects keep the bare call; their
 handlers arrive through the ingress barrel. Manifest updates preserve existing key order. Deno
@@ -862,3 +865,19 @@ dependencies, JSX and example view files only; CSS there belongs to Wrangler sta
 
 The full-stack template includes Tailwind through Vite, copied shadcn Button/Card, a fixed app shell
 and a light/dark/system toggle. Run `npx shadcn add <component>` to add more components.
+
+`setu add` accepts several names and validates the complete request before writing. Backend flags
+are `--provider` (mail), `--type` (database), `--adapter` (vector-store), and `--dialect` for
+Drizzle. A terminal asks when no backend flag is supplied; `--yes` takes the default. Existing peer
+pins, scripts and config files are preserved. Drizzle and Prisma add schema migration scripts and
+create-only configs; schemas and client instances belong to the application. Deno prints schema
+commands and Workers writes none. `view --plugin-only` installs only the capability and compatible
+JSX settings; it is the full-stack default and refuses `--module`. `mcp` leaves `setu.config.ts`
+unchanged and prints `McpPlugin({})` with the note that the app boots with it only once at least one
+route is marked with `mcpTool()` or `@McpTool()`.
+
+Worker tasks named `*.task.ts` referenced by a literal
+`new URL('./src/tasks/hash.task.ts', import.meta.url)` are built by `setu build` and their URLs
+relocated for each output, including migrations. A non-literal reference naming `.task.ts` in the
+call is refused with the file and line; a path held in a variable is not detected (it builds without
+the task), so keep the literal in the call. `--dry-run` lists task outputs.

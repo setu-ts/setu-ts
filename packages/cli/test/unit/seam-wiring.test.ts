@@ -24,6 +24,17 @@ import { seamSpecFor } from './schematics/_shared.ts';
 /** The templates that host generated-artifact seams. */
 const HOSTS = ['rest', 'microservice', 'class-based'] as const;
 
+it('V12-16 explains plugin-list and starter registration in both generated barrel headers', () => {
+  const jobs = seamSpecFor('job')!.renderBarrel({});
+  expect(jobs).toContain('QueuePlugin({ processors: [...QUEUE_PROCESSORS] })');
+  expect(jobs).toContain('starter queue: { processors: [...QUEUE_PROCESSORS] }');
+  const plugins = seamSpecFor('plugin')!.renderBarrel({});
+  expect(plugins).toContain('createApplication({ plugins:');
+  expect(plugins).toContain(
+    'full-stack: for (const generated of GENERATED_PLUGINS) app.register(generated);',
+  );
+});
+
 /**
  * Every barrel path a template emits.
  *

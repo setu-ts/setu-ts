@@ -15,6 +15,7 @@
  * @module
  */
 
+import { moduleRouteBase } from './module-route-base.ts';
 import type { TargetRuntime } from '../constants.ts';
 import type { DerivedNames } from '../utils/names.ts';
 import type { GeneratedFile } from '../utils/file-writer.ts';
@@ -158,7 +159,7 @@ function inputOf(body: unknown): ${p}Input | undefined {
  */
 export function ${routeRegistrarSymbol(names)}(router: IRouterApi, services?: IServiceRegistry): void {
   void services;
-  router.group('/api/${names.kebab}', (routes) => {
+  router.group('${moduleRouteBase(names.kebab, new Set(['react-router-plugin']))}', (routes) => {
     routes.get('/', async (ctx) => {
       const service = resolveRequestService(ctx, ${names.screaming});
       return ctx.response.json({ items: await service.list() });

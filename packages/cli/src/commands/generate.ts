@@ -5,6 +5,7 @@
  */
 
 import { formatForTarget } from '../utils/prettier-format.ts';
+import { moduleRouteBase } from '../schematics/module-route-base.ts';
 import type { IFileSystem } from '@setu-ts/common';
 import { diagnoseProject, type ProjectDiagnosis } from '../diagnostics/diagnose.ts';
 import { refuseDuplicateNames, renderGenerateFindings } from '../diagnostics/render.ts';
@@ -75,6 +76,7 @@ import { interruptionMessage } from '../utils/interruption.ts';
 
 import { createCommandRunner, type CommandRunner } from '../utils/run-command.ts';
 import { kernelShadows, readPagePaths } from '../utils/react-router-routes.ts';
+import { isMissingPath } from '../utils/filesystem-errors.ts';
 import { cliInvocation } from '../templates/project-files.ts';
 
 /**
@@ -498,8 +500,31 @@ export async function runGenerateCommand(
     // and its page of the same name never collide.
     const base =
       schematicName === 'module'
-        ? `/api/${names.kebab}`
-        : `/${module === undefined ? '' : `${module}/`}${names.kebab}`;
+        ? moduleRouteBase(names.kebab, installed)
+        : `${module === undefined ? '' : moduleRouteBase(module, installed)}/${names.kebab}`;
+    // An adopted same-named controller keeps its own routes, which this
+    // command cannot read, and a kernel route outranks a React Router page:
+    // refuse rather than write a page its controller may shadow.
+    if (schematicName === 'module' && page && adoptControllers) {
+      const adopting = await deps.fs
+        .stat(joinPath(dir, `src/controllers/${names.kebab}.controller.ts`))
+        .then(
+          (stat) => stat.isFile,
+          (cause: unknown) => {
+            if (isMissingPath(cause)) return false;
+            throw cause;
+          },
+        );
+      if (adopting) {
+        deps.error(
+          `Cannot generate module "${names.kebab}" with --page while adopting src/controllers/${names.kebab}.controller.ts: that controller keeps its own routes, and one at /${names.kebab} would take precedence over the page.`,
+        );
+        deps.error(
+          'Generate the module without --page, or adopt the controller under another module name.',
+        );
+        return EXIT_ERROR;
+      }
+    }
     const pages = await readPagePaths(dir, deps.runCommand ?? createCommandRunner(), deps.fs);
     if (!pages.ok) {
       deps.error(
@@ -513,14 +538,15 @@ export async function runGenerateCommand(
         );
         deps.error(
           schematicName === 'module'
-            ? `Choose another module name: a full-stack module's routes are mounted at /api/<module name>.`
-            : `Choose another name, or place the ${schematicName} in a module: setu g module api (with --adopt-controllers if the project has controllers), then setu g ${schematicName} ${names.kebab} --module api (which yields /api/${names.kebab}).`,
+            ? `Choose another module name: this project's module routes are mounted at ${moduleRouteBase('<module name>', installed)}.`
+            : `Choose another name, or place the ${schematicName} in a module: setu g module orders (with --adopt-controllers if the project has controllers), then setu g ${schematicName} ${names.kebab} --module orders (which yields ${moduleRouteBase('orders', installed)}/${names.kebab}).`,
         );
         return EXIT_ERROR;
       }
       // `--page` adds a page at /<name>: an existing page there would be
       // shadowed or, for /login, the guarded page would redirect to itself.
       const pagePath = `/${names.kebab}`;
+
       const existing = page
         ? pages.paths.find((path) => path.replace(/\/+$/, '') === pagePath)
         : undefined;

@@ -79,6 +79,7 @@ function renderEntry(
   runtime: TargetRuntime,
   legacy = false,
   startupCatch = !legacy,
+  currentWording = true,
 ): string {
   const portImport =
     input.port === undefined ? '' : `import { ${input.port.symbol} } from '${input.port.from}';\n`;
@@ -140,7 +141,7 @@ ${startupIndent}  plugins: [diagnostics${probe ? ', devtoolProbe' : ''}],
 ${startupIndent}  diagnostics: {},
 ${startupIndent}});
 
-${startupIndent}await app.start({ port: ${appPort} });${
+${startupIndent}await app.start({ port: ${appPort} });${currentWording && runtime !== 'deno' ? `\n${startupIndent}console.log(\`Listening on http://localhost:\${${appPort}}/\`);` : ''}${
     !startupCatch
       ? ''
       : `
@@ -149,7 +150,7 @@ ${startupIndent}await app.start({ port: ${appPort} });${
 
 const app = await boot().catch((error: unknown) => {
   console.error(
-    \`setu devtool: startup failed: \${describeError(error)}. The connector did not start.\`,
+    ${currentWording ? '`setu devtool: startup failed: ${\n      describeError(error)\n    }. The application did not start, and the connector is not running.`' : '`setu devtool: startup failed: ${describeError(error)}. The connector did not start.`'},
   );
   return runtime.exit(1);
 });
@@ -213,7 +214,9 @@ export function devEntryVariants(devtoolPort: number, member = true): readonly s
     previous,
     renderEntry(input, false, 'deno', true),
     renderEntry(input, true, 'deno', false, false),
-    renderEntry(input, true, 'node', false, false),
+    renderEntry(input, true, 'node', false, false, false),
+    renderEntry(input, true, 'deno', false, true, false),
+    renderEntry(input, true, 'node', false, true, false),
   ];
   return [
     ...variants,

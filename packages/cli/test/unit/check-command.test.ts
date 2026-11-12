@@ -19,6 +19,21 @@ function harness(seed: Readonly<Record<string, string>> = { '/app/package.json':
   };
 }
 
+it('V12-32 check accepts ordinary template and regex literals without W001', async () => {
+  const h = harness();
+  expect(await h.run(['new', 'rest', '--template', 'rest'])).toBe(0);
+  const path = '/app/rest/setu.config.ts';
+  await h.fs.writeFile(
+    path,
+    new TextEncoder().encode(
+      h.fs.read(path) +
+        '\nconst label = `ordinary ${1 + 2}`; const patterns = [/literal/]; void label; void patterns;',
+    ),
+  );
+  expect(await h.run(['check', '--dir', '/app/rest']), h.err.text()).toBe(0);
+  expect(h.err.text()).not.toContain('setu.W001');
+});
+
 it('H1 keeps a missing full-stack module token export at E001', async () => {
   const h = harness();
   expect(await h.run(['new', 'web', '--template', 'full-stack', '--runtime', 'node'])).toBe(0);
@@ -41,7 +56,7 @@ it('M1 keeps REST check warning symbols local to its required wiring', async () 
   const path = '/app/rest/setu.config.ts';
   await h.fs.writeFile(
     path,
-    new TextEncoder().encode(h.fs.read(path) + '\nconst label = `unsupported`;'),
+    new TextEncoder().encode(h.fs.read(path) + '\nconst label = globalThis;'),
   );
   const start = h.err.lines.length;
   expect(await h.run(['check', '--dir', '/app/rest'])).toBe(0);
@@ -54,7 +69,7 @@ it('M1 keeps REST check warning symbols local to its required wiring', async () 
 it('L1 prints the collapsed config warning for g module dry-run', async () => {
   const h = harness({
     '/app/package.json': '{}',
-    '/app/setu.config.ts': 'const label = `unsupported`;',
+    '/app/setu.config.ts': 'const label = globalThis;',
   });
   const before = h.fs.writes.length;
   expect(await h.run(['g', 'module', 'orders', '--dry-run'])).toBe(0);
@@ -245,7 +260,7 @@ it('fails on drift, silences exact barrel paths, and counts warnings under stric
     '/app/package.json': '{}',
     '/app/src/controllers/new.controller.ts': 'export function registerNewRoutes() {}',
     '/app/src/controllers/index.ts': '',
-    '/app/setu.config.ts': 'const x = `unclassifiable`;',
+    '/app/setu.config.ts': 'const x = globalThis;',
   };
   const h = harness(seed);
   expect(await h.run(['check'])).toBe(1);

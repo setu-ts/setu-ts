@@ -12,6 +12,7 @@ import {
 
 interface IViewSetupInput {
   readonly runtime: TargetRuntime;
+  readonly pluginOnly?: boolean;
   /** Relative paths, with pending manifest/config edits already applied. */
   readonly existing: ReadonlyMap<string, string>;
   /**
@@ -64,6 +65,15 @@ export function planViewSetup(input: IViewSetupInput): IViewSetupPlan {
   const compilerFile =
     runtime === 'deno' ? (existing.has('deno.json') ? 'deno.json' : 'deno.jsonc') : 'tsconfig.json';
   const manifestFile = runtime === 'deno' ? compilerFile : 'package.json';
+  let react = false;
+  try {
+    const manifest = object(JSON.parse(existing.get(manifestFile) ?? '{}'));
+    react = ['dependencies', 'devDependencies', 'peerDependencies', 'imports'].some((section) =>
+      Object.hasOwn(object(manifest?.[section]) ?? {}, 'react'),
+    );
+  } catch {
+    /* An unreadable manifest cannot establish a React default. */
+  }
   const paths = new Set([
     compilerFile,
     manifestFile,
@@ -94,6 +104,7 @@ export function planViewSetup(input: IViewSetupInput): IViewSetupPlan {
         parsed['compilerOptions'] === undefined ? {} : object(parsed['compilerOptions']);
       if (
         options === undefined ||
+        (react && options['jsx'] === 'react-jsx' && options['jsxImportSource'] === undefined) ||
         (options['jsx'] !== undefined && options['jsx'] !== 'react-jsx') ||
         (options['jsxImportSource'] !== undefined && options['jsxImportSource'] !== 'hono/jsx')
       ) {
@@ -105,7 +116,7 @@ export function planViewSetup(input: IViewSetupInput): IViewSetupPlan {
         changed = true;
       } else note(`${path} compilerOptions`);
     }
-    if (!workers && path === manifestFile) {
+    if (!input.pluginOnly && !workers && path === manifestFile) {
       const deno = runtime === 'deno';
       const section = deno ? 'imports' : 'devDependencies';
       const pins = parsed[section] === undefined ? {} : object(parsed[section]);
@@ -158,7 +169,11 @@ export function planViewSetup(input: IViewSetupInput): IViewSetupPlan {
       }
     }
     // A hybrid npm scaffold can also carry a Deno import map for plugin detection.
-    if (!workers && (path === 'package.json' || path === 'deno.json' || path === 'deno.jsonc')) {
+    if (
+      !input.pluginOnly &&
+      !workers &&
+      (path === 'package.json' || path === 'deno.json' || path === 'deno.jsonc')
+    ) {
       const section = path === 'package.json' ? 'dependencies' : 'imports';
       const pins = parsed[section] === undefined ? {} : object(parsed[section]);
       const specifier = '@setu-ts/static-plugin';
@@ -185,6 +200,8 @@ export function planViewSetup(input: IViewSetupInput): IViewSetupPlan {
       (path === 'tsconfig.json' ? configEdits : manifestEdits).push(edit);
     }
   }
+
+  if (input.pluginOnly) return { files, manifestEdits, configEdits, notes };
 
   const viewFiles: GeneratedFile[] = [
     { path: 'src/views/layout.tsx', contents: renderLayout(workers) },

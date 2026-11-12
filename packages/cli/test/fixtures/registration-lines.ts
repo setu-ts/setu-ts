@@ -20,6 +20,9 @@ import { ServiceDiscoveryPlugin } from '@setu-ts/service-discovery-plugin';
 import { SessionPlugin } from '@setu-ts/session-plugin';
 import { StaticPlugin } from '@setu-ts/static-plugin';
 import { MemoryVectorStore, VectorStorePlugin } from '@setu-ts/vector-store-plugin';
+import { PgVectorStore, QdrantVectorStore } from '@setu-ts/vector-store-plugin';
+import { MailPlugin } from '@setu-ts/mail-plugin';
+import type { DatabasePluginOptions } from '@setu-ts/database-plugin';
 
 /** Stands in for the Workers environment the printed line names. */
 declare const env: Record<string, unknown>;
@@ -27,8 +30,40 @@ declare const env: Record<string, unknown>;
 /** Stands in for the platform sink the printed line names (M113d §3.8). */
 declare const waitUntil: ((promise: Promise<unknown>) => void) | undefined;
 
+declare const drizzleInstance: Extract<
+  DatabasePluginOptions,
+  { type: 'drizzle' }
+>['options']['drizzleInstance'];
+declare const drizzleTables: Record<string, unknown>;
+declare const prismaClient: Extract<
+  DatabasePluginOptions,
+  { type: 'prisma' }
+>['options']['prismaClient'];
+declare const db: ConstructorParameters<typeof PgVectorStore>[0]['db'];
+declare const client: ConstructorParameters<typeof QdrantVectorStore>[0]['client'];
+declare const databaseUrl: string;
+declare const region: string;
+declare const endpoint: string;
+declare const key: string;
+declare const database: string;
+declare const projectId: string;
+declare const instance: string;
+
 /** The printed registrations, constructed against the real option types. */
 export const PRINTED_REGISTRATIONS = [
+  MailPlugin({ provider: 'smtp', options: {} }),
+  MailPlugin({ provider: 'ses', options: {} }),
+  MailPlugin({ provider: 'sendgrid', options: {} }),
+  DatabasePlugin({ type: 'drizzle', options: { drizzleInstance, drizzleTables } }),
+  DatabasePlugin({ type: 'prisma', options: { prismaClient } }),
+  DatabasePlugin({ type: 'mongodb', options: { url: databaseUrl, collections: {} } }),
+  DatabasePlugin({ type: 'dynamodb', options: { region, entities: {} } }),
+  DatabasePlugin({ type: 'cosmos', options: { endpoint, key, database, containers: {} } }),
+  DatabasePlugin({ type: 'bigtable', options: { projectId, instance, tables: {} } }),
+  // prettier-ignore
+  VectorStorePlugin({ adapter: new PgVectorStore({ db }), collections: [{ name: 'documents', dimensions: 768 }] }),
+  // prettier-ignore
+  VectorStorePlugin({ adapter: new QdrantVectorStore({ client }), collections: [{ name: 'documents', dimensions: 768 }] }),
   AuthPlugin({ jwt: { secret: '<your-secret>' }, rbac: { roles: {} } }),
   SessionPlugin({ secret: '<your-secret>' }),
   GrpcPlugin({ services: [] }),

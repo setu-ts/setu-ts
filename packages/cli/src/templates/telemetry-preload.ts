@@ -27,6 +27,18 @@ export const TELEMETRY_PRELOAD_PATH: string = 'instrumentation.mjs';
 /** The `node` flag that runs the preload before the application. */
 export const TELEMETRY_PRELOAD_FLAG: string = `--import ./${TELEMETRY_PRELOAD_PATH}`;
 
+/** Modules patched by the supported loader-based instrumentations; fetch uses diagnostics_channel. */
+export const TELEMETRY_HOOK_MODULES: readonly string[] = [
+  'http',
+  'https',
+  'ioredis',
+  'redis',
+  '@redis/client',
+  '@node-redis/client',
+  'amqplib',
+  'kafkajs',
+];
+
 /** The preload's contents. */
 export const TELEMETRY_PRELOAD_CONTENTS: string = `// Registers OpenTelemetry's ESM loader hook before the application loads, so
 // the Redis, AMQP and Kafka drivers the plugins import lazily can be traced.
@@ -37,7 +49,13 @@ export const TELEMETRY_PRELOAD_CONTENTS: string = `// Registers OpenTelemetry's 
 import { register } from 'node:module';
 
 try {
-  register('@opentelemetry/instrumentation/hook.mjs', import.meta.url);
+  register('@opentelemetry/instrumentation/hook.mjs', import.meta.url, {
+    data: {
+      include: [
+${TELEMETRY_HOOK_MODULES.map((name) => `        '${name}',`).join('\n')}
+      ],
+    },
+  });
 } catch {
   // No instrumentation package: start without the hook.
 }

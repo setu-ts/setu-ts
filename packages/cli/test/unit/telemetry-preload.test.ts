@@ -10,6 +10,7 @@
  *
  * @module
  */
+import type { InstrumentationKind } from '@setu-ts/telemetry-plugin';
 import { execFile } from 'node:child_process';
 import * as nodeFs from 'node:fs/promises';
 import * as nodeOs from 'node:os';
@@ -20,6 +21,7 @@ import { createFakeFs } from '../fixtures/fake-fs.ts';
 import { runCli } from '../../src/cli.ts';
 import { NODE_START_BUILD_CHECK } from '../../src/templates/project-files.ts';
 import {
+  TELEMETRY_HOOK_MODULES,
   TELEMETRY_PRELOAD_CONTENTS,
   TELEMETRY_PRELOAD_FLAG,
   TELEMETRY_PRELOAD_PATH,
@@ -47,6 +49,21 @@ function harness() {
 function scripts(h: ReturnType<typeof harness>, path: string): Record<string, string> {
   return (JSON.parse(h.fs.read(path)) as { scripts: Record<string, string> }).scripts;
 }
+
+it('V12-47 scopes the hook to the instrumentation module table', () => {
+  const modules = {
+    http: ['http', 'https'],
+    fetch: [],
+    ioredis: ['ioredis'],
+    redis: ['redis', '@redis/client', '@node-redis/client'],
+    amqplib: ['amqplib'],
+    kafkajs: ['kafkajs'],
+  } satisfies Record<InstrumentationKind, readonly string[]>;
+  expect(TELEMETRY_HOOK_MODULES).toEqual(Object.values(modules).flat());
+  expect(TELEMETRY_PRELOAD_CONTENTS).toContain('data: {\n      include: [');
+  for (const name of TELEMETRY_HOOK_MODULES)
+    expect(TELEMETRY_PRELOAD_CONTENTS).toContain(`'${name}',`);
+});
 
 describe('the OpenTelemetry preload (M131a X88-4)', () => {
   it('a Node project carries the preload and runs it before the application', async () => {

@@ -172,12 +172,14 @@ describe('M113i review regressions', () => {
     ['bun', `bunx @setu-ts/cli@${VERSION}`],
     ['cloudflare-workers', `npx @setu-ts/cli@${VERSION}`],
   ] as const) {
-    it(`pins Deno-only diagnostics refusal for ${runtime}`, async () => {
+    it(`pins the diagnostics refusal for ${runtime}`, async () => {
       const fs = createFakeFs(
         runtime === 'deno'
           ? { '/app/deno.json': '{}' }
           : {
               '/app/package.json': JSON.stringify({ scripts: { start: `${runtime} main.ts` } }),
+              // A Workers project is detected by its Wrangler config.
+              ...(runtime === 'cloudflare-workers' ? { '/app/wrangler.jsonc': '{}' } : {}),
             },
       );
       const error = createRecorder();
@@ -189,8 +191,12 @@ describe('M113i review regressions', () => {
           error: error.sink,
         }),
       ).toBe(2);
+      // The devtool runs on Deno and Node (M126), so those get their own runner;
+      // Bun and Workers get the devtool's refusal instead of a command that refuses.
       expect(error.text()).toContain(
-        `\`deno run -A --no-lock npm:@setu-ts/cli@${VERSION} devtool enable\``,
+        runtime === 'deno' || runtime === 'node'
+          ? `\`${invocation} devtool enable\``
+          : `This project targets ${runtime}; the devtool can only be enabled on Deno or Node.`,
       );
     });
     it(`pins generated middleware guidance for ${runtime}`, () => {

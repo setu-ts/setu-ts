@@ -225,6 +225,13 @@ const GENERATE_LIBRARY: ICommandFlagSpec = spec(
  * that message with a second way of saying the same thing.
  */
 const ADD: ICommandFlagSpec = spec('add', [
+  'plugin-only',
+  'provider',
+  'type',
+  'adapter',
+  'dialect',
+  'yes',
+  'y',
   'dir',
   'dry-run',
   'broker',

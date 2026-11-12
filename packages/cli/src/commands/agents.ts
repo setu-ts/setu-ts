@@ -4,7 +4,7 @@ import { stringFlag, type ParsedArgs } from '../args.ts';
 import { EXIT_ERROR, EXIT_INTERRUPTED, EXIT_OK, EXIT_USAGE, VERSION } from '../constants.ts';
 import { gatherFacts, type ProjectFacts } from '../agents/facts.ts';
 import { renderBrief, renderWorkspaceRoot } from '../agents/render.ts';
-import { briefSection, spliceBrief } from '../agents/brief-file.ts';
+import { normalizeBrief, briefSection, spliceBrief } from '../agents/brief-file.ts';
 import { cardWarnings } from '../agents/card-presence.ts';
 import { detectProject } from '../utils/project-detector.ts';
 import {
@@ -235,7 +235,10 @@ export async function runAgentsCommand(
       const before = await existingBrief(deps.fs, path);
       try {
         const range = briefSection(before);
-        if (range === undefined || before.slice(range.start, range.end) !== brief.section)
+        if (
+          range === undefined ||
+          normalizeBrief(before.slice(range.start, range.end)) !== normalizeBrief(brief.section)
+        )
           stale.push(path);
         const contents = spliceBrief(before, brief.section);
         if (contents === before) unchanged.add(path);

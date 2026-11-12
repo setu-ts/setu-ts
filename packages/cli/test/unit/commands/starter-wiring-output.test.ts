@@ -28,6 +28,31 @@ async function scaffold() {
   };
 }
 
+it('V12-3 inserts worker-pool above the full-stack loop, preserving starter arm guidance', async () => {
+  const h = await scaffold();
+  expect(await h.add(['worker-pool'])).toBe(0);
+  const config = h.fs.read(CONFIG_PATH);
+  expect(config).toContain("import { WorkerPoolPlugin } from '@setu-ts/worker-pool-plugin';");
+  expect(config).toContain(
+    '  app.register(WorkerPoolPlugin());\n  for (const generated of GENERATED_PLUGINS) app.register(generated);',
+  );
+  expect(await h.add(['worker-pool'])).toBe(0);
+  expect(h.fs.read(CONFIG_PATH)).toBe(config);
+  expect(await h.add(['storage'])).toBe(0);
+  expect(h.fs.read(CONFIG_PATH)).not.toContain('StoragePlugin(');
+});
+
+it('V12-26 defaults full-stack view to the capability without examples or CSS', async () => {
+  const h = await scaffold();
+  expect(await h.add(['view'])).toBe(0);
+  expect(h.fs.read(CONFIG_PATH)).toContain('app.register(ViewPlugin());');
+  expect(h.fs.has('/app/shop/src/views/home.tsx')).toBe(false);
+  const manifest = JSON.parse(h.fs.read('/app/shop/package.json')) as {
+    dependencies: Record<string, string>;
+  };
+  expect(manifest.dependencies['hono']).toBeDefined();
+});
+
 function expected(base: string, imports: readonly string[], arms: readonly string[]): string {
   expect(base).toContain(LAST_IMPORT);
   expect(base).toContain('      return {\n');

@@ -17141,7 +17141,8 @@ required members to `IIdempotencyService`, `IQuota` and `IQuotaStore`.
   inserts a zero-config plugin), V12-25 (one package per run), V12-26 (`view` has no capability-only
   path), V12-27 (no backend peer for `mail`, `database`, `vector-store`), V12-28 (`database` writes
   no migration scripts), V12-30 (`exceptions` not a direct dependency), V12-33 (`g job` refuses on a
-  `--queue redis` full-stack project), X91-9 (`messaging`/`queue` write no `REDIS_URL`).
+  `--queue redis` full-stack project). X91-9 was fixed in 0.12.0 by #537; it closes on a published
+  re-run.
 - **Generated text and gates:** V12-22, V12-23 (the full-stack brief), V12-16 (barrel comments),
   V12-31 (`g middleware` JSDoc), V12-32 (W001 on the scaffold's own config), V12-24 (no plain
   startup line), V12-43 (the Workers config says the devtool is Deno-only), V12-44 (the devtool
@@ -17473,7 +17474,7 @@ thing.
 | 139a      | ✅     | auth-plugin + multi-tenancy + session + mcp + cli — identity and authorization a token or a tenant can escape                                                                                                                                                                             |
 | 139b      | ✅     | common + kernel + runtime + grpc-plugin — gRPC over HTTP/2: streamed RPC bodies, an HTTP/2 listener that keeps HTTP/1.1, response trailers and native gRPC on Node and Bun                                                                                                                |
 | 139c      | ✅     | agent-runs + idempotency + vector-store + auth + multi-tenancy + database + mail + common — AI-layer and data contracts with a missing half                                                                                                                                               |
-| 139d      | ⬜     | cli — the CLI on a full-stack project: `add`, `build`, `check`, the brief                                                                                                                                                                                                                 |
+| 139d      | ✅     | cli — the CLI on a full-stack project: `add`, `build`, `check`, the brief                                                                                                                                                                                                                 |
 | 139e      | ⬜     | docs — documentation                                                                                                                                                                                                                                                                      |
 | 139f      | ✅     | service-discovery + database + realtime-backplane + queue + scheduler — health and failure signals that mislead the operator                                                                                                                                                              |
 | 139g      | ⬜     | common + kernel — capability lookups typed by their token (0.13.0)                                                                                                                                                                                                                        |

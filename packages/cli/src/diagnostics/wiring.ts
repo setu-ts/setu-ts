@@ -1,5 +1,6 @@
 /** Three-outcome config wiring inspection shared by the command renderers. @module */
 import { maskSourceCode } from '../devtool/sources.ts';
+import { referenceMask } from './reference-mask.ts';
 import { hostSeamSpecs, scanSeamSpecs } from '../seams/registry.ts';
 import { decoratorKeyFor, decoratorExportFor } from '../templates/seam.ts';
 import { composingStarter } from '../utils/starter-arms.ts';
@@ -8,14 +9,34 @@ import { withoutImports } from './modules.ts';
 
 /** Tests a value reference in code outside import declarations. */
 export function referencedOutsideImports(config: string, symbol: string): boolean | undefined {
-  const code = withoutImports(maskSourceCode(config));
+  const code = withoutImports(referenceMask(config));
   return code === undefined ? undefined : new RegExp(`\\b${symbol}\\b`).test(code);
 }
 
 /** Tests a call in code outside import declarations, matching module activation. */
 export function calledOutsideImports(config: string, symbol: string): boolean | undefined {
+  const code = withoutImports(referenceMask(config));
+  return code === undefined ? undefined : new RegExp(`\\b${symbol}\\s*\\(`).test(code);
+}
+
+/**
+ * The same call test through the strict, audited lexer, for a decision that
+ * leads to an automatic edit (`setu workspace broker|rpc`): the tolerant
+ * reference mask may only decide what a read-only check reports (V12-32,
+ * M139d audit F2).
+ */
+export function strictlyCalledOutsideImports(config: string, symbol: string): boolean | undefined {
   const code = withoutImports(maskSourceCode(config));
   return code === undefined ? undefined : new RegExp(`\\b${symbol}\\s*\\(`).test(code);
+}
+
+/** The strict-lexer value-reference test, for a note an automatic edit prints. */
+export function strictlyReferencedOutsideImports(
+  config: string,
+  symbol: string,
+): boolean | undefined {
+  const code = withoutImports(maskSourceCode(config));
+  return code === undefined ? undefined : new RegExp(`\\b${symbol}\\b`).test(code);
 }
 
 /** Wiring requires a value use outside imports; registerModules requires a call. */
@@ -67,7 +88,7 @@ export function wiringFinding(
   const unusedImports = missing.filter(
     (symbol) =>
       referencedOutsideImports(config, symbol) === false &&
-      new RegExp(`\\b${symbol}\\b`).test(maskSourceCode(config) ?? ''),
+      new RegExp(`\\b${symbol}\\b`).test(referenceMask(config) ?? ''),
   );
   return {
     kind: 'unwired',

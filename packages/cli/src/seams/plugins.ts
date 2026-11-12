@@ -48,6 +48,7 @@ function renderPluginsBarrel(artifacts: SeamArtifacts): string {
   const names = seamNames(artifacts, 'plugin');
   const header = seamHeader('setu generate plugin', [
     `createApplication({ plugins: [/* … */, ...${GENERATED_PLUGINS_EXPORT}] })`,
+    `full-stack: for (const generated of ${GENERATED_PLUGINS_EXPORT}) app.register(generated);`,
   ]);
   const imports = [
     `import type { IPlugin } from '@setu-ts/common';`,
@@ -60,7 +61,8 @@ function renderPluginsBarrel(artifacts: SeamArtifacts): string {
 
   return assembleSeamBarrel(header, imports, [
     `/**\n` +
-      ` * Every generated plugin, spread into \`createApplication({ plugins })\`.\n` +
+      ` * Every generated plugin, spread into \`createApplication({ plugins })\` or registered\n` +
+      ` * by the full-stack \`app.register\` loop.\n` +
       ` *\n` +
       ` * Array position does not decide registration order: the kernel resolves plugins\n` +
       ` * by their declared \`dependencies\`, and a generated plugin declares none. Delete a\n` +

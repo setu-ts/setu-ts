@@ -321,13 +321,13 @@ describe('the entry shutdown handler', () => {
   // time, so moving a project between runtimes meant rewriting the file by
   // hand. All three socket targets now emit the same body, through capabilities
   // that already existed.
-  it('emits ONE portable body, byte-identical across all three socket targets', () => {
+  it('emits portable entries with a banner only where the runtime needs it', () => {
     const deno = entryFor('deno');
     const node = entryFor('node');
     const bun = entryFor('bun');
 
-    expect(node).toBe(deno);
-    expect(bun).toBe(deno);
+    expect(node).toBe(bun);
+    expect(node.replace(/^.*console.log\(`Listening on.*\n/m, '')).toBe(deno);
   });
 
   for (const runtime of ['deno', 'node', 'bun'] as const) {
@@ -500,7 +500,9 @@ describe('a template with a frontend build, on a Deno target', () => {
       const files = [
         ...projectFiles('shop', runtime, resolveHost(getTemplate('full-stack')!, runtime)),
       ];
-      expect(contentsOf(files, 'dev.ts')).toBe(deno);
+      expect(contentsOf(files, 'dev.ts').replace(/^.*console.log\(`Listening on.*\n/m, '')).toBe(
+        deno,
+      );
       const scripts = (
         JSON.parse(contentsOf(files, 'package.json')) as {
           scripts: Record<string, string>;

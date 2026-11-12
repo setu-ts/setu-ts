@@ -17,7 +17,8 @@ import { legacyRegistrarNotice, readLegacyHttpFiles } from '../utils/legacy-layo
 import { joinPath } from '../utils/file-writer.ts';
 import { diagnoseBarrels, readBarrel } from './barrel-drift.ts';
 import { moduleActive, moduleSymbol } from './modules.ts';
-import { maskSourceDiagnosis, type ISourceStop } from '../devtool/sources.ts';
+import type { ISourceStop } from '../devtool/sources.ts';
+import { referenceDiagnosis } from './reference-mask.ts';
 import { wiringFinding, wiringSites } from './wiring.ts';
 import { flatArtifactFiles, projectLayout, type ProjectLayout } from '../utils/project-layout.ts';
 import { composingStarter } from '../utils/starter-arms.ts';
@@ -310,7 +311,7 @@ export async function diagnoseProject(
     findings.push({ kind: 'page-kernel-value-import', ...violation });
   for (const path of pages.unreadable) findings.push({ kind: 'page-unreadable', path });
   const starter = composingStarter(config);
-  const classified = maskSourceDiagnosis(config);
+  const classified = referenceDiagnosis(config);
   if ('stop' in classified) {
     const isUncertain = (f: Finding): boolean =>
       f.kind === 'unwired' && f.outcome === 'unclassifiable';

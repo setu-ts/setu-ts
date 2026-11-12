@@ -131,7 +131,9 @@ it('keeps a single full-stack socket entry and leaves Workers deployment with Wr
       (file) => file.path === 'main.ts',
     )!.contents;
   });
-  expect(new Set(entries).size).toBe(1);
+  expect(entries[0]).toBe(entries[1]);
+  expect(entries[2]).not.toContain('Listening on http://localhost:');
+  expect(entries[0]).toContain('Listening on http://localhost:');
   expect(entries[0]).toContain('createApp(undefined, undefined, { serverBuild })');
   const worker = projectFiles(
     'probe',

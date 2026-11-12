@@ -3576,6 +3576,7 @@
       },
       "jsr:@setu-ts/cli@0.12.0": {
         "dependencies": [
+          "npm:drizzle-kit@0.31.11",
           "npm:esbuild@0.28",
           "npm:prettier@^3.9.10",
           "npm:tsx@^4.23.0",

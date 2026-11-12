@@ -29,6 +29,7 @@
 export const GENERATED_LINE_WIDTH = 100;
 
 const FMT_SETTINGS = {
+  proseWrap: 'preserve',
   lineWidth: GENERATED_LINE_WIDTH,
   indentWidth: 2,
   singleQuote: true,

@@ -14,7 +14,8 @@ It builds every member's image, tags it with the current commit, loads it into a
 cluster or pushes it to `--registry` for any other context, applies one Secret per member, applies
 this file with the namespace and images filled in, and waits for every rollout. Flags: `--context`,
 `--namespace` (default: the workspace directory name), `--registry`, `--tag`, `--timeout` (default
-`120s`), `--build-arg`, `--network`.
+`120s`), `--build-arg`, `--network`, and `--pull-secret <name>` (repeatable; an existing registry
+Secret in the namespace).
 
 **Secrets.** A member's variables are the names its committed `.env.example` declares; their values
 go in `k8s/secrets/<member>/.env`, which git ignores and no image copies. Deploy refuses, naming

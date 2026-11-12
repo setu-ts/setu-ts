@@ -79,6 +79,7 @@ export const EXTERNAL_RANGES: Readonly<Record<string, string>> = {
   '@prisma/client': '^7.10.0',
   amqplib: '0.10.x',
   'drizzle-orm': '0.45.2',
+  'drizzle-kit': '0.31.11',
   graphql: '^16',
   ioredis: '5.x',
   redis: '6.x',

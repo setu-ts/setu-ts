@@ -399,6 +399,70 @@ describe('setu workspace rpc', () => {
     expect(result.out).toContain('orders is already http; nothing changed');
   });
 
+  for (const [runtime, broker] of [
+    ['node', 'redis'],
+    ['deno', 'redis'],
+    ['node', 'rabbitmq'],
+  ] as const) {
+    it(`gives a full-stack member the queue package on a ${broker} switch (V12-60, ${runtime})`, async () => {
+      const ws = await workspace({ runtime, members: [['web', 'full-stack']] });
+      const manifest = runtime === 'node' ? 'apps/web/package.json' : 'apps/web/deno.json';
+      const member = `${ROOT}/apps/web`;
+      // On the memory broker the member has no queue package, so `setu g job` refuses.
+      expect((await ws.run(['g', 'job', 'sync'], member)).code).not.toBe(0);
+
+      const switched = await ws.run(['workspace', 'broker', broker]);
+      expect(switched.code, switched.err).toBe(0);
+      expect(ws.read(manifest)).toContain('@setu-ts/queue-plugin');
+      // No seam is pre-created: a barrel the config does not read yet would fail
+      // the member's own gate before any job exists (review of c333e06d0).
+      expect(() => ws.fs.read(`${member}/src/jobs/index.ts`)).toThrow();
+      expect((await ws.run(['check'], member)).code).toBe(0);
+      // The config stays the developer's: the planner names the lines instead.
+      expect(switched.out).toContain('setu.E006');
+      expect(switched.out).toContain('processors: [...QUEUE_PROCESSORS]');
+      expect(ws.read('apps/web/setu.config.ts')).not.toContain('QUEUE_PROCESSORS');
+
+      const job = await ws.run(['g', 'job', 'sync'], member);
+      expect(job.code, job.err).toBe(0);
+      expect(ws.fs.read(`${member}/src/jobs/index.ts`)).toContain('sync');
+      // Exactly what the note said: E006 until the config takes the two lines.
+      const unwired = await ws.run(['check'], member);
+      expect(unwired.code).not.toBe(0);
+      expect(unwired.err + unwired.out).toContain('setu.E006');
+      const config = ws.read('apps/web/setu.config.ts');
+      await ws.write(
+        'apps/web/setu.config.ts',
+        `import { QUEUE_PROCESSORS } from './src/jobs/index.ts';\n${config.replace(
+          /queue: \{ /,
+          'queue: { processors: [...QUEUE_PROCESSORS], ',
+        )}`,
+      );
+      const wired = await ws.run(['check'], member);
+      expect(wired.code, wired.err + wired.out).toBe(0);
+
+      // Leaving the queue broker keeps the package without calling it unused.
+      const back = await ws.run(['workspace', 'broker', 'memory']);
+      expect(back.code, back.err).toBe(0);
+      expect(back.out).not.toContain('@setu-ts/queue-plugin');
+    });
+  }
+
+  it('does not repeat the processors note once the config reads them (V12-60)', async () => {
+    const ws = await workspace({ runtime: 'node', members: [['web', 'full-stack']] });
+    const config = ws.read('apps/web/setu.config.ts');
+    await ws.write(
+      'apps/web/setu.config.ts',
+      `import { QUEUE_PROCESSORS } from './src/jobs/index.ts';\n${config.replace(
+        'queue: { ...queueOptions(config) }',
+        'queue: { processors: [...QUEUE_PROCESSORS], ...queueOptions(config) }',
+      )}`,
+    );
+    const switched = await ws.run(['workspace', 'broker', 'redis']);
+    expect(switched.code, switched.err).toBe(0);
+    expect(switched.out).not.toContain('start its queue option with processors');
+  });
+
   it('exempts the gRPC mount from form CSRF on a full-stack member', async () => {
     const ws = await workspace({ members: [['web', 'full-stack']] });
     expect((await ws.run(['workspace', 'rpc', 'web', 'grpc'])).code).toBe(0);
@@ -459,6 +523,19 @@ describe('refusing a member that does not read the module', () => {
     const result = await ws.run(['workspace', 'broker', 'redis', '--force']);
     expect(result.code).toBe(1);
     expect(result.err).toContain('...transportPlugins(),');
+  });
+
+  it('decides through the strict lexer, which a template literal stops (M139d audit F2)', async () => {
+    const ws = await workspace();
+    // The module IS called; only the read-only check's tolerant mask could see
+    // that past the template literal, and an automatic edit must not rely on it.
+    const config = ws.read('apps/orders/setu.config.ts');
+    await ws.write('apps/orders/setu.config.ts', `${config}\nconst label = \`orders\`;\n`);
+    const before = ws.fs.writes.length;
+    const result = await ws.run(['workspace', 'broker', 'redis']);
+    expect(result.code).toBe(1);
+    expect(result.err).toContain('Nothing was written.');
+    expect(ws.fs.writes.length).toBe(before);
   });
 
   it('refuses a member manifest that is not plain JSON, writing nothing', async () => {

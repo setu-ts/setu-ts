@@ -7,7 +7,7 @@ import { createFakeFs } from '../fixtures/fake-fs.ts';
 
 it('M1 L1 keeps each collapsed warning scoped to its own diagnostic group', async () => {
   const fs = createFakeFs({
-    '/app/setu.config.ts': 'const label = `unsupported`;',
+    '/app/setu.config.ts': 'const label = globalThis;',
     '/app/src/modules/orders/index.ts': 'export function registerOrdersModule() {}',
     '/app/src/modules/index.ts': 'registerOrdersModule();',
   });

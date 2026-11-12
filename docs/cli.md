@@ -227,8 +227,8 @@ before launching Node. If it is absent, it exits 1 with
 `dist/main.js is missing; run the build script first`. Run the generated `build` script, then start
 again. The check is in `start`, not a `prestart` hook (package managers do not all run those hooks).
 Bun and Deno starts are unchanged. The devtool entry also catches creation/start failures, prints
-`setu devtool: startup failed: ... The connector did not start.`, and exits 1. Devtool usage names
-`setu devtool enable`.
+`setu devtool: startup failed: ... The application did not start, and the connector is not running.`,
+and exits 1. Devtool usage names `setu devtool enable`.
 
 **Node development runs TypeScript through `tsx`; production runs the bundle.** Node's built-in
 support (`--experimental-strip-types`) erases types without transforming code, so it cannot run a
@@ -413,14 +413,13 @@ The check reads only the imports a page makes itself: a file outside `app/` that
 code is not followed.
 
 In projects with `react-router-plugin`, `g route`, `g controller` and `g module` refuse kernel
-routes that would shadow an existing page, with its file named. To put an API at `/api/products`
-while keeping the `/products` page, run `setu g module api`, then
-`setu g route products --module api`. The check runs the installed `react-router routes --json` in
-the project with a 15-second deadline. In a workspace it searches from the member up to the
-workspace root for the first installed binary; outside a workspace it searches only the project
-directory; if it cannot run, generation continues with a notice and the paths to check manually.
-`setu check` does not run React Router, so a page added after the route is not detected. On a shared
-path, the kernel route answers document requests.
+routes that would shadow an existing page, with its file named. Run `setu g module orders` for
+`/api/orders`, then `setu g route summary --module orders` for `/api/orders/summary`. The check runs
+the installed `react-router routes --json` in the project with a 15-second deadline. In a workspace
+it searches from the member up to the workspace root for the first installed binary; outside a
+workspace it searches only the project directory; if it cannot run, generation continues with a
+notice and the paths to check manually. `setu check` does not run React Router, so a page added
+after the route is not detected. On a shared path, the kernel route answers document requests.
 
 `guard`, `migration` and `schema` are unwired deliberately, not by omission. A `guard` answers `401`
 when `ctx.request.user` is absent, so registering it globally would 401 `/health`, `/metrics` and
@@ -617,9 +616,10 @@ folder.
 
 - The file is written into `src/modules/<module>/`, and a controller is registered by regenerating
   the module's `index.ts` (a function controller) or by adding it to the module's declaration (a
-  class controller). A module-scoped controller mounts at `/<module>/<name>` (an SSE controller at
-  `/<module>/sse/<name>`); a static path such as `GET /invoices/summary` outranks
-  `GET /invoices/:id`, so an `id` equal to `summary` is unreachable through `/:id`.
+  class controller). Functional full-stack controllers mount at `/api/<module>/<name>` (SSE at
+  `/api/<module>/sse/<name>`); other projects, including class-based full-stack, keep
+  `/<module>/<name>` (SSE at `/<module>/sse/<name>`). A static `/api/orders/summary` outranks
+  `/api/orders/:id`, so an `id` equal to `summary` is unreachable through `/:id`.
 - **Class-based:** a class controller or service is added to the `controllers` or `providers` array
   of `<module>.module.ts`, as the NestJS CLI does, when that array is a plain literal. Anything else
   is left unchanged and the line to add is printed. A module-scoped service is registered under the
@@ -1027,6 +1027,43 @@ Run `npx @setu-ts/cli@<version> agents` to update AGENTS.md.
 The command named is the project's pinned CLI invocation for its runtime: on Bun it is
 `bunx @setu-ts/cli@<version>`, and on Deno it is `deno run -A npm:@setu-ts/cli@<version>`.
 
+`setu add mail database --provider smtp --type drizzle --dialect postgresql` validates every name,
+alias, runtime and applicable flag before writing, then adds packages in order. An I/O failure stops
+at that package and lists the packages already added and those not attempted. There is one install
+command and one brief reminder. A flag must apply to at least one listed package; `--dry-run`
+previews each against the current disk.
+
+Backend choices are `--provider log|smtp|ses|sendgrid` for mail,
+`--type memory|drizzle|prisma|mongodb|dynamodb|cosmos|bigtable` for database, and
+`--adapter memory|pgvector|qdrant` for vector-store. Without a flag a terminal asks; `--yes` or a
+non-terminal takes `log`, `memory`, `memory`. Only plugin peers are recorded. App-owned clients such
+as `pg`, `@prisma/client` and `@prisma/adapter-pg` appear in the install guidance. Backend
+configuration remains application-owned; only mail's default `MailPlugin()` is inserted.
+
+`setu add view --plugin-only` installs and wires the view capability and compatible JSX settings
+without examples, controllers, Tailwind or StaticPlugin. It cannot be combined with `--module`. This
+is the default on full-stack, where React Router owns pages. `setu add mcp` leaves `setu.config.ts`
+unchanged and prints `McpPlugin({})` with the note that the app boots with it only once at least one
+route is marked with `mcpTool()` or `@McpTool()`. Zero-config plugins a full-stack starter does not
+own are registered above the managed plugin loop; starter-provided plugins are configured through
+their starter option.
+
+On Node and Bun, `add database --type drizzle` adds `db:generate` / `db:migrate`, drizzle-kit and a
+create-only `drizzle.config.ts` (`--dialect postgresql|sqlite`, default postgresql; the Drizzle
+adapter writes through `RETURNING`, which MySQL lacks). `--type prisma` adds `db:generate`,
+`db:migrate`, `db:deploy`, Prisma 7 and `prisma.config.ts`. Existing scripts and configs are
+preserved. Create the schema at `src/database/schema.ts` or `prisma/schema.prisma` yourself; see the
+[database setup](../packages/database-plugin/README.md#prisma-7-setup). Deno prints the commands;
+Workers adds no schema scripts. Schema migrations are separate from `setu g migration` data
+migrations in `src/migrations/run.ts`.
+
+Briefs tolerate formatter whitespace and distinguish starter-provided packages from packages to add.
+The full-stack request context includes the request id; SSR fault logs carry that id and a
+URL-masked stack. Node and Bun entries print `Listening on http://localhost:<port>/` after startup;
+Deno prints its runtime banner. A taken Vite port exits 1 with `VITE_PORT` guidance (workspace
+members name `setu.workspace.json`). A non-memory full-stack queue scaffold includes its queue
+package and processor barrel, so `setu g job` works immediately.
+
 ## Wiring check (`setu check` and `setu sync`)
 
 Code in a seam directory that nothing registers compiles, lints and never runs. `tsc` cannot see it,
@@ -1093,10 +1130,13 @@ in a module call or the flat barrel's registrar array. An imported registrar wit
 is E003; run `setu sync` to restore its registration.
 
 Config wiring requires a value use outside import declarations; importing a barrel alone is `E006`,
-and `registerModules` must be called. An unclassifiable config produces one `W001` on
-`setu.config.ts`, naming the construct, line and affected symbols; the check cannot tell whether it
-registers them. A plain-function service missing `describe<Name>` receives `W005`: it is not
-re-exported from `src/services/index.ts`, which is a convenience listing rather than a registration.
+and `registerModules` must be called. Ordinary template literals, regex literals and division
+classify for reference checks. Computed access, reflection, dynamic execution/imports and ambiguous
+syntax still stop classification; automatic edits retain their stricter lexer. An unclassifiable
+config produces one `W001` on `setu.config.ts`, naming the construct, line and affected symbols; the
+check cannot tell whether it registers them. A plain-function service missing `describe<Name>`
+receives `W005`: it is not re-exported from `src/services/index.ts`, which is a convenience listing
+rather than a registration.
 
 `setu sync` rewrites the managed barrels — each seam family's `index.ts`, `src/modules/index.ts`,
 and each functional module's `index.ts` — with the same renderer `setu generate` uses, so a synced
@@ -1175,6 +1215,13 @@ name.
 `dist/main.js` with source maps. It also emits `dist/src/migrations/run.js` when the source runner
 exists. A workspace root refuses with exit 2: use `setu build --dir apps/orders`. Bun and Deno run
 source natively; Workers uses Wrangler. The command never boots the application.
+
+Worker-pool tasks use a literal `new URL('./src/tasks/hash.task.ts', import.meta.url)`. `setu build`
+emits `dist/src/tasks/hash.task.js` and rewrites the URL relative to each containing bundle,
+including the migration runner. A non-literal reference naming `.task.ts` in the call is refused
+with the file and line; a path held in a variable is not detected (it builds without the task), so
+keep the literal in the call. `--dry-run` lists task outputs. Keep the `.task.ts` source suffix in
+development.
 
 Generated Node `build` runs `tsc --noEmit && setu build`; full-stack prefixes `react-router build`.
 `npm start` runs `node --enable-source-maps dist/main.js` after building. `start:dev` runs

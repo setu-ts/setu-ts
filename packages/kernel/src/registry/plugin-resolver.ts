@@ -109,8 +109,7 @@ function assertUniqueNames(plugins: readonly IPlugin[]): void {
   for (const plugin of plugins) {
     if (seen.has(plugin.name)) {
       throw new Error(
-        `Duplicate plugin name '${plugin.name}'. To replace a plugin, register the ` +
-          `replacement's services with { override: true } instead of reusing the name.`,
+        `Duplicate plugin name '${plugin.name}': it is registered twice. A starter (createRestApp, createMicroserviceApp, createFullStackApp, createFullStackAppFromConfig) may already include it; configure it through the starter's option instead of registering it again. To replace a plugin's services, register them with { override: true } under a different plugin name.`,
       );
     }
     seen.add(plugin.name);

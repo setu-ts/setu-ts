@@ -196,8 +196,7 @@ describe('unchanged neighbors of the refusal', () => {
   it('add keeps its own X18-1 wording — the dispatcher does not preempt it', async () => {
     const h = harness({ seed: { '/work/deno.json': '{}' } });
     expect(await h.run(['add', 'auth', 'extra', 'junk'])).toBe(2);
-    expect(h.err.text()).toContain('setu add takes one package; got 3.');
-    expect(h.err.text()).toContain('Run it once per package.');
+    expect(h.err.text()).toContain('"extra" is not a Setu-TS package');
     expect(h.fs.writes).toEqual([]);
   });
 

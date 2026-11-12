@@ -120,5 +120,9 @@ describe('generated Kubernetes manifests', () => {
 
     expect(readme).toContain('prometheus.io/scrape');
     expect(readme).toContain('/metrics');
+    expect(readme).toContain('--pull-secret <name>');
+    expect(readme.replace(/\s+/g, ' ')).toContain(
+      'repeatable; an existing registry Secret in the namespace',
+    );
   });
 });

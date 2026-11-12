@@ -76,6 +76,43 @@ for (const template of ['rest', 'class-based', 'full-stack']) {
 }
 
 it(
+  'V12-12 runs a worker-pool task from the compiled Node output',
+  { timeout: 600_000 },
+  async () => {
+    await cli(['new', 'app', '--template', 'rest']);
+    const project = `${root}/app`;
+    await cli(['add', 'worker-pool', '--dir', project]);
+    await cli(['g', 'route', 'double', '--dir', project]);
+    await fs.mkdir(`${project}/src/tasks`, { recursive: true });
+    await fs.writeFile(
+      `${project}/src/tasks/double.task.ts`,
+      "import { defineWorkerTask } from '@setu-ts/runtime/worker';\ndefineWorkerTask<number, number>((input) => input * 2);\n",
+    );
+    await fs.writeFile(
+      `${project}/src/controllers/double.controller.ts`,
+      `import { CAPABILITIES } from '@setu-ts/common';
+import type { IRouterApi, IWorkerPool } from '@setu-ts/common';
+export function registerDoubleRoutes(router: IRouterApi): void {
+  router.get('/double', async (ctx) => {
+    const pool = ctx.services.get<IWorkerPool>(CAPABILITIES.WORKER_POOL);
+    const result = await pool.run<number, number>(new URL('../tasks/double.task.ts', import.meta.url).href, 21);
+    return ctx.response.json({ result });
+  });
+}
+`,
+    );
+    const installed = await npmInstall(project, overlay);
+    expect(installed.code, installed.output).toBe(0);
+    const built = await npmRun(project, 'build');
+    expect(built.code, built.output).toBe(0);
+    await fs.stat(`${project}/dist/src/tasks/double.task.js`);
+    await withNodeServer(project, async (origin) => {
+      expect(await (await fetch(`${origin}/double`)).json()).toEqual({ result: 42 });
+    });
+  },
+);
+
+it(
   'inlines workspace libraries, externalizes their dependencies, and serves their value',
   { timeout: 600_000 },
   async () => {

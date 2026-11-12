@@ -23,6 +23,7 @@ function renderJobsBarrel(artifacts: SeamArtifacts): string {
   return assembleSeamBarrel(
     seamHeader('setu generate job', [
       `QueuePlugin({ processors: [...${QUEUE_PROCESSORS_EXPORT}] })`,
+      `starter queue: { processors: [...${QUEUE_PROCESSORS_EXPORT}] }`,
     ]),
     [
       `import type { QueueProcessorEntry } from '@setu-ts/queue-plugin';`,
