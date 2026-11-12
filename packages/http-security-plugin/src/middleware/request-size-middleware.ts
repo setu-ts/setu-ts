@@ -8,8 +8,9 @@
  *
  * A request with no `Content-Length` (a chunked body) passes through: this
  * middleware cannot measure a body it has not read. Bound that read with
- * `RuntimePlugin({ maxBodyBytes })` from `@setu-ts/runtime`, set to this
- * middleware's limit or higher; the starters set both.
+ * `RuntimePlugin({ maxBodyBytes })` from `@setu-ts/runtime`, set to the same
+ * value as this middleware's limit (a higher one admits an undeclared body
+ * larger than `maxBodySize`); the starters set both.
  *
  * @module
  */

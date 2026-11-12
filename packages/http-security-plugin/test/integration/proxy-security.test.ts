@@ -216,6 +216,38 @@ describe('proxy security through a kernel application', () => {
       }
     }
   });
+  // A same-origin POST with no Fetch Metadata matches only the published
+  // origin, so a retained `Host: app.example:443` must not keep `:443` there.
+  it('accepts a POST from the public origin when the proxy keeps a default port in Host', async () => {
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        HttpSecurityPlugin({
+          ipSecurity: { trustProxy: true, trustedProxies: ['127.0.0.1'] },
+          csrf: {},
+        }),
+      ],
+    });
+    app.router.post('/form', (ctx) => ctx.response.text('accepted'));
+    await app.start();
+    try {
+      const post = (origin: string) =>
+        app.inject({
+          method: 'POST',
+          url: 'http://app.example:443/form',
+          ip: '127.0.0.1',
+          headers: {
+            'X-Forwarded-For': '203.0.113.7',
+            'X-Forwarded-Proto': 'https',
+            Origin: origin,
+          },
+        });
+      expect((await post('https://app.example')).statusCode).toBe(200);
+      expect((await post('https://evil.example')).statusCode).toBe(403);
+    } finally {
+      await app.stop();
+    }
+  });
   // M113n audit F1: `X-Forwarded-*` are not forbidden request headers, and the
   // CORS middleware echoes requested headers by default, so a script on a
   // credentialed CORS origin could name its own host and match its own Origin.

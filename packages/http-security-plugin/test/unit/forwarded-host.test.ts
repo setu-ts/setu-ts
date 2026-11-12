@@ -148,6 +148,32 @@ describe('X-Forwarded-Proto is read from the right', () => {
     }
   });
 
+  // A proxy that keeps `Host: app.example:443` and forwards `https`: the URL
+  // parser kept `:443` for the `http` URL, and a browser's Origin never carries
+  // it, so the retained host drops the new scheme's default port.
+  it('drops the forwarded scheme default port from the retained URL host', async () => {
+    const cases: readonly (readonly [string, string, string])[] = [
+      ['http://app.example:443/', 'https', 'https://app.example'],
+      ['https://app.example:80/', 'http', 'http://app.example'],
+      ['http://[2001:db8::1]:443/', 'https', 'https://[2001:db8::1]'],
+      ['http://app.example:8443/', 'https', 'https://app.example:8443'],
+      ['http://app.example:443/', 'http', 'http://app.example:443'],
+    ];
+    for (const [url, proto, expected] of cases) {
+      const { ctx } = createFakeContext({
+        request: {
+          url,
+          headers: { 'X-Forwarded-For': '203.0.113.7', 'X-Forwarded-Proto': proto },
+          ip: '127.0.0.1',
+        },
+      });
+      await ipSecurityMiddleware({ trustProxy: true, trustedProxies: ['127.0.0.1'] })(ctx, () =>
+        Promise.resolve(),
+      );
+      expect(requestOriginOf(ctx).origin, `${url} ${proto}`).toBe(expected);
+    }
+  });
+
   it('keeps the URL protocol for a rightmost value that is not http or https', async () => {
     expect(
       (await originFor({ 'X-Forwarded-For': '203.0.113.7', 'X-Forwarded-Proto': 'https, ftp' }))

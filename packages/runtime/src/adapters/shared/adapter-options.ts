@@ -24,8 +24,8 @@ export interface HttpAdapterOptions {
    * `HttpSecurityPlugin({ requestSize: { maxBodySize } })` refuses on a
    * declared `Content-Length` before anything is read, which is cheaper and
    * reports earlier; a chunked request declares no length, so only the read
-   * itself can bound it. Set both, and set this one to the same value or
-   * higher.
+   * itself can bound it. Set both to the same value: a higher one here admits
+   * an undeclared body larger than `maxBodySize`.
    *
    * @since 0.5.0
    */

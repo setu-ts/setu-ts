@@ -104,7 +104,8 @@ length, and since the body read became lazy it happens inside the handler, after
 has returned. So the middleware bounds declared lengths and this option bounds the read itself.
 There are two knobs because the request mapping runs before any plugin and there is no channel
 between them: `mapWebRequestToFrameworkRequest` receives a `Request` and nothing else. Set both, and
-set `maxBodyBytes` to the same value as `maxBodySize` or higher.
+set `maxBodyBytes` to the same value as `maxBodySize`: a higher one admits an undeclared body larger
+than `maxBodySize`.
 
 A body past the cap rejects with `RequestBodyTooLargeError`, branded with a `413` HTTP status hint,
 so an application running `errorHandler` answers `413 Payload Too Large` in its configured format

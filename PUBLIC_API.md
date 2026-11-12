@@ -636,11 +636,12 @@ app.register(RuntimePlugin({ maxBodyBytes: 10 * 1024 * 1024 }));
 
 Use it with `HttpSecurityPlugin({ requestSize: { maxBodySize } })`: that middleware rejects a
 declared `Content-Length` before reading, while this option bounds chunked bodies as they are read.
-Set both to the same value or make `maxBodyBytes` larger. Omit `maxBodyBytes` for an unbounded read;
-`0` refuses every request that carries a body. A non-negative integer is required. An over-limit
-read rejects with a `RequestBodyTooLargeError` carrying a `413` status hint, so `errorHandler`
-answers `413 Payload Too Large` in its configured format; the kernel fallback also honors this 4xx
-hint when no errorHandler is installed.
+Set both to the same value: a larger `maxBodyBytes` admits an undeclared body larger than
+`maxBodySize`. Omit `maxBodyBytes` for an unbounded read; `0` refuses every request that carries a
+body. A non-negative integer is required. An over-limit read rejects with a
+`RequestBodyTooLargeError` carrying a `413` status hint, so `errorHandler` answers
+`413 Payload Too Large` in its configured format; the kernel fallback also honors this 4xx hint when
+no errorHandler is installed.
 
 A component that wraps its own body read in a `try` must honour that hint rather than reporting its
 own status: the read can now REJECT, and a `catch` that assumes a parse failure reports the wrong
@@ -4283,10 +4284,10 @@ Checks `Content-Length` against `maxBodySize` (default 1 MiB). Over limit → 41
 without reading body. A `Content-Length` that is present but not plain decimal digits (empty,
 signed, fractional, exponent, a comma list) → 400 short-circuit (since 0.13.0; earlier it passed
 through unbounded). Absent `Content-Length` (a chunked body) → pass through: the middleware cannot
-measure a body it has not read, so bound the read with `RuntimePlugin({ maxBodyBytes })`, set to
-this limit or higher. `maxBodySize` must be a non-negative integer; `NaN`, `Infinity`, a negative or
-a fraction throws `RangeError` when the middleware is built (since 0.13.0). The three starters set
-both (see `RestStarterOptions.runtime`).
+measure a body it has not read, so bound the read with `RuntimePlugin({ maxBodyBytes })`, set to the
+same value (a higher one admits an undeclared body larger than this limit). `maxBodySize` must be a
+non-negative integer; `NaN`, `Infinity`, a negative or a fraction throws `RangeError` when the
+middleware is built (since 0.13.0). The three starters set both (see `RestStarterOptions.runtime`).
 
 #### IP Security (`ipSecurityMiddleware`)
 

@@ -220,8 +220,8 @@ throws `RangeError` when the middleware is built.
 `maxBodySize` bounds a declared `Content-Length` and nothing else — a chunked request declares none,
 and the body read happens inside the handler, after this middleware has returned. The bound no
 client can disable lives where the body is consumed: `RuntimePlugin({ maxBodyBytes })`. Set both,
-and set `maxBodyBytes` to the same value or higher. See "Bounding the request body" in
-`PUBLIC_API.md`.
+and set `maxBodyBytes` to the same value: a higher one admits an undeclared body larger than
+`maxBodySize`. See "Bounding the request body" in `PUBLIC_API.md`.
 
 ### IpSecurityOptions
 

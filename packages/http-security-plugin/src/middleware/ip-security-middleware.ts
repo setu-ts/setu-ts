@@ -523,11 +523,17 @@ function validatedForwardedOrigin(
 ): RequestOrigin {
   const candidate = proto?.toLowerCase();
   const protocol = candidate === 'http' || candidate === 'https' ? candidate : fallback.protocol;
-  let host = fallback.host;
   // A browser's `Origin` never carries the scheme's default port, so a proxy
   // writing `$host:$server_port` would otherwise publish an origin no
   // same-origin request matches (M113n audit round 3 observation).
   const defaultPort = protocol === 'https' ? ':443' : ':80';
+  // The retained URL host too: the URL parser drops only its OWN scheme's
+  // default port, so `Host: app.example:443` on an `http` URL keeps `:443`
+  // once a forwarded `https` is chosen. The URL host is already parsed, so
+  // dropping the suffix repairs nothing a client wrote.
+  let host = fallback.host.endsWith(defaultPort)
+    ? fallback.host.slice(0, -defaultPort.length)
+    : fallback.host;
   const candidateHost =
     forwardedHost?.endsWith(defaultPort) === true
       ? forwardedHost.slice(0, -defaultPort.length)
