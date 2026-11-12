@@ -22,6 +22,8 @@ interface ITaskReference {
 interface ICodeView {
   /** The source with comments, regex bodies and template text blanked, same length. */
   readonly code: string;
+  /** The source with only comments and regex bodies blanked: template text kept. */
+  readonly text: string;
   /** Quoted string literals, kept in `code`. */
   readonly strings: readonly { readonly start: number; readonly end: number }[];
 }
@@ -38,9 +40,15 @@ interface ICodeView {
  */
 function codeView(source: string): ICodeView {
   const code = source.split('');
+  const text = source.split('');
   const strings: { start: number; end: number }[] = [];
-  const blank = (from: number, to: number): void => {
-    for (let at = from; at < to; at++) if (code[at] !== '\n' && code[at] !== '\r') code[at] = ' ';
+  // Template text is blanked in `code` only; a comment or a regex body in both.
+  const blank = (from: number, to: number, both = false): void => {
+    for (let at = from; at < to; at++) {
+      if (code[at] === '\n' || code[at] === '\r') continue;
+      code[at] = ' ';
+      if (both) text[at] = ' ';
+    }
   };
   // Each open template substitution's brace depth; a template body resumes when it closes.
   const substitutions: number[] = [];
@@ -73,11 +81,11 @@ function codeView(source: string): ICodeView {
     const next = source[at + 1];
     if (char === '/' && next === '/') {
       const end = source.indexOf('\n', at);
-      blank(at, end === -1 ? source.length : end);
+      blank(at, end === -1 ? source.length : end, true);
       at = end === -1 ? source.length : end;
     } else if (char === '/' && next === '*') {
       const end = source.indexOf('*/', at + 2);
-      blank(at, end === -1 ? source.length : end + 2);
+      blank(at, end === -1 ? source.length : end + 2, true);
       at = end === -1 ? source.length : end + 2;
     } else if (char === "'" || char === '"') {
       const start = at;
@@ -110,7 +118,7 @@ function codeView(source: string): ICodeView {
       }
       at++;
       while (/[a-z]/.test(source[at] ?? '')) at++;
-      blank(start, Math.min(at, source.length));
+      blank(start, Math.min(at, source.length), true);
       previous = 'value';
     } else if (/[A-Za-z_$]/.test(char)) {
       const start = at;
@@ -123,7 +131,7 @@ function codeView(source: string): ICodeView {
       at++;
     }
   }
-  return { code: code.join(''), strings };
+  return { code: code.join(''), text: text.join(''), strings };
 }
 
 /**
@@ -181,7 +189,8 @@ export function taskReferences(source: string, file: string): readonly ITaskRefe
     const head = match.index + match[0].length;
     const end = match[0].endsWith('(') ? (parens.get(head - 1) ?? visible.length) + 1 : head;
     if (
-      source.slice(match.index, end).includes('.task.ts') &&
+      // Template text counts (a computed specifier), a comment does not.
+      view.text.slice(match.index, end).includes('.task.ts') &&
       !references.some((ref) => match.index === ref.start)
     ) {
       throw new Error(

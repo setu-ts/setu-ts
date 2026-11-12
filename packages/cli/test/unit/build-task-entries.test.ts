@@ -437,4 +437,15 @@ describe('worker task entries', () => {
       ).map((ref) => ref.target),
     ).toEqual(['/app/a.task.ts']);
   });
+  it('ignores a task path in a comment inside a URL call, not one in template text (CodeRabbit #582)', () => {
+    expect(
+      taskReferences(
+        "new URL('/status' /* unlike './hash.task.ts' */, import.meta.url);",
+        '/app/main.ts',
+      ),
+    ).toEqual([]);
+    expect(() =>
+      taskReferences('new URL(`./${name}.task.ts`, import.meta.url);', '/app/main.ts'),
+    ).toThrow('worker task references must use');
+  });
 });
