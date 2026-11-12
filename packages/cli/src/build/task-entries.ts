@@ -123,7 +123,13 @@ function codeView(source: string): ICodeView {
     } else if (/[A-Za-z_$]/.test(char)) {
       const start = at;
       while (/[\w$]/.test(source[at] ?? '')) at++;
-      previous = source.slice(start, at);
+      // A property (`settings.default`, `x?.return`) is a value, so a `/` after
+      // it divides; a spread's `...` is not a property access (as in the
+      // check mask, M139d audit F1/F6/F7). Read in `code`, where comments are blanked.
+      let before = start - 1;
+      while (before >= 0 && /\s/.test(code[before]!)) before--;
+      const property = previous === '.' && code[before - 1] !== '.';
+      previous = property ? 'value' : source.slice(start, at);
     } else {
       if (char === '{') depth++;
       else if (char === '}') depth--;

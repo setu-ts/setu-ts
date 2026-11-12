@@ -464,4 +464,22 @@ describe('worker task entries', () => {
       taskReferences('new URL(`./${name}.task.ts`, import.meta.url);', '/app/main.ts'),
     ).toThrow('worker task references must use');
   });
+  it('reads a property named like a keyword as a value before / (CodeRabbit #582)', () => {
+    for (const name of ['default', 'return', 'typeof']) {
+      for (const access of ['.', '?.', ' /* c */ .']) {
+        const source = `const half = settings${access}${name} / 2; new URL('./hash.task.ts', import.meta.url);`;
+        expect(
+          taskReferences(source, '/app/main.ts').map((ref) => ref.target),
+          source,
+        ).toEqual(['/app/hash.task.ts']);
+      }
+    }
+    // A keyword after a spread still starts a regex, which hides nothing here.
+    expect(
+      taskReferences(
+        "const a = [...typeof /x/]; new URL('./hash.task.ts', import.meta.url);",
+        '/app/main.ts',
+      ).map((ref) => ref.target),
+    ).toEqual(['/app/hash.task.ts']);
+  });
 });
