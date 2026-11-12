@@ -140,6 +140,11 @@ function lines(finding: Finding): readonly string[] {
           ? '  Write `import type { … }`: braces of `type` bindings still leave a side-effect import.'
           : '  A page imports kernel code only as `import type`, or a `*.token.ts` module; reach the service with getService(context, TOKEN).',
       ];
+    case 'plugin-unregistered':
+      return [
+        `Installed @setu-ts/${escapeName(f.pkg)} has no ${escapeName(f.symbol)} call in setu.config.ts.`,
+        `  Add ${escapeName(f.symbol)}({ … }) in that config factory. If registered in another module, silence setu.W006 in .setu-ts/check.json.`,
+      ];
     case 'page-unreadable':
       return [
         `Cannot read the imports of ${escapeName(f.path)}, so whether it imports kernel code by value cannot be checked.`,

@@ -1,3 +1,4 @@
+import { loggerDouble } from '../../../../test/fixtures/capability-doubles.ts';
 /**
  * RabbitMQ job durability: persistent publishes and publisher confirms.
  *
@@ -443,15 +444,15 @@ describe('QueuePlugin RabbitMQ durability options', () => {
           version: '1.0.0',
           provides: [CAPABILITIES.LOGGER],
           register(ctx) {
-            ctx.services.register(CAPABILITIES.LOGGER, {
-              debug: () => {},
-              info: () => {},
-              warn: (message: string) => warnings.push(message),
-              error: () => {},
-              child() {
-                return this;
-              },
-            });
+            ctx.services.register(
+              CAPABILITIES.LOGGER,
+              loggerDouble({
+                debug: () => {},
+                info: () => {},
+                warn: (message: string) => warnings.push(message),
+                error: () => {},
+              }),
+            );
           },
         },
         QueuePlugin({

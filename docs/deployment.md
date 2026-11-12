@@ -75,13 +75,13 @@ a client's `X-Forwarded-Host` through would otherwise let the client choose the 
 absolute URL the application builds, password-reset and sign-in links included, and nothing in the
 request tells the two kinds of proxy apart.
 
-| Proxy in front of the application                                           | `X-Forwarded-Host`                    | `trustForwardedHost` |
-| --------------------------------------------------------------------------- | ------------------------------------- | -------------------- |
-| Cloudflare Tunnel (cloudflared)                                             | passes the client's copy through      | leave `false`        |
-| ingress-nginx, Compose with no proxy                                        | `Host` already carries the public one | leave `false`        |
-| nginx with `proxy_set_header Host $host` (no `X-Forwarded-Host`)            | passes the client's copy through      | leave `false`        |
-| nginx with `proxy_set_header X-Forwarded-Host $host` and a rewritten `Host` | overwritten by the proxy              | `true`               |
-| a load balancer that rewrites `Host` and sets `X-Forwarded-Host`            | written by the proxy                  | `true`               |
+| Proxy in front of the application                                           | `X-Forwarded-Host`                    | `trustForwardedHost` | Scaffold `TRUST_FORWARDED_HOST`     |
+| --------------------------------------------------------------------------- | ------------------------------------- | -------------------- | ----------------------------------- |
+| Cloudflare Tunnel (cloudflared)                                             | passes the client's copy through      | leave `false`        | empty or `false`                    |
+| ingress-nginx, Compose with no proxy                                        | `Host` already carries the public one | leave `false`        | empty or `false`                    |
+| nginx with `proxy_set_header Host $host` (no `X-Forwarded-Host`)            | passes the client's copy through      | leave `false`        | empty or `false`                    |
+| nginx with `proxy_set_header X-Forwarded-Host $host` and a rewritten `Host` | overwritten by the proxy              | `true`               | `true` (requires `TRUSTED_PROXIES`) |
+| a load balancer that rewrites `Host` and sets `X-Forwarded-Host`            | written by the proxy                  | `true`               | `true` (requires `TRUSTED_PROXIES`) |
 
 Behind a chain of appending proxies the rightmost entry is the innermost proxy's view, for
 `X-Forwarded-Proto` as well as `X-Forwarded-Host`: an outer proxy that terminates TLS and an inner
@@ -119,11 +119,12 @@ refused at construction because `SameSite=None` forces `Secure`. The React Route
 public URL to loaders and actions. Without IP security these consumers use `ctx.request.url` — and
 behind a TLS-terminating proxy that makes **every React Router action answer 400**, because React
 Router's own origin check compares the browser's `https` origin with the internal `http` URL
-(V10-41). A `setu new --template full-stack` project reads `TRUSTED_PROXIES` (a comma-separated CIDR
-list of your proxies) and registers IP security from it; empty leaves it off. Set it to your proxies
-only — IPv4 addresses or CIDRs, IPv6 proxies as single addresses (an IPv6 CIDR is compared literally
-and matches nothing). Never `0.0.0.0/0`: it trusts every IPv4 client's forwarded headers, so any
-client could choose its own address and origin.
+(V10-41). A `setu new --template full-stack` project reads `TRUST_FORWARDED_HOST` (empty/`false` by
+default; `true` only for proxies that overwrite the host) and `TRUSTED_PROXIES` (a comma-separated
+CIDR list of your proxies) and registers IP security from it; empty leaves it off. Set it to your
+proxies only — IPv4 addresses or CIDRs, IPv6 proxies as single addresses (an IPv6 CIDR is compared
+literally and matches nothing). Never `0.0.0.0/0`: it trusts every IPv4 client's forwarded headers,
+so any client could choose its own address and origin.
 
 `csrf: {}` implicitly trusts the URL origin, that published public origin, and, when the browser
 sends `Sec-Fetch-Site: same-origin`, the validated leftmost `X-Forwarded-Proto`/`X-Forwarded-Host`

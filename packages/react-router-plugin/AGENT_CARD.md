@@ -24,13 +24,13 @@ export const frontend = ReactRouterPlugin({
 Put this in the frontend route module:
 
 ```ts
-import { serviceToken } from '@setu-ts/common';
+import { requestServiceToken } from '@setu-ts/common';
 import { getService, type RouterLoadContext } from '@setu-ts/react-router-plugin';
 
 interface ProductsService {
   list(): Promise<readonly { name: string }[]>;
 }
-const PRODUCTS = serviceToken<ProductsService>('module.products');
+const PRODUCTS = requestServiceToken<ProductsService>('module.products');
 
 export async function loader({ context }: { context: RouterLoadContext }) {
   return { products: await getService(context, PRODUCTS).list() };

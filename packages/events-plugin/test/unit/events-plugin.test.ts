@@ -1,3 +1,4 @@
+import { InMemoryEventBus } from '../../src/bus/in-memory-event-bus.ts';
 /**
  * Unit tests for EventsPlugin.
  */
@@ -158,11 +159,9 @@ describe('EventsPlugin', () => {
     const plugin = EventsPlugin();
     await plugin.register(ctx);
 
-    const bus = ctx.services.get(CAPABILITIES.EVENTS) as {
-      subscribe: unknown;
-      subscriptionCount: number;
-    };
-    (bus as { subscribe: (e: string, h: () => void) => void }).subscribe('TestEvent', () => {});
+    const bus = ctx.services.get(CAPABILITIES.EVENTS);
+    if (!(bus instanceof InMemoryEventBus)) throw new Error('Expected memory bus');
+    bus.subscribe('TestEvent', () => {});
     expect(bus.subscriptionCount).toBe(1);
 
     await onCloseHandler();
@@ -174,11 +173,8 @@ describe('EventsPlugin', () => {
     const plugin = EventsPlugin({ async: true });
     await plugin.register(ctx);
 
-    const bus = ctx.services.get(CAPABILITIES.EVENTS) as {
-      subscribe: (e: string, h: () => Promise<void>) => void;
-      publish: (e: unknown) => Promise<void>;
-      whenIdle: () => Promise<void>;
-    };
+    const bus = ctx.services.get(CAPABILITIES.EVENTS);
+    if (!(bus instanceof InMemoryEventBus)) throw new Error('Expected memory bus');
     const { defineDomainEvent } = await import('../../src/events/domain-event.ts');
     const runtime = {
       platform: () => 'deno' as const,

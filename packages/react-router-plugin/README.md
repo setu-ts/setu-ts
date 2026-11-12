@@ -105,14 +105,14 @@ request context itself). `getService(context, token)` resolves through `resolveR
 kernel `/api` route resolving the same token in that request share one instance:
 
 ```typescript
-import { serviceToken } from '@setu-ts/common';
+import { requestServiceToken } from '@setu-ts/common';
 import { getService, type RouterLoadContext } from '@setu-ts/react-router-plugin';
 
 interface ProductsService {
   list(): Promise<readonly { name: string }[]>;
 }
 // In a scaffolded project this lives in src/modules/products/products.token.ts.
-const PRODUCTS = serviceToken<ProductsService>('module.products');
+const PRODUCTS = requestServiceToken<ProductsService>('module.products');
 
 export async function loader({ context }: { context: RouterLoadContext }) {
   return { products: await getService(context, PRODUCTS).list() };
@@ -213,6 +213,7 @@ application's choice.
 | `ISsrService`                     | interface |
 | `RouterContextKey`                | interface |
 | `RouterLoadContext`               | interface |
+| `ServiceResolver`                 | interface |
 | `SsrRuntime`                      | interface |
 | `ViteDevExternalId`               | interface |
 | `ViteDevExternalsOptions`         | interface |
@@ -222,7 +223,6 @@ application's choice.
 | `PopulateLoadContext`             | type      |
 | `ReactRouterPluginOptions`        | type      |
 | `RouteHandler`                    | type      |
-| `ServiceResolver`                 | type      |
 | `SsrRequestHandler`               | type      |
 
 Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it

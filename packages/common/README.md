@@ -38,7 +38,7 @@ Without `requiredBy`, the message says `the package that loads it` generically.
 | Plugin contract     | `IPlugin`, `IPluginContext`, `IApplication`, context APIs (`IRouterApi`, `IMiddlewareApi`, `ILifecycleApi`, …)                                                                                                                                                                                                  |
 | Service registry    | `IServiceRegistry`, `RegisterOptions`, `ServiceFactory`                                                                                                                                                                                                                                                         |
 | HTTP abstractions   | `IRequest`, `IResponse`, `IRequestContext`, `IMiddleware`, `MiddlewareFunction`, `RouteHandler`, `RouteDefinition`, `ResponseSnapshot`, `ResponseSnapshotInit`                                                                                                                                                  |
-| Request services    | `serviceToken()`, `ServiceToken`, `requestService()`, `RequestBoundService`, `resolveRequestService()`, `RequestServiceUnavailableError` — one instance per request and token, shared by kernel routes and React Router loaders (0.12.0)                                                                        |
+| Request services    | `serviceToken()`, `ServiceToken`, `requestServiceToken()`, `RequestServiceToken`, `requestService()`, `RequestBoundService`, `resolveRequestService()`, `RequestServiceUnavailableError` — one instance per request and token, shared by kernel routes and React Router loaders (0.12.0)                        |
 | Runtime abstraction | `IRuntimeServices`, `IFileSystem`, `IHttpAdapter`                                                                                                                                                                                                                                                               |
 | Optional DI         | `IContainer`, `Provider`, `ServiceScope`, `createToken`, `InjectionToken`, `ContainerToken`, `InjectEntry`                                                                                                                                                                                                      |
 | Domain contracts    | `ILogger`, `IConfig`, `IValidationService`, `IHealthIndicator`, `IMetric`, `IJwtService`, `IOrmAdapter`, `ICacheStore`, `IEventBus`, `IMessageBroker`, `IQueue`, `ISecretManager`, `IAuditLogger`, `ICircuitBreaker`, `IStorage`, `IMailer`, `INotifier`, `IFeatureFlags`, `ITenantResolver`, `ITenantRegistry` |
@@ -47,10 +47,20 @@ Without `requiredBy`, the message says `the package that loads it` generically.
 
 ## Usage
 
+Since 0.13.0, standard tokens infer their interfaces from the augmentable `CapabilityServices` map.
+`StandardCapabilityToken<K>` carries a standard key; `CapabilityKey` is the plain key union.
+`KeysServing<T>` permits correct explicit types and widening on reads; `KeysAccepting<T>` makes a
+write supply the whole bound contract, and a write under a typed token reads its entry type from the
+token (`TokenEntry<Tok>`). `UnboundCapability` and `UnboundToken` preserve explicit lookups of
+unmapped and custom tokens. `ServiceToken<T>` carries a singleton type;
+`requestServiceToken<T>(name)` creates a `RequestServiceToken<T>` for a `requestService` wrapper.
+Resolve that token through `resolveRequestService`, which builds one instance per request; `get` and
+`getAll` refuse request-bound tokens at compilation.
+
 Resolve capabilities by token, typed by the interfaces defined here:
 
 ```typescript
-import { CAPABILITIES, type ILogger, type IPlugin } from '@setu-ts/common';
+import { CAPABILITIES, type IPlugin } from '@setu-ts/common';
 
 export function MyPlugin(): IPlugin {
   return {
@@ -58,7 +68,7 @@ export function MyPlugin(): IPlugin {
     version: '1.0.0',
     dependencies: [CAPABILITIES.LOGGER],
     register(ctx) {
-      const logger = ctx.services.get<ILogger>(CAPABILITIES.LOGGER);
+      const logger = ctx.services.get(CAPABILITIES.LOGGER);
       logger.info('my-plugin registered');
     },
   };
@@ -296,6 +306,7 @@ package fits the plugin architecture.
 | `replaceTenant`                       | function  |
 | `requestOriginOf`                     | function  |
 | `requestService`                      | function  |
+| `requestServiceToken`                 | function  |
 | `resolveKeysetSort`                   | function  |
 | `resolveProbeTiming`                  | function  |
 | `resolveRegistryEntry`                | function  |
@@ -414,6 +425,7 @@ package fits the plugin architecture.
 | `CacheDiagnosticsResponse`            | interface |
 | `CacheDiagnosticsSnapshot`            | interface |
 | `CachedProbeOptions`                  | interface |
+| `CapabilityServices`                  | interface |
 | `CircuitBreakerPolicy`                | interface |
 | `ClassProvider`                       | interface |
 | `ConfigDiagnosticsSnapshot`           | interface |
@@ -743,6 +755,7 @@ package fits the plugin architecture.
 | `BackendFault`                        | type      |
 | `BackoffStrategy`                     | type      |
 | `CacheDiagnosticsOperation`           | type      |
+| `CapabilityKey`                       | type      |
 | `CapabilityToken`                     | type      |
 | `ChannelSendResult`                   | type      |
 | `CircuitState`                        | type      |
@@ -796,6 +809,8 @@ package fits the plugin architecture.
 | `ITenantIsolationStrategy`            | type      |
 | `JobProcessor`                        | type      |
 | `JsonValue`                           | type      |
+| `KeysAccepting`                       | type      |
+| `KeysServing`                         | type      |
 | `LifecyclePhase`                      | type      |
 | `LoadBalanceStrategy`                 | type      |
 | `LocalizationMessage`                 | type      |
@@ -840,6 +855,7 @@ package fits the plugin architecture.
 | `RegistryFactory`                     | type      |
 | `RequestHandler`                      | type      |
 | `RequestOrigin`                       | type      |
+| `RequestServiceToken`                 | type      |
 | `ResilientCall`                       | type      |
 | `ResponseSnapshot`                    | type      |
 | `ResponseSnapshotInit`                | type      |
@@ -865,14 +881,18 @@ package fits the plugin architecture.
 | `SpanKind`                            | type      |
 | `SpanStatus`                          | type      |
 | `StandardCapability`                  | type      |
+| `StandardCapabilityToken`             | type      |
 | `StorageDiagnosticsOperation`         | type      |
 | `TimerHandle`                         | type      |
+| `TokenEntry`                          | type      |
 | `TraceCoverage`                       | type      |
 | `TraceInstrumentationKind`            | type      |
 | `TraceOutcome`                        | type      |
 | `TraceParentVisibility`               | type      |
 | `TraceSourceState`                    | type      |
 | `TransactionIsolationLevel`           | type      |
+| `UnboundCapability`                   | type      |
+| `UnboundToken`                        | type      |
 | `Unsubscribe`                         | type      |
 | `ValidationTarget`                    | type      |
 | `VectorFieldType`                     | type      |

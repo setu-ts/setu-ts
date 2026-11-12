@@ -132,6 +132,16 @@ function fullStackArgs(context: AppFactoryRenderContext): string {
     (config): FullStackStarterOptions => {
       const trustedProxies = config.get<string>('TRUSTED_PROXIES', { default: '' })
         .split(',').map((entry) => entry.trim()).filter((entry) => entry.length > 0);
+      const forwardedHost = config.get<string>('TRUST_FORWARDED_HOST', { default: '' });
+      if (forwardedHost !== '' && forwardedHost !== 'false' && forwardedHost !== 'true') {
+        throw new Error("TRUST_FORWARDED_HOST must be 'true', 'false' or empty");
+      }
+      const trustForwardedHost = forwardedHost === 'true';
+      if (trustForwardedHost && trustedProxies.length === 0) {
+        throw new Error(
+          'TRUST_FORWARDED_HOST=true needs TRUSTED_PROXIES: list the proxies that overwrite X-Forwarded-Host',
+        );
+      }
       return {
         reactRouter: {
           // Production entries pass the compiled server build as a MODULE so
@@ -166,7 +176,7 @@ function fullStackArgs(context: AppFactoryRenderContext): string {
         httpSecurity: {
           headers: { referrerPolicy: 'same-origin' },
           ...(trustedProxies.length > 0
-            ? { ipSecurity: { trustProxy: true, trustedProxies } }
+            ? { ipSecurity: { trustProxy: true, trustedProxies, trustForwardedHost } }
             : {}),
         },${context.swaggerAssets === 'cdn' ? "\n        openapi: { swagger: { assets: 'cdn' } }," : ''}
       };
@@ -257,7 +267,7 @@ export const FULL_STACK_TEMPLATE: TemplateDefinition = {
     { pkg: 'full-stack-starter', symbols: ['type FullStackStarterOptions'] },
     // The load-context bridge in the generated setu.config.ts.
     { pkg: 'session-plugin', symbols: ['getCsrfToken', 'getSession'] },
-    // Imported by the products module (serviceToken, requestService,
+    // Imported by the products module (requestServiceToken, requestService,
     // resolveRequestService) and by app/entry.server.tsx; setu.config.ts names
     // no common symbol beyond IPlugin.
     { pkg: 'common' },
@@ -291,7 +301,7 @@ React Router actions answer 400 behind TLS termination unless the proxy is trust
 TRUSTED_PROXIES to a comma-separated list of your proxies (for example, 10.0.0.0/8). This trusts
 their forwarded client IP and protocol headers. The public host stays the Host header the proxy
 sends; if your proxy rewrites Host and writes X-Forwarded-Host itself, also set
-\`ipSecurity: { trustForwardedHost: true }\` in setu.config.ts (never for a proxy that passes a
+TRUST_FORWARDED_HOST=true (keep it off behind a proxy that passes a
 client's X-Forwarded-Host through), as the deployment guide describes:
 ${siteUrl('docs/deployment/')}. Leave TRUSTED_PROXIES empty for direct access. List IPv4
 proxies as addresses or CIDRs, and IPv6 proxies as single addresses: an IPv6 CIDR is compared
@@ -305,7 +315,13 @@ headers, so any client can choose its own address and origin.
       {
         name: 'TRUSTED_PROXIES',
         description:
-          'Your proxies (IPv4 CIDRs or single IPv6 addresses), comma-separated; trusts their forwarded client IP and protocol, fixing TLS-proxy action 400s; the forwarded host also needs ipSecurity.trustForwardedHost (see the deployment guide). Never 0.0.0.0/0: it trusts every client.',
+          'Your proxies (IPv4 CIDRs or single IPv6 addresses), comma-separated; trusts their forwarded client IP and protocol, fixing TLS-proxy action 400s; the forwarded host also needs TRUST_FORWARDED_HOST=true (see the deployment guide). Never 0.0.0.0/0: it trusts every client.',
+        develop: '',
+      },
+      {
+        name: 'TRUST_FORWARDED_HOST',
+        description:
+          'Set true only when TRUSTED_PROXIES overwrite X-Forwarded-Host; leave empty otherwise.',
         develop: '',
       },
       {

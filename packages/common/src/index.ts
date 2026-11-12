@@ -112,7 +112,12 @@ export type {
 
 // Capability tokens
 export { CAPABILITIES, createCapabilityToken } from './tokens.ts';
-export type { CapabilityToken, StandardCapability } from './tokens.ts';
+export type {
+  CapabilityKey,
+  CapabilityToken,
+  StandardCapability,
+  StandardCapabilityToken,
+} from './tokens.ts';
 
 // Shared types
 export { PLUGIN_PRIORITY } from './types.ts';
@@ -137,6 +142,9 @@ export type { None, Option, Some } from './option.ts';
 export { resolveRegistryEntry } from './registry.ts';
 export type {
   IServiceRegistry,
+  KeysAccepting,
+  KeysServing,
+  UnboundToken,
   RegisterOptions,
   RegistryFactory,
   ServiceFactory,
@@ -298,8 +306,14 @@ export {
   requestService,
   resolveRequestService,
   serviceToken,
+  requestServiceToken,
 } from './services/request-service.ts';
-export type { RequestBoundService, ServiceToken } from './services/request-service.ts';
+export type {
+  RequestBoundService,
+  ServiceToken,
+  RequestServiceToken,
+  TokenEntry,
+} from './services/request-service.ts';
 export type { ILogger, LogMetadata } from './services/logger.ts';
 export type { IConfig } from './services/config.ts';
 export { validatedStateKey } from './services/validation.ts';
@@ -835,3 +849,5 @@ export {
   AgentRunLeaseLostError,
   AgentRunStoreUnavailableError,
 } from './errors/agent-runs.ts';
+
+export type { CapabilityServices, UnboundCapability } from './capability-services.ts';

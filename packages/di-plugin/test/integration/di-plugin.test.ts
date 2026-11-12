@@ -1,3 +1,4 @@
+import { loggerDouble } from '../../../../test/fixtures/capability-doubles.ts';
 import { describe, expect, it, vi } from 'vitest';
 
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
@@ -13,6 +14,16 @@ import { RuntimePlugin } from '@setu-ts/runtime';
 // --- Test doubles for autoRegister ---
 
 class FakeLogger {
+  readonly level = 'info' as const;
+  trace() {}
+  debug() {}
+  info() {}
+  warn() {}
+  error() {}
+  fatal() {}
+  child(): FakeLogger {
+    return this;
+  }
   readonly tag = 'fake-logger';
 }
 
@@ -87,7 +98,7 @@ describe('DiPlugin integration', () => {
           version: '1.0.0',
           dependencies: [CAPABILITIES.DI_CONTAINER],
           register(ctx) {
-            ctx.services.register(CAPABILITIES.LOGGER, { warn });
+            ctx.services.register(CAPABILITIES.LOGGER, loggerDouble({ warn }));
             const root = ctx.container!;
             root.register('sibling', { useValue: {} }, { scope: 'scoped', dispose: released });
             root.register(

@@ -23,7 +23,7 @@ function makeContext(): {
   const health: Array<{ name: string; fn: () => Promise<{ status: string; data?: unknown }> }> = [];
   const ctx: IPluginContext = {
     services: {
-      register: (token, service) => {
+      register: (token: string, service: object) => {
         services.set(token, service);
       },
       registerFactory: () => {},

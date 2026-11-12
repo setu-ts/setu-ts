@@ -2,7 +2,14 @@
 // Verifies the corrected registry examples: CAPABILITIES constants (not raw
 // strings), no nonexistent `lazy` option on RegisterOptions, and
 // registerFactory() for lazy construction.
-import type { ICacheStore, IConfig, INotifier, IPlugin, IPluginContext } from '@setu-ts/common';
+import type {
+  ICacheStore,
+  IConfig,
+  INotifier,
+  ILogger,
+  IPlugin,
+  IPluginContext,
+} from '@setu-ts/common';
 import { CAPABILITIES, createCapabilityToken } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
@@ -35,19 +42,17 @@ const registryPlugin: IPlugin = {
     // Lazy construction: the factory runs only on the first get().
     ctx.services.registerFactory(CAPABILITIES.CACHE, () => cacheStore);
 
-    // Multi-provider registration.
+    // Notifications have one provider.
     const emailNotifier: INotifier = {
       send: (_msg: unknown) => Promise.resolve(),
     };
-    ctx.services.register(CAPABILITIES.NOTIFICATION, emailNotifier, {
-      multi: true,
-    });
+    ctx.services.register(CAPABILITIES.NOTIFICATION, emailNotifier);
 
     // Lookup uses the same CAPABILITIES constant.
-    const cache = ctx.services.get<ICacheStore>(CAPABILITIES.CACHE);
+    const cache = ctx.services.get(CAPABILITIES.CACHE);
     if (ctx.services.has(CAPABILITIES.NOTIFICATION)) {
-      const notifiers = ctx.services.getAll<INotifier>(CAPABILITIES.NOTIFICATION);
-      void notifiers;
+      const notifier = ctx.services.get(CAPABILITIES.NOTIFICATION);
+      void notifier;
     }
     void cache;
 
@@ -61,10 +66,18 @@ const registryPlugin: IPlugin = {
     });
 
     // Override requires the explicit flag.
-    interface SimpleLogger {
-      log: (m: string) => void;
-    }
-    const logger: SimpleLogger = { log: () => {} };
+    const logger: ILogger = {
+      level: 'info',
+      trace() {},
+      debug() {},
+      info() {},
+      warn() {},
+      error() {},
+      fatal() {},
+      child() {
+        return this;
+      },
+    };
     ctx.services.register(CAPABILITIES.LOGGER, logger);
     ctx.services.register(CAPABILITIES.LOGGER, logger, { override: true });
 

@@ -1,5 +1,8 @@
 import { run as runProcess, tempDir } from '../../../../test/node-helpers.ts';
 import * as nodeFs from 'node:fs/promises';
+import ts from 'typescript';
+import type { IConfig } from '@setu-ts/common';
+import { configDouble } from '../../../../test/fixtures/capability-doubles.ts';
 /**
  * Tests for the `full-stack` template definition and the files it emits.
  *
@@ -32,6 +35,63 @@ import { getTemplate, listTemplates } from '../../src/templates/registry.ts';
 import { withBrokerArgs, withQueueArgs } from '../../src/templates/broker.ts';
 import { brokerSpec } from '../../src/workspace/transport.ts';
 import { workspaceProfile } from '../../src/workspace/runtime-profile.ts';
+
+it('V12-61 evaluates the rendered proxy switch for every accepted and refused value', async () => {
+  for (const runtime of ['node', 'deno', 'bun', 'cloudflare-workers'] as const) {
+    const args = FULL_STACK_TEMPLATE.appFactory!.args!({ runtime });
+    const callback = args.slice(0, args.indexOf('\n    { env')).trim().replace(/,$/, '');
+    const source = `const ssr = { serverBuild: {} }; export const configure = ${callback};`;
+    const code = ts.transpileModule(source, {
+      compilerOptions: { target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.ESNext },
+    }).outputText;
+    const loaded: {
+      configure: (config: IConfig) => {
+        httpSecurity: {
+          ipSecurity?: {
+            trustProxy: boolean;
+            trustedProxies: string[];
+            trustForwardedHost: boolean;
+          };
+        };
+      };
+    } = await import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}`);
+    const configure = (value: string, proxies = '127.0.0.1/32') =>
+      loaded.configure(
+        configDouble({
+          TRUST_FORWARDED_HOST: value,
+          TRUSTED_PROXIES: proxies,
+          SESSION_SECRET: 'test-secret',
+        }),
+      );
+    for (const [value, expected] of [
+      ['', false],
+      ['false', false],
+      ['true', true],
+    ] as const) {
+      expect(configure(value).httpSecurity.ipSecurity).toEqual({
+        trustProxy: true,
+        trustedProxies: ['127.0.0.1/32'],
+        trustForwardedHost: expected,
+      });
+    }
+    expect(configure('', '').httpSecurity.ipSecurity).toBeUndefined();
+    expect(configure('false', '').httpSecurity.ipSecurity).toBeUndefined();
+    expect(() => configure('yes')).toThrow("TRUST_FORWARDED_HOST must be 'true', 'false' or empty");
+    expect(() => configure('yes')).not.toThrow('yes');
+    expect(() => configure('true', '')).toThrow('TRUST_FORWARDED_HOST=true needs TRUSTED_PROXIES:');
+    const files = projectFiles('proxy-shop', runtime, resolveHost(FULL_STACK_TEMPLATE, runtime));
+    {
+      expect(
+        files.find(
+          (file) => file.path === (runtime === 'cloudflare-workers' ? '.dev.vars' : '.env'),
+        )!.contents,
+      ).toContain('TRUST_FORWARDED_HOST=');
+    }
+    expect(files.find((file) => file.path === 'README.md')!.contents).toContain(
+      'TRUST_FORWARDED_HOST=true',
+    );
+  }
+});
 
 it('X87-2 renders member app and Vite ports from discovery and preserves standalone defaults', () => {
   for (const runtime of ['node', 'bun', 'deno'] as const) {
@@ -206,10 +266,10 @@ describe('full-stack template | the layering it emits', () => {
       ...token.matchAll(/^import\s+(?!type\b)\{([^}]*)\}\s+from\s+'([^']+)'/gm),
     ];
     expect(valueImports.map((m) => [m[1]!.trim(), m[2]])).toEqual([
-      ['serviceToken', '@setu-ts/common'],
+      ['requestServiceToken', '@setu-ts/common'],
     ]);
     expect(token).toContain("import type { ProductsService } from './products.service.ts';");
-    expect(token).toContain("serviceToken<ProductsService>('module.products')");
+    expect(token).toContain("requestServiceToken<ProductsService>('module.products')");
   });
 
   it('emits both layout groups and a route in each', () => {

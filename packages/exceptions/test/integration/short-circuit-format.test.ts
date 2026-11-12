@@ -70,7 +70,10 @@ function sessionStubPlugin(): IPlugin {
     version: '0.0.0',
     provides: [CAPABILITIES.SESSION],
     register(ctx) {
-      ctx.services.register(CAPABILITIES.SESSION, { from: () => session });
+      ctx.services.register(CAPABILITIES.SESSION, {
+        from: () => session,
+        fromHeaders: () => Promise.resolve(null),
+      });
     },
   };
 }

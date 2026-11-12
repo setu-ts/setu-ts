@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { CAPABILITIES } from '@setu-ts/common';
-import type { IPlugin, IPluginContext } from '@setu-ts/common';
+import type { CapabilityServices, IPlugin, IPluginContext } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
 import { createTestApp } from '../../src/test-app.ts';
 import type { TestAppFromApp, TestAppFromPlugins, TestAppOptions } from '../../src/test-app.ts';
@@ -83,7 +83,7 @@ describe('createTestApp — the composition-root arm', () => {
       provides: [CAPABILITIES.DATABASE],
       register(ctx: IPluginContext) {
         ran.push('database');
-        ctx.services.register(CAPABILITIES.DATABASE, {});
+        ctx.services.register(CAPABILITIES.DATABASE, {} as CapabilityServices['database']);
       },
     };
 

@@ -8,7 +8,7 @@ import {
 } from '@setu-ts/database-plugin';
 import { IdempotencyPlugin } from '@setu-ts/idempotency-plugin';
 import { CAPABILITIES } from '@setu-ts/common';
-import type { IAgentRunService } from '@setu-ts/common';
+import type { IAgentRunService, IIdempotencyService } from '@setu-ts/common';
 import { MockServiceRegistry } from '@setu-ts/testing';
 import { AgentRunsPlugin } from '../../src/index.ts';
 import { definition, harness } from '../fixtures/harness.ts';
@@ -27,7 +27,7 @@ describe('AgentRunsPlugin', () => {
                 version: '1',
                 provides: [CAPABILITIES.IDEMPOTENCY],
                 register(ctx) {
-                  ctx.services.register(CAPABILITIES.IDEMPOTENCY, {});
+                  ctx.services.register(CAPABILITIES.IDEMPOTENCY, {} as IIdempotencyService);
                 },
               },
           AgentRunsPlugin({ store: createDatabaseAgentRunStore(), definitions: [definition()] }),
@@ -60,7 +60,7 @@ describe('AgentRunsPlugin', () => {
           child() {
             return this;
           },
-          level: 'info',
+          level: 'info' as const,
         };
         if (hasLogger) services.register(CAPABILITIES.LOGGER, logger);
         const closes: (() => void | Promise<void>)[] = [];

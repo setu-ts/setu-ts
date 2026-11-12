@@ -3,9 +3,15 @@
  *
  * @module
  */
-import { describe, expect, it } from 'vitest';
-import type { IServiceRegistry } from '@setu-ts/common';
-import { RequestServiceUnavailableError, requestService, serviceToken } from '@setu-ts/common';
+import { describe, expect, expectTypeOf, it } from 'vitest';
+import type { ILogger, IMailer, IServiceRegistry } from '@setu-ts/common';
+import {
+  CAPABILITIES,
+  RequestServiceUnavailableError,
+  requestService,
+  requestServiceToken,
+  serviceToken,
+} from '@setu-ts/common';
 import type { IRequestContext } from '../../src/interfaces/index.ts';
 import { applyDefaultLoadContext } from '../../src/handler/load-context.ts';
 import { contextKeyFor } from '../../src/handler/context-keys.ts';
@@ -20,7 +26,31 @@ import { FakeRouterContextProvider } from '../fixtures/fake-handler.ts';
 interface Greeter {
   greet(): string;
 }
-const GREETER = serviceToken<Greeter>('module.greeter');
+const GREETER = requestServiceToken<Greeter>('module.greeter');
+
+it('infers every getService and resolver overload arm', () => {
+  const check = (context: FakeRouterContextProvider, resolve: ServiceResolver): void => {
+    expectTypeOf(getService(context, CAPABILITIES.LOGGER)).toEqualTypeOf<ILogger>();
+    expectTypeOf(getService<ILogger>(context, CAPABILITIES.LOGGER)).toEqualTypeOf<ILogger>();
+    expectTypeOf(getService<object>(context, CAPABILITIES.LOGGER)).toEqualTypeOf<object>();
+    expectTypeOf(getService<Greeter>(context, CAPABILITIES.CLI_COMMAND)).toEqualTypeOf<Greeter>();
+    expectTypeOf(getService(context, GREETER)).toEqualTypeOf<Greeter>();
+    expectTypeOf(
+      getService(context, serviceToken<Greeter>('app.greeter')),
+    ).toEqualTypeOf<Greeter>();
+    expectTypeOf(getService<Greeter>(context, 'app.custom')).toEqualTypeOf<Greeter>();
+    expectTypeOf(resolve(CAPABILITIES.LOGGER)).toEqualTypeOf<ILogger>();
+    expectTypeOf(resolve<ILogger>(CAPABILITIES.LOGGER)).toEqualTypeOf<ILogger>();
+    expectTypeOf(resolve<Greeter>(CAPABILITIES.CLI_COMMAND)).toEqualTypeOf<Greeter>();
+    expectTypeOf(resolve(GREETER)).toEqualTypeOf<Greeter>();
+    expectTypeOf(resolve<Greeter>('app.custom')).toEqualTypeOf<Greeter>();
+    // @ts-expect-error The logger token cannot serve mail.
+    getService<IMailer>(context, CAPABILITIES.LOGGER);
+    // @ts-expect-error The resolver uses the same bound map.
+    resolve<IMailer>(CAPABILITIES.LOGGER);
+  };
+  expectTypeOf(check).toBeFunction();
+});
 
 function registry(entries: Record<string, object>): IServiceRegistry {
   return {

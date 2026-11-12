@@ -19,12 +19,13 @@ import { diagnoseBarrels, readBarrel } from './barrel-drift.ts';
 import { moduleActive, moduleSymbol } from './modules.ts';
 import type { ISourceStop } from '../devtool/sources.ts';
 import { referenceDiagnosis } from './reference-mask.ts';
-import { wiringFinding, wiringSites } from './wiring.ts';
+import { unregisteredPluginFindings, wiringFinding, wiringSites } from './wiring.ts';
 import { flatArtifactFiles, projectLayout, type ProjectLayout } from '../utils/project-layout.ts';
 import { composingStarter } from '../utils/starter-arms.ts';
 
 /** Typed findings carry facts; renderers own prose and exit policy. */
 export type Finding =
+  | { readonly kind: 'plugin-unregistered'; readonly pkg: string; readonly symbol: string }
   | { readonly kind: 'module-rejected' | 'artifact-invalid'; readonly path: string }
   | {
       readonly kind: 'module-skipped';
@@ -310,6 +311,7 @@ export async function diagnoseProject(
   for (const violation of pages.violations)
     findings.push({ kind: 'page-kernel-value-import', ...violation });
   for (const path of pages.unreadable) findings.push({ kind: 'page-unreadable', path });
+  if (configRead.kind === 'source') findings.push(...unregisteredPluginFindings(config, installed));
   const starter = composingStarter(config);
   const classified = referenceDiagnosis(config);
   if ('stop' in classified) {
