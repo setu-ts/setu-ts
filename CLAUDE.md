@@ -811,7 +811,7 @@ here.
   plus V12-58, V12-59, V12-61; V12-41; ships in `0.13.0`) — complete (PR #585).
 - **Milestone 137a** (`common` + `openapi-plugin` + `decorator-plugin` + `sdk` — OpenAPI document
   metadata (`contact`, `license`, `termsOfService`, `tags`, `externalDocs`), `deprecated` and
-  per-route `excludeFromDocument`, `@deprecated` in generated clients) — complete (PR pending).
+  per-route `excludeFromDocument`, `@deprecated` in generated clients) — complete (PR #587).
 - **Next milestone** — the remaining M139 letters. M137b follows.
 
 ## Verification (run before declaring any work done)
