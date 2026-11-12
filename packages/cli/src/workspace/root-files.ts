@@ -43,6 +43,17 @@ export const TRANSPORT_README_MARKERS = {
 } as const;
 
 /**
+ * The fallback the transport section shows: the broker's local default, or the
+ * workspace override with any URL credentials masked and the masking stated,
+ * so a reader does not copy the masked value as a working connection string.
+ */
+function fallbackShown(localDefault: string, brokerUrl: string | undefined): string {
+  if (brokerUrl === undefined) return `\`${localDefault}\``;
+  const shown = maskUrlUserinfo(brokerUrl);
+  return shown === brokerUrl ? `\`${shown}\`` : `\`${shown}\` (credentials redacted)`;
+}
+
+/**
  * Renders the workspace README's transport section, between its markers.
  *
  * One renderer for `setu new --workspace` and `setu workspace broker`, which
@@ -72,7 +83,7 @@ ${wrapProse(`Members share the **${broker.name}** broker — ${broker.descriptio
 
 ${wrapProse(
   `Every member reads its connection value from \`${broker.connection.variable}\`, ` +
-    `falling back to \`${brokerUrl === undefined ? broker.connection.localDefault : maskUrlUserinfo(brokerUrl)}\` when that ` +
+    `falling back to ${fallbackShown(broker.connection.localDefault, brokerUrl)} when that ` +
     `is unset. Both halves matter: \`${profile.runScript('dev')}\` on this machine needs ` +
     `the local address, and the generated Compose stack overrides the variable with the ` +
     `broker's service name, because two containers do not share a loopback interface.`,

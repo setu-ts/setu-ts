@@ -19,7 +19,9 @@ still work; downcasts and wrong token/interface pairs fail. Use the bound interf
 narrow with `instanceof` for an implementation's extra method
 (`if (cache instanceof CacheService) await cache.getOrSet(…)`). `register` and `registerFactory`
 require the whole bound contract: an empty or partial object no longer compiles, so tests use a full
-double or `overrideCapability` for a partial replacement.
+double or `overrideCapability` for a partial replacement. A write under a `serviceToken` or
+`requestServiceToken` takes its type from the token: drop an explicit type argument such as
+`register<ProductsService>(PRODUCTS, …)`.
 
 Replace `serviceToken<T>(name)` with `requestServiceToken<T>(name)` for entries registered with
 `requestService`. Read those entries with `resolveRequestService` or React Router's `getService`;

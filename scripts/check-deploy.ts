@@ -1393,7 +1393,7 @@ async function checkWorkspace(clusterModeFollows: boolean): Promise<CheckOutcome
     await mkdir(`${root}/k8s/secrets/portal`, { recursive: true });
     await writeFile(
       `${root}/k8s/secrets/portal/.env`,
-      `TRUSTED_PROXIES=\nSESSION_SECRET=${secret}\n`,
+      `TRUSTED_PROXIES=\nTRUST_FORWARDED_HOST=\nSESSION_SECRET=${secret}\n`,
     );
 
     // A Secret an earlier client-side apply created carries every value in plaintext in its
@@ -1522,7 +1522,7 @@ async function checkWorkspace(clusterModeFollows: boolean): Promise<CheckOutcome
     const rotated = randomBytes(32).toString('base64url');
     await writeFile(
       `${root}/k8s/secrets/portal/.env`,
-      `TRUSTED_PROXIES=\nSESSION_SECRET=${rotated}\n`,
+      `TRUSTED_PROXIES=\nTRUST_FORWARDED_HOST=\nSESSION_SECRET=${rotated}\n`,
     );
     const redeployed = await cli(deployArgs);
     if (!redeployed.success) {

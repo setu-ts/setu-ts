@@ -7,7 +7,7 @@
  */
 import { causeMessage } from './errors/serialize-error.ts';
 import type { CapabilityServices, UnboundCapability } from './capability-services.ts';
-import type { RequestBoundService, ServiceToken } from './services/request-service.ts';
+import type { ServiceToken, TokenEntry } from './services/request-service.ts';
 import type {
   CapabilityToken,
   StandardCapabilityToken,
@@ -178,25 +178,29 @@ export interface IServiceRegistry {
   /**
    * Registers a service under a typed singleton service token.
    *
-   * @typeParam T - The service interface carried by the token or supplied by the caller
+   * @typeParam Tok - The token; the service type is read from it, so an explicit type argument cannot widen it
    * @param token - The capability token
    * @param service - The service instance
    * @param options - Override and multi-provider behavior
    * @returns No value; records the registration
    */
-  register<T extends object>(token: ServiceToken<T>, service: T, options?: RegisterOptions): void;
+  register<Tok extends ServiceToken<object>>(
+    token: Tok,
+    service: TokenEntry<Tok>,
+    options?: RegisterOptions,
+  ): void;
   /**
    * Registers a service under a request-bound service token.
    *
-   * @typeParam T - The service interface carried by the token or supplied by the caller
+   * @typeParam Tok - The token; the service type is read from it, so an explicit type argument cannot widen it
    * @param token - The request-bound token
    * @param service - The request-bound wrapper
    * @param options - Override and multi-provider behavior
    * @returns No value; records the registration
    */
-  register<T extends object>(
-    token: RequestServiceToken<T>,
-    service: RequestBoundService<T>,
+  register<Tok extends RequestServiceToken<object>>(
+    token: Tok,
+    service: TokenEntry<Tok>,
     options?: RegisterOptions,
   ): void;
   /**
@@ -260,29 +264,29 @@ export interface IServiceRegistry {
   /**
    * Registers a lazy factory under a typed singleton service token.
    *
-   * @typeParam T - The service interface carried by the token or supplied by the caller
+   * @typeParam Tok - The token; the service type is read from it, so an explicit type argument cannot widen it
    * @param token - The capability token
    * @param factory - Factory producing the service
    * @param options - Override and multi-provider behavior
    * @returns No value; records the registration
    */
-  registerFactory<T extends object>(
-    token: ServiceToken<T>,
-    factory: ServiceFactory<T>,
+  registerFactory<Tok extends ServiceToken<object>>(
+    token: Tok,
+    factory: ServiceFactory<TokenEntry<Tok>>,
     options?: RegisterOptions,
   ): void;
   /**
    * Registers a lazy factory under a request-bound service token.
    *
-   * @typeParam T - The service interface carried by the token or supplied by the caller
+   * @typeParam Tok - The token; the service type is read from it, so an explicit type argument cannot widen it
    * @param token - The request-bound token
    * @param factory - Factory producing the request-bound wrapper
    * @param options - Override and multi-provider behavior
    * @returns No value; records the registration
    */
-  registerFactory<T extends object>(
-    token: RequestServiceToken<T>,
-    factory: ServiceFactory<RequestBoundService<T>>,
+  registerFactory<Tok extends RequestServiceToken<object>>(
+    token: Tok,
+    factory: ServiceFactory<TokenEntry<Tok>>,
     options?: RegisterOptions,
   ): void;
   /**

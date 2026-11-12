@@ -249,6 +249,12 @@ describe('the workspace README transport section', () => {
     expect(readme).toContain('redis://***@shared:6379');
     expect(readme).not.toContain('canary-secret');
     expect(readme).not.toContain('user:');
+    expect(readme).toMatch(/`redis:\/\/\*\*\*@shared:6379`\s+\(credentials\s+redacted\)/);
+    // An override without credentials is shown as written, with no redaction note.
+    const plain = readmeFor('redis', 'redis://shared:6379');
+    expect(plain).toContain('`redis://shared:6379`');
+    expect(plain).not.toContain('redacted');
+    expect(readmeFor('redis')).not.toContain('redacted');
   });
 
   // Both cloud arms carry an operational fact a developer cannot guess, and the

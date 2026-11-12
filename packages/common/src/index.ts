@@ -312,6 +312,7 @@ export type {
   RequestBoundService,
   ServiceToken,
   RequestServiceToken,
+  TokenEntry,
 } from './services/request-service.ts';
 export type { ILogger, LogMetadata } from './services/logger.ts';
 export type { IConfig } from './services/config.ts';

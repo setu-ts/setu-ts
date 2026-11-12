@@ -50,8 +50,9 @@ Without `requiredBy`, the message says `the package that loads it` generically.
 Since 0.13.0, standard tokens infer their interfaces from the augmentable `CapabilityServices` map.
 `StandardCapabilityToken<K>` carries a standard key; `CapabilityKey` is the plain key union.
 `KeysServing<T>` permits correct explicit types and widening on reads; `KeysAccepting<T>` makes a
-write supply the whole bound contract. `UnboundCapability` and `UnboundToken` preserve explicit
-lookups of unmapped and custom tokens. `ServiceToken<T>` carries a singleton type;
+write supply the whole bound contract, and a write under a typed token reads its entry type from the
+token (`TokenEntry<Tok>`). `UnboundCapability` and `UnboundToken` preserve explicit lookups of
+unmapped and custom tokens. `ServiceToken<T>` carries a singleton type;
 `requestServiceToken<T>(name)` creates a `RequestServiceToken<T>` for a `requestService` wrapper.
 Resolve that token through `resolveRequestService`, which builds one instance per request; `get` and
 `getAll` refuse request-bound tokens at compilation.
@@ -883,6 +884,7 @@ package fits the plugin architecture.
 | `StandardCapabilityToken`             | type      |
 | `StorageDiagnosticsOperation`         | type      |
 | `TimerHandle`                         | type      |
+| `TokenEntry`                          | type      |
 | `TraceCoverage`                       | type      |
 | `TraceInstrumentationKind`            | type      |
 | `TraceOutcome`                        | type      |

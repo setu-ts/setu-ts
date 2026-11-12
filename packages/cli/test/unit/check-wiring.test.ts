@@ -29,6 +29,32 @@ it('V12-59 reports installed uncalled providers once and respects starter owners
   expect(unregisteredPluginFindings('', new Set())).toEqual([]);
 });
 
+it('V12-59 recognises a provider called through an aliased import', () => {
+  const installed = new Set(['queue-plugin']);
+  const aliased = "import { QueuePlugin as queue } from '@setu-ts/queue-plugin';";
+  expect(unregisteredPluginFindings(`${aliased}\nqueue({});`, installed)).toEqual([]);
+  expect(
+    unregisteredPluginFindings(
+      `import { CAPABILITIES, QueuePlugin as q, type QueuePlugin as T } from "@setu-ts/queue-plugin";\nq({});`,
+      installed,
+    ),
+  ).toEqual([]);
+  // An alias that is never called, a type-only alias and another package's alias still warn.
+  expect(unregisteredPluginFindings(aliased, installed)).toHaveLength(1);
+  expect(
+    unregisteredPluginFindings(
+      "import { type QueuePlugin as queue } from '@setu-ts/queue-plugin';\nqueue({});",
+      installed,
+    ),
+  ).toHaveLength(1);
+  expect(
+    unregisteredPluginFindings(
+      "import { QueuePlugin as queue } from '@setu-ts/cache-plugin';\nqueue({});",
+      installed,
+    ),
+  ).toHaveLength(1);
+});
+
 it('X91-3 requires registerModules to be called and consumes values outside imports', () => {
   for (const source of [
     "import { registerModules } from './index.ts';",

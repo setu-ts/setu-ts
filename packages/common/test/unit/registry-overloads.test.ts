@@ -38,6 +38,12 @@ it('checks every registry overload at compilation', () => {
     registry.registerFactory(CAPABILITIES.CLI_COMMAND, () => ({ name: 'example' }));
     registry.register(singleton, logger);
     registry.registerFactory(singleton, () => logger);
+    // @ts-expect-error A singleton token's type cannot be widened to admit an empty object.
+    registry.register<object>(singleton, {});
+    // @ts-expect-error A singleton factory cannot be widened to produce an empty object.
+    registry.registerFactory<object>(singleton, () => ({}));
+    // @ts-expect-error A singleton token's service must be complete.
+    registry.register(singleton, {});
     registry.register('acme.logger', logger);
     registry.registerFactory('acme.logger', () => logger);
     // @ts-expect-error The bound logger contract is required at registration.
@@ -68,6 +74,13 @@ it('checks every registry overload at compilation', () => {
     const entry = requestService(() => logger);
     registry.register(request, entry);
     registry.registerFactory(request, () => entry);
+    const empty = requestService(() => ({}));
+    // @ts-expect-error A request token's type cannot be widened to admit an empty service.
+    registry.register<object>(request, empty);
+    // @ts-expect-error A request factory cannot be widened to produce an empty service.
+    registry.registerFactory<object>(request, () => empty);
+    // @ts-expect-error A request-bound wrapper must build the token's service.
+    registry.register(request, empty);
     // @ts-expect-error A request token registers a wrapper, not the service itself.
     registry.register(request, logger);
     // @ts-expect-error A request factory must produce a wrapper.

@@ -96,6 +96,26 @@ export interface RequestBoundService<T extends object> {
 }
 
 /**
+ * The registry entry a typed token accepts: the service itself for a
+ * {@linkcode ServiceToken}, a {@linkcode RequestBoundService} wrapper for a
+ * {@linkcode RequestServiceToken}. Registry writes read the service type from
+ * the token through this type, so an explicit type argument cannot widen it.
+ *
+ * @typeParam Tok - A singleton or request-bound service token
+ * @example
+ * ```typescript
+ * type Entry = TokenEntry<typeof PRODUCTS>; // RequestBoundService<ProductsService>
+ * ```
+ * @since 0.13.0
+ */
+export type TokenEntry<Tok> =
+  Tok extends ServiceToken<infer S extends object>
+    ? S
+    : Tok extends RequestServiceToken<infer S extends object>
+      ? RequestBoundService<S>
+      : never;
+
+/**
  * Wraps a factory as a request-bound registry entry. Register the result under
  * a {@linkcode RequestServiceToken}; every {@linkcode resolveRequestService} call in
  * one request then shares one instance built from that request's context.
