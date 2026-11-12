@@ -499,8 +499,8 @@ Additional evidence:
   - The generated `src/transport/index.ts` and `setu.workspace.json` hold the `brokerUrl` as
     entered, because the transport connects with it. A credentialed endpoint belongs in the broker's
     environment variable, not in the override.
-- **Audit:** a committed-tree security audit by a fresh Claude agent, per
-  `.roo/skills/security-audit/SKILL.md`, before the PR merges.
+- **Audit:** a committed-tree security audit by a freshly spawned agent session that did not
+  implement the milestone, per `.roo/skills/security-audit/SKILL.md`, before the PR merges.
 
 ## 8. Risks & mitigations
 
