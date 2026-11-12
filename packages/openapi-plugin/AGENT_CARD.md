@@ -35,15 +35,8 @@ export function registerStatusRoutes(router: IRouterApi): void {
 
 ## Behaviour the types do not show
 
-- `contact`, `license` and `termsOfService` populate `info`; `tags` and `externalDocs` populate the
-  document root. `tags: []` is omitted. Duplicate tag names or a license carrying both `identifier`
-  and `url` throw `OpenApiDocumentOptionsError` at startup, or at direct service and generator
-  construction.
-- `schema.deprecated: true` (or `@ApiOperation({ deprecated: true })`) marks the operation and
-  generated client members deprecated without adding response headers.
-- `schema.excludeFromDocument: true` (or the matching `ApiOperation` option) hides one operation,
-  skips its operation-id claim and generated client method, but keeps it served, router-listed and
-  discoverable as a marked MCP tool. It does not enforce access control.
+- Duplicate `tags` names or a `license` with both `identifier` and `url` refuse startup.
+  `schema.excludeFromDocument` hides an operation; the route is still served.
 
 - `endpoint` defaults to `/docs`, `specEndpoint` to `/openapi.json`; served documentation and
   self-hosted asset routes are excluded from the generated document.

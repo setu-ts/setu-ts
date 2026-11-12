@@ -35,11 +35,8 @@ export function watchUpdates(signal: AbortSignal): ISseClient {
 
 ## Behaviour the types do not show
 
-- `generateOpenApiClient` reads `SdkOpenApiOperation.deprecated === true` and writes `@deprecated`
-  on the returned interface member and factory method so editor call sites are flagged. False and
-  omission preserve output bytes. Routes hidden from the document have no generated method, even
-  though the server can still serve them.
-
+- A `deprecated: true` operation gets `@deprecated` on its generated interface member and method, so
+  editors flag the call site.
 - `request` returns status, headers and parsed JSON data; data is `undefined` for `204` or an empty
   body. Non-2xx responses throw `HttpClientError`.
 - `retry.limit` counts total attempts, not extra retries; `delay` is milliseconds. Request
