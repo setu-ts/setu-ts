@@ -360,4 +360,28 @@ describe('worker task entries', () => {
     // Following any of them would refuse the static task import inside.
     expect(await discoverTasks(fs, '/app', ['main.ts'])).toEqual([]);
   });
+  it('counts a } or ) inside a string, and a nested call, correctly (CodeRabbit #582)', () => {
+    for (const source of [
+      "const href = `${'}' + new URL('./hash.task.ts', import.meta.url).href}`;",
+      "const url = new URL(getBase() + './hash.task.ts', import.meta.url);",
+      "const url = new URL(join(')', './hash.task.ts'), import.meta.url);",
+      "const href = import.meta.resolve(prefix() + './hash.task.ts');",
+    ])
+      expect(() => taskReferences(source, '/app/main.ts'), source).toThrow(
+        'worker task references must use',
+      );
+    // A balanced literal after a nested call elsewhere on the line still counts.
+    expect(
+      taskReferences(
+        "pool.run(f(g()), new URL('./a.task.ts', import.meta.url).href);",
+        '/app/main.ts',
+      ).map((ref) => ref.target),
+    ).toEqual(['/app/a.task.ts']);
+  });
+  it('pairs delimiters in linear time on unclosed input (CodeRabbit #582 follow-up)', () => {
+    const started = performance.now();
+    taskReferences('new URL('.repeat(40_000), '/app/main.ts');
+    taskReferences(`\`${'${'.repeat(40_000)}\``, '/app/main.ts');
+    expect(performance.now() - started).toBeLessThan(1_000);
+  });
 });

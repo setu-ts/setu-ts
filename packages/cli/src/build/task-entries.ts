@@ -20,21 +20,40 @@ interface ITaskReference {
 }
 
 /**
+ * For every `opener` in `text`, the index of the `closer` that balances it,
+ * skipping string and template literals, so a `)` or `}` inside a string or a
+ * nested call does not end a span early (CodeRabbit #582). One linear pass:
+ * looking each span up again per head was quadratic on unclosed input. An
+ * opener that never closes maps to the text's length.
+ */
+function closingIndexes(text: string, opener: string, closer: string): Map<number, number> {
+  const closes = new Map<number, number>();
+  const open: number[] = [];
+  for (let at = 0; at < text.length; at++) {
+    const char = text[at]!;
+    if (char === "'" || char === '"' || char === '`') {
+      for (at++; at < text.length && text[at] !== char; at++) if (text[at] === '\\') at++;
+    } else if (char === opener) open.push(at);
+    else if (char === closer && open.length > 0) closes.set(open.pop()!, at);
+  }
+  for (const at of open) closes.set(at, text.length);
+  return closes;
+}
+
+/**
  * Whether any `${…}` substitution in a template literal names a `.task.ts`
  * path. Braces are counted, so an object literal inside the substitution does
  * not end it early (CodeRabbit #582).
  */
 function substitutionNamesTask(template: string): boolean {
-  for (let at = template.indexOf('${'); at !== -1; at = template.indexOf('${', at + 1)) {
-    let depth = 0;
-    let end = at + 1;
-    for (; end < template.length; end++) {
-      if (template[end] === '{') depth++;
-      else if (template[end] === '}' && --depth === 0) break;
-    }
+  // The body between the backticks: the literal's own delimiters are not strings in it.
+  const body = template.slice(1, -1);
+  const closes = closingIndexes(body, '{', '}');
+  for (let at = body.indexOf('${'); at !== -1; at = body.indexOf('${', at + 1)) {
+    const end = closes.get(at + 1) ?? body.length;
     // Only a task REFERENCE: a `new URL(…)` or an `import` naming the path. A
     // substitution that merely formats a string mentioning one is ordinary code.
-    const substitution = template.slice(at, end);
+    const substitution = body.slice(at, end);
     if (substitution.includes('.task.ts') && /\bnew\s+URL\s*\(|\bimport\b/.test(substitution))
       return true;
   }
@@ -76,15 +95,20 @@ export function taskReferences(source: string, file: string): readonly ITaskRefe
       target: resolveDir(dirName(file), match[2]!),
     });
   }
+  const parens = closingIndexes(visible, '(', ')');
   for (const match of visible.matchAll(
-    // `import` the keyword only (not `importer`, not any `import.meta`); a separate
-    // arm refuses `import.meta.resolve(…)`, Prettier-wrapped or not, and another a
-    // static `from '….task.ts'`: an `export … from` or a wrapped import.
-    /\bnew\s+URL\s*\([^)]*\)|\bimport\b(?!\s*\.)(?:\s*\([^)]*\)|[^;\r\n]*)|\bimport\s*\.\s*meta\s*\.\s*resolve\s*\([^)]*\)|\bfrom\s*(['"])[^'"\r\n]*\.task\.ts\1/g,
+    // A call head (`new URL(`, `import(`, `import.meta.resolve(`) spans to its
+    // balanced `)`, so a nested call or a string cannot end it early. `import`
+    // is the keyword only (not `importer`, not any other `import.meta`); a
+    // static import runs to its line end, and `from '….task.ts'` covers an
+    // `export … from` and a wrapped import.
+    /\bnew\s+URL\s*\(|\bimport\s*\.\s*meta\s*\.\s*resolve\s*\(|\bimport\b(?!\s*\.)(?:\s*\(|[^;\r\n]*)|\bfrom\s*(['"])[^'"\r\n]*\.task\.ts\1/g,
   )) {
     if (strings.some((range) => match.index >= range.start && match.index < range.end)) continue;
+    const head = match.index + match[0].length;
+    const end = match[0].endsWith('(') ? (parens.get(head - 1) ?? visible.length) + 1 : head;
     if (
-      source.slice(match.index, match.index + match[0].length).includes('.task.ts') &&
+      source.slice(match.index, end).includes('.task.ts') &&
       !references.some((ref) => match.index === ref.start)
     ) {
       throw new Error(
