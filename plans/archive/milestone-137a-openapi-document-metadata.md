@@ -192,13 +192,14 @@ from middleware brands (that is M137b), and no change to request bodies (M137c).
 
 - **Why:** ROADMAP M137a decision 4. The interface member is what a call site resolves to (§1), so
   without it no editor would flag `api.foo()`.
-- **Test home:** `packages/sdk/test/unit/codegen/openapi-codegen.test.ts` (text assertions; output
-  for a document without `deprecated` equals the pre-change output); a TypeScript-compiler test in
-  the same file that compiles the generated module plus a call site with the `typescript` compiler
-  API and asserts a suggestion diagnostic with code `6385` ("is deprecated") on the call to the
-  deprecated method and none on the other; `packages/cli/test/e2e/client-e2e.test.ts` (the gate:
-  `setu client` output after Prettier contains `@deprecated` above the deprecated member and omits
-  the hidden route's method, and `client:check` passes on the regenerated file).
+- **Test home:** `packages/sdk/test/unit/openapi-codegen.test.ts` (text assertions; output for a
+  document without `deprecated` equals the pre-change output); a TypeScript-compiler test in the
+  same file that compiles the generated module plus a call site with the `typescript` compiler API
+  and asserts a suggestion diagnostic with `reportsDeprecated: true` (code `6387`, "The signature …
+  is deprecated", as measured on TypeScript 6.0.3) on the call to the deprecated method and none on
+  the other; `packages/cli/test/e2e/client-e2e.test.ts` (the gate: `setu client` output after
+  Prettier contains `@deprecated` above the deprecated member and omits the hidden route's method,
+  and `client:check` passes on the regenerated file).
 
 ## 4. Exported surface — every symbol names its consumer
 

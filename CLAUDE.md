@@ -805,7 +805,10 @@ here.
   packages, backend peers and migration scripts, full-stack wiring, task builds in `setu build`, a
   formatter-stable brief and a check-only reference mask; 27 V12/V8/X91/X93 rows, X91-9 already
   fixed; ships in `0.13.0`) — complete (PR #582).
-- **Next milestone** — the remaining M139 letters.
+- **Milestone 137a** (`common` + `openapi-plugin` + `decorator-plugin` + `sdk` — OpenAPI document
+  metadata (`contact`, `license`, `termsOfService`, `tags`, `externalDocs`), `deprecated` and
+  per-route `excludeFromDocument`, `@deprecated` in generated clients) — complete (PR pending).
+- **Next milestone** — the remaining M139 letters. M137b follows.
 
 ## Verification (run before declaring any work done)
 

@@ -10,6 +10,33 @@ describe('OpenAPI decorators', () => {
     metadataStore.clear();
   });
 
+  it.each([true, false])('stores both document flags when %s', (flag) => {
+    @Controller('/flags')
+    class C {
+      @Get('/')
+      @ApiOperation({ deprecated: flag, excludeFromDocument: flag })
+      list() {
+        return [];
+      }
+    }
+    expect(metadataStore.getRoutesFor(C)[0].openapi).toEqual({
+      deprecated: flag,
+      excludeFromDocument: flag,
+    });
+  });
+
+  it('omits document flags when absent', () => {
+    @Controller('/flags')
+    class C {
+      @Get('/')
+      @ApiOperation({})
+      list() {
+        return [];
+      }
+    }
+    expect(metadataStore.getRoutesFor(C)[0].openapi).toEqual({});
+  });
+
   it('@ApiTags stores tags on the controller', () => {
     @Controller('/x')
     @ApiTags('users', 'admin')

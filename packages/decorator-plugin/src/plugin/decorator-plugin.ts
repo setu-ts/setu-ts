@@ -677,6 +677,8 @@ function buildRouteSchema(
   const summary = route.openapi?.summary;
   const operationId = route.openapi?.operationId;
   const description = route.openapi?.description;
+  const deprecated = route.openapi?.deprecated;
+  const excludeFromDocument = route.openapi?.excludeFromDocument;
   const response = buildResponseSchemas(route);
   const hasSchema = schema !== undefined;
   const hasTags = tags.length > 0;
@@ -694,6 +696,8 @@ function buildRouteSchema(
     summary === undefined &&
     operationId === undefined &&
     description === undefined &&
+    deprecated !== true &&
+    excludeFromDocument !== true &&
     response === undefined &&
     !isPublic
   ) {
@@ -707,6 +711,8 @@ function buildRouteSchema(
     ...(summary !== undefined ? { summary } : {}),
     ...(operationId !== undefined ? { operationId } : {}),
     ...(description !== undefined ? { description } : {}),
+    ...(deprecated === true ? { deprecated: true } : {}),
+    ...(excludeFromDocument === true ? { excludeFromDocument: true } : {}),
     ...(response !== undefined ? { response } : {}),
     ...(isPublic ? { security: [] } : {}),
   };

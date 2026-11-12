@@ -10502,6 +10502,60 @@ app.register(
 );
 ```
 
+### Document metadata, deprecation and per-route exclusion
+
+Since 0.13.0, `OpenApiGeneratorOptions` (also accepted by `OpenApiPluginOptions` and
+`OpenApiServiceOptions`) includes:
+
+| Option           | Type                                                                             | Output                   |
+| ---------------- | -------------------------------------------------------------------------------- | ------------------------ |
+| `contact`        | `{ readonly name?: string; readonly url?: string; readonly email?: string }`     | `info.contact`           |
+| `license`        | `{ readonly name: string; readonly identifier?: string; readonly url?: string }` | `info.license`           |
+| `termsOfService` | `string`                                                                         | `info.termsOfService`    |
+| `tags`           | `readonly OpenApiTag[]`                                                          | top-level `tags`         |
+| `externalDocs`   | `OpenApiExternalDocs`                                                            | top-level `externalDocs` |
+
+New exports from `@setu-ts/openapi-plugin`:
+
+| Export                        | Kind      | Contract                                                                                                                                                                                               |
+| ----------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `OpenApiExternalDocs`         | interface | `{ readonly url: string; readonly description?: string }`                                                                                                                                              |
+| `OpenApiTag`                  | interface | `{ readonly name: string; readonly description?: string; readonly externalDocs?: OpenApiExternalDocs }`                                                                                                |
+| `OpenApiDocumentOptionsError` | class     | `extends Error`; constructor `(reason: 'license-identifier-and-url' \| 'duplicate-tag', message: string)`; readonly `reason`, `name: 'OpenApiDocumentOptionsError'`, diagnostic naming the keys or tag |
+
+All fields are optional at the option and document level. Objects contain only their defined keys;
+`tags: []` is omitted. Tag entries retain order and must have unique names within the document list;
+route tags need not be declared there. No URL/email format validation is performed.
+`OpenApiDocument.info` gains `termsOfService`, `contact` and `license` in that order after its
+existing fields; the document appends `tags` and `externalDocs` after `components`.
+
+```typescript
+// The metadata portion of the generated document:
+const metadata = {
+  info: {
+    title: 'Users', version: '2', description: 'User API',
+    termsOfService: 'https://example.com/terms',
+    contact: { name: 'API team', url: 'https://example.com', email: 'api@example.com' },
+    license: { name: 'Apache 2.0', identifier: 'Apache-2.0' },
+  },
+  tags: [{ name: 'users', description: 'Users', externalDocs: { url: '/users', description: 'Guide' } }],
+  externalDocs: { url: '/docs', description: 'Docs' },
+};
+```
+
+Supplying both `license.identifier` and `license.url` throws `OpenApiDocumentOptionsError` with
+`reason: 'license-identifier-and-url'`; duplicate tag names throw it with `reason: 'duplicate-tag'`.
+The shared validator runs at `OpenApiGenerator` and `OpenApiService` construction. The plugin
+constructs the service during registration, so `app.start()` rejects before any request.
+
+`RouteSchema.deprecated?: boolean` emits `OpenApiOperation.deprecated: true` only when true.
+`RouteSchema.excludeFromDocument?: boolean` omits only that operation when true, including its
+declared-id claim: a hidden DELETE beside a visible GET on one path can reuse its declared id.
+`ApiOperationConfig` accepts the same flags, including when either is a method's only metadata.
+False and omission have no effect, preserving existing document and client bytes. Hidden routes
+remain registered, served, listed in `router.listRoutes()` and discoverable as marked MCP tools.
+Neither flag enforces access control or adds `Deprecation`/`Sunset` headers.
+
 ### Operation ids and descriptions
 
 <!-- version:history -->
@@ -13721,6 +13775,10 @@ Contract notes:
   operation metadata. OpenAPI uses the id verbatim, derives it only when absent, and emits the
   description. Included declared ids must be nonblank and unique; `OperationIdError` from
   `@setu-ts/openapi-plugin` refuses invalid declarations at bootstrap and document generation.
+- `RouteSchema.deprecated?: boolean` and `RouteSchema.excludeFromDocument?: boolean` (since 0.13.0)
+  mark an operation deprecated or omit just that operation from OpenAPI when true. False and
+  omission have no effect. Hidden routes stay served, router-listed and discoverable as marked MCP
+  tools; neither flag enforces access control or adds deprecation response headers.
 - `RouteSchema.security` is documentation only — it describes an operation for the OpenAPI document
   and for client generation, and enforces nothing. Authentication is enforced by middleware and
   guards. An **empty array** declares the operation public and is not the same as omitting the
@@ -14901,29 +14959,29 @@ carry full JSDoc.
 
 ### Types
 
-| Export                                                        | Kind | Purpose                                                                                                                                                                      |
-| ------------------------------------------------------------- | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DecoratorPluginOptions`                                      | type | Options for `DecoratorPlugin()` (`autoDiscover?`, `controllersPath?`, `controllers?`, `services?`, `ingress?`, `modules?`, `enforceSchemas?`, `enforceRoles?`, `policies?`)  |
-| `AbilityOptions` / `PolicyClassAbility` / `PolicyClassTarget` | type | **Since M110a.** `@Ability`'s options, and the helpers typing `@RequirePolicy`'s ability (a policy class's method names) and target (read off the method's second parameter) |
-| `InjectableOptions`                                           | type | Options for `@Injectable()` (`scope?`, `token?`)                                                                                                                             |
-| `ModuleOptions`                                               | type | Options for `@Module()` (`controllers?`, `providers?` — classes and, since `0.13.0`, `ModuleFactoryProvider` entries — `imports?`; no `exports`)                             |
-| `ApiOperationConfig`                                          | type | Config for `@ApiOperation()` (`operationId?`, `summary?`, `description?`); all three fields reach RouteSchema; OpenAPI uses a declared id verbatim and emits the description |
-| `ApiResponseConfig`                                           | type | Config for `@ApiResponse()` (`status`, `description?`, `schema?`)                                                                                                            |
-| `HttpMethodDecorator`                                         | type | `(path?: string) => SetuMethodDecorator`                                                                                                                                     |
-| `ParamSource`                                                 | type | One entry in a `@Params(...)` declaration; carries the resolved value type                                                                                                   |
-| `SourceValues`                                                | type | Maps a source tuple onto the handler parameter tuple it binds                                                                                                                |
-| `InjectToken`                                                 | type | `string \| OptionalToken` — one entry in an `@Inject(...)` list                                                                                                              |
-| `OptionalToken`                                               | type | A token wrapped by `Optional(...)`, marking that argument absent-tolerant                                                                                                    |
-| `SetuClassDecorator`                                          | type | A standard class decorator that records metadata and leaves the class unchanged                                                                                              |
-| `SetuMethodDecorator`                                         | type | A standard method decorator that records metadata and leaves the method unchanged                                                                                            |
-| `SetuClassOrMethodDecorator`                                  | type | A standard decorator valid in either position, discriminating on `context.kind`                                                                                              |
-| `MiddlewareLike`                                              | type | `MiddlewareFunction \| (new () => IMiddleware)` — accepted by pipeline decorators                                                                                            |
-| `CustomParameterResolver`                                     | type | `(ctx, metadata?) => unknown \| Promise<unknown>`                                                                                                                            |
-| `ParameterMetadata`                                           | type | Parameter metadata captured by a `@Params(...)` source                                                                                                                       |
-| `ParameterType`                                               | type | `'body' \| 'query' \| 'param' \| 'header' \| 'cookie' \| 'custom'`                                                                                                           |
-| `DiscoveryOptions`                                            | type | Config for `discoverControllers()` (`path`, `extensions?`, `exclude?`)                                                                                                       |
-| `DiscoveryResult`                                             | type | Result of discovery (`controllers`, `services`, `errors`)                                                                                                                    |
-| `ModuleImporter`                                              | type | `(specifier: string) => Promise<unknown>` — injectable module loader                                                                                                         |
+| Export                                                        | Kind | Purpose                                                                                                                                                                                                           |
+| ------------------------------------------------------------- | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DecoratorPluginOptions`                                      | type | Options for `DecoratorPlugin()` (`autoDiscover?`, `controllersPath?`, `controllers?`, `services?`, `ingress?`, `modules?`, `enforceSchemas?`, `enforceRoles?`, `policies?`)                                       |
+| `AbilityOptions` / `PolicyClassAbility` / `PolicyClassTarget` | type | **Since M110a.** `@Ability`'s options, and the helpers typing `@RequirePolicy`'s ability (a policy class's method names) and target (read off the method's second parameter)                                      |
+| `InjectableOptions`                                           | type | Options for `@Injectable()` (`scope?`, `token?`)                                                                                                                                                                  |
+| `ModuleOptions`                                               | type | Options for `@Module()` (`controllers?`, `providers?` — classes and, since `0.13.0`, `ModuleFactoryProvider` entries — `imports?`; no `exports`)                                                                  |
+| `ApiOperationConfig`                                          | type | Config for `@ApiOperation()` (`operationId?`, `summary?`, `description?`, `deprecated?`, `excludeFromDocument?`); metadata reaches RouteSchema, including either document flag alone; only true flags take effect |
+| `ApiResponseConfig`                                           | type | Config for `@ApiResponse()` (`status`, `description?`, `schema?`)                                                                                                                                                 |
+| `HttpMethodDecorator`                                         | type | `(path?: string) => SetuMethodDecorator`                                                                                                                                                                          |
+| `ParamSource`                                                 | type | One entry in a `@Params(...)` declaration; carries the resolved value type                                                                                                                                        |
+| `SourceValues`                                                | type | Maps a source tuple onto the handler parameter tuple it binds                                                                                                                                                     |
+| `InjectToken`                                                 | type | `string \| OptionalToken` — one entry in an `@Inject(...)` list                                                                                                                                                   |
+| `OptionalToken`                                               | type | A token wrapped by `Optional(...)`, marking that argument absent-tolerant                                                                                                                                         |
+| `SetuClassDecorator`                                          | type | A standard class decorator that records metadata and leaves the class unchanged                                                                                                                                   |
+| `SetuMethodDecorator`                                         | type | A standard method decorator that records metadata and leaves the method unchanged                                                                                                                                 |
+| `SetuClassOrMethodDecorator`                                  | type | A standard decorator valid in either position, discriminating on `context.kind`                                                                                                                                   |
+| `MiddlewareLike`                                              | type | `MiddlewareFunction \| (new () => IMiddleware)` — accepted by pipeline decorators                                                                                                                                 |
+| `CustomParameterResolver`                                     | type | `(ctx, metadata?) => unknown \| Promise<unknown>`                                                                                                                                                                 |
+| `ParameterMetadata`                                           | type | Parameter metadata captured by a `@Params(...)` source                                                                                                                                                            |
+| `ParameterType`                                               | type | `'body' \| 'query' \| 'param' \| 'header' \| 'cookie' \| 'custom'`                                                                                                                                                |
+| `DiscoveryOptions`                                            | type | Config for `discoverControllers()` (`path`, `extensions?`, `exclude?`)                                                                                                                                            |
+| `DiscoveryResult`                                             | type | Result of discovery (`controllers`, `services`, `errors`)                                                                                                                                                         |
+| `ModuleImporter`                                              | type | `(specifier: string) => Promise<unknown>` — injectable module loader                                                                                                                                              |
 
 Contract notes:
 
@@ -15772,6 +15830,12 @@ schema that is both reused (so it becomes that component) and enclosed in an inl
 `SdkOpenApiRequestBody`, `SdkOpenApiResponse`, and `SdkOpenApiSchema` are the structural OpenAPI 3.1
 subset accepted by the generator. They are intentionally different from the openapi-plugin types
 (which have different shapes) and take the `SdkOpenApi*` prefix to avoid a barrel collision.
+
+`SdkOpenApiOperation.deprecated?: boolean` (since 0.13.0) emits `/** @deprecated */` above the
+generated interface member and a method JSDoc containing the escaped operation id and `@deprecated`,
+only when true. TypeScript then flags a call such as `api.oldOp()` through the factory's returned
+interface. False and omitted fields preserve generated bytes. An operation absent from the input
+document has no generated method.
 
 ---
 

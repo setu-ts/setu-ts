@@ -151,6 +151,44 @@ throw `TypeError` at construction. `SwaggerUiOptions.assets` selects the same mo
 The remaining options come from `OpenApiGeneratorOptions` (title, version, servers,
 `securitySchemes`, and the rest of the document metadata).
 
+### Document metadata
+
+`OpenApiPlugin`, `OpenApiService` and `OpenApiGenerator` accept the same optional metadata:
+
+| Option           | Shape                                                 | Emitted field            |
+| ---------------- | ----------------------------------------------------- | ------------------------ |
+| `contact`        | `{ name?: string; url?: string; email?: string }`     | `info.contact`           |
+| `license`        | `{ name: string; identifier?: string; url?: string }` | `info.license`           |
+| `termsOfService` | `string`                                              | `info.termsOfService`    |
+| `tags`           | `readonly OpenApiTag[]`                               | top-level `tags`         |
+| `externalDocs`   | `OpenApiExternalDocs`                                 | top-level `externalDocs` |
+
+`OpenApiExternalDocs` is `{ readonly url: string; readonly description?: string }`. `OpenApiTag` is
+`{ readonly name: string; readonly description?: string; readonly externalDocs?: OpenApiExternalDocs }`.
+Tag names must be unique within this list; route tags may use names absent from it. An empty list is
+omitted. Metadata objects are copied with only defined keys; no URL or email format validation is
+performed. Fields that are absent produce no new document keys.
+
+OpenAPI 3.1 makes `license.identifier` and `license.url` mutually exclusive. Supplying both throws
+`OpenApiDocumentOptionsError` with `reason: 'license-identifier-and-url'`. Repeating a document tag
+name throws the same class with `reason: 'duplicate-tag'` and a message naming the tag. Both are
+refused during `OpenApiPlugin` registration (so `app.start()` rejects before any spec request), and
+at construction for direct `OpenApiService` and `OpenApiGenerator` use.
+
+### Deprecation and per-route exclusion
+
+Set `schema: { deprecated: true }` on a route or `@ApiOperation({ deprecated: true })` on a
+controller method to emit the operation's `deprecated: true`. The generated SDK client marks its
+interface member and method `@deprecated`, so editors flag calls. False and absent flags leave the
+document and generated client unchanged. Deprecation is documentation only and adds no `Deprecation`
+or `Sunset` response headers.
+
+Set `schema: { excludeFromDocument: true }` or `@ApiOperation({ excludeFromDocument: true })` to
+omit just that operation: a hidden `DELETE /users/:id` can coexist with a documented `GET` on the
+same path. A hidden route does not claim an operation id, so its id can duplicate a visible one. It
+stays registered, served, listed by `router.listRoutes()`, and discoverable as an MCP tool when
+marked as one. Hiding a route does not enforce access control.
+
 `exclude` matches the **fully-resolved** router pattern — router-style (`/todos/:id`, not
 `/todos/{id}`) and including any `router.group()` prefix, so a route registered as `get('/metrics')`
 inside `group('/internal', …)` is matched only by `'/internal/metrics'`. An entry matching no route
@@ -243,10 +281,10 @@ Declared ids are reserved before derived ones, regardless of registration order.
 `get-users` becomes `get-users-2` if another included route declares `get-users`. A blank id (empty
 or whitespace-only) or duplicate declared id throws exported `OperationIdError` with
 `reason: 'blank' | 'duplicate'` at `app.start()`; direct `OpenApiGenerator.generate()` calls throw
-the same error. Its message names the id and routes as `METHOD path`. Excluded paths and owners
-neither claim nor collide. A route added after bootstrap is validated when the document is first
-built; invalid declarations then produce a request-time `500`. The startup scan does not build or
-cache the document.
+the same error. Its message names the id and routes as `METHOD path`. Excluded routes, paths and
+owners neither claim nor collide. A route added after bootstrap is validated when the document is
+first built; invalid declarations then produce a request-time `500`. The startup scan does not build
+or cache the document.
 
 Distinct ids can still sanitize to the same SDK method: declared `getUsers` beside undeclared
 `GET /users` (derived `get-users`) is valid OpenAPI, but `@setu-ts/sdk` refuses it with
@@ -329,29 +367,32 @@ and the `@ApiTags`/`@ApiOperation`/`@ApiResponse` decorators from
 
 ## Exports
 
-| Export                    | Kind      |
-| ------------------------- | --------- |
-| `OpenApiPlugin`           | function  |
-| `swaggerUiHtml`           | function  |
-| `zodToOpenApi`            | function  |
-| `OpenApiGenerator`        | class     |
-| `OpenApiService`          | class     |
-| `OperationIdError`        | class     |
-| `ZodToOpenApi`            | class     |
-| `IOpenApiService`         | interface |
-| `OpenApiDocument`         | interface |
-| `OpenApiGeneratorOptions` | interface |
-| `OpenApiOperation`        | interface |
-| `OpenApiParameter`        | interface |
-| `OpenApiPluginOptions`    | interface |
-| `OpenApiRequestBody`      | interface |
-| `OpenApiResponse`         | interface |
-| `OpenApiSchemaObject`     | interface |
-| `OpenApiServiceOptions`   | interface |
-| `SwaggerUiOptions`        | interface |
-| `SchemaIo`                | type      |
-| `SchemaNodeHook`          | type      |
-| `SwaggerOptions`          | type      |
+| Export                        | Kind      |
+| ----------------------------- | --------- |
+| `OpenApiPlugin`               | function  |
+| `swaggerUiHtml`               | function  |
+| `zodToOpenApi`                | function  |
+| `OpenApiDocumentOptionsError` | class     |
+| `OpenApiGenerator`            | class     |
+| `OpenApiService`              | class     |
+| `OperationIdError`            | class     |
+| `ZodToOpenApi`                | class     |
+| `IOpenApiService`             | interface |
+| `OpenApiDocument`             | interface |
+| `OpenApiExternalDocs`         | interface |
+| `OpenApiGeneratorOptions`     | interface |
+| `OpenApiOperation`            | interface |
+| `OpenApiParameter`            | interface |
+| `OpenApiPluginOptions`        | interface |
+| `OpenApiRequestBody`          | interface |
+| `OpenApiResponse`             | interface |
+| `OpenApiSchemaObject`         | interface |
+| `OpenApiServiceOptions`       | interface |
+| `OpenApiTag`                  | interface |
+| `SwaggerUiOptions`            | interface |
+| `SchemaIo`                    | type      |
+| `SchemaNodeHook`              | type      |
+| `SwaggerOptions`              | type      |
 
 Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.

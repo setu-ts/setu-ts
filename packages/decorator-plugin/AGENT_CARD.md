@@ -29,6 +29,11 @@ Register a config provider for that token.
 
 ## Behaviour the types do not show
 
+- `@ApiOperation({ deprecated: true })` marks the OpenAPI operation and generated SDK members
+  deprecated. `excludeFromDocument: true` omits only the operation; the route stays served,
+  router-listed and discoverable as a marked MCP tool. Either flag can be the only metadata; false
+  and omission have no effect. Neither changes access control or response headers.
+
 - Decorators only capture metadata; routes become active when the plugin registers their classes.
 - These are standard decorators: `@Params(...)` goes on the method with one source per argument.
   Constructor injection uses class-level `@Inject(...)`; a controller is a singleton, so it takes

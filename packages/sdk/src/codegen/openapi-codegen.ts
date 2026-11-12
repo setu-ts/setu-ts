@@ -1304,6 +1304,7 @@ export function generateOpenApiClient(
   // them not to edit it.
   L(`export interface ${apiTypeName} {`);
   for (const shape of shapes) {
+    if (shape.entry.operation.deprecated === true) L(`${INDENT}/** @deprecated */`);
     const params = shape.pathParams.map((p) => `${p.name}: ${p.type}`);
     if (shape.hasArgs) {
       params.push(`opts${shape.argsRequired ? '' : '?'}: ${shape.argsTypeName}`);
@@ -1333,7 +1334,14 @@ export function generateOpenApiClient(
     const optsRef = shape.argsRequired ? 'opts' : 'opts?';
 
     if (shape !== shapes[0]) L('');
-    L(`${i1}/** ${escapeBlockComment(entry.operationId)} */`);
+    if (entry.operation.deprecated === true) {
+      L(`${i1}/**`);
+      L(`${i1} * ${escapeBlockComment(entry.operationId)}`);
+      L(`${i1} * @deprecated`);
+      L(`${i1} */`);
+    } else {
+      L(`${i1}/** ${escapeBlockComment(entry.operationId)} */`);
+    }
 
     const paramList = shape.pathParams.map((p) => `${p.name}: ${p.type}`);
     if (shape.hasArgs) {

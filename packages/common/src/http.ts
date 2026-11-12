@@ -564,6 +564,19 @@ export interface RouteSchema {
    */
   readonly description?: string;
   /**
+   * Marks the OpenAPI operation deprecated when true. Documentation only;
+   * does not change route handling or emit Deprecation/Sunset headers.
+   * @since 0.13.0
+   */
+  readonly deprecated?: boolean;
+  /**
+   * Omits this operation from the OpenAPI document when true. The route stays
+   * registered, served and listed by the router, and remains an MCP tool when
+   * marked as one. This flag does not enforce access control.
+   * @since 0.13.0
+   */
+  readonly excludeFromDocument?: boolean;
+  /**
    * OpenAPI security requirements for this operation, overriding any
    * document-level default. Each entry names a scheme declared in the
    * document's `components.securitySchemes` and lists the scopes it needs

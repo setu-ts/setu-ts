@@ -1,4 +1,6 @@
 import * as nodeFsSync from 'node:fs';
+import { resolve } from 'node:path';
+import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 import { generateOpenApiClient, sanitizeIdentifier } from '../../src/codegen/openapi-codegen.ts';
 import { OpenApiCodegenError } from '../../src/errors.ts';
@@ -64,6 +66,139 @@ function genDoc(schema: SdkOpenApiSchema): SdkOpenApiDocument {
     },
   });
 }
+
+describe('deprecated OpenAPI operations', () => {
+  const doc = (deprecated?: boolean): SdkOpenApiDocument =>
+    makeDoc({
+      '/old': {
+        get: { operationId: 'oldOp', ...(deprecated !== undefined ? { deprecated } : {}) },
+      },
+      '/new': {
+        get: { operationId: 'newOp', ...(deprecated !== undefined ? { deprecated: false } : {}) },
+      },
+    });
+
+  it('preserves the pre-change client bytes for absent and false flags', () => {
+    const source = generateOpenApiClient(doc());
+    expect(generateOpenApiClient(doc(false))).toBe(source);
+    expect(source).toMatchInlineSnapshot(`
+      "/**
+       * Auto-generated SDK client. Do not edit manually.
+       */
+
+      import type { ClientResponse, IHttpClient, OperationRequestOptions } from '@setu-ts/sdk';
+
+      export interface Api {
+        oldOp(request?: OperationRequestOptions): Promise<ClientResponse<void>>;
+        newOp(request?: OperationRequestOptions): Promise<ClientResponse<void>>;
+      }
+
+      export function createApi(client: IHttpClient): Api {
+        /** oldOp */
+        function oldOp(request?: OperationRequestOptions): Promise<ClientResponse<void>> {
+          return client.request<void>({
+            method: 'GET',
+            path: 'old',
+            ...(request?.idempotencyKey === undefined ? {} : { idempotencyKey: request.idempotencyKey }),
+            ...(request?.signal === undefined ? {} : { signal: request.signal }),
+          });
+        }
+
+        /** newOp */
+        function newOp(request?: OperationRequestOptions): Promise<ClientResponse<void>> {
+          return client.request<void>({
+            method: 'GET',
+            path: 'new',
+            ...(request?.idempotencyKey === undefined ? {} : { idempotencyKey: request.idempotencyKey }),
+            ...(request?.signal === undefined ? {} : { signal: request.signal }),
+          });
+        }
+
+        return {
+          oldOp,
+          newOp,
+        };
+      }
+      "
+    `);
+  });
+
+  it('marks only the deprecated interface member and method', () => {
+    const source = generateOpenApiClient(doc(true));
+    expect(source).toContain('  /** @deprecated */\n  oldOp(');
+    expect(source).toContain('  /**\n   * oldOp\n   * @deprecated\n   */\n  function oldOp(');
+    expect(source.match(/@deprecated/g)).toHaveLength(2);
+    expect(source).toContain('  /** newOp */\n  function newOp(');
+    expect(source).not.toContain('/** @deprecated */\n  newOp(');
+  });
+
+  it('escapes document text in deprecated method JSDoc', () => {
+    const source = generateOpenApiClient(
+      makeDoc({ '/old': { get: makeOp('old*/\noperation', { deprecated: true }) } }),
+    );
+    expect(source).toContain('   * old*\\/ operation\n   * @deprecated\n   */');
+    expect(source).not.toContain('old*/ operation');
+  });
+
+  it('reportsDeprecated at the generated interface call site only for oldOp', () => {
+    const generatedPath = resolve('.tmp/m137a-api.ts');
+    const callPath = resolve('.tmp/m137a-caller.ts');
+    const caller =
+      "import { createApi } from './m137a-api.ts';\nimport type { IHttpClient } from '@setu-ts/sdk';\ndeclare const client: IHttpClient;\nconst api = createApi(client);\napi.oldOp();\napi.newOp();\n";
+    const files = new Map([
+      [generatedPath, generateOpenApiClient(doc(true))],
+      [callPath, caller],
+    ]);
+    const options: ts.CompilerOptions = {
+      target: ts.ScriptTarget.ESNext,
+      module: ts.ModuleKind.NodeNext,
+      moduleResolution: ts.ModuleResolutionKind.NodeNext,
+      strict: true,
+      noEmit: true,
+      allowImportingTsExtensions: true,
+      skipLibCheck: true,
+      paths: {
+        '@setu-ts/sdk': [resolve('packages/sdk/src/index.ts')],
+        '@setu-ts/common': [resolve('packages/common/src/index.ts')],
+      },
+    };
+    const host: ts.LanguageServiceHost = {
+      getCompilationSettings: () => options,
+      getScriptFileNames: () => [...files.keys()],
+      getScriptVersion: () => '0',
+      getScriptSnapshot: (name) => {
+        const source = files.get(name) ?? ts.sys.readFile(name);
+        return source === undefined ? undefined : ts.ScriptSnapshot.fromString(source);
+      },
+      getCurrentDirectory: () => process.cwd(),
+      getDefaultLibFileName: ts.getDefaultLibFilePath,
+      fileExists: (name) => files.has(name) || ts.sys.fileExists(name),
+      readFile: (name) => files.get(name) ?? ts.sys.readFile(name),
+      readDirectory: ts.sys.readDirectory,
+    };
+    const service = ts.createLanguageService(host);
+    try {
+      for (const name of files.keys()) {
+        expect(service.getSyntacticDiagnostics(name)).toEqual([]);
+        expect(
+          service
+            .getSemanticDiagnostics(name)
+            .map((d) => ts.flattenDiagnosticMessageText(d.messageText, '\n')),
+        ).toEqual([]);
+      }
+      const deprecated = service
+        .getSuggestionDiagnostics(callPath)
+        .filter((diagnostic) => diagnostic.reportsDeprecated === true);
+      expect(deprecated).toHaveLength(1);
+      // 6387: "The signature … is deprecated" — a call resolves to the deprecated method signature.
+      expect(deprecated[0]?.code).toBe(6387);
+      const diagnostic = deprecated[0]!;
+      expect(caller.slice(diagnostic.start, diagnostic.start! + diagnostic.length!)).toBe('oldOp');
+    } finally {
+      service.dispose();
+    }
+  });
+});
 
 describe('declared OpenAPI operation ids', () => {
   it('names the generated client method from a declared id', () => {
