@@ -1218,8 +1218,10 @@ source natively; Workers uses Wrangler. The command never boots the application.
 
 Worker-pool tasks use a literal `new URL('./src/tasks/hash.task.ts', import.meta.url)`. `setu build`
 emits `dist/src/tasks/hash.task.js` and rewrites the URL relative to each containing bundle,
-including the migration runner. Dynamic task paths are refused with their file and line; `--dry-run`
-lists task outputs. Keep the `.task.ts` source suffix in development.
+including the migration runner. A non-literal reference naming `.task.ts` in the call is refused
+with the file and line; a path held in a variable is not detected (it builds without the task), so
+keep the literal in the call. `--dry-run` lists task outputs. Keep the `.task.ts` source suffix in
+development.
 
 Generated Node `build` runs `tsc --noEmit && setu build`; full-stack prefixes `react-router build`.
 `npm start` runs `node --enable-source-maps dist/main.js` after building. `start:dev` runs

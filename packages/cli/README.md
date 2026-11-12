@@ -878,5 +878,6 @@ route is marked with `mcpTool()` or `@McpTool()`.
 
 Worker tasks named `*.task.ts` referenced by a literal
 `new URL('./src/tasks/hash.task.ts', import.meta.url)` are built by `setu build` and their URLs
-relocated for each output, including migrations. Dynamic task paths fail with the file and line;
-`--dry-run` lists task outputs.
+relocated for each output, including migrations. A non-literal reference naming `.task.ts` in the
+call is refused with the file and line; a path held in a variable is not detected (it builds without
+the task), so keep the literal in the call. `--dry-run` lists task outputs.

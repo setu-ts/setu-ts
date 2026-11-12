@@ -26,5 +26,6 @@ walkthrough.
 
 For a Node production build, `setu build` bundles the literal
 `new URL('./spin.task.ts', import.meta.url)` and `fill.task.ts` targets into `dist/src/tasks/` and
-relocates their URLs for each output. Keep source specifiers unchanged for development. Dynamic task
-paths are refused; Deno and Bun run source.
+relocates their URLs for each output. Keep source specifiers unchanged for development. A
+non-literal reference naming `.task.ts` in the call is refused, but a path held in a variable is not
+detected, so keep the literal in the call. Deno and Bun run source.
