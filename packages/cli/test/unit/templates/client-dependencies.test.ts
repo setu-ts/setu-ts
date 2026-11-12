@@ -14,7 +14,7 @@ import { resolveHost } from '../../../src/templates/project-files.ts';
 import { getTemplate } from '../../../src/templates/registry.ts';
 import { SWAGGER_UI_DIST_VERSION } from '../../../src/templates/swagger-version.ts';
 import { readFile } from 'node:fs/promises';
-import { BACKEND_PEERS } from '../../../src/commands/add.ts';
+import { ADDABLE, BACKEND_PEERS } from '../../../src/commands/add.ts';
 
 describe('CLIENT_RANGES', () => {
   it('V12-27 backend peer ranges equal each owning plugin manifest', async () => {
@@ -23,6 +23,17 @@ describe('CLIENT_RANGES', () => {
         await readFile(new URL(`../../../../${pkg}/package.json`, import.meta.url), 'utf8'),
       ) as { peerDependencies: Record<string, string> };
       for (const peer of new Set(Object.values(backend.arms).flat()))
+        expect(CLIENT_RANGES[peer], `${pkg}: ${peer}`).toBe(manifest.peerDependencies[peer]);
+    }
+  });
+  it('graphql and grpc peer ranges equal each owning plugin manifest', async () => {
+    for (const pkg of ['graphql-plugin', 'grpc-plugin']) {
+      const manifest = JSON.parse(
+        await readFile(new URL(`../../../../${pkg}/package.json`, import.meta.url), 'utf8'),
+      ) as { peerDependencies: Record<string, string> };
+      const entry = [...ADDABLE.values()].find((addable) => addable.pkg === pkg);
+      expect(entry?.peers?.packages.length, pkg).toBeGreaterThan(0);
+      for (const peer of entry?.peers?.packages ?? [])
         expect(CLIENT_RANGES[peer], `${pkg}: ${peer}`).toBe(manifest.peerDependencies[peer]);
     }
   });

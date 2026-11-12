@@ -15,8 +15,16 @@ the kernel router.
 
 ## Installation
 
+In a Setu project, `setu add graphql` records the plugin and `graphql` together. By hand, install
+both — `graphql` is an optional peer, loaded on first use, that no package manager installs for you:
+
 ```bash
-deno add npm:graphql npm:@setu-ts/graphql-plugin
+# npm
+npm i @setu-ts/graphql-plugin graphql@^16
+# Bun
+bun add @setu-ts/graphql-plugin graphql@^16
+# Deno
+deno add npm:@setu-ts/graphql-plugin npm:graphql@^16
 ```
 
 ## Usage
