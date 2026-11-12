@@ -126,8 +126,10 @@ describe('deprecated OpenAPI operations', () => {
   it('marks only the deprecated interface member and method', () => {
     const source = generateOpenApiClient(doc(true));
     expect(source).toContain('  /** @deprecated */\n  oldOp(');
-    expect(source).toContain('  /**\n   * oldOp\n   * @deprecated\n   */\n  function oldOp(');
-    expect(source.match(/@deprecated/g)).toHaveLength(2);
+    expect(source).toContain(
+      '  /**\n   * oldOp\n   * Deprecated operation.\n   */\n  function oldOp(',
+    );
+    expect(source.match(/@deprecated/g)).toHaveLength(1);
     expect(source).toContain('  /** newOp */\n  function newOp(');
     expect(source).not.toContain('/** @deprecated */\n  newOp(');
   });
@@ -136,7 +138,7 @@ describe('deprecated OpenAPI operations', () => {
     const source = generateOpenApiClient(
       makeDoc({ '/old': { get: makeOp('old*/\noperation', { deprecated: true }) } }),
     );
-    expect(source).toContain('   * old*\\/ operation\n   * @deprecated\n   */');
+    expect(source).toContain('   * old*\\/ operation\n   * Deprecated operation.\n   */');
     expect(source).not.toContain('old*/ operation');
   });
 
@@ -190,6 +192,12 @@ describe('deprecated OpenAPI operations', () => {
         .getSuggestionDiagnostics(callPath)
         .filter((diagnostic) => diagnostic.reportsDeprecated === true);
       expect(deprecated).toHaveLength(1);
+      // The generated module never uses its own deprecated symbol (typescript-eslint no-deprecated).
+      expect(
+        service
+          .getSuggestionDiagnostics(generatedPath)
+          .filter((diagnostic) => diagnostic.reportsDeprecated === true),
+      ).toEqual([]);
       // 6387: "The signature … is deprecated" — a call resolves to the deprecated method signature.
       expect(deprecated[0]?.code).toBe(6387);
       const diagnostic = deprecated[0]!;

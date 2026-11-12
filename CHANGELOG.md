@@ -115,9 +115,10 @@ All notable changes to this project are documented here. The format follows
   `OpenApiDocumentOptionsError` refuses duplicate document tag names and a license carrying both
   `identifier` and `url` at startup or direct service/generator construction. `RouteSchema` and
   `ApiOperationConfig` gain `deprecated` and `excludeFromDocument`: generated clients mark
-  deprecated interface members and methods `@deprecated`, and a hidden operation neither claims an
-  id nor produces a client method. Hidden routes remain served, router-listed and discoverable as
-  marked MCP tools. Neither flag changes access control or adds response headers.
+  deprecated interface members `@deprecated` (the method JSDoc carries a plain sentence, so the file
+  stays clean under `no-deprecated`), and a hidden operation neither claims an id nor produces a
+  client method. Hidden routes remain served, router-listed and discoverable as marked MCP tools.
+  Neither flag changes access control or adds response headers.
 
 - **M139d (#582, `@setu-ts/cli`, V12-25).** `setu add` accepts several validated package names, with
   ordered progress and one install command.

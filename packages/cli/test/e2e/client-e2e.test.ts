@@ -79,8 +79,9 @@ it(
     const generated = await fs.readFile(`${project}/src/clientsdk/api.ts`, 'utf8');
     expect(generated).toMatch(/\/\*\* @deprecated \*\/\s+m129Probe\(/);
     expect(generated).toMatch(
-      /\/\*\*\s+\* m129Probe\s+\* @deprecated\s+\*\/\s+function m129Probe\(/,
+      /\/\*\*\s+\* m129Probe\s+\* Deprecated operation\.\s+\*\/\s+function m129Probe\(/,
     );
+    expect(generated.match(/@deprecated/g)).toHaveLength(1);
     expect(generated).not.toContain('m137aHidden');
     await script(project, 'client:check');
     await script(project, 'format');

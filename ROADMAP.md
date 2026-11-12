@@ -16760,7 +16760,7 @@ while `GET /users/:id` stays documented.
    top-level `tags`. OpenAPI 3.1 makes `license.identifier` and `license.url` mutually exclusive, so
    supplying both is refused at construction with a named error, never emitted.
 4. **Generated clients carry the deprecation.** `sdk`'s codegen writes `/** @deprecated */` on the
-   method of a deprecated operation, so an editor flags the call site.
+   generated interface member of a deprecated operation, so an editor flags the call site.
 
 **Out of scope:** RFC 9745 `Deprecation`/`Sunset` response headers (no adopter has asked; the field
 is documentation, not behaviour).

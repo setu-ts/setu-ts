@@ -72,7 +72,7 @@ export interface SdkOpenApiOperation {
   readonly summary?: string;
   readonly description?: string;
   readonly tags?: string[];
-  /** Marks the generated interface member and method deprecated when true. @since 0.13.0 */
+  /** Marks the generated interface member deprecated when true. @since 0.13.0 */
   readonly deprecated?: boolean;
   readonly parameters?: SdkOpenApiParameter[];
   readonly requestBody?: SdkOpenApiRequestBody;

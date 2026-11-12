@@ -35,8 +35,8 @@ export function watchUpdates(signal: AbortSignal): ISseClient {
 
 ## Behaviour the types do not show
 
-- A `deprecated: true` operation gets `@deprecated` on its generated interface member and method, so
-  editors flag the call site.
+- A `deprecated: true` operation gets `@deprecated` on its generated interface member, so editors
+  flag the call site.
 - `request` returns status, headers and parsed JSON data; data is `undefined` for `204` or an empty
   body. Non-2xx responses throw `HttpClientError`.
 - `retry.limit` counts total attempts, not extra retries; `delay` is milliseconds. Request

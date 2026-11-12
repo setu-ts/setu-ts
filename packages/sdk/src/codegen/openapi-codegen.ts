@@ -1337,7 +1337,10 @@ export function generateOpenApiClient(
     if (entry.operation.deprecated === true) {
       L(`${i1}/**`);
       L(`${i1} * ${escapeBlockComment(entry.operationId)}`);
-      L(`${i1} * @deprecated`);
+      // A plain sentence, not the tag: the factory returns this function, and a tag here would make
+      // the generated module use its own deprecated symbol (`no-deprecated` in strict lint presets).
+      // Callers are flagged through the `@deprecated` interface member above.
+      L(`${i1} * Deprecated operation.`);
       L(`${i1} */`);
     } else {
       L(`${i1}/** ${escapeBlockComment(entry.operationId)} */`);
