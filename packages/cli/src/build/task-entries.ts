@@ -19,65 +19,138 @@ interface ITaskReference {
   readonly target: string;
 }
 
-/**
- * For every `opener` in `text`, the index of the `closer` that balances it,
- * skipping string and template literals, so a `)` or `}` inside a string or a
- * nested call does not end a span early (CodeRabbit #582). One linear pass:
- * looking each span up again per head was quadratic on unclosed input. An
- * opener that never closes maps to the text's length.
- */
-function closingIndexes(text: string, opener: string, closer: string): Map<number, number> {
-  const closes = new Map<number, number>();
-  const open: number[] = [];
-  for (let at = 0; at < text.length; at++) {
-    const char = text[at]!;
-    if (char === "'" || char === '"' || char === '`') {
-      for (at++; at < text.length && text[at] !== char; at++) if (text[at] === '\\') at++;
-    } else if (char === opener) open.push(at);
-    else if (char === closer && open.length > 0) closes.set(open.pop()!, at);
-  }
-  for (const at of open) closes.set(at, text.length);
-  return closes;
+interface ICodeView {
+  /** The source with comments, regex bodies and template text blanked, same length. */
+  readonly code: string;
+  /** Quoted string literals, kept in `code`. */
+  readonly strings: readonly { readonly start: number; readonly end: number }[];
 }
 
 /**
- * Whether any `${…}` substitution in a template literal names a `.task.ts`
- * path. Braces are counted, so an object literal inside the substitution does
- * not end it early (CodeRabbit #582).
+ * Splits a module into what executes and what does not, in one linear pass
+ * (CodeRabbit #582: a regex pass per construct kept missing combinations).
+ * Comments, regex literal bodies and template text become spaces; quoted
+ * strings are kept and recorded; a template's `${…}` substitutions stay code,
+ * nested templates included. Offsets are unchanged, so a match in `code` is a
+ * match at the same offset in the source. A `/` is a regex after `(`, `,`, `=`,
+ * `:`, `[`, `!`, `&`, `|`, `?`, `{`, `}`, `;`, the start, or `return`/`typeof`/
+ * `default`; otherwise division.
  */
-function substitutionNamesTask(template: string): boolean {
-  // The body between the backticks: the literal's own delimiters are not strings in it.
-  const body = template.slice(1, -1);
-  const closes = closingIndexes(body, '{', '}');
-  for (let at = body.indexOf('${'); at !== -1; at = body.indexOf('${', at + 1)) {
-    const end = closes.get(at + 1) ?? body.length;
-    // Only a task REFERENCE: a `new URL(…)` or an `import` naming the path. A
-    // substitution that merely formats a string mentioning one is ordinary code.
-    const substitution = body.slice(at, end);
-    if (substitution.includes('.task.ts') && /\bnew\s+URL\s*\(|\bimport\b/.test(substitution))
-      return true;
+function codeView(source: string): ICodeView {
+  const code = source.split('');
+  const strings: { start: number; end: number }[] = [];
+  const blank = (from: number, to: number): void => {
+    for (let at = from; at < to; at++) if (code[at] !== '\n' && code[at] !== '\r') code[at] = ' ';
+  };
+  // Each open template substitution's brace depth; a template body resumes when it closes.
+  const substitutions: number[] = [];
+  let depth = 0;
+  let previous = '';
+  let at = 0;
+  const templateBody = (): void => {
+    // `at` is just past a backtick, or just past a substitution's closing `}`.
+    const start = at;
+    for (; at < source.length; at++) {
+      if (source[at] === '\\') at++;
+      else if (source[at] === '`') {
+        blank(start - 1, at + 1);
+        at++;
+        previous = 'value';
+        return;
+      } else if (source[at] === '$' && source[at + 1] === '{') {
+        blank(start - 1, at + 2);
+        at += 2;
+        substitutions.push(depth);
+        depth++;
+        previous = '(';
+        return;
+      }
+    }
+    blank(start - 1, source.length);
+  };
+  while (at < source.length) {
+    const char = source[at]!;
+    const next = source[at + 1];
+    if (char === '/' && next === '/') {
+      const end = source.indexOf('\n', at);
+      blank(at, end === -1 ? source.length : end);
+      at = end === -1 ? source.length : end;
+    } else if (char === '/' && next === '*') {
+      const end = source.indexOf('*/', at + 2);
+      blank(at, end === -1 ? source.length : end + 2);
+      at = end === -1 ? source.length : end + 2;
+    } else if (char === "'" || char === '"') {
+      const start = at;
+      for (at++; at < source.length && source[at] !== char && source[at] !== '\n'; at++)
+        if (source[at] === '\\') at++;
+      at++;
+      strings.push({ start, end: Math.min(at, source.length) });
+      previous = 'value';
+    } else if (char === '`') {
+      at++;
+      templateBody();
+    } else if (char === '}' && substitutions.length > 0 && depth - 1 === substitutions.at(-1)) {
+      substitutions.pop();
+      depth--;
+      at++;
+      templateBody();
+    } else if (
+      char === '/' &&
+      (previous === '' ||
+        '(,=:[!&|?{};'.includes(previous) ||
+        ['return', 'typeof', 'default'].includes(previous))
+    ) {
+      const start = at;
+      let inClass = false;
+      for (at++; at < source.length && source[at] !== '\n'; at++) {
+        if (source[at] === '\\') at++;
+        else if (source[at] === '[') inClass = true;
+        else if (source[at] === ']') inClass = false;
+        else if (source[at] === '/' && !inClass) break;
+      }
+      at++;
+      while (/[a-z]/.test(source[at] ?? '')) at++;
+      blank(start, Math.min(at, source.length));
+      previous = 'value';
+    } else if (/[A-Za-z_$]/.test(char)) {
+      const start = at;
+      while (/[\w$]/.test(source[at] ?? '')) at++;
+      previous = source.slice(start, at);
+    } else {
+      if (char === '{') depth++;
+      else if (char === '}') depth--;
+      if (!/\s/.test(char)) previous = /[0-9)\]]/.test(char) ? 'value' : char;
+      at++;
+    }
   }
-  return false;
+  return { code: code.join(''), strings };
+}
+
+/**
+ * For every `opener` in `code`, the index of the `closer` that balances it,
+ * skipping quoted strings, in one linear pass (per-head scanning was quadratic
+ * on unclosed input). An opener that never closes maps to the length.
+ */
+function closingIndexes(code: string, opener: string, closer: string): Map<number, number> {
+  const closes = new Map<number, number>();
+  const open: number[] = [];
+  for (let at = 0; at < code.length; at++) {
+    const char = code[at]!;
+    if (char === "'" || char === '"') {
+      for (at++; at < code.length && code[at] !== char && code[at] !== '\n'; at++)
+        if (code[at] === '\\') at++;
+    } else if (char === opener) open.push(at);
+    else if (char === closer && open.length > 0) closes.set(open.pop()!, at);
+  }
+  for (const at of open) closes.set(at, code.length);
+  return closes;
 }
 
 /** Finds supported literal worker URLs; refuses other task references by location. */
 export function taskReferences(source: string, file: string): readonly ITaskReference[] {
-  // Consume strings before comments so a URL in a string cannot begin a comment.
-  const strings: { readonly start: number; readonly end: number }[] = [];
-  const visible = source
-    .replace(
-      /(['"])(?:\\.|(?!\1)[^\\])*?\1|`(?:\\.|[^`\\])*`|\/\/[^\r\n]*|\/\*[\s\S]*?\*\/|(?<=(?:^|[=(,:;[!&|?{}]|\breturn|\bdefault)\s*)\/(?:\\.|\[(?:\\.|[^\]\\])*\]|[^/\\\r\n[])+\/[dgimsuvy]*/g,
-      (text: string, quote: string | undefined, offset: number) => {
-        if (quote !== undefined) strings.push({ start: offset, end: offset + text.length });
-        // A `${…}` substitution is code, so a task named inside one would be
-        // blanked with the template text and silently left unbuilt: refuse it.
-        if (text.startsWith('`') && substitutionNamesTask(text))
-          throw new Error(
-            `${file}:${source.slice(0, offset).split('\n').length}: worker task references must use new URL('<relative>.task.ts', import.meta.url) outside a template literal.`,
-          );
-        return quote === undefined ? text.replace(/[^\r\n]/g, ' ') : text;
-      },
-    )
+  const view = codeView(source);
+  const strings = view.strings;
+  const visible = view.code
     // Bounded to a type-only head, so a file without semicolons stays linear (audit F3).
     .replace(
       /\b(?:import|export)\s+type\s*(?:\{[^}]*\}|[\w$*,\s]+?)\s*\bfrom\s*(['"])[^'"]+\1\s*;?/g,
@@ -160,23 +233,13 @@ async function localModule(fs: IFileSystem, absolute: string): Promise<string | 
 }
 
 /**
- * The specifiers a module imports, requires or re-exports, read only from code:
- * comments are blanked and a match that starts inside a string is skipped, so
- * a commented-out `require('./legacy.js')` or a quoted example is not followed
+ * The specifiers a module imports, requires or re-exports, read only from its
+ * code view: a commented-out `require('./legacy.js')`, a quoted example or a
+ * regex is not followed, while a `require` in a template substitution is
  * (CodeRabbit #582). The specifier strings themselves are kept.
  */
 function moduleSpecifiers(source: string): readonly string[] {
-  const strings: { readonly start: number; readonly end: number }[] = [];
-  const code = source.replace(
-    /(['"])(?:\\.|(?!\1)[^\\])*?\1|`(?:\\.|[^`\\])*`|\/\/[^\r\n]*|\/\*[\s\S]*?\*\//g,
-    (text: string, quote: string | undefined, offset: number) => {
-      if (quote !== undefined) {
-        strings.push({ start: offset, end: offset + text.length });
-        return text;
-      }
-      return text.replace(/[^\r\n]/g, ' ');
-    },
-  );
+  const { code, strings } = codeView(source);
   const found: string[] = [];
   for (const match of code.matchAll(
     // `require('./x')` too: esbuild bundles a literal require target.

@@ -318,23 +318,50 @@ describe('worker task entries', () => {
         source,
       ).toEqual(['/app/a.task.ts']);
   });
-  it('refuses a task URL inside a template substitution, not in template text (CodeRabbit #582)', () => {
-    expect(() =>
-      taskReferences(
-        "const href = `${new URL('./hash.task.ts', import.meta.url).href}`;",
-        '/app/main.ts',
-      ),
-    ).toThrow('outside a template literal');
-    // Braces inside the substitution do not end it early (CodeRabbit #582).
-    expect(() =>
-      taskReferences(
-        "const href = `${({ ready: true }) && new URL('./hash.task.ts', import.meta.url).href}`;",
-        '/app/main.ts',
-      ),
-    ).toThrow('outside a template literal');
-    expect(taskReferences('const msg = `${count} wrote ./hash.task.ts`;', '/app/main.ts')).toEqual(
-      [],
-    );
+  it('finds a task URL inside a template substitution as code, not template text (CodeRabbit #582)', () => {
+    // A substitution is code, so its literal is an ordinary reference: built and rewritten.
+    for (const source of [
+      "const href = `${new URL('./hash.task.ts', import.meta.url).href}`;",
+      "const href = `${({ ready: true }) && new URL('./hash.task.ts', import.meta.url).href}`;",
+      "const href = `${'}' + new URL('./hash.task.ts', import.meta.url).href}`;",
+      "const href = `a ${`b ${new URL('./hash.task.ts', import.meta.url)}`} c`;",
+    ])
+      expect(
+        taskReferences(source, '/app/main.ts').map((ref) => ref.target),
+        source,
+      ).toEqual(['/app/hash.task.ts']);
+    for (const source of [
+      'const msg = `${count} wrote ./hash.task.ts`;',
+      "const message = `Task: ${name.replace('.task.ts', '')}`;",
+      "const message = `Task: ${new URL('/status', import.meta.url).pathname + name.replace('.task.ts', '')}`;",
+    ])
+      expect(taskReferences(source, '/app/main.ts'), source).toEqual([]);
+  });
+  it('rewrites a task URL inside a template substitution in the bundle', async () => {
+    const fs = createFakeFs({
+      '/app/main.ts': "console.log(`${new URL('./src/a.task.ts', import.meta.url).href}`);",
+      '/app/src/a.task.ts': '',
+    });
+    const result = await build({
+      absWorkingDir: '/app',
+      entryPoints: ['main.ts'],
+      bundle: true,
+      format: 'esm',
+      write: false,
+      plugins: [taskRewritePlugin(fs, '/app', 'main.ts', ['src/a.task.ts']), resolveFakeFiles(fs)],
+    });
+    expect(result.outputFiles[0]?.text).toContain('new URL("./src/a.task.js"');
+  });
+  it('follows require() in a substitution, and past a quote inside a regex (CodeRabbit #582)', async () => {
+    const fs = createFakeFs({
+      '/app/main.ts':
+        "const re = /['\"]/; require('./worker.js');\nconst label = `${require('./other.js')}`;",
+      '/app/worker.ts': "new URL('./a.task.ts', import.meta.url);",
+      '/app/other.ts': "new URL('./b.task.ts', import.meta.url);",
+      '/app/a.task.ts': '',
+      '/app/b.task.ts': '',
+    });
+    expect(await discoverTasks(fs, '/app', ['main.ts'])).toEqual(['a.task.ts', 'b.task.ts']);
   });
   it('follows a literal require() of a local module (CodeRabbit #582)', async () => {
     const fs = createFakeFs({
@@ -362,7 +389,6 @@ describe('worker task entries', () => {
   });
   it('counts a } or ) inside a string, and a nested call, correctly (CodeRabbit #582)', () => {
     for (const source of [
-      "const href = `${'}' + new URL('./hash.task.ts', import.meta.url).href}`;",
       "const url = new URL(getBase() + './hash.task.ts', import.meta.url);",
       "const url = new URL(join(')', './hash.task.ts'), import.meta.url);",
       "const href = import.meta.resolve(prefix() + './hash.task.ts');",
@@ -383,5 +409,32 @@ describe('worker task entries', () => {
     taskReferences('new URL('.repeat(40_000), '/app/main.ts');
     taskReferences(`\`${'${'.repeat(40_000)}\``, '/app/main.ts');
     expect(performance.now() - started).toBeLessThan(1_000);
+  });
+  it('reads the edges of the code view: unterminated input, regex classes and flags, division', () => {
+    for (const source of [
+      'const t = `never closed',
+      'const t = `${a',
+      '/* never closed',
+      "const s = 'never closed\nnew URL('./a.task.ts', import.meta.url);",
+      'const re = /[/]x/giu; const d = a / b / c; const e = (x) / 2; const f = [1] / 2;',
+      'if (a) { b(); }\n/regex/.test(c);',
+      'return /x/;',
+      'const s = "escaped \\" quote"; const t = `esc \\` tick`;',
+    ])
+      expect(() => taskReferences(source, '/app/main.ts'), source).not.toThrow();
+    // A literal after a regex holding a slash in a class is still found.
+    expect(
+      taskReferences(
+        "const re = /[/]/; new URL('./a.task.ts', import.meta.url);",
+        '/app/main.ts',
+      ).map((ref) => ref.target),
+    ).toEqual(['/app/a.task.ts']);
+    // A string broken by a newline ends there; the next line is code again.
+    expect(
+      taskReferences(
+        "const s = 'broken\nnew URL('./a.task.ts', import.meta.url);",
+        '/app/main.ts',
+      ).map((ref) => ref.target),
+    ).toEqual(['/app/a.task.ts']);
   });
 });
