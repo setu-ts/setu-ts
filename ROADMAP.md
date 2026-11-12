@@ -16992,7 +16992,7 @@ plan names its breaks, per the versioning policy above.
 | **M139d** | fix    | the CLI on a full-stack project: `add`, `build`, `check`, the brief | V12-42, V12-47, V12-46, V8-14, X91-1, V12-1, V12-12, V12-2, V12-3, V12-25, V12-26, V12-27, V12-28, V12-30, V12-33, X91-9, V12-22, V12-23, V12-16 (CLI half), V12-31, V12-32, V12-24, X93-3, V12-43, V12-44, V12-45, V12-48 | `cli`, `create`, `kernel`                                                                                                                           |
 | **M139e** | docs   | documentation                                                       | V12-5, V12-6, V12-7, V12-8, V12-13, V12-14 (= V12-29), V12-15, V12-16 (card half), V12-17, V12-38, X93-4, X93-5, V9-29 remainder                                                                                           | READMEs, agent cards, `docs/`, CHANGELOG, website                                                                                                   |
 | **M139f** | fix    | health and failure signals that mislead the operator                | X10-3, V8-3, X3-3, X88-9, V12-50, V12-49                                                                                                                                                                                   | `service-discovery-plugin`, `database-plugin`, `realtime-backplane-plugin`, `queue-plugin`, `scheduler-plugin`                                      |
-| **M139g** | design | capability lookups typed by their token                             | V12-41                                                                                                                                                                                                                     | `common`, `kernel`                                                                                                                                  |
+| **M139g** | design | capability lookups typed by their token                             | V12-41, V12-58, V12-59, V12-61                                                                                                                                                                                             | `common`, `kernel`, `testing`, `react-router-plugin`, `cli`, four augmenting plugins                                                                |
 
 **Sequence.** The regression run is done. M139d's two regressions (V12-42, V12-47) go first, as
 V11-10 led M131. M139a next: it is the only letter that crosses a trust boundary, and it is
@@ -17188,7 +17188,9 @@ thing.
 
 ### Milestone 139g: Capability Lookups Typed by Their Token
 
-**Package(s):** `common`, `kernel`. Targets `0.13.0` with M139b: it changes the committed
+**Package(s):** `common`, `kernel`, `testing`, `react-router-plugin`, `cli`, and the four plugins
+that bind their interface by module augmentation (`database-plugin`, `cloudflare-plugin`,
+`static-plugin`, `messaging-plugin`). Targets `0.13.0` with M139b: it changes the committed
 `IServiceRegistry` contract.
 
 - **V12-41** — `services.get<T>(CAPABILITIES.X)` takes its type from the caller, so a wrong pairing
@@ -17196,6 +17198,12 @@ thing.
   capability-to-interface map in `common`, open to module augmentation for plugin tokens, and
   `get`/`getAll` overloads that infer the type from a `CAPABILITIES` value or a `ServiceToken<T>`;
   the explicit type argument stays for third-party string tokens.
+- **V12-58** — the workspace `AGENTS.md` copies a credentialed `brokerUrl` unmasked; mask its
+  userinfo there and in the root `README.md` transport section.
+- **V12-59** — `setu check` says nothing about an installed provider that nothing registers; add the
+  `setu.W006 plugin-unregistered` warning.
+- **V12-61** — the full-stack template cannot set `ipSecurity.trustForwardedHost` without editing
+  generated code; add a validated `TRUST_FORWARDED_HOST` switch.
 
 ---
 
@@ -17477,4 +17485,4 @@ thing.
 | 139d      | ✅     | cli — the CLI on a full-stack project: `add`, `build`, `check`, the brief                                                                                                                                                                                                                 |
 | 139e      | ⬜     | docs — documentation                                                                                                                                                                                                                                                                      |
 | 139f      | ✅     | service-discovery + database + realtime-backplane + queue + scheduler — health and failure signals that mislead the operator                                                                                                                                                              |
-| 139g      | ⬜     | common + kernel — capability lookups typed by their token (0.13.0)                                                                                                                                                                                                                        |
+| 139g      | ✅     | common + kernel + testing + react-router + cli — capability lookups typed by their token (0.13.0); V12-58, V12-59, V12-61                                                                                                                                                                 |

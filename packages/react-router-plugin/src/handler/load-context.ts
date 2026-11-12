@@ -9,7 +9,16 @@ import { resolveRequestService } from '@setu-ts/common';
 import type { IRequestContext, RouterLoadContext } from '../interfaces/index.ts';
 import { servicesContext, userContext } from './context-keys.ts';
 import { serviceResolverContext } from './get-service.ts';
-import type { ServiceResolver } from './get-service.ts';
+import type {
+  CapabilityToken,
+  CapabilityServices,
+  StandardCapabilityToken,
+  KeysServing,
+  UnboundCapability,
+  UnboundToken,
+  ServiceToken,
+  RequestServiceToken,
+} from '@setu-ts/common';
 
 /**
  * Populates the per-request React Router context with the plugin's defaults.
@@ -27,7 +36,16 @@ import type { ServiceResolver } from './get-service.ts';
  */
 export function applyDefaultLoadContext(ctx: IRequestContext, context: RouterLoadContext): void {
   context.set(servicesContext, ctx.services);
-  const resolver: ServiceResolver = (token) => resolveRequestService(ctx, token);
+  function resolver<K extends keyof CapabilityServices>(
+    token: StandardCapabilityToken<K>,
+  ): CapabilityServices[K];
+  function resolver<T extends object>(token: StandardCapabilityToken<KeysServing<T>>): T;
+  function resolver<T extends object>(token: StandardCapabilityToken<UnboundCapability>): T;
+  function resolver<T extends object>(token: ServiceToken<T> | RequestServiceToken<T>): T;
+  function resolver<T extends object>(token: UnboundToken): T;
+  function resolver(token: CapabilityToken): object {
+    return resolveRequestService<object>(ctx, token);
+  }
   context.set(serviceResolverContext, resolver);
 
   if (ctx.request.user != null) {

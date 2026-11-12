@@ -1,6 +1,80 @@
 import { expect, it } from 'vitest';
-import { classifyWiring, wiringFinding, wiringSites } from '../../src/diagnostics/wiring.ts';
+import {
+  classifyWiring,
+  unregisteredPluginFindings,
+  wiringFinding,
+  wiringSites,
+} from '../../src/diagnostics/wiring.ts';
 import { hostSeamSpecs } from '../../src/seams/registry.ts';
+
+it('V12-59 reports installed uncalled providers once and respects starter ownership', () => {
+  const installed = new Set(['queue-plugin', 'mcp-plugin', 'not-a-provider']);
+  expect(
+    unregisteredPluginFindings("import { QueuePlugin } from '@setu-ts/queue-plugin';", installed),
+  ).toEqual([
+    { kind: 'plugin-unregistered', pkg: 'queue-plugin', symbol: 'QueuePlugin' },
+    { kind: 'plugin-unregistered', pkg: 'mcp-plugin', symbol: 'McpPlugin' },
+  ]);
+  expect(unregisteredPluginFindings('QueuePlugin({}); McpPlugin({});', installed)).toEqual([]);
+  expect(
+    unregisteredPluginFindings(
+      "import { createMicroserviceApp } from '@setu-ts/microservice-starter'; McpPlugin({});",
+      installed,
+    ),
+  ).toEqual([]);
+  expect(unregisteredPluginFindings('const unclassifiable = globalThis;', installed)).toEqual([]);
+  expect(
+    unregisteredPluginFindings('// QueuePlugin();\nconst text = "McpPlugin()";', installed),
+  ).toHaveLength(2);
+  expect(unregisteredPluginFindings('', new Set())).toEqual([]);
+});
+
+it('V12-59 recognises a provider called through an aliased import', () => {
+  const installed = new Set(['queue-plugin']);
+  const aliased = "import { QueuePlugin as queue } from '@setu-ts/queue-plugin';";
+  expect(unregisteredPluginFindings(`${aliased}\nqueue({});`, installed)).toEqual([]);
+  expect(
+    unregisteredPluginFindings(
+      `import { CAPABILITIES, QueuePlugin as q, type QueuePlugin as T } from "@setu-ts/queue-plugin";\nq({});`,
+      installed,
+    ),
+  ).toEqual([]);
+  // A commented-out aliased import adds no alias, so an unrelated call does not count.
+  expect(
+    unregisteredPluginFindings(
+      "// import { QueuePlugin as init } from '@setu-ts/queue-plugin';\nimport { init } from './init.ts';\ninit();",
+      installed,
+    ),
+  ).toHaveLength(1);
+  expect(
+    unregisteredPluginFindings(
+      "/* import { QueuePlugin as init } from '@setu-ts/queue-plugin'; */\ninit();",
+      installed,
+    ),
+  ).toHaveLength(1);
+  // A `$` alias is an ordinary identifier, and `$Name(` is not a call to `Name`.
+  expect(
+    unregisteredPluginFindings(
+      "import { QueuePlugin as $queue } from '@setu-ts/queue-plugin';\n$queue({});",
+      installed,
+    ),
+  ).toEqual([]);
+  expect(unregisteredPluginFindings('$QueuePlugin({});', installed)).toHaveLength(1);
+  // An alias that is never called, a type-only alias and another package's alias still warn.
+  expect(unregisteredPluginFindings(aliased, installed)).toHaveLength(1);
+  expect(
+    unregisteredPluginFindings(
+      "import { type QueuePlugin as queue } from '@setu-ts/queue-plugin';\nqueue({});",
+      installed,
+    ),
+  ).toHaveLength(1);
+  expect(
+    unregisteredPluginFindings(
+      "import { QueuePlugin as queue } from '@setu-ts/cache-plugin';\nqueue({});",
+      installed,
+    ),
+  ).toHaveLength(1);
+});
 
 it('X91-3 requires registerModules to be called and consumes values outside imports', () => {
   for (const source of [

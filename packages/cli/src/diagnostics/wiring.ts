@@ -1,5 +1,6 @@
+import { ZERO_CONFIG_WIRINGS } from '../utils/plugin-wirings.ts';
 /** Three-outcome config wiring inspection shared by the command renderers. @module */
-import { maskSourceCode } from '../devtool/sources.ts';
+import { maskComments, maskSourceCode } from '../devtool/sources.ts';
 import { referenceMask } from './reference-mask.ts';
 import { hostSeamSpecs, scanSeamSpecs } from '../seams/registry.ts';
 import { decoratorKeyFor, decoratorExportFor } from '../templates/seam.ts';
@@ -16,7 +17,11 @@ export function referencedOutsideImports(config: string, symbol: string): boolea
 /** Tests a call in code outside import declarations, matching module activation. */
 export function calledOutsideImports(config: string, symbol: string): boolean | undefined {
   const code = withoutImports(referenceMask(config));
-  return code === undefined ? undefined : new RegExp(`\\b${symbol}\\s*\\(`).test(code);
+  // Identifier-aware boundaries: `\b` treats `$` as a non-word character, so it
+  // neither matches before `$name` nor stops `$Name(` matching `Name(`.
+  return code === undefined
+    ? undefined
+    : new RegExp(`(?<![\\w$])${symbol.replaceAll('$', () => '\\$')}\\s*\\(`).test(code);
 }
 
 /**
@@ -99,4 +104,50 @@ export function wiringFinding(
     ...(unusedImports.length === 0 ? {} : { unusedImports }),
     ...(starter === undefined ? {} : { starter }),
   };
+}
+
+/**
+ * The local names a config gives `symbol` when importing it from
+ * `@setu-ts/<pkg>`: the symbol itself plus every `symbol as alias` binding.
+ * Type-only bindings and commented-out imports are skipped.
+ */
+export function importedCallNames(config: string, pkg: string, symbol: string): readonly string[] {
+  const names = new Set([symbol]);
+  const from = new RegExp(`import\\s*\\{([^}]*)\\}\\s*from\\s*['"]@setu-ts/${pkg}['"]`, 'g');
+  // Comments are blanked so a commented-out import adds no alias; strings stay, so
+  // the package specifier still matches. Unclassifiable source yields no aliases.
+  for (const [, bindings = ''] of (maskComments(config) ?? '').matchAll(from)) {
+    for (const binding of bindings.split(',')) {
+      const [, exported, local = ''] =
+        /^\s*(?!type\s)([A-Za-z_$][\w$]*)\s+as\s+([A-Za-z_$][\w$]*)\s*$/.exec(binding) ?? [];
+      if (exported === symbol) names.add(local);
+    }
+  }
+  return [...names];
+}
+
+/**
+ * Finds installed zero-config providers absent from this config's calls.
+ * Registration elsewhere can be silenced by id in the project's check config.
+ * @since 0.13.0
+ */
+export function unregisteredPluginFindings(
+  config: string,
+  installed: ReadonlySet<string>,
+): Finding[] {
+  const starter = composingStarter(config);
+  const candidates = new Map([...ZERO_CONFIG_WIRINGS, ['mcp-plugin', { symbol: 'McpPlugin' }]]);
+  const findings: Finding[] = [];
+  for (const [pkg, { symbol }] of candidates) {
+    if (
+      installed.has(pkg) &&
+      !starter?.arms.has(pkg) &&
+      importedCallNames(config, pkg, symbol).every(
+        (name) => calledOutsideImports(config, name) === false,
+      )
+    ) {
+      findings.push({ kind: 'plugin-unregistered', pkg, symbol });
+    }
+  }
+  return findings;
 }

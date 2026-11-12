@@ -590,7 +590,7 @@ const CAPABILITIES = {
 ctx.services.register(CAPABILITIES.DATABASE, new DatabaseService());
 
 // Plugin B consumes the capability
-const db = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+const db = ctx.services.get(CAPABILITIES.DATABASE);
 ```
 
 **Why tokens instead of class references?**
@@ -738,32 +738,35 @@ ctx.services.registerFactory(CAPABILITIES.DATABASE, () => new DatabaseService())
 
 ```typescript
 // Get a service (throws if not found)
-const db = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+const db = ctx.services.get(CAPABILITIES.DATABASE);
 
 // Check if a capability is available
 if (ctx.services.has(CAPABILITIES.CACHE)) {
-  const cache = ctx.services.get<ICacheStore>(CAPABILITIES.CACHE);
+  const cache = ctx.services.get(CAPABILITIES.CACHE);
 }
 
-// Get all services for a multi-provider token
-const allNotifiers = ctx.services.getAll<INotifier>(CAPABILITIES.NOTIFICATION);
+// Notifications have one provider
+const notifier = ctx.services.get(CAPABILITIES.NOTIFICATION);
 ```
 
 ### Multi-Provider Support
 
-Some capabilities can have multiple providers:
+Contribution tokens such as `HEALTH_INDICATOR` can have multiple providers. `NOTIFICATION` is a
+single `INotifier` that routes messages to its configured channels.
 
 ```typescript
-// Plugin A
-ctx.services.register(CAPABILITIES.NOTIFICATION, new EmailNotifier(), { multi: true });
-
-// Plugin B
-ctx.services.register(CAPABILITIES.NOTIFICATION, new SmsNotifier(), { multi: true });
-
-// Consumer
-const notifiers = ctx.services.getAll<INotifier>(CAPABILITIES.NOTIFICATION);
-// Returns [EmailNotifier, SmsNotifier]
+ctx.services.register(CAPABILITIES.HEALTH_INDICATOR, {
+  name: 'database',
+  check: () => Promise.resolve({ status: 'up' as const }),
+}, { multi: true });
+const indicators = ctx.services.getAll(CAPABILITIES.HEALTH_INDICATOR);
 ```
+
+Since 0.13.0, `CapabilityServices` binds standard token values to their interfaces. Plugins augment
+the map from their own interface modules. The registry infers reads and checks writes; an explicit
+type can widen the bound interface, but cannot downcast it. Custom strings and unmapped standard
+tokens retain explicit types. Request-bound entries use `requestServiceToken<T>()` and
+`resolveRequestService(ctx, token)`; raw `get`/`getAll` refuse those tokens.
 
 ### Override Rules
 
@@ -792,10 +795,10 @@ ctx.services.registerFactory(CAPABILITIES.DATABASE, () => {
 // ...
 
 // First get() triggers factory
-const db = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE); // Factory called here
+const db = ctx.services.get(CAPABILITIES.DATABASE); // Factory called here
 
 // Subsequent get() returns cached instance
-const db2 = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE); // Same instance
+const db2 = ctx.services.get(CAPABILITIES.DATABASE); // Same instance
 ```
 
 ### Service Scopes

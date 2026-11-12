@@ -16,13 +16,13 @@ import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 
 import { MetricsPlugin } from '../../src/index.ts';
-import type { MetricsService } from '../../src/services/metrics-service.ts';
+import type { IMetricsService } from '@setu-ts/common';
 import type { Counter } from '../../src/metrics/counter.ts';
 import type { Gauge } from '../../src/metrics/gauge.ts';
 
 /** Resolves the concrete service so tests can read metric values back. */
-function metricsOf(app: ReturnType<typeof createApplication>): MetricsService {
-  return app.services.get<MetricsService>(CAPABILITIES.METRICS);
+function metricsOf(app: ReturnType<typeof createApplication>): IMetricsService {
+  return app.services.get(CAPABILITIES.METRICS);
 }
 
 describe('Metrics integration (through the real kernel pipeline)', () => {
@@ -47,7 +47,7 @@ describe('Metrics integration (through the real kernel pipeline)', () => {
           version: '1.0.0',
           register(ctx: IPluginContext): void {
             ctx.lifecycle.onInit(() => {
-              const service = ctx.services.get<MetricsService>(CAPABILITIES.METRICS);
+              const service = ctx.services.get(CAPABILITIES.METRICS);
               service.counter('users_total', { help: 'Total users' }).inc(3);
             });
           },

@@ -84,21 +84,26 @@ await app.start({ port: 3000 });
 Creating plugins via factory functions allows configuration and encapsulation:
 
 ```typescript
+import { CAPABILITIES } from '@setu-ts/common';
+import type { ICacheStore, IPlugin } from '@setu-ts/common';
+
+export interface CachePluginOptions {
+  readonly store: ICacheStore & { close?(): void | Promise<void> };
+}
+
 export function CachePlugin(options: CachePluginOptions): IPlugin {
-  const config = { ...defaultConfig, ...options };
+  const { store } = options;
 
   return {
     name: 'cache',
     version: '1.0.0',
-    optionalDependencies: [CAPABILITIES.LOGGER],
     provides: [CAPABILITIES.CACHE],
-    async register(ctx) {
-      const cache = createCache(config);
-
-      ctx.services.register(CAPABILITIES.CACHE, cache);
+    register(ctx) {
+      // The supplied store implements the complete bound ICacheStore contract.
+      ctx.services.register(CAPABILITIES.CACHE, store);
 
       ctx.lifecycle.onClose(() => {
-        cache.close();
+        return store.close?.();
       });
     },
   };
