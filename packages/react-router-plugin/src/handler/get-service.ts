@@ -7,7 +7,16 @@
  * @since 0.12.0
  */
 
-import type { CapabilityToken, ServiceToken } from '@setu-ts/common';
+import type {
+  CapabilityToken,
+  CapabilityServices,
+  StandardCapabilityToken,
+  KeysServing,
+  UnboundCapability,
+  UnboundToken,
+  ServiceToken,
+  RequestServiceToken,
+} from '@setu-ts/common';
 import type { RouterContextKey } from '../interfaces/index.ts';
 import { contextKeyFor } from './context-keys.ts';
 
@@ -17,7 +26,13 @@ import { contextKeyFor } from './context-keys.ts';
  *
  * @since 0.12.0
  */
-export type ServiceResolver = <T>(token: ServiceToken<T> | CapabilityToken) => T;
+export interface ServiceResolver {
+  <K extends keyof CapabilityServices>(token: StandardCapabilityToken<K>): CapabilityServices[K];
+  <T extends object>(token: StandardCapabilityToken<KeysServing<T>>): T;
+  <T extends object>(token: StandardCapabilityToken<UnboundCapability>): T;
+  <T extends object>(token: ServiceToken<T> | RequestServiceToken<T>): T;
+  <T extends object>(token: UnboundToken): T;
+}
 
 /**
  * Key holding the current request's {@linkcode ServiceResolver}, or `null` when
@@ -77,11 +92,31 @@ export class ServiceResolverUnavailableError extends Error {
  * ```
  * @since 0.12.0
  */
-export function getService<T>(
+export function getService<K extends keyof CapabilityServices>(
   context: { get<V>(key: RouterContextKey<V>): V },
-  token: ServiceToken<T> | CapabilityToken,
-): T {
+  token: StandardCapabilityToken<K>,
+): CapabilityServices[K];
+export function getService<T extends object>(
+  context: { get<V>(key: RouterContextKey<V>): V },
+  token: StandardCapabilityToken<KeysServing<T>>,
+): T;
+export function getService<T extends object>(
+  context: { get<V>(key: RouterContextKey<V>): V },
+  token: StandardCapabilityToken<UnboundCapability>,
+): T;
+export function getService<T extends object>(
+  context: { get<V>(key: RouterContextKey<V>): V },
+  token: ServiceToken<T> | RequestServiceToken<T>,
+): T;
+export function getService<T extends object>(
+  context: { get<V>(key: RouterContextKey<V>): V },
+  token: UnboundToken,
+): T;
+export function getService(
+  context: { get<V>(key: RouterContextKey<V>): V },
+  token: CapabilityToken,
+): object {
   const resolve = context.get(serviceResolverContext);
   if (resolve === null) throw new ServiceResolverUnavailableError();
-  return resolve<T>(token);
+  return resolve<object>(token);
 }

@@ -1,6 +1,33 @@
 import { expect, it } from 'vitest';
-import { classifyWiring, wiringFinding, wiringSites } from '../../src/diagnostics/wiring.ts';
+import {
+  classifyWiring,
+  unregisteredPluginFindings,
+  wiringFinding,
+  wiringSites,
+} from '../../src/diagnostics/wiring.ts';
 import { hostSeamSpecs } from '../../src/seams/registry.ts';
+
+it('V12-59 reports installed uncalled providers once and respects starter ownership', () => {
+  const installed = new Set(['queue-plugin', 'mcp-plugin', 'not-a-provider']);
+  expect(
+    unregisteredPluginFindings("import { QueuePlugin } from '@setu-ts/queue-plugin';", installed),
+  ).toEqual([
+    { kind: 'plugin-unregistered', pkg: 'queue-plugin', symbol: 'QueuePlugin' },
+    { kind: 'plugin-unregistered', pkg: 'mcp-plugin', symbol: 'McpPlugin' },
+  ]);
+  expect(unregisteredPluginFindings('QueuePlugin({}); McpPlugin({});', installed)).toEqual([]);
+  expect(
+    unregisteredPluginFindings(
+      "import { createMicroserviceApp } from '@setu-ts/microservice-starter'; McpPlugin({});",
+      installed,
+    ),
+  ).toEqual([]);
+  expect(unregisteredPluginFindings('const unclassifiable = globalThis;', installed)).toEqual([]);
+  expect(
+    unregisteredPluginFindings('// QueuePlugin();\nconst text = "McpPlugin()";', installed),
+  ).toHaveLength(2);
+  expect(unregisteredPluginFindings('', new Set())).toEqual([]);
+});
 
 it('X91-3 requires registerModules to be called and consumes values outside imports', () => {
   for (const source of [

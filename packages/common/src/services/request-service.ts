@@ -8,26 +8,21 @@
  */
 import type { IRequestContext } from '../http.ts';
 import { createCapabilityToken } from '../tokens.ts';
-import type { CapabilityToken } from '../tokens.ts';
-
-/**
- * A capability token that carries the type of the service registered under
- * it, so a resolver infers the service type from the token alone. At run time
- * it is the plain token string; the type parameter exists only for the
- * compiler.
- *
- * @typeParam T - The service type registered under this token
- * @example
- * ```typescript
- * export const PRODUCTS = serviceToken<ProductsService>('module.products');
- * ```
- * @since 0.12.0
- */
-export type ServiceToken<T> = CapabilityToken & { readonly __service?: T };
+import type {
+  CapabilityToken,
+  StandardCapabilityToken,
+  ServiceToken,
+  RequestServiceToken,
+  UnboundToken,
+} from '../tokens.ts';
+import type { CapabilityServices, UnboundCapability } from '../capability-services.ts';
+import type { KeysServing } from '../registry.ts';
+export type { ServiceToken, RequestServiceToken } from '../tokens.ts';
 
 /**
  * Creates a typed service token after validating the name against the
  * capability-token grammar (lowercase kebab-case segments joined by dots).
+ * The returned singleton token carries a required type-only brand.
  *
  * @typeParam T - The service type registered under this token
  * @param name - The token name, for example `module.products`
@@ -41,6 +36,24 @@ export type ServiceToken<T> = CapabilityToken & { readonly __service?: T };
  */
 export function serviceToken<T>(name: string): ServiceToken<T> {
   return createCapabilityToken(name) as ServiceToken<T>;
+}
+
+/**
+ * Creates a typed token for a request-bound service, validating the token grammar.
+ * @typeParam T - The service built for each request
+ * @param name - Lowercase kebab-case segments joined by dots
+ * @returns The validated request-bound token
+ * @throws {TypeError} If the token name is invalid
+ * @example
+ * ```typescript
+ * const PRODUCTS = requestServiceToken<ProductsService>('module.products');
+ * services.register(PRODUCTS, requestService(productsService));
+ * const products = resolveRequestService(ctx, PRODUCTS);
+ * ```
+ * @since 0.13.0
+ */
+export function requestServiceToken<T>(name: string): RequestServiceToken<T> {
+  return createCapabilityToken(name) as RequestServiceToken<T>;
 }
 
 /**
@@ -65,7 +78,7 @@ export interface RequestBoundService<T extends object> {
 
 /**
  * Wraps a factory as a request-bound registry entry. Register the result under
- * a {@linkcode ServiceToken}; every {@linkcode resolveRequestService} call in
+ * a {@linkcode RequestServiceToken}; every {@linkcode resolveRequestService} call in
  * one request then shares one instance built from that request's context.
  *
  * @typeParam T - The service type the factory produces
@@ -116,7 +129,7 @@ export class RequestServiceUnavailableError extends Error {
 /** One slot key per token; identity is stable for the life of the process. */
 const slotKeys = new Map<string, object>();
 /** Fallback per-request cache for a context without `slot`. */
-const fallbackCache = new WeakMap<IRequestContext, Map<string, unknown>>();
+const fallbackCache = new WeakMap<IRequestContext, Map<string, object>>();
 
 function slotKeyFor(token: string): object {
   let key = slotKeys.get(token);
@@ -153,6 +166,8 @@ function build(entry: RequestBoundService<object>, ctx: IRequestContext, token: 
  * ({@linkcode requestService}) is built at most once per request and token and
  * shared by every caller in that request; any other entry is returned as
  * registered.
+ * Overloads infer the service from a standard or typed token; custom and
+ * unbound tokens retain an explicit service type argument.
  *
  * @typeParam T - The service type, inferred from a {@linkcode ServiceToken}
  * @param ctx - The kernel request context
@@ -166,23 +181,40 @@ function build(entry: RequestBoundService<object>, ctx: IRequestContext, token: 
  * ```
  * @since 0.12.0
  */
-export function resolveRequestService<T>(
+export function resolveRequestService<K extends keyof CapabilityServices>(
   ctx: IRequestContext,
-  token: ServiceToken<T> | CapabilityToken,
-): T {
+  token: StandardCapabilityToken<K>,
+): CapabilityServices[K];
+export function resolveRequestService<T extends object>(
+  ctx: IRequestContext,
+  token: StandardCapabilityToken<KeysServing<T>>,
+): T;
+export function resolveRequestService<T extends object>(
+  ctx: IRequestContext,
+  token: StandardCapabilityToken<UnboundCapability>,
+): T;
+export function resolveRequestService<T extends object>(
+  ctx: IRequestContext,
+  token: ServiceToken<T> | RequestServiceToken<T>,
+): T;
+export function resolveRequestService<T extends object>(
+  ctx: IRequestContext,
+  token: UnboundToken,
+): T;
+export function resolveRequestService(ctx: IRequestContext, token: CapabilityToken): object {
   if (!ctx.services.has(token)) throw new RequestServiceUnavailableError(token);
   const entry = ctx.services.get<object>(token);
-  if (!isRequestBound(entry)) return entry as T;
+  if (!isRequestBound(entry)) return entry;
   if (ctx.slot !== undefined) {
-    return ctx.slot(slotKeyFor(token), () => build(entry, ctx, token)) as T;
+    return ctx.slot(slotKeyFor(token), () => build(entry, ctx, token));
   }
   let perRequest = fallbackCache.get(ctx);
   if (perRequest === undefined) {
     perRequest = new Map();
     fallbackCache.set(ctx, perRequest);
   }
-  if (perRequest.has(token)) return perRequest.get(token) as T;
+  if (perRequest.has(token)) return perRequest.get(token)!;
   const instance = build(entry, ctx, token);
   perRequest.set(token, instance);
-  return instance as T;
+  return instance;
 }

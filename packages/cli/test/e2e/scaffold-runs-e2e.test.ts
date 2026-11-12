@@ -250,6 +250,23 @@ const HOSTS: readonly (readonly [label: string, args: readonly string[]])[] = [
   ],
 ];
 
+it('V12-59 fresh scaffolds of every host have no unregistered provider warning', async () => {
+  for (const [label, args] of HOSTS) {
+    const name = label.replaceAll(' ', '-');
+    expect(await run(['new', name, ...args])).toBe(0);
+    const output: string[] = [];
+    const code = await runCli(['check', '--dir', `${root}/${name}`], {
+      fs,
+      cwd: root,
+      now: () => runtime.now(),
+      log: (line) => output.push(line),
+      error: (line) => output.push(line),
+    });
+    expect(code, output.join('\n')).toBe(0);
+    expect(output.join('\n'), label).not.toContain('setu.W006');
+  }
+});
+
 let root = '';
 
 beforeEach(async () => {
@@ -546,6 +563,7 @@ import { createApp } from './setu.config.ts';
 const options = [undefined, '', ',', ' , ', '192.0.2.1/32', '127.0.0.1/32', 'example', '10.0.0.0/33', '::1/129'];
 const port = Number(process.argv[2]);
 const origin = 'http://127.0.0.1:' + port;
+delete process.env['TRUST_FORWARDED_HOST'];
 for (const proxies of options) {
   if (proxies === undefined) delete process.env['TRUSTED_PROXIES'];
   else process.env['TRUSTED_PROXIES'] = proxies;
@@ -561,8 +579,7 @@ for (const proxies of options) {
     const headers = { 'X-Forwarded-For': '203.0.113.9', 'X-Forwarded-Host': 'public.example', 'X-Forwarded-Proto': 'https' };
     const trusted = proxies === '127.0.0.1/32';
     const identity = await fetch(origin + '/identity-probe', { headers });
-    // A trusted proxy contributes the protocol; X-Forwarded-Host needs trustForwardedHost,
-    // which the template does not set, so the host stays the one the request named.
+    // With TRUST_FORWARDED_HOST unset, even a trusted peer cannot change the host.
     assert.deepEqual(await identity.json(), { ip: trusted ? '203.0.113.9' : '127.0.0.1', origin: trusted ? 'https://127.0.0.1:' + port : origin });
     const page = await fetch(origin + '/login', { headers });
     assert.equal(page.status, 200);
@@ -580,6 +597,28 @@ for (const proxies of options) {
     console.log('PROXY_CASE', JSON.stringify(proxies), action.status);
   } finally { await app.stop(); }
 }
+// V12-61: opt in only behind a peer that overwrites the forwarded host.
+process.env['TRUSTED_PROXIES'] = '127.0.0.1/32';
+process.env['TRUST_FORWARDED_HOST'] = 'true';
+{
+  const app = await createApp();
+  app.router.get('/identity-probe', (ctx) => ctx.response.json({ origin: requestOriginOf(ctx).origin }));
+  await app.start({ port, hostname: '127.0.0.1' });
+  try {
+    const headers = { 'X-Forwarded-Host': 'public.example', 'X-Forwarded-Proto': 'https' };
+    assert.deepEqual(await (await fetch(origin + '/identity-probe', { headers })).json(), { origin: 'https://public.example' });
+    const page = await fetch(origin + '/login', { headers });
+    const token = /name="_csrf"\\s+value="([^"]+)"/.exec(await page.text())?.[1];
+    assert.ok(token);
+    const cookie = page.headers.getSetCookie().map((line) => line.split(';', 1)[0]).join('; ');
+    const action = await fetch(origin + '/login', { method: 'POST', redirect: 'manual', headers: {
+      ...headers, cookie, Origin: 'https://public.example', 'Sec-Fetch-Site': 'same-origin',
+    }, body: new URLSearchParams({ _csrf: token, email: 'ada@example.com' }) });
+    assert.equal(action.status, 302, await action.text());
+    console.log('FORWARDED_HOST_CASE', action.status);
+  } finally { await app.stop(); }
+}
+delete process.env['TRUST_FORWARDED_HOST'];
 // §8a.1.6: a CIDR width that is not plain digits fails start() with the named
 // error rather than compiling to a mask that trusts every address.
 for (const proxies of ['10.0.0.1/', '10.0.0.0/0x20']) {
@@ -599,6 +638,7 @@ for (const proxies of ['10.0.0.1/', '10.0.0.0/0x20']) {
       ]);
       expect(proof.code, proof.output).toBe(0);
       expect(proof.output.match(/PROXY_CASE/g)).toHaveLength(11);
+      expect(proof.output).toContain('FORWARDED_HOST_CASE 302');
     } finally {
       await overlay.close();
     }

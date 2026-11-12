@@ -213,6 +213,7 @@ application's choice.
 | `ISsrService`                     | interface |
 | `RouterContextKey`                | interface |
 | `RouterLoadContext`               | interface |
+| `ServiceResolver`                 | interface |
 | `SsrRuntime`                      | interface |
 | `ViteDevExternalId`               | interface |
 | `ViteDevExternalsOptions`         | interface |
@@ -222,7 +223,6 @@ application's choice.
 | `PopulateLoadContext`             | type      |
 | `ReactRouterPluginOptions`        | type      |
 | `RouteHandler`                    | type      |
-| `ServiceResolver`                 | type      |
 | `SsrRequestHandler`               | type      |
 
 Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it

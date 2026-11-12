@@ -268,13 +268,14 @@ on 2026-11-12 so no separate `fix/` branch is needed:
     - `cli/src/templates/full-stack-module-files.ts` and `cli/src/schematics/module-full-stack.ts`
       emit `requestServiceToken<…>`;
     - `apps/full-stack/src/modules/products/products.token.ts` does the same;
-    - template and schematic `get<ILogger>(CAPABILITIES.LOGGER)` lines become
-      `get(CAPABILITIES.LOGGER)`.
+    - generated `get<ILogger>(CAPABILITIES.LOGGER)` lines stay as they are. The explicit form is
+      valid, and the shutdown block is shared with the dev entry, whose CLI-owned recognition would
+      otherwise have to accept both spellings (found in review).
   - The comment at `cli/src/templates/full-stack.ts:260` that names `serviceToken` is updated.
   - Template baselines are re-captured.
   - Existing correct explicit calls elsewhere are left alone: they compile and are not churn this
     milestone owns.
-- **Why:** the generated scaffold is what users copy, so it teaches the inferred form. A mass
+- **Why:** generated code changes only where the new types require it (the request-bound token). A
   rewrite of valid sites would bloat the diff with no behavioural gain.
 - **Test home:**
   - `packages/cli/test/unit/full-stack-template.test.ts` asserts the emitted token constructor;

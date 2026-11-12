@@ -60,7 +60,7 @@ describe('AgentRunsPlugin', () => {
           child() {
             return this;
           },
-          level: 'info',
+          level: 'info' as const,
         };
         if (hasLogger) services.register(CAPABILITIES.LOGGER, logger);
         const closes: (() => void | Promise<void>)[] = [];

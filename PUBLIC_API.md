@@ -10,6 +10,7 @@
 - [Durable agent runs (`@setu-ts/common` + `@setu-ts/agent-runs-plugin` + `@setu-ts/database-plugin`)](#durable-agent-runs-setu-tscommon--setu-tsagent-runs-plugin--setu-tsdatabase-plugin)
 - [Shared reconnect supervisor (`@setu-ts/common`)](#shared-reconnect-supervisor-setu-tscommon)
 - [Request-bound services (`@setu-ts/common`)](#request-bound-services-setu-tscommon)
+- [Typed capability registry (`@setu-ts/common`)](#typed-capability-registry-setu-tscommon)
 - [Dotenv parser (`@setu-ts/common`)](#dotenv-parser-setu-tscommon)
 - [Vector store (`@setu-ts/common` + `@setu-ts/vector-store-plugin`)](#vector-store-setu-tscommon--setu-tsvector-store-plugin)
 
@@ -360,15 +361,41 @@ Call `start()` to attach listeners, `fault()` to mark an outage and start drive-
 `faulted` reports the current fault window. A stopped supervisor is terminal; construct a new
 instance to start another lifecycle.
 
+## Typed capability registry (`@setu-ts/common`)
+
+Since 0.13.0, `CAPABILITIES` values are `StandardCapabilityToken<K>` strings carrying their
+capability key. `CapabilityKey` is the plain string union; `StandardCapability` is the branded value
+union. `CapabilityToken` and `createCapabilityToken(name)` remain ordinary strings.
+
+`CapabilityServices` is the augmentable token-value-to-interface map. Common binds its own
+interfaces; database, cloudflare, static and messaging plugins augment their entries.
+`UnboundCapability = Exclude<CapabilityKey, keyof CapabilityServices>` leaves four kernel
+contribution tokens unmapped in the full program. A plugin whose types are not loaded is also
+unbound. `KeysServing<T>` selects keys whose bound interface extends `T`. `UnboundToken` excludes
+all three token brands and accepts third-party and derived strings.
+
+`IServiceRegistry.get` and `getAll` have five ordered arms: inferred mapped standard token;
+compatible explicit `T`; unbound standard token; `ServiceToken<T>`; and `UnboundToken`. `getAll`
+returns readonly arrays. `register` and `registerFactory` check the same interfaces and additionally
+accept `RequestServiceToken<T>` with `RequestBoundService<T>`. A wrong pair or downcast fails
+compilation. Correct explicit interfaces and widening to `object` still work. `has`, `unregister`
+and optional `isCurrent` retain their string-token contracts.
+
+`MockServiceRegistry` publishes the identical overloads. `overrideCapability(token, service)`
+deliberately accepts partial test doubles without token binding.
+
 ## Request-bound services (`@setu-ts/common`)
 
 Since 0.12.0, common exports the request-bound service helpers that kernel routes and React Router
 loaders share (M130).
 
-- `type ServiceToken<T> = CapabilityToken & { readonly __service?: T }` — a capability token that
-  carries its service type. At run time it is the token string.
+- `ServiceToken<T>` (since 0.13.0: a required unique-symbol brand) — a capability token that carries
+  its service type. At run time it is the token string.
 - `serviceToken<T>(name: string): ServiceToken<T>` — validates `name` against the capability-token
   grammar (lowercase kebab-case segments joined by dots) and throws `TypeError` on an illegal name.
+- `RequestServiceToken<T>` and `requestServiceToken<T>(name: string): RequestServiceToken<T>` (since
+  0.13.0) — a separate required brand for request-bound entries, validated with the same token
+  grammar as `serviceToken`. Plain strings satisfy neither typed token.
 - `requestService<T extends object>(create: (ctx: IRequestContext) => T): RequestBoundService<T>` —
   a frozen registry entry branded with `Symbol.for('setu.request-service')`, so a copy of `common`
   inlined into an SSR bundle recognizes it. An object literal of the same shape is not branded and
@@ -379,13 +406,18 @@ loaders share (M130).
   has no `slot`), and shared by every caller in that request. A factory that returns a non-object
   throws `TypeError`; a factory that throws is not cached, so the next call retries. Any other entry
   is returned as registered.
-- `IServiceRegistry.get(token)` on a `requestService` entry returns the frozen wrapper, not the
-  service: only `resolveRequestService` (and `getService` in a loader) builds the request's
-  instance. Kernel code and plugins reading a module's service use `resolveRequestService`.
+- Since 0.13.0, `IServiceRegistry.get` and `getAll` refuse `RequestServiceToken` at compilation.
+  Register it with a `requestService` wrapper and read it with `resolveRequestService` (or
+  `getService` in a loader). The raw entry remains the wrapper at run time.
+- `resolveRequestService` has five overloads: a mapped `StandardCapabilityToken<K>` infers
+  `CapabilityServices[K]`; an explicit `T` accepts `StandardCapabilityToken<KeysServing<T>>`; an
+  unmapped `StandardCapabilityToken<UnboundCapability>` retains explicit `T`;
+  `ServiceToken<T> | RequestServiceToken<T>` infers `T`; `UnboundToken` retains explicit `T`. All
+  service type parameters extend `object`.
 
 ```typescript
 // src/modules/products/products.token.ts — the only module a page imports by value
-export const PRODUCTS = serviceToken<ProductsService>('module.products');
+export const PRODUCTS = requestServiceToken<ProductsService>('module.products');
 
 // src/modules/products/index.ts — before the application starts
 services.register(PRODUCTS, requestService(productsService));
@@ -5516,9 +5548,9 @@ app.router.get('/api/health', (ctx) => {
 - `servicesContext: RouterContextKey<IServiceRegistry | null>` — context key holding the kernel
   service registry. Always set by the plugin. Superseded by `getService` for a module's
   request-bound service (since 0.12.0): the registry holds that service as its `requestService`
-  wrapper, so `services.get(TOKEN)` returns the wrapper, not the service.
-- `getService<T>(context, token: ServiceToken<T> | CapabilityToken): T` (since 0.12.0) — resolves a
-  kernel service for the current request from a loader, action or `handleError`, through
+  wrapper. Since 0.13.0, `services.get(TOKEN)` refuses its `RequestServiceToken`; use the resolver.
+- `getService(context, token)` (since 0.13.0: five overloads matching `resolveRequestService`) —
+  resolves a kernel service for the current request from a loader, action or `handleError`, through
   `resolveRequestService`. A module's request-bound service is the same instance a kernel `/api`
   route resolving that token sees in the same request. Throws `ServiceResolverUnavailableError` when
   the context carries no resolver (the request was not served by this plugin, or a page test did not
@@ -5527,7 +5559,9 @@ app.router.get('/api/health', (ctx) => {
   bridge sets to a closure over the current request; the load context never holds the kernel
   `IRequestContext` itself. Created with `contextKeyFor`, so its identity survives the SSR bundle. A
   page test sets a fake: `context.set(serviceResolverContext, (token) => fakes[token])`.
-- `type ServiceResolver = <T>(token: ServiceToken<T> | CapabilityToken) => T` (since 0.12.0).
+- `interface ServiceResolver` (since 0.13.0) — five call signatures matching `getService`: inferred
+  standard map entry, compatible explicit interface, unbound standard token, singleton or
+  request-bound token, and unbranded custom token.
 - `userContext: RouterContextKey<IPrincipal | null>` — context key holding the authenticated
   principal, or `null` on an anonymous request.
 - `contextKeyFor<T>(name, defaultValue): RouterContextKey<T>` — returns the key for a name,
@@ -13573,12 +13607,12 @@ reaches `redactors[<string>]`):
 
 | Group                  | Exports                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Tokens                 | `CapabilityToken`, `StandardCapability`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Tokens                 | `CapabilityToken`, `StandardCapability`, `StandardCapabilityToken<K>`, `CapabilityKey`, `ServiceToken<T>`, `RequestServiceToken<T>`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | Shared types           | `HttpMethod`, `RuntimePlatform`, `LogLevel`, `LifecyclePhase`, `HealthStatus`, `MetricType`, `PluginPriority`, `JsonValue` — the recursive JSON-safe value type (M74); `SseMessage.data` is typed with it, and its object arm admits `undefined` because `JSON.stringify` drops such a key                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | Utilities              | `Result<T, E>`, `Ok<T>`, `Err<E>`, `Option<T>`, `Some<T>`, `None`, `PathPattern` — one path-exclusion entry (`string \| RegExp`); a string is an exact match, never a prefix                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | Plugin contract        | `IPlugin`, `IPluginContext`, `IApplication`, `DispatchOptions`, `StartOptions`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | Plugin context APIs    | `IMiddlewareApi`, `MiddlewareOptions`, `IRouterApi`, `IEnvironmentApi`, `EnvVarSpec`, `IHealthApi`, `IMetricsApi`, `IOpenApiApi`, `IDecoratorApi`, `DecoratorHandler`, `ICliApi`, `CliCommandHandler`, `ILifecycleApi`, `IMetadataStore`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| Service registry       | `IServiceRegistry`, `RegisterOptions`, `ServiceFactory<T>`, `RegistryFactory<T>`, `resolveRegistryEntry`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Service registry       | `IServiceRegistry` (token-checked reads and writes since 0.13.0), `CapabilityServices`, `KeysServing<T>`, `UnboundCapability`, `UnboundToken`, `RegisterOptions`, `ServiceFactory<T>`, `RegistryFactory<T>`, `resolveRegistryEntry`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | HTTP                   | `IRequest`, `IResponse`, `IRequestContext`, `IMiddleware`, `MiddlewareFunction`, `NextFunction`, `RouteHandler`, `RouteDefinition`, `RouteSchema`, `SecurityRequirement`, `SECURITY_METADATA`, `RouteSecurityMetadata`, `withSecurityMetadata`, `securityMetadataOf`, `IDEMPOTENCY_METADATA`, `RouteIdempotencyMetadata`, `withIdempotencyMetadata`, `idempotencyMetadataOf`, `MCP_TOOL_METADATA`, `RouteMcpToolMetadata`, `withMcpToolMetadata`, `mcpToolMetadataOf`, `VALIDATION_METADATA`, `RouteValidationMetadata`, `withValidationMetadata`, `validationMetadataOf`, `RESPONSE_METADATA`, `RouteResponseMetadata`, `withResponseMetadata`, `responseMetadataOf`, `HandlerResult`, `ResponseSnapshot`, `ResponseSnapshotInit`, `StreamOptions`, `UPGRADE_INTENT`, `WebSocketUpgradeIntent`, `setUpgradeIntent`, `upgradeIntentOf`, `isWebSocketUpgradeRequest`, `HTTP_STATUS_HINT`, `HttpStatusHint`, `withHttpStatusHint`, `httpStatusHintOf`, `fallbackErrorStatus`, `fallbackErrorHint` |
 | Runtime                | `IRuntimeServices`, `IFileSystem`, `IHttpAdapter`, `IWorkerHost`, `IWorkerHandle`, `TimerHandle`, `ServerHandle`, `StatResult`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | DI (optional)          | `IContainer`, `Constructor<T>`, `ServiceScope`, `Provider<T>`, `ClassProvider<T>`, `FactoryProvider<T>`, `ValueProvider<T>`, `ProviderOptions<T>`, `InjectionToken<T>`, `ContainerToken<T>` — `string \| InjectionToken<T> \| Constructor<T>`, the token any `IContainer` method accepts — and `InjectEntry`, one `inject` element: a `ContainerToken` or `{ token, optional: true }`; `ModuleFactoryProvider<T>` (`0.13.0`) is a `FactoryProvider<T>` that names its own token (`provide`: a string or an `InjectionToken<T>`) and an optional `scope`, the factory entry `@Module({ providers })` takes. See "DI container contract (M125)" below                                                                                                                                                                                                                                                                                                                                             |
@@ -15124,27 +15158,27 @@ streaming-response reader.
 
 ### Exports
 
-| Export                | File                               | Description                                   |
-| --------------------- | ---------------------------------- | --------------------------------------------- |
-| `createTestApp`       | `src/test-app.ts`                  | Test application factory                      |
-| `TestAppOptions`      | `src/test-app.ts`                  | Factory options (union of the two arms below) |
-| `TestAppFromPlugins`  | `src/test-app.ts`                  | Hand-assembled arm                            |
-| `TestAppFromApp`      | `src/test-app.ts`                  | Composition-root arm                          |
-| `overrideCapability`  | `src/override-capability.ts`       | Capability replacement plugin builder         |
-| `overrideProvider`    | `src/override-provider.ts`         | DI container provider replacement builder     |
-| `createMockPlugin`    | `src/mock-plugin.ts`               | Mock plugin builder                           |
-| `MockPluginOptions`   | `src/mock-plugin.ts`               | Builder options                               |
-| `collectStream`       | `src/inject.ts`                    | Collect streaming response body               |
-| `inject`              | `src/inject.ts`                    | Inject HTTP requests into test app            |
-| `StreamingBody`       | `src/inject.ts`                    | Stream collector result shape                 |
-| `createTestContext`   | `src/mock-context.ts`              | Create a mock `IRequestContext`               |
-| `TestContextOptions`  | `src/mock-context.ts`              | Context builder options                       |
-| `MockResponse`        | `src/mock-context.ts`              | Fake `IResponse` double                       |
-| `MockServiceRegistry` | `src/mock-registry.ts`             | Fake `IServiceRegistry` double                |
-| `FixtureManager`      | `src/fixtures/fixture-manager.ts`  | Assemble mock plugins per-test                |
-| `IKernelApplication`  | (re-export from `@setu-ts/kernel`) | Kernel application interface                  |
-| `InjectRequest`       | (re-export from `@setu-ts/kernel`) | Shape for `inject()` request                  |
-| `InjectResponse`      | (re-export from `@setu-ts/kernel`) | Shape for `inject()` response                 |
+| Export                | File                               | Description                                                           |
+| --------------------- | ---------------------------------- | --------------------------------------------------------------------- |
+| `createTestApp`       | `src/test-app.ts`                  | Test application factory                                              |
+| `TestAppOptions`      | `src/test-app.ts`                  | Factory options (union of the two arms below)                         |
+| `TestAppFromPlugins`  | `src/test-app.ts`                  | Hand-assembled arm                                                    |
+| `TestAppFromApp`      | `src/test-app.ts`                  | Composition-root arm                                                  |
+| `overrideCapability`  | `src/override-capability.ts`       | Capability replacement plugin builder                                 |
+| `overrideProvider`    | `src/override-provider.ts`         | DI container provider replacement builder                             |
+| `createMockPlugin`    | `src/mock-plugin.ts`               | Mock plugin builder                                                   |
+| `MockPluginOptions`   | `src/mock-plugin.ts`               | Builder options                                                       |
+| `collectStream`       | `src/inject.ts`                    | Collect streaming response body                                       |
+| `inject`              | `src/inject.ts`                    | Inject HTTP requests into test app                                    |
+| `StreamingBody`       | `src/inject.ts`                    | Stream collector result shape                                         |
+| `createTestContext`   | `src/mock-context.ts`              | Create a mock `IRequestContext`                                       |
+| `TestContextOptions`  | `src/mock-context.ts`              | Context builder options                                               |
+| `MockResponse`        | `src/mock-context.ts`              | Fake `IResponse` double                                               |
+| `MockServiceRegistry` | `src/mock-registry.ts`             | Token-checked `IServiceRegistry` double (same overloads since 0.13.0) |
+| `FixtureManager`      | `src/fixtures/fixture-manager.ts`  | Assemble mock plugins per-test                                        |
+| `IKernelApplication`  | (re-export from `@setu-ts/kernel`) | Kernel application interface                                          |
+| `InjectRequest`       | (re-export from `@setu-ts/kernel`) | Shape for `inject()` request                                          |
+| `InjectResponse`      | (re-export from `@setu-ts/kernel`) | Shape for `inject()` response                                         |
 
 ### Registration
 

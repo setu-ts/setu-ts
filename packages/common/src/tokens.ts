@@ -21,44 +21,121 @@
  */
 export type CapabilityToken = string;
 
+declare const capabilityBrand: unique symbol;
+declare const serviceBrand: unique symbol;
+declare const requestServiceBrand: unique symbol;
+
+/**
+ * A standard capability string carrying its key as a required type-only brand.
+ * Registry overloads use the key to infer the service from `CapabilityServices`;
+ * a plain string cannot stand in for a branded standard token.
+ *
+ * @typeParam K - The standard capability's string value
+ * @example
+ * ```typescript
+ * const token: StandardCapabilityToken<'logger'> = CAPABILITIES.LOGGER;
+ * const logger = services.get(token);
+ * ```
+ * @since 0.13.0
+ */
+export type StandardCapabilityToken<K extends string> = K & { readonly [capabilityBrand]: K };
+
+/**
+ * A capability token that carries the type of the service registered under
+ * it, so a resolver infers the service type from the token alone. At run time
+ * it is the plain token string; the type parameter exists only for the
+ * compiler.
+ *
+ * The required unique-symbol brand distinguishes a singleton service token
+ * from plain strings and request-bound tokens. Create it with `serviceToken`;
+ * use `requestServiceToken` for a service registered with `requestService`.
+ *
+ * @typeParam T - The service type registered under this token
+ * @example
+ * ```typescript
+ * export const PRODUCTS = serviceToken<ProductsService>('module.products');
+ * ```
+ * @since 0.12.0
+ */
+export type ServiceToken<T> = string & { readonly [serviceBrand]: T };
+
+/**
+ * A capability token carrying the service type produced by a request-bound
+ * registration. The required brand keeps it distinct from singleton tokens.
+ * Register a `RequestBoundService<T>` wrapper under it, then resolve the
+ * request's instance with `resolveRequestService` or React Router's `getService`.
+ * Raw registry `get` and `getAll` calls refuse this token at compile time.
+ *
+ * @typeParam T - The service built for each request
+ * @example
+ * ```typescript
+ * const PRODUCTS = requestServiceToken<ProductsService>('module.products');
+ * services.register(PRODUCTS, requestService(productsService));
+ * const products = resolveRequestService(ctx, PRODUCTS);
+ * ```
+ * @since 0.13.0
+ */
+export type RequestServiceToken<T> = string & { readonly [requestServiceBrand]: T };
+
+/**
+ * A custom or derived string token without a standard, singleton-service or
+ * request-service brand. Registry and request-resolver overloads accept an
+ * explicit service type for these tokens because no interface binding is known.
+ * The optional `never` properties exclude all three branded token kinds from
+ * this fallback overload.
+ *
+ * @example
+ * ```typescript
+ * const CUSTOM: UnboundToken = createCapabilityToken('acme.cache');
+ * const cache = services.get<ICacheStore>(CUSTOM);
+ * ```
+ * @since 0.13.0
+ */
+export type UnboundToken = string & {
+  readonly [capabilityBrand]?: never;
+  readonly [serviceBrand]?: never;
+  readonly [requestServiceBrand]?: never;
+};
+
 /**
  * Standard capability tokens provided by the first-party plugins.
  *
  * Consumers must reference tokens through this constant rather than repeating
- * string literals:
+ * string literals. Each value carries its capability key at the type level,
+ * allowing the registry to infer the bound service interface.
  *
  * @example
  * ```typescript
  * import { CAPABILITIES } from '@setu-ts/common';
  *
- * const logger = ctx.services.get<ILogger>(CAPABILITIES.LOGGER);
+ * const logger = ctx.services.get(CAPABILITIES.LOGGER);
  * ```
  *
  * @since 0.1.0
  */
 export const CAPABILITIES = {
   /** Durable agent-run service (IAgentRunService). */
-  AGENT_RUNS: 'agent-runs',
+  AGENT_RUNS: 'agent-runs' as StandardCapabilityToken<'agent-runs'>,
   /** Runtime services provided by the RuntimePlugin. Mandatory in every application. */
-  RUNTIME: 'runtime',
+  RUNTIME: 'runtime' as StandardCapabilityToken<'runtime'>,
   /** Structured logger. */
-  LOGGER: 'logger',
+  LOGGER: 'logger' as StandardCapabilityToken<'logger'>,
   /** Configuration access. */
-  CONFIG: 'config',
+  CONFIG: 'config' as StandardCapabilityToken<'config'>,
   /** Request/data validation. */
-  VALIDATION: 'validation',
+  VALIDATION: 'validation' as StandardCapabilityToken<'validation'>,
   /** Database access (repositories, unit of work). */
-  DATABASE: 'database',
+  DATABASE: 'database' as StandardCapabilityToken<'database'>,
   /** Key/value caching. */
-  CACHE: 'cache',
+  CACHE: 'cache' as StandardCapabilityToken<'cache'>,
   /** In-memory domain event bus. */
-  EVENTS: 'events',
+  EVENTS: 'events' as StandardCapabilityToken<'events'>,
   /** Message broker for integration events. */
-  MESSAGING: 'messaging',
+  MESSAGING: 'messaging' as StandardCapabilityToken<'messaging'>,
   /** Authentication service. */
-  AUTH: 'authentication',
+  AUTH: 'authentication' as StandardCapabilityToken<'authentication'>,
   /** Authorization service (RBAC, permissions). */
-  AUTHORIZATION: 'authorization',
+  AUTHORIZATION: 'authorization' as StandardCapabilityToken<'authorization'>,
   /**
    * Authorization policies — an `IAuthorizationPolicyService` the AuthPlugin
    * always registers: an asynchronous, target-aware check over named
@@ -68,9 +145,10 @@ export const CAPABILITIES = {
    *
    * @since 0.9.0
    */
-  AUTHORIZATION_POLICIES: 'authorization-policies',
+  AUTHORIZATION_POLICIES:
+    'authorization-policies' as StandardCapabilityToken<'authorization-policies'>,
   /** JWT sign/verify service. */
-  JWT: 'jwt',
+  JWT: 'jwt' as StandardCapabilityToken<'jwt'>,
   /**
    * The single owner of "this session is signed in as this principal" — an
    * `IAuthSessionService` the AuthPlugin registers when its `signIn` option is
@@ -80,65 +158,65 @@ export const CAPABILITIES = {
    *
    * @since 0.8.0
    */
-  AUTH_SESSION: 'auth-session',
+  AUTH_SESSION: 'auth-session' as StandardCapabilityToken<'auth-session'>,
   /** Job scheduling (cron, delayed, recurring). */
-  SCHEDULER: 'scheduler',
+  SCHEDULER: 'scheduler' as StandardCapabilityToken<'scheduler'>,
   /** Metrics collection. */
-  METRICS: 'metrics',
+  METRICS: 'metrics' as StandardCapabilityToken<'metrics'>,
   /** Health checks. */
-  HEALTH: 'health',
+  HEALTH: 'health' as StandardCapabilityToken<'health'>,
   /** OpenAPI spec contribution and generation. */
-  OPENAPI: 'openapi',
+  OPENAPI: 'openapi' as StandardCapabilityToken<'openapi'>,
   /** Distributed tracing. */
-  TELEMETRY: 'telemetry',
+  TELEMETRY: 'telemetry' as StandardCapabilityToken<'telemetry'>,
   /** Secret management. */
-  SECRETS: 'secrets',
+  SECRETS: 'secrets' as StandardCapabilityToken<'secrets'>,
   /** Audit trail logging. */
-  AUDIT: 'audit',
+  AUDIT: 'audit' as StandardCapabilityToken<'audit'>,
   /** Resilience patterns (circuit breaker, retry, timeout, bulkhead). */
-  RESILIENCE: 'resilience',
+  RESILIENCE: 'resilience' as StandardCapabilityToken<'resilience'>,
   /** File storage. */
-  STORAGE: 'storage',
+  STORAGE: 'storage' as StandardCapabilityToken<'storage'>,
   /** Email sending. */
-  MAIL: 'mail',
+  MAIL: 'mail' as StandardCapabilityToken<'mail'>,
   /** Multi-channel notifications. */
-  NOTIFICATION: 'notification',
+  NOTIFICATION: 'notification' as StandardCapabilityToken<'notification'>,
   /** Feature flag evaluation. */
-  FEATURE_FLAGS: 'feature-flags',
+  FEATURE_FLAGS: 'feature-flags' as StandardCapabilityToken<'feature-flags'>,
   /** Background job queue. */
-  QUEUE: 'queue',
+  QUEUE: 'queue' as StandardCapabilityToken<'queue'>,
   /** CQRS facade. */
-  CQRS: 'cqrs',
+  CQRS: 'cqrs' as StandardCapabilityToken<'cqrs'>,
   /** Command bus (CQRS). */
-  COMMAND_BUS: 'command-bus',
+  COMMAND_BUS: 'command-bus' as StandardCapabilityToken<'command-bus'>,
   /** Query bus (CQRS). */
-  QUERY_BUS: 'query-bus',
+  QUERY_BUS: 'query-bus' as StandardCapabilityToken<'query-bus'>,
   /** Multi-tenancy service. */
-  MULTI_TENANCY: 'multi-tenancy',
+  MULTI_TENANCY: 'multi-tenancy' as StandardCapabilityToken<'multi-tenancy'>,
   /** Worker-thread pool for CPU-bound tasks. */
-  WORKER_POOL: 'worker-pool',
+  WORKER_POOL: 'worker-pool' as StandardCapabilityToken<'worker-pool'>,
   /** Optional dependency injection container. */
-  DI_CONTAINER: 'di-container',
+  DI_CONTAINER: 'di-container' as StandardCapabilityToken<'di-container'>,
   /** HTTP server adapter — the runtime plugin registers its IHttpAdapter here. */
-  HTTP_ADAPTER: 'http-adapter',
+  HTTP_ADAPTER: 'http-adapter' as StandardCapabilityToken<'http-adapter'>,
   /** Server-Sent Events (SSE) hub for in-process real-time broadcasting. */
-  SSE: 'sse',
+  SSE: 'sse' as StandardCapabilityToken<'sse'>,
   /** WebSocket hub for bidirectional real-time messaging. */
-  WEBSOCKET: 'websocket',
+  WEBSOCKET: 'websocket' as StandardCapabilityToken<'websocket'>,
   /**
    * Pub/sub transport carrying real-time broadcasts between application
    * instances, so WebSocket rooms and SSE channels fan out across replicas.
    * Consumed optionally — absent means purely in-process broadcasting.
    */
-  REALTIME_BACKPLANE: 'realtime-backplane',
+  REALTIME_BACKPLANE: 'realtime-backplane' as StandardCapabilityToken<'realtime-backplane'>,
   /** Server-side rendering (SSR) — React Router or similar framework. */
-  SSR: 'ssr',
+  SSR: 'ssr' as StandardCapabilityToken<'ssr'>,
   /** Cookie-backed sessions for server-rendered applications. */
-  SESSION: 'session',
+  SESSION: 'session' as StandardCapabilityToken<'session'>,
   /** Service discovery — logical service name to reachable instances. */
-  SERVICE_DISCOVERY: 'service-discovery',
+  SERVICE_DISCOVERY: 'service-discovery' as StandardCapabilityToken<'service-discovery'>,
   /** Health indicator contributions (multi-provider). */
-  HEALTH_INDICATOR: 'health-indicator',
+  HEALTH_INDICATOR: 'health-indicator' as StandardCapabilityToken<'health-indicator'>,
   /**
    * Minimized health observations (M98d) — an `IHealthDiagnosticsSource` the
    * HealthPlugin registers under this token and the DiagnosticsPlugin
@@ -146,7 +224,7 @@ export const CAPABILITIES = {
    * connector answers a typed `unsupported` snapshot; it never runs an
    * indicator itself.
    */
-  HEALTH_DIAGNOSTICS: 'health-diagnostics',
+  HEALTH_DIAGNOSTICS: 'health-diagnostics' as StandardCapabilityToken<'health-diagnostics'>,
   /**
    * Value-free configuration provenance (M98e) — an `IConfigDiagnosticsSource`
    * the ConfigPlugin registers under this token and the DiagnosticsPlugin
@@ -154,7 +232,7 @@ export const CAPABILITIES = {
    * answers a typed `unsupported` snapshot; it never reads a configuration
    * value, enumerates keys, or invokes a custom `IConfig` implementation.
    */
-  CONFIG_DIAGNOSTICS: 'config-diagnostics',
+  CONFIG_DIAGNOSTICS: 'config-diagnostics' as StandardCapabilityToken<'config-diagnostics'>,
   /**
    * Minimized queue observations (M98f) — an `IQueueDiagnosticsSource` every
    * QueuePlugin instance registers under this token with `{ multi: true }`,
@@ -163,7 +241,7 @@ export const CAPABILITIES = {
    * registered source means the connector answers a typed `unsupported`
    * batch. A read never reserves, settles or counts a job.
    */
-  QUEUE_DIAGNOSTICS: 'queue-diagnostics',
+  QUEUE_DIAGNOSTICS: 'queue-diagnostics' as StandardCapabilityToken<'queue-diagnostics'>,
   /**
    * Minimized distributed-tracing observations (M98g) — an
    * `ITraceDiagnosticsSource` the TelemetryPlugin always registers under
@@ -172,7 +250,7 @@ export const CAPABILITIES = {
    * The DiagnosticsPlugin consumes it optionally to serve `GET /v1/traces`.
    * A read never starts, exports or flushes a span.
    */
-  TRACE_DIAGNOSTICS: 'trace-diagnostics',
+  TRACE_DIAGNOSTICS: 'trace-diagnostics' as StandardCapabilityToken<'trace-diagnostics'>,
   /**
    * Authorization decision explanations (M98h) — an
    * `IAuthorizationDiagnosticsSource` the AuthPlugin always registers under
@@ -183,7 +261,8 @@ export const CAPABILITIES = {
    * optionally to serve `GET /v1/authorization`. A read never evaluates a
    * role, permission or wildcard, and never resolves a service.
    */
-  AUTHORIZATION_DIAGNOSTICS: 'authorization-diagnostics',
+  AUTHORIZATION_DIAGNOSTICS:
+    'authorization-diagnostics' as StandardCapabilityToken<'authorization-diagnostics'>,
   /**
    * Minimized cache operation counters (M98i) — an `ICacheDiagnosticsSource`
    * every CachePlugin instance registers under this token with
@@ -191,7 +270,7 @@ export const CAPABILITIES = {
    * instances never collide. The DiagnosticsPlugin reads every source to serve
    * `GET /v1/cache`. A read never performs a cache operation.
    */
-  CACHE_DIAGNOSTICS: 'cache-diagnostics',
+  CACHE_DIAGNOSTICS: 'cache-diagnostics' as StandardCapabilityToken<'cache-diagnostics'>,
   /**
    * Scheduler execution observations (M98k) — an
    * `ISchedulerDiagnosticsSource` every SchedulerPlugin instance registers
@@ -203,7 +282,8 @@ export const CAPABILITIES = {
    * read never acquires a lock, invokes a handler, or claims cluster
    * completeness — a skipped local fire is not a globally missed execution.
    */
-  SCHEDULER_DIAGNOSTICS: 'scheduler-diagnostics',
+  SCHEDULER_DIAGNOSTICS:
+    'scheduler-diagnostics' as StandardCapabilityToken<'scheduler-diagnostics'>,
   /**
    * Minimized event-dispatch observations (M98j) — an
    * `IEventDiagnosticsSource` every EventsPlugin instance registers under
@@ -213,7 +293,7 @@ export const CAPABILITIES = {
    * connector answers a typed `unsupported` response. A read never
    * publishes an event or invokes a handler.
    */
-  EVENTS_DIAGNOSTICS: 'event-diagnostics',
+  EVENTS_DIAGNOSTICS: 'event-diagnostics' as StandardCapabilityToken<'event-diagnostics'>,
   /**
    * Minimized realtime lifecycle observations (M98l) — an
    * `IRealtimeDiagnosticsSource` the WebSocket, SSE and realtime-backplane
@@ -223,7 +303,7 @@ export const CAPABILITIES = {
    * a typed `unsupported` response. A read never sends, closes, publishes,
    * subscribes, or creates or enumerates a room or channel.
    */
-  REALTIME_DIAGNOSTICS: 'realtime-diagnostics',
+  REALTIME_DIAGNOSTICS: 'realtime-diagnostics' as StandardCapabilityToken<'realtime-diagnostics'>,
   /**
    * Minimized outbound HTTP attempt observations (M98n) — an
    * `IOutboundHttpDiagnosticsSource` the SDK's `createObservedFetch` helper
@@ -234,7 +314,8 @@ export const CAPABILITIES = {
    * `GET /v1/outbound-http`; no registered source means a typed
    * `unsupported` response. A read never performs a request.
    */
-  OUTBOUND_HTTP_DIAGNOSTICS: 'outbound-http-diagnostics',
+  OUTBOUND_HTTP_DIAGNOSTICS:
+    'outbound-http-diagnostics' as StandardCapabilityToken<'outbound-http-diagnostics'>,
   /**
    * Minimized storage operation observations (M98m) — an
    * `IStorageDiagnosticsSource` every StoragePlugin instance registers under
@@ -244,40 +325,40 @@ export const CAPABILITIES = {
    * connector answers a typed `unsupported` response. A read never performs a
    * storage operation, resolves the storage capability, or probes a backend.
    */
-  STORAGE_DIAGNOSTICS: 'storage-diagnostics',
+  STORAGE_DIAGNOSTICS: 'storage-diagnostics' as StandardCapabilityToken<'storage-diagnostics'>,
   /** Metric registration contributions (multi-provider). */
-  METRIC_REGISTRATION: 'metric-registration',
+  METRIC_REGISTRATION: 'metric-registration' as StandardCapabilityToken<'metric-registration'>,
   /** OpenAPI schema contributions (multi-provider). */
-  OPENAPI_SCHEMA: 'openapi-schema',
+  OPENAPI_SCHEMA: 'openapi-schema' as StandardCapabilityToken<'openapi-schema'>,
   /** CLI command contributions (multi-provider). */
-  CLI_COMMAND: 'cli-command',
+  CLI_COMMAND: 'cli-command' as StandardCapabilityToken<'cli-command'>,
   /** Decorator handler contributions (multi-provider). */
-  DECORATOR_HANDLER: 'decorator-handler',
+  DECORATOR_HANDLER: 'decorator-handler' as StandardCapabilityToken<'decorator-handler'>,
   /** Decorator metadata store (from the DecoratorPlugin, when registered). */
-  METADATA_STORE: 'metadata-store',
+  METADATA_STORE: 'metadata-store' as StandardCapabilityToken<'metadata-store'>,
   /** gRPC plugin — server-side Connect/gRPC/gRPC-Web co-serving. */
-  GRPC: 'grpc',
+  GRPC: 'grpc' as StandardCapabilityToken<'grpc'>,
   /**
    * Cloudflare Workers platform bindings (KV, R2, D1, Queues, service and
    * Durable Object namespaces) published as one typed accessor.
    */
-  CLOUDFLARE: 'cloudflare',
+  CLOUDFLARE: 'cloudflare' as StandardCapabilityToken<'cloudflare'>,
   /** GraphQL plugin — schema-first and code-first GraphQL-over-HTTP. */
-  GRAPHQL: 'graphql',
+  GRAPHQL: 'graphql' as StandardCapabilityToken<'graphql'>,
   /** Static file serving plugin. */
-  STATIC_FILES: 'static-files',
+  STATIC_FILES: 'static-files' as StandardCapabilityToken<'static-files'>,
   /**
    * View rendering (server-rendered HTML) — an `IViewEngine` that turns a
    * view component and its props into an HTML string, so a handler can answer
    * with markup it did not concatenate by hand.
    */
-  VIEW: 'view',
+  VIEW: 'view' as StandardCapabilityToken<'view'>,
   /**
    * Localization — an `ILocalizer` holding the application's message
    * catalogues per locale, bound to a request's resolved `IRequest.locale`
    * through the localization plugin's `localizerFor(ctx)`.
    */
-  LOCALIZATION: 'localization',
+  LOCALIZATION: 'localization' as StandardCapabilityToken<'localization'>,
   /**
    * Transactional outbox — the `IOutbox` the messaging plugin registers when
    * its `outbox` option is set (`outbox.<name>` for a named messaging
@@ -286,7 +367,7 @@ export const CAPABILITIES = {
    *
    * @since 0.9.0
    */
-  OUTBOX: 'outbox',
+  OUTBOX: 'outbox' as StandardCapabilityToken<'outbox'>,
   /**
    * Consumer inbox — the `IInbox` the messaging plugin registers when its
    * `inbox` option is set (`inbox.<name>` for a named messaging instance).
@@ -296,7 +377,7 @@ export const CAPABILITIES = {
    *
    * @since 0.9.0
    */
-  INBOX: 'inbox',
+  INBOX: 'inbox' as StandardCapabilityToken<'inbox'>,
   /**
    * Idempotency — an `IIdempotencyService` whose `middleware` and `behavior`
    * members build the HTTP and ingress idempotency paths over one store. The
@@ -304,28 +385,38 @@ export const CAPABILITIES = {
    * `@setu-ts/idempotency-plugin`; only the port, the service contract, the
    * option types and this token live in `common`.
    */
-  IDEMPOTENCY: 'idempotency',
+  IDEMPOTENCY: 'idempotency' as StandardCapabilityToken<'idempotency'>,
   /**
    * Runtime-owned local diagnostics listener — the single IPv4-loopback port
    * the RuntimePlugin can bind for the local diagnostics connector
    * (`ILocalDiagnosticsListenerFactory`). Provided by the RuntimePlugin;
    * consumed by the DiagnosticsPlugin. Not a generic second HTTP server API.
    */
-  LOCAL_DIAGNOSTICS_LISTENER: 'local-diagnostics-listener',
+  LOCAL_DIAGNOSTICS_LISTENER:
+    'local-diagnostics-listener' as StandardCapabilityToken<'local-diagnostics-listener'>,
   /**
    * Vector store — tenant-scoped similarity search (`IVectorStore`). Provided
    * by `@setu-ts/vector-store-plugin`; every data method takes the tenant scope
    * as a required argument.
    */
-  VECTOR_STORE: 'vector-store',
+  VECTOR_STORE: 'vector-store' as StandardCapabilityToken<'vector-store'>,
 } as const;
 
 /**
- * Union of all standard capability token values.
+ * Union of all standard capability token values, including their type-only
+ * brands. Use `CapabilityKey` when an unbranded key union is needed.
  *
  * @since 0.1.0
  */
 export type StandardCapability = (typeof CAPABILITIES)[keyof typeof CAPABILITIES];
+
+/**
+ * The plain string union underlying the branded `StandardCapability` values.
+ * Used to compute which standard keys lack an interface in `CapabilityServices`.
+ *
+ * @since 0.13.0
+ */
+export type CapabilityKey = StandardCapability extends StandardCapabilityToken<infer K> ? K : never;
 
 /**
  * One kebab-case segment of a token: a lowercase letter, then lowercase

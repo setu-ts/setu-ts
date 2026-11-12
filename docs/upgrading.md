@@ -12,6 +12,31 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+## 0.13.0
+
+### Typed capability lookups
+
+`services.get(CAPABILITIES.LOGGER)` now infers `ILogger`. Correct explicit interfaces and widening
+still work; downcasts and wrong token/interface pairs fail. Use the bound interface's methods.
+`register` and `registerFactory` require the bound contract too: tests use a full double or
+`overrideCapability` for a partial replacement.
+
+Replace `serviceToken<T>(name)` with `requestServiceToken<T>(name)` for entries registered with
+`requestService`. Read those entries with `resolveRequestService` or React Router's `getService`;
+raw `get` and `getAll` refuse them. Singleton entries keep `serviceToken`. Neither typed token can
+be assigned from a plain string now. Custom strings, derived tokens and unbound standard tokens
+retain explicit service types. Single generic registry implementations still compile.
+
+A standard token reported as "not assignable to parameter of type 'UnboundToken'" can indicate a
+wrong explicit interface or two installed copies of `@setu-ts/common`. Correct the pairing, or
+dedupe common so all packages share its unique-symbol brands.
+
+New full-stack scaffolds read `TRUST_FORWARDED_HOST`: leave it empty or `false` unless your listed
+`TRUSTED_PROXIES` overwrite `X-Forwarded-Host`. `true` requires a nonempty proxy list; other values
+fail configuration without echoing the value. `setu check` now warns with `setu.W006` when an
+installed zero-config provider or MCP plugin has no call in `setu.config.ts`; if another module
+registers it, silence that id in `.setu-ts/check.json`.
+
 ### `trustForwardedHost`, worker-pool labels and the starter body limit (`@setu-ts/http-security-plugin`, `@setu-ts/worker-pool-plugin`, `@setu-ts/rest-starter`)
 
 - **Behind a proxy, the public host is the `Host` header unless you opt in**

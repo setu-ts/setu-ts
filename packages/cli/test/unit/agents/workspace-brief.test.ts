@@ -19,6 +19,13 @@ describe('workspace briefs', () => {
       { name: 'billing', port: 3001, dependsOn: ['orders'] },
     ],
   };
+  it('V12-58 masks broker credentials while preserving the endpoint', () => {
+    const text = renderWorkspaceRoot({ ...manifest, brokerUrl: 'amqp://user:secret@mq:5672' }, '1');
+    const endpoint = text.split('\n').find((line) => line.startsWith('Broker:'))!;
+    expect(endpoint).not.toContain('secret');
+    expect(endpoint).not.toContain('user:');
+    expect(text).toContain('amqp://***@mq:5672');
+  });
   it.each(['\n', '`', '|', '<', '>', '\r', '\u0000', '\u007f', '\u2028', '\u202e'])(
     'F1 suppresses unsafe workspace display values containing %j',
     (char) => {

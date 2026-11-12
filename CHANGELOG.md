@@ -8,6 +8,17 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **BREAKING — typed capability registry (M139g, 0.13.0, `@setu-ts/common`, `kernel`, `testing`,
+  `react-router-plugin`).** Standard tokens carry a required brand and infer their interfaces
+  through `CapabilityServices`; reads reject wrong explicit pairings and downcasts, and writes
+  require the bound contract. Database, Cloudflare, static and messaging plugins augment the map.
+  Singleton `ServiceToken` is now branded; request-bound entries use `requestServiceToken` and
+  resolve through `resolveRequestService` or `getService`. Raw registry reads refuse request tokens.
+  CLI modules and the full-stack app emit the request token constructor. Correct explicit interfaces
+  and single generic registry implementations remain supported; see the upgrading guide. The new
+  public types are `StandardCapabilityToken`, `CapabilityKey`, `RequestServiceToken`, `KeysServing`,
+  `UnboundCapability` and `UnboundToken`.
+
 - **BREAKING — `X-Forwarded-Host` is believed only on opt-in (#583,
   `@setu-ts/http-security-plugin`).** Behind a trusted proxy, `ipSecurityMiddleware` published the
   LEFTMOST `X-Forwarded-Host` as the public origin. A proxy that passes a client's copy through
@@ -215,6 +226,13 @@ All notable changes to this project are documented here. The format follows
   generated discovery module, and code that calls the member by name.
 
 ### Fixed
+
+- **V12-58 (`@setu-ts/cli`):** workspace agent briefs mask broker URL credentials while keeping the
+  host and the endpoint-free fallback.
+- **V12-59 (`@setu-ts/cli`):** `setu.W006` warns about installed zero-config providers and MCP
+  without a call in the config, exempts starter-owned arms, and supports check silences.
+- **V12-61 (`@setu-ts/cli`):** full-stack scaffolds expose a validated `TRUST_FORWARDED_HOST` switch
+  alongside `TRUSTED_PROXIES`, with proxy guidance and safe defaults.
 
 - **M139d (#582, `@setu-ts/cli`, V12-42).** A `--module` route on functional full-stack now mounts
   at `/api/<m>/<name>`; controller, SSE and page-shadow bases use the same module mount.

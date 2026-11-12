@@ -4,6 +4,29 @@ import { diagnoseProject } from '../../src/diagnostics/diagnose.ts';
 import { moduleActive, moduleSymbol } from '../../src/diagnostics/modules.ts';
 import { runCli } from '../../src/cli.ts';
 import { createFakeFs } from '../fixtures/fake-fs.ts';
+import { findingId } from '../../src/diagnostics/ids.ts';
+
+it('V12-59 includes the warning id in serialized findings and skips unreadable configs', async () => {
+  const fs = createFakeFs({ '/app/setu.config.ts': 'export function createApp() {}' });
+  const diagnosis = await diagnoseProject(fs, '/app', new Set(['mcp-plugin']));
+  const json = JSON.stringify(
+    diagnosis.findings.map((finding) => ({ id: findingId(finding), ...finding })),
+  );
+  expect(JSON.parse(json)).toContainEqual({
+    id: 'setu.W006',
+    kind: 'plugin-unregistered',
+    pkg: 'mcp-plugin',
+    symbol: 'McpPlugin',
+  });
+  for (const source of ['const unclassifiable = globalThis;']) {
+    await fs.writeFile('/app/setu.config.ts', new TextEncoder().encode(source));
+    expect(
+      (await diagnoseProject(fs, '/app', new Set(['mcp-plugin']))).findings.some(
+        (finding) => finding.kind === 'plugin-unregistered',
+      ),
+    ).toBe(false);
+  }
+});
 
 it('M1 L1 keeps each collapsed warning scoped to its own diagnostic group', async () => {
   const fs = createFakeFs({

@@ -16,8 +16,8 @@ import { CachePlugin } from '@setu-ts/cache-plugin';
 ```typescript
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
-import { cacheMiddleware, CachePlugin, CacheService } from '@setu-ts/cache-plugin';
-import { CAPABILITIES, type ICacheStore } from '@setu-ts/common';
+import { cacheMiddleware, CachePlugin } from '@setu-ts/cache-plugin';
+import { CAPABILITIES } from '@setu-ts/common';
 
 const app = createApplication({
   plugins: [
@@ -27,19 +27,16 @@ const app = createApplication({
 });
 await app.start({ port: 3000 });
 
-const cache = app.services.get<ICacheStore>(CAPABILITIES.CACHE);
+const cache = app.services.get(CAPABILITIES.CACHE);
 await cache.set('user:1', { name: 'Ada' }, 60);
 const user = await cache.get<{ name: string }>('user:1');
 
-// CacheService adds coalesced read-through for one cache key.
-const readThroughCache = app.services.get<CacheService>(CAPABILITIES.CACHE);
-const profile = await readThroughCache.getOrSet(
-  'profile:1',
-  async () => {
-    return await loadProfile('1');
-  },
-  60,
-);
+// The capability exposes ICacheStore's get/set contract.
+let profile = await cache.get<{ name: string }>('profile:1');
+if (profile === null) {
+  profile = { name: 'Ada' };
+  await cache.set('profile:1', profile, 60);
+}
 ```
 
 ## Options

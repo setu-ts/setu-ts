@@ -173,7 +173,7 @@ interface IPlugin {
 ### 3.3 Plugin Independence
 
 - A plugin must never import from another plugin's internal modules.
-- A plugin accesses other plugins' capabilities only via `ctx.services.get<T>(token)`.
+- A plugin accesses other plugins' capabilities only via `ctx.services.get(CAPABILITIES.X)`.
 - A plugin must function correctly when optional dependencies are absent.
 - A plugin must declare all required dependencies in `dependencies[]`.
 

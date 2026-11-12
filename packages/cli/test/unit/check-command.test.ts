@@ -19,6 +19,26 @@ function harness(seed: Readonly<Record<string, string>> = { '/app/package.json':
   };
 }
 
+it('V12-59 renders W006, fails only in strict mode, and supports silencing', async () => {
+  const seed = {
+    '/app/package.json': JSON.stringify({ dependencies: { '@setu-ts/mcp-plugin': '^0.12.0' } }),
+    '/app/setu.config.ts': 'export function createApp() {}',
+  };
+  const h = harness(seed);
+  expect(await h.run(['check'])).toBe(0);
+  expect(h.err.text()).toContain('setu.W006');
+  expect(h.err.text()).toContain('McpPlugin({ … })');
+  expect(h.err.text()).toContain('setu.config.ts');
+  expect(await h.run(['check', '--strict'])).toBe(1);
+  const silent = harness({
+    ...seed,
+    '/app/.setu-ts/check.json': JSON.stringify({ silence: ['setu.W006'] }),
+  });
+  expect(await silent.run(['check', '--strict'])).toBe(0);
+  expect(silent.err.text()).not.toContain('setu.W006');
+  expect(silent.log.text()).toContain('1 silenced');
+});
+
 it('V12-32 check accepts ordinary template and regex literals without W001', async () => {
   const h = harness();
   expect(await h.run(['new', 'rest', '--template', 'rest'])).toBe(0);
@@ -225,6 +245,7 @@ it('renders each stable id with its severity and strict counts', () => {
     'app/routes/_app/products._index.tsx:7 imports ~kernel/modules/products/products.service.ts by value, which would carry kernel code into the browser bundle.',
     'Cannot read the imports of app/routes/broken.tsx, so whether it imports kernel code by value cannot be checked.',
     'src/services/plain.service.ts is not re-exported from src/services/index.ts: it does not export describePlain.',
+    'Installed @setu-ts/mcp-plugin has no McpPlugin call in setu.config.ts.',
   ];
   for (const [index, finding] of CHECK_FINDINGS.entries()) {
     for (const strict of [false, true]) {

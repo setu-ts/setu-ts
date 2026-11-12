@@ -1,3 +1,4 @@
+import { ZERO_CONFIG_WIRINGS } from '../utils/plugin-wirings.ts';
 /** Three-outcome config wiring inspection shared by the command renderers. @module */
 import { maskSourceCode } from '../devtool/sources.ts';
 import { referenceMask } from './reference-mask.ts';
@@ -99,4 +100,28 @@ export function wiringFinding(
     ...(unusedImports.length === 0 ? {} : { unusedImports }),
     ...(starter === undefined ? {} : { starter }),
   };
+}
+
+/**
+ * Finds installed zero-config providers absent from this config's calls.
+ * Registration elsewhere can be silenced by id in the project's check config.
+ * @since 0.13.0
+ */
+export function unregisteredPluginFindings(
+  config: string,
+  installed: ReadonlySet<string>,
+): Finding[] {
+  const starter = composingStarter(config);
+  const candidates = new Map([...ZERO_CONFIG_WIRINGS, ['mcp-plugin', { symbol: 'McpPlugin' }]]);
+  const findings: Finding[] = [];
+  for (const [pkg, { symbol }] of candidates) {
+    if (
+      installed.has(pkg) &&
+      !starter?.arms.has(pkg) &&
+      calledOutsideImports(config, symbol) === false
+    ) {
+      findings.push({ kind: 'plugin-unregistered', pkg, symbol });
+    }
+  }
+  return findings;
 }

@@ -1895,7 +1895,17 @@ describe('withPluginWiring', () => {
       (node) => ts.isFunctionDeclaration(node) && node.name?.text === 'withPluginWiring',
     );
     expect(helper && ts.isFunctionDeclaration(helper) && helper.parameters.length).toBe(4);
-    const wiring = ast.statements.find(
+    const wirings = await nodeFs.readFile(
+      new URL('../../../src/utils/plugin-wirings.ts', import.meta.url),
+      'utf8',
+    );
+    const wiringsAst = ts.createSourceFile(
+      'plugin-wirings.ts',
+      wirings,
+      ts.ScriptTarget.Latest,
+      true,
+    );
+    const wiring = wiringsAst.statements.find(
       (node) => ts.isInterfaceDeclaration(node) && node.name.text === 'IPluginWiring',
     );
     expect(wiring && ts.isInterfaceDeclaration(wiring) && wiring.members.length).toBe(1);

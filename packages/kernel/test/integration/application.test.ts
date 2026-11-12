@@ -1,3 +1,5 @@
+import { configDouble } from '../../../../test/fixtures/capability-doubles.ts';
+import { loggerDouble } from '../../../../test/fixtures/capability-doubles.ts';
 import { describe, expect, it } from 'vitest';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { ILogger, IPlugin, IPluginContext } from '@setu-ts/common';
@@ -958,7 +960,10 @@ describe('Application review fixes', () => {
           version: '1.0.0',
           provides: [CAPABILITIES.OPENAPI],
           register(ctx) {
-            ctx.services.register(CAPABILITIES.OPENAPI, { spec: 'openapi' });
+            ctx.services.register(CAPABILITIES.OPENAPI, {
+              getSpec: () => ({ spec: 'openapi' }),
+              addSchema() {},
+            });
           },
         },
         {
@@ -987,7 +992,10 @@ describe('Application review fixes', () => {
           version: '1.0.0',
           provides: [CAPABILITIES.OPENAPI],
           register(ctx) {
-            ctx.services.register(CAPABILITIES.OPENAPI, { spec: 'openapi' });
+            ctx.services.register(CAPABILITIES.OPENAPI, {
+              getSpec: () => ({ spec: 'openapi' }),
+              addSchema() {},
+            });
           },
         },
         {
@@ -1106,14 +1114,17 @@ describe('Application review fixes', () => {
           version: '1.0.0',
           register(ctx) {
             before = 'logger' in ctx;
-            ctx.services.register(CAPABILITIES.LOGGER, {
-              debug() {},
-              info() {},
-              warn() {},
-              error() {},
-              fatal() {},
-              trace() {},
-            });
+            ctx.services.register(
+              CAPABILITIES.LOGGER,
+              loggerDouble({
+                debug() {},
+                info() {},
+                warn() {},
+                error() {},
+                fatal() {},
+                trace() {},
+              }),
+            );
             after = 'logger' in ctx;
           },
         },
@@ -1136,7 +1147,7 @@ describe('Application review fixes', () => {
           version: '1.0.0',
           register(ctx) {
             keysBefore = Object.keys(ctx);
-            ctx.services.register(CAPABILITIES.CONFIG, { get: () => undefined });
+            ctx.services.register(CAPABILITIES.CONFIG, configDouble());
             keysAfter = Object.keys(ctx);
           },
         },
@@ -1151,7 +1162,7 @@ describe('Application review fixes', () => {
   it('Proxy-trap: ctx.config is undefined when absent and the service when present', async () => {
     let before: unknown = 'unset';
     let after: unknown = 'unset';
-    const config = { get: () => 'value' };
+    const config = configDouble({ value: 'value' });
     const app = createApplication({
       plugins: [
         runtimePlugin(),
@@ -1370,7 +1381,7 @@ describe('Application review fixes', () => {
           version: '1.0.0',
           provides: [CAPABILITIES.LOGGER],
           register(ctx) {
-            ctx.services.register(CAPABILITIES.LOGGER, stubLogger);
+            ctx.services.register(CAPABILITIES.LOGGER, loggerDouble(stubLogger));
           },
         },
         {
@@ -1427,7 +1438,7 @@ describe('Application review fixes', () => {
           version: '1.0.0',
           provides: [CAPABILITIES.LOGGER],
           register(ctx) {
-            ctx.services.register(CAPABILITIES.LOGGER, brokenLogger);
+            ctx.services.register(CAPABILITIES.LOGGER, loggerDouble(brokenLogger));
           },
         },
         {
@@ -1868,7 +1879,7 @@ describe('unsatisfied consumed-capability startup diagnostic', () => {
           version: '1.0.0',
           provides: [CAPABILITIES.LOGGER],
           register(ctx) {
-            ctx.services.register(CAPABILITIES.LOGGER, captureLogger);
+            ctx.services.register(CAPABILITIES.LOGGER, loggerDouble(captureLogger));
           },
         },
         {
@@ -1911,7 +1922,7 @@ describe('unsatisfied consumed-capability startup diagnostic', () => {
           version: '1.0.0',
           provides: [CAPABILITIES.LOGGER],
           register(ctx) {
-            ctx.services.register(CAPABILITIES.LOGGER, captureLogger);
+            ctx.services.register(CAPABILITIES.LOGGER, loggerDouble(captureLogger));
           },
         },
         {
@@ -1979,7 +1990,7 @@ describe('unsatisfied consumed-capability startup diagnostic', () => {
           version: '1.0.0',
           provides: [CAPABILITIES.LOGGER],
           register(ctx) {
-            ctx.services.register(CAPABILITIES.LOGGER, brokenLogger);
+            ctx.services.register(CAPABILITIES.LOGGER, loggerDouble(brokenLogger));
           },
         },
         {

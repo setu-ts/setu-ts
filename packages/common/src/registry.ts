@@ -6,7 +6,33 @@
  * @module
  */
 import { causeMessage } from './errors/serialize-error.ts';
-import type { CapabilityToken } from './tokens.ts';
+import type { CapabilityServices, UnboundCapability } from './capability-services.ts';
+import type { RequestBoundService } from './services/request-service.ts';
+import type {
+  CapabilityToken,
+  StandardCapabilityToken,
+  ServiceToken,
+  RequestServiceToken,
+  UnboundToken,
+} from './tokens.ts';
+export type { UnboundToken } from './tokens.ts';
+
+/**
+ * Capability keys whose bound service interface is assignable to `T`.
+ * Explicit registry and resolver overloads use this set to permit the bound
+ * interface or a wider type while refusing a downcast to an implementation.
+ *
+ * @typeParam T - The interface requested by the caller
+ * @example
+ * ```typescript
+ * type LoggerCapabilities = KeysServing<ILogger>;
+ * const logger = services.get<ILogger>(CAPABILITIES.LOGGER);
+ * ```
+ * @since 0.13.0
+ */
+export type KeysServing<T> = {
+  [K in keyof CapabilityServices]: CapabilityServices[K] extends T ? K : never;
+}[keyof CapabilityServices];
 
 /**
  * Options accepted when registering a service.
@@ -72,6 +98,8 @@ export type RegistryFactory<T> = (services: IServiceRegistry) => T;
  * optional DI container is a convenience layer on top of it. The application
  * registry is sealed after `runBootstrap()`; request-scoped services are
  * registered on the request context instead.
+ * Standard token lookups and registrations are checked against the interface
+ * bound in `CapabilityServices`.
  *
  * @example
  * ```typescript
@@ -79,7 +107,7 @@ export type RegistryFactory<T> = (services: IServiceRegistry) => T;
  * ctx.services.register(CAPABILITIES.CACHE, new RedisCacheStore(options));
  *
  * // Consumer plugin
- * const cache = ctx.services.get<ICacheStore>(CAPABILITIES.CACHE);
+ * const cache = ctx.services.get(CAPABILITIES.CACHE);
  * ```
  * @since 0.1.0
  */
@@ -96,7 +124,28 @@ export interface IServiceRegistry {
    * @throws {Error} If called after the application has run `runBootstrap()`
    * @remarks `override: true` is reported through the logger capability.
    */
-  register<T extends object>(token: CapabilityToken, service: T, options?: RegisterOptions): void;
+  register<K extends keyof CapabilityServices>(
+    token: StandardCapabilityToken<K>,
+    service: CapabilityServices[K],
+    options?: RegisterOptions,
+  ): void;
+  register<T extends object>(
+    token: StandardCapabilityToken<KeysServing<T>>,
+    service: T,
+    options?: RegisterOptions,
+  ): void;
+  register<T extends object>(
+    token: StandardCapabilityToken<UnboundCapability>,
+    service: T,
+    options?: RegisterOptions,
+  ): void;
+  register<T extends object>(token: ServiceToken<T>, service: T, options?: RegisterOptions): void;
+  register<T extends object>(
+    token: RequestServiceToken<T>,
+    service: RequestBoundService<T>,
+    options?: RegisterOptions,
+  ): void;
+  register<T extends object>(token: UnboundToken, service: T, options?: RegisterOptions): void;
 
   /**
    * Registers a lazy factory: the service is instantiated on first
@@ -111,8 +160,33 @@ export interface IServiceRegistry {
    * @throws {Error} If called after the application has run `runBootstrap()`
    * @remarks `override: true` is reported through the logger capability.
    */
+  registerFactory<K extends keyof CapabilityServices>(
+    token: StandardCapabilityToken<K>,
+    factory: ServiceFactory<CapabilityServices[K]>,
+    options?: RegisterOptions,
+  ): void;
   registerFactory<T extends object>(
-    token: CapabilityToken,
+    token: StandardCapabilityToken<KeysServing<T>>,
+    factory: ServiceFactory<T>,
+    options?: RegisterOptions,
+  ): void;
+  registerFactory<T extends object>(
+    token: StandardCapabilityToken<UnboundCapability>,
+    factory: ServiceFactory<T>,
+    options?: RegisterOptions,
+  ): void;
+  registerFactory<T extends object>(
+    token: ServiceToken<T>,
+    factory: ServiceFactory<T>,
+    options?: RegisterOptions,
+  ): void;
+  registerFactory<T extends object>(
+    token: RequestServiceToken<T>,
+    factory: ServiceFactory<RequestBoundService<T>>,
+    options?: RegisterOptions,
+  ): void;
+  registerFactory<T extends object>(
+    token: UnboundToken,
     factory: ServiceFactory<T>,
     options?: RegisterOptions,
   ): void;
@@ -128,7 +202,11 @@ export interface IServiceRegistry {
    * @returns The registered service
    * @throws {Error} If no service is registered for the token
    */
-  get<T extends object>(token: CapabilityToken): T;
+  get<K extends keyof CapabilityServices>(token: StandardCapabilityToken<K>): CapabilityServices[K];
+  get<T extends object>(token: StandardCapabilityToken<KeysServing<T>>): T;
+  get<T extends object>(token: StandardCapabilityToken<UnboundCapability>): T;
+  get<T extends object>(token: ServiceToken<T>): T;
+  get<T extends object>(token: UnboundToken): T;
 
   /**
    * Resolves every provider registered for a multi-provider token.
@@ -137,7 +215,13 @@ export interface IServiceRegistry {
    * @param token - The capability token to resolve
    * @returns All registered providers, in registration order; empty when none
    */
-  getAll<T extends object>(token: CapabilityToken): readonly T[];
+  getAll<K extends keyof CapabilityServices>(
+    token: StandardCapabilityToken<K>,
+  ): readonly CapabilityServices[K][];
+  getAll<T extends object>(token: StandardCapabilityToken<KeysServing<T>>): readonly T[];
+  getAll<T extends object>(token: StandardCapabilityToken<UnboundCapability>): readonly T[];
+  getAll<T extends object>(token: ServiceToken<T>): readonly T[];
+  getAll<T extends object>(token: UnboundToken): readonly T[];
 
   /**
    * Reports whether a capability is available.

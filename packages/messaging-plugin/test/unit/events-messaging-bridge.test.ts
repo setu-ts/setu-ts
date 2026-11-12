@@ -1,37 +1,57 @@
 import { describe, expect, it } from 'vitest';
 import { EventsMessagingBridge } from '../../src/bridge/events-messaging-bridge.ts';
 import { CAPABILITIES } from '@setu-ts/common';
-import type { IPluginContext, IRuntimeServices } from '@setu-ts/common';
+import type {
+  IPluginContext,
+  IRuntimeServices,
+  IEventBus,
+  IDomainEvent,
+  EventHandler,
+  IMessageBroker,
+  MessageHandler,
+  ISubscription,
+} from '@setu-ts/common';
 import manifest from '../../deno.json' with { type: 'json' };
 
 /**
  * Fake implementations for testing EventsMessagingBridge.
  */
-class FakeEventBus {
-  #subscribers = new Map<string, Array<(event: unknown) => Promise<void>>>();
+class FakeEventBus implements IEventBus {
+  #subscribers = new Map<string, Array<(event: IDomainEvent<unknown>) => void | Promise<void>>>();
   unsubscribeCalls: Array<{ eventType: string }> = [];
 
-  subscribe<T>(eventType: string, handler: (event: T) => Promise<void>): () => Promise<void> {
+  subscribe<T>(eventType: string, handler: EventHandler<T>): () => void {
     if (!this.#subscribers.has(eventType)) {
       this.#subscribers.set(eventType, []);
     }
     const handlers = this.#subscribers.get(eventType)!;
-    handlers.push(handler as (event: unknown) => Promise<void>);
+    handlers.push(handler as EventHandler);
 
-    // eslint-disable-next-line require-await
-    return async () => {
-      const idx = handlers.indexOf(handler as (event: unknown) => Promise<void>);
+    return () => {
+      const idx = handlers.indexOf(handler as EventHandler);
       if (idx >= 0) {
         handlers.splice(idx, 1);
       }
     };
   }
 
-  async publish<T>(eventType: string, event: T): Promise<void> {
-    const handlers = this.#subscribers.get(eventType) || [];
-    for (const handler of handlers) {
-      await handler(event as unknown as Promise<void>);
-    }
+  publish<T>(event: IDomainEvent<T>): Promise<void>;
+  publish<T>(eventType: string, event: T): Promise<void>;
+  async publish(eventOrType: string | IDomainEvent<unknown>, value?: unknown): Promise<void> {
+    const event =
+      typeof eventOrType === 'string'
+        ? {
+            id: 'test',
+            occurredOn: new Date(0),
+            type: eventOrType,
+            data: {},
+            ...(typeof value === 'object' && value !== null ? value : {}),
+          }
+        : eventOrType;
+    for (const handler of this.#subscribers.get(event.type) ?? []) await handler(event);
+  }
+  async publishBatch(events: IDomainEvent[]): Promise<void> {
+    for (const event of events) await this.publish(event);
   }
 
   getSubscriberCount(eventType: string): number {
@@ -39,7 +59,13 @@ class FakeEventBus {
   }
 }
 
-class FakeMessageBroker {
+class FakeMessageBroker implements IMessageBroker {
+  request<TReq, TRes>(_topic: string, _message: TReq): Promise<TRes> {
+    return Promise.reject(new Error('Not configured'));
+  }
+  respond(): Promise<ISubscription> {
+    return Promise.resolve({ unsubscribe: () => Promise.resolve() });
+  }
   publishedMessages: Array<{ topic: string; message: unknown }> = [];
   publishCalls: Array<{ topic: string; message: unknown }> = [];
 
@@ -54,12 +80,8 @@ class FakeMessageBroker {
   isReady(): boolean {
     return true;
   }
-  // eslint-disable-next-line require-await
-  async subscribe<T>(
-    _topic: string,
-    _handler: (msg: T, meta: unknown) => Promise<void>,
-  ): Promise<() => void> {
-    return () => {};
+  subscribe<T>(_topic: string, _handler: MessageHandler<T>): Promise<ISubscription> {
+    return Promise.resolve({ unsubscribe: () => Promise.resolve() });
   }
 }
 
@@ -289,7 +311,7 @@ describe('EventsMessagingBridge', () => {
     ctx.services.register(CAPABILITIES.MESSAGING, broker);
 
     // Make broker throw on publish
-    (broker as unknown as { publish: (t: string, m: unknown) => Promise<void> }).publish = () => {
+    broker.publish = () => {
       throw new Error('Publish failed');
     };
 
@@ -318,7 +340,7 @@ describe('EventsMessagingBridge', () => {
     ctx.services.register('logger', logger);
 
     // Make broker throw on publish
-    (broker as unknown as { publish: (t: string, m: unknown) => Promise<void> }).publish = () => {
+    broker.publish = () => {
       throw new Error('Default handler test');
     };
 
@@ -342,7 +364,7 @@ describe('EventsMessagingBridge', () => {
     ctx.services.register(CAPABILITIES.MESSAGING, broker);
 
     // Make broker throw on publish - should not throw from bridge
-    (broker as unknown as { publish: (t: string, m: unknown) => Promise<void> }).publish = () => {
+    broker.publish = () => {
       throw new Error('Should be swallowed');
     };
 
@@ -399,7 +421,7 @@ describe('EventsMessagingBridge', () => {
     ctx.services.register(CAPABILITIES.EVENTS, eventBus);
     ctx.services.register(CAPABILITIES.MESSAGING, broker);
 
-    (broker as unknown as { publish: (t: string, m: unknown) => Promise<void> }).publish = () => {
+    broker.publish = () => {
       throw new Error('Error instance test');
     };
 
@@ -428,7 +450,7 @@ describe('EventsMessagingBridge', () => {
     ctx.services.register(CAPABILITIES.EVENTS, eventBus);
     ctx.services.register(CAPABILITIES.MESSAGING, broker);
 
-    (broker as unknown as { publish: (t: string, m: unknown) => Promise<void> }).publish = () => {
+    broker.publish = () => {
       throw 'String error';
     };
 
@@ -511,7 +533,7 @@ describe('EventsMessagingBridge', () => {
 
     // Make broker throw an Error
     const testError = new Error('test-error-message');
-    (broker as unknown as { publish: (t: string, m: unknown) => Promise<void> }).publish = () => {
+    broker.publish = () => {
       throw testError;
     };
 
@@ -536,7 +558,7 @@ describe('EventsMessagingBridge', () => {
     ctx.services.register('logger', logger);
 
     // Make broker throw a string (non-Error)
-    (broker as unknown as { publish: (t: string, m: unknown) => Promise<void> }).publish = () => {
+    broker.publish = () => {
       throw 'string-error';
     };
 
