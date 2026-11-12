@@ -29,8 +29,9 @@ drain as every other route. No adapter seam is involved: `GrpcService.available`
 
 ## Installation
 
-The Connect and Protobuf-ES modules are lazy-loaded on first use. Install them with the package
-manager that matches your runtime:
+The Connect and Protobuf-ES modules are lazy-loaded on first use. In a Setu project, `setu add grpc`
+records both beside the plugin. By hand, install them with the package manager that matches your
+runtime:
 
 ```bash
 # Deno

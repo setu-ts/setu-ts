@@ -30,7 +30,7 @@ export class GraphqlRuntimeLoadError extends Error {
   constructor(specifier: string, cause: unknown) {
     const message =
       `Failed to load graphql runtime from "${specifier}". ` +
-      `Install with: deno add npm:graphql@^16`;
+      `Install it: npm i graphql@^16 · bun add graphql@^16 · deno add npm:graphql@^16`;
     super(message, { cause });
     this.specifier = specifier;
   }

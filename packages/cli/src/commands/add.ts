@@ -193,8 +193,27 @@ export const ADDABLE: ReadonlyMap<string, IAddablePackage> = new Map([
   ['events', { pkg: 'events-plugin' }],
   ['exceptions', { pkg: 'exceptions' }],
   ['feature-flags', { pkg: 'feature-flags-plugin' }],
-  ['graphql', { pkg: 'graphql-plugin' }],
-  ['grpc', { pkg: 'grpc-plugin' }],
+  // Both plugins import their runtime lazily from an OPTIONAL peer, which no
+  // package manager installs for the consumer: without it the app fails at
+  // start. `@connectrpc/connect-node` is left out — only an outbound client
+  // needs it, and the workspace RPC path records the same two packages.
+  [
+    'graphql',
+    {
+      pkg: 'graphql-plugin',
+      peers: { runtimes: ['node', 'deno', 'bun', 'cloudflare-workers'], packages: ['graphql'] },
+    },
+  ],
+  [
+    'grpc',
+    {
+      pkg: 'grpc-plugin',
+      peers: {
+        runtimes: ['node', 'deno', 'bun', 'cloudflare-workers'],
+        packages: ['@connectrpc/connect', '@bufbuild/protobuf'],
+      },
+    },
+  ],
   ['health', { pkg: 'health-plugin' }],
   ['http-security', { pkg: 'http-security-plugin' }],
   ['idempotency', { pkg: 'idempotency-plugin' }],
