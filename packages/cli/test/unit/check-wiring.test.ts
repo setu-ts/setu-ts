@@ -39,6 +39,19 @@ it('V12-59 recognises a provider called through an aliased import', () => {
       installed,
     ),
   ).toEqual([]);
+  // A commented-out aliased import adds no alias, so an unrelated call does not count.
+  expect(
+    unregisteredPluginFindings(
+      "// import { QueuePlugin as init } from '@setu-ts/queue-plugin';\nimport { init } from './init.ts';\ninit();",
+      installed,
+    ),
+  ).toHaveLength(1);
+  expect(
+    unregisteredPluginFindings(
+      "/* import { QueuePlugin as init } from '@setu-ts/queue-plugin'; */\ninit();",
+      installed,
+    ),
+  ).toHaveLength(1);
   // A `$` alias is an ordinary identifier, and `$Name(` is not a call to `Name`.
   expect(
     unregisteredPluginFindings(

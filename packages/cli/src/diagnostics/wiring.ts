@@ -1,6 +1,6 @@
 import { ZERO_CONFIG_WIRINGS } from '../utils/plugin-wirings.ts';
 /** Three-outcome config wiring inspection shared by the command renderers. @module */
-import { maskSourceCode } from '../devtool/sources.ts';
+import { maskComments, maskSourceCode } from '../devtool/sources.ts';
 import { referenceMask } from './reference-mask.ts';
 import { hostSeamSpecs, scanSeamSpecs } from '../seams/registry.ts';
 import { decoratorKeyFor, decoratorExportFor } from '../templates/seam.ts';
@@ -109,12 +109,14 @@ export function wiringFinding(
 /**
  * The local names a config gives `symbol` when importing it from
  * `@setu-ts/<pkg>`: the symbol itself plus every `symbol as alias` binding.
- * Type-only bindings are skipped, since they cannot be called.
+ * Type-only bindings and commented-out imports are skipped.
  */
 export function importedCallNames(config: string, pkg: string, symbol: string): readonly string[] {
   const names = new Set([symbol]);
   const from = new RegExp(`import\\s*\\{([^}]*)\\}\\s*from\\s*['"]@setu-ts/${pkg}['"]`, 'g');
-  for (const [, bindings = ''] of config.matchAll(from)) {
+  // Comments are blanked so a commented-out import adds no alias; strings stay, so
+  // the package specifier still matches. Unclassifiable source yields no aliases.
+  for (const [, bindings = ''] of (maskComments(config) ?? '').matchAll(from)) {
     for (const binding of bindings.split(',')) {
       const [, exported, local = ''] =
         /^\s*(?!type\s)([A-Za-z_$][\w$]*)\s+as\s+([A-Za-z_$][\w$]*)\s*$/.exec(binding) ?? [];
