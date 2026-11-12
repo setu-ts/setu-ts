@@ -471,6 +471,9 @@ section and an earlier one disagree, this section holds.
   (`envFileDeclaration`, default `.env`) with `process.loadEnvFile` when that file exists, so the
   `db:*` scripts see `DATABASE_URL` as the app's other scripts do. The schema hint names the README
   section for the chosen arm.
+- **§3.14 dialects (CodeRabbit review of PR #582):** `--dialect` is `postgresql|sqlite`, not
+  `mysql`: the Drizzle adapter writes through `RETURNING`, which MySQL lacks, and refuses
+  synchronous drivers, so the app-owned client printed is `pg` or `@libsql/client`.
 - **§3.17:** the section ends with exactly one newline in every write path: `spliceBrief` consumes
   the line terminator after `BRIEF_END` when it replaces a section and adds none after a section
   that already ends with one.

@@ -40,6 +40,13 @@ for (const template of [REST_TEMPLATE, FULL_STACK_TEMPLATE])
       );
     } else expect(await h.run(['controller', 'orders'])).toBe(0);
     const original = h.fs.read('/app/src/controllers/orders.controller.ts');
+    if (template === FULL_STACK_TEMPLATE) {
+      // The adopted controller keeps its own routes, which may shadow a page
+      // at /orders: --page is refused before anything moves (CodeRabbit #582).
+      expect(await h.run(['module', 'orders', '--adopt-controllers', '--page'])).toBe(1);
+      expect(h.err.text()).toContain('with --page while adopting');
+      expect(h.fs.read('/app/src/controllers/orders.controller.ts')).toBe(original);
+    }
     expect(await h.run(['module', 'orders', '--adopt-controllers']), h.err.text()).toBe(0);
     expect(h.fs.read('/app/src/modules/orders/orders.controller.ts')).toBe(original);
     expect(

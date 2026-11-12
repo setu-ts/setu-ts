@@ -312,6 +312,10 @@ Every export and option is documented in
 
 On Node, keep task specifiers as literal `new URL('./tasks/resize-image.task.ts', import.meta.url)`
 expressions. `setu build` bundles each referenced `*.task.ts` into `dist/` and rewrites the URL to
-its emitted `.js` path relative to each application output, including the migration runner. Dynamic
-task paths are refused with the file and line; `--dry-run` lists task outputs. Development uses the
-same `.task.ts` specifier through the source loader. Deno and Bun run source directly.
+its emitted `.js` path relative to each application output, including the migration runner. A
+non-literal reference that names the `.task.ts` path in the call (a template literal, a
+concatenation, `import.meta.resolve`) is refused with the file and line, but a path held in a
+variable (`new URL(taskPath, import.meta.url)`) cannot be detected: it builds, and the task is
+missing from `dist/` at run time, so keep the literal in the call. `--dry-run` lists task outputs.
+Development uses the same `.task.ts` specifier through the source loader. Deno and Bun run source
+directly.

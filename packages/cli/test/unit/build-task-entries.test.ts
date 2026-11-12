@@ -318,4 +318,23 @@ describe('worker task entries', () => {
         source,
       ).toEqual(['/app/a.task.ts']);
   });
+  it('refuses a task URL inside a template substitution, not in template text (CodeRabbit #582)', () => {
+    expect(() =>
+      taskReferences(
+        "const href = `${new URL('./hash.task.ts', import.meta.url).href}`;",
+        '/app/main.ts',
+      ),
+    ).toThrow('outside a template literal');
+    expect(taskReferences('const msg = `${count} wrote ./hash.task.ts`;', '/app/main.ts')).toEqual(
+      [],
+    );
+  });
+  it('follows a literal require() of a local module (CodeRabbit #582)', async () => {
+    const fs = createFakeFs({
+      '/app/main.ts': "const worker = require('./worker.js');",
+      '/app/worker.ts': "new URL('./a.task.ts', import.meta.url);",
+      '/app/a.task.ts': '',
+    });
+    expect(await discoverTasks(fs, '/app', ['main.ts'])).toEqual(['a.task.ts']);
+  });
 });

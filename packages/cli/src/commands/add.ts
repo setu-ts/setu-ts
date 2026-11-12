@@ -1687,13 +1687,34 @@ function backendRegistration(bare: string, arm: string): string | undefined {
   return undefined;
 }
 
-function appBackendPackages(bare: string, arm: string): readonly string[] {
+/**
+ * The registration line for a chosen backend: the starter's own option when a
+ * composing starter owns the plugin, otherwise the plugin call.
+ */
+function backendGuidance(line: string, config: string | undefined, bare: string): string {
+  const owner = config === undefined ? undefined : composingStarter(config)?.arms.get(bare);
+  const value = line.slice(line.indexOf('(') + 1, -1);
+  return `  In setu.config.ts: ${owner === undefined ? line : `${owner}: ${value}`}`;
+}
+
+/**
+ * The Drizzle dialects `--dialect` offers, with the driver the app installs.
+ *
+ * Only dialects the Drizzle adapter can write through: its `create`, `update`
+ * and `delete` need `RETURNING`, which MySQL lacks, and it refuses synchronous
+ * drivers such as `better-sqlite3` (database-plugin README), so SQLite goes
+ * through the Promise-aware libsql client.
+ */
+const DRIZZLE_DIALECTS: Readonly<Record<string, readonly string[]>> = {
+  postgresql: ['pg'],
+  sqlite: ['@libsql/client'],
+};
+
+function appBackendPackages(bare: string, arm: string, dialect = 'postgresql'): readonly string[] {
   if (bare === 'database-plugin' && arm === 'prisma')
     return ['@prisma/client', '@prisma/adapter-pg', 'pg'];
-  return (bare === 'database-plugin' && arm === 'drizzle') ||
-    (bare === 'vector-store-plugin' && arm === 'pgvector')
-    ? ['pg']
-    : [];
+  if (bare === 'database-plugin' && arm === 'drizzle') return DRIZZLE_DIALECTS[dialect] ?? [];
+  return bare === 'vector-store-plugin' && arm === 'pgvector' ? ['pg'] : [];
 }
 
 /** Package-specific flags are validated for the complete request before any write. */
@@ -1830,9 +1851,11 @@ export async function runAddCommand(
           const bare = packages[index]!;
           const backend = BACKEND_PEERS[bare];
           const arm = backend === undefined ? '' : request.flags[backend.flag];
+          const dialect = request.flags.dialect;
           return appBackendPackages(
             bare,
             typeof arm === 'string' ? arm : (Object.keys(backend?.arms ?? {})[0] ?? ''),
+            typeof dialect === 'string' ? dialect : undefined,
           );
         }),
       ),
@@ -1888,9 +1911,11 @@ async function addOne(
     dialectFlag !== undefined &&
     (backendArm !== 'drizzle' ||
       typeof dialectFlag !== 'string' ||
-      !['postgresql', 'mysql', 'sqlite'].includes(dialectFlag))
+      !Object.hasOwn(DRIZZLE_DIALECTS, dialectFlag))
   ) {
-    deps.error('--dialect requires database --type drizzle and postgresql, mysql or sqlite.');
+    deps.error(
+      `--dialect requires database --type drizzle and ${Object.keys(DRIZZLE_DIALECTS).join(' or ')} (the Drizzle adapter writes through RETURNING, which MySQL lacks).`,
+    );
     return EXIT_USAGE;
   }
   const backendLine = backendRegistration(bare, backendArm);
@@ -2647,6 +2672,8 @@ async function addOne(
   if (edits.length === 0 && alreadyPresent) {
     deps.log(`${specifier} is already installed in ${escapeName(dir)}.`);
     for (const line of seamGapLines(configSource, bare, seam)) deps.log(line);
+    // A backend chosen for an installed plugin still needs its registration.
+    if (backendLine !== undefined) deps.log(backendGuidance(backendLine, configSource, bare));
     if (bare === 'messaging-plugin' || bare === 'queue-plugin') {
       printWiringNote(configSource, bare, deps.log, seam, transportArgs);
       printNodeRedisImportNote(configSource, transport?.clients ?? [], deps.log);
@@ -2705,7 +2732,9 @@ async function addOne(
   deps.log('');
   if (summary) {
     deps.log('Next:');
-    deps.log(`  ${installCommand(runtime, appBackendPackages(bare, backendArm))}`);
+    deps.log(
+      `  ${installCommand(runtime, appBackendPackages(bare, backendArm, typeof dialectFlag === 'string' ? dialectFlag : undefined))}`,
+    );
   }
   // When this run wrote the transport into setu.config.ts, the guidance would ask
   // for the very option it just wrote (PR #519 review). Any other config edit —
@@ -2719,18 +2748,18 @@ async function addOne(
       ? composingStarter(configSource)?.arms.get(bare)
       : undefined;
   if (wiredArm !== undefined) deps.log(`wired ${wiredArm} in setu.config.ts`);
-  if (backendLine !== undefined) {
-    const owner =
-      configSource === undefined ? undefined : composingStarter(configSource)?.arms.get(bare);
-    const value = backendLine.slice(backendLine.indexOf('(') + 1, -1);
-    deps.log(`  In setu.config.ts: ${owner === undefined ? backendLine : `${owner}: ${value}`}`);
-  } else if (
+  if (backendLine !== undefined) deps.log(backendGuidance(backendLine, configSource, bare));
+  else if (
     !transportWritten &&
     wiredArm === undefined &&
     !(configWired && starter && transportArgs === undefined)
   )
     printWiringNote(configSource, bare, deps.log, seam, transportArgs);
-  const appPackages = appBackendPackages(bare, backendArm);
+  const appPackages = appBackendPackages(
+    bare,
+    backendArm,
+    typeof dialectFlag === 'string' ? dialectFlag : undefined,
+  );
   if (appPackages.length > 0)
     deps.log(`  App-owned clients (not plugin peers): ${appPackages.join(' ')}`);
   printNodeRedisImportNote(configSource, transport?.clients ?? [], deps.log);
@@ -2950,7 +2979,7 @@ function printAddHelp(log: (message: string) => void): void {
     '--provider log|smtp|ses|sendgrid selects mail; --type memory|drizzle|prisma|mongodb|dynamodb|cosmos|bigtable selects database.',
   );
   log(
-    '--adapter memory|pgvector|qdrant selects vector-store; --dialect postgresql|mysql|sqlite selects Drizzle schema tooling.',
+    '--adapter memory|pgvector|qdrant selects vector-store; --dialect postgresql|sqlite selects Drizzle schema tooling.',
   );
   log('--yes, -y takes backend defaults without prompting.');
   log('');

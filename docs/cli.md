@@ -1049,10 +1049,10 @@ own are registered above the managed plugin loop; starter-provided plugins are c
 their starter option.
 
 On Node and Bun, `add database --type drizzle` adds `db:generate` / `db:migrate`, drizzle-kit and a
-create-only `drizzle.config.ts` (`--dialect postgresql|mysql|sqlite`, default postgresql).
-`--type prisma` adds `db:generate`, `db:migrate`, `db:deploy`, Prisma 7 and `prisma.config.ts`.
-Existing scripts and configs are preserved. Create the schema at `src/database/schema.ts` or
-`prisma/schema.prisma` yourself; see the
+create-only `drizzle.config.ts` (`--dialect postgresql|sqlite`, default postgresql; the Drizzle
+adapter writes through `RETURNING`, which MySQL lacks). `--type prisma` adds `db:generate`,
+`db:migrate`, `db:deploy`, Prisma 7 and `prisma.config.ts`. Existing scripts and configs are
+preserved. Create the schema at `src/database/schema.ts` or `prisma/schema.prisma` yourself; see the
 [database setup](../packages/database-plugin/README.md#prisma-7-setup). Deno prints the commands;
 Workers adds no schema scripts. Schema migrations are separate from `setu g migration` data
 migrations in `src/migrations/run.ts`.

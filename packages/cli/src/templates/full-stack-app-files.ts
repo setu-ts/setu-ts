@@ -169,7 +169,12 @@ export function handleError(
     path: new URL(request.url).pathname,
     requestId: context.get(requestIdContext),
     error: describeError(error),
-    ...(error instanceof Error && error.stack ? { stack: maskUrlUserinfo(error.stack) } : {}),
+    // Masked first, so a cut cannot split a URL before its userinfo is hidden;
+    // then bounded like describeError's 8192, so one failing request cannot
+    // write an unbounded log record.
+    ...(error instanceof Error && error.stack
+      ? { stack: maskUrlUserinfo(error.stack).slice(0, 8192) }
+      : {}),
   });
 }
 `;

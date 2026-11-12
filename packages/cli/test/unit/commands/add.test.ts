@@ -170,7 +170,7 @@ describe('M139d add request and backend contracts', () => {
   it('type-checks each generated drizzle dialect against the installed defineConfig types', async () => {
     expect(drizzleTypes?.resolvedFileName).toBeDefined();
     // The dialects `--dialect` accepts are values of drizzle-kit's own union.
-    const dialects: readonly DrizzleKitConfig['dialect'][] = ['postgresql', 'mysql', 'sqlite'];
+    const dialects: readonly DrizzleKitConfig['dialect'][] = ['postgresql', 'sqlite'];
     for (const dialect of dialects) {
       const h = harness({ '/app/package.json': '{}' });
       expect(await h.run(['database', '--type', 'drizzle', '--dialect', dialect])).toBe(0);
@@ -308,7 +308,7 @@ describe('M139d add request and backend contracts', () => {
       '/app/package.json':
         '{"dependencies":{"drizzle-orm":"custom"},"scripts":{"db:migrate":"custom migrate"}}',
     });
-    expect(await h.run(['database', '--type', 'drizzle', '--dialect', 'mysql'])).toBe(0);
+    expect(await h.run(['database', '--type', 'drizzle', '--dialect', 'sqlite'])).toBe(0);
     const manifest = JSON.parse(h.read('/app/package.json')) as {
       dependencies: Record<string, string>;
       devDependencies: Record<string, string>;
@@ -318,11 +318,26 @@ describe('M139d add request and backend contracts', () => {
     expect(manifest.devDependencies['drizzle-kit']).toBe('^0.31.11');
     expect(manifest.scripts['db:generate']).toBe('drizzle-kit generate');
     expect(manifest.scripts['db:migrate']).toBe('custom migrate');
-    expect(h.read('/app/drizzle.config.ts')).toContain("dialect: 'mysql'");
+    expect(h.read('/app/drizzle.config.ts')).toContain("dialect: 'sqlite'");
+    // The Promise-aware libsql client, not pg, and never a synchronous driver.
+    expect(h.out.join('\n')).toContain('@libsql/client');
+    expect(h.out.join('\n')).not.toContain(' pg');
     await h.fs.writeFile('/app/drizzle.config.ts', new TextEncoder().encode('// user config'));
     expect(await h.run(['database', '--type', 'drizzle'])).toBe(0);
     expect(h.read('/app/drizzle.config.ts')).toBe('// user config');
-    expect(await h.run(['database', '--type', 'mongodb', '--dialect', 'mysql'])).toBe(2);
+    expect(await h.run(['database', '--type', 'mongodb', '--dialect', 'sqlite'])).toBe(2);
+    // MySQL lacks RETURNING, which the Drizzle adapter writes through.
+    expect(await h.run(['database', '--type', 'drizzle', '--dialect', 'mysql'])).toBe(2);
+    expect(h.err.join('\n')).toContain('RETURNING');
+  });
+  it('prints the chosen backend for an installed plugin with nothing to edit (CodeRabbit #582)', async () => {
+    const h = harness({ '/app/package.json': '{}' });
+    expect(await h.run(['mail', '--provider', 'sendgrid'])).toBe(0);
+    h.out.length = 0;
+    expect(await h.run(['mail', '--provider', 'sendgrid'])).toBe(0);
+    const out = h.out.join('\n');
+    expect(out).toContain('is already installed');
+    expect(out).toContain("provider: 'sendgrid'");
   });
   it('writes Prisma 7 config and deploy scripts without writing either schema', async () => {
     const h = harness({ '/app/package.json': '{}' });

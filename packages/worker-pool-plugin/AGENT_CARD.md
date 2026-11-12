@@ -61,5 +61,6 @@ ctx.response.json(pools);
 
 ## Building with `setu build`
 
-Keep task specifiers literal (`new URL('./tasks/x.task.ts', import.meta.url)`): `setu build` bundles
-each `*.task.ts` into `dist/` and rewrites the URL to the emitted `.js`; dynamic paths are refused.
+Keep the specifier a literal in the call (`new URL('./tasks/x.task.ts', import.meta.url)`):
+`setu build` bundles each `*.task.ts` and rewrites it to the emitted `.js`; it cannot see a path in
+a variable.

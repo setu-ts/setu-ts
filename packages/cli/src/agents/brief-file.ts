@@ -15,9 +15,19 @@ export function briefSection(source: string): { start: number; end: number } | u
   return { start: begins[0].index, end: ends[0].index + BRIEF_END.length };
 }
 
-/** Whitespace-insensitive freshness, shared by checking and writing. */
+/**
+ * Formatter-insensitive freshness, shared by checking and writing.
+ *
+ * Ignores what Prettier and `deno fmt` change — blank lines, trailing and
+ * repeated spaces — but keeps every line boundary, so two list items or a
+ * heading joined onto one line still read as a changed section.
+ */
 export function normalizeBrief(source: string): string {
-  return source.replace(/\s+/g, ' ').trim();
+  return source
+    .split(/\r?\n/)
+    .map((line) => line.replace(/[ \t]+/g, ' ').trim())
+    .filter((line) => line !== '')
+    .join('\n');
 }
 
 /** Replace only the section; preserve every byte outside its markers. */
@@ -26,8 +36,9 @@ export function spliceBrief(source: string, section: string): string {
   const rendered = section.replace(/[\r\n]+$/, '');
   if (range === undefined) return rendered + '\n' + (source === '' ? '' : '\n' + source);
   const terminator = source.startsWith('\r\n', range.end) ? '\r\n' : '\n';
-  let suffix = source.slice(range.end).replace(/^\r?\n/, '');
-  if (/^[\r\n]*$/.test(suffix)) suffix = '';
+  // Every byte after the marker's own line terminator is the user's, blank
+  // lines included.
+  const suffix = source.slice(range.end).replace(/^\r?\n/, '');
   const body =
     normalizeBrief(source.slice(range.start, range.end)) === normalizeBrief(section)
       ? source.slice(range.start, range.end)

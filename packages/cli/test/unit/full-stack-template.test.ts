@@ -364,7 +364,7 @@ describe('full-stack template | what the plugins own is NOT reimplemented', () =
       (file) => file.path === 'setu.config.ts',
     )!.contents;
     expect(config).toContain('context.set(requestIdContext, ctx.id)');
-    expect(entry).toContain('stack: maskUrlUserinfo(error.stack)');
+    expect(entry).toContain('stack: maskUrlUserinfo(error.stack).slice(0, 8192)');
     expect(contentsOf('app/server/context-keys.server.ts')).toContain(
       "contextKeyFor<string | null>('app.request-id', null)",
     );

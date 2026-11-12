@@ -28,6 +28,12 @@ export function taskReferences(source: string, file: string): readonly ITaskRefe
       /(['"])(?:\\.|(?!\1)[^\\])*?\1|`(?:\\.|[^`\\])*`|\/\/[^\r\n]*|\/\*[\s\S]*?\*\/|(?<=(?:^|[=(,:;[!&|?{}]|\breturn|\bdefault)\s*)\/(?:\\.|\[(?:\\.|[^\]\\])*\]|[^/\\\r\n[])+\/[dgimsuvy]*/g,
       (text: string, quote: string | undefined, offset: number) => {
         if (quote !== undefined) strings.push({ start: offset, end: offset + text.length });
+        // A `${…}` substitution is code, so a task named inside one would be
+        // blanked with the template text and silently left unbuilt: refuse it.
+        if (text.startsWith('`') && /\$\{[^}`]*\.task\.ts[^}`]*\}/.test(text))
+          throw new Error(
+            `${file}:${source.slice(0, offset).split('\n').length}: worker task references must use new URL('<relative>.task.ts', import.meta.url) outside a template literal.`,
+          );
         return quote === undefined ? text.replace(/[^\r\n]/g, ' ') : text;
       },
     )
@@ -128,7 +134,8 @@ export async function discoverTasks(
       pending.push(ref.target);
     }
     for (const imported of source.matchAll(
-      /(?:\bfrom\s*|\bimport\s*(?:\(\s*)?)['"]([^'"]+)['"]/g,
+      // `require('./x')` too: esbuild bundles a literal require target.
+      /(?:\bfrom\s*|\bimport\s*(?:\(\s*)?|\brequire\s*\(\s*)['"]([^'"]+)['"]/g,
     )) {
       const path = imported[1]!;
       if (path.startsWith('.')) {

@@ -76,6 +76,7 @@ import { interruptionMessage } from '../utils/interruption.ts';
 
 import { createCommandRunner, type CommandRunner } from '../utils/run-command.ts';
 import { kernelShadows, readPagePaths } from '../utils/react-router-routes.ts';
+import { isMissingPath } from '../utils/filesystem-errors.ts';
 import { cliInvocation } from '../templates/project-files.ts';
 
 /**
@@ -501,6 +502,29 @@ export async function runGenerateCommand(
       schematicName === 'module'
         ? moduleRouteBase(names.kebab, installed)
         : `${module === undefined ? '' : moduleRouteBase(module, installed)}/${names.kebab}`;
+    // An adopted same-named controller keeps its own routes, which this
+    // command cannot read, and a kernel route outranks a React Router page:
+    // refuse rather than write a page its controller may shadow.
+    if (schematicName === 'module' && page && adoptControllers) {
+      const adopting = await deps.fs
+        .stat(joinPath(dir, `src/controllers/${names.kebab}.controller.ts`))
+        .then(
+          (stat) => stat.isFile,
+          (cause: unknown) => {
+            if (isMissingPath(cause)) return false;
+            throw cause;
+          },
+        );
+      if (adopting) {
+        deps.error(
+          `Cannot generate module "${names.kebab}" with --page while adopting src/controllers/${names.kebab}.controller.ts: that controller keeps its own routes, and one at /${names.kebab} would take precedence over the page.`,
+        );
+        deps.error(
+          'Generate the module without --page, or adopt the controller under another module name.',
+        );
+        return EXIT_ERROR;
+      }
+    }
     const pages = await readPagePaths(dir, deps.runCommand ?? createCommandRunner(), deps.fs);
     if (!pages.ok) {
       deps.error(
@@ -522,6 +546,7 @@ export async function runGenerateCommand(
       // `--page` adds a page at /<name>: an existing page there would be
       // shadowed or, for /login, the guarded page would redirect to itself.
       const pagePath = `/${names.kebab}`;
+
       const existing = page
         ? pages.paths.find((path) => path.replace(/\/+$/, '') === pagePath)
         : undefined;

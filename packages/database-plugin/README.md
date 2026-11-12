@@ -757,7 +757,11 @@ and the `'bigtable'` arm its `BigtableAdapterOptions` — see
 | `url`                | `string`                  | —       | **Deprecated and unread by Prisma** — a v7 client carries its own connection configuration; see below. The `'mongodb'` arm reads it as the driver connection string. |
 
 Schema migrations use the scripts `setu add database --type drizzle|prisma` adds; data migrations
-use `setu g migration` and `src/migrations/run.ts`. The schema files remain application-owned.
+use `setu g migration` and `src/migrations/run.ts`. The schema files remain application-owned. The
+scripts are written to `package.json` on Node and Bun; on Deno the command prints them instead, to
+add as `deno.json` tasks yourself; a Cloudflare Workers project gets neither scripts nor a schema
+config (D1 migrates with `wrangler d1 migrations`). Drizzle's `--dialect` is `postgresql` (the
+default) or `sqlite`: the adapter writes through `RETURNING`, which MySQL lacks.
 
 ### Prisma 7 setup
 

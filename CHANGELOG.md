@@ -84,7 +84,8 @@ All notable changes to this project are documented here. The format follows
 - **M139d (#582, `@setu-ts/cli`, V12-12).** `setu build` emits literal worker-pool task URL targets
   and relocates their `.js` URLs separately for each entry bundle, including tasks and migrations; a
   task reached through a `.js` import of a `.ts` source is found, a Prettier-wrapped literal is
-  accepted, and dynamic task references are refused.
+  accepted, and a non-literal reference naming `.task.ts` in the call is refused (a path held in a
+  variable is not detected).
 
 - **Tenant repositories join a transaction (M139c, #578, `@setu-ts/common`,
   `@setu-ts/multi-tenancy-plugin`, `@setu-ts/database-plugin`, V12-20).** `getRepository` and
