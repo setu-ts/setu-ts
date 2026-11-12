@@ -325,6 +325,13 @@ describe('worker task entries', () => {
         '/app/main.ts',
       ),
     ).toThrow('outside a template literal');
+    // Braces inside the substitution do not end it early (CodeRabbit #582).
+    expect(() =>
+      taskReferences(
+        "const href = `${({ ready: true }) && new URL('./hash.task.ts', import.meta.url).href}`;",
+        '/app/main.ts',
+      ),
+    ).toThrow('outside a template literal');
     expect(taskReferences('const msg = `${count} wrote ./hash.task.ts`;', '/app/main.ts')).toEqual(
       [],
     );

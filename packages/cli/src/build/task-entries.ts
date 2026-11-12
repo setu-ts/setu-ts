@@ -19,6 +19,24 @@ interface ITaskReference {
   readonly target: string;
 }
 
+/**
+ * Whether any `${…}` substitution in a template literal names a `.task.ts`
+ * path. Braces are counted, so an object literal inside the substitution does
+ * not end it early (CodeRabbit #582).
+ */
+function substitutionNamesTask(template: string): boolean {
+  for (let at = template.indexOf('${'); at !== -1; at = template.indexOf('${', at + 1)) {
+    let depth = 0;
+    let end = at + 1;
+    for (; end < template.length; end++) {
+      if (template[end] === '{') depth++;
+      else if (template[end] === '}' && --depth === 0) break;
+    }
+    if (template.slice(at, end).includes('.task.ts')) return true;
+  }
+  return false;
+}
+
 /** Finds supported literal worker URLs; refuses other task references by location. */
 export function taskReferences(source: string, file: string): readonly ITaskReference[] {
   // Consume strings before comments so a URL in a string cannot begin a comment.
@@ -30,7 +48,7 @@ export function taskReferences(source: string, file: string): readonly ITaskRefe
         if (quote !== undefined) strings.push({ start: offset, end: offset + text.length });
         // A `${…}` substitution is code, so a task named inside one would be
         // blanked with the template text and silently left unbuilt: refuse it.
-        if (text.startsWith('`') && /\$\{[^}`]*\.task\.ts[^}`]*\}/.test(text))
+        if (text.startsWith('`') && substitutionNamesTask(text))
           throw new Error(
             `${file}:${source.slice(0, offset).split('\n').length}: worker task references must use new URL('<relative>.task.ts', import.meta.url) outside a template literal.`,
           );
