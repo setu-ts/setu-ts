@@ -344,4 +344,20 @@ describe('worker task entries', () => {
     });
     expect(await discoverTasks(fs, '/app', ['main.ts'])).toEqual(['a.task.ts']);
   });
+  it('accepts a substitution that only formats a task-looking string (CodeRabbit #582)', () => {
+    expect(
+      taskReferences("const message = `Task: ${name.replace('.task.ts', '')}`;", '/app/main.ts'),
+    ).toEqual([]);
+  });
+  it('does not follow an import or require in a comment or a string (CodeRabbit #582)', async () => {
+    const fs = createFakeFs({
+      '/app/main.ts':
+        "// require('./legacy.js')\n/* import './old'; */\nconst s = \"require('./quoted.js')\";",
+      '/app/legacy.ts': "import './stale.task.ts';",
+      '/app/old.ts': "import './stale.task.ts';",
+      '/app/quoted.ts': "import './stale.task.ts';",
+    });
+    // Following any of them would refuse the static task import inside.
+    expect(await discoverTasks(fs, '/app', ['main.ts'])).toEqual([]);
+  });
 });

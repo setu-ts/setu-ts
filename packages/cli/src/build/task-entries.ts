@@ -32,7 +32,11 @@ function substitutionNamesTask(template: string): boolean {
       if (template[end] === '{') depth++;
       else if (template[end] === '}' && --depth === 0) break;
     }
-    if (template.slice(at, end).includes('.task.ts')) return true;
+    // Only a task REFERENCE: a `new URL(…)` or an `import` naming the path. A
+    // substitution that merely formats a string mentioning one is ordinary code.
+    const substitution = template.slice(at, end);
+    if (substitution.includes('.task.ts') && /\bnew\s+URL\s*\(|\bimport\b/.test(substitution))
+      return true;
   }
   return false;
 }
@@ -131,6 +135,35 @@ async function localModule(fs: IFileSystem, absolute: string): Promise<string | 
   return undefined;
 }
 
+/**
+ * The specifiers a module imports, requires or re-exports, read only from code:
+ * comments are blanked and a match that starts inside a string is skipped, so
+ * a commented-out `require('./legacy.js')` or a quoted example is not followed
+ * (CodeRabbit #582). The specifier strings themselves are kept.
+ */
+function moduleSpecifiers(source: string): readonly string[] {
+  const strings: { readonly start: number; readonly end: number }[] = [];
+  const code = source.replace(
+    /(['"])(?:\\.|(?!\1)[^\\])*?\1|`(?:\\.|[^`\\])*`|\/\/[^\r\n]*|\/\*[\s\S]*?\*\//g,
+    (text: string, quote: string | undefined, offset: number) => {
+      if (quote !== undefined) {
+        strings.push({ start: offset, end: offset + text.length });
+        return text;
+      }
+      return text.replace(/[^\r\n]/g, ' ');
+    },
+  );
+  const found: string[] = [];
+  for (const match of code.matchAll(
+    // `require('./x')` too: esbuild bundles a literal require target.
+    /(?:\bfrom\s*|\bimport\s*(?:\(\s*)?|\brequire\s*\(\s*)['"]([^'"]+)['"]/g,
+  )) {
+    if (strings.some((range) => match.index >= range.start && match.index < range.end)) continue;
+    found.push(match[1]!);
+  }
+  return found;
+}
+
 /** Scans local modules reachable from the application entries, including nested tasks. */
 export async function discoverTasks(
   fs: IFileSystem,
@@ -151,11 +184,8 @@ export async function discoverTasks(
       tasks.add(ref.target.slice(root.length + 1));
       pending.push(ref.target);
     }
-    for (const imported of source.matchAll(
-      // `require('./x')` too: esbuild bundles a literal require target.
-      /(?:\bfrom\s*|\bimport\s*(?:\(\s*)?|\brequire\s*\(\s*)['"]([^'"]+)['"]/g,
-    )) {
-      const path = imported[1]!;
+    for (const imported of moduleSpecifiers(source)) {
+      const path = imported;
       if (path.startsWith('.')) {
         const found = await localModule(fs, resolveDir(dirName(file), path));
         if (found !== undefined) pending.push(found);
