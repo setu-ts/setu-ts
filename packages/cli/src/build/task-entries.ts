@@ -170,7 +170,7 @@ export function taskReferences(source: string, file: string): readonly ITaskRefe
   }
   const parens = closingIndexes(visible, '(', ')');
   for (const match of visible.matchAll(
-    // A call head (`new URL(`, `import(`, `import.meta.resolve(`) spans to its
+    // A call head (new URL, a dynamic import, import.meta.resolve) spans to its
     // balanced `)`, so a nested call or a string cannot end it early. `import`
     // is the keyword only (not `importer`, not any other `import.meta`); a
     // static import runs to its line end, and `from '….task.ts'` covers an
