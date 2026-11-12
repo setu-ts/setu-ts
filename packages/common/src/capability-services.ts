@@ -65,7 +65,7 @@ import type { IWorkerPool } from './services/worker-pool.ts';
  * declares its own interfaces here; a plugin whose interface lives elsewhere
  * augments the map in the module that declares that interface.
  *
- * @example In the plugin module that declares `IDatabaseService`
+ * @example Bind a plugin service
  * ```typescript
  * declare module '@setu-ts/common' {
  *   interface CapabilityServices {

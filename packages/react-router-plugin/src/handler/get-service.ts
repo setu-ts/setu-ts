@@ -27,10 +27,45 @@ import { contextKeyFor } from './context-keys.ts';
  * @since 0.12.0
  */
 export interface ServiceResolver {
+  /**
+   * Resolves the service for a mapped standard capability token.
+   *
+   * @typeParam K - The mapped standard capability key
+   * @param token - The capability or typed service token
+   * @returns The request's service instance, or the registered singleton
+   */
   <K extends keyof CapabilityServices>(token: StandardCapabilityToken<K>): CapabilityServices[K];
+  /**
+   * Resolves the service for a compatible mapped standard token.
+   *
+   * @typeParam T - The resolved service interface
+   * @param token - The capability or typed service token
+   * @returns The request's service instance, or the registered singleton
+   */
   <T extends object>(token: StandardCapabilityToken<KeysServing<T>>): T;
+  /**
+   * Resolves the service for an unbound standard capability token.
+   *
+   * @typeParam T - The resolved service interface
+   * @param token - The capability or typed service token
+   * @returns The request's service instance, or the registered singleton
+   */
   <T extends object>(token: StandardCapabilityToken<UnboundCapability>): T;
+  /**
+   * Resolves the service for a singleton or request-bound service token.
+   *
+   * @typeParam T - The resolved service interface
+   * @param token - The capability or typed service token
+   * @returns The request's service instance, or the registered singleton
+   */
   <T extends object>(token: ServiceToken<T> | RequestServiceToken<T>): T;
+  /**
+   * Resolves the service for an unbranded custom or derived string token.
+   *
+   * @typeParam T - The resolved service interface
+   * @param token - The capability or typed service token
+   * @returns The request's service instance, or the registered singleton
+   */
   <T extends object>(token: UnboundToken): T;
 }
 
@@ -74,8 +109,9 @@ export class ServiceResolverUnavailableError extends Error {
  * Resolves a kernel service for the current request from a loader, action or
  * `handleError`. A module's request-bound service is built once per request
  * and shared with kernel routes resolving the same token in that request.
+ * This overload accepts a mapped standard token and returns its bound interface.
  *
- * @typeParam T - The service type, inferred from a `ServiceToken`
+ * @typeParam K - The mapped standard capability key
  * @param context - React Router's `context` argument
  * @param token - The token the service is registered under
  * @returns The request's instance, or the registered singleton
@@ -96,18 +132,50 @@ export function getService<K extends keyof CapabilityServices>(
   context: { get<V>(key: RouterContextKey<V>): V },
   token: StandardCapabilityToken<K>,
 ): CapabilityServices[K];
+/**
+ * Resolves the service for a compatible mapped standard token.
+ *
+ * @typeParam T - The resolved service interface
+ * @param context - The React Router load context
+ * @param token - The capability or typed service token
+ * @returns The request's service instance, or the registered singleton
+ */
 export function getService<T extends object>(
   context: { get<V>(key: RouterContextKey<V>): V },
   token: StandardCapabilityToken<KeysServing<T>>,
 ): T;
+/**
+ * Resolves the service for an unbound standard capability token.
+ *
+ * @typeParam T - The resolved service interface
+ * @param context - The React Router load context
+ * @param token - The capability or typed service token
+ * @returns The request's service instance, or the registered singleton
+ */
 export function getService<T extends object>(
   context: { get<V>(key: RouterContextKey<V>): V },
   token: StandardCapabilityToken<UnboundCapability>,
 ): T;
+/**
+ * Resolves the service for a singleton or request-bound service token.
+ *
+ * @typeParam T - The resolved service interface
+ * @param context - The React Router load context
+ * @param token - The capability or typed service token
+ * @returns The request's service instance, or the registered singleton
+ */
 export function getService<T extends object>(
   context: { get<V>(key: RouterContextKey<V>): V },
   token: ServiceToken<T> | RequestServiceToken<T>,
 ): T;
+/**
+ * Resolves the service for an unbranded custom or derived string token.
+ *
+ * @typeParam T - The resolved service interface
+ * @param context - The React Router load context
+ * @param token - The capability or typed service token
+ * @returns The request's service instance, or the registered singleton
+ */
 export function getService<T extends object>(
   context: { get<V>(key: RouterContextKey<V>): V },
   token: UnboundToken,

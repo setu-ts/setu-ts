@@ -7,11 +7,10 @@
  */
 import { causeMessage } from './errors/serialize-error.ts';
 import type { CapabilityServices, UnboundCapability } from './capability-services.ts';
-import type { RequestBoundService } from './services/request-service.ts';
+import type { RequestBoundService, ServiceToken } from './services/request-service.ts';
 import type {
   CapabilityToken,
   StandardCapabilityToken,
-  ServiceToken,
   RequestServiceToken,
   UnboundToken,
 } from './tokens.ts';
@@ -113,12 +112,13 @@ export type RegistryFactory<T> = (services: IServiceRegistry) => T;
  */
 export interface IServiceRegistry {
   /**
-   * Registers a service instance under a capability token.
+   * Registers the bound service interface under a mapped standard capability token.
    *
-   * @typeParam T - The service type
+   * @typeParam K - The mapped standard capability key
    * @param token - The capability token to register under
    * @param service - The service instance
    * @param options - Override and multi-provider behavior
+   * @returns No value; records the registration
    * @throws {Error} If the token is already registered and neither
    * `override` nor `multi` is set
    * @throws {Error} If called after the application has run `runBootstrap()`
@@ -129,32 +129,78 @@ export interface IServiceRegistry {
     service: CapabilityServices[K],
     options?: RegisterOptions,
   ): void;
+  /**
+   * Registers a service under a compatible mapped standard token.
+   *
+   * @typeParam T - The service interface carried by the token or supplied by the caller
+   * @param token - The capability token
+   * @param service - The service instance
+   * @param options - Override and multi-provider behavior
+   * @returns No value; records the registration
+   */
   register<T extends object>(
     token: StandardCapabilityToken<KeysServing<T>>,
     service: T,
     options?: RegisterOptions,
   ): void;
+  /**
+   * Registers a service under an unbound standard capability token.
+   *
+   * @typeParam T - The service interface carried by the token or supplied by the caller
+   * @param token - The capability token
+   * @param service - The service instance
+   * @param options - Override and multi-provider behavior
+   * @returns No value; records the registration
+   */
   register<T extends object>(
     token: StandardCapabilityToken<UnboundCapability>,
     service: T,
     options?: RegisterOptions,
   ): void;
+  /**
+   * Registers a service under a typed singleton service token.
+   *
+   * @typeParam T - The service interface carried by the token or supplied by the caller
+   * @param token - The capability token
+   * @param service - The service instance
+   * @param options - Override and multi-provider behavior
+   * @returns No value; records the registration
+   */
   register<T extends object>(token: ServiceToken<T>, service: T, options?: RegisterOptions): void;
+  /**
+   * Registers a service under a request-bound service token.
+   *
+   * @typeParam T - The service interface carried by the token or supplied by the caller
+   * @param token - The request-bound token
+   * @param service - The request-bound wrapper
+   * @param options - Override and multi-provider behavior
+   * @returns No value; records the registration
+   */
   register<T extends object>(
     token: RequestServiceToken<T>,
     service: RequestBoundService<T>,
     options?: RegisterOptions,
   ): void;
+  /**
+   * Registers a service under an unbranded custom or derived string token.
+   *
+   * @typeParam T - The service interface carried by the token or supplied by the caller
+   * @param token - The capability token
+   * @param service - The service instance
+   * @param options - Override and multi-provider behavior
+   * @returns No value; records the registration
+   */
   register<T extends object>(token: UnboundToken, service: T, options?: RegisterOptions): void;
 
   /**
-   * Registers a lazy factory: the service is instantiated on first
+   * Registers a mapped standard token's lazy factory: the service is instantiated on first
    * {@linkcode get} and cached for subsequent lookups.
    *
-   * @typeParam T - The service type
+   * @typeParam K - The mapped standard capability key
    * @param token - The capability token to register under
    * @param factory - Factory invoked once, on first lookup
    * @param options - Override and multi-provider behavior
+   * @returns No value; records the registration
    * @throws {Error} If the token is already registered and neither
    * `override` nor `multi` is set
    * @throws {Error} If called after the application has run `runBootstrap()`
@@ -165,26 +211,71 @@ export interface IServiceRegistry {
     factory: ServiceFactory<CapabilityServices[K]>,
     options?: RegisterOptions,
   ): void;
+  /**
+   * Registers a lazy factory under a compatible mapped standard token.
+   *
+   * @typeParam T - The service interface carried by the token or supplied by the caller
+   * @param token - The capability token
+   * @param factory - Factory producing the service
+   * @param options - Override and multi-provider behavior
+   * @returns No value; records the registration
+   */
   registerFactory<T extends object>(
     token: StandardCapabilityToken<KeysServing<T>>,
     factory: ServiceFactory<T>,
     options?: RegisterOptions,
   ): void;
+  /**
+   * Registers a lazy factory under an unbound standard capability token.
+   *
+   * @typeParam T - The service interface carried by the token or supplied by the caller
+   * @param token - The capability token
+   * @param factory - Factory producing the service
+   * @param options - Override and multi-provider behavior
+   * @returns No value; records the registration
+   */
   registerFactory<T extends object>(
     token: StandardCapabilityToken<UnboundCapability>,
     factory: ServiceFactory<T>,
     options?: RegisterOptions,
   ): void;
+  /**
+   * Registers a lazy factory under a typed singleton service token.
+   *
+   * @typeParam T - The service interface carried by the token or supplied by the caller
+   * @param token - The capability token
+   * @param factory - Factory producing the service
+   * @param options - Override and multi-provider behavior
+   * @returns No value; records the registration
+   */
   registerFactory<T extends object>(
     token: ServiceToken<T>,
     factory: ServiceFactory<T>,
     options?: RegisterOptions,
   ): void;
+  /**
+   * Registers a lazy factory under a request-bound service token.
+   *
+   * @typeParam T - The service interface carried by the token or supplied by the caller
+   * @param token - The request-bound token
+   * @param factory - Factory producing the request-bound wrapper
+   * @param options - Override and multi-provider behavior
+   * @returns No value; records the registration
+   */
   registerFactory<T extends object>(
     token: RequestServiceToken<T>,
     factory: ServiceFactory<RequestBoundService<T>>,
     options?: RegisterOptions,
   ): void;
+  /**
+   * Registers a lazy factory under an unbranded custom or derived string token.
+   *
+   * @typeParam T - The service interface carried by the token or supplied by the caller
+   * @param token - The capability token
+   * @param factory - Factory producing the service
+   * @param options - Override and multi-provider behavior
+   * @returns No value; records the registration
+   */
   registerFactory<T extends object>(
     token: UnboundToken,
     factory: ServiceFactory<T>,
@@ -192,35 +283,91 @@ export interface IServiceRegistry {
   ): void;
 
   /**
-   * Resolves a service by capability token.
+   * Resolves the bound service interface for a mapped standard capability token.
    *
    * On a multi-provider token this returns the FIRST registered provider; use
    * {@linkcode IServiceRegistry.getAll} to reach all of them.
    *
-   * @typeParam T - The expected service type
+   * @typeParam K - The mapped standard capability key
    * @param token - The capability token to resolve
    * @returns The registered service
    * @throws {Error} If no service is registered for the token
    */
   get<K extends keyof CapabilityServices>(token: StandardCapabilityToken<K>): CapabilityServices[K];
+  /**
+   * Resolves the service for a compatible mapped standard token.
+   *
+   * @typeParam T - The service interface carried by the token or supplied by the caller
+   * @param token - The capability token
+   * @returns The registered service
+   */
   get<T extends object>(token: StandardCapabilityToken<KeysServing<T>>): T;
+  /**
+   * Resolves the service for an unbound standard capability token.
+   *
+   * @typeParam T - The service interface carried by the token or supplied by the caller
+   * @param token - The capability token
+   * @returns The registered service
+   */
   get<T extends object>(token: StandardCapabilityToken<UnboundCapability>): T;
+  /**
+   * Resolves the service for a typed singleton service token.
+   *
+   * @typeParam T - The service interface carried by the token or supplied by the caller
+   * @param token - The capability token
+   * @returns The registered service
+   */
   get<T extends object>(token: ServiceToken<T>): T;
+  /**
+   * Resolves the service for an unbranded custom or derived string token.
+   *
+   * @typeParam T - The service interface carried by the token or supplied by the caller
+   * @param token - The capability token
+   * @returns The registered service
+   */
   get<T extends object>(token: UnboundToken): T;
 
   /**
-   * Resolves every provider registered for a multi-provider token.
+   * Resolves every bound provider for a mapped standard capability token.
    *
-   * @typeParam T - The expected service type
+   * @typeParam K - The mapped standard capability key
    * @param token - The capability token to resolve
    * @returns All registered providers, in registration order; empty when none
    */
   getAll<K extends keyof CapabilityServices>(
     token: StandardCapabilityToken<K>,
   ): readonly CapabilityServices[K][];
+  /**
+   * Resolves all registered providers for a compatible mapped standard token.
+   *
+   * @typeParam T - The service interface carried by the token or supplied by the caller
+   * @param token - The capability token
+   * @returns All registered providers in registration order, or an empty array
+   */
   getAll<T extends object>(token: StandardCapabilityToken<KeysServing<T>>): readonly T[];
+  /**
+   * Resolves all registered providers for an unbound standard capability token.
+   *
+   * @typeParam T - The service interface carried by the token or supplied by the caller
+   * @param token - The capability token
+   * @returns All registered providers in registration order, or an empty array
+   */
   getAll<T extends object>(token: StandardCapabilityToken<UnboundCapability>): readonly T[];
+  /**
+   * Resolves all registered providers for a typed singleton service token.
+   *
+   * @typeParam T - The service interface carried by the token or supplied by the caller
+   * @param token - The capability token
+   * @returns All registered providers in registration order, or an empty array
+   */
   getAll<T extends object>(token: ServiceToken<T>): readonly T[];
+  /**
+   * Resolves all registered providers for an unbranded custom or derived string token.
+   *
+   * @typeParam T - The service interface carried by the token or supplied by the caller
+   * @param token - The capability token
+   * @returns All registered providers in registration order, or an empty array
+   */
   getAll<T extends object>(token: UnboundToken): readonly T[];
 
   /**

@@ -12,9 +12,7 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
-## 0.13.0
-
-### Typed capability lookups
+### Typed capability lookups (M139g, `@setu-ts/common`, `@setu-ts/kernel`, `@setu-ts/testing`, `@setu-ts/react-router-plugin`, `@setu-ts/cli`)
 
 `services.get(CAPABILITIES.LOGGER)` now infers `ILogger`. Correct explicit interfaces and widening
 still work; downcasts and wrong token/interface pairs fail. Use the bound interface's methods.

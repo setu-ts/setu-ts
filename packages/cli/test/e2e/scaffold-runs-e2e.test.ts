@@ -563,6 +563,7 @@ import { createApp } from './setu.config.ts';
 const options = [undefined, '', ',', ' , ', '192.0.2.1/32', '127.0.0.1/32', 'example', '10.0.0.0/33', '::1/129'];
 const port = Number(process.argv[2]);
 const origin = 'http://127.0.0.1:' + port;
+const csrfTokenOf = (html: string) => /name="_csrf"\\s+value="([^"]+)"/.exec(html)?.[1];
 delete process.env['TRUST_FORWARDED_HOST'];
 for (const proxies of options) {
   if (proxies === undefined) delete process.env['TRUSTED_PROXIES'];
@@ -583,7 +584,7 @@ for (const proxies of options) {
     assert.deepEqual(await identity.json(), { ip: trusted ? '203.0.113.9' : '127.0.0.1', origin: trusted ? 'https://127.0.0.1:' + port : origin });
     const page = await fetch(origin + '/login', { headers });
     assert.equal(page.status, 200);
-    const token = /name="_csrf"\\s+value="([^"]+)"/.exec(await page.text())?.[1];
+    const token = csrfTokenOf(await page.text());
     assert.ok(token);
     const cookie = page.headers.getSetCookie().map((line) => line.split(';', 1)[0]).join('; ');
     // The scaffold uses the session plugin's secure:true default on both paths.
@@ -605,10 +606,11 @@ process.env['TRUST_FORWARDED_HOST'] = 'true';
   app.router.get('/identity-probe', (ctx) => ctx.response.json({ origin: requestOriginOf(ctx).origin }));
   await app.start({ port, hostname: '127.0.0.1' });
   try {
-    const headers = { 'X-Forwarded-Host': 'public.example', 'X-Forwarded-Proto': 'https' };
+    // The forwarded origin is believed only once the walk resolves a client (M113n F2).
+    const headers = { 'X-Forwarded-For': '203.0.113.9', 'X-Forwarded-Host': 'public.example', 'X-Forwarded-Proto': 'https' };
     assert.deepEqual(await (await fetch(origin + '/identity-probe', { headers })).json(), { origin: 'https://public.example' });
     const page = await fetch(origin + '/login', { headers });
-    const token = /name="_csrf"\\s+value="([^"]+)"/.exec(await page.text())?.[1];
+    const token = csrfTokenOf(await page.text());
     assert.ok(token);
     const cookie = page.headers.getSetCookie().map((line) => line.split(';', 1)[0]).join('; ');
     const action = await fetch(origin + '/login', { method: 'POST', redirect: 'manual', headers: {

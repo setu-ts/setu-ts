@@ -22,7 +22,12 @@
 export type CapabilityToken = string;
 
 declare const capabilityBrand: unique symbol;
-declare const serviceBrand: unique symbol;
+/**
+ * Required singleton-token brand, imported only in type positions.
+ * @internal
+ * @since 0.13.0
+ */
+export declare const serviceBrand: unique symbol;
 declare const requestServiceBrand: unique symbol;
 
 /**
@@ -39,25 +44,6 @@ declare const requestServiceBrand: unique symbol;
  * @since 0.13.0
  */
 export type StandardCapabilityToken<K extends string> = K & { readonly [capabilityBrand]: K };
-
-/**
- * A capability token that carries the type of the service registered under
- * it, so a resolver infers the service type from the token alone. At run time
- * it is the plain token string; the type parameter exists only for the
- * compiler.
- *
- * The required unique-symbol brand distinguishes a singleton service token
- * from plain strings and request-bound tokens. Create it with `serviceToken`;
- * use `requestServiceToken` for a service registered with `requestService`.
- *
- * @typeParam T - The service type registered under this token
- * @example
- * ```typescript
- * export const PRODUCTS = serviceToken<ProductsService>('module.products');
- * ```
- * @since 0.12.0
- */
-export type ServiceToken<T> = string & { readonly [serviceBrand]: T };
 
 /**
  * A capability token carrying the service type produced by a request-bound

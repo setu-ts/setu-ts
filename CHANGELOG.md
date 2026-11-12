@@ -8,15 +8,16 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
-- **BREAKING — typed capability registry (M139g, 0.13.0, `@setu-ts/common`, `kernel`, `testing`,
-  `react-router-plugin`).** Standard tokens carry a required brand and infer their interfaces
-  through `CapabilityServices`; reads reject wrong explicit pairings and downcasts, and writes
-  require the bound contract. Database, Cloudflare, static and messaging plugins augment the map.
-  Singleton `ServiceToken` is now branded; request-bound entries use `requestServiceToken` and
-  resolve through `resolveRequestService` or `getService`. Raw registry reads refuse request tokens.
-  CLI modules and the full-stack app emit the request token constructor. Correct explicit interfaces
-  and single generic registry implementations remain supported; see the upgrading guide. The new
-  public types are `StandardCapabilityToken`, `CapabilityKey`, `RequestServiceToken`, `KeysServing`,
+- **BREAKING — typed capability registry (M139g, 0.13.0, `@setu-ts/common`, `@setu-ts/kernel`,
+  `@setu-ts/testing`, `@setu-ts/react-router-plugin`, `@setu-ts/cli`).** Standard tokens carry a
+  required brand and infer their interfaces through `CapabilityServices`; reads reject wrong
+  explicit pairings and downcasts, and writes require the bound contract. Database, Cloudflare,
+  static and messaging plugins augment the map. Singleton `ServiceToken` is now branded;
+  request-bound entries use `requestServiceToken` and resolve through `resolveRequestService` or
+  `getService`. Raw registry reads refuse request tokens. CLI modules and the full-stack app emit
+  the request token constructor. Correct explicit interfaces and single generic registry
+  implementations remain supported; see the upgrading guide. The new public types are
+  `StandardCapabilityToken`, `CapabilityKey`, `RequestServiceToken`, `KeysServing`,
   `UnboundCapability` and `UnboundToken`.
 
 - **BREAKING — `X-Forwarded-Host` is believed only on opt-in (#583,

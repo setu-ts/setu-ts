@@ -11,13 +11,32 @@ import { createCapabilityToken } from '../tokens.ts';
 import type {
   CapabilityToken,
   StandardCapabilityToken,
-  ServiceToken,
+  serviceBrand,
   RequestServiceToken,
   UnboundToken,
 } from '../tokens.ts';
 import type { CapabilityServices, UnboundCapability } from '../capability-services.ts';
 import type { KeysServing } from '../registry.ts';
-export type { ServiceToken, RequestServiceToken } from '../tokens.ts';
+export type { RequestServiceToken } from '../tokens.ts';
+
+/**
+ * A capability token that carries the type of the service registered under
+ * it, so a resolver infers the service type from the token alone. At run time
+ * it is the plain token string; the type parameter exists only for the
+ * compiler.
+ *
+ * The required unique-symbol brand distinguishes a singleton service token
+ * from plain strings and request-bound tokens. Create it with `serviceToken`;
+ * use `requestServiceToken` for a service registered with `requestService`.
+ *
+ * @typeParam T - The service type registered under this token
+ * @example
+ * ```typescript
+ * export const PRODUCTS = serviceToken<ProductsService>('module.products');
+ * ```
+ * @since 0.12.0
+ */
+export type ServiceToken<T> = string & { readonly [serviceBrand]: T };
 
 /**
  * Creates a typed service token after validating the name against the
@@ -168,8 +187,9 @@ function build(entry: RequestBoundService<object>, ctx: IRequestContext, token: 
  * registered.
  * Overloads infer the service from a standard or typed token; custom and
  * unbound tokens retain an explicit service type argument.
+ * This overload accepts a mapped standard token and returns its bound interface.
  *
- * @typeParam T - The service type, inferred from a {@linkcode ServiceToken}
+ * @typeParam K - The mapped standard capability key
  * @param ctx - The kernel request context
  * @param token - The token the service is registered under
  * @returns The request's instance, or the registered singleton
@@ -185,18 +205,50 @@ export function resolveRequestService<K extends keyof CapabilityServices>(
   ctx: IRequestContext,
   token: StandardCapabilityToken<K>,
 ): CapabilityServices[K];
+/**
+ * Resolves the service for a compatible mapped standard token.
+ *
+ * @typeParam T - The resolved service interface
+ * @param ctx - The kernel request context
+ * @param token - The capability or typed service token
+ * @returns The request's service instance, or the registered singleton
+ */
 export function resolveRequestService<T extends object>(
   ctx: IRequestContext,
   token: StandardCapabilityToken<KeysServing<T>>,
 ): T;
+/**
+ * Resolves the service for an unbound standard capability token.
+ *
+ * @typeParam T - The resolved service interface
+ * @param ctx - The kernel request context
+ * @param token - The capability or typed service token
+ * @returns The request's service instance, or the registered singleton
+ */
 export function resolveRequestService<T extends object>(
   ctx: IRequestContext,
   token: StandardCapabilityToken<UnboundCapability>,
 ): T;
+/**
+ * Resolves the service for a singleton or request-bound service token.
+ *
+ * @typeParam T - The resolved service interface
+ * @param ctx - The kernel request context
+ * @param token - The capability or typed service token
+ * @returns The request's service instance, or the registered singleton
+ */
 export function resolveRequestService<T extends object>(
   ctx: IRequestContext,
   token: ServiceToken<T> | RequestServiceToken<T>,
 ): T;
+/**
+ * Resolves the service for an unbranded custom or derived string token.
+ *
+ * @typeParam T - The resolved service interface
+ * @param ctx - The kernel request context
+ * @param token - The capability or typed service token
+ * @returns The request's service instance, or the registered singleton
+ */
 export function resolveRequestService<T extends object>(
   ctx: IRequestContext,
   token: UnboundToken,
