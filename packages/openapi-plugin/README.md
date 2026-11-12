@@ -179,9 +179,10 @@ at construction for direct `OpenApiService` and `OpenApiGenerator` use.
 
 Set `schema: { deprecated: true }` on a route or `@ApiOperation({ deprecated: true })` on a
 controller method to emit the operation's `deprecated: true`. The generated SDK client marks its
-interface member and method `@deprecated`, so editors flag calls. False and absent flags leave the
-document and generated client unchanged. Deprecation is documentation only and adds no `Deprecation`
-or `Sunset` response headers.
+interface member `@deprecated`, so editors flag calls; its factory method says "Deprecated
+operation." without the tag, so the generated module never uses its own deprecated symbol. False and
+absent flags leave the document and generated client unchanged. Deprecation is documentation only
+and adds no `Deprecation` or `Sunset` response headers.
 
 Set `schema: { excludeFromDocument: true }` or `@ApiOperation({ excludeFromDocument: true })` to
 omit just that operation: a hidden `DELETE /users/:id` can coexist with a documented `GET` on the

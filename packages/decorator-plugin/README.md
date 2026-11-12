@@ -290,11 +290,12 @@ schema and a description the declaration does not carry.
 - **Discovery** — `discoverControllers`
 
 `@ApiOperation({ deprecated: true })` marks only the OpenAPI operation deprecated; generated SDK
-interface members and methods carry `@deprecated`. It does not change serving behavior or add
-deprecation response headers. `@ApiOperation({ excludeFromDocument: true })` hides only that
-operation from the document. It stays served, listed in `router.listRoutes()` and discoverable as an
-MCP tool when marked; the flag is not access control. False and omitted flags have no effect. Either
-flag works as the method's only OpenAPI metadata.
+interface members carry `@deprecated`, while generated factory methods say "Deprecated operation."
+without the tag. It does not change serving behavior or add deprecation response headers.
+`@ApiOperation({ excludeFromDocument: true })` hides only that operation from the document. It stays
+served, listed in `router.listRoutes()` and discoverable as an MCP tool when marked; the flag is not
+access control. False and omitted flags have no effect. Either flag works as the method's only
+OpenAPI metadata.
 
 ## Options
 

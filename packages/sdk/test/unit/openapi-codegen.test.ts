@@ -123,7 +123,7 @@ describe('deprecated OpenAPI operations', () => {
     `);
   });
 
-  it('marks only the deprecated interface member and method', () => {
+  it('tags only the deprecated interface member and describes its method in plain text', () => {
     const source = generateOpenApiClient(doc(true));
     expect(source).toContain('  /** @deprecated */\n  oldOp(');
     expect(source).toContain(
