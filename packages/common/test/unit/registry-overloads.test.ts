@@ -44,6 +44,26 @@ it('checks every registry overload at compilation', () => {
     registry.register(CAPABILITIES.LOGGER, { send: () => Promise.resolve() });
     // @ts-expect-error The bound logger contract is required from the factory.
     registry.registerFactory(CAPABILITIES.LOGGER, () => ({ send: () => Promise.resolve() }));
+    // A write must supply the whole bound contract; an empty, partial or wider object is refused.
+    const partial = { info: (_message: string): void => undefined };
+    type FullLogger = ILogger & { flush(): void };
+    // @ts-expect-error An empty object is not a logger.
+    registry.register(CAPABILITIES.LOGGER, {});
+    // @ts-expect-error A logger with only `info` is not a logger.
+    registry.register(CAPABILITIES.LOGGER, partial);
+    // @ts-expect-error A wider explicit type cannot register under a bound token.
+    registry.register<object>(CAPABILITIES.LOGGER, {});
+    // @ts-expect-error An empty factory result is not a logger.
+    registry.registerFactory(CAPABILITIES.LOGGER, () => ({}));
+    // @ts-expect-error A wider explicit type cannot register a factory under a bound token.
+    registry.registerFactory<object>(CAPABILITIES.LOGGER, () => ({}));
+    // @ts-expect-error A partial factory result is not a logger.
+    registry.registerFactory<typeof partial>(CAPABILITIES.LOGGER, () => partial);
+    // An implementation with more than the contract is still accepted.
+    registry.register<FullLogger>(CAPABILITIES.LOGGER, Object.assign(logger, { flush() {} }));
+    registry.registerFactory<FullLogger>(CAPABILITIES.LOGGER, () =>
+      Object.assign(logger, { flush() {} }),
+    );
     const request = requestServiceToken<ILogger>('app.request-logger');
     const entry = requestService(() => logger);
     registry.register(request, entry);

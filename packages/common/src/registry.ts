@@ -34,6 +34,24 @@ export type KeysServing<T> = {
 }[keyof CapabilityServices];
 
 /**
+ * Capability keys whose bound service interface `T` satisfies.
+ * Explicit registration overloads use this set — the reverse of
+ * {@linkcode KeysServing} — so a registration supplies the bound interface or
+ * an implementation of it, and an empty, partial or wider object is refused.
+ *
+ * @typeParam T - The service type supplied by the caller
+ * @example
+ * ```typescript
+ * type LoggerCapabilities = KeysAccepting<ConsoleLogger>;
+ * services.register<ConsoleLogger>(CAPABILITIES.LOGGER, new ConsoleLogger());
+ * ```
+ * @since 0.13.0
+ */
+export type KeysAccepting<T> = {
+  [K in keyof CapabilityServices]: T extends CapabilityServices[K] ? K : never;
+}[keyof CapabilityServices];
+
+/**
  * Options accepted when registering a service.
  *
  * @since 0.1.0
@@ -130,7 +148,7 @@ export interface IServiceRegistry {
     options?: RegisterOptions,
   ): void;
   /**
-   * Registers a service under a compatible mapped standard token.
+   * Registers an implementation of the bound interface under a mapped standard token.
    *
    * @typeParam T - The service interface carried by the token or supplied by the caller
    * @param token - The capability token
@@ -139,7 +157,7 @@ export interface IServiceRegistry {
    * @returns No value; records the registration
    */
   register<T extends object>(
-    token: StandardCapabilityToken<KeysServing<T>>,
+    token: StandardCapabilityToken<KeysAccepting<T>>,
     service: T,
     options?: RegisterOptions,
   ): void;
@@ -212,7 +230,7 @@ export interface IServiceRegistry {
     options?: RegisterOptions,
   ): void;
   /**
-   * Registers a lazy factory under a compatible mapped standard token.
+   * Registers a lazy factory for an implementation of the bound interface under a mapped standard token.
    *
    * @typeParam T - The service interface carried by the token or supplied by the caller
    * @param token - The capability token
@@ -221,7 +239,7 @@ export interface IServiceRegistry {
    * @returns No value; records the registration
    */
   registerFactory<T extends object>(
-    token: StandardCapabilityToken<KeysServing<T>>,
+    token: StandardCapabilityToken<KeysAccepting<T>>,
     factory: ServiceFactory<T>,
     options?: RegisterOptions,
   ): void;

@@ -2,7 +2,7 @@ import { configDouble } from '../../../../test/fixtures/capability-doubles.ts';
 import { loggerDouble } from '../../../../test/fixtures/capability-doubles.ts';
 import { describe, expect, it } from 'vitest';
 import { CAPABILITIES } from '@setu-ts/common';
-import type { ILogger, IPlugin, IPluginContext } from '@setu-ts/common';
+import type { IContainer, ILogger, IMetadataStore, IPlugin, IPluginContext } from '@setu-ts/common';
 
 import { createApplication } from '../../src/application/application.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
@@ -2110,8 +2110,8 @@ it('exposes only registered lazy context capabilities during enumeration', async
           expect(Object.getOwnPropertyDescriptor(ctx, 'metadata')).toBeUndefined();
           expect('environment' in ctx).toBe(true);
           ctx.services.registerFactory(CAPABILITIES.RUNTIME, () => fake.runtime);
-          const metadata = {};
-          const container = {};
+          const metadata = {} as IMetadataStore;
+          const container = {} as IContainer;
           ctx.services.register(CAPABILITIES.METADATA_STORE, metadata);
           ctx.services.register(CAPABILITIES.DI_CONTAINER, container);
           expect(ctx.metadata).toBe(metadata);

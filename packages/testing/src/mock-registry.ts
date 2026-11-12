@@ -2,6 +2,7 @@ import type {
   CapabilityToken,
   CapabilityServices,
   StandardCapabilityToken,
+  KeysAccepting,
   KeysServing,
   UnboundCapability,
   UnboundToken,
@@ -69,7 +70,7 @@ export class MockServiceRegistry implements IServiceRegistry {
     options?: RegisterOptions,
   ): void;
   /**
-   * Registers a service under a compatible mapped standard token.
+   * Registers an implementation of the bound interface under a mapped standard token.
    *
    * @typeParam T - The service interface carried by the token or supplied by the caller
    * @param token - A compatible mapped standard token
@@ -78,7 +79,7 @@ export class MockServiceRegistry implements IServiceRegistry {
    * @returns No value; records the registration
    */
   register<T extends object>(
-    token: StandardCapabilityToken<KeysServing<T>>,
+    token: StandardCapabilityToken<KeysAccepting<T>>,
     service: T,
     options?: RegisterOptions,
   ): void;
@@ -149,7 +150,7 @@ export class MockServiceRegistry implements IServiceRegistry {
     options?: RegisterOptions,
   ): void;
   /**
-   * Registers a lazy factory under a compatible mapped standard token.
+   * Registers a lazy factory for an implementation of the bound interface under a mapped standard token.
    *
    * @typeParam T - The service interface carried by the token or supplied by the caller
    * @param token - A compatible mapped standard token
@@ -158,7 +159,7 @@ export class MockServiceRegistry implements IServiceRegistry {
    * @returns No value; records the registration
    */
   registerFactory<T extends object>(
-    token: StandardCapabilityToken<KeysServing<T>>,
+    token: StandardCapabilityToken<KeysAccepting<T>>,
     factory: ServiceFactory<T>,
     options?: RegisterOptions,
   ): void;

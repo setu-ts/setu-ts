@@ -16,7 +16,7 @@ import { CachePlugin } from '@setu-ts/cache-plugin';
 ```typescript
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
-import { cacheMiddleware, CachePlugin } from '@setu-ts/cache-plugin';
+import { cacheMiddleware, CachePlugin, CacheService } from '@setu-ts/cache-plugin';
 import { CAPABILITIES } from '@setu-ts/common';
 
 const app = createApplication({
@@ -31,11 +31,10 @@ const cache = app.services.get(CAPABILITIES.CACHE);
 await cache.set('user:1', { name: 'Ada' }, 60);
 const user = await cache.get<{ name: string }>('user:1');
 
-// The capability exposes ICacheStore's get/set contract.
-let profile = await cache.get<{ name: string }>('profile:1');
-if (profile === null) {
-  profile = { name: 'Ada' };
-  await cache.set('profile:1', profile, 60);
+// The capability is typed as ICacheStore. The plugin registers a CacheService, so narrow with
+// instanceof to reach its coalesced read-through for one cache key.
+if (cache instanceof CacheService) {
+  const profile = await cache.getOrSet('profile:1', async () => ({ name: 'Ada' }), 60);
 }
 ```
 
@@ -96,7 +95,8 @@ cacheable, buffered origin response and waiters replay it with `X-Cache: COALESC
 streaming, or otherwise uncacheable leader is not replayed; every waiter runs the origin itself.
 Separate processes do not coordinate, so one overlapping successful batch can produce at most one
 origin call per process. `CacheService.getOrSet()` applies the same per-store coalescing to
-programmatic read-through calls.
+programmatic read-through calls; the capability is typed as `ICacheStore`, so narrow it with
+`instanceof CacheService` first.
 
 ## Exports
 

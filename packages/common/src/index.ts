@@ -142,6 +142,7 @@ export type { None, Option, Some } from './option.ts';
 export { resolveRegistryEntry } from './registry.ts';
 export type {
   IServiceRegistry,
+  KeysAccepting,
   KeysServing,
   UnboundToken,
   RegisterOptions,

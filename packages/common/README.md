@@ -38,7 +38,7 @@ Without `requiredBy`, the message says `the package that loads it` generically.
 | Plugin contract     | `IPlugin`, `IPluginContext`, `IApplication`, context APIs (`IRouterApi`, `IMiddlewareApi`, `ILifecycleApi`, …)                                                                                                                                                                                                  |
 | Service registry    | `IServiceRegistry`, `RegisterOptions`, `ServiceFactory`                                                                                                                                                                                                                                                         |
 | HTTP abstractions   | `IRequest`, `IResponse`, `IRequestContext`, `IMiddleware`, `MiddlewareFunction`, `RouteHandler`, `RouteDefinition`, `ResponseSnapshot`, `ResponseSnapshotInit`                                                                                                                                                  |
-| Request services    | `serviceToken()`, `ServiceToken`, `requestService()`, `RequestBoundService`, `resolveRequestService()`, `RequestServiceUnavailableError` — one instance per request and token, shared by kernel routes and React Router loaders (0.12.0)                                                                        |
+| Request services    | `serviceToken()`, `ServiceToken`, `requestServiceToken()`, `RequestServiceToken`, `requestService()`, `RequestBoundService`, `resolveRequestService()`, `RequestServiceUnavailableError` — one instance per request and token, shared by kernel routes and React Router loaders (0.12.0)                        |
 | Runtime abstraction | `IRuntimeServices`, `IFileSystem`, `IHttpAdapter`                                                                                                                                                                                                                                                               |
 | Optional DI         | `IContainer`, `Provider`, `ServiceScope`, `createToken`, `InjectionToken`, `ContainerToken`, `InjectEntry`                                                                                                                                                                                                      |
 | Domain contracts    | `ILogger`, `IConfig`, `IValidationService`, `IHealthIndicator`, `IMetric`, `IJwtService`, `IOrmAdapter`, `ICacheStore`, `IEventBus`, `IMessageBroker`, `IQueue`, `ISecretManager`, `IAuditLogger`, `ICircuitBreaker`, `IStorage`, `IMailer`, `INotifier`, `IFeatureFlags`, `ITenantResolver`, `ITenantRegistry` |
@@ -49,9 +49,9 @@ Without `requiredBy`, the message says `the package that loads it` generically.
 
 Since 0.13.0, standard tokens infer their interfaces from the augmentable `CapabilityServices` map.
 `StandardCapabilityToken<K>` carries a standard key; `CapabilityKey` is the plain key union.
-`KeysServing<T>` permits correct explicit types and widening, while `UnboundCapability` and
-`UnboundToken` preserve explicit lookups of unmapped and custom tokens. `register` and
-`registerFactory` check the same contracts. `ServiceToken<T>` carries a singleton type;
+`KeysServing<T>` permits correct explicit types and widening on reads; `KeysAccepting<T>` makes a
+write supply the whole bound contract. `UnboundCapability` and `UnboundToken` preserve explicit
+lookups of unmapped and custom tokens. `ServiceToken<T>` carries a singleton type;
 `requestServiceToken<T>(name)` creates a `RequestServiceToken<T>` for a `requestService` wrapper.
 Resolve that token through `resolveRequestService`, which builds one instance per request; `get` and
 `getAll` refuse request-bound tokens at compilation.
@@ -808,6 +808,7 @@ package fits the plugin architecture.
 | `ITenantIsolationStrategy`            | type      |
 | `JobProcessor`                        | type      |
 | `JsonValue`                           | type      |
+| `KeysAccepting`                       | type      |
 | `KeysServing`                         | type      |
 | `LifecyclePhase`                      | type      |
 | `LoadBalanceStrategy`                 | type      |

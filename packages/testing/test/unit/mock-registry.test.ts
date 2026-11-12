@@ -13,6 +13,8 @@ it('keeps the public overloads identical to IServiceRegistry', () => {
   const check = (registry: MockServiceRegistry): void => {
     // @ts-expect-error The logger token cannot resolve a mailer.
     registry.get<IMailer>(CAPABILITIES.LOGGER);
+    // @ts-expect-error A partial double cannot register under the bound logger token.
+    registry.register<object>(CAPABILITIES.LOGGER, {});
   };
   expectTypeOf(check).toBeFunction();
 });

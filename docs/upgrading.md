@@ -15,9 +15,11 @@ cutting a release renames that heading to the version and is a rename, not a rec
 ### Typed capability lookups (M139g, `@setu-ts/common`, `@setu-ts/kernel`, `@setu-ts/testing`, `@setu-ts/react-router-plugin`, `@setu-ts/cli`)
 
 `services.get(CAPABILITIES.LOGGER)` now infers `ILogger`. Correct explicit interfaces and widening
-still work; downcasts and wrong token/interface pairs fail. Use the bound interface's methods.
-`register` and `registerFactory` require the bound contract too: tests use a full double or
-`overrideCapability` for a partial replacement.
+still work; downcasts and wrong token/interface pairs fail. Use the bound interface's methods, or
+narrow with `instanceof` for an implementation's extra method
+(`if (cache instanceof CacheService) await cache.getOrSet(…)`). `register` and `registerFactory`
+require the whole bound contract: an empty or partial object no longer compiles, so tests use a full
+double or `overrideCapability` for a partial replacement.
 
 Replace `serviceToken<T>(name)` with `requestServiceToken<T>(name)` for entries registered with
 `requestService`. Read those entries with `resolveRequestService` or React Router's `getService`;
