@@ -405,11 +405,26 @@ describe('worker task entries', () => {
     ).toEqual(['/app/a.task.ts']);
   });
   it('pairs delimiters in linear time on unclosed input (CodeRabbit #582 follow-up)', () => {
-    const started = performance.now();
-    // 3.2 MB: linear runs in about 0.2 s; the per-span re-scan took 4.4 s.
-    taskReferences('new URL('.repeat(400_000), '/app/main.ts');
-    taskReferences(`\`${'${'.repeat(40_000)}\``, '/app/main.ts');
-    expect(performance.now() - started).toBeLessThan(1_000);
+    // Growth, not a wall-clock bound: CI's coverage instrumentation runs this
+    // scan about 8x slower, so an absolute limit fails a linear scan there.
+    // Quadrupling the input quadruples a linear scan (measured 2.6x) and
+    // multiplies a quadratic one by 16 (measured 12.9x for the per-span re-scan).
+    const best = (source: string): number => {
+      let fastest = Infinity;
+      for (let run = 0; run < 3; run++) {
+        const started = performance.now();
+        taskReferences(source, '/app/main.ts');
+        fastest = Math.min(fastest, performance.now() - started);
+      }
+      return fastest;
+    };
+    for (const unit of ['new URL(', '${']) {
+      const wrap = (text: string): string => (unit === '${' ? `\`${text}\`` : text);
+      best(wrap(unit.repeat(10_000))); // warm up
+      const small = best(wrap(unit.repeat(100_000)));
+      const large = best(wrap(unit.repeat(400_000)));
+      expect(large / small, unit).toBeLessThan(8);
+    }
   });
   it('reads the edges of the code view: unterminated input, regex classes and flags, division', () => {
     for (const source of [
