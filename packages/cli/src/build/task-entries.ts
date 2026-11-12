@@ -177,6 +177,20 @@ export function taskReferences(source: string, file: string): readonly ITaskRefe
     });
   }
   const parens = closingIndexes(visible, '(', ')');
+  // Every `.task.ts` in the comment-blanked text, found once: asking each span
+  // with a slice and includes() re-scanned to the end per unclosed head, which
+  // was quadratic (CodeRabbit #582).
+  const mentions = [...view.text.matchAll(/\.task\.ts/g)].map((mention) => mention.index);
+  const mentionsWithin = (start: number, end: number): boolean => {
+    let low = 0;
+    let high = mentions.length;
+    while (low < high) {
+      const middle = (low + high) >>> 1;
+      if (mentions[middle]! < start) low = middle + 1;
+      else high = middle;
+    }
+    return low < mentions.length && mentions[low]! + '.task.ts'.length <= end;
+  };
   for (const match of visible.matchAll(
     // A call head (new URL, a dynamic import, import.meta.resolve) spans to its
     // balanced `)`, so a nested call or a string cannot end it early. `import`
@@ -190,7 +204,7 @@ export function taskReferences(source: string, file: string): readonly ITaskRefe
     const end = match[0].endsWith('(') ? (parens.get(head - 1) ?? visible.length) + 1 : head;
     if (
       // Template text counts (a computed specifier), a comment does not.
-      view.text.slice(match.index, end).includes('.task.ts') &&
+      mentionsWithin(match.index, end) &&
       !references.some((ref) => match.index === ref.start)
     ) {
       throw new Error(

@@ -406,7 +406,8 @@ describe('worker task entries', () => {
   });
   it('pairs delimiters in linear time on unclosed input (CodeRabbit #582 follow-up)', () => {
     const started = performance.now();
-    taskReferences('new URL('.repeat(40_000), '/app/main.ts');
+    // 3.2 MB: linear runs in about 0.2 s; the per-span re-scan took 4.4 s.
+    taskReferences('new URL('.repeat(400_000), '/app/main.ts');
     taskReferences(`\`${'${'.repeat(40_000)}\``, '/app/main.ts');
     expect(performance.now() - started).toBeLessThan(1_000);
   });
