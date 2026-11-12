@@ -1,3 +1,4 @@
+import { createRuntimeServices } from '@setu-ts/runtime';
 import { describe, expect, it } from 'vitest';
 import { CAPABILITIES, ERROR_RESPONDER_STATE_KEY, withHttpStatusHint } from '@setu-ts/common';
 import type { IErrorResponder } from '@setu-ts/common';
@@ -82,6 +83,7 @@ describe('errorHandler logging and pure status prediction', () => {
     const records: Readonly<Record<string, unknown>>[] = [];
     const { ctx } = createFakeContext();
     ctx.services.register(CAPABILITIES.RUNTIME, {
+      ...createRuntimeServices(),
       reportError: (record: Readonly<Record<string, unknown>>) => records.push(record),
     });
     await errorHandler()(ctx, () => {
@@ -98,6 +100,7 @@ describe('errorHandler logging and pure status prediction', () => {
         const records: Readonly<Record<string, unknown>>[] = [];
         const { ctx } = createFakeContext();
         ctx.services.register(CAPABILITIES.RUNTIME, {
+          ...createRuntimeServices(),
           reportError: (record: Readonly<Record<string, unknown>>) => records.push(record),
         });
         if (withLogger) ctx.services.register(CAPABILITIES.LOGGER, new FakeLogger());

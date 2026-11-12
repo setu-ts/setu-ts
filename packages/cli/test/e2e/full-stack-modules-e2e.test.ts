@@ -59,6 +59,9 @@ it(
         output.join('\n'),
       ).toBe(0);
       expect(await nodeFs.readFile(`${project}/setu.config.ts`, 'utf8')).toBe(configBefore);
+      expect(
+        await nodeFs.readFile(`${project}/src/modules/articles/articles.token.ts`, 'utf8'),
+      ).toContain('requestServiceToken<ArticlesService>');
 
       expect(
         await cli(['g', 'route', 'summary', '--module', 'articles', '--dir', project]),

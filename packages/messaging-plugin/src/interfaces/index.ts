@@ -1466,3 +1466,13 @@ export interface IInbox {
    */
   purge(): Promise<number>;
 }
+
+/** Standard capability bindings. @since 0.13.0 */
+declare module '@setu-ts/common' {
+  interface CapabilityServices {
+    /** Bound plugin service. @since 0.13.0 */
+    outbox: IOutbox;
+    /** Bound plugin service. @since 0.13.0 */
+    inbox: IInbox;
+  }
+}

@@ -275,11 +275,7 @@ describe('CachePlugin', () => {
       // carries every member the plugin reads (hrtime for the memory
       // clock, the timer pair for the M90b reachability probe) — the real
       // IRuntimeServices contract requires all of them.
-      ctx.services.register(CAPABILITIES.RUNTIME, {
-        hrtime: () => 12345,
-        setTimeout: (fn: () => void, ms: number) => setTimeout(fn, ms),
-        clearTimeout: (handle: unknown) => clearTimeout(handle as ReturnType<typeof setTimeout>),
-      });
+      ctx.services.register(CAPABILITIES.RUNTIME, { ...ctx.runtime, hrtime: () => 12345 });
       const plugin = CachePlugin();
       await plugin.register(ctx);
       expect(registered.has(CAPABILITIES.CACHE)).toBe(true);

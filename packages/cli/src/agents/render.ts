@@ -1,3 +1,4 @@
+import { maskUrlUserinfo } from '@setu-ts/common';
 /** Pure renderers shared by writing and freshness checks. */
 import type { ProjectFacts } from './facts.ts';
 import type { WorkspaceManifest } from '../workspace/manifest.ts';
@@ -140,7 +141,7 @@ export function renderBrief(facts: ProjectFacts, member = false): string {
   return checkedSection(sections.join('\n') + `\n\n${BRIEF_END}\n`);
 }
 
-/** Workspace roots carry layout facts, with package guidance in each member. */
+/** Workspace roots carry layout facts with masked broker credentials. */
 export function renderWorkspaceRoot(workspace: WorkspaceManifest, version: string): string {
   const profile = workspaceProfile(workspace.runtime);
   return checkedSection(
@@ -163,7 +164,7 @@ export function renderWorkspaceRoot(workspace: WorkspaceManifest, version: strin
         (m) =>
           `- ${displayValue(m.name)} — port: ${displayValue(m.port)}; dependsOn: ${m.dependsOn?.map(displayValue).join(', ') || '—'}; devtool port: ${displayValue(m.devtoolPort ?? '—')}; brief: apps/${displayValue(m.name)}/AGENTS.md`,
       ),
-      `\nBroker: ${workspace.broker}; URL variable: ${getBroker(workspace.broker)?.connection?.variable ?? 'none'}. Endpoint override: ${displayValue(workspace.brokerUrl ?? 'broker default')}. gRPC members: ${
+      `\nBroker: ${workspace.broker}; URL variable: ${getBroker(workspace.broker)?.connection?.variable ?? 'none'}. Endpoint override: ${displayValue(workspace.brokerUrl === undefined ? 'broker default' : maskUrlUserinfo(workspace.brokerUrl))}. gRPC members: ${
         workspace.members
           .filter((m) => m.rpc === 'grpc')
           .map((m) => displayValue(m.name))

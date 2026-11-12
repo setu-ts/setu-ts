@@ -145,7 +145,7 @@ export function AuditPlugin(options?: AuditPluginOptions): IPlugin {
       const runtime = ctx.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
       const service = new AuditService(storage, runtime, redaction);
 
-      ctx.services.register<typeof service>(CAPABILITIES.AUDIT, service);
+      ctx.services.register(CAPABILITIES.AUDIT, service);
 
       // H-70c-1: this reported `storage.isReady()` alone, which is a constant
       // `true` for three of the four backends — so the indicator was in

@@ -10,6 +10,10 @@
 import { describe, expect, it } from 'vitest';
 import * as common from '../../src/index.ts';
 
+it('exports the request-bound token constructor', () => {
+  expect(common.requestServiceToken('module.counter')).toBe('module.counter');
+});
+
 it('exports the shared OpenAPI service contract', () => {
   const service: common.IOpenApiService = {
     getSpec: () => ({ openapi: '3.1.0', paths: {} }),

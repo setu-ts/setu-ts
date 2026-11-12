@@ -1,3 +1,4 @@
+import { databaseDouble } from '../../../../test/fixtures/capability-doubles.ts';
 import { describe, expect, it } from 'vitest';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type { IPlugin, IPluginContext } from '@setu-ts/common';
@@ -24,7 +25,10 @@ function realDatabase(priority?: number): IPlugin {
     version: '1.0.0',
     provides: [CAPABILITIES.DATABASE],
     register(ctx: IPluginContext) {
-      ctx.services.register(CAPABILITIES.DATABASE, { who: 'REAL' });
+      ctx.services.register(
+        CAPABILITIES.DATABASE,
+        Object.assign(databaseDouble(), { who: 'REAL' }),
+      );
     },
   };
   return priority === undefined ? plugin : { ...plugin, priority };
@@ -63,7 +67,7 @@ describe('overrideCapability', () => {
     });
     await app.start();
 
-    expect(app.services.get<{ who: string }>(CAPABILITIES.DATABASE).who).toBe('MOCK');
+    expect(app.services.get(CAPABILITIES.DATABASE)).toHaveProperty('who', 'MOCK');
   });
 
   it('wins against a provider in the LOW band, which a default-priority plugin would not', async () => {
@@ -80,7 +84,7 @@ describe('overrideCapability', () => {
     });
     await app.start();
 
-    expect(app.services.get<{ who: string }>(CAPABILITIES.DATABASE).who).toBe('MOCK');
+    expect(app.services.get(CAPABILITIES.DATABASE)).toHaveProperty('who', 'MOCK');
   });
 
   it('overrides a provider in ANY priority band, including above its own', async () => {
@@ -98,7 +102,7 @@ describe('overrideCapability', () => {
       });
       await app.start();
 
-      expect(app.services.get<{ who: string }>(CAPABILITIES.DATABASE).who).toBe('MOCK');
+      expect(app.services.get(CAPABILITIES.DATABASE)).toHaveProperty('who', 'MOCK');
     }
   });
 
@@ -112,7 +116,10 @@ describe('overrideCapability', () => {
       name: 'db',
       version: '1.0.0',
       register(ctx: IPluginContext) {
-        ctx.services.register(CAPABILITIES.DATABASE, { who: 'REAL' });
+        ctx.services.register(
+          CAPABILITIES.DATABASE,
+          Object.assign(databaseDouble(), { who: 'REAL' }),
+        );
       },
     };
     const app = createApplication({
@@ -270,6 +277,6 @@ describe('createMockPlugin boundary (pinned, not a defect)', () => {
     });
     await app.start();
 
-    expect(app.services.get<{ who: string }>(CAPABILITIES.DATABASE).who).toBe('MOCK');
+    expect(app.services.get(CAPABILITIES.DATABASE)).toHaveProperty('who', 'MOCK');
   });
 });

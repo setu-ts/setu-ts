@@ -122,7 +122,7 @@ export function ${names.camel}Service(ctx: IRequestContext): ${p}Service {
 }
 
 function token(names: DerivedNames): string {
-  return `import { serviceToken } from '@setu-ts/common';
+  return `import { requestServiceToken } from '@setu-ts/common';
 
 import type { ${names.pascal}Service } from './${names.kebab}.service.ts';
 
@@ -131,7 +131,7 @@ import type { ${names.pascal}Service } from './${names.kebab}.service.ts';
  * holds nothing else: \`setu check\` admits \`*.token.ts\` imports from \`~kernel/*\`
  * and refuses every other value import (setu.E017).
  */
-export const ${names.screaming} = serviceToken<${names.pascal}Service>('module.${names.kebab}');
+export const ${names.screaming} = requestServiceToken<${names.pascal}Service>('module.${names.kebab}');
 `;
 }
 

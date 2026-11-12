@@ -48,7 +48,7 @@ describe('generateModule in a full-stack project', () => {
 
   it('names the token module.<name> and serves /api/<name> through resolveRequestService', () => {
     expect(byPath(files, 'src/modules/articles/articles.token.ts')).toContain(
-      "export const ARTICLES = serviceToken<ArticlesService>('module.articles');",
+      "export const ARTICLES = requestServiceToken<ArticlesService>('module.articles');",
     );
     const controller = byPath(files, 'src/modules/articles/articles.controller.ts');
     expect(controller).toContain("router.group('/api/articles'");

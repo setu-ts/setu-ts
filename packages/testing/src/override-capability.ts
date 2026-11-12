@@ -89,6 +89,7 @@ import { PLUGIN_PRIORITY } from '@setu-ts/common';
  *   overrides: [overrideCapability(CAPABILITIES.MAIL, { send: () => Promise.resolve() })],
  * });
  * ```
+ * Deliberately accepts partial test doubles without token binding.
  * @since 0.6.0
  */
 export function overrideCapability(token: CapabilityToken, service: object): IPlugin {
