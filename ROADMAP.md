@@ -17197,6 +17197,53 @@ thing.
   `get`/`getAll` overloads that infer the type from a `CAPABILITIES` value or a `ServiceToken<T>`;
   the explicit type argument stays for third-party string tokens.
 
+## Milestone 140: Generated Code Read as Code
+
+**Source:** the generated-code review of 2026-11-12/13 on `develop` `1fa2996b9`
+(`smoke/GENERATED-CODE-REVIEW.md`, rows V12-62 … V12-129). Earlier runs tested what the CLI
+generates by using it; this one read every generated file as a pull request is read — every template
+on Node, then Bun, Deno, Cloudflare Workers, a workspace with Compose and Kubernetes, the `--agents`
+brief and the `--devtool` entry. The generated code calls the framework correctly; the 68 rows are
+what it teaches and what its defaults do in production: 2 High, 26 Medium, 40 Low. 51 were new; 8
+extend an existing row; one (V12-104) is X9-7's fix no longer working; 8 were behaviour an earlier
+milestone chose, settled below. Four code letters and one documentation letter, at the maintainer's
+direction to keep the split to five.
+
+| Letter    | Kind   | Shape                                                          | Rows                                                                                                                                                                                                                                                 | Packages                               |
+| --------- | ------ | -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
+| **M140a** | design | security defaults a generated project starts with              | V12-63, V12-64, V12-66, V12-67, V12-69, V12-71, V12-72, V12-74, V12-75, V12-76, V12-77, V12-94, V12-108, V12-112, V12-117, V12-119, V12-120, V12-129                                                                                                 | `cli`, `session-plugin`, `auth-plugin` |
+| **M140b** | fix    | Workers, Deno and Bun project output                           | V12-102, V12-103, V12-104, V12-105, V12-106, V12-107, V12-109, V12-118, V12-124, V12-80                                                                                                                                                              | `cli`                                  |
+| **M140c** | fix    | images, Compose, Kubernetes and gRPC between workspace members | V12-68, V12-110, V12-111, V12-113, V12-114, V12-115, V12-116, V12-121, V12-122, V12-123                                                                                                                                                              | `cli`, `grpc-plugin`                   |
+| **M140d** | fix    | what the generators write, and the agent brief                 | V12-62, V12-65, V12-70, V12-73, V12-78, V12-79, V12-81, V12-82, V12-83, V12-84, V12-85, V12-86, V12-87, V12-88, V12-89, V12-90, V12-91, V12-92, V12-93, V12-95, V12-96, V12-97, V12-98, V12-99, V12-100, V12-101, V12-125, V12-126, V12-127, V12-128 | `cli`                                  |
+| **M140e** | docs   | documentation the code letters change                          | package READMEs, agent cards, `docs/` and the website pages M140a–d change                                                                                                                                                                           | READMEs, agent cards, `docs/`, website |
+
+**Decisions (maintainer, 2026-11-13).** The eight rows that were earlier choices:
+
+- **V12-66, V12-112 (session secret):** the scaffold writes a random `SESSION_SECRET` per project
+  into the gitignored env file, never a shared placeholder; Compose and the README's `docker run`
+  pass it explicitly.
+- **V12-119 (full-stack Deno start):** `--allow-scripts` names the packages that need install
+  scripts, and `start` checks for the build instead of installing and building.
+- **V12-120 (Deno dependency age):** `minimumDependencyAge: 0` covers only the scaffold's own
+  install; the `check` task runs the exactly pinned CLI version.
+- **V12-110 (Kubernetes `REDIS_URL`):** a value in the member's Secret overrides the generated
+  default.
+- **V12-116 (hand-applied image tag):** `:dev` stays; the README states the `imagePullPolicy`
+  consequence and points at `setu workspace deploy`.
+- **V12-123 (Bun and Deno image checks):** their images gain a check stage equivalent to Node's
+  `tsc --noEmit` and `setu check`.
+- **V12-89 (full-stack login comment):** it points at auth-plugin's request-bound module-service
+  recipe instead of `authSession.signIn`.
+
+**Sequence.** M140a first: it changes `session-plugin` and `auth-plugin` behaviour (the CSRF token
+rotated at sign-in) and every row crosses a trust boundary, so it is **security-audited** before it
+merges. M140b and M140c touch different files and can follow in either order. M140d starts after
+M139g (#585) merges, because both change `add`'s zero-config wiring and `setu check`'s
+unregistered-plugin finding (V12-62 is W006's missing `validation-plugin` arm). M140e batches the
+documentation last; its plan decides whether it also takes M139e's open rows. Each code letter ships
+its own CHANGELOG entry and boots a scaffold of every template it changes, per the generated-output
+rule.
+
 ---
 
 ## Progress Tracking
@@ -17478,3 +17525,9 @@ thing.
 | 139e      | ⬜     | docs — documentation                                                                                                                                                                                                                                                                      |
 | 139f      | ✅     | service-discovery + database + realtime-backplane + queue + scheduler — health and failure signals that mislead the operator                                                                                                                                                              |
 | 139g      | ⬜     | common + kernel — capability lookups typed by their token (0.13.0)                                                                                                                                                                                                                        |
+| 140       | ⬜     | generated code read as code — the 2026-11-12 review of what the CLI writes, four code letters and docs                                                                                                                                                                                    |
+| 140a      | ⬜     | cli + session-plugin + auth-plugin — security defaults a generated project starts with                                                                                                                                                                                                    |
+| 140b      | ⬜     | cli — Workers, Deno and Bun project output                                                                                                                                                                                                                                                |
+| 140c      | ⬜     | cli + grpc-plugin — images, Compose, Kubernetes and gRPC between workspace members                                                                                                                                                                                                        |
+| 140d      | ⬜     | cli — what the generators write, and the agent brief                                                                                                                                                                                                                                      |
+| 140e      | ⬜     | docs — documentation the code letters change                                                                                                                                                                                                                                              |
