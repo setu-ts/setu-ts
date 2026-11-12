@@ -8,26 +8,26 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
-- **BREAKING — `X-Forwarded-Host` is believed only on opt-in (`@setu-ts/http-security-plugin`).**
-  Behind a trusted proxy, `ipSecurityMiddleware` published the LEFTMOST `X-Forwarded-Host` as the
-  public origin. A proxy that passes a client's copy through (Cloudflare Tunnel's cloudflared) let
-  the client choose the host of every absolute URL the application built, sign-in links included.
-  The host now comes from `X-Forwarded-Host` only with the new
-  `IpSecurityOptions.trustForwardedHost: true`, and then from the rightmost entry, the one the
-  nearest proxy wrote; otherwise it is the `Host` the proxy sent. `X-Forwarded-Proto` is still read
-  by default, now from its rightmost entry. CSRF's zero-configuration same-origin candidate, whose
-  trust source is the browser's `Sec-Fetch-Site`, is unchanged. **Migration:** an application whose
-  proxy rewrites `Host` and writes `X-Forwarded-Host` (some load balancers and ingresses) sets
+- **BREAKING — `X-Forwarded-Host` is believed only on opt-in (#583,
+  `@setu-ts/http-security-plugin`).** Behind a trusted proxy, `ipSecurityMiddleware` published the
+  LEFTMOST `X-Forwarded-Host` as the public origin. A proxy that passes a client's copy through
+  (Cloudflare Tunnel's cloudflared) let the client choose the host of every absolute URL the
+  application built, sign-in links included. The host now comes from `X-Forwarded-Host` only with
+  the new `IpSecurityOptions.trustForwardedHost: true`, and then from the rightmost entry, the one
+  the nearest proxy wrote; otherwise it is the `Host` the proxy sent. `X-Forwarded-Proto` is still
+  read by default, now from its rightmost entry. CSRF's zero-configuration same-origin candidate,
+  whose trust source is the browser's `Sec-Fetch-Site`, is unchanged. **Migration:** an application
+  whose proxy rewrites `Host` and writes `X-Forwarded-Host` (some load balancers and ingresses) sets
   `ipSecurity: { trustForwardedHost: true }`; see `docs/deployment.md`.
-- **BREAKING — worker-pool metrics and health name pools by label, not path
-  (`@setu-ts/worker-pool-plugin`).** The `task_module` metric label and the `/health` payload
-  carried the task-module specifier, normally a `file:///home/<user>/…` URL. Both now carry a task
-  label: the new `TaskPoolOptions.label`, or the module's file name without its extension. Health
-  `pools` entries are `{ task, workers, busy, queued, completed, failed }` (was `taskModule`).
+- **BREAKING — worker-pool metrics and health name pools by label, not path (#583,
+  `@setu-ts/worker-pool-plugin`).** The `task_module` metric label and the `/health` payload carried
+  the task-module specifier, normally a `file:///home/<user>/…` URL. Both now carry a task label:
+  the new `TaskPoolOptions.label`, or the module's file name without its extension. Health `pools`
+  entries are `{ task, workers, busy, queued, completed, failed }` (was `taskModule`).
   `IWorkerPool.stats()`, errors and logs keep the specifier. **Migration:** update dashboards and
   alerts that match `task_module` values; set `pools[<specifier>].label` where two modules share a
   file name.
-- **BREAKING — the starters bound the request body at 1 MiB (`@setu-ts/rest-starter`,
+- **BREAKING — the starters bound the request body at 1 MiB (#583, `@setu-ts/rest-starter`,
   `@setu-ts/microservice-starter`, `@setu-ts/full-stack-starter`).** They called `RuntimePlugin()`
   with no body bound and offered no way to set one, so a fresh application parsed a body of any
   size, declared or chunked. The new `runtime` arm is spread over `{ maxBodyBytes: 1_048_576 }` (its
@@ -35,7 +35,7 @@ All notable changes to this project are documented here. The format follows
   `httpSecurity.requestSize` unless the application sets its own bound. Client- and bidi-streaming
   gRPC calls are bounded per message by `GrpcPlugin({ readMaxBytes })` instead. **Migration:**
   routes that take larger bodies raise `runtime: { maxBodyBytes }`.
-- **BREAKING — a malformed `Content-Length` is refused (`@setu-ts/http-security-plugin`).**
+- **BREAKING — a malformed `Content-Length` is refused (#583, `@setu-ts/http-security-plugin`).**
   `requestSizeMiddleware` treated a `Content-Length` that is not plain decimal digits as absent and
   let the body through unbounded; it now answers `400`. A `maxBodySize` that is not a non-negative
   integer (`NaN` from an unset environment variable, `Infinity`) now throws `RangeError` when the
