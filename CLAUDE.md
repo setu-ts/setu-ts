@@ -812,7 +812,8 @@ here.
 - **Milestone 137a** (`common` + `openapi-plugin` + `decorator-plugin` + `sdk` — OpenAPI document
   metadata (`contact`, `license`, `termsOfService`, `tags`, `externalDocs`), `deprecated` and
   per-route `excludeFromDocument`, `@deprecated` in generated clients) — complete (PR #587).
-- **Next milestone** — the remaining M139 letters. M137b follows.
+- **Next milestone** — the remaining M139 letters, M137b, then M140 (generated code read as code;
+  M140a first).
 
 ## Verification (run before declaring any work done)
 
