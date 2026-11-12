@@ -30,16 +30,16 @@ drain as every other route. No adapter seam is involved: `GrpcService.available`
 ## Installation
 
 The Connect and Protobuf-ES modules are lazy-loaded on first use. In a Setu project, `setu add grpc`
-records both beside the plugin. By hand, install them with the package manager that matches your
-runtime:
+records both beside the plugin. By hand, install the plugin and both modules with the package
+manager that matches your runtime:
 
 ```bash
 # Deno
-deno add npm:@connectrpc/connect@^2.1.2 npm:@bufbuild/protobuf@^2.7.0
+deno add npm:@setu-ts/grpc-plugin npm:@connectrpc/connect@^2.1.2 npm:@bufbuild/protobuf@^2.7.0
 # npm
-npm i @connectrpc/connect @bufbuild/protobuf
+npm i @setu-ts/grpc-plugin @connectrpc/connect @bufbuild/protobuf
 # Bun
-bun add @connectrpc/connect @bufbuild/protobuf
+bun add @setu-ts/grpc-plugin @connectrpc/connect @bufbuild/protobuf
 ```
 
 A member that calls other services also needs `@connectrpc/connect-node` (the client's transport),
