@@ -8,7 +8,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
-- **BREAKING — typed capability registry (M139g, 0.13.0, `@setu-ts/common`, `@setu-ts/kernel`,
+- **BREAKING — typed capability registry (M139g, #585, 0.13.0, `@setu-ts/common`, `@setu-ts/kernel`,
   `@setu-ts/testing`, `@setu-ts/react-router-plugin`, `@setu-ts/cli`).** Standard tokens carry a
   required brand and infer their interfaces through `CapabilityServices`; reads reject wrong
   explicit pairings and downcasts, and writes require the bound contract: an empty, partial or wider
@@ -228,12 +228,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
-- **V12-58 (`@setu-ts/cli`):** the workspace `AGENTS.md` and the root `README.md` transport section
-  mask the userinfo of a `brokerUrl` override, keeping the host and the default fallback.
-- **V12-59 (`@setu-ts/cli`):** `setu.W006` warns about installed zero-config providers and MCP
+- **V12-58 (#585, `@setu-ts/cli`):** the workspace `AGENTS.md` and the root `README.md` transport
+  section mask the userinfo of a `brokerUrl` override, keeping the host and the default fallback.
+- **V12-59 (#585, `@setu-ts/cli`):** `setu.W006` warns about installed zero-config providers and MCP
   without a call in the config, exempts starter-owned arms, and supports check silences.
-- **V12-61 (`@setu-ts/cli`):** full-stack scaffolds expose a validated `TRUST_FORWARDED_HOST` switch
-  alongside `TRUSTED_PROXIES`, with proxy guidance and safe defaults.
+- **V12-61 (#585, `@setu-ts/cli`):** full-stack scaffolds expose a validated `TRUST_FORWARDED_HOST`
+  switch alongside `TRUSTED_PROXIES`, with proxy guidance and safe defaults.
 - **`setu add graphql` and `setu add grpc` record their runtime peers (#584, `@setu-ts/cli`).**
   `add graphql` now pins `graphql` and `add grpc` pins `@connectrpc/connect` and
   `@bufbuild/protobuf`, in `package.json` or the Deno import map. Both are optional peers that no
