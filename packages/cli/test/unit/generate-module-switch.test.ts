@@ -120,10 +120,10 @@ describe('X91-1 same-named adoption', () => {
     });
     for (const file of projectFiles('svc', 'node', resolveHost(FULL_STACK_TEMPLATE, 'node')))
       if (file.path.startsWith('src/modules/')) await h.fs.rm(`/app/${file.path}`);
-    expect(await h.run(['module', 'orders', '--adopt-controllers', '--page']), h.err.text()).toBe(
-      0,
-    );
-    expect(h.fs.has('/app/app/routes/_app/orders._index.tsx')).toBe(true);
+    // Without --page: an adopted same-named controller keeps routes that could
+    // shadow a page at /orders, so that combination is refused (CodeRabbit #582).
+    expect(await h.run(['module', 'orders', '--adopt-controllers']), h.err.text()).toBe(0);
+    expect(h.fs.has('/app/app/routes/_app/orders._index.tsx')).toBe(false);
     expect(h.fs.read('/app/src/modules/orders/orders.controller.ts')).toBe(
       'export function registerOrdersRoutes() {}',
     );
