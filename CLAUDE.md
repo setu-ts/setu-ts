@@ -809,7 +809,8 @@ here.
   augmenting plugins — capability lookups typed by their token: branded `CAPABILITIES`, an
   augmentable `CapabilityServices` map, token-checked registry overloads, `requestServiceToken`;
   plus V12-58, V12-59, V12-61; V12-41; ships in `0.13.0`) — complete (PR #585).
-- **Next milestone** — the remaining M139 letters.
+- **Next milestone** — the remaining M139 letters, then M140 (generated code read as code; M140a
+  first).
 
 ## Verification (run before declaring any work done)
 
