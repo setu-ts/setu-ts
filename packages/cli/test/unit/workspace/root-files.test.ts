@@ -242,6 +242,15 @@ describe('the workspace README transport section', () => {
     expect(readme).not.toContain('redis://127.0.0.1:6379');
   });
 
+  // M139g audit F2: the README is committed beside AGENTS.md, so it masks the
+  // override's userinfo the same way the brief does (V12-58).
+  it('masks credentials in the override it shows', () => {
+    const readme = readmeFor('redis', 'redis://user:canary-secret@shared:6379');
+    expect(readme).toContain('redis://***@shared:6379');
+    expect(readme).not.toContain('canary-secret');
+    expect(readme).not.toContain('user:');
+  });
+
   // Both cloud arms carry an operational fact a developer cannot guess, and the
   // generated README is where they would look for it.
   it('carries the transport operational note when it has one', () => {

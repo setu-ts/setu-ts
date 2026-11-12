@@ -462,6 +462,46 @@ Additional evidence:
 - A fresh-agent security audit of V12-58 (credential masking) and V12-61 (proxy trust switch) on the
   final commit, per `.roo/skills/security-audit/SKILL.md`. Its record goes in the PR.
 
+## 8a. Design security review
+
+- **Assets:**
+  - broker credentials a workspace's `brokerUrl` can carry into committed files (`AGENTS.md`, the
+    root `README.md`);
+  - the public origin an application derives behind a proxy (absolute URLs, the React Router action
+    origin check, the WebSocket Origin check);
+  - the developer's project tree that `setu check` reads.
+- **Attackers and inputs:**
+  - any reader of the repository, for credentials written into committed text;
+  - a network client that sends its own `X-Forwarded-Host`, `X-Forwarded-For` or
+    `X-Forwarded-Proto`;
+  - a deployer who sets `TRUST_FORWARDED_HOST` to an unexpected spelling;
+  - a hostile or unusual project manifest or `setu.config.ts` that `setu check` reads.
+- **Reviewed flows and obligations:**
+  1. **V12-58:** a credentialed `brokerUrl` reaches `AGENTS.md` and the root `README.md` transport
+     section only through `maskUrlUserinfo`. The host is kept, and the `broker default` /
+     local-default fallbacks are unchanged. Masking covers userinfo, which is the function's
+     documented scope; see the accepted risk below.
+  2. **V12-61:** only the exact strings `''`, `'false'` and `'true'` are accepted. Every other value
+     refuses with a constant message that does not echo the value. `true` without `TRUSTED_PROXIES`
+     refuses. `trustForwardedHost` reaches `ipSecurity` only when proxies are listed. The forwarded
+     host is believed only behind a trusted peer whose walk resolves a client; that is the unchanged
+     `ip-security-middleware` rule (M113n F2). The default is off in `.env`, `.env.example` and the
+     template.
+  3. **V12-59:** `setu check` reads files only and executes nothing from the project. Rendered names
+     come from the constant provider table and pass through `escapeName`. The call test is a
+     constant regex.
+  4. **§3.1–§3.8:** the typing changes are compile-time only. The emitted JavaScript of the
+     registry, `resolveRequestService` and `getService` is unchanged, and no test double weakens a
+     security-relevant assertion.
+- **Accepted risk:**
+  - `maskUrlUserinfo` does not mask credentials in a query string or a fragment, or userinfo in a
+    URL with no scheme (audit F3). This is the function's documented limit and outside V12-58's row.
+  - The generated `src/transport/index.ts` and `setu.workspace.json` hold the `brokerUrl` as
+    entered, because the transport connects with it. A credentialed endpoint belongs in the broker's
+    environment variable, not in the override.
+- **Audit:** a committed-tree security audit by a fresh Claude agent, per
+  `.roo/skills/security-audit/SKILL.md`, before the PR merges.
+
 ## 8. Risks & mitigations
 
 - **Two copies of `@setu-ts/common` in one install** have distinct `unique symbol` brands, so a

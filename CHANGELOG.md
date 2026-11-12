@@ -228,8 +228,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
-- **V12-58 (`@setu-ts/cli`):** workspace agent briefs mask broker URL credentials while keeping the
-  host and the endpoint-free fallback.
+- **V12-58 (`@setu-ts/cli`):** the workspace `AGENTS.md` and the root `README.md` transport section
+  mask the userinfo of a `brokerUrl` override, keeping the host and the default fallback.
 - **V12-59 (`@setu-ts/cli`):** `setu.W006` warns about installed zero-config providers and MCP
   without a call in the config, exempts starter-owned arms, and supports check silences.
 - **V12-61 (`@setu-ts/cli`):** full-stack scaffolds expose a validated `TRUST_FORWARDED_HOST` switch

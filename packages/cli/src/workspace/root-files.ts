@@ -23,6 +23,7 @@ import { workspaceProfile, type WorkspaceRuntimeProfile } from './runtime-profil
 import { workspaceDevRunner } from './dev-runner.ts';
 import type { BrokerSpec } from './transport.ts';
 import { wrapProse } from '../utils/wrap-prose.ts';
+import { maskUrlUserinfo } from '@setu-ts/common';
 
 /**
  * The member pattern the root `deno.json` declares.
@@ -71,7 +72,7 @@ ${wrapProse(`Members share the **${broker.name}** broker — ${broker.descriptio
 
 ${wrapProse(
   `Every member reads its connection value from \`${broker.connection.variable}\`, ` +
-    `falling back to \`${brokerUrl ?? broker.connection.localDefault}\` when that ` +
+    `falling back to \`${brokerUrl === undefined ? broker.connection.localDefault : maskUrlUserinfo(brokerUrl)}\` when that ` +
     `is unset. Both halves matter: \`${profile.runScript('dev')}\` on this machine needs ` +
     `the local address, and the generated Compose stack overrides the variable with the ` +
     `broker's service name, because two containers do not share a loopback interface.`,
