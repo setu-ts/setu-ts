@@ -39,6 +39,14 @@ it('V12-59 recognises a provider called through an aliased import', () => {
       installed,
     ),
   ).toEqual([]);
+  // A `$` alias is an ordinary identifier, and `$Name(` is not a call to `Name`.
+  expect(
+    unregisteredPluginFindings(
+      "import { QueuePlugin as $queue } from '@setu-ts/queue-plugin';\n$queue({});",
+      installed,
+    ),
+  ).toEqual([]);
+  expect(unregisteredPluginFindings('$QueuePlugin({});', installed)).toHaveLength(1);
   // An alias that is never called, a type-only alias and another package's alias still warn.
   expect(unregisteredPluginFindings(aliased, installed)).toHaveLength(1);
   expect(

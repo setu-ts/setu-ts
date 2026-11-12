@@ -17,7 +17,11 @@ export function referencedOutsideImports(config: string, symbol: string): boolea
 /** Tests a call in code outside import declarations, matching module activation. */
 export function calledOutsideImports(config: string, symbol: string): boolean | undefined {
   const code = withoutImports(referenceMask(config));
-  return code === undefined ? undefined : new RegExp(`\\b${symbol}\\s*\\(`).test(code);
+  // Identifier-aware boundaries: `\b` treats `$` as a non-word character, so it
+  // neither matches before `$name` nor stops `$Name(` matching `Name(`.
+  return code === undefined
+    ? undefined
+    : new RegExp(`(?<![\\w$])${symbol.replaceAll('$', () => '\\$')}\\s*\\(`).test(code);
 }
 
 /**
@@ -113,7 +117,7 @@ export function importedCallNames(config: string, pkg: string, symbol: string): 
   for (const [, bindings = ''] of config.matchAll(from)) {
     for (const binding of bindings.split(',')) {
       const [, exported, local = ''] =
-        /^\s*(?!type\s)([A-Za-z_]\w*)\s+as\s+([A-Za-z_]\w*)\s*$/.exec(binding) ?? [];
+        /^\s*(?!type\s)([A-Za-z_$][\w$]*)\s+as\s+([A-Za-z_$][\w$]*)\s*$/.exec(binding) ?? [];
       if (exported === symbol) names.add(local);
     }
   }
