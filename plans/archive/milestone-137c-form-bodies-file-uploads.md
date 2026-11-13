@@ -393,3 +393,23 @@ media type, `formFile` bounds, the SDK dropping a caller `Content-Type`.
 - `application/*+json` listed separately; urlencoded-only or text bodies in generated clients (they
   get the §3.8 refusal).
 - A per-file streaming bound, and `format: binary` responses.
+
+## 10. As built
+
+- **Transformer clone fix.** `formFile`'s `superRefine` returns a clone whose `_zod.parent` is the
+  bare `z.custom`; the parent visited with an empty node reported `x-setu-unrepresentable`. The
+  transformer now records every node at a path and lets a transparent clone decide for its parent
+  (`zod-to-openapi.ts`), so the parent is neither hooked nor reported.
+- **`OpenApiSchemaObject.contentMediaType`** was added to the exported transformer type, because the
+  binary node does not otherwise type-check; PUBLIC_API.md records it.
+- **Optional multipart bodies** generate
+  `...(opts?.body === undefined ? {} : { multipart: opts.body })` rather than
+  `multipart: opts?.body`, which `exactOptionalPropertyTypes` refuses against `multipart?: object`.
+- **Subpath aliases.** `@setu-ts/validation-plugin/zod` joined the generated source aliases
+  (`tsconfig.check.json`, `tsconfig.apps.json`, `apps/full-stack/tsconfig.json`, the Deno lane
+  import map) and the hand-kept README-fence tsconfig (`test/fixtures/snippets/tsconfig.json`); the
+  API-docs entry-point count moved 58 → 59.
+- **Delegation.** Codex implemented code and tests in a no-network sandbox (the full-access launch
+  was refused by the auto-mode classifier); the socket-bound suites and the CLI e2e upload were run
+  outside it. The docs batch also went to Codex, because an unattended `opencode --auto` launch was
+  refused the same way.

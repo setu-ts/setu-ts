@@ -16889,15 +16889,16 @@ fixed on its own would produce a client that silently drops the body.
    types when they are declared.
 4. **A file-field brand and helper.** common gains a schema brand (`withFormFileMetadata` /
    `formFileMetadataOf`, the existing brand pattern; `common` stays dependency-free).
-   validation-plugin exports `formFile({ mimeTypes?, maxBytes? })`, a Zod schema that validates the
-   `FormFile` shape, enforces both options, and carries the brand. The transformer emits a branded
-   field as `{ type: 'string', format: 'binary', contentMediaType: 'application/octet-stream' }`
-   (both keywords, because the generators read different ones); an array of them is an array of
-   binaries.
+   validation-plugin exports `formFile({ mimeTypes?, maxBytes? })` from the subpath
+   `@setu-ts/validation-plugin/zod`, with `zod` as an optional peer needed only by that subpath. It
+   returns a Zod schema that validates the `FormFile` shape, enforces both options, and carries the
+   brand. The transformer emits a branded field as
+   `{ type: 'string', format: 'binary', contentMediaType: 'application/octet-stream' }` (both
+   keywords, because the generators read different ones); an array of them is an array of binaries.
 5. **The SDK sends `FormData` only for a multipart-only body,** and JSON otherwise — the selection
    is a fixed rule, not the order of a map. It never sets `Content-Type` on a `FormData` body (the
-   boundary must be the runtime's), and a file field is typed `Blob | File` with the filename taken
-   from `File.name` or a declared default, because `FormFile` requires one.
+   boundary must be the runtime's), and the generated file type is `Blob` (a `File` is assignable).
+   The filename is the `File`'s name or `blob` for a bare `Blob`; there is no declared default.
 6. **Every declared media type is enforced.** The route already answers 415 for an encoding it does
    not accept, so the document lists exactly the accepted set — the property ASP.NET and Hono have.
 
@@ -17543,7 +17544,7 @@ generated-output rule.
 | 137       | ⬜     | OpenAPI coverage — forms, lifecycle and derived responses (three letters)                                                                                                                                                                                                                 |
 | 137a      | ✅     | common + openapi-plugin + decorator-plugin + sdk — document metadata, `deprecated`, per-route exclusion                                                                                                                                                                                   |
 | 137b      | ✅     | common + openapi-plugin + auth-plugin + decorator-plugin — derived 401/403/415/429 and idempotency headers, declared response headers, opt-in Problem Details schema                                                                                                                      |
-| 137c      | ⬜     | common + validation-plugin + openapi-plugin + sdk — form bodies and file uploads in the document and the generated client                                                                                                                                                                 |
+| 137c      | ✅     | common + validation-plugin + openapi-plugin + sdk — form bodies and file uploads in the document and the generated client                                                                                                                                                                 |
 | 138       | ✅     | cli — workspace broker and per-member RPC style: a CLI-owned transport module per member, `setu workspace broker` and `setu workspace rpc`; PR #568                                                                                                                                       |
 | 139       | ⬜     | the `v0.12.0` smoke closeout — the `0.12.0` row re-run done, then seven letters (0.13.0)                                                                                                                                                                                                  |
 | 139a      | ✅     | auth-plugin + multi-tenancy + session + mcp + cli — identity and authorization a token or a tenant can escape                                                                                                                                                                             |
