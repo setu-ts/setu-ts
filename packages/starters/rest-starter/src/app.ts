@@ -9,7 +9,8 @@ import type { RuntimeOptions } from '@setu-ts/runtime';
 import type { HttpSecurityPluginOptions } from '@setu-ts/http-security-plugin';
 import { ConfigPlugin } from '@setu-ts/config-plugin';
 import { LoggerPlugin } from '@setu-ts/logger-plugin';
-import { ValidationPlugin } from '@setu-ts/validation-plugin';
+import { rfc9457Formatter, ValidationPlugin } from '@setu-ts/validation-plugin';
+import type { ValidationPluginOptions } from '@setu-ts/validation-plugin';
 import { HttpSecurityPlugin } from '@setu-ts/http-security-plugin';
 import { HealthPlugin } from '@setu-ts/health-plugin';
 import { MetricsPlugin } from '@setu-ts/metrics-plugin';
@@ -48,31 +49,56 @@ export function buildRestPlugins(options: RestStarterOptions = {}): IPlugin[] {
  * `swagger: false` and an explicit `assets` value are kept; `true` and `{}`
  * name no asset mode, so they get the CDN too.
  *
- * `errorSchema: 'rfc9457'` is the default, because the starter's
- * `ValidationPlugin` and `errorHandler` both answer in RFC 9457 format; a
- * caller's own `errorSchema` still wins (M137b §3.8).
+ * `errorSchema: 'rfc9457'` is the default only while the validation format
+ * is RFC 9457 too, because then the starter's `ValidationPlugin` and
+ * `errorHandler` both answer in that format. A caller who chose another
+ * validation format gets no default, so the document never names a body the
+ * validator does not send; a caller's own `errorSchema` still wins (M137b §3.8).
  *
  * @internal
  * @param openapi - The caller's OpenAPI options, if any.
  * @param platform - The platform the application runs on.
+ * @param problemDetails - Whether validation failures answer in RFC 9457 format.
  * @returns The options to construct {@linkcode OpenApiPlugin} with.
  */
 export function openApiOptionsFor(
   openapi: OpenApiPluginOptions | undefined,
   platform: RuntimePlatform,
+  problemDetails = true,
 ): OpenApiPluginOptions {
+  const defaults: OpenApiPluginOptions = problemDetails ? { errorSchema: 'rfc9457' } : {};
   const swagger = openapi?.swagger;
   if (
     platform !== 'cloudflare-workers' ||
     swagger === false ||
     (typeof swagger === 'object' && swagger.assets !== undefined)
   )
-    return { errorSchema: 'rfc9457', ...openapi };
+    return { ...defaults, ...openapi };
   return {
-    errorSchema: 'rfc9457',
+    ...defaults,
     ...openapi,
     swagger: { ...(typeof swagger === 'object' ? swagger : {}), assets: 'cdn' },
   };
+}
+
+/**
+ * Whether the starter's validation failures answer in RFC 9457 format: the
+ * starter's own default, the `'rfc9457'` alias, its deprecated `'rfc7807'`
+ * alias, or the {@linkcode rfc9457Formatter} reference itself.
+ *
+ * @internal
+ * @param format - The caller's `validation.errorFormat`, if any.
+ * @returns `true` when validation answers with Problem Details.
+ */
+export function validationAnswersProblemDetails(
+  format: ValidationPluginOptions['errorFormat'],
+): boolean {
+  return (
+    format === undefined ||
+    format === 'rfc9457' ||
+    format === 'rfc7807' ||
+    format === rfc9457Formatter
+  );
 }
 
 /**
@@ -153,7 +179,13 @@ export function composeRestPlugins(
     HttpSecurityPlugin(starterHttpSecurityOptions(options)),
     HealthPlugin(options.health),
     MetricsPlugin(options.metrics),
-    OpenApiPlugin(openApiOptionsFor(options.openapi, platform)),
+    OpenApiPlugin(
+      openApiOptionsFor(
+        options.openapi,
+        platform,
+        validationAnswersProblemDetails(options.validation?.errorFormat),
+      ),
+    ),
     DecoratorPlugin(options.decorators),
 
     // Gated arms — only added when explicitly provided.

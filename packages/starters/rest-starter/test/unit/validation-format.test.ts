@@ -86,3 +86,51 @@ describe('rest-starter validation format (C3)', () => {
     }
   });
 });
+
+describe('rest-starter OpenAPI error schema follows the validation format (M137b §3.8)', () => {
+  /** The documented `POST /validate` responses and the document's components. */
+  async function documented(opts?: Parameters<typeof createRestApp>[0]) {
+    const app = await appWith({ ...opts, openapi: { swagger: false, ...opts?.openapi } });
+    try {
+      const res = await app.inject({ method: 'GET', url: 'http://localhost/openapi.json' });
+      const doc = JSON.parse(res.body as string) as {
+        paths: Record<string, Record<string, { responses: Record<string, unknown> }>>;
+        components?: { schemas?: Record<string, unknown> };
+      };
+      return {
+        responses: doc.paths['/validate']?.['post']?.responses ?? {},
+        schemas: doc.components?.schemas ?? {},
+      };
+    } finally {
+      await app.stop();
+    }
+  }
+
+  it('documents the 400 as Problem Details under the default rfc9457 format', async () => {
+    const { responses, schemas } = await documented();
+    expect(responses['400']).toEqual({
+      description: 'Bad request',
+      content: {
+        'application/problem+json': { schema: { $ref: '#/components/schemas/ProblemDetails' } },
+      },
+    });
+    expect(schemas['ProblemDetails']).toBeDefined();
+  });
+
+  it.each(['nestjs', 'default'] as const)(
+    'names no Problem Details body when validation answers in %s format',
+    async (errorFormat) => {
+      const { responses, schemas } = await documented({ validation: { errorFormat } });
+      expect(responses['400']).toEqual({ description: 'Bad request' });
+      expect(schemas['ProblemDetails']).toBeUndefined();
+    },
+  );
+
+  it('keeps an explicit openapi.errorSchema even when validation answers in another format', async () => {
+    const { responses } = await documented({
+      validation: { errorFormat: 'nestjs' },
+      openapi: { errorSchema: 'rfc9457' },
+    });
+    expect(responses['400']).toHaveProperty(['content', 'application/problem+json']);
+  });
+});

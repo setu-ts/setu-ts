@@ -1909,16 +1909,19 @@ function sortResponses(
 }
 
 /**
- * Orders headers by name, case-insensitively.
+ * Orders headers by name, case-insensitively, by UTF-16 code unit rather
+ * than by locale, so the served document is the same bytes on every host.
  *
  * @param headers - Headers keyed by name
  * @returns A new object in name order
  */
 function sortHeaders<T>(headers: Readonly<Record<string, T>>): Record<string, T> {
   const sorted: Record<string, T> = {};
-  for (const name of Object.keys(headers).sort((a, b) =>
-    a.toLowerCase().localeCompare(b.toLowerCase()),
-  )) {
+  for (const name of Object.keys(headers).sort((a, b) => {
+    const x = a.toLowerCase();
+    const y = b.toLowerCase();
+    return x < y ? -1 : x > y ? 1 : 0;
+  })) {
     sorted[name] = headers[name] as T;
   }
   return sorted;

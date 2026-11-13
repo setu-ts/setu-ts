@@ -105,7 +105,9 @@ which has no filesystem to self-host from, the starter selects them itself when 
 mode is chosen; an explicit choice, such as `assets: { baseUrl: '/assets' }`, is kept. Omitting the
 package while self-hosting fails startup with `OptionalDependencyUnavailableError`. The starter's
 OpenAPI document gives generated error responses an RFC 9457 body (`errorSchema: 'rfc9457'`),
-matching its validation and error-handler format; pass your own `openapi.errorSchema` to change it.
+matching its validation and error-handler format. When `validation.errorFormat` names another
+format, such as `'nestjs'`, the starter sets no `errorSchema`, so the document names no body the
+validator does not send; pass `openapi: { errorSchema: 'rfc9457' }` to set it anyway.
 
 `RestStarterOptions` is one optional field per plugin. Every field is optional and `createRestApp()`
 with no arguments is valid.

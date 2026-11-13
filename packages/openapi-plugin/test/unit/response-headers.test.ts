@@ -68,6 +68,14 @@ describe('declared response headers', () => {
     expect(Object.keys(response?.headers ?? {})).toEqual(['Alpha', 'beta', 'zeta']);
   });
 
+  it('orders by code unit, not by locale, so every host serves the same bytes', () => {
+    // `localeCompare` places `\u00e9` before `f`; code-unit order places it after.
+    const response = op({ 200: { headers: { 'X-\u00e9': {}, 'X-F': {}, 'x-a': {} } } }).responses[
+      '200'
+    ];
+    expect(Object.keys(response?.headers ?? {})).toEqual(['x-a', 'X-F', 'X-\u00e9']);
+  });
+
   it('treats a non-object header value as an empty declaration', () => {
     const response = op({ 200: { headers: { 'X-Flag': 'yes' } } }).responses['200'];
     expect(response?.headers).toEqual({ 'X-Flag': { schema: { type: 'string' } } });

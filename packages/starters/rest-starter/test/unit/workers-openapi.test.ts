@@ -9,7 +9,13 @@ import { describe, expect, it } from 'vitest';
 import type { IPlugin } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
-import { buildRestPlugins, composeRestPlugins, openApiOptionsFor } from '../../src/app.ts';
+import { rfc9457Formatter, rfc7807Formatter, nestjsFormatter } from '@setu-ts/validation-plugin';
+import {
+  buildRestPlugins,
+  composeRestPlugins,
+  openApiOptionsFor,
+  validationAnswersProblemDetails,
+} from '../../src/app.ts';
 
 /** Replaces the starter's detecting `RuntimePlugin()` with one forced to Workers. */
 function onWorkers(plugins: readonly IPlugin[]): IPlugin[] {
@@ -72,6 +78,33 @@ describe('rest-starter / OpenAPI assets per platform', () => {
       expect(
         openApiOptionsFor({ errorSchema: undefined } as never, platform).errorSchema,
       ).toBeUndefined();
+    }
+  });
+
+  it('adds no errorSchema default when validation answers in another format', () => {
+    for (const platform of ['node', 'cloudflare-workers'] as const) {
+      expect(openApiOptionsFor(undefined, platform, false).errorSchema).toBeUndefined();
+      expect(openApiOptionsFor({ errorSchema: 'rfc9457' }, platform, false).errorSchema).toBe(
+        'rfc9457',
+      );
+    }
+    expect(openApiOptionsFor(undefined, 'cloudflare-workers', false)).toEqual({
+      swagger: { assets: 'cdn' },
+    });
+  });
+
+  it('treats the starter default, both aliases and the formatter as Problem Details', () => {
+    for (const format of [
+      undefined,
+      'rfc9457',
+      'rfc7807',
+      rfc9457Formatter,
+      rfc7807Formatter,
+    ] as const) {
+      expect(validationAnswersProblemDetails(format)).toBe(true);
+    }
+    for (const format of ['nestjs', 'default', nestjsFormatter] as const) {
+      expect(validationAnswersProblemDetails(format)).toBe(false);
     }
   });
 
