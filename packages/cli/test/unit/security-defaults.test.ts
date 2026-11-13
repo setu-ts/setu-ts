@@ -167,21 +167,22 @@ describe('M140a scaffold security defaults', () => {
   );
 
   it.each([
-    ['no .gitignore and no .env', undefined, false, '.env\n', 0],
-    ['an uncovering .gitignore and no .env', 'node_modules/', false, 'node_modules/\n.env\n', 0],
-    ['a covering .gitignore and a .env', 'node_modules/\n.env\n', true, 'node_modules/\n.env\n', 0],
-    ['a .env.* rule', '.env.*\n', true, '.env.*\n', 1],
-    ['an uncovering .gitignore and a .env', 'node_modules/\n', true, 'node_modules/\n', 1],
-    ['a later negation', '.env\n!.env\n', true, '.env\n!.env\n', 1],
-    ['a later wildcard negation', '.env\n!**/.env\n', true, '.env\n!**/.env\n', 1],
-    ['an unrelated directory negation', '.env\n!config/**\n', true, '.env\n!config/**\n', 0],
-    ['a **/ ignore', '**/.env\n', true, '**/.env\n', 0],
+    ['no .gitignore and no .env', undefined, false, '.env\n', false],
+    [
+      'an uncovering .gitignore and no .env',
+      'node_modules/',
+      false,
+      'node_modules/\n.env\n',
+      false,
+    ],
+    ['an exact entry and a .env', 'node_modules/\n.env\n', true, 'node_modules/\n.env\n', false],
+    ['an anchored entry', '/.env\n', true, '/.env\n', false],
+    ['only a pattern and a .env', '.env*\n', true, '.env*\n.env\n', true],
   ] as const)(
-    'guards the written secret with %s',
-    async (_label, before, envExists, after, exitCode) => {
+    'lists the written secret in .gitignore as Rails does, with %s',
+    async (_label, before, envExists, after, hint) => {
       const fs = createFakeFs();
       const lines: string[] = [];
-      const errors: string[] = [];
       const deps = {
         fs,
         cwd: '/work',
@@ -190,7 +191,7 @@ describe('M140a scaffold security defaults', () => {
           lines.push(line);
         },
         error: (line: string) => {
-          errors.push(line);
+          throw new Error(line);
         },
         secret: () => 'f'.repeat(64),
       };
@@ -199,21 +200,36 @@ describe('M140a scaffold security defaults', () => {
       else await fs.writeFile('/work/shop/.gitignore', new TextEncoder().encode(before));
       if (envExists) await fs.writeFile('/work/shop/.env', new TextEncoder().encode('PORT=3000\n'));
       else await fs.rm('/work/shop/.env');
-      expect(await runCli(['add', 'session'], { ...deps, cwd: '/work/shop' })).toBe(exitCode);
-      expect(fs.has('/work/shop/.gitignore') ? fs.read('/work/shop/.gitignore') : undefined).toBe(
-        exitCode === 0 ? after : before,
+      expect(await runCli(['add', 'session'], { ...deps, cwd: '/work/shop' })).toBe(0);
+      expect(fs.read('/work/shop/.gitignore')).toBe(after);
+      expect(fs.read('/work/shop/.env')).toContain(`SESSION_SECRET=${'f'.repeat(64)}`);
+      expect(lines.some((line) => line.startsWith('Added .env to .gitignore'))).toBe(
+        before !== after,
       );
-      if (exitCode === 0) {
-        expect(fs.read('/work/shop/.env')).toContain(`SESSION_SECRET=${'f'.repeat(64)}`);
-        expect(lines.some((line) => line.startsWith('Added .env to .gitignore'))).toBe(
-          before !== after,
-        );
-      } else {
-        expect(fs.read('/work/shop/.env')).toBe('PORT=3000\n');
-        expect(errors.join('\n')).toContain('.env exists and .gitignore does not ignore it');
-      }
+      expect(lines.some((line) => line.includes('git rm --cached .env'))).toBe(hint);
     },
   );
+
+  it('lists a nested env file by its own path', async () => {
+    const fs = createFakeFs();
+    const deps = {
+      fs,
+      cwd: '/work',
+      now: () => 0,
+      log: () => {},
+      error: (line: string) => {
+        throw new Error(line);
+      },
+      secret: () => 'b'.repeat(64),
+    };
+    expect(
+      await runCli(['new', 'shop', '--template', 'rest', '--env-file', 'config/local.env'], deps),
+    ).toBe(0);
+    await fs.writeFile('/work/shop/.gitignore', new TextEncoder().encode('node_modules/\n'));
+    expect(await runCli(['add', 'session'], { ...deps, cwd: '/work/shop' })).toBe(0);
+    expect(fs.read('/work/shop/config/local.env')).toContain(`SESSION_SECRET=${'b'.repeat(64)}`);
+    expect(fs.read('/work/shop/.gitignore')).toBe('node_modules/\nconfig/local.env\n');
+  });
 
   it('refuses a member or secret whose Compose variable another member already needs', async () => {
     const fs = createFakeFs();
@@ -249,40 +265,6 @@ describe('M140a scaffold security defaults', () => {
     expect(fs.has(memberEnv) ? fs.read(memberEnv) : '').not.toContain('SESSION_SECRET=');
     expect(fs.read(path)).toBe(added);
     expect(added).not.toBe(before);
-  });
-
-  it.each([
-    ['an anchored path', 'config/local.env\n', 0],
-    ['an ignored directory', 'config/\n', 0],
-    ['a name at any depth', 'local.env\n', 0],
-    ['a globstar path', '**/local.env\n', 0],
-    ['a different directory', 'other/local.env\n', 1],
-    ['a later anchored negation', 'config/\n!/config/local.env\n', 1],
-  ] as const)('reads a nested env file as Git does: %s', async (_label, ignore, exitCode) => {
-    const fs = createFakeFs();
-    const errors: string[] = [];
-    const deps = {
-      fs,
-      cwd: '/work',
-      now: () => 0,
-      log: () => {},
-      error: (line: string) => {
-        errors.push(line);
-      },
-      secret: () => 'b'.repeat(64),
-    };
-    expect(
-      await runCli(['new', 'shop', '--template', 'rest', '--env-file', 'config/local.env'], deps),
-    ).toBe(0);
-    await fs.writeFile('/work/shop/.gitignore', new TextEncoder().encode(ignore));
-    await fs.writeFile('/work/shop/config/local.env', new TextEncoder().encode('PORT=3000\n'));
-    expect(await runCli(['add', 'session'], { ...deps, cwd: '/work/shop' })).toBe(exitCode);
-    if (exitCode === 0)
-      expect(fs.read('/work/shop/config/local.env')).toContain(`SESSION_SECRET=${'b'.repeat(64)}`);
-    else
-      expect(errors.join('\n')).toContain(
-        'config/local.env exists and .gitignore does not ignore it',
-      );
   });
 
   it('keeps a custom env file the default rules miss out of the image', async () => {

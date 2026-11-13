@@ -17,11 +17,11 @@ All notable changes to this project are documented here. The format follows
   `--down=<n>` or `--down=all` explicitly. SSE generators retain a connection and send ready. Deno
   full-stack installation runs without blanket scripts; build before start. Third-party dependencies
   keep a one-day cooldown, check pins the exact CLI, and the devtool key is removed before
-  application creation. `setu add auth|session` adds the env file to `.gitignore` when nothing there
-  covers it, and refuses to write the secret into an existing env file nothing ignores (Git may
-  track it); a custom `--env-file` path is excluded from the generated `.dockerignore`; a manifest
-  whose members' secrets map to one Compose variable is refused; and the generated `runMigrations`
-  refuses a rollback count that is not a positive whole number or `Infinity`.
+  application creation. `setu add auth|session` adds an exact `.gitignore` entry for the env file
+  when there is none (as Rails does for `config/master.key`), with a `git rm --cached` hint when the
+  file already existed; a custom `--env-file` path is excluded from the generated `.dockerignore`; a
+  manifest whose members' secrets map to one Compose variable is refused; and the generated
+  `runMigrations` refuses a rollback count that is not a positive whole number or `Infinity`.
 - **BREAKING — `@setu-ts/session-plugin` (M140a, #589).** Regeneration clears form CSRF while
   preserving other data. Fetch a fresh token after sign-in or MFA promotion. Secret resolution now
   checks configuration before the environment; supply an explicit option to override it.

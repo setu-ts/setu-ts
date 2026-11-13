@@ -2436,26 +2436,9 @@ async function addOne(
             ? '.env'
             : undefined;
     if (envFile !== undefined) {
-      // The file is about to hold a usable signing secret, so it must not reach
-      // Git: a project the CLI did not scaffold may have no .gitignore, or one
-      // that does not name a custom dotenv path. An EXISTING file nothing ignores
-      // may already be tracked, which a new ignore rule does not undo, so the
-      // secret is refused there rather than written.
-      const ignorePath = joinPath(dir, '.gitignore');
-      const ignore = await readProjectText(deps, ignorePath, '.gitignore');
-      if (ignore === null) return EXIT_ERROR;
+      const value = (deps.secret ?? generateSecret)();
       const existing = await readProjectText(deps, joinPath(dir, envFile), envFile);
       if (existing === null) return EXIT_ERROR;
-      const covered = gitignoreCovers(ignore ?? '', envFile);
-      if (!covered && existing !== undefined) {
-        deps.error(
-          `${escapeName(envFile)} exists and .gitignore does not ignore it, so Git may track it; ` +
-            `${variableName} was not written. Ignore it in .gitignore (and run ` +
-            `\`git rm --cached ${escapeName(envFile)}\` if Git tracks it), then run this again.`,
-        );
-        return EXIT_ERROR;
-      }
-      const value = (deps.secret ?? generateSecret)();
       for (const [file, localValue] of [
         [envFile, value],
         [`${envFile}.example`, ''],
@@ -2466,13 +2449,28 @@ async function addOne(
         const appended = withEnvVariable(text ?? '', [variable], localValue);
         if (appended !== undefined) edits.push({ path, contents: appended });
       }
-      if (!covered) {
+      // The file now holds a usable signing secret, so it is listed in
+      // .gitignore exactly as Rails lists `config/master.key`
+      // (EncryptionKeyFileGenerator): an exact entry, appended when absent. No
+      // pattern is evaluated; next to an existing `.env*` rule the entry is
+      // merely redundant. Whether Git already TRACKS the file is not something a
+      // CLI that does not run Git can know, so that case gets a hint.
+      const ignorePath = joinPath(dir, '.gitignore');
+      const ignore = await readProjectText(deps, ignorePath, '.gitignore');
+      if (ignore === null) return EXIT_ERROR;
+      const entries = new Set((ignore ?? '').split('\n').map((line) => line.trim()));
+      if (!entries.has(envFile) && !entries.has(`/${envFile}`)) {
         const base =
           ignore === undefined || ignore === '' || ignore.endsWith('\n')
             ? (ignore ?? '')
             : `${ignore}\n`;
         edits.push({ path: ignorePath, contents: `${base}${envFile}\n` });
-        deps.log(`Added ${envFile} to .gitignore: it holds ${variableName}.`);
+        deps.log(`Added ${escapeName(envFile)} to .gitignore: it holds ${variableName}.`);
+        if (existing !== undefined)
+          deps.log(
+            `If Git already tracks ${escapeName(envFile)}, run \`git rm --cached ${escapeName(envFile)}\`: an ignore ` +
+              'rule does not untrack a file.',
+          );
       }
     } else {
       deps.log(
@@ -2940,59 +2938,6 @@ export function withEnvVariable(
   const newline = text.includes('\r\n') ? '\r\n' : '\n';
   const separator = text === '' || text.endsWith('\n') ? '' : newline;
   return `${text}${separator}${newline}# ${variable.description}${newline}${variable.name}=${value}${newline}`;
-}
-
-/**
- * Whether the project's root `.gitignore` ignores a file, read the way Git
- * reads it: the LAST matching line wins (so `.env` then `!.env` does not
- * ignore it); a pattern with no slash matches a name at any depth, one with a
- * slash is anchored to the project root; `**` spans directories; a trailing
- * slash matches directories only; and a rule matching a parent directory
- * ignores everything beneath it. Git's further rule that a file under an
- * ignored directory cannot be re-included is not modelled, which can only make
- * this answer "not ignored" (a refusal), never hide a secret.
- */
-function gitignoreCovers(ignore: string, file: string): boolean {
-  const path = file.replace(/^\.\//, '');
-  const parts = path.split('/');
-  const dirs = parts.slice(0, -1).map((_, index) => parts.slice(0, index + 1).join('/'));
-  let covered = false;
-  for (const raw of ignore.split('\n')) {
-    const line = raw.trim();
-    if (line === '' || line.startsWith('#')) continue;
-    const negated = line.startsWith('!');
-    let pattern = negated ? line.slice(1) : line;
-    const directoryOnly = pattern.endsWith('/');
-    if (directoryOnly) pattern = pattern.slice(0, -1);
-    const anchored = pattern.includes('/');
-    pattern = pattern.replace(/^\//, '');
-    if (pattern === '') continue;
-    const matcher = new RegExp(`^${globSource(pattern)}$`);
-    const test = (candidate: string): boolean =>
-      matcher.test(anchored ? candidate : candidate.slice(candidate.lastIndexOf('/') + 1));
-    if (dirs.some(test) || (!directoryOnly && test(path))) covered = !negated;
-  }
-  return covered;
-}
-
-/** A `.gitignore` glob as a regular-expression source: `**` spans directories. */
-function globSource(pattern: string): string {
-  return pattern
-    .split(/(\*\*\/|\/\*\*$|\*\*|\*|\?)/)
-    .map((token) =>
-      token === '**/'
-        ? '(?:.*/)?'
-        : token === '/**'
-          ? '/.*'
-          : token === '**'
-            ? '.*'
-            : token === '*'
-              ? '[^/]*'
-              : token === '?'
-                ? '[^/]'
-                : token.replace(/[.+^${}()|[\]\\]/g, '\\$&'),
-    )
-    .join('');
 }
 
 /**
