@@ -557,6 +557,15 @@ jobs:
         if: matrix.shard == 'packages'
         run: pnpm test:coverage --no-tooling --skip cli --skip messaging-plugin
 
+      # script-entrypoints runs `check-deploy.ts --render`, which compares the
+      # committed manifests with `helm template`. Pinned to the deploy job's
+      # version: the runner image's own helm moves with the image, and the
+      # ubuntu-26.04 image's helm renders the chart differently.
+      - uses: azure/setup-helm@v4
+        if: matrix.shard == 'tooling'
+        with:
+          version: v3.16.3
+
       - name: Root and script tests with coverage
         if: matrix.shard == 'tooling'
         run: pnpm run test:tooling:coverage

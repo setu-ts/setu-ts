@@ -140,6 +140,37 @@ describe('deriveRequestSchemas', () => {
     expect(op?.parameters?.map((p) => p.name)).toEqual(['q']);
   });
 
+  it('documents the validation 400 when the validated body is also declared', () => {
+    const body = z.object({ name: z.string() });
+    const declaredAndValidated = route('POST', '/orders', {
+      schema: { body },
+      middleware: [branded('body', body)],
+    });
+
+    const plain400 = generator().generate([declaredAndValidated]).paths['/orders']?.post?.responses[
+      '400'
+    ];
+    expect(plain400).toEqual({ description: 'Bad request' });
+
+    const problem400 = new OpenApiGenerator({
+      title: 'T',
+      version: '1',
+      errorSchema: 'rfc9457',
+    }).generate([declaredAndValidated]).paths['/orders']?.post?.responses['400'];
+    expect(problem400).toEqual({
+      description: 'Bad request',
+      content: {
+        'application/problem+json': { schema: { $ref: '#/components/schemas/ProblemDetails' } },
+      },
+    });
+
+    // A declared schema with no validation brand still documents no 400.
+    expect(
+      generator().generate([route('POST', '/orders', { schema: { body } })]).paths['/orders']?.post
+        ?.responses['400'],
+    ).toBeUndefined();
+  });
+
   it('keeps the LAST brand when a route carries two for one target', () => {
     const first = z.object({ first: z.string() });
     const second = z.object({ second: z.string() });
@@ -193,6 +224,8 @@ describe('deriveRequestSchemas', () => {
       title: 'T',
       version: '1',
       deriveRequestSchemas: false,
+      // The body validator's 415 (M137b) is not part of the pre-M70m document.
+      deriveErrorResponses: false,
     }).generate(routes);
 
     expect(off.paths['/orders']?.post).toEqual({
@@ -276,7 +309,9 @@ describe('review findings (PR #181)', () => {
     const op = doc.paths?.['/u']?.post;
 
     expect(op?.requestBody).toBeUndefined();
-    expect(Object.keys(op?.responses ?? {})).toEqual(['200']);
+    // No derived 400; the body validator still answers 415 for a non-JSON body
+    // whatever its schema (M137b §3.3).
+    expect(Object.keys(op?.responses ?? {})).toEqual(['200', '415']);
   });
 
   it('suffixes an operationId that a literal path segment collides with', () => {

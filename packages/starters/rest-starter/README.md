@@ -104,6 +104,12 @@ Deno also needs filesystem read permission. All starter families forward `openap
 which has no filesystem to self-host from, the starter selects them itself when no Swagger asset
 mode is chosen; an explicit choice, such as `assets: { baseUrl: '/assets' }`, is kept. Omitting the
 package while self-hosting fails startup with `OptionalDependencyUnavailableError`.
+`createRestApp()`'s OpenAPI document gives generated error responses an RFC 9457 body
+(`errorSchema: 'rfc9457'`), matching its validation and error-handler format. `buildRestPlugins()`
+installs no error handler, so it sets no `errorSchema`; add one when you install
+`errorHandler({ format: 'rfc9457' })` yourself. When `validation.errorFormat` names another format,
+such as `'nestjs'`, the starter sets no `errorSchema`, so the document names no body the validator
+does not send; pass `openapi: { errorSchema: 'rfc9457' }` to set it anyway.
 
 `RestStarterOptions` is one optional field per plugin. Every field is optional and `createRestApp()`
 with no arguments is valid.

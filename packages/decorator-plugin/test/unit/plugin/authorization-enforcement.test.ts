@@ -211,6 +211,15 @@ describe('authorization middleware refusals', () => {
   it('brands every middleware with M57 security metadata so deriveSecurity sees it', () => {
     expect(securityMetadataOf(createRolesMiddleware(['admin']))?.authenticated).toBe(true);
     expect(securityMetadataOf(createPermissionsMiddleware(['p']))?.authenticated).toBe(true);
+    // Both answer 403 for a principal lacking the grant (M137b §3.1).
+    expect(securityMetadataOf(createRolesMiddleware(['admin']))).toEqual({
+      authenticated: true,
+      forbids: true,
+    });
+    expect(securityMetadataOf(createPermissionsMiddleware(['p']))).toEqual({
+      authenticated: true,
+      forbids: true,
+    });
   });
 });
 

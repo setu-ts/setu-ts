@@ -9,7 +9,13 @@ import { describe, expect, it } from 'vitest';
 import type { IPlugin } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
-import { buildRestPlugins, composeRestPlugins, openApiOptionsFor } from '../../src/app.ts';
+import { rfc9457Formatter, rfc7807Formatter, nestjsFormatter } from '@setu-ts/validation-plugin';
+import {
+  buildRestPlugins,
+  composeRestPlugins,
+  openApiOptionsFor,
+  validationAnswersProblemDetails,
+} from '../../src/app.ts';
 
 /** Replaces the starter's detecting `RuntimePlugin()` with one forced to Workers. */
 function onWorkers(plugins: readonly IPlugin[]): IPlugin[] {
@@ -20,10 +26,12 @@ function onWorkers(plugins: readonly IPlugin[]): IPlugin[] {
 
 describe('rest-starter / OpenAPI assets per platform', () => {
   it('selects the CDN on Workers when no Swagger mode was chosen', () => {
-    expect(openApiOptionsFor(undefined, 'cloudflare-workers')).toEqual({
+    expect(openApiOptionsFor(undefined, 'cloudflare-workers', true)).toEqual({
+      errorSchema: 'rfc9457',
       swagger: { assets: 'cdn' },
     });
-    expect(openApiOptionsFor({ endpoint: '/api/docs' }, 'cloudflare-workers')).toEqual({
+    expect(openApiOptionsFor({ endpoint: '/api/docs' }, 'cloudflare-workers', true)).toEqual({
+      errorSchema: 'rfc9457',
       endpoint: '/api/docs',
       swagger: { assets: 'cdn' },
     });
@@ -35,13 +43,17 @@ describe('rest-starter / OpenAPI assets per platform', () => {
       { assets: 'self' },
       { assets: { baseUrl: '/swagger' } },
     ] as const) {
-      expect(openApiOptionsFor({ swagger }, 'cloudflare-workers')).toEqual({ swagger });
+      expect(openApiOptionsFor({ swagger }, 'cloudflare-workers', true)).toEqual({
+        errorSchema: 'rfc9457',
+        swagger,
+      });
     }
   });
 
   it('selects the CDN on Workers for a Swagger value naming no asset mode', () => {
     for (const swagger of [true, {}] as const) {
-      expect(openApiOptionsFor({ swagger }, 'cloudflare-workers')).toEqual({
+      expect(openApiOptionsFor({ swagger }, 'cloudflare-workers', true)).toEqual({
+        errorSchema: 'rfc9457',
         swagger: { assets: 'cdn' },
       });
     }
@@ -49,8 +61,52 @@ describe('rest-starter / OpenAPI assets per platform', () => {
 
   it('leaves every server runtime on the self-hosted default', () => {
     for (const platform of ['deno', 'node', 'bun'] as const) {
-      expect(openApiOptionsFor(undefined, platform)).toBeUndefined();
-      expect(openApiOptionsFor({ endpoint: '/x' }, platform)).toEqual({ endpoint: '/x' });
+      expect(openApiOptionsFor(undefined, platform, true)).toEqual({ errorSchema: 'rfc9457' });
+      expect(openApiOptionsFor({ endpoint: '/x' }, platform, true)).toEqual({
+        errorSchema: 'rfc9457',
+        endpoint: '/x',
+      });
+    }
+  });
+
+  it('defaults errorSchema to rfc9457 and lets a caller value win (M137b §3.8)', () => {
+    // A caller value spreads last, so it is kept on both branches; the type
+    // admits only 'rfc9457', so an explicit `undefined` is the caller's other
+    // choice and it, too, wins.
+    for (const platform of ['node', 'cloudflare-workers'] as const) {
+      expect(openApiOptionsFor({ errorSchema: 'rfc9457' }, platform, true).errorSchema).toBe(
+        'rfc9457',
+      );
+      expect(
+        openApiOptionsFor({ errorSchema: undefined } as never, platform, true).errorSchema,
+      ).toBeUndefined();
+    }
+  });
+
+  it('adds no errorSchema default when validation answers in another format', () => {
+    for (const platform of ['node', 'cloudflare-workers'] as const) {
+      expect(openApiOptionsFor(undefined, platform, false).errorSchema).toBeUndefined();
+      expect(openApiOptionsFor({ errorSchema: 'rfc9457' }, platform, false).errorSchema).toBe(
+        'rfc9457',
+      );
+    }
+    expect(openApiOptionsFor(undefined, 'cloudflare-workers', false)).toEqual({
+      swagger: { assets: 'cdn' },
+    });
+  });
+
+  it('treats the starter default, both aliases and the formatter as Problem Details', () => {
+    for (const format of [
+      undefined,
+      'rfc9457',
+      'rfc7807',
+      rfc9457Formatter,
+      rfc7807Formatter,
+    ] as const) {
+      expect(validationAnswersProblemDetails(format)).toBe(true);
+    }
+    for (const format of ['nestjs', 'default', nestjsFormatter] as const) {
+      expect(validationAnswersProblemDetails(format)).toBe(false);
     }
   });
 

@@ -232,6 +232,6 @@ describe('scoped guards — construction and brands', () => {
     expect(policyGuardOf(requireScopedPermission('invoices:read'))?.abilities).toEqual([
       'perm:invoices:read',
     ]);
-    expect(securityMetadataOf(role)).toEqual({ authenticated: true });
+    expect(securityMetadataOf(role)).toEqual({ authenticated: true, forbids: true });
   });
 });

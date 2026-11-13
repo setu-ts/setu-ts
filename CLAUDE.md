@@ -812,12 +812,16 @@ here.
 - **Milestone 137a** (`common` + `openapi-plugin` + `decorator-plugin` + `sdk` — OpenAPI document
   metadata (`contact`, `license`, `termsOfService`, `tags`, `externalDocs`), `deprecated` and
   per-route `excludeFromDocument`, `@deprecated` in generated clients) — complete (PR #587).
+- **Milestone 137b** (`common` + `openapi-plugin` + `auth-plugin` + `decorator-plugin` +
+  `idempotency-plugin` + `rest-starter` + `cli` — derived 401/403/415/429 and idempotency errors
+  from route middleware brands, declared response headers, `errorSchema: 'rfc9457'`) — complete (PR
+  #588).
 - **Milestone 140a** (`cli` + `session-plugin` + `auth-plugin` + `common` + `runtime` + four more —
   security defaults a generated project starts with: random per-project secrets with per-member
   Compose refusals, `JWT_SECRET` resolution with a 32-byte HS256 floor, CSRF rotation on
   `regenerate()`, 1 MiB WebSocket and REST bounds, a 30 s SSE heartbeat, gateway guards, bounded
   `migration --down`; 16 V12 rows; ships in `0.13.0`) — complete (PR pending).
-- **Next milestone** — the remaining M139 letters, M137b, then M140b (generated code read as code).
+- **Next milestone** — the remaining M139 letters, M137c, then M140b (generated code read as code).
 
 ## Verification (run before declaring any work done)
 

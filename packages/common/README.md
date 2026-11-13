@@ -301,6 +301,7 @@ package fits the plugin architecture.
 | `publishHeaderNameProblem`            | function  |
 | `publishHeaderValueProblem`           | function  |
 | `publishIdProblem`                    | function  |
+| `rateLimitMetadataOf`                 | function  |
 | `replaceLocale`                       | function  |
 | `replacePrincipal`                    | function  |
 | `replaceTenant`                       | function  |
@@ -340,6 +341,7 @@ package fits the plugin architecture.
 | `withHttpStatusHint`                  | function  |
 | `withIdempotencyMetadata`             | function  |
 | `withMcpToolMetadata`                 | function  |
+| `withRateLimitMetadata`               | function  |
 | `withResponseMetadata`                | function  |
 | `withSecurityMetadata`                | function  |
 | `withValidationMetadata`              | function  |
@@ -393,6 +395,7 @@ package fits the plugin architecture.
 | `ORDERING_KEY_HEADER`                 | const     |
 | `OUTBOX_RECORD_KIND`                  | const     |
 | `PLUGIN_PRIORITY`                     | const     |
+| `RATE_LIMIT_METADATA`                 | const     |
 | `REQUEST_ORIGIN_STATE_KEY`            | const     |
 | `REQUIRED_SCOPES_STATE_KEY`           | const     |
 | `RESERVED_HEADER_NAMES`               | const     |
@@ -678,6 +681,9 @@ package fits the plugin architecture.
 | `RouteIdempotencyMetadata`            | interface |
 | `RouteInfo`                           | interface |
 | `RouteMcpToolMetadata`                | interface |
+| `RouteRateLimitMetadata`              | interface |
+| `RouteResponseDocumentation`          | interface |
+| `RouteResponseHeader`                 | interface |
 | `RouteResponseMetadata`               | interface |
 | `RouteSchema`                         | interface |
 | `RouteSecurityMetadata`               | interface |

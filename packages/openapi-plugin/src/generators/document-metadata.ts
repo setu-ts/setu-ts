@@ -6,7 +6,8 @@ import type {
 } from './openapi-generator.ts';
 
 /**
- * Refuses conflicting license keys and repeated document tag names.
+ * Refuses conflicting license keys, repeated document tag names and an
+ * unknown `errorSchema`.
  * @param options - Document generator options
  * @throws {OpenApiDocumentOptionsError} If a metadata constraint is violated
  * @since 0.13.0
@@ -27,6 +28,14 @@ export function validateDocumentMetadata(options: OpenApiGeneratorOptions): void
       );
     }
     names.add(tag.name);
+  }
+  // Typed as `'rfc9457'`, but an untyped caller can pass anything.
+  const errorSchema: unknown = options.errorSchema;
+  if (errorSchema !== undefined && errorSchema !== 'rfc9457') {
+    throw new OpenApiDocumentOptionsError(
+      'error-schema',
+      `errorSchema must be 'rfc9457', got ${JSON.stringify(errorSchema)}.`,
+    );
   }
 }
 

@@ -60,7 +60,9 @@ export const REST_PLUGINS: readonly Wiring[] = [
   },
   { pkg: 'health-plugin', symbol: 'HealthPlugin' },
   { pkg: 'metrics-plugin', symbol: 'MetricsPlugin' },
-  { pkg: 'openapi-plugin', symbol: 'OpenApiPlugin' },
+  // `errorSchema: 'rfc9457'` documents the Problem Details body the
+  // validation and error-handler wirings above answer with (M137b §3.8).
+  { pkg: 'openapi-plugin', symbol: 'OpenApiPlugin', args: "{ errorSchema: 'rfc9457' }" },
 ];
 
 /**
@@ -103,7 +105,11 @@ export const REST_RECIPE: TemplateRecipe = {
     'cloudflare-workers': {
       removePackages: ['openapi-plugin'],
       addPlugins: [
-        { pkg: 'openapi-plugin', symbol: 'OpenApiPlugin', args: "{ swagger: { assets: 'cdn' } }" },
+        {
+          pkg: 'openapi-plugin',
+          symbol: 'OpenApiPlugin',
+          args: "{ swagger: { assets: 'cdn' }, errorSchema: 'rfc9457' }",
+        },
       ],
     },
   },

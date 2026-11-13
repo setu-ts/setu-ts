@@ -309,6 +309,12 @@ describe('node-redis CLI', () => {
         if (manifest.fmt) manifest.fmt = { proseWrap: 'preserve', ...manifest.fmt };
         contents = JSON.stringify(manifest, null, 2) + '\n';
       }
+      // M137b: the template documents its RFC 9457 error bodies in OpenAPI.
+      if (path.endsWith('/setu.config.ts'))
+        contents = contents.replace(
+          '      OpenApiPlugin(),\n',
+          "      OpenApiPlugin({ errorSchema: 'rfc9457' }),\n",
+        );
       if (path.endsWith('/k8s/README.md'))
         contents = contents.replace(
           '`--build-arg`, `--network`.',

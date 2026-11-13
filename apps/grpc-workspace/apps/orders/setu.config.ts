@@ -63,7 +63,7 @@ export function createApp(
       HttpSecurityPlugin({ requestSize: { maxBodySize: 1_048_576 } }),
       HealthPlugin({ indicators: [...HEALTH_INDICATORS] }),
       MetricsPlugin({ customMetrics: [...CUSTOM_METRICS] }),
-      OpenApiPlugin(),
+      OpenApiPlugin({ errorSchema: 'rfc9457' }),
       MessagingPlugin(messagingOptions()),
       QueuePlugin({ processors: [...QUEUE_PROCESSORS], ...queueOptions() }),
       ResiliencePlugin(),

@@ -19,8 +19,10 @@ import * as nodeFs from 'node:fs/promises';
  * (`instrumentation.mjs`, `--import` in the Node scripts and image) and masked
  * one-line start failure in `main.ts` — which change exactly `package.json`,
  * `deno.json`, `.env`, `main.ts`, `Dockerfile` and the new `instrumentation.mjs`; and
- * M131d's README link to the site instead of GitHub (X93-7), which changes only `README.md`, and
- * M140a's body bounds, local ignore rules and Deno cooldown/check pin:
+ * M131d's README link to the site instead of GitHub (X93-7), which changes only `README.md`;
+ * M137b's `OpenApiPlugin({ errorSchema: 'rfc9457' })`, which changes only `setu.config.ts` (reversing
+ * it reproduces every previous hash); and M140a's body bounds, local ignore rules and Deno
+ * cooldown/check pin:
  *
  *   node packages/cli/test/fixtures/capture-template-baseline.ts
  *

@@ -2594,9 +2594,15 @@ importers:
       '@setu-ts/decorator-plugin':
         specifier: workspace:^
         version: link:../decorator-plugin
+      '@setu-ts/exceptions':
+        specifier: workspace:^
+        version: link:../exceptions
       '@setu-ts/health-plugin':
         specifier: workspace:^
         version: link:../health-plugin
+      '@setu-ts/idempotency-plugin':
+        specifier: workspace:^
+        version: link:../idempotency-plugin
       '@setu-ts/kernel':
         specifier: workspace:^
         version: link:../kernel

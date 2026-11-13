@@ -45,15 +45,16 @@ export function registerStatusRoutes(router: IRouterApi): void {
 - `title` defaults to `"API"` and `version` to `"1.0.0"`.
 - `security` describes requirements; it does not enforce authentication. Route `security: []`
   overrides the document default. A required scheme absent from `securitySchemes` refuses startup.
-- `deriveRequestSchemas` and `deriveResponseStatus` default to `true`: validation metadata supplies
-  request schemas and decorated handler metadata supplies response status.
+- `deriveRequestSchemas`, `deriveResponseStatus` and `deriveErrorResponses` default to `true`: route
+  middleware brands supply request schemas, success status and 401/403/415/429 errors.
 - `excludeOwners` defaults to the health and metrics plugins; `exclude` matches fully resolved route
   patterns, including group prefixes.
 
 ## Other options
 
 - `swagger: false` disables the UI; `swagger.assets` also accepts a custom `baseUrl` object.
-- `description` and `servers` describe the API; `excludeOwners: []` includes infrastructure routes.
+- `errorSchema: 'rfc9457'` adds a Problem Details error body.
+- `excludeOwners: []` includes infrastructure routes.
 - `deriveSecurity: { scheme }` derives requirements from branded guards; the scheme must be
   declared.
 - `IOpenApiService.getSpec` reads the document and `addSchema` contributes a named schema.

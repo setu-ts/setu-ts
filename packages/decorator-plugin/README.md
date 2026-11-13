@@ -255,7 +255,10 @@ pipeline has finished, or a `TypeError` while headers are written, answering `50
 `@setu-ts/openapi-plugin` derives an operation's success status from `@HttpCode`/`@Redirect` (on by
 default, `deriveResponseStatus`), so a `201` route is documented under `201` rather than the assumed
 `200`. `@ResponseHeader` is deliberately not derived: an OpenAPI response-header entry needs a
-schema and a description the declaration does not carry.
+schema and a description the declaration does not carry. Document a header with
+`@ApiResponse({ status, headers: { Location: { description, required } } })` instead (since 0.13.0).
+`@Roles`, `@Permissions`, `@RequirePolicy`, `@ScopedRoles` and `@ScopedPermissions` carry the
+`forbids` security brand, so the generated document lists their `401` and `403`.
 
 ## What it exports
 

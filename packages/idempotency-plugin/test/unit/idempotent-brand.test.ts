@@ -25,6 +25,7 @@ it('brands both entry points and shares non-default configuration behavior', asy
       idempotent: true,
       keyHeader: 'Idempotency-Key',
       required: false,
+      principalRequired: true,
     });
     let calls = 0;
     const ctx = createTestContext({ runtime, services, request: { method: 'POST' } });
@@ -47,19 +48,29 @@ it('brands both entry points and shares non-default configuration behavior', asy
 
 it('records the key source and whether a key is required in the brand', () => {
   const cases = [
-    [undefined, { idempotent: true, keyHeader: 'Idempotency-Key', required: true }],
+    [
+      undefined,
+      { idempotent: true, keyHeader: 'Idempotency-Key', required: true, principalRequired: true },
+    ],
     [
       { key: { header: 'X-Request-Key' } },
-      { idempotent: true, keyHeader: 'X-Request-Key', required: true },
+      { idempotent: true, keyHeader: 'X-Request-Key', required: true, principalRequired: true },
     ],
     [
-      { key: { header: 'X-Request-Key' }, required: false },
-      { idempotent: true, keyHeader: 'X-Request-Key', required: false },
+      { key: { header: 'X-Request-Key' }, required: false, principal: 'optional' },
+      { idempotent: true, keyHeader: 'X-Request-Key', required: false, principalRequired: false },
     ],
-    [{ key: { bodyField: 'requestId' } }, { idempotent: true, required: true }],
     [
-      { key: () => 'k', required: false },
-      { idempotent: true, required: false },
+      { key: { bodyField: 'requestId' } },
+      { idempotent: true, required: true, principalRequired: true },
+    ],
+    [
+      { key: () => 'k', required: false, principal: 'optional' },
+      { idempotent: true, required: false, principalRequired: false },
+    ],
+    [
+      { key: () => 'k', principal: 'required' },
+      { idempotent: true, required: true, principalRequired: true },
     ],
   ] as const;
   for (const [options, expected] of cases) {
