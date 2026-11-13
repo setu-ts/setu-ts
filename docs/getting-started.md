@@ -329,9 +329,9 @@ import { AuthPlugin } from '@setu-ts/auth-plugin';
 app.register(
   AuthPlugin({
     jwt: {
-      // Read this from configuration in a real application — never commit it.
-      secret: 'your-secret-key-at-least-32-characters',
-      // 'HS256' pairs with `secret`; 'RS256' pairs with `privateKey`/`publicKey`.
+      // No `secret` here: JWT_SECRET (32+ random bytes) is read from secrets, configuration
+      // or the environment, so no key is committed.
+      // 'HS256' pairs with that secret; 'RS256' pairs with `privateKey`/`publicKey`.
       algorithm: 'HS256',
     },
   }),

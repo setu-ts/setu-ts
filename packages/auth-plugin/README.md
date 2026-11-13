@@ -813,7 +813,7 @@ import { AuthPlugin } from '@setu-ts/auth-plugin';
 const app = createApplication({
   plugins: [
     RuntimePlugin(),
-    SessionPlugin({ secret: 'replace-with-at-least-32-characters!!', store: 'memory' }),
+    SessionPlugin({ store: 'memory' }), // SESSION_SECRET from secrets, config or env
     AuthPlugin({
       signIn: {
         providers: [
@@ -1216,7 +1216,7 @@ const idpSigningCert = '-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE--
 const app = createApplication({
   plugins: [
     RuntimePlugin(),
-    SessionPlugin({ secret: 'replace-with-at-least-32-characters!!', store: 'memory' }),
+    SessionPlugin({ store: 'memory' }), // SESSION_SECRET from secrets, config or env
     AuthPlugin({
       signIn: {
         providers: [
@@ -1323,7 +1323,7 @@ import { SessionPlugin } from '@setu-ts/session-plugin';
 import { HttpSecurityPlugin } from '@setu-ts/http-security-plugin';
 
 SessionPlugin({
-  secret: 'replace-with-at-least-32-characters!!',
+  // SESSION_SECRET from secrets, config or env
   csrf: { exclude: ['/auth/corp/acs'] },
 });
 HttpSecurityPlugin({ csrf: { exclude: ['/auth/corp/acs'] } });
@@ -1383,7 +1383,7 @@ const totp = new TotpService({ store: new MemoryTotpStore(), runtime, issuer: 'M
 const app = createApplication({
   plugins: [
     RuntimePlugin(),
-    SessionPlugin({ secret: 'replace-with-at-least-32-characters!!', store: 'memory' }),
+    SessionPlugin({ store: 'memory' }), // SESSION_SECRET from secrets, config or env
     AuthPlugin({
       signIn: {
         providers: [],
@@ -1586,7 +1586,7 @@ function loadPrincipal(principalId: string): Promise<IPrincipal | null> {
 const app = createApplication({
   plugins: [
     RuntimePlugin(),
-    SessionPlugin({ secret: 'replace-with-at-least-32-characters!!' }),
+    SessionPlugin(), // SESSION_SECRET from secrets, config or env
     AuthPlugin({
       signIn: {
         providers: [],
