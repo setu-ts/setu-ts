@@ -19,8 +19,10 @@ const MIME_ESSENCE = /^[!#$%&'+.^_`|~0-9a-z-]+\/(?:[!#$%&'+.^_`|~0-9a-z-]+|\*)$/
 // subtype — is refused before matching, so the allow-list judges the string the
 // handler receives rather than a prefix of it.
 const PART_ESSENCE = /^[!#$%&'+.^_`|~0-9a-z-]+\/[!#$%&'+.^_`|~0-9a-z-]+$/i;
-// eslint-disable-next-line no-control-regex -- control characters are what it refuses
-const UNSAFE_PART_TYPE = /[\u0000-\u001f\u007f,]/;
+// Anything outside printable ASCII, and the comma. Non-ASCII matters twice:
+// a character such as U+212A (KELVIN SIGN) lower-cases to an ASCII letter, and
+// a non-ByteString value cannot be set as a header at all.
+const UNSAFE_PART_TYPE = /[^\u0020-\u007e]|,/;
 
 /**
  * Validates a parsed FormFile and records its constraints for documentation.
@@ -57,11 +59,13 @@ export function formFile(options?: FormFileOptions): z.ZodCustom<FormFile, FormF
       { message: 'Expected a file' },
     )
     .superRefine((file, ctx) => {
-      const essence = file.mimeType.split(';', 1)[0]!.trim().toLowerCase();
+      const raw = file.mimeType.split(';', 1)[0]!.trim();
+      const essence = raw.toLowerCase();
       if (
         mimeTypes !== undefined &&
         (UNSAFE_PART_TYPE.test(file.mimeType) ||
-          !PART_ESSENCE.test(essence) ||
+          // Checked before lower-casing, on the text the handler receives.
+          !PART_ESSENCE.test(raw) ||
           !mimeTypes.some(
             (type) =>
               type === essence || (type.endsWith('/*') && essence.startsWith(type.slice(0, -1))),

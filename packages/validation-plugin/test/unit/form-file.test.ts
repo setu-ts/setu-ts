@@ -43,6 +43,11 @@ describe('formFile', () => {
       'image/',
       'image/\rX',
       'image/png\u0000',
+      // Audit L3: U+212A lower-cases to ASCII `k`; non-ASCII parameters cannot
+      // be a header value.
+      'image/x-matros\u212aa',
+      'image/png; x=\u2603',
+      'image/p\u00e9ng',
       'image/*',
       '',
     ];

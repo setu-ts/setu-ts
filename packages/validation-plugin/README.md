@@ -131,12 +131,12 @@ called. Request validation reports these issues through the route's configured 4
 - `File exceeds <maxBytes> bytes` when its parsed byte length exceeds the bound.
 
 The checked media type is the part's `Content-Type` essence, trimmed and lower-cased with parameters
-removed; a value with a comma or a control character, or whose essence is not one `type/subtype`, is
-refused rather than matched. It is **client-supplied, never sniffed**, and the handler receives it
-as sent: never serve `file.mimeType` back as a `Content-Type`. The `filename` is client-supplied
-too: never use it as a path or trust the claimed type for a security decision. `maxBytes` runs after
-the whole body is parsed, so it is not a DoS control; use the request-size bound
-`RuntimePlugin({ maxBodyBytes })`.
+removed; a value with a comma or any character outside printable ASCII, or whose essence (as sent,
+before lower-casing) is not one `type/subtype`, is refused rather than matched. It is
+**client-supplied, never sniffed**, and the handler receives it as sent: never serve `file.mimeType`
+back as a `Content-Type`. The `filename` is client-supplied too: never use it as a path or trust the
+claimed type for a security decision. `maxBytes` runs after the whole body is parsed, so it is not a
+DoS control; use the request-size bound `RuntimePlugin({ maxBodyBytes })`.
 
 For an array of files, a single file arrives as a scalar unless the field name ends `[]`. Use a name
 such as `files[]` and the matching schema key, since the form record preserves that name as written.
