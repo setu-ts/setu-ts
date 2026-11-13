@@ -52,6 +52,7 @@ import {
 } from '../utils/file-writer.ts';
 import { isMissingPath } from '../utils/filesystem-errors.ts';
 import { frameworkSpecifier } from '../templates/framework-specifier.ts';
+import { generateSecret } from '../templates/secret.ts';
 import { BROKER_COMPOSE_FILE, cliInvocation, resolveHost } from '../templates/project-files.ts';
 import { MINIMAL_HOST } from '../templates/minimal.ts';
 import { envFileDeclaration } from '../templates/env-file.ts';
@@ -97,10 +98,15 @@ import {
 import {
   MEMBERS_DIR,
   readWorkspaceManifest,
+  renderWorkspaceManifest,
+  workspaceSecretVariables,
+  WORKSPACE_MANIFEST,
   type WorkspaceManifest,
   type WorkspaceMember,
 } from '../workspace/manifest.ts';
 import { memberTransportModule } from '../workspace/rewire.ts';
+import { COMPOSE_FILE, workspaceContainerFiles } from '../workspace/compose.ts';
+import { renderTransportSection, replaceTransportSection } from '../workspace/root-files.ts';
 import { applyTransportChange } from './workspace.ts';
 import { TRANSPORT_EXPORTS, TRANSPORT_SPECIFIER } from '../workspace/transport-module.ts';
 import {
@@ -137,6 +143,8 @@ import {
 
 /** What `runAddCommand` reaches the outside world through. */
 export interface AddCommandDependencies {
+  /** Creates a fresh local secret when adding session support. */
+  readonly secret?: () => string;
   readonly ask?: Prompter;
   /** The filesystem all reads and writes go through. */
   readonly fs: IFileSystem;
@@ -372,9 +380,9 @@ function registrationLine(bare: string): string | undefined {
   // `rbac` is what registers the authorization service a generated guard asks;
   // without it every permission check answers 501.
   if (bare === 'auth-plugin') {
-    return "AuthPlugin({ jwt: { secret: '<your-secret>' }, rbac: { roles: {} } })";
+    return 'AuthPlugin({ jwt: {}, rbac: { roles: {} } })';
   }
-  if (bare === 'session-plugin') return "SessionPlugin({ secret: '<your-secret>' })";
+  if (bare === 'session-plugin') return 'SessionPlugin()';
   if (bare === 'telemetry-plugin') {
     return "TelemetryPlugin({ serviceName: '<service-name>', exporter: 'console' })";
   }
@@ -2406,6 +2414,90 @@ async function addOne(
     return EXIT_ERROR;
   }
 
+  if (bare === 'session-plugin' || bare === 'auth-plugin') {
+    const variableName = bare === 'auth-plugin' ? 'JWT_SECRET' : 'SESSION_SECRET';
+    const variable: EnvVariable = {
+      name: variableName,
+      description: 'Use a random signing secret of at least 32 characters.',
+      generated: 'secret',
+    };
+    const declaration = configText === undefined ? undefined : envFileDeclaration(configText);
+    const envFile =
+      runtime === 'cloudflare-workers'
+        ? '.dev.vars'
+        : declaration?.kind === 'paths'
+          ? declaration.paths[declaration.paths.length - 1]
+          : // A config that declares no dotenv file still runs under a Node or Bun
+            // start script that loads `.env` (`--env-file-if-exists=.env`, Bun's own
+            // `.env`); Deno's start task loads none, so there is no file to write.
+            declaration === undefined || (declaration.kind === 'absent' && runtime !== 'deno')
+            ? '.env'
+            : undefined;
+    if (envFile !== undefined) {
+      const value = (deps.secret ?? generateSecret)();
+      for (const [file, localValue] of [
+        [envFile, value],
+        [`${envFile}.example`, ''],
+      ] as const) {
+        const path = joinPath(dir, file);
+        const text = await readProjectText(deps, path, file);
+        if (text === null) return EXIT_ERROR;
+        const appended = withEnvVariable(text ?? '', [variable], localValue);
+        if (appended !== undefined) edits.push({ path, contents: appended });
+      }
+    } else {
+      deps.log(
+        declaration?.kind === 'absent'
+          ? `Set ${variableName} in the environment: this project's config declares no dotenv file, ` +
+              "and its Deno start task loads none (ConfigPlugin({ envFilePath: '.env', envFileOptional: true }) adds one)."
+          : `Set ${variableName} where the app reads configuration; its dotenv path could not be determined.`,
+      );
+    }
+    const workspace = await workspaceMemberOf(deps.fs, dir);
+    if (workspace !== undefined) {
+      const { root, manifest, member } = workspace;
+      const secrets = member.generatedSecrets ?? [];
+      const next: WorkspaceManifest = {
+        ...manifest,
+        members: manifest.members.map((entry) =>
+          entry.name === member.name
+            ? { ...entry, generatedSecrets: [...new Set([...secrets, variableName])] }
+            : entry,
+        ),
+      };
+      writeRoot = root;
+      if (!secrets.includes(variableName))
+        edits.push({
+          path: joinPath(root, WORKSPACE_MANIFEST),
+          contents: renderWorkspaceManifest(next),
+        });
+      const broker = brokerSpec(next.broker, next.redisClient);
+      const profile = workspaceProfile(next.runtime);
+      for (const file of workspaceContainerFiles(next, broker, profile)) {
+        if (file.path !== COMPOSE_FILE) continue;
+        const path = joinPath(root, file.path);
+        const previous = await readProjectText(deps, path, file.path);
+        if (previous === null) return EXIT_ERROR;
+        if (previous !== file.contents) edits.push({ path, contents: file.contents });
+      }
+      const path = joinPath(root, 'README.md');
+      const readme = await readProjectText(deps, path, 'README.md');
+      if (readme === null) return EXIT_ERROR;
+      const section = renderTransportSection(
+        broker,
+        profile,
+        next.brokerUrl,
+        workspaceSecretVariables(next.members),
+      );
+      const updated = replaceTransportSection(readme, section);
+      if (updated === undefined) {
+        deps.log(
+          `README.md has no transport section; it was left as it is. The current section is:\n${section}`,
+        );
+      } else if (updated !== readme) edits.push({ path, contents: updated });
+    }
+  }
+
   if (selected?.connection !== undefined) {
     const { variable, localDefault } = selected.connection;
     // The dotenv pair `setu new --broker` writes, appended here only where the
@@ -2875,16 +2967,15 @@ async function reportAgentsHint(
  */
 function installCommand(runtime: TargetRuntime, appPackages: readonly string[] = []): string {
   if (appPackages.length > 0) {
-    if (runtime === 'deno')
-      return `deno add --min-dep-age 0 ${appPackages.map((name) => `npm:${name}`).join(' ')}`;
+    if (runtime === 'deno') return `deno add ${appPackages.map((name) => `npm:${name}`).join(' ')}`;
     return `${runtime === 'bun' ? 'bun add' : 'npm install'} ${appPackages.join(' ')}`;
   }
   switch (runtime) {
     case 'deno':
-      // `--min-dep-age 0` for the same reason the generated manifest carries
-      // `minimumDependencyAge` (D1): this pin is the CLI's own version, which on
-      // release day is younger than the policy allows.
-      return 'deno install --min-dep-age 0';
+      // No `--min-dep-age 0`: the generated `deno.json` exempts only `npm:@setu-ts/*`
+      // (the CLI's own release-day pin) from its one-day cooldown, and turning the
+      // cooldown off here would exempt every third-party package too (M140a §3.12).
+      return 'deno install';
     case 'bun':
       return 'bun install';
     case 'node':

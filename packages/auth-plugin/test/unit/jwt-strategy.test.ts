@@ -16,7 +16,7 @@ describe('JwtStrategy', () => {
   beforeAll(() => {
     const runtime = createFakeRuntime(1000000);
     jwt = new JwtService(runtime, {
-      secret: 'test-secret-key',
+      secret: 'test-secret-key-at-least-32-characters',
       algorithm: 'HS256',
     });
     strategy = new JwtStrategy({ jwtService: jwt });
@@ -226,7 +226,7 @@ describe('JwtStrategy', () => {
 
 describe('M139a JWT boundaries', () => {
   const jwt = new JwtService(createFakeRuntime(1000000), {
-    secret: 'test-secret-key',
+    secret: 'test-secret-key-at-least-32-characters',
     algorithm: 'HS256',
   });
   const request = (token: string, tenant?: string): IRequest =>

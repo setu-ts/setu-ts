@@ -13,7 +13,7 @@ import { getSession } from '@setu-ts/session-plugin';
  */
 const AUTH_FIXTURE: RestStarterOptions = {
   auth: {
-    jwt: { secret: 'starter-test-secret' },
+    jwt: { secret: 'starter-test-secret-at-least-32-characters' },
     rbac: {
       roles: {
         admin: { permissions: ['*'], inherits: ['user'] },

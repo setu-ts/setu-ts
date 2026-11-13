@@ -63,12 +63,14 @@ function fallbackShown(localDefault: string, brokerUrl: string | undefined): str
  * @param broker - The workspace broker
  * @param profile - The workspace's runtime, which names its commands
  * @param brokerUrl - The workspace's endpoint override, when it set one
+ * @param secretVariables - Member-prefixed shell variables required by Compose
  * @returns The section, markers included
  */
 export function renderTransportSection(
   broker: BrokerSpec,
   profile: WorkspaceRuntimeProfile,
   brokerUrl?: string,
+  secretVariables: readonly string[] = [],
 ): string {
   // Blank lines around each marker: Markdown ends an HTML block at the first
   // blank line, and `deno fmt` inserts them otherwise.
@@ -89,17 +91,17 @@ ${wrapProse(
     `broker's service name, because two containers do not share a loopback interface.`,
 )}${broker.connection.note === undefined ? '' : `\n\n${wrapProse(broker.connection.note)}`}`
   }${
-    broker.compose === undefined
+    broker.compose === undefined && secretVariables.length === 0
       ? ''
       : `
 
 ## Run the stack
 
 \`\`\`bash
-docker compose -f docker/compose.yaml up --build
+${secretVariables.map((variable) => `export ${variable}="$(openssl rand -hex 32)"\n`).join('')}docker compose -f docker/compose.yaml up --build
 \`\`\`
 
-That builds every member and starts the ${broker.name} service they share.`
+${wrapProse(`That builds every member${broker.compose === undefined ? '.' : ` and starts the ${broker.name} service they share.`}${secretVariables.length === 0 ? '' : ' Compose refuses to start until every secret variable above is set; each member receives its own key instead of its development .env value.'}`)}`
   }
 
 ${wrapProse(
@@ -110,6 +112,18 @@ ${wrapProse(
 )}
 
 ${TRANSPORT_README_MARKERS.end}`;
+}
+
+/** Replaces only the CLI-owned README transport section, preserving surrounding prose. */
+export function replaceTransportSection(
+  readme: string | undefined,
+  section: string,
+): string | undefined {
+  const start = readme?.indexOf(TRANSPORT_README_MARKERS.start) ?? -1;
+  const end = readme?.indexOf(TRANSPORT_README_MARKERS.end) ?? -1;
+  return readme !== undefined && start >= 0 && end > start
+    ? readme.slice(0, start) + section + readme.slice(end + TRANSPORT_README_MARKERS.end.length)
+    : undefined;
 }
 
 /**
@@ -268,7 +282,7 @@ cd apps/orders
 ${profile.runtime === 'node' ? 'npm run build\nnpm start' : profile.runtime === 'bun' ? 'bun run start' : 'deno task start'}
 \`\`\`
 
-${wrapProse('Full-stack Bun members also run `bun run build` before starting. Node builds inline shared libraries and keep npm dependencies external.')}
+${wrapProse('Full-stack Bun members also run `bun run build`, and full-stack Deno members `deno task build`, before starting. Node builds inline shared libraries and keep npm dependencies external.')}
 `;
 
   return [

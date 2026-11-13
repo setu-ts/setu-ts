@@ -1,3 +1,4 @@
+import { generateSecret } from '../../src/templates/secret.ts';
 import { describe, expect, it } from 'vitest';
 import { createFakeFs, createRecorder } from '../fixtures/fake-fs.ts';
 import { parseArgs } from '../../src/args.ts';
@@ -84,6 +85,7 @@ function harness(seed: Readonly<Record<string, string>> = {}, portAvailable?: Po
     errText: () => err.text(),
     run: (argv) =>
       runNewCommand(parseArgs(argv), {
+        secret: generateSecret,
         fs,
         cwd: '/work',
         log: () => {},

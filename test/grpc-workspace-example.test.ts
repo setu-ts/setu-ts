@@ -41,7 +41,7 @@ const MAY_DIFFER: Readonly<Record<string, string>> = {
   'apps/orders/tsconfig.json':
     'extends the repository tsconfig.apps.json, so @setu-ts/* resolves to source',
   'apps/billing/setu.config.ts':
-    'RuntimePlugin({ http2: true }): billing serves HTTP/2 beside HTTP/1.1, which orders calls over one connection',
+    'billing enables HTTP/2 beside the generated body bound: it serves HTTP/2 beside HTTP/1.1, which orders calls over one connection',
   'apps/billing/main.ts':
     'the repository lint forbids console outside the CLI; one eslint-disable line',
   'apps/orders/main.ts':

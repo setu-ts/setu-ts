@@ -10,10 +10,22 @@ import {
 import { VERSION } from '../../src/version.ts';
 
 describe('renderDevEntry', () => {
+  it('uses ambient process deletion for a Bun rendering', () => {
+    const entry = renderDevEntry({ devtoolPort: 4919 }, 'bun');
+    const deletion = "delete process.env['SETU_DEVTOOL_SESSION_KEY'];";
+    expect(entry.indexOf(deletion)).toBeGreaterThan(entry.indexOf('const rawSessionKey'));
+    expect(entry.indexOf(deletion)).toBeLessThan(entry.indexOf('const app = await createApp'));
+  });
   for (const runtime of ['deno', 'node'] as const) {
     it(`renders portable credential reads and exits for ${runtime}`, () => {
       const entry = renderDevEntry({ devtoolPort: 4919 }, runtime);
-      expect(entry).not.toMatch(/Deno\.|process\./);
+      const deletion =
+        runtime === 'deno'
+          ? "Deno.env.delete('SETU_DEVTOOL_SESSION_KEY');"
+          : "delete process.env['SETU_DEVTOOL_SESSION_KEY'];";
+      expect(entry).toContain(deletion);
+      expect(entry.indexOf(deletion)).toBeLessThan(entry.indexOf('const app = await createApp'));
+      expect(entry.indexOf(deletion)).toBeGreaterThan(entry.indexOf('const rawSessionKey'));
       expect(entry).toContain("runtime.env['SETU_DEVTOOL_SESSION_ID']");
       expect(entry).toContain("runtime.env['SETU_DEVTOOL_SESSION_KEY']");
       expect(entry.match(/runtime.exit\(1\)/g)).toHaveLength(5);

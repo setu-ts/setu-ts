@@ -165,6 +165,7 @@ export async function loadRequestHandler(
       throw new Error(
         `Failed to load React Router server build from "${serverBuildPath}". ` +
           `Ensure the path is correct and the file exports a ServerBuild as default. ` +
+          `If the app has not been built, run its \`build\` task first. ` +
           `Cause: ${err instanceof Error ? err.message : String(err)}`,
         { cause: err },
       );

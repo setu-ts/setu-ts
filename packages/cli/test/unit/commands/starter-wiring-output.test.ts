@@ -1,3 +1,4 @@
+import { generateSecret } from '../../../src/templates/secret.ts';
 import { expect, it } from 'vitest';
 import * as ts from 'typescript';
 import { runNewCommand } from '../../../src/commands/new.ts';
@@ -15,7 +16,7 @@ const REDIS_ARM = `        queue: {
 
 async function scaffold() {
   const fs = createFakeFs();
-  const deps = { fs, cwd: '/app', log: () => {}, error: () => {} };
+  const deps = { secret: generateSecret, fs, cwd: '/app', log: () => {}, error: () => {} };
   expect(
     await runNewCommand(parseArgs(['shop', '--template', 'full-stack', '--runtime', 'node']), deps),
   ).toBe(0);

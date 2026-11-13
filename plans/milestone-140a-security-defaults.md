@@ -145,15 +145,41 @@ AdonisJS and Django scaffolds write a random secret per project; Deno `minimumDe
   - README Production: for every `generated` variable, the `docker run` line gains `-e <NAME>`
     (`docker run --rm -p 3000:3000 -e SESSION_SECRET <name>`) and a sentence: set it in the shell to
     a value of at least 32 characters; the development value in `.env` is not copied into the image.
-  - Workspace Compose: a member with a `generated` variable gets
-    `environment: { NAME: '${NAME:?set NAME — see README, Run the stack}' }` beside its `env_file`,
-    so `docker compose up` refuses to start without it instead of crash-looping. The workspace
-    README "Run the stack" says to export each named variable first.
+  - Workspace Compose (maintainer decision 2026-11-13, kept in M140a): the manifest records which
+    secrets each member generates, because nothing else does — `WorkspaceMember`
+    (`workspace/manifest.ts:131-200`) has no template or variable list, and
+    `workspaceContainerFiles` (`compose.ts:498-520`) and `renderTransportSection`
+    (`root-files.ts:68-72`) see only the manifest. `WorkspaceMember` gains
+    `readonly generatedSecrets?: readonly string[]`, the variable names as the member reads them
+    (`SESSION_SECRET`). The member parser (`manifest.ts:360-390`) keeps it when it is an array of
+    strings matching `^[A-Z][A-Z0-9_]*$` and refuses the member otherwise, as it refuses a malformed
+    `devtoolPort`; an absent or empty list is dropped. `generate app` writes it from the chosen
+    template's `generated: 'secret'` variables; `adopt` writes none (an adopted project's variables
+    are its own). `setu add auth` or `setu add session` run inside a workspace member appends its
+    variable to that member's list (once) and replans the Compose file and the README transport
+    section, as `devtool.ts:684` already replans container files from a member command.
+  - Compose: for each name in a member's list, the member's `environment:` block gains
+    `NAME: '${<MEMBER>_NAME:?set <MEMBER>_NAME — see README, Run the stack}'`, where `<MEMBER>` is
+    the member name upper-cased with `-` → `_` (`web` → `WEB_SESSION_SECRET`). The shell variable
+    carries the member's name so two members never share one session or JWT key. The `environment:`
+    entry wins over `env_file`, so `docker compose up` refuses to start without the variable instead
+    of crash-looping on a fresh clone, and the development value in the member's `.env` is never
+    what Compose runs. Members without the field are unchanged.
+  - README: `renderTransportSection` takes the members' shell variable names; when any exist it
+    emits `## Run the stack` (also when the broker has no Compose service, since the Compose file
+    exists regardless) with one `export <MEMBER>_NAME="$(openssl rand -hex 32)"` line per variable
+    before the `docker compose` command, and a sentence saying Compose refuses to start without
+    them. `docs/deployment.md`, which lists the member fields, documents `generatedSecrets` and the
+    export step.
 - **Why:** maintainer decision 2026-11-13; every surveyed scaffold that writes a secret writes a
   random one.
 - **Test home:** `new-command.test.ts` (injected `secret` → exact `.env` and `.dev.vars` value; two
   scaffolds with the default generator differ; `.env.example` empty); `project-files.test.ts`
-  (README `-e SESSION_SECRET`); `compose.test.ts` (the `:?` interpolation on `web` only);
+  (README `-e SESSION_SECRET`); `compose.test.ts` (the `:?` line with the member-prefixed variable
+  on a member with `generatedSecrets`, none on one without, two members with distinct variables);
+  `workspace-manifest.test.ts` (the field round-trips; a lower-case or non-string entry refuses the
+  member); `app-command.test.ts` (a full-stack member records `SESSION_SECRET`, a rest member none);
+  `add.test.ts` (`add auth` in a member appends `JWT_SECRET` once and replans Compose);
   `root-files.test.ts` (README sentence); `secret.test.ts` (length, alphabet).
 
 ### 3.3 V12-71: the JWT secret comes from the environment, and a short one is refused
@@ -176,12 +202,13 @@ AdonisJS and Django scaffolds write a random secret per project; Deno `minimumDe
     refused by `AuthPlugin` and by `JwtService` with `AuthPluginConfigurationError` naming
     `JWT_SECRET` and the RFC 7518 §3.2 floor. A missing secret with no RS256 keys throws the same
     class (replacing the plain `Error`).
-  - `setu add auth` prints `AuthPlugin({ rbac: { roles: {} } })` and writes `JWT_SECRET=<secret()>`
-    into the project's env file and `JWT_SECRET=` into `.env.example`, through the existing
-    `withEnvVariable` path; on Workers the files are `.dev.vars` and `.dev.vars.example`. An
-    existing `JWT_SECRET` row is left as it is. `setu add session` prints `SessionPlugin()` and
-    writes `SESSION_SECRET` the same way. `g guard`'s JSDoc shows the bare form and names
-    `JWT_SECRET`.
+  - `setu add auth` prints `AuthPlugin({ jwt: {}, rbac: { roles: {} } })` (the empty `jwt` turns on
+    the JWT strategy, whose secret the resolver finds; without it `register()` refuses for want of a
+    passive strategy, `auth-plugin.ts:515`) and writes `JWT_SECRET=<secret()>` into the project's
+    env file and `JWT_SECRET=` into `.env.example`, through the existing `withEnvVariable` path; on
+    Workers the files are `.dev.vars` and `.dev.vars.example`. An existing `JWT_SECRET` row is left
+    as it is. `setu add session` prints `SessionPlugin()` and writes `SESSION_SECRET` the same way.
+    `g guard`'s JSDoc shows `jwt: {}` and names `JWT_SECRET`.
   - Every repository literal under 32 bytes (`'test-secret'` and the others the survey counted, 18
     files, among them `apps/rest-api/src/auth/demo-token.ts:10` and
     `starters/rest-starter/README.md:92`) is lengthened.
@@ -232,9 +259,12 @@ AdonisJS and Django scaffolds write a random secret per project; Deno `minimumDe
 
 - **Decision:** `@Gateway(path, options?: WebSocketRouteOptions)` stores the options in gateway
   metadata, and `ingress-registration.ts` passes them as `websocket.route(path, handlers, options)`.
-  `@Roles`, `@Permissions` or `@Public` on a gateway class or method is refused at registration with
-  a message naming `@Gateway(path, { guards })`, as `@UseGuards` already is. The class-based
-  `g ws-route` arm emits a commented `guards` example matching the functional arm's.
+  `@Roles` or `@Permissions` on a gateway class or method, and `@Public` on a gateway method
+  (`Public()` is a method decorator, `security.ts:144`, so a class cannot carry it), is refused at
+  registration with a message naming `@Gateway(path, { guards })`, as `@UseGuards` already is. Both
+  `g ws-route` arms gain a commented `guards` example, since neither has one today: the class arm
+  above `@Gateway('/ws/<name>')` shows `@Gateway('/ws/<name>', { guards: [...] })`, the functional
+  arm shows the third `websocket.route` argument.
 - **Why:** the plugin already supports guards per route; a decorated gateway had no way to reach
   them, and authorization decorators were silently ignored.
 - **Test home:** `decorator-plugin/test/integration/gateway-guards.test.ts` (a refusing guard gives
@@ -354,7 +384,7 @@ changes listed in §3.15 ship in minor `0.13.0`.
 | `cli/src/templates/project-files.ts`                                                                         | Generated env values, README `-e`, `.gitignore`, Deno tasks, check task (§3.2, 3.4, 3.11, 3.13) |
 | `cli/src/templates/full-stack.ts`                                                                            | `SESSION_SECRET` `generated` (§3.2)                                                             |
 | `cli/src/commands/new.ts`, `commands/app.ts`                                                                 | `secret` seam (§3.2)                                                                            |
-| `cli/src/workspace/compose.ts`, `workspace/root-files.ts`                                                    | Compose `:?`, README (§3.2)                                                                     |
+| `cli/src/workspace/compose.ts`, `workspace/root-files.ts`, `workspace/manifest.ts`, `commands/{app,add}.ts`  | Compose `:?`, README (§3.2)                                                                     |
 | `cli/src/commands/add.ts`, `schematics/guard.ts`                                                             | Hints and env rows (§3.3)                                                                       |
 | `cli/src/schematics/migration.ts`                                                                            | `--down` count (§3.6)                                                                           |
 | `cli/src/schematics/ws-route.ts`, `schematics/sse.ts`                                                        | §3.7, §3.9                                                                                      |

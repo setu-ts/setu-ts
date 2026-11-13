@@ -50,6 +50,7 @@ import { listTemplates } from '../templates/registry.ts';
 import { deriveNames, escapeName, IDENTIFIER_NAME_RULE, isIdentifierSafe } from '../utils/names.ts';
 import {
   findExisting,
+  readExistingText,
   reportDryRunPlan,
   firstDuplicatePath,
   type GeneratedFile,
@@ -64,6 +65,7 @@ import {
   SERVICE_PORT_EXPORT,
 } from '../workspace/discovery-module.ts';
 import { workspaceContainerFiles } from '../workspace/compose.ts';
+import { renderTransportSection, replaceTransportSection } from '../workspace/root-files.ts';
 import { workspaceK8sFiles } from '../workspace/k8s.ts';
 import { workspaceProfile, type WorkspaceRuntimeProfile } from '../workspace/runtime-profile.ts';
 import type { PortProbe } from '../workspace/port-probe.ts';
@@ -95,6 +97,7 @@ import {
   type WorkspaceManifest,
   type WorkspaceManifestProblem,
   manifestProblemDetail,
+  workspaceSecretVariables,
 } from '../workspace/manifest.ts';
 import { describeReconcileFailure, reconcileMembers } from '../workspace/reconcile.ts';
 import { interruptionMessage } from '../utils/interruption.ts';
@@ -103,6 +106,8 @@ import { interruptionMessage } from '../utils/interruption.ts';
  * Everything `runAppCommand` reaches the outside world through.
  */
 export interface AppDependencies {
+  /** Creates secrets for ignored member configuration. */
+  readonly secret?: () => string;
   /** The filesystem to read the workspace through and write the member with. */
   readonly fs: IFileSystem;
   /** The workspace root to operate on (absolute, already `--dir`-resolved). */
@@ -288,6 +293,7 @@ function planMember(
   profile: WorkspaceRuntimeProfile,
   rootManifest: string,
   rootGitignore: string,
+  secret: (() => string) | undefined,
   devtoolPort?: number,
 ):
   | {
@@ -375,13 +381,19 @@ function planMember(
           from: DISCOVERY_SPECIFIER,
         });
 
-  const files: GeneratedFile[] = projectFiles(name, profile.runtime, devHost, {
-    symbol: SERVICE_PORT_EXPORT,
-    from: DISCOVERY_SPECIFIER,
-    ...(next.members.find((member) => member.name === name)?.inspectPort === undefined
-      ? {}
-      : { inspectPort: next.members.find((member) => member.name === name)!.inspectPort! }),
-  }).map((file) => ({ ...file, path: joinPath(memberRoot, file.path) }));
+  const files: GeneratedFile[] = projectFiles(
+    name,
+    profile.runtime,
+    devHost,
+    {
+      symbol: SERVICE_PORT_EXPORT,
+      from: DISCOVERY_SPECIFIER,
+      ...(next.members.find((member) => member.name === name)?.inspectPort === undefined
+        ? {}
+        : { inspectPort: next.members.find((member) => member.name === name)!.inspectPort! }),
+    },
+    secret === undefined ? undefined : { secret },
+  ).map((file) => ({ ...file, path: joinPath(memberRoot, file.path) }));
 
   if (devtoolPort !== undefined && profile.runtime === 'node') {
     const index = files.findIndex((file) => file.path === joinPath(memberRoot, 'package.json'));
@@ -762,6 +774,9 @@ export async function runAppCommand(args: ParsedArgs, deps: AppDependencies): Pr
     return EXIT_USAGE;
   }
   const portHost = resolveHost(choice.host ?? MINIMAL_HOST, read.manifest.runtime);
+  const generatedSecrets = (portHost.manifest?.envVariables ?? [])
+    .filter((variable) => variable.generated === 'secret')
+    .map((variable) => variable.name);
 
   let next: WorkspaceManifest = {
     ...read.manifest,
@@ -778,6 +793,7 @@ export async function runAppCommand(args: ParsedArgs, deps: AppDependencies): Pr
       {
         name,
         port,
+        ...(generatedSecrets.length === 0 ? {} : { generatedSecrets }),
         ...(devtoolPort === undefined ? {} : { devtoolPort }),
         ...(dependsOn.length === 0 ? {} : { dependsOn }),
         // Read from the FLAG rather than the resolved template, because the
@@ -861,6 +877,7 @@ export async function runAppCommand(args: ParsedArgs, deps: AppDependencies): Pr
     profile,
     rootManifest,
     rootGitignore,
+    deps.secret,
     ...(devtoolPort === undefined ? ([] as const) : ([devtoolPort] as const)),
   );
   if (!plan.ok) {
@@ -888,6 +905,21 @@ export async function runAppCommand(args: ParsedArgs, deps: AppDependencies): Pr
       .filter((member) => member.name !== name)
       .map((member) => memberTransportModule(deps.fs, deps.dir, next, member)),
   );
+  const section = renderTransportSection(
+    brokerSpec(next.broker, next.redisClient),
+    profile,
+    next.brokerUrl,
+    workspaceSecretVariables(next.members),
+  );
+  const readme = await readExistingText(deps.fs, joinPath(deps.dir, 'README.md'));
+  const updatedReadme = replaceTransportSection(readme, section);
+  if (updatedReadme !== undefined) {
+    modules.push({ path: 'README.md', contents: updatedReadme, managed: true });
+  } else {
+    deps.log(
+      `README.md has no transport section; it was left as it is. The current section is:\n${section}`,
+    );
+  }
   const files = [
     ...plan.files,
     ...modules,

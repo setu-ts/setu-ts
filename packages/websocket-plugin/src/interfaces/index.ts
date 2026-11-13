@@ -78,8 +78,9 @@ export interface WebSocketPluginOptions {
    */
   readonly idleTimeoutMs?: number;
   /**
-   * Maximum size in bytes of a single inbound frame. `0` (the default) means
-   * unlimited. A larger frame closes the connection with code `1009`
+   * Maximum size in bytes of a single inbound message. Defaults to 1 MiB;
+   * `0` means unlimited. Node enforces the bound while reading; Bun and Deno
+   * enforce it after buffering. A larger message closes with code `1009`
    * (message too big) and is never delivered to `onMessage`.
    */
   readonly maxMessageBytes?: number;

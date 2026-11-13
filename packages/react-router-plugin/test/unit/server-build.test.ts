@@ -194,7 +194,7 @@ describe('server-build', () => {
   it('loadRequestHandler rejects when server build path does not exist', async () => {
     const nonExistentPath = './__non_existent_build_path_for_test__';
     await expect(loadRequestHandler(nonExistentPath, 'production')).rejects.toThrow(
-      'Failed to load React Router server build',
+      'If the app has not been built, run its `build` task first.',
     );
   });
 });

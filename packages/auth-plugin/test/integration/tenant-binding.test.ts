@@ -13,7 +13,7 @@ describe('M139a real tenant and authentication pipeline', () => {
         RuntimePlugin(),
         MultiTenancyPlugin({ resolver: 'header', required: false }),
         AuthPlugin({
-          jwt: { secret: 'm139a-tenant-secret', tenantClaim: 'tid' },
+          jwt: { secret: 'm139a-tenant-secret-at-least-32-characters', tenantClaim: 'tid' },
           local: {
             verify: (id, secret, request) =>
               Promise.resolve(

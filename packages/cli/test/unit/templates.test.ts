@@ -402,6 +402,8 @@ describe('class-based template', () => {
     // wiring as well would be a second source of truth that `--env-file`
     // silently overrides.
     const withArgs = new Set([
+      'runtime',
+      'http-security-plugin',
       'decorator-plugin',
       'health-plugin',
       'metrics-plugin',

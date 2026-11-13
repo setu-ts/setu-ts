@@ -54,6 +54,31 @@ const NPMRC_MOUNT = '--mount=type=secret,id=npmrc,target=/root/.npmrc';
 const GUARD = `RUN ${NPMRC_MOUNT} if [ -z "$NPM_CONFIG_REGISTRY" ]; then unset NPM_CONFIG_REGISTRY; fi && `;
 
 describe('workspaceContainerFiles', () => {
+  it('requires a separate shell key for each member generated secret', () => {
+    const manifest: WorkspaceManifest = {
+      ...manifestOf([]),
+      members: [
+        { name: 'web', port: 3000, generatedSecrets: ['SESSION_SECRET', 'JWT_SECRET'] },
+        { name: 'admin-web', port: 3001, generatedSecrets: ['SESSION_SECRET'] },
+        { name: 'api', port: 3002 },
+      ],
+    };
+    const compose = contentsOf(
+      workspaceContainerFiles(manifest, brokerSpec('memory')),
+      COMPOSE_FILE,
+    );
+    expect(compose).toContain(
+      "SESSION_SECRET: '${WEB_SESSION_SECRET:?set WEB_SESSION_SECRET — see README, Run the stack}'",
+    );
+    expect(compose).toContain(
+      "JWT_SECRET: '${WEB_JWT_SECRET:?set WEB_JWT_SECRET — see README, Run the stack}'",
+    );
+    expect(compose).toContain(
+      "SESSION_SECRET: '${ADMIN_WEB_SESSION_SECRET:?set ADMIN_WEB_SESSION_SECRET — see README, Run the stack}'",
+    );
+    expect(compose).not.toContain('API_SESSION_SECRET');
+    expect(compose).toContain('path: ../apps/web/.env');
+  });
   it('keeps the Node devtool out of the runtime image without a strip step', () => {
     const manifest: WorkspaceManifest = {
       ...manifestOf([{ name: 'a', port: 3000 }]),

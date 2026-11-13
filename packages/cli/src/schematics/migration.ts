@@ -155,17 +155,17 @@ function runner(runtime: TargetRuntime): string {
   const guard = onDeno
     ? 'import.meta.main'
     : "import.meta.url === pathToFileURL(process.argv[1] ?? '').href";
-  const args = onDeno ? 'Deno.args' : 'process.argv';
   const entry = workers
     ? ''
     : `if (${guard}) {
+  const command = migrationCommand(${onDeno ? 'Deno.args' : 'process.argv.slice(2)'});
   const { createApp } = await import('../../setu.config.ts');
   const app = await createApp();
   try {
     await app.start();
     const database = app.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
     const ledger = createMigrationLedger(database);
-    await runMigrations(${args}.includes('--down') ? 'down' : 'up', { database, ledger });
+    await runMigrations(command.direction, { database, ledger }, command.count);
   } finally {
     await app.stop();
   }
@@ -181,7 +181,8 @@ import { createMigrationLedger } from '@setu-ts/database-plugin';
     : `// Run it with:
 //
 //   ${run}          # apply pending migrations
-//   ${run} --down   # reverse applied migrations, newest first
+//   ${run} --down   # reverse the newest applied migration
+//   ${run} --down=2 # reverse the newest two; --down=all reverses all
 ${runtime === 'node' ? '//\n// After npm run build, use node dist/src/migrations/run.js (or add --down).\n// The commands above run the source in development.\n' : ''}\
 //
 // This boots the whole app without a listening port, so every plugin's start-up
@@ -209,6 +210,22 @@ ${instructions}
 ${entryImports}import type { IDatabaseService, IMigrationLedger } from '@setu-ts/database-plugin';
 import { MIGRATIONS } from './index.ts';
 
+/** Parses rollback forms before loading the application or touching the database. */
+export function migrationCommand(
+  args: readonly string[],
+): { direction: 'up' | 'down'; count?: number } {
+  const down = args.find((arg) => arg === '--down' || arg.startsWith('--down='));
+  if (down === undefined) return { direction: 'up' };
+  if (down === '--down') return { direction: 'down', count: 1 };
+  const value = down.slice('--down='.length);
+  if (value === 'all') return { direction: 'down', count: Infinity };
+  const count = Number(value);
+  if (!/^[1-9][0-9]*$/.test(value) || !Number.isSafeInteger(count)) {
+    throw new Error('Expected --down, --down=<positive integer>, or --down=all.');
+  }
+  return { direction: 'down', count };
+}
+
 /** Services available to each migration. */
 export interface MigrationContext {
   /** The same connection used by the ledger. */
@@ -228,13 +245,16 @@ export interface Migration {
  *
  * @param direction - \`up\` applies oldest first; \`down\` reverses newest first
  * @param options - Database connection and its migration ledger
+ * @param count - Number to reverse, default one; Infinity reverses all
  */
 export async function runMigrations(
   direction: 'up' | 'down',
   { database, ledger }: { readonly database: IDatabaseService; readonly ledger: IMigrationLedger },
+  count = 1,
 ): Promise<void> {
   const applied = new Set(await ledger.applied());
   const ordered = direction === 'up' ? MIGRATIONS : [...MIGRATIONS].reverse();
+  let reversed = 0;
 
   for (const entry of ordered) {
     if (direction === 'up' ? applied.has(entry.name) : !applied.has(entry.name)) continue;
@@ -260,6 +280,7 @@ export async function runMigrations(
       );
     }
     console.log(\`\${direction} \${entry.name}\`);
+    if (direction === 'down' && ++reversed >= count) break;
   }
 }
 

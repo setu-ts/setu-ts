@@ -27,6 +27,7 @@ import type {
   ScheduleOptions,
   ScopeSource,
   SubscribeOptions,
+  WebSocketRouteOptions,
 } from '@setu-ts/common';
 
 import { takePending } from './pending.ts';
@@ -203,7 +204,7 @@ export type IngressMetadata =
       readonly topic: string;
       readonly options?: SubscribeOptions;
     }
-  | { readonly kind: 'gateway'; readonly path: string }
+  | { readonly kind: 'gateway'; readonly path: string; readonly options?: WebSocketRouteOptions }
   | { readonly kind: 'websocket-open'; readonly handler: string }
   | { readonly kind: 'websocket-message'; readonly handler: string }
   | { readonly kind: 'websocket-close'; readonly handler: string }

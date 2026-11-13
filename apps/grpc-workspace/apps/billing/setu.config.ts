@@ -54,7 +54,7 @@ export function createApp(
     plugins: [
       // HTTP/2 beside HTTP/1.1 on one port: orders calls Quote over one reused
       // HTTP/2 connection, while probes and browsers keep HTTP/1.1.
-      RuntimePlugin({ http2: true }),
+      RuntimePlugin({ maxBodyBytes: 1_048_576, http2: true }),
       ConfigPlugin({ envFilePath: '.env', envFileOptional: true }),
       LoggerPlugin({
         requestLogging: true,
@@ -62,7 +62,7 @@ export function createApp(
         transport: 'pino',
       }),
       ValidationPlugin({ errorFormat: 'rfc9457' }),
-      HttpSecurityPlugin(),
+      HttpSecurityPlugin({ requestSize: { maxBodySize: 1_048_576 } }),
       HealthPlugin({ indicators: [...HEALTH_INDICATORS] }),
       MetricsPlugin({ customMetrics: [...CUSTOM_METRICS] }),
       OpenApiPlugin(),

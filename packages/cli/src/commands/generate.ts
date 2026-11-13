@@ -83,6 +83,8 @@ import { cliInvocation } from '../templates/project-files.ts';
  * Everything `runGenerateCommand` reaches the outside world through.
  */
 export interface GenerateDependencies {
+  /** Creates a fresh secret for a new workspace member. */
+  readonly secret?: () => string;
   /** The filesystem to detect plugins on and write generated files through. */
   readonly fs: IFileSystem;
   /** Runs the installed React Router route-tree command. */
@@ -179,6 +181,7 @@ export async function runGenerateCommand(
   // installs nothing) would say nothing about the member being created.
   if (args.positionals[0] === APP_VERB) {
     return await runAppCommand(args, {
+      ...(deps.secret === undefined ? {} : { secret: deps.secret }),
       fs: deps.fs,
       dir,
       log: deps.log,

@@ -66,7 +66,7 @@ export interface DevEntryInput {
  * @returns The file contents
  */
 export function renderDevEntry(input: DevEntryInput, runtime: TargetRuntime): string {
-  return renderEntry(input, true, runtime);
+  return renderEntry(input, true, runtime, false, true, true, true);
 }
 
 /**
@@ -80,6 +80,7 @@ function renderEntry(
   legacy = false,
   startupCatch = !legacy,
   currentWording = true,
+  removeKey = false,
 ): string {
   const portImport =
     input.port === undefined ? '' : `import { ${input.port.symbol} } from '${input.port.from}';\n`;
@@ -107,7 +108,7 @@ ${legacy ? '' : '// Annotated so the never-returning `exit` call narrows the cre
 // change those sites together.
 const sessionId = ${legacy ? `Deno.env.get('${DEVTOOL_SESSION_ID_VARIABLE}')` : `runtime.env['${DEVTOOL_SESSION_ID_VARIABLE}']`};
 const rawSessionKey = ${legacy ? `Deno.env.get('${DEVTOOL_SESSION_KEY_VARIABLE}')` : `runtime.env['${DEVTOOL_SESSION_KEY_VARIABLE}']`};
-
+${removeKey ? `// Remove the launcher key before the application snapshots its environment.\n${runtime === 'deno' ? `Deno.env.delete('${DEVTOOL_SESSION_KEY_VARIABLE}');` : `delete process.env['${DEVTOOL_SESSION_KEY_VARIABLE}'];`}\n` : ''}
 if (sessionId === undefined || /^[0-9a-f]{32}$/.test(sessionId) === false) {
   console.error(
     'setu devtool: ${DEVTOOL_SESSION_ID_VARIABLE} is absent or malformed (expected 32 lowercase' +
@@ -217,6 +218,8 @@ export function devEntryVariants(devtoolPort: number, member = true): readonly s
     renderEntry(input, true, 'node', false, false, false),
     renderEntry(input, true, 'deno', false, true, false),
     renderEntry(input, true, 'node', false, true, false),
+    renderEntry(input, true, 'deno'),
+    renderEntry(input, true, 'node'),
   ];
   return [
     ...variants,

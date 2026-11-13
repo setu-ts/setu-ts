@@ -49,7 +49,8 @@ import {
   renderTestServer,
   renderAppE2e,
 } from '../schematics/test-harness.ts';
-import { frameworkSpecifier } from './framework-specifier.ts';
+import { exactFrameworkSpecifier, frameworkSpecifier } from './framework-specifier.ts';
+import { generateSecret } from './secret.ts';
 import {
   NPM_TOOLING_DEV_DEPENDENCIES,
   NPM_TOOLING_SCRIPTS,
@@ -272,13 +273,13 @@ export function resolveHost(host: TemplateHost, runtime: TargetRuntime): Resolve
  *
  * Each declared variable is written with its development value, so a template
  * whose own source calls `config.getOrThrow(...)` boots immediately after
- * `setu new`. The values are placeholders, never secrets — the file is
- * gitignored precisely so a real one can replace them in place.
+ * `setu new`. Generated secret variables receive fresh random values in this
+ * ignored file; the tracked example contains empty values.
  *
  * @param variables - The variables this template's generated source reads
  * @returns The dotenv file contents
  */
-function envFileContents(variables: readonly EnvVariable[]): string {
+function envFileContents(variables: readonly EnvVariable[], secret: () => string): string {
   // M131a X88-2: the local start scripts read this file into the environment
   // before the process starts, so a value set here wins over a default.
   const header =
@@ -286,7 +287,10 @@ function envFileContents(variables: readonly EnvVariable[]): string {
     '# The local start scripts read it into the environment before the process starts.\n';
   if (variables.length === 0) return header;
   return `${header}# The values below are development placeholders. Replace them before deploying.\n${variables
-    .map((variable) => `\n# ${variable.description}\n${variable.name}=${variable.develop}`)
+    .map(
+      (variable) =>
+        `\n# ${variable.description}\n${variable.name}=${variable.generated === 'secret' ? secret() : variable.develop}`,
+    )
     .join('\n')}\n`;
 }
 
@@ -1305,14 +1309,9 @@ function denoTasks(
   }
 
   return {
-    // `--min-dep-age 0` for the same reason the root manifest carries
-    // `minimumDependencyAge`: this project is pinned to the CLI's own version,
-    // which on release day is younger than Deno's 24-hour policy allows (D1).
-    // The manifest setting covers a bare `deno install`; this task passes its
-    // own flags, so it needs the flag too.
-    install: 'deno install --allow-scripts --min-dep-age 0',
+    install: 'deno install',
     build: `deno task install && ${manifest.npmBuild.denoCommand}`,
-    start: `deno task build && ${start}`,
+    start,
     ...development,
     ...(runtime === 'deno' && manifest.npmBuild.devEntry !== undefined
       ? {
@@ -1340,7 +1339,7 @@ function denoTasks(
 }
 
 /**
- * A generated task's invocation of the CLI: the pinned specifier under Deno, the `setu` bin a
+ * A generated task's invocation of the CLI: a compatible range under Deno, the `setu` bin a
  * member's devDependency installs everywhere else.
  *
  * @param runtime - The project's runtime
@@ -1353,9 +1352,11 @@ export function cliCommand(runtime: TargetRuntime, args: string): string {
     : `setu ${args}`;
 }
 
-/** The pinned CLI half of a generated project's check task. */
+/** The exact CLI half of a generated project's check task. */
 export function cliCheckCommand(runtime: TargetRuntime): string {
-  return cliCommand(runtime, 'check');
+  return runtime === 'deno'
+    ? `deno run -A --no-lock ${exactFrameworkSpecifier('cli')} check`
+    : cliCommand(runtime, 'check');
 }
 
 /** The development entry module the devtool opt-in emits. */
@@ -2018,6 +2019,7 @@ function servedRoutesSection(host: ResolvedHost, runtime: TargetRuntime, port?: 
  * extra source files, and manifest additions
  * @param port - Where the entry gets its port, when it is not the literal
  * default (a workspace member imports it)
+ * @param options - Optional secret generator for ignored local configuration
  * @returns The files to create, relative to the project root
  */
 export function projectFiles(
@@ -2025,8 +2027,11 @@ export function projectFiles(
   runtime: TargetRuntime,
   host: ResolvedHost,
   port?: EntryPort,
+  options?: { readonly secret?: () => string },
 ): readonly GeneratedFile[] {
   const manifest = host.manifest;
+  const generatedVariables =
+    manifest?.envVariables?.filter((variable) => variable.generated === 'secret') ?? [];
   // A broker-selected project ships the Compose file that starts its own
   // backing services; without this line the scaffold cannot complete
   // app.start() until the reader discovers the file on their own.
@@ -2105,17 +2110,15 @@ ${
     ? `
 \`\`\`bash
 docker build -t ${projectName} .
-docker run --rm -p 3000:3000 ${projectName}
-\`\`\`
+docker run --rm -p 3000:3000 ${generatedVariables.map((variable) => `-e ${variable.name} `).join('')}${projectName}
+\`\`\`${generatedVariables.map((variable) => `\n\n${wrapProse(`Set ${variable.name} in the shell to a value of at least 32 characters. The development value in .env is not copied into the image.`)}`).join('')}
 `
     : ''
 }`
   }`;
 
-  // A Deno frontend build creates node_modules too; other Deno projects do not.
-  const gitignore = `${
-    runtime !== 'deno' || host.manifest?.npmBuild !== undefined ? 'node_modules/\n' : ''
-  }coverage/\n${runtime === 'node' ? 'dist/\n' : ''}${runtime === 'cloudflare-workers' ? '.wrangler/\n' : ''}${
+  // Deno's nodeModulesDir: 'auto' creates node_modules for standalone projects too.
+  const gitignore = `node_modules/\ncoverage/\n.env\n.env.*\n!.env.example\n${runtime === 'node' ? 'dist/\n' : ''}${runtime === 'cloudflare-workers' ? '.wrangler/\n' : ''}${
     // A frontend build's output and its typegen directory are generated, so
     // they are ignored like any other build artifact — the generated file used
     // to list only `coverage/` and the env file, which left a minified bundle
@@ -2123,10 +2126,10 @@ docker run --rm -p 3000:3000 ${projectName}
     generatedOutputDirs(manifest)
       .map((dir) => `${dir}/\n`)
       .join('')
-  }${manifest?.envFilePath === undefined ? '' : `${manifest.envFilePath}\n`}${
+  }${manifest?.envFilePath === undefined || manifest.envFilePath === '.env' ? '' : `${manifest.envFilePath}\n!${manifest.envFilePath}.example\n`}${
     // M113d §3.10: on Workers the local variables live in `.dev.vars` (the file
     // `wrangler dev` reads), never committed.
-    runtime === 'cloudflare-workers' ? '.dev.vars\n' : ''
+    runtime === 'cloudflare-workers' ? '.dev.vars\n.dev.vars.*\n!.dev.vars.example\n' : ''
   }`;
 
   const files: GeneratedFile[] = [
@@ -2340,7 +2343,7 @@ describe('application composition', () => {
   if (manifest?.envFilePath !== undefined) {
     files.push({
       path: manifest.envFilePath,
-      contents: envFileContents(manifest.envVariables ?? []),
+      contents: envFileContents(manifest.envVariables ?? [], options?.secret ?? generateSecret),
     });
     files.push({
       path: `${manifest.envFilePath}.example`,
@@ -2356,7 +2359,7 @@ describe('application composition', () => {
     // `.dev.vars` — the file `wrangler dev` reads — and a committed example.
     files.push({
       path: '.dev.vars',
-      contents: envFileContents(manifest.envVariables ?? []),
+      contents: envFileContents(manifest.envVariables ?? [], options?.secret ?? generateSecret),
     });
     files.push({
       path: '.dev.vars.example',

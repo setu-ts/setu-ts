@@ -110,7 +110,7 @@ export function resolveOptions(options?: WebSocketPluginOptions): ResolvedOption
     heartbeatMs,
     heartbeatPayload: options?.heartbeatPayload ?? 'ping',
     idleTimeoutMs,
-    maxMessageBytes: options?.maxMessageBytes ?? 0,
+    maxMessageBytes: options?.maxMessageBytes ?? 1_048_576,
     checkOrigin: resolveCheckOrigin(options?.checkOrigin),
     allowedOrigins: resolveAllowedOrigins(options?.allowedOrigins),
   };
@@ -770,6 +770,7 @@ export class WebSocketService implements IWebSocketService {
     };
 
     return {
+      maxMessageBytes: this.#options.maxMessageBytes,
       onOpen: (transport: IWebSocketTransport): void => {
         settlePending();
         const opened = new WebSocketConnection(

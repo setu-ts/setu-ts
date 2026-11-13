@@ -37,6 +37,26 @@ function manager(values: Record<string, string | Error>): ISecretManager {
 }
 
 describe('resolveSecrets', () => {
+  it('reads configuration before the environment, splitting a rotation list', async () => {
+    const registry = new FakeRegistry();
+    registry.register(CAPABILITIES.CONFIG, { get: () => `${LONG},${OTHER}` });
+    expect(
+      await resolveSecrets({}, { services: registry, env: { SESSION_SECRET: OTHER } }),
+    ).toEqual([LONG, OTHER]);
+    registry.register(CAPABILITIES.SECRETS, manager({ SESSION_SECRET: OTHER }));
+    expect(await resolveSecrets({}, { services: registry, env: {} })).toEqual([OTHER]);
+  });
+
+  it.each(['', undefined, 42])(
+    'falls through an absent/non-string config value %s',
+    async (value) => {
+      const registry = new FakeRegistry();
+      registry.register(CAPABILITIES.CONFIG, { get: () => value });
+      expect(
+        await resolveSecrets({}, { services: registry, env: { SESSION_SECRET: LONG } }),
+      ).toEqual([LONG]);
+    },
+  );
   it('prefers an explicit string secret over everything else', async () => {
     const registry = new FakeRegistry();
     registry.register(CAPABILITIES.SECRETS, manager({ SESSION_SECRET: OTHER }));

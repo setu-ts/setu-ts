@@ -225,7 +225,10 @@ it('M139a redirects a bearer principal on a cookie-only page', async () => {
   const { AuthPlugin } = await import('../../src/index.ts');
   const { CAPABILITIES } = await import('@setu-ts/common');
   const app = createApplication({
-    plugins: [RuntimePlugin(), AuthPlugin({ jwt: { secret: 'm139a-secret' } })],
+    plugins: [
+      RuntimePlugin(),
+      AuthPlugin({ jwt: { secret: 'm139a-secret-at-least-32-characters' } }),
+    ],
   });
   app.router.get('/cookie-page', {
     middleware: [requireAuth({ credentials: 'cookie', signInPage: '/login' })],

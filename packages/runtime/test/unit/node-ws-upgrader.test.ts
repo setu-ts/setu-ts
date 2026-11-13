@@ -279,6 +279,42 @@ describe('NodeUpgradeCoordinator', () => {
     expect(handshakes).toHaveLength(2);
   });
 
+  it('keeps one transport server per distinct message limit and closes every server', async () => {
+    const limits: (number | undefined)[] = [];
+    let closes = 0;
+    const coordinator = new NodeUpgradeCoordinator({
+      WebSocketServer: class implements WsServerLike {
+        constructor(options: { maxPayload?: number }) {
+          limits.push(options.maxPayload);
+        }
+        handleUpgrade(
+          _request: unknown,
+          _socket: unknown,
+          _head: unknown,
+          callback: (ws: WsSocketLike) => void,
+        ): void {
+          callback(fakeWsSocket());
+        }
+        close(): void {
+          closes++;
+        }
+      },
+    });
+    for (const maxMessageBytes of [1_048_576, 64, 1_048_576, 0, undefined]) {
+      const sink = {
+        ...recordingSink(),
+        ...(maxMessageBytes === undefined ? {} : { maxMessageBytes }),
+      };
+      await coordinator.handshake(incoming, {}, new Uint8Array(), sink);
+    }
+    expect(limits).toEqual([1_048_576, 64, 0, undefined]);
+    coordinator.close();
+    expect(closes).toBe(4);
+    expect(coordinator.hasServer).toBe(false);
+    coordinator.close();
+    expect(closes).toBe(4);
+  });
+
   it('hands the negotiated subprotocol to ws through handleProtocols', async () => {
     const { module, constructedWith } = fakeModule();
     const coordinator = new NodeUpgradeCoordinator(module);

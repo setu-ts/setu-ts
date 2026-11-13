@@ -45,8 +45,8 @@ reason). In short:
   `setu generate plugin billing` wrote `src/plugins/billing.plugin.ts`, which now implements `Quote`
   and adds it through `IGrpcService.addService`, depending on the gRPC capability: the CLI owns
   `GrpcPlugin` itself, in `src/transport/index.ts`. The plugins barrel registers it. billing's
-  `setu.config.ts` differs from the generated one in one line: `RuntimePlugin({ http2: true })`, so
-  billing serves HTTP/2 and HTTP/1.1 on its one port.
+  `setu.config.ts` enables `http2: true` beside the generated 1 MiB body bound, so billing serves
+  HTTP/2 and HTTP/1.1 on its one port.
 - **orders** is an HTTP member that depends on billing, so its CLI-owned `src/transport/index.ts`
   registers `GrpcPlugin({ serve: false, clients: { billing: { basePath: '/grpc' } } })` — the
   plugin's client, serving nothing — and its `package.json` declares the plugin and Connect's client

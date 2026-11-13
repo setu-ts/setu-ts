@@ -1,8 +1,7 @@
 # @setu-ts/session-plugin — cookie sessions and form CSRF
 
 **Add it:** `setu add session` prints the registration for `setu.config.ts`; use
-`SessionPlugin({ secret: process.env.SESSION_SECRET!, csrf: {} })`. It provides
-`CAPABILITIES.SESSION` (`ISessionService`).
+`SessionPlugin({ csrf: {} })`. It provides `CAPABILITIES.SESSION` (`ISessionService`).
 
 ## Save and read a shopping cart
 
@@ -47,10 +46,12 @@ export function registerCartFormRoutes(router: IRouterApi): void {
 - Missing session keys return `undefined`. Nested mutations need another `set` to mark a change.
 - `csrf: {}` enables verification: the default field is `_csrf`, the header is `x-csrf-token`, and
   safe methods are skipped. The helper follows the configured field name.
+- Secrets resolve from the option, secrets manager, configuration, then the environment.
 - Secrets need at least 32 characters; an array rotates secrets, with index 0 sealing new cookies.
 
 ## Other options
 
 - `store: 'memory'`, `'cache'` or an `ISessionStore` enables server-side payload storage.
-- `regenerate` rotates the session id after a privilege change; `destroy` logs the session out.
+- `regenerate` rotates the session id and clears the form-CSRF token; fetch a fresh token after
+  sign-in or MFA promotion. Other data, including the tenant binding, stays. `destroy` logs out.
 - `rolling` renews expiry; `tenantBinding` defaults to true and refuses a tenant mismatch with 403.

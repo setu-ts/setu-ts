@@ -1,3 +1,4 @@
+import { generateSecret } from '../../src/templates/secret.ts';
 /**
  * The `--style` flag, end to end through `runNewCommand`.
  *
@@ -31,6 +32,7 @@ function harness(seed: Readonly<Record<string, string>> = {}): Harness {
     logText: () => log.text(),
     run: (argv) =>
       runNewCommand(parseArgs(argv), {
+        secret: generateSecret,
         fs,
         cwd: '/work',
         log: log.sink,

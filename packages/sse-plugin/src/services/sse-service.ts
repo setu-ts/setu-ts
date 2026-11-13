@@ -65,7 +65,8 @@ export class SseService implements IService {
     backplane?: IRealtimeBackplane,
     logger?: ILogger,
   ) {
-    this.#heartbeatMs = options?.heartbeatMs;
+    const heartbeatMs = options?.heartbeatMs ?? 30_000;
+    this.#heartbeatMs = heartbeatMs === 0 ? undefined : heartbeatMs;
     this.#retryMs = options?.retryMs;
     this.#runtime = runtime;
     this.#backplane = backplane;

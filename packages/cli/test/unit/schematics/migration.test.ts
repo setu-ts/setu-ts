@@ -133,7 +133,7 @@ describe('the migration runner, per target', () => {
     expect(runner).not.toContain('deno run -A');
     expect(runner).toContain('Grant the same permission flags as your `start` task');
     expect(runner).toContain('if (import.meta.main) {');
-    expect(runner).toContain("Deno.args.includes('--down')");
+    expect(runner).toContain('migrationCommand(Deno.args)');
     expect(runner).not.toContain('node:url');
     expect(runner).not.toContain('process.');
   });
@@ -152,7 +152,7 @@ describe('the migration runner, per target', () => {
       expect(runner).toContain(
         "if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {",
       );
-      expect(runner).toContain("process.argv.includes('--down')");
+      expect(runner).toContain('migrationCommand(process.argv.slice(2))');
       expect(runner).not.toContain('Deno.');
       expect(runner).not.toContain('import.meta.main');
     });
@@ -205,8 +205,20 @@ export const MIGRATIONS = ['one', 'two', 'three'].map((name) => ({ name, migrati
         `${directory}/probe.ts`,
         `
 import assert from 'node:assert/strict';
-import { runMigrations } from './run.ts';
+import { runMigrations, migrationCommand } from './run.ts';
 import { events, failNext } from './index.ts';
+for (const [args, expected] of [[[], []], [['--down'], ['three']], [['--down=2'], ['three', 'two']], [['--down=all'], ['three', 'two', 'one']]]) {
+ const command = migrationCommand(args);
+ if (!args.length) { assert.equal(command.direction, 'up'); continue; }
+ const removed: string[] = [];
+ await runMigrations(command.direction, { database: {}, ledger: {
+  async applied() { return ['one', 'two', 'three']; },
+  async record() {}, async remove(name: string) { removed.push(name); },
+ } }, command.count);
+ assert.deepEqual(removed, expected);
+}
+for (const arg of ['--down=0', '--down=x', '--down=', '--down=-1', '--down=1.5']) assert.throws(() => migrationCommand([arg]), /Expected --down/);
+events.length = 0;
 const names = new Set(['one']);
 const ledger = {
   async applied() { return [...names]; },
@@ -222,10 +234,10 @@ assert.deepEqual(events, ['up two', 'record two', 'up three', 'record three']);
 events.length = 0;
 await runMigrations('up', options);
 assert.deepEqual(events, []);
-await runMigrations('down', options);
+await runMigrations('down', options, Infinity);
 assert.deepEqual(events, ['down three', 'remove three', 'down two', 'remove two', 'down one', 'remove one']);
 events.length = 0;
-await runMigrations('down', options);
+await runMigrations('down', options, Infinity);
 assert.deepEqual(events, []);
 failNext();
 await assert.rejects(runMigrations('up', options), (error: Error) => {

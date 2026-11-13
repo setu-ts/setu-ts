@@ -315,6 +315,39 @@ describe('node-redis CLI', () => {
           '`--build-arg`, `--network`, and `--pull-secret <name>` (repeatable; an existing registry\nSecret in the namespace).',
         );
       const file = path.slice(path.indexOf('/work/') + '/work/app/'.length);
+      // M140a deliberately changes only the body bound, local ignores, and Deno cooldown/check pin.
+      if (file.endsWith('setu.config.ts')) {
+        contents = contents
+          .replaceAll('RuntimePlugin()', 'RuntimePlugin({ maxBodyBytes: 1_048_576 })')
+          .replaceAll(
+            'HttpSecurityPlugin()',
+            'HttpSecurityPlugin({ requestSize: { maxBodySize: 1_048_576 } })',
+          );
+      }
+      if (
+        file.endsWith('.gitignore') &&
+        !path.includes('/--workspace/work/app/.gitignore') &&
+        contents.split('\n').includes('coverage/')
+      ) {
+        const rest = contents
+          .trimEnd()
+          .split('\n')
+          .filter((line) => !['node_modules/', 'coverage/', '.env'].includes(line));
+        contents = `node_modules/\ncoverage/\n.env\n.env.*\n!.env.example\n${rest.length === 0 ? '' : `${rest.join('\n')}\n`}`;
+      }
+      if (runtime === 'deno' && file.endsWith('deno.json')) {
+        const manifest = JSON.parse(contents);
+        if (manifest.minimumDependencyAge === 0) {
+          manifest.minimumDependencyAge = { age: 'P1D', exclude: ['npm:@setu-ts/*'] };
+          manifest['//minimumDependencyAge'] =
+            'setu pins this project to the CLI version that generated it. Deno refuses a dependency published in the last 24 hours. Excluding only @setu-ts/* permits release-day framework installs while third-party dependencies keep the one-day cooldown.';
+        }
+        contents = JSON.stringify(manifest, null, 2) + '\n';
+        contents = contents.replaceAll(
+          `npm:@setu-ts/cli@^${VERSION} check`,
+          `npm:@setu-ts/cli@${VERSION} check`,
+        );
+      }
       expected[path] = (
         await formatForTarget([{ path: file, contents }], runtime, '/work/app', () => {})
       )[0]!.contents;

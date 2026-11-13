@@ -89,7 +89,7 @@ const app = createApplication({
   plugins: buildRestPlugins({
     database: { type: 'memory' }, // provide options object; omit to exclude
     auth: {
-      jwt: { secret: 'test-secret' },
+      jwt: { secret: 'test-secret-at-least-32-characters' },
       rbac: { roles: {} },
     },
   }),

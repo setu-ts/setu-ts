@@ -43,6 +43,7 @@ import {
   MEMBERS_DIR,
   renderWorkspaceManifest,
   WORKSPACE_MANIFEST,
+  workspaceSecretVariables,
   type WorkspaceManifest,
   type WorkspaceMember,
 } from './manifest.ts';
@@ -733,7 +734,12 @@ export async function planTransportChange(
     );
     files.push(...workspaceK8sFiles(next, after).map((file) => ({ ...file, managed: true })));
     const readme = await readText(fs, joinPath(dir, 'README.md'));
-    const section = renderTransportSection(after, profile, next.brokerUrl);
+    const section = renderTransportSection(
+      after,
+      profile,
+      next.brokerUrl,
+      workspaceSecretVariables(next.members),
+    );
     const start = readme?.indexOf(TRANSPORT_README_MARKERS.start) ?? -1;
     const end = readme?.indexOf(TRANSPORT_README_MARKERS.end) ?? -1;
     if (readme !== undefined && start >= 0 && end > start) {

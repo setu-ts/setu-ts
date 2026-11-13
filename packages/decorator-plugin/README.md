@@ -548,6 +548,11 @@ checked through the permissions it bundles). They run after `@Roles`/`@Permissio
 Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.
 
+`@Gateway(path, options)` accepts WebSocket route options, including handshake guards, protocols and
+heartbeat participation. Use `@Gateway('/ws', { guards: [guard] })` to authorize an upgrade. HTTP
+`@Roles`, `@Permissions` and method-level `@Public` declarations on gateways fail registration; use
+handshake guards instead. `@UseGuards` remains invalid on non-HTTP ingress.
+
 ## Full API
 
 Every export and option is documented in

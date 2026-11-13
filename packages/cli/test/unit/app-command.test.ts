@@ -2,6 +2,26 @@ import { describe, expect, it, vi } from 'vitest';
 import * as templates from '../../src/templates/registry.ts';
 import { FULL_STACK_TEMPLATE } from '../../src/templates/full-stack.ts';
 
+it('records generated secrets only for the template that generates them', async () => {
+  const h = harness([], 3000, 'memory', undefined, 'node');
+  await h.fs.writeFile(
+    '/ws/README.md',
+    new TextEncoder().encode(
+      'custom intro\n<!-- setu:transport -->\nold transport\n<!-- /setu:transport -->\ncustom footer',
+    ),
+  );
+  expect(await h.run(['app', 'web', '--template', 'full-stack']), h.err.text()).toBe(0);
+  expect(await h.run(['app', 'api', '--template', 'rest']), h.err.text()).toBe(0);
+  const members = JSON.parse(h.fs.read('/ws/setu.workspace.json')).members;
+  expect(members[0].generatedSecrets).toEqual(['SESSION_SECRET']);
+  expect(members[1].generatedSecrets).toBeUndefined();
+  expect(h.fs.read('/ws/docker/compose.yaml')).toContain('WEB_SESSION_SECRET:?');
+  const readme = h.fs.read('/ws/README.md');
+  expect(readme).toContain('export WEB_SESSION_SECRET="$(openssl rand -hex 32)"');
+  expect(readme).toContain('custom intro');
+  expect(readme).toContain('custom footer');
+});
+
 it('L3 refuses Workers workspace members without allocating ports or printing edit notes', async () => {
   const h = harness([], 3000, 'memory', undefined, 'cloudflare-workers');
   const before = h.fs.read('/ws/setu.workspace.json');

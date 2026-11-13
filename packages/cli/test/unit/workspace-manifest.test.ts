@@ -25,6 +25,49 @@ function baseManifest(members: WorkspaceManifest['members']): WorkspaceManifest 
   return { version: 2, basePort: 3000, broker: 'memory', runtime: 'deno', members };
 }
 
+describe('generatedSecrets in the workspace manifest', () => {
+  it('round-trips valid names and drops absent or empty lists', async () => {
+    for (const generatedSecrets of [undefined, [], ['SESSION_SECRET', 'JWT_SECRET']]) {
+      const member = {
+        name: 'web',
+        port: 3000,
+        ...(generatedSecrets === undefined ? {} : { generatedSecrets }),
+      };
+      const read = await readWorkspaceManifest(
+        fsWith({
+          '/ws/setu.workspace.json': renderWorkspaceManifest(baseManifest([member])),
+        }),
+        '/ws',
+      );
+      expect(read.ok).toBe(true);
+      if (read.ok)
+        expect(read.manifest.members[0]?.generatedSecrets).toEqual(
+          generatedSecrets?.length ? generatedSecrets : undefined,
+        );
+    }
+  });
+
+  it.each([null, 'JWT_SECRET', [42], ['lower_case'], [''], ['_SECRET'], ['JWT-SECRET']])(
+    'refuses malformed generated secrets %j',
+    async (generatedSecrets) => {
+      const source = {
+        ...baseManifest([]),
+        members: [{ name: 'web', port: 3000, generatedSecrets }],
+      };
+      expect(
+        (
+          await readWorkspaceManifest(
+            fsWith({
+              '/ws/setu.workspace.json': JSON.stringify(source),
+            }),
+            '/ws',
+          )
+        ).ok,
+      ).toBe(false);
+    },
+  );
+});
+
 it('X87-2 X87-6 round-trips and validates development ports without dropping fields', async () => {
   const manifest = {
     ...baseManifest([{ name: 'web', port: 3000, inspectPort: 5100, vitePort: 5101 }]),

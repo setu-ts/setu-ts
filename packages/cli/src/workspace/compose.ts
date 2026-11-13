@@ -38,7 +38,7 @@ import { TELEMETRY_PRELOAD_PATH } from '../templates/telemetry-preload.ts';
 import type { GeneratedFile } from '../utils/file-writer.ts';
 import { hostVariable } from './discovery-module.ts';
 import { LIBS_DIR } from './library.ts';
-import { MEMBERS_DIR, type WorkspaceManifest } from './manifest.ts';
+import { MEMBERS_DIR, memberSecretVariable, type WorkspaceManifest } from './manifest.ts';
 import { workspaceProfile, type WorkspaceRuntimeProfile } from './runtime-profile.ts';
 import type { BrokerSpec } from './transport.ts';
 
@@ -414,6 +414,7 @@ export function memberEnvironment(
  * @param port - The port it binds
  * @param siblings - Every other member, whose host variables this service sets
  * @param transport - The workspace's transport, read for its backing service
+ * @param generatedSecrets - Secret names requiring member-specific shell values
  * @returns The service definition, indented for Compose's `services:` key
  */
 function memberService(
@@ -421,12 +422,21 @@ function memberService(
   port: number,
   siblings: readonly WorkspaceManifest['members'][number][],
   transport: BrokerSpec,
+  generatedSecrets: readonly string[],
 ): string {
   const backing = transport.compose;
 
   // Each sibling by SERVICE NAME. Without these the member's generated map falls
   // back to loopback, which inside a container is the member itself.
-  const envLines = Object.entries(memberEnvironment(siblings, transport))
+  const envLines = Object.entries({
+    ...memberEnvironment(siblings, transport),
+    ...Object.fromEntries(
+      generatedSecrets.map((variable) => {
+        const shell = memberSecretVariable(name, variable);
+        return [variable, `\${${shell}:?set ${shell} — see README, Run the stack}`] as const;
+      }),
+    ),
+  })
     .map(([key, value]) => `      ${key}: '${value}'`)
     .join('\n');
 
@@ -516,6 +526,7 @@ export function workspaceContainerFiles(
         member.port,
         members.filter((other) => other.name !== member.name),
         transport,
+        member.generatedSecrets ?? [],
       ),
     )
     .join('\n');

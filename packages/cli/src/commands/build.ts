@@ -153,7 +153,7 @@ export async function runBuildCommand(args: ParsedArgs, deps: IBuildDependencies
     if (runtime !== 'node') {
       const instead = {
         bun: 'bun run main.ts',
-        deno: 'deno task start',
+        deno: 'deno task start (after deno task build in a full-stack project)',
         'cloudflare-workers': 'wrangler deploy',
       };
       deps.error(`setu build supports Node projects; for ${runtime}, run ${instead[runtime]}.`);

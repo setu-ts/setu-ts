@@ -13,6 +13,7 @@
  * @module
  */
 import type { ISession, SessionData } from '@setu-ts/common';
+import { CSRF_SESSION_KEY } from '../csrf/token.ts';
 
 /** The serialized session payload carried in the cookie. */
 export interface SessionSnapshot {
@@ -178,6 +179,7 @@ export class Session implements ISession {
   }
 
   regenerate(): void {
+    this.delete(CSRF_SESSION_KEY);
     // Captured only on the first call, so two regenerations in one request
     // still identify the id that is actually persisted server-side.
     if (this.#previousId === null) {

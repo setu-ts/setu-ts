@@ -54,6 +54,70 @@ import {
 const runtime = createNodeRuntimeServices();
 const fs: IFileSystem = runtime.fs!;
 
+it(
+  'setu add auth then the project own tests boot with JWT_SECRET from config',
+  { timeout: 900_000 },
+  async () => {
+    expect(await run(['new', 'auth-app', '--template', 'rest', '--runtime', 'node'])).toBe(0);
+    const project = `${root}/auth-app`;
+    const output: string[] = [];
+    expect(
+      await runCli(['add', 'auth'], {
+        fs,
+        cwd: project,
+        now: () => runtime.now(),
+        log: (line) => output.push(line),
+        error: (line) => output.push(line),
+      }),
+      output.join('\n'),
+    ).toBe(0);
+    const hint = 'AuthPlugin({ jwt: {}, rbac: { roles: {} } })';
+    expect(output.join('\n')).toContain(hint);
+    const configPath = `${project}/setu.config.ts`;
+    const config = await nodeFs.readFile(configPath, 'utf8');
+    expect(config).toContain('plugins: [');
+    // Auth requires application choices, so apply the exact printed registration.
+    await nodeFs.writeFile(
+      configPath,
+      "import { AuthPlugin } from '@setu-ts/auth-plugin';\n" +
+        config.replace('plugins: [', `plugins: [\n      ${hint},`),
+    );
+    await nodeFs.writeFile(
+      `${project}/test/auth-config.test.ts`,
+      `import { it } from 'node:test';
+import assert from 'node:assert/strict';
+import { CAPABILITIES } from '@setu-ts/common';
+import { createApp } from '../setu.config.ts';
+it('boots JWT from dotenv configuration without process JWT_SECRET', async () => {
+  assert.equal(process.env.JWT_SECRET, undefined);
+  const app = createApp();
+  await app.start();
+  try {
+    const jwt = app.services.get(CAPABILITIES.JWT);
+    const token = await jwt.sign({ sub: 'config-user' });
+    assert.equal((await jwt.verify(token)).sub, 'config-user');
+  } finally { await app.stop(); }
+});
+`,
+    );
+    const overlay = await startOverlay();
+    try {
+      const installed = await npmInstall(project, overlay);
+      expect(installed.code, installed.output).toBe(0);
+      const env: Record<string, string> = {};
+      for (const [key, value] of Object.entries(process.env))
+        if (key !== 'JWT_SECRET' && value !== undefined) env[key] = value;
+      const tested = await runProcess('npm', { args: ['test'], cwd: project, clearEnv: true, env });
+      const text =
+        new TextDecoder().decode(tested.stdout) + new TextDecoder().decode(tested.stderr);
+      expect(tested.code, text).toBe(0);
+      expect(text).toContain('boots JWT from dotenv configuration without process JWT_SECRET');
+    } finally {
+      await overlay.close();
+    }
+  },
+);
+
 // `class-based` runs the same request logger behind DI and decorator dispatch,
 // so it gets the same one-line proof rather than relying on `rest`'s.
 for (const template of ['rest', 'class-based'] as const) {
@@ -63,6 +127,21 @@ for (const template of ['rest', 'class-based'] as const) {
     async () => {
       expect(await run(['new', 'pino-app', '--template', template, '--runtime', 'node'])).toBe(0);
       const project = `${root}/pino-app`;
+      if (template === 'rest') {
+        const configPath = `${project}/setu.config.ts`;
+        const config = await nodeFs.readFile(configPath, 'utf8');
+        await nodeFs.writeFile(
+          configPath,
+          config.replace(
+            '  return app;',
+            `  app.router.post('/body-probe', async (ctx) => {
+    const body = await ctx.request.text();
+    return ctx.response.text(String(body.length));
+  });
+  return app;`,
+          ),
+        );
+      }
       const overlay = await startOverlay();
       try {
         const installed = await npmInstall(project, overlay);
@@ -72,6 +151,33 @@ for (const template of ['rest', 'class-based'] as const) {
         const built = await npmRun(project, 'build');
         expect(built.code, built.output).toBe(0);
         const result = await withNodeServer(project, async (origin, output) => {
+          if (template === 'rest') {
+            for (const chunked of [false, true]) {
+              const body = 'x'.repeat(1_048_577);
+              const response = await fetch(`${origin}/body-probe`, {
+                method: 'POST',
+                ...(chunked
+                  ? {
+                      body: new ReadableStream({
+                        start(controller) {
+                          controller.enqueue(new TextEncoder().encode(body));
+                          controller.close();
+                        },
+                      }),
+                      duplex: 'half',
+                    }
+                  : { body }),
+              } as RequestInit);
+              expect(response.status).toBe(413);
+              await response.body?.cancel();
+            }
+            const within = await fetch(`${origin}/body-probe`, {
+              method: 'POST',
+              body: 'x'.repeat(1_048_576),
+            });
+            expect(within.status).toBe(200);
+            expect(await within.text()).toBe('1048576');
+          }
           const response = await fetch(`${origin}/greetings/log-probe`);
           await response.body?.cancel();
           // Pino's default stdout destination writes asynchronously, and the
@@ -141,6 +247,67 @@ for (const target of ['deno', 'bun'] as const) {
         expect(broken.code, broken.output).not.toBe(0);
         expect(broken.output).toContain('setu.E003');
         expect(broken.output).toContain('greeting.controller.ts');
+      } finally {
+        await overlay.close();
+      }
+    },
+  );
+}
+
+for (const target of ['node', 'deno'] as const) {
+  it(
+    `removes the devtool key before ${target} config and app runtime are created`,
+    { timeout: 900_000 },
+    async () => {
+      expect(
+        await run([
+          'new',
+          'key-probe',
+          '--template',
+          'rest',
+          '--runtime',
+          target,
+          '--devtool',
+          '--devtool-port',
+          String(await unusedPort()),
+        ]),
+      ).toBe(0);
+      const project = `${root}/key-probe`;
+      const entryPath = `${project}/main.dev.ts`;
+      await nodeFs.appendFile(
+        entryPath,
+        `
+const appConfig = app.services.get(CAPABILITIES.CONFIG);
+const appRuntime = app.services.get(CAPABILITIES.RUNTIME);
+if (appConfig.get('SETU_DEVTOOL_SESSION_KEY') !== undefined || appRuntime.env['SETU_DEVTOOL_SESSION_KEY'] !== undefined) {
+  throw new Error('The launcher key reached application configuration');
+}
+console.log('M140a key absent from config and application environment');
+await app.stop();
+`,
+      );
+      const overlay = await startOverlay();
+      try {
+        const installed = await runIn(
+          project,
+          target === 'node' ? 'npm' : 'deno',
+          ['install'],
+          overlay,
+        );
+        expect(installed.code, installed.output).toBe(0);
+        const probe = await runIn(
+          project,
+          target === 'node' ? 'npm' : 'deno',
+          [target === 'node' ? 'run' : 'task', 'dev'],
+          overlay,
+          {
+            PORT: String(await unusedPort()),
+            SETU_DEVTOOL_SESSION_ID: 'a'.repeat(32),
+            SETU_DEVTOOL_SESSION_KEY: 'b'.repeat(64),
+          },
+        );
+        expect(probe.code, probe.output).toBe(0);
+        expect(probe.output).toContain('M140a key absent from config and application environment');
       } finally {
         await overlay.close();
       }
@@ -1021,11 +1188,10 @@ describe('a scaffolded project configures itself from a dotenv file', () => {
 
     expect((await nodeFs.stat(`${project}/.env`)).isFile()).toBe(true);
     expect((await nodeFs.stat(`${project}/.env.example`)).isFile()).toBe(true);
-    // The example is the committed one, so the ignore rule must name only the
-    // real file — an ignore of `.env*` would take the example with it.
+    // Local variants are ignored; the explicit negation keeps the tracked example.
     const gitignore = await nodeFs.readFile(`${project}/.gitignore`, 'utf8');
     expect(gitignore).toContain('.env\n');
-    expect(gitignore).not.toContain('.env.example');
+    expect(gitignore).toContain('!.env.example');
   });
 
   it('boots with no dotenv file at all — the state of every fresh clone', async () => {
@@ -1176,7 +1342,7 @@ describe('a scaffolded project can install the versions it was pinned to', () =>
    * @param project - The project directory
    * @param value - The value to set, or null to remove the key entirely
    */
-  async function setDependencyAge(project: string, value: number | null): Promise<void> {
+  async function setDependencyAge(project: string, value: unknown): Promise<void> {
     const path = `${project}/deno.json`;
     const manifest = JSON.parse(await nodeFs.readFile(path, 'utf8')) as Record<string, unknown>;
     delete manifest['minimumDependencyAge'];
@@ -1192,8 +1358,8 @@ describe('a scaffolded project can install the versions it was pinned to', () =>
     // The overlay stamps the tree's own packs as published NOW, and the policy is
     // raised to ten years, which makes every version "too new" — reproducing the
     // refusal deterministically and forever. The scaffold's own
-    // `minimumDependencyAge: 0` is then the only thing that can let the install
-    // through. The pinned version is the tree's own, which the overlay always
+    // scoped framework exclusion is then what lets the install through, while
+    // the one-day third-party cooldown stays on. The pinned version is the tree's own, which the overlay always
     // serves, so a release bump can never deadlock this test against the
     // publish that would satisfy it.
     expect(await run(['new', 'shop', '--runtime', 'deno'])).toBe(0);
@@ -1206,7 +1372,7 @@ describe('a scaffolded project can install the versions it was pinned to', () =>
     const emitted = JSON.parse(await nodeFs.readFile(`${project}/deno.json`, 'utf8')) as {
       minimumDependencyAge?: unknown;
     };
-    expect(emitted.minimumDependencyAge).toBe(0);
+    expect(emitted.minimumDependencyAge).toEqual({ age: 'P1D', exclude: ['npm:@setu-ts/*'] });
     expect(await nodeFs.readFile(`${project}/deno.json`, 'utf8')).toContain(
       'npm:@setu-ts/kernel@^',
     );
@@ -1228,7 +1394,7 @@ describe('a scaffolded project can install the versions it was pinned to', () =>
 
       // What the CLI actually emits. Expected to SUCCEED, through the retrying
       // runner, while a real refusal is still returned on its first attempt.
-      await setDependencyAge(project, 0);
+      await setDependencyAge(project, emitted.minimumDependencyAge);
       const allowed = await denoRunRetry(project, ['install'], env);
       expect(allowed.code, allowed.output).toBe(0);
       expect(allowed.output).not.toContain('minimum dependency age');

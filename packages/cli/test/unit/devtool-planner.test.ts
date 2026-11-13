@@ -1,3 +1,4 @@
+import { generateSecret } from '../../src/templates/secret.ts';
 import { describe, expect, it } from 'vitest';
 
 import { createFakeFs, createRecorder, type FakeFs } from '../fixtures/fake-fs.ts';
@@ -70,7 +71,12 @@ function harnessOver(fs: FakeFs): Harness {
     fs,
     out,
     err,
-    runNew: (argv, cwd = '/ws') => runNewCommand(parseArgs(argv), { ...deps, cwd }),
+    runNew: (argv, cwd = '/ws') =>
+      runNewCommand(parseArgs(argv), {
+        secret: generateSecret,
+        ...deps,
+        cwd,
+      }),
     runApp: (argv) => runAppCommand(parseArgs(argv), { ...deps, dir: '/ws' }),
     runDevtool: (argv, cwd = '/ws') => runDevtoolCommand(parseArgs(argv), { ...deps, cwd }),
   };

@@ -528,6 +528,26 @@ regenerated for every member:
 | `docker/compose.yaml` | Every member plus the transport's broker, each member on its allocated port                            |
 | `k8s/members.yaml`    | A Deployment and a Service per member                                                                  |
 
+Each member's optional `generatedSecrets` in `setu.workspace.json` records secret variable names
+such as `SESSION_SECRET` and `JWT_SECRET`. `generate app` records a template's generated secrets;
+`setu add auth` and `setu add session` append their names once and refresh Compose and the README's
+transport section. Adoption records no generated secrets. Names must match `^[A-Z][A-Z0-9_]*$`;
+malformed entries refuse the member, while absent or empty lists are omitted.
+
+Compose requires a separate shell value per member, overriding its development `.env`. For a member
+named `web` with both secrets, export its required keys before starting the stack:
+
+```bash
+export WEB_SESSION_SECRET="$(openssl rand -hex 32)"
+export WEB_JWT_SECRET="$(openssl rand -hex 32)"
+docker compose -f docker/compose.yaml up --build
+```
+
+The member still reads `SESSION_SECRET` and `JWT_SECRET`. Shell names prefix the upper-cased member
+name with hyphens changed to underscores, so `admin-web` uses `ADMIN_WEB_SESSION_SECRET`. Compose's
+`:?` interpolation refuses to start until every required shell variable is set. The generated README
+lists the exact export lines, including workspaces whose broker needs no Compose service.
+
 ```bash
 docker compose -f docker/compose.yaml up --build
 NAMESPACE=acme WORKSPACE=acme envsubst < k8s/members.yaml | kubectl apply -f -

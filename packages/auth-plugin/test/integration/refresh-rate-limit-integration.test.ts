@@ -90,7 +90,7 @@ function registerAuthPlugin(
 
   AuthPlugin({
     jwt: {
-      secret: 'integration-secret',
+      secret: 'integration-secret-at-least-32-characters',
       ...(accessTokenRevocationStore === undefined ? {} : { accessTokenRevocationStore }),
     },
     rbac: { roles: { admin: { permissions: ['*'] } } },

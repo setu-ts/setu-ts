@@ -134,6 +134,11 @@ export interface WorkspaceMember {
   /** The port this member binds, and the port its siblings dial. */
   readonly port: number;
   /**
+   * Generated secret variable names required from the shell by Compose.
+   * @since 0.13.0
+   */
+  readonly generatedSecrets?: readonly string[];
+  /**
    * The IPv4 loopback port this member's local diagnostics connector listens
    * on, when the devtool opt-in recorded one.
    *
@@ -194,6 +199,18 @@ export interface WorkspaceMember {
    * reach each other over HTTP — unlike two members on different brokers.
    */
   readonly rpc?: 'grpc';
+}
+
+/** Names the shell variable supplying one member's own secret. */
+export function memberSecretVariable(member: string, variable: string): string {
+  return `${member.toUpperCase().replaceAll('-', '_')}_${variable}`;
+}
+
+/** Lists the member-specific shell variables the workspace README must export. */
+export function workspaceSecretVariables(members: readonly WorkspaceMember[]): readonly string[] {
+  return members.flatMap((member) =>
+    (member.generatedSecrets ?? []).map((variable) => memberSecretVariable(member.name, variable)),
+  );
 }
 
 /** A workspace's CLI-owned record of itself. */
@@ -344,8 +361,17 @@ function toMember(value: unknown): WorkspaceMember | undefined {
   const name = record['name'];
   const port = record['port'];
   const dependsOn = record['dependsOn'];
+  const generatedSecrets = record['generatedSecrets'];
   if (typeof name !== 'string' || !isMemberName(name)) return undefined;
   if (typeof port !== 'number') return undefined;
+  if (
+    generatedSecrets !== undefined &&
+    (!Array.isArray(generatedSecrets) ||
+      !generatedSecrets.every(
+        (entry) => typeof entry === 'string' && /^[A-Z][A-Z0-9_]*$/.test(entry),
+      ))
+  )
+    return undefined;
   if (
     dependsOn !== undefined &&
     (!Array.isArray(dependsOn) ||
@@ -380,6 +406,9 @@ function toMember(value: unknown): WorkspaceMember | undefined {
   return {
     name,
     port,
+    ...(generatedSecrets === undefined || generatedSecrets.length === 0
+      ? {}
+      : { generatedSecrets }),
     ...(devtoolPort === undefined ? {} : { devtoolPort }),
     ...(dependsOn === undefined ? {} : { dependsOn }),
     ...(typeof healthProbes === 'boolean' ? { healthProbes } : {}),

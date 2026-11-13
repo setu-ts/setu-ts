@@ -707,9 +707,10 @@ trust it already holds over the schema.
 
 `setu generate migration` maintains `run.ts` and `index.ts` and exports `MIGRATION_NAMES` from the
 barrel. Migrations receive `{ database }`. The runner applies only pending names oldest first;
-`--down` reverses only applied names newest first. It writes/removes the row after each successful
-change, outside any transaction. A crash between a change and its ledger write re-runs that change:
-make migrations idempotent. A failure stops the run and names the migration.
+`--down` reverses the newest applied name, `--down=<n>` the newest n, and `--down=all` every one,
+newest first; any other value exits before the database is touched. It writes/removes the row after
+each successful change, outside any transaction. A crash between a change and its ledger write
+re-runs that change: make migrations idempotent. A failure stops the run and names the migration.
 
 On socket targets, executing `run.ts` dynamically loads `setu.config.ts`, awaits `createApp()`,
 starts the whole app without a port, resolves the default database and stops the app in `finally`.

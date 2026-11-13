@@ -101,6 +101,11 @@ export interface WsModuleLike {
   /** The `WebSocketServer` constructor. */
   readonly WebSocketServer: new (options: {
     noServer: boolean;
+    /**
+     * Maximum inbound message bytes; zero is unlimited, absent uses the ws default.
+     * @since 0.13.0
+     */
+    maxPayload?: number;
     handleProtocols?: (protocols: Set<string>) => string | false;
   }) => WsServerLike;
 }
@@ -363,7 +368,7 @@ export function createUpgradeRequest(incoming: NodeIncomingMessage): Request {
  */
 export class NodeUpgradeCoordinator {
   #module: WsModuleLike | null;
-  #server: WsServerLike | null = null;
+  readonly #servers = new Map<number | undefined, WsServerLike>();
   #pendingProtocol: string | undefined;
 
   /**
@@ -387,7 +392,7 @@ export class NodeUpgradeCoordinator {
 
   /** Whether a `ws` server has been created yet. */
   get hasServer(): boolean {
-    return this.#server !== null;
+    return this.#servers.size > 0;
   }
 
   /**
@@ -411,25 +416,27 @@ export class NodeUpgradeCoordinator {
     if (this.#module === null) {
       this.#module = await loadWsModule();
     }
-    if (this.#server === null) {
-      this.#server = new this.#module.WebSocketServer({
+    const limit = sink.maxMessageBytes;
+    let server = this.#servers.get(limit);
+    if (server === undefined) {
+      server = new this.#module.WebSocketServer({
         noServer: true,
         handleProtocols: this.#selectProtocol,
+        ...(limit === undefined ? {} : { maxPayload: limit }),
       });
+      this.#servers.set(limit, server);
     }
 
     this.#pendingProtocol = protocol;
-    this.#server.handleUpgrade(incoming, socket, head, (ws) => {
+    server.handleUpgrade(incoming, socket, head, (ws) => {
       bindWsSocketToSink(ws, sink);
     });
   }
 
   /** Shuts down the `ws` server, when one was ever created. */
   close(): void {
-    if (this.#server !== null) {
-      this.#server.close();
-      this.#server = null;
-    }
+    for (const server of this.#servers.values()) server.close();
+    this.#servers.clear();
   }
 }
 

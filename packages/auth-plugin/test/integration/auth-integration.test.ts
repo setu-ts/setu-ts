@@ -189,7 +189,7 @@ describe('Auth Plugin Integration', () => {
 
     // Register the plugin
     const plugin = AuthPlugin({
-      jwt: { secret: 'integration-test-secret' },
+      jwt: { secret: 'integration-test-secret-at-least-32-characters' },
       rbac: {
         roles: {
           admin: { permissions: ['*'], inherits: ['user'] },
@@ -383,7 +383,7 @@ describe('AuthPlugin without RBAC — real application', () => {
     return createApplication({
       plugins: [
         runtimePlugin(),
-        AuthPlugin({ jwt: { secret: 'jwt-only-secret' } }),
+        AuthPlugin({ jwt: { secret: 'jwt-only-secret-at-least-32-characters' } }),
         {
           name: 'protected-routes',
           version: '1.0.0',

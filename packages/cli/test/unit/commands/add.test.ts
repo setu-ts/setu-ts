@@ -1,3 +1,4 @@
+import { generateSecret } from '../../../src/templates/secret.ts';
 import { cliInvocation } from '../../../src/templates/project-files.ts';
 import * as nodeFs from 'node:fs/promises';
 import * as ts from 'typescript';
@@ -34,11 +35,84 @@ import { SWAGGER_UI_DIST_VERSION } from '../../../src/templates/swagger-version.
 import { BACKEND_PEERS } from '../../../src/commands/add.ts';
 import { BROKERS, brokerSpec } from '../../../src/workspace/transport.ts';
 
+describe('M140a installed signing secrets', () => {
+  it.each(['node', 'cloudflare-workers'] as const)(
+    'writes auth local/example values once on %s',
+    async (runtime) => {
+      const h = harness();
+      const deps = {
+        fs: h.fs,
+        cwd: '/app',
+        now: () => 0,
+        log: (line: string) => h.out.push(line),
+        error: (line: string) => h.err.push(line),
+        secret: () => 'a'.repeat(64),
+      };
+      expect(await runCli(['new', 'shop', '--template', 'rest', '--runtime', runtime], deps)).toBe(
+        0,
+      );
+      const member = { ...deps, cwd: '/app/shop' };
+      expect(await runCli(['add', 'auth'], member), h.err.join('\n')).toBe(0);
+      expect(h.out.join('\n')).toContain('AuthPlugin({ jwt: {}, rbac: { roles: {} } })');
+      const path = `/app/shop/${runtime === 'node' ? '.env' : '.dev.vars'}`;
+      const before = h.read(path);
+      expect(before).toContain(`JWT_SECRET=${'a'.repeat(64)}`);
+      expect(h.read(`${path}.example`)).toContain('JWT_SECRET=\n');
+      expect(await runCli(['add', 'auth'], { ...member, secret: () => 'b'.repeat(64) })).toBe(0);
+      expect(h.read(path)).toBe(before);
+    },
+  );
+
+  it('records member keys once and replans Compose and the owned README section', async () => {
+    const h = harness();
+    const deps = {
+      fs: h.fs,
+      cwd: '/app',
+      now: () => 0,
+      log: (line: string) => h.out.push(line),
+      error: (line: string) => h.err.push(line),
+      secret: () => 'c'.repeat(64),
+    };
+    expect(await runCli(['new', 'ws', '--workspace'], deps)).toBe(0);
+    const root = { ...deps, cwd: '/app/ws' };
+    for (const name of ['api', 'admin-web'])
+      expect(await runCli(['g', 'app', name, '--template', 'rest'], root)).toBe(0);
+    const original = h.read('/app/ws/README.md');
+    await h.fs.writeFile(
+      '/app/ws/README.md',
+      new TextEncoder().encode(`custom intro\n${original}\ncustom footer`),
+    );
+    for (const name of ['api', 'admin-web']) {
+      const member = { ...deps, cwd: `/app/ws/apps/${name}` };
+      for (const plugin of ['auth', 'session', 'auth'])
+        expect(await runCli(['add', plugin], member), h.err.join('\n')).toBe(0);
+    }
+    const manifest = JSON.parse(h.read('/app/ws/setu.workspace.json'));
+    for (const member of manifest.members)
+      expect(member.generatedSecrets).toEqual(['JWT_SECRET', 'SESSION_SECRET']);
+    const compose = h.read('/app/ws/docker/compose.yaml');
+    expect(compose).toContain('API_JWT_SECRET:?');
+    expect(compose).toContain('ADMIN_WEB_SESSION_SECRET:?');
+    const readme = h.read('/app/ws/README.md');
+    expect(readme).toContain('export API_JWT_SECRET="$(openssl rand -hex 32)"');
+    expect(readme.match(/export API_JWT_SECRET=/g)).toHaveLength(1);
+    expect(readme).toContain('custom intro');
+    expect(readme).toContain('custom footer');
+    expect(await runCli(['workspace', 'broker', 'redis'], root), h.err.join('\n')).toBe(0);
+    expect(h.read('/app/ws/README.md')).toContain('export API_JWT_SECRET=');
+    await h.fs.writeFile('/app/ws/README.md', new TextEncoder().encode('developer-owned README'));
+    expect(await runCli(['add', 'auth'], { ...deps, cwd: '/app/ws/apps/api' })).toBe(0);
+    expect(h.read('/app/ws/README.md')).toBe('developer-owned README');
+    expect(h.out.join('\n')).toContain('README.md has no transport section');
+  });
+});
+
 describe('M139d add request and backend contracts', () => {
   async function stack(runtime: 'node' | 'bun' = 'node') {
     const h = harness();
     expect(
       await runNewCommand(parseArgs(['shop', '--template', 'full-stack', '--runtime', runtime]), {
+        secret: generateSecret,
         fs: h.fs,
         cwd: '/app',
         log: () => {},
@@ -364,6 +438,7 @@ describe('setu add openapi Swagger UI dependency (M129)', () => {
       const h = harness();
       expect(
         await runNewCommand(parseArgs(['api', '--runtime', runtime]), {
+          secret: generateSecret,
           fs: h.fs,
           cwd: '/app',
           log: (line) => h.out.push(line),
@@ -468,6 +543,7 @@ describe('M121 transport additions', () => {
     const h = harness();
     expect(
       await runNewCommand(parseArgs(['shop', '--template', 'full-stack', '--runtime', 'node']), {
+        secret: generateSecret,
         fs: h.fs,
         cwd: '/app',
         log: () => {},
@@ -509,6 +585,7 @@ export function createApp(): IKernelApplication {
     const h = harness();
     expect(
       await runNewCommand(parseArgs(['shop', '--template', 'rest', '--runtime', 'node']), {
+        secret: generateSecret,
         fs: h.fs,
         cwd: '/app',
         log: () => {},
@@ -538,6 +615,7 @@ export function createApp(): IKernelApplication {
       const h = harness();
       expect(
         await runNewCommand(parseArgs(['shop', '--template', template, '--runtime', 'node']), {
+          secret: generateSecret,
           fs: h.fs,
           cwd: '/app',
           log: () => {},
@@ -644,7 +722,13 @@ export function createApp(): IKernelApplication {
           expect(
             await runNewCommand(
               parseArgs(['portal', '--runtime', runtime, '--template', 'full-stack']),
-              { fs: h.fs, cwd: '/app', log: () => {}, error: () => {} },
+              {
+                secret: generateSecret,
+                fs: h.fs,
+                cwd: '/app',
+                log: () => {},
+                error: () => {},
+              },
             ),
           ).toBe(0);
           const env = h.read('/app/portal/.env');
@@ -795,6 +879,7 @@ export function createApp(): IKernelApplication {
     expect(h.fs.writes).toEqual([]);
     expect(
       await runNewCommand(parseArgs(['portal', '--template', 'full-stack']), {
+        secret: generateSecret,
         fs: h.fs,
         cwd: '/app',
         log: () => {},
@@ -884,7 +969,13 @@ describe('the connection variable in the dotenv pair (X91-9)', () => {
           '--env-file',
           'config/app.env',
         ]),
-        { fs: h.fs, cwd: '/app', log: () => {}, error: () => {} },
+        {
+          secret: generateSecret,
+          fs: h.fs,
+          cwd: '/app',
+          log: () => {},
+          error: () => {},
+        },
       ),
     ).toBe(0);
     await h.fs.writeFile(
@@ -906,7 +997,13 @@ describe('the connection variable in the dotenv pair (X91-9)', () => {
       expect(
         await runNewCommand(
           parseArgs(['portal', '--runtime', 'node', '--template', 'full-stack']),
-          { fs: h.fs, cwd: '/app', log: () => {}, error: () => {} },
+          {
+            secret: generateSecret,
+            fs: h.fs,
+            cwd: '/app',
+            log: () => {},
+            error: () => {},
+          },
         ),
       ).toBe(0);
       return h;
@@ -951,7 +1048,13 @@ describe('the connection variable in the dotenv pair (X91-9)', () => {
       expect(
         await runNewCommand(
           parseArgs(['portal', '--runtime', 'node', '--template', 'full-stack']),
-          { fs: h.fs, cwd: '/app', log: () => {}, error: () => {} },
+          {
+            secret: generateSecret,
+            fs: h.fs,
+            cwd: '/app',
+            log: () => {},
+            error: () => {},
+          },
         ),
       ).toBe(0);
       return h;
@@ -1016,6 +1119,7 @@ describe('the connection variable in the dotenv pair (X91-9)', () => {
     const h = harness();
     expect(
       await runNewCommand(parseArgs(['portal', '--runtime', 'node', '--template', 'full-stack']), {
+        secret: generateSecret,
         fs: h.fs,
         cwd: '/app',
         log: () => {},
@@ -1041,6 +1145,7 @@ describe('safe-default additions (M119c)', () => {
       const h = harness();
       expect(
         await runNewCommand(parseArgs(['api', '--runtime', runtime]), {
+          secret: generateSecret,
           fs: h.fs,
           cwd: '/app',
           log: (m) => h.out.push(m),
@@ -1869,7 +1974,7 @@ describe('withPluginWiring', () => {
   it('V12-3 refuses ambiguous full-stack loop edits and preserves an aliased binding', async () => {
     const { withFactoryRegistration } = await import('../../../src/commands/add.ts');
     const fs = createFakeFs();
-    const deps = { fs, cwd: '/', log: () => {}, error: () => {} };
+    const deps = { secret: generateSecret, fs, cwd: '/', log: () => {}, error: () => {} };
     expect(await runNewCommand(parseArgs(['shop', '--template', 'full-stack']), deps)).toBe(0);
     const source = fs.read('/shop/setu.config.ts');
     const loop = 'for (const generated of GENERATED_PLUGINS) app.register(generated);';
@@ -1918,14 +2023,20 @@ describe('withPluginWiring', () => {
   it('wires a provider into the default (Prettier-formatted) Node scaffold', async () => {
     const fs = createFakeFs();
     const quiet = { fs, log: () => {}, error: () => {} };
-    expect(await runNewCommand(parseArgs(['demo']), { ...quiet, cwd: '/' })).toBe(0);
+    expect(
+      await runNewCommand(parseArgs(['demo']), {
+        secret: generateSecret,
+        ...quiet,
+        cwd: '/',
+      }),
+    ).toBe(0);
     const before = fs.read('/demo/setu.config.ts');
-    expect(before).toMatch(/plugins: \[[^\n]*\.\.\.\(devtool\?\.plugins \?\? \[\]\)\]/);
+    expect(before).toMatch(/plugins: \[[\s\S]*\.\.\.\(devtool\?\.plugins \?\? \[\]\)/);
 
     expect(await runAddCommand(parseArgs(['cache']), { ...quiet, cwd: '/demo' })).toBe(0);
     const after = fs.read('/demo/setu.config.ts');
     expect(after).toContain("import { CachePlugin } from '@setu-ts/cache-plugin';");
-    expect(after).toContain('CachePlugin(), ...(devtool?.plugins ?? [])');
+    expect(after).toMatch(/CachePlugin\(\),\s+\.\.\.\(devtool\?\.plugins \?\? \[\]\)/);
   });
 
   it('refuses a factory carrying the spread twice', () => {
@@ -2309,9 +2420,7 @@ describe('runAddCommand', () => {
     // The guard schematic composes requirePermission, which answers 501 unless
     // AuthPlugin registers an authorization service — so the auth line must
     // carry the rbac arm, not just jwt.
-    expect(printed[0]).toBe(
-      "AuthPlugin({ jwt: { secret: '<your-secret>' }, rbac: { roles: {} } })",
-    );
+    expect(printed[0]).toBe('AuthPlugin({ jwt: {}, rbac: { roles: {} } })');
   });
 
   // Audit round 6 (T-R6): the CLI's own rewrite `RealtimeBackplanePlugin({ ...sources.backplane })`
@@ -2497,7 +2606,7 @@ describe('runAddCommand', () => {
     const h = harness({ '/app/deno.json': DENO_MANIFEST });
     await h.run(['auth']);
 
-    expect(h.out.join('\n')).toContain('deno install --min-dep-age 0');
+    expect(h.out.join('\n')).toMatch(/^\s*deno install$/m);
   });
 
   it('updates BOTH manifests when a project carries both', async () => {
@@ -2735,7 +2844,7 @@ describe('setu add — install command per runtime', () => {
   it('keeps the release-day flag for a Deno project', async () => {
     const h = harness({ '/app/deno.json': DENO_MANIFEST });
     await h.run(['cache']);
-    expect(h.out.join('\n')).toContain('  deno install --min-dep-age 0');
+    expect(h.out.join('\n')).toContain('  deno install\n');
   });
 
   // From 0.9 the framework installs from npm under its own names, so an npm
@@ -2764,7 +2873,7 @@ describe('setu add — install command per runtime', () => {
     });
     expect(await h.run(['cache'])).toBe(0);
     const out = h.out.join('\n');
-    expect(out).toContain('  deno install --min-dep-age 0');
+    expect(out).toContain('  deno install\n');
     expect(out).not.toContain('.npmrc');
   });
 
@@ -3157,6 +3266,7 @@ describe('setu add view styling (M123)', () => {
       const h = harness();
       expect(
         await runNewCommand(parseArgs(['shop', '--template', 'rest', '--runtime', runtime]), {
+          secret: generateSecret,
           fs: h.fs,
           cwd: '/app',
           log: (line) => h.out.push(line),
@@ -3185,6 +3295,7 @@ describe('setu add view styling (M123)', () => {
     const h = harness();
     expect(
       await runNewCommand(parseArgs(['shop', '--template', 'rest', '--runtime', 'node']), {
+        secret: generateSecret,
         fs: h.fs,
         cwd: '/app',
         log: () => {},
@@ -3209,6 +3320,7 @@ describe('setu add view styling (M123)', () => {
     const h = harness();
     expect(
       await runNewCommand(parseArgs(['shop', '--template', 'rest', '--runtime', 'node']), {
+        secret: generateSecret,
         fs: h.fs,
         cwd: '/app',
         log: () => {},
@@ -3235,6 +3347,7 @@ describe('setu add view styling (M123)', () => {
     const h = harness();
     expect(
       await runNewCommand(parseArgs(['shop', '--template', 'rest', '--runtime', 'node']), {
+        secret: generateSecret,
         fs: h.fs,
         cwd: '/app',
         log: () => {},
@@ -3303,6 +3416,7 @@ it('does not wire either view provider through a retargeted framework import map
   const h = harness();
   expect(
     await runNewCommand(parseArgs(['shop', '--template', 'rest', '--runtime', 'node']), {
+      secret: generateSecret,
       fs: h.fs,
       cwd: '/app',
       log: () => {},
@@ -3356,6 +3470,7 @@ describe('starter handler-arm wiring', () => {
     const h = harness();
     expect(
       await runNewCommand(parseArgs(['shop', '--template', 'full-stack', '--runtime', 'node']), {
+        secret: generateSecret,
         fs: h.fs,
         cwd: '/app',
         log: () => {},

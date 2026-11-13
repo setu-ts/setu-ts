@@ -8,6 +8,36 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **`@setu-ts/cli` (M140a).** Generated application bodies are bounded at 1 MiB; module names and
+  ids have length limits. New projects generate local session secrets, ignore local secret files and
+  Deno node_modules, and name required Docker environment variables. Session installation writes an
+  ignored secret; auth installation enables environment-resolved JWTs. Workspace members record
+  generated secret names; Compose requires separate member-prefixed shell values, listed in the
+  README. Both WebSocket schematics show handshake guards. Rollback defaults to one migration; use
+  `--down=<n>` or `--down=all` explicitly. SSE generators retain a connection and send ready. Deno
+  full-stack installation runs without blanket scripts; build before start. Third-party dependencies
+  keep a one-day cooldown, check pins the exact CLI, and the devtool key is removed before
+  application creation.
+- **BREAKING — `@setu-ts/session-plugin` (M140a).** Regeneration clears form CSRF while preserving
+  other data. Fetch a fresh token after sign-in or MFA promotion. Secret resolution now checks
+  configuration before the environment; supply an explicit option to override it.
+- **BREAKING — `@setu-ts/auth-plugin` (M140a).** Missing or under-32-byte HS256 secrets raise
+  `AuthPluginConfigurationError` during registration; use at least 32 UTF-8 or raw bytes. Configure
+  `jwt: {}` to resolve JWT_SECRET from secrets, configuration, then the environment.
+- **`@setu-ts/common` (M140a).** Documents CSRF clearing on session regeneration and adds optional
+  `WebSocketEventSink.maxMessageBytes` for transport admission limits.
+- **`@setu-ts/runtime` (M140a).** Node WebSocket upgrades use one ws server per message limit and
+  enforce that limit while reading. Omit the sink limit for the transport default; `0` is unlimited.
+- **BREAKING — `@setu-ts/websocket-plugin` (M140a).** The message limit defaults to 1 MiB. Set
+  `maxMessageBytes: 0` to opt out, or configure a larger bound. Node bounds the transport read; Bun
+  and Deno close oversized messages after buffering.
+- **BREAKING — `@setu-ts/sse-plugin` (M140a).** Heartbeats default to 30 seconds. Set
+  `heartbeatMs: 0` to disable them.
+- **`@setu-ts/decorator-plugin` (M140a).** Gateway route options reach handshake admission. Use
+  `@Gateway(path, { guards })`; ignored HTTP authorization decorators on gateways now fail startup.
+- **`@setu-ts/react-router-plugin` (M140a).** A missing server build names the build task to run
+  before starting the application.
+
 - **BREAKING — typed capability registry (M139g, #585, 0.13.0, `@setu-ts/common`, `@setu-ts/kernel`,
   `@setu-ts/testing`, `@setu-ts/react-router-plugin`, `@setu-ts/cli`).** Standard tokens carry a
   required brand and infer their interfaces through `CapabilityServices`; reads reject wrong

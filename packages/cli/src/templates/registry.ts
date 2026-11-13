@@ -160,14 +160,23 @@ export interface AppFactoryParameter {
 }
 
 /** One configuration variable a template's generated source reads. */
-export interface EnvVariable {
+export type EnvVariable = {
   /** The environment variable name, as the generated source spells it. */
   readonly name: string;
   /** One line explaining what it is, written above it in both dotenv files. */
   readonly description: string;
-  /** A non-secret development value, written to the gitignored dotenv file. */
-  readonly develop: string;
-}
+} & (
+  | {
+      /** A non-secret development value, written to the gitignored dotenv file. */
+      readonly develop: string;
+      readonly generated?: never;
+    }
+  | {
+      /** Generate a fresh secret in the ignored local file; examples stay empty. */
+      readonly generated: 'secret';
+      readonly develop?: never;
+    }
+);
 
 /** Inputs a template factory needs while its call is rendered. */
 export interface AppFactoryRenderContext {

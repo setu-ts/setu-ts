@@ -122,7 +122,7 @@ That suppresses the message only. Channel delivery is identical either way.
 
 | Option          | Type                         | Default  | Description                                                                                    |
 | --------------- | ---------------------------- | -------- | ---------------------------------------------------------------------------------------------- |
-| `heartbeatMs`   | `number`                     | disabled | Interval for a `: heartbeat` comment frame. Omitted means **no timer at all**.                 |
+| `heartbeatMs`   | `number`                     | `30_000` | Sends a heartbeat comment every 30 seconds by default; `0` disables the timer.                 |
 | `retryMs`       | `number`                     | disabled | Emits a leading `retry: <ms>` advertising the reconnect delay.                                 |
 | `scalingNotice` | `boolean`                    | `true`   | Logs one `info` line at startup when no realtime backplane is registered. `false` silences it. |
 | `diagnostics`   | `RealtimeDiagnosticsOptions` | omitted  | Opt-in realtime observations (M98l); see below.                                                |

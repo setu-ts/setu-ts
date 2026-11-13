@@ -12,6 +12,19 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### Security defaults (M140a, `@setu-ts/auth-plugin`, `@setu-ts/session-plugin`, `@setu-ts/websocket-plugin`, `@setu-ts/sse-plugin`, `@setu-ts/cli`)
+
+Use HS256 keys of at least 32 UTF-8 bytes; a missing or shorter key now raises
+`AuthPluginConfigurationError`. Configure `jwt: {}` to resolve JWT_SECRET from secrets,
+configuration or the environment. Fetch a fresh form-CSRF token after session regeneration,
+including sign-in and MFA promotion. WebSocket messages default to a 1 MiB bound (`0` opts out); SSE
+defaults to a 30-second heartbeat (`heartbeatMs: 0` opts out).
+
+When upgrading a generated Deno project, update the exact CLI version in its `check` task alongside
+the `@setu-ts/*` dependency versions. There is no `setu upgrade` command. Run the full-stack `build`
+task before `start`; `start` no longer installs or builds. Installation runs without blanket
+lifecycle-script permission, and third-party dependencies retain a one-day cooldown.
+
 ### Typed capability lookups (M139g, `@setu-ts/common`, `@setu-ts/kernel`, `@setu-ts/testing`, `@setu-ts/react-router-plugin`, `@setu-ts/cli`)
 
 `services.get(CAPABILITIES.LOGGER)` now infers `ILogger`. Correct explicit interfaces and widening

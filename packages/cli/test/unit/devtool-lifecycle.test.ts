@@ -1,3 +1,4 @@
+import { generateSecret } from '../../src/templates/secret.ts';
 import * as nodeFsSync from 'node:fs';
 import * as nodeFs from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
@@ -50,9 +51,13 @@ describe('M101f lifecycle refusals and allocation', () => {
       const error = createRecorder();
       const deps = { fs, log: () => {}, error: error.sink };
       if (member) {
-        expect(await runNewCommand(parseArgs(['ws', '--workspace']), { ...deps, cwd: '/' })).toBe(
-          0,
-        );
+        expect(
+          await runNewCommand(parseArgs(['ws', '--workspace']), {
+            secret: generateSecret,
+            ...deps,
+            cwd: '/',
+          }),
+        ).toBe(0);
         expect(
           await runAppCommand(parseArgs(['app', 'a', '--devtool', '--devtool-port', '5123']), {
             ...deps,
@@ -62,6 +67,7 @@ describe('M101f lifecycle refusals and allocation', () => {
       } else {
         expect(
           await runNewCommand(parseArgs(['ws', '--devtool', '--devtool-port', '5123']), {
+            secret: generateSecret,
             ...deps,
             cwd: '/',
           }),
@@ -83,7 +89,7 @@ describe('M101f lifecycle refusals and allocation', () => {
       const entry = fs.read(`${project}/main.dev.ts`);
       expect(entry).toContain('port: 5123,');
       expect(entry).toContain('npx @setu-ts/cli@');
-      expect(entry).not.toMatch(/Deno\.|process\./);
+      expect(entry).toContain("delete process.env['SETU_DEVTOOL_SESSION_KEY'];");
     });
   }
   it('retains a standalone entry port without probing again when availability changes', async () => {
@@ -94,6 +100,7 @@ describe('M101f lifecycle refusals and allocation', () => {
           await runNewCommand(
             parseArgs(['shop', '--runtime', 'deno', '--devtool', '--devtool-port', String(port)]),
             {
+              secret: generateSecret,
               fs,
               cwd: '/ws',
               log: () => {},
@@ -134,6 +141,7 @@ describe('M101f lifecycle refusals and allocation', () => {
     const deps = { fs, log: () => {}, error: () => {} };
     expect(
       await runNewCommand(parseArgs(['ws', '--workspace', '--runtime', 'deno', '--port', '3000']), {
+        secret: generateSecret,
         ...deps,
         cwd: '/',
       }),
@@ -175,6 +183,7 @@ describe('M101f lifecycle refusals and allocation', () => {
     const deps = { fs, log: () => {}, error: () => {} };
     expect(
       await runNewCommand(parseArgs(['ws', '--workspace', '--runtime', 'deno', '--port', '3000']), {
+        secret: generateSecret,
         ...deps,
         cwd: '/',
       }),
@@ -311,6 +320,7 @@ describe('M101f lifecycle refusals and allocation', () => {
     const fs = createFakeFs();
     expect(
       await runNewCommand(parseArgs(['shop', '--runtime', 'deno', '--devtool']), {
+        secret: generateSecret,
         fs,
         cwd: '/ws',
         log: () => {},
@@ -419,6 +429,7 @@ describe('M101f lifecycle refusals and allocation', () => {
     const deps = { fs, log: () => {}, error: () => {} };
     expect(
       await runNewCommand(parseArgs(['ws', '--workspace', '--runtime', 'deno', '--port', '3000']), {
+        secret: generateSecret,
         ...deps,
         cwd: '/',
       }),
