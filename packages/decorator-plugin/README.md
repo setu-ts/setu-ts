@@ -556,7 +556,8 @@ heartbeat participation. Use `@Gateway('/ws', { guards: [guard] })` to authorize
 `@Roles`, `@Permissions`, `@RequirePolicy`, `@ScopedRoles`, `@ScopedPermissions` and method-level
 `@Public` declarations on gateways fail registration; use handshake guards instead. `@UseGuards`
 remains invalid on non-HTTP ingress. On a class that also serves HTTP routes, only the WebSocket
-handler methods are checked; class-level authorization keeps applying to those routes.
+handler methods are checked, and class-level authorization, which applies to those routes, is
+accepted only when `@Gateway(path, { guards })` declares the handshake's own guards.
 
 ## Full API
 

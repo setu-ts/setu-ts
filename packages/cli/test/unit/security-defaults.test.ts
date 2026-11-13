@@ -277,6 +277,44 @@ describe('M140a scaffold security defaults', () => {
     expect(added).not.toBe(before);
   });
 
+  it.each([
+    ['the scaffold default', '.env', undefined, undefined],
+    ['a custom path missing', 'secrets.env', 'node_modules\n', 'node_modules\nsecrets.env\n'],
+    ['a custom path listed', 'secrets.env', 'secrets.env\n', 'secrets.env\n'],
+    [
+      'a negated custom path',
+      'secrets.env',
+      'secrets.env\n!secrets.env\n',
+      'secrets.env\n!secrets.env\nsecrets.env\n',
+    ],
+    ['no .dockerignore', 'secrets.env', null, null],
+  ] as const)(
+    'keeps the written secret out of a Bun image: %s',
+    async (_label, envFile, before, after) => {
+      const fs = createFakeFs();
+      const deps = {
+        fs,
+        cwd: '/work',
+        now: () => 0,
+        log: () => {},
+        error: (line: string) => {
+          throw new Error(line);
+        },
+        secret: () => 'c'.repeat(64),
+      };
+      const args = ['new', 'shop', '--template', 'rest', '--runtime', 'bun'];
+      if (envFile !== '.env') args.push('--env-file', envFile);
+      expect(await runCli(args, deps)).toBe(0);
+      const path = '/work/shop/.dockerignore';
+      const scaffolded = fs.read(path);
+      if (before === null) await fs.rm(path);
+      else if (before !== undefined) await fs.writeFile(path, new TextEncoder().encode(before));
+      expect(await runCli(['add', 'auth'], { ...deps, cwd: '/work/shop' })).toBe(0);
+      if (after === null) expect(fs.has(path)).toBe(false);
+      else expect(fs.read(path)).toBe(after ?? scaffolded);
+    },
+  );
+
   it('keeps a custom env file the default rules miss out of the image', async () => {
     const fs = createFakeFs();
     const deps = {

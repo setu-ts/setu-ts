@@ -2478,6 +2478,28 @@ async function addOne(
               'rule does not untrack a file.',
           );
       }
+      // A Bun or Deno image copies the source tree, so the project's own
+      // .dockerignore (when it has one) must list the file too. The generated
+      // one already excludes `.env` and `.env.*` through its `**/` rules.
+      const dockerPath = joinPath(dir, '.dockerignore');
+      const docker = await readProjectText(deps, dockerPath, '.dockerignore');
+      if (docker === null) return EXIT_ERROR;
+      if (docker !== undefined) {
+        const rules = docker.split('\n').map((line) => line.trim());
+        const negated = [envFile, `/${envFile}`, `**/${envFile}`].some((rule) =>
+          rules.includes(`!${rule}`),
+        );
+        const excluded =
+          rules.includes(envFile) ||
+          rules.includes(`/${envFile}`) ||
+          (envFile === '.env' && rules.includes('**/.env')) ||
+          (envFile.startsWith('.env.') && rules.includes('**/.env.*'));
+        if (!excluded || negated) {
+          const base = docker === '' || docker.endsWith('\n') ? docker : `${docker}\n`;
+          edits.push({ path: dockerPath, contents: `${base}${envFile}\n` });
+          deps.log(`Added ${escapeName(envFile)} to .dockerignore: images must not copy it.`);
+        }
+      }
     } else {
       deps.log(
         declaration?.kind === 'absent'

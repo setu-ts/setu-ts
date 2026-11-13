@@ -144,9 +144,9 @@ describe('gateway handshake guards', () => {
     }
   });
 
-  it('keeps HTTP authorization on a class that also declares a gateway', async () => {
+  it('keeps HTTP authorization on a class whose gateway declares its own guards', async () => {
     @Controller('/mixed')
-    @Gateway('/ws-mixed')
+    @Gateway('/ws-mixed', { guards: [() => ({ status: 401 })] })
     @Roles('admin')
     class Mixed {
       @Get('/report')
@@ -166,6 +166,32 @@ describe('gateway handshake guards', () => {
     });
     try {
       await app.start();
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('refuses class-level authorization on a mixed class whose gateway has no guards', async () => {
+    @Controller('/mixed-open')
+    @Gateway('/ws-mixed-open')
+    @Roles('admin')
+    class MixedOpen {
+      @Get('/report')
+      report(): { readonly ok: boolean } {
+        return { ok: true };
+      }
+
+      @OnOpen open(): void {}
+    }
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        WebSocketPlugin(),
+        DecoratorPlugin({ controllers: [MixedOpen], ingress: [MixedOpen] }),
+      ],
+    });
+    try {
+      await expect(app.start()).rejects.toThrow('on a gateway');
     } finally {
       await app.stop();
     }

@@ -19,9 +19,10 @@ All notable changes to this project are documented here. The format follows
   keep a one-day cooldown, check pins the exact CLI, and the devtool key is removed before
   application creation. `setu add auth|session` adds an exact `.gitignore` entry for the env file
   when there is none (as Rails does for `config/master.key`), with a `git rm --cached` hint when the
-  file already existed; a custom `--env-file` path is excluded from the generated `.dockerignore`; a
-  manifest whose members' secrets map to one Compose variable is refused; and the generated
-  `runMigrations` refuses a rollback count that is not a positive whole number or `Infinity`.
+  file already existed; a custom `--env-file` path is excluded from the generated `.dockerignore`,
+  and `setu add auth|session` lists a custom env path in an existing `.dockerignore`; a manifest
+  whose members' secrets map to one Compose variable is refused; and the generated `runMigrations`
+  refuses a rollback count that is not a positive whole number or `Infinity`.
 - **BREAKING — `@setu-ts/session-plugin` (M140a, #589).** Regeneration clears form CSRF while
   preserving other data. Fetch a fresh token after sign-in or MFA promotion. Secret resolution now
   checks configuration before the environment; supply an explicit option to override it.
@@ -43,7 +44,7 @@ All notable changes to this project are documented here. The format follows
 - **`@setu-ts/decorator-plugin` (M140a, #589).** Gateway route options reach handshake admission.
   Use `@Gateway(path, { guards })`; ignored HTTP authorization decorators on gateways now fail
   startup. On a class that also serves HTTP routes, only its WebSocket handlers are checked, and
-  class-level authorization keeps applying to those routes.
+  class-level authorization is accepted only when the gateway declares its own handshake guards.
 - **`@setu-ts/react-router-plugin` (M140a, #589).** A missing server build names the build task to
   run before starting the application.
 - **Generated OpenAPI documents list derived errors and order responses by status (M137b, #588,
