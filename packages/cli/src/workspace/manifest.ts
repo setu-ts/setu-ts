@@ -340,6 +340,33 @@ export function isMemberName(name: string): boolean {
 }
 
 /**
+ * The first pair of members whose generated secrets map to one Compose shell
+ * variable (member `admin` with `WEB_SESSION_SECRET` and member `admin-web`
+ * with `SESSION_SECRET` both need `ADMIN_WEB_SESSION_SECRET`), so Compose would
+ * hand both the same signing key. Checked by the reader and by every command
+ * that writes `generatedSecrets`, so no command writes a manifest the reader
+ * then refuses.
+ *
+ * @param members - The members as they are, or would be after a write
+ * @returns The collision, or undefined when every shell variable is distinct
+ */
+export function findSecretCollision(
+  members: readonly WorkspaceMember[],
+): Extract<WorkspaceManifestProblem, { kind: 'secret-collision' }> | undefined {
+  const owners = new Map<string, string>();
+  for (const member of members)
+    for (const variable of member.generatedSecrets ?? []) {
+      const shell = memberSecretVariable(member.name, variable);
+      const owner = `${member.name} (${variable})`;
+      const first = owners.get(shell);
+      if (first !== undefined)
+        return { kind: 'secret-collision', variable: shell, first, second: owner };
+      owners.set(shell, owner);
+    }
+  return undefined;
+}
+
+/**
  * The sentence naming a manifest problem the generic "not a workspace" refusal
  * does not explain, for every command that reads the manifest.
  *
@@ -666,26 +693,8 @@ export async function readWorkspaceManifest(
     members.push(member);
   }
 
-  // Two generated secrets that map to one shell variable would give two members
-  // the same signing key; the names are built from parsed (validated) parts, so
-  // they need no escaping in the message.
-  const owners = new Map<string, string>();
-  for (const member of members)
-    for (const variable of member.generatedSecrets ?? []) {
-      const shell = memberSecretVariable(member.name, variable);
-      const first = owners.get(shell);
-      if (first !== undefined)
-        return {
-          ok: false,
-          problem: {
-            kind: 'secret-collision',
-            variable: shell,
-            first,
-            second: `${member.name} (${variable})`,
-          },
-        };
-      owners.set(shell, `${member.name} (${variable})`);
-    }
+  const collision = findSecretCollision(members);
+  if (collision !== undefined) return { ok: false, problem: collision };
 
   const names = new Set(members.map((member) => member.name));
   for (const member of members) {

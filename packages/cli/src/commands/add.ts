@@ -96,6 +96,8 @@ import {
   workspaceMemberOf,
 } from '../app-loader.ts';
 import {
+  findSecretCollision,
+  manifestProblemDetail,
   MEMBERS_DIR,
   readWorkspaceManifest,
   renderWorkspaceManifest,
@@ -2434,6 +2436,25 @@ async function addOne(
             ? '.env'
             : undefined;
     if (envFile !== undefined) {
+      // The file is about to hold a usable signing secret, so it must not reach
+      // Git: a project the CLI did not scaffold may have no .gitignore, or one
+      // that does not name a custom dotenv path. An EXISTING file nothing ignores
+      // may already be tracked, which a new ignore rule does not undo, so the
+      // secret is refused there rather than written.
+      const ignorePath = joinPath(dir, '.gitignore');
+      const ignore = await readProjectText(deps, ignorePath, '.gitignore');
+      if (ignore === null) return EXIT_ERROR;
+      const existing = await readProjectText(deps, joinPath(dir, envFile), envFile);
+      if (existing === null) return EXIT_ERROR;
+      const covered = gitignoreCovers(ignore ?? '', envFile);
+      if (!covered && existing !== undefined) {
+        deps.error(
+          `${escapeName(envFile)} exists and .gitignore does not ignore it, so Git may track it; ` +
+            `${variableName} was not written. Ignore it in .gitignore (and run ` +
+            `\`git rm --cached ${escapeName(envFile)}\` if Git tracks it), then run this again.`,
+        );
+        return EXIT_ERROR;
+      }
       const value = (deps.secret ?? generateSecret)();
       for (const [file, localValue] of [
         [envFile, value],
@@ -2445,13 +2466,7 @@ async function addOne(
         const appended = withEnvVariable(text ?? '', [variable], localValue);
         if (appended !== undefined) edits.push({ path, contents: appended });
       }
-      // The file now holds a usable signing secret, so it must not reach Git: a
-      // project the CLI did not scaffold may have no .gitignore, or one that
-      // does not name a custom dotenv path.
-      const ignorePath = joinPath(dir, '.gitignore');
-      const ignore = await readProjectText(deps, ignorePath, '.gitignore');
-      if (ignore === null) return EXIT_ERROR;
-      if (!gitignoreCovers(ignore ?? '', envFile)) {
+      if (!covered) {
         const base =
           ignore === undefined || ignore === '' || ignore.endsWith('\n')
             ? (ignore ?? '')
@@ -2479,6 +2494,13 @@ async function addOne(
             : entry,
         ),
       };
+      // Refused before anything is written, for the reason `generate app`
+      // refuses: the reader would refuse this manifest on its next read.
+      const collision = findSecretCollision(next.members);
+      if (collision !== undefined) {
+        deps.error(`${variableName} cannot be added here. ${manifestProblemDetail(collision)}`);
+        return EXIT_ERROR;
+      }
       writeRoot = root;
       if (!secrets.includes(variableName))
         edits.push({
@@ -2921,28 +2943,35 @@ export function withEnvVariable(
 }
 
 /**
+ * Whether a `.gitignore` ignores a file at the project root, judged the way Git
+ * does for the simple patterns a root dotenv file meets: the LAST matching line
+ * wins, so `.env` followed by `!.env` does not ignore it. Patterns with a
+ * directory part, `**` or a trailing `/` are skipped as not matching — a
+ * misjudgement there costs one redundant `.gitignore` line or a refusal, never
+ * an unignored secret.
+ */
+function gitignoreCovers(ignore: string, file: string): boolean {
+  let covered = false;
+  for (const raw of ignore.split('\n')) {
+    const line = raw.trim();
+    if (line === '' || line.startsWith('#')) continue;
+    const negated = line.startsWith('!');
+    const pattern = (negated ? line.slice(1) : line).replace(/^\//, '');
+    if (pattern.includes('/') || pattern.includes('**') || pattern === '') continue;
+    const source = pattern
+      .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+      .replace(/\*/g, '[^/]*')
+      .replace(/\?/g, '[^/]');
+    if (new RegExp(`^${source}$`).test(file)) covered = !negated;
+  }
+  return covered;
+}
+
+/**
  * An existing project file's text, `undefined` when it is absent, or `null` after
  * reporting why it cannot be used (unreadable, not UTF-8, over 1 MiB), so the
  * command fails with its error code before anything is written.
  */
-/**
- * Whether a `.gitignore` already ignores a dotenv file at the project root: by
- * its own name, or by the `.env` / `.env.*` / `.dev.vars` patterns the CLI
- * writes. Deliberately narrow — an unrecognised pattern counts as not covering,
- * and the cost is one redundant line.
- */
-function gitignoreCovers(ignore: string, file: string): boolean {
-  const lines = new Set(ignore.split('\n').map((line) => line.trim()));
-  if (lines.has(file) || lines.has(`/${file}`)) return true;
-  const stem =
-    file === '.env' || file.startsWith('.env.')
-      ? '.env'
-      : file === '.dev.vars'
-        ? '.dev.vars'
-        : undefined;
-  return stem !== undefined && file !== stem && lines.has(`${stem}.*`);
-}
-
 async function readProjectText(
   deps: AddCommandDependencies,
   path: string,

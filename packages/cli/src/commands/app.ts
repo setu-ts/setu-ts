@@ -96,6 +96,7 @@ import {
   WORKSPACE_VERSION,
   type WorkspaceManifest,
   type WorkspaceManifestProblem,
+  findSecretCollision,
   manifestProblemDetail,
   workspaceSecretVariables,
 } from '../workspace/manifest.ts';
@@ -811,6 +812,13 @@ export async function runAppCommand(args: ParsedArgs, deps: AppDependencies): Pr
       },
     ],
   };
+  // Refused before anything is written: the reader would refuse the manifest
+  // this would write, and the member would share a signing key with another.
+  const collision = findSecretCollision(next.members);
+  if (collision !== undefined) {
+    deps.error(`${escapeName(name)} cannot be added. ${manifestProblemDetail(collision)}`);
+    return EXIT_ERROR;
+  }
 
   for (const field of (portHost.manifest?.npmBuild?.devEntry !== undefined
     ? ['inspectPort', 'vitePort']

@@ -167,32 +167,85 @@ describe('M140a scaffold security defaults', () => {
   );
 
   it.each([
-    ['no .gitignore', undefined, '.env\n'],
-    ['one that does not cover .env', 'node_modules/', 'node_modules/\n.env\n'],
-    ['one that already covers it', 'node_modules/\n.env\n', 'node_modules/\n.env\n'],
-  ])('keeps the written secret out of Git with %s', async (_label, before, after) => {
+    ['no .gitignore and no .env', undefined, false, '.env\n', 0],
+    ['an uncovering .gitignore and no .env', 'node_modules/', false, 'node_modules/\n.env\n', 0],
+    ['a covering .gitignore and a .env', 'node_modules/\n.env\n', true, 'node_modules/\n.env\n', 0],
+    ['a .env.* rule', '.env.*\n', true, '.env.*\n', 1],
+    ['an uncovering .gitignore and a .env', 'node_modules/\n', true, 'node_modules/\n', 1],
+    ['a later negation', '.env\n!.env\n', true, '.env\n!.env\n', 1],
+  ] as const)(
+    'guards the written secret with %s',
+    async (_label, before, envExists, after, exitCode) => {
+      const fs = createFakeFs();
+      const lines: string[] = [];
+      const errors: string[] = [];
+      const deps = {
+        fs,
+        cwd: '/work',
+        now: () => 0,
+        log: (line: string) => {
+          lines.push(line);
+        },
+        error: (line: string) => {
+          errors.push(line);
+        },
+        secret: () => 'f'.repeat(64),
+      };
+      expect(await runCli(['new', 'shop', '--template', 'rest'], deps)).toBe(0);
+      if (before === undefined) await fs.rm('/work/shop/.gitignore');
+      else await fs.writeFile('/work/shop/.gitignore', new TextEncoder().encode(before));
+      if (envExists) await fs.writeFile('/work/shop/.env', new TextEncoder().encode('PORT=3000\n'));
+      else await fs.rm('/work/shop/.env');
+      expect(await runCli(['add', 'session'], { ...deps, cwd: '/work/shop' })).toBe(exitCode);
+      expect(fs.has('/work/shop/.gitignore') ? fs.read('/work/shop/.gitignore') : undefined).toBe(
+        exitCode === 0 ? after : before,
+      );
+      if (exitCode === 0) {
+        expect(fs.read('/work/shop/.env')).toContain(`SESSION_SECRET=${'f'.repeat(64)}`);
+        expect(lines.some((line) => line.startsWith('Added .env to .gitignore'))).toBe(
+          before !== after,
+        );
+      } else {
+        expect(fs.read('/work/shop/.env')).toBe('PORT=3000\n');
+        expect(errors.join('\n')).toContain('.env exists and .gitignore does not ignore it');
+      }
+    },
+  );
+
+  it('refuses a member or secret whose Compose variable another member already needs', async () => {
     const fs = createFakeFs();
-    const lines: string[] = [];
+    const errors: string[] = [];
     const deps = {
       fs,
       cwd: '/work',
       now: () => 0,
-      log: (line: string) => {
-        lines.push(line);
-      },
+      log: () => {},
       error: (line: string) => {
-        throw new Error(line);
+        errors.push(line);
       },
-      secret: () => 'f'.repeat(64),
+      secret: () => 'a'.repeat(64),
     };
-    expect(await runCli(['new', 'shop', '--template', 'rest'], deps)).toBe(0);
-    if (before === undefined) await fs.rm('/work/shop/.gitignore');
-    else await fs.writeFile('/work/shop/.gitignore', new TextEncoder().encode(before));
-    expect(await runCli(['add', 'session'], { ...deps, cwd: '/work/shop' })).toBe(0);
-    expect(fs.read('/work/shop/.gitignore')).toBe(after);
-    expect(lines.some((line) => line.startsWith('Added .env to .gitignore'))).toBe(
-      before !== after,
-    );
+    expect(await runCli(['new', 'ws', '--workspace'], deps)).toBe(0);
+    const inWs = { ...deps, cwd: '/work/ws' };
+    expect(await runCli(['g', 'app', 'admin', '--template', 'rest'], inWs)).toBe(0);
+    const path = '/work/ws/setu.workspace.json';
+    const manifest = JSON.parse(fs.read(path)) as {
+      members: { name: string; generatedSecrets?: string[] }[];
+    };
+    manifest.members[0]!.generatedSecrets = ['WEB_SESSION_SECRET'];
+    await fs.writeFile(path, new TextEncoder().encode(JSON.stringify(manifest, null, 2)));
+    const before = fs.read(path);
+    expect(await runCli(['g', 'app', 'admin-web', '--template', 'full-stack'], inWs)).toBe(1);
+    expect(errors.pop()).toContain('both need the Compose variable ADMIN_WEB_SESSION_SECRET');
+    expect(fs.has('/work/ws/apps/admin-web')).toBe(false);
+    expect(await runCli(['g', 'app', 'admin-web', '--template', 'rest'], inWs)).toBe(0);
+    const added = fs.read(path);
+    expect(await runCli(['add', 'session'], { ...deps, cwd: '/work/ws/apps/admin-web' })).toBe(1);
+    expect(errors.pop()).toContain('SESSION_SECRET cannot be added here.');
+    const memberEnv = '/work/ws/apps/admin-web/.env';
+    expect(fs.has(memberEnv) ? fs.read(memberEnv) : '').not.toContain('SESSION_SECRET=');
+    expect(fs.read(path)).toBe(added);
+    expect(added).not.toBe(before);
   });
 
   it('keeps a custom env file the default rules miss out of the image', async () => {
