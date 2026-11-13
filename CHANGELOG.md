@@ -8,12 +8,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
-- **Generated OpenAPI documents list derived errors and order responses by status (M137b, PR
-  pending, `@setu-ts/openapi-plugin`, `@setu-ts/rest-starter`, `@setu-ts/cli`).** A route carrying a
-  guard, body validator, route-level rate limiter or idempotency middleware now documents the errors
-  that middleware answers with; `deriveErrorResponses: false` stops adding those statuses, but
-  responses are still emitted in ascending status order and a declared 409, 415, 422 or 429 without
-  a description now reads by its status name. The REST starter, when its validation format is RFC
+- **Generated OpenAPI documents list derived errors and order responses by status (M137b, #588,
+  `@setu-ts/openapi-plugin`, `@setu-ts/rest-starter`, `@setu-ts/cli`).** A route carrying a guard,
+  body validator, route-level rate limiter or idempotency middleware now documents the errors that
+  middleware answers with; `deriveErrorResponses: false` stops adding those statuses, but responses
+  are still emitted in ascending status order and a declared 409, 415, 422 or 429 without a
+  description now reads by its status name. The REST starter, when its validation format is RFC
   9457, and the `rest` and `microservice` templates set `errorSchema: 'rfc9457'`.
   `setu client --check` reports the changed document as drift once; regenerate the client with
   `setu client`.
@@ -131,7 +131,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
-- **Derived error responses and declared response headers (M137b, PR pending, `@setu-ts/common`,
+- **Derived error responses and declared response headers (M137b, #588, `@setu-ts/common`,
   `@setu-ts/openapi-plugin`, `@setu-ts/auth-plugin`, `@setu-ts/decorator-plugin`,
   `@setu-ts/idempotency-plugin`, `@setu-ts/rest-starter`, `@setu-ts/cli`).** The generated document
   lists the errors a route's own middleware answers with, read from its brands

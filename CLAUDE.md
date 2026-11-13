@@ -815,7 +815,7 @@ here.
 - **Milestone 137b** (`common` + `openapi-plugin` + `auth-plugin` + `decorator-plugin` +
   `idempotency-plugin` + `rest-starter` + `cli` — derived 401/403/415/429 and idempotency errors
   from route middleware brands, declared response headers, `errorSchema: 'rfc9457'`) — complete (PR
-  pending).
+  #588).
 - **Next milestone** — the remaining M139 letters, M137c, then M140 (generated code read as code;
   M140a first).
 
