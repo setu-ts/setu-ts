@@ -2943,28 +2943,56 @@ export function withEnvVariable(
 }
 
 /**
- * Whether a `.gitignore` ignores a file at the project root, judged the way Git
- * does for the simple patterns a root dotenv file meets: the LAST matching line
- * wins, so `.env` followed by `!.env` does not ignore it. Patterns with a
- * directory part, `**` or a trailing `/` are skipped as not matching — a
- * misjudgement there costs one redundant `.gitignore` line or a refusal, never
- * an unignored secret.
+ * Whether the project's root `.gitignore` ignores a file, read the way Git
+ * reads it: the LAST matching line wins (so `.env` then `!.env` does not
+ * ignore it); a pattern with no slash matches a name at any depth, one with a
+ * slash is anchored to the project root; `**` spans directories; a trailing
+ * slash matches directories only; and a rule matching a parent directory
+ * ignores everything beneath it. Git's further rule that a file under an
+ * ignored directory cannot be re-included is not modelled, which can only make
+ * this answer "not ignored" (a refusal), never hide a secret.
  */
 function gitignoreCovers(ignore: string, file: string): boolean {
+  const path = file.replace(/^\.\//, '');
+  const parts = path.split('/');
+  const dirs = parts.slice(0, -1).map((_, index) => parts.slice(0, index + 1).join('/'));
   let covered = false;
   for (const raw of ignore.split('\n')) {
     const line = raw.trim();
     if (line === '' || line.startsWith('#')) continue;
     const negated = line.startsWith('!');
-    const pattern = (negated ? line.slice(1) : line).replace(/^\//, '');
-    if (pattern.includes('/') || pattern.includes('**') || pattern === '') continue;
-    const source = pattern
-      .replace(/[.+^${}()|[\]\\]/g, '\\$&')
-      .replace(/\*/g, '[^/]*')
-      .replace(/\?/g, '[^/]');
-    if (new RegExp(`^${source}$`).test(file)) covered = !negated;
+    let pattern = negated ? line.slice(1) : line;
+    const directoryOnly = pattern.endsWith('/');
+    if (directoryOnly) pattern = pattern.slice(0, -1);
+    const anchored = pattern.includes('/');
+    pattern = pattern.replace(/^\//, '');
+    if (pattern === '') continue;
+    const matcher = new RegExp(`^${globSource(pattern)}$`);
+    const test = (candidate: string): boolean =>
+      matcher.test(anchored ? candidate : candidate.slice(candidate.lastIndexOf('/') + 1));
+    if (dirs.some(test) || (!directoryOnly && test(path))) covered = !negated;
   }
   return covered;
+}
+
+/** A `.gitignore` glob as a regular-expression source: `**` spans directories. */
+function globSource(pattern: string): string {
+  return pattern
+    .split(/(\*\*\/|\/\*\*$|\*\*|\*|\?)/)
+    .map((token) =>
+      token === '**/'
+        ? '(?:.*/)?'
+        : token === '/**'
+          ? '/.*'
+          : token === '**'
+            ? '.*'
+            : token === '*'
+              ? '[^/]*'
+              : token === '?'
+                ? '[^/]'
+                : token.replace(/[.+^${}()|[\]\\]/g, '\\$&'),
+    )
+    .join('');
 }
 
 /**
