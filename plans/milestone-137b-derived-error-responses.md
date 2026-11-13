@@ -232,9 +232,12 @@ DECLARED status always wins over a derived one.
     statuses) gets
     `content: { 'application/problem+json': { schema: { $ref: '#/components/schemas/<name>' } } }`.
     Declared responses are untouched.
-  - **The component name** is claimed once per `generate()` through
-    `#claimComponentName('ProblemDetails', …)`, so a registered `ProblemDetails` keeps its name and
-    this one gets the suffix.
+  - **The component name** is claimed once per `generate()`, AFTER every operation is built and only
+    when at least one generated error response used it, through
+    `#claimComponentName('ProblemDetails')`. Each such response holds one shared `{ $ref }` object
+    whose value is filled in after the claim, so an application schema named `ProblemDetails`
+    (registered or hoisted) keeps its name and this one gets the suffix. The component is recorded
+    as per-document (`#perDocComponents`), so the next `generate()` purges it.
   - **The schema:**
     `{ type: 'object', properties: { type: { type: 'string', format: 'uri-reference', default: 'about:blank' }, title: { type: 'string' }, status: { type: 'integer', minimum: 100, maximum: 599 }, detail: { type: 'string' }, instance: { type: 'string', format: 'uri-reference' } } }`,
     with no `required` list and no `additionalProperties: false` (RFC 9457 §3: members are optional;
