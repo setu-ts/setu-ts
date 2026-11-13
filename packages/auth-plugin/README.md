@@ -1982,7 +1982,7 @@ code; declare their `429` on the routes:
 app.router.post('/chat', {
   schema: {
     response: {
-      200: Reply,
+      200: { description: 'The reply' },
       429: { description: 'Quota spent', headers: { 'Retry-After': { required: true } } },
     },
   },

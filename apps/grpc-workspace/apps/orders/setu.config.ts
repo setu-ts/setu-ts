@@ -63,7 +63,7 @@ export function createApp(
       HttpSecurityPlugin(),
       HealthPlugin({ indicators: [...HEALTH_INDICATORS] }),
       MetricsPlugin({ customMetrics: [...CUSTOM_METRICS] }),
-      OpenApiPlugin(),
+      OpenApiPlugin({ errorSchema: 'rfc9457' }),
       MessagingPlugin(messagingOptions()),
       QueuePlugin({ processors: [...QUEUE_PROCESSORS], ...queueOptions() }),
       ResiliencePlugin(),

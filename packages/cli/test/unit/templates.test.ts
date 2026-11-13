@@ -413,6 +413,9 @@ describe('class-based template', () => {
       // paths it excludes, so every template built from it — this one included —
       // carries that argument.
       'logger-plugin',
+      // M137b §3.8: the document describes that same Problem Details shape, so
+      // OpenAPI carries `errorSchema: 'rfc9457'`.
+      'openapi-plugin',
     ]);
     for (const wiring of resolveHost(CLASS_BASED_TEMPLATE, 'deno').plugins) {
       if (withArgs.has(wiring.pkg)) {
