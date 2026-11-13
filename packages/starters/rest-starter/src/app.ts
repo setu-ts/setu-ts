@@ -178,6 +178,10 @@ export function composeRestPlugins(
   platform: RuntimePlatform,
   errorHandlerInstalled = false,
 ): IPlugin[] {
+  // Resolved once, so the validator and the document read the same format. An
+  // explicit `errorFormat: undefined` from a JavaScript caller falls back to the
+  // starter's default rather than overwriting it.
+  const errorFormat = options.validation?.errorFormat ?? 'rfc9457';
   const plugins: IPlugin[] = [
     // Runtime must be first — the kernel requires it at start()
     RuntimePlugin(starterRuntimeOptions(options)),
@@ -187,9 +191,9 @@ export function composeRestPlugins(
     LoggerPlugin(options.logger),
     // `errorFormat: 'rfc9457'` makes a validation failure answer in the same
     // Problem Details shape the `errorHandler` below emits for thrown errors
-    // (C3). `options.validation` spreads LAST so an explicit caller option —
-    // including its own `errorFormat` — still wins.
-    ValidationPlugin({ errorFormat: 'rfc9457', ...options.validation }),
+    // (C3). A caller's other validation options are kept, and its own
+    // `errorFormat`, when it names one, still wins.
+    ValidationPlugin({ ...options.validation, errorFormat }),
     HttpSecurityPlugin(starterHttpSecurityOptions(options)),
     HealthPlugin(options.health),
     MetricsPlugin(options.metrics),
@@ -197,7 +201,7 @@ export function composeRestPlugins(
       openApiOptionsFor(
         options.openapi,
         platform,
-        errorHandlerInstalled && validationAnswersProblemDetails(options.validation?.errorFormat),
+        errorHandlerInstalled && validationAnswersProblemDetails(errorFormat),
       ),
     ),
     DecoratorPlugin(options.decorators),

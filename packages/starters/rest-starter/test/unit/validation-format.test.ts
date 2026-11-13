@@ -127,6 +127,28 @@ describe('rest-starter OpenAPI error schema follows the validation format (M137b
     },
   );
 
+  it('treats an explicit errorFormat: undefined as the rfc9457 default, at runtime and in the document', async () => {
+    // A JavaScript caller can pass the key with no value; it must not
+    // overwrite the default and leave the document describing another body.
+    const options = { validation: { errorFormat: undefined } } as unknown as Parameters<
+      typeof createRestApp
+    >[0];
+    const { responses } = await documented(options);
+    expect(responses['400']).toHaveProperty(['content', 'application/problem+json']);
+
+    const app = await appWith(options);
+    try {
+      const val = await app.inject({
+        method: 'POST',
+        url: 'http://localhost/validate',
+        body: { name: '' },
+      });
+      expect(val.headers.get('content-type')).toBe('application/problem+json');
+    } finally {
+      await app.stop();
+    }
+  });
+
   it('keeps an explicit openapi.errorSchema even when validation answers in another format', async () => {
     const { responses } = await documented({
       validation: { errorFormat: 'nestjs' },
