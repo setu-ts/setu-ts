@@ -26,6 +26,7 @@ export type {
   OpenApiOperation,
   OpenApiParameter,
   OpenApiRequestBody,
+  OpenApiHeader,
   OpenApiResponse,
   OpenApiTag,
 } from './generators/openapi-generator.ts';

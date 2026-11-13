@@ -21,6 +21,7 @@ import {
   CLIENT_IP_STATE_KEY,
   createPathMatcher,
   respondWithError,
+  withRateLimitMetadata,
 } from '@setu-ts/common';
 import type { RateLimitStore } from '../stores/rate-limit-store.ts';
 import { MemoryRateLimitStore } from '../stores/rate-limit-store.ts';
@@ -138,6 +139,12 @@ export function serializeSfString(value: string): string {
  * narrow that list rather than dropping it: an exhausted bucket that refuses
  * `/live` gets the container restarted.
  *
+ * The returned function carries a rate-limit brand (`rateLimitMetadataOf`), so
+ * on a route's own `middleware` array `@setu-ts/openapi-plugin` documents its
+ * `429` and headers. An app-wide limiter is invisible to the generator; such
+ * an application declares the `429` on its routes. A wrapper around this
+ * limiter must re-brand itself with `withRateLimitMetadata`.
+ *
  * @example
  * ```typescript
  * app.middleware.add(rateLimitMiddleware({
@@ -181,7 +188,12 @@ export function rateLimitMiddleware(options: RateLimitOptions): MiddlewareFuncti
   // Lazily-built store (memoized per middleware instance, not per request)
   let store: RateLimitStore | undefined = options.store;
 
-  return async (ctx: IRequestContext, next: () => Promise<void>): Promise<void | HandlerResult> => {
+  // Branded so a documentation generator can list the 429 and the headers
+  // this limiter actually sends (M137b §3.4).
+  const limiter = async (
+    ctx: IRequestContext,
+    next: () => Promise<void>,
+  ): Promise<void | HandlerResult> => {
     // An exempt path skips the limiter entirely: no counter is incremented, so
     // a probe cannot consume the budget a real caller needs, and no
     // `RateLimit`/`RateLimit-Policy` fields are written for a request the limit
@@ -242,6 +254,7 @@ export function rateLimitMiddleware(options: RateLimitOptions): MiddlewareFuncti
 
     await next();
   };
+  return withRateLimitMetadata(limiter, { standardHeaders });
 }
 
 /**

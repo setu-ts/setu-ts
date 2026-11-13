@@ -153,7 +153,7 @@ function scopedGuard(
     await next();
   };
   brandPolicyGuard(guard, { policy: SCOPED_RBAC_POLICY, abilities, anonymous: false });
-  return withSecurityMetadata(guard, { authenticated: true });
+  return withSecurityMetadata(guard, { authenticated: true, forbids: true });
 }
 
 /**

@@ -223,7 +223,7 @@ export function createPolicyMiddleware(
     }
     await next();
   };
-  return withSecurityMetadata(middleware, { authenticated: !anonymous });
+  return withSecurityMetadata(middleware, { authenticated: !anonymous, forbids: true });
 }
 
 /**
@@ -359,7 +359,7 @@ export function createScopedRbacMiddleware(
     }
     await next();
   };
-  return withSecurityMetadata(middleware, { authenticated: true });
+  return withSecurityMetadata(middleware, { authenticated: true, forbids: true });
 }
 
 /**

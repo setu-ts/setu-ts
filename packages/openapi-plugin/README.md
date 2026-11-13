@@ -147,6 +147,8 @@ throw `TypeError` at construction. `SwaggerUiOptions.assets` selects the same mo
 | `exclude`              | `readonly string[]`              | —                                     | Router paths to omit; matches the resolved pattern.          |
 | `excludeOwners`        | `readonly string[]`              | `['health-plugin', 'metrics-plugin']` | Plugin names whose routes are omitted, by `RouteInfo.owner`. |
 | `deriveRequestSchemas` | `boolean`                        | `true`                                | Fill `requestBody`/`parameters` from validation middleware.  |
+| `deriveErrorResponses` | `boolean`                        | `true`                                | Document the errors a route's own middleware answers with.   |
+| `errorSchema`          | `'rfc9457'`                      | —                                     | Give generated error responses an RFC 9457 body.             |
 
 The remaining options come from `OpenApiGeneratorOptions` (title, version, servers,
 `securitySchemes`, and the rest of the document metadata).
@@ -248,7 +250,8 @@ Rules and limits:
   client generator refuses an `in: 'cookie'` parameter outright, so emitting one would turn a
   working document into a codegen failure for its consumers.
 - The derived `400` carries a description and no schema — the body shape depends on the validation
-  plugin's configured `errorFormat`, which this plugin cannot see.
+  plugin's configured `errorFormat`, which this plugin cannot see. Set `errorSchema: 'rfc9457'` when
+  that format is RFC 9457 (see [Derived error responses](#derived-error-responses)).
 - `deriveRequestSchemas: false` disables derivation only. It does NOT restore the rest of the
   pre-derivation document: owner exclusion, the `operationId` format and schema deduplication are
   unconditional. To document the operational routes again, pass `excludeOwners: []`.
@@ -264,6 +267,60 @@ header, so nothing is added, and a header the route declares in its own `headers
 Swagger UI therefore shows a field for the key, and a request sent from it is not refused for
 lacking one. This is not governed by `deriveRequestSchemas`: the middleware refuses the request
 either way.
+
+## Derived error responses
+
+`deriveErrorResponses` (default `true`) documents the statuses and headers a route's **own**
+middleware answers with, read from the brands that middleware carries:
+
+| Route middleware                                                                                                                   | Documented                                                                                                                     |
+| ---------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| A guard requiring a principal (`requireAuth()`, every `@setu-ts/auth-plugin` guard)                                                | `401`                                                                                                                          |
+| A guard that can refuse a signed-in caller (roles, permissions, scopes, policies, MFA, scoped RBAC, `requireAuth({ delegation })`) | `403` as well. `requireAuth()` alone documents no `403`.                                                                       |
+| A body validator (`validateBody`, `@ValidateBody`)                                                                                 | `415`                                                                                                                          |
+| `rateLimitMiddleware`                                                                                                              | `429` with `Retry-After`, plus `RateLimit` and `RateLimit-Policy` on the `429` and every `2xx` unless `standardHeaders: false` |
+| `idempotent()` / `IdempotencyService.middleware()` (not on GET, HEAD, OPTIONS)                                                     | `400`, `409`, `422`, `429`, `401` unless `principal: 'optional'`, and `Idempotent-Replayed` on every `2xx`                     |
+
+`401` (and a scope guard's `403`) carries `WWW-Authenticate` only when `deriveSecurity` names an
+HTTP bearer, OAuth 2.0 or OpenID Connect scheme, because only bearer-token authentication sends that
+header; a session-cookie app's `401` lists none. A status the route **declares** in its `response`
+map is never changed. A derived success header joins a declared `2xx`, and a declared header of the
+same name (any case) wins. Statuses are listed in ascending order. `501` (no authorization service),
+`503` (idempotency store down) and the `signInPage` redirect are not documented.
+
+Only the route's own `middleware` array is visible. Middleware added app-wide with
+`app.middleware.add(...)` — the usual home of `rateLimitMiddleware` — cannot be seen, so declare its
+`429` on the routes it governs, or attach the limiter per route. A middleware that wraps a branded
+one carries no brand; re-brand the wrapper with `withRateLimitMetadata` or `withSecurityMetadata`
+from `@setu-ts/common`. Quota refusals (`createQuota`) happen inside handlers and are declared the
+same way.
+
+`errorSchema: 'rfc9457'` adds one `ProblemDetails` component (`type`, `title`, `status`, `detail`,
+`instance`; all optional, extension members allowed) and points every generated error response at it
+under `application/problem+json`. Set it when the application answers errors in RFC 9457 format
+(`ValidationPlugin({ errorFormat: 'rfc9457' })` and `errorHandler({ format: 'rfc9457' })`); the REST
+starter and the CLI templates set it. A schema the application registers as `ProblemDetails` keeps
+the name. Any other value throws `OpenApiDocumentOptionsError` with `reason: 'error-schema'`.
+
+### Declaring response headers
+
+A `response` entry may be a `RouteResponseDocumentation` (from `@setu-ts/common`) instead of a bare
+schema, and `@ApiResponse` takes the same `headers`:
+
+```typescript
+import { z } from 'zod';
+import type { RouteResponseDocumentation } from '@setu-ts/common';
+
+const created: RouteResponseDocumentation = {
+  schema: z.object({ id: z.string() }),
+  description: 'Created',
+  headers: { Location: { description: 'The new item URL', required: true } },
+};
+app.router.post('/items', { schema: { response: { 201: created } }, handler });
+```
+
+Each header's `schema` is converted like a body schema (a string when omitted); `description` and
+`required` are copied when set.
 
 ## Operation ids
 
@@ -382,6 +439,7 @@ and the `@ApiTags`/`@ApiOperation`/`@ApiResponse` decorators from
 | `OpenApiDocument`             | interface |
 | `OpenApiExternalDocs`         | interface |
 | `OpenApiGeneratorOptions`     | interface |
+| `OpenApiHeader`               | interface |
 | `OpenApiOperation`            | interface |
 | `OpenApiParameter`            | interface |
 | `OpenApiPluginOptions`        | interface |

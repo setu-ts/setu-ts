@@ -48,6 +48,10 @@ export function buildRestPlugins(options: RestStarterOptions = {}): IPlugin[] {
  * `swagger: false` and an explicit `assets` value are kept; `true` and `{}`
  * name no asset mode, so they get the CDN too.
  *
+ * `errorSchema: 'rfc9457'` is the default, because the starter's
+ * `ValidationPlugin` and `errorHandler` both answer in RFC 9457 format; a
+ * caller's own `errorSchema` still wins (M137b §3.8).
+ *
  * @internal
  * @param openapi - The caller's OpenAPI options, if any.
  * @param platform - The platform the application runs on.
@@ -56,15 +60,16 @@ export function buildRestPlugins(options: RestStarterOptions = {}): IPlugin[] {
 export function openApiOptionsFor(
   openapi: OpenApiPluginOptions | undefined,
   platform: RuntimePlatform,
-): OpenApiPluginOptions | undefined {
+): OpenApiPluginOptions {
   const swagger = openapi?.swagger;
   if (
     platform !== 'cloudflare-workers' ||
     swagger === false ||
     (typeof swagger === 'object' && swagger.assets !== undefined)
   )
-    return openapi;
+    return { errorSchema: 'rfc9457', ...openapi };
   return {
+    errorSchema: 'rfc9457',
     ...openapi,
     swagger: { ...(typeof swagger === 'object' ? swagger : {}), assets: 'cdn' },
   };

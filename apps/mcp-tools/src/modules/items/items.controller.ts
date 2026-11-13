@@ -1,4 +1,4 @@
-import { CAPABILITIES, withResponseMetadata } from '@setu-ts/common';
+import { CAPABILITIES, withRateLimitMetadata, withResponseMetadata } from '@setu-ts/common';
 import { requireScopes, rateLimitMiddleware } from '@setu-ts/auth-plugin';
 import { idempotent } from '@setu-ts/idempotency-plugin';
 import { mcpTool } from '@setu-ts/mcp-plugin';
@@ -31,16 +31,21 @@ const listQuery = validateQuery(ListItemsQuery);
 const params = validateParams(ItemsParams);
 const archiveBody = validateBody(ArchiveItemsBody);
 
-// Config is available after bootstrap; each route owns its own limiter.
+// Config is available after bootstrap; each route owns its own limiter. The
+// wrapper carries the limiter's brand itself, so the OpenAPI document lists
+// the 429 and its headers (the inner limiter's brand never reaches the route).
 function toolRateLimit(): MiddlewareFunction {
   let limiter: MiddlewareFunction | undefined;
-  return (ctx, next) => {
-    limiter ??= rateLimitMiddleware({
-      windowMs: 60_000,
-      max: ctx.services.get<IConfig>(CAPABILITIES.CONFIG).getOrThrow<number>('MCP_RATE_MAX'),
-    });
-    return limiter(ctx, next);
-  };
+  return withRateLimitMetadata(
+    (ctx, next) => {
+      limiter ??= rateLimitMiddleware({
+        windowMs: 60_000,
+        max: ctx.services.get<IConfig>(CAPABILITIES.CONFIG).getOrThrow<number>('MCP_RATE_MAX'),
+      });
+      return limiter(ctx, next);
+    },
+    { standardHeaders: true },
+  );
 }
 
 /** Registers the items feature routes. */

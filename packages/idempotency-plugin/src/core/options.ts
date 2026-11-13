@@ -672,8 +672,10 @@ export function routeIdempotencyMetadata(
 ): RouteIdempotencyMetadata {
   const key = options?.key;
   const required = options?.required ?? true;
-  if (key === undefined) return { idempotent: true, keyHeader: IDEMPOTENCY_KEY_HEADER, required };
+  const principalRequired = options?.principal !== 'optional';
+  if (key === undefined)
+    return { idempotent: true, keyHeader: IDEMPOTENCY_KEY_HEADER, required, principalRequired };
   if (typeof key === 'object' && 'header' in key)
-    return { idempotent: true, keyHeader: key.header, required };
-  return { idempotent: true, required };
+    return { idempotent: true, keyHeader: key.header, required, principalRequired };
+  return { idempotent: true, required, principalRequired };
 }

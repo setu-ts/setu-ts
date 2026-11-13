@@ -69,6 +69,10 @@ export class OpenApiService implements IOpenApiService {
     if (this.#options.deriveResponseStatus !== undefined) {
       base.deriveResponseStatus = this.#options.deriveResponseStatus;
     }
+    if (this.#options.deriveErrorResponses !== undefined) {
+      base.deriveErrorResponses = this.#options.deriveErrorResponses;
+    }
+    if (this.#options.errorSchema !== undefined) base.errorSchema = this.#options.errorSchema;
     return base as OpenApiGeneratorOptions;
   }
 
@@ -76,7 +80,7 @@ export class OpenApiService implements IOpenApiService {
    * Creates a new OpenAPI service.
    *
    * @param options - Service options
-   * @throws {OpenApiDocumentOptionsError} If license keys conflict or tag names repeat
+   * @throws {OpenApiDocumentOptionsError} If license keys conflict, tag names repeat or `errorSchema` is unknown
    */
   constructor(options: OpenApiServiceOptions) {
     validateDocumentMetadata(options);

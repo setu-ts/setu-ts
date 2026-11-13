@@ -103,7 +103,9 @@ Deno also needs filesystem read permission. All starter families forward `openap
 `createRestApp({ openapi: { swagger: { assets: 'cdn' } } })` selects pinned CDN assets. On Workers,
 which has no filesystem to self-host from, the starter selects them itself when no Swagger asset
 mode is chosen; an explicit choice, such as `assets: { baseUrl: '/assets' }`, is kept. Omitting the
-package while self-hosting fails startup with `OptionalDependencyUnavailableError`.
+package while self-hosting fails startup with `OptionalDependencyUnavailableError`. The starter's
+OpenAPI document gives generated error responses an RFC 9457 body (`errorSchema: 'rfc9457'`),
+matching its validation and error-handler format; pass your own `openapi.errorSchema` to change it.
 
 `RestStarterOptions` is one optional field per plugin. Every field is optional and `createRestApp()`
 with no arguments is valid.

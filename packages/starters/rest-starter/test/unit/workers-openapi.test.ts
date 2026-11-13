@@ -21,9 +21,11 @@ function onWorkers(plugins: readonly IPlugin[]): IPlugin[] {
 describe('rest-starter / OpenAPI assets per platform', () => {
   it('selects the CDN on Workers when no Swagger mode was chosen', () => {
     expect(openApiOptionsFor(undefined, 'cloudflare-workers')).toEqual({
+      errorSchema: 'rfc9457',
       swagger: { assets: 'cdn' },
     });
     expect(openApiOptionsFor({ endpoint: '/api/docs' }, 'cloudflare-workers')).toEqual({
+      errorSchema: 'rfc9457',
       endpoint: '/api/docs',
       swagger: { assets: 'cdn' },
     });
@@ -35,13 +37,17 @@ describe('rest-starter / OpenAPI assets per platform', () => {
       { assets: 'self' },
       { assets: { baseUrl: '/swagger' } },
     ] as const) {
-      expect(openApiOptionsFor({ swagger }, 'cloudflare-workers')).toEqual({ swagger });
+      expect(openApiOptionsFor({ swagger }, 'cloudflare-workers')).toEqual({
+        errorSchema: 'rfc9457',
+        swagger,
+      });
     }
   });
 
   it('selects the CDN on Workers for a Swagger value naming no asset mode', () => {
     for (const swagger of [true, {}] as const) {
       expect(openApiOptionsFor({ swagger }, 'cloudflare-workers')).toEqual({
+        errorSchema: 'rfc9457',
         swagger: { assets: 'cdn' },
       });
     }
@@ -49,8 +55,23 @@ describe('rest-starter / OpenAPI assets per platform', () => {
 
   it('leaves every server runtime on the self-hosted default', () => {
     for (const platform of ['deno', 'node', 'bun'] as const) {
-      expect(openApiOptionsFor(undefined, platform)).toBeUndefined();
-      expect(openApiOptionsFor({ endpoint: '/x' }, platform)).toEqual({ endpoint: '/x' });
+      expect(openApiOptionsFor(undefined, platform)).toEqual({ errorSchema: 'rfc9457' });
+      expect(openApiOptionsFor({ endpoint: '/x' }, platform)).toEqual({
+        errorSchema: 'rfc9457',
+        endpoint: '/x',
+      });
+    }
+  });
+
+  it('defaults errorSchema to rfc9457 and lets a caller value win (M137b §3.8)', () => {
+    // A caller value spreads last, so it is kept on both branches; the type
+    // admits only 'rfc9457', so an explicit `undefined` is the caller's other
+    // choice and it, too, wins.
+    for (const platform of ['node', 'cloudflare-workers'] as const) {
+      expect(openApiOptionsFor({ errorSchema: 'rfc9457' }, platform).errorSchema).toBe('rfc9457');
+      expect(
+        openApiOptionsFor({ errorSchema: undefined } as never, platform).errorSchema,
+      ).toBeUndefined();
     }
   });
 

@@ -15,9 +15,24 @@ import {
 import type { RateLimitResult, RateLimitStore } from '../../src/stores/rate-limit-store.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 import { createContext } from '../fixtures/rate-limit-context.ts';
-import { CLIENT_IP_STATE_KEY } from '@setu-ts/common';
+import { CLIENT_IP_STATE_KEY, rateLimitMetadataOf } from '@setu-ts/common';
 
 describe('rateLimitMiddleware', () => {
+  it('carries a rate-limit brand whose standardHeaders follows the option (M137b)', () => {
+    for (const [standardHeaders, expected] of [
+      [undefined, true],
+      [true, true],
+      [false, false],
+    ] as const) {
+      const limiter = rateLimitMiddleware({
+        windowMs: 1000,
+        max: 1,
+        ...(standardHeaders === undefined ? {} : { standardHeaders }),
+      });
+      expect(rateLimitMetadataOf(limiter)).toEqual({ standardHeaders: expected });
+    }
+  });
+
   it('under-limit request calls next and sets the draft-11 header fields', async () => {
     const runtime = createFakeRuntime();
     const middleware = rateLimitMiddleware({ windowMs: 60000, max: 100 });

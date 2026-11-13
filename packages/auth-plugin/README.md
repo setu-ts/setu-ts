@@ -1968,6 +1968,28 @@ requirement names a scheme, not a role, so `requireRole('admin')` documents that
 required and nothing about the role; scopes are merged, sorted and de-duplicated into the derived
 requirement's scope list.
 
+The brand also says which errors a guard answers, which `OpenApiPlugin` documents by default
+(`deriveErrorResponses`). Every guard documents `401`. Those that can refuse a signed-in caller —
+`requireRole`, `requireAnyRole`, `requirePermission`, `requireAllPermissions`, `requireScopes`,
+`requireMfa`, `requirePolicy`, the scoped guards, and `requireAuth({ delegation: 'forbid' })` or
+`'require'` — carry `forbids: true` and document `403` too; `requireAuth()` alone documents no
+`403`. `rateLimitMiddleware` carries a rate-limit brand, so a route-level limiter documents its
+`429` with `Retry-After` (and `RateLimit`/`RateLimit-Policy` unless `standardHeaders: false`). An
+app-wide limiter is invisible to the generator, and so are quota refusals, which happen in handler
+code; declare their `429` on the routes:
+
+```typescript
+app.router.post('/chat', {
+  schema: {
+    response: {
+      200: Reply,
+      429: { description: 'Quota spent', headers: { 'Retry-After': { required: true } } },
+    },
+  },
+  handler,
+});
+```
+
 ## License
 
 MIT

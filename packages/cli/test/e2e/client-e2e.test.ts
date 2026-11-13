@@ -69,7 +69,7 @@ it(
       configPath,
       config.replace(
         'return app;',
-        "app.router.get('/m129', { handler: (ctx) => ctx.response.json({ message: 'm129' }), schema: { operationId: 'm129Probe', deprecated: true } });\n  app.router.get('/m137a-hidden', { handler: (ctx) => ctx.response.json({ hidden: true }), schema: { operationId: 'm137aHidden', excludeFromDocument: true } });\n  return app;",
+        "app.router.get('/m129', { handler: (ctx) => ctx.response.json({ message: 'm129' }), schema: { operationId: 'm129Probe', deprecated: true } });\n  app.router.get('/m137a-hidden', { handler: (ctx) => ctx.response.json({ hidden: true }), schema: { operationId: 'm137aHidden', excludeFromDocument: true } });\n  app.router.get('/m137b', { middleware: [Object.defineProperty((_ctx: unknown, next: () => Promise<void>) => next(), Symbol.for('setu.security.metadata'), { value: { authenticated: true } })], handler: (ctx) => ctx.response.json({ ok: true }), schema: { operationId: 'm137bGuarded' } });\n  return app;",
       ),
     );
     const drift = await npmRun(project, 'client:check');
@@ -83,6 +83,9 @@ it(
     );
     expect(generated.match(/@deprecated/g)).toHaveLength(1);
     expect(generated).not.toContain('m137aHidden');
+    // M137b: the guarded route's derived 401 reaches the client as an error arm.
+    // No other scaffold route is guarded, so the only 401 arm is this route's.
+    expect(generated).toContain('readonly status: 401');
     await script(project, 'client:check');
     await script(project, 'format');
     for (const name of ['check', 'lint', 'format:check', 'build']) await script(project, name);
@@ -90,6 +93,9 @@ it(
       const response = await fetch(`${origin}/openapi.json`);
       expect(response.status).toBe(200);
       const document = await response.text();
+      // M137b: the rest template sets errorSchema, so the derived 401 carries
+      // the shared Problem Details body.
+      expect(JSON.parse(document).components?.schemas?.ProblemDetails).toBeDefined();
       await fs.writeFile(`${project}/openapi.json`, document);
       const before = await fs.readFile(`${project}/src/clientsdk/api.ts`, 'utf8');
       const saved = await runIn(project, 'setu', ['client', '--input', 'openapi.json']);

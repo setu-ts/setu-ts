@@ -133,4 +133,16 @@ describe('route security metadata', () => {
 
     expect(securityMetadataOf(impostor)).toBeUndefined();
   });
+  it('should round-trip forbids: true (M137b)', () => {
+    const branded = withSecurityMetadata(passthrough(), { authenticated: true, forbids: true });
+
+    expect(securityMetadataOf(branded)).toEqual({ authenticated: true, forbids: true });
+  });
+
+  it.each([false, 'yes', 1])('should treat forbids: %j as an invalid brand', (forbids) => {
+    const impostor = passthrough();
+    Object.defineProperty(impostor, SECURITY_METADATA, { value: { authenticated: true, forbids } });
+
+    expect(securityMetadataOf(impostor)).toBeUndefined();
+  });
 });

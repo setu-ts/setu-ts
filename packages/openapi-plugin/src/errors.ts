@@ -42,7 +42,7 @@ export class OpenApiDocumentOptionsError extends Error {
    * The document metadata constraint that was violated.
    * @since 0.13.0
    */
-  readonly reason: 'license-identifier-and-url' | 'duplicate-tag';
+  readonly reason: 'license-identifier-and-url' | 'duplicate-tag' | 'error-schema';
 
   /**
    * Creates a refusal naming the invalid metadata.
@@ -50,7 +50,10 @@ export class OpenApiDocumentOptionsError extends Error {
    * @param message - Diagnostic naming the conflicting keys or tag
    * @since 0.13.0
    */
-  constructor(reason: 'license-identifier-and-url' | 'duplicate-tag', message: string) {
+  constructor(
+    reason: 'license-identifier-and-url' | 'duplicate-tag' | 'error-schema',
+    message: string,
+  ) {
     super(message);
     this.name = 'OpenApiDocumentOptionsError';
     this.reason = reason;

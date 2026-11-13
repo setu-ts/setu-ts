@@ -193,6 +193,8 @@ describe('deriveRequestSchemas', () => {
       title: 'T',
       version: '1',
       deriveRequestSchemas: false,
+      // The body validator's 415 (M137b) is not part of the pre-M70m document.
+      deriveErrorResponses: false,
     }).generate(routes);
 
     expect(off.paths['/orders']?.post).toEqual({
@@ -276,7 +278,9 @@ describe('review findings (PR #181)', () => {
     const op = doc.paths?.['/u']?.post;
 
     expect(op?.requestBody).toBeUndefined();
-    expect(Object.keys(op?.responses ?? {})).toEqual(['200']);
+    // No derived 400; the body validator still answers 415 for a non-JSON body
+    // whatever its schema (M137b §3.3).
+    expect(Object.keys(op?.responses ?? {})).toEqual(['200', '415']);
   });
 
   it('suffixes an operationId that a literal path segment collides with', () => {

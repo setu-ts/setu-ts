@@ -35,9 +35,18 @@ describe('idempotency metadata', () => {
     { idempotent: false },
     { idempotent: true, keyHeader: 1 },
     { idempotent: true, required: 'no' },
+    { idempotent: true, principalRequired: 'yes' },
   ])('ignores forged metadata %j', (value) => {
     const fn: MiddlewareFunction = () => {};
     Object.defineProperty(fn, IDEMPOTENCY_METADATA, { value });
     expect(idempotencyMetadataOf(fn)).toBeUndefined();
+  });
+
+  it.each([true, false])('reads principalRequired: %j (M137b)', (principalRequired) => {
+    const fn = withIdempotencyMetadata((() => {}) as MiddlewareFunction, {
+      idempotent: true,
+      principalRequired,
+    });
+    expect(idempotencyMetadataOf(fn)).toEqual({ idempotent: true, principalRequired });
   });
 });
