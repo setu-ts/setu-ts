@@ -166,9 +166,17 @@ function pipelineBehaviors(
 /** Refuses HTTP guards whose request context cannot exist on non-HTTP ingress. */
 function refuseHttpGuards(target: Constructor, entries: readonly IngressMetadata[]): void {
   if (entries.some((entry) => entry.kind === 'gateway')) {
-    const controller = metadataStore.getController(target);
+    // Only the declarations a WebSocket handshake would have to honour: the
+    // WebSocket handler methods, and the class itself unless it also serves HTTP
+    // routes, where class-level authorization applies to those routes (a class
+    // may carry both, registered through both lists).
     const methods = metadataStore.getMethods(target);
-    const declarations = [controller, ...methods.values()];
+    const declarations = [
+      ...(metadataStore.getRoutesFor(target).length === 0
+        ? [metadataStore.getController(target)]
+        : []),
+      ...entries.filter(isWebsocketEntry).map((entry) => methods.get(entry.handler)),
+    ];
     for (const declaration of declarations) {
       if (
         declaration !== undefined &&

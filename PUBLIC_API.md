@@ -15032,7 +15032,8 @@ Contract notes:
 heartbeat participation. Use `@Gateway('/ws', { guards: [guard] })` to authorize an upgrade. HTTP
 `@Roles`, `@Permissions`, `@RequirePolicy`, `@ScopedRoles`, `@ScopedPermissions` and method-level
 `@Public` declarations on gateways fail registration; use handshake guards instead. `@UseGuards`
-remains invalid on non-HTTP ingress.
+remains invalid on non-HTTP ingress. On a class that also serves HTTP routes, only the WebSocket
+handler methods are checked; class-level authorization keeps applying to those routes.
 
 Optional decorator and metadata system plugin. Provides NestJS-style decorators as syntactic sugar
 over the kernel's programmatic API. Decorators capture metadata in a plain `MetadataStore` (no

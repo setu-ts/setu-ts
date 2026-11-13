@@ -166,6 +166,57 @@ describe('M140a scaffold security defaults', () => {
     },
   );
 
+  it.each([
+    ['no .gitignore', undefined, '.env\n'],
+    ['one that does not cover .env', 'node_modules/', 'node_modules/\n.env\n'],
+    ['one that already covers it', 'node_modules/\n.env\n', 'node_modules/\n.env\n'],
+  ])('keeps the written secret out of Git with %s', async (_label, before, after) => {
+    const fs = createFakeFs();
+    const lines: string[] = [];
+    const deps = {
+      fs,
+      cwd: '/work',
+      now: () => 0,
+      log: (line: string) => {
+        lines.push(line);
+      },
+      error: (line: string) => {
+        throw new Error(line);
+      },
+      secret: () => 'f'.repeat(64),
+    };
+    expect(await runCli(['new', 'shop', '--template', 'rest'], deps)).toBe(0);
+    if (before === undefined) await fs.rm('/work/shop/.gitignore');
+    else await fs.writeFile('/work/shop/.gitignore', new TextEncoder().encode(before));
+    expect(await runCli(['add', 'session'], { ...deps, cwd: '/work/shop' })).toBe(0);
+    expect(fs.read('/work/shop/.gitignore')).toBe(after);
+    expect(lines.some((line) => line.startsWith('Added .env to .gitignore'))).toBe(
+      before !== after,
+    );
+  });
+
+  it('keeps a custom env file the default rules miss out of the image', async () => {
+    const fs = createFakeFs();
+    const deps = {
+      fs,
+      cwd: '/work',
+      now: () => 0,
+      log: () => {},
+      error: (line: string) => {
+        throw new Error(line);
+      },
+    };
+    expect(
+      await runCli(
+        ['new', 'shop', '--template', 'full-stack', '--runtime', 'bun', '--env-file', 'local.env'],
+        deps,
+      ),
+    ).toBe(0);
+    expect(fs.read('/work/shop/local.env')).toMatch(/SESSION_SECRET=[0-9a-f]{64}/);
+    expect(fs.read('/work/shop/.dockerignore').split('\n')).toContain('local.env');
+    expect(fs.read('/work/shop/.gitignore').split('\n')).toContain('local.env');
+  });
+
   it('keeps a custom env file ignored and its example tracked', async () => {
     const fs = createFakeFs();
     const deps = {

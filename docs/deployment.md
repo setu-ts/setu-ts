@@ -548,6 +548,10 @@ name with hyphens changed to underscores, so `admin-web` uses `ADMIN_WEB_SESSION
 `:?` interpolation refuses to start until every required shell variable is set. The generated README
 lists the exact export lines, including workspaces whose broker needs no Compose service.
 
+Generate each value once and keep it, in a password manager or in a file Git ignores that you source
+before starting. A new value on every start invalidates every session cookie and token the previous
+one signed, which signs every user out.
+
 ```bash
 docker compose -f docker/compose.yaml up --build
 NAMESPACE=acme WORKSPACE=acme envsubst < k8s/members.yaml | kubectl apply -f -

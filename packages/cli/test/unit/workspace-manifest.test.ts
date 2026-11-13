@@ -4,6 +4,7 @@ import type { IFileSystem } from '@setu-ts/common';
 
 import {
   isMemberName,
+  manifestProblemDetail,
   readWorkspaceManifest,
   renderWorkspaceManifest,
   WORKSPACE_VERSION,
@@ -66,6 +67,34 @@ describe('generatedSecrets in the workspace manifest', () => {
       ).toBe(false);
     },
   );
+
+  it('refuses two members whose secrets need the same Compose variable', async () => {
+    const read = await readWorkspaceManifest(
+      fsWith({
+        '/ws/setu.workspace.json': renderWorkspaceManifest(
+          baseManifest([
+            { name: 'admin', port: 3000, generatedSecrets: ['WEB_SESSION_SECRET'] },
+            { name: 'admin-web', port: 3001, generatedSecrets: ['SESSION_SECRET'] },
+          ]),
+        ),
+      }),
+      '/ws',
+    );
+    expect(read.ok).toBe(false);
+    if (!read.ok) {
+      expect(read.problem).toEqual({
+        kind: 'secret-collision',
+        variable: 'ADMIN_WEB_SESSION_SECRET',
+        first: 'admin (WEB_SESSION_SECRET)',
+        second: 'admin-web (SESSION_SECRET)',
+      });
+      expect(manifestProblemDetail(read.problem)).toBe(
+        'Members admin (WEB_SESSION_SECRET) and admin-web (SESSION_SECRET) both need the Compose ' +
+          'variable ADMIN_WEB_SESSION_SECRET, so they would share one signing key. Rename a member ' +
+          'or its generated secret in the manifest.',
+      );
+    }
+  });
 });
 
 it('X87-2 X87-6 round-trips and validates development ports without dropping fields', async () => {

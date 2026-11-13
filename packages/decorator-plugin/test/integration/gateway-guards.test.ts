@@ -4,8 +4,10 @@ import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { WebSocketPlugin } from '@setu-ts/websocket-plugin';
 import {
+  Controller,
   DecoratorPlugin,
   Gateway,
+  Get,
   OnOpen,
   OnMessage,
   Roles,
@@ -137,6 +139,60 @@ describe('gateway handshake guards', () => {
       await expect(app.start()).rejects.toThrow(
         /@RequirePolicy, @ScopedRoles or @ScopedPermissions on a gateway[\s\S]*@Gateway\(path, \{ guards \}\)/,
       );
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('keeps HTTP authorization on a class that also declares a gateway', async () => {
+    @Controller('/mixed')
+    @Gateway('/ws-mixed')
+    @Roles('admin')
+    class Mixed {
+      @Get('/report')
+      @Permissions('read')
+      report(): { readonly ok: boolean } {
+        return { ok: true };
+      }
+
+      @OnOpen open(): void {}
+    }
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        WebSocketPlugin(),
+        DecoratorPlugin({ controllers: [Mixed], ingress: [Mixed] }),
+      ],
+    });
+    try {
+      await app.start();
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('still refuses authorization on the WebSocket handler of a mixed class', async () => {
+    @Controller('/mixed-ws')
+    @Gateway('/ws-mixed-refused')
+    class MixedRefused {
+      @Get('/report')
+      report(): { readonly ok: boolean } {
+        return { ok: true };
+      }
+
+      @OnOpen
+      @Roles('admin')
+      open(): void {}
+    }
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        WebSocketPlugin(),
+        DecoratorPlugin({ controllers: [MixedRefused], ingress: [MixedRefused] }),
+      ],
+    });
+    try {
+      await expect(app.start()).rejects.toThrow('on a gateway');
     } finally {
       await app.stop();
     }

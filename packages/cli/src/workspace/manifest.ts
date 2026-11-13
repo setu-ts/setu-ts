@@ -303,7 +303,19 @@ export type WorkspaceManifestProblem =
    * (M139b): lowercase kebab-case whose derived identifiers are safe. Reported
    * by name, so a workspace that used to accept it does not read as corrupt.
    */
-  | { readonly kind: 'invalid-member-name'; readonly name: string };
+  | { readonly kind: 'invalid-member-name'; readonly name: string }
+  /**
+   * Well-formed, but two members' generated secrets map to one Compose shell
+   * variable (member `admin` with `WEB_SESSION_SECRET` and member `admin-web`
+   * with `SESSION_SECRET` both need `ADMIN_WEB_SESSION_SECRET`), so Compose would
+   * hand both the same signing key.
+   */
+  | {
+      readonly kind: 'secret-collision';
+      readonly variable: string;
+      readonly first: string;
+      readonly second: string;
+    };
 
 /** The result of reading a workspace manifest. */
 export type WorkspaceManifestResult =
@@ -335,6 +347,13 @@ export function isMemberName(name: string): boolean {
  * @returns The sentence, or undefined when the generic refusal says enough
  */
 export function manifestProblemDetail(problem: WorkspaceManifestProblem): string | undefined {
+  if (problem.kind === 'secret-collision') {
+    return (
+      `Members ${problem.first} and ${problem.second} both need the Compose variable ` +
+      `${problem.variable}, so they would share one signing key. Rename a member or its ` +
+      'generated secret in the manifest.'
+    );
+  }
   if (problem.kind !== 'invalid-member-name') return undefined;
   const kebab = deriveNames(problem.name).kebab;
   const rename = isMemberName(kebab) ? ` (for example to "${escapeName(kebab)}")` : '';
@@ -646,6 +665,27 @@ export async function readWorkspaceManifest(
         };
     members.push(member);
   }
+
+  // Two generated secrets that map to one shell variable would give two members
+  // the same signing key; the names are built from parsed (validated) parts, so
+  // they need no escaping in the message.
+  const owners = new Map<string, string>();
+  for (const member of members)
+    for (const variable of member.generatedSecrets ?? []) {
+      const shell = memberSecretVariable(member.name, variable);
+      const first = owners.get(shell);
+      if (first !== undefined)
+        return {
+          ok: false,
+          problem: {
+            kind: 'secret-collision',
+            variable: shell,
+            first,
+            second: `${member.name} (${variable})`,
+          },
+        };
+      owners.set(shell, `${member.name} (${variable})`);
+    }
 
   const names = new Set(members.map((member) => member.name));
   for (const member of members) {

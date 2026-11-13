@@ -218,6 +218,13 @@ for (const [args, expected] of [[[], []], [['--down'], ['three']], [['--down=2']
  assert.deepEqual(removed, expected);
 }
 for (const arg of ['--down=0', '--down=x', '--down=', '--down=-1', '--down=1.5']) assert.throws(() => migrationCommand([arg]), /Expected --down/);
+for (const count of [Number.NaN, 0, -1, 1.5]) {
+ let read = false;
+ await assert.rejects(runMigrations('down', { database: {}, ledger: {
+  async applied() { read = true; return ['one']; }, async record() {}, async remove() {},
+ } }, count), /Cannot reverse .* migrations/);
+ assert.equal(read, false);
+}
 events.length = 0;
 const names = new Set(['one']);
 const ledger = {

@@ -2445,6 +2445,20 @@ async function addOne(
         const appended = withEnvVariable(text ?? '', [variable], localValue);
         if (appended !== undefined) edits.push({ path, contents: appended });
       }
+      // The file now holds a usable signing secret, so it must not reach Git: a
+      // project the CLI did not scaffold may have no .gitignore, or one that
+      // does not name a custom dotenv path.
+      const ignorePath = joinPath(dir, '.gitignore');
+      const ignore = await readProjectText(deps, ignorePath, '.gitignore');
+      if (ignore === null) return EXIT_ERROR;
+      if (!gitignoreCovers(ignore ?? '', envFile)) {
+        const base =
+          ignore === undefined || ignore === '' || ignore.endsWith('\n')
+            ? (ignore ?? '')
+            : `${ignore}\n`;
+        edits.push({ path: ignorePath, contents: `${base}${envFile}\n` });
+        deps.log(`Added ${envFile} to .gitignore: it holds ${variableName}.`);
+      }
     } else {
       deps.log(
         declaration?.kind === 'absent'
@@ -2911,6 +2925,24 @@ export function withEnvVariable(
  * reporting why it cannot be used (unreadable, not UTF-8, over 1 MiB), so the
  * command fails with its error code before anything is written.
  */
+/**
+ * Whether a `.gitignore` already ignores a dotenv file at the project root: by
+ * its own name, or by the `.env` / `.env.*` / `.dev.vars` patterns the CLI
+ * writes. Deliberately narrow — an unrecognised pattern counts as not covering,
+ * and the cost is one redundant line.
+ */
+function gitignoreCovers(ignore: string, file: string): boolean {
+  const lines = new Set(ignore.split('\n').map((line) => line.trim()));
+  if (lines.has(file) || lines.has(`/${file}`)) return true;
+  const stem =
+    file === '.env' || file.startsWith('.env.')
+      ? '.env'
+      : file === '.dev.vars'
+        ? '.dev.vars'
+        : undefined;
+  return stem !== undefined && file !== stem && lines.has(`${stem}.*`);
+}
+
 async function readProjectText(
   deps: AddCommandDependencies,
   path: string,

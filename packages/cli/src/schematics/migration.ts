@@ -246,12 +246,21 @@ export interface Migration {
  * @param direction - \`up\` applies oldest first; \`down\` reverses newest first
  * @param options - Database connection and its migration ledger
  * @param count - Number to reverse, default one; Infinity reverses all
+ * @throws {Error} If \`count\` is not a positive whole number or Infinity
  */
 export async function runMigrations(
   direction: 'up' | 'down',
   { database, ledger }: { readonly database: IDatabaseService; readonly ledger: IMigrationLedger },
   count = 1,
 ): Promise<void> {
+  // Checked here as well as on the command line: a direct caller (a Worker's
+  // migration route) bypasses migrationCommand, and NaN would never satisfy the
+  // stop condition below, reversing every applied migration.
+  if (direction === 'down' && count !== Infinity && !(Number.isSafeInteger(count) && count > 0)) {
+    throw new Error(
+      \`Cannot reverse \${String(count)} migrations: use a positive whole number or Infinity.\`,
+    );
+  }
   const applied = new Set(await ledger.applied());
   const ordered = direction === 'up' ? MIGRATIONS : [...MIGRATIONS].reverse();
   let reversed = 0;

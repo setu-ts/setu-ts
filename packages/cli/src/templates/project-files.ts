@@ -2137,7 +2137,14 @@ docker run --rm -p 3000:3000 ${generatedVariables.map((variable) => `-e ${variab
     ...(runtime !== 'cloudflare-workers' && port === undefined
       ? [
           { path: 'Dockerfile', contents: renderDockerfile(workspaceProfile(runtime), false) },
-          { path: '.dockerignore', contents: renderDockerignore() },
+          {
+            path: '.dockerignore',
+            contents: renderDockerignore(
+              manifest?.envFilePath === undefined || manifest.envFilePath === '.env'
+                ? undefined
+                : manifest.envFilePath,
+            ),
+          },
         ]
       : []),
   ];

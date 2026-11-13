@@ -101,7 +101,7 @@ ${wrapProse(
 ${secretVariables.map((variable) => `export ${variable}="$(openssl rand -hex 32)"\n`).join('')}docker compose -f docker/compose.yaml up --build
 \`\`\`
 
-${wrapProse(`That builds every member${broker.compose === undefined ? '.' : ` and starts the ${broker.name} service they share.`}${secretVariables.length === 0 ? '' : ' Compose refuses to start until every secret variable above is set; each member receives its own key instead of its development .env value.'}`)}`
+${wrapProse(`That builds every member${broker.compose === undefined ? '.' : ` and starts the ${broker.name} service they share.`}${secretVariables.length === 0 ? '' : ' Compose refuses to start until every secret variable above is set; each member receives its own key instead of its development .env value. Generate each value once and keep it (a password manager, or a file Git ignores that you source before starting): a new value on every start signs every user out.'}`)}`
   }
 
 ${wrapProse(
