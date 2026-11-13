@@ -66,6 +66,12 @@ export class SseService implements IService {
     logger?: ILogger,
   ) {
     const heartbeatMs = options?.heartbeatMs ?? 30_000;
+    // A NaN or negative interval would become a ~1 ms timer per connection.
+    if (!Number.isSafeInteger(heartbeatMs) || heartbeatMs < 0) {
+      throw new Error(
+        'SsePlugin: heartbeatMs must be a whole number of milliseconds, 0 to disable.',
+      );
+    }
     this.#heartbeatMs = heartbeatMs === 0 ? undefined : heartbeatMs;
     this.#retryMs = options?.retryMs;
     this.#runtime = runtime;

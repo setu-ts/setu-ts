@@ -29,6 +29,15 @@ describe('SseService', () => {
       }
     },
   );
+  it.each([Number.NaN, -1, 2.5, Infinity])(
+    'refuses a heartbeat that would become a 1 ms timer (%s)',
+    (heartbeatMs) => {
+      expect(() => new SseService({ heartbeatMs }, createFakeRuntime())).toThrow(
+        'heartbeatMs must be a whole number of milliseconds',
+      );
+    },
+  );
+
   it('should return 0 connections initially', () => {
     const runtime = createFakeRuntime({ uuidPrefix: 'svc' });
     const service = new SseService({}, runtime);

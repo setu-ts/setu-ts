@@ -61,7 +61,7 @@ const postPolicy = definePolicy({
 const app = createApplication({
   plugins: [
     RuntimePlugin(),
-    AuthPlugin({ jwt: { secret: 'replace-with-a-secret-of-32-chars!' }, policies: [postPolicy] }),
+    AuthPlugin({ jwt: {}, policies: [postPolicy] }), // JWT_SECRET from secrets, config or env
   ],
 });
 
@@ -286,7 +286,7 @@ const app = createApplication({
     RuntimePlugin(),
     MultiTenancyPlugin({ resolver: 'header' }),
     AuthPlugin({
-      jwt: { secret: 'replace-with-a-secret-of-32-chars!' },
+      jwt: {}, // JWT_SECRET from secrets, config or env
       // The catalogue: the only roles and permissions a guard may name.
       rbac: {
         roles: {

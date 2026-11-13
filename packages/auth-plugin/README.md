@@ -240,7 +240,7 @@ const postPolicy = definePolicy({
 const app = createApplication({
   plugins: [
     RuntimePlugin(),
-    AuthPlugin({ jwt: { secret: 'replace-with-a-secret-of-32-chars!' }, policies: [postPolicy] }),
+    AuthPlugin({ jwt: {}, policies: [postPolicy] }), // JWT_SECRET from secrets, config or env
   ],
 });
 
@@ -281,7 +281,7 @@ const app = createApplication({
   plugins: [
     RuntimePlugin(),
     AuthPlugin({
-      jwt: { secret: 'replace-with-a-secret-of-32-chars!' },
+      jwt: {}, // JWT_SECRET from secrets, config or env
       rbac: {
         roles: {
           approver: { permissions: ['invoices:approve'] },

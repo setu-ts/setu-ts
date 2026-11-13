@@ -84,14 +84,18 @@ interface ResolvedOptions {
   readonly allowedOrigins: readonly string[];
 }
 
+/** The largest bound Node's `ws` represents (a signed 32-bit `maxPayload`). */
+const MAX_MESSAGE_BYTES_LIMIT = 2 ** 31 - 1;
+
 /**
  * Applies defaults and rejects a configuration that cannot work.
  *
  * @param options - The caller's options
  * @returns The resolved options
  * @throws {Error} If an idle timeout is set with no heartbeat to sweep on, an
- *   `allowedOrigins` entry is not an absolute http(s) origin, or `checkOrigin`
- *   is not a boolean
+ *   `allowedOrigins` entry is not an absolute http(s) origin, `checkOrigin`
+ *   is not a boolean, or `maxMessageBytes` is not a whole number from 0 to
+ *   2^31 - 1
  * @since 0.1.0
  */
 export function resolveOptions(options?: WebSocketPluginOptions): ResolvedOptions {
@@ -105,12 +109,26 @@ export function resolveOptions(options?: WebSocketPluginOptions): ResolvedOption
     );
   }
 
+  // Validated, not passed through: Node's `ws` coerces its `maxPayload` with
+  // `| 0`, so NaN, ±Infinity, a negative or anything from 2^31 becomes 0 —
+  // unlimited — and a mis-read environment variable would remove the bound.
+  const maxMessageBytes = options?.maxMessageBytes ?? 1_048_576;
+  if (
+    !Number.isSafeInteger(maxMessageBytes) ||
+    maxMessageBytes < 0 ||
+    maxMessageBytes > MAX_MESSAGE_BYTES_LIMIT
+  ) {
+    throw new Error(
+      `WebSocketPlugin: maxMessageBytes must be a whole number of bytes from 0 (unlimited) to ${MAX_MESSAGE_BYTES_LIMIT}.`,
+    );
+  }
+
   return {
     maxConnections: options?.maxConnections ?? 0,
     heartbeatMs,
     heartbeatPayload: options?.heartbeatPayload ?? 'ping',
     idleTimeoutMs,
-    maxMessageBytes: options?.maxMessageBytes ?? 1_048_576,
+    maxMessageBytes,
     checkOrigin: resolveCheckOrigin(options?.checkOrigin),
     allowedOrigins: resolveAllowedOrigins(options?.allowedOrigins),
   };

@@ -30,9 +30,10 @@ All notable changes to this project are documented here. The format follows
   enforce that limit while reading. Omit the sink limit for the transport default; `0` is unlimited.
 - **BREAKING — `@setu-ts/websocket-plugin` (M140a).** The message limit defaults to 1 MiB. Set
   `maxMessageBytes: 0` to opt out, or configure a larger bound. Node bounds the transport read; Bun
-  and Deno close oversized messages after buffering.
+  and Deno close oversized messages after buffering. A value that is not a whole number from 0 to
+  2^31 - 1 (NaN, a negative, Infinity) is refused at registration instead of becoming unlimited.
 - **BREAKING — `@setu-ts/sse-plugin` (M140a).** Heartbeats default to 30 seconds. Set
-  `heartbeatMs: 0` to disable them.
+  `heartbeatMs: 0` to disable them. A NaN, negative or fractional value is refused at construction.
 - **`@setu-ts/decorator-plugin` (M140a).** Gateway route options reach handshake admission. Use
   `@Gateway(path, { guards })`; ignored HTTP authorization decorators on gateways now fail startup.
 - **`@setu-ts/react-router-plugin` (M140a).** A missing server build names the build task to run
