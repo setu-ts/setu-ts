@@ -1367,6 +1367,21 @@ interface ValidationPluginOptions {
 }
 ```
 
+### Form-file schemas (`@setu-ts/validation-plugin/zod`)
+
+The optional Zod v4 subpath exports
+`formFile(options?: FormFileOptions): z.ZodCustom<FormFile, FormFile>` and `FormFileOptions`
+(`readonly mimeTypes?: readonly string[]; readonly maxBytes?: number`). The main entry does not load
+Zod. MIME entries are type/subtype or type/* essences, normalized to lowercase. Invalid entries, an
+empty list or a non-positive/non-safe-integer byte limit throw `TypeError` at construction. Parsing
+reports `Expected a file`, `File type <essence> is not accepted`, or `File exceeds <maxBytes> bytes`
+through the configured validation formatter. MIME parameters are ignored during matching. Filenames
+and MIME types are client claims; maxBytes checks parsed bytes and is not a request-size bound.
+
+`RouteValidationMetadata.forms?: true` records the body validator opt-in on both helper and service
+paths; the key is omitted otherwise. A present non-true forms value makes a foreign brand
+unreadable.
+
 ### Programmatic Validation
 
 ```typescript
@@ -10761,6 +10776,17 @@ Unlike `deriveSecurity` this is ON by default, because nothing has to be configu
 security requirement names a scheme that cannot be inferred from a guard, while the schema on the
 route IS the schema the document wants.
 
+### Form request bodies
+
+`OpenApiRequestBody.content` has optional `application/json`, `application/x-www-form-urlencoded`
+and `multipart/form-data` entries. Each is an `OpenApiMediaTypeObject`
+(`readonly schema: OpenApiSchemaObject; readonly encoding?: Readonly<Record<string, OpenApiEncoding>>`);
+`OpenApiEncoding` has `readonly contentType?: string`. Every body brand must carry `forms: true` to
+list forms. Without a file the three types share one schema, JSON first; a top-level branded file or
+array of files lists only multipart, with binary string schemas
+(`OpenApiSchemaObject.contentMediaType?: string` records application/octet-stream) and per-field
+MIME encoding constraints when present. The effective declared body wins over the derived schema.
+
 ### Deriving The Success Status From The Handler
 
 With no `schema.response`, an operation is documented as
@@ -13952,15 +13978,21 @@ Contract notes:
   serveability bound `[200, 599]` rather than this error-ness one.
 
 - `withValidationMetadata` brands a `MiddlewareFunction` with a `RouteValidationMetadata`
-  (`{ target: ValidationTarget; schema: unknown }`), and `validationMetadataOf` reads it back — the
-  same mechanism, for the same reason, applied to request shape rather than authentication. Every
-  helper `@setu-ts/validation-plugin` ships carries it, as does
+  (`{ target: ValidationTarget; schema: unknown; forms?: true }`), and `validationMetadataOf` reads
+  it back — the same mechanism, for the same reason, applied to request shape rather than
+  authentication. Every helper `@setu-ts/validation-plugin` ships carries it, as does
   `IValidationService.middleware(schema, target)`, and `@setu-ts/openapi-plugin` reads it to fill an
   operation's `requestBody` and `parameters`. `VALIDATION_METADATA` is created with `Symbol.for` for
   the same cross-copy reason, the brand is symbol-keyed and non-enumerable, and the `schema` travels
   by REFERENCE — a reader transforms it with whatever schema support it has, and identity is what
   the OpenAPI generator's deduplication keys on. A foreign value under the same global symbol reads
   as absent rather than being trusted.
+- `FORM_FILE_METADATA = Symbol.for("setu.form-file.metadata")`, `FormFileMetadata`
+  (`readonly mimeTypes?: readonly string[]; readonly maxBytes?: number`),
+  `withFormFileMetadata<T extends object>(schema: T, metadata: FormFileMetadata): T` and
+  `formFileMetadataOf(value: unknown): FormFileMetadata | undefined` describe a file schema without
+  a Zod dependency. Branding preserves identity and is non-enumerable. The reader rejects foreign
+  brands with non-string MIME arrays or non-positive/non-safe-integer byte limits.
 - `withResponseMetadata` brands a **`RouteHandler`** with a `RouteResponseMetadata`
   (`{ status: number }`), and `responseMetadataOf` reads it back — the same mechanism as the two
   brands above, applied to the status a handler answers with on success. Every route
@@ -15644,10 +15676,21 @@ interface ClientRequest<TBody = unknown> {
   query?: Record<string, string | string[]>;
   headers?: Record<string, string>;
   json?: TBody;
+  multipart?: object;
   idempotencyKey?: string;
   signal?: AbortSignal;
 }
 ```
+
+`ClientRequest.multipart` encodes own enumerable flat fields as FormData, repeating array keys and
+skipping undefined. Blob (including File), string, number, boolean and bigint values are accepted;
+null, nested arrays and other objects throw TypeError naming the field. The runtime supplies
+File.name or the filename blob and the multipart boundary; merged Content-Type is removed. JSON plus
+multipart throws before interceptors. Generated optional multipart bodies omit the multipart key
+when no body is supplied. The body is reused for retry attempts. Codegen prefers application/json,
+otherwise multipart/form-data, maps binary strings to Blob, and throws OpenApiCodegenError with
+path/method for content containing only unsupported media types (including an empty content map). A
+requestBody without content stays bodiless.
 
 `ClientRequest.idempotencyKey` supplies a caller-owned key. `ClientOptions.idempotency` enables
 generated keys through `ClientIdempotencyOptions`: `methods?: readonly string[]` defaults to

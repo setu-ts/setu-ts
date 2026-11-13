@@ -141,6 +141,8 @@ identity and behaviour are unchanged, and removing it would change nothing this 
 
 ## Exports
 
+### `@setu-ts/validation-plugin`
+
 | Export                       | Kind      |
 | ---------------------------- | --------- |
 | `createSanitizer`            | function  |
@@ -166,6 +168,13 @@ identity and behaviour are unchanged, and removing it would change nothing this 
 | `ValidatedOutput`            | type      |
 | `ValidationErrorFormatter`   | type      |
 | `ValidatorMiddleware`        | type      |
+
+### `@setu-ts/validation-plugin/zod`
+
+| Export            | Kind      |
+| ----------------- | --------- |
+| `formFile`        | function  |
+| `FormFileOptions` | interface |
 
 Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.

@@ -437,9 +437,11 @@ and the `@ApiTags`/`@ApiOperation`/`@ApiResponse` decorators from
 | `ZodToOpenApi`                | class     |
 | `IOpenApiService`             | interface |
 | `OpenApiDocument`             | interface |
+| `OpenApiEncoding`             | interface |
 | `OpenApiExternalDocs`         | interface |
 | `OpenApiGeneratorOptions`     | interface |
 | `OpenApiHeader`               | interface |
+| `OpenApiMediaTypeObject`      | interface |
 | `OpenApiOperation`            | interface |
 | `OpenApiParameter`            | interface |
 | `OpenApiPluginOptions`        | interface |

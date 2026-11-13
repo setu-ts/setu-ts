@@ -26,6 +26,8 @@ export type {
   OpenApiOperation,
   OpenApiParameter,
   OpenApiRequestBody,
+  OpenApiMediaTypeObject,
+  OpenApiEncoding,
   OpenApiHeader,
   OpenApiResponse,
   OpenApiTag,

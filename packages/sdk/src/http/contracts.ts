@@ -57,6 +57,9 @@ export interface ClientRequest<TBody = unknown> {
   /** JSON body. When present, `Content-Type: application/json` is set automatically. */
   readonly json?: TBody;
 
+  /** Flat multipart body; mutually exclusive with json. @since 0.13.0 */
+  readonly multipart?: object;
+
   /**
    * The caller's own idempotency key: 1–255 characters of `0x21`–`0x7E`
    * without `"`, validated before any network call. Its presence makes the

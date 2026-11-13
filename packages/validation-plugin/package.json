@@ -31,6 +31,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./zod": {
+      "types": "./dist/zod/index.d.ts",
+      "default": "./dist/zod/index.js"
     }
   },
   "scripts": {
@@ -38,6 +42,14 @@
   },
   "dependencies": {
     "@setu-ts/common": "workspace:^"
+  },
+  "peerDependencies": {
+    "zod": "^4.6.6"
+  },
+  "peerDependenciesMeta": {
+    "zod": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@setu-ts/decorator-plugin": "workspace:^",
@@ -47,6 +59,7 @@
     "@types/node": "^24",
     "typescript": "6.0.3",
     "vitest": "5.0.3",
+    "zod": "^4.6.6",
     "zod-v4": "npm:zod@^4.6.6"
   }
 }

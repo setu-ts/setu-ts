@@ -19,6 +19,8 @@ export interface OpenApiSchemaObject {
   type?: 'string' | 'number' | 'integer' | 'boolean' | 'array' | 'object' | 'null';
   /** Format (e.g., 'email', 'uri', 'uuid', 'date-time'). */
   format?: string;
+  /** Media type of binary string content. @since 0.13.0 */
+  contentMediaType?: string;
   /** For arrays: schema of items. */
   items?: OpenApiSchemaObject;
   /** For objects: properties map. */
@@ -397,8 +399,8 @@ export class ZodToOpenApi {
    * Saved/restored because hoisting a child re-enters {@linkcode transform}.
    */
   #zod4ConversionRoot: unknown = undefined;
-  #conversionNodes = new Map<string, unknown>();
-  /** Outermost public schema at each position, excluding transparent parent clones. */
+  /** Nodes at each position, including wrappers and transparent parent clones. */
+  #conversionNodes = new Map<string, unknown[]>();
 
   /**
    * Creates a transformer.
@@ -482,7 +484,10 @@ export class ZodToOpenApi {
           io,
           unrepresentable: 'any',
           override: (ctx: Zod4OverrideContext): void => {
-            this.#conversionNodes.set(JSON.stringify(ctx.path), ctx.zodSchema);
+            const path = JSON.stringify(ctx.path);
+            const nodes = this.#conversionNodes.get(path) ?? [];
+            nodes.push(ctx.zodSchema);
+            this.#conversionNodes.set(path, nodes);
           },
         });
       }
@@ -512,14 +517,12 @@ export class ZodToOpenApi {
     // The conversion ROOT was already consulted by `transform` on entry;
     // consulting it again here would double-count it.
     const isConversionRoot = ctx.zodSchema === this.#zod4ConversionRoot;
-    const outermost = this.#conversionNodes.get(JSON.stringify(ctx.path));
-    const replacement =
-      isConversionRoot ||
-      (outermost !== undefined &&
-        outermost !== ctx.zodSchema &&
-        isCloneOf(outermost, ctx.zodSchema))
-        ? undefined
-        : this.#onSchema?.(ctx.zodSchema, ctx.path);
+    const nodes = this.#conversionNodes.get(JSON.stringify(ctx.path));
+    // A metadata/refinement clone owns the representation at this path. Its
+    // parent may still be empty before the clone's hook supplies a schema;
+    // only the outermost node can decide whether the result is unrepresentable.
+    if (nodes?.some((node) => node !== ctx.zodSchema && isCloneOf(node, ctx.zodSchema))) return;
+    const replacement = isConversionRoot ? undefined : this.#onSchema?.(ctx.zodSchema, ctx.path);
     if (replacement !== undefined) {
       replaceOwnKeys(ctx.jsonSchema, replacement);
       return;

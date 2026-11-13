@@ -419,7 +419,7 @@ function rtp(
 ): string {
   switch (type) {
     case 'string':
-      return 'string';
+      return schema.format === 'binary' ? 'Blob' : 'string';
     case 'number':
       return 'number';
     case 'integer':
@@ -598,13 +598,28 @@ function splitParams(
   return { pathParams, queryParams, headerParams };
 }
 
-function getBodySchema(op: SdkOpenApiOperation): SdkOpenApiSchema | undefined {
+function getBodySchema(
+  op: SdkOpenApiOperation,
+  path: string,
+  method: string,
+): { schema: SdkOpenApiSchema | undefined; encoding: 'json' | 'multipart' } | undefined {
   if (!op.requestBody) return undefined;
   const rb = op.requestBody as SdkOpenApiRequestBody;
-  return rb.content?.['application/json']?.schema;
+  if (!rb.content) return undefined;
+  if (rb.content['application/json'] !== undefined) {
+    return { schema: rb.content['application/json'].schema, encoding: 'json' };
+  }
+  if (rb.content['multipart/form-data'] !== undefined) {
+    return { schema: rb.content['multipart/form-data'].schema, encoding: 'multipart' };
+  }
+  throw new OpenApiCodegenError(
+    `request body media types ${Object.keys(rb.content).join(', ')} are not supported: the generated method would drop the body`,
+    path,
+    method,
+  );
 }
 
-/** Whether the operation's JSON request body is declared required. */
+/** Whether the operation's request body is declared required. */
 function isBodyRequired(op: SdkOpenApiOperation): boolean {
   if (!op.requestBody) return false;
   return (op.requestBody as SdkOpenApiRequestBody).required === true;
@@ -635,6 +650,7 @@ interface OpShape {
   readonly headerParams: RenderedParam[];
   readonly bodyType: string | undefined;
   readonly bodyRequired: boolean;
+  readonly bodyEncoding: 'json' | 'multipart' | undefined;
   readonly argsTypeName: string;
   /** True when the operation has any `opts` field at all. */
   readonly hasArgs: boolean;
@@ -924,7 +940,8 @@ function buildOpShape(entry: OpEntry, types: TypeNameRegistry): OpShape {
   const queryParams = split.queryParams.map((p) => render(p));
   const headerParams = split.headerParams.map((p) => render(p));
 
-  const bodySchema = getBodySchema(entry.operation);
+  const body = getBodySchema(entry.operation, path, method);
+  const bodySchema = body?.schema;
   const bodyType = bodySchema
     ? hoistMultiline(
         renderSchema(bodySchema, new Set(), path, method),
@@ -958,6 +975,7 @@ function buildOpShape(entry: OpEntry, types: TypeNameRegistry): OpShape {
     headerParams,
     bodyType,
     bodyRequired,
+    bodyEncoding: body?.encoding,
     argsTypeName: hasArgs
       ? types.claim(
           sanitizeTypeName(entry.operationId) + 'Args',
@@ -1392,7 +1410,11 @@ export function generateOpenApiClient(
       L(`${i3}})(),`);
     }
     if (shape.bodyType !== undefined) {
-      L(`${i3}json: ${optsRef}.body,`);
+      if (shape.bodyEncoding === 'multipart' && !shape.bodyRequired) {
+        L(`${i3}...(${optsRef}.body === undefined ? {} : { multipart: opts.body }),`);
+      } else {
+        L(`${i3}${shape.bodyEncoding}: ${optsRef}.body,`);
+      }
     }
 
     for (const field of ['idempotencyKey', 'signal']) {
