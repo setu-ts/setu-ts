@@ -819,7 +819,7 @@ here.
 - **Milestone 137c** (`common` + `validation-plugin` + `openapi-plugin` + `sdk` — form bodies and
   file uploads: `forms` in the validation brand, `formFile()` from `@setu-ts/validation-plugin/zod`
   with `zod` as an optional peer, the document listing JSON/urlencoded/multipart or multipart alone
-  with `format: binary` and `encoding`, the SDK sending `FormData`) — complete (PR pending).
+  with `format: binary` and `encoding`, the SDK sending `FormData`) — complete (PR #590).
 - **Next milestone** — the remaining M139 letters, then M140 (generated code read as code; M140a
   first).
 

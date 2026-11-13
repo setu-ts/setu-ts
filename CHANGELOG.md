@@ -8,8 +8,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
-- **Form routes document their encodings and codegen refuses unsupported request bodies (M137c, PR
-  pending, `@setu-ts/common`, `@setu-ts/validation-plugin`, `@setu-ts/openapi-plugin`,
+- **Form routes document their encodings and codegen refuses unsupported request bodies (M137c,
+  #590, `@setu-ts/common`, `@setu-ts/validation-plugin`, `@setu-ts/openapi-plugin`,
   `@setu-ts/sdk`).** A `forms: true` route's document now lists `application/json`,
   `application/x-www-form-urlencoded` and `multipart/form-data`, or multipart alone when it has a
   file field. `setu client --check` reports drift once; regenerate with `setu client`. Codegen now
@@ -143,13 +143,13 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
-- **Form bodies and file uploads in the document and the client (M137c, PR pending,
-  `@setu-ts/common`, `@setu-ts/validation-plugin`, `@setu-ts/openapi-plugin`, `@setu-ts/sdk`).**
-  `formFile` and `FormFileOptions` from `@setu-ts/validation-plugin/zod` validate a file field's
-  shape, accepted media types and parsed byte length; `zod` is an optional peer needed only by that
-  subpath. `FORM_FILE_METADATA`, `FormFileMetadata`, `withFormFileMetadata` and `formFileMetadataOf`
-  carry its constraints without a Zod dependency in common. `RouteValidationMetadata.forms` records
-  the form opt-in. `OpenApiEncoding` and `OpenApiMediaTypeObject` describe multipart encoding and
+- **Form bodies and file uploads in the document and the client (M137c, #590, `@setu-ts/common`,
+  `@setu-ts/validation-plugin`, `@setu-ts/openapi-plugin`, `@setu-ts/sdk`).** `formFile` and
+  `FormFileOptions` from `@setu-ts/validation-plugin/zod` validate a file field's shape, accepted
+  media types and parsed byte length; `zod` is an optional peer needed only by that subpath.
+  `FORM_FILE_METADATA`, `FormFileMetadata`, `withFormFileMetadata` and `formFileMetadataOf` carry
+  its constraints without a Zod dependency in common. `RouteValidationMetadata.forms` records the
+  form opt-in. `OpenApiEncoding` and `OpenApiMediaTypeObject` describe multipart encoding and
   request-body content; binary fields carry `format: binary` and
   `OpenApiSchemaObject.contentMediaType`. `multipart` on `ClientRequest` sends flat form fields and
   files with a runtime-generated boundary, and generated clients select JSON when listed, otherwise
