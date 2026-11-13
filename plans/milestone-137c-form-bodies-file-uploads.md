@@ -26,7 +26,8 @@ and the storage plugin's upload middleware are untouched.
   - `openapi-plugin`: request-body media types from the brand, `format: binary` for a branded field,
     the multipart `encoding` object.
   - `sdk`: `ClientRequest.multipart`, its `FormData` encoding in the HTTP client, codegen selecting
-    JSON or multipart and mapping `format: binary` to `Blob`, an `OpenApiCodegenError` for an unsupported body.
+    JSON or multipart and mapping `format: binary` to `Blob`, an `OpenApiCodegenError` for an
+    unsupported body.
   - Docs: the validation-plugin README's and `docs/cli.md`'s stated limit removed; openapi-plugin,
     sdk, validation-plugin, common READMEs, AGENT_CARDs, PUBLIC_API.md, CHANGELOG, upgrading note.
 - **NOT this milestone:**
@@ -105,9 +106,10 @@ and the storage plugin's upload middleware are untouched.
 
 - **Decision:** `ClassificationOverride.kind` gains `'optional-peer'`. Applied only when the scan
   found the dependency (a value import, so it sits in `dependencies`): move it to `peerDependencies`
-  - `peerDependenciesMeta.optional` + the identical-range `devDependencies` mirror — the same shape
-    a dynamic import already gets. One override row: `packages/validation-plugin` → `zod`, reason
-    "only the `./zod` subpath imports it (M137c)". The range is the table's existing `zod` range.
+  with `peerDependenciesMeta.optional`, plus the identical-range `devDependencies` mirror — the same
+  shape a dynamic import already gets. One override row: `packages/validation-plugin` → `zod`,
+  reason "only the `./zod` subpath imports it (M137c)". The range is the table's existing `zod`
+  range.
 - **Why:** C1. A value import otherwise makes Zod a hard dependency of the whole package.
 - **Test home:** `test/unit/node-manifests.test.ts` (extend): a fixture member with a value import
   and the override classifies as optional peer + dev mirror; the override with no matching import is
@@ -129,15 +131,19 @@ and the storage plugin's upload middleware are untouched.
     (`filename` string, `mimeType` string, `data` a `Uint8Array`) → "Expected a file"; `mimeTypes`
     set and the part's media-type essence (before `;`, trimmed, lower-cased) matches no entry
     (`type/*` matches by type) → "File type <essence> is not accepted"; `maxBytes` set and
-    `data.byteLength > maxBytes` → "File exceeds <maxBytes> bytes".
+    `data.byteLength > maxBytes` → "File exceeds <maxBytes> bytes". The shape check is the
+    `z.custom` predicate and the other two run in a `superRefine` on it; Zod v4 stops at a failed
+    `z.custom` check, so the refinement only ever sees a `FormFile` (probed 2026-11-13: a string
+    yields the single issue "Expected a file").
   - The brand: `withFormFileMetadata(schema, { mimeTypes?, maxBytes? })` applied to the FINAL
     instance returned (Zod v4 `.check`/`.refine` return a new instance).
 - **Why:** C1; one helper both enforces the rules and tells the document about them.
 - **Test home:** `validation-plugin/test/unit/form-file.test.ts` (new) — every issue, every
   construction refusal, `type/*`, parameters on the part's type, the brand read back; and
   `validation-plugin/test/integration/form-file-upload.test.ts` (new) — a real multipart upload
-  through `app.inject` accepted, a wrong type and an oversize file answering 400 with the issue
-  text.
+  through `app.fetch(new Request(url, { method: 'POST', body: formData }))` (the pattern
+  `form-body-validation.test.ts:65-114` uses) accepted, a wrong type and an oversize file answering
+  400 with the issue text.
 
 ### 3.4 The form-file brand in `common`
 
@@ -184,8 +190,13 @@ and the storage plugin's upload middleware are untouched.
   - `#hook`: right after the hoisting check, before the count logic, a node with `fileMetadataOf` →
     `{ type: 'string', format: 'binary', contentMediaType: 'application/octet-stream' }` plus the
     node's own `description` when it has one. Returned in both passes, so a file node is never
-    counted, hoisted or reported unrepresentable; `z.array(formFile())` therefore emits an array of
-    binaries.
+    counted, hoisted or reported unrepresentable by the generator; `z.array(formFile())` therefore
+    emits an array of binaries (probed: the replacement survives `.optional()`, `.describe()`,
+    `.nullable()` and `z.array`). One case stays shared: the SAME `formFile()` instance used for two
+    fields of one body is extracted by Zod's own `reused: 'ref'` into a `$defs` entry that the
+    adapter hoists as a component — the fields become `$ref`s to a binary component. That is valid
+    OpenAPI, both third-party generators dereference it, and `form-bodies.test.ts` asserts it rather
+    than preventing it.
   - `encoding`: for each file field whose metadata has `mimeTypes`,
     `{ contentType: mimeTypes.join(', ') }` under the field name; omitted entirely when no field
     declares types.
@@ -218,15 +229,16 @@ and the storage plugin's upload middleware are untouched.
 
 ### 3.8 SDK codegen: body selection and `Blob`
 
-- **Decision:** - `getBodySchema` returns `{ schema, encoding: 'json' | 'multipart' }`:
-  `application/json` when present (whatever else is listed); else `multipart/form-data`; else, for a
-  `requestBody` with `content`, it throws `OpenApiCodegenError` ("request body media types <list>
-  are not supported: the generated method would drop the body", with `path` and `method`) — codegen
-  has no soft diagnostic channel; it refuses rather than emit a client that misbehaves (sdk README
-  "Codegen diagnostics"). A `requestBody` with no `content` stays bodiless, as today.
+- **Decision:**
+  - `getBodySchema` returns `{ schema, encoding: 'json' | 'multipart' }`: `application/json` when
+    present (whatever else is listed); else `multipart/form-data`; else, for a `requestBody` with
+    `content`, it throws `OpenApiCodegenError` ("request body media types <list> are not supported:
+    the generated method would drop the body", with `path` and `method`) — codegen has no soft
+    diagnostic channel; it refuses rather than emit a client that misbehaves (sdk README "Codegen
+    diagnostics"). A `requestBody` with no `content` stays bodiless, as today.
   - The generated call passes `multipart: opts.body` (or `opts?.body`) instead of `json:` for a
-    multipart body; everything else in the call is unchanged. - `rtp`: `type: 'string'` with
-    `format: 'binary'` → `Blob`.
+    multipart body; everything else in the call is unchanged.
+  - `rtp`: `type: 'string'` with `format: 'binary'` → `Blob`.
 - **Why:** ROADMAP decision 5; the selection is a fixed rule, not map order; a dropped body is no
   longer silent. Behaviour change: an operation whose body is only `text/plain` (or urlencoded only)
   used to generate a bodiless method and now refuses — named in the CHANGELOG.
@@ -256,15 +268,15 @@ and the storage plugin's upload middleware are untouched.
 
 - **Decision:** validation-plugin README: `formFile` section (import from `/zod`, options, issue
   texts, `filename` and `mimeType` are client-supplied — never trust the filename for a path or the
-  media type for a type decision decision), the stated limit deleted, the "every body brand needs
-  `forms`" rule (C3). openapi-plugin README: "Form bodies and file uploads" (the three rules,
-  `encoding`). sdk README: `multipart`, the value rules, `Blob` mapping, the `blob` filename, the
-  new "Codegen diagnostics" refusal row, and the request-body sentence at `:143`. common README
-  export table (docs:exports). `docs/cli.md:705` limit deleted. AGENT_CARDs of the four packages
-  (≤2560 bytes, own identifiers only). PUBLIC_API.md for every export in §4. CHANGELOG (Added;
-  Changed: form routes' documents list three media types, so `setu client --check` reports drift
-  once; codegen now refuses an operation whose only request body media types it cannot send).
-  `docs/upgrading.md` M137c section. ROADMAP C1/C2 amendments, 137c ✅. CLAUDE.md status entry.
+  media type for a type decision), the stated limit deleted, the "every body brand needs `forms`"
+  rule (C3). openapi-plugin README: "Form bodies and file uploads" (the three rules, `encoding`).
+  sdk README: `multipart`, the value rules, `Blob` mapping, the `blob` filename, the new "Codegen
+  diagnostics" refusal row, and the request-body sentence at `:143`. common README export table
+  (docs:exports). `docs/cli.md:705` limit deleted. AGENT_CARDs of the four packages (≤2560 bytes,
+  own identifiers only). PUBLIC_API.md for every export in §4. CHANGELOG (Added; Changed: form
+  routes' documents list three media types, so `setu client --check` reports drift once; codegen now
+  refuses an operation whose only request body media types it cannot send). `docs/upgrading.md`
+  M137c section. ROADMAP C1/C2 amendments, 137c ✅. CLAUDE.md status entry.
 - **Test home:** `check:docs`, `docs:exports`, `test/package-readme-fence-compiler.test.ts` (fence
   counts updated for every README that gains a compilable fence).
 
@@ -299,23 +311,23 @@ three media types) is a described-output change for clients, noted in the CHANGE
 
 ## 5. Implementation files
 
-| File                                                                 | Purpose                                                      |
-| -------------------------------------------------------------------- | ------------------------------------------------------------ |
-| `packages/common/src/http.ts`                                        | `forms?: true` + guard                                       |
-| `packages/common/src/form/form-file-metadata.ts` (new)               | the form-file brand                                          |
-| `packages/common/src/index.ts`                                       | exports                                                      |
-| `packages/validation-plugin/src/middleware/validation-middleware.ts` | brand `forms` on both paths                                  |
-| `packages/validation-plugin/src/zod/index.ts` (new)                  | subpath barrel                                               |
-| `packages/validation-plugin/src/zod/form-file.ts` (new)              | `formFile`                                                   |
-| `packages/validation-plugin/package.json`, `deno.json`               | `./zod` export; manifest regenerated (`zod` optional peer)   |
-| `scripts/node-dependency-ranges.ts`, `scripts/node-manifests.ts`     | `optional-peer` kind + the row                               |
-| `packages/openapi-plugin/src/generators/form-fields.ts` (new)        | file-field walk                                              |
-| `packages/openapi-plugin/src/generators/openapi-generator.ts`        | media types, `encoding`, binary in `#hook`, types            |
-| `packages/openapi-plugin/src/index.ts`                               | export the two new types                                     |
-| `packages/sdk/src/http/contracts.ts`, `http-client.ts`               | `multipart`                                                  |
-| `packages/sdk/src/http/multipart.ts` (new, internal)                 | `encodeMultipart`                                            |
-| `packages/sdk/src/codegen/openapi-codegen.ts`                        | body selection, unsupported-body refusal, `Blob`                           |
-| `test/deno-lane/deno.lock`                                           | if the Deno lane resolves `zod` newly (memory: M137a lesson) |
+| File                                                                 | Purpose                                                    |
+| -------------------------------------------------------------------- | ---------------------------------------------------------- |
+| `packages/common/src/http.ts`                                        | `forms?: true` + guard                                     |
+| `packages/common/src/form/form-file-metadata.ts` (new)               | the form-file brand                                        |
+| `packages/common/src/index.ts`                                       | exports                                                    |
+| `packages/validation-plugin/src/middleware/validation-middleware.ts` | brand `forms` on both paths                                |
+| `packages/validation-plugin/src/zod/index.ts` (new)                  | subpath barrel                                             |
+| `packages/validation-plugin/src/zod/form-file.ts` (new)              | `formFile`                                                 |
+| `packages/validation-plugin/package.json`, `deno.json`               | `./zod` export; manifest regenerated (`zod` optional peer) |
+| `scripts/node-dependency-ranges.ts`, `scripts/node-manifests.ts`     | `optional-peer` kind + the row                             |
+| `packages/openapi-plugin/src/generators/form-fields.ts` (new)        | file-field walk                                            |
+| `packages/openapi-plugin/src/generators/openapi-generator.ts`        | media types, `encoding`, binary in `#hook`, types          |
+| `packages/openapi-plugin/src/index.ts`                               | export the two new types                                   |
+| `packages/sdk/src/http/contracts.ts`, `http-client.ts`               | `multipart`                                                |
+| `packages/sdk/src/http/multipart.ts` (new, internal)                 | `encodeMultipart`                                          |
+| `packages/sdk/src/codegen/openapi-codegen.ts`                        | body selection, unsupported-body refusal, `Blob`           |
+| `test/deno-lane/deno.lock`                                           | only if the lane moves (§8)                                |
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
@@ -325,7 +337,7 @@ three media types) is a described-output change for clients, noted in the CHANGE
 | `packages/common/test/unit/form-file-metadata.test.ts` (new)                 | `form/form-file-metadata.ts`        | in place, non-enumerable, identity kept; every foreign shape → `undefined`                       |
 | `packages/validation-plugin/test/unit/form-brand.test.ts` (new)              | `validation-middleware.ts`          | helper and service paths brand `forms` identically under `forms: true`; absent otherwise         |
 | `packages/validation-plugin/test/unit/form-file.test.ts` (new)               | `zod/form-file.ts`, `zod/index.ts`  | §3.3 issues and refusals; `formFile(): z.ZodCustom<FormFile, FormFile>` usable inside `z.object` |
-| `packages/validation-plugin/test/integration/form-file-upload.test.ts` (new) | same + middleware                   | real multipart through `app.inject` (kernel multipart injection) accepted / 400s                 |
+| `packages/validation-plugin/test/integration/form-file-upload.test.ts` (new) | same + middleware                   | real multipart through `app.fetch` with a `FormData` body accepted / 400s                        |
 | `test/unit/node-manifests.test.ts` (extend)                                  | `scripts/node-manifests.ts`, ranges | `optional-peer` classification and refusal                                                       |
 | `packages/openapi-plugin/test/unit/form-fields.test.ts` (new)                | `generators/form-fields.ts`         | every unwrap branch, arrays, non-Zod, non-object                                                 |
 | `packages/openapi-plugin/test/unit/form-bodies.test.ts` (new)                | `openapi-generator.ts`              | §3.5/§3.6 outputs incl. two brands (one without `forms`), declared body + forms, decorated route |
@@ -365,8 +377,10 @@ media type, `formFile` bounds, the SDK dropping a caller `Content-Type`.
 - A single-value repeated field (`files: z.array(formFile())` with one file) arrives as a scalar
   (`form-record.ts`) and fails the array schema → documented in the README with the `files[]` name
   rule that already exists; not changed here.
-- The Deno lane must resolve `zod` from validation-plugin `src` → re-run the lane after the manifest
-  change and update `test/deno-lane/deno.lock` if it moves.
+- The Deno lane runs no validation-plugin, openapi-plugin or sdk tests (`DENO_LANE_TESTS`: cli,
+  diagnostics-plugin, mcp-plugin, runtime, websocket-plugin), and the main entry never imports
+  `zod`, so the lane should not move → re-run it after the manifest change anyway and update
+  `test/deno-lane/deno.lock` only if it does.
 - `maxBytes` runs after the whole body is parsed, so it is not a DoS control → README says the
   request-size bound (`RuntimePlugin({ maxBodyBytes })`) is.
 - A third-party generator disagrees with the predicted encoding → the §7 probe records the result
