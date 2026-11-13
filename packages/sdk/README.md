@@ -142,13 +142,14 @@ interface ClientRequest<TBody = never> {
   the per-origin circuit breaker and rate limiter.
 - Query values are encoded; arrays repeat the key.
 - `json` is serialized with `JSON.stringify`; `Content-Type: application/json` is set automatically.
-- `multipart` accepts a flat object: `undefined` is skipped; `Blob` or `File` is appended as a file;
-  strings are kept; numbers, booleans and bigints use `String()`; arrays repeat the key. A `File`
-  keeps its name and the runtime names a bare `Blob` `blob`. `null`, nested arrays and other objects
-  throw `TypeError` naming the field. `json` and `multipart` are mutually exclusive; supplying both
-  throws `TypeError` before request interceptors run. The client removes any `Content-Type` —
-  merged, or set by a request interceptor — so the runtime sets the multipart boundary, and re-sends
-  the same `FormData` on a retry.
+- `multipart` accepts a `FormData`, sent as given, or a plain object of flat fields — any other body
+  (`URLSearchParams`, `Map`, a class instance) throws `TypeError`. In a plain object, `undefined` is
+  skipped; `Blob` or `File` is appended as a file; strings are kept; numbers, booleans and bigints
+  use `String()`; arrays repeat the key. A `File` keeps its name and the runtime names a bare `Blob`
+  `blob`. `null`, nested arrays and other objects throw `TypeError` naming the field. `json` and
+  `multipart` are mutually exclusive; supplying both throws `TypeError` before request interceptors
+  run. The client removes any `Content-Type` — merged, or set by a request interceptor — so the
+  runtime sets the multipart boundary, and re-sends the same `FormData` on a retry.
 - `signal` aborts fetches, queued waits, and retry attempts.
 
 ### Response

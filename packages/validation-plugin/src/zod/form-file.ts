@@ -41,6 +41,9 @@ export function formFile(options?: FormFileOptions): z.ZodCustom<FormFile, FormF
     return entry.toLowerCase();
   });
   if (mimeTypes?.length === 0) throw new TypeError('Invalid mimeTypes: empty array');
+  // Frozen: the brand exposes this same list to readers, and the check below
+  // reads it, so a reader must not be able to widen the allow-list.
+  if (mimeTypes !== undefined) Object.freeze(mimeTypes);
   const maxBytes = options?.maxBytes;
   if (maxBytes !== undefined && (!Number.isSafeInteger(maxBytes) || maxBytes <= 0)) {
     throw new TypeError(`Invalid maxBytes: ${String(maxBytes)}`);
@@ -78,8 +81,11 @@ export function formFile(options?: FormFileOptions): z.ZodCustom<FormFile, FormF
         ctx.addIssue({ code: 'custom', message: `File exceeds ${maxBytes} bytes` });
       }
     });
-  return withFormFileMetadata(schema, {
-    ...(mimeTypes === undefined ? {} : { mimeTypes }),
-    ...(maxBytes === undefined ? {} : { maxBytes }),
-  });
+  return withFormFileMetadata(
+    schema,
+    Object.freeze({
+      ...(mimeTypes === undefined ? {} : { mimeTypes }),
+      ...(maxBytes === undefined ? {} : { maxBytes }),
+    }),
+  );
 }

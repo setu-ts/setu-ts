@@ -56,6 +56,11 @@ it silently generated a method with no body argument. List `application/json` or
 `multipart/form-data` for that body, matching what the route accepts. Codegen selects JSON when
 listed, otherwise multipart.
 
+Code that reads a document through the `OpenApiDocument` type and indexes
+`requestBody.content['application/json'].schema` no longer compiles under `strict`: the JSON entry
+is optional because a file route lists `multipart/form-data` alone. Use `?.`, or check which media
+type the body lists.
+
 ### Derived error responses (M137b, `@setu-ts/openapi-plugin`, `@setu-ts/rest-starter`, `@setu-ts/cli`)
 
 The generated OpenAPI document now lists the errors a route's guards, body validator, route-level

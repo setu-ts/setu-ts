@@ -14,7 +14,10 @@ All notable changes to this project are documented here. The format follows
   `application/x-www-form-urlencoded` and `multipart/form-data`, or multipart alone when it has a
   file field. `setu client --check` reports drift once; regenerate with `setu client`. Codegen now
   refuses an operation whose only request body media types it cannot send, instead of silently
-  generating a method without a body argument.
+  generating a method without a body argument. `OpenApiRequestBody.content['application/json']` is
+  now optional, since a file route lists `multipart/form-data` alone: code reading
+  `requestBody.content['application/json'].schema` from `OpenApiDocument` needs `?.` or a check for
+  the media type.
 
 - **Generated OpenAPI documents list derived errors and order responses by status (M137b, #588,
   `@setu-ts/openapi-plugin`, `@setu-ts/rest-starter`, `@setu-ts/cli`).** A route carrying a guard,

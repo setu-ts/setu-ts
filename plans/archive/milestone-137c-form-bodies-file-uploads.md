@@ -470,3 +470,11 @@ media type, `formFile` bounds, the SDK dropping a caller `Content-Type`.
   was refused by the auto-mode classifier); the socket-bound suites and the CLI e2e upload were run
   outside it. The docs batch also went to Codex, because an unattended `opencode --auto` launch was
   refused the same way.
+- **Code review (after the audit).** Five findings fixed on the branch: a `.describe()`/`.meta()`
+  clone of an unrepresentable type had stopped being reported (the transformer now reports the
+  outermost unreplaced node by its original's type, once per path); `encodeMultipart` sent an empty
+  form for a `FormData`, `URLSearchParams` or `Map` (a `FormData` now passes through, any other
+  non-plain body throws); the `formFile` brand shared its live `mimeTypes` array with the check (now
+  frozen); `OpenApiRequestBody.content['application/json']` becoming optional is named in the
+  CHANGELOG and upgrade guide — a compile change for readers of the document type, not for
+  implementors, so §4's "Breaking for implementors: none" stands; and the M137 umbrella row is ✅.

@@ -92,6 +92,43 @@ const COMPONENT_REF_PREFIX = '#/components/schemas/';
 const LEGITIMATELY_EMPTY_TYPES: ReadonlySet<string> = new Set(['any', 'unknown']);
 
 /**
+ * JSON Schema annotation keywords — what `.describe()` and `.meta()` add to a
+ * node without describing a value. A node carrying only these is as empty as
+ * `{}` for the unrepresentable report.
+ */
+const ANNOTATION_KEYWORDS: ReadonlySet<string> = new Set([
+  'title',
+  'description',
+  'examples',
+  'example',
+  'default',
+  'deprecated',
+  'readOnly',
+  'writeOnly',
+  '$comment',
+]);
+
+/**
+ * The original schema a metadata or refinement clone derives from: the end of
+ * its `_zod.parent` chain, or the node itself when it is not a clone.
+ *
+ * @param zodSchema - The zod v4 schema node
+ * @returns The deepest ancestor
+ */
+function cloneRoot(zodSchema: unknown): unknown {
+  type Node = { _zod?: { parent?: unknown } };
+  let current = zodSchema;
+  for (
+    let parent = (current as Node)._zod?.parent;
+    parent !== undefined;
+    parent = (current as Node)._zod?.parent
+  ) {
+    current = parent;
+  }
+  return current;
+}
+
+/**
  * Consulted for every schema {@linkcode ZodToOpenApi.transform} is about to
  * convert — the top-level one AND every sub-schema it recurses into.
  *
@@ -401,6 +438,8 @@ export class ZodToOpenApi {
   #zod4ConversionRoot: unknown = undefined;
   /** Nodes at each position, including wrappers and transparent parent clones. */
   #conversionNodes = new Map<string, unknown[]>();
+  /** Paths already reported unrepresentable in the current conversion. */
+  #reportedPaths = new Set<string>();
 
   /**
    * Creates a transformer.
@@ -471,8 +510,10 @@ export class ZodToOpenApi {
   #transformZod4(schema: Zod4SchemaLike, io: SchemaIo): OpenApiSchemaObject {
     const previousRoot = this.#zod4ConversionRoot;
     const previousNodes = this.#conversionNodes;
+    const previousReported = this.#reportedPaths;
     this.#zod4ConversionRoot = schema;
     this.#conversionNodes = new Map();
+    this.#reportedPaths = new Set();
     try {
       if (this.#onSchema !== undefined) {
         // Transparent metadata clones share a public path with their parent.
@@ -502,6 +543,7 @@ export class ZodToOpenApi {
     } finally {
       this.#zod4ConversionRoot = previousRoot;
       this.#conversionNodes = previousNodes;
+      this.#reportedPaths = previousReported;
     }
   }
 
@@ -517,7 +559,8 @@ export class ZodToOpenApi {
     // The conversion ROOT was already consulted by `transform` on entry;
     // consulting it again here would double-count it.
     const isConversionRoot = ctx.zodSchema === this.#zod4ConversionRoot;
-    const nodes = this.#conversionNodes.get(JSON.stringify(ctx.path));
+    const path = JSON.stringify(ctx.path);
+    const nodes = this.#conversionNodes.get(path);
     // A metadata/refinement clone owns the representation at this path. Its
     // parent may still be empty before the clone's hook supplies a schema;
     // only the outermost node can decide whether the result is unrepresentable.
@@ -527,12 +570,20 @@ export class ZodToOpenApi {
       replaceOwnKeys(ctx.jsonSchema, replacement);
       return;
     }
+    // A clone (`.describe()`, `.meta()`, a refinement) carries only the
+    // annotations it added over its original's empty node, so the check reads
+    // the original's type and ignores annotation keywords. One report per
+    // path: without a hook both the original and its clone reach here.
+    const original = cloneRoot(ctx.zodSchema);
+    const type = zod4DefType(original);
     if (
-      Object.keys(ctx.jsonSchema).length === 0 &&
-      !LEGITIMATELY_EMPTY_TYPES.has(zod4DefType(ctx.zodSchema))
+      !this.#reportedPaths.has(path) &&
+      Object.keys(ctx.jsonSchema).every((key) => ANNOTATION_KEYWORDS.has(key)) &&
+      !LEGITIMATELY_EMPTY_TYPES.has(type)
     ) {
+      this.#reportedPaths.add(path);
       this.#channels?.onUnrepresentable?.({
-        reason: `zod v4 type '${zod4DefType(ctx.zodSchema)}' has no JSON Schema representation`,
+        reason: `zod v4 type '${type}' has no JSON Schema representation`,
       });
     }
   }

@@ -64,6 +64,14 @@ describe('formFile', () => {
     // Without `mimeTypes` the type is not judged at all, as documented.
     expect(formFile().safeParse(file('image/png, text/html')).success).toBe(true);
   });
+  it('freezes the brand so a reader cannot widen the allow-list (review)', () => {
+    const schema = formFile({ mimeTypes: ['image/png'], maxBytes: 3 });
+    const metadata = formFileMetadataOf(schema)!;
+    expect(Object.isFrozen(metadata)).toBe(true);
+    expect(Object.isFrozen(metadata.mimeTypes)).toBe(true);
+    expect(() => (metadata.mimeTypes as string[]).push('text/html')).toThrow(TypeError);
+    expect(schema.safeParse(file('text/html')).success).toBe(false);
+  });
   it('reports only Expected a file for invalid shapes before refinements', () => {
     for (const value of [
       null,
