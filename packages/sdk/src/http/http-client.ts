@@ -244,6 +244,9 @@ export class HttpClient implements IHttpClient {
     for (const interceptor of this.#requestInterceptors) {
       await interceptor(requestContext);
     }
+    // Again after the interceptors: a `Content-Type` one of them sets would
+    // reach the wire without the boundary the runtime writes for `FormData`.
+    if (body instanceof FormData) headers.delete('Content-Type');
 
     // Extract origin for per-origin policy gates.
     const origin = url.origin;

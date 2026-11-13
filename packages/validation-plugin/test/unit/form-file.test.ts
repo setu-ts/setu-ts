@@ -28,11 +28,36 @@ describe('formFile', () => {
       expect(schema.safeParse(file(type)).success).toBe(true);
     expect(
       schema.safeParse(file('application/json')).error?.issues.map((issue) => issue.message),
-    ).toEqual(['File type application/json is not accepted']);
+    ).toEqual(['File type is not accepted']);
     expect(
       schema.safeParse(file('text/plain', 4)).error?.issues.map((issue) => issue.message),
     ).toEqual(['File exceeds 3 bytes']);
     expect(schema.safeParse(file('application/json', 4)).error?.issues).toHaveLength(2);
+  });
+  it('refuses a part type that is not one media type, under both entry kinds (audit L1)', () => {
+    // Each passed the allow-list before the fix: the comma lists are read by
+    // the Fetch MIME extraction as their LAST type (`text/html`).
+    const malformed = [
+      'image/png, text/html',
+      'image/png; a=1, text/html',
+      'image/',
+      'image/\rX',
+      'image/png\u0000',
+      'image/*',
+      '',
+    ];
+    for (const mimeTypes of [['image/*'], ['image/png']]) {
+      const schema = formFile({ mimeTypes });
+      for (const type of malformed) {
+        expect(
+          schema.safeParse(file(type)).error?.issues.map((issue) => issue.message),
+          `${JSON.stringify(type)} under ${mimeTypes[0]}`,
+        ).toEqual(['File type is not accepted']);
+      }
+      expect(schema.safeParse(file('IMAGE/PNG; q=1')).success).toBe(true);
+    }
+    // Without `mimeTypes` the type is not judged at all, as documented.
+    expect(formFile().safeParse(file('image/png, text/html')).success).toBe(true);
   });
   it('reports only Expected a file for invalid shapes before refinements', () => {
     for (const value of [

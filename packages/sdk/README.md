@@ -146,8 +146,9 @@ interface ClientRequest<TBody = never> {
   strings are kept; numbers, booleans and bigints use `String()`; arrays repeat the key. A `File`
   keeps its name and the runtime names a bare `Blob` `blob`. `null`, nested arrays and other objects
   throw `TypeError` naming the field. `json` and `multipart` are mutually exclusive; supplying both
-  throws `TypeError` before request interceptors run. The client removes any merged `Content-Type`
-  so the runtime sets the multipart boundary, and re-sends the same `FormData` on a retry.
+  throws `TypeError` before request interceptors run. The client removes any `Content-Type` —
+  merged, or set by a request interceptor — so the runtime sets the multipart boundary, and re-sends
+  the same `FormData` on a retry.
 - `signal` aborts fetches, queued waits, and retry attempts.
 
 ### Response

@@ -27,6 +27,30 @@ describe('HTTP client multipart bodies', () => {
       headers: { 'cOnTeNt-TyPe': 'text/plain' },
     });
   });
+  it('drops a Content-Type a request interceptor sets on a multipart request (audit L2)', async () => {
+    const seen: (string | null)[] = [];
+    const client = createClient({
+      baseUrl: 'https://example.test',
+      requestInterceptors: [
+        (ctx) => {
+          ctx.headers.set('Content-Type', 'application/json');
+        },
+      ],
+      fetch: async (_input, init) => {
+        seen.push(new Headers(init?.headers).get('content-type'));
+        if (init?.body instanceof FormData) {
+          const request = new Request('https://example.test/uploads', init);
+          expect(request.headers.get('content-type')).toMatch(/^multipart\/form-data; boundary=/);
+          expect((await request.formData()).get('title')).toBe('hello');
+        }
+        return new Response('{}', { headers: { 'content-type': 'application/json' } });
+      },
+    });
+    await client.request({ method: 'POST', path: 'uploads', multipart: { title: 'hello' } });
+    // The same interceptor still sets the header on a JSON request.
+    await client.request({ method: 'POST', path: 'uploads', json: { title: 'hello' } });
+    expect(seen).toEqual([null, 'application/json']);
+  });
   it('reuses the same FormData with identical entries for a retried keyed POST', async () => {
     const bodies: unknown[] = [];
     const entries: string[] = [];

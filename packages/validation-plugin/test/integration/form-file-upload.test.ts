@@ -32,7 +32,7 @@ describe('form-file upload through app.fetch', () => {
       await app.start();
       for (const [text, mimeType, status, issue] of [
         ['hey', 'text/plain', 200, 'hello.txt'],
-        ['hey', 'image/png', 400, 'File type image/png is not accepted'],
+        ['hey', 'image/png', 400, 'File type is not accepted'],
         ['long', 'text/plain', 400, 'File exceeds 3 bytes'],
       ] as const) {
         const form = new FormData();

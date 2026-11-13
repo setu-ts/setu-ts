@@ -126,13 +126,17 @@ be non-empty and contain only `type/subtype` or `type/*` entries; entries are lo
 called. Request validation reports these issues through the route's configured 400 error format:
 
 - `Expected a file` when the value lacks the `FormFile` shape;
-- `File type <type> is not accepted` when its media-type essence matches no accepted entry;
+- `File type is not accepted` when the part's type is not a single valid media type or its essence
+  matches no accepted entry — the client's type is not echoed;
 - `File exceeds <maxBytes> bytes` when its parsed byte length exceeds the bound.
 
 The checked media type is the part's `Content-Type` essence, trimmed and lower-cased with parameters
-removed. It is **client-supplied, never sniffed**. The `filename` is client-supplied too: never use
-it as a path or trust the claimed type for a security decision. `maxBytes` runs after the whole body
-is parsed, so it is not a DoS control; use the request-size bound `RuntimePlugin({ maxBodyBytes })`.
+removed; a value with a comma or a control character, or whose essence is not one `type/subtype`, is
+refused rather than matched. It is **client-supplied, never sniffed**, and the handler receives it
+as sent: never serve `file.mimeType` back as a `Content-Type`. The `filename` is client-supplied
+too: never use it as a path or trust the claimed type for a security decision. `maxBytes` runs after
+the whole body is parsed, so it is not a DoS control; use the request-size bound
+`RuntimePlugin({ maxBodyBytes })`.
 
 For an array of files, a single file arrives as a scalar unless the field name ends `[]`. Use a name
 such as `files[]` and the matching schema key, since the form record preserves that name as written.

@@ -386,6 +386,62 @@ media type, `formFile` bounds, the SDK dropping a caller `Content-Type`.
 - A third-party generator disagrees with the predicted encoding → the §7 probe records the result
   before merge; a disagreement is a finding, not a silent pass.
 
+## 8a. Design security review
+
+- **Status:** ADDED AFTER the first committed-tree audit (`5c1c37337`, 2026-11-13), which failed
+  this plan for having none. §7 named the audit's topics but not a review; this section completes
+  the review from those topics and the audit's map of inputs and outputs, and records the two Low
+  findings that audit raised as resolved below. It does not stand in for a re-audit: the audit is
+  re-issued against the commit that carries this section.
+- **Reviewed flows:** F1 a browser or client posting a multipart body to a `formFile()` route
+  (accepted, wrong type, oversize, forged non-file value); F2 the same route answering its 400 issue
+  text; F3 the OpenAPI document built from validation and form-file brands; F4 the SDK sending a
+  `multipart` request through defaults, caller headers, interceptors and retries; F5 codegen reading
+  a document whose request body lists media types it cannot send.
+- **Boundaries:** B1 remote client → multipart parser → `formFile` (part filename, part
+  `Content-Type`, bytes); B2 `formFile` → 400 response body; B3 handler → whatever it does with
+  `FormFile.filename` / `mimeType`; B4 in-process code → the global brands → the document; B5 SDK
+  caller and interceptors → outbound request; B6 a supplied OpenAPI document → codegen output and
+  its error text.
+- **Assets:** the application's storage and the paths it writes; browsers that later receive a
+  stored file with its stored type; process memory; the integrity of outbound multipart requests;
+  generated client source.
+- **Attackers:** X1 an anonymous uploader choosing the filename, the part type and the bytes; X2 a
+  client sending a JSON or urlencoded value shaped like a file; X3 in-process code writing the brand
+  symbols; X4 the author of a hostile OpenAPI document fed to `setu client --input`.
+- **Threats and resolutions:**
+
+  | #   | Threat                                                                                                                               | Resolution                                                                                                                                                                                     |
+  | --- | ------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | T1  | the client filename used as a path                                                                                                   | no new code reads it; README: never a path                                                                                                                                                     |
+  | T2  | the type allow-list judges a different string than the handler receives (`image/png, text/html`, which browsers read as `text/html`) | a part type with a comma or control character, or whose essence is not one `type/subtype`, is refused before matching (audit L1, fixed); README: never serve `file.mimeType` as `Content-Type` |
+  | T3  | client text reflected in the 400 (length, control characters)                                                                        | the type issue no longer echoes the client's type (L1 fix); the body is JSON-escaped; validation 400s are not logged                                                                           |
+  | T4  | a forged non-file value passes as a file                                                                                             | the `z.custom` shape check (`data instanceof Uint8Array`) runs first and Zod stops there                                                                                                       |
+  | T5  | `maxBytes` read as a DoS control                                                                                                     | it runs after the full parse; README names `RuntimePlugin({ maxBodyBytes })` (413 before parsing) as the bound                                                                                 |
+  | T6  | a forged brand changes runtime behaviour                                                                                             | brands only describe; a forged `forms: true` route still answers 415 to a form body (audit probe C)                                                                                            |
+  | T7  | prototype pollution through brands, `encoding` or the multipart encoder                                                              | readers check own shapes; `Object.fromEntries` and `FormData` keep `__proto__` as an ordinary key (audit probes C, D)                                                                          |
+  | T8  | a `Content-Type` without a boundary reaches the wire on a multipart request                                                          | dropped after merging AND after request interceptors (audit L2, fixed)                                                                                                                         |
+  | T9  | hand-built multipart framing broken by a field name or value                                                                         | nothing hand-builds framing: the runtime's `FormData` encodes                                                                                                                                  |
+  | T10 | document text injected into generated source                                                                                         | media-type names reach only the `OpenApiCodegenError` message; property names were already quoted                                                                                              |
+  | T11 | hostile document text in the codegen error message (terminal control characters)                                                     | accepted residual: display only, the developer supplied the document                                                                                                                           |
+
+- **Audit obligations:** O1 the filename is unused and the type allow-list cannot be bypassed (case,
+  parameters, whitespace, `type/*` prefix, empty, missing part type, comma lists, control
+  characters); O2 `maxBytes` has no off-by-one and only ever sees a `FormFile`; O3 brands change
+  only the document; O4 the SDK never sends a caller or interceptor `Content-Type` on multipart,
+  re-sends identical entries on retry and refuses `json` + `multipart` before any network call; O5
+  codegen emits no document text into source.
+- **Findings and dispositions (first audit, `5c1c37337`):**
+
+  | #   | Finding                                                                                                                | Disposition                                                                                                                  |
+  | --- | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+  | A0  | no design security review (blocking)                                                                                   | this section                                                                                                                 |
+  | L1  | allow-list matches a part type that is not one media type                                                              | fixed: `form-file.ts` refuses it and stops echoing the type; tests in `form-file.test.ts`, `form-file-upload.test.ts`        |
+  | L2  | an interceptor's `Content-Type` survives on multipart                                                                  | fixed: `http-client.ts` drops it after the interceptors; test in `http-client-multipart.test.ts`                             |
+  | R1  | codegen error carries raw document text                                                                                | accepted (T11)                                                                                                               |
+  | R2  | `FormFile.mimeType` is passed to the handler as sent                                                                   | accepted and documented (T2)                                                                                                 |
+  | R3  | out of diff: in-process `app.fetch` with an over-limit `FormData` body crashes with "ReadableStream is already closed" | not M137c's code (runtime body reader with undici's `FormData` producer); registered as V12-139 in the local defect register |
+
 ## 9. Out of scope
 
 - Documenting `storage-plugin`'s `uploadMiddleware` routes (no validation brand; no milestone owns

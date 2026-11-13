@@ -13,6 +13,15 @@ export interface FormFileOptions {
 // RFC 9110 token characters, with a wildcard permitted only as the whole subtype.
 const MIME_ESSENCE = /^[!#$%&'+.^_`|~0-9a-z-]+\/(?:[!#$%&'+.^_`|~0-9a-z-]+|\*)$/i;
 
+// A part's own type: one `type/subtype` essence, no wildcard. A value that is
+// not one media type — a comma list (`image/png, text/html`, which the Fetch
+// MIME extraction reads as its LAST type), a control character, an empty
+// subtype — is refused before matching, so the allow-list judges the string the
+// handler receives rather than a prefix of it.
+const PART_ESSENCE = /^[!#$%&'+.^_`|~0-9a-z-]+\/[!#$%&'+.^_`|~0-9a-z-]+$/i;
+// eslint-disable-next-line no-control-regex -- control characters are what it refuses
+const UNSAFE_PART_TYPE = /[\u0000-\u001f\u007f,]/;
+
 /**
  * Validates a parsed FormFile and records its constraints for documentation.
  * Filenames and MIME types are client supplied; neither is trusted or sniffed.
@@ -51,12 +60,15 @@ export function formFile(options?: FormFileOptions): z.ZodCustom<FormFile, FormF
       const essence = file.mimeType.split(';', 1)[0]!.trim().toLowerCase();
       if (
         mimeTypes !== undefined &&
-        !mimeTypes.some(
-          (type) =>
-            type === essence || (type.endsWith('/*') && essence.startsWith(type.slice(0, -1))),
-        )
+        (UNSAFE_PART_TYPE.test(file.mimeType) ||
+          !PART_ESSENCE.test(essence) ||
+          !mimeTypes.some(
+            (type) =>
+              type === essence || (type.endsWith('/*') && essence.startsWith(type.slice(0, -1))),
+          ))
       ) {
-        ctx.addIssue({ code: 'custom', message: `File type ${essence} is not accepted` });
+        // The client's type is not echoed: it is client-chosen text.
+        ctx.addIssue({ code: 'custom', message: 'File type is not accepted' });
       }
       if (maxBytes !== undefined && file.data.byteLength > maxBytes) {
         ctx.addIssue({ code: 'custom', message: `File exceeds ${maxBytes} bytes` });

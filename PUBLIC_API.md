@@ -1374,9 +1374,11 @@ The optional Zod v4 subpath exports
 (`readonly mimeTypes?: readonly string[]; readonly maxBytes?: number`). The main entry does not load
 Zod. MIME entries are type/subtype or type/* essences, normalized to lowercase. Invalid entries, an
 empty list or a non-positive/non-safe-integer byte limit throw `TypeError` at construction. Parsing
-reports `Expected a file`, `File type <essence> is not accepted`, or `File exceeds <maxBytes> bytes`
-through the configured validation formatter. MIME parameters are ignored during matching. Filenames
-and MIME types are client claims; maxBytes checks parsed bytes and is not a request-size bound.
+reports `Expected a file`, `File type is not accepted`, or `File exceeds <maxBytes> bytes` through
+the configured validation formatter, without echoing the client's type. MIME parameters are ignored
+during matching; a part type with a comma or control character, or whose essence is not one
+`type/subtype`, is refused rather than matched. Filenames and MIME types are client claims; maxBytes
+checks parsed bytes and is not a request-size bound.
 
 `RouteValidationMetadata.forms?: true` records the body validator opt-in on both helper and service
 paths; the key is omitted otherwise. A present non-true forms value makes a foreign brand
