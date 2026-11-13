@@ -32,6 +32,8 @@ import {
 } from '../../src/index.ts';
 import { DecoratorPlugin } from '../../src/plugin/decorator-plugin.ts';
 import { metadataStore } from '../../src/metadata/metadata-store.ts';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
 import { createFakeContext } from '../fixtures/fake-context.ts';
 import { createFakeFileSystem, createFakeRuntime } from '../fixtures/fake-runtime.ts';
 
@@ -98,6 +100,48 @@ describe('DecoratorPlugin registration (integration)', () => {
   beforeEach(() => {
     metadataStore.clear();
   });
+
+  it.each([
+    { path: '/flags/old', schema: { deprecated: true } },
+    { path: '/flags/hidden', schema: { excludeFromDocument: true } },
+  ])(
+    'keeps a schema whose only metadata is a document flag through DecoratorPlugin: $path',
+    async ({ path, schema }) => {
+      @Controller('/flags')
+      class C {
+        @Get('/old')
+        @ApiOperation({ deprecated: true })
+        old() {
+          return [];
+        }
+
+        @Get('/hidden')
+        @ApiOperation({ excludeFromDocument: true })
+        hidden() {
+          return [];
+        }
+
+        @Get('/false')
+        @ApiOperation({ deprecated: false, excludeFromDocument: false })
+        current() {
+          return [];
+        }
+      }
+      const app = createApplication({
+        plugins: [RuntimePlugin(), DecoratorPlugin({ controllers: [C] })],
+      });
+      try {
+        await app.start();
+        const schemas = new Map(
+          app.router.listRoutes().map((route) => [route.path, route.definition.schema]),
+        );
+        expect(schemas.get(path)).toEqual(schema);
+        expect(schemas.get('/flags/false')).toBeUndefined();
+      } finally {
+        await app.stop();
+      }
+    },
+  );
 
   it('registers the metadata store under CAPABILITIES.METADATA_STORE', async () => {
     @Controller('/x')

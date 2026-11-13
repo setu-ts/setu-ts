@@ -19,6 +19,31 @@ import {
   DEFAULT_EXCLUDED_OWNERS,
   isRouteExcluded,
 } from './declared-operation-ids.ts';
+import { buildDocumentMetadata, validateDocumentMetadata } from './document-metadata.ts';
+
+/**
+ * External documentation for an API or a document tag.
+ * @since 0.13.0
+ */
+export interface OpenApiExternalDocs {
+  /** Documentation URL. @since 0.13.0 */
+  readonly url: string;
+  /** Documentation description. @since 0.13.0 */
+  readonly description?: string;
+}
+
+/**
+ * A named document tag with optional description and documentation.
+ * @since 0.13.0
+ */
+export interface OpenApiTag {
+  /** Unique tag name within the document's tags list. @since 0.13.0 */
+  readonly name: string;
+  /** Tag description. @since 0.13.0 */
+  readonly description?: string;
+  /** External tag documentation. @since 0.13.0 */
+  readonly externalDocs?: OpenApiExternalDocs;
+}
 
 /** Prefix of a component reference in the generated document. */
 const COMPONENT_REF_PREFIX = '#/components/schemas/';
@@ -139,6 +164,12 @@ export interface OpenApiDocument {
     readonly title: string;
     readonly version: string;
     readonly description?: string;
+    /** Terms of service URL. @since 0.13.0 */
+    readonly termsOfService?: string;
+    /** API contact details. @since 0.13.0 */
+    readonly contact?: NonNullable<OpenApiGeneratorOptions['contact']>;
+    /** API license details. @since 0.13.0 */
+    readonly license?: NonNullable<OpenApiGeneratorOptions['license']>;
   };
   /** Server URLs. */
   readonly servers?: readonly {
@@ -168,6 +199,10 @@ export interface OpenApiDocument {
     readonly schemas?: Record<string, OpenApiSchemaObject>;
     readonly securitySchemes?: Record<string, unknown>;
   };
+  /** Document tag descriptions, in declaration order. @since 0.13.0 */
+  readonly tags?: readonly OpenApiTag[];
+  /** External API documentation. @since 0.13.0 */
+  readonly externalDocs?: OpenApiExternalDocs;
 }
 
 /**
@@ -187,6 +222,8 @@ export interface OpenApiOperation {
   readonly description?: string;
   /** Operation tags. */
   readonly tags?: readonly string[];
+  /** Whether this operation is deprecated. Emitted only when true. @since 0.13.0 */
+  readonly deprecated?: boolean;
   /** Path/query parameters. */
   readonly parameters?: readonly OpenApiParameter[];
   /** Request body. */
@@ -280,6 +317,33 @@ export interface OpenApiGeneratorOptions {
   readonly version?: string;
   /** API description. */
   readonly description?: string;
+  /** API contact details, copied to info.contact. @since 0.13.0 */
+  readonly contact?: {
+    /** Contact name. @since 0.13.0 */
+    readonly name?: string;
+    /** Contact URL. @since 0.13.0 */
+    readonly url?: string;
+    /** Contact email. @since 0.13.0 */
+    readonly email?: string;
+  };
+  /**
+   * API license, copied to info.license. Identifier and URL are mutually exclusive.
+   * @since 0.13.0
+   */
+  readonly license?: {
+    /** License name. @since 0.13.0 */
+    readonly name: string;
+    /** SPDX license expression; mutually exclusive with url. @since 0.13.0 */
+    readonly identifier?: string;
+    /** License URL; mutually exclusive with identifier. @since 0.13.0 */
+    readonly url?: string;
+  };
+  /** Terms of service URL, copied verbatim to info.termsOfService. @since 0.13.0 */
+  readonly termsOfService?: string;
+  /** External API documentation. @since 0.13.0 */
+  readonly externalDocs?: OpenApiExternalDocs;
+  /** Document tags with unique names; an empty list is omitted. @since 0.13.0 */
+  readonly tags?: readonly OpenApiTag[];
   /** Server URLs. */
   readonly servers?: readonly {
     readonly url: string;
@@ -553,12 +617,19 @@ export class OpenApiGenerator {
    * Creates a new OpenAPI generator.
    *
    * @param options - Generator options
+   * @throws {OpenApiDocumentOptionsError} If license keys conflict or tag names repeat
    */
   constructor(options: OpenApiGeneratorOptions) {
+    validateDocumentMetadata(options);
     this.#options = {
       title: options.title ?? 'API',
       version: options.version ?? '1.0.0',
       ...(options.description !== undefined ? { description: options.description } : {}),
+      ...(options.contact !== undefined ? { contact: options.contact } : {}),
+      ...(options.license !== undefined ? { license: options.license } : {}),
+      ...(options.termsOfService !== undefined ? { termsOfService: options.termsOfService } : {}),
+      ...(options.externalDocs !== undefined ? { externalDocs: options.externalDocs } : {}),
+      ...(options.tags !== undefined ? { tags: options.tags } : {}),
       ...(options.servers !== undefined ? { servers: options.servers } : {}),
       ...(options.securitySchemes !== undefined
         ? { securitySchemes: options.securitySchemes }
@@ -744,6 +815,7 @@ export class OpenApiGenerator {
         components.securitySchemes = this.#options.securitySchemes;
       }
 
+      const metadata = buildDocumentMetadata(this.#options);
       return {
         openapi: '3.1.0',
         info: {
@@ -752,11 +824,13 @@ export class OpenApiGenerator {
           ...(this.#options.description !== undefined
             ? { description: this.#options.description }
             : {}),
+          ...metadata.info,
         },
         ...(this.#options.servers !== undefined ? { servers: this.#options.servers } : {}),
         ...(this.#options.security !== undefined ? { security: this.#options.security } : {}),
         paths,
         ...(Object.keys(components).length > 0 ? { components } : {}),
+        ...metadata.top,
       };
     } finally {
       // Restored even when a schema throws mid-pass. A stranded
@@ -840,6 +914,7 @@ export class OpenApiGenerator {
       ...(schema?.summary ? { summary: schema.summary } : {}),
       ...(schema?.description !== undefined ? { description: schema.description } : {}),
       ...(schema?.tags && schema.tags.length > 0 ? { tags: schema.tags } : {}),
+      ...(schema?.deprecated === true ? { deprecated: true } : {}),
       ...(parameters.length > 0 ? { parameters } : {}),
       ...(requestBody ? { requestBody } : {}),
       responses,

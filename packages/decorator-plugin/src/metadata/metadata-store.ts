@@ -89,6 +89,10 @@ export interface OpenApiMetadata {
   summary?: string;
   /** Longer description. */
   description?: string;
+  /** Whether the operation is deprecated. @since 0.13.0 */
+  deprecated?: boolean;
+  /** Whether the operation is omitted from OpenAPI. @since 0.13.0 */
+  excludeFromDocument?: boolean;
   /** Responses keyed by status code. */
   responses?: Record<string, unknown>;
   /** Operation tags (method-level). */

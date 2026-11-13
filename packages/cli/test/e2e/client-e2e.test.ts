@@ -69,13 +69,20 @@ it(
       configPath,
       config.replace(
         'return app;',
-        "app.router.get('/m129', { handler: (ctx) => ctx.response.json({ message: 'm129' }), schema: { operationId: 'm129Probe' } });\n  return app;",
+        "app.router.get('/m129', { handler: (ctx) => ctx.response.json({ message: 'm129' }), schema: { operationId: 'm129Probe', deprecated: true } });\n  app.router.get('/m137a-hidden', { handler: (ctx) => ctx.response.json({ hidden: true }), schema: { operationId: 'm137aHidden', excludeFromDocument: true } });\n  return app;",
       ),
     );
     const drift = await npmRun(project, 'client:check');
     expect(drift.code, drift.output).toBe(1);
     expect(drift.output).toContain('is out of date');
     await script(project, 'client');
+    const generated = await fs.readFile(`${project}/src/clientsdk/api.ts`, 'utf8');
+    expect(generated).toMatch(/\/\*\* @deprecated \*\/\s+m129Probe\(/);
+    expect(generated).toMatch(
+      /\/\*\*\s+\* m129Probe\s+\* Deprecated operation\.\s+\*\/\s+function m129Probe\(/,
+    );
+    expect(generated.match(/@deprecated/g)).toHaveLength(1);
+    expect(generated).not.toContain('m137aHidden');
     await script(project, 'client:check');
     await script(project, 'format');
     for (const name of ['check', 'lint', 'format:check', 'build']) await script(project, name);

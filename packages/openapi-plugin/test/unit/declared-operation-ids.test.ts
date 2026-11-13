@@ -22,6 +22,44 @@ function route(path: string, operationId?: string, owner?: string): RouteInfo {
 describe('claimDeclaredOperationIds', () => {
   const included = (): boolean => false;
 
+  for (const flag of [true, false, undefined]) {
+    it.each([
+      { pathMatch: false, ownerMatch: false },
+      { pathMatch: true, ownerMatch: false },
+      { pathMatch: false, ownerMatch: true },
+      { pathMatch: true, ownerMatch: true },
+    ])(
+      `exclusion flag ${String(flag)} with path $pathMatch and owner $ownerMatch`,
+      ({ pathMatch, ownerMatch }) => {
+        const r = route('/users', 'readUser', 'app');
+        const flagged = {
+          ...r,
+          definition: {
+            ...r.definition,
+            schema: {
+              operationId: 'readUser',
+              ...(flag !== undefined ? { excludeFromDocument: flag } : {}),
+            },
+          },
+        };
+        expect(
+          isRouteExcluded(
+            flagged,
+            new Set(pathMatch ? ['/users'] : []),
+            new Set(ownerMatch ? ['app'] : []),
+          ),
+        ).toBe(flag === true || pathMatch || ownerMatch);
+        if (flag === true) {
+          expect(
+            claimDeclaredOperationIds([route('/visible', 'readUser'), flagged], (candidate) =>
+              isRouteExcluded(candidate, new Set(), new Set()),
+            ),
+          ).toEqual(new Set(['readUser']));
+        }
+      },
+    );
+  }
+
   it('returns only declared ids and preserves nonblank ids verbatim', () => {
     expect(
       claimDeclaredOperationIds(

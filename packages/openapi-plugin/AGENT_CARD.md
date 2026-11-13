@@ -35,6 +35,9 @@ export function registerStatusRoutes(router: IRouterApi): void {
 
 ## Behaviour the types do not show
 
+- Duplicate `tags` names or a `license` with both `identifier` and `url` refuse startup.
+  `schema.excludeFromDocument` hides an operation; the route is still served.
+
 - `endpoint` defaults to `/docs`, `specEndpoint` to `/openapi.json`; served documentation and
   self-hosted asset routes are excluded from the generated document.
 - `swagger` defaults to `true` with self-hosted assets: this needs `swagger-ui-dist` and a runtime

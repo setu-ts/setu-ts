@@ -121,6 +121,18 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **OpenAPI document metadata, deprecation and per-route exclusion (M137a, #587, `@setu-ts/common`,
+  `@setu-ts/openapi-plugin`, `@setu-ts/decorator-plugin`, `@setu-ts/sdk`).** Document options
+  `contact`, `license`, `termsOfService`, `tags` and `externalDocs` describe the API; new
+  `OpenApiTag` and `OpenApiExternalDocs` types name their shapes. New `OpenApiDocumentOptionsError`
+  refuses duplicate document tag names and a license carrying both `identifier` and `url` at startup
+  or direct service/generator construction. `RouteSchema` and `ApiOperationConfig` gain `deprecated`
+  and `excludeFromDocument`: generated clients mark deprecated interface members `@deprecated` (the
+  method JSDoc carries a plain sentence, so the file stays clean under `no-deprecated`), and a
+  hidden operation neither claims an id nor produces a client method. Hidden routes remain served,
+  router-listed and discoverable as marked MCP tools. Neither flag changes access control or adds
+  response headers.
+
 - **M139d (#582, `@setu-ts/cli`, V12-25).** `setu add` accepts several validated package names, with
   ordered progress and one install command.
 - **M139d (#582, `@setu-ts/cli`, V12-26).** `setu add view --plugin-only` installs the rendering

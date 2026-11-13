@@ -16760,7 +16760,7 @@ while `GET /users/:id` stays documented.
    top-level `tags`. OpenAPI 3.1 makes `license.identifier` and `license.url` mutually exclusive, so
    supplying both is refused at construction with a named error, never emitted.
 4. **Generated clients carry the deprecation.** `sdk`'s codegen writes `/** @deprecated */` on the
-   method of a deprecated operation, so an editor flags the call site.
+   generated interface member of a deprecated operation, so an editor flags the call site.
 
 **Out of scope:** RFC 9745 `Deprecation`/`Sunset` response headers (no adopter has asked; the field
 is documentation, not behaviour).
@@ -17527,7 +17527,7 @@ generated-output rule.
 | 135       | ✅     | vector-store-plugin (new) + common + cloudflare + cli — tenant-scoped retrieval with refused-not-ignored filters                                                                                                                                                                          |
 | 136       | ✅     | agent-runs-plugin + common + database-plugin — durable agent runs: fenced leases, persisted model/tool entries, timed approvals and UI-message replay (PR #565)                                                                                                                           |
 | 137       | ⬜     | OpenAPI coverage — forms, lifecycle and derived responses (three letters)                                                                                                                                                                                                                 |
-| 137a      | ⬜     | common + openapi-plugin + decorator-plugin + sdk — document metadata, `deprecated`, per-route exclusion                                                                                                                                                                                   |
+| 137a      | ✅     | common + openapi-plugin + decorator-plugin + sdk — document metadata, `deprecated`, per-route exclusion                                                                                                                                                                                   |
 | 137b      | ⬜     | common + openapi-plugin + auth-plugin + decorator-plugin — derived 401/403/415/429 and idempotency headers, declared response headers, opt-in Problem Details schema                                                                                                                      |
 | 137c      | ⬜     | common + validation-plugin + openapi-plugin + sdk — form bodies and file uploads in the document and the generated client                                                                                                                                                                 |
 | 138       | ✅     | cli — workspace broker and per-member RPC style: a CLI-owned transport module per member, `setu workspace broker` and `setu workspace rpc`; PR #568                                                                                                                                       |

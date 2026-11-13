@@ -2,6 +2,7 @@ import type { IApplication } from '@setu-ts/common';
 
 import type { OpenApiDocument, OpenApiGeneratorOptions } from '../generators/openapi-generator.ts';
 import { OpenApiGenerator } from '../generators/openapi-generator.ts';
+import { validateDocumentMetadata } from '../generators/document-metadata.ts';
 import type { IOpenApiService } from '../interfaces/openapi-service.ts';
 
 /**
@@ -44,6 +45,12 @@ export class OpenApiService implements IOpenApiService {
       version: this.#options.version ?? '1.0.0',
     };
     if (this.#options.description !== undefined) base.description = this.#options.description;
+    if (this.#options.contact !== undefined) base.contact = this.#options.contact;
+    if (this.#options.license !== undefined) base.license = this.#options.license;
+    if (this.#options.termsOfService !== undefined)
+      base.termsOfService = this.#options.termsOfService;
+    if (this.#options.externalDocs !== undefined) base.externalDocs = this.#options.externalDocs;
+    if (this.#options.tags !== undefined) base.tags = this.#options.tags;
     if (this.#options.servers !== undefined) base.servers = this.#options.servers;
     if (this.#options.securitySchemes !== undefined) {
       base.securitySchemes = this.#options.securitySchemes;
@@ -69,8 +76,10 @@ export class OpenApiService implements IOpenApiService {
    * Creates a new OpenAPI service.
    *
    * @param options - Service options
+   * @throws {OpenApiDocumentOptionsError} If license keys conflict or tag names repeat
    */
   constructor(options: OpenApiServiceOptions) {
+    validateDocumentMetadata(options);
     this.#options = options;
 
     // Seed pre-registered schemas so they are present regardless of whether

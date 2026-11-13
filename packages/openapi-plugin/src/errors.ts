@@ -25,3 +25,34 @@ export class OperationIdError extends Error {
     this.reason = reason;
   }
 }
+
+/**
+ * Refuses document metadata that violates OpenAPI 3.1 object constraints.
+ *
+ * @example
+ * ```typescript
+ * if (error instanceof OpenApiDocumentOptionsError && error.reason === 'duplicate-tag') {
+ *   // Give every document tag a distinct name.
+ * }
+ * ```
+ * @since 0.13.0
+ */
+export class OpenApiDocumentOptionsError extends Error {
+  /**
+   * The document metadata constraint that was violated.
+   * @since 0.13.0
+   */
+  readonly reason: 'license-identifier-and-url' | 'duplicate-tag';
+
+  /**
+   * Creates a refusal naming the invalid metadata.
+   * @param reason - The violated constraint
+   * @param message - Diagnostic naming the conflicting keys or tag
+   * @since 0.13.0
+   */
+  constructor(reason: 'license-identifier-and-url' | 'duplicate-tag', message: string) {
+    super(message);
+    this.name = 'OpenApiDocumentOptionsError';
+    this.reason = reason;
+  }
+}

@@ -284,10 +284,18 @@ schema and a description the declaration does not carry.
   `@setu-ts/view-plugin`)
 - **Response shaping** — `@HttpCode`, `@ResponseHeader`, `@Redirect`
 - **OpenAPI** — `@ApiTags`, `@ApiOperation`, `@ApiResponse` (`@ApiOperation` forwards `operationId`,
-  `summary` and `description` into the route schema; OpenAPI uses a declared id verbatim and derives
-  one from method and path when it is absent.)
+  `summary`, `description`, `deprecated` and `excludeFromDocument` into the route schema; OpenAPI
+  uses a declared id verbatim and derives one from method and path when it is absent.)
 - **Extension** — `createDecorator`, `Custom`, `registerParameterResolver`
 - **Discovery** — `discoverControllers`
+
+`@ApiOperation({ deprecated: true })` marks only the OpenAPI operation deprecated; generated SDK
+interface members carry `@deprecated`, while generated factory methods say "Deprecated operation."
+without the tag. It does not change serving behavior or add deprecation response headers.
+`@ApiOperation({ excludeFromDocument: true })` hides only that operation from the document. It stays
+served, listed in `router.listRoutes()` and discoverable as an MCP tool when marked; the flag is not
+access control. False and omitted flags have no effect. Either flag works as the method's only
+OpenAPI metadata.
 
 ## Options
 

@@ -24,6 +24,10 @@ export interface ApiOperationConfig {
   readonly summary?: string;
   /** Longer description. */
   readonly description?: string;
+  /** Marks the operation deprecated in OpenAPI when true. @since 0.13.0 */
+  readonly deprecated?: boolean;
+  /** Omits only this operation from OpenAPI when true; it stays served. @since 0.13.0 */
+  readonly excludeFromDocument?: boolean;
 }
 
 /**
@@ -57,7 +61,7 @@ export function ApiTags(...tags: string[]): SetuClassDecorator {
 /**
  * Describes the OpenAPI operation for a route handler.
  *
- * @param config - Operation id, summary, and/or description
+ * @param config - Operation id, summary, description, deprecation and document exclusion
  * @returns A method decorator
  * @since 0.1.0
  */
@@ -76,6 +80,12 @@ export function ApiOperation(config: ApiOperationConfig): SetuMethodDecorator {
       }
       if (config.description !== undefined) {
         oa.description = config.description;
+      }
+      if (config.deprecated !== undefined) {
+        oa.deprecated = config.deprecated;
+      }
+      if (config.excludeFromDocument !== undefined) {
+        oa.excludeFromDocument = config.excludeFromDocument;
       }
     });
   });

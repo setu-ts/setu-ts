@@ -17,15 +17,17 @@ export type { OpenApiServiceOptions } from './services/openapi-service.ts';
 export type { IOpenApiService } from './interfaces/openapi-service.ts';
 
 // Generator
-export { OperationIdError } from './errors.ts';
+export { OpenApiDocumentOptionsError, OperationIdError } from './errors.ts';
 export { OpenApiGenerator } from './generators/openapi-generator.ts';
 export type {
   OpenApiDocument,
+  OpenApiExternalDocs,
   OpenApiGeneratorOptions,
   OpenApiOperation,
   OpenApiParameter,
   OpenApiRequestBody,
   OpenApiResponse,
+  OpenApiTag,
 } from './generators/openapi-generator.ts';
 
 // Transformer

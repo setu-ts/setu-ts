@@ -5,10 +5,31 @@
  */
 import { describe, expect, it } from 'vitest';
 import * as openapiPlugin from '../../src/index.ts';
-import type { IOpenApiService, OpenApiSchemaObject, SchemaNodeHook } from '../../src/index.ts';
+import type {
+  IOpenApiService,
+  OpenApiSchemaObject,
+  SchemaNodeHook,
+  OpenApiExternalDocs,
+  OpenApiTag,
+} from '../../src/index.ts';
 import type { IOpenApiService as CommonOpenApiService } from '@setu-ts/common';
 
 describe('Barrel exports', () => {
+  it('exports document metadata contracts and keeps their implementation internal', () => {
+    const error = new openapiPlugin.OpenApiDocumentOptionsError(
+      'duplicate-tag',
+      'duplicate users tag',
+    );
+    expect(error).toBeInstanceOf(Error);
+    expect(error.name).toBe('OpenApiDocumentOptionsError');
+    expect(error.reason).toBe('duplicate-tag');
+    expect(error.message).toBe('duplicate users tag');
+    const docs: OpenApiExternalDocs = { url: '/guide' };
+    const tag: OpenApiTag = { name: 'users', externalDocs: docs };
+    expect(tag.externalDocs).toBe(docs);
+    expect(openapiPlugin).not.toHaveProperty('validateDocumentMetadata');
+    expect(openapiPlugin).not.toHaveProperty('buildDocumentMetadata');
+  });
   it('exports OperationIdError with a reason and keeps allocation helpers internal', () => {
     const error = new openapiPlugin.OperationIdError('duplicate', 'duplicate id');
     expect(error).toBeInstanceOf(Error);
