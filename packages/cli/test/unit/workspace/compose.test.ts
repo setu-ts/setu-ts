@@ -78,6 +78,18 @@ describe('workspaceContainerFiles', () => {
     );
     expect(compose).not.toContain('API_SESSION_SECRET');
     expect(compose).toContain('path: ../apps/web/.env');
+    expect(compose).toContain(
+      '# Export ADMIN_WEB_SESSION_SECRET, WEB_SESSION_SECRET, WEB_JWT_SECRET first (README, Run the stack):',
+    );
+    expect(
+      contentsOf(
+        workspaceContainerFiles(
+          { ...manifestOf([]), members: [{ name: 'api', port: 3002 }] },
+          brokerSpec('memory'),
+        ),
+        COMPOSE_FILE,
+      ),
+    ).not.toContain('# Export ');
   });
   it('keeps the Node devtool out of the runtime image without a strip step', () => {
     const manifest: WorkspaceManifest = {

@@ -11278,16 +11278,16 @@ It writes the manifest and **reports** the install command rather than running i
 matches the project's toolchain, detected from its manifests the same way `setu generate` detects
 it:
 
-| Project            | Printed command                |
-| ------------------ | ------------------------------ |
-| Deno               | `deno install --min-dep-age 0` |
-| Node               | `npm install`                  |
-| Bun                | `bun install`                  |
-| Cloudflare Workers | `npm install`                  |
+| Project            | Printed command |
+| ------------------ | --------------- |
+| Deno               | `deno install`  |
+| Node               | `npm install`   |
+| Bun                | `bun install`   |
+| Cloudflare Workers | `npm install`   |
 
-That is deliberate. On the day of a release the pin is younger than Deno's 24-hour
-minimum-dependency-age policy, so the flags need to be visible rather than buried in a failing
-subprocess — and it keeps the command free of the `run` permission. No registry mapping is printed:
+That is deliberate: it keeps the command free of the `run` permission. No `--min-dep-age` flag is
+needed on a release day, because the generated `deno.json` exempts only `npm:@setu-ts/*` from its
+one-day dependency cooldown; every third-party package keeps it. No registry mapping is printed:
 every package resolves from the default npm registry.
 
 A **workspace root** is refused (exit `2`, nothing written) — recognised by `setu.workspace.json`, a
@@ -14954,8 +14954,9 @@ Contract notes:
 
 `@Gateway(path, options)` accepts WebSocket route options, including handshake guards, protocols and
 heartbeat participation. Use `@Gateway('/ws', { guards: [guard] })` to authorize an upgrade. HTTP
-`@Roles`, `@Permissions` and method-level `@Public` declarations on gateways fail registration; use
-handshake guards instead. `@UseGuards` remains invalid on non-HTTP ingress.
+`@Roles`, `@Permissions`, `@RequirePolicy`, `@ScopedRoles`, `@ScopedPermissions` and method-level
+`@Public` declarations on gateways fail registration; use handshake guards instead. `@UseGuards`
+remains invalid on non-HTTP ingress.
 
 Optional decorator and metadata system plugin. Provides NestJS-style decorators as syntactic sugar
 over the kernel's programmatic API. Decorators capture metadata in a plain `MetadataStore` (no

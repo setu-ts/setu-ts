@@ -1230,13 +1230,12 @@ function npmDevFrameworkDependencies(
 /**
  * The task block a generated Deno manifest carries.
  *
- * A template with a frontend build gets `install` and `build` beside `start`,
- * and `start` DEPENDS on `build` — which is the whole of X5-3. Before this the
- * Deno target emitted the build command into `package.json` alone, whose script
- * runner a Deno project never invokes, so `deno task start` failed with
- * `Failed to load React Router server build … Module not found`. The generated
- * README said `deno task start` and nothing else; there was no `build` task, no
- * `install` task, and no mention anywhere of how the server build got produced.
+ * A template with a frontend build gets `install` and `build` beside `start`
+ * (X5-3: the Deno target once emitted its build command into `package.json`
+ * alone, which a Deno project never runs). `start` serves an existing build and
+ * does not run `build` itself (M140a §3.11): a production start must not
+ * install or build. When no server build exists, the react-router plugin's
+ * load error names the `build` task.
  *
  * These are the four pieces `apps/full-stack/deno.json` — described in its own
  * README as "the runnable counterpart to `setu new --template full-stack`" —

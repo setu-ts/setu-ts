@@ -29,7 +29,7 @@ describe('SseService', () => {
       }
     },
   );
-  it.each([Number.NaN, -1, 2.5, Infinity])(
+  it.each([Number.NaN, -1, 2.5, Infinity, 2 ** 31])(
     'refuses a heartbeat that would become a 1 ms timer (%s)',
     (heartbeatMs) => {
       expect(() => new SseService({ heartbeatMs }, createFakeRuntime())).toThrow(

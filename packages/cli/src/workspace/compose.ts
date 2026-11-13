@@ -38,7 +38,12 @@ import { TELEMETRY_PRELOAD_PATH } from '../templates/telemetry-preload.ts';
 import type { GeneratedFile } from '../utils/file-writer.ts';
 import { hostVariable } from './discovery-module.ts';
 import { LIBS_DIR } from './library.ts';
-import { MEMBERS_DIR, memberSecretVariable, type WorkspaceManifest } from './manifest.ts';
+import {
+  MEMBERS_DIR,
+  memberSecretVariable,
+  workspaceSecretVariables,
+  type WorkspaceManifest,
+} from './manifest.ts';
 import { workspaceProfile, type WorkspaceRuntimeProfile } from './runtime-profile.ts';
 import type { BrokerSpec } from './transport.ts';
 
@@ -536,7 +541,14 @@ export function workspaceContainerFiles(
 # are lost — the member list and the ports come from setu.workspace.json.
 #
 #   docker compose -f ${COMPOSE_FILE} up --build
-#
+#${
+    workspaceSecretVariables(members).length === 0
+      ? ''
+      : `
+# Export ${workspaceSecretVariables(members).join(', ')} first (README, Run the stack):
+# every Compose command refuses to run without them.
+#`
+  }
 # This is the LOCAL topology. A deployed one uses a real registry, a real service
 # discovery backend (\`provider: 'consul'\`, \`'kubernetes'\`, \`'dns'\`), and the
 # Kubernetes objects under k8s/.

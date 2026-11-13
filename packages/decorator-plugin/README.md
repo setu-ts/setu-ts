@@ -550,8 +550,9 @@ drifts.
 
 `@Gateway(path, options)` accepts WebSocket route options, including handshake guards, protocols and
 heartbeat participation. Use `@Gateway('/ws', { guards: [guard] })` to authorize an upgrade. HTTP
-`@Roles`, `@Permissions` and method-level `@Public` declarations on gateways fail registration; use
-handshake guards instead. `@UseGuards` remains invalid on non-HTTP ingress.
+`@Roles`, `@Permissions`, `@RequirePolicy`, `@ScopedRoles`, `@ScopedPermissions` and method-level
+`@Public` declarations on gateways fail registration; use handshake guards instead. `@UseGuards`
+remains invalid on non-HTTP ingress.
 
 ## Full API
 
