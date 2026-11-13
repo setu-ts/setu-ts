@@ -13,10 +13,11 @@ All notable changes to this project are documented here. The format follows
   body validator, route-level rate limiter or idempotency middleware now documents the errors that
   middleware answers with; `deriveErrorResponses: false` stops adding those statuses, but responses
   are still emitted in ascending status order and a declared 409, 415, 422 or 429 without a
-  description now reads by its status name. The REST starter, when its validation format is RFC
-  9457, and the `rest` and `microservice` templates set `errorSchema: 'rfc9457'`.
-  `setu client --check` reports the changed document as drift once; regenerate the client with
-  `setu client`.
+  description now reads by its status name. `createRestApp()`, when its validation format is RFC
+  9457, and the `rest` and `microservice` templates set `errorSchema: 'rfc9457'`;
+  `buildRestPlugins()` and `createMicroserviceApp()` do not, since the first installs no error
+  handler. `setu client --check` reports the changed document as drift once; regenerate the client
+  with `setu client`.
 
 - **BREAKING — typed capability registry (M139g, #585, 0.13.0, `@setu-ts/common`, `@setu-ts/kernel`,
   `@setu-ts/testing`, `@setu-ts/react-router-plugin`, `@setu-ts/cli`).** Standard tokens carry a

@@ -7,7 +7,8 @@
  * @module
  */
 import { describe, expect, it } from 'vitest';
-import { createRestApp } from '../../src/index.ts';
+import { createApplication } from '@setu-ts/kernel';
+import { buildRestPlugins, createRestApp } from '../../src/index.ts';
 import { validateBody } from '@setu-ts/validation-plugin';
 
 /** A schema that always fails, so the route short-circuits with a 400. */
@@ -132,5 +133,27 @@ describe('rest-starter OpenAPI error schema follows the validation format (M137b
       openapi: { errorSchema: 'rfc9457' },
     });
     expect(responses['400']).toHaveProperty(['content', 'application/problem+json']);
+  });
+
+  it('names no Problem Details body from buildRestPlugins, which installs no errorHandler', async () => {
+    const app = createApplication({ plugins: buildRestPlugins({ openapi: { swagger: false } }) });
+    app.router.post('/validate', {
+      middleware: [validateBody(failingSchema)],
+      handler: (ctx) => ctx.response.text('ok'),
+    });
+    await app.start();
+    try {
+      const res = await app.inject({ method: 'GET', url: 'http://localhost/openapi.json' });
+      const doc = JSON.parse(res.body as string) as {
+        paths: Record<string, Record<string, { responses: Record<string, unknown> }>>;
+        components?: { schemas?: Record<string, unknown> };
+      };
+      expect(doc.paths['/validate']?.['post']?.responses['400']).toEqual({
+        description: 'Bad request',
+      });
+      expect(doc.components?.schemas?.['ProblemDetails']).toBeUndefined();
+    } finally {
+      await app.stop();
+    }
   });
 });

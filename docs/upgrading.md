@@ -51,8 +51,11 @@ stays, and a declared 409, 415, 422 or 429 without a description now reads by it
 than `Response`.
 
 `createRestApp()` sets `errorSchema: 'rfc9457'` while its validation format is RFC 9457, so derived
-errors carry a `ProblemDetails` body. New `rest` and `microservice` projects pass the same option in
-`setu.config.ts`; an existing project adds it there to get the body.
+errors carry a `ProblemDetails` body. `buildRestPlugins()` installs no error handler and sets no
+`errorSchema`, and neither does `createMicroserviceApp()`, which composes from it: pass
+`openapi: { errorSchema: 'rfc9457' }` where an RFC 9457 `errorHandler` is installed. New `rest` and
+`microservice` projects pass the same option in `setu.config.ts`; an existing project adds it there
+to get the body.
 
 ### `trustForwardedHost`, worker-pool labels and the starter body limit (`@setu-ts/http-security-plugin`, `@setu-ts/worker-pool-plugin`, `@setu-ts/rest-starter`)
 

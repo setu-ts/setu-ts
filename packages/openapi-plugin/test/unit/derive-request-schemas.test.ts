@@ -140,6 +140,37 @@ describe('deriveRequestSchemas', () => {
     expect(op?.parameters?.map((p) => p.name)).toEqual(['q']);
   });
 
+  it('documents the validation 400 when the validated body is also declared', () => {
+    const body = z.object({ name: z.string() });
+    const declaredAndValidated = route('POST', '/orders', {
+      schema: { body },
+      middleware: [branded('body', body)],
+    });
+
+    const plain400 = generator().generate([declaredAndValidated]).paths['/orders']?.post?.responses[
+      '400'
+    ];
+    expect(plain400).toEqual({ description: 'Bad request' });
+
+    const problem400 = new OpenApiGenerator({
+      title: 'T',
+      version: '1',
+      errorSchema: 'rfc9457',
+    }).generate([declaredAndValidated]).paths['/orders']?.post?.responses['400'];
+    expect(problem400).toEqual({
+      description: 'Bad request',
+      content: {
+        'application/problem+json': { schema: { $ref: '#/components/schemas/ProblemDetails' } },
+      },
+    });
+
+    // A declared schema with no validation brand still documents no 400.
+    expect(
+      generator().generate([route('POST', '/orders', { schema: { body } })]).paths['/orders']?.post
+        ?.responses['400'],
+    ).toBeUndefined();
+  });
+
   it('keeps the LAST brand when a route carries two for one target', () => {
     const first = z.object({ first: z.string() });
     const second = z.object({ second: z.string() });

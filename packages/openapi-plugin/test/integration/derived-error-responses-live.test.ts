@@ -28,6 +28,9 @@ type App = ReturnType<typeof createApplication>;
 let app: App;
 let spec: OpenApiDocument;
 
+/** Set only while a concurrent trigger runs; POST handlers wait on it. */
+let hold: Promise<void> | undefined;
+
 beforeAll(async () => {
   app = createApplication({
     plugins: [
@@ -56,8 +59,10 @@ beforeAll(async () => {
     register.call(app.router, `/r${index}`, {
       middleware: row.middleware(),
       handler: async (ctx) => {
-        // Long enough for a concurrent duplicate to find the claim in progress.
-        if (row.method === 'POST') await new Promise((resolve) => setTimeout(resolve, 50));
+        // A concurrent trigger holds whichever request claimed the key until
+        // the other has answered, so the duplicate always finds the claim in
+        // progress rather than racing the first handler to completion.
+        if (hold !== undefined) await hold;
         return ctx.response.json({ ok: true });
       },
     });
@@ -90,7 +95,20 @@ async function fire(
   trigger: LiveTrigger,
 ): Promise<InjectResponse[]> {
   if (trigger.concurrent === true) {
-    return Promise.all(trigger.requests.map((request) => send(index, method, request)));
+    let release!: () => void;
+    hold = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const sent = trigger.requests.map((request) => send(index, method, request));
+    try {
+      // The first to answer is the refused duplicate; the claimant is held.
+      // The timer bounds a regression in which no request is refused.
+      await Promise.race([...sent, new Promise((resolve) => setTimeout(resolve, 2_000))]);
+    } finally {
+      hold = undefined;
+      release();
+    }
+    return Promise.all(sent);
   }
   const responses: InjectResponse[] = [];
   for (const request of trigger.requests) responses.push(await send(index, method, request));

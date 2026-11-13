@@ -37,9 +37,18 @@ import type { RestStarterOptions } from './options.ts';
  * @returns Array of {@linkcode IPlugin} instances in registration order.
  */
 export function buildRestPlugins(options: RestStarterOptions = {}): IPlugin[] {
-  // The platform RuntimePlugin will run on: an explicit `runtime.platform`
-  // wins, so the starter's own platform choices agree with it.
-  return composeRestPlugins(options, options.runtime?.platform ?? detectRuntime());
+  return composeRestPlugins(options, platformFor(options));
+}
+
+/**
+ * The platform the starter's plugins run on: an explicit `runtime.platform`
+ * wins, so the starter's own platform choices agree with it.
+ *
+ * @param options - The starter options.
+ * @returns The platform to compose for.
+ */
+function platformFor(options: RestStarterOptions): RuntimePlatform {
+  return options.runtime?.platform ?? detectRuntime();
 }
 
 /**
@@ -49,22 +58,23 @@ export function buildRestPlugins(options: RestStarterOptions = {}): IPlugin[] {
  * `swagger: false` and an explicit `assets` value are kept; `true` and `{}`
  * name no asset mode, so they get the CDN too.
  *
- * `errorSchema: 'rfc9457'` is the default only while the validation format
- * is RFC 9457 too, because then the starter's `ValidationPlugin` and
- * `errorHandler` both answer in that format. A caller who chose another
- * validation format gets no default, so the document never names a body the
- * validator does not send; a caller's own `errorSchema` still wins (M137b §3.8).
+ * `errorSchema: 'rfc9457'` is the default only when `problemDetails` says
+ * every generated error answers in that format: `createRestApp` installs the
+ * RFC 9457 `errorHandler` and the validation format is RFC 9457 too. Otherwise
+ * the document names no body the application might not send; a caller's own
+ * `errorSchema` still wins (M137b §3.8).
  *
  * @internal
  * @param openapi - The caller's OpenAPI options, if any.
  * @param platform - The platform the application runs on.
- * @param problemDetails - Whether validation failures answer in RFC 9457 format.
+ * @param problemDetails - Whether thrown errors and validation failures both
+ *   answer in RFC 9457 format.
  * @returns The options to construct {@linkcode OpenApiPlugin} with.
  */
 export function openApiOptionsFor(
   openapi: OpenApiPluginOptions | undefined,
   platform: RuntimePlatform,
-  problemDetails = true,
+  problemDetails: boolean,
 ): OpenApiPluginOptions {
   const defaults: OpenApiPluginOptions = problemDetails ? { errorSchema: 'rfc9457' } : {};
   const swagger = openapi?.swagger;
@@ -158,11 +168,15 @@ export function starterHttpSecurityOptions(options: RestStarterOptions): HttpSec
  * @internal
  * @param options - Optional per-plugin configuration arms.
  * @param platform - The platform the application runs on.
+ * @param errorHandlerInstalled - Whether the caller installs the RFC 9457
+ *   `errorHandler`; only `createRestApp` does, and only then may the OpenAPI
+ *   document promise a Problem Details body for thrown errors.
  * @returns Array of {@linkcode IPlugin} instances in registration order.
  */
 export function composeRestPlugins(
   options: RestStarterOptions,
   platform: RuntimePlatform,
+  errorHandlerInstalled = false,
 ): IPlugin[] {
   const plugins: IPlugin[] = [
     // Runtime must be first — the kernel requires it at start()
@@ -183,7 +197,7 @@ export function composeRestPlugins(
       openApiOptionsFor(
         options.openapi,
         platform,
-        validationAnswersProblemDetails(options.validation?.errorFormat),
+        errorHandlerInstalled && validationAnswersProblemDetails(options.validation?.errorFormat),
       ),
     ),
     DecoratorPlugin(options.decorators),
@@ -230,7 +244,8 @@ export function composeRestPlugins(
  * ```
  */
 export function createRestApp(options?: RestStarterOptions): IKernelApplication {
-  const plugins = buildRestPlugins(options);
+  const opts = options ?? {};
+  const plugins = composeRestPlugins(opts, platformFor(opts), true);
   const app = createApplication({ plugins });
 
   // Add error handler as outermost middleware (priority 0) — required by

@@ -428,3 +428,10 @@ the guards' behaviour is untouched, only their brands gain a field).
   never sends) fails the live test.
 - **CLI fixture.** `node-redis-cli.test.ts` records the `OpenApiPlugin({ errorSchema: 'rfc9457' })`
   line as M137b's deliberate delta against the historical capture.
+- **Starter default, narrowed in review.** The `errorSchema` default is applied by `createRestApp`
+  only, which installs the RFC 9457 `errorHandler`, and only while the validation format is
+  RFC 9457. `buildRestPlugins()` installs no handler, so a thrown error reaches the kernel fallback;
+  it, and `createMicroserviceApp()` composed from it, set no default.
+- **Validation `400`, widened in review.** The `400` follows any validation brand carrying a schema
+  (not `cookies`), including one whose target the route also declares, rather than only a derived
+  target. `deriveRequestSchemas: false` still adds none.

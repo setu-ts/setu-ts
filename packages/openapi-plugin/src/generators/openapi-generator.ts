@@ -960,7 +960,7 @@ export class OpenApiGenerator {
 
     // Declared schema merged with what the route's validation middleware
     // enforces; declared wins per field.
-    const { schema, derived } = this.#effectiveSchema(route);
+    const { schema, validated } = this.#effectiveSchema(route);
 
     // Build parameters from params and query schemas
     const parameters = this.#buildParameters(route, schema, operationId);
@@ -977,15 +977,16 @@ export class OpenApiGenerator {
         }
       : undefined;
 
-    // Build responses from response schema. A route whose request shape was
-    // DERIVED also answers 400 when validation fails, so the document says so
-    // unless the route declares its own 400 — Redocly flags an operation with
+    // Build responses from response schema. A route carrying a validation
+    // brand with a schema answers 400 when validation fails — whether or not
+    // the route also declares that target's schema — so the document says so
+    // unless the route declares its own 400. Redocly flags an operation with
     // no 4XX and is right.
     const responses = this.#buildResponses(schema?.response, operationId);
     // Statuses the generator adds, as opposed to ones the route declared; only
     // these carry the `errorSchema` body (M137b §3.7).
     const generated = new Set<string>();
-    if (derived && responses['400'] === undefined) {
+    if (validated && responses['400'] === undefined) {
       responses['400'] = { description: 'Bad request' };
       generated.add('400');
     }
@@ -1109,12 +1110,13 @@ export class OpenApiGenerator {
    * {@linkcode OpenApiGeneratorOptions.deriveRequestSchemas} for why.
    *
    * @param route - The route being documented
-   * @returns The effective schema and whether any field came from a brand
+   * @returns The effective schema, and whether any brand validates the request
+   *   against a schema (so the route answers a validation `400`)
    */
-  #effectiveSchema(route: RouteInfo): { schema: RouteSchema | undefined; derived: boolean } {
+  #effectiveSchema(route: RouteInfo): { schema: RouteSchema | undefined; validated: boolean } {
     const declared = route.definition.schema;
     if (this.#options.deriveRequestSchemas === false) {
-      return { schema: declared, derived: false };
+      return { schema: declared, validated: false };
     }
 
     const brands: RouteValidationMetadata[] = [];
@@ -1122,8 +1124,9 @@ export class OpenApiGenerator {
       const metadata = validationMetadataOf(middleware);
       if (metadata !== undefined) brands.push(metadata);
     }
-    if (brands.length === 0) return { schema: declared, derived: false };
+    if (brands.length === 0) return { schema: declared, validated: false };
 
+    let validated = false;
     const additions: {
       body?: unknown;
       query?: unknown;
@@ -1137,6 +1140,9 @@ export class OpenApiGenerator {
       // creates an OWN key, which counted as a derivation and added a `400` to
       // an operation whose request shape had not changed at all.
       if (schema === undefined) continue;
+      // From here the brand validates against a schema, so the route answers
+      // a validation `400` even when its declared schema wins the field.
+      validated = true;
       // A route may carry two brands for one target (a merged chain). The LAST
       // one wins, because that is what the handler actually receives: each
       // middleware writes `validated:<target>` on its way through, so the final
@@ -1150,8 +1156,8 @@ export class OpenApiGenerator {
     }
 
     const keys = Object.keys(additions);
-    if (keys.length === 0) return { schema: declared, derived: false };
-    return { schema: { ...declared, ...additions }, derived: true };
+    if (keys.length === 0) return { schema: declared, validated };
+    return { schema: { ...declared, ...additions }, validated };
   }
 
   /**
