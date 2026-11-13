@@ -2458,8 +2458,14 @@ async function addOne(
       const ignorePath = joinPath(dir, '.gitignore');
       const ignore = await readProjectText(deps, ignorePath, '.gitignore');
       if (ignore === null) return EXIT_ERROR;
-      const entries = new Set((ignore ?? '').split('\n').map((line) => line.trim()));
-      if (!entries.has(envFile) && !entries.has(`/${envFile}`)) {
+      const lines = (ignore ?? '').split('\n').map((line) => line.trim());
+      // Git applies the LAST matching rule, so an exact entry appended at the
+      // end ignores the file whatever negation precedes it. It is skipped only
+      // when the entry is already there and nothing in the file negates.
+      const listed =
+        (lines.includes(envFile) || lines.includes(`/${envFile}`)) &&
+        !lines.some((line) => line.startsWith('!'));
+      if (!listed) {
         const base =
           ignore === undefined || ignore === '' || ignore.endsWith('\n')
             ? (ignore ?? '')

@@ -178,6 +178,8 @@ describe('M140a scaffold security defaults', () => {
     ['an exact entry and a .env', 'node_modules/\n.env\n', true, 'node_modules/\n.env\n', false],
     ['an anchored entry', '/.env\n', true, '/.env\n', false],
     ['only a pattern and a .env', '.env*\n', true, '.env*\n.env\n', true],
+    ['a later negation', '.env\n!.env\n', true, '.env\n!.env\n.env\n', true],
+    ['an unrelated negation', '.env\n!.env.example\n', true, '.env\n!.env.example\n.env\n', true],
   ] as const)(
     'lists the written secret in .gitignore as Rails does, with %s',
     async (_label, before, envExists, after, hint) => {
@@ -229,6 +231,14 @@ describe('M140a scaffold security defaults', () => {
     expect(await runCli(['add', 'session'], { ...deps, cwd: '/work/shop' })).toBe(0);
     expect(fs.read('/work/shop/config/local.env')).toContain(`SESSION_SECRET=${'b'.repeat(64)}`);
     expect(fs.read('/work/shop/.gitignore')).toBe('node_modules/\nconfig/local.env\n');
+    await fs.writeFile(
+      '/work/shop/.gitignore',
+      new TextEncoder().encode('config/local.env\n!config/local.env\n'),
+    );
+    expect(await runCli(['add', 'auth'], { ...deps, cwd: '/work/shop' })).toBe(0);
+    expect(fs.read('/work/shop/.gitignore')).toBe(
+      'config/local.env\n!config/local.env\nconfig/local.env\n',
+    );
   });
 
   it('refuses a member or secret whose Compose variable another member already needs', async () => {
