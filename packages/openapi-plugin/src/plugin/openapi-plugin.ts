@@ -99,6 +99,8 @@ export function OpenApiPlugin(options: OpenApiPluginOptions = {}): IPlugin {
     excludeOwners,
     deriveRequestSchemas,
     deriveResponseStatus,
+    deriveErrorResponses,
+    errorSchema,
     exclude,
     swagger = true,
     endpoint = '/docs',
@@ -173,6 +175,8 @@ export function OpenApiPlugin(options: OpenApiPluginOptions = {}): IPlugin {
         ...(excludeOwners !== undefined ? { excludeOwners } : {}),
         ...(deriveRequestSchemas !== undefined ? { deriveRequestSchemas } : {}),
         ...(deriveResponseStatus !== undefined ? { deriveResponseStatus } : {}),
+        ...(deriveErrorResponses !== undefined ? { deriveErrorResponses } : {}),
+        ...(errorSchema !== undefined ? { errorSchema } : {}),
         exclude: excludedPaths,
         schemas: [], // Will be populated at onInit
       });

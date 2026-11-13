@@ -204,6 +204,9 @@ export type {
   RouteValidationMetadata,
   RouteIdempotencyMetadata,
   RouteMcpToolMetadata,
+  RouteRateLimitMetadata,
+  RouteResponseDocumentation,
+  RouteResponseHeader,
   SecurityRequirement,
   WebSocketUpgradeIntent,
 } from './http.ts';
@@ -229,6 +232,9 @@ export {
   withResponseMetadata,
   withSecurityMetadata,
   withValidationMetadata,
+  RATE_LIMIT_METADATA,
+  withRateLimitMetadata,
+  rateLimitMetadataOf,
 } from './http.ts';
 
 // Form body reading (M94b) — the ONE parse every `IRequest.formData?()`

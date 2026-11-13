@@ -156,4 +156,17 @@ describe('OpenAPI decorators', () => {
     const resp = metadataStore.getRoutesFor(C)[0].openapi?.responses?.['200'];
     expect(resp).toMatchObject({ schema: { type: 'string' } });
   });
+  it('@ApiResponse stores headers (M137b)', () => {
+    const headers = { Location: { description: 'New item', required: true } };
+    @Controller('/x')
+    class C {
+      @Get('/')
+      @ApiResponse({ status: 201, headers })
+      create() {
+        return {};
+      }
+    }
+    const resp = metadataStore.getRoutesFor(C)[0].openapi?.responses?.['201'];
+    expect(resp).toEqual({ headers });
+  });
 });

@@ -26,6 +26,16 @@ import { REQUIRED_SCOPES_STATE_KEY } from '@setu-ts/common';
  */
 const AUTHENTICATED: RouteSecurityMetadata = Object.freeze({ authenticated: true });
 
+/**
+ * Brand for a guard that can also refuse an authenticated caller with `403`.
+ * Kept apart from {@linkcode AUTHENTICATED} so `requireAuth()` documents no
+ * `403` (M137b §3.1).
+ */
+const AUTHENTICATED_FORBIDS: RouteSecurityMetadata = Object.freeze({
+  authenticated: true,
+  forbids: true,
+});
+
 /** Brand for a guard that explicitly marks a route public. */
 const PUBLIC: RouteSecurityMetadata = Object.freeze({ authenticated: false });
 
@@ -213,6 +223,8 @@ export function requireAuth(options?: RequireAuthOptions): MiddlewareFunction {
       )}'`,
     );
   }
+  // Only a delegation rule can make requireAuth answer 403.
+  const authBrand = delegation === 'allow' ? AUTHENTICATED : AUTHENTICATED_FORBIDS;
   const signInPage = options?.signInPage;
   if (signInPage === undefined) {
     const guard = async (ctx: IRequestContext, next: () => Promise<void>): Promise<void> => {
@@ -227,7 +239,7 @@ export function requireAuth(options?: RequireAuthOptions): MiddlewareFunction {
       }
       await next();
     };
-    return withSecurityMetadata(guard, AUTHENTICATED);
+    return withSecurityMetadata(guard, authBrand);
   }
 
   const page = compileSignInPage(signInPage);
@@ -261,7 +273,7 @@ export function requireAuth(options?: RequireAuthOptions): MiddlewareFunction {
     );
     ctx.response.redirect(target.pathname + target.search + target.hash, 302);
   };
-  return withSecurityMetadata(guard, AUTHENTICATED);
+  return withSecurityMetadata(guard, authBrand);
 }
 
 /**
@@ -310,7 +322,11 @@ export function requireScopes(first: string, ...rest: string[]): MiddlewareFunct
     required.push(scope);
   }
   const scopes: readonly string[] = Object.freeze(required);
-  const brand: RouteSecurityMetadata = Object.freeze({ authenticated: true, scopes });
+  const brand: RouteSecurityMetadata = Object.freeze({
+    authenticated: true,
+    scopes,
+    forbids: true,
+  });
   const guard = async (ctx: IRequestContext, next: () => Promise<void>): Promise<void> => {
     const user = ctx.request.user;
     if (!user) {
@@ -361,7 +377,7 @@ export function requireRole(role: string): MiddlewareFunction {
 
     await next();
   };
-  return withSecurityMetadata(guard, AUTHENTICATED);
+  return withSecurityMetadata(guard, AUTHENTICATED_FORBIDS);
 }
 
 /**
@@ -394,7 +410,7 @@ export function requirePermission(permission: string): MiddlewareFunction {
 
     await next();
   };
-  return withSecurityMetadata(guard, AUTHENTICATED);
+  return withSecurityMetadata(guard, AUTHENTICATED_FORBIDS);
 }
 
 /**
@@ -427,7 +443,7 @@ export function requireAnyRole(roles: readonly string[]): MiddlewareFunction {
 
     await next();
   };
-  return withSecurityMetadata(guard, AUTHENTICATED);
+  return withSecurityMetadata(guard, AUTHENTICATED_FORBIDS);
 }
 
 /**
@@ -463,7 +479,7 @@ export function requireAllPermissions(permissions: readonly string[]): Middlewar
 
     await next();
   };
-  return withSecurityMetadata(guard, AUTHENTICATED);
+  return withSecurityMetadata(guard, AUTHENTICATED_FORBIDS);
 }
 
 /**
@@ -509,7 +525,7 @@ export function requireMfa(): MiddlewareFunction {
     }
     await next();
   };
-  return withSecurityMetadata(guard, AUTHENTICATED);
+  return withSecurityMetadata(guard, AUTHENTICATED_FORBIDS);
 }
 
 /**

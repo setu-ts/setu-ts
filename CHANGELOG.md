@@ -8,6 +8,17 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **Generated OpenAPI documents list derived errors and order responses by status (M137b, #588,
+  `@setu-ts/openapi-plugin`, `@setu-ts/rest-starter`, `@setu-ts/cli`).** A route carrying a guard,
+  body validator, route-level rate limiter or idempotency middleware now documents the errors that
+  middleware answers with; `deriveErrorResponses: false` stops adding those statuses, but responses
+  are still emitted in ascending status order and a declared 409, 415, 422 or 429 without a
+  description now reads by its status name. `createRestApp()`, when its validation format is RFC
+  9457, and the `rest` and `microservice` templates set `errorSchema: 'rfc9457'`;
+  `buildRestPlugins()` and `createMicroserviceApp()` do not, since the first installs no error
+  handler. `setu client --check` reports the changed document as drift once; regenerate the client
+  with `setu client`.
+
 - **BREAKING — typed capability registry (M139g, #585, 0.13.0, `@setu-ts/common`, `@setu-ts/kernel`,
   `@setu-ts/testing`, `@setu-ts/react-router-plugin`, `@setu-ts/cli`).** Standard tokens carry a
   required brand and infer their interfaces through `CapabilityServices`; reads reject wrong
@@ -120,6 +131,25 @@ All notable changes to this project are documented here. The format follows
   write. The `grpc-workspace` example's orders member calls billing through `grpcClient`.
 
 ### Added
+
+- **Derived error responses and declared response headers (M137b, #588, `@setu-ts/common`,
+  `@setu-ts/openapi-plugin`, `@setu-ts/auth-plugin`, `@setu-ts/decorator-plugin`,
+  `@setu-ts/idempotency-plugin`, `@setu-ts/rest-starter`, `@setu-ts/cli`).** The generated document
+  lists the errors a route's own middleware answers with, read from its brands
+  (`deriveErrorResponses`, default `true`): `401` for a guard that needs a principal, `403` for one
+  that can refuse a signed-in caller (new `RouteSecurityMetadata.forbids`, set by every role,
+  permission, scope, policy, MFA and scoped guard and by `requireAuth({ delegation })`), `415` for a
+  body validator, `429` with `Retry-After` and the `RateLimit` fields for a route-level
+  `rateLimitMiddleware` (new `RATE_LIMIT_METADATA`, `RouteRateLimitMetadata`,
+  `withRateLimitMetadata` and `rateLimitMetadataOf`), and the idempotency middleware's `400`, `401`,
+  `409`, `422` and `429` with `Idempotent-Replayed` on success (new
+  `RouteIdempotencyMetadata.principalRequired`). `WWW-Authenticate` is listed only for a bearer,
+  OAuth 2.0 or OpenID Connect `deriveSecurity` scheme. `errorSchema: 'rfc9457'` points every
+  generated error at one `ProblemDetails` component; an unknown value refuses with
+  `OpenApiDocumentOptionsError` reason `'error-schema'`. New `RouteResponseDocumentation`,
+  `RouteResponseHeader`, `ApiResponseConfig.headers` and `OpenApiHeader` declare response headers. A
+  declared status is never changed. App-wide middleware and quota refusals are not visible to the
+  generator; declare their `429` on the route.
 
 - **OpenAPI document metadata, deprecation and per-route exclusion (M137a, #587, `@setu-ts/common`,
   `@setu-ts/openapi-plugin`, `@setu-ts/decorator-plugin`, `@setu-ts/sdk`).** Document options

@@ -635,13 +635,19 @@ describe('runNewCommand', () => {
         'HttpSecurityPlugin',
         'OpenApiPlugin',
       ]) {
-        if (symbol !== 'ValidationPlugin' && symbol !== 'LoggerPlugin') {
+        if (
+          symbol !== 'ValidationPlugin' &&
+          symbol !== 'LoggerPlugin' &&
+          symbol !== 'OpenApiPlugin'
+        ) {
           expect(config).toContain(`${symbol}()`);
         }
       }
       // M70f (C3): validation answers in the same Problem Details shape the
       // `errorHandler` emits for thrown errors, so it is NOT argument-free.
       expect(config).toContain("ValidationPlugin({ errorFormat: 'rfc9457' })");
+      // M137b §3.8: the document describes that Problem Details body.
+      expect(config).toContain("OpenApiPlugin({ errorSchema: 'rfc9457' })");
       // M113h §3.9: the scaffold opts in to request logging, excluding the probe
       // and scrape paths so a kubelet does not write a line per poll. The file
       // has been through Prettier, so the call is wrapped.

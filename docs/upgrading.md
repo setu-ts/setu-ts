@@ -39,6 +39,24 @@ fail configuration without echoing the value. `setu check` now warns with `setu.
 installed zero-config provider or MCP plugin has no call in `setu.config.ts`; if another module
 registers it, silence that id in `.setu-ts/check.json`.
 
+### Derived error responses (M137b, `@setu-ts/openapi-plugin`, `@setu-ts/rest-starter`, `@setu-ts/cli`)
+
+The generated OpenAPI document now lists the errors a route's guards, body validator, route-level
+rate limiter and idempotency middleware answer with, and emits each operation's responses in
+ascending status order. Run `setu client` once to regenerate the typed client; until you do,
+`setu client --check` reports the changed document as drift.
+
+To stop the derived statuses, pass `OpenApiPlugin({ deriveErrorResponses: false })`. The ordering
+stays, and a declared 409, 415, 422 or 429 without a description now reads by its status name rather
+than `Response`.
+
+`createRestApp()` sets `errorSchema: 'rfc9457'` while its validation format is RFC 9457, so derived
+errors carry a `ProblemDetails` body. `buildRestPlugins()` installs no error handler and sets no
+`errorSchema`, and neither does `createMicroserviceApp()`, which composes from it: pass
+`openapi: { errorSchema: 'rfc9457' }` where an RFC 9457 `errorHandler` is installed. New `rest` and
+`microservice` projects pass the same option in `setu.config.ts`; an existing project adds it there
+to get the body.
+
 ### `trustForwardedHost`, worker-pool labels and the starter body limit (`@setu-ts/http-security-plugin`, `@setu-ts/worker-pool-plugin`, `@setu-ts/rest-starter`)
 
 - **Behind a proxy, the public host is the `Host` header unless you opt in**

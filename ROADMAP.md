@@ -16775,7 +16775,9 @@ fields included; `deprecated` and `excludeFromDocument` driven through **both** 
 
 **Package(s):** `packages/common` (the security brand, a new rate-limit brand, the response
 wrapper), `packages/openapi-plugin`, `packages/auth-plugin` (brands on its guards and limiters),
-`packages/decorator-plugin` (`ApiResponseConfig`); docs.
+`packages/decorator-plugin` (`ApiResponseConfig` and its authorization middleware's brands),
+`packages/idempotency-plugin` (the principal rule in its brand), `packages/starters/rest-starter`
+and `packages/cli` (the `errorSchema` default), `apps/mcp-tools` (its wrapped limiter); docs.
 
 **The problem.** The statuses and headers Setu-TS's own middleware produces are absent from the
 document, although the middleware is already branded for three of them:
@@ -16806,15 +16808,26 @@ refusal statuses.
    `RateLimit-Policy` for a rate-limited route; the `Idempotency-Key` header parameter (named by
    `keyHeader`, with the requiredness and refusal statuses the idempotency middleware actually
    enforces, read from its source in the plan) and an `Idempotent-Replayed` response header. A
-   **declared** status always wins over a derived one, per status.
+   **declared** status always wins over a derived one, per status. _As built:_ only a route's own
+   `middleware` array is visible — `IMiddlewareApi` has `add()` and no listing — so an app-wide
+   `rateLimitMiddleware` is not derived and its `429` is declared on the routes. `WWW-Authenticate`
+   is written only by the `bearer-challenge` middleware, which exists only with `jwt`, a trusted
+   issuer or a resource server, so the header is listed only when `deriveSecurity` names a bearer,
+   OAuth 2.0 or OpenID Connect scheme.
 2. **The security brand gains one optional field,** `forbids?: true`, set by `requireScopes`,
    `requireRole`, `requireAnyRole`, `requirePermission`, `requireAllPermissions`, `requirePolicy`,
    `requireScopedRole` and `requireScopedPermission` — not by `requireAuth`; `requireMfa` takes
-   whichever its source shows it answers — so a 403 is documented only where one can occur.
+   whichever its source shows it answers — so a 403 is documented only where one can occur. _As
+   built:_ `requireMfa` answers `403` and carries it; so do `requireAuth({ delegation: 'forbid' })`
+   and `'require'`, an anonymous-allowed `requirePolicy` (which also answers `401`), and the
+   decorator-plugin `@Roles`, `@Permissions`, `@RequirePolicy`, `@ScopedRoles` and
+   `@ScopedPermissions` middleware.
 3. **A rate-limit brand in common,** `withRateLimitMetadata`/`rateLimitMetadataOf` (the pattern of
    the three existing brands), applied by `rateLimitMiddleware` and the quota refusal
    (`quotaProblemInit`), carrying whether the `RateLimit` fields are emitted (the middleware's
-   existing option) so the document never lists a header the route does not send.
+   existing option) so the document never lists a header the route does not send. _As built:_ only
+   `rateLimitMiddleware` is branded; a quota is reserved inside handler code, so there is no
+   middleware to brand, and a quota route declares its `429`.
 4. **Declared response headers.** The `{ schema?, description? }` response wrapper (already
    unwrapped by `#normalizeResponse`) and `ApiResponseConfig` gain
    `headers?: Record<string, { schema?, description?, required? }>`, emitted as the response's
@@ -16823,7 +16836,8 @@ refusal statuses.
    (`ValidationPlugin({ errorFormat })` and the exceptions responder), which the generator cannot
    read. An `errorSchema?: 'rfc9457'` option attaches one shared `ProblemDetails` component under
    `application/problem+json` to every generated error response; omitted, error responses keep no
-   schema. The CLI templates, which already set both formats to `'rfc9457'`, set it too.
+   schema. The CLI templates, which already set both formats to `'rfc9457'`, set it too. _As built:_
+   so does the REST starter's default OpenAPI composition, which the full-stack starter reuses.
 
 **Gate:** a table-driven test — the brand set as data, each row naming the statuses and headers it
 must produce — run against the generator; and the same table run against a **live** app driving each
@@ -17528,7 +17542,7 @@ generated-output rule.
 | 136       | ✅     | agent-runs-plugin + common + database-plugin — durable agent runs: fenced leases, persisted model/tool entries, timed approvals and UI-message replay (PR #565)                                                                                                                           |
 | 137       | ⬜     | OpenAPI coverage — forms, lifecycle and derived responses (three letters)                                                                                                                                                                                                                 |
 | 137a      | ✅     | common + openapi-plugin + decorator-plugin + sdk — document metadata, `deprecated`, per-route exclusion                                                                                                                                                                                   |
-| 137b      | ⬜     | common + openapi-plugin + auth-plugin + decorator-plugin — derived 401/403/415/429 and idempotency headers, declared response headers, opt-in Problem Details schema                                                                                                                      |
+| 137b      | ✅     | common + openapi-plugin + auth-plugin + decorator-plugin — derived 401/403/415/429 and idempotency headers, declared response headers, opt-in Problem Details schema                                                                                                                      |
 | 137c      | ⬜     | common + validation-plugin + openapi-plugin + sdk — form bodies and file uploads in the document and the generated client                                                                                                                                                                 |
 | 138       | ✅     | cli — workspace broker and per-member RPC style: a CLI-owned transport module per member, `setu workspace broker` and `setu workspace rpc`; PR #568                                                                                                                                       |
 | 139       | ⬜     | the `v0.12.0` smoke closeout — the `0.12.0` row re-run done, then seven letters (0.13.0)                                                                                                                                                                                                  |

@@ -783,6 +783,14 @@ export interface RouteSecurityMetadata {
    * "scopes".
    */
   readonly scopes?: readonly string[];
+  /**
+   * `true` when the middleware can refuse an authenticated caller with `403`
+   * (a role, permission, scope, policy or second-factor check, or a delegation
+   * rule). Absent on a guard that only authenticates, such as `requireAuth()`,
+   * so a document lists `403` only where one can occur.
+   * @since 0.13.0
+   */
+  readonly forbids?: true;
 }
 
 /**
@@ -857,8 +865,11 @@ function isRouteSecurityMetadata(value: unknown): value is RouteSecurityMetadata
   if (typeof value !== 'object' || value === null) {
     return false;
   }
-  const candidate = value as { authenticated?: unknown; scopes?: unknown };
+  const candidate = value as { authenticated?: unknown; scopes?: unknown; forbids?: unknown };
   if (typeof candidate.authenticated !== 'boolean') {
+    return false;
+  }
+  if (candidate.forbids !== undefined && candidate.forbids !== true) {
     return false;
   }
   const scopes = candidate.scopes;
@@ -1232,6 +1243,13 @@ export interface RouteIdempotencyMetadata {
    * unprotected (`false`). Absent means required, the middleware default.
    */
   readonly required?: boolean;
+  /**
+   * Whether the middleware refuses an anonymous request with `401` (`true`,
+   * the `principal: 'required'` default) or accepts it (`false`). Absent
+   * means required.
+   * @since 0.13.0
+   */
+  readonly principalRequired?: boolean;
 }
 
 /** Brands a middleware in place, preserving its behavior and identity.
@@ -1271,9 +1289,117 @@ export function idempotencyMetadataOf(
     'idempotent' in value &&
     value.idempotent === true &&
     (!('keyHeader' in value) || typeof value.keyHeader === 'string') &&
-    (!('required' in value) || typeof value.required === 'boolean')
+    (!('required' in value) || typeof value.required === 'boolean') &&
+    (!('principalRequired' in value) || typeof value.principalRequired === 'boolean')
     ? (value as RouteIdempotencyMetadata)
     : undefined;
+}
+
+/**
+ * Key under which a rate-limiting {@linkcode MiddlewareFunction} carries its
+ * {@linkcode RouteRateLimitMetadata}. `Symbol.for`, like
+ * {@linkcode SECURITY_METADATA}, so two copies of this package agree; exported
+ * so a limiter outside `@setu-ts/auth-plugin` can be branded too.
+ * @since 0.13.0
+ */
+export const RATE_LIMIT_METADATA: unique symbol = Symbol.for('setu.rate-limit.metadata');
+
+/**
+ * What a rate-limiting middleware sends, for documentation generators. A
+ * description, not a mechanism: removing it changes no runtime behaviour.
+ * @since 0.13.0
+ */
+export interface RouteRateLimitMetadata {
+  /**
+   * `true` when the limiter writes the `RateLimit` and `RateLimit-Policy`
+   * fields on every response it governs; it always writes `Retry-After` on
+   * its `429`.
+   */
+  readonly standardHeaders: boolean;
+}
+
+/**
+ * Brands a rate-limiting middleware in place, preserving its identity and
+ * behaviour. The property is symbol-keyed and non-enumerable.
+ * @param middleware - The limiter to brand
+ * @param metadata - What the limiter sends
+ * @returns The same `middleware` reference, branded
+ * @example
+ * ```typescript
+ * const limiter = withRateLimitMetadata((ctx, next) => inner(ctx, next), {
+ *   standardHeaders: true,
+ * });
+ * ```
+ * @since 0.13.0
+ */
+export function withRateLimitMetadata<T extends MiddlewareFunction>(
+  middleware: T,
+  metadata: RouteRateLimitMetadata,
+): T {
+  Object.defineProperty(middleware, RATE_LIMIT_METADATA, {
+    value: metadata,
+    enumerable: false,
+    configurable: true,
+    writable: false,
+  });
+  return middleware;
+}
+
+/**
+ * Reads a valid rate-limit brand; a foreign value is treated as absent.
+ * @param middleware - The middleware to inspect
+ * @returns Its metadata, or `undefined`
+ * @since 0.13.0
+ */
+export function rateLimitMetadataOf(
+  middleware: MiddlewareFunction,
+): RouteRateLimitMetadata | undefined {
+  const value: unknown = (
+    middleware as MiddlewareFunction & { readonly [RATE_LIMIT_METADATA]?: unknown }
+  )[RATE_LIMIT_METADATA];
+  return typeof value === 'object' &&
+    value !== null &&
+    'standardHeaders' in value &&
+    typeof value.standardHeaders === 'boolean'
+    ? (value as RouteRateLimitMetadata)
+    : undefined;
+}
+
+/**
+ * One documented response header, for {@linkcode RouteResponseDocumentation}
+ * and `@ApiResponse({ headers })`.
+ * @since 0.13.0
+ */
+export interface RouteResponseHeader {
+  /** The header value's schema (a Zod schema by default); a string when absent. */
+  readonly schema?: unknown;
+  /** What the header carries. */
+  readonly description?: string;
+  /** Whether the header is always present on this response. */
+  readonly required?: boolean;
+}
+
+/**
+ * A documented response, the value a route may put under a status in
+ * {@linkcode RouteSchema.response} instead of a bare schema.
+ * @example
+ * ```typescript
+ * const created: RouteResponseDocumentation = {
+ *   schema: Item,
+ *   description: 'Created',
+ *   headers: { Location: { description: 'The new item URL', required: true } },
+ * };
+ * app.router.post('/items', { schema: { response: { 201: created } }, handler });
+ * ```
+ * @since 0.13.0
+ */
+export interface RouteResponseDocumentation {
+  /** The response body schema. */
+  readonly schema?: unknown;
+  /** The response description. */
+  readonly description?: string;
+  /** Response headers keyed by header name. */
+  readonly headers?: Readonly<Record<string, RouteResponseHeader>>;
 }
 
 /** Route tool marker shared by functional and decorated routes.

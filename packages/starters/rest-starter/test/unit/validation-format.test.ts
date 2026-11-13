@@ -7,7 +7,8 @@
  * @module
  */
 import { describe, expect, it } from 'vitest';
-import { createRestApp } from '../../src/index.ts';
+import { createApplication } from '@setu-ts/kernel';
+import { buildRestPlugins, createRestApp } from '../../src/index.ts';
 import { validateBody } from '@setu-ts/validation-plugin';
 
 /** A schema that always fails, so the route short-circuits with a 400. */
@@ -81,6 +82,98 @@ describe('rest-starter validation format (C3)', () => {
       expect(v.type).toBeUndefined();
       expect(v.message).toBe('Validation failed with 1 issue(s).');
       expect(v.errors).toEqual([{ field: 'name', message: 'name is required' }]);
+    } finally {
+      await app.stop();
+    }
+  });
+});
+
+describe('rest-starter OpenAPI error schema follows the validation format (M137b §3.8)', () => {
+  /** The documented `POST /validate` responses and the document's components. */
+  async function documented(opts?: Parameters<typeof createRestApp>[0]) {
+    const app = await appWith({ ...opts, openapi: { swagger: false, ...opts?.openapi } });
+    try {
+      const res = await app.inject({ method: 'GET', url: 'http://localhost/openapi.json' });
+      const doc = JSON.parse(res.body as string) as {
+        paths: Record<string, Record<string, { responses: Record<string, unknown> }>>;
+        components?: { schemas?: Record<string, unknown> };
+      };
+      return {
+        responses: doc.paths['/validate']?.['post']?.responses ?? {},
+        schemas: doc.components?.schemas ?? {},
+      };
+    } finally {
+      await app.stop();
+    }
+  }
+
+  it('documents the 400 as Problem Details under the default rfc9457 format', async () => {
+    const { responses, schemas } = await documented();
+    expect(responses['400']).toEqual({
+      description: 'Bad request',
+      content: {
+        'application/problem+json': { schema: { $ref: '#/components/schemas/ProblemDetails' } },
+      },
+    });
+    expect(schemas['ProblemDetails']).toBeDefined();
+  });
+
+  it.each(['nestjs', 'default'] as const)(
+    'names no Problem Details body when validation answers in %s format',
+    async (errorFormat) => {
+      const { responses, schemas } = await documented({ validation: { errorFormat } });
+      expect(responses['400']).toEqual({ description: 'Bad request' });
+      expect(schemas['ProblemDetails']).toBeUndefined();
+    },
+  );
+
+  it('treats an explicit errorFormat: undefined as the rfc9457 default, at runtime and in the document', async () => {
+    // A JavaScript caller can pass the key with no value; it must not
+    // overwrite the default and leave the document describing another body.
+    const options = { validation: { errorFormat: undefined } } as unknown as Parameters<
+      typeof createRestApp
+    >[0];
+    const { responses } = await documented(options);
+    expect(responses['400']).toHaveProperty(['content', 'application/problem+json']);
+
+    const app = await appWith(options);
+    try {
+      const val = await app.inject({
+        method: 'POST',
+        url: 'http://localhost/validate',
+        body: { name: '' },
+      });
+      expect(val.headers.get('content-type')).toBe('application/problem+json');
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('keeps an explicit openapi.errorSchema even when validation answers in another format', async () => {
+    const { responses } = await documented({
+      validation: { errorFormat: 'nestjs' },
+      openapi: { errorSchema: 'rfc9457' },
+    });
+    expect(responses['400']).toHaveProperty(['content', 'application/problem+json']);
+  });
+
+  it('names no Problem Details body from buildRestPlugins, which installs no errorHandler', async () => {
+    const app = createApplication({ plugins: buildRestPlugins({ openapi: { swagger: false } }) });
+    app.router.post('/validate', {
+      middleware: [validateBody(failingSchema)],
+      handler: (ctx) => ctx.response.text('ok'),
+    });
+    await app.start();
+    try {
+      const res = await app.inject({ method: 'GET', url: 'http://localhost/openapi.json' });
+      const doc = JSON.parse(res.body as string) as {
+        paths: Record<string, Record<string, { responses: Record<string, unknown> }>>;
+        components?: { schemas?: Record<string, unknown> };
+      };
+      expect(doc.paths['/validate']?.['post']?.responses['400']).toEqual({
+        description: 'Bad request',
+      });
+      expect(doc.components?.schemas?.['ProblemDetails']).toBeUndefined();
     } finally {
       await app.stop();
     }

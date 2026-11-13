@@ -113,7 +113,11 @@ export class ReplyInboxObject {
 const WORKERS_SWAP = {
   removePackages: ['messaging-plugin', 'queue-plugin', 'openapi-plugin'],
   addPlugins: [
-    { pkg: 'openapi-plugin', symbol: 'OpenApiPlugin', args: "{ swagger: { assets: 'cdn' } }" },
+    {
+      pkg: 'openapi-plugin',
+      symbol: 'OpenApiPlugin',
+      args: "{ swagger: { assets: 'cdn' }, errorSchema: 'rfc9457' }",
+    },
     {
       pkg: 'cloudflare-plugin',
       symbol: 'CloudflarePlugin',
