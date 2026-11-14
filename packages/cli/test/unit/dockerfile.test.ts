@@ -10,7 +10,12 @@
  * @module
  */
 import { describe, expect, it } from 'vitest';
-import { DOCKERFILE, workspaceContainerFiles } from '../../src/workspace/compose.ts';
+import {
+  DOCKERFILE,
+  renderDockerfile,
+  workspaceContainerFiles,
+} from '../../src/workspace/compose.ts';
+import { workspaceProfile } from '../../src/workspace/runtime-profile.ts';
 import { WORKSPACE_VERSION, type WorkspaceManifest } from '../../src/workspace/manifest.ts';
 import { brokerSpec } from '../../src/workspace/transport.ts';
 
@@ -39,7 +44,7 @@ describe('generated Dockerfile chown fold (X10-5)', () => {
     const contents = dockerfile();
     const runLines = contents.split('\n').filter((line) => line.startsWith('RUN '));
 
-    const cacheRun = runLines.find((line) => line.includes('deno cache main.ts'));
+    const cacheRun = runLines.find((line) => line.includes('&& deno cache main.ts'));
     expect(cacheRun).toBeDefined();
     // Same line, same layer: `&&`, not two instructions. DENO_UID interpolates
     // to its numeric value in the emitted text.
@@ -60,6 +65,16 @@ describe('generated Dockerfile chown fold (X10-5)', () => {
 });
 
 describe('generated Dockerfile lockfile verification', () => {
+  it.each([true, false])(
+    'runs the Bun check without registry credentials (workspace %s)',
+    (workspace) => {
+      const check = renderDockerfile(workspaceProfile('bun'), workspace)
+        .split('\n')
+        .find((line) => line.startsWith('RUN ') && line.includes('bun run check'));
+      expect(check).toBeDefined();
+      expect(check).not.toContain('--mount=type=secret');
+    },
+  );
   it('builds a declared frontend on glibc and copies only its output before caching', () => {
     const contents = dockerfile();
     const frontend = contents.slice(
@@ -78,6 +93,14 @@ describe('generated Dockerfile lockfile verification', () => {
     expect(frontend).toContain(
       'if [ -f .setu-build-task ]; then deno task build; else mkdir -p build; fi',
     );
+    const runs = frontend.split('\n').filter((line) => line.startsWith('RUN '));
+    const cache = runs.find((line) => line.includes('deno cache main.ts setu.config.ts'));
+    const check = runs.find((line) => line.includes('deno task check'));
+    expect(cache).toContain('--mount=type=secret');
+    expect(cache).not.toContain('deno task check');
+    expect(check).toBeDefined();
+    expect(check).not.toContain('--mount=type=secret');
+    expect(runs.indexOf(cache!)).toBeLessThan(runs.indexOf(check!));
     const runtime = contents.slice(contents.indexOf('FROM denoland/deno:alpine-2.9.5'));
     const copy = runtime.indexOf('COPY --from=frontend /srv/apps/${MEMBER}/buil[d] ./build/');
     expect(copy).toBeGreaterThan(-1);
@@ -87,7 +110,7 @@ describe('generated Dockerfile lockfile verification', () => {
   it('switches an auto node_modules root to manual after installing, before the chown', () => {
     const buildRun = dockerfile()
       .split('\n')
-      .find((line) => line.startsWith('RUN ') && line.includes('deno cache main.ts'))!;
+      .find((line) => line.startsWith('RUN ') && line.includes('&& deno cache main.ts'))!;
     const rewrite = buildRun.indexOf('manifest.nodeModulesDir === "auto"');
     expect(rewrite).toBeGreaterThan(
       buildRun.lastIndexOf('deno install --entrypoint main.ts --frozen'),
@@ -102,7 +125,7 @@ describe('generated Dockerfile lockfile verification', () => {
     const contents = dockerfile();
     const buildRun = contents
       .split('\n')
-      .find((line) => line.startsWith('RUN ') && line.includes('deno cache main.ts'));
+      .find((line) => line.startsWith('RUN ') && line.includes('&& deno cache main.ts'));
     expect(buildRun).toBeDefined();
 
     // Deno records a jsr package's npm edge list nondeterministically on a cold

@@ -68,6 +68,10 @@ describe('workspaceContainerFiles', () => {
             dockerfile.match(/bun.lock is missing: run bun install and commit bun.lock/g),
           ).toHaveLength(2);
           expect(stages[0]).toContain('then bun run check; fi');
+          const check = stages[0]!
+            .split('\n')
+            .find((line) => line.startsWith('RUN ') && line.includes('bun run check'));
+          expect(check).not.toContain('--mount=type=secret');
           expect(stages[0]!.indexOf('then bun run check')).toBeGreaterThan(
             stages[0]!.indexOf('then bun run build'),
           );
@@ -79,6 +83,18 @@ describe('workspaceContainerFiles', () => {
             '--allow-write=./.setu-build-task,./.setu-check-task,./deno.json,./deno.jsonc',
           );
           expect(stages[0]).toContain('then deno task check; fi');
+          const runs = stages[0]!.split('\n').filter((line) => line.startsWith('RUN '));
+          const mounted = runs.find((line) => line.includes('--mount=type=secret'));
+          const check = runs.find((line) => line.includes('deno task check'));
+          expect(mounted).toContain(
+            'if [ -f .setu-check-task ]; then deno cache main.ts setu.config.ts; fi',
+          );
+          expect(mounted).not.toContain('deno task check');
+          expect(check).not.toContain('--mount=type=secret');
+          expect(check).toBe(
+            'RUN if [ -z "$NPM_CONFIG_REGISTRY" ]; then unset NPM_CONFIG_REGISTRY; fi && if [ -f .setu-check-task ]; then deno task check; fi',
+          );
+          expect(runs.indexOf(mounted!)).toBeLessThan(runs.indexOf(check!));
           expect(stages[0]!.indexOf('then deno task check')).toBeGreaterThan(
             stages[0]!.indexOf('then deno task build'),
           );
