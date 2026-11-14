@@ -155,6 +155,8 @@ describe('codegen form bodies', () => {
       ['rows', { rows: { type: 'array', items: { type: 'object' } } }],
       ['grid', { grid: { type: 'array', items: { $ref: '#/components/schemas/Tags' } } }],
       ['bad\nname', { 'bad\nname': { type: 'object' } }],
+      ['gone', { gone: { type: 'null' } }],
+      ['nulls', { nulls: { type: 'array', items: { type: 'null' } } }],
     ] as const) {
       try {
         generateOpenApiClient(body(properties));

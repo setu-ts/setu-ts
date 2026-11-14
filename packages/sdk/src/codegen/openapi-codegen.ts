@@ -673,13 +673,19 @@ function getBodySchema(
       );
     }
     // A field `encodeMultipart` can never send — one whose schema can only be
-    // an object, or an array of objects or arrays — would type-check and then
+    // an object or `null`, or an array of objects, arrays or nulls — would type-check and then
     // throw on every call. Composed, enum and untyped fields can hold a flat
     // value, so they are left to the encoder's own runtime refusal.
     for (const [field, raw] of Object.entries(resolved.properties ?? {})) {
       const value = resolveComponentRef(raw, schemas);
       const items = value?.type === 'array' ? resolveComponentRef(value.items, schemas) : undefined;
-      if (value?.type === 'object' || items?.type === 'object' || items?.type === 'array') {
+      if (
+        value?.type === 'object' ||
+        value?.type === 'null' ||
+        items?.type === 'object' ||
+        items?.type === 'array' ||
+        items?.type === 'null'
+      ) {
         throw new OpenApiCodegenError(
           `multipart/form-data request body field '${sanitizeFieldForMessage(field)}' is not a flat form value: the generated method could not send it`,
           path,
