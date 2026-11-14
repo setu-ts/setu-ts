@@ -97,6 +97,17 @@ describe('form request body documents', () => {
     expect(content['multipart/form-data']).not.toHaveProperty('encoding');
     expect(content['multipart/form-data']!.schema.properties?.['upload']).toEqual(binary);
   });
+  it('documents a .required() file body as multipart only, with its encoding (review)', () => {
+    const body = z
+      .object({ title: z.string(), upload: formFile({ mimeTypes: ['image/png'] }) })
+      .required();
+    const content = generator().generate([route(body)]).paths['/form']!.post!.requestBody!.content;
+    expect(Object.keys(content)).toEqual(['multipart/form-data']);
+    expect(content['multipart/form-data']).toMatchObject({
+      encoding: { upload: { contentType: 'image/png' } },
+    });
+    expect(content['multipart/form-data']!.schema.properties?.['upload']).toEqual(binary);
+  });
   it('keeps encoding on every operation when a shared body is hoisted', () => {
     const body = z.object({ upload: formFile({ mimeTypes: ['text/plain'] }) });
     const first = route(body);
