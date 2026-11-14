@@ -78,17 +78,22 @@ export function renderTransportSection(
 
 ## Transport
 
-${wrapProse(`Members share the **${broker.name}** broker — ${broker.description}.`)}${
+${wrapProse(`Members that register \`MessagingPlugin\` or \`QueuePlugin\` share the **${broker.name}** broker — ${broker.description}.`)}${
     broker.connection === undefined
       ? ''
       : `
 
 ${wrapProse(
-  `Every member reads its connection value from \`${broker.connection.variable}\`, ` +
+  `Each reads its connection value from \`${broker.connection.variable}\`, ` +
     `falling back to ${fallbackShown(broker.connection.localDefault, brokerUrl)} when that ` +
     `is unset. Both halves matter: \`${profile.runScript('dev')}\` on this machine needs ` +
     `the local address, and the generated Compose stack overrides the variable with the ` +
     `broker's service name, because two containers do not share a loopback interface.`,
+)}
+
+${wrapProse(
+  'A member without these plugins (a `rest` member, for one) receives the variable but connects ' +
+    'to nothing until `setu add messaging` (or `queue`) wires the generated options in.',
 )}${broker.connection.note === undefined ? '' : `\n\n${wrapProse(broker.connection.note)}`}`
   }${
     broker.compose === undefined && secretVariables.length === 0

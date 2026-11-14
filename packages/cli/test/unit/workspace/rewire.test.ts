@@ -77,6 +77,25 @@ async function workspace(
 }
 
 describe('setu workspace broker', () => {
+  it.each(['microservice', 'full-stack'])(
+    'refuses a %s config missing runtimeOptions and names the call to add',
+    async (template) => {
+      const ws = await workspace({ members: [['orders', template]] });
+      await ws.write(
+        'apps/orders/setu.config.ts',
+        ws.read('apps/orders/setu.config.ts').replace(/runtimeOptions\(\)/g, '{}'),
+      );
+      const before = ws.fs.writes.length;
+      const result = await ws.run(['workspace', 'broker', 'nats']);
+      expect(result.code).toBe(1);
+      expect(result.err).toContain(
+        template === 'full-stack'
+          ? 'runtime: runtimeOptions(),'
+          : 'RuntimePlugin({ ...runtimeOptions(), <its existing options> }),',
+      );
+      expect(ws.fs.writes).toHaveLength(before);
+    },
+  );
   it('rewrites every CLI-owned file and merges the clients the broker needs', async () => {
     const ws = await workspace({
       members: [
@@ -92,7 +111,7 @@ describe('setu workspace broker', () => {
     expect(ws.read('apps/web/src/transport/index.ts')).toContain("config.get<string>('REDIS_URL'");
     expect(JSON.parse(ws.read('setu.workspace.json'))).toMatchObject({ broker: 'redis' });
     expect(ws.read('docker/compose.yaml')).toContain('image: redis:7');
-    expect(ws.read('README.md')).toContain('Members share the **redis** broker');
+    expect(ws.read('README.md')).toContain('share the **redis** broker');
     // Class 2: merged, never removed.
     expect(JSON.parse(ws.read('apps/orders/deno.json')).imports).toMatchObject({
       ioredis: expect.stringContaining('npm:ioredis@'),
@@ -118,8 +137,8 @@ describe('setu workspace broker', () => {
     const after = ws.read('README.md');
     expect(after).toContain('# Mine\n\nMy notes.');
     expect(after).toContain('My footer.');
-    expect(after).toContain('Members share the **kafka** broker');
-    expect(after).not.toContain('Members share the **memory** broker');
+    expect(after).toContain('share the **kafka** broker');
+    expect(after).not.toContain('share the **memory** broker');
   });
 
   it('leaves a README without markers alone and prints the section', async () => {
@@ -129,7 +148,7 @@ describe('setu workspace broker', () => {
     expect(result.code).toBe(0);
     expect(ws.read('README.md')).toBe('# My own README\n');
     expect(result.out).toContain(`README.md has no ${TRANSPORT_README_MARKERS.start} section`);
-    expect(result.out).toContain('Members share the **redis** broker');
+    expect(result.out).toContain('share the **redis** broker');
   });
 
   // A no-op on each field the change compares.
@@ -815,7 +834,8 @@ describe('a workspace made by 0.11.0', () => {
       )
       .replace(/\nimport \{[^}]*\} from '\.\/src\/transport\/index\.ts';/, '')
       .replace(', ...queueOptions()', '')
-      .replace('      ...transportPlugins(),\n', '');
+      .replace('      ...transportPlugins(),\n', '')
+      .replace('...runtimeOptions(), ', '');
     await ws.write('apps/orders/setu.config.ts', literal);
     await ws.fs.rm(`${ROOT}/apps/orders/src/transport/index.ts`);
     const manifest = JSON.parse(ws.read('setu.workspace.json'));
@@ -833,7 +853,7 @@ describe('a workspace made by 0.11.0', () => {
     const refused = await ws.run(['workspace', 'broker', 'nats']);
     expect(refused.code).toBe(1);
     expect(refused.err).toContain(
-      "import { messagingOptions, queueOptions, transportPlugins } from './src/transport/index.ts';",
+      "import { runtimeOptions, messagingOptions, queueOptions, transportPlugins } from './src/transport/index.ts';",
     );
 
     await ws.write(
@@ -842,11 +862,15 @@ describe('a workspace made by 0.11.0', () => {
         .read('apps/orders/setu.config.ts')
         .replace(
           "import { MessagingPlugin } from '@setu-ts/messaging-plugin';",
-          "import { MessagingPlugin } from '@setu-ts/messaging-plugin';\nimport { messagingOptions, queueOptions, transportPlugins } from './src/transport/index.ts';",
+          "import { MessagingPlugin } from '@setu-ts/messaging-plugin';\nimport { runtimeOptions, messagingOptions, queueOptions, transportPlugins } from './src/transport/index.ts';",
         )
         .replace(
           "MessagingPlugin({ broker: 'redis-streams', url: 'redis://127.0.0.1:6379' })",
           'MessagingPlugin(messagingOptions())',
+        )
+        .replace(
+          'RuntimePlugin({ maxBodyBytes:',
+          'RuntimePlugin({ ...runtimeOptions(), maxBodyBytes:',
         )
         .replace(
           'processors: [...QUEUE_PROCESSORS] }',

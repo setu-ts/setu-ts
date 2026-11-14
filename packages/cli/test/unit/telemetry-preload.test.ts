@@ -13,9 +13,9 @@
 import type { InstrumentationKind } from '@setu-ts/telemetry-plugin';
 import { execFile } from 'node:child_process';
 import * as nodeFs from 'node:fs/promises';
-import * as nodeOs from 'node:os';
 import * as nodePath from 'node:path';
 import { promisify } from 'node:util';
+import { tempDir } from '../../../../test/node-helpers.ts';
 import { describe, expect, it } from 'vitest';
 import { createFakeFs } from '../fixtures/fake-fs.ts';
 import { runCli } from '../../src/cli.ts';
@@ -72,7 +72,7 @@ describe('the OpenTelemetry preload (M131a X88-4)', () => {
     expect(h.fs.read(`/work/svc/${TELEMETRY_PRELOAD_PATH}`)).toBe(TELEMETRY_PRELOAD_CONTENTS);
     const s = scripts(h, '/work/svc/package.json');
     expect(s['start']).toBe(
-      `${NODE_START_BUILD_CHECK} && node ${TELEMETRY_PRELOAD_FLAG} --env-file-if-exists=.env --enable-source-maps dist/main.js`,
+      `${NODE_START_BUILD_CHECK} && node --import "data:text/javascript,process.env.NODE_ENV??='production'" ${TELEMETRY_PRELOAD_FLAG} --env-file-if-exists=.env --enable-source-maps dist/main.js`,
     );
     expect(s['start:dev']).toBe(
       `tsx watch ${TELEMETRY_PRELOAD_FLAG} --env-file-if-exists=.env main.ts`,
@@ -108,7 +108,7 @@ describe('the OpenTelemetry preload (M131a X88-4)', () => {
   });
 
   it('the generated preload starts cleanly without the instrumentation package', async () => {
-    const dir = await nodeFs.mkdtemp(nodePath.join(nodeOs.tmpdir(), 'setu-preload-'));
+    const dir = await tempDir({ prefix: 'setu-preload-' });
     try {
       await nodeFs.writeFile(
         nodePath.join(dir, TELEMETRY_PRELOAD_PATH),

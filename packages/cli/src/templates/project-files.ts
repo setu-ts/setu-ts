@@ -1267,7 +1267,7 @@ function denoTasks(
   const start =
     runtime === 'cloudflare-workers'
       ? `deno serve ${denoPermissions(manifest)} ${entry}`
-      : `deno run ${denoPermissions(manifest)} ${denoEnvFile}${entry}`;
+      : `NODE_ENV=production deno run ${denoPermissions(manifest)} ${denoEnvFile}${entry}`;
 
   // A3: every Deno template emits a `test` task now. `setu generate module`
   // writes a `<name>.test.ts`, and NO template declared a task that runs it — so
@@ -1721,8 +1721,8 @@ function npmScripts(
         : { build: frontend }
       : { build: `${frontend === undefined ? '' : `${frontend} && `}tsc --noEmit && setu build` }),
     start: bun
-      ? `bun ${envFile}run main.ts`
-      : `${NODE_START_BUILD_CHECK} && node ${nodeFlags}--enable-source-maps dist/main.js`,
+      ? `NODE_ENV=production bun ${envFile}run main.ts`
+      : `${NODE_START_BUILD_CHECK} && node --import "data:text/javascript,process.env.NODE_ENV??='production'" ${nodeFlags}--enable-source-maps dist/main.js`,
     'start:dev':
       devEntry === undefined
         ? bun
@@ -2103,7 +2103,7 @@ ${manifest?.readmeSection === undefined ? '' : `\n${typeof manifest.readmeSectio
 ${runtime === 'deno' ? 'deno task build\ndeno task start' : runtime === 'bun' ? `${manifest?.npmBuild === undefined ? '' : 'bun run build\n'}bun run start` : 'npm run build\nnpm start'}
 \`\`\`
 
-${runtime === 'node' ? 'The build type-checks, checks CLI wiring and bundles the service into dist/. Run npm test before building an image: DI graph validation happens at boot.' : 'The service runs TypeScript source; a full-stack project builds its frontend before production.'}
+${runtime === 'node' ? 'The build type-checks, checks CLI wiring and bundles the service into dist/. The start script uses a data-URL preload to default NODE_ENV to production before imports, keeping any preset value. Run npm test before building an image: DI graph validation happens at boot.' : 'The service runs TypeScript source; a full-stack project builds its frontend before production.'}
 ${
   port === undefined
     ? `

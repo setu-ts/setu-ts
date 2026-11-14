@@ -132,7 +132,10 @@ export async function detectTargetRuntime(fs: IFileSystem, dir: string): Promise
     typeof packageJson.value === 'object' && packageJson.value !== null
       ? (packageJson.value as { scripts?: Record<string, string> })
       : {};
-  const start = parsed.scripts?.['start'] ?? '';
+  const start = (parsed.scripts?.['start'] ?? '').replace(
+    /^(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*/,
+    '',
+  );
 
   if (start.startsWith('bun')) return 'bun';
   if (start !== '') return 'node';

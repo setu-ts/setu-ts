@@ -146,6 +146,7 @@ function withTransportModule(
   const factory = input.host === 'app-factory';
   const onDeno = input.profile.manifestKind === 'deno';
   const symbols = [
+    TRANSPORT_EXPORTS.runtime,
     ...(shape.messaging ? [TRANSPORT_EXPORTS.messaging] : []),
     ...(shape.queue ? [TRANSPORT_EXPORTS.queue] : []),
     TRANSPORT_EXPORTS.plugins,
@@ -162,6 +163,7 @@ function withTransportModule(
       ? {
           appFactoryContext: {
             ...host.appFactoryContext,
+            runtimeOptions: `${TRANSPORT_EXPORTS.runtime}()`,
             messaging: `${TRANSPORT_EXPORTS.messaging}(config)`,
             queue: `{ ${broker.connection !== undefined && broker.queueArgs !== undefined ? 'processors: [...QUEUE_PROCESSORS], ' : ''}...${TRANSPORT_EXPORTS.queue}(config) }`,
             csrfExclude: `${TRANSPORT_EXPORTS.csrf}()`,
@@ -177,7 +179,9 @@ function withTransportModule(
               ? { ...wiring, args: `${TRANSPORT_EXPORTS.messaging}()` }
               : wiring.pkg === QUEUE_PACKAGE
                 ? { ...wiring, args: withQueueSpread(wiring.args) }
-                : wiring,
+                : wiring.pkg === 'runtime'
+                  ? { ...wiring, args: withRuntimeSpread(wiring.args) }
+                  : wiring,
           ),
           pluginSpreads: [`...${TRANSPORT_EXPORTS.plugins}()`, ...host.pluginSpreads],
         }),
@@ -211,6 +215,7 @@ function withTransportModule(
       : { transportNotes: [...(host.transportNotes ?? []), note] }),
     extraFrameworkPackages: [
       ...host.extraFrameworkPackages,
+      ...(factory ? ['runtime'] : []),
       ...(factory && broker.connection !== undefined && broker.queueArgs !== undefined
         ? [QUEUE_PACKAGE]
         : []),
@@ -252,6 +257,24 @@ function withTransportModule(
  * @param args - The wiring's current arguments, if any
  * @returns The arguments calling `queueOptions()`
  */
+/**
+ * The host's own `RuntimePlugin` options with the transport's runtime options spread first, so a
+ * template's options (the REST body cap) are kept and a template with none gains none.
+ *
+ * @param args - The template's `RuntimePlugin` argument text, if any
+ * @returns The argument text calling the transport module's runtime options
+ */
+function withRuntimeSpread(args: string | undefined): string {
+  const call = `${TRANSPORT_EXPORTS.runtime}()`;
+  const body =
+    args
+      ?.trim()
+      .replace(/^\{|\}$/g, '')
+      .trim()
+      .replace(/,$/, '') ?? '';
+  return body === '' ? call : `{ ...${call}, ${body} }`;
+}
+
 function withQueueSpread(args: string | undefined): string {
   const call = `${TRANSPORT_EXPORTS.queue}()`;
   const body =

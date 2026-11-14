@@ -90,6 +90,16 @@ describe('M140a installed signing secrets', () => {
     const manifest = JSON.parse(h.read('/app/ws/setu.workspace.json'));
     for (const member of manifest.members)
       expect(member.generatedSecrets).toEqual(['JWT_SECRET', 'SESSION_SECRET']);
+    for (const member of manifest.members) {
+      const file = h.read(`/app/ws/k8s/secrets/${member.name}/.env`);
+      expect(
+        file
+          .split('\n')
+          .filter(Boolean)
+          .map((line) => line.split('=')[0]),
+      ).toEqual(['JWT_SECRET', 'SESSION_SECRET']);
+      expect(h.out.join('\n').includes('c'.repeat(64))).toBe(false);
+    }
     const compose = h.read('/app/ws/docker/compose.yaml');
     expect(compose).toContain('API_JWT_SECRET:?');
     expect(compose).toContain('ADMIN_WEB_SESSION_SECRET:?');
@@ -105,6 +115,53 @@ describe('M140a installed signing secrets', () => {
     expect(h.read('/app/ws/README.md')).toBe('developer-owned README');
     expect(h.out.join('\n')).toContain('README.md has no transport section');
   });
+
+  it.each(['dry', 'existing', 'link'])(
+    'handles %s operator files when generatedSecrets grows',
+    async (mode) => {
+      const h = harness();
+      const deps = {
+        fs: h.fs,
+        cwd: '/app',
+        now: () => 0,
+        secret: () => 'test-only-placeholder',
+        log: (line: string) => h.out.push(line),
+        error: (line: string) => h.err.push(line),
+      };
+      expect(await runCli(['new', 'ws', '--workspace'], deps)).toBe(0);
+      expect(
+        await runCli(['g', 'app', 'api', '--template', 'rest', '--dir', '/app/ws'], deps),
+      ).toBe(0);
+      const path = '/app/ws/k8s/secrets/api/.env';
+      if (mode === 'existing')
+        await h.fs.writeFile(
+          path,
+          new TextEncoder().encode('JWT_SECRET=operator-owned\nOTHER=kept'),
+        );
+      if (mode === 'link') {
+        const original = h.fs.realPath!.bind(h.fs);
+        h.fs.realPath = (path) =>
+          path.startsWith('/app/ws/k8s')
+            ? Promise.resolve(path.replace('/app/ws/k8s', '/outside'))
+            : original(path);
+      }
+      const writes = h.fs.writes.length;
+      const code = await runCli(['add', 'auth', ...(mode === 'dry' ? ['--dry-run'] : [])], {
+        ...deps,
+        cwd: '/app/ws/apps/api',
+      });
+      expect(code, h.err.join('\n')).toBe(mode === 'link' ? 1 : 0);
+      if (mode === 'existing') {
+        expect(h.read(path) === 'JWT_SECRET=operator-owned\nOTHER=kept').toBe(true);
+        expect(h.fs.writes.slice(writes)).not.toContain(path);
+        expect(h.out.join('\n')).not.toContain('Operator secrets for api:');
+      } else expect(h.fs.writes).toHaveLength(writes);
+      if (mode === 'dry')
+        expect(h.out.join('\n')).toContain('Operator secrets for api: JWT_SECRET');
+      if (mode === 'link') expect(h.err.join('\n')).toContain('link');
+      expect(h.out.join('\n').includes('test-only-placeholder')).toBe(false);
+    },
+  );
 });
 
 describe('M139d add request and backend contracts', () => {

@@ -20,6 +20,45 @@ it('records generated secrets only for the template that generates them', async 
   expect(readme).toContain('export WEB_SESSION_SECRET="$(openssl rand -hex 32)"');
   expect(readme).toContain('custom intro');
   expect(readme).toContain('custom footer');
+  const operator = h.fs.read('/ws/k8s/secrets/web/.env');
+  expect(/^SESSION_SECRET=[a-f0-9]{64}\n$/.test(operator)).toBe(true);
+  const value = operator.trim().split('=')[1]!;
+  expect(h.out.text().includes(value) || h.err.text().includes(value)).toBe(false);
+  expect(h.fs.read('/ws/apps/web/.env').includes(value)).toBe(false);
+  expect(h.fs.has('/ws/k8s/secrets/api/.env')).toBe(false);
+});
+
+it.each([false, true])(
+  'preserves an existing operator key when adding a member (dry run %s)',
+  async (dry) => {
+    const h = harness([], 3000, 'memory', undefined, 'node');
+    const path = '/ws/k8s/secrets/web/.env';
+    const before = '# keep\nSESSION_SECRET=operator-owned\n';
+    await h.fs.writeFile(path, new TextEncoder().encode(before));
+    const writes = h.fs.writes.length;
+    expect(
+      await h.run(['app', 'web', '--template', 'full-stack', ...(dry ? ['--dry-run'] : [])]),
+      h.err.text(),
+    ).toBe(0);
+    expect(h.fs.read(path) === before).toBe(true);
+    expect(h.out.text()).not.toContain('Operator secrets for web:');
+    expect(h.fs.writes.slice(writes)).not.toContain(path);
+    expect(h.out.text().includes('operator-owned')).toBe(false);
+    if (dry) expect(h.fs.writes).toHaveLength(writes);
+  },
+);
+
+it('refuses an operator path through a link before writing the member', async () => {
+  const h = harness([], 3000, 'memory', undefined, 'node');
+  const original = h.fs.realPath!.bind(h.fs);
+  h.fs.realPath = (path) =>
+    path.startsWith('/ws/k8s')
+      ? Promise.resolve(path.replace('/ws/k8s', '/outside'))
+      : original(path);
+  const writes = h.fs.writes.length;
+  expect(await h.run(['app', 'web', '--template', 'full-stack'])).toBe(1);
+  expect(h.err.text()).toContain('link');
+  expect(h.fs.writes).toHaveLength(writes);
 });
 
 it('L3 refuses Workers workspace members without allocating ports or printing edit notes', async () => {

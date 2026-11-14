@@ -195,6 +195,8 @@ export interface AppFactoryRenderContext {
    * workspace member's transport module (M138). Absent → no exclusions.
    */
   readonly csrfExclude?: string;
+  /** Runtime options from a workspace member's transport module. */
+  readonly runtimeOptions?: string;
   /** Rendered messaging options supplied by a transport. @since 0.11.0 */
   readonly messaging?: string;
   /** Rendered queue options supplied by a transport. @since 0.11.0 */

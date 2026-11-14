@@ -102,6 +102,7 @@ import {
 } from '../workspace/manifest.ts';
 import { describeReconcileFailure, reconcileMembers } from '../workspace/reconcile.ts';
 import { interruptionMessage } from '../utils/interruption.ts';
+import { operatorSecretFiles } from '../workspace/operator-secrets.ts';
 
 /**
  * Everything `runAppCommand` reaches the outside world through.
@@ -943,6 +944,29 @@ export async function runAppCommand(args: ParsedArgs, deps: AppDependencies): Pr
     ...modules,
     ...(devtoolRunnerFile === undefined ? [] : [devtoolRunnerFile]),
   ].map((file) => ({ ...file, path: joinPath(deps.dir, file.path) }));
+
+  if (generatedSecrets.length > 0) {
+    try {
+      const operatorFiles = await operatorSecretFiles(
+        deps.fs,
+        deps.dir,
+        name,
+        generatedSecrets,
+        deps.secret,
+      );
+      if (operatorFiles.length > 0) {
+        files.push(...operatorFiles);
+        deps.log(
+          `Operator secrets for ${name}: ${generatedSecrets.join(', ')} (k8s/secrets/${name}/.env).`,
+        );
+      }
+    } catch (cause) {
+      deps.error(
+        `Cannot prepare operator secrets: ${escapeName(cause instanceof Error ? cause.message : String(cause))}`,
+      );
+      return EXIT_ERROR;
+    }
+  }
 
   if (args.flags['dry-run'] === true) {
     if (plan.logger !== undefined) deps.log(`Logger: ${plan.logger}`);

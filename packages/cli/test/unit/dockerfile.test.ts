@@ -70,9 +70,10 @@ describe('generated Dockerfile lockfile verification', () => {
     // Parsed from the MEMBER manifest (the stage's working directory), never a
     // root task, and never by matching text.
     expect(frontend).toContain('"jsr:@std/jsonc@1.0.3"');
-    expect(frontend).toContain('if (manifest.tasks && "build" in manifest.tasks)');
+    expect(frontend).toContain('for (const task of ["build", "check"])');
+    expect(frontend).toContain('if (manifest.tasks && task in manifest.tasks)');
     expect(frontend).toContain(
-      '--allow-read=./deno.json,./deno.jsonc --allow-write=./.setu-build-task -',
+      '--allow-read=./deno.json,./deno.jsonc --allow-write=./.setu-build-task,./.setu-check-task -',
     );
     expect(frontend).toContain(
       'if [ -f .setu-build-task ]; then deno task build; else mkdir -p build; fi',

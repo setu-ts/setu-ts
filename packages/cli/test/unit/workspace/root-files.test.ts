@@ -253,7 +253,7 @@ describe('the workspace README transport section', () => {
 
   it('says nothing about a connection for a broker that has none', () => {
     const readme = readmeFor('memory');
-    expect(readme).toContain('Members share the **memory** broker');
+    expect(readme).toContain('share the **memory** broker');
     // The call style is each member's own choice, and the README says how to make it.
     expect(readme).toContain('generate app <name> --rpc grpc');
     expect(readme).not.toContain('reads its connection value');
@@ -266,6 +266,14 @@ describe('the workspace README transport section', () => {
     expect(readme).toContain('REDIS_URL');
     expect(readme).toContain('redis://127.0.0.1:6379');
     expect(readme).toContain('Run the stack');
+    const prose = readme.replace(/\s+/g, ' ');
+    expect(prose).toContain(
+      'Members that register `MessagingPlugin` or `QueuePlugin` share the **redis** broker',
+    );
+    expect(prose).toContain('Each reads its connection value from `REDIS_URL`');
+    expect(prose).toContain(
+      'receives the variable but connects to nothing until `setu add messaging` (or `queue`)',
+    );
   });
 
   it('shows the override in place of the local default when one is given', () => {

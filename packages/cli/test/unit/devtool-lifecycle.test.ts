@@ -8,7 +8,7 @@ import { runDevtoolCommand } from '../../src/commands/devtool.ts';
 import { runWorkspaceCommand } from '../../src/commands/workspace.ts';
 import { runNewCommand } from '../../src/commands/new.ts';
 import { runAppCommand } from '../../src/commands/app.ts';
-import { factoryRefusal, standaloneDevtoolPort } from '../../src/devtool/planner.ts';
+import { deriveDevTask, factoryRefusal, standaloneDevtoolPort } from '../../src/devtool/planner.ts';
 import { devEntryVariants, renderDevEntry } from '../../src/devtool/dev-entry.ts';
 import {
   allocateDevtoolPort,
@@ -45,6 +45,66 @@ const seed = {
 };
 
 describe('M101f lifecycle refusals and allocation', () => {
+  it.each([
+    ['NODE_ENV=production deno run --allow-net main.ts', 'deno run --allow-net main.dev.ts'],
+    ['deno run --allow-net main.ts', 'deno run --allow-net main.dev.ts'],
+    [
+      'NODE_ENV=production NODE_ENV=production deno run main.ts',
+      'NODE_ENV=production deno run main.dev.ts',
+    ],
+    ['NODE_ENV=test deno run main.ts', 'NODE_ENV=test deno run main.dev.ts'],
+    ['NODE_ENV=production deno run server.ts', undefined],
+  ])('derives a development task from %s', (start, expected) => {
+    expect(deriveDevTask(start!)).toBe(expected);
+  });
+
+  it.each([false, true])(
+    're-enables a freshly generated Deno project cleanly (workspace member %s)',
+    async (member) => {
+      const fs = createFakeFs();
+      const error = createRecorder();
+      const log = createRecorder();
+      const deps = { fs, log: log.sink, error: error.sink, secret: () => 'test-secret' };
+      expect(
+        await runNewCommand(
+          parseArgs([
+            'shop',
+            '--runtime',
+            'deno',
+            ...(member ? ['--workspace', '--port', '3000'] : ['--template', 'rest', '--devtool']),
+          ]),
+          { ...deps, cwd: '/projects' },
+        ),
+        error.text(),
+      ).toBe(0);
+      if (member)
+        expect(
+          await runAppCommand(parseArgs(['app', 'orders', '--template', 'rest', '--devtool']), {
+            ...deps,
+            dir: '/projects/shop',
+          }),
+          error.text(),
+        ).toBe(0);
+      const dir = member ? '/projects/shop/apps/orders' : '/projects/shop';
+      const before = fs.read(`${dir}/deno.json`);
+      const tasks = (JSON.parse(before) as { tasks: Record<string, string> }).tasks;
+      expect(tasks['start']).toMatch(/^NODE_ENV=production /);
+      expect(tasks['dev']).not.toContain('NODE_ENV=production');
+      const writes = fs.writes.length;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        expect(
+          await runDevtoolCommand(parseArgs(member ? ['enable', 'orders'] : ['enable']), {
+            ...deps,
+            cwd: '/projects/shop',
+          }),
+          error.text(),
+        ).toBe(0);
+      }
+      expect(fs.read(`${dir}/deno.json`)).toBe(before);
+      expect(fs.writes).toHaveLength(writes);
+      expect(log.text()).toContain('already enabled');
+    },
+  );
   for (const member of [false, true]) {
     it(`upgrades a captured Deno entry to the Node ${member ? 'member' : 'standalone'} rendering without moving its port`, async () => {
       const fs = createFakeFs();

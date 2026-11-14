@@ -54,6 +54,64 @@ const NPMRC_MOUNT = '--mount=type=secret,id=npmrc,target=/root/.npmrc';
 const GUARD = `RUN ${NPMRC_MOUNT} if [ -z "$NPM_CONFIG_REGISTRY" ]; then unset NPM_CONFIG_REGISTRY; fi && `;
 
 describe('workspaceContainerFiles', () => {
+  it.each(['node', 'bun', 'deno'] as const)(
+    'sets production only in the %s runtime stage for both shapes',
+    (runtime) => {
+      for (const workspace of [true, false]) {
+        const dockerfile = renderDockerfile(workspaceProfile(runtime), workspace);
+        const stages = dockerfile.split(/^FROM /m).slice(1);
+        expect(stages[0]).not.toContain('ENV NODE_ENV=production');
+        expect(stages[1]).toContain('ENV NODE_ENV=production');
+        if (runtime === 'bun') {
+          expect(dockerfile.match(/FROM oven\/bun:1\.4\.0-alpine/g)).toHaveLength(2);
+          expect(
+            dockerfile.match(/bun.lock is missing: run bun install and commit bun.lock/g),
+          ).toHaveLength(2);
+          expect(stages[0]).toContain('then bun run check; fi');
+          expect(stages[0]!.indexOf('then bun run check')).toBeGreaterThan(
+            stages[0]!.indexOf('then bun run build'),
+          );
+        } else if (runtime === 'deno') {
+          expect(stages[0]).toContain('for (const task of ["build", "check"])');
+          expect(stages[0]).toContain('then deno task check; fi');
+          expect(stages[0]!.indexOf('then deno task check')).toBeGreaterThan(
+            stages[0]!.indexOf('then deno task build'),
+          );
+        }
+      }
+    },
+  );
+
+  it('merges broker and sibling dependencies with declared health support', () => {
+    const manifest: WorkspaceManifest = {
+      ...manifestOf([]),
+      members: [
+        {
+          name: 'orders',
+          port: 3000,
+          healthProbes: true,
+          dependsOn: ['billing', 'plain', 'billing'],
+        },
+        { name: 'billing', port: 3001, healthProbes: true },
+        { name: 'plain', port: 3002, healthProbes: false },
+      ],
+    };
+    const yaml = contentsOf(workspaceContainerFiles(manifest, brokerSpec('redis')), COMPOSE_FILE);
+    const orders = yaml.slice(yaml.indexOf('  orders:'), yaml.indexOf('\n  plain:'));
+    expect(orders).toContain('redis:\n        condition: service_healthy');
+    expect(orders).toContain('billing:\n        condition: service_healthy');
+    expect(orders.match(/ {6}billing:/g)).toHaveLength(1);
+    expect(orders).toContain('plain:\n        condition: service_started');
+    expect(orders).toContain(
+      "test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1:3000/ready']",
+    );
+    expect(orders).toContain(
+      'interval: 5s\n      timeout: 3s\n      retries: 10\n      start_period: 30s',
+    );
+    expect(yaml.slice(yaml.indexOf('\n  plain:'), yaml.indexOf('\n  redis:'))).not.toContain(
+      'healthcheck:',
+    );
+  });
   it('requires a separate shell key for each member generated secret', () => {
     const manifest: WorkspaceManifest = {
       ...manifestOf([]),
@@ -479,7 +537,7 @@ describe('workspaceContainerFiles', () => {
         DOCKERFILE,
       );
 
-    it('builds a Node member into the pinned Node image', () => {
+    it('builds a Node member into the Node 24 image', () => {
       const contents = dockerfileFor('node');
       expect(contents).toContain('FROM node:24-alpine');
       expect(contents).not.toContain('denoland/deno');
@@ -501,12 +559,13 @@ describe('workspaceContainerFiles', () => {
 
     it('builds a Bun member into the pinned Bun image', () => {
       const contents = dockerfileFor('bun');
-      expect(contents).toContain('FROM oven/bun:1-alpine');
+      expect(contents).toContain('FROM oven/bun:1.4.0-alpine');
       expect(contents).not.toContain('node:24');
       expect(contents).not.toContain('denoland/deno');
       // Bun installs into each member's own node_modules as well as the root,
       // and runs the entry with `bun`.
-      expect(contents).toContain(`${GUARD}bun install`);
+      expect(contents).toContain(`${GUARD}{ test -f bun.lock ||`);
+      expect(contents).toContain('&& bun install --frozen-lockfile');
       expect(contents).toContain('ARG NPM_CONFIG_REGISTRY=');
       expect(contents).toContain('USER 1000:1000');
       expect(contents).toContain('CMD ["bun", "run", "main.ts"]');

@@ -53,6 +53,7 @@ import {
 import { isMissingPath } from '../utils/filesystem-errors.ts';
 import { frameworkSpecifier } from '../templates/framework-specifier.ts';
 import { generateSecret } from '../templates/secret.ts';
+import { operatorSecretFiles } from '../workspace/operator-secrets.ts';
 import { BROKER_COMPOSE_FILE, cliInvocation, resolveHost } from '../templates/project-files.ts';
 import { MINIMAL_HOST } from '../templates/minimal.ts';
 import { envFileDeclaration, isCoveredDotenvName } from '../templates/env-file.ts';
@@ -2525,6 +2526,28 @@ async function addOne(
         return EXIT_ERROR;
       }
       writeRoot = root;
+      if (!secrets.includes(variableName)) {
+        try {
+          const operatorFiles = await operatorSecretFiles(
+            deps.fs,
+            root,
+            member.name,
+            [variableName],
+            deps.secret,
+          );
+          if (operatorFiles.length > 0) {
+            edits.push(...operatorFiles);
+            deps.log(
+              `Operator secrets for ${member.name}: ${variableName} (k8s/secrets/${member.name}/.env).`,
+            );
+          }
+        } catch (cause) {
+          deps.error(
+            `Cannot prepare operator secrets: ${escapeName(cause instanceof Error ? cause.message : String(cause))}`,
+          );
+          return EXIT_ERROR;
+        }
+      }
       if (
         !secrets.includes(variableName) ||
         (memberEnvFile !== undefined && !(member.envFilePaths ?? []).includes(memberEnvFile))

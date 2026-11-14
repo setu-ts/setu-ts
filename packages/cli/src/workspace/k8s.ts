@@ -33,7 +33,7 @@
  */
 
 import type { GeneratedFile } from '../utils/file-writer.ts';
-import { memberEnvironment } from './compose.ts';
+import { hostVariable } from './discovery-module.ts';
 import { envFromBlock, SECRET_VERSION_ANNOTATION } from './secrets.ts';
 import { cliInvocation } from '../templates/project-files.ts';
 import type { WorkspaceManifest } from './manifest.ts';
@@ -57,6 +57,17 @@ const RUN_AS_USER = 1000;
  * cluster.
  */
 const PRE_STOP_SLEEP_SECONDS = 5;
+
+/** Defaults are read before member Secrets, which can override broker endpoints. */
+const TRANSPORT_CONFIG_MAP = 'setu-transport';
+const TRANSPORT_CONFIG_ANNOTATION = 'setu-ts.dev/transport-config';
+
+/** Stable non-secret defaults also stamp the pod template so broker changes roll it out. */
+function transportEntries(transport: BrokerSpec): readonly (readonly [string, string])[] {
+  return Object.entries(transport.compose?.memberEnv ?? {}).sort(([left], [right]) =>
+    left.localeCompare(right),
+  );
+}
 
 /**
  * Renders the Deployment and Service for one member.
@@ -117,7 +128,10 @@ function memberObjects(
             initialDelaySeconds: 10
             periodSeconds: 10`;
 
-  const env = memberEnvironment(siblings, transport);
+  const env = Object.fromEntries(
+    siblings.map((sibling) => [hostVariable(sibling.name), sibling.name]),
+  );
+  const defaults = transportEntries(transport);
   const envBlock =
     Object.keys(env).length === 0
       ? ''
@@ -143,7 +157,14 @@ ${Object.entries(env)
   // Deployment out by itself — also when a deploy is re-run after failing part-way.
   const annotationsBlock = `      annotations:
         # Set by \`setu workspace deploy\` to the ${name}-env Secret's resourceVersion.
-        ${SECRET_VERSION_ANNOTATION}: ''${metricsAnnotations}
+        ${SECRET_VERSION_ANNOTATION}: ''${
+          defaults.length === 0
+            ? ''
+            : `\n        ${TRANSPORT_CONFIG_ANNOTATION}: '${defaults
+                .map(([key, value]) => `${key}=${value}`)
+                .join(',')
+                .replaceAll("'", "''")}'`
+        }${metricsAnnotations}
 `;
 
   // X10-4: the chart's preStop sleep (M39's cluster finding). Covers the gap
@@ -197,7 +218,8 @@ ${annotationsBlock}      labels:
           # the image it built. By hand instead:
           #   docker build -f docker/Dockerfile --build-arg MEMBER=${name} -t ${name}:dev .
           # then push it to a registry this cluster can pull from and put that
-          # reference here.
+          # reference here. :dev with IfNotPresent reuses the node's cached image;
+          # use a new tag after rebuilding. Deploy tags with the commit for this reason.
           image: ${name}:dev
           imagePullPolicy: IfNotPresent
           ports:
@@ -211,7 +233,7 @@ ${annotationsBlock}      labels:
           # The member's own variables (SESSION_SECRET, …): \`setu workspace deploy\`
           # applies this Secret from k8s/secrets/${name}/.env. The env: entries above
           # still win over it, so it cannot redirect a sibling host.
-${envFromBlock(name)}
+${envFromBlock(name, defaults.length === 0 ? undefined : TRANSPORT_CONFIG_MAP)}
 ${probeBlock}
 ${lifecycleBlock}
           resources:
@@ -282,6 +304,18 @@ export function workspaceK8sFiles(
       member.metricsEndpoint === true,
     ),
   );
+  const defaults = transportEntries(transport);
+  if (defaults.length > 0)
+    documents.unshift(`apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ${TRANSPORT_CONFIG_MAP}
+  namespace: \${NAMESPACE}
+  labels:
+    app.kubernetes.io/part-of: \${WORKSPACE}
+data:
+${defaults.map(([key, value]) => `  ${key}: '${value.replaceAll("'", "''")}'`).join('\n')}
+`);
 
   // Re-flowed rather than hand-wrapped: a workspace passes its own `deno fmt
   // --check`, which re-wraps a Markdown paragraph to the generated width, so a
@@ -334,6 +368,18 @@ ${wrapProse(
 \`\`\`bash
 NAMESPACE=acme WORKSPACE=acme envsubst < ${K8S_DIR}/members.yaml | kubectl apply -f -
 \`\`\`
+
+${wrapProse(
+  'The hand-applied `:dev` tag with `imagePullPolicy: IfNotPresent` reuses whatever image a node ' +
+    'already holds under that tag. After rebuilding, use a new tag. `setu workspace deploy` ' +
+    'tags with the commit for this reason.',
+)}
+
+${wrapProse(
+  "Kubernetes has no start order between members. Each member's readiness probe keeps it out " +
+    'of its Service until it answers `/ready`. Generated callers resolve a sibling per call, ' +
+    'so a dependent started first does not fail at startup.',
+)}
 
 ${healthSupport}
 

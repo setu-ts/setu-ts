@@ -142,7 +142,7 @@ function fullStackArgs(context: AppFactoryRenderContext): string {
           'TRUST_FORWARDED_HOST=true needs TRUSTED_PROXIES: list the proxies that overwrite X-Forwarded-Host',
         );
       }
-      return {
+      return {${context.runtimeOptions === undefined ? '' : `\n        runtime: ${context.runtimeOptions},`}
         reactRouter: {
           // Production entries pass the compiled server build as a MODULE so
           // bundling cannot relocate a path relative to import.meta.url.
