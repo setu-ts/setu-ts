@@ -490,7 +490,11 @@ for (const signal of ['SIGTERM', 'SIGINT'] as const) {
   };
 }
 
-/** Current and recognition-only 0.12.0 standalone entries, for workspace adoption. */
+/**
+ * Current and recognition-only 0.12.0-shaped standalone entries, for workspace
+ * adoption. Both render the current port reads (M140b's logical-or), so a file
+ * 0.12.0 wrote with the nullish reads is treated as hand-edited.
+ */
 export function fullStackDevEntryVariants(
   runtime: TargetRuntime,
 ): readonly { path: string; contents: string }[] {

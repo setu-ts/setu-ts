@@ -564,6 +564,12 @@ export function renderConnection(
 
 /**
  * Reads a transport from the registered ConfigPlugin, including dotenv values.
+ *
+ * A logical-or fallback rather than `config.get`'s `default` option: the
+ * option applies only when the key is absent, and a copied `.env.example`
+ * sets `REDIS_URL=` — an empty value that would reach the plugin (M140b,
+ * V12-124). An empty connection value is never valid, so empty means unset.
+ *
  * @param connection - The transport's connection declaration
  * @param override - The workspace's replacement fallback
  * @param column - Column at which the expression begins (zero based)
@@ -578,21 +584,16 @@ export function renderConfigConnection(
 ): string {
   const quote = (value: string): string =>
     `'${value.replaceAll('\\', '\\\\').replaceAll("'", "\\'").replaceAll('\n', '\\n').replaceAll('\r', '\\r')}'`;
-  const variable = quote(connection.variable);
+  const read = `config.get<string>(${quote(connection.variable)})`;
   const fallback = quote(override ?? connection.localDefault);
-  const single = `config.get<string>(${variable}, { default: ${fallback} })`;
+  const single = `${read} || ${fallback}`;
   if (column + single.length + 1 <= 100) return single;
-  // What `deno fmt` and Prettier both print when the call overflows (measured on
-  // the Service Bus emulator default, 2026-10-28): the last argument hugs the call,
-  // and `default:` breaks onto its own line only when its value still overflows.
-  // Callers render in the inline frame and shift the literal two spaces deeper, so
-  // the property's final inner column is `depth + 4`.
-  const inner = ' '.repeat(depth + 2);
-  const property =
-    depth + 4 + `default: ${fallback},`.length <= 100
-      ? `${inner}default: ${fallback},`
-      : `${inner}default:\n${inner}  ${fallback},`;
-  return `config.get<string>(${variable}, {\n${property}\n${' '.repeat(depth)}})`;
+  // What `deno fmt` prints when the expression overflows (measured on the Service
+  // Bus emulator default, M140b): the operator ends the first line and the
+  // fallback continues two columns past the property. Deno output is written as
+  // rendered; an npm target is reformatted by Prettier, which moves the whole
+  // expression under the property instead.
+  return `${read} ||\n${' '.repeat(depth + 2)}${fallback}`;
 }
 
 /**

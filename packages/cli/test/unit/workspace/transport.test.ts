@@ -21,7 +21,7 @@ describe('config connection reads', () => {
       const connection = spec.connection!;
       for (const override of [undefined, 'override']) {
         const rendered = renderConfigConnection(connection, override);
-        expect(rendered).toContain('config.get<string>(');
+        expect(rendered).toContain(`config.get<string>('${connection.variable}') ||`);
         expect(rendered).toContain(`'${connection.variable}'`);
         expect(rendered).toContain(`'${override ?? connection.localDefault}'`);
         expect(rendered.includes('\n')).toBe(spec.name === 'service-bus' && override === undefined);
@@ -35,21 +35,31 @@ describe('config connection reads', () => {
         localDefault: "a'b\\c\nd\r",
         urlOverridable: true,
       }),
-    ).toBe("config.get<string>('URL', { default: 'a\\'b\\\\c\\nd\\r' })");
+    ).toBe("config.get<string>('URL') || 'a\\'b\\\\c\\nd\\r'");
   });
-  // The two overflowing shapes are what `deno fmt` and Prettier both print (measured
-  // 2026-10-28): the last argument hugs the call, and `default:` breaks only when its
-  // value still overflows.
-  it('hugs the options object when the call overflows at the caller column', () => {
-    const value = renderConfigConnection(
-      { variable: 'URL', localDefault: 'x', urlOverridable: true },
-      undefined,
-      90,
-      6,
-    );
-    expect(value).toBe("config.get<string>('URL', {\n        default: 'x',\n      })");
+  // M140b V12-124: `config.get`'s `default` applies only to an ABSENT key, and a
+  // copied `.env.example` sets the key to ''. The rendered read is evaluated
+  // against a config holding '', unset, and a real value.
+  it('falls back when the configured value is empty, not only when it is absent', () => {
+    const rendered = renderConfigConnection({
+      variable: 'REDIS_URL',
+      localDefault: 'redis://127.0.0.1:6379',
+      urlOverridable: true,
+    });
+    const evaluate = (values: Readonly<Record<string, string>>): string => {
+      const config = { get: <T>(key: string): T | undefined => values[key] as T | undefined };
+      const read = /^config\.get<string>\('([A-Z_]+)'\) \|\| '(.*)'$/.exec(rendered);
+      expect(read, rendered).not.toBeNull();
+      return config.get<string>(read![1]!) || read![2]!;
+    };
+    expect(evaluate({ REDIS_URL: '' })).toBe('redis://127.0.0.1:6379');
+    expect(evaluate({})).toBe('redis://127.0.0.1:6379');
+    expect(evaluate({ REDIS_URL: 'redis://cache:6379' })).toBe('redis://cache:6379');
   });
-  it('breaks the default onto its own line when the value itself overflows', () => {
+  // The overflowing shape is what `deno fmt` prints (measured M140b on the Service
+  // Bus emulator default): the operator ends the first line and the fallback
+  // continues two columns past the property. npm targets are reformatted by Prettier.
+  it('continues the fallback two columns past the property when the read overflows', () => {
     const long = 'x'.repeat(90);
     const value = renderConfigConnection(
       { variable: 'URL', localDefault: long, urlOverridable: true },
@@ -57,9 +67,7 @@ describe('config connection reads', () => {
       28,
       8,
     );
-    expect(value).toBe(
-      `config.get<string>('URL', {\n          default:\n            '${long}',\n        })`,
-    );
+    expect(value).toBe(`config.get<string>('URL') ||\n          '${long}'`);
   });
 });
 

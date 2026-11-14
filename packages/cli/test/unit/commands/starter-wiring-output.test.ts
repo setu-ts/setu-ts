@@ -11,7 +11,7 @@ const CONFIG_PATH = '/app/shop/setu.config.ts';
 const REDIS_ARM = `        queue: {
           processors: [...QUEUE_PROCESSORS],
           adapter: 'redis',
-          url: config.get<string>('REDIS_URL', { default: 'redis://127.0.0.1:6379' }),
+          url: config.get<string>('REDIS_URL') || 'redis://127.0.0.1:6379',
         },`;
 
 async function scaffold() {

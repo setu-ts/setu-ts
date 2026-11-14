@@ -237,7 +237,12 @@ Survey for the two designed behaviours (§3.1–3.2 and §3.6), done before deci
     dev entry (`PORT`, `VITE_PORT`) and the devtool dev entry (`PORT`) render through it
     (`Number(${runtimeEnvRead('PORT', '3000')})`).
   - `denoEnvRead` / `nodeEnvRead` in `runtime-profile.ts` emit `||` instead of `??`; every broker,
-    Redis and discovery-host read already goes through them.
+    Redis and discovery-host read already goes through them. Full-stack starter options and
+    app-factory transport modules read through `renderConfigConnection` (`transport.ts`) instead, as
+    `config.get<string>('<VAR>')` with a logical-or fallback: `config.get`'s `default` option
+    applies only to an absent key (`config-plugin/src/services/config-service.ts:48-56`). Its
+    overflow layout is `deno fmt`'s (measured); npm targets are reformatted by Prettier. (Code
+    review, M140b.)
   - Comments that quote the rendered form (`plugin-args.ts:82`, `transport.ts:246`,
     `node-redis.ts:54`) are updated to the logical-or form; `nodeRedisCall` re-indents by line and
     needs no code change. Kafka's `nestConnection` (`transport.ts`) is deleted: measured on
@@ -379,6 +384,15 @@ boot-failure rejection, and `fetch`'s same 503/500 split, generic bodies and log
 still never reaches the client, M70l X9-8); F3 the `.dev.vars` header now tells the developer to
 deploy secrets with `wrangler secret put`, which narrows where a secret is written. The code review
 checks each.
+
+## 8b. Code review fixes
+
+- `setu generate job` on a Workers project whose job needs `queue-plugin` printed `setu add queue`,
+  which §3.1 refuses; `generate` now consults `RUNTIME_RESTRICTIONS` and prints the restriction's
+  reason instead (`generate-unwired-seam.test.ts`).
+- Workers wording left over: the `TRUSTED_PROXIES` description is runtime-neutral (the Workers
+  full-stack config still reads it); the reply-inbox module no longer cites `deno check`; the Deploy
+  section names `.dev.vars` only when the host writes one.
 
 ## 9. Out of scope
 

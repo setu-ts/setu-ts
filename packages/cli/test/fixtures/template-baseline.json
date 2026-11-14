@@ -72,7 +72,7 @@
     "src/metrics/index.ts": "19689d1d27c17e83cf3d14455de53aab3f9c6b641820a0ed60d7bddeaf0cbcee"
   },
   "rest/cloudflare-workers": {
-    "README.md": "6da3da3d0549b16bab1253a72b2454f74a798fd87c7b3d6c2b3d75dd972cf1d3",
+    "README.md": "b308a61cf33f447b241bbf2795e04e5dbb5d278c79cd7b48c93d2c6866bbae23",
     ".gitignore": "616c4bd0fa34c47784957429dc4f1cc023a8a3e3cb649b617db2490bbd23c69f",
     "test/support/server.ts": "689e7511bc8e1ea4267824907896e2d0a3517c0470bf6c77cd8132de3da9aec4",
     "test/e2e/app.e2e.test.ts": "45b88481e10785078791df2b73b0abf5c5a3a432b7c32cd3a987c795e073c533",
@@ -169,7 +169,7 @@
     "src/jobs/index.ts": "a3536efae42d1898f9ed0388ad1cda267b9d96e03788020dc949337699efec6d"
   },
   "microservice/cloudflare-workers": {
-    "README.md": "8522ede4cf9943d38965d1b0120ff5fdf422660a32539908410dbec1c5a5ea0b",
+    "README.md": "d309ea81986f384e6fa3083a95d51b3c00a32037cda70f2f5356171a2c7ae55d",
     ".gitignore": "616c4bd0fa34c47784957429dc4f1cc023a8a3e3cb649b617db2490bbd23c69f",
     "test/support/server.ts": "689e7511bc8e1ea4267824907896e2d0a3517c0470bf6c77cd8132de3da9aec4",
     "test/e2e/app.e2e.test.ts": "07fbe686c627f71c326e96113106d514563d47004ec1e963d9b19402c5ad364e",
@@ -189,7 +189,7 @@
     "src/metrics/index.ts": "19689d1d27c17e83cf3d14455de53aab3f9c6b641820a0ed60d7bddeaf0cbcee",
     "src/cqrs/index.ts": "be35f9f9cba0887aedd152a622ad7e8826aec3fae1469fca2e509fc839970368",
     "src/events/index.ts": "78f66f365e842c6dabb33fd039dd3d7835369e686ec37b406a68fac5c495ae46",
-    "src/reply-inbox-object.ts": "8893a44fd1a8fd1a7ff9db9cb63463344326f2a90568bc81907e655a2f55488e"
+    "src/reply-inbox-object.ts": "559d170056610d95c89c5d38ac8b79c1dd62fdaf1f1c2c064ef7a890bf7ef56b"
   },
   "class-based/node": {
     "README.md": "fb7a2342556a03ecce160f60a5754ff68c0a46743bcc779d7af6689e572eb3e5",
@@ -270,7 +270,7 @@
     "src/ingress/index.ts": "6ab6f035d5f4398adb996e6ee1a132dd45276e7bc97b0dc0c45c5855ba0809e4"
   },
   "class-based/cloudflare-workers": {
-    "README.md": "6da3da3d0549b16bab1253a72b2454f74a798fd87c7b3d6c2b3d75dd972cf1d3",
+    "README.md": "b308a61cf33f447b241bbf2795e04e5dbb5d278c79cd7b48c93d2c6866bbae23",
     ".gitignore": "616c4bd0fa34c47784957429dc4f1cc023a8a3e3cb649b617db2490bbd23c69f",
     "test/support/server.ts": "689e7511bc8e1ea4267824907896e2d0a3517c0470bf6c77cd8132de3da9aec4",
     "test/e2e/app.e2e.test.ts": "45b88481e10785078791df2b73b0abf5c5a3a432b7c32cd3a987c795e073c533",

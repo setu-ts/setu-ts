@@ -952,7 +952,9 @@ describe('M140b runtime output', () => {
       const readme = contentsOf(files, 'README.md');
       expect(readme.match(/## Deploy\n/g)).toHaveLength(1);
       expect(readme).toContain('npm run deploy');
-      expect(readme).toContain('`.dev.vars` is local only');
+      // Only full-stack declares variables, so only it writes `.dev.vars`.
+      expect(readme.includes('`.dev.vars` is local only')).toBe(name === 'full-stack');
+      expect(files.some((file) => file.path === '.dev.vars')).toBe(name === 'full-stack');
       expect(readme).toContain('bindings CloudflarePlugin names');
       expect(readme.includes('Cloudflare does not probe a Worker')).toBe(name !== 'minimal');
       expect(readme.includes('only the isolate that answers')).toBe(name !== 'minimal');

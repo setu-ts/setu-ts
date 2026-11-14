@@ -2039,6 +2039,8 @@ function workersDeploySection(host: ResolvedHost): string {
   ];
   const secrets =
     host.manifest?.envVariables?.filter((variable) => variable.generated === 'secret') ?? [];
+  // The same condition that writes `.dev.vars` (any declared variable).
+  const devVars = (host.manifest?.envVariables?.length ?? 0) > 0;
   const setup = [
     ...queues.map((queue) => `npx wrangler queues create ${queue}`),
     ...secrets.map((variable) => `npx wrangler secret put ${variable.name}`),
@@ -2046,7 +2048,7 @@ function workersDeploySection(host: ResolvedHost): string {
   return `
 ## Deploy
 
-Uncomment the \`wrangler.toml\` bindings CloudflarePlugin names. \`.dev.vars\` is local only.
+Uncomment the \`wrangler.toml\` bindings CloudflarePlugin names.${devVars ? ' `.dev.vars` is local only.' : ''}
 ${setup.length === 0 ? '' : `\n\`\`\`bash\n${setup.join('\n')}\n\`\`\`\n`}
 \`\`\`bash
 npm run deploy

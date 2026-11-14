@@ -317,7 +317,7 @@ headers, so any client can choose its own address and origin.
       {
         name: 'TRUSTED_PROXIES',
         description:
-          'Your proxies (IPv4 CIDRs or single IPv6 addresses), comma-separated; trusts their forwarded client IP and protocol, fixing TLS-proxy action 400s; the forwarded host also needs TRUST_FORWARDED_HOST=true (see the deployment guide). Never 0.0.0.0/0: it trusts every client.',
+          'Your proxies (IPv4 CIDRs or single IPv6 addresses), comma-separated; trusts their forwarded client IP and protocol (behind a TLS-terminating proxy, actions otherwise answer 400); the forwarded host also needs TRUST_FORWARDED_HOST=true. Never 0.0.0.0/0: it trusts every client.',
         develop: '',
       },
       {

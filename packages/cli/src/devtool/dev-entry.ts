@@ -193,6 +193,8 @@ export { DEVTOOL_ENTRY_MODULE };
 /**
  * CLI-owned renderings at this port: current Deno and Node entries, the previous
  * Deno entry, its unpinned-guidance predecessor, and the pre-probe 0.8.0 entry.
+ * Every variant renders the current port read (M140b's logical-or), so an entry
+ * an earlier release wrote with the nullish read is treated as hand-edited.
  */
 export function devEntryVariants(devtoolPort: number, member = true): readonly string[] {
   const input: DevEntryInput = {
