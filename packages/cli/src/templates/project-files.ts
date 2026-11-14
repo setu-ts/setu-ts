@@ -1364,7 +1364,8 @@ export const DEVTOOL_ENTRY_MODULE = 'main.dev.ts';
 /**
  * The tasks the devtool opt-in adds to a generated Deno project's `deno.json`.
  *
- * `dev` differs from `start` ONLY in the entry module — its flags come from
+ * `dev` differs from `start` only in the entry module and `start`'s
+ * `NODE_ENV=production` prefix — its flags come from
  * the same {@linkcode denoPermissions} call and its build prefix from the same
  * `npmBuild` check, so the two tasks cannot drift, and neither carries a
  * scoped `--allow-net`: on Deno 2.9.6 an allowlist governs OUTBOUND as well

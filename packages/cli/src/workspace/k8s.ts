@@ -380,8 +380,8 @@ ${wrapProse(
 )}
 
 ${wrapProse(
-  "Kubernetes has no start order between members. Each member's readiness probe keeps it out " +
-    'of its Service until it answers `/ready`. Generated callers resolve a sibling per call, ' +
+  'Kubernetes has no start order between members. A member with probes stays out of its ' +
+    'Service until it answers `/ready`. Generated callers resolve a sibling per call, ' +
     'so a dependent started first does not fail at startup.',
 )}
 

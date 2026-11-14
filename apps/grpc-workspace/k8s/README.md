@@ -38,9 +38,9 @@ The hand-applied `:dev` tag with `imagePullPolicy: IfNotPresent` reuses whatever
 already holds under that tag. After rebuilding, use a new tag. `setu workspace deploy` tags with the
 commit for this reason.
 
-Kubernetes has no start order between members. Each member's readiness probe keeps it out of its
-Service until it answers `/ready`. Generated callers resolve a sibling per call, so a dependent
-started first does not fail at startup.
+Kubernetes has no start order between members. A member with probes stays out of its Service until
+it answers `/ready`. Generated callers resolve a sibling per call, so a dependent started first does
+not fail at startup.
 
 Probes follow DECLARED health support. A member generated WITH a template, or adopted from a project
 that declares `@setu-ts/health-plugin` or a starter, is recorded in `setu.workspace.json` with

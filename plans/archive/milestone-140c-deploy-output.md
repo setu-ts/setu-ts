@@ -1,6 +1,6 @@
 # Milestone 140c — Images, Compose, Kubernetes and gRPC between workspace members (`@setu-ts/cli`)
 
-> **Status:** Planning. Branch: `feat/m140c-deploy-output`. `develop` and `main` are protected, so
+> **Status:** Complete. Branch: `feat/m140c-deploy-output`. `develop` and `main` are protected, so
 > all work, including fixes, stays on this one branch until it merges through a single PR into
 > `develop`.
 
@@ -133,7 +133,9 @@ All paths under `packages/` unless stated. Read on `8f4f226f2`.
   like `build`, with `bun -e`); Deno's `frontend` stage runs `deno task check` when the `check` task
   exists (detected with the same pinned `@std/jsonc` parser it uses for `build`). A full-stack Deno
   member's `check` task rebuilds the frontend; that cost is accepted rather than hand-splitting the
-  task. The check runs after `build` so a full-stack member's server build exists.
+  task. The check runs after `build` so a full-stack member's server build exists. (Review fix: the
+  stage drops ` main.dev.ts` from its own discarded copy of the `check` task, since `.dockerignore`
+  excludes that file.)
 - **Why:** maintainer decision 2026-11-13 ("a check stage equivalent to Node's `tsc --noEmit` and
   `setu check`"); running the project's own task keeps one definition of "check".
 - **Test home:** `compose.test.ts`; scaffold-image e2e: a Bun and a Deno member with a type error
