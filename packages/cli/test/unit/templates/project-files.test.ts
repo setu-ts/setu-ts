@@ -35,7 +35,7 @@ it.each(['node', 'bun', 'deno'] as const)(
   },
 );
 
-it('marks only a local env file that holds a generated secret (audit F2)', () => {
+it('creates every local env file owner-only, and nothing else (audit F2, N2)', () => {
   const fullStack = projectFiles('shop', 'node', resolveHost(getTemplate('full-stack')!, 'node'));
   expect(fullStack.find((file) => file.path === '.env')?.secret).toBe(true);
   expect(fullStack.find((file) => file.path === '.env.example')?.secret).toBeUndefined();
@@ -45,8 +45,9 @@ it('marks only a local env file that holds a generated secret (audit F2)', () =>
     resolveHost(getTemplate('full-stack')!, 'cloudflare-workers'),
   );
   expect(worker.find((file) => file.path === '.dev.vars')?.secret).toBe(true);
+  // A REST project's .env holds no secret yet; `setu add auth` writes one into it later.
   const rest = projectFiles('api', 'node', resolveHost(getTemplate('rest')!, 'node'));
-  expect(rest.some((file) => file.secret === true)).toBe(false);
+  expect(rest.filter((file) => file.secret === true).map((file) => file.path)).toEqual(['.env']);
 });
 
 it('V11-3 names Node through tsx as the config loader on Workers', () => {

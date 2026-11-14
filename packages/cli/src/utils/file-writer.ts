@@ -89,7 +89,8 @@ export interface GeneratedFile {
    */
   readonly managed?: boolean;
   /**
-   * The file holds a generated secret, so a file this write CREATES is owner-only (`0600`).
+   * The file holds, or is a local env file that will hold, a generated secret, so a file this
+   * write CREATES is owner-only (`0600`).
    * An existing file keeps the mode it has: the operator's choice. Honoured by the
    * regular-file writer the CLI binary installs; a filesystem without it writes as before.
    */

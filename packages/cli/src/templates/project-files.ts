@@ -269,11 +269,6 @@ export function resolveHost(host: TemplateHost, runtime: TargetRuntime): Resolve
   );
 }
 
-/** Whether a template's local env file receives a generated secret value. */
-function holdsGeneratedSecret(variables: readonly EnvVariable[] | undefined): boolean {
-  return (variables ?? []).some((variable) => variable.generated === 'secret');
-}
-
 /**
  * Renders the gitignored dotenv file a generated project starts with.
  *
@@ -2414,7 +2409,9 @@ describe('application composition', () => {
         options?.secret ?? generateSecret,
         manifest.envFilePath,
       ),
-      ...(holdsGeneratedSecret(manifest.envVariables) ? { secret: true } : {}),
+      // Owner-only from creation: a later `setu add auth|session` writes a signing secret into
+      // it, and an existing file keeps its mode (M140c audit N2).
+      secret: true,
     });
     files.push({
       path: `${manifest.envFilePath}.example`,
@@ -2435,7 +2432,9 @@ describe('application composition', () => {
         options?.secret ?? generateSecret,
         '.dev.vars',
       ),
-      ...(holdsGeneratedSecret(manifest.envVariables) ? { secret: true } : {}),
+      // Owner-only from creation: a later `setu add auth|session` writes a signing secret into
+      // it, and an existing file keeps its mode (M140c audit N2).
+      secret: true,
     });
     files.push({
       path: '.dev.vars.example',
