@@ -727,15 +727,17 @@ resolve application data from process.cwd() or pass modules in explicitly.
 Bun runs source with production dependencies on the pinned `oven/bun:1.4.0-alpine`, builds a
 declared frontend script, then runs the member's `check` script, refuses to build without a
 `bun.lock`, and copies the workspace's hoisted-linker bunfig.toml. Every runtime stage sets
-`NODE_ENV=production`. Deno runs the member's `check` task after `build` in its `frontend` stage
-(without `main.dev.ts`, which the image excludes), and builds a declared frontend in that stage on
-`denoland/deno:debian-2.9.5` (Vite's native bundler binding has no musl build, so it cannot run on
-the Alpine image), copies only `build/` into the Alpine image before caching main.ts, then retains
-the frozen, scoped source run. When the root sets `nodeModulesDir: "auto"` (a workspace with a
-full-stack member does), the image switches it to `"manual"` after installing: under `"auto"` every
-start re-syncs `node_modules`, which a read-only root refuses. A full-stack socket server serves its
-own client bundle from `build/client/assets`. Native bun build and deno compile are optional custom
-packaging choices, not generated commands. Workers continues using Wrangler.
+`NODE_ENV=production`. Deno runs the member's `check` task after `build` in a separate `check`
+stage, without the `npmrc` secret and without `main.dev.ts` (which the image excludes); the final
+image copies only that stage's empty marker, so nothing the check writes ships. Deno builds a
+declared frontend in its `frontend` stage on `denoland/deno:debian-2.9.5` (Vite's native bundler
+binding has no musl build, so it cannot run on the Alpine image), copies only `build/` into the
+Alpine image before caching main.ts, then retains the frozen, scoped source run. When the root sets
+`nodeModulesDir: "auto"` (a workspace with a full-stack member does), the image switches it to
+`"manual"` after installing: under `"auto"` every start re-syncs `node_modules`, which a read-only
+root refuses. A full-stack socket server serves its own client bundle from `build/client/assets`.
+Native bun build and deno compile are optional custom packaging choices, not generated commands.
+Workers continues using Wrangler.
 
 Both standalone and workspace ignore files exclude host node_modules, dist, build, coverage, git and
 dotenv files, preserving .env.example, and every `.npmrc`. To use one in the image's install — a
