@@ -43,7 +43,8 @@ spec:
           # the image it built. By hand instead:
           #   docker build -f docker/Dockerfile --build-arg MEMBER=billing -t billing:dev .
           # then push it to a registry this cluster can pull from and put that
-          # reference here.
+          # reference here. :dev with IfNotPresent reuses the node's cached image;
+          # use a new tag after rebuilding. Deploy tags with the commit for this reason.
           image: billing:dev
           imagePullPolicy: IfNotPresent
           ports:
@@ -163,7 +164,8 @@ spec:
           # the image it built. By hand instead:
           #   docker build -f docker/Dockerfile --build-arg MEMBER=orders -t orders:dev .
           # then push it to a registry this cluster can pull from and put that
-          # reference here.
+          # reference here. :dev with IfNotPresent reuses the node's cached image;
+          # use a new tag after rebuilding. Deploy tags with the commit for this reason.
           image: orders:dev
           imagePullPolicy: IfNotPresent
           ports:

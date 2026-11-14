@@ -61,7 +61,9 @@ it('the full-stack Node production preload defaults NODE_ENV before imports and 
   const manifest = JSON.parse(
     await nodeFs.readFile(`${root}/production-start/package.json`, 'utf8'),
   ) as { scripts: Record<string, string> };
-  const token = /--import "([^"]+)"/.exec(manifest.scripts['start']!)?.[1];
+  // \x22 for the double quote: the manifest generator's import scanner misreads a quote
+  // inside a regex literal as a string opening.
+  const token = new RegExp('--import \\x22([^\\x22]+)\\x22').exec(manifest.scripts['start']!)?.[1];
   expect(token).toBeDefined();
   for (const preset of [false, true]) {
     const result = await runProcess(process.execPath, {

@@ -29,7 +29,12 @@ import { COMMAND_HANDLERS, QUERY_HANDLERS } from './src/cqrs/index.ts';
 import { EVENT_HANDLERS } from './src/events/index.ts';
 import { QUEUE_PROCESSORS } from './src/jobs/index.ts';
 import { SERVICE_ENDPOINTS } from './src/discovery/services.ts';
-import { messagingOptions, queueOptions, transportPlugins } from './src/transport/index.ts';
+import {
+  messagingOptions,
+  queueOptions,
+  runtimeOptions,
+  transportPlugins,
+} from './src/transport/index.ts';
 
 /**
  * Builds the application.
@@ -52,9 +57,7 @@ export function createApp(
 ): IKernelApplication {
   const app = createApplication({
     plugins: [
-      // HTTP/2 beside HTTP/1.1 on one port: orders calls Quote over one reused
-      // HTTP/2 connection, while probes and browsers keep HTTP/1.1.
-      RuntimePlugin({ maxBodyBytes: 1_048_576, http2: true }),
+      RuntimePlugin({ ...runtimeOptions(), maxBodyBytes: 1_048_576 }),
       ConfigPlugin({ envFilePath: '.env', envFileOptional: true }),
       LoggerPlugin({
         requestLogging: true,
@@ -65,7 +68,7 @@ export function createApp(
       HttpSecurityPlugin({ requestSize: { maxBodySize: 1_048_576 } }),
       HealthPlugin({ indicators: [...HEALTH_INDICATORS] }),
       MetricsPlugin({ customMetrics: [...CUSTOM_METRICS] }),
-      OpenApiPlugin(),
+      OpenApiPlugin({ errorSchema: 'rfc9457' }),
       MessagingPlugin(messagingOptions()),
       QueuePlugin({ processors: [...QUEUE_PROCESSORS], ...queueOptions() }),
       ResiliencePlugin(),

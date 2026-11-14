@@ -12,6 +12,7 @@ COPY apps/${MEMBER} ./apps/${MEMBER}
 RUN npm run build --workspace apps/${MEMBER}
 
 FROM node:24-alpine AS runtime
+ENV NODE_ENV=production
 ARG MEMBER
 WORKDIR /srv
 COPY package.json package-lock.json* ./
