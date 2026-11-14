@@ -793,6 +793,7 @@ MIT
 | --------------- | --------- |
 | `emitInterrupt` | function  |
 | `nodeProcess`   | function  |
+| `nodeRuntime`   | function  |
 | `runMain`       | function  |
 | `MainProcess`   | interface |
 | `MainRuntime`   | interface |
