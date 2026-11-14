@@ -198,7 +198,7 @@ describe('workspaceK8sFiles', () => {
     )[1]!.contents.replace(/\s+/g, ' ');
     expect(readme).toContain('Kubernetes has no start order between members.');
     expect(readme).toContain(
-      'readiness probe keeps it out of its Service until it answers `/ready`',
+      'A member with probes stays out of its Service until it answers `/ready`',
     );
     expect(readme).toContain('Generated callers resolve a sibling per call');
     expect(readme).toContain(
