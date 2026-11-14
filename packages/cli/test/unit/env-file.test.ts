@@ -53,7 +53,13 @@ describe('readEnvFilePath', () => {
   });
 
   it('rejects a path ending in .example, the committed example name', () => {
-    for (const value of ['.env.example', 'secrets.example', 'config/local.example']) {
+    for (const value of [
+      '.env.example',
+      'secrets.example',
+      'config/local.example',
+      '.env.EXAMPLE',
+      'secrets.Example',
+    ]) {
       const result = readEnvFilePath({ 'env-file': value });
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.message).toContain('must not end in .example');

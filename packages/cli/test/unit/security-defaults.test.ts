@@ -180,6 +180,13 @@ describe('M140a scaffold security defaults', () => {
     ['only a pattern and a .env', '.env*\n', true, '.env*\n.env\n', true],
     ['a later negation', '.env\n!.env\n', true, '.env\n!.env\n.env\n', true],
     ['an .example negation', '.env\n!.env.example\n', true, '.env\n!.env.example\n', false],
+    [
+      'an uppercase .EXAMPLE negation',
+      '.env\n!.env.EXAMPLE\n',
+      true,
+      '.env\n!.env.EXAMPLE\n',
+      false,
+    ],
     ['a broad later negation', '.env\n!*.env\n', true, '.env\n!*.env\n.env\n', true],
     ['the entry after a negation', '!*.env\n.env\n', true, '!*.env\n.env\n', false],
   ] as const)(

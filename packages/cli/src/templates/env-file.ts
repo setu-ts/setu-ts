@@ -70,7 +70,9 @@ export function readEnvFilePath(
   // The CLI writes `<path>.example` as the committed example beside the file,
   // and every ignore file it writes re-includes `*.example`, so a dotenv file
   // whose own name ends in `.example` would be committed and copied into images.
-  if (value.endsWith('.example')) {
+  // Case-insensitive: macOS and Windows filesystems (and Git's core.ignorecase)
+  // treat `.env.EXAMPLE` as the committed `.env.example`.
+  if (/\.example$/i.test(value)) {
     return {
       ok: false,
       message:

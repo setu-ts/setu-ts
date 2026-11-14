@@ -2984,7 +2984,7 @@ function listedLast(text: string, entries: readonly string[]): boolean {
   let negation = -1;
   lines.forEach((line, index) => {
     if (entries.includes(line)) entry = index;
-    else if (line.startsWith('!') && !line.endsWith('.example')) negation = index;
+    else if (line.startsWith('!') && !/\.example$/i.test(line)) negation = index;
   });
   return entry > negation;
 }
