@@ -72,7 +72,7 @@
     "src/metrics/index.ts": "19689d1d27c17e83cf3d14455de53aab3f9c6b641820a0ed60d7bddeaf0cbcee"
   },
   "rest/cloudflare-workers": {
-    "README.md": "b308a61cf33f447b241bbf2795e04e5dbb5d278c79cd7b48c93d2c6866bbae23",
+    "README.md": "dbf5cb67dada39d417d612534746edad6c84330fb4dce1997d9148ba717327e7",
     ".gitignore": "616c4bd0fa34c47784957429dc4f1cc023a8a3e3cb649b617db2490bbd23c69f",
     "test/support/server.ts": "689e7511bc8e1ea4267824907896e2d0a3517c0470bf6c77cd8132de3da9aec4",
     "test/e2e/app.e2e.test.ts": "45b88481e10785078791df2b73b0abf5c5a3a432b7c32cd3a987c795e073c533",
@@ -169,7 +169,7 @@
     "src/jobs/index.ts": "a3536efae42d1898f9ed0388ad1cda267b9d96e03788020dc949337699efec6d"
   },
   "microservice/cloudflare-workers": {
-    "README.md": "d309ea81986f384e6fa3083a95d51b3c00a32037cda70f2f5356171a2c7ae55d",
+    "README.md": "9b2a2d95f46bfd9b7af4019b3d16ea8a4efafa53e54bf74aa5d8a4a15a1ebd84",
     ".gitignore": "616c4bd0fa34c47784957429dc4f1cc023a8a3e3cb649b617db2490bbd23c69f",
     "test/support/server.ts": "689e7511bc8e1ea4267824907896e2d0a3517c0470bf6c77cd8132de3da9aec4",
     "test/e2e/app.e2e.test.ts": "07fbe686c627f71c326e96113106d514563d47004ec1e963d9b19402c5ad364e",
@@ -270,7 +270,7 @@
     "src/ingress/index.ts": "6ab6f035d5f4398adb996e6ee1a132dd45276e7bc97b0dc0c45c5855ba0809e4"
   },
   "class-based/cloudflare-workers": {
-    "README.md": "b308a61cf33f447b241bbf2795e04e5dbb5d278c79cd7b48c93d2c6866bbae23",
+    "README.md": "dbf5cb67dada39d417d612534746edad6c84330fb4dce1997d9148ba717327e7",
     ".gitignore": "616c4bd0fa34c47784957429dc4f1cc023a8a3e3cb649b617db2490bbd23c69f",
     "test/support/server.ts": "689e7511bc8e1ea4267824907896e2d0a3517c0470bf6c77cd8132de3da9aec4",
     "test/e2e/app.e2e.test.ts": "45b88481e10785078791df2b73b0abf5c5a3a432b7c32cd3a987c795e073c533",

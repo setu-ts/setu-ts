@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { runtimeEnvRead } from '../../../src/templates/env-fallback.ts';
+import { runtimeEnvRead, withNullishEnvReads } from '../../../src/templates/env-fallback.ts';
 
 /** Imports a rendered JavaScript expression with the supplied runtime environment. */
 async function readExpression(expression: string, env: Record<string, string>): Promise<unknown> {
@@ -26,4 +26,22 @@ it('renders an empty-means-unset runtime environment read', async () => {
 it('keeps a quoted fallback a literal', async () => {
   const fallback = "it's a fallback";
   expect(await readExpression(runtimeEnvRead('PORT', fallback), {})).toBe(fallback);
+});
+
+it('rewrites only the listed current reads to the nullish form earlier releases wrote', () => {
+  const source =
+    `const port = Number(${runtimeEnvRead('PORT', '3000')});\n` +
+    `const vitePort = Number(${runtimeEnvRead('VITE_PORT', '5173')});\n` +
+    `const other = ${runtimeEnvRead('OTHER', 'x')};\n`;
+  expect(
+    withNullishEnvReads(source, [
+      ['PORT', '3000'],
+      ['VITE_PORT', '5173'],
+    ]),
+  ).toBe(
+    "const port = Number(runtime.env.PORT ?? '3000');\n" +
+      "const vitePort = Number(runtime.env.VITE_PORT ?? '5173');\n" +
+      "const other = runtime.env.OTHER || 'x';\n",
+  );
+  expect(withNullishEnvReads(source, [])).toBe(source);
 });

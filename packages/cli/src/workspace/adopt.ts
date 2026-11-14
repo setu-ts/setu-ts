@@ -542,7 +542,8 @@ export function rewriteEntryPort(
   // Both shipped forms: the current entry reads PORT from the runtime services
   // (X4-10), and a project scaffolded before that carries the literal. Quotes
   // are either kind because Prettier may have rewritten the file.
-  const current = /await app\.start\(\{ port: Number\(runtime\.env\.PORT \|\| (['"])3000\1\) \}\);/;
+  const current =
+    /await app\.start\(\{ port: Number\(runtime\.env\.PORT (?:\|\||\?\?) (['"])3000\1\) \}\);/;
   const legacy = /await app\.start\(\{ port: 3000 \}\);/;
   const binding = current.exec(entry) ?? legacy.exec(entry);
   if (binding === null) return undefined;
@@ -582,7 +583,7 @@ export function rewriteEntryPort(
   return withImport
     .replace(binding[0], `await app.start({ port: ${symbol} });`)
     .replace(
-      /console\.log\(`Listening on http:\/\/localhost:\$\{Number\(runtime\.env\.PORT \|\| (['"])3000\1\)\}\/`\);/,
+      /console\.log\(`Listening on http:\/\/localhost:\$\{Number\(runtime\.env\.PORT (?:\|\||\?\?) (['"])3000\1\)\}\/`\);/,
       `console.log(\`Listening on http://localhost:\${${symbol}}/\`);`,
     );
 }

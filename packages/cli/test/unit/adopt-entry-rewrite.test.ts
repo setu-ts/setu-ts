@@ -195,6 +195,25 @@ describe('rewriteEntryPort', () => {
     );
   });
 
+  // M140b changed the generated read to logical-or; every earlier release, and
+  // the shipped `--example` entries, still carry the nullish form.
+  it('rewrites an entry an earlier release wrote with the nullish read', () => {
+    for (const runtime of ['deno', 'node', 'bun'] as const) {
+      const nullish = standaloneEntry(runtime).replaceAll(
+        "runtime.env.PORT || '3000'",
+        "runtime.env.PORT ?? '3000'",
+      );
+      expect(nullish).toContain("runtime.env.PORT ?? '3000'");
+      const rewritten = rewriteEntryPort(nullish, SERVICE_PORT_EXPORT, DISCOVERY_SPECIFIER);
+      expect(rewritten).toContain(`await app.start({ port: ${SERVICE_PORT_EXPORT} });`);
+      // Deno's entry logs nothing; Node and Bun log the bound address.
+      if (runtime !== 'deno') {
+        expect(rewritten).toContain(`Listening on http://localhost:\${${SERVICE_PORT_EXPORT}}/`);
+      }
+      expect(rewritten).not.toContain('runtime.env.PORT');
+    }
+  });
+
   it('accepts double quotes in both pieces, as Prettier may leave them', () => {
     const entry =
       `import { createApp } from "./setu.config.ts";\n` +

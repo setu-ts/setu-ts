@@ -296,7 +296,11 @@ function envFileContents(
         '# A deployed Worker reads secrets set with wrangler secret put instead.\n'
       : '# The local start scripts read it into the environment before the process starts.\n');
   if (variables.length === 0) return header;
-  return `${header}# The values below are development placeholders. Replace them before deploying.\n${variables
+  const placeholders =
+    file === '.dev.vars'
+      ? '# The values below are development placeholders and stay local; set the deployed\n# values with wrangler secret put.\n'
+      : '# The values below are development placeholders. Replace them before deploying.\n';
+  return `${header}${placeholders}${variables
     .map(
       (variable) =>
         `\n# ${variable.description}\n${variable.name}=${variable.generated === 'secret' ? secret() : variable.develop}`,
@@ -2048,7 +2052,8 @@ function workersDeploySection(host: ResolvedHost): string {
   return `
 ## Deploy
 
-Uncomment the \`wrangler.toml\` bindings CloudflarePlugin names.${devVars ? ' `.dev.vars` is local only.' : ''}
+Before the first deploy, fill in any \`wrangler.toml\` binding the project uses: the commented
+stanzas there are placeholders.${devVars ? ' `.dev.vars` is local only.' : ''}
 ${setup.length === 0 ? '' : `\n\`\`\`bash\n${setup.join('\n')}\n\`\`\`\n`}
 \`\`\`bash
 npm run deploy

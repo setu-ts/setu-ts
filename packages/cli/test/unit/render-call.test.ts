@@ -39,7 +39,7 @@ const LAYOUTS: readonly (readonly [string, string, string, string, number?])[] =
     "CachePlugin({\n        store: 'redis',\n        options: { client: nodeRedisClient(Deno.env.get('REDIS_URL') || 'redis://127.0.0.1:6379') },\n      })",
   ],
   [
-    'an overflowing ?? chain continues one level in',
+    'an overflowing logical-or chain continues one level in',
     'MessagingPlugin',
     "{ url: Deno.env.get('A_VERY_LONG_ENVIRONMENT_VARIABLE_NAME_FOR_THE_BROKER') || 'redis://a-very-long-host-name.internal.example:6379' }",
     "MessagingPlugin({\n        url: Deno.env.get('A_VERY_LONG_ENVIRONMENT_VARIABLE_NAME_FOR_THE_BROKER') ||\n          'redis://a-very-long-host-name.internal.example:6379',\n      })",

@@ -391,8 +391,7 @@ describe('M101f lifecycle refusals and allocation', () => {
         'utf8',
       );
     expect(devEntryVariants(5123)).toContain(fixture('member'));
-    // M140b deliberately does not recognise the old standalone ?? port read.
-    expect(devEntryVariants(4919, false)).not.toContain(fixture('standalone'));
+    expect(devEntryVariants(4919, false)).toContain(fixture('standalone'));
 
     const fs = createFakeFs({
       ...seed,

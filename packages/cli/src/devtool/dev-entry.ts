@@ -16,7 +16,7 @@
  * @module
  */
 
-import { runtimeEnvRead } from '../templates/env-fallback.ts';
+import { runtimeEnvRead, withNullishEnvReads } from '../templates/env-fallback.ts';
 import { DISCOVERY_SPECIFIER, SERVICE_PORT_EXPORT } from '../workspace/discovery-module.ts';
 import { isUsablePort } from '../workspace/manifest.ts';
 import type { EntryPort } from '../templates/project-files.ts';
@@ -193,8 +193,7 @@ export { DEVTOOL_ENTRY_MODULE };
 /**
  * CLI-owned renderings at this port: current Deno and Node entries, the previous
  * Deno entry, its unpinned-guidance predecessor, and the pre-probe 0.8.0 entry.
- * Every variant renders the current port read (M140b's logical-or), so an entry
- * an earlier release wrote with the nullish read is treated as hand-edited.
+ * Each also appears with the nullish port read every release before M140b wrote.
  */
 export function devEntryVariants(devtoolPort: number, member = true): readonly string[] {
   const input: DevEntryInput = {
@@ -224,9 +223,13 @@ export function devEntryVariants(devtoolPort: number, member = true): readonly s
     renderEntry(input, true, 'deno'),
     renderEntry(input, true, 'node'),
   ];
-  return [
+  const released = [
     ...variants,
-    ...variants.map((entry) => entry.replace(/--no-lock (?=npm:@setu-ts\/cli@)/g, '')),
+    ...variants.map((entry) => withNullishEnvReads(entry, [['PORT', '3000']])),
+  ];
+  return [
+    ...released,
+    ...released.map((entry) => entry.replace(/--no-lock (?=npm:@setu-ts\/cli@)/g, '')),
   ];
 }
 

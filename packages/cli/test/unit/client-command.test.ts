@@ -474,7 +474,7 @@ describe('project client generation', () => {
     expect(h.err.join('\n')).toContain('Run `deno install`');
     expect(h.importFromProject).not.toHaveBeenCalled();
     expect(h.loadApp).not.toHaveBeenCalled();
-    // A Workers project carries a deno.json for plugin gating; it is not told to run deno install.
+    // A Workers project with a hand-added deno.json is not told to run deno install.
     const workers = harness({
       '/app/deno.json': '{"imports":{}}',
       '/app/wrangler.toml': '',

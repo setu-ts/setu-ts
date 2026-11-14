@@ -192,8 +192,9 @@ describe('node-redis CLI', () => {
   });
 
   it('keeps every ioredis variant byte-identical to captured develop output', async () => {
-    // Except the one deliberate change: `setu add` on Deno wrote its call on one
-    // line, which the project's own `deno fmt --check` refused; it is laid out now.
+    // Except the deliberate changes declared below. The first: `setu add` on Deno
+    // wrote its call on one line, which the project's own `deno fmt --check`
+    // refused; it is laid out now.
     const read = "url: Deno.env.get('REDIS_URL') ??\n          'redis://127.0.0.1:6379'";
     const joined = "url: Deno.env.get('REDIS_URL') ?? 'redis://127.0.0.1:6379'";
     const relaid: Record<string, readonly [string, string]> = {

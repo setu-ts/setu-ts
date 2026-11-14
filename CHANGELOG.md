@@ -336,14 +336,20 @@ All notable changes to this project are documented here. The format follows
 ### Fixed
 
 - **V12-102, V12-103, V12-104, V12-105, V12-106, V12-107, V12-109, V12-118, V12-80, V12-124 (M140b,
-  `@setu-ts/cli`).** Workers projects no longer emit `deno.json`; `setu add queue` refuses an
-  isolate-local memory queue and points to Cloudflare queues. Generated Workers exports share
-  application acquisition and release, and Wrangler queue/Cron instructions match the exports
-  present. The Durable Object example uses the realtime binding. Every Workers README includes
-  deployment, queue creation and secret setup, explains isolate metrics and external health checks,
-  and uses Workers configuration wording without TLS proxy instructions. Module storage comments
-  describe isolate memory. Deno production instructions name only available tasks. Empty port,
-  broker, Redis and discovery environment values now use their generated defaults on every runtime.
+  `@setu-ts/cli`).** Workers projects no longer emit `deno.json`. `setu add queue` is refused on
+  Workers, because its default queue lives in one isolate's memory, and `setu generate job` there
+  names that reason instead of suggesting the refused command; use
+  `CloudflarePlugin({ queue: { binding } })` with a `queue` export. The Workers entry routes `fetch`
+  and every export through one `withApplication`, and the `wrangler.toml` queue and Cron comments
+  match the exports the entry has. The commented Durable Object example uses the realtime
+  backplane's `REALTIME` binding. Every Workers README has a Deploy section (queue creation where
+  the template declares queues, `wrangler secret put` for each generated secret) and, where `/live`,
+  `/ready` and `/metrics` are served, says what they mean on Workers. The full-stack README omits
+  its TLS-proxy section on Workers, and `.dev.vars` describes `wrangler dev`. The module sample's
+  storage comment names isolate memory. A Deno README lists only tasks the project has. An empty
+  port, broker, Redis or discovery value now falls back to the generated default on every runtime,
+  in `config.get` reads too; `setu adopt` and the dev-entry recognizers still accept the nullish
+  form earlier releases wrote.
 
 - **V12-58 (#585, `@setu-ts/cli`):** the workspace `AGENTS.md` and the root `README.md` transport
   section mask the userinfo of a `brokerUrl` override, keeping the host and the default fallback.

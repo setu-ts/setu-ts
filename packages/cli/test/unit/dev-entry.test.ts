@@ -36,7 +36,7 @@ describe('renderDevEntry', () => {
     });
   }
   for (const member of [false, true]) {
-    it(`recognizes the captured 0.10.0 ${member ? 'member' : 'standalone'} entry only when its port form is current`, async () => {
+    it(`recognizes the captured pre-change 0.10.0 ${member ? 'member' : 'standalone'} entry verbatim`, async () => {
       const source = await readFile(
         new URL(
           `../fixtures/dev-entry-0.10.0-${member ? 'member' : 'standalone'}.txt`,
@@ -44,15 +44,13 @@ describe('renderDevEntry', () => {
         ),
         'utf8',
       );
-      // M140b: a standalone capture uses ?? and is now treated as hand-edited.
-      // A member imports its port and is unaffected by the fallback change.
-      expect(
-        devEntryVariants(4919, member).includes(
-          source.replaceAll('@setu-ts/cli@0.10.0', `@setu-ts/cli@${VERSION}`),
-        ),
-      ).toBe(member);
-      expect(isDevEntry(source, 4919, member)).toBe(member);
-      expect(devEntryPort(source, member)).toBe(member ? 4919 : undefined);
+      // The capture pins the CLI it was written by; renderings pin the running one.
+      expect(devEntryVariants(4919, member)).toContain(
+        source.replaceAll('@setu-ts/cli@0.10.0', `@setu-ts/cli@${VERSION}`),
+      );
+      // Recognition itself normalizes the version, so the raw capture still matches.
+      expect(isDevEntry(source, 4919, member)).toBe(true);
+      expect(devEntryPort(source, member)).toBe(4919);
     });
   }
   it('recognises ports only in complete current and previous CLI renderings', () => {

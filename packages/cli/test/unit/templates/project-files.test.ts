@@ -955,7 +955,7 @@ describe('M140b runtime output', () => {
       // Only full-stack declares variables, so only it writes `.dev.vars`.
       expect(readme.includes('`.dev.vars` is local only')).toBe(name === 'full-stack');
       expect(files.some((file) => file.path === '.dev.vars')).toBe(name === 'full-stack');
-      expect(readme).toContain('bindings CloudflarePlugin names');
+      expect(readme).toContain('the commented\nstanzas there are placeholders');
       expect(readme.includes('Cloudflare does not probe a Worker')).toBe(name !== 'minimal');
       expect(readme.includes('only the isolate that answers')).toBe(name !== 'minimal');
       const wrangler = contentsOf(files, 'wrangler.toml');
@@ -979,6 +979,9 @@ describe('M140b runtime output', () => {
       if (name === 'full-stack') {
         expect(readme.match(/npx wrangler secret put SESSION_SECRET/g)).toHaveLength(1);
         expect(readme).toContain('Everything in `build/client`');
+        const devVars = contentsOf(files, '.dev.vars');
+        expect(devVars).toContain('set the deployed\n# values with wrangler secret put');
+        expect(devVars).not.toContain('Replace them before deploying');
       }
     });
   }

@@ -10,7 +10,7 @@
  * @module
  */
 
-import { runtimeEnvRead } from './env-fallback.ts';
+import { runtimeEnvRead, withNullishEnvReads } from './env-fallback.ts';
 import type { TargetRuntime } from '../constants.ts';
 import type { EntryPort } from './project-files.ts';
 import type { GeneratedFile } from '../utils/file-writer.ts';
@@ -490,11 +490,7 @@ for (const signal of ['SIGTERM', 'SIGINT'] as const) {
   };
 }
 
-/**
- * Current and recognition-only 0.12.0-shaped standalone entries, for workspace
- * adoption. Both render the current port reads (M140b's logical-or), so a file
- * 0.12.0 wrote with the nullish reads is treated as hand-edited.
- */
+/** Current and recognition-only 0.12.0 standalone entries, for workspace adoption. */
 export function fullStackDevEntryVariants(
   runtime: TargetRuntime,
 ): readonly { path: string; contents: string }[] {
@@ -515,5 +511,10 @@ export function fullStackDevEntryVariants(
     .replace(', type IRuntimeServices', '')
     .replace('const runtime: IRuntimeServices =', 'const runtime =')
     .replace('  console.log(`Listening on http://localhost:${port}/`);\n', '');
-  return [current, { path: current.path, contents: legacy }];
+  // 0.12.0 wrote the nullish port reads M140b replaced.
+  const released = withNullishEnvReads(legacy, [
+    ['PORT', '3000'],
+    ['VITE_PORT', '5173'],
+  ]);
+  return [current, { path: current.path, contents: released }];
 }

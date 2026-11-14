@@ -60,9 +60,11 @@ describe('generated Workers entry boot semantics (X9-8)', () => {
     // malformed request.
     expect(entry).toContain("console.error('setu: request failed', error)");
     expect(entry).toContain("new Response('Internal Server Error', { status: 500 })");
-    // The request catch is INSIDE the shared callback, before the outer boot catch.
+    // The request catch comes before the outer boot catch in the text; the 500
+    // and 503 behaviour tests below prove the nesting itself.
     const bootCatch = entry.indexOf("console.error('setu: application failed to start'");
     const fetchCall = entry.indexOf('await app.fetch(request)');
+    expect(fetchCall).toBeGreaterThanOrEqual(0);
     expect(fetchCall).toBeLessThan(bootCatch);
     // Still no stack in either body.
     expect(entry).not.toContain('String(error)');
