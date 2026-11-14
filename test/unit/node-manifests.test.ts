@@ -145,6 +145,24 @@ describe('classifyMember — the §3.1 classification table', () => {
 });
 
 describe('classifyMember — the committed overrides', () => {
+  it('makes the validation Zod value import an optional peer with a dev mirror', () => {
+    const input = member('packages/validation-plugin', '@setu-ts/validation-plugin', {
+      'src/zod/index.ts': "import { z } from 'zod';",
+    });
+    const { classified, refusals } = classifyMember(input, new Map());
+    expect(refusals).toEqual([]);
+    expect(classified.dependencies.has('zod')).toBe(false);
+    expect(classified.peerDependencies.get('zod')).toBe('^4.6.6');
+    expect(classified.devDependencies.get('zod')).toBe('^4.6.6');
+    const manifest = JSON.parse(renderPackageJson(input, classified));
+    expect(manifest.peerDependenciesMeta.zod.optional).toBe(true);
+  });
+  it('refuses an optional-peer override when no import remains', () => {
+    const input = member('packages/validation-plugin', '@setu-ts/validation-plugin');
+    expect(classifyMember(input, new Map()).refusals.join('\n')).toContain(
+      'override packages/validation-plugin → zod matches nothing',
+    );
+  });
   it('adds declarations for packages used only by tests without creating a runtime dependency', () => {
     for (const [dir, name, dependency, types] of [
       ['packages/database-plugin', '@setu-ts/database-plugin', 'pg', '@types/pg'],

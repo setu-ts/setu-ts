@@ -4,9 +4,9 @@ Zod-compatible request validation. Registers a validation service under `CAPABIL
 (`'validation'`) and ships middleware helpers for body, query, params, headers, and cookies.
 
 Schemas are duck-typed through the public `safeParse` method. The supported Zod range is
-**`>=4.6.6 <5`**, and validation is tested with Zod 4 only. The plugin does not import Zod;
-applications install their own supported version. `pnpm run check:compat` exercises validation and
-OpenAPI generation with Zod 4.
+**`>=4.6.6 <5`**, and validation is tested with Zod 4 only. The main entry does not import Zod;
+applications install their own supported version. The optional `/zod` subpath imports Zod.
+`pnpm run check:compat` exercises validation and OpenAPI generation with Zod 4.
 
 ## Installation
 
@@ -94,11 +94,57 @@ The form is converted to a record before validation:
   refuses a file part and a schema checks the `FormFile` shape instead;
 - numbers and booleans arrive as strings — use `z.coerce` in the schema for them.
 
-Stated limits: the generated OpenAPI document still describes a validated body as
-`application/json`; the session plugin's `_csrf` field reaches the schema, where a Zod object strips
-the unknown key by default and `forbidNonWhitelisted` (or the schema's own `.strict()`) refuses it;
-and an over-limit body answers `413` when `RuntimePlugin({ maxBodyBytes })` is set — previously such
-a body answered `400` on a validated route.
+The document lists form media types only when every body validator on the route has `forms: true`.
+
+### File fields
+
+Install `zod` (`^4.6.6`) in applications that import `@setu-ts/validation-plugin/zod`. It is an
+optional peer of validation-plugin, needed only by this subpath; the main entry still accepts
+schemas through `safeParse` without importing Zod.
+
+```typescript
+import { z } from 'zod';
+import { validateBody } from '@setu-ts/validation-plugin';
+import { formFile } from '@setu-ts/validation-plugin/zod';
+
+const body = validateBody(
+  z.object({
+    file: formFile({ mimeTypes: ['image/png', 'image/jpeg'], maxBytes: 1_000_000 }),
+  }),
+  { forms: true },
+);
+
+app.router.post('/uploads', {
+  middleware: [body],
+  handler: (ctx) => ctx.response.json({ filename: body.value(ctx).file.filename }),
+});
+```
+
+`formFile(options?)` returns a Zod schema for one `FormFile` field. `mimeTypes`, when supplied, must
+be non-empty and contain only `type/subtype` or `type/*` entries; entries are lower-cased.
+`maxBytes` must be a positive safe integer. Invalid options throw `TypeError` when `formFile` is
+called. Request validation reports these issues through the route's configured 400 error format:
+
+- `Expected a file` when the value lacks the `FormFile` shape;
+- `File type is not accepted` when the part's type is not a single valid media type or its essence
+  matches no accepted entry — the client's type is not echoed;
+- `File exceeds <maxBytes> bytes` when its parsed byte length exceeds the bound.
+
+The checked media type is the part's `Content-Type` essence, trimmed and lower-cased with parameters
+removed; a value with a comma or any character outside printable ASCII, or whose essence (as sent,
+before lower-casing) is not one `type/subtype`, is refused rather than matched. It is
+**client-supplied, never sniffed**, and the handler receives it as sent: never serve `file.mimeType`
+back as a `Content-Type`. The `filename` is client-supplied too: never use it as a path or trust the
+claimed type for a security decision. `maxBytes` runs after the whole body is parsed, so it is not a
+DoS control; use the request-size bound `RuntimePlugin({ maxBodyBytes })`.
+
+For an array of files, a single file arrives as a scalar unless the field name ends `[]`. Use a name
+such as `files[]` and the matching schema key, since the form record preserves that name as written.
+
+Stated limits: the session plugin's `_csrf` field reaches the schema, where a Zod object strips the
+unknown key by default and `forbidNonWhitelisted` (or the schema's own `.strict()`) refuses it; and
+an over-limit body answers `413` when `RuntimePlugin({ maxBodyBytes })` is set — previously such a
+body answered `400` on a validated route.
 
 ## Options
 
@@ -141,6 +187,8 @@ identity and behaviour are unchanged, and removing it would change nothing this 
 
 ## Exports
 
+### `@setu-ts/validation-plugin`
+
 | Export                       | Kind      |
 | ---------------------------- | --------- |
 | `createSanitizer`            | function  |
@@ -166,6 +214,13 @@ identity and behaviour are unchanged, and removing it would change nothing this 
 | `ValidatedOutput`            | type      |
 | `ValidationErrorFormatter`   | type      |
 | `ValidatorMiddleware`        | type      |
+
+### `@setu-ts/validation-plugin/zod`
+
+| Export            | Kind      |
+| ----------------- | --------- |
+| `formFile`        | function  |
+| `FormFileOptions` | interface |
 
 Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.

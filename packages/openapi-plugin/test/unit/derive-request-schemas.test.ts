@@ -60,7 +60,7 @@ describe('deriveRequestSchemas', () => {
 
     const body = doc.paths['/orders']?.post?.requestBody;
     expect(body?.required).toBe(true);
-    expect(body?.content['application/json'].schema).toEqual({
+    expect(body?.content['application/json']?.schema).toEqual({
       type: 'object',
       properties: { sku: { type: 'string', minLength: 1 }, qty: { type: 'number' } },
       required: ['sku', 'qty'],
@@ -134,7 +134,7 @@ describe('deriveRequestSchemas', () => {
     const op = doc.paths['/orders']?.post;
     // Declared body wins…
     expect(
-      Object.keys(op?.requestBody?.content['application/json'].schema.properties ?? {}),
+      Object.keys(op?.requestBody?.content['application/json']?.schema.properties ?? {}),
     ).toEqual(['declared']);
     // …while the query, which is NOT declared, is still derived.
     expect(op?.parameters?.map((p) => p.name)).toEqual(['q']);
@@ -180,7 +180,7 @@ describe('deriveRequestSchemas', () => {
 
     expect(
       Object.keys(
-        doc.paths['/orders']?.post?.requestBody?.content['application/json'].schema.properties ??
+        doc.paths['/orders']?.post?.requestBody?.content['application/json']?.schema.properties ??
           {},
       ),
     ).toEqual(['second']);

@@ -131,6 +131,7 @@ interface ClientRequest<TBody = never> {
   query?: Record<string, string | string[]>;
   headers?: Record<string, string>;
   json?: TBody;
+  multipart?: object;
   idempotencyKey?: string;
   signal?: AbortSignal;
 }
@@ -141,6 +142,14 @@ interface ClientRequest<TBody = never> {
   the per-origin circuit breaker and rate limiter.
 - Query values are encoded; arrays repeat the key.
 - `json` is serialized with `JSON.stringify`; `Content-Type: application/json` is set automatically.
+- `multipart` accepts a `FormData`, sent as given, or a plain object of flat fields — any other body
+  (`URLSearchParams`, `Map`, a class instance) throws `TypeError`. In a plain object, `undefined` is
+  skipped; `Blob` or `File` is appended as a file; strings are kept; numbers, booleans and bigints
+  use `String()`; arrays repeat the key. A `File` keeps its name and the runtime names a bare `Blob`
+  `blob`. `null`, nested arrays and other objects throw `TypeError` naming the field. `json` and
+  `multipart` are mutually exclusive; supplying both throws `TypeError` before request interceptors
+  run. The client removes any `Content-Type` — merged, or set by a request interceptor — so the
+  runtime sets the multipart boundary, and re-sends the same `FormData` on a retry.
 - `signal` aborts fetches, queued waits, and retry attempts.
 
 ### Response
@@ -374,7 +383,11 @@ TypeScript function. Its options are `factoryName`, `apiTypeName` and `sdkImport
 
 The generated factory accepts an `IHttpClient` and returns typed operation methods. Schema mapping
 covers the M21 vocabulary: primitives, arrays, objects with `required`, `$ref`, `enum`, `const`,
-`anyOf`, `allOf`, `additionalProperties`, `null`, and `integer`.
+`anyOf`, `allOf`, `additionalProperties`, `null`, and `integer`. A string with `format: 'binary'`
+maps to `globalThis.Blob` — qualified, so a component schema named `Blob` cannot capture it (a
+`File` is assignable). A generated method sends `json` when the request body lists
+`application/json`, otherwise `multipart` when it lists `multipart/form-data`, regardless of map
+order. Optional multipart bodies omit the request key when no body is supplied.
 
 `SdkOpenApiOperation.deprecated?: boolean` marks a deprecated operation. Only `deprecated: true`
 emits `/** @deprecated */` above its interface member, so an editor flags `api.oldOperation()`; the
@@ -494,16 +507,23 @@ their callers.
 `generateOpenApiClient` throws `OpenApiCodegenError` — carrying `path` and `method` where they apply
 — rather than emitting a client that misbehaves or does not compile:
 
-| Condition                                                        | Why it is rejected                                                                                                                                             |
-| ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Missing `operationId`                                            | No name to derive a method from                                                                                                                                |
-| Two operations deriving onto one method name                     | Duplicate declaration; both originals are named                                                                                                                |
-| Two emitted TYPE names colliding                                 | Duplicate declaration; one registry covers every emitted name. A HOISTED alias is the exception and does NOT throw — it allocates (see the naming rules above) |
-| Parameter with `in: 'cookie'`                                    | Unsupported location                                                                                                                                           |
-| Path placeholder with no matching `in: 'path'` parameter         | Emitted source would reference an undeclared argument                                                                                                          |
-| `in: 'path'` parameter absent from the path template             | The caller's value would be silently dropped                                                                                                                   |
-| Two placeholders in one template deriving onto one argument name | Duplicate parameter in the emitted signature                                                                                                                   |
-| Malformed local `$ref`                                           | No component name to resolve                                                                                                                                   |
+| Condition                                                                                                | Why it is rejected                                                                                                                                                                                                                       |
+| -------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Missing `operationId`                                                                                    | No name to derive a method from                                                                                                                                                                                                          |
+| Two operations deriving onto one method name                                                             | Duplicate declaration; both originals are named                                                                                                                                                                                          |
+| Two emitted TYPE names colliding                                                                         | Duplicate declaration; one registry covers every emitted name. A HOISTED alias is the exception and does NOT throw — it allocates (see the naming rules above)                                                                           |
+| Parameter with `in: 'cookie'`                                                                            | Unsupported location                                                                                                                                                                                                                     |
+| Path placeholder with no matching `in: 'path'` parameter                                                 | Emitted source would reference an undeclared argument                                                                                                                                                                                    |
+| `in: 'path'` parameter absent from the path template                                                     | The caller's value would be silently dropped                                                                                                                                                                                             |
+| Two placeholders in one template deriving onto one argument name                                         | Duplicate parameter in the emitted signature                                                                                                                                                                                             |
+| Malformed local `$ref`                                                                                   | No component name to resolve                                                                                                                                                                                                             |
+| Request body content lists only unsupported media types                                                  | The generated method would drop the body; `OpenApiCodegenError` names the media types, `path` and `method`. List `application/json` or `multipart/form-data` for that body.                                                              |
+| `multipart/form-data` body schema not an object of form fields                                           | `multipart` sends a flat object, so a primitive, a missing schema, a schema that is not a plain `type: 'object'` (no top-level `anyOf`, `oneOf`, `allOf`, `enum` or `const`), or a `$ref` that does not resolve to one could not be sent |
+| `multipart/form-data` field whose schema is an object or `null`, or an array of objects, arrays or nulls | `encodeMultipart` sends only flat values, so every call would throw; the error names the field                                                                                                                                           |
+
+That body refusal reads
+`request body media types … are not supported: the generated method would drop the body`. Before
+M137c, such an operation silently generated a method with no body argument.
 
 ## Outbound HTTP observations (devtool)
 

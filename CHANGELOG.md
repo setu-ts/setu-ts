@@ -49,6 +49,17 @@ All notable changes to this project are documented here. The format follows
   class-level authorization is accepted only when the gateway declares its own handshake guards.
 - **`@setu-ts/react-router-plugin` (M140a, #589).** A missing server build names the build task to
   run before starting the application.
+- **Form routes document their encodings and codegen refuses unsupported request bodies (M137c,
+  #590, `@setu-ts/common`, `@setu-ts/validation-plugin`, `@setu-ts/openapi-plugin`,
+  `@setu-ts/sdk`).** A `forms: true` route's document now lists `application/json`,
+  `application/x-www-form-urlencoded` and `multipart/form-data`, or multipart alone when it has a
+  file field. `setu client --check` reports drift once; regenerate with `setu client`. Codegen now
+  refuses an operation whose only request body media types it cannot send, instead of silently
+  generating a method without a body argument. `OpenApiRequestBody.content['application/json']` is
+  now optional, since a file route lists `multipart/form-data` alone: code reading
+  `requestBody.content['application/json'].schema` from `OpenApiDocument` needs `?.` or a check for
+  the media type.
+
 - **Generated OpenAPI documents list derived errors and order responses by status (M137b, #588,
   `@setu-ts/openapi-plugin`, `@setu-ts/rest-starter`, `@setu-ts/cli`).** A route carrying a guard,
   body validator, route-level rate limiter or idempotency middleware now documents the errors that
@@ -172,6 +183,18 @@ All notable changes to this project are documented here. The format follows
   write. The `grpc-workspace` example's orders member calls billing through `grpcClient`.
 
 ### Added
+
+- **Form bodies and file uploads in the document and the client (M137c, #590, `@setu-ts/common`,
+  `@setu-ts/validation-plugin`, `@setu-ts/openapi-plugin`, `@setu-ts/sdk`).** `formFile` and
+  `FormFileOptions` from `@setu-ts/validation-plugin/zod` validate a file field's shape, accepted
+  media types and parsed byte length; `zod` is an optional peer needed only by that subpath.
+  `FORM_FILE_METADATA`, `FormFileMetadata`, `withFormFileMetadata` and `formFileMetadataOf` carry
+  its constraints without a Zod dependency in common. `RouteValidationMetadata.forms` records the
+  form opt-in. `OpenApiEncoding` and `OpenApiMediaTypeObject` describe multipart encoding and
+  request-body content; binary fields carry `format: binary` and
+  `OpenApiSchemaObject.contentMediaType`. `multipart` on `ClientRequest` sends flat form fields and
+  files with a runtime-generated boundary, and generated clients select JSON when listed, otherwise
+  multipart, with binary strings typed as `Blob`.
 
 - **Derived error responses and declared response headers (M137b, #588, `@setu-ts/common`,
   `@setu-ts/openapi-plugin`, `@setu-ts/auth-plugin`, `@setu-ts/decorator-plugin`,

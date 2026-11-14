@@ -2,7 +2,7 @@
  * Internal HttpClient implementation.
  *
  * Composes URL building, query serialization, request/response interceptors,
- * JSON body serialization/parsing, retry, circuit breaker, rate limiting, and
+ * JSON and multipart body serialization, response parsing, retry, circuit breaker, rate limiting, and
  * abort support. Not exported from the barrel — consumers receive `IHttpClient`.
  *
  * @internal
@@ -20,6 +20,7 @@ import type {
 import type { CircuitBreakerPolicy } from '@setu-ts/common';
 
 import { HttpClientError } from '../errors.ts';
+import { encodeMultipart } from './multipart.ts';
 import { createCircuitBreaker } from '../circuit-breaker/circuit-breaker.ts';
 import { markExecuted, runWithRetry, validateRetryPolicy } from '../retry/retry-strategy.ts';
 import type { ResolvedClientIdempotencyOptions } from './idempotency-key.ts';
@@ -197,10 +198,17 @@ export class HttpClient implements IHttpClient {
     }
 
     // Build request body.
-    let body: string | undefined;
+    if (req.json !== undefined && req.multipart !== undefined) {
+      throw new TypeError('json and multipart are mutually exclusive');
+    }
+    let body: string | FormData | undefined;
     if (req.json !== undefined) {
       body = JSON.stringify(req.json);
       headers.set('Content-Type', 'application/json');
+    }
+    if (req.multipart !== undefined) {
+      body = encodeMultipart(req.multipart);
+      headers.delete('Content-Type');
     }
 
     // Idempotency: set ONE key now, before the interceptors and the retry
@@ -236,6 +244,9 @@ export class HttpClient implements IHttpClient {
     for (const interceptor of this.#requestInterceptors) {
       await interceptor(requestContext);
     }
+    // Again after the interceptors: a `Content-Type` one of them sets would
+    // reach the wire without the boundary the runtime writes for `FormData`.
+    if (body instanceof FormData) headers.delete('Content-Type');
 
     // Extract origin for per-origin policy gates.
     const origin = url.origin;

@@ -264,6 +264,7 @@ package fits the plugin architecture.
 | `fallbackErrorHint`                   | function  |
 | `fallbackErrorStatus`                 | function  |
 | `formEncodingOf`                      | function  |
+| `formFileMetadataOf`                  | function  |
 | `fromNodeRedis`                       | function  |
 | `fromNullable`                        | function  |
 | `fullJitterDelay`                     | function  |
@@ -338,6 +339,7 @@ package fits the plugin architecture.
 | `vectorRecordKey`                     | function  |
 | `watchConnection`                     | function  |
 | `withDeadline`                        | function  |
+| `withFormFileMetadata`                | function  |
 | `withHttpStatusHint`                  | function  |
 | `withIdempotencyMetadata`             | function  |
 | `withMcpToolMetadata`                 | function  |
@@ -382,6 +384,7 @@ package fits the plugin architecture.
 | `DEFAULT_SECRET_FIELD_PATTERNS`       | const     |
 | `ERROR_RESPONDER_BRAND`               | const     |
 | `ERROR_RESPONDER_STATE_KEY`           | const     |
+| `FORM_FILE_METADATA`                  | const     |
 | `HTTP_STATUS_HINT`                    | const     |
 | `IDEMPOTENCY_METADATA`                | const     |
 | `IDEMPOTENCY_RECORD_KIND`             | const     |
@@ -461,6 +464,7 @@ package fits the plugin architecture.
 | `FlagContext`                         | interface |
 | `FormBody`                            | interface |
 | `FormFile`                            | interface |
+| `FormFileMetadata`                    | interface |
 | `GraphqlConnectionInfo`               | interface |
 | `GraphqlExecutionOutcome`             | interface |
 | `GraphqlExecutionResult`              | interface |

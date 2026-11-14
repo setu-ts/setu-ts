@@ -155,6 +155,51 @@ describe('ZodToOpenApi — zod v4 (plain transform)', () => {
     expect(reasons[0]).toContain('date');
   });
 
+  it('reports a described, meta-tagged or refined unrepresentable node once, with and without a hook', () => {
+    // `.describe()`/`.meta()` clones carry only annotations over their
+    // original's `{}`; the report names the original's type, once per path.
+    const hook: SchemaNodeHook = () => undefined;
+    for (const withHook of [false, true]) {
+      for (const [field, type] of [
+        [z4.date().describe('when'), 'date'],
+        [z4.custom(() => true).describe('x'), 'custom'],
+        [z4.map(z4.string(), z4.string()).meta({ title: 'Lookup' }), 'map'],
+        [z4.date().refine(() => true), 'date'],
+        [z4.date(), 'date'],
+      ] as const) {
+        const reasons: string[] = [];
+        const transformer = new ZodToOpenApi(withHook ? hook : undefined, {
+          onUnrepresentable: (diagnostic) => reasons.push(diagnostic.reason),
+        });
+        transformer.transform(z4.object({ field }));
+        expect(reasons, `${type} (hook: ${withHook})`).toEqual([
+          `zod v4 type '${type}' has no JSON Schema representation`,
+        ]);
+      }
+    }
+  });
+
+  it('stays silent for a described any/unknown and for a clone a hook replaces', () => {
+    const reasons: string[] = [];
+    const replaced = z4.custom(() => true);
+    const hook: SchemaNodeHook = (schema) =>
+      schema === replaced || (schema as { _zod?: { parent?: unknown } })._zod?.parent === replaced
+        ? { type: 'string', format: 'binary' }
+        : undefined;
+    const transformer = new ZodToOpenApi(hook, {
+      onUnrepresentable: (diagnostic) => reasons.push(diagnostic.reason),
+    });
+    const result = transformer.transform(
+      z4.object({
+        anything: z4.any().describe('free'),
+        whatever: z4.unknown().meta({ title: 'W' }),
+        file: replaced.refine(() => true),
+      }),
+    );
+    expect(reasons).toEqual([]);
+    expect(result.properties?.file).toEqual({ type: 'string', format: 'binary' });
+  });
+
   it('does NOT report legitimately empty schemas (`any`/`unknown`) as unrepresentable', () => {
     const reasons: string[] = [];
     const transformer = new ZodToOpenApi(undefined, {

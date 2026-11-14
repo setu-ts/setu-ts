@@ -52,6 +52,28 @@ fail configuration without echoing the value. `setu check` now warns with `setu.
 installed zero-config provider or MCP plugin has no call in `setu.config.ts`; if another module
 registers it, silence that id in `.setu-ts/check.json`.
 
+### Form bodies and file uploads (M137c, `@setu-ts/validation-plugin`, `@setu-ts/openapi-plugin`, `@setu-ts/sdk`)
+
+Run `setu client` once to regenerate clients for routes with `forms: true`: `setu client --check`
+reports drift until regeneration. Their document now lists JSON, urlencoded and multipart, or
+multipart alone when a file field is present. Generated binary fields are typed `Blob`; a `File` is
+assignable and keeps its name, while a bare `Blob` is named `blob` by the runtime.
+
+Install `zod` (`^4.6.6`) when using `formFile` from `@setu-ts/validation-plugin/zod`. It is an
+optional peer needed only by that subpath.
+
+An operation whose request body lists only unsupported media types now throws `OpenApiCodegenError`
+with `path` and `method`:
+`request body media types … are not supported: the generated method would drop the body`. Previously
+it silently generated a method with no body argument. List `application/json` or
+`multipart/form-data` for that body, matching what the route accepts. Codegen selects JSON when
+listed, otherwise multipart.
+
+Code that reads a document through the `OpenApiDocument` type and indexes
+`requestBody.content['application/json'].schema` no longer compiles under `strict`: the JSON entry
+is optional because a file route lists `multipart/form-data` alone. Use `?.`, or check which media
+type the body lists.
+
 ### Derived error responses (M137b, `@setu-ts/openapi-plugin`, `@setu-ts/rest-starter`, `@setu-ts/cli`)
 
 The generated OpenAPI document now lists the errors a route's guards, body validator, route-level

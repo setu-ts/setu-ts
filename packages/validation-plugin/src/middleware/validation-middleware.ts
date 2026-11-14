@@ -241,7 +241,7 @@ export function buildValidationMiddleware<S>(
 
         return respond(ctx, formatter(result.error, ctx), isProblemJson);
       },
-      { target, schema },
+      { target, schema, ...(forms ? { forms: true as const } : {}) },
     ),
     target,
     token,
@@ -393,7 +393,11 @@ function bindHelper<S>(
         }
         await entry.built(ctx, next);
       },
-      { target, schema },
+      {
+        target,
+        schema,
+        ...(target === 'body' && options?.forms === true ? { forms: true as const } : {}),
+      },
     ),
     target,
     token,

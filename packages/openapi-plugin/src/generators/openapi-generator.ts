@@ -20,6 +20,7 @@ import {
   isRouteExcluded,
 } from './declared-operation-ids.ts';
 import { buildDocumentMetadata, validateDocumentMetadata } from './document-metadata.ts';
+import { fileMetadataOf, formFileFieldsOf } from './form-fields.ts';
 import {
   collectErrorFacts,
   deriveErrorStatuses,
@@ -289,10 +290,24 @@ export interface OpenApiRequestBody {
   readonly required: boolean;
   /** Content types. */
   readonly content: {
-    readonly 'application/json': {
-      readonly schema: OpenApiSchemaObject;
-    };
+    readonly 'application/json'?: OpenApiMediaTypeObject;
+    readonly 'application/x-www-form-urlencoded'?: OpenApiMediaTypeObject;
+    readonly 'multipart/form-data'?: OpenApiMediaTypeObject;
   };
+}
+
+/** Per-field multipart encoding constraints. @since 0.13.0 */
+export interface OpenApiEncoding {
+  /** Accepted MIME types, separated by commas. */
+  readonly contentType?: string;
+}
+
+/** A request body's schema and optional multipart encodings. @since 0.13.0 */
+export interface OpenApiMediaTypeObject {
+  /** Schema shared by every accepted media type. */
+  readonly schema: OpenApiSchemaObject;
+  /** Multipart encoding constraints keyed by field name. */
+  readonly encoding?: Readonly<Record<string, OpenApiEncoding>>;
 }
 
 /**
@@ -966,16 +981,45 @@ export class OpenApiGenerator {
     const parameters = this.#buildParameters(route, schema, operationId);
 
     // Build request body from body schema
-    const requestBody = schema?.body
-      ? {
+    let requestBody: OpenApiRequestBody | undefined;
+    if (schema?.body) {
+      const resolved = this.#resolveSchema(schema.body, `${operationId}Body`, 'input');
+      const brands = (route.definition.middleware ?? [])
+        .map(validationMetadataOf)
+        .filter((brand) => brand?.target === 'body');
+      const forms = brands.length > 0 && brands.every((brand) => brand?.forms === true);
+      const files = formFileFieldsOf(schema.body);
+      const media = { schema: resolved };
+      if (!forms) {
+        requestBody = { required: true, content: { 'application/json': media } };
+      } else if (files.size === 0) {
+        requestBody = {
           required: true,
           content: {
-            'application/json': {
-              schema: this.#resolveSchema(schema.body, `${operationId}Body`, 'input'),
+            'application/json': media,
+            'application/x-www-form-urlencoded': media,
+            'multipart/form-data': media,
+          },
+        };
+      } else {
+        const encoding = Object.fromEntries(
+          [...files].flatMap(([key, metadata]) =>
+            metadata.mimeTypes === undefined
+              ? []
+              : [[key, { contentType: metadata.mimeTypes.join(', ') }]],
+          ),
+        );
+        requestBody = {
+          required: true,
+          content: {
+            'multipart/form-data': {
+              ...media,
+              ...(Object.keys(encoding).length === 0 ? {} : { encoding }),
             },
           },
-        }
-      : undefined;
+        };
+      }
+    }
 
     // Build responses from response schema. A route carrying a validation
     // brand with a schema answers 400 when validation fails — whether or not
@@ -1682,6 +1726,16 @@ export class OpenApiGenerator {
     // The node currently BEING hoisted must transform normally, or it would
     // answer itself with a `$ref` to the component it is building.
     if (this.#hoisting.has(schema)) return undefined;
+
+    if (fileMetadataOf(schema) !== undefined) {
+      const description = (schema as { description?: unknown }).description;
+      return {
+        type: 'string',
+        format: 'binary',
+        contentMediaType: 'application/octet-stream',
+        ...(typeof description === 'string' ? { description } : {}),
+      };
+    }
 
     if (this.#pass === 'count') {
       const bucket = this.#bucket(schema);

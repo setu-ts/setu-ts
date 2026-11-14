@@ -102,12 +102,18 @@ export const EXTERNAL_RANGES: Readonly<Record<string, string>> = {
 export interface Override {
   readonly package: string;
   readonly dependency: string;
-  readonly kind: 'regular-dependency' | 'dev-dependency-types';
+  readonly kind: 'regular-dependency' | 'dev-dependency-types' | 'optional-peer';
   readonly reason: string;
 }
 
 /** The committed overrides (M111a plan §3.1), each with its reason. */
 export const OVERRIDES: readonly Override[] = [
+  {
+    package: 'packages/validation-plugin',
+    dependency: 'zod',
+    kind: 'optional-peer',
+    reason: 'only the `./zod` subpath imports it (M137c)',
+  },
   {
     package: 'packages/openapi-plugin',
     dependency: '@types/swagger-ui-dist',
