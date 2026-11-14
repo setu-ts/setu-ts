@@ -2,7 +2,11 @@ import { resolve } from 'node:path';
 import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 import { generateOpenApiClient, OpenApiCodegenError } from '../../src/index.ts';
-import type { SdkOpenApiDocument, SdkOpenApiRequestBody } from '../../src/index.ts';
+import type {
+  SdkOpenApiDocument,
+  SdkOpenApiRequestBody,
+  SdkOpenApiSchema,
+} from '../../src/index.ts';
 
 const schema = {
   type: 'object',
@@ -126,6 +130,57 @@ describe('codegen form bodies', () => {
         ),
       ).toContain('multipart: opts.body,');
     }
+  });
+  it('refuses a multipart field the encoder can never send, naming it (review)', () => {
+    const components = {
+      schemas: {
+        Meta: { type: 'object', properties: { a: { type: 'string' } } },
+        Tags: { type: 'array', items: { type: 'string' } },
+      },
+    };
+    const body = (properties: Record<string, unknown>): SdkOpenApiDocument => ({
+      ...doc({
+        required: true,
+        content: {
+          'multipart/form-data': {
+            schema: { type: 'object', properties } as SdkOpenApiSchema,
+          },
+        },
+      }),
+      components,
+    });
+    for (const [field, properties] of [
+      ['metadata', { metadata: { type: 'object' } }],
+      ['meta', { meta: { $ref: '#/components/schemas/Meta' } }],
+      ['rows', { rows: { type: 'array', items: { type: 'object' } } }],
+      ['grid', { grid: { type: 'array', items: { $ref: '#/components/schemas/Tags' } } }],
+      ['bad\nname', { 'bad\nname': { type: 'object' } }],
+    ] as const) {
+      try {
+        generateOpenApiClient(body(properties));
+        expect.fail(`must refuse ${field}`);
+      } catch (error) {
+        expect(error).toBeInstanceOf(OpenApiCodegenError);
+        expect((error as Error).message).toContain(
+          `field '${field.replace('\n', '')}' is not a flat form value`,
+        );
+      }
+    }
+    // Flat fields, arrays of them, enums, composed and untyped fields pass.
+    expect(
+      generateOpenApiClient(
+        body({
+          title: { type: 'string' },
+          count: { type: 'integer' },
+          file: { type: 'string', format: 'binary' },
+          files: { type: 'array', items: { type: 'string', format: 'binary' } },
+          tags: { $ref: '#/components/schemas/Tags' },
+          kind: { enum: ['a', 'b'] },
+          either: { anyOf: [{ type: 'string' }, { type: 'number' }] },
+          anything: {},
+        }),
+      ),
+    ).toContain('multipart: opts.body,');
   });
   it('type-checks the emitted client and a File caller under exact optional types', () => {
     const files = new Map<string, string>();

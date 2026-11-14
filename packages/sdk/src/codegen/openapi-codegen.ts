@@ -623,6 +623,19 @@ function resolveComponentRef(
   return current;
 }
 
+/**
+ * A document-supplied field name, made safe for an error message: control
+ * characters are dropped and the length is bounded.
+ *
+ * @param field - The property name as written in the document
+ * @returns The name for display
+ */
+function sanitizeFieldForMessage(field: string): string {
+  // eslint-disable-next-line no-control-regex -- control characters are what it drops
+  const clean = field.replace(/[\u0000-\u001f\u007f]/g, '');
+  return clean.length > 64 ? `${clean.slice(0, 64)}…` : clean;
+}
+
 function getBodySchema(
   op: SdkOpenApiOperation,
   path: string,
@@ -658,6 +671,21 @@ function getBodySchema(
         path,
         method,
       );
+    }
+    // A field `encodeMultipart` can never send — one whose schema can only be
+    // an object, or an array of objects or arrays — would type-check and then
+    // throw on every call. Composed, enum and untyped fields can hold a flat
+    // value, so they are left to the encoder's own runtime refusal.
+    for (const [field, raw] of Object.entries(resolved.properties ?? {})) {
+      const value = resolveComponentRef(raw, schemas);
+      const items = value?.type === 'array' ? resolveComponentRef(value.items, schemas) : undefined;
+      if (value?.type === 'object' || items?.type === 'object' || items?.type === 'array') {
+        throw new OpenApiCodegenError(
+          `multipart/form-data request body field '${sanitizeFieldForMessage(field)}' is not a flat form value: the generated method could not send it`,
+          path,
+          method,
+        );
+      }
     }
     return { schema, encoding: 'multipart' };
   }
