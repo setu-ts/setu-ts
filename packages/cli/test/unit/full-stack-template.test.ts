@@ -87,9 +87,11 @@ it('V12-61 evaluates the rendered proxy switch for every accepted and refused va
         )!.contents,
       ).toContain('TRUST_FORWARDED_HOST=');
     }
-    expect(files.find((file) => file.path === 'README.md')!.contents).toContain(
-      'TRUST_FORWARDED_HOST=true',
-    );
+    expect(
+      files
+        .find((file) => file.path === 'README.md')!
+        .contents.includes('TRUST_FORWARDED_HOST=true'),
+    ).toBe(runtime !== 'cloudflare-workers');
   }
 });
 
@@ -108,8 +110,8 @@ it('X87-2 renders member app and Vite ports from discovery and preserves standal
     const standalone = projectFiles('web', runtime, host).find(
       (file) => file.path === 'dev.ts',
     )!.contents;
-    expect(standalone).toContain("Number(runtime.env.PORT ?? '3000')");
-    expect(standalone).toContain("Number(runtime.env.VITE_PORT ?? '5173')");
+    expect(standalone).toContain("Number(runtime.env.PORT || '3000')");
+    expect(standalone).toContain("Number(runtime.env.VITE_PORT || '5173')");
   }
 });
 
@@ -971,5 +973,16 @@ it('M139a executes the generated login with a real session and rotates its id', 
     await after.text();
   } finally {
     await app.stop();
+  }
+});
+
+it('M140b describes SSR neutrally and omits TLS proxy instructions on Workers', () => {
+  for (const runtime of ['node', 'cloudflare-workers'] as const) {
+    const files = projectFiles('shop', runtime, resolveHost(getTemplate('full-stack')!, runtime));
+    const config = files.find((file) => file.path === 'setu.config.ts')!.contents;
+    expect(config).toContain('Supplied by the entry: the compiled server build in production');
+    expect(
+      files.find((file) => file.path === 'README.md')!.contents.includes('## Behind a TLS proxy'),
+    ).toBe(runtime === 'node');
   }
 });

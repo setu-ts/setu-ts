@@ -100,13 +100,10 @@ describe('functional hosts and generated test tasks', () => {
         const tasks = manifest.tasks ?? manifest.scripts!;
         if (name === 'full-stack' || name === 'rest' || name === 'microservice') {
           const dependencies = JSON.parse(
-            contentsOf(
-              files,
-              target === 'deno' || target === 'cloudflare-workers' ? 'deno.json' : 'package.json',
-            ),
+            contentsOf(files, target === 'deno' ? 'deno.json' : 'package.json'),
           ) as { imports?: Record<string, string>; dependencies?: Record<string, string> };
           expect(dependencies.imports?.['zod'] ?? dependencies.dependencies?.['zod']).toBe(
-            target === 'deno' || target === 'cloudflare-workers' ? 'npm:zod@^4.6.6' : '^4.6.6',
+            target === 'deno' ? 'npm:zod@^4.6.6' : '^4.6.6',
           );
         }
         const unit =
@@ -247,7 +244,7 @@ describe('the entry port', () => {
   // reads PORT, defaulting to 3000 so a project with no `.env` is unchanged.
   it('reads PORT from the environment, defaulting to 3000', () => {
     const main = contentsOf([...projectFiles('svc', 'deno', host)], 'main.ts');
-    expect(main).toContain("await app.start({ port: Number(runtime.env.PORT ?? '3000') });");
+    expect(main).toContain("await app.start({ port: Number(runtime.env.PORT || '3000') });");
   });
 
   // The read goes through IRuntimeServices, never `Deno.env`/`process.env`:
@@ -598,13 +595,13 @@ describe('the Cloudflare Workers target', () => {
     expect(entry).toContain('createApp(env, waitUntil)');
   });
 
-  it('starts with deno serve, which actually binds (X9-7)', () => {
-    // `deno run` on a `fetch` default export binds nothing and exits 0, so a CI
-    // step and a developer's first instinct both read as success.
-    const manifest = JSON.parse(contentsOf(filesOf(rest), 'deno.json')) as {
-      tasks: Record<string, string>;
+  it('uses the npm toolchain without a Deno manifest on Workers', () => {
+    expect(filesOf(rest).some((file) => file.path === 'deno.json')).toBe(false);
+    const pkg = JSON.parse(contentsOf(filesOf(rest), 'package.json')) as {
+      scripts: Record<string, string>;
     };
-    expect(manifest.tasks['start']?.startsWith('deno serve ')).toBe(true);
+    expect(pkg.scripts['dev']).toBe('wrangler dev');
+    expect(pkg.scripts['deploy']).toBe('wrangler deploy');
   });
 
   it('ships a type-check path, which the target had none of (X9-4)', () => {
@@ -926,5 +923,91 @@ describe('the emitted smoke test', () => {
     expect(smokeTest('full-stack', 'node')).toContain('assert.deepStrictEqual(page.status, 200);');
     expect(smokeTest('full-stack', 'bun')).toContain('expect(page.status).toEqual(200);');
     expect(smokeTest('full-stack', 'deno')).toContain('expect(page.status).toEqual(200);');
+  });
+});
+
+describe('M140b runtime output', () => {
+  const hosts = ['minimal', 'rest', 'microservice', 'class-based', 'full-stack'] as const;
+  for (const name of hosts) {
+    it(`${name}: Deno Production commands name real tasks`, () => {
+      const definition = name === 'minimal' ? MINIMAL_HOST : getTemplate(name)!;
+      const files = projectFiles('svc', 'deno', resolveHost(definition, 'deno'));
+      const manifest = JSON.parse(contentsOf(files, 'deno.json')) as {
+        tasks: Record<string, string>;
+      };
+      const production = contentsOf(files, 'README.md').split('## Production')[1]!;
+      const commands = [...production.matchAll(/deno task ([\w:-]+)/g)].map((match) => match[1]!);
+      expect(commands).toContain('start');
+      expect(commands.includes('build')).toBe(name === 'full-stack');
+      for (const command of commands) expect(manifest.tasks).toHaveProperty(command);
+    });
+    it(`${name}: Workers deployment matches the host`, () => {
+      const definition = name === 'minimal' ? MINIMAL_HOST : getTemplate(name)!;
+      const files = projectFiles(
+        'worker',
+        'cloudflare-workers',
+        resolveHost(definition, 'cloudflare-workers'),
+      );
+      expect(files.some((file) => file.path === 'deno.json')).toBe(false);
+      const readme = contentsOf(files, 'README.md');
+      expect(readme.match(/## Deploy\n/g)).toHaveLength(1);
+      expect(readme).toContain('npm run deploy');
+      expect(readme).toContain('`.dev.vars` is local only');
+      expect(readme).toContain('bindings CloudflarePlugin names');
+      expect(readme.includes('Cloudflare does not probe a Worker')).toBe(name !== 'minimal');
+      expect(readme.includes('only the isolate that answers')).toBe(name !== 'minimal');
+      const wrangler = contentsOf(files, 'wrangler.toml');
+      expect(wrangler.includes('CONSUMER — drives the `queue` export')).toBe(
+        name === 'microservice',
+      );
+      if (name !== 'microservice') {
+        expect(wrangler).toContain('src/index.ts does not have yet');
+        expect(wrangler).toContain('withApplication(env, (app) => createQueueHandler(app)(batch))');
+        expect(wrangler).toContain('IQueueMessageBatch');
+      }
+      expect(wrangler).toContain('`scheduled` export, which src/index.ts does not have');
+      expect(wrangler).toContain('createScheduledHandler(cron)(controller)');
+      expect(wrangler).toContain('IScheduledController');
+      expect(wrangler).toContain('name = "REALTIME"');
+      expect(wrangler).toContain("durableObject: { binding: 'REALTIME', topic: '…' }");
+      if (name === 'microservice') {
+        for (const queue of ['messages', 'jobs'])
+          expect(readme).toContain(`npx wrangler queues create ${queue}`);
+      }
+      if (name === 'full-stack') {
+        expect(readme.match(/npx wrangler secret put SESSION_SECRET/g)).toHaveLength(1);
+        expect(readme).toContain('Everything in `build/client`');
+      }
+    });
+  }
+  for (const runtime of ['deno', 'node', 'bun', 'cloudflare-workers'] as const) {
+    for (const name of ['rest', 'full-stack']) {
+      it(`${runtime}/${name}: factory docs name the entry and local env reader`, () => {
+        const files = projectFiles('svc', runtime, resolveHost(getTemplate(name)!, runtime));
+        expect(contentsOf(files, 'setu.config.ts')).toContain(
+          `\`${runtime === 'cloudflare-workers' ? 'src/index.ts' : 'main.ts'}\` owns that`,
+        );
+        if (name === 'full-stack') {
+          const env = contentsOf(files, runtime === 'cloudflare-workers' ? '.dev.vars' : '.env');
+          expect(env).toContain(
+            runtime === 'cloudflare-workers'
+              ? "wrangler dev reads this file into the Worker's env"
+              : 'before the process starts',
+          );
+          if (runtime === 'cloudflare-workers') expect(env).toContain('wrangler secret put');
+        }
+      });
+    }
+  }
+  it('an empty PORT in the generated main.ts falls back to 3000', async () => {
+    const files = projectFiles('svc', 'node', resolveHost(MINIMAL_HOST, 'node'));
+    const expression = contentsOf(files, 'main.ts').match(
+      /port: (Number\(runtime\.env\.PORT[^)]+\))/,
+    )![1]!;
+    const source = `const runtime = { env: { PORT: '' } }; export default ${expression};`;
+    const result: { default: unknown } = await import(
+      `data:text/javascript,${encodeURIComponent(source)}`
+    );
+    expect(result.default).toBe(3000);
   });
 });

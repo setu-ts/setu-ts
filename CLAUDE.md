@@ -825,7 +825,11 @@ here.
   Compose refusals, `JWT_SECRET` resolution with a 32-byte HS256 floor, CSRF rotation on
   `regenerate()`, 1 MiB WebSocket and REST bounds, a 30 s SSE heartbeat, gateway guards, bounded
   `migration --down`; 16 V12 rows; ships in `0.13.0`) — complete (PR #589).
-- **Next milestone** — the remaining M139 letters, then M140b (generated code read as code).
+- **Milestone 140b** (`packages/cli` — Workers, Deno and Bun project output: `setu add queue`
+  refused on Workers, a shared `withApplication` in the Workers entry with `wrangler.toml` comments
+  that match it, no Workers `deno.json`, a Workers `## Deploy` section, an empty env value read as
+  unset; V12-102…V12-109, V12-118, V12-80, V12-124) — complete (PR pending).
+- **Next milestone** — the remaining M139 letters, then M140c–M140e (generated code read as code).
 
 ## Verification (run before declaring any work done)
 

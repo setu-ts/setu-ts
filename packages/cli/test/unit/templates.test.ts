@@ -29,8 +29,7 @@ describe('the scaffolded application smoke test', () => {
           expect(
             files.find((file) => file.path === 'test/e2e/app.e2e.test.ts')?.contents,
           ).toContain('startTestServer');
-          const deno = files.find((file) => file.path === 'deno.json')!.contents;
-          expect(deno).not.toContain('deno test');
+          expect(files.some((file) => file.path === 'deno.json')).toBe(false);
           expect(files.find((file) => file.path === 'README.md')!.contents).toContain(
             'npm run test:e2e',
           );

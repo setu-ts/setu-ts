@@ -62,6 +62,10 @@ describe('generated local start scripts load .env (M131a X88-2)', () => {
       await import('../../src/templates/full-stack-build-files.ts');
     for (const port of [undefined, { symbol: 'PORT', from: './src/discovery/index.ts' }]) {
       const entry = renderFullStackDevEntry(port).contents;
+      if (port === undefined) {
+        expect(entry).toContain("Number(runtime.env.PORT || '3000')");
+        expect(entry).toContain("Number(runtime.env.VITE_PORT || '5173')");
+      }
       expect(entry).toContain('try {\n  server = await vite.createServer');
       expect(entry).toContain('await server?.close();');
       expect(entry).toContain(

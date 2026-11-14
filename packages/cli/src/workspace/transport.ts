@@ -239,28 +239,6 @@ const SQL_EDGE_PASSWORD_VARIABLE = 'MSSQL_SA_PASSWORD';
  */
 const NATS_STREAM_SUBJECTS = ['app.>', 'rr.req.app.>', 'rr.inbox.>'] as const;
 
-/**
- * Re-indents a rendered connection expression by one nesting level.
- *
- * {@linkcode WorkspaceRuntimeProfile.envRead} bakes a FIXED continuation indent
- * into its output (`Deno.env.get('X') ??\n<10 spaces>'fallback'`), which is
- * what `deno fmt` wants for a value sitting directly under a plugin option at
- * eight spaces. Kafka is the one arm that nests the connection inside a bracket
- * — `brokers: [...]` — where the element sits two columns deeper and the
- * formatter therefore wants its continuation two columns deeper too. Emitting
- * the unshifted form made a fresh `--broker kafka` (standalone or workspace)
- * scaffold fail its OWN `deno fmt --check`, which is the bar M63 set.
- *
- * Adds two spaces to every line after the first rather than rewriting a known
- * indent, so it stays correct if a profile ever renders a different one.
- *
- * @param connection - The rendered connection expression
- * @returns The expression, indented for one extra nesting level
- */
-function nestConnection(connection: string): string {
-  return connection.replaceAll('\n', '\n  ');
-}
-
 const BROKER_SPECS: Readonly<Record<BrokerName, BrokerSpec>> = {
   ['memory']: {
     name: 'memory',
@@ -382,10 +360,13 @@ const BROKER_SPECS: Readonly<Record<BrokerName, BrokerSpec>> = {
     // shape differs, which is why each spec renders its own literal instead of a
     // shared `{ broker, url }` template.
     description: 'Kafka broker shared by every member',
+    // The connection goes in as rendered, inside the bracket. `deno fmt` keeps a
+    // logical-or continuation at the element's own column inside an array (a
+    // nullish one it indents two more), and `envRead`'s continuation already
+    // sits at ten, the element's column — so a shifted form fails the project's
+    // own `deno fmt --check` (M63's bar; measured on deno fmt, M140b).
     messagingArgs: (connection) =>
-      `{\n        broker: 'kafka',\n        brokers: [\n          ${nestConnection(
-        connection,
-      )},\n        ],\n      }`,
+      `{\n        broker: 'kafka',\n        brokers: [\n          ${connection},\n        ],\n      }`,
     connection: {
       variable: 'KAFKA_BROKERS',
       localDefault: '127.0.0.1:9092',

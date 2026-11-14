@@ -199,7 +199,7 @@ describe('rewriteEntryPort', () => {
     const entry =
       `import { createApp } from "./setu.config.ts";\n` +
       `\nconst app = await createApp();\n\n` +
-      `await app.start({ port: Number(runtime.env.PORT ?? "3000") });\n`;
+      `await app.start({ port: Number(runtime.env.PORT || "3000") });\n`;
 
     expect(rewriteEntryPort(entry, SERVICE_PORT_EXPORT, DISCOVERY_SPECIFIER)).toContain(
       `await app.start({ port: ${SERVICE_PORT_EXPORT} });`,

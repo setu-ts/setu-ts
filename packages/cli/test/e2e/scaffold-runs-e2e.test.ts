@@ -1129,7 +1129,11 @@ describe('a scaffolded Workers project retries a failed boot and never leaks the
       await run(['new', 'shop', '--template', 'rest', '--runtime', 'cloudflare-workers']),
     ).toBe(0);
     const project = `${root}/shop`;
-    await useWorkspacePackages(project);
+    await expect(nodeFs.stat(`${project}/deno.json`)).rejects.toMatchObject({ code: 'ENOENT' });
+    // This synthetic boot-logic probe runs on Deno with a stub platform sink,
+    // independently of the workerd-backed bundle/install proofs. Its private
+    // config belongs to the probe: Workers scaffolds no longer emit one.
+    await nodeFs.writeFile(`${project}/deno.json`, '{}\n');
 
     // A config whose FIRST construction fails with an error carrying a path
     // marker — under the old memoisation both requests would replay this

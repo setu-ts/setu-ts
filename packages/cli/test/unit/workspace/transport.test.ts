@@ -138,17 +138,15 @@ describe('the broker registry', () => {
     // Kafka is the one arm whose option is a LIST, not a `url` — rendering it
     // like the others would produce a literal the union rejects.
     it('renders kafka as a broker list, not a url', () => {
-      // Broken across lines, and the connection re-indented one level, because
-      // this is the ONE arm nesting it inside a bracket: `deno fmt` wants the
-      // element two columns deeper than a plain option value, and the
-      // single-line form made a `--transport kafka` scaffold fail its own
-      // `deno fmt --check`. `nestConnection` shifts every continuation line, so
-      // a multi-line connection lands where the formatter puts it.
+      // Broken across lines because this is the ONE arm nesting the connection
+      // inside a bracket. A multi-line connection goes in unshifted: `deno fmt`
+      // keeps a logical-or continuation at the element's column (ten) inside an
+      // array, which is where `envRead` already puts it.
       expect(brokerSpec('kafka').messagingArgs?.('CONN')).toBe(
         "{\n        broker: 'kafka',\n        brokers: [\n          CONN,\n        ],\n      }",
       );
-      expect(brokerSpec('kafka').messagingArgs?.('A ??\n          B')).toBe(
-        "{\n        broker: 'kafka',\n        brokers: [\n          A ??\n            B,\n        ],\n      }",
+      expect(brokerSpec('kafka').messagingArgs?.('A ||\n          B')).toBe(
+        "{\n        broker: 'kafka',\n        brokers: [\n          A ||\n          B,\n        ],\n      }",
       );
     });
 
@@ -157,7 +155,7 @@ describe('the broker registry', () => {
     it('reads its connection value from the environment, with the local fallback', () => {
       const redis = brokerSpec('redis').connection;
       expect(renderConnection(redis!, workspaceProfile('deno'))).toBe(
-        `Deno.env.get('REDIS_URL') ??\n          'redis://127.0.0.1:6379'`,
+        `Deno.env.get('REDIS_URL') ||\n          'redis://127.0.0.1:6379'`,
       );
       // `--transport-url` replaces the FALLBACK, not the variable: an override
       // still has to lose to the environment inside a deployed stack.

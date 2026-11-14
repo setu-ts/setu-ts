@@ -30,9 +30,7 @@ it('pins and invokes the CLI in every runtime and template check script', () => 
           `${host.manifest?.npmBuild === undefined ? '' : runtime === 'cloudflare-workers' ? 'npm run build && ' : 'react-router build && '}tsc --noEmit && setu check`,
         );
         if (runtime === 'cloudflare-workers')
-          expect(
-            JSON.parse(files.find((file) => file.path === 'deno.json')!.contents).tasks.check,
-          ).toBeUndefined();
+          expect(files.some((file) => file.path === 'deno.json')).toBe(false);
       }
     }
   }

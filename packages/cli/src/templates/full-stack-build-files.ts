@@ -10,6 +10,7 @@
  * @module
  */
 
+import { runtimeEnvRead } from './env-fallback.ts';
 import type { TargetRuntime } from '../constants.ts';
 import type { EntryPort } from './project-files.ts';
 import type { GeneratedFile } from '../utils/file-writer.ts';
@@ -379,8 +380,8 @@ import { frameworkPackages, workspaceLibraries } from './vite.config.ts';${port 
  */
 const BASE = '/__vite/';
 const runtime: IRuntimeServices = createRuntimeServices();
-const port = ${port === undefined ? `Number(runtime.env.PORT ?? '3000')` : port.symbol};
-const vitePort = ${port === undefined ? `Number(runtime.env.VITE_PORT ?? '5173')` : 'VITE_PORT'};
+const port = ${port === undefined ? `Number(${runtimeEnvRead('PORT', '3000')})` : port.symbol};
+const vitePort = ${port === undefined ? `Number(${runtimeEnvRead('VITE_PORT', '5173')})` : 'VITE_PORT'};
 
 // A file module always has a directory; the fallback only satisfies the type.
 const root = import.meta.dirname ?? '.';

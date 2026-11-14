@@ -8,7 +8,7 @@ import * as nodeFs from 'node:fs/promises';
  * promise — ONE failed boot (a mistyped binding, a broker briefly down at
  * cold start) was permanent for the isolate's life, and the raw error
  * propagated to the client. The entry now claims the boot through
- * `ensureBooted`, which clears itself on rejection so the next request
+ * `withApplication`, whose cache forgets a rejected boot so the next request
  * retries, and `fetch` answers a generic `503` while reporting the real
  * error through `console.error` (sanctioned here: this is CLI-emitted output,
  * and `no-console` exempts `packages/cli`).
@@ -60,10 +60,10 @@ describe('generated Workers entry boot semantics (X9-8)', () => {
     // malformed request.
     expect(entry).toContain("console.error('setu: request failed', error)");
     expect(entry).toContain("new Response('Internal Server Error', { status: 500 })");
-    // `app.fetch` is NOT inside the boot try block.
+    // The request catch is INSIDE the shared callback, before the outer boot catch.
     const bootCatch = entry.indexOf("console.error('setu: application failed to start'");
     const fetchCall = entry.indexOf('await app.fetch(request)');
-    expect(fetchCall).toBeGreaterThan(bootCatch);
+    expect(fetchCall).toBeLessThan(bootCatch);
     // Still no stack in either body.
     expect(entry).not.toContain('String(error)');
   });
@@ -82,10 +82,9 @@ describe('generated Workers entry boot semantics (X9-8)', () => {
     // early would stop an app under a queue batch still running on it.
     const entry = workersEntry(getTemplate('microservice'));
     expect(entry).toContain('async queue(');
-    const acquires = entry.match(/const booted = acquire\(env\);\n {4}try \{/g) ?? [];
-    const releases = entry.match(/\} finally \{\n {6}release\(booted\);\n {4}\}/g) ?? [];
-    expect(acquires).toHaveLength(2);
-    expect(releases).toHaveLength(2);
+    expect(entry.match(/const booted = acquire\(env\);/g)).toHaveLength(1);
+    expect(entry.match(/release\(booted\);/g)).toHaveLength(1);
+    expect(entry.match(/withApplication\(env, async \(app\) =>/g)).toHaveLength(2);
   });
 });
 
@@ -93,6 +92,7 @@ describe('generated Workers entry boot semantics (X9-8)', () => {
 interface BootLog {
   readonly built: string[];
   readonly stopped: string[];
+  readonly batches: string[];
   /** When set, every `fetch` waits on it, so a request can be held open. */
   hold: Promise<void> | undefined;
 }
@@ -101,6 +101,7 @@ interface BootLog {
 interface WorkerModule {
   readonly default: {
     fetch(request: Request, env: Record<string, unknown>): Promise<Response>;
+    queue?(payload: { queue: string }, env: Record<string, unknown>): Promise<void>;
   };
 }
 
@@ -108,15 +109,21 @@ interface WorkerModule {
 const tempDirs: string[] = [];
 let errorSpy: MockInstance<typeof console.error>;
 let expectedFailedBoots = 0;
+let expectedRequestFailures = 0;
 beforeEach(() => {
   expectedFailedBoots = 0;
+  expectedRequestFailures = 0;
   errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 });
 afterEach(() => {
   try {
-    expect(errorSpy).toHaveBeenCalledTimes(expectedFailedBoots);
-    for (const call of errorSpy.mock.calls)
-      expect(call[0]).toBe('setu: application failed to start');
+    expect(
+      errorSpy.mock.calls.filter((call) => call[0] === 'setu: application failed to start'),
+    ).toHaveLength(expectedFailedBoots);
+    expect(errorSpy.mock.calls.filter((call) => call[0] === 'setu: request failed')).toHaveLength(
+      expectedRequestFailures,
+    );
+    expect(errorSpy).toHaveBeenCalledTimes(expectedFailedBoots + expectedRequestFailures);
   } finally {
     errorSpy.mockRestore();
   }
@@ -130,7 +137,9 @@ afterEach(() => {
  * when `env.FAIL_LATER` is. Each call uses a fresh directory, so the entry's
  * module-level cache starts empty.
  */
-async function loadEntry(): Promise<{ worker: WorkerModule['default']; log: BootLog }> {
+async function loadEntry(
+  queue = false,
+): Promise<{ worker: WorkerModule['default']; log: BootLog }> {
   const dir = await tempDir({ prefix: 'workers-entry-' });
   tempDirs.push(dir);
   await nodeFs.mkdir(`${dir}/src`);
@@ -139,9 +148,18 @@ async function loadEntry(): Promise<{ worker: WorkerModule['default']; log: Boot
   // test are independent of where the sink comes from, so the specifier is
   // rewritten to a local stub; the import line itself is pinned verbatim by
   // new-command.test.ts and project-files.test.ts.
-  const rendered = workersEntry().replace(
-    "from 'cloudflare:workers'",
-    "from './cloudflare-workers-stub.mjs'",
+  const rendered = workersEntry(queue ? getTemplate('microservice')! : REST_TEMPLATE)
+    .replace("from 'cloudflare:workers'", "from './cloudflare-workers-stub.mjs'")
+    .replaceAll("from '@setu-ts/cloudflare-plugin'", "from './queue-stub.ts'")
+    .replace("export { ReplyInboxObject } from './reply-inbox-object.ts';", '');
+  await nodeFs.writeFile(
+    `${dir}/src/queue-stub.ts`,
+    `
+export function createQueueHandler(app: { batch(queue: string): Promise<void> }) {
+  return (payload: { queue: string }) => app.batch(payload.queue);
+}
+export const createMessagingHandler = createQueueHandler;
+`,
   );
   await nodeFs.writeFile(`${dir}/src/index.ts`, rendered);
   await nodeFs.writeFile(
@@ -153,6 +171,7 @@ async function loadEntry(): Promise<{ worker: WorkerModule['default']; log: Boot
     `export const log = {
   built: [] as string[],
   stopped: [] as string[],
+  batches: [] as string[],
   hold: undefined as Promise<void> | undefined,
 };
 export function createApp(env: Record<string, unknown>) {
@@ -169,8 +188,14 @@ export function createApp(env: Record<string, unknown>) {
       log.stopped.push(name);
       return Promise.resolve();
     },
+    batch: async (queue: string) => {
+      log.batches.push(queue);
+      if (log.hold !== undefined) await log.hold;
+      if (env.BATCH_FAIL) throw new Error('batch failed');
+    },
     fetch: async () => {
       if (log.hold !== undefined) await log.hold;
+      if (env.REQUEST_FAIL) throw new Error('request failed');
       return new Response(name);
     },
   });
@@ -341,5 +366,65 @@ describe('generated Workers entry keeps one app per binding environment', () => 
     expect((await first).status).toBe(503);
     expect(await body(worker, env)).toBe('x');
     expect(log.built).toEqual(['x', 'a', 'b', 'x']);
+  });
+});
+
+describe('M140b shared application lifetime', () => {
+  it('answers request failures with 500 and releases the application for retirement', async () => {
+    expectedRequestFailures = 1;
+    const { worker, log } = await loadEntry();
+    const response = await worker.fetch(request(), { NAME: 'a', REQUEST_FAIL: true });
+    expect(response.status).toBe(500);
+    expect(await response.text()).toBe('Internal Server Error');
+    await body(worker, { NAME: 'b' });
+    await body(worker, { NAME: 'c' });
+    await settle();
+    expect(log.stopped).toEqual(['a']);
+  });
+  for (const fail of [false, true]) {
+    it(`releases a retired queue application after the batch ${fail ? 'throws' : 'succeeds'}`, async () => {
+      const { worker, log } = await loadEntry(true);
+      let finish = () => {};
+      log.hold = new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      const env = { NAME: 'a', BATCH_FAIL: fail };
+      expect(worker.queue).toBeDefined();
+      const batch = worker.queue!({ queue: 'jobs' }, env);
+      // Observe rejection immediately, while the hold still prevents completion.
+      const observed = batch.then(
+        () => 'ok',
+        (error: unknown) => error,
+      );
+      await settle();
+      log.hold = undefined;
+      await body(worker, { NAME: 'b' });
+      await body(worker, { NAME: 'c' });
+      expect(log.stopped).toEqual([]);
+      finish();
+      if (fail) expect(await observed).toEqual(new Error('batch failed'));
+      else expect(await observed).toBe('ok');
+      await settle();
+      expect(log.stopped).toEqual(['a']);
+      expect(log.batches).toEqual(['jobs']);
+    });
+  }
+  it('shares the boot between fetch and both routed queues and rejects failed boots', async () => {
+    const { worker, log } = await loadEntry(true);
+    const env = { NAME: 'shared' };
+    await body(worker, env);
+    expect(worker.queue).toBeDefined();
+    for (const queue of ['messages', 'jobs']) await worker.queue!({ queue }, env);
+    expect(log.built).toEqual(['shared']);
+    expect(log.batches).toEqual(['messages', 'jobs']);
+    const broken = { NAME: 'bad', FAIL: true };
+    for (let i = 0; i < 2; i++)
+      await expect(worker.queue!({ queue: 'jobs' }, broken)).rejects.toThrow('boot failed');
+    expect(log.built).toEqual(['shared', 'bad', 'bad']);
+    expect(log.batches).toEqual(['messages', 'jobs']);
+    await body(worker, { NAME: 'next' });
+    await body(worker, { NAME: 'last' });
+    await settle();
+    expect(log.stopped).toContain('shared');
   });
 });

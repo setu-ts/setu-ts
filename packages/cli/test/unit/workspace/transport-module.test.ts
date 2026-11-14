@@ -89,7 +89,7 @@ describe('the transport module', () => {
   it('returns the same options the standalone overlay passes, on a plugin-list host', () => {
     const module = renderTransportModule(input({ broker: 'redis' }));
     expect(module).toContain(
-      "  return {\n    broker: 'redis-streams',\n    url: Deno.env.get('REDIS_URL') ??\n      'redis://127.0.0.1:6379',\n  };",
+      "  return {\n    broker: 'redis-streams',\n    url: Deno.env.get('REDIS_URL') ||\n      'redis://127.0.0.1:6379',\n  };",
     );
     expect(module).toContain("    adapter: 'redis',");
   });

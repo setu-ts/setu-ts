@@ -150,15 +150,14 @@ it('X87-2 X87-6 adoption records dev ports and rewrites only canonical entries a
   }
 });
 
-it('M139d review L7 rewrites a 0.12.0 full-stack dev.ts, recognised from its real rendering', async () => {
-  // Rendered by the 0.12.0 template (develop 4ec5eaa01), before M139d's Vite
-  // listen guard and startup line; the recognition variant must equal it.
+it('M140b treats a captured nullish-coalescing full-stack entry as hand-edited', async () => {
+  // Old ?? port reads deliberately have no recognition compatibility.
   const previous = readFileSync(
     new URL('../fixtures/full-stack-dev-entry-0.12.0-node.txt', import.meta.url),
     'utf8',
   );
-  expect(fullStackDevEntryVariants('node')[1]!.contents).toBe(previous);
-  expect(fullStackDevEntryVariants('bun')[1]!.contents).toBe(
+  expect(fullStackDevEntryVariants('node').map((file) => file.contents)).not.toContain(previous);
+  expect(fullStackDevEntryVariants('bun').map((file) => file.contents)).not.toContain(
     readFileSync(
       new URL('../fixtures/full-stack-dev-entry-0.12.0-bun.txt', import.meta.url),
       'utf8',
@@ -173,8 +172,8 @@ it('M139d review L7 rewrites a 0.12.0 full-stack dev.ts, recognised from its rea
     '/work/svc/dev.ts': previous,
   });
   expect(await h.run(['--name', 'web'], new AbortController().signal), h.err.text()).toBe(0);
-  expect(h.fs.read('/work/svc/apps/web/dev.ts')).toContain('const vitePort = VITE_PORT;');
-  expect(h.out.text()).not.toContain('Set the two development port lines');
+  expect(h.fs.read('/work/svc/apps/web/dev.ts')).toBe(previous);
+  expect(h.out.text()).toContain('Set the two development port lines');
 });
 
 it('X87-2 refuses an exhausted development range before moving any project files', async () => {
