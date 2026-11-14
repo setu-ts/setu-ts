@@ -272,7 +272,7 @@ describe('workspaceContainerFiles', () => {
           {
             ...manifestOf([]),
             members: [
-              { name: 'api', port: 3000, envFilePath: 'secrets.env' },
+              { name: 'api', port: 3000, envFilePaths: ['secrets.env'] },
               { name: 'web', port: 3001 },
             ],
           },

@@ -180,7 +180,7 @@ which is what you want during a version bump, when the pinned version is not on 
 The generated workspace `.dockerignore` excludes `**/.env` and `**/.env.*` and keeps
 `!**/.env.example`; the root `.gitignore` ignores `.env`/`.env.*` and keeps the example. The rules
 cover the default `.env` and any name beginning `.env.`. A custom `--env-file name` that does not
-match those patterns is recorded on the member as `envFilePath` by `setu generate app`, `setu adopt`
+match those patterns is recorded on the member's `envFilePaths` by `setu generate app`, `setu adopt`
 and `setu add auth|session`, and the managed `.dockerignore` lists it by its path from the workspace
 root (for example `apps/billing/local.env`): that file sits at the workspace root, and a pattern
 without a slash matches only there. Because the file is regenerated from the record, the entry
@@ -535,11 +535,13 @@ such as `SESSION_SECRET` and `JWT_SECRET`. `generate app` records a template's g
 transport section. Adoption records no generated secrets. Names must match `^[A-Z][A-Z0-9_]*$`;
 malformed entries refuse the member, while absent or empty lists are omitted.
 
-A member's optional `envFilePath` records a custom dotenv path that the generic `.env`/`.env.*`
-rules do not cover. `generate app --env-file`, `setu adopt` and `setu add auth|session` record it,
-and the managed root `.dockerignore` lists it as `apps/<member>/<path>` on every regeneration, so an
-image never copies the member's secrets. The path follows the `--env-file` grammar: relative
-segments of letters, digits, `.`, `_` and `-`.
+A member's optional `envFilePaths` records the custom dotenv paths that the generic `.env`/`.env.*`
+rules do not cover. `generate app --env-file`, `setu adopt` and `setu add auth|session` add to it,
+and the managed root `.dockerignore` lists each as `apps/<member>/<path>` on every regeneration, so
+an image never copies the member's secrets. The list only grows: a path stays listed after the
+config moves to another file, because the old file may still hold a secret the CLI generated. Each
+path follows the `--env-file` grammar: relative segments of letters, digits, `.`, `_` and `-`, not
+ending in `.example`, which is the committed example's name.
 
 Compose requires a separate shell value per member, overriding its development `.env`. For a member
 named `web` with both secrets, export its required keys before starting the stack:

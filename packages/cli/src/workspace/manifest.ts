@@ -140,12 +140,14 @@ export interface WorkspaceMember {
    */
   readonly generatedSecrets?: readonly string[];
   /**
-   * The member's custom dotenv path, relative to its directory, when the
-   * generated `.env`/`.env.*` rules do not already cover it. The managed root
-   * `.dockerignore` lists it, so an image never copies the member's secrets.
+   * Custom dotenv paths, relative to the member's directory, that the generated
+   * `.env`/`.env.*` rules do not already cover. The managed root
+   * `.dockerignore` lists each, so an image never copies the member's secrets.
+   * Append-only: a path is never dropped, because the file it names may still
+   * hold a secret the CLI generated.
    * @since 0.13.0
    */
-  readonly envFilePath?: string;
+  readonly envFilePaths?: readonly string[];
   /**
    * The IPv4 loopback port this member's local diagnostics connector listens
    * on, when the devtool opt-in recorded one.
@@ -416,15 +418,20 @@ function toMember(value: unknown): WorkspaceMember | undefined {
   const port = record['port'];
   const dependsOn = record['dependsOn'];
   const generatedSecrets = record['generatedSecrets'];
-  const envFilePath = record['envFilePath'];
+  const envFilePaths = record['envFilePaths'];
   if (typeof name !== 'string' || !isMemberName(name)) return undefined;
   // The path is rendered into the managed .dockerignore, so it is held to the
   // same grammar `--env-file` is: relative segments of [A-Za-z0-9._-] only.
-  if (envFilePath !== undefined) {
-    if (typeof envFilePath !== 'string') return undefined;
-    const parsed = readEnvFilePath({ 'env-file': envFilePath });
-    if (!parsed.ok || parsed.path !== envFilePath) return undefined;
-  }
+  if (
+    envFilePaths !== undefined &&
+    (!Array.isArray(envFilePaths) ||
+      !envFilePaths.every((entry) => {
+        if (typeof entry !== 'string') return false;
+        const parsed = readEnvFilePath({ 'env-file': entry });
+        return parsed.ok && parsed.path === entry;
+      }))
+  )
+    return undefined;
   if (typeof port !== 'number') return undefined;
   if (
     generatedSecrets !== undefined &&
@@ -471,7 +478,7 @@ function toMember(value: unknown): WorkspaceMember | undefined {
     ...(generatedSecrets === undefined || generatedSecrets.length === 0
       ? {}
       : { generatedSecrets }),
-    ...(envFilePath === undefined ? {} : { envFilePath }),
+    ...(envFilePaths === undefined || envFilePaths.length === 0 ? {} : { envFilePaths }),
     ...(devtoolPort === undefined ? {} : { devtoolPort }),
     ...(dependsOn === undefined ? {} : { dependsOn }),
     ...(typeof healthProbes === 'boolean' ? { healthProbes } : {}),

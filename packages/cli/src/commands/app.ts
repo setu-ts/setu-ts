@@ -804,7 +804,7 @@ export async function runAppCommand(args: ParsedArgs, deps: AppDependencies): Pr
         name,
         port,
         ...(generatedSecrets.length === 0 ? {} : { generatedSecrets }),
-        ...(envFilePath === undefined ? {} : { envFilePath }),
+        ...(envFilePath === undefined ? {} : { envFilePaths: [envFilePath] }),
         ...(devtoolPort === undefined ? {} : { devtoolPort }),
         ...(dependsOn.length === 0 ? {} : { dependsOn }),
         // Read from the FLAG rather than the resolved template, because the

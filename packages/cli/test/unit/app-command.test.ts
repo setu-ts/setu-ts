@@ -881,14 +881,20 @@ describe('runAppCommand', () => {
         await custom.run(['app', 'billing', '--template', 'rest', '--env-file', 'local.env']),
       ).toBe(0);
       expect(custom.fs.read('/ws/.dockerignore').split('\n')).toContain('apps/billing/local.env');
-      expect(custom.fs.read('/ws/setu.workspace.json')).toContain('"envFilePath": "local.env"');
+      expect(
+        (
+          JSON.parse(custom.fs.read('/ws/setu.workspace.json')) as {
+            members: { name: string; envFilePaths?: string[] }[];
+          }
+        ).members.find((member) => member.name === 'billing')?.envFilePaths,
+      ).toEqual(['local.env']);
 
       const covered = harness([{ name: 'orders', port: 3000 }]);
       expect(
         await covered.run(['app', 'billing', '--template', 'rest', '--env-file', '.env.prod']),
       ).toBe(0);
       expect(covered.fs.read('/ws/.dockerignore')).not.toContain('apps/billing/');
-      expect(covered.fs.read('/ws/setu.workspace.json')).not.toContain('envFilePath');
+      expect(covered.fs.read('/ws/setu.workspace.json')).not.toContain('envFilePaths');
     });
   });
 

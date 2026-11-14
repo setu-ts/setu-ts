@@ -21,9 +21,10 @@ All notable changes to this project are documented here. The format follows
   when there is none (as Rails does for `config/master.key`), with a `git rm --cached` hint when the
   file already existed; a custom `--env-file` path is excluded from the generated `.dockerignore`,
   and `setu add auth|session` lists a custom env path in an existing `.dockerignore` (a workspace
-  member's path is recorded as `envFilePath` and listed in the managed root `.dockerignore`); a
-  manifest whose members' secrets map to one Compose variable is refused; and the generated
-  `runMigrations` refuses a rollback count that is not a positive whole number or `Infinity`.
+  member's paths are recorded in `envFilePaths`, append-only, and listed in the managed root
+  `.dockerignore`; an env path ending in `.example` is refused); a manifest whose members' secrets
+  map to one Compose variable is refused; and the generated `runMigrations` refuses a rollback count
+  that is not a positive whole number or `Infinity`.
 - **BREAKING — `@setu-ts/session-plugin` (M140a, #589).** Regeneration clears form CSRF while
   preserving other data. Fetch a fresh token after sign-in or MFA promotion. Secret resolution now
   checks configuration before the environment; supply an explicit option to override it.

@@ -2510,7 +2510,9 @@ async function addOne(
             ? {
                 ...entry,
                 generatedSecrets: [...new Set([...secrets, variableName])],
-                ...(memberEnvFile === undefined ? {} : { envFilePath: memberEnvFile }),
+                ...(memberEnvFile === undefined
+                  ? {}
+                  : { envFilePaths: [...new Set([...(entry.envFilePaths ?? []), memberEnvFile])] }),
               }
             : entry,
         ),
@@ -2525,7 +2527,7 @@ async function addOne(
       writeRoot = root;
       if (
         !secrets.includes(variableName) ||
-        (memberEnvFile !== undefined && member.envFilePath !== memberEnvFile)
+        (memberEnvFile !== undefined && !(member.envFilePaths ?? []).includes(memberEnvFile))
       )
         edits.push({
           path: joinPath(root, WORKSPACE_MANIFEST),
@@ -2972,7 +2974,8 @@ export function withEnvVariable(
  * when one of its exact entries appears after the last negation that could
  * match it. No pattern is evaluated: any `!` line counts as possibly matching,
  * except one ending in the literal `.example`, which can only match a
- * `.example` file and so never the env file. When this is false, an exact entry
+ * `.example` file and so never the env file (`readEnvFilePath` refuses an env
+ * path ending in `.example`). When this is false, an exact entry
  * appended at the end ignores the file whatever precedes it.
  */
 function listedLast(text: string, entries: readonly string[]): boolean {

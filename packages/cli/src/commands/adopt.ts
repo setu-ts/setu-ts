@@ -282,7 +282,7 @@ export async function runAdoptCommand(args: ParsedArgs, deps: AdoptDependencies)
         name: names.kebab,
         port: basePort,
         ...support,
-        ...(plan.envFilePath === undefined ? {} : { envFilePath: plan.envFilePath }),
+        ...(plan.envFilePath === undefined ? {} : { envFilePaths: [plan.envFilePath] }),
       },
     ],
   };

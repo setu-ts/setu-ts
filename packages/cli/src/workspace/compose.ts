@@ -577,9 +577,9 @@ secrets:
     {
       path: DOCKERIGNORE,
       contents: renderDockerignore(
-        members
-          .filter((member) => member.envFilePath !== undefined)
-          .map((member) => `${MEMBERS_DIR}/${member.name}/${member.envFilePath}`),
+        members.flatMap((member) =>
+          (member.envFilePaths ?? []).map((path) => `${MEMBERS_DIR}/${member.name}/${path}`),
+        ),
       ),
       managed: true,
     },
