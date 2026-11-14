@@ -20,7 +20,7 @@ import { secretValuesPath } from './secrets.ts';
  * @param member - Validated workspace member name
  * @param names - Names newly recorded in generatedSecrets
  * @param secret - Creates an independent value for each absent name
- * @returns A managed file when a name is absent, otherwise no files
+ * @returns The file to write (none when every name is present) and the names it appends
  * @throws {Error} When the path traverses a link or cannot be read safely
  * @since 0.13.0
  */
@@ -30,19 +30,22 @@ export async function operatorSecretFiles(
   member: string,
   names: readonly string[],
   secret: () => string = generateSecret,
-): Promise<readonly GeneratedFile[]> {
+): Promise<{ readonly files: readonly GeneratedFile[]; readonly appended: readonly string[] }> {
   const path = joinPath(root, secretValuesPath(member));
   await assertInsideProject(fs, root, path);
   const before = (await readExistingText(fs, path)) ?? '';
   const values = parseEnv(before);
   const missing = [...new Set(names)].filter((name) => !Object.hasOwn(values, name));
-  if (missing.length === 0) return [];
+  if (missing.length === 0) return { files: [], appended: [] };
   const base = before === '' || before.endsWith('\n') ? before : `${before}\n`;
-  return [
-    {
-      path,
-      contents: base + missing.map((name) => `${name}=${secret()}\n`).join(''),
-      managed: true,
-    },
-  ];
+  return {
+    files: [
+      {
+        path,
+        contents: base + missing.map((name) => `${name}=${secret()}\n`).join(''),
+        managed: true,
+      },
+    ],
+    appended: missing,
+  };
 }

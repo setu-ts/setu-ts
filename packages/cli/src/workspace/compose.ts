@@ -148,6 +148,12 @@ export function renderDockerfile(profile: WorkspaceRuntimeProfile, workspace = t
 # without the task gets an empty \`build/\`, so the copy below never fails. The
 # task is detected by PARSING the member manifest with the pinned parser, never
 # by matching text.
+#
+# The member's own \`check\` task runs here too, after the build, so the image
+# cannot be built from code its check refuses; the final stage copies this
+# stage's output, so BuildKit never skips it. main.dev.ts is excluded from the
+# build context (.dockerignore), so it is dropped from this stage's copy of the
+# check task, which is discarded with the stage.
 FROM ${DENO_BUILD_IMAGE} AS frontend
 ARG MEMBER
 WORKDIR /srv
@@ -156,7 +162,7 @@ COPY lib[s] ./${LIBS_DIR}/
 COPY ${MEMBERS_DIR}/\${MEMBER} ./${MEMBERS_DIR}/\${MEMBER}
 WORKDIR /srv/${MEMBERS_DIR}/\${MEMBER}
 ARG NPM_CONFIG_REGISTRY=
-RUN ${NPMRC_MOUNT} printf '%s' 'import { parse } from "jsr:@std/jsonc@1.0.3"; for (const name of ["deno.json", "deno.jsonc"]) { let source; try { source = Deno.readTextFileSync(name); } catch (error) { if (error instanceof Deno.errors.NotFound) continue; throw error; } const manifest = parse(source); for (const task of ["build", "check"]) { if (manifest.tasks && task in manifest.tasks) Deno.writeTextFileSync(".setu-" + task + "-task", ""); } break; }' | DENO_DIR=/tmp/.setu-build-cache deno run --no-config --no-lock --no-prompt --allow-read=./deno.json,./deno.jsonc --allow-write=./.setu-build-task,./.setu-check-task - && if [ -z "$NPM_CONFIG_REGISTRY" ]; then unset NPM_CONFIG_REGISTRY; fi && if [ -f .setu-build-task ]; then deno task build; else mkdir -p build; fi && if [ -f .setu-check-task ]; then deno task check; fi
+RUN ${NPMRC_MOUNT} printf '%s' 'import { parse } from "jsr:@std/jsonc@1.0.3"; for (const name of ["deno.json", "deno.jsonc"]) { let source; try { source = Deno.readTextFileSync(name); } catch (error) { if (error instanceof Deno.errors.NotFound) continue; throw error; } const manifest = parse(source); for (const task of ["build", "check"]) { if (manifest.tasks && task in manifest.tasks) Deno.writeTextFileSync(".setu-" + task + "-task", ""); } if (manifest.tasks && typeof manifest.tasks.check === "string" && manifest.tasks.check.includes(" main.dev.ts")) { manifest.tasks.check = manifest.tasks.check.replaceAll(" main.dev.ts", ""); Deno.writeTextFileSync(name, JSON.stringify(manifest)); } break; }' | DENO_DIR=/tmp/.setu-build-cache deno run --no-config --no-lock --no-prompt --allow-read=./deno.json,./deno.jsonc --allow-write=./.setu-build-task,./.setu-check-task,./deno.json,./deno.jsonc - && if [ -z "$NPM_CONFIG_REGISTRY" ]; then unset NPM_CONFIG_REGISTRY; fi && if [ -f .setu-build-task ]; then deno task build; else mkdir -p build; fi && if [ -f .setu-check-task ]; then deno task check; fi
 
 FROM ${DENO_IMAGE}
 ENV NODE_ENV=production

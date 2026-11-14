@@ -947,17 +947,17 @@ export async function runAppCommand(args: ParsedArgs, deps: AppDependencies): Pr
 
   if (generatedSecrets.length > 0) {
     try {
-      const operatorFiles = await operatorSecretFiles(
+      const operator = await operatorSecretFiles(
         deps.fs,
         deps.dir,
         name,
         generatedSecrets,
         deps.secret,
       );
-      if (operatorFiles.length > 0) {
-        files.push(...operatorFiles);
+      if (operator.files.length > 0) {
+        files.push(...operator.files);
         deps.log(
-          `Operator secrets for ${name}: ${generatedSecrets.join(', ')} (k8s/secrets/${name}/.env).`,
+          `Operator secrets for ${name}: ${operator.appended.join(', ')} (k8s/secrets/${name}/.env).`,
         );
       }
     } catch (cause) {

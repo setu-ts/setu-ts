@@ -249,15 +249,6 @@ function withTransportModule(
 }
 
 /**
- * Spreads the module's queue options into a `QueuePlugin` argument.
- *
- * The template's own options (the generated jobs seam, `processors`) are kept in
- * front of the spread, so `setu check` still sees the barrel wired.
- *
- * @param args - The wiring's current arguments, if any
- * @returns The arguments calling `queueOptions()`
- */
-/**
  * The host's own `RuntimePlugin` options with the transport's runtime options spread first, so a
  * template's options (the REST body cap) are kept and a template with none gains none.
  *
@@ -275,6 +266,15 @@ function withRuntimeSpread(args: string | undefined): string {
   return body === '' ? call : `{ ...${call}, ${body} }`;
 }
 
+/**
+ * Spreads the module's queue options into a `QueuePlugin` argument.
+ *
+ * The template's own options (the generated jobs seam, `processors`) are kept in
+ * front of the spread, so `setu check` still sees the barrel wired.
+ *
+ * @param args - The wiring's current arguments, if any
+ * @returns The arguments calling `queueOptions()`
+ */
 function withQueueSpread(args: string | undefined): string {
   const call = `${TRANSPORT_EXPORTS.queue}()`;
   const body =

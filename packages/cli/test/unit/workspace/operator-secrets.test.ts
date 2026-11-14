@@ -15,13 +15,14 @@ describe('operator secrets', () => {
         '/ws/package.json': '{}',
         ...(before === '' ? {} : { [path]: before }),
       });
-      const files = await operatorSecretFiles(
+      const { files, appended } = await operatorSecretFiles(
         fs,
         '/ws',
         'api',
         ['JWT_SECRET', 'JWT_SECRET'],
         () => 'operator-value',
       );
+      expect(appended).toEqual(['JWT_SECRET']);
       await writeFiles(fs, files, { root: '/ws' });
       expect(
         fs.read(path) ===
@@ -31,7 +32,7 @@ describe('operator secrets', () => {
         await operatorSecretFiles(fs, '/ws', 'api', ['JWT_SECRET'], () => {
           throw new Error('must preserve');
         }),
-      ).toEqual([]);
+      ).toEqual({ files: [], appended: [] });
     },
   );
 
@@ -39,13 +40,14 @@ describe('operator secrets', () => {
     const path = '/ws/k8s/secrets/api/.env';
     const before = '# comment\nexport JWT_SECRET=\nSESSION_SECRET=operator-owned\n';
     const fs = createFakeFs({ [path]: before });
-    const files = await operatorSecretFiles(
+    const { files, appended } = await operatorSecretFiles(
       fs,
       '/ws',
       'api',
       ['JWT_SECRET', 'SESSION_SECRET', 'NEW_SECRET'],
       () => 'independent',
     );
+    expect(appended).toEqual(['NEW_SECRET']);
     expect(files[0]?.contents === `${before}NEW_SECRET=independent\n`).toBe(true);
   });
 

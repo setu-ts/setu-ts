@@ -2528,15 +2528,15 @@ async function addOne(
       writeRoot = root;
       if (!secrets.includes(variableName)) {
         try {
-          const operatorFiles = await operatorSecretFiles(
+          const operator = await operatorSecretFiles(
             deps.fs,
             root,
             member.name,
             [variableName],
             deps.secret,
           );
-          if (operatorFiles.length > 0) {
-            edits.push(...operatorFiles);
+          if (operator.files.length > 0) {
+            edits.push(...operator.files);
             deps.log(
               `Operator secrets for ${member.name}: ${variableName} (k8s/secrets/${member.name}/.env).`,
             );

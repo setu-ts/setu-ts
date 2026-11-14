@@ -73,6 +73,11 @@ describe('workspaceContainerFiles', () => {
           );
         } else if (runtime === 'deno') {
           expect(stages[0]).toContain('for (const task of ["build", "check"])');
+          // main.dev.ts is excluded from the context, so the stage's check copy drops it.
+          expect(stages[0]).toContain('manifest.tasks.check.replaceAll(" main.dev.ts", "")');
+          expect(stages[0]).toContain(
+            '--allow-write=./.setu-build-task,./.setu-check-task,./deno.json,./deno.jsonc',
+          );
           expect(stages[0]).toContain('then deno task check; fi');
           expect(stages[0]!.indexOf('then deno task check')).toBeGreaterThan(
             stages[0]!.indexOf('then deno task build'),

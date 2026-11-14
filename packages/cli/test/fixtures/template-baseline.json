@@ -28,7 +28,7 @@
   "rest/deno": {
     "README.md": "23bbeb074f7c60931bfae1d2246a357e62a380b19ab802e979ea707c0dbe6633",
     ".gitignore": "74608d5564fef13c5aa0525034a06ddfe6be6b5999cb2cfa58f7c0b18b26dc69",
-    "Dockerfile": "08d010751b2e9948a97feaec6c301043716f37932adce78d8880cd0562d80af6",
+    "Dockerfile": "146d587539e0d3b1d7d0b927bcb9d88ed5aa55ce095c7bbb2a15cc10f3edcfe1",
     ".dockerignore": "7205d39ea9c6a71f98ba42f92e09b484cdddcd1bc806b2616ed8de52f11202d6",
     "test/support/server.ts": "4a68bf1eb15217e2fd1084a6fb731841671887c134c2739dccef1aba9f6de422",
     "test/e2e/app.e2e.test.ts": "eecc4131b9eb9b307d7372105907b80e52754b25571b33bf55bc7fe7d5eb5e53",
@@ -124,7 +124,7 @@
   "microservice/deno": {
     "README.md": "ad75b269cc95fc622eebb41e4d4b5e6019e823183ad15682e415edeebd436285",
     ".gitignore": "74608d5564fef13c5aa0525034a06ddfe6be6b5999cb2cfa58f7c0b18b26dc69",
-    "Dockerfile": "08d010751b2e9948a97feaec6c301043716f37932adce78d8880cd0562d80af6",
+    "Dockerfile": "146d587539e0d3b1d7d0b927bcb9d88ed5aa55ce095c7bbb2a15cc10f3edcfe1",
     ".dockerignore": "7205d39ea9c6a71f98ba42f92e09b484cdddcd1bc806b2616ed8de52f11202d6",
     "test/support/server.ts": "4a68bf1eb15217e2fd1084a6fb731841671887c134c2739dccef1aba9f6de422",
     "test/e2e/app.e2e.test.ts": "22b1515b542adb104753ac16e5ca4ebd16486387386da695015937194fd7cc4f",
@@ -224,7 +224,7 @@
   "class-based/deno": {
     "README.md": "23bbeb074f7c60931bfae1d2246a357e62a380b19ab802e979ea707c0dbe6633",
     ".gitignore": "74608d5564fef13c5aa0525034a06ddfe6be6b5999cb2cfa58f7c0b18b26dc69",
-    "Dockerfile": "08d010751b2e9948a97feaec6c301043716f37932adce78d8880cd0562d80af6",
+    "Dockerfile": "146d587539e0d3b1d7d0b927bcb9d88ed5aa55ce095c7bbb2a15cc10f3edcfe1",
     ".dockerignore": "7205d39ea9c6a71f98ba42f92e09b484cdddcd1bc806b2616ed8de52f11202d6",
     "test/support/server.ts": "4a68bf1eb15217e2fd1084a6fb731841671887c134c2739dccef1aba9f6de422",
     "test/e2e/app.e2e.test.ts": "eecc4131b9eb9b307d7372105907b80e52754b25571b33bf55bc7fe7d5eb5e53",
@@ -299,7 +299,7 @@
   "minimal/deno": {
     "README.md": "4e114debfbf4949dd75a6809efffc6063a6294ff22dfab0a17d7a4c46a90fe27",
     ".gitignore": "74608d5564fef13c5aa0525034a06ddfe6be6b5999cb2cfa58f7c0b18b26dc69",
-    "Dockerfile": "08d010751b2e9948a97feaec6c301043716f37932adce78d8880cd0562d80af6",
+    "Dockerfile": "146d587539e0d3b1d7d0b927bcb9d88ed5aa55ce095c7bbb2a15cc10f3edcfe1",
     ".dockerignore": "7205d39ea9c6a71f98ba42f92e09b484cdddcd1bc806b2616ed8de52f11202d6",
     "test/support/server.ts": "4a68bf1eb15217e2fd1084a6fb731841671887c134c2739dccef1aba9f6de422",
     "test/e2e/app.e2e.test.ts": "8db041fb025833b45dc0d47d13092b947a0c4b050f699842e8d9fc131eaaef0f",

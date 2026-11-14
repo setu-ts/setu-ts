@@ -1385,7 +1385,7 @@ export const DEVTOOL_ENTRY_MODULE = 'main.dev.ts';
 export function devtoolTasks(manifest?: TemplateManifest): Record<string, string> {
   // M131a X88-2: the local `dev` task loads `.env` through the runtime, exactly
   // as the `start` task does, so `dev` differs from `start` only in the entry
-  // module. Deno's `--env-file` is a hard error when the file is missing, so
+  // module and `start`'s `NODE_ENV=production` prefix (M140c). Deno's `--env-file` is a hard error when the file is missing, so
   // the flag is passed only when the manifest writes the dotenv.
   const envFile = manifest?.envFilePath !== undefined ? `--env-file=${manifest.envFilePath} ` : '';
   const run = `deno run ${denoPermissions(manifest)} ${envFile}${DEVTOOL_ENTRY_MODULE}`;

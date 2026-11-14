@@ -85,8 +85,8 @@ export interface TransportModuleShape {
 /**
  * Which functions a module for this input exports.
  *
- * `transportPlugins` is always exported, so a member can switch to gRPC without
- * its config changing.
+ * `transportPlugins` and `runtimeOptions` are always exported, so a member can
+ * switch to gRPC without its config changing.
  *
  * @param input - The module's inputs
  * @returns The exported functions besides `transportPlugins`
@@ -267,9 +267,14 @@ export function renderTransportModule(input: TransportModuleInput): string {
 
   const functions = [
     `/**
- * Serve gRPC over cleartext HTTP/2 beside HTTP/1.1 on the member's port.
+${
+  serving
+    ? ` * Serve gRPC over cleartext HTTP/2 beside HTTP/1.1 on the member's port.
  * For TLS use RuntimePlugin({ http2: { key, cert } }) with discovery secure: true.
- * On Bun HTTP/2 uses the Node adapter; WebSockets then need the optional ws peer.
+ * On Bun HTTP/2 uses the Node adapter; WebSockets then need the optional ws peer.`
+    : ` * No runtime options: this member does not serve gRPC. \`setu workspace rpc\`
+ * switching it to gRPC makes this return \`{ http2: true }\`.`
+}
  *
  * @returns The runtime options for this member's RPC style
  * @since 0.13.0
