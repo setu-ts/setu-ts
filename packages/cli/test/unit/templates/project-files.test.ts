@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { parseEnvRead } from '../../fixtures/env-read-shape.ts';
 import {
   BROKER_COMPOSE_FILE,
   projectFiles,
@@ -1006,15 +1007,16 @@ describe('M140b runtime output', () => {
       });
     }
   }
-  it('an empty PORT in the generated main.ts falls back to 3000', async () => {
+  it('an empty PORT in the generated main.ts falls back to 3000', () => {
     const files = projectFiles('svc', 'node', resolveHost(MINIMAL_HOST, 'node'));
     const expression = contentsOf(files, 'main.ts').match(
       /port: (Number\(runtime\.env\.PORT[^)]+\))/,
     )![1]!;
-    const source = `const runtime = { env: { PORT: '' } }; export default ${expression};`;
-    const result: { default: unknown } = await import(
-      `data:text/javascript,${encodeURIComponent(source)}`
-    );
-    expect(result.default).toBe(3000);
+    // Parsed, not executed: `||` is what makes an empty PORT take the fallback.
+    expect(parseEnvRead(expression)).toEqual({
+      operator: '||',
+      variable: 'PORT',
+      fallback: '3000',
+    });
   });
 });

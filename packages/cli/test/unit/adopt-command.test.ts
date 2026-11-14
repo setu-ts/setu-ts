@@ -178,6 +178,29 @@ it('M139d review L7 rewrites a 0.12.0 full-stack dev.ts, recognised from its rea
   expect(h.out.text()).not.toContain('Set the two development port lines');
 });
 
+it('M140b rewrites the guarded full-stack dev.ts develop wrote with nullish port reads', async () => {
+  // The layout M139d generated, before M140b turned its port reads into logical-or.
+  const [current, , guardedNullish] = fullStackDevEntryVariants('node');
+  expect(guardedNullish!.contents).toBe(
+    current!.contents
+      .replace("runtime.env.PORT || '3000'", "runtime.env.PORT ?? '3000'")
+      .replace("runtime.env.VITE_PORT || '5173'", "runtime.env.VITE_PORT ?? '5173'"),
+  );
+  expect(guardedNullish!.contents).toContain("runtime.env.VITE_PORT ?? '5173'");
+  const [written] = await formatForTarget([guardedNullish!], 'node', undefined, () => {});
+  const h = harness({
+    ...NODE_PROJECT,
+    '/work/svc/package.json': JSON.stringify({
+      dependencies: { '@setu-ts/react-router-plugin': '^0.12.0' },
+      scripts: { 'start:debug': 'node --inspect dev.ts' },
+    }),
+    '/work/svc/dev.ts': written!.contents,
+  });
+  expect(await h.run(['--name', 'web'], new AbortController().signal), h.err.text()).toBe(0);
+  expect(h.fs.read('/work/svc/apps/web/dev.ts')).toContain('const vitePort = VITE_PORT;');
+  expect(h.out.text()).not.toContain('Set the two development port lines');
+});
+
 it('X87-2 refuses an exhausted development range before moving any project files', async () => {
   const h = harness(NODE_PROJECT);
   expect(await h.run(['--name', 'web', '--port', '65535'])).toBe(1);

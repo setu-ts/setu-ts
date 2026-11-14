@@ -490,7 +490,10 @@ for (const signal of ['SIGTERM', 'SIGINT'] as const) {
   };
 }
 
-/** Current and recognition-only 0.12.0 standalone entries, for workspace adoption. */
+/**
+ * Current and recognition-only standalone entries (0.12.0's, and the guarded
+ * layout with nullish port reads), for workspace adoption.
+ */
 export function fullStackDevEntryVariants(
   runtime: TargetRuntime,
 ): readonly { path: string; contents: string }[] {
@@ -511,10 +514,15 @@ export function fullStackDevEntryVariants(
     .replace(', type IRuntimeServices', '')
     .replace('const runtime: IRuntimeServices =', 'const runtime =')
     .replace('  console.log(`Listening on http://localhost:${port}/`);\n', '');
-  // 0.12.0 wrote the nullish port reads M140b replaced.
-  const released = withNullishEnvReads(legacy, [
+  // 0.12.0 wrote the nullish port reads M140b replaced, and so did the guarded
+  // layout develop generated before M140b; both stay recognisable.
+  const nullish: readonly (readonly [string, string])[] = [
     ['PORT', '3000'],
     ['VITE_PORT', '5173'],
-  ]);
-  return [current, { path: current.path, contents: released }];
+  ];
+  return [
+    current,
+    { path: current.path, contents: withNullishEnvReads(legacy, nullish) },
+    { path: current.path, contents: withNullishEnvReads(current.contents, nullish) },
+  ];
 }
