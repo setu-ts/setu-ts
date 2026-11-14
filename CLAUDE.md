@@ -825,6 +825,11 @@ here.
   Compose refusals, `JWT_SECRET` resolution with a 32-byte HS256 floor, CSRF rotation on
   `regenerate()`, 1 MiB WebSocket and REST bounds, a 30 s SSE heartbeat, gateway guards, bounded
   `migration --down`; 16 V12 rows; ships in `0.13.0`) — complete (PR #589).
+- **Milestone 140c** (`packages/cli` — images, Compose, Kubernetes and gRPC between workspace
+  members: `NODE_ENV=production`, a pinned Bun base with a lockfile refusal, Bun/Deno check stages,
+  Compose healthchecks and `--depends-on`, a `setu-transport` ConfigMap below member Secrets,
+  `runtimeOptions()` serving h2c for gRPC members, operator secret values; V12-68, V12-110, V12-111,
+  V12-113, V12-115, V12-116, V12-121, V12-122, V12-123) — complete (PR pending).
 - **Next milestone** — the remaining M139 letters, then M140b (generated code read as code).
 
 ## Verification (run before declaring any work done)

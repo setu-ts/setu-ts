@@ -619,17 +619,22 @@ including one first made by hand), values base64-encoded under `data:`: measured
 client-side apply stores every value in plaintext in the `last-applied-configuration` annotation,
 and `stringData` under a server-side apply keeps keys the file has dropped. Each generated
 Deployment reads `<member>-env` through `envFrom`, after its explicit `env:` entries, which keep
-precedence. envFrom is read when a container starts, so deploy writes each Secret's
-`resourceVersion` into its member's pod-template annotation (`setu-ts.dev/secret-version`): a
-changed Secret changes the template and Kubernetes rolls the member out — a rotation on a clean tree
-keeps the tag and the manifest and would otherwise leave the old value live, and the annotation
-keeps a re-run after a partial failure from losing the rollout. After the apply, deploy reads each
-member's pod template back from the cluster and sets the annotation with `kubectl patch` wherever it
-is not current — a `members.yaml` from before the annotation, a hand-edited one, or an earlier
-deploy that failed part-way — so the cluster's state, not the run's history, decides what rolls out.
-Deploy reads the values files, `.env.example` and `k8s/members.yaml` only as regular files inside
-the workspace, never through a symbolic link: a branch that replaced `k8s/secrets/<member>` with a
-link could otherwise load any dotenv file on the host into a pod its code runs in.
+precedence. When the broker has connection defaults (`REDIS_URL`, for one), `envFrom` lists the
+generated `setu-transport` ConfigMap before the Secret, so a value in the Secret overrides the
+default; a `setu-ts.dev/transport-config` annotation rolls members when the defaults change.
+`generate app` and `setu add auth|session` append a random value for each newly generated secret
+name to `k8s/secrets/<member>/.env`, keeping existing entries and refusing symbolic links. envFrom
+is read when a container starts, so deploy writes each Secret's `resourceVersion` into its member's
+pod-template annotation (`setu-ts.dev/secret-version`): a changed Secret changes the template and
+Kubernetes rolls the member out — a rotation on a clean tree keeps the tag and the manifest and
+would otherwise leave the old value live, and the annotation keeps a re-run after a partial failure
+from losing the rollout. After the apply, deploy reads each member's pod template back from the
+cluster and sets the annotation with `kubectl patch` wherever it is not current — a `members.yaml`
+from before the annotation, a hand-edited one, or an earlier deploy that failed part-way — so the
+cluster's state, not the run's history, decides what rolls out. Deploy reads the values files,
+`.env.example` and `k8s/members.yaml` only as regular files inside the workspace, never through a
+symbolic link: a branch that replaced `k8s/secrets/<member>` with a link could otherwise load any
+dotenv file on the host into a pod its code runs in.
 
 For production, keep the values in a secret manager —
 [Sealed Secrets](https://github.com/bitnami-labs/sealed-secrets) or
@@ -719,8 +724,11 @@ source; production start never rebuilds. Full-stack main.ts passes its compiled 
 createApp so its location survives bundling. User import.meta.url paths move with the bundle:
 resolve application data from process.cwd() or pass modules in explicitly.
 
-Bun runs source with production dependencies, builds a declared frontend script first, and copies
-the workspace's hoisted-linker bunfig.toml. Deno builds a declared frontend in a `frontend` stage on
+Bun runs source with production dependencies on the pinned `oven/bun:1.4.0-alpine`, builds a
+declared frontend script, then runs the member's `check` script, refuses to build without a
+`bun.lock`, and copies the workspace's hoisted-linker bunfig.toml. Every runtime stage sets
+`NODE_ENV=production`. Deno runs the member's `check` task after `build` in its `frontend` stage
+(without `main.dev.ts`, which the image excludes), and builds a declared frontend in that stage on
 `denoland/deno:debian-2.9.5` (Vite's native bundler binding has no musl build, so it cannot run on
 the Alpine image), copies only `build/` into the Alpine image before caching main.ts, then retains
 the frozen, scoped source run. When the root sets `nodeModulesDir: "auto"` (a workspace with a

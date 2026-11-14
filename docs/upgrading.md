@@ -12,6 +12,18 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### Deployment output (M140c, `@setu-ts/cli`)
+
+A workspace member's config must call the transport module's `runtimeOptions()`, which serves gRPC
+members over cleartext HTTP/2: `runtime: runtimeOptions(),` in a full-stack starter's options, or
+`RuntimePlugin({ ...runtimeOptions(), <its existing options> })` in a plugin-list config, imported
+from `./src/transport/index.ts`. `setu workspace broker`, `setu workspace rpc` and `setu add grpc`
+refuse until it does and print the line to add. Regenerate the workspace files (`setu sync`) to pick
+up the new Dockerfile, Compose file and Kubernetes manifest. A Bun image now needs a `bun.lock`
+beside `package.json` (run `bun install` and commit it), and Bun and Deno images run the project's
+own `check`, so an image no longer builds from code that check refuses. Existing members get no
+values written into `k8s/secrets/<member>/.env`; only secrets recorded from now on are.
+
 ### Security defaults (M140a, `@setu-ts/auth-plugin`, `@setu-ts/session-plugin`, `@setu-ts/websocket-plugin`, `@setu-ts/sse-plugin`, `@setu-ts/cli`)
 
 Use HS256 keys of at least 32 UTF-8 bytes; a missing or shorter key now raises
