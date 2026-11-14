@@ -55,7 +55,7 @@ import { frameworkSpecifier } from '../templates/framework-specifier.ts';
 import { generateSecret } from '../templates/secret.ts';
 import { BROKER_COMPOSE_FILE, cliInvocation, resolveHost } from '../templates/project-files.ts';
 import { MINIMAL_HOST } from '../templates/minimal.ts';
-import { envFileDeclaration } from '../templates/env-file.ts';
+import { envFileDeclaration, isCoveredDotenvName } from '../templates/env-file.ts';
 import type { EnvVariable } from '../templates/registry.ts';
 import {
   brokerComposeFiles,
@@ -107,7 +107,7 @@ import {
   type WorkspaceMember,
 } from '../workspace/manifest.ts';
 import { memberTransportModule } from '../workspace/rewire.ts';
-import { COMPOSE_FILE, workspaceContainerFiles } from '../workspace/compose.ts';
+import { COMPOSE_FILE, DOCKERIGNORE, workspaceContainerFiles } from '../workspace/compose.ts';
 import { renderTransportSection, replaceTransportSection } from '../workspace/root-files.ts';
 import { applyTransportChange } from './workspace.ts';
 import { TRANSPORT_EXPORTS, TRANSPORT_SPECIFIER } from '../workspace/transport-module.ts';
@@ -2458,14 +2458,7 @@ async function addOne(
       const ignorePath = joinPath(dir, '.gitignore');
       const ignore = await readProjectText(deps, ignorePath, '.gitignore');
       if (ignore === null) return EXIT_ERROR;
-      const lines = (ignore ?? '').split('\n').map((line) => line.trim());
-      // Git applies the LAST matching rule, so an exact entry appended at the
-      // end ignores the file whatever negation precedes it. It is skipped only
-      // when the entry is already there and nothing in the file negates.
-      const listed =
-        (lines.includes(envFile) || lines.includes(`/${envFile}`)) &&
-        !lines.some((line) => line.startsWith('!'));
-      if (!listed) {
+      if (!listedLast(ignore ?? '', [envFile, `/${envFile}`])) {
         const base =
           ignore === undefined || ignore === '' || ignore.endsWith('\n')
             ? (ignore ?? '')
@@ -2484,21 +2477,12 @@ async function addOne(
       const dockerPath = joinPath(dir, '.dockerignore');
       const docker = await readProjectText(deps, dockerPath, '.dockerignore');
       if (docker === null) return EXIT_ERROR;
-      if (docker !== undefined) {
-        const rules = docker.split('\n').map((line) => line.trim());
-        const negated = [envFile, `/${envFile}`, `**/${envFile}`].some((rule) =>
-          rules.includes(`!${rule}`),
-        );
-        const excluded =
-          rules.includes(envFile) ||
-          rules.includes(`/${envFile}`) ||
-          (envFile === '.env' && rules.includes('**/.env')) ||
-          (envFile.startsWith('.env.') && rules.includes('**/.env.*'));
-        if (!excluded || negated) {
-          const base = docker === '' || docker.endsWith('\n') ? docker : `${docker}\n`;
-          edits.push({ path: dockerPath, contents: `${base}${envFile}\n` });
-          deps.log(`Added ${escapeName(envFile)} to .dockerignore: images must not copy it.`);
-        }
+      const covering =
+        envFile === '.env' ? ['**/.env'] : envFile.startsWith('.env.') ? ['**/.env.*'] : [];
+      if (docker !== undefined && !listedLast(docker, [envFile, `/${envFile}`, ...covering])) {
+        const base = docker === '' || docker.endsWith('\n') ? docker : `${docker}\n`;
+        edits.push({ path: dockerPath, contents: `${base}${envFile}\n` });
+        deps.log(`Added ${escapeName(envFile)} to .dockerignore: images must not copy it.`);
       }
     } else {
       deps.log(
@@ -2512,11 +2496,22 @@ async function addOne(
     if (workspace !== undefined) {
       const { root, manifest, member } = workspace;
       const secrets = member.generatedSecrets ?? [];
+      // A custom dotenv name the generated `.env`/`.env.*` rules miss is
+      // recorded on the member, so the managed root .dockerignore lists it and
+      // keeps listing it across regenerations.
+      const memberEnvFile =
+        envFile !== undefined && !isCoveredDotenvName(envFile.split('/').at(-1) ?? '')
+          ? envFile
+          : undefined;
       const next: WorkspaceManifest = {
         ...manifest,
         members: manifest.members.map((entry) =>
           entry.name === member.name
-            ? { ...entry, generatedSecrets: [...new Set([...secrets, variableName])] }
+            ? {
+                ...entry,
+                generatedSecrets: [...new Set([...secrets, variableName])],
+                ...(memberEnvFile === undefined ? {} : { envFilePath: memberEnvFile }),
+              }
             : entry,
         ),
       };
@@ -2528,7 +2523,10 @@ async function addOne(
         return EXIT_ERROR;
       }
       writeRoot = root;
-      if (!secrets.includes(variableName))
+      if (
+        !secrets.includes(variableName) ||
+        (memberEnvFile !== undefined && member.envFilePath !== memberEnvFile)
+      )
         edits.push({
           path: joinPath(root, WORKSPACE_MANIFEST),
           contents: renderWorkspaceManifest(next),
@@ -2536,7 +2534,7 @@ async function addOne(
       const broker = brokerSpec(next.broker, next.redisClient);
       const profile = workspaceProfile(next.runtime);
       for (const file of workspaceContainerFiles(next, broker, profile)) {
-        if (file.path !== COMPOSE_FILE) continue;
+        if (file.path !== COMPOSE_FILE && file.path !== DOCKERIGNORE) continue;
         const path = joinPath(root, file.path);
         const previous = await readProjectText(deps, path, file.path);
         if (previous === null) return EXIT_ERROR;
@@ -2966,6 +2964,26 @@ export function withEnvVariable(
   const newline = text.includes('\r\n') ? '\r\n' : '\n';
   const separator = text === '' || text.endsWith('\n') ? '' : newline;
   return `${text}${separator}${newline}# ${variable.description}${newline}${variable.name}=${value}${newline}`;
+}
+
+/**
+ * Whether an ignore file (`.gitignore` or `.dockerignore`) already lists a file
+ * so that it wins. Both apply the LAST matching rule, so the file is listed
+ * when one of its exact entries appears after the last negation that could
+ * match it. No pattern is evaluated: any `!` line counts as possibly matching,
+ * except one ending in the literal `.example`, which can only match a
+ * `.example` file and so never the env file. When this is false, an exact entry
+ * appended at the end ignores the file whatever precedes it.
+ */
+function listedLast(text: string, entries: readonly string[]): boolean {
+  const lines = text.split('\n').map((line) => line.trim());
+  let entry = -1;
+  let negation = -1;
+  lines.forEach((line, index) => {
+    if (entries.includes(line)) entry = index;
+    else if (line.startsWith('!') && !line.endsWith('.example')) negation = index;
+  });
+  return entry > negation;
 }
 
 /**

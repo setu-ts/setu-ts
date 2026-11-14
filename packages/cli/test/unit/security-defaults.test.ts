@@ -179,7 +179,9 @@ describe('M140a scaffold security defaults', () => {
     ['an anchored entry', '/.env\n', true, '/.env\n', false],
     ['only a pattern and a .env', '.env*\n', true, '.env*\n.env\n', true],
     ['a later negation', '.env\n!.env\n', true, '.env\n!.env\n.env\n', true],
-    ['an unrelated negation', '.env\n!.env.example\n', true, '.env\n!.env.example\n.env\n', true],
+    ['an .example negation', '.env\n!.env.example\n', true, '.env\n!.env.example\n', false],
+    ['a broad later negation', '.env\n!*.env\n', true, '.env\n!*.env\n.env\n', true],
+    ['the entry after a negation', '!*.env\n.env\n', true, '!*.env\n.env\n', false],
   ] as const)(
     'lists the written secret in .gitignore as Rails does, with %s',
     async (_label, before, envExists, after, hint) => {
@@ -287,6 +289,12 @@ describe('M140a scaffold security defaults', () => {
       'secrets.env\n!secrets.env\n',
       'secrets.env\n!secrets.env\nsecrets.env\n',
     ],
+    [
+      'a broad later negation',
+      'secrets.env',
+      'secrets.env\n!*.env\n',
+      'secrets.env\n!*.env\nsecrets.env\n',
+    ],
     ['no .dockerignore', 'secrets.env', null, null],
   ] as const)(
     'keeps the written secret out of a Bun image: %s',
@@ -309,11 +317,55 @@ describe('M140a scaffold security defaults', () => {
       const scaffolded = fs.read(path);
       if (before === null) await fs.rm(path);
       else if (before !== undefined) await fs.writeFile(path, new TextEncoder().encode(before));
+      const gitignore = fs.read('/work/shop/.gitignore');
       expect(await runCli(['add', 'auth'], { ...deps, cwd: '/work/shop' })).toBe(0);
       if (after === null) expect(fs.has(path)).toBe(false);
       else expect(fs.read(path)).toBe(after ?? scaffolded);
+      // A scaffold's own .gitignore already lists the file after its only
+      // negation (`!.env.example`), so nothing is appended to it.
+      expect(fs.read('/work/shop/.gitignore')).toBe(gitignore);
     },
   );
+
+  it('lists a workspace member custom env file in the managed root .dockerignore', async () => {
+    const fs = createFakeFs();
+    const deps = {
+      fs,
+      cwd: '/work',
+      now: () => 0,
+      log: () => {},
+      error: (line: string) => {
+        throw new Error(line);
+      },
+      secret: () => 'd'.repeat(64),
+    };
+    expect(await runCli(['new', 'ws', '--workspace'], deps)).toBe(0);
+    const inWs = { ...deps, cwd: '/work/ws' };
+    expect(
+      await runCli(['g', 'app', 'api', '--template', 'rest', '--env-file', 'secrets.env'], inWs),
+    ).toBe(0);
+    const manifestPath = '/work/ws/setu.workspace.json';
+    const docker = '/work/ws/.dockerignore';
+    const member = (): { envFilePath?: string } =>
+      (
+        JSON.parse(fs.read(manifestPath)) as { members: { name: string; envFilePath?: string }[] }
+      ).members.find((entry) => entry.name === 'api')!;
+    expect(member().envFilePath).toBe('secrets.env');
+    expect(fs.read(docker).split('\n')).toContain('apps/api/secrets.env');
+    // Regenerating the managed file keeps the entry.
+    expect(await runCli(['g', 'app', 'web', '--template', 'rest'], inWs)).toBe(0);
+    expect(fs.read(docker).split('\n')).toContain('apps/api/secrets.env');
+    // A member that lost the record regains it from `setu add`.
+    const manifest = JSON.parse(fs.read(manifestPath)) as {
+      members: { name: string; envFilePath?: string }[];
+    };
+    delete manifest.members.find((entry) => entry.name === 'api')!.envFilePath;
+    await fs.writeFile(manifestPath, new TextEncoder().encode(JSON.stringify(manifest, null, 2)));
+    expect(await runCli(['add', 'auth'], { ...deps, cwd: '/work/ws/apps/api' })).toBe(0);
+    expect(member().envFilePath).toBe('secrets.env');
+    expect(fs.read('/work/ws/apps/api/secrets.env')).toContain(`JWT_SECRET=${'d'.repeat(64)}`);
+    expect(fs.read(docker).split('\n')).toContain('apps/api/secrets.env');
+  });
 
   it('keeps a custom env file the default rules miss out of the image', async () => {
     const fs = createFakeFs();

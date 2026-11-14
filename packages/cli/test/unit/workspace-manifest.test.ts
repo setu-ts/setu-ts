@@ -68,6 +68,33 @@ describe('generatedSecrets in the workspace manifest', () => {
     },
   );
 
+  it.each([42, '', '/abs.env', '../up.env', 'a//b.env', 'bad name.env'])(
+    'refuses a member env file path outside the --env-file grammar (%j)',
+    async (envFilePath) => {
+      const source = { ...baseManifest([]), members: [{ name: 'web', port: 3000, envFilePath }] };
+      expect(
+        (
+          await readWorkspaceManifest(
+            fsWith({ '/ws/setu.workspace.json': JSON.stringify(source) }),
+            '/ws',
+          )
+        ).ok,
+      ).toBe(false);
+    },
+  );
+
+  it('round-trips a member env file path', async () => {
+    const read = await readWorkspaceManifest(
+      fsWith({
+        '/ws/setu.workspace.json': renderWorkspaceManifest(
+          baseManifest([{ name: 'web', port: 3000, envFilePath: 'config/local.env' }]),
+        ),
+      }),
+      '/ws',
+    );
+    expect(read.ok && read.manifest.members[0]?.envFilePath).toBe('config/local.env');
+  });
+
   it('refuses two members whose secrets need the same Compose variable', async () => {
     const read = await readWorkspaceManifest(
       fsWith({

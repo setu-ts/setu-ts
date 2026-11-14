@@ -277,7 +277,14 @@ export async function runAdoptCommand(args: ParsedArgs, deps: AdoptDependencies)
     // service talks without being asked to. `--broker` belongs to a workspace
     // created fresh.
     broker: DEFAULT_BROKER,
-    members: [{ name: names.kebab, port: basePort, ...support }],
+    members: [
+      {
+        name: names.kebab,
+        port: basePort,
+        ...support,
+        ...(plan.envFilePath === undefined ? {} : { envFilePath: plan.envFilePath }),
+      },
+    ],
   };
   for (const field of (workersProject
     ? []

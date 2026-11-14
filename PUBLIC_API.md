@@ -11601,6 +11601,11 @@ member name is upper-cased with hyphens changed to underscores. README export li
 startup, including brokers without a backing service. These values override development dotenv
 files, and each member receives a distinct key.
 
+`WorkspaceMember.envFilePath?: string` records a member's custom dotenv path when the generic
+`.env`/`.env.*` rules miss it. The parser holds it to the `--env-file` grammar and refuses the
+member otherwise. `generate app`, adoption and `setu add auth|session` record it, and the managed
+root `.dockerignore` lists `apps/<member>/<path>` for each recorded path.
+
 `deno task dev` (or the Node/Bun equivalent) reads that dependency metadata at runtime. It starts a
 prerequisite first, waits until `http://127.0.0.1:<port>/ready` succeeds, then starts each
 dependent; it names a cycle or readiness timeout and terminates children on failure or shutdown. A

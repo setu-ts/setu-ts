@@ -17,6 +17,7 @@ import { deriveNames, escapeName, isIdentifierSafe } from '../utils/names.ts';
 import { isTargetRuntime, type TargetRuntime } from '../constants.ts';
 
 import { joinPath } from '../utils/file-writer.ts';
+import { readEnvFilePath } from '../templates/env-file.ts';
 import { isWorkspaceRuntime } from './runtime-profile.ts';
 import { DEFAULT_BROKER, getBroker, type BrokerName } from './transport.ts';
 
@@ -138,6 +139,13 @@ export interface WorkspaceMember {
    * @since 0.13.0
    */
   readonly generatedSecrets?: readonly string[];
+  /**
+   * The member's custom dotenv path, relative to its directory, when the
+   * generated `.env`/`.env.*` rules do not already cover it. The managed root
+   * `.dockerignore` lists it, so an image never copies the member's secrets.
+   * @since 0.13.0
+   */
+  readonly envFilePath?: string;
   /**
    * The IPv4 loopback port this member's local diagnostics connector listens
    * on, when the devtool opt-in recorded one.
@@ -408,7 +416,15 @@ function toMember(value: unknown): WorkspaceMember | undefined {
   const port = record['port'];
   const dependsOn = record['dependsOn'];
   const generatedSecrets = record['generatedSecrets'];
+  const envFilePath = record['envFilePath'];
   if (typeof name !== 'string' || !isMemberName(name)) return undefined;
+  // The path is rendered into the managed .dockerignore, so it is held to the
+  // same grammar `--env-file` is: relative segments of [A-Za-z0-9._-] only.
+  if (envFilePath !== undefined) {
+    if (typeof envFilePath !== 'string') return undefined;
+    const parsed = readEnvFilePath({ 'env-file': envFilePath });
+    if (!parsed.ok || parsed.path !== envFilePath) return undefined;
+  }
   if (typeof port !== 'number') return undefined;
   if (
     generatedSecrets !== undefined &&
@@ -455,6 +471,7 @@ function toMember(value: unknown): WorkspaceMember | undefined {
     ...(generatedSecrets === undefined || generatedSecrets.length === 0
       ? {}
       : { generatedSecrets }),
+    ...(envFilePath === undefined ? {} : { envFilePath }),
     ...(devtoolPort === undefined ? {} : { devtoolPort }),
     ...(dependsOn === undefined ? {} : { dependsOn }),
     ...(typeof healthProbes === 'boolean' ? { healthProbes } : {}),

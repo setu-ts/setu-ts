@@ -180,10 +180,11 @@ which is what you want during a version bump, when the pinned version is not on 
 The generated workspace `.dockerignore` excludes `**/.env` and `**/.env.*` and keeps
 `!**/.env.example`; the root `.gitignore` ignores `.env`/`.env.*` and keeps the example. The rules
 cover the default `.env` and any name beginning `.env.`. A custom `--env-file name` that does not
-match those patterns is **not** covered. `setu generate app` and `setu adopt` print one line naming
-such a file by its path from the workspace root (for example `apps/billing/local.env`), which is the
-form to add to `.dockerignore`: that file sits at the workspace root, and a pattern without a slash
-matches only there. The CLI cannot edit a file you own for you.
+match those patterns is recorded on the member as `envFilePath` by `setu generate app`, `setu adopt`
+and `setu add auth|session`, and the managed `.dockerignore` lists it by its path from the workspace
+root (for example `apps/billing/local.env`): that file sits at the workspace root, and a pattern
+without a slash matches only there. Because the file is regenerated from the record, the entry
+survives every later `generate app`.
 
 `setu adopt` moves a configured single-segment dotenv pair into the member, where the member's
 `envFilePath` reads it, and writes `apps/<member>/.gitignore` with `/<name>` for the moved dotenv
@@ -533,6 +534,12 @@ such as `SESSION_SECRET` and `JWT_SECRET`. `generate app` records a template's g
 `setu add auth` and `setu add session` append their names once and refresh Compose and the README's
 transport section. Adoption records no generated secrets. Names must match `^[A-Z][A-Z0-9_]*$`;
 malformed entries refuse the member, while absent or empty lists are omitted.
+
+A member's optional `envFilePath` records a custom dotenv path that the generic `.env`/`.env.*`
+rules do not cover. `generate app --env-file`, `setu adopt` and `setu add auth|session` record it,
+and the managed root `.dockerignore` lists it as `apps/<member>/<path>` on every regeneration, so an
+image never copies the member's secrets. The path follows the `--env-file` grammar: relative
+segments of letters, digits, `.`, `_` and `-`.
 
 Compose requires a separate shell value per member, overriding its development `.env`. For a member
 named `web` with both secrets, export its required keys before starting the stack:

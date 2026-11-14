@@ -126,6 +126,11 @@ export type AdoptPlan =
       readonly creates?: readonly AdoptCreatedFile[];
       /** A step the developer must take by hand, in the order it is reported. */
       readonly notes?: readonly string[];
+      /**
+       * The member's dotenv name when the generated `.env`/`.env.*` rules miss
+       * it, recorded on the member so the managed root `.dockerignore` lists it.
+       */
+      readonly envFilePath?: string;
     }
   | { readonly ok: false; readonly message: string };
 
@@ -235,6 +240,7 @@ export async function planAdoption(
   // `apps/<member>/`, where `envFilePath: '.env'` would otherwise read nothing —
   // and the miss is silent because the generated config sets `envFileOptional`.
   const notes: string[] = [];
+  let envFilePath: string | undefined;
   const creates: AdoptCreatedFile[] = [];
   const configured = await readConfiguredEnvPath(fs, project);
   if (configured !== undefined) {
@@ -270,14 +276,7 @@ export async function planAdoption(
           const gitignore = await memberGitignore(fs, project, memberRoot, name);
           if (!gitignore.ok) return { ok: false, message: gitignore.message };
           creates.push(gitignore.file);
-          if (!isCoveredDotenvName(name)) {
-            // The workspace-relative path, not the bare name: `.dockerignore` sits at
-            // the workspace root, where a pattern without a slash matches only there.
-            notes.push(
-              `Add ${escapeName(joinPath(memberRoot, name))} to .dockerignore: the generated ` +
-                `rules cover only .env and .env.* names, so this file would be copied into the image.`,
-            );
-          }
+          if (!isCoveredDotenvName(name)) envFilePath = name;
         }
       }
     }
@@ -297,6 +296,7 @@ export async function planAdoption(
   return {
     ok: true,
     files,
+    ...(envFilePath === undefined ? {} : { envFilePath }),
     ...(notes.length === 0 ? {} : { notes }),
     ...(creates.length === 0 ? {} : { creates }),
   };

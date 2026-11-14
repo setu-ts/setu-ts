@@ -2141,8 +2141,8 @@ docker run --rm -p 3000:3000 ${generatedVariables.map((variable) => `-e ${variab
             path: '.dockerignore',
             contents: renderDockerignore(
               manifest?.envFilePath === undefined || manifest.envFilePath === '.env'
-                ? undefined
-                : manifest.envFilePath,
+                ? []
+                : [manifest.envFilePath],
             ),
           },
         ]

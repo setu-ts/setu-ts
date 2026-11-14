@@ -778,6 +778,15 @@ export async function runAppCommand(args: ParsedArgs, deps: AppDependencies): Pr
   const generatedSecrets = (portHost.manifest?.envVariables ?? [])
     .filter((variable) => variable.generated === 'secret')
     .map((variable) => variable.name);
+  // A custom dotenv name the generated `.env`/`.env.*` rules miss is recorded,
+  // so the managed root .dockerignore lists it on every regeneration.
+  const envFlag = readEnvFilePath(args.flags);
+  const envFilePath =
+    envFlag.ok &&
+    envFlag.path !== undefined &&
+    !isCoveredDotenvName(envFlag.path.split('/').at(-1) ?? '')
+      ? envFlag.path
+      : undefined;
 
   let next: WorkspaceManifest = {
     ...read.manifest,
@@ -795,6 +804,7 @@ export async function runAppCommand(args: ParsedArgs, deps: AppDependencies): Pr
         name,
         port,
         ...(generatedSecrets.length === 0 ? {} : { generatedSecrets }),
+        ...(envFilePath === undefined ? {} : { envFilePath }),
         ...(devtoolPort === undefined ? {} : { devtoolPort }),
         ...(dependsOn.length === 0 ? {} : { dependsOn }),
         // Read from the FLAG rather than the resolved template, because the
@@ -967,26 +977,6 @@ export async function runAppCommand(args: ParsedArgs, deps: AppDependencies): Pr
       `Failed to write: ${escapeName(cause instanceof Error ? cause.message : String(cause))}`,
     );
     return EXIT_ERROR;
-  }
-
-  // The generated .dockerignore covers only .env and .env.* names, so a custom
-  // name would travel into the image. Nothing here can add the rule for the
-  // developer without guessing at a file they own, so it is named once. Named by
-  // its workspace-relative path: `.dockerignore` sits at the workspace root, and
-  // a pattern without a slash matches only there, so the bare name would exclude
-  // nothing under the member.
-  const envFilePath = readEnvFilePath(args.flags);
-  const envFileName = envFilePath.ok ? envFilePath.path?.split('/').at(-1) : undefined;
-  if (
-    envFilePath.ok &&
-    envFilePath.path !== undefined &&
-    envFileName !== undefined &&
-    !isCoveredDotenvName(envFileName)
-  ) {
-    deps.log(
-      `Add ${escapeName(joinPath(MEMBERS_DIR, name, envFilePath.path))} to .dockerignore: the ` +
-        `generated rules cover only .env and .env.* names, so this file would be copied into the image.`,
-    );
   }
 
   deps.log('');

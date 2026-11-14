@@ -260,11 +260,33 @@ describe('workspaceContainerFiles', () => {
       expect(contents).toContain('!**/.env.example');
       // M120 audit F2: registry credentials never reach the context.
       expect(contents).toContain('\n**/.npmrc\n');
-      // The limit is stated, not implied: the rules cover .env and .env.* only,
-      // and a custom --env-file name must be added by hand (F2).
+      // The rules cover .env and .env.* only; a custom --env-file name is listed
+      // from the workspace record (M140a F9), so the comment says so.
       expect(contents).toContain('Dotenv files whose names are .env or .env.*');
-      expect(contents).toContain('A custom --env-file name such as local.env is NOT');
-      expect(contents).toContain('add its path from here (apps/<member>/local.env)');
+      expect(contents).toContain('A custom --env-file name such as local.env is listed');
+    });
+
+    it('lists each member custom env file from the manifest, after the generic rules', () => {
+      const lines = contentsOf(
+        workspaceContainerFiles(
+          {
+            ...manifestOf([]),
+            members: [
+              { name: 'api', port: 3000, envFilePath: 'secrets.env' },
+              { name: 'web', port: 3001 },
+            ],
+          },
+          brokerSpec('memory'),
+        ),
+        DOCKERIGNORE,
+      ).split('\n');
+      expect(lines).toContain('apps/api/secrets.env');
+      expect(lines.indexOf('apps/api/secrets.env')).toBeGreaterThan(
+        lines.indexOf('!**/.env.example'),
+      );
+      expect(
+        lines.filter((line) => line.startsWith('apps/') && !line.startsWith('apps/*')),
+      ).toEqual(['apps/api/secrets.env']);
     });
   });
 
