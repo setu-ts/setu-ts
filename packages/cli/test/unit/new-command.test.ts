@@ -187,9 +187,10 @@ describe('the Workers target is deployable as documented', () => {
     expect(manifest.scripts?.['deploy']).toBe('wrangler deploy');
   });
 
-  it('keeps its deno.json too, which is what generate reads for plugin gating', async () => {
+  it('uses package.json for plugin gating without a Deno manifest', async () => {
     const h = await workers('rest');
-    expect(h.fs.has('/work/app/deno.json')).toBe(true);
+    expect(h.fs.has('/work/app/deno.json')).toBe(false);
+    expect(h.fs.has('/work/app/package.json')).toBe(true);
   });
 
   // The trap this must not reintroduce: a package.json switches Deno to
@@ -391,7 +392,7 @@ describe('runNewCommand', () => {
       await h.run(['app']);
       const main = h.fs.read('/work/app/main.ts');
       expect(main).toContain("import { createApp } from './setu.config.ts'");
-      expect(main).toContain("app.start({ port: Number(runtime.env.PORT ?? '3000') })");
+      expect(main).toContain("app.start({ port: Number(runtime.env.PORT || '3000') })");
       expect(main).not.toContain('RuntimePlugin');
       expect(main).not.toContain('createApplication');
     });
@@ -894,7 +895,7 @@ describe('runNewCommand', () => {
       const h = harness();
       await h.run(['app', '--runtime', 'deno']);
       const main = h.fs.read('/work/app/main.ts');
-      expect(main).toContain("await app.start({ port: Number(runtime.env.PORT ?? '3000') })");
+      expect(main).toContain("await app.start({ port: Number(runtime.env.PORT || '3000') })");
       // The plugin list lives in setu.config.ts, not here.
       expect(main).toContain("from './setu.config.ts'");
       expect(h.fs.read('/work/app/setu.config.ts')).toContain(
@@ -996,7 +997,7 @@ describe('runNewCommand', () => {
         const h = harness();
         await h.run(['app', '--runtime', runtime]);
         expect(h.fs.read('/work/app/main.ts')).toContain(
-          "app.start({ port: Number(runtime.env.PORT ?? '3000') })",
+          "app.start({ port: Number(runtime.env.PORT || '3000') })",
         );
         expect(h.fs.has('/work/app/deno.json')).toBe(false);
       });

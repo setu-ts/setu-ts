@@ -35,7 +35,7 @@ export const SERVICE_PORT = 3411;
 export const SERVICE_ENDPOINTS = {
   billing: [
     {
-      host: process.env.BILLING_HOST ?? '127.0.0.1',
+      host: process.env.BILLING_HOST || '127.0.0.1',
       port: 3410,
     },
   ],

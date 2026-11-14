@@ -182,7 +182,7 @@ describe('a --broker scaffold', () => {
       [
         '      MessagingPlugin({',
         "        broker: 'nats',",
-        "        url: process.env.NATS_URL ?? 'nats://127.0.0.1:4222',",
+        "        url: process.env.NATS_URL || 'nats://127.0.0.1:4222',",
         "        streamSubjects: ['app.>', 'rr.req.app.>', 'rr.inbox.>'],",
         '      }),',
       ].join('\n'),

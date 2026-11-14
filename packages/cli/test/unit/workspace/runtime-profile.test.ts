@@ -341,14 +341,19 @@ describe('a connection fallback is rendered as a literal, never as code', () => 
     }
   }
 
-  // Byte-identical for an ordinary URL, so no existing generated project changes.
-  it('renders an ordinary value exactly as before', () => {
+  // The line break and continuation indent stay stable as empty values gain the fallback.
+  it('renders an ordinary value with an empty-means-unset fallback', () => {
     expect(workspaceProfile('deno').envRead('REDIS_URL', 'redis://127.0.0.1:6379')).toBe(
-      "Deno.env.get('REDIS_URL') ??\n          'redis://127.0.0.1:6379'",
+      "Deno.env.get('REDIS_URL') ||\n          'redis://127.0.0.1:6379'",
     );
     expect(workspaceProfile('node').envRead('REDIS_URL', 'redis://127.0.0.1:6379')).toBe(
-      "process.env.REDIS_URL ??\n          'redis://127.0.0.1:6379'",
+      "process.env.REDIS_URL ||\n          'redis://127.0.0.1:6379'",
     );
+    for (const runtime of WORKSPACE_RUNTIMES) {
+      expect(workspaceProfile(runtime).envRead('REDIS_URL', 'default')).toContain(
+        ' ||\n          ',
+      );
+    }
   });
 
   // The quote choice deno fmt keeps under the generated projects' singleQuote

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { renderPluginCall } from '../../src/utils/render-call.ts';
 
 /** The two-line read a Deno connection renders as. */
-const DENO_READ = "Deno.env.get('REDIS_URL') ??\n          'redis://127.0.0.1:6379'";
+const DENO_READ = "Deno.env.get('REDIS_URL') ||\n          'redis://127.0.0.1:6379'";
 
 /** Each shape the CLI writes, at the indent of the generated `plugins: [` array unless named. */
 const LAYOUTS: readonly (readonly [string, string, string, string, number?])[] = [
@@ -18,37 +18,37 @@ const LAYOUTS: readonly (readonly [string, string, string, string, number?])[] =
     'an overflowing object breaks one property per line, the read joined',
     'MessagingPlugin',
     `{ broker: 'redis-streams', url: ${DENO_READ} }`,
-    "MessagingPlugin({\n        broker: 'redis-streams',\n        url: Deno.env.get('REDIS_URL') ?? 'redis://127.0.0.1:6379',\n      })",
+    "MessagingPlugin({\n        broker: 'redis-streams',\n        url: Deno.env.get('REDIS_URL') || 'redis://127.0.0.1:6379',\n      })",
   ],
   [
     'merged seam and transport options lose their stray spaces',
     'QueuePlugin',
     `{  processors: [...QUEUE_PROCESSORS] ,  adapter: 'redis', url: ${DENO_READ}  }`,
-    "QueuePlugin({\n        processors: [...QUEUE_PROCESSORS],\n        adapter: 'redis',\n        url: Deno.env.get('REDIS_URL') ?? 'redis://127.0.0.1:6379',\n      })",
+    "QueuePlugin({\n        processors: [...QUEUE_PROCESSORS],\n        adapter: 'redis',\n        url: Deno.env.get('REDIS_URL') || 'redis://127.0.0.1:6379',\n      })",
   ],
   [
     'a nested object breaks only when it overflows',
     'SchedulerPlugin',
     `{ distributedLock: { enabled: true, storage: 'redis', url: ${DENO_READ} } }`,
-    "SchedulerPlugin({\n        distributedLock: {\n          enabled: true,\n          storage: 'redis',\n          url: Deno.env.get('REDIS_URL') ?? 'redis://127.0.0.1:6379',\n        },\n      })",
+    "SchedulerPlugin({\n        distributedLock: {\n          enabled: true,\n          storage: 'redis',\n          url: Deno.env.get('REDIS_URL') || 'redis://127.0.0.1:6379',\n        },\n      })",
   ],
   [
     'a pre-broken call argument is joined when it fits',
     'CachePlugin',
-    "{ store: 'redis', options: { client: nodeRedisClient(\n          Deno.env.get('REDIS_URL') ??\n            'redis://127.0.0.1:6379',\n        ) } }",
-    "CachePlugin({\n        store: 'redis',\n        options: { client: nodeRedisClient(Deno.env.get('REDIS_URL') ?? 'redis://127.0.0.1:6379') },\n      })",
+    "{ store: 'redis', options: { client: nodeRedisClient(\n          Deno.env.get('REDIS_URL') ||\n            'redis://127.0.0.1:6379',\n        ) } }",
+    "CachePlugin({\n        store: 'redis',\n        options: { client: nodeRedisClient(Deno.env.get('REDIS_URL') || 'redis://127.0.0.1:6379') },\n      })",
   ],
   [
-    'an overflowing ?? chain continues one level in',
+    'an overflowing logical-or chain continues one level in',
     'MessagingPlugin',
-    "{ url: Deno.env.get('A_VERY_LONG_ENVIRONMENT_VARIABLE_NAME_FOR_THE_BROKER') ?? 'redis://a-very-long-host-name.internal.example:6379' }",
-    "MessagingPlugin({\n        url: Deno.env.get('A_VERY_LONG_ENVIRONMENT_VARIABLE_NAME_FOR_THE_BROKER') ??\n          'redis://a-very-long-host-name.internal.example:6379',\n      })",
+    "{ url: Deno.env.get('A_VERY_LONG_ENVIRONMENT_VARIABLE_NAME_FOR_THE_BROKER') || 'redis://a-very-long-host-name.internal.example:6379' }",
+    "MessagingPlugin({\n        url: Deno.env.get('A_VERY_LONG_ENVIRONMENT_VARIABLE_NAME_FOR_THE_BROKER') ||\n          'redis://a-very-long-host-name.internal.example:6379',\n      })",
   ],
   [
     'an overflowing call moves its argument in, then breaks the chain',
     'MessagingPlugin',
-    "{ client: someFactoryFunctionName(Deno.env.get('A_VERY_LONG_ENVIRONMENT_VARIABLE_NAME') ?? 'redis://a-long-host.example:6379') }",
-    "MessagingPlugin({\n        client: someFactoryFunctionName(\n          Deno.env.get('A_VERY_LONG_ENVIRONMENT_VARIABLE_NAME') ??\n            'redis://a-long-host.example:6379',\n        ),\n      })",
+    "{ client: someFactoryFunctionName(Deno.env.get('A_VERY_LONG_ENVIRONMENT_VARIABLE_NAME') || 'redis://a-long-host.example:6379') }",
+    "MessagingPlugin({\n        client: someFactoryFunctionName(\n          Deno.env.get('A_VERY_LONG_ENVIRONMENT_VARIABLE_NAME') ||\n            'redis://a-long-host.example:6379',\n        ),\n      })",
   ],
   [
     'an overflowing array breaks one item per line',
@@ -85,7 +85,7 @@ const LAYOUTS: readonly (readonly [string, string, string, string, number?])[] =
     'a deeper array indents from its own line',
     'MessagingPlugin',
     `{ broker: 'redis-streams', url: ${DENO_READ} }`,
-    "MessagingPlugin({\n            broker: 'redis-streams',\n            url: Deno.env.get('REDIS_URL') ?? 'redis://127.0.0.1:6379',\n          })",
+    "MessagingPlugin({\n            broker: 'redis-streams',\n            url: Deno.env.get('REDIS_URL') || 'redis://127.0.0.1:6379',\n          })",
     10,
   ],
 ];

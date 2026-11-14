@@ -10,6 +10,7 @@
  * @module
  */
 
+import { runtimeEnvRead, withNullishEnvReads } from './env-fallback.ts';
 import type { TargetRuntime } from '../constants.ts';
 import type { EntryPort } from './project-files.ts';
 import type { GeneratedFile } from '../utils/file-writer.ts';
@@ -379,8 +380,8 @@ import { frameworkPackages, workspaceLibraries } from './vite.config.ts';${port 
  */
 const BASE = '/__vite/';
 const runtime: IRuntimeServices = createRuntimeServices();
-const port = ${port === undefined ? `Number(runtime.env.PORT ?? '3000')` : port.symbol};
-const vitePort = ${port === undefined ? `Number(runtime.env.VITE_PORT ?? '5173')` : 'VITE_PORT'};
+const port = ${port === undefined ? `Number(${runtimeEnvRead('PORT', '3000')})` : port.symbol};
+const vitePort = ${port === undefined ? `Number(${runtimeEnvRead('VITE_PORT', '5173')})` : 'VITE_PORT'};
 
 // A file module always has a directory; the fallback only satisfies the type.
 const root = import.meta.dirname ?? '.';
@@ -489,7 +490,10 @@ for (const signal of ['SIGTERM', 'SIGINT'] as const) {
   };
 }
 
-/** Current and recognition-only 0.12.0 standalone entries, for workspace adoption. */
+/**
+ * Current and recognition-only standalone entries (0.12.0's, and the guarded
+ * layout with nullish port reads), for workspace adoption.
+ */
 export function fullStackDevEntryVariants(
   runtime: TargetRuntime,
 ): readonly { path: string; contents: string }[] {
@@ -510,5 +514,15 @@ export function fullStackDevEntryVariants(
     .replace(', type IRuntimeServices', '')
     .replace('const runtime: IRuntimeServices =', 'const runtime =')
     .replace('  console.log(`Listening on http://localhost:${port}/`);\n', '');
-  return [current, { path: current.path, contents: legacy }];
+  // 0.12.0 wrote the nullish port reads M140b replaced, and so did the guarded
+  // layout develop generated before M140b; both stay recognisable.
+  const nullish: readonly (readonly [string, string])[] = [
+    ['PORT', '3000'],
+    ['VITE_PORT', '5173'],
+  ];
+  return [
+    current,
+    { path: current.path, contents: withNullishEnvReads(legacy, nullish) },
+    { path: current.path, contents: withNullishEnvReads(current.contents, nullish) },
+  ];
 }

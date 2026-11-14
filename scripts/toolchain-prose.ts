@@ -370,6 +370,11 @@ export const TOOLCHAIN_PROSE_RULES: ToolchainProseRules = {
       reason: 'Commands emitted for or exercised against supported Deno projects.',
     },
     {
+      path: 'packages/cli/test/unit/node-redis-cli.test.ts',
+      category: 'deno-target',
+      reason: 'Commands emitted for or exercised against supported Deno projects.',
+    },
+    {
       path: 'packages/cli/test/unit/templates/project-files.test.ts',
       category: 'deno-target',
       reason: 'Commands emitted for or exercised against supported Deno projects.',

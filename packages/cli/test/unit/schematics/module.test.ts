@@ -22,6 +22,8 @@ describe('generateModule', () => {
         const source = (name: string): string =>
           files.find((file) => file.path === `src/modules/invoices/${name}`)!.contents;
         expect(gateOf('module')).toBeUndefined();
+        expect(source('invoices.service.ts')).toContain('isolate: other isolates do not see it');
+        expect(source('invoices.service.ts')).not.toContain('process restarts');
         expect(files.some((file) => file.path.startsWith('src/controllers/'))).toBe(false);
         expect(files.map((file) => file.path)).toEqual(
           expect.arrayContaining([

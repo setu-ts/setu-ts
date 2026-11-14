@@ -98,8 +98,7 @@ async function denoOrNode(fs: IFileSystem, dir: string): Promise<TargetRuntime> 
  * Detects the runtime a project was scaffolded for.
  *
  * The order is what makes it unambiguous. A Cloudflare Workers project carries
- * BOTH a `deno.json` (which `setu generate` reads for plugin gating) and a
- * `package.json` (which `wrangler` needs), so it has to be recognised by
+ * `package.json` for Wrangler and plugin gating, so it must be recognised by
  * its Wrangler config first or it would be misread as Node. Deno is decided by
  * its own manifest, and a directory with no manifest at all is Node.
  *

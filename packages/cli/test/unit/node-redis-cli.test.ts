@@ -40,14 +40,14 @@ const VERSION_PIN = new RegExp(
 describe('node-redis CLI', () => {
   it('renders the client call in the layout each project formatter keeps', () => {
     // Short single-line read: one line.
-    expect(nodeRedisClientCall("process.env.REDIS_URL ?? 'redis://127.0.0.1:6379'")).toBe(
-      "nodeRedisClient(process.env.REDIS_URL ?? 'redis://127.0.0.1:6379')",
+    expect(nodeRedisClientCall("process.env.REDIS_URL || 'redis://127.0.0.1:6379'")).toBe(
+      "nodeRedisClient(process.env.REDIS_URL || 'redis://127.0.0.1:6379')",
     );
     // A Deno read continues at 10 for a property at 8: the argument moves one level in.
     expect(
-      nodeRedisClientCall("Deno.env.get('REDIS_URL') ??\n          'redis://127.0.0.1:6379'"),
+      nodeRedisClientCall("Deno.env.get('REDIS_URL') ||\n          'redis://127.0.0.1:6379'"),
     ).toBe(
-      "nodeRedisClient(\n          Deno.env.get('REDIS_URL') ??\n            'redis://127.0.0.1:6379',\n        )",
+      "nodeRedisClient(\n          Deno.env.get('REDIS_URL') ||\n            'redis://127.0.0.1:6379',\n        )",
     );
     // A single-line read too wide for column 10 after `client: ` wraps as deno fmt does.
     const read = "config.get<string>('REDIS_URL', { default: 'redis://127.0.0.1:6379' })";
@@ -192,8 +192,9 @@ describe('node-redis CLI', () => {
   });
 
   it('keeps every ioredis variant byte-identical to captured develop output', async () => {
-    // Except the one deliberate change: `setu add` on Deno wrote its call on one
-    // line, which the project's own `deno fmt --check` refused; it is laid out now.
+    // Except the deliberate changes declared below. The first: `setu add` on Deno
+    // wrote its call on one line, which the project's own `deno fmt --check`
+    // refused; it is laid out now.
     const read = "url: Deno.env.get('REDIS_URL') ??\n          'redis://127.0.0.1:6379'";
     const joined = "url: Deno.env.get('REDIS_URL') ?? 'redis://127.0.0.1:6379'";
     const relaid: Record<string, readonly [string, string]> = {
@@ -220,6 +221,24 @@ describe('node-redis CLI', () => {
     for (const [path, [before, after]] of Object.entries(relaid)) {
       expect(expected[path]).toContain(before);
       expected[path] = expected[path]!.replace(before, after);
+    }
+    // The third deliberate change (M140b V12-124): an empty connection value
+    // means unset, so every generated read falls back with a logical-or. The
+    // capture holds the earlier nullish form; only the operator changes.
+    const ENV_READ_NULLISH =
+      /(Deno\.env\.get\('[A-Z_]+'\)|(?:process|runtime)\.env\.[A-Z_]+) \?\?/g;
+    for (const path of Object.keys(expected)) {
+      expected[path] = expected[path]!.replace(ENV_READ_NULLISH, '$1 ||');
+    }
+    // And M140b V12-118: a Deno README names `deno task build` only when the
+    // project has that task, and none of these microservice projects does.
+    for (const path of Object.keys(expected)) {
+      if (path.startsWith('deno/') && path.endsWith('/README.md')) {
+        expected[path] = expected[path]!.replace(
+          '```bash\ndeno task build\ndeno task start\n```',
+          '```bash\ndeno task start\n```',
+        );
+      }
     }
     // The second deliberate change (X91-9): `setu add messaging --broker redis` and
     // `setu add queue --queue redis` append the REDIS_URL row `setu new --broker`

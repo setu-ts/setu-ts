@@ -24,6 +24,7 @@ import {
   type TargetRuntime,
 } from '../constants.ts';
 import { runAppCommand } from './app.ts';
+import { RUNTIME_RESTRICTIONS } from './add.ts';
 import type { PortProbe } from '../workspace/port-probe.ts';
 import { runLibraryCommand } from './library.ts';
 import {
@@ -398,6 +399,15 @@ export async function runGenerateCommand(
       `The "${schematicName}" schematic requires @setu-ts/${requiredPlugin}, ` +
         `which is not installed in ${escapeName(dir)}.`,
     );
+    // A package `add` refuses on this runtime (M140b: queue-plugin on Workers)
+    // gets the refusal's reason, not an `add` command that would then refuse.
+    const restriction = RUNTIME_RESTRICTIONS.get(requiredPlugin);
+    if (restriction !== undefined && !restriction.runtimes.includes(runtime)) {
+      deps.error(
+        `@setu-ts/${requiredPlugin} is not available on a ${runtime} project: ${restriction.reason}.`,
+      );
+      return EXIT_ERROR;
+    }
     if (diagnosis.starter?.arms.has(requiredPlugin) === true) {
       deps.error(
         `${diagnosis.starter.symbol} already runs ${requiredPlugin}; add installs its package and wires the generated handlers into setu.config.ts.`,

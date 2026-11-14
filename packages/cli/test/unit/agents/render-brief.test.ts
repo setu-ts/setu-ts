@@ -238,3 +238,12 @@ describe('project brief rendering', () => {
     }
   });
 });
+
+it('M140b offers queue installation only on server runtimes', () => {
+  for (const runtime of ['node', 'deno', 'bun', 'cloudflare-workers'] as const) {
+    const brief = renderBrief(agentFacts({ runtime, installed: new Set(['runtime']) }));
+    expect(brief.includes('- `queue` (`@setu-ts/queue-plugin`)')).toBe(
+      runtime !== 'cloudflare-workers',
+    );
+  }
+});

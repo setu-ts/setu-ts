@@ -753,12 +753,9 @@ export const FULL_STACK_README_SECTION = (
     runtime !== 'cloudflare-workers'
       ? ''
       : `
-## Deploying to Cloudflare Workers
+## Cloudflare Workers build
 
-\`npx wrangler deploy\` builds the client and server, then bundles the Worker. The session secret is a
-Cloudflare secret, not a file: run \`npx wrangler secret put SESSION_SECRET\` once per environment
-before the first deploy. Local development reads \`.dev.vars\` instead, which the scaffold creates
-with a random development value of its own; it is not the value to deploy.
+\`npm run deploy\` builds the client and server, then bundles the Worker.
 
 Everything in \`build/client\` is served by the platform before the Worker runs, so those requests
 skip the application's middleware: no security headers and no authentication apply to them. Put only

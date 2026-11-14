@@ -152,7 +152,8 @@ it('X87-2 X87-6 adoption records dev ports and rewrites only canonical entries a
 
 it('M139d review L7 rewrites a 0.12.0 full-stack dev.ts, recognised from its real rendering', async () => {
   // Rendered by the 0.12.0 template (develop 4ec5eaa01), before M139d's Vite
-  // listen guard and startup line; the recognition variant must equal it.
+  // listen guard and startup line; the recognition variant must equal it,
+  // nullish port reads included (M140b changed them to logical-or).
   const previous = readFileSync(
     new URL('../fixtures/full-stack-dev-entry-0.12.0-node.txt', import.meta.url),
     'utf8',
@@ -171,6 +172,32 @@ it('M139d review L7 rewrites a 0.12.0 full-stack dev.ts, recognised from its rea
       scripts: { 'start:debug': 'node --inspect dev.ts' },
     }),
     '/work/svc/dev.ts': previous,
+  });
+  expect(await h.run(['--name', 'web'], new AbortController().signal), h.err.text()).toBe(0);
+  expect(h.fs.read('/work/svc/apps/web/dev.ts')).toContain('const vitePort = VITE_PORT;');
+  expect(h.out.text()).not.toContain('Set the two development port lines');
+});
+
+it('M140b rewrites the guarded full-stack dev.ts develop wrote with nullish port reads', async () => {
+  // Rendered by develop 8f4f226f2's own renderFullStackDevEntry (M139d's guarded
+  // layout, before M140b turned its port reads into logical-or).
+  const develop = (runtime: 'node' | 'bun'): string =>
+    readFileSync(
+      new URL(`../fixtures/full-stack-dev-entry-develop-${runtime}.txt`, import.meta.url),
+      'utf8',
+    );
+  for (const runtime of ['node', 'bun'] as const) {
+    expect(fullStackDevEntryVariants(runtime)[2]!.contents).toBe(develop(runtime));
+  }
+  const guardedNullish = { path: 'dev.ts', contents: develop('node') };
+  const [written] = await formatForTarget([guardedNullish], 'node', undefined, () => {});
+  const h = harness({
+    ...NODE_PROJECT,
+    '/work/svc/package.json': JSON.stringify({
+      dependencies: { '@setu-ts/react-router-plugin': '^0.12.0' },
+      scripts: { 'start:debug': 'node --inspect dev.ts' },
+    }),
+    '/work/svc/dev.ts': written!.contents,
   });
   expect(await h.run(['--name', 'web'], new AbortController().signal), h.err.text()).toBe(0);
   expect(h.fs.read('/work/svc/apps/web/dev.ts')).toContain('const vitePort = VITE_PORT;');

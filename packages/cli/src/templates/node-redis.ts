@@ -51,7 +51,7 @@ export function nodeRedisClientCall(connection: string): string {
     if (10 + 'client: '.length + call.length + ','.length <= LINE_WIDTH) return call;
     return `${NODE_REDIS_FACTORY}(\n${' '.repeat(10)}${connection},\n${' '.repeat(8)})`;
   }
-  // A multi-line read (Deno: `Deno.env.get('X') ??` then the fallback, its
+  // A multi-line read (Deno: `Deno.env.get('X') ||` then the fallback, its
   // continuation indented for a `url:` property) is laid out as `deno fmt` lays
   // out a wrapped call argument: the argument on its own lines one level in,
   // a trailing comma, and the closing parenthesis back at the property's

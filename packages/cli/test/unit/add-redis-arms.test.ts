@@ -37,7 +37,7 @@ describe('setu add Redis arm flags (M131a X88-1)', () => {
   it('renders each arm through the inferred node-redis client, with no ioredis', () => {
     const spec = getBroker('redis', 'node-redis')!;
     // The node-redis arm renders `nodeRedisClient(<read>)` for every arm.
-    const read = 'process.env.REDIS_URL ?? "redis://127.0.0.1:6379"';
+    const read = 'process.env.REDIS_URL || "redis://127.0.0.1:6379"';
     expect(spec.cacheArgs!(read)).toBe(
       `{ store: 'redis', options: { client: nodeRedisClient(${read}) } }`,
     );
@@ -58,7 +58,7 @@ describe('setu add Redis arm flags (M131a X88-1)', () => {
 
   it('renders each arm through ioredis as a url, with the ioredis dependency', () => {
     const spec = getBroker('redis', 'ioredis')!;
-    const read = 'process.env.REDIS_URL ?? "redis://127.0.0.1:6379"';
+    const read = 'process.env.REDIS_URL || "redis://127.0.0.1:6379"';
     expect(spec.cacheArgs!(read)).toBe(`{ store: 'redis', options: { url: ${read} } }`);
     expect(spec.idempotencyArgs!(read)).toBe(
       `{ store: { type: 'redis', namespace: 'setu', url: ${read} } }`,

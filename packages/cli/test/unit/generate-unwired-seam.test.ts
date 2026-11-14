@@ -261,6 +261,41 @@ it('refuses an uninstalled starter-owned job queue before writing, including dry
     }
   }
 });
+it('M140b names the Workers refusal instead of an add command that would refuse', async () => {
+  const packageJson = (...packages: string[]): string =>
+    JSON.stringify({
+      dependencies: Object.fromEntries(packages.map((p) => [`@setu-ts/${p}`, '^0.12.0'])),
+    });
+  for (const [config, args] of [
+    [
+      "import { createFullStackAppFromConfig } from '@setu-ts/full-stack-starter';",
+      ['job', 'email'],
+    ],
+    // The class-based job requires queue-plugin whenever the decorator plugin is installed.
+    ['', ['job', 'email']],
+  ] as const) {
+    for (const runtime of ['cloudflare-workers', 'node'] as const) {
+      const classBased = config === '';
+      const h = harness({
+        '/app/package.json': packageJson(...(classBased ? ['decorator-plugin'] : [])),
+        '/app/setu.config.ts': config,
+        ...(runtime === 'cloudflare-workers' ? { '/app/wrangler.toml': 'name = "app"\n' } : {}),
+      });
+      expect(await h.run([...args])).toBe(1);
+      if (runtime === 'cloudflare-workers') {
+        expect(h.fs.writes).toEqual([]);
+        expect(h.err.text()).toContain(
+          '@setu-ts/queue-plugin is not available on a cloudflare-workers project:',
+        );
+        expect(h.err.text()).toContain('CloudflarePlugin({ queue: { binding } })');
+        expect(h.err.text()).not.toContain('add queue');
+        expect(h.err.text()).not.toContain('already runs queue-plugin');
+      } else {
+        expect(h.err.text()).toContain('add queue');
+      }
+    }
+  }
+});
 it('keeps functional jobs ungated without a queue-owning starter', async () => {
   for (const config of ['', "import { createRestApp } from '@setu-ts/rest-starter';"]) {
     const h = harness({ '/app/deno.json': manifest(), '/app/setu.config.ts': config });
