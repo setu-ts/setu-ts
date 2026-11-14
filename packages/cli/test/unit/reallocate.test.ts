@@ -111,7 +111,7 @@ describe('ports --reallocate', () => {
     const source = h.fs.read('/ws/apps/a/main.dev.ts');
     expect(source).toContain('port: 4000,');
     expect(source).toContain('npx @setu-ts/cli@');
-    expect(source).not.toMatch(/Deno\.|process\./);
+    expect(source).toContain("delete process.env['SETU_DEVTOOL_SESSION_KEY'];");
     expect(source).toContain('await app.start({ port: SERVICE_PORT });');
   });
   it('moves a member application port and devtool port together', async () => {

@@ -23,7 +23,7 @@ describe('the generated Deno task set', () => {
     ]);
     expect(manifest.tasks['start']).toMatch(/^deno run --allow-net --allow-env .* main\.ts$/);
     expect(manifest.tasks['check']).toBe(
-      `deno check main.ts setu.config.ts && deno run -A --no-lock npm:@setu-ts/cli@^${VERSION} check`,
+      `deno check main.ts setu.config.ts && deno run -A --no-lock npm:@setu-ts/cli@${VERSION} check`,
     );
   });
 
@@ -48,7 +48,7 @@ describe('the generated Deno task set', () => {
   it('names main.ts, setu.config.ts and main.dev.ts in the check task', () => {
     const tasks = devtoolTasks();
     expect(tasks['check']).toBe(
-      `deno check main.ts setu.config.ts main.dev.ts && deno run -A --no-lock npm:@setu-ts/cli@^${VERSION} check`,
+      `deno check main.ts setu.config.ts main.dev.ts && deno run -A --no-lock npm:@setu-ts/cli@${VERSION} check`,
     );
   });
 

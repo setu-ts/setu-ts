@@ -12,6 +12,7 @@ import process from 'node:process';
 import { createServer } from 'node:net';
 import type { IFileSystem } from '@setu-ts/common';
 import { runCli } from './cli.ts';
+import { generateSecret } from './templates/secret.ts';
 import { EXIT_ERROR } from './constants.ts';
 import { createTerminalPrompter } from './prompt.ts';
 import { createLineReader } from './terminal-line.ts';
@@ -62,6 +63,7 @@ export async function runMain(runtime: MainRuntime, host: MainProcess): Promise<
 
   try {
     return await runCli(host.args, {
+      secret: generateSecret,
       fs: runtime.fs,
       cwd,
       ...(logicalCwd === undefined ? {} : { logicalCwd }),

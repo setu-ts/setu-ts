@@ -1,7 +1,12 @@
 import { VERSION } from '../../../src/constants.ts';
 import { describe, expect, it } from 'vitest';
 import { firstDuplicatePath } from '../../../src/utils/file-writer.ts';
-import { workspaceRootFiles } from '../../../src/workspace/root-files.ts';
+import {
+  workspaceRootFiles,
+  renderTransportSection,
+  replaceTransportSection,
+  TRANSPORT_README_MARKERS,
+} from '../../../src/workspace/root-files.ts';
 import { frameworkSpecifier } from '../../../src/templates/framework-specifier.ts';
 import { WORKSPACE_MANIFEST, WORKSPACE_VERSION } from '../../../src/workspace/manifest.ts';
 import { brokerSpec } from '../../../src/workspace/transport.ts';
@@ -31,6 +36,33 @@ function contentsOf(path: string): string {
 }
 
 describe('workspaceRootFiles', () => {
+  it('prints member-specific export lines even without a backing service', () => {
+    for (const broker of ['memory', 'redis'] as const) {
+      const section = renderTransportSection(brokerSpec(broker), DENO, undefined, [
+        'WEB_SESSION_SECRET',
+        'ADMIN_WEB_SESSION_SECRET',
+      ]);
+      expect(section).toContain('## Run the stack');
+      expect(section).toContain('export WEB_SESSION_SECRET="$(openssl rand -hex 32)"');
+      expect(section).toContain('export ADMIN_WEB_SESSION_SECRET="$(openssl rand -hex 32)"');
+      expect(section).toContain('Compose refuses to start');
+      expect(section.indexOf('export WEB_SESSION_SECRET')).toBeLessThan(
+        section.indexOf('docker compose'),
+      );
+    }
+    const section = renderTransportSection(HTTP, DENO);
+    const before = `user intro\n${section}\nuser footer`;
+    expect(replaceTransportSection(before, 'replacement')).toBe(
+      'user intro\nreplacement\nuser footer',
+    );
+    for (const source of [
+      undefined,
+      '',
+      TRANSPORT_README_MARKERS.start,
+      TRANSPORT_README_MARKERS.end + TRANSPORT_README_MARKERS.start,
+    ])
+      expect(replaceTransportSection(source, section)).toBeUndefined();
+  });
   it('ignores production outputs and selects the hoisted linker only on Bun', () => {
     for (const runtime of ['deno', 'node', 'bun'] as const) {
       const files = workspaceRootFiles('acme', 3000, HTTP, workspaceProfile(runtime));

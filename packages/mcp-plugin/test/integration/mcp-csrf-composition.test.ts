@@ -89,7 +89,7 @@ describe('M139a MCP form CSRF composition', () => {
     const app = await appFor({}, { middleware: [requireScopes('tools:read')] }, [
       SessionPlugin({ secret: ['m139a-session-secret-at-least-32-characters'], csrf: {} }),
       AuthPlugin({
-        jwt: { secret: 'm139a-token-secret' },
+        jwt: { secret: 'm139a-token-secret-at-least-32-characters' },
         resourceServer: { resource: 'http://localhost' },
       }),
     ]);

@@ -65,7 +65,15 @@ export class SseService implements IService {
     backplane?: IRealtimeBackplane,
     logger?: ILogger,
   ) {
-    this.#heartbeatMs = options?.heartbeatMs;
+    const heartbeatMs = options?.heartbeatMs ?? 30_000;
+    // A NaN, negative or over-2^31-1 interval would become a ~1 ms timer per
+    // connection (timers clamp an out-of-range delay to 1 ms).
+    if (!Number.isSafeInteger(heartbeatMs) || heartbeatMs < 0 || heartbeatMs > 2_147_483_647) {
+      throw new Error(
+        'SsePlugin: heartbeatMs must be a whole number of milliseconds up to 2147483647, 0 to disable.',
+      );
+    }
+    this.#heartbeatMs = heartbeatMs === 0 ? undefined : heartbeatMs;
     this.#retryMs = options?.retryMs;
     this.#runtime = runtime;
     this.#backplane = backplane;

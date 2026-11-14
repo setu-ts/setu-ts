@@ -64,8 +64,8 @@ export const PRINTED_REGISTRATIONS = [
   VectorStorePlugin({ adapter: new PgVectorStore({ db }), collections: [{ name: 'documents', dimensions: 768 }] }),
   // prettier-ignore
   VectorStorePlugin({ adapter: new QdrantVectorStore({ client }), collections: [{ name: 'documents', dimensions: 768 }] }),
-  AuthPlugin({ jwt: { secret: '<your-secret>' }, rbac: { roles: {} } }),
-  SessionPlugin({ secret: '<your-secret>' }),
+  AuthPlugin({ jwt: {}, rbac: { roles: {} } }),
+  SessionPlugin(),
   GrpcPlugin({ services: [] }),
   DatabasePlugin({ type: 'memory' }),
   FeatureFlagsPlugin({ provider: 'memory' }),

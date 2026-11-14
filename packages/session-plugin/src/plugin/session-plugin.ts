@@ -82,10 +82,10 @@ export function SessionPlugin(options: SessionPluginOptions = {}): IPlugin {
     name: 'session-plugin',
     version: VERSION,
     dependencies: [CAPABILITIES.RUNTIME],
-    // Ordered after these so the lookups below see them when present. Neither
-    // is required: without secrets the env fallback applies, and the cache store
+    // Ordered after these so the lookups below see them when present. None
+    // is required: config and environment provide secret fallbacks, and the cache store
     // is only consulted when `store: 'cache'` asked for it.
-    optionalDependencies: [CAPABILITIES.SECRETS, CAPABILITIES.CACHE],
+    optionalDependencies: [CAPABILITIES.SECRETS, CAPABILITIES.CONFIG, CAPABILITIES.CACHE],
     provides: [CAPABILITIES.SESSION],
     consumes: [CAPABILITIES.RUNTIME],
     priority: PLUGIN_PRIORITY.NORMAL,

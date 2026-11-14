@@ -32,7 +32,7 @@ describe('M139a scoped token confinement through public entry points', () => {
           cookie: { secure: false },
         }),
         AuthPlugin({
-          jwt: { secret: 'm139a-secret' },
+          jwt: { secret: 'm139a-secret-at-least-32-characters' },
           ...(cap === undefined ? {} : { confineScopedTokens: cap }),
           rbac: { roles: { admin: { permissions: ['*'] } } },
           scopedRbac: {
@@ -112,7 +112,7 @@ describe('audit F1 malformed scopes remain confined', () => {
         plugins: [
           RuntimePlugin(),
           AuthPlugin({
-            jwt: { secret: 'audit-f1-secret' },
+            jwt: { secret: 'audit-f1-secret-at-least-32-characters' },
             rbac: { roles: { admin: { permissions: ['*'] } } },
           }),
         ],

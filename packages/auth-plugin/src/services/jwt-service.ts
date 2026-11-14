@@ -10,6 +10,7 @@ import { decodeBase64Url, encodeBase64Url } from '../utils/base64url.ts';
 import { toBuffer } from '../utils/buffer.ts';
 import { pemToDer } from '../utils/pem.ts';
 import { parseDuration } from '../utils/duration.ts';
+import { validateJwtSecret } from '../secret/jwt-secret.ts';
 
 /**
  * Internal options for JWT service construction.
@@ -36,9 +37,7 @@ export class JwtService implements IJwtService {
     this.runtime = runtime;
     this.options = options;
 
-    if (options.algorithm === 'HS256' && !options.secret) {
-      throw new Error('HS256 requires a secret key');
-    }
+    if (options.algorithm === 'HS256') validateJwtSecret(options.secret);
     if (options.algorithm === 'RS256' && (!options.privateKey || !options.publicKey)) {
       throw new Error('RS256 requires both private and public keys');
     }

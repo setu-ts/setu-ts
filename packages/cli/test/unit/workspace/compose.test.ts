@@ -54,6 +54,43 @@ const NPMRC_MOUNT = '--mount=type=secret,id=npmrc,target=/root/.npmrc';
 const GUARD = `RUN ${NPMRC_MOUNT} if [ -z "$NPM_CONFIG_REGISTRY" ]; then unset NPM_CONFIG_REGISTRY; fi && `;
 
 describe('workspaceContainerFiles', () => {
+  it('requires a separate shell key for each member generated secret', () => {
+    const manifest: WorkspaceManifest = {
+      ...manifestOf([]),
+      members: [
+        { name: 'web', port: 3000, generatedSecrets: ['SESSION_SECRET', 'JWT_SECRET'] },
+        { name: 'admin-web', port: 3001, generatedSecrets: ['SESSION_SECRET'] },
+        { name: 'api', port: 3002 },
+      ],
+    };
+    const compose = contentsOf(
+      workspaceContainerFiles(manifest, brokerSpec('memory')),
+      COMPOSE_FILE,
+    );
+    expect(compose).toContain(
+      "SESSION_SECRET: '${WEB_SESSION_SECRET:?set WEB_SESSION_SECRET — see README, Run the stack}'",
+    );
+    expect(compose).toContain(
+      "JWT_SECRET: '${WEB_JWT_SECRET:?set WEB_JWT_SECRET — see README, Run the stack}'",
+    );
+    expect(compose).toContain(
+      "SESSION_SECRET: '${ADMIN_WEB_SESSION_SECRET:?set ADMIN_WEB_SESSION_SECRET — see README, Run the stack}'",
+    );
+    expect(compose).not.toContain('API_SESSION_SECRET');
+    expect(compose).toContain('path: ../apps/web/.env');
+    expect(compose).toContain(
+      '# Export ADMIN_WEB_SESSION_SECRET, WEB_SESSION_SECRET, WEB_JWT_SECRET first (README, Run the stack):',
+    );
+    expect(
+      contentsOf(
+        workspaceContainerFiles(
+          { ...manifestOf([]), members: [{ name: 'api', port: 3002 }] },
+          brokerSpec('memory'),
+        ),
+        COMPOSE_FILE,
+      ),
+    ).not.toContain('# Export ');
+  });
   it('keeps the Node devtool out of the runtime image without a strip step', () => {
     const manifest: WorkspaceManifest = {
       ...manifestOf([{ name: 'a', port: 3000 }]),
@@ -223,11 +260,33 @@ describe('workspaceContainerFiles', () => {
       expect(contents).toContain('!**/.env.example');
       // M120 audit F2: registry credentials never reach the context.
       expect(contents).toContain('\n**/.npmrc\n');
-      // The limit is stated, not implied: the rules cover .env and .env.* only,
-      // and a custom --env-file name must be added by hand (F2).
+      // The rules cover .env and .env.* only; a custom --env-file name is listed
+      // from the workspace record (M140a F9), so the comment says so.
       expect(contents).toContain('Dotenv files whose names are .env or .env.*');
-      expect(contents).toContain('A custom --env-file name such as local.env is NOT');
-      expect(contents).toContain('add its path from here (apps/<member>/local.env)');
+      expect(contents).toContain('A custom --env-file name such as local.env is listed');
+    });
+
+    it('lists each member custom env file from the manifest, after the generic rules', () => {
+      const lines = contentsOf(
+        workspaceContainerFiles(
+          {
+            ...manifestOf([]),
+            members: [
+              { name: 'api', port: 3000, envFilePaths: ['secrets.env'] },
+              { name: 'web', port: 3001 },
+            ],
+          },
+          brokerSpec('memory'),
+        ),
+        DOCKERIGNORE,
+      ).split('\n');
+      expect(lines).toContain('apps/api/secrets.env');
+      expect(lines.indexOf('apps/api/secrets.env')).toBeGreaterThan(
+        lines.indexOf('!**/.env.example'),
+      );
+      expect(
+        lines.filter((line) => line.startsWith('apps/') && !line.startsWith('apps/*')),
+      ).toEqual(['apps/api/secrets.env']);
     });
   });
 

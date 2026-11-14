@@ -327,7 +327,7 @@ headers, so any client can choose its own address and origin.
       {
         name: 'SESSION_SECRET',
         description: 'Signs and encrypts session cookies. Use a long random value in production.',
-        develop: 'dev-only-insecure-session-secret-change-me',
+        generated: 'secret',
       },
     ],
     // The one template with a real frontend build, and the only one that should

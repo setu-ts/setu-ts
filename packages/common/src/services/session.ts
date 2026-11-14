@@ -20,10 +20,8 @@ import type { IRequestContext } from '../http.ts';
  * `multi-tenancy-plugin`'s tenant middleware reads it for the tenant-binding
  * compare that runs on whichever side sees the tenant second (M101c, V8-7).
  *
- * Application code must not read or write this key — `clear()` and
- * `regenerate()` drop it and the next commit re-binds it, which is correct
- * because a regenerated session is a new session and should adopt the current
- * tenant.
+ * Application code must not read or write this key. `clear()` drops it and
+ * the next commit re-binds it. `regenerate()` preserves the tenant binding.
  *
  * @since 0.9.0
  */
@@ -156,7 +154,8 @@ export interface ISession {
    */
   clear(): void;
   /**
-   * Issues a new session id while keeping the current data.
+   * Issues a new session id while keeping the current data except the form-CSRF token.
+   * Fetch a fresh CSRF token after regeneration before submitting another form.
    *
    * Call this on privilege change (most importantly immediately after login) so
    * that a session id an attacker planted before authentication does not carry

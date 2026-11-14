@@ -407,21 +407,18 @@ describe('a template with a frontend build, on a Deno target', () => {
   const manifestOf = (runtime: TargetRuntime): Record<string, never> =>
     JSON.parse(contentsOf([...projectFiles('shop', runtime, host)], 'deno.json'));
 
-  it('emits install and build tasks, with start depending on build', () => {
+  it('emits a script-free install and separate build and start tasks', () => {
     const tasks = (
       manifestOf('deno') as unknown as {
         tasks: Record<string, string>;
       }
     ).tasks;
 
-    // `--min-dep-age 0` for D1: the project is pinned to the CLI's own version,
-    // which on release day is younger than Deno's 24-hour policy allows.
-    expect(tasks['install']).toBe('deno install --allow-scripts --min-dep-age 0');
+    expect(tasks['install']).toBe('deno install');
     expect(tasks['build']).toContain('deno task install &&');
     expect(tasks['build']).toContain('npm:@react-router/dev build');
-    // The dependency is the point: `deno task start` on a fresh clone has to
-    // produce the server build before importing it.
-    expect(tasks['start']?.startsWith('deno task build && ')).toBe(true);
+    expect(tasks['start']?.startsWith('deno run ')).toBe(true);
+    expect(tasks['start']).not.toContain('build');
   });
 
   it('sets nodeModulesDir so a COLD checkout type-checks', () => {

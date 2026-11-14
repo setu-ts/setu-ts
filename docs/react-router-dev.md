@@ -16,7 +16,7 @@ restarting the application; the browser gets Hot Module Replacement and React Fa
 production build runs in this loop.
 
 For production, Node runs `npm run build` then `npm start`; Bun runs `bun run build` then
-`bun run start`. Deno runs `deno task start`, which builds first. These entries use the compiled
+`bun run start`. Deno runs `deno task build` then `deno task start`. These entries use the compiled
 frontend; Node also builds the service entry.
 
 Cloudflare Workers projects have no `dev.ts`: `npm run dev` runs `wrangler dev`, which builds the

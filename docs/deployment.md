@@ -180,10 +180,11 @@ which is what you want during a version bump, when the pinned version is not on 
 The generated workspace `.dockerignore` excludes `**/.env` and `**/.env.*` and keeps
 `!**/.env.example`; the root `.gitignore` ignores `.env`/`.env.*` and keeps the example. The rules
 cover the default `.env` and any name beginning `.env.`. A custom `--env-file name` that does not
-match those patterns is **not** covered. `setu generate app` and `setu adopt` print one line naming
-such a file by its path from the workspace root (for example `apps/billing/local.env`), which is the
-form to add to `.dockerignore`: that file sits at the workspace root, and a pattern without a slash
-matches only there. The CLI cannot edit a file you own for you.
+match those patterns is recorded on the member's `envFilePaths` by `setu generate app`, `setu adopt`
+and `setu add auth|session`, and the managed `.dockerignore` lists it by its path from the workspace
+root (for example `apps/billing/local.env`): that file sits at the workspace root, and a pattern
+without a slash matches only there. Because the file is regenerated from the record, the entry
+survives every later `generate app`.
 
 `setu adopt` moves a configured single-segment dotenv pair into the member, where the member's
 `envFilePath` reads it, and writes `apps/<member>/.gitignore` with `/<name>` for the moved dotenv
@@ -527,6 +528,38 @@ regenerated for every member:
 | `docker/Dockerfile`   | One parameterized image: `docker build -f docker/Dockerfile --build-arg MEMBER=orders -t orders:dev .` |
 | `docker/compose.yaml` | Every member plus the transport's broker, each member on its allocated port                            |
 | `k8s/members.yaml`    | A Deployment and a Service per member                                                                  |
+
+Each member's optional `generatedSecrets` in `setu.workspace.json` records secret variable names
+such as `SESSION_SECRET` and `JWT_SECRET`. `generate app` records a template's generated secrets;
+`setu add auth` and `setu add session` append their names once and refresh Compose and the README's
+transport section. Adoption records no generated secrets. Names must match `^[A-Z][A-Z0-9_]*$`;
+malformed entries refuse the member, while absent or empty lists are omitted.
+
+A member's optional `envFilePaths` records the custom dotenv paths that the generic `.env`/`.env.*`
+rules do not cover. `generate app --env-file`, `setu adopt` and `setu add auth|session` add to it,
+and the managed root `.dockerignore` lists each as `apps/<member>/<path>` on every regeneration, so
+an image never copies the member's secrets. The list only grows: a path stays listed after the
+config moves to another file, because the old file may still hold a secret the CLI generated. Each
+path follows the `--env-file` grammar: relative segments of letters, digits, `.`, `_` and `-`, not
+ending in `.example`, which is the committed example's name.
+
+Compose requires a separate shell value per member, overriding its development `.env`. For a member
+named `web` with both secrets, export its required keys before starting the stack:
+
+```bash
+export WEB_SESSION_SECRET="$(openssl rand -hex 32)"
+export WEB_JWT_SECRET="$(openssl rand -hex 32)"
+docker compose -f docker/compose.yaml up --build
+```
+
+The member still reads `SESSION_SECRET` and `JWT_SECRET`. Shell names prefix the upper-cased member
+name with hyphens changed to underscores, so `admin-web` uses `ADMIN_WEB_SESSION_SECRET`. Compose's
+`:?` interpolation refuses to start until every required shell variable is set. The generated README
+lists the exact export lines, including workspaces whose broker needs no Compose service.
+
+Generate each value once and keep it, in a password manager or in a file Git ignores that you source
+before starting. A new value on every start invalidates every session cookie and token the previous
+one signed, which signs every user out.
 
 ```bash
 docker compose -f docker/compose.yaml up --build

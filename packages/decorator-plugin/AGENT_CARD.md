@@ -1,9 +1,9 @@
 # @setu-ts/decorator-plugin — class controllers and injection
 
-**Add it:** `setu add decorator` adds the dependency; register `DecoratorPlugin({ controllers })` in
-`setu.config.ts`. It provides `CAPABILITIES.METADATA_STORE` (`IMetadataStore`).
+**Add it:** `setu add decorator`; register `DecoratorPlugin({ controllers })` in `setu.config.ts`.
+Provides `CAPABILITIES.METADATA_STORE` (`IMetadataStore`).
 
-## Serve a controller with injected configuration
+## Inject configuration
 
 ```ts
 import { CAPABILITIES } from "@setu-ts/common";
@@ -25,23 +25,24 @@ export class OrdersController {
 app.register(DecoratorPlugin({ controllers: [OrdersController] }));
 ```
 
-Register a config provider for that token.
+Provide `CAPABILITIES.CONFIG`.
 
-## Behaviour the types do not show
+## Behaviour
 
-- Decorators only capture metadata; routes become active when the plugin registers their classes.
+- Decorators capture metadata; registered classes activate their routes.
 - These are standard decorators: `@Params(...)` goes on the method with one source per argument.
   Constructor injection uses class-level `@Inject(...)`; a controller is a singleton, so it takes
   `'scoped'` services as `@Params(Service(token))`.
 - Plain returns serialize as JSON; `Ctx()` supplies the response writer, which overrides shaping.
-- `enforceSchemas` defaults to `true`; validation decorators enforce only when a validation service
-  is registered, otherwise they remain descriptive and the plugin warns.
-- `enforceRoles` defaults to `true`; role/permission routes without an authorization provider fail
-  closed with `501` instead of running unguarded.
-- `@McpTool(meta?)` marks one method for @setu-ts/mcp-plugin discovery. Name defaults to
-  operationId, then method; description to operation description, then summary. Register
-  `McpPlugin({})`. Every tool needs a security brand or `schema.security`; `@Public()` declares
-  public intent.
+- `enforceSchemas` defaults to `true`; without a validation service, schemas are descriptive and the
+  plugin warns.
+- `enforceRoles` defaults to `true`; role/permission routes fail `501` without an authorization
+  provider.
+- `@McpTool(meta?)` enables @setu-ts/mcp-plugin discovery; register `McpPlugin({})`. Name falls back
+  to operationId, then method; description to operation description, then summary. Tools need a
+  security brand or `schema.security`; `@Public()` declares public intent.
+- `Gateway(path, { guards })` supplies handshake options. Gateways refuse `Roles`, `Permissions` and
+  method-level `Public` at startup; use handshake guards.
 
 ## Other options
 

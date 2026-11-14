@@ -20,9 +20,8 @@ import { SESSION_TENANT_BINDING_KEY } from '@setu-ts/common';
  * multi-tenancy plugin's tenant-side compare reads the same key. Reserved by
  * `SessionPlugin({ tenantBinding: true })` (the default): when a tenant is
  * resolved for the request, the id is sealed here on commit. Application code
- * must not read or write this key — `clear()` and `regenerate()` drop it and
- * the next commit re-binds it, which is correct because a regenerated session
- * is a new session and should adopt the current tenant.
+ * must not read or write this key. `clear()` drops it and the next commit
+ * re-binds it. `regenerate()` preserves the tenant binding.
  *
  * @since 0.2.0
  */

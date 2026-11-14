@@ -60,7 +60,7 @@ it('V12-61 evaluates the rendered proxy switch for every accepted and refused va
         configDouble({
           TRUST_FORWARDED_HOST: value,
           TRUSTED_PROXIES: proxies,
-          SESSION_SECRET: 'test-secret',
+          SESSION_SECRET: 'test-secret-at-least-32-characters',
         }),
       );
     for (const [value, expected] of [

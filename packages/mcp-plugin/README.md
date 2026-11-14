@@ -44,7 +44,7 @@ const items = new Map<string, { id: string; name: string }>();
 const app = createApplication({
   plugins: [
     RuntimePlugin(),
-    AuthPlugin({ jwt: { secret: 'replace-with-your-application-secret-at-least-32-characters' } }),
+    AuthPlugin({ jwt: {} }), // reads JWT_SECRET (32+ random bytes) from secrets, config or env
     ValidationPlugin({ errorFormat: 'rfc9457' }),
     IdempotencyPlugin(),
     McpPlugin({}),

@@ -84,7 +84,7 @@ it(
         const summary = await fetch(`${origin}/api/articles/summary`);
         expect(summary.status).toBe(200);
         expect(await summary.json()).toEqual({ items: [] });
-        // Sign in through /login, keeping the session cookie and CSRF token.
+        // Sign in through /login; regeneration invalidates this anonymous form token.
         const loginPage = await fetch(`${origin}/login`);
         const token = /name="_csrf"\s+value="([^"]+)"/.exec(await loginPage.text())?.[1] ?? '';
         const submitted = await fetch(`${origin}/login`, {
@@ -97,7 +97,18 @@ it(
           body: new URLSearchParams({ _csrf: token, email: 'ada@example.com', password: 'x' }),
         });
         await submitted.body?.cancel();
-        const cookie = cookiesOf(submitted);
+        let cookie = cookiesOf(submitted);
+        const stale = await fetch(`${origin}/api/articles`, {
+          method: 'POST',
+          headers: { cookie, 'x-csrf-token': token, 'content-type': 'application/json' },
+          body: JSON.stringify({ name: 'Stale token' }),
+        });
+        await stale.body?.cancel();
+        const freshForm = await fetch(`${origin}/login`, { headers: { cookie } });
+        const freshToken = /name="_csrf"\s+value="([^"]+)"/.exec(await freshForm.text())?.[1] ?? '';
+        expect(freshToken).not.toBe('');
+        expect(freshToken).not.toBe(token);
+        cookie = cookiesOf(freshForm) || cookie;
 
         // (O3) An unsafe /api request without the token is refused; with it, created.
         const refused = await fetch(`${origin}/api/articles`, {
@@ -116,7 +127,7 @@ it(
         // (2) Seed through the API with the session cookie and CSRF token.
         const seeded = await fetch(`${origin}/api/articles`, {
           method: 'POST',
-          headers: { cookie, 'x-csrf-token': token, 'content-type': 'application/json' },
+          headers: { cookie, 'x-csrf-token': freshToken, 'content-type': 'application/json' },
           body: JSON.stringify({ name: 'Hello from the module' }),
         });
         const record = (await seeded.json()) as { id: string; name: string };
@@ -149,6 +160,7 @@ it(
           submitted: submitted.status,
           refused: refused.status,
           bearer: bearer.status,
+          stale: stale.status,
           seeded: seeded.status,
           record,
           page: { status: page.status, html },
@@ -163,6 +175,7 @@ it(
       expect(result.submitted, serverOutput).toBe(302);
       expect(result.refused).toBe(403);
       expect(result.bearer).toBe(403);
+      expect(result.stale).toBe(403);
       expect(result.seeded).toBe(201);
       expect(result.page.status).toBe(200);
       expect(result.page.html).toContain('Hello from the module');

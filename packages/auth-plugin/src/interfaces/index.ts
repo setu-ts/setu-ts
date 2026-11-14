@@ -35,7 +35,11 @@ export interface JwtOptions {
    * @since 0.13.0
    */
   readonly tenantClaim?: string;
-  /** Secret key for HS256 algorithm. Required if RS256 keys not provided. */
+  /**
+   * HS256 key, at least 32 UTF-8 bytes (or raw bytes). If omitted, registration
+   * resolves JWT_SECRET from secrets, then config, then the runtime environment.
+   * RS256 does not resolve this value.
+   */
   readonly secret?: string | Uint8Array;
   /** Private key for RS256 signing (PEM format). Required if HS256 secret not provided. */
   readonly privateKey?: string;

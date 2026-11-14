@@ -27,7 +27,10 @@ function makeService(options?: {
   service: RefreshTokenService;
 } {
   const runtime = createFakeRuntime();
-  const jwt = new JwtService(runtime, { algorithm: 'HS256', secret: 'test-secret' });
+  const jwt = new JwtService(runtime, {
+    algorithm: 'HS256',
+    secret: 'test-secret-at-least-32-characters',
+  });
   const store = new MemoryRefreshTokenStore(runtime);
   const accessTokenRevocationStore = options?.withAccessTokenRevocationStore
     ? new MemoryAccessTokenRevocationStore(runtime)
@@ -378,7 +381,10 @@ describe('RefreshTokenService', () => {
 
     it('keeps a revoked access token blocked through JwtService expiry boundary', async () => {
       const runtime = createFakeRuntime(100);
-      const jwt = new JwtService(runtime, { algorithm: 'HS256', secret: 'test-secret' });
+      const jwt = new JwtService(runtime, {
+        algorithm: 'HS256',
+        secret: 'test-secret-at-least-32-characters',
+      });
       const accessTokenRevocationStore = new MemoryAccessTokenRevocationStore(runtime);
       const service = new RefreshTokenService({
         jwt,
@@ -422,7 +428,10 @@ describe('RefreshTokenService', () => {
 
     it('requires a bounded access lifetime when access revocation is configured', () => {
       const runtime = createFakeRuntime();
-      const jwt = new JwtService(runtime, { algorithm: 'HS256', secret: 'test-secret' });
+      const jwt = new JwtService(runtime, {
+        algorithm: 'HS256',
+        secret: 'test-secret-at-least-32-characters',
+      });
 
       expect(
         () =>
@@ -459,7 +468,10 @@ describe('RefreshTokenService', () => {
 
     it('revokes an expired ancestor access token when logging out through a live descendant', async () => {
       const runtime = createFakeRuntime(0);
-      const jwt = new JwtService(runtime, { algorithm: 'HS256', secret: 'test-secret' });
+      const jwt = new JwtService(runtime, {
+        algorithm: 'HS256',
+        secret: 'test-secret-at-least-32-characters',
+      });
       const accessTokenRevocationStore = new MemoryAccessTokenRevocationStore(runtime);
       const service = new RefreshTokenService({
         jwt,

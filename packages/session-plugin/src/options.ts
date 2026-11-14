@@ -123,12 +123,12 @@ export interface SessionPluginOptions {
    * signs/encrypts new cookies while every entry can still open existing ones,
    * so rotating a secret does not log everybody out.
    *
-   * When omitted, the secret is resolved from `CAPABILITIES.SECRETS` and then
-   * from the environment. Each secret must be at least 32 characters.
+   * When omitted, the secret is resolved from `CAPABILITIES.SECRETS`, then
+   * `CAPABILITIES.CONFIG`, then the environment. Each secret must be at least 32 characters.
    */
   readonly secret?: string | readonly string[];
   /**
-   * Name looked up in the secret manager and the environment.
+   * Name looked up in the secret manager, configuration and the environment.
    * Default `'SESSION_SECRET'`.
    */
   readonly secretName?: string;

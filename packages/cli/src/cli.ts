@@ -26,6 +26,7 @@ import { runClientCommand } from './commands/client.ts';
 import { runSyncCommand } from './commands/sync.ts';
 import { runGenerateCommand } from './commands/generate.ts';
 import { runAddCommand } from './commands/add.ts';
+import { generateSecret } from './templates/secret.ts';
 import { runAgentsCommand } from './commands/agents.ts';
 import { runDevtoolCommand } from './commands/devtool.ts';
 import { runAdoptCommand } from './commands/adopt.ts';
@@ -53,6 +54,11 @@ import { InterruptedError } from './utils/interruption.ts';
  * misconfigured call silently degrade to "no filesystem" at runtime.
  */
 export interface CliDependencies {
+  /**
+   * Creates secrets written only to ignored local configuration.
+   * @since 0.13.0
+   */
+  readonly secret?: () => string;
   /** The filesystem all reads and writes go through. */
   readonly fs: IFileSystem;
   /** The working directory commands resolve relative paths against (absolute). */
@@ -248,6 +254,7 @@ export async function runCli(argv: readonly string[], rawDeps: CliDependencies):
       case 'new':
       case 'n':
         return await runNewCommand(rest, {
+          secret: deps.secret ?? generateSecret,
           fs: deps.fs,
           cwd: deps.cwd,
           log: deps.log,
@@ -261,6 +268,7 @@ export async function runCli(argv: readonly string[], rawDeps: CliDependencies):
       case 'generate':
       case 'g':
         return await runGenerateCommand(rest, {
+          ...(deps.secret === undefined ? {} : { secret: deps.secret }),
           fs: deps.fs,
           ...(deps.runCommand === undefined ? {} : { runCommand: deps.runCommand }),
           cwd: deps.cwd,

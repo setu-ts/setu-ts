@@ -835,8 +835,8 @@ const snapshot = await client.snapshot();`,
             '): IKernelApplication {',
         )
         .replace(
-          '      RuntimePlugin(),\n',
-          '      RuntimePlugin(),\n      ...(devtool?.plugins ?? []),\n',
+          '      RuntimePlugin({ maxBodyBytes: 1_048_576 }),\n',
+          '      RuntimePlugin({ maxBodyBytes: 1_048_576 }),\n      ...(devtool?.plugins ?? []),\n',
         )
         .replace(
           '    ],\n  });',

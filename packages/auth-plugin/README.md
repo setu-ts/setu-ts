@@ -36,6 +36,15 @@ Without `rbac`, the four authorization guards answer **`501 Not Implemented`** r
 > — that has no rotation and no replay rejection. Use `RefreshTokenService` and
 > `rateLimitMiddleware`, both covered below.
 
+With `jwt: {}`, registration resolves JWT_SECRET from the explicit secret option, then the secrets
+manager, then configuration, then the runtime environment. HS256 requires at least 32 UTF-8 bytes
+for a string or 32 raw bytes for a byte array (RFC 7518 §3.2). Missing or short keys throw
+`AuthPluginConfigurationError` during registration. RS256 keys skip secret lookup. Configure `jwt`
+explicitly to enable self-issued tokens; RBAC alone supplies no passive authentication strategy.
+
+Sign-in and MFA promotion regenerate the session and clear its form-CSRF token. Fetch a fresh token
+after either transition before posting another form.
+
 ## Installation
 
 ```bash
@@ -231,7 +240,7 @@ const postPolicy = definePolicy({
 const app = createApplication({
   plugins: [
     RuntimePlugin(),
-    AuthPlugin({ jwt: { secret: 'replace-with-a-secret-of-32-chars!' }, policies: [postPolicy] }),
+    AuthPlugin({ jwt: {}, policies: [postPolicy] }), // JWT_SECRET from secrets, config or env
   ],
 });
 
@@ -272,7 +281,7 @@ const app = createApplication({
   plugins: [
     RuntimePlugin(),
     AuthPlugin({
-      jwt: { secret: 'replace-with-a-secret-of-32-chars!' },
+      jwt: {}, // JWT_SECRET from secrets, config or env
       rbac: {
         roles: {
           approver: { permissions: ['invoices:approve'] },
@@ -464,7 +473,7 @@ Workers application passes `new PasswordHasher(runtime, { iterations: 100_000 })
 | Option                           | Type                                                            | Default             | Description                                                                                                                                                                                                                                     |
 | -------------------------------- | --------------------------------------------------------------- | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `jwt`                            | `JwtOptions`                                                    | -                   | Optional JWT service and passive bearer strategy.                                                                                                                                                                                               |
-| `jwt.secret`                     | `string \| Uint8Array`                                          | -                   | HS256 key. Required for HS256.                                                                                                                                                                                                                  |
+| `jwt.secret`                     | `string \| Uint8Array`                                          | -                   | At least 32 UTF-8 or raw bytes; omitted resolves JWT_SECRET from secrets, config, then environment.                                                                                                                                             |
 | `jwt.privateKey`                 | `string` (PEM)                                                  | -                   | RS256 private key. Required for RS256.                                                                                                                                                                                                          |
 | `jwt.publicKey`                  | `string` (PEM)                                                  | -                   | RS256 public key. Required for RS256.                                                                                                                                                                                                           |
 | `jwt.algorithm`                  | `'HS256' \| 'RS256'`                                            | inferred            | Inferred from which key material is provided.                                                                                                                                                                                                   |
@@ -506,8 +515,8 @@ Pass `middleware: false` only when attaching `authMiddleware()` at route level y
 applications that added a global copy should remove it; two copies remain correct but run the
 strategy chain twice.
 
-When `jwt` is supplied, omitting both `jwt.secret` (HS256) and `jwt.privateKey` + `jwt.publicKey`
-(RS256) throws at construction.
+When `jwt` is supplied without RS256 keys, registration resolves JWT_SECRET from the configured
+sources. A missing or under-32-byte HS256 key throws `AuthPluginConfigurationError` at registration.
 
 ## Accepting tokens from an identity provider
 
@@ -804,7 +813,7 @@ import { AuthPlugin } from '@setu-ts/auth-plugin';
 const app = createApplication({
   plugins: [
     RuntimePlugin(),
-    SessionPlugin({ secret: 'replace-with-at-least-32-characters!!', store: 'memory' }),
+    SessionPlugin({ store: 'memory' }), // SESSION_SECRET from secrets, config or env
     AuthPlugin({
       signIn: {
         providers: [
@@ -1207,7 +1216,7 @@ const idpSigningCert = '-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE--
 const app = createApplication({
   plugins: [
     RuntimePlugin(),
-    SessionPlugin({ secret: 'replace-with-at-least-32-characters!!', store: 'memory' }),
+    SessionPlugin({ store: 'memory' }), // SESSION_SECRET from secrets, config or env
     AuthPlugin({
       signIn: {
         providers: [
@@ -1314,7 +1323,7 @@ import { SessionPlugin } from '@setu-ts/session-plugin';
 import { HttpSecurityPlugin } from '@setu-ts/http-security-plugin';
 
 SessionPlugin({
-  secret: 'replace-with-at-least-32-characters!!',
+  // SESSION_SECRET from secrets, config or env
   csrf: { exclude: ['/auth/corp/acs'] },
 });
 HttpSecurityPlugin({ csrf: { exclude: ['/auth/corp/acs'] } });
@@ -1374,7 +1383,7 @@ const totp = new TotpService({ store: new MemoryTotpStore(), runtime, issuer: 'M
 const app = createApplication({
   plugins: [
     RuntimePlugin(),
-    SessionPlugin({ secret: 'replace-with-at-least-32-characters!!', store: 'memory' }),
+    SessionPlugin({ store: 'memory' }), // SESSION_SECRET from secrets, config or env
     AuthPlugin({
       signIn: {
         providers: [],
@@ -1577,7 +1586,7 @@ function loadPrincipal(principalId: string): Promise<IPrincipal | null> {
 const app = createApplication({
   plugins: [
     RuntimePlugin(),
-    SessionPlugin({ secret: 'replace-with-at-least-32-characters!!' }),
+    SessionPlugin(), // SESSION_SECRET from secrets, config or env
     AuthPlugin({
       signIn: {
         providers: [],

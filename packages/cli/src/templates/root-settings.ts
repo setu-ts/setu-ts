@@ -37,15 +37,15 @@ const FMT_SETTINGS = {
 } as const;
 
 /**
- * Why a generated project opts out of the minimum-dependency-age policy.
+ * Why the framework alone is excluded from the minimum-dependency-age policy.
  *
  * Emitted as a sibling comment key so the reason travels with the setting: a
  * reader who deletes the line should know what breaks.
  */
 const MIN_DEP_AGE_NOTE =
   'setu pins this project to the CLI version that generated it. Deno refuses a ' +
-  'dependency published in the last 24 hours, so without this a project scaffolded ' +
-  'on the day of a release cannot install the versions it was just pinned to.';
+  'dependency published in the last 24 hours. Excluding only @setu-ts/* permits ' +
+  'release-day framework installs while third-party dependencies keep the one-day cooldown.';
 
 /**
  * Builds the settings block a generated root manifest carries.
@@ -69,7 +69,7 @@ export function rootManifestSettings(
         };
   return {
     '//minimumDependencyAge': MIN_DEP_AGE_NOTE,
-    minimumDependencyAge: 0,
+    minimumDependencyAge: { age: 'P1D', exclude: ['npm:@setu-ts/*'] },
     fmt: FMT_SETTINGS,
     ...exclude,
   };

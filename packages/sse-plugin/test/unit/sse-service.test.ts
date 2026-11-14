@@ -3,13 +3,41 @@
  *
  * @module
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { IRealtimeBackplane } from '@setu-ts/common';
 import { SseService } from '../../src/services/sse-service.ts';
 import { createFakeContext } from '../fixtures/fake-context.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 
 describe('SseService', () => {
+  it.each([undefined, 0])(
+    'uses a 30 s default heartbeat, with zero disabling it (%s)',
+    (heartbeatMs) => {
+      const runtime = createFakeRuntime();
+      const interval = vi.spyOn(runtime, 'setInterval');
+      const service = new SseService(
+        heartbeatMs === undefined ? undefined : { heartbeatMs },
+        runtime,
+      );
+      const conn = service.open(createFakeContext({ runtime }));
+      try {
+        if (heartbeatMs === undefined)
+          expect(interval).toHaveBeenCalledWith(expect.any(Function), 30_000);
+        else expect(interval).not.toHaveBeenCalled();
+      } finally {
+        conn.close();
+      }
+    },
+  );
+  it.each([Number.NaN, -1, 2.5, Infinity, 2 ** 31])(
+    'refuses a heartbeat that would become a 1 ms timer (%s)',
+    (heartbeatMs) => {
+      expect(() => new SseService({ heartbeatMs }, createFakeRuntime())).toThrow(
+        'heartbeatMs must be a whole number of milliseconds',
+      );
+    },
+  );
+
   it('should return 0 connections initially', () => {
     const runtime = createFakeRuntime({ uuidPrefix: 'svc' });
     const service = new SseService({}, runtime);

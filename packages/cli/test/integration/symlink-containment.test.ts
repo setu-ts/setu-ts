@@ -1,3 +1,4 @@
+import { generateSecret } from '../../src/templates/secret.ts';
 import { tempDir } from '../../../../test/node-helpers.ts';
 import * as nodeFs from 'node:fs/promises';
 /**
@@ -208,7 +209,7 @@ describe('commands refuse to follow a link inside a project', () => {
     await nodeFs.mkdir(`${base}/real`);
     await nodeFs.symlink(`${base}/real`, `${base}/linked`);
     const { out, deps: d } = deps(`${base}/linked`);
-    expect(await runNewCommand(parseArgs(['shop']), d)).toBe(0);
+    expect(await runNewCommand(parseArgs(['shop']), { ...d, secret: generateSecret })).toBe(0);
     const generated = deps(`${base}/linked/shop`);
     expect(await runGenerateCommand(parseArgs(['route', 'billing']), generated.deps)).toBe(0);
     expect(generated.out.text()).not.toContain('symbolic link');

@@ -7,7 +7,7 @@
  *
  * @module
  */
-import type { ISecretManager, IServiceRegistry } from '@setu-ts/common';
+import type { IConfig, ISecretManager, IServiceRegistry } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 
 import { SessionSecretMissingError } from '../errors.ts';
@@ -34,7 +34,7 @@ export interface SecretResolverDeps {
  * Resolves the ordered secret list.
  *
  * Precedence: an explicitly supplied `secret` option wins; otherwise
- * `CAPABILITIES.SECRETS` when registered; otherwise the environment. The secrets
+ * `CAPABILITIES.SECRETS` when registered; then configuration; then the environment. The secrets
  * manager is tried inside a `catch` because `ISecretManager.get` throws on a
  * missing secret rather than returning `null`, which is the same shape as the
  * reference implementation's Key-Vault-then-env fallback.
@@ -58,6 +58,13 @@ export async function resolveSecrets(
   const fromManager = await readFromManager(deps.services, name);
   if (fromManager !== undefined) {
     return validate([fromManager], `secret '${name}' from the secrets manager`);
+  }
+
+  const fromConfig = deps.services.has(CAPABILITIES.CONFIG)
+    ? deps.services.get<IConfig>(CAPABILITIES.CONFIG).get<unknown>(name)
+    : undefined;
+  if (typeof fromConfig === 'string' && fromConfig !== '') {
+    return validate(normalizeEnv(fromConfig), `configuration ${name}`);
   }
 
   const fromEnv = deps.env[name];

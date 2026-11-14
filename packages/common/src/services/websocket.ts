@@ -81,6 +81,12 @@ export interface IWebSocketTransport {
  */
 export interface WebSocketEventSink {
   /**
+   * Maximum inbound message bytes. Node enforces this while reading through `ws`.
+   * `0` means unlimited; absent leaves the transport's default in place.
+   * @since 0.13.0
+   */
+  readonly maxMessageBytes?: number;
+  /**
    * Called once, when the socket is live and writable.
    *
    * @param transport - The normalized socket

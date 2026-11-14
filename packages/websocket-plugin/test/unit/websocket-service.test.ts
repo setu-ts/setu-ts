@@ -42,13 +42,40 @@ function open(sink: WebSocketEventSink): FakeTransport {
 }
 
 describe('resolveOptions', () => {
+  it.each([Number.NaN, Infinity, -Infinity, -1, 1.5, 2 ** 31])(
+    'refuses a frame limit Node ws would coerce to unlimited (%s)',
+    (maxMessageBytes) => {
+      expect(() => resolveOptions({ maxMessageBytes })).toThrow(
+        'maxMessageBytes must be a whole number of bytes from 0 (unlimited) to 2147483647',
+      );
+    },
+  );
+
+  it('accepts the largest representable frame limit', () => {
+    expect(resolveOptions({ maxMessageBytes: 2 ** 31 - 1 }).maxMessageBytes).toBe(2 ** 31 - 1);
+  });
+
+  it('carries the resolved frame limit to the transport sink, preserving zero opt-out', async () => {
+    for (const limit of [undefined, 0, 64]) {
+      const service = new WebSocketService(
+        createFakeRuntime(),
+        resolveOptions(limit === undefined ? {} : { maxMessageBytes: limit }),
+        true,
+      );
+      service.route('/ws', {});
+      const sink = await accept(service, 'http://localhost/ws');
+      expect(sink.maxMessageBytes).toBe(limit ?? 1_048_576);
+      sink.onClose({ code: 1000, reason: '' });
+      service.closeAll();
+    }
+  });
   it('applies inert defaults', () => {
     expect(resolveOptions()).toEqual({
       maxConnections: 0,
       heartbeatMs: 0,
       heartbeatPayload: 'ping',
       idleTimeoutMs: 0,
-      maxMessageBytes: 0,
+      maxMessageBytes: 1_048_576,
       // The Origin check is on by default, with no extra origins allowed.
       checkOrigin: true,
       allowedOrigins: [],

@@ -51,6 +51,24 @@ describe('readEnvFilePath', () => {
       if (!result.ok) expect(result.message).toContain('inside the generated project');
     }
   });
+
+  it('rejects a path ending in .example, the committed example name', () => {
+    for (const value of [
+      '.env.example',
+      'secrets.example',
+      'config/local.example',
+      '.env.EXAMPLE',
+      'secrets.Example',
+    ]) {
+      const result = readEnvFilePath({ 'env-file': value });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.message).toContain('must not end in .example');
+    }
+    expect(readEnvFilePath({ 'env-file': 'example.env' })).toEqual({
+      ok: true,
+      path: 'example.env',
+    });
+  });
 });
 
 describe('configuredEnvFilePath', () => {

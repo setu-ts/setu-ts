@@ -52,7 +52,7 @@ export function createApp(
 ): IKernelApplication {
   const app = createApplication({
     plugins: [
-      RuntimePlugin(),
+      RuntimePlugin({ maxBodyBytes: 1_048_576 }),
       ConfigPlugin({ envFilePath: '.env', envFileOptional: true }),
       LoggerPlugin({
         requestLogging: true,
@@ -60,7 +60,7 @@ export function createApp(
         transport: 'pino',
       }),
       ValidationPlugin({ errorFormat: 'rfc9457' }),
-      HttpSecurityPlugin(),
+      HttpSecurityPlugin({ requestSize: { maxBodySize: 1_048_576 } }),
       HealthPlugin({ indicators: [...HEALTH_INDICATORS] }),
       MetricsPlugin({ customMetrics: [...CUSTOM_METRICS] }),
       OpenApiPlugin({ errorSchema: 'rfc9457' }),

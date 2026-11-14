@@ -123,7 +123,8 @@ Resolved once at startup, in this order:
 
 1. the `secret` option, when given;
 2. `CAPABILITIES.SECRETS` (the secrets plugin), under `secretName` — default `SESSION_SECRET`;
-3. the same name in the environment.
+3. the same name in configuration through `CAPABILITIES.CONFIG`;
+4. the same name in the runtime environment.
 
 A missing or under-32-character secret throws `SessionSecretMissingError` during `register()`. That
 is deliberate: without the right secret every session is unreadable, and finding out at boot beats
@@ -157,13 +158,15 @@ SessionPlugin({ secret, maxAge: 3600, rolling: true, idleTimeoutMs: 900_000 });
 
 ## Session fixation
 
-Call `regenerate()` immediately after any privilege change, above all after login:
+Call `regenerate()` immediately after any privilege change, above all after login. It clears the
+form-CSRF token while preserving other data, including the tenant binding. Fetch a fresh token with
+`getCsrfToken` after sign-in or MFA promotion before submitting another form:
 
 ```typescript
 app.router.post('/login', async (ctx) => {
   const session = getSession(ctx);
   session.set('userId', user.id);
-  session.regenerate(); // new id, same data
+  session.regenerate(); // new id; drops the form-CSRF token, keeps other data
   return ctx.response.json({ ok: true });
 });
 ```
@@ -403,7 +406,7 @@ must run at a priority **above** 260, or `getSession` throws `SessionMiddlewareM
 | Option              | Default          | Notes                                                                                                                                                                                                                        |
 | ------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `secret`            | resolved         | `string` or rotation list; index 0 seals                                                                                                                                                                                     |
-| `secretName`        | `SESSION_SECRET` | Looked up in the secrets manager and the environment                                                                                                                                                                         |
+| `secretName`        | `SESSION_SECRET` | Looked up in the secrets manager, configuration, then the environment                                                                                                                                                        |
 | `mode`              | `'encrypt'`      | `'sign'` exposes its payload                                                                                                                                                                                                 |
 | `store`             | —                | `'memory'`, `'cache'`, or an `ISessionStore`                                                                                                                                                                                 |
 | `maxAge`            | `7200`           | Seconds; also the cookie's `Max-Age`                                                                                                                                                                                         |

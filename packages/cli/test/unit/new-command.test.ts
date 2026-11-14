@@ -30,7 +30,9 @@ describe('Node standalone devtool scaffold', () => {
     expect(manifest.scripts.check).toBe('tsc --noEmit && setu check');
     expect(manifest.devDependencies['@setu-ts/diagnostics-plugin']).toBe(`^${VERSION}`);
     expect(manifest.dependencies['@setu-ts/diagnostics-plugin']).toBeUndefined();
-    expect(real.fs.read('/work/shop/main.dev.ts')).not.toMatch(/Deno\.|process\./);
+    expect(real.fs.read('/work/shop/main.dev.ts')).toContain(
+      "delete process.env['SETU_DEVTOOL_SESSION_KEY'];",
+    );
     // The runnable next step needs no credentials; `dev` is named as the launcher's.
     expect(real.out.text()).toContain('npm install && npm run start:dev');
     expect(real.out.text()).toContain(
@@ -60,6 +62,7 @@ function harness(seed: Readonly<Record<string, string>> = {}, portAvailable?: Po
     err,
     run: (argv) =>
       runNewCommand(parseArgs(argv), {
+        secret: () => 'a'.repeat(64),
         fs,
         cwd: '/work',
         log: out.sink,
@@ -371,7 +374,7 @@ describe('runNewCommand', () => {
       const h = harness();
       await h.run(['app']);
       const config = h.fs.read('/work/app/setu.config.ts');
-      expect(config).toContain('RuntimePlugin()');
+      expect(config).toContain('RuntimePlugin({ maxBodyBytes: 1_048_576 })');
       expect(config).not.toContain('ConfigPlugin');
       expect(config).not.toContain('errorHandler');
     });
@@ -494,7 +497,7 @@ describe('runNewCommand', () => {
       expect(h.fs.has('/work/shop/.dev.vars')).toBe(true);
       expect(h.fs.has('/work/shop/.dev.vars.example')).toBe(true);
       expect(h.fs.read('/work/shop/.dev.vars')).toContain(
-        'SESSION_SECRET=dev-only-insecure-session-secret-change-me',
+        'SESSION_SECRET=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
       );
       expect(h.fs.read('/work/shop/.gitignore')).toContain('.dev.vars');
       // M113d §10 D2: assets bypass the application's middleware, and both
@@ -555,7 +558,7 @@ describe('runNewCommand', () => {
       expect(config).toContain(
         'export function createApp(\n  env: Readonly<Record<string, unknown>> = {},',
       );
-      expect(config).toContain('RuntimePlugin({ env })');
+      expect(config).toContain('RuntimePlugin({ env, maxBodyBytes: 1_048_576 })');
     });
 
     it('renders the plugin-list factory with the devtool parameter on every target', async () => {
@@ -609,7 +612,9 @@ describe('runNewCommand', () => {
       expect(example).toContain('SESSION_SECRET=');
       // The gitignored file carries a working development value; the COMMITTED
       // example carries none, so nothing here can be deployed by accident.
-      expect(env).toContain('SESSION_SECRET=dev-only-insecure-session-secret-change-me');
+      expect(env).toContain(
+        'SESSION_SECRET=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      );
       expect(example).toContain('SESSION_SECRET=\n');
     });
 
@@ -636,9 +641,13 @@ describe('runNewCommand', () => {
         'OpenApiPlugin',
       ]) {
         if (
-          symbol !== 'ValidationPlugin' &&
-          symbol !== 'LoggerPlugin' &&
-          symbol !== 'OpenApiPlugin'
+          ![
+            'ValidationPlugin',
+            'LoggerPlugin',
+            'RuntimePlugin',
+            'HttpSecurityPlugin',
+            'OpenApiPlugin',
+          ].includes(symbol)
         ) {
           expect(config).toContain(`${symbol}()`);
         }
@@ -694,7 +703,7 @@ describe('runNewCommand', () => {
       const h = harness();
       expect(await h.run(['bare'])).toBe(0);
       const config = h.fs.read('/work/bare/setu.config.ts');
-      expect(config).toContain('RuntimePlugin(),');
+      expect(config).toContain('RuntimePlugin({ maxBodyBytes: 1_048_576 }),');
       // route: a call; plugin: an array spread; middleware: a loop.
       expect(config).toContain('registerGeneratedRoutes(app.router, app.services);');
       expect(config).toContain('...GENERATED_PLUGINS,');
@@ -888,7 +897,9 @@ describe('runNewCommand', () => {
       expect(main).toContain("await app.start({ port: Number(runtime.env.PORT ?? '3000') })");
       // The plugin list lives in setu.config.ts, not here.
       expect(main).toContain("from './setu.config.ts'");
-      expect(h.fs.read('/work/app/setu.config.ts')).toContain('RuntimePlugin()');
+      expect(h.fs.read('/work/app/setu.config.ts')).toContain(
+        'RuntimePlugin({ maxBodyBytes: 1_048_576 })',
+      );
     });
 
     it('emits no package.json', async () => {
@@ -1230,6 +1241,7 @@ describe('runNewCommand', () => {
     const fs = createFakeFs();
     const err = createRecorder();
     const code = await runNewCommand(parseArgs(['app']), {
+      secret: () => 'a'.repeat(64),
       fs: { ...fs, writeFile: () => Promise.reject(new Error('read-only fs')) },
       cwd: '/work',
       log: () => {},
@@ -1243,6 +1255,7 @@ describe('runNewCommand', () => {
     const fs = createFakeFs();
     const err = createRecorder();
     const code = await runNewCommand(parseArgs(['app']), {
+      secret: () => 'a'.repeat(64),
       fs: { ...fs, writeFile: () => Promise.reject('EROFS') },
       cwd: '/work',
       log: () => {},
@@ -1637,6 +1650,7 @@ describe('the interactive seam on setu new', () => {
     const out = createRecorder();
     const err = createRecorder();
     const code = await runNewCommand(parseArgs(['svc', '--yes']), {
+      secret: () => 'a'.repeat(64),
       fs,
       cwd: '/work',
       log: out.sink,
@@ -1666,6 +1680,7 @@ describe('the interactive seam on setu new', () => {
     };
     const fs = createFakeFs();
     const code = await runNewCommand(parseArgs(['svc']), {
+      secret: () => 'a'.repeat(64),
       fs,
       cwd: '/work',
       log: () => {},
@@ -1684,6 +1699,7 @@ describe('the interactive seam on setu new', () => {
     // and pins both worlds to one byte-identical file set.
     const enter = createFakeFs();
     const code = await runNewCommand(parseArgs(['svc']), {
+      secret: () => 'a'.repeat(64),
       fs: enter,
       cwd: '/work',
       log: () => {},
@@ -1706,6 +1722,7 @@ describe('the interactive seam on setu new', () => {
     const fs = createFakeFs();
     const errors: string[] = [];
     const code = await runNewCommand(parseArgs(['svc']), {
+      secret: () => 'a'.repeat(64),
       fs,
       cwd: '/work',
       log: () => {},

@@ -195,7 +195,11 @@ describe('SessionPlugin registration', () => {
     expect(plugin.name).toBe('session-plugin');
     expect(plugin.provides).toEqual([CAPABILITIES.SESSION]);
     expect(plugin.dependencies).toEqual([CAPABILITIES.RUNTIME]);
-    expect(plugin.optionalDependencies).toEqual([CAPABILITIES.SECRETS, CAPABILITIES.CACHE]);
+    expect(plugin.optionalDependencies).toEqual([
+      CAPABILITIES.SECRETS,
+      CAPABILITIES.CONFIG,
+      CAPABILITIES.CACHE,
+    ]);
   });
 
   it('closes the store on shutdown', async () => {

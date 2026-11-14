@@ -88,7 +88,10 @@ export function ${routeRegistrarSymbol(names)}(
   }
   router.get('${path}', (ctx) => {
     const sse = services.get<ISseService>(CAPABILITIES.SSE);
-    return sse.open(ctx).result;
+    const conn = sse.open(ctx);
+    conn.send({ event: 'ready', data: {} });
+    // Use sse.channel(name) for fan-out to several connections.
+    return conn.result;
   });
 }
 `;
@@ -106,7 +109,11 @@ export class ${names.pascal}Controller {
   @Get('/')
   @Params(Ctx())
   open(ctx: IRequestContext): unknown {
-    return ctx.services.get<ISseService>(CAPABILITIES.SSE).open(ctx).result;
+    const sse = ctx.services.get<ISseService>(CAPABILITIES.SSE);
+    const conn = sse.open(ctx);
+    conn.send({ event: 'ready', data: {} });
+    // Use sse.channel(name) for fan-out to several connections.
+    return conn.result;
   }
 }
 `;

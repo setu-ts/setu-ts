@@ -690,19 +690,17 @@ describe('runAdoptCommand', () => {
       expect(fs.has('/work/svc/.env')).toBe(true);
     });
 
-    // The generated .dockerignore covers .env and .env.* only. A custom name would
-    // be copied into the image, so the step to add it is printed.
-    it('prints the .dockerignore step only for a name the generic rules miss', async () => {
+    // The generated .dockerignore covers .env and .env.* only, so a custom name is
+    // recorded on the member and listed in the managed root file (M140a F9).
+    it('lists only a name the generic rules miss in the managed .dockerignore', async () => {
       const covered = withEnv('.env', { '/work/svc/.env': 'SECRET=1\n' });
       expect(await covered.run([])).toBe(0);
-      expect(covered.out.text()).not.toContain('to .dockerignore');
+      expect(covered.fs.read('/work/svc/.dockerignore')).not.toContain('apps/svc/');
 
       const custom = withEnv('local.env', { '/work/svc/local.env': 'SECRET=1\n' });
       expect(await custom.run([])).toBe(0);
-      expect(custom.out.text()).toContain(
-        'Add apps/svc/local.env to .dockerignore: the generated rules cover only .env and .env.* names, ' +
-          'so this file would be copied into the image.',
-      );
+      expect(custom.fs.read('/work/svc/.dockerignore').split('\n')).toContain('apps/svc/local.env');
+      expect(custom.out.text()).not.toContain('to .dockerignore');
     });
 
     it('does not move a multi-segment path, and prints the step to take', async () => {

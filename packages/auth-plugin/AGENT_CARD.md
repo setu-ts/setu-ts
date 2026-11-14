@@ -1,10 +1,9 @@
-# @setu-ts/auth-plugin — authenticate requests and guard routes
+# @setu-ts/auth-plugin — request authentication
 
-**Add it:** `setu add auth` prints config; register `AuthPlugin` with `jwt.secret` and `rbac.roles`.
-It provides `CAPABILITIES.AUTH` (`IAuthService`), `CAPABILITIES.JWT` (`IJwtService`) with `jwt`, and
-`CAPABILITIES.AUTHORIZATION` (`IAuthorizationService`) with `rbac`.
+**Add it:** `setu add auth`; register `AuthPlugin({ jwt: {}, rbac: { roles: {} } })`. Provides
+`CAPABILITIES.AUTH`, `CAPABILITIES.JWT` with `jwt`, and `CAPABILITIES.AUTHORIZATION` with `rbac`.
 
-## Protect an order route
+## Protect orders
 
 ```ts
 import type { IRouterApi } from '@setu-ts/common';
@@ -18,9 +17,9 @@ export function registerOrderRoutes(router: IRouterApi): void {
 }
 ```
 
-## Verify credentials and sign
+## Sign a token
 
-Configure `local.verify(identifier, secret, request)` first.
+Configure `local.verify(identifier, secret, request)`.
 
 ```ts
 import { CAPABILITIES } from '@setu-ts/common';
@@ -38,21 +37,24 @@ if (principal === null) {
 }
 ```
 
-## Behaviour the types do not show
+## Behaviour
 
-- Passive authentication defaults to priority 300; put guards on routes.
+- Passive auth: priority 300; add route guards.
 - Missing principal: 401; denied role/permission: 403; no `rbac`: those guards return 501.
 - `requireAuth({ signInPage })` redirects anonymous browser navigations with `returnTo`, except that
-  page itself; APIs keep 401.
-- Tokens expire at `exp`. `local` needs a passive strategy for later requests.
-- A JWT needs a string `sub`. Scoped tokens fail role/permission guards (`confineScopedTokens`).
-- `requireAuth({ credentials: 'header' })` restricts the credential kind; `tenantClaim` refuses
-  another tenant's token.
+  page; APIs keep 401.
+- JWT_SECRET resolves option → secrets manager → config → environment. HS256 needs ≥32 UTF-8/raw
+  bytes; missing/short keys throw `AuthPluginConfigurationError`. RS256 skips lookup.
+- Sign-in/MFA clear form CSRF; fetch a new token before posting.
+- JWTs need a string `sub` and expire at `exp`; `local` needs a passive strategy. Scoped tokens fail
+  role/permission guards (`confineScopedTokens`).
+- `requireAuth({ credentials: 'header' })` restricts credential kind; `tenantClaim` refuses other
+  tenants.
 
-## Other options
+## Options
 
-- `apiKey`, `session`, `issuers` and `strategies` supply passive auth.
-- `requireScopes` (ALL-of) and `resourceServer` (RFC 9728) serve token APIs.
-- `definePolicy` and `requirePolicy` evaluate policies; scoped guards use `scopedRbac`.
-- `signIn.mfa`/`signIn.passkeys` add factors; `createQuota` budgets (read with `quota.usage(key)`).
-- `signIn` with `providers: []` is password-only; advancing `signIn.sessionStamp` revokes sessions.
+- Passive auth: `apiKey`, `session`, `issuers`, `strategies`.
+- Token APIs: `requireScopes` (ALL-of), `resourceServer` (RFC 9728).
+- Policies: `definePolicy`, `requirePolicy`; scoped guards use `scopedRbac`.
+- Factors: `signIn.mfa`/`signIn.passkeys`; budgets: `createQuota`, `quota.usage(key)`.
+- `signIn` with `providers: []` is password-only; advance `signIn.sessionStamp` to revoke sessions.

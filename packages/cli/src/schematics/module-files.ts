@@ -20,7 +20,7 @@ export function moduleSchemas(names: DerivedNames): string {
   return cleanSource(`import { z } from 'zod';
 
 /** Input for a new ${names.kebab} record. */
-export const Create${p}Body = z.object({ name: z.string().min(1) });
+export const Create${p}Body = z.object({ name: z.string().min(1).max(200) });
 export type Create${p}Body = z.infer<typeof Create${p}Body>;
 export const Update${p}Body = Create${p}Body.partial();
 export type Update${p}Body = z.infer<typeof Update${p}Body>;
@@ -29,7 +29,7 @@ export const List${p}Query = z.object({
   offset: z.coerce.number().int().min(0).default(0),
 });
 export type List${p}Query = z.infer<typeof List${p}Query>;
-export const ${p}Params = z.object({ id: z.string().min(1) });
+export const ${p}Params = z.object({ id: z.string().min(1).max(128) });
 export type ${p}Params = z.infer<typeof ${p}Params>;
 export const ${p}Response = Create${p}Body.extend({ id: z.string() });
 export type ${p}Response = z.infer<typeof ${p}Response>;

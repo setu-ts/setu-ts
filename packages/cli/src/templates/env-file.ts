@@ -67,6 +67,18 @@ export function readEnvFilePath(
       message: '--env-file must be a relative path inside the generated project.',
     };
   }
+  // The CLI writes `<path>.example` as the committed example beside the file,
+  // and every ignore file it writes re-includes `*.example`, so a dotenv file
+  // whose own name ends in `.example` would be committed and copied into images.
+  // Case-insensitive: macOS and Windows filesystems (and Git's core.ignorecase)
+  // treat `.env.EXAMPLE` as the committed `.env.example`.
+  if (/\.example$/i.test(value)) {
+    return {
+      ok: false,
+      message:
+        '--env-file must not end in .example: that name is the committed example the CLI writes beside it.',
+    };
+  }
   return { ok: true, path: value };
 }
 

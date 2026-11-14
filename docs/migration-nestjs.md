@@ -337,7 +337,7 @@ import { AuthPlugin, requireAuth, requireRole } from '@setu-ts/auth-plugin';
 
 app.register(
   AuthPlugin({
-    jwt: { secret: 'replace-with-a-secret-from-configuration' },
+    jwt: {}, // JWT_SECRET from secrets, config or env
     rbac: { roles: { admin: { permissions: ['*'] } } },
   }),
 );

@@ -66,6 +66,7 @@ import { createScopedRbac } from '../scoped/scoped-policy.ts';
 import type { ScopedRbac } from '../scoped/scoped-policy.ts';
 import { GrantResolutionError } from '../scoped/errors.ts';
 import type { LoadedSamlProvider } from '../saml/routes.ts';
+import { jwtAlgorithm, resolveJwtSecret } from '../secret/jwt-secret.ts';
 import { VERSION } from '../version.ts';
 
 const AUTH_MIDDLEWARE_PRIORITY = 300;
@@ -82,6 +83,8 @@ const AUTH_MIDDLEWARE_PRIORITY = 300;
  *
  * @param options - Plugin configuration options
  * @returns A configured IPlugin instance
+ * @throws {AuthPluginConfigurationError} For invalid options, or during registration
+ *   when an HS256 key cannot resolve to at least 32 bytes or RS256 keys are incomplete
  *
  * @example
  * ```typescript
@@ -111,15 +114,6 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
   ) {
     throw new AuthPluginConfigurationError(
       'auth-plugin: jwt.tenantClaim must be a non-empty string',
-    );
-  }
-  if (
-    options.jwt !== undefined &&
-    !options.jwt.secret &&
-    !(options.jwt.privateKey && options.jwt.publicKey)
-  ) {
-    throw new Error(
-      'AuthPlugin requires either jwt.secret (for HS256) or jwt.privateKey + jwt.publicKey (for RS256)',
     );
   }
   if (
@@ -183,6 +177,497 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
     );
   }
 
+  function registerServices(
+    ctx: IPluginContext,
+    secret?: string | Uint8Array,
+  ): void | Promise<void> {
+    // Resolve runtime
+    const runtime = ctx.services.get<IRuntimeServices>('runtime');
+    // Scoped RBAC (M110b): built before the sign-in block, which reads it
+    // for 'sign-in' timing. The logger is read at call time.
+    const scoped: ScopedRbac | null =
+      compiledScoped === null
+        ? null
+        : createScopedRbac(compiledScoped, resolveProbeTiming(runtime), () => ctx.logger);
+
+    // The outbound seam is shared by the issuer key-set caches (M100b) and the
+    // sign-in routes (M100c): one place to configure it, one place to fake it.
+    const http = options.http ?? createDefaultAuthHttp();
+    // Reporting is best-effort: a throwing logger must not abort a strategy
+    // chain or a route handler whose outcome is already decided.
+    const debug = (message: string): void => {
+      try {
+        ctx.logger?.debug(message);
+      } catch {
+        // Swallowed deliberately.
+      }
+    };
+    const warn = (message: string): void => {
+      try {
+        ctx.logger?.warn(message);
+      } catch {
+        // Swallowed deliberately.
+      }
+    };
+
+    // Build strategies list
+    const strategies: IAuthStrategy[] = [];
+    let jwtService: JwtService | null = null;
+
+    if (options.jwt !== undefined) {
+      const algorithm = jwtAlgorithm(options.jwt);
+      const jwtOptions: {
+        secret?: string | Uint8Array;
+        privateKey?: string;
+        publicKey?: string;
+        algorithm: 'HS256' | 'RS256';
+        expectedAudience?: string;
+        expectedIssuer?: string;
+      } = { algorithm };
+      if (secret !== undefined) {
+        jwtOptions.secret = secret;
+      }
+      if (options.jwt.privateKey !== undefined) {
+        jwtOptions.privateKey = options.jwt.privateKey;
+      }
+      if (options.jwt.publicKey !== undefined) {
+        jwtOptions.publicKey = options.jwt.publicKey;
+      }
+      if (options.jwt.audience !== undefined) {
+        jwtOptions.expectedAudience = options.jwt.audience;
+      }
+      if (options.jwt.issuer !== undefined) {
+        jwtOptions.expectedIssuer = options.jwt.issuer;
+      }
+
+      jwtService = new JwtService(runtime, jwtOptions);
+      const jwtStrategyOpts: {
+        jwtService: JwtService;
+        header?: string;
+        scheme?: string;
+        tenantClaim?: string;
+        accessTokenRevocationStore?: IAccessTokenRevocationStore;
+      } = { jwtService };
+      if (options.jwt.tenantClaim !== undefined) {
+        jwtStrategyOpts.tenantClaim = options.jwt.tenantClaim;
+      }
+      if (options.jwt.header !== undefined) {
+        jwtStrategyOpts.header = options.jwt.header;
+      }
+      if (options.jwt.scheme !== undefined) {
+        jwtStrategyOpts.scheme = options.jwt.scheme;
+      }
+      if (options.jwt.accessTokenRevocationStore !== undefined) {
+        jwtStrategyOpts.accessTokenRevocationStore = options.jwt.accessTokenRevocationStore;
+      }
+      strategies.push(new JwtStrategy(jwtStrategyOpts));
+    }
+
+    // Outside-issuer strategy (M100b), immediately after the JWT strategy and
+    // reading the same header and scheme. The logger is read at call time.
+    const issuerKeySets: IssuerKeySet[] = [];
+    if (compiledIssuers.length > 0) {
+      // One reporter for the bearer path: a provider the operator cannot
+      // reach warns once per change of reason per issuer, and a successful
+      // refresh resets it so the next outage warns again (M119g, V10-62).
+      const issuerReporter = createStateChangeReporter({ warn, debug });
+      const bindings = compiledIssuers.map((issuer) => {
+        const keySet = new IssuerKeySet(issuer, runtime, http, {
+          failed: (name, reason) =>
+            issuerReporter.failed(
+              name,
+              reason,
+              `auth-plugin: issuer '${name}' key-set refresh failed (${reason})`,
+            ),
+          recovered: (name) => issuerReporter.recovered(name),
+        });
+        issuerKeySets.push(keySet);
+        return { issuer, keySet };
+      });
+      strategies.push(
+        new IssuerStrategy({
+          bindings,
+          runtime,
+          report: (name, reason) =>
+            debug(`auth-plugin: issuer '${name}' token refused (${reason})`),
+          ...(options.jwt?.header !== undefined ? { header: options.jwt.header } : {}),
+          ...(options.jwt?.scheme !== undefined ? { scheme: options.jwt.scheme } : {}),
+        }),
+      );
+      // Abort key-set fetches at the START of stop(): the kernel drains
+      // in-flight requests before onClose, so a request parked on a fetch
+      // would otherwise hold shutdown for up to fetchTimeoutMs. Cached sets
+      // stay usable for requests still being served in this window.
+      ctx.lifecycle.onStopping(() => {
+        for (const keySet of issuerKeySets) {
+          keySet.close();
+        }
+      });
+      // Reads cached state only. Shared issuer faults stay in data:
+      // determineStatusCode withdraws every non-up replica from /ready.
+      ctx.health.register('auth', () => {
+        const states: Record<string, string> = {};
+        let current = true;
+        compiledIssuers.forEach((issuer, index) => {
+          const state = issuerKeySets[index].state();
+          states[issuer.name] = state;
+          current &&= state === 'current';
+        });
+        return Promise.resolve({
+          status: 'up',
+          data: { issuers: states, current },
+        });
+      });
+    }
+
+    // API key strategy (optional)
+    if (options.apiKey) {
+      const apiKeyOpts: {
+        header?: string;
+        validate: (key: string) => Promise<IPrincipal | null>;
+      } = { validate: options.apiKey.validate };
+      if (options.apiKey.header !== undefined) {
+        apiKeyOpts.header = options.apiKey.header;
+      }
+      strategies.push(new ApiKeyStrategy(apiKeyOpts));
+    }
+
+    // Session strategy (optional). Fails at register() rather than per
+    // request: the session service is resolved once, and a misconfiguration
+    // (session arm without SessionPlugin) is a startup error, not a 401.
+    if (options.session !== undefined) {
+      if (!ctx.services.has(CAPABILITIES.SESSION)) {
+        throw new Error(
+          'auth-plugin: options.session requires the session capability — register the session-plugin (SessionPlugin), or drop options.session',
+        );
+      }
+      const sessionService = ctx.services.get<ISessionService>(CAPABILITIES.SESSION);
+      strategies.push(
+        new SessionStrategy({ sessionService, toPrincipal: options.session.toPrincipal }),
+      );
+    }
+
+    // Sign-in with an outside provider (M100c). Registered after the M73
+    // session strategy so a session carrying an explicit identity is consulted
+    // before this plugin's own record, and before any caller-supplied strategy.
+    const signInKeySets: IssuerKeySet[] = [];
+    // Set only when a saml provider is configured; awaited as register()'s
+    // last step, so every other configuration still registers synchronously.
+    let loadSamlRoutes: (() => Promise<void>) | null = null;
+    if (compiledSignIn !== null) {
+      // The session is what holds the signed-in record and the pending state,
+      // so this arm cannot work without it. Named as a startup error rather than
+      // failing per request, exactly as options.session does.
+      if (!ctx.services.has(CAPABILITIES.SESSION)) {
+        throw new Error(
+          'auth-plugin: options.signIn requires the session capability — register the session-plugin (SessionPlugin) alongside auth-plugin, or drop options.signIn',
+        );
+      }
+      const sessionService = ctx.services.get<ISessionService>(CAPABILITIES.SESSION);
+
+      // One key-set cache per oidc provider: it holds the discovery document the
+      // routes read their endpoints from AND the keys the ID token verifies
+      // against, so both come from the same issuer-checked fetch.
+      const keySets = new Map<string, IssuerKeySet>();
+      for (const provider of compiledSignIn.providers) {
+        if (provider.compiledIssuer === undefined) {
+          continue;
+        }
+        const keySet = new IssuerKeySet(provider.compiledIssuer, runtime, http, {
+          // Debug-only: the sign-in route's reporter carries the operator
+          // line, keyed by provider, so this path does not duplicate it.
+          failed: (name, reason) =>
+            debug(`auth-plugin: signIn['${name}'] key-set refresh failed (${reason})`),
+          recovered: () => {},
+        });
+        keySets.set(provider.name, keySet);
+        signInKeySets.push(keySet);
+      }
+
+      const mfa = compiledSignIn.mfa;
+      // One check object serves the service (records) and the strategy
+      // (compares), so both digest the stamp the same way.
+      const sessionStamp =
+        compiledSignIn.sessionStamp === null
+          ? null
+          : { read: compiledSignIn.sessionStamp, subtle: runtime.subtle };
+      const authSessionService = new AuthSessionService({
+        sessionService,
+        now: () => runtime.now(),
+        ...(sessionStamp === null ? {} : { sessionStamp }),
+        ...(compiledSignIn.refreshPrincipal === null
+          ? {}
+          : { refreshPrincipal: compiledSignIn.refreshPrincipal }),
+        ...(scoped === null || compiledScoped?.timing.kind !== 'sign-in'
+          ? {}
+          : {
+              scopedGrants: {
+                resolveAll: async (principal) => {
+                  const outcome = await scoped.resolver.resolveFromSources(principal, {
+                    kind: 'all',
+                  });
+                  if (!outcome.ok) {
+                    scoped.evaluator.report(outcome);
+                    throw new GrantResolutionError(outcome.reason, outcome.source);
+                  }
+                  return outcome.grants;
+                },
+              },
+            }),
+        ...(mfa === null
+          ? {}
+          : {
+              // The configured TTL passes through untouched; `AuthSessionService`
+              // owns the default and is the only reader of the value, so the
+              // option has exactly one owner.
+              mfa: {
+                required: mfa.required,
+                ...(mfa.pendingTtlMs === undefined ? {} : { pendingTtlMs: mfa.pendingTtlMs }),
+              },
+            }),
+      });
+      ctx.services.register(CAPABILITIES.AUTH_SESSION, authSessionService);
+      scoped?.resolver.useStoredGrants((request, principal) =>
+        authSessionService.storedGrants(request, principal),
+      );
+
+      strategies.push(
+        new AuthSessionStrategy({
+          sessionService,
+          ...(compiledSignIn.refreshPrincipal === null
+            ? {}
+            : { refreshPrincipal: compiledSignIn.refreshPrincipal }),
+          ...(sessionStamp === null ? {} : { sessionStamp }),
+        }),
+      );
+
+      registerSignInRoutes({
+        router: ctx.router,
+        config: compiledSignIn,
+        sessionService,
+        authSessionService,
+        http,
+        runtime,
+        keySets,
+        debug,
+        warn,
+      });
+
+      // SAML (M100f): the library load is awaited by register() (below), so a
+      // missing package or a Workers deployment without nodejs_compat fails at
+      // startup with SamlRuntimeLoadError rather than at the first login.
+      if (compiledSignIn.samlProviders.length > 0) {
+        const samlProviders = compiledSignIn.samlProviders;
+        const challengePath = mfa?.challengePath;
+        loadSamlRoutes = async () => {
+          const loaded: LoadedSamlProvider[] = [];
+          for (const provider of samlProviders) {
+            loaded.push({ provider, SAML: await loadSaml(provider.module) });
+          }
+          registerSamlRoutes({
+            router: ctx.router,
+            providers: loaded,
+            authSessionService,
+            runtime,
+            debug,
+            ...(challengePath === undefined ? {} : { challengePath }),
+          });
+        };
+      }
+
+      // Passkeys (M100e): the ceremonies ride the same session and
+      // auth-session services the sign-in arm built, and register the four
+      // ceremony routes under the sign-in base path.
+      if (compiledPasskeys !== null) {
+        const ceremonies = new PasskeyCeremonies({
+          config: compiledPasskeys,
+          runtime,
+          sessionService,
+          authSession: authSessionService,
+          debug,
+          mfaConfigured: compiledSignIn.mfa !== null,
+        });
+        registerPasskeyRoutes({
+          router: ctx.router,
+          basePath: compiledSignIn.basePath,
+          ceremonies,
+        });
+      }
+
+      // Abort discovery fetches at the START of stop(), as the issuer key sets
+      // do: the kernel drains in-flight requests before onClose, so a login
+      // parked on a provider would otherwise hold shutdown open.
+      ctx.lifecycle.onStopping(() => {
+        for (const keySet of signInKeySets) {
+          keySet.close();
+        }
+      });
+    }
+
+    // Caller-supplied strategies, appended in declaration order after every
+    // built-in (jwt → api-key → session → auth-session → caller).
+    if (options.strategies !== undefined) {
+      for (const strategy of options.strategies) {
+        strategies.push(strategy);
+      }
+    }
+
+    if (strategies.length === 0) {
+      throw new AuthPluginConfigurationError(
+        'auth-plugin requires at least one passive authentication strategy; configure jwt, issuers, apiKey, session, or strategies',
+      );
+    }
+
+    // A strategy's name is its only identity; a duplicate makes the later
+    // entry unreachable for anything that reasons about the chain by name.
+    const seenNames = new Set<string>();
+    for (const strategy of strategies) {
+      if (seenNames.has(strategy.name)) {
+        throw new Error(`auth-plugin: duplicate strategy name '${strategy.name}'`);
+      }
+      seenNames.add(strategy.name);
+    }
+
+    // Local strategy (optional, defaults to always-null). When no `local`
+    // callback is configured, verifyCredentials resolves to null.
+    const localStrategy = options.local
+      ? new LocalStrategy(options.local.verify)
+      : new LocalStrategy(() => Promise.resolve(null));
+
+    // Create auth service
+    const authService = new AuthService(strategies, localStrategy);
+
+    // Register services
+    if (jwtService !== null) {
+      ctx.services.register(CAPABILITIES.JWT, jwtService);
+    }
+    ctx.services.register(CAPABILITIES.AUTH, authService);
+
+    if (compiledResourceServer !== null) {
+      registerMetadataRoute(ctx.router, compiledResourceServer);
+    }
+
+    // One challenge writer for every 401/scope-403 producer (M132 §3.3),
+    // in the auth band and registered BEFORE `auth` so it wraps it. It reads
+    // only the request and the response, so `middleware: false` keeps it: an
+    // app that authenticates per route still needs the challenge.
+    if (
+      options.jwt !== undefined ||
+      compiledIssuers.length > 0 ||
+      compiledResourceServer !== null
+    ) {
+      ctx.middleware.add(
+        bearerChallenge({
+          // Read the credential where the bearer strategies read it, so a
+          // custom `jwt.header`/`jwt.scheme` still reports `invalid_token`.
+          ...(options.jwt?.header !== undefined ? { header: options.jwt.header } : {}),
+          ...(options.jwt?.scheme !== undefined ? { scheme: options.jwt.scheme } : {}),
+          ...(compiledResourceServer === null
+            ? {}
+            : { resourceMetadata: compiledResourceServer.metadataUrl }),
+        }),
+        { name: 'bearer-challenge', priority: AUTH_MIDDLEWARE_PRIORITY },
+      );
+    }
+
+    if (options.middleware !== false) {
+      const configured = options.middleware ?? {};
+      const isExcluded = createPathMatcher(configured.exclude ?? []);
+      const authenticate = authMiddleware();
+      ctx.middleware.add(
+        async (requestContext, next): Promise<void> => {
+          if (isExcluded(requestContext.request.path)) {
+            await next();
+            return;
+          }
+          await authenticate(requestContext, next);
+        },
+        {
+          name: 'auth',
+          priority: configured.priority ?? AUTH_MIDDLEWARE_PRIORITY,
+        },
+      );
+    }
+
+    // Authorization decision explanations (M98h). The AuthPlugin ALWAYS
+    // registers a source under CAPABILITIES.AUTHORIZATION_DIAGNOSTICS: a
+    // `disabled`-answering source without the option (whether or not RBAC
+    // is configured — the owning plugin's answer that observation was never
+    // opted into), an `unsupported` (`rbac-not-configured`) source when the
+    // option is present but RBAC is absent, and an active collector when
+    // both are present. The boolean IAuthorizationService remains
+    // authoritative and unchanged; a diagnostic failure can never alter an
+    // allow/deny or a guard's short-circuit order.
+    const rbacService =
+      options.rbac === undefined ? null : new RbacService(options.rbac, confineScopedTokens);
+    if (rbacService !== null) {
+      ctx.services.register(CAPABILITIES.AUTHORIZATION, rbacService);
+    }
+    // Authorization policies (M110a). The logger is read at CALL time, so a
+    // logger registered after this plugin still receives a throwing
+    // policy's report.
+    const policyService = new PolicyService(() => ctx.logger);
+    for (const policy of policies) {
+      policyService.define(policy);
+    }
+    if (scoped !== null) {
+      policyService.define(scoped.policy);
+      // Factory sources resolve once every plugin has registered — the
+      // first phase at which the registry holds every capability (M101c).
+      ctx.lifecycle.onInit(() => {
+        scoped.resolver.bind(ctx.services);
+      });
+    }
+    ctx.services.register(CAPABILITIES.AUTHORIZATION_POLICIES, policyService);
+    // After every plugin has registered its routes and before the server
+    // listens: a guard naming an unregistered policy fails start(), and the
+    // policy set is then fixed for the life of the application.
+    ctx.lifecycle.onBootstrap(() => {
+      scanPolicyGuards(
+        ctx.router.listRoutes(),
+        ctx.services.get<IAuthorizationPolicyService>(CAPABILITIES.AUTHORIZATION_POLICIES),
+      );
+      policyService.seal();
+    });
+
+    let authorizationSource: IAuthorizationDiagnosticsSource;
+    if (authorizationPolicy === null) {
+      authorizationSource = createDisabledAuthorizationSource();
+    } else if (rbacService === null) {
+      authorizationSource = createUnsupportedAuthorizationSource('rbac-not-configured');
+    } else {
+      const collector = new AuthorizationObservationCollector(
+        authorizationPolicy,
+        runtime,
+        ctx.services,
+        rbacService,
+      );
+      attachAuthorizationObserver(rbacService, collector);
+      authorizationSource = collector;
+    }
+    ctx.services.register(CAPABILITIES.AUTHORIZATION_DIAGNOSTICS, authorizationSource);
+
+    // Cleanup on close
+    ctx.lifecycle.onClose(() => {
+      // JwtService cached keys are GC'd when the service is dropped. Key sets
+      // are closed here too (idempotent) for a failed start, where the
+      // stopping phase never runs.
+      for (const keySet of issuerKeySets) {
+        keySet.close();
+      }
+      for (const keySet of signInKeySets) {
+        keySet.close();
+      }
+      if (authorizationSource instanceof AuthorizationObservationCollector) {
+        authorizationSource.close();
+      }
+    });
+
+    // Last, after every synchronous refusal above: a load failure rejects
+    // register() with SamlRuntimeLoadError.
+    return loadSamlRoutes === null ? undefined : loadSamlRoutes();
+  }
+
   return {
     name: 'auth-plugin',
     version: VERSION,
@@ -201,495 +686,16 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
     // The session strategy reads the session service, but only when
     // `options.session` is configured — the edge orders SessionPlugin before
     // AuthPlugin within the shared NORMAL priority band.
-    optionalDependencies: [CAPABILITIES.SESSION],
+    optionalDependencies: [CAPABILITIES.SESSION, CAPABILITIES.SECRETS, CAPABILITIES.CONFIG],
     priority: PLUGIN_PRIORITY.NORMAL,
 
     register(ctx: IPluginContext): void | Promise<void> {
-      // Resolve runtime
-      const runtime = ctx.services.get<IRuntimeServices>('runtime');
-      // Scoped RBAC (M110b): built before the sign-in block, which reads it
-      // for 'sign-in' timing. The logger is read at call time.
-      const scoped: ScopedRbac | null =
-        compiledScoped === null
-          ? null
-          : createScopedRbac(compiledScoped, resolveProbeTiming(runtime), () => ctx.logger);
-
-      // The outbound seam is shared by the issuer key-set caches (M100b) and the
-      // sign-in routes (M100c): one place to configure it, one place to fake it.
-      const http = options.http ?? createDefaultAuthHttp();
-      // Reporting is best-effort: a throwing logger must not abort a strategy
-      // chain or a route handler whose outcome is already decided.
-      const debug = (message: string): void => {
-        try {
-          ctx.logger?.debug(message);
-        } catch {
-          // Swallowed deliberately.
-        }
-      };
-      const warn = (message: string): void => {
-        try {
-          ctx.logger?.warn(message);
-        } catch {
-          // Swallowed deliberately.
-        }
-      };
-
-      // Build strategies list
-      const strategies: IAuthStrategy[] = [];
-      let jwtService: JwtService | null = null;
-
-      if (options.jwt !== undefined) {
-        const algorithm = options.jwt.algorithm ?? (options.jwt.secret ? 'HS256' : 'RS256');
-        const jwtOptions: {
-          secret?: string | Uint8Array;
-          privateKey?: string;
-          publicKey?: string;
-          algorithm: 'HS256' | 'RS256';
-          expectedAudience?: string;
-          expectedIssuer?: string;
-        } = { algorithm };
-        if (options.jwt.secret !== undefined) {
-          jwtOptions.secret = options.jwt.secret;
-        }
-        if (options.jwt.privateKey !== undefined) {
-          jwtOptions.privateKey = options.jwt.privateKey;
-        }
-        if (options.jwt.publicKey !== undefined) {
-          jwtOptions.publicKey = options.jwt.publicKey;
-        }
-        if (options.jwt.audience !== undefined) {
-          jwtOptions.expectedAudience = options.jwt.audience;
-        }
-        if (options.jwt.issuer !== undefined) {
-          jwtOptions.expectedIssuer = options.jwt.issuer;
-        }
-
-        jwtService = new JwtService(runtime, jwtOptions);
-        const jwtStrategyOpts: {
-          jwtService: JwtService;
-          header?: string;
-          scheme?: string;
-          tenantClaim?: string;
-          accessTokenRevocationStore?: IAccessTokenRevocationStore;
-        } = { jwtService };
-        if (options.jwt.tenantClaim !== undefined) {
-          jwtStrategyOpts.tenantClaim = options.jwt.tenantClaim;
-        }
-        if (options.jwt.header !== undefined) {
-          jwtStrategyOpts.header = options.jwt.header;
-        }
-        if (options.jwt.scheme !== undefined) {
-          jwtStrategyOpts.scheme = options.jwt.scheme;
-        }
-        if (options.jwt.accessTokenRevocationStore !== undefined) {
-          jwtStrategyOpts.accessTokenRevocationStore = options.jwt.accessTokenRevocationStore;
-        }
-        strategies.push(new JwtStrategy(jwtStrategyOpts));
-      }
-
-      // Outside-issuer strategy (M100b), immediately after the JWT strategy and
-      // reading the same header and scheme. The logger is read at call time.
-      const issuerKeySets: IssuerKeySet[] = [];
-      if (compiledIssuers.length > 0) {
-        // One reporter for the bearer path: a provider the operator cannot
-        // reach warns once per change of reason per issuer, and a successful
-        // refresh resets it so the next outage warns again (M119g, V10-62).
-        const issuerReporter = createStateChangeReporter({ warn, debug });
-        const bindings = compiledIssuers.map((issuer) => {
-          const keySet = new IssuerKeySet(issuer, runtime, http, {
-            failed: (name, reason) =>
-              issuerReporter.failed(
-                name,
-                reason,
-                `auth-plugin: issuer '${name}' key-set refresh failed (${reason})`,
-              ),
-            recovered: (name) => issuerReporter.recovered(name),
-          });
-          issuerKeySets.push(keySet);
-          return { issuer, keySet };
-        });
-        strategies.push(
-          new IssuerStrategy({
-            bindings,
-            runtime,
-            report: (name, reason) =>
-              debug(`auth-plugin: issuer '${name}' token refused (${reason})`),
-            ...(options.jwt?.header !== undefined ? { header: options.jwt.header } : {}),
-            ...(options.jwt?.scheme !== undefined ? { scheme: options.jwt.scheme } : {}),
-          }),
-        );
-        // Abort key-set fetches at the START of stop(): the kernel drains
-        // in-flight requests before onClose, so a request parked on a fetch
-        // would otherwise hold shutdown for up to fetchTimeoutMs. Cached sets
-        // stay usable for requests still being served in this window.
-        ctx.lifecycle.onStopping(() => {
-          for (const keySet of issuerKeySets) {
-            keySet.close();
-          }
-        });
-        // Reads cached state only. Shared issuer faults stay in data:
-        // determineStatusCode withdraws every non-up replica from /ready.
-        ctx.health.register('auth', () => {
-          const states: Record<string, string> = {};
-          let current = true;
-          compiledIssuers.forEach((issuer, index) => {
-            const state = issuerKeySets[index].state();
-            states[issuer.name] = state;
-            current &&= state === 'current';
-          });
-          return Promise.resolve({
-            status: 'up',
-            data: { issuers: states, current },
-          });
-        });
-      }
-
-      // API key strategy (optional)
-      if (options.apiKey) {
-        const apiKeyOpts: {
-          header?: string;
-          validate: (key: string) => Promise<IPrincipal | null>;
-        } = { validate: options.apiKey.validate };
-        if (options.apiKey.header !== undefined) {
-          apiKeyOpts.header = options.apiKey.header;
-        }
-        strategies.push(new ApiKeyStrategy(apiKeyOpts));
-      }
-
-      // Session strategy (optional). Fails at register() rather than per
-      // request: the session service is resolved once, and a misconfiguration
-      // (session arm without SessionPlugin) is a startup error, not a 401.
-      if (options.session !== undefined) {
-        if (!ctx.services.has(CAPABILITIES.SESSION)) {
-          throw new Error(
-            'auth-plugin: options.session requires the session capability — register the session-plugin (SessionPlugin), or drop options.session',
-          );
-        }
-        const sessionService = ctx.services.get<ISessionService>(CAPABILITIES.SESSION);
-        strategies.push(
-          new SessionStrategy({ sessionService, toPrincipal: options.session.toPrincipal }),
-        );
-      }
-
-      // Sign-in with an outside provider (M100c). Registered after the M73
-      // session strategy so a session carrying an explicit identity is consulted
-      // before this plugin's own record, and before any caller-supplied strategy.
-      const signInKeySets: IssuerKeySet[] = [];
-      // Set only when a saml provider is configured; awaited as register()'s
-      // last step, so every other configuration still registers synchronously.
-      let loadSamlRoutes: (() => Promise<void>) | null = null;
-      if (compiledSignIn !== null) {
-        // The session is what holds the signed-in record and the pending state,
-        // so this arm cannot work without it. Named as a startup error rather than
-        // failing per request, exactly as options.session does.
-        if (!ctx.services.has(CAPABILITIES.SESSION)) {
-          throw new Error(
-            'auth-plugin: options.signIn requires the session capability — register the session-plugin (SessionPlugin) alongside auth-plugin, or drop options.signIn',
-          );
-        }
-        const sessionService = ctx.services.get<ISessionService>(CAPABILITIES.SESSION);
-
-        // One key-set cache per oidc provider: it holds the discovery document the
-        // routes read their endpoints from AND the keys the ID token verifies
-        // against, so both come from the same issuer-checked fetch.
-        const keySets = new Map<string, IssuerKeySet>();
-        for (const provider of compiledSignIn.providers) {
-          if (provider.compiledIssuer === undefined) {
-            continue;
-          }
-          const keySet = new IssuerKeySet(provider.compiledIssuer, runtime, http, {
-            // Debug-only: the sign-in route's reporter carries the operator
-            // line, keyed by provider, so this path does not duplicate it.
-            failed: (name, reason) =>
-              debug(`auth-plugin: signIn['${name}'] key-set refresh failed (${reason})`),
-            recovered: () => {},
-          });
-          keySets.set(provider.name, keySet);
-          signInKeySets.push(keySet);
-        }
-
-        const mfa = compiledSignIn.mfa;
-        // One check object serves the service (records) and the strategy
-        // (compares), so both digest the stamp the same way.
-        const sessionStamp =
-          compiledSignIn.sessionStamp === null
-            ? null
-            : { read: compiledSignIn.sessionStamp, subtle: runtime.subtle };
-        const authSessionService = new AuthSessionService({
-          sessionService,
-          now: () => runtime.now(),
-          ...(sessionStamp === null ? {} : { sessionStamp }),
-          ...(compiledSignIn.refreshPrincipal === null
-            ? {}
-            : { refreshPrincipal: compiledSignIn.refreshPrincipal }),
-          ...(scoped === null || compiledScoped?.timing.kind !== 'sign-in'
-            ? {}
-            : {
-                scopedGrants: {
-                  resolveAll: async (principal) => {
-                    const outcome = await scoped.resolver.resolveFromSources(principal, {
-                      kind: 'all',
-                    });
-                    if (!outcome.ok) {
-                      scoped.evaluator.report(outcome);
-                      throw new GrantResolutionError(outcome.reason, outcome.source);
-                    }
-                    return outcome.grants;
-                  },
-                },
-              }),
-          ...(mfa === null
-            ? {}
-            : {
-                // The configured TTL passes through untouched; `AuthSessionService`
-                // owns the default and is the only reader of the value, so the
-                // option has exactly one owner.
-                mfa: {
-                  required: mfa.required,
-                  ...(mfa.pendingTtlMs === undefined ? {} : { pendingTtlMs: mfa.pendingTtlMs }),
-                },
-              }),
-        });
-        ctx.services.register(CAPABILITIES.AUTH_SESSION, authSessionService);
-        scoped?.resolver.useStoredGrants((request, principal) =>
-          authSessionService.storedGrants(request, principal),
-        );
-
-        strategies.push(
-          new AuthSessionStrategy({
-            sessionService,
-            ...(compiledSignIn.refreshPrincipal === null
-              ? {}
-              : { refreshPrincipal: compiledSignIn.refreshPrincipal }),
-            ...(sessionStamp === null ? {} : { sessionStamp }),
-          }),
-        );
-
-        registerSignInRoutes({
-          router: ctx.router,
-          config: compiledSignIn,
-          sessionService,
-          authSessionService,
-          http,
-          runtime,
-          keySets,
-          debug,
-          warn,
-        });
-
-        // SAML (M100f): the library load is awaited by register() (below), so a
-        // missing package or a Workers deployment without nodejs_compat fails at
-        // startup with SamlRuntimeLoadError rather than at the first login.
-        if (compiledSignIn.samlProviders.length > 0) {
-          const samlProviders = compiledSignIn.samlProviders;
-          const challengePath = mfa?.challengePath;
-          loadSamlRoutes = async () => {
-            const loaded: LoadedSamlProvider[] = [];
-            for (const provider of samlProviders) {
-              loaded.push({ provider, SAML: await loadSaml(provider.module) });
-            }
-            registerSamlRoutes({
-              router: ctx.router,
-              providers: loaded,
-              authSessionService,
-              runtime,
-              debug,
-              ...(challengePath === undefined ? {} : { challengePath }),
-            });
-          };
-        }
-
-        // Passkeys (M100e): the ceremonies ride the same session and
-        // auth-session services the sign-in arm built, and register the four
-        // ceremony routes under the sign-in base path.
-        if (compiledPasskeys !== null) {
-          const ceremonies = new PasskeyCeremonies({
-            config: compiledPasskeys,
-            runtime,
-            sessionService,
-            authSession: authSessionService,
-            debug,
-            mfaConfigured: compiledSignIn.mfa !== null,
-          });
-          registerPasskeyRoutes({
-            router: ctx.router,
-            basePath: compiledSignIn.basePath,
-            ceremonies,
-          });
-        }
-
-        // Abort discovery fetches at the START of stop(), as the issuer key sets
-        // do: the kernel drains in-flight requests before onClose, so a login
-        // parked on a provider would otherwise hold shutdown open.
-        ctx.lifecycle.onStopping(() => {
-          for (const keySet of signInKeySets) {
-            keySet.close();
-          }
-        });
-      }
-
-      // Caller-supplied strategies, appended in declaration order after every
-      // built-in (jwt → api-key → session → auth-session → caller).
-      if (options.strategies !== undefined) {
-        for (const strategy of options.strategies) {
-          strategies.push(strategy);
-        }
-      }
-
-      if (strategies.length === 0) {
-        throw new AuthPluginConfigurationError(
-          'auth-plugin requires at least one passive authentication strategy; configure jwt, issuers, apiKey, session, or strategies',
-        );
-      }
-
-      // A strategy's name is its only identity; a duplicate makes the later
-      // entry unreachable for anything that reasons about the chain by name.
-      const seenNames = new Set<string>();
-      for (const strategy of strategies) {
-        if (seenNames.has(strategy.name)) {
-          throw new Error(`auth-plugin: duplicate strategy name '${strategy.name}'`);
-        }
-        seenNames.add(strategy.name);
-      }
-
-      // Local strategy (optional, defaults to always-null). When no `local`
-      // callback is configured, verifyCredentials resolves to null.
-      const localStrategy = options.local
-        ? new LocalStrategy(options.local.verify)
-        : new LocalStrategy(() => Promise.resolve(null));
-
-      // Create auth service
-      const authService = new AuthService(strategies, localStrategy);
-
-      // Register services
-      if (jwtService !== null) {
-        ctx.services.register(CAPABILITIES.JWT, jwtService);
-      }
-      ctx.services.register(CAPABILITIES.AUTH, authService);
-
-      if (compiledResourceServer !== null) {
-        registerMetadataRoute(ctx.router, compiledResourceServer);
-      }
-
-      // One challenge writer for every 401/scope-403 producer (M132 §3.3),
-      // in the auth band and registered BEFORE `auth` so it wraps it. It reads
-      // only the request and the response, so `middleware: false` keeps it: an
-      // app that authenticates per route still needs the challenge.
-      if (
-        options.jwt !== undefined ||
-        compiledIssuers.length > 0 ||
-        compiledResourceServer !== null
-      ) {
-        ctx.middleware.add(
-          bearerChallenge({
-            // Read the credential where the bearer strategies read it, so a
-            // custom `jwt.header`/`jwt.scheme` still reports `invalid_token`.
-            ...(options.jwt?.header !== undefined ? { header: options.jwt.header } : {}),
-            ...(options.jwt?.scheme !== undefined ? { scheme: options.jwt.scheme } : {}),
-            ...(compiledResourceServer === null
-              ? {}
-              : { resourceMetadata: compiledResourceServer.metadataUrl }),
-          }),
-          { name: 'bearer-challenge', priority: AUTH_MIDDLEWARE_PRIORITY },
-        );
-      }
-
-      if (options.middleware !== false) {
-        const configured = options.middleware ?? {};
-        const isExcluded = createPathMatcher(configured.exclude ?? []);
-        const authenticate = authMiddleware();
-        ctx.middleware.add(
-          async (requestContext, next): Promise<void> => {
-            if (isExcluded(requestContext.request.path)) {
-              await next();
-              return;
-            }
-            await authenticate(requestContext, next);
-          },
-          {
-            name: 'auth',
-            priority: configured.priority ?? AUTH_MIDDLEWARE_PRIORITY,
-          },
-        );
-      }
-
-      // Authorization decision explanations (M98h). The AuthPlugin ALWAYS
-      // registers a source under CAPABILITIES.AUTHORIZATION_DIAGNOSTICS: a
-      // `disabled`-answering source without the option (whether or not RBAC
-      // is configured — the owning plugin's answer that observation was never
-      // opted into), an `unsupported` (`rbac-not-configured`) source when the
-      // option is present but RBAC is absent, and an active collector when
-      // both are present. The boolean IAuthorizationService remains
-      // authoritative and unchanged; a diagnostic failure can never alter an
-      // allow/deny or a guard's short-circuit order.
-      const rbacService =
-        options.rbac === undefined ? null : new RbacService(options.rbac, confineScopedTokens);
-      if (rbacService !== null) {
-        ctx.services.register(CAPABILITIES.AUTHORIZATION, rbacService);
-      }
-      // Authorization policies (M110a). The logger is read at CALL time, so a
-      // logger registered after this plugin still receives a throwing
-      // policy's report.
-      const policyService = new PolicyService(() => ctx.logger);
-      for (const policy of policies) {
-        policyService.define(policy);
-      }
-      if (scoped !== null) {
-        policyService.define(scoped.policy);
-        // Factory sources resolve once every plugin has registered — the
-        // first phase at which the registry holds every capability (M101c).
-        ctx.lifecycle.onInit(() => {
-          scoped.resolver.bind(ctx.services);
-        });
-      }
-      ctx.services.register(CAPABILITIES.AUTHORIZATION_POLICIES, policyService);
-      // After every plugin has registered its routes and before the server
-      // listens: a guard naming an unregistered policy fails start(), and the
-      // policy set is then fixed for the life of the application.
-      ctx.lifecycle.onBootstrap(() => {
-        scanPolicyGuards(
-          ctx.router.listRoutes(),
-          ctx.services.get<IAuthorizationPolicyService>(CAPABILITIES.AUTHORIZATION_POLICIES),
-        );
-        policyService.seal();
-      });
-
-      let authorizationSource: IAuthorizationDiagnosticsSource;
-      if (authorizationPolicy === null) {
-        authorizationSource = createDisabledAuthorizationSource();
-      } else if (rbacService === null) {
-        authorizationSource = createUnsupportedAuthorizationSource('rbac-not-configured');
-      } else {
-        const collector = new AuthorizationObservationCollector(
-          authorizationPolicy,
-          runtime,
-          ctx.services,
-          rbacService,
-        );
-        attachAuthorizationObserver(rbacService, collector);
-        authorizationSource = collector;
-      }
-      ctx.services.register(CAPABILITIES.AUTHORIZATION_DIAGNOSTICS, authorizationSource);
-
-      // Cleanup on close
-      ctx.lifecycle.onClose(() => {
-        // JwtService cached keys are GC'd when the service is dropped. Key sets
-        // are closed here too (idempotent) for a failed start, where the
-        // stopping phase never runs.
-        for (const keySet of issuerKeySets) {
-          keySet.close();
-        }
-        for (const keySet of signInKeySets) {
-          keySet.close();
-        }
-        if (authorizationSource instanceof AuthorizationObservationCollector) {
-          authorizationSource.close();
-        }
-      });
-
-      // Last, after every synchronous refusal above: a load failure rejects
-      // register() with SamlRuntimeLoadError.
-      return loadSamlRoutes === null ? undefined : loadSamlRoutes();
+      if (options.jwt === undefined) return registerServices(ctx);
+      const runtime = ctx.services.get(CAPABILITIES.RUNTIME);
+      const secret = resolveJwtSecret(options.jwt, ctx.services, runtime.env);
+      return secret instanceof Promise
+        ? secret.then((resolved) => registerServices(ctx, resolved))
+        : registerServices(ctx, secret);
     },
   };
 }

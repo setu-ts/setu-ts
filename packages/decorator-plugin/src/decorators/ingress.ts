@@ -15,6 +15,7 @@ import type {
   ProcessOptions,
   ScheduleOptions,
   SubscribeOptions,
+  WebSocketRouteOptions,
 } from '@setu-ts/common';
 
 import { classDecorator, methodDecorator } from '../metadata/context-bridge.ts';
@@ -108,11 +109,16 @@ export function Subscribe(topic: string, options?: SubscribeOptions): SetuMethod
  * Declares the WebSocket path served by a gateway class.
  *
  * @param path - Exact upgrade path
+ * @param options - WebSocket route options, including handshake guards
  * @returns A standard class decorator
  */
-export function Gateway(path: string): SetuClassDecorator {
+export function Gateway(path: string, options?: WebSocketRouteOptions): SetuClassDecorator {
   return classDecorator((store, target) => {
-    store.addIngress(target, { kind: 'gateway', path });
+    store.addIngress(target, {
+      kind: 'gateway',
+      path,
+      ...(options === undefined ? {} : { options }),
+    });
   });
 }
 

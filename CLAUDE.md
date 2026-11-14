@@ -820,8 +820,12 @@ here.
   file uploads: `forms` in the validation brand, `formFile()` from `@setu-ts/validation-plugin/zod`
   with `zod` as an optional peer, the document listing JSON/urlencoded/multipart or multipart alone
   with `format: binary` and `encoding`, the SDK sending `FormData`) — complete (PR #590).
-- **Next milestone** — the remaining M139 letters, then M140 (generated code read as code; M140a
-  first).
+- **Milestone 140a** (`cli` + `session-plugin` + `auth-plugin` + `common` + `runtime` + four more —
+  security defaults a generated project starts with: random per-project secrets with per-member
+  Compose refusals, `JWT_SECRET` resolution with a 32-byte HS256 floor, CSRF rotation on
+  `regenerate()`, 1 MiB WebSocket and REST bounds, a 30 s SSE heartbeat, gateway guards, bounded
+  `migration --down`; 16 V12 rows; ships in `0.13.0`) — complete (PR #589).
+- **Next milestone** — the remaining M139 letters, then M140b (generated code read as code).
 
 ## Verification (run before declaring any work done)
 
