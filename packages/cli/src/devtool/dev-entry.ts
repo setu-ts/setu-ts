@@ -193,7 +193,8 @@ export { DEVTOOL_ENTRY_MODULE };
 /**
  * CLI-owned renderings at this port: current Deno and Node entries, the previous
  * Deno entry, its unpinned-guidance predecessor, and the pre-probe 0.8.0 entry.
- * Each also appears with the nullish port read every release before M140b wrote.
+ * A standalone entry also appears with the nullish port read every release before
+ * M140b wrote.
  */
 export function devEntryVariants(devtoolPort: number, member = true): readonly string[] {
   const input: DevEntryInput = {
@@ -223,9 +224,12 @@ export function devEntryVariants(devtoolPort: number, member = true): readonly s
     renderEntry(input, true, 'deno'),
     renderEntry(input, true, 'node'),
   ];
+  // A member imports its port, so its nullish form is itself; the Set drops it.
   const released = [
-    ...variants,
-    ...variants.map((entry) => withNullishEnvReads(entry, [['PORT', '3000']])),
+    ...new Set([
+      ...variants,
+      ...variants.map((entry) => withNullishEnvReads(entry, [['PORT', '3000']])),
+    ]),
   ];
   return [
     ...released,

@@ -298,7 +298,7 @@ function envFileContents(
   if (variables.length === 0) return header;
   const placeholders =
     file === '.dev.vars'
-      ? '# The values below are development placeholders and stay local; set the deployed\n# values with wrangler secret put.\n'
+      ? '# The values below are development placeholders and stay local. A deployed Worker\n# takes secrets from wrangler secret put and plain values from [vars] in wrangler.toml.\n'
       : '# The values below are development placeholders. Replace them before deploying.\n';
   return `${header}${placeholders}${variables
     .map(

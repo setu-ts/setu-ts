@@ -980,7 +980,9 @@ describe('M140b runtime output', () => {
         expect(readme.match(/npx wrangler secret put SESSION_SECRET/g)).toHaveLength(1);
         expect(readme).toContain('Everything in `build/client`');
         const devVars = contentsOf(files, '.dev.vars');
-        expect(devVars).toContain('set the deployed\n# values with wrangler secret put');
+        expect(devVars).toContain(
+          'takes secrets from wrangler secret put and plain values from [vars]',
+        );
         expect(devVars).not.toContain('Replace them before deploying');
       }
     });
