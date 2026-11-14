@@ -336,8 +336,8 @@ All notable changes to this project are documented here. The format follows
 ### Fixed
 
 - **V12-102, V12-103, V12-104, V12-105, V12-106, V12-107, V12-109, V12-118, V12-80, V12-124 (M140b,
-  `@setu-ts/cli`).** Workers projects no longer emit `deno.json`. `setu add queue` is refused on
-  Workers, because its default queue lives in one isolate's memory, and `setu generate job` there
+  #591, `@setu-ts/cli`).** Workers projects no longer emit `deno.json`. `setu add queue` is refused
+  on Workers, because its default queue lives in one isolate's memory, and `setu generate job` there
   names that reason instead of suggesting the refused command; use
   `CloudflarePlugin({ queue: { binding } })` with a `queue` export. The Workers entry routes `fetch`
   and every export through one `withApplication`, and the `wrangler.toml` queue and Cron comments

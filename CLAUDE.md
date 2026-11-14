@@ -828,7 +828,7 @@ here.
 - **Milestone 140b** (`packages/cli` — Workers, Deno and Bun project output: `setu add queue`
   refused on Workers, a shared `withApplication` in the Workers entry with `wrangler.toml` comments
   that match it, no Workers `deno.json`, a Workers `## Deploy` section, an empty env value read as
-  unset; V12-102…V12-109, V12-118, V12-80, V12-124) — complete (PR pending).
+  unset; V12-102…V12-109, V12-118, V12-80, V12-124) — complete (PR #591).
 - **Next milestone** — the remaining M139 letters, then M140c–M140e (generated code read as code).
 
 ## Verification (run before declaring any work done)
