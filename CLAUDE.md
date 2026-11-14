@@ -833,7 +833,7 @@ here.
   members: `NODE_ENV=production`, a pinned Bun base with a lockfile refusal, Bun/Deno check stages,
   Compose healthchecks and `--depends-on`, a `setu-transport` ConfigMap below member Secrets,
   `runtimeOptions()` serving h2c for gRPC members, operator secret values; V12-68, V12-110, V12-111,
-  V12-113, V12-115, V12-116, V12-121, V12-122, V12-123) — complete (PR pending).
+  V12-113, V12-115, V12-116, V12-121, V12-122, V12-123) — complete (PR #592).
 - **Next milestone** — the remaining M139 letters, then M140d–M140e (generated code read as code).
 
 ## Verification (run before declaring any work done)
