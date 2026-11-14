@@ -146,7 +146,8 @@ to get the body.
   upgrade every machine that runs `setu` in the workspace together.
 - **Existing members.** Run `setu sync` in the workspace to write each member's
   `src/transport/index.ts`. Then make each `setu.config.ts` call it — `setu workspace broker` and
-  `setu workspace rpc` refuse until it does, and print exactly these lines:
+  `setu workspace rpc` refuse until it does, and print exactly these lines (since 0.13.0 also the
+  `runtimeOptions()` call; see Deployment output above):
   - `import { messagingOptions, queueOptions, transportPlugins } from './src/transport/index.ts';`
     (a full-stack member also imports `csrfExclusions`);
   - `MessagingPlugin(messagingOptions())` and `...queueOptions()` inside `QueuePlugin`, in place of

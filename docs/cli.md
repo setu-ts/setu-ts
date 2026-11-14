@@ -200,9 +200,9 @@ manifest change:
 
 - **Node → Bun:** keep `package.json`, set its scripts to `bun run main.ts` and `bun test`, and
   replace the `tsx` and `@types/node` dev dependencies with `@types/bun`. A `full-stack` project
-  builds the frontend before production, keeps `start: bun run main.ts`, prefixes tests with
-  `react-router build && ` and uses `start:dev: bun run dev.ts`. Bun workspaces need the hoisted
-  linker setting described in the upgrade guide.
+  builds the frontend before production, keeps `start: NODE_ENV=production bun run main.ts`,
+  prefixes tests with `react-router build && ` and uses `start:dev: bun run dev.ts`. Bun workspaces
+  need the hoisted linker setting described in the upgrade guide.
 - **Node or Bun → Deno:** _replace_ `package.json`, `tsconfig.json`, the ESLint and Prettier files
   and the npm lockfile with the `deno.json` that `setu new --runtime deno` emits. A `deno.json`
   added beside a kept `package.json` still serves, but `setu generate` checks `package.json` first,
@@ -775,9 +775,11 @@ Two choices decide how members talk, and they are recorded in different places:
 
 Each member carries a CLI-owned `src/transport/index.ts`, regenerated from `setu.workspace.json`.
 Its `setu.config.ts` calls it instead of holding literal options:
-`MessagingPlugin(messagingOptions())`, `...queueOptions()` inside `QueuePlugin`, and
-`...transportPlugins()` in the plugin list (a full-stack member passes `messagingOptions(config)`
-and `queueOptions(config)` to its starter and registers `transportPlugins()` after it). The config's
+`RuntimePlugin({ ...runtimeOptions(), <its options> })` (`{ http2: true }` for a member that serves
+gRPC, so Node callers reach it over HTTP/2), `MessagingPlugin(messagingOptions())`,
+`...queueOptions()` inside `QueuePlugin`, and `...transportPlugins()` in the plugin list (a
+full-stack member passes `runtime: runtimeOptions()`, `messagingOptions(config)` and
+`queueOptions(config)` to its starter and registers `transportPlugins()` after it). The config's
 calls are the same on every broker and style, so changing either regenerates the module and leaves
 the config alone.
 
@@ -1223,10 +1225,10 @@ keep the literal in the call. `--dry-run` lists task outputs. Keep the `.task.ts
 development.
 
 Generated Node `build` runs `tsc --noEmit && setu build`; full-stack prefixes `react-router build`.
-`npm start` runs `node --enable-source-maps dist/main.js` after building. `start:dev` runs
-`tsx watch main.ts`, or `tsx dev.ts` for full-stack. `start:debug` runs
-`node --inspect --import tsx main.ts` (full-stack uses `dev.ts`). The CLI command itself does not
-run TypeScript: use the project's build script for type-checking.
+`npm start` defaults `NODE_ENV` to `production` (keeping a preset value) and runs
+`node … dist/main.js` after building. `start:dev` runs `tsx watch main.ts`, or `tsx dev.ts` for
+full-stack. `start:debug` runs `node --inspect --import tsx main.ts` (full-stack uses `dev.ts`). The
+CLI command itself does not run TypeScript: use the project's build script for type-checking.
 
 `build` type-checks DI tokens; graph validation happens at boot, so run `npm test` before building
 an image.
