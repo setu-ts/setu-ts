@@ -88,7 +88,7 @@ describe('generated Dockerfile lockfile verification', () => {
     expect(frontend).toContain('for (const task of ["build", "check"])');
     expect(frontend).toContain('if (manifest.tasks && task in manifest.tasks)');
     expect(frontend).toContain(
-      '--allow-read=./deno.json,./deno.jsonc --allow-write=./.setu-build-task,./.setu-check-task,./deno.json,./deno.jsonc -',
+      '--allow-read=./deno.json,./deno.jsonc --allow-write=./.setu-build-task,./.setu-check-task,./.setu-check-cli,./deno.json,./deno.jsonc -',
     );
     expect(frontend).toContain(
       'if [ -f .setu-build-task ]; then deno task build; else mkdir -p build; fi',

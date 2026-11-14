@@ -43,8 +43,7 @@ it('marks only a local env file that holds a generated secret (audit F2)', () =>
     'cloudflare-workers',
     resolveHost(getTemplate('full-stack')!, 'cloudflare-workers'),
   );
-  const devVars = worker.find((file) => file.path === '.dev.vars');
-  if (devVars !== undefined) expect(devVars.secret).toBe(true);
+  expect(worker.find((file) => file.path === '.dev.vars')?.secret).toBe(true);
   const rest = projectFiles('api', 'node', resolveHost(getTemplate('rest')!, 'node'));
   expect(rest.some((file) => file.secret === true)).toBe(false);
 });

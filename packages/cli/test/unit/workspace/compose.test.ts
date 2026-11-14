@@ -80,7 +80,7 @@ describe('workspaceContainerFiles', () => {
           // main.dev.ts is excluded from the context, so the stage's check copy drops it.
           expect(stages[0]).toContain('manifest.tasks.check.replaceAll(" main.dev.ts", "")');
           expect(stages[0]).toContain(
-            '--allow-write=./.setu-build-task,./.setu-check-task,./deno.json,./deno.jsonc',
+            '--allow-write=./.setu-build-task,./.setu-check-task,./.setu-check-cli,./deno.json,./deno.jsonc',
           );
           expect(stages[0]).toContain('then deno task check; fi');
           const runs = stages[0]!.split('\n').filter((line) => line.startsWith('RUN '));
@@ -90,6 +90,13 @@ describe('workspaceContainerFiles', () => {
             'if [ -f .setu-check-task ]; then deno cache main.ts setu.config.ts; fi',
           );
           expect(mounted).not.toContain('deno task check');
+          // The check's exact CLI is fetched with the token, never run beside it (audit F1).
+          expect(mounted).toContain(
+            'Deno.writeTextFileSync(".setu-check-cli", manifest.tasks.check.slice(manifest.tasks.check.indexOf("npm:@setu-ts/cli@")).split(" ")[0])',
+          );
+          expect(mounted).toContain(
+            'if [ -f .setu-check-cli ]; then deno cache --no-lock "$(cat .setu-check-cli)"; fi',
+          );
           expect(check).not.toContain('--mount=type=secret');
           expect(check).toBe(
             'RUN if [ -z "$NPM_CONFIG_REGISTRY" ]; then unset NPM_CONFIG_REGISTRY; fi && if [ -f .setu-check-task ]; then deno task check; fi',

@@ -11152,13 +11152,14 @@ workspace root also refuses the flag because it registers no logger. Interactive
 `Logger?` only for a host with logging; `--yes` takes the runtime default. `--dry-run` reports the
 selected logger and writes nothing.
 
-| Export          | Kind      | Description                                                                                                                                   |
-| --------------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `runMain`       | function  | `(runtime: MainRuntime, host: MainProcess) => Promise<number>` — runs one invocation and returns its exit code; never exits                   |
-| `nodeProcess`   | function  | `(onInterrupt?) => MainProcess` — the Node host: `process.argv`, `process.cwd()`, console output, one shared `readline` reader                |
-| `emitInterrupt` | function  | Delivers an interrupt to this process's `SIGINT` handlers as an event, never as a real signal; `nodeProcess`'s default                        |
-| `MainRuntime`   | interface | The runtime services `runMain` reads (`fs`, the clock, `onSignal`)                                                                            |
-| `MainProcess`   | interface | The host: `args`, `cwd()`, `isTerminal()`, `prompt(message, signal?) => Promise<string \| null>`, `log`, `error`, `portAvailable`, `dispose?` |
+| Export          | Kind      | Description                                                                                                                                                             |
+| --------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `runMain`       | function  | `(runtime: MainRuntime, host: MainProcess) => Promise<number>` — runs one invocation and returns its exit code; never exits                                             |
+| `nodeProcess`   | function  | `(onInterrupt?) => MainProcess` — the Node host: `process.argv`, `process.cwd()`, console output, one shared `readline` reader                                          |
+| `nodeRuntime`   | function  | `() => MainRuntime` — the Node runtime both executables use: writes never follow a link, and a new file holding a generated secret is created owner-only (since 0.13.0) |
+| `emitInterrupt` | function  | Delivers an interrupt to this process's `SIGINT` handlers as an event, never as a real signal; `nodeProcess`'s default                                                  |
+| `MainRuntime`   | interface | The runtime services `runMain` reads (`fs`, the clock, `onSignal`)                                                                                                      |
+| `MainProcess`   | interface | The host: `args`, `cwd()`, `isTerminal()`, `prompt(message, signal?) => Promise<string \| null>`, `log`, `error`, `portAvailable`, `dispose?`                           |
 
 <!-- version:history -->
 

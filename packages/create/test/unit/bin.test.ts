@@ -6,11 +6,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 const runMain = vi.fn((_runtime: unknown, _host: { args: readonly string[] }) =>
   Promise.resolve(3),
 );
+// The CLI's own Node runtime, so the writer that creates secret files owner-only is the one
+// `setu` uses (M140c audit F2).
 vi.mock('@setu-ts/cli/main', () => ({
   runMain,
+  nodeRuntime: () => ({ marker: 'runtime' }),
   nodeProcess: () => ({ args: ['shop', '--template', 'rest'], marker: 'host' }),
 }));
-vi.mock('@setu-ts/runtime', () => ({ createNodeRuntimeServices: () => ({ marker: 'runtime' }) }));
 
 describe('the npm create executable', () => {
   afterEach(() => {
