@@ -63,6 +63,42 @@ describe('M140a installed signing secrets', () => {
     },
   );
 
+  it('asks the writer to create every file holding a generated secret owner-only (audit F2)', async () => {
+    const h = harness();
+    const secretPaths: string[] = [];
+    // The CLI binary installs writeRegularFile; this one records which writes are secret.
+    const fs = {
+      ...h.fs,
+      writeRegularFile: async (
+        path: string,
+        bytes: Uint8Array,
+        _max: number,
+        options?: { readonly secret?: boolean },
+      ) => {
+        if (options?.secret === true) secretPaths.push(path);
+        const before = h.fs.has(path) ? await h.fs.readFile(path) : undefined;
+        await h.fs.writeFile(path, bytes);
+        return { before };
+      },
+    };
+    const deps = {
+      fs,
+      cwd: '/app',
+      now: () => 0,
+      log: (line: string) => h.out.push(line),
+      error: (line: string) => h.err.push(line),
+      secret: () => 'a'.repeat(64),
+    };
+    expect(
+      await runCli(['new', 'shop', '--template', 'full-stack', '--runtime', 'node'], deps),
+    ).toBe(0);
+    // SESSION_SECRET lands in the ignored .env; its committed example is not secret.
+    expect(secretPaths).toEqual(['/app/shop/.env']);
+    secretPaths.length = 0;
+    expect(await runCli(['add', 'auth'], { ...deps, cwd: '/app/shop' }), h.err.join('\n')).toBe(0);
+    expect(secretPaths).toEqual(['/app/shop/.env']);
+  });
+
   it('records member keys once and replans Compose and the owned README section', async () => {
     const h = harness();
     const deps = {

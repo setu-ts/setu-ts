@@ -44,6 +44,7 @@ export async function operatorSecretFiles(
         path,
         contents: base + missing.map((name) => `${name}=${secret()}\n`).join(''),
         managed: true,
+        secret: true,
       },
     ],
     appended: missing,

@@ -268,6 +268,11 @@ export function resolveHost(host: TemplateHost, runtime: TargetRuntime): Resolve
   );
 }
 
+/** Whether a template's local env file receives a generated secret value. */
+function holdsGeneratedSecret(variables: readonly EnvVariable[] | undefined): boolean {
+  return (variables ?? []).some((variable) => variable.generated === 'secret');
+}
+
 /**
  * Renders the gitignored dotenv file a generated project starts with.
  *
@@ -2351,6 +2356,7 @@ describe('application composition', () => {
     files.push({
       path: manifest.envFilePath,
       contents: envFileContents(manifest.envVariables ?? [], options?.secret ?? generateSecret),
+      ...(holdsGeneratedSecret(manifest.envVariables) ? { secret: true } : {}),
     });
     files.push({
       path: `${manifest.envFilePath}.example`,
@@ -2367,6 +2373,7 @@ describe('application composition', () => {
     files.push({
       path: '.dev.vars',
       contents: envFileContents(manifest.envVariables ?? [], options?.secret ?? generateSecret),
+      ...(holdsGeneratedSecret(manifest.envVariables) ? { secret: true } : {}),
     });
     files.push({
       path: '.dev.vars.example',

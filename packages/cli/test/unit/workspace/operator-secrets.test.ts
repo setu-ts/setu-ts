@@ -48,6 +48,8 @@ describe('operator secrets', () => {
       () => 'independent',
     );
     expect(appended).toEqual(['NEW_SECRET']);
+    // Marked so the writer creates the file owner-only (audit F2).
+    expect(files[0]?.secret).toBe(true);
     expect(files[0]?.contents === `${before}NEW_SECRET=independent\n`).toBe(true);
   });
 

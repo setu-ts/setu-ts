@@ -34,6 +34,21 @@ it.each(['node', 'bun', 'deno'] as const)(
   },
 );
 
+it('marks only a local env file that holds a generated secret (audit F2)', () => {
+  const fullStack = projectFiles('shop', 'node', resolveHost(getTemplate('full-stack')!, 'node'));
+  expect(fullStack.find((file) => file.path === '.env')?.secret).toBe(true);
+  expect(fullStack.find((file) => file.path === '.env.example')?.secret).toBeUndefined();
+  const worker = projectFiles(
+    'shop',
+    'cloudflare-workers',
+    resolveHost(getTemplate('full-stack')!, 'cloudflare-workers'),
+  );
+  const devVars = worker.find((file) => file.path === '.dev.vars');
+  if (devVars !== undefined) expect(devVars.secret).toBe(true);
+  const rest = projectFiles('api', 'node', resolveHost(getTemplate('rest')!, 'node'));
+  expect(rest.some((file) => file.secret === true)).toBe(false);
+});
+
 it('V11-3 names Node through tsx as the config loader on Workers', () => {
   const files = projectFiles(
     'worker',

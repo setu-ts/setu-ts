@@ -21,9 +21,10 @@ All notable changes to this project are documented here. The format follows
   release must call `runtimeOptions()`; `setu workspace broker`, `setu workspace rpc` and
   `setu add grpc` refuse until it does and print the line to add. `generate app` and
   `setu add auth|session` in a member write a random value for each generated secret into
-  `k8s/secrets/<member>/.env`, keeping existing entries and refusing symbolic links. The workspace
-  READMEs say which members use the broker, why the `:dev` tag can go stale, and why Kubernetes
-  needs no start order.
+  `k8s/secrets/<member>/.env`, keeping existing entries and refusing symbolic links. A file the CLI
+  creates with a generated secret (that file, a project's or member's `.env`) is owner-only
+  (`0600`); an existing file keeps its mode. The workspace READMEs say which members use the broker,
+  why the `:dev` tag can go stale, and why Kubernetes needs no start order.
 - **`@setu-ts/cli` (M140a, #589).** Generated application bodies are bounded at 1 MiB; module names
   and ids have length limits. New projects generate local session secrets, ignore local secret files
   and Deno node_modules, and name required Docker environment variables. Session installation writes

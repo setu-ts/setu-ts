@@ -1989,7 +1989,8 @@ async function addOne(
     },
   ];
 
-  const edits: { readonly path: string; readonly contents: string }[] = [];
+  const edits: { readonly path: string; readonly contents: string; readonly secret?: boolean }[] =
+    [];
   const createOnlyPaths = new Set<string>();
   let found = false;
   let alreadyPresent = false;
@@ -2448,7 +2449,8 @@ async function addOne(
         const text = await readProjectText(deps, path, file);
         if (text === null) return EXIT_ERROR;
         const appended = withEnvVariable(text ?? '', [variable], localValue);
-        if (appended !== undefined) edits.push({ path, contents: appended });
+        if (appended !== undefined)
+          edits.push({ path, contents: appended, ...(file === envFile ? { secret: true } : {}) });
       }
       // The file now holds a usable signing secret, so it is listed in
       // .gitignore exactly as Rails lists `config/master.key`

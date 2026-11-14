@@ -70,12 +70,14 @@ export function regularFileWriteFlags(flags: {
  * readable by others mid-write; after writing it receives the target's owner and group and
  * only its 0o777 permission bits, never setuid, setgid or sticky. A target the invoking user
  * cannot write is refused, as is one whose owner or group cannot be kept. ACLs and extended
- * attributes are not carried over. A new target's temp uses 0o666 minus the umask.
+ * attributes are not carried over. A new target's temp uses 0o666 minus the umask, or 0o600
+ * when `options.secret` marks it as holding a generated secret.
  * Cleanup covers handled failures only: a process killed between temp creation and rename
  * can leave a .<name>.setu-<hex>.tmp file in the target directory.
  * @param path - Target whose parent chain the caller has checked.
  * @param bytes - Replacement bytes.
  * @param maxExistingBytes - Maximum prior content to retain for undo.
+ * @param options - `secret` creates a NEW target owner-only; an existing one keeps its mode.
  * @returns Prior bytes, or undefined when the snapshot found no target.
  * @throws Snapshot errors (including close) before any mutation; no undo is needed.
  * @throws RegularFileWriteError with undo bytes if temp creation, writing, close or rename fails;
@@ -85,6 +87,7 @@ export async function writeRegularFile(
   path: string,
   bytes: Uint8Array,
   maxExistingBytes: number,
+  options?: { readonly secret?: boolean },
 ): Promise<{ before: Uint8Array | undefined }> {
   const refusal = `${path}: expected a regular file at most 1 MiB`;
   const handle = await open(path, regularFileFlags(constants) | (constants.O_NOFOLLOW ?? 0)).catch(
@@ -146,7 +149,7 @@ export async function writeRegularFile(
     const output = await open(
       temp,
       regularFileWriteFlags(constants),
-      existing === undefined ? 0o666 : 0o600,
+      existing === undefined && options?.secret !== true ? 0o666 : 0o600,
     ).catch((cause: unknown) => {
       // The temp name is ours, not the developer's: naming it in a refusal is
       // noise, and it must never be mistaken for the target. The raw errno is

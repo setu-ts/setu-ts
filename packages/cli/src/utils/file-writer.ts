@@ -24,6 +24,7 @@ export interface ICliFileSystem extends IFileSystem {
     path: string,
     bytes: Uint8Array,
     maxExistingBytes: number,
+    options?: { readonly secret?: boolean },
   ): Promise<{ before: Uint8Array | undefined }>;
   /** POSIX identity; absent on platforms without getuid and on legacy test filesystems. */
   readonly invokingUid?: number;
@@ -87,6 +88,12 @@ export interface GeneratedFile {
    * Omitted or `false` → current behavior, byte-identical.
    */
   readonly managed?: boolean;
+  /**
+   * The file holds a generated secret, so a file this write CREATES is owner-only (`0600`).
+   * An existing file keeps the mode it has: the operator's choice. Honoured by the
+   * regular-file writer the CLI binary installs; a filesystem without it writes as before.
+   */
+  readonly secret?: boolean;
 }
 
 /**
@@ -625,7 +632,12 @@ export async function writeFiles(
       let before: Uint8Array | undefined;
       if (fs.writeRegularFile !== undefined) {
         try {
-          ({ before } = await fs.writeRegularFile(file.path, bytes, MAX_EXISTING_FILE_BYTES));
+          ({ before } =
+            file.secret === true
+              ? await fs.writeRegularFile(file.path, bytes, MAX_EXISTING_FILE_BYTES, {
+                  secret: true,
+                })
+              : await fs.writeRegularFile(file.path, bytes, MAX_EXISTING_FILE_BYTES));
         } catch (cause) {
           // A failure before the rename left the target untouched: undoing it would only
           // risk reporting a spurious incomplete rollback, or removing a file another
