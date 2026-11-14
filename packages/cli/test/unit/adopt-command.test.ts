@@ -179,15 +179,18 @@ it('M139d review L7 rewrites a 0.12.0 full-stack dev.ts, recognised from its rea
 });
 
 it('M140b rewrites the guarded full-stack dev.ts develop wrote with nullish port reads', async () => {
-  // The layout M139d generated, before M140b turned its port reads into logical-or.
-  const [current, , guardedNullish] = fullStackDevEntryVariants('node');
-  expect(guardedNullish!.contents).toBe(
-    current!.contents
-      .replace("runtime.env.PORT || '3000'", "runtime.env.PORT ?? '3000'")
-      .replace("runtime.env.VITE_PORT || '5173'", "runtime.env.VITE_PORT ?? '5173'"),
-  );
-  expect(guardedNullish!.contents).toContain("runtime.env.VITE_PORT ?? '5173'");
-  const [written] = await formatForTarget([guardedNullish!], 'node', undefined, () => {});
+  // Rendered by develop 8f4f226f2's own renderFullStackDevEntry (M139d's guarded
+  // layout, before M140b turned its port reads into logical-or).
+  const develop = (runtime: 'node' | 'bun'): string =>
+    readFileSync(
+      new URL(`../fixtures/full-stack-dev-entry-develop-${runtime}.txt`, import.meta.url),
+      'utf8',
+    );
+  for (const runtime of ['node', 'bun'] as const) {
+    expect(fullStackDevEntryVariants(runtime)[2]!.contents).toBe(develop(runtime));
+  }
+  const guardedNullish = { path: 'dev.ts', contents: develop('node') };
+  const [written] = await formatForTarget([guardedNullish], 'node', undefined, () => {});
   const h = harness({
     ...NODE_PROJECT,
     '/work/svc/package.json': JSON.stringify({
