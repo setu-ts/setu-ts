@@ -51,6 +51,7 @@ export function registerSearchRoutes(router: IRouterApi): void {
 ## Other options
 
 - `validateBody(schema, { forms: true })` also accepts URL-encoded and multipart forms.
+- `formFile` from `@setu-ts/validation-plugin/zod` validates a file field.
 - `validateParams`, `validateHeaders` and `validateCookies` validate the other request targets.
 - `errorFormat` also accepts `"nestjs"` or a custom formatter; `ValidatedOutput` names inferred
   output.

@@ -65,12 +65,29 @@ it(
     const configPath = `${project}/setu.config.ts`;
     const config = await fs.readFile(configPath, 'utf8');
     expect(config).toContain('return app;');
+    const uploads = `
+  const uploads = new Map<string, FormFile>();
+  const uploadBody = validateBody(z.object({ title: z.string(), file: formFile({ maxBytes: 1_000_000 }) }), { forms: true });
+  app.router.post('/uploads', {
+    middleware: [uploadBody],
+    handler: (ctx) => { const file = uploadBody.value(ctx).file; const id = String(uploads.size + 1); uploads.set(id, file); return ctx.response.json({ id }); },
+    schema: { operationId: 'uploadFile', response: { 200: z.object({ id: z.string() }) } },
+  });
+  app.router.get('/uploads/:id', {
+    handler: (ctx) => { const file = uploads.get(ctx.params['id']!)!; return ctx.response.json({ filename: file.filename, mimeType: file.mimeType, text: new TextDecoder().decode(file.data) }); },
+    schema: { operationId: 'readUpload', response: { 200: z.object({ filename: z.string(), mimeType: z.string(), text: z.string() }) } },
+  });`;
     await fs.writeFile(
       configPath,
-      config.replace(
-        'return app;',
-        "app.router.get('/m129', { handler: (ctx) => ctx.response.json({ message: 'm129' }), schema: { operationId: 'm129Probe', deprecated: true } });\n  app.router.get('/m137a-hidden', { handler: (ctx) => ctx.response.json({ hidden: true }), schema: { operationId: 'm137aHidden', excludeFromDocument: true } });\n  app.router.get('/m137b', { middleware: [Object.defineProperty((_ctx: unknown, next: () => Promise<void>) => next(), Symbol.for('setu.security.metadata'), { value: { authenticated: true } })], handler: (ctx) => ctx.response.json({ ok: true }), schema: { operationId: 'm137bGuarded' } });\n  return app;",
-      ),
+      (
+        "import { z } from 'zod';\nimport { validateBody } from '@setu-ts/validation-plugin';\nimport { formFile } from '@setu-ts/validation-plugin/zod';\nimport type { FormFile } from '@setu-ts/common';\n" +
+        config
+      )
+        .replace('return app;', uploads + '\nreturn app;')
+        .replace(
+          'return app;',
+          "app.router.get('/m129', { handler: (ctx) => ctx.response.json({ message: 'm129' }), schema: { operationId: 'm129Probe', deprecated: true } });\n  app.router.get('/m137a-hidden', { handler: (ctx) => ctx.response.json({ hidden: true }), schema: { operationId: 'm137aHidden', excludeFromDocument: true } });\n  app.router.get('/m137b', { middleware: [Object.defineProperty((_ctx: unknown, next: () => Promise<void>) => next(), Symbol.for('setu.security.metadata'), { value: { authenticated: true } })], handler: (ctx) => ctx.response.json({ ok: true }), schema: { operationId: 'm137bGuarded' } });\n  return app;",
+        ),
     );
     const drift = await npmRun(project, 'client:check');
     expect(drift.code, drift.output).toBe(1);
@@ -86,6 +103,8 @@ it(
     // M137b: the guarded route's derived 401 reaches the client as an error arm.
     // No other scaffold route is guarded, so the only 401 arm is this route's.
     expect(generated).toContain('readonly status: 401');
+    expect(generated).toContain('file: globalThis.Blob;');
+    expect(generated).toContain('multipart: opts.body,');
     await script(project, 'client:check');
     await script(project, 'format');
     for (const name of ['check', 'lint', 'format:check', 'build']) await script(project, name);
@@ -107,6 +126,12 @@ it(
       ]);
       expect(call.code, call.output).toBe(0);
       expect(call.output).toContain('m129 generated call passed');
+      const upload = await runIn(project, 'tsx', [
+        '--eval',
+        `import { createClient } from '@setu-ts/sdk'; import { createApi } from './src/clientsdk/api.ts'; const api = createApi(createClient({ baseUrl: '${origin}' })); (async () => { const created = await api.uploadFile({ body: { title: 'Hello', file: new File(['hello m137c'], 'hello.txt', { type: 'text/plain' }) } }); const read = await api.readUpload(created.data.id); if (read.data.filename !== 'hello.txt' || read.data.mimeType !== 'text/plain' || read.data.text !== 'hello m137c') throw new Error('wrong uploaded file: ' + JSON.stringify(read.data)); console.log('m137c generated upload and read-back passed'); })();`,
+      ]);
+      expect(upload.code, upload.output).toBe(0);
+      expect(upload.output).toContain('m137c generated upload and read-back passed');
     });
   },
 );

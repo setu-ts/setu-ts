@@ -268,6 +268,47 @@ Swagger UI therefore shows a field for the key, and a request sent from it is no
 lacking one. This is not governed by `deriveRequestSchemas`: the middleware refuses the request
 either way.
 
+## Form bodies and file uploads
+
+For a body validated by `validateBody(schema, { forms: true })` or
+`@ValidateBody(schema, { forms: true })`, the document lists the media types the route accepts:
+
+- Without a file field, `application/json`, `application/x-www-form-urlencoded` and
+  `multipart/form-data` appear in that order, with the same schema under each.
+- With a `formFile()` field or an array of them, only `multipart/form-data` is listed. A file is
+  described as `{ type: 'string', format: 'binary', contentMediaType: 'application/octet-stream' }`;
+  an array contains those binary strings. `formFile` comes from `@setu-ts/validation-plugin/zod`.
+- Each file field that sets `mimeTypes` gets an `encoding` entry whose `contentType` joins those
+  types with `", "`. Fields without that option have no encoding entry.
+- If any body validator on the route omits `forms: true`, only `application/json` is listed: that
+  validator answers 415 to a form body. A JSON route's document is unchanged.
+
+For example, a file field accepting PNG and JPEG produces this request body:
+
+```json
+{
+  "required": true,
+  "content": {
+    "multipart/form-data": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string",
+            "format": "binary",
+            "contentMediaType": "application/octet-stream"
+          }
+        },
+        "required": ["file"]
+      },
+      "encoding": {
+        "file": { "contentType": "image/png, image/jpeg" }
+      }
+    }
+  }
+}
+```
+
 ## Derived error responses
 
 `deriveErrorResponses` (default `true`) documents the statuses and headers a route's **own**
@@ -437,9 +478,11 @@ and the `@ApiTags`/`@ApiOperation`/`@ApiResponse` decorators from
 | `ZodToOpenApi`                | class     |
 | `IOpenApiService`             | interface |
 | `OpenApiDocument`             | interface |
+| `OpenApiEncoding`             | interface |
 | `OpenApiExternalDocs`         | interface |
 | `OpenApiGeneratorOptions`     | interface |
 | `OpenApiHeader`               | interface |
+| `OpenApiMediaTypeObject`      | interface |
 | `OpenApiOperation`            | interface |
 | `OpenApiParameter`            | interface |
 | `OpenApiPluginOptions`        | interface |

@@ -816,8 +816,12 @@ here.
   `idempotency-plugin` + `rest-starter` + `cli` — derived 401/403/415/429 and idempotency errors
   from route middleware brands, declared response headers, `errorSchema: 'rfc9457'`) — complete (PR
   #588).
-- **Next milestone** — the remaining M139 letters, M137c, then M140 (generated code read as code;
-  M140a first).
+- **Milestone 137c** (`common` + `validation-plugin` + `openapi-plugin` + `sdk` — form bodies and
+  file uploads: `forms` in the validation brand, `formFile()` from `@setu-ts/validation-plugin/zod`
+  with `zod` as an optional peer, the document listing JSON/urlencoded/multipart or multipart alone
+  with `format: binary` and `encoding`, the SDK sending `FormData`) — complete (PR #590).
+- **Next milestone** — the remaining M139 letters, then M140 (generated code read as code; M140a
+  first).
 
 ## Verification (run before declaring any work done)
 

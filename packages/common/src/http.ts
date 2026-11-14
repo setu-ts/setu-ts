@@ -916,6 +916,8 @@ export interface RouteValidationMetadata {
   readonly target: ValidationTarget;
   /** The schema it validates against, exactly as the caller supplied it. */
   readonly schema: unknown;
+  /** Whether this body validator also accepts form encodings. @since 0.13.0 */
+  readonly forms?: true;
 }
 
 /**
@@ -998,6 +1000,7 @@ function isRouteValidationMetadata(value: unknown): value is RouteValidationMeta
   // derivation — adding a `400` response to an operation from which nothing was
   // actually derived.
   if (!('schema' in value)) return false;
+  if ('forms' in value && value.forms !== true) return false;
   const target = (value as { target?: unknown }).target;
   return (
     target === 'body' ||

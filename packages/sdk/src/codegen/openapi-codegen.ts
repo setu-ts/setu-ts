@@ -419,7 +419,8 @@ function rtp(
 ): string {
   switch (type) {
     case 'string':
-      return 'string';
+      // Qualified, so a component schema named `Blob` cannot capture it.
+      return schema.format === 'binary' ? 'globalThis.Blob' : 'string';
     case 'number':
       return 'number';
     case 'integer':
@@ -598,13 +599,110 @@ function splitParams(
   return { pathParams, queryParams, headerParams };
 }
 
-function getBodySchema(op: SdkOpenApiOperation): SdkOpenApiSchema | undefined {
-  if (!op.requestBody) return undefined;
-  const rb = op.requestBody as SdkOpenApiRequestBody;
-  return rb.content?.['application/json']?.schema;
+/**
+ * Follows local `#/components/schemas/` references to the schema they name.
+ * Stops at a missing target or a cycle and returns what it reached.
+ *
+ * @param schema - The schema as written
+ * @param schemas - The document's component schemas
+ * @returns The referenced schema, or `undefined` when a reference is dangling
+ */
+function resolveComponentRef(
+  schema: SdkOpenApiSchema | undefined,
+  schemas: Readonly<Record<string, SdkOpenApiSchema>> | undefined,
+): SdkOpenApiSchema | undefined {
+  const seen = new Set<SdkOpenApiSchema>();
+  let current = schema;
+  while (current?.$ref !== undefined && !seen.has(current)) {
+    seen.add(current);
+    const name = current.$ref.startsWith('#/components/schemas/')
+      ? current.$ref.slice('#/components/schemas/'.length)
+      : undefined;
+    current = name === undefined ? undefined : schemas?.[name];
+  }
+  return current;
 }
 
-/** Whether the operation's JSON request body is declared required. */
+/**
+ * A document-supplied field name, made safe for an error message: control
+ * characters are dropped and the length is bounded.
+ *
+ * @param field - The property name as written in the document
+ * @returns The name for display
+ */
+function sanitizeFieldForMessage(field: string): string {
+  // eslint-disable-next-line no-control-regex -- control characters are what it drops
+  const clean = field.replace(/[\u0000-\u001f\u007f]/g, '');
+  return clean.length > 64 ? `${clean.slice(0, 64)}…` : clean;
+}
+
+function getBodySchema(
+  op: SdkOpenApiOperation,
+  path: string,
+  method: string,
+  schemas: Readonly<Record<string, SdkOpenApiSchema>> | undefined,
+): { schema: SdkOpenApiSchema | undefined; encoding: 'json' | 'multipart' } | undefined {
+  if (!op.requestBody) return undefined;
+  const rb = op.requestBody as SdkOpenApiRequestBody;
+  if (!rb.content) return undefined;
+  if (rb.content['application/json'] !== undefined) {
+    return { schema: rb.content['application/json'].schema, encoding: 'json' };
+  }
+  if (rb.content['multipart/form-data'] !== undefined) {
+    const schema = rb.content['multipart/form-data'].schema;
+    // `multipart` sends a flat object of fields, so the body must BE one: a
+    // primitive renders as a type the client cannot send, and a missing schema
+    // would drop the body argument altogether.
+    const resolved = resolveComponentRef(schema, schemas);
+    // Aligned with `renderSchema`, which renders `enum`, `const`, `anyOf`,
+    // `oneOf` and `allOf` BEFORE `type`, and properties without a type as
+    // `unknown`: only a plain `type: 'object'` renders as a type
+    // `multipart?: object` accepts.
+    if (
+      resolved?.type !== 'object' ||
+      resolved.enum !== undefined ||
+      resolved.const !== undefined ||
+      resolved.anyOf !== undefined ||
+      resolved.oneOf !== undefined ||
+      resolved.allOf !== undefined
+    ) {
+      throw new OpenApiCodegenError(
+        'multipart/form-data request body schema is not an object of form fields: the generated method could not send it',
+        path,
+        method,
+      );
+    }
+    // A field `encodeMultipart` can never send — one whose schema can only be
+    // an object or `null`, or an array of objects, arrays or nulls — would type-check and then
+    // throw on every call. Composed, enum and untyped fields can hold a flat
+    // value, so they are left to the encoder's own runtime refusal.
+    for (const [field, raw] of Object.entries(resolved.properties ?? {})) {
+      const value = resolveComponentRef(raw, schemas);
+      const items = value?.type === 'array' ? resolveComponentRef(value.items, schemas) : undefined;
+      if (
+        value?.type === 'object' ||
+        value?.type === 'null' ||
+        items?.type === 'object' ||
+        items?.type === 'array' ||
+        items?.type === 'null'
+      ) {
+        throw new OpenApiCodegenError(
+          `multipart/form-data request body field '${sanitizeFieldForMessage(field)}' is not a flat form value: the generated method could not send it`,
+          path,
+          method,
+        );
+      }
+    }
+    return { schema, encoding: 'multipart' };
+  }
+  throw new OpenApiCodegenError(
+    `request body media types ${Object.keys(rb.content).join(', ')} are not supported: the generated method would drop the body`,
+    path,
+    method,
+  );
+}
+
+/** Whether the operation's request body is declared required. */
 function isBodyRequired(op: SdkOpenApiOperation): boolean {
   if (!op.requestBody) return false;
   return (op.requestBody as SdkOpenApiRequestBody).required === true;
@@ -635,6 +733,7 @@ interface OpShape {
   readonly headerParams: RenderedParam[];
   readonly bodyType: string | undefined;
   readonly bodyRequired: boolean;
+  readonly bodyEncoding: 'json' | 'multipart' | undefined;
   readonly argsTypeName: string;
   /** True when the operation has any `opts` field at all. */
   readonly hasArgs: boolean;
@@ -891,7 +990,11 @@ function assertPathParamsMatchTemplate(
   }
 }
 
-function buildOpShape(entry: OpEntry, types: TypeNameRegistry): OpShape {
+function buildOpShape(
+  entry: OpEntry,
+  types: TypeNameRegistry,
+  schemas: Readonly<Record<string, SdkOpenApiSchema>> | undefined,
+): OpShape {
   const { path, method } = entry;
   const split = splitParams(entry.parameters, path, method);
   assertPathParamsMatchTemplate(path, method, split.pathParams);
@@ -924,7 +1027,8 @@ function buildOpShape(entry: OpEntry, types: TypeNameRegistry): OpShape {
   const queryParams = split.queryParams.map((p) => render(p));
   const headerParams = split.headerParams.map((p) => render(p));
 
-  const bodySchema = getBodySchema(entry.operation);
+  const body = getBodySchema(entry.operation, path, method, schemas);
+  const bodySchema = body?.schema;
   const bodyType = bodySchema
     ? hoistMultiline(
         renderSchema(bodySchema, new Set(), path, method),
@@ -958,6 +1062,7 @@ function buildOpShape(entry: OpEntry, types: TypeNameRegistry): OpShape {
     headerParams,
     bodyType,
     bodyRequired,
+    bodyEncoding: body?.encoding,
     argsTypeName: hasArgs
       ? types.claim(
           sanitizeTypeName(entry.operationId) + 'Args',
@@ -1150,7 +1255,7 @@ export function generateOpenApiClient(
     }
   }
 
-  const shapes = operations.map((entry) => buildOpShape(entry, types));
+  const shapes = operations.map((entry) => buildOpShape(entry, types, schemas));
   const anyErrors = shapes.some((shape) => shape.errorArms.length > 0);
   const hasRedirects = operations.some((entry) =>
     Object.keys(entry.operation.responses ?? {}).some(isRedirectResponseCode),
@@ -1392,7 +1497,11 @@ export function generateOpenApiClient(
       L(`${i3}})(),`);
     }
     if (shape.bodyType !== undefined) {
-      L(`${i3}json: ${optsRef}.body,`);
+      if (shape.bodyEncoding === 'multipart' && !shape.bodyRequired) {
+        L(`${i3}...(${optsRef}.body === undefined ? {} : { multipart: opts.body }),`);
+      } else {
+        L(`${i3}${shape.bodyEncoding}: ${optsRef}.body,`);
+      }
     }
 
     for (const field of ['idempotencyKey', 'signal']) {

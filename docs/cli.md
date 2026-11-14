@@ -701,10 +701,9 @@ Type". Generated modules do not opt in. With the option, a server-rendered form 
 against the module's `<P>Body` like a JSON client does. The limits to know: a field sent once is a
 single value and a repeated field becomes an array in wire order, with a name ending `[]` always an
 array (kept under the name as written); values are strings or the framework's `FormFile` (not a web
-`File`, so `z.instanceof(File)` refuses it), and numbers arrive as strings — use `z.coerce`; the
-generated OpenAPI document still describes a validated body as JSON; a `_csrf` field from the
-session plugin reaches the schema, where a Zod object strips it by default and
-`forbidNonWhitelisted` refuses it; and an over-limit body answers 413 when
+`File`, so `z.instanceof(File)` refuses it), and numbers arrive as strings — use `z.coerce`; a
+`_csrf` field from the session plugin reaches the schema, where a Zod object strips it by default
+and `forbidNonWhitelisted` refuses it; and an over-limit body answers 413 when
 `RuntimePlugin({ maxBodyBytes })` is set. The full behaviour is documented in the
 [`@setu-ts/validation-plugin` README](../packages/validation-plugin/README.md).
 

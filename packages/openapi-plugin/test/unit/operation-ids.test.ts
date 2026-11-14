@@ -131,7 +131,7 @@ describe('operation ids', () => {
       },
     ]);
     const op = result.paths['/users']?.post;
-    expect(op?.requestBody?.content['application/json'].schema).toEqual({
+    expect(op?.requestBody?.content['application/json']?.schema).toEqual({
       $ref: '#/components/schemas/CreateUsersBody',
     });
     expect(result.components?.schemas).toHaveProperty('CreateUsersBody');

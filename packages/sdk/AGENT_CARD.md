@@ -50,6 +50,7 @@ export function watchUpdates(signal: AbortSignal): ISseClient {
 
 ## Other options
 
+- `multipart` sends form fields; `generateOpenApiClient` selects JSON when listed, else multipart.
 - `fetch` and `timing` inject transport and time; `circuitBreaker` and `rateLimit` add resilience.
 - `createBearerAuthInterceptor` and `createApiKeyAuthInterceptor` add credentials;
   `createTraceContextInterceptor` propagates traces.
