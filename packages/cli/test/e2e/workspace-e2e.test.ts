@@ -546,9 +546,9 @@ try {
     const ws = await twoMembers();
     const orders = await nodeFs.readFile(`${ws}/apps/orders/${DISCOVERY_MODULE}`, 'utf8');
     const billing = await nodeFs.readFile(`${ws}/apps/billing/${DISCOVERY_MODULE}`, 'utf8');
-    expect(orders).toContain("host: Deno.env.get('BILLING_HOST') ?? '127.0.0.1'");
+    expect(orders).toContain("host: Deno.env.get('BILLING_HOST') || '127.0.0.1'");
     expect(orders).toContain(`port: ${base + 1},`);
-    expect(billing).toContain("host: Deno.env.get('ORDERS_HOST') ?? '127.0.0.1'");
+    expect(billing).toContain("host: Deno.env.get('ORDERS_HOST') || '127.0.0.1'");
     expect(billing).toContain(`port: ${base},`);
   });
 

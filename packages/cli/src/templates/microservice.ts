@@ -60,11 +60,10 @@ const REPLY_INBOX_MODULE = `/**
  * Cloudflare requires the Durable Object class to be exported by YOUR Worker,
  * which no library can do on your behalf.
  *
- * It deliberately does NOT \`extends DurableObject\`. That base class lives in
- * \`cloudflare:workers\`, a specifier only a Worker toolchain can resolve — so
- * importing it would break \`deno check\` on this project. workerd accepts a
- * plain class that takes \`(ctx, env)\`, which is the older and still-supported
- * form. Extend the base class instead if you want \`this.env\`.
+ * It is a plain class that takes \`(ctx, env)\` rather than \`extends
+ * DurableObject\`: workerd accepts that older, still-supported form, and the
+ * core needs nothing from the base class. Extend \`DurableObject\` (from
+ * \`cloudflare:workers\`) instead if you want \`this.env\`.
  */
 import type { IDurableObjectState, IDurableObjectWebSocket } from '@setu-ts/cloudflare-plugin';
 import { ReplyInboxObjectCore } from '@setu-ts/cloudflare-plugin';

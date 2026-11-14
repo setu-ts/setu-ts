@@ -98,7 +98,7 @@ describe('the transport module', () => {
   it('returns the same options the standalone overlay passes, on a plugin-list host', () => {
     const module = renderTransportModule(input({ broker: 'redis' }));
     expect(module).toContain(
-      "  return {\n    broker: 'redis-streams',\n    url: Deno.env.get('REDIS_URL') ??\n      'redis://127.0.0.1:6379',\n  };",
+      "  return {\n    broker: 'redis-streams',\n    url: Deno.env.get('REDIS_URL') ||\n      'redis://127.0.0.1:6379',\n  };",
     );
     expect(module).toContain("    adapter: 'redis',");
   });
@@ -124,9 +124,7 @@ describe('the transport module', () => {
     expect(redis).toContain(
       'export function messagingOptions(config: IConfig): StarterMessagingOptions {',
     );
-    expect(redis).toContain(
-      "config.get<string>('REDIS_URL', { default: 'redis://127.0.0.1:6379' })",
-    );
+    expect(redis).toContain("config.get<string>('REDIS_URL') || 'redis://127.0.0.1:6379'");
     // NATS has no queue arm: the queue stays in memory and reads nothing.
     const nats = renderTransportModule(input({ broker: 'nats', host: 'app-factory' }));
     expect(nats).toContain('export function queueOptions(_config: IConfig): StarterQueueOptions {');

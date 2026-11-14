@@ -29,6 +29,7 @@ import type { IFileSystem } from '@setu-ts/common';
 import { runCli } from '../../src/cli.ts';
 import { listTemplates } from '../../src/templates/registry.ts';
 import { collectSources, denoCheck, useWorkspacePackages } from '../fixtures/generated-project.ts';
+import { npmInstall, npmRun, startOverlay } from '../fixtures/node-project.ts';
 
 const runtime = createNodeRuntimeServices();
 const fs: IFileSystem = runtime.fs!;
@@ -279,55 +280,60 @@ describe('template scaffolding — end to end', () => {
   // The microservice template was refused outright on Workers until its runtime
   // swap existed, so NOTHING here had ever been scaffolded, let alone checked.
   // Everything the swap contributes is a rendered string as far as the CLI's own
-  // `deno check` is concerned — the `workersArgs` option object, the DO class
+  // type-check is concerned — the `workersArgs` option object, the DO class
   // module, the `queue` export's signature — so this is the only place a wrong
   // field name or a bad import is a compile error (the M50b trap).
-  it('type-checks the scaffolded microservice project on Cloudflare Workers', async () => {
-    expect(
-      await run(['new', 'edge', '--template', 'microservice', '--runtime', 'cloudflare-workers']),
-    ).toBe(0);
-    const project = `${root}/edge`;
+  it(
+    'type-checks the scaffolded microservice project on Cloudflare Workers',
+    { timeout: 900_000 },
+    async () => {
+      expect(
+        await run(['new', 'edge', '--template', 'microservice', '--runtime', 'cloudflare-workers']),
+      ).toBe(0);
+      const project = `${root}/edge`;
 
-    const config = await nodeFs.readFile(`${project}/setu.config.ts`, 'utf8');
-    // The swap happened: the two socket-bound plugins are gone and the platform
-    // plugin serves both capabilities in their place.
-    expect(config).not.toContain('MessagingPlugin');
-    expect(config).not.toContain('QueuePlugin');
-    expect(config).toContain("import { CloudflarePlugin } from '@setu-ts/cloudflare-plugin';");
-    expect(config).toContain("messaging: { binding: 'MESSAGES'");
-    expect(config).toContain("queue: { binding: 'JOBS' }");
+      const config = await nodeFs.readFile(`${project}/setu.config.ts`, 'utf8');
+      // The swap happened: the two socket-bound plugins are gone and the platform
+      // plugin serves both capabilities in their place.
+      expect(config).not.toContain('MessagingPlugin');
+      expect(config).not.toContain('QueuePlugin');
+      expect(config).toContain("import { CloudflarePlugin } from '@setu-ts/cloudflare-plugin';");
+      expect(config).toContain("messaging: { binding: 'MESSAGES'");
+      expect(config).toContain("queue: { binding: 'JOBS' }");
 
-    // The consumer half is a module export, which no plugin option can declare.
-    const entry = await nodeFs.readFile(`${project}/src/index.ts`, 'utf8');
-    expect(entry).toContain('async queue(');
-    expect(entry).toContain("export { ReplyInboxObject } from './reply-inbox-object.ts';");
-    // Cloudflare invokes ONE queue export for every consumed queue, so messaging
-    // and jobs must be told apart by name — otherwise the messaging broker gets
-    // job batches it cannot read and retries them to the dead-letter queue.
-    expect(entry).toContain('switch (payload.queue)');
-    expect(entry).toContain('createMessagingHandler(app)(payload)');
-    expect(entry).toContain('createQueueHandler(app)(payload)');
+      // The consumer half is a module export, which no plugin option can declare.
+      const entry = await nodeFs.readFile(`${project}/src/index.ts`, 'utf8');
+      expect(entry).toContain('async queue(');
+      expect(entry).toContain("export { ReplyInboxObject } from './reply-inbox-object.ts';");
+      // Cloudflare invokes ONE queue export for every consumed queue, so messaging
+      // and jobs must be told apart by name — otherwise the messaging broker gets
+      // job batches it cannot read and retries them to the dead-letter queue.
+      expect(entry).toContain('switch (payload.queue)');
+      expect(entry).toContain('createMessagingHandler(app)(payload)');
+      expect(entry).toContain('createQueueHandler(app)(payload)');
 
-    // `max_batch_timeout = 0` is what makes request/reply usable at all; the
-    // platform default of 5s alone exhausts the default reply budget.
-    const wrangler = await nodeFs.readFile(`${project}/wrangler.toml`, 'utf8');
-    expect(wrangler).toContain('max_batch_timeout = 0');
-    expect(wrangler).toContain('[[queues.producers]]');
-    expect(wrangler).toContain('class_name = "ReplyInboxObject"');
-    expect(wrangler).toContain('new_classes = ["ReplyInboxObject"]');
+      // `max_batch_timeout = 0` is what makes request/reply usable at all; the
+      // platform default of 5s alone exhausts the default reply budget.
+      const wrangler = await nodeFs.readFile(`${project}/wrangler.toml`, 'utf8');
+      expect(wrangler).toContain('max_batch_timeout = 0');
+      expect(wrangler).toContain('[[queues.producers]]');
+      expect(wrangler).toContain('class_name = "ReplyInboxObject"');
+      expect(wrangler).toContain('new_classes = ["ReplyInboxObject"]');
 
-    // The DO class is checked too, which is only possible because it does NOT
-    // import `cloudflare:workers` — a specifier Deno cannot resolve.
-    const sources = [
-      `${project}/src/index.ts`,
-      `${project}/setu.config.ts`,
-      `${project}/src/reply-inbox-object.ts`,
-    ];
-    await useWorkspacePackages(project);
-    const { code, stderr } = await denoCheck(project, sources);
-    expect(stderr).not.toContain('SyntaxError');
-    expect(code, stderr).toBe(0);
-  });
+      // Workers uses its own npm/TypeScript check, including the entry and DO
+      // class, without a Deno import map or a stand-in for cloudflare:workers.
+      await expect(nodeFs.stat(`${project}/deno.json`)).rejects.toMatchObject({ code: 'ENOENT' });
+      const overlay = await startOverlay();
+      try {
+        const installed = await npmInstall(project, overlay);
+        expect(installed.code, installed.output).toBe(0);
+        const checked = await npmRun(project, 'check');
+        expect(checked.code, checked.output).toBe(0);
+      } finally {
+        await overlay.close();
+      }
+    },
+  );
 
   // Every other runtime keeps the socket-bound brokers, so the swap must be
   // scoped to Workers rather than applied to the template.

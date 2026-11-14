@@ -35,7 +35,7 @@ export const SERVICE_PORT = 3410;
 export const SERVICE_ENDPOINTS = {
   orders: [
     {
-      host: process.env.ORDERS_HOST ?? '127.0.0.1',
+      host: process.env.ORDERS_HOST || '127.0.0.1',
       port: 3411,
     },
   ],

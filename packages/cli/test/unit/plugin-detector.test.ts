@@ -1,3 +1,5 @@
+import { projectFiles, resolveHost } from '../../src/templates/project-files.ts';
+import { getTemplate } from '../../src/templates/registry.ts';
 import { describe, expect, it } from 'vitest';
 import { createFakeFs } from '../fixtures/fake-fs.ts';
 import { detectPlugins } from '../../src/utils/plugin-detector.ts';
@@ -83,4 +85,19 @@ describe('detectPlugins', () => {
     });
     expect([...(await detectPlugins(fs, '/app'))]).toEqual(['cache-plugin']);
   });
+});
+
+it('M140b detects Workers plugins from the scaffold npm manifest alone', async () => {
+  const files = projectFiles(
+    'worker',
+    'cloudflare-workers',
+    resolveHost(getTemplate('microservice')!, 'cloudflare-workers'),
+  );
+  const fs = createFakeFs(
+    Object.fromEntries(files.map((file) => [`/app/${file.path}`, file.contents])),
+  );
+  expect(fs.has('/app/deno.json')).toBe(false);
+  const plugins = await detectPlugins(fs, '/app');
+  for (const plugin of ['cloudflare-plugin', 'health-plugin', 'metrics-plugin'])
+    expect(plugins.has(plugin)).toBe(true);
 });

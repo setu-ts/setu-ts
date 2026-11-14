@@ -79,7 +79,7 @@ export function mergeObjectArgs(a: string, b: string): string {
 /**
  * Wraps a rendered argument literal that would overflow the emitted line width.
  *
- * A broker connection read is long — `Deno.env.get('RABBITMQ_URL') ??
+ * A broker connection read is long — `Deno.env.get('RABBITMQ_URL') ||
  * 'amqp://127.0.0.1:5672'` on its own is most of the budget — so the
  * single-line form pushed a fresh `--transport rabbitmq` scaffold past its own
  * formatter (X2-4). Emitting the wrapped form directly is what keeps a

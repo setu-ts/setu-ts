@@ -317,6 +317,14 @@ export const RUNTIME_RESTRICTIONS: ReadonlyMap<
     },
   ],
   [
+    'queue-plugin',
+    {
+      runtimes: ['deno', 'node', 'bun'],
+      reason:
+        "its default queue lives in one isolate's memory, so a job added in one request is lost to the others; on Workers, register CloudflarePlugin({ queue: { binding } }) with a queue export in src/index.ts (setu add cloudflare)",
+    },
+  ],
+  [
     'scheduler-plugin',
     {
       runtimes: ['deno', 'node', 'bun'],
@@ -1968,10 +1976,9 @@ async function addOne(
     return EXIT_USAGE;
   }
 
-  // Both manifests are updated when both exist, because a Workers or Node
-  // project carries a `package.json` for its toolchain AND a `deno.json` that
-  // `setu generate` reads for plugin gating — writing only one would leave the
-  // gate and the build disagreeing about what is installed.
+  // Update every manifest that exists. Workers projects carry package.json;
+  // Deno projects gate plugins through deno.json imports, with package.json
+  // also present when the template needs npm build tooling.
   const targets: readonly {
     readonly file: string;
     readonly section: string;
@@ -2199,8 +2206,8 @@ async function addOne(
       }
     }
 
-    // Only the manifest the runtime runs scripts from: a Workers project's
-    // deno.json exists for plugin gating, and tasks there would never run.
+    // Only the manifest the runtime runs scripts from: Workers uses
+    // package.json for plugin gating and its npm scripts.
     if (bare === 'sdk' && (target.file === 'package.json') === (runtime !== 'deno')) {
       updated = withClientScripts(updated ?? source, target.file, runtime, deps.log) ?? updated;
     }
@@ -2943,6 +2950,9 @@ async function addOne(
     deps.log("  In createApp (setu.config.ts), rename the '_waitUntil' parameter to 'waitUntil'.");
     deps.log('  No such parameter (a project scaffolded before 0.10.0)? Add it as the second');
     deps.log('  parameter, as docs/upgrading.md describes ("Workers projects: thread waitUntil").');
+    deps.log(
+      '  To consume a queue or a Cron Trigger, add a `queue` or `scheduled` export to src/index.ts through withApplication — wrangler.toml shows both.',
+    );
   }
   // Both notes concern a Deno start task's permission flags; on another target
   // they describe nothing the developer can act on.
@@ -3067,8 +3077,7 @@ async function reportAgentsHint(
  * It used to be `deno install` unconditionally, so a Node or Bun project was
  * told to run a command its toolchain does not use. The commands match what
  * `setu new` prints for each target. Workers installs through npm, because
- * `wrangler` bundles from `node_modules`; its `deno.json` exists only for
- * plugin gating.
+ * `wrangler` bundles from `node_modules` and reads the npm manifest.
  *
  * @param runtime - The detected target runtime
  * @returns The command to print

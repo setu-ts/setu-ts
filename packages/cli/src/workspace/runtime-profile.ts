@@ -123,7 +123,7 @@ export interface WorkspaceRuntimeProfile {
  * @returns The expression, as source
  */
 function denoEnvRead(variable: string, fallback: string): string {
-  return `Deno.env.get('${variable}') ??\n          ${stringLiteral(fallback)}`;
+  return `Deno.env.get('${variable}') ||\n          ${stringLiteral(fallback)}`;
 }
 
 /**
@@ -138,7 +138,7 @@ function denoEnvRead(variable: string, fallback: string): string {
  * @returns The expression, as source
  */
 function nodeEnvRead(variable: string, fallback: string): string {
-  return `process.env.${variable} ??\n          ${stringLiteral(fallback)}`;
+  return `process.env.${variable} ||\n          ${stringLiteral(fallback)}`;
 }
 
 /**

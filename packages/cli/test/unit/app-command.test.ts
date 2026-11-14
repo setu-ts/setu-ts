@@ -1002,7 +1002,7 @@ describe('runAppCommand', () => {
     it('rewrites the first member map to name it', async () => {
       const h = await twoMembers();
       const orders = h.fs.read(`/ws/apps/orders/${DISCOVERY_MODULE}`);
-      expect(orders).toContain("host: Deno.env.get('BILLING_HOST') ?? '127.0.0.1'");
+      expect(orders).toContain("host: Deno.env.get('BILLING_HOST') || '127.0.0.1'");
       expect(orders).toContain('port: 3001,');
       expect(orders).not.toContain(`'orders':`);
     });
@@ -1010,7 +1010,7 @@ describe('runAppCommand', () => {
     it('gives the new member the first one address', async () => {
       const h = await twoMembers();
       const billing = h.fs.read(`/ws/apps/billing/${DISCOVERY_MODULE}`);
-      expect(billing).toContain("host: Deno.env.get('ORDERS_HOST') ?? '127.0.0.1'");
+      expect(billing).toContain("host: Deno.env.get('ORDERS_HOST') || '127.0.0.1'");
       expect(billing).toContain('port: 3000,');
     });
 

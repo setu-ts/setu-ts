@@ -656,7 +656,7 @@ describe('M121 transport additions', () => {
   });
   it('does not take an unrelated object with the same literal for the configured call', async () => {
     const source = `import { MessagingPlugin } from '@setu-ts/messaging-plugin';
-const unrelated = { broker: 'redis-streams', url: process.env.REDIS_URL ?? 'redis://127.0.0.1:6379' };
+const unrelated = { broker: 'redis-streams', url: process.env.REDIS_URL || 'redis://127.0.0.1:6379' };
 export function createApp(): IKernelApplication {
   return createApplication({ plugins: [MessagingPlugin(), ...(devtool?.plugins ?? [])] });
 }
@@ -898,7 +898,9 @@ export function createApp(): IKernelApplication {
       expect(await h.run([flag === 'broker' ? 'messaging' : 'queue', `--${flag}`, 'redis'])).toBe(
         2,
       );
-      expect(h.err.join('\n')).toContain('Cloudflare Workers');
+      expect(h.err.join('\n')).toContain(
+        flag === 'queue' ? 'cloudflare-workers' : 'Cloudflare Workers',
+      );
       expect(h.fs.writes).toEqual([]);
     });
     it(`refuses --${flag} in a workspace member`, async () => {
@@ -3746,4 +3748,52 @@ it('setu add mcp installs the SDK peer for a Workers project', async () => {
   expect(JSON.parse(h.read('/app/package.json')).dependencies['@modelcontextprotocol/server']).toBe(
     '^2.4.0',
   );
+});
+
+describe('M140b Workers additions', () => {
+  it.each(['node', 'cloudflare-workers'] as const)(
+    'queue installation follows the runtime restriction on %s',
+    async (runtime) => {
+      const h = harness();
+      expect(
+        await runNewCommand(parseArgs(['shop', '--runtime', runtime]), {
+          fs: h.fs,
+          secret: generateSecret,
+          cwd: '/app',
+          log: (line) => h.out.push(line),
+          error: (line) => h.err.push(line),
+        }),
+      ).toBe(0);
+      const before = h.read('/app/shop/package.json');
+      const writesBefore = [...h.fs.writes];
+      expect(await h.run(['queue', '--dir', '/app/shop'])).toBe(
+        runtime === 'cloudflare-workers' ? 2 : 0,
+      );
+      if (runtime === 'cloudflare-workers') {
+        expect(h.err.join('\n')).toContain("its default queue lives in one isolate's memory");
+        expect(h.err.join('\n')).toContain('CloudflarePlugin({ queue: { binding } })');
+        expect(h.read('/app/shop/package.json')).toBe(before);
+        expect(h.fs.writes).toEqual(writesBefore);
+      } else {
+        expect(h.read('/app/shop/package.json')).toContain('@setu-ts/queue-plugin');
+      }
+    },
+  );
+  it('adds cloudflare through package.json and prints the shared accessor guidance', async () => {
+    const h = harness();
+    expect(
+      await runNewCommand(parseArgs(['shop', '--runtime', 'cloudflare-workers']), {
+        fs: h.fs,
+        secret: generateSecret,
+        cwd: '/app',
+        log: (line) => h.out.push(line),
+        error: (line) => h.err.push(line),
+      }),
+    ).toBe(0);
+    expect(h.fs.has('/app/shop/deno.json')).toBe(false);
+    expect(await h.run(['cloudflare', '--dir', '/app/shop'])).toBe(0);
+    expect(h.read('/app/shop/package.json')).toContain('@setu-ts/cloudflare-plugin');
+    expect(h.fs.has('/app/shop/deno.json')).toBe(false);
+    expect(h.out.join('\n')).toContain('through withApplication — wrangler.toml shows both.');
+  });
 });

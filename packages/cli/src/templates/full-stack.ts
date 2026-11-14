@@ -249,7 +249,7 @@ export const FULL_STACK_TEMPLATE: TemplateDefinition = {
     parameter: {
       name: 'ssr',
       type: "{ serverBuild: unknown } | Pick<ReactRouterPluginOptions, 'loadRequestHandler' | 'mode'>",
-      doc: 'The Vite runtime start:dev supplies; production entries pass the compiled server build module.',
+      doc: 'Supplied by the entry: the compiled server build in production, the Vite runtime in local development.',
       readOn: ['deno', 'node', 'bun', 'cloudflare-workers'],
     },
   },
@@ -294,7 +294,9 @@ export const FULL_STACK_TEMPLATE: TemplateDefinition = {
   manifest: {
     readmeSection: (cli, runtime, member) =>
       FULL_STACK_README_SECTION(cli, runtime, member) +
-      `
+      (runtime === 'cloudflare-workers'
+        ? ''
+        : `
 ## Behind a TLS proxy
 
 React Router actions answer 400 behind TLS termination unless the proxy is trusted. Set
@@ -307,7 +309,7 @@ ${siteUrl('docs/deployment/')}. Leave TRUSTED_PROXIES empty for direct access. L
 proxies as addresses or CIDRs, and IPv6 proxies as single addresses: an IPv6 CIDR is compared
 literally and matches nothing. Never use 0.0.0.0/0, which trusts every IPv4 client's forwarded
 headers, so any client can choose its own address and origin.
-`,
+`),
     envFilePath: '.env',
     // `fullStackArgs` emits `config.getOrThrow<string>('SESSION_SECRET')`, so
     // without this the template scaffolds a project that throws at startup.
@@ -315,7 +317,7 @@ headers, so any client can choose its own address and origin.
       {
         name: 'TRUSTED_PROXIES',
         description:
-          'Your proxies (IPv4 CIDRs or single IPv6 addresses), comma-separated; trusts their forwarded client IP and protocol, fixing TLS-proxy action 400s; the forwarded host also needs TRUST_FORWARDED_HOST=true (see the deployment guide). Never 0.0.0.0/0: it trusts every client.',
+          'Your proxies (IPv4 CIDRs or single IPv6 addresses), comma-separated; trusts their forwarded client IP and protocol (behind a TLS-terminating proxy, actions otherwise answer 400); the forwarded host also needs TRUST_FORWARDED_HOST=true. Never 0.0.0.0/0: it trusts every client.',
         develop: '',
       },
       {

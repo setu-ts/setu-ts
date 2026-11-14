@@ -134,7 +134,7 @@ describe('renderDevEntry', () => {
     expect(entry).toContain("import { createApp } from './setu.config.ts';");
     expect(entry).toContain('await createApp(undefined, {');
     expect(entry).toContain('diagnostics: {},');
-    expect(entry).toContain("await app.start({ port: Number(runtime.env.PORT ?? '3000') });");
+    expect(entry).toContain("await app.start({ port: Number(runtime.env.PORT || '3000') });");
     expect(entry).toContain('runtime.onSignal?.(signal, () => {');
   });
 

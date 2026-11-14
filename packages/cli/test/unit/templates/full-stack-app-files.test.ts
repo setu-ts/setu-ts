@@ -24,12 +24,14 @@ describe('full-stack app files', () => {
       expect(new Set(widths).size).toBe(1);
       expect(section).toContain(`${invocation} generate middleware <name>`);
       // V11-19: the Workers deployment notes appear on Workers and nowhere else.
-      expect(section.includes('## Deploying to Cloudflare Workers')).toBe(
+      expect(section.includes('## Cloudflare Workers build')).toBe(
         runtime === 'cloudflare-workers',
       );
-      expect(section.includes('wrangler secret put SESSION_SECRET')).toBe(
-        runtime === 'cloudflare-workers',
-      );
+      expect(section).not.toContain('wrangler secret put');
+      if (runtime === 'cloudflare-workers') {
+        expect(section).toContain('builds the client and server');
+        expect(section).toContain('Everything in `build/client`');
+      }
       // Review finding 2: Workers has no dev.ts, PORT or VITE_PORT.
       expect(section.includes('## Development ports')).toBe(runtime !== 'cloudflare-workers');
       expect(section).not.toMatch(/\n\n\n/);
