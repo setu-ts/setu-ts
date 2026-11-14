@@ -103,7 +103,7 @@ it(
     // M137b: the guarded route's derived 401 reaches the client as an error arm.
     // No other scaffold route is guarded, so the only 401 arm is this route's.
     expect(generated).toContain('readonly status: 401');
-    expect(generated).toContain('file: Blob;');
+    expect(generated).toContain('file: globalThis.Blob;');
     expect(generated).toContain('multipart: opts.body,');
     await script(project, 'client:check');
     await script(project, 'format');

@@ -42,7 +42,7 @@ describe('codegen form bodies', () => {
       const source = generateOpenApiClient(
         doc({ required, content: { 'multipart/form-data': { schema } } }),
       );
-      expect(source).toContain("'file': Blob;");
+      expect(source).toContain("'file': globalThis.Blob;");
       expect(source).toContain(
         required
           ? 'multipart: opts.body,'
@@ -70,26 +70,82 @@ describe('codegen form bodies', () => {
     }
   });
   it('keeps bodies without content and supported media without a schema bodiless', () => {
-    for (const body of [
-      undefined,
-      {},
-      { content: { 'application/json': {} } },
-      { content: { 'multipart/form-data': {} } },
-    ]) {
+    for (const body of [undefined, {}, { content: { 'application/json': {} } }]) {
       const source = generateOpenApiClient(doc(body));
       expect(source).not.toContain('json:');
       expect(source).not.toContain('multipart:');
     }
   });
+  it('refuses a multipart body that is not an object of form fields (review)', () => {
+    const withComponents = (body: SdkOpenApiRequestBody): SdkOpenApiDocument => ({
+      ...doc(body),
+      components: {
+        schemas: {
+          Upload: schema,
+          Text: { type: 'string' },
+          Loop: { $ref: '#/components/schemas/Loop' },
+        },
+      },
+    });
+    for (const media of [
+      {},
+      { schema: { type: 'string' } },
+      { schema: { $ref: '#/components/schemas/Text' } },
+      { schema: { $ref: '#/components/schemas/Missing' } },
+      { schema: { $ref: '#/components/schemas/Loop' } },
+      { schema: { $ref: 'https://example.test/schema.json' } },
+    ]) {
+      try {
+        generateOpenApiClient(
+          withComponents({ required: true, content: { 'multipart/form-data': media } }),
+        );
+        expect.fail(`must refuse ${JSON.stringify(media)}`);
+      } catch (error) {
+        expect(error).toBeInstanceOf(OpenApiCodegenError);
+        expect(error).toMatchObject({ path: '/uploads', method: 'post' });
+        expect((error as Error).message).toContain(
+          'multipart/form-data request body schema is not an object of form fields',
+        );
+      }
+    }
+    // A reference to an object component, or properties without `type`, is accepted.
+    for (const media of [
+      { schema: { $ref: '#/components/schemas/Upload' } },
+      { schema: { properties: { title: { type: 'string' } } } },
+    ]) {
+      expect(
+        generateOpenApiClient(
+          withComponents({ required: true, content: { 'multipart/form-data': media } }),
+        ),
+      ).toContain('multipart: opts.body,');
+    }
+  });
   it('type-checks the emitted client and a File caller under exact optional types', () => {
     const files = new Map<string, string>();
-    for (const { required, query } of [
-      { required: true, query: false },
-      { required: false, query: false },
-      { required: false, query: true },
+    for (const { required, query, blob } of [
+      { required: true, query: false, blob: false },
+      { required: false, query: false, blob: false },
+      { required: false, query: true, blob: false },
+      // A component named `Blob` must not capture the binary field's type
+      // (review): unqualified, it emitted the circular `type Blob = Blob`.
+      { required: true, query: false, blob: true },
     ]) {
-      const path = resolve(`.tmp/m137c-generated-${required}-${query}.ts`);
-      const base = doc({ required, content: { 'multipart/form-data': { schema } } });
+      const path = resolve(`.tmp/m137c-generated-${required}-${query}-${blob}.ts`);
+      const plain = doc({ required, content: { 'multipart/form-data': { schema } } });
+      const base: SdkOpenApiDocument = blob
+        ? {
+            ...plain,
+            components: {
+              schemas: {
+                Blob: { type: 'string', format: 'binary' },
+                Attachment: {
+                  type: 'object',
+                  properties: { data: { $ref: '#/components/schemas/Blob' } },
+                },
+              },
+            },
+          }
+        : plain;
       const source = generateOpenApiClient(
         query
           ? {

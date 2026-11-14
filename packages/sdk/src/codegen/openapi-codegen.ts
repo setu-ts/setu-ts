@@ -419,7 +419,8 @@ function rtp(
 ): string {
   switch (type) {
     case 'string':
-      return schema.format === 'binary' ? 'Blob' : 'string';
+      // Qualified, so a component schema named `Blob` cannot capture it.
+      return schema.format === 'binary' ? 'globalThis.Blob' : 'string';
     case 'number':
       return 'number';
     case 'integer':
@@ -598,10 +599,35 @@ function splitParams(
   return { pathParams, queryParams, headerParams };
 }
 
+/**
+ * Follows local `#/components/schemas/` references to the schema they name.
+ * Stops at a missing target or a cycle and returns what it reached.
+ *
+ * @param schema - The schema as written
+ * @param schemas - The document's component schemas
+ * @returns The referenced schema, or `undefined` when a reference is dangling
+ */
+function resolveComponentRef(
+  schema: SdkOpenApiSchema | undefined,
+  schemas: Readonly<Record<string, SdkOpenApiSchema>> | undefined,
+): SdkOpenApiSchema | undefined {
+  const seen = new Set<SdkOpenApiSchema>();
+  let current = schema;
+  while (current?.$ref !== undefined && !seen.has(current)) {
+    seen.add(current);
+    const name = current.$ref.startsWith('#/components/schemas/')
+      ? current.$ref.slice('#/components/schemas/'.length)
+      : undefined;
+    current = name === undefined ? undefined : schemas?.[name];
+  }
+  return current;
+}
+
 function getBodySchema(
   op: SdkOpenApiOperation,
   path: string,
   method: string,
+  schemas: Readonly<Record<string, SdkOpenApiSchema>> | undefined,
 ): { schema: SdkOpenApiSchema | undefined; encoding: 'json' | 'multipart' } | undefined {
   if (!op.requestBody) return undefined;
   const rb = op.requestBody as SdkOpenApiRequestBody;
@@ -610,7 +636,19 @@ function getBodySchema(
     return { schema: rb.content['application/json'].schema, encoding: 'json' };
   }
   if (rb.content['multipart/form-data'] !== undefined) {
-    return { schema: rb.content['multipart/form-data'].schema, encoding: 'multipart' };
+    const schema = rb.content['multipart/form-data'].schema;
+    // `multipart` sends a flat object of fields, so the body must BE one: a
+    // primitive renders as a type the client cannot send, and a missing schema
+    // would drop the body argument altogether.
+    const resolved = resolveComponentRef(schema, schemas);
+    if (resolved?.type !== 'object' && resolved?.properties === undefined) {
+      throw new OpenApiCodegenError(
+        'multipart/form-data request body schema is not an object of form fields: the generated method could not send it',
+        path,
+        method,
+      );
+    }
+    return { schema, encoding: 'multipart' };
   }
   throw new OpenApiCodegenError(
     `request body media types ${Object.keys(rb.content).join(', ')} are not supported: the generated method would drop the body`,
@@ -907,7 +945,11 @@ function assertPathParamsMatchTemplate(
   }
 }
 
-function buildOpShape(entry: OpEntry, types: TypeNameRegistry): OpShape {
+function buildOpShape(
+  entry: OpEntry,
+  types: TypeNameRegistry,
+  schemas: Readonly<Record<string, SdkOpenApiSchema>> | undefined,
+): OpShape {
   const { path, method } = entry;
   const split = splitParams(entry.parameters, path, method);
   assertPathParamsMatchTemplate(path, method, split.pathParams);
@@ -940,7 +982,7 @@ function buildOpShape(entry: OpEntry, types: TypeNameRegistry): OpShape {
   const queryParams = split.queryParams.map((p) => render(p));
   const headerParams = split.headerParams.map((p) => render(p));
 
-  const body = getBodySchema(entry.operation, path, method);
+  const body = getBodySchema(entry.operation, path, method, schemas);
   const bodySchema = body?.schema;
   const bodyType = bodySchema
     ? hoistMultiline(
@@ -1168,7 +1210,7 @@ export function generateOpenApiClient(
     }
   }
 
-  const shapes = operations.map((entry) => buildOpShape(entry, types));
+  const shapes = operations.map((entry) => buildOpShape(entry, types, schemas));
   const anyErrors = shapes.some((shape) => shape.errorArms.length > 0);
   const hasRedirects = operations.some((entry) =>
     Object.keys(entry.operation.responses ?? {}).some(isRedirectResponseCode),

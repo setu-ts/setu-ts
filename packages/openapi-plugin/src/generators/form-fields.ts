@@ -42,7 +42,9 @@ function unwrap(schema: unknown): unknown {
     }
     const def = record(zod?.['def']);
     switch (def?.['type']) {
+      // `nonoptional`: `.required()` wraps every field, even a required one.
       case 'optional':
+      case 'nonoptional':
       case 'nullable':
       case 'default':
       case 'readonly':

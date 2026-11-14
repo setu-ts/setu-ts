@@ -384,7 +384,8 @@ TypeScript function. Its options are `factoryName`, `apiTypeName` and `sdkImport
 The generated factory accepts an `IHttpClient` and returns typed operation methods. Schema mapping
 covers the M21 vocabulary: primitives, arrays, objects with `required`, `$ref`, `enum`, `const`,
 `anyOf`, `allOf`, `additionalProperties`, `null`, and `integer`. A string with `format: 'binary'`
-maps to `Blob` (a `File` is assignable). A generated method sends `json` when the request body lists
+maps to `globalThis.Blob` — qualified, so a component schema named `Blob` cannot capture it (a
+`File` is assignable). A generated method sends `json` when the request body lists
 `application/json`, otherwise `multipart` when it lists `multipart/form-data`, regardless of map
 order. Optional multipart bodies omit the request key when no body is supplied.
 
@@ -517,6 +518,7 @@ their callers.
 | Two placeholders in one template deriving onto one argument name | Duplicate parameter in the emitted signature                                                                                                                                |
 | Malformed local `$ref`                                           | No component name to resolve                                                                                                                                                |
 | Request body content lists only unsupported media types          | The generated method would drop the body; `OpenApiCodegenError` names the media types, `path` and `method`. List `application/json` or `multipart/form-data` for that body. |
+| `multipart/form-data` body schema not an object of form fields   | `multipart` sends a flat object, so a primitive, a missing schema, or a `$ref` that does not resolve to an object schema could not be sent                                  |
 
 That body refusal reads
 `request body media types … are not supported: the generated method would drop the body`. Before

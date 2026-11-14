@@ -57,6 +57,12 @@ describe('form field structural walk', () => {
         ['upload', { mimeTypes: ['image/*'] }],
       ]);
   });
+  it('finds file fields through .required(), which wraps each field in nonoptional (review)', () => {
+    const field = file();
+    const body = z.object({ upload: field, maybe: field.optional(), title: z.string() }).required();
+    expect([...formFileFieldsOf(body).keys()]).toEqual(['upload', 'maybe']);
+  });
+
   it('returns no fields for non-Zod, non-object and malformed inputs', () => {
     for (const input of [
       undefined,
