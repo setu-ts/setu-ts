@@ -171,8 +171,9 @@ ARG NPM_CONFIG_REGISTRY=
 RUN ${NPMRC_MOUNT} printf '%s' 'import { parse } from "jsr:@std/jsonc@1.0.3"; for (const name of ["deno.json", "deno.jsonc"]) { let source; try { source = Deno.readTextFileSync(name); } catch (error) { if (error instanceof Deno.errors.NotFound) continue; throw error; } const manifest = parse(source); for (const task of ["build", "check"]) { if (manifest.tasks && task in manifest.tasks) Deno.writeTextFileSync(".setu-" + task + "-task", ""); } if (manifest.tasks && typeof manifest.tasks.check === "string" && manifest.tasks.check.includes(" main.dev.ts")) { manifest.tasks.check = manifest.tasks.check.replaceAll(" main.dev.ts", ""); Deno.writeTextFileSync(name, JSON.stringify(manifest)); } if (manifest.tasks && typeof manifest.tasks.check === "string" && manifest.tasks.check.includes("npm:@setu-ts/cli@")) Deno.writeTextFileSync(".setu-check-cli", manifest.tasks.check.slice(manifest.tasks.check.indexOf("npm:@setu-ts/cli@")).split(" ")[0]); break; }' | DENO_DIR=/tmp/.setu-build-cache deno run --no-config --no-lock --no-prompt --allow-read=./deno.json,./deno.jsonc --allow-write=./.setu-build-task,./.setu-check-task,./.setu-check-cli,./deno.json,./deno.jsonc - && if [ -z "$NPM_CONFIG_REGISTRY" ]; then unset NPM_CONFIG_REGISTRY; fi && if [ -f .setu-build-task ]; then deno task build; else mkdir -p build; fi && if [ -f .setu-check-task ]; then deno cache main.ts setu.config.ts; fi && if [ -f .setu-check-cli ]; then deno cache --no-lock "$(cat .setu-check-cli)"; fi
 
 # The check runs in a stage of its own: whatever its unlocked CLI writes stays
-# here, because the final stage copies build/ from the frontend stage above, and
-# only the empty marker from this one (which is also what makes BuildKit run it).
+# here. The final stage copies build/ from the frontend stage above and nothing
+# from this one; it only bind-mounts this stage's marker for one no-op step,
+# which is what makes BuildKit run the check.
 FROM frontend AS check
 RUN if [ -z "$NPM_CONFIG_REGISTRY" ]; then unset NPM_CONFIG_REGISTRY; fi && if [ -f .setu-check-task ]; then deno task check; fi && touch /tmp/.setu-checked
 
@@ -204,8 +205,9 @@ WORKDIR /srv/${MEMBERS_DIR}/\${MEMBER}
 
 # The frontend output, built in the stage above (empty for a member without one).
 COPY --from=frontend /srv/${MEMBERS_DIR}/\${MEMBER}/buil[d] ./build/
-# The check stage's empty marker: copying it is what makes BuildKit run the check.
-COPY --from=check /tmp/.setu-checked /tmp/.setu-checked
+# Depend on the check stage without copying anything from it: the marker is
+# mounted for this one no-op step only, so nothing the check wrote reaches a layer.
+RUN --mount=type=bind,from=check,source=/tmp/.setu-checked,target=/tmp/.setu-checked true
 
 # Three steps, and the LAST one is the guarantee. Deno records a jsr package's
 # npm edge list NONDETERMINISTICALLY on a cold cache: four \`--no-cache\` builds of

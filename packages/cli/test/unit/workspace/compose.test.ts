@@ -91,8 +91,11 @@ describe('workspaceContainerFiles', () => {
           expect(stages[0]).not.toContain('deno task check');
           expect(stages[1]!.startsWith('frontend AS check\n')).toBe(true);
           expect(runtimeStage).toContain('COPY --from=frontend ');
-          expect(runtimeStage).not.toMatch(/COPY --from=check \S*buil/);
-          expect(runtimeStage).toContain('COPY --from=check /tmp/.setu-checked /tmp/.setu-checked');
+          // Nothing is copied from the check stage, not even its marker (audit N3).
+          expect(runtimeStage).not.toContain('COPY --from=check');
+          expect(runtimeStage).toContain(
+            'RUN --mount=type=bind,from=check,source=/tmp/.setu-checked,target=/tmp/.setu-checked true',
+          );
           const runs = stages[0]!.split('\n').filter((line) => line.startsWith('RUN '));
           const mounted = runs.find((line) => line.includes('--mount=type=secret'));
           const check = stages[1]!.split('\n').find((line) => line.includes('deno task check'));
