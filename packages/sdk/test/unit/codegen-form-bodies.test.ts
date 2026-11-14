@@ -94,6 +94,8 @@ describe('codegen form bodies', () => {
       { schema: { $ref: '#/components/schemas/Missing' } },
       { schema: { $ref: '#/components/schemas/Loop' } },
       { schema: { $ref: 'https://example.test/schema.json' } },
+      // Properties without `type` render as `unknown`, which `multipart` refuses.
+      { schema: { properties: { title: { type: 'string' } } } },
     ]) {
       try {
         generateOpenApiClient(
@@ -108,11 +110,8 @@ describe('codegen form bodies', () => {
         );
       }
     }
-    // A reference to an object component, or properties without `type`, is accepted.
-    for (const media of [
-      { schema: { $ref: '#/components/schemas/Upload' } },
-      { schema: { properties: { title: { type: 'string' } } } },
-    ]) {
+    // A reference to an object component is accepted.
+    for (const media of [{ schema: { $ref: '#/components/schemas/Upload' } }]) {
       expect(
         generateOpenApiClient(
           withComponents({ required: true, content: { 'multipart/form-data': media } }),

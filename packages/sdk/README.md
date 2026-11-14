@@ -518,7 +518,7 @@ their callers.
 | Two placeholders in one template deriving onto one argument name | Duplicate parameter in the emitted signature                                                                                                                                |
 | Malformed local `$ref`                                           | No component name to resolve                                                                                                                                                |
 | Request body content lists only unsupported media types          | The generated method would drop the body; `OpenApiCodegenError` names the media types, `path` and `method`. List `application/json` or `multipart/form-data` for that body. |
-| `multipart/form-data` body schema not an object of form fields   | `multipart` sends a flat object, so a primitive, a missing schema, or a `$ref` that does not resolve to an object schema could not be sent                                  |
+| `multipart/form-data` body schema not an object of form fields   | `multipart` sends a flat object, so a primitive, a missing schema, a schema without `type: 'object'`, or a `$ref` that does not resolve to one could not be sent            |
 
 That body refusal reads
 `request body media types … are not supported: the generated method would drop the body`. Before
