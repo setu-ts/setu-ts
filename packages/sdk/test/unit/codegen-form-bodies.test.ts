@@ -96,6 +96,14 @@ describe('codegen form bodies', () => {
       { schema: { $ref: 'https://example.test/schema.json' } },
       // Properties without `type` render as `unknown`, which `multipart` refuses.
       { schema: { properties: { title: { type: 'string' } } } },
+      // Composition keywords render before `type` (review): each would emit a
+      // type `multipart?: object` does not accept.
+      { schema: { type: 'object', anyOf: [{ type: 'string' }, { type: 'object' }] } },
+      { schema: { type: 'object', oneOf: [{ type: 'string' }] } },
+      { schema: { type: 'object', allOf: [{ type: 'string' }] } },
+      { schema: { type: 'object', enum: ['a'] } },
+      { schema: { type: 'object', const: 'a' } },
+      { schema: { type: ['object', 'null'] } },
     ]) {
       try {
         generateOpenApiClient(

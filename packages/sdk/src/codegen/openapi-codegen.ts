@@ -641,9 +641,18 @@ function getBodySchema(
     // primitive renders as a type the client cannot send, and a missing schema
     // would drop the body argument altogether.
     const resolved = resolveComponentRef(schema, schemas);
-    // `type: 'object'` exactly: `renderSchema` renders properties without a
-    // type as `unknown`, which `multipart?: object` does not accept.
-    if (resolved?.type !== 'object') {
+    // Aligned with `renderSchema`, which renders `enum`, `const`, `anyOf`,
+    // `oneOf` and `allOf` BEFORE `type`, and properties without a type as
+    // `unknown`: only a plain `type: 'object'` renders as a type
+    // `multipart?: object` accepts.
+    if (
+      resolved?.type !== 'object' ||
+      resolved.enum !== undefined ||
+      resolved.const !== undefined ||
+      resolved.anyOf !== undefined ||
+      resolved.oneOf !== undefined ||
+      resolved.allOf !== undefined
+    ) {
       throw new OpenApiCodegenError(
         'multipart/form-data request body schema is not an object of form fields: the generated method could not send it',
         path,
