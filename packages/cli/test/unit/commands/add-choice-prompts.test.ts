@@ -222,45 +222,68 @@ describe('setu add choice prompts', () => {
 
   // Every given-flag refusal is caught by the silent dry run, so none of these asks
   // a question it then refuses. Each row is a command the real run refuses.
-  const refusedUpFront: readonly (readonly [string, readonly string[], Record<string, string>?])[] =
-    [
-      ['an invalid --redis-client', ['add', 'mail', 'cache', '--redis-client', 'bogus']],
-      [
-        'a valid --redis-client with no Redis arm',
-        ['add', 'mail', 'cache', '--redis-client', 'ioredis'],
-      ],
-      [
-        'a valid --redis-client beside a non-Redis arm',
-        ['add', 'mail', 'cache', '--redis-client', 'ioredis', '--store', 'memory'],
-      ],
-      [
-        'a --redis-client that disagrees with the project client',
-        ['add', 'mail', 'queue', '--redis-client', 'node-redis'],
-        { '/app/package.json': '{"dependencies":{"ioredis":"^5.0.0"}}' },
-      ],
-      ['an unknown --dialect', ['add', 'database', '--dialect', 'mysql']],
-      ['--dialect without --type drizzle', ['add', 'mail', 'database', '--dialect', 'sqlite']],
-      [
-        '--dialect with a non-drizzle --type',
-        ['add', 'mail', 'database', '--type', 'prisma', '--dialect', 'sqlite'],
-      ],
-      [
-        'an unknown --provider beside another package',
-        ['add', 'cache', 'mail', '--provider', 'bogus'],
-      ],
-      [
-        'a --redis-client on Workers',
-        ['add', 'mail', 'cache', '--redis-client', 'ioredis'],
-        { '/app/package.json': '{}', '/app/wrangler.toml': '' },
-      ],
-    ];
-  for (const [name, argv, seed] of refusedUpFront) {
+  const refusedUpFront: readonly {
+    readonly name: string;
+    readonly argv: readonly string[];
+    /** The refusal the real run reports, so a row refused for another reason fails. */
+    readonly refusal: string;
+    readonly seed?: Readonly<Record<string, string>>;
+  }[] = [
+    {
+      name: 'an invalid --redis-client',
+      argv: ['add', 'mail', 'cache', '--redis-client', 'bogus'],
+      refusal: 'Unknown --redis-client "bogus"',
+    },
+    {
+      name: 'a valid --redis-client with no Redis arm',
+      argv: ['add', 'mail', 'cache', '--redis-client', 'ioredis'],
+      refusal: '--redis-client requires a Redis arm',
+    },
+    {
+      name: 'a valid --redis-client beside a non-Redis arm',
+      argv: ['add', 'mail', 'cache', '--redis-client', 'ioredis', '--store', 'memory'],
+      refusal: '--redis-client requires a Redis arm',
+    },
+    {
+      name: 'a --redis-client that disagrees with the project client',
+      argv: ['add', 'mail', 'queue', '--redis-client', 'node-redis', '--queue', 'redis'],
+      refusal: "--redis-client node-redis disagrees with the project's ioredis client",
+      seed: { '/app/package.json': '{"dependencies":{"ioredis":"^5.0.0"}}' },
+    },
+    {
+      name: 'an unknown --dialect',
+      argv: ['add', 'database', '--dialect', 'mysql'],
+      refusal: '--dialect requires database --type drizzle',
+    },
+    {
+      name: '--dialect without --type drizzle',
+      argv: ['add', 'mail', 'database', '--dialect', 'sqlite'],
+      refusal: '--dialect requires database --type drizzle',
+    },
+    {
+      name: '--dialect with a non-drizzle --type',
+      argv: ['add', 'mail', 'database', '--type', 'prisma', '--dialect', 'sqlite'],
+      refusal: '--dialect requires database --type drizzle',
+    },
+    {
+      name: 'an unknown --provider beside another package',
+      argv: ['add', 'cache', 'mail', '--provider', 'bogus'],
+      refusal: 'Unknown --provider: bogus',
+    },
+    {
+      name: 'a --redis-client on Workers',
+      argv: ['add', 'mail', 'cache', '--redis-client', 'ioredis'],
+      refusal: '--redis-client cannot apply on Cloudflare Workers',
+      seed: { '/app/package.json': '{}', '/app/wrangler.toml': '' },
+    },
+  ];
+  for (const { name, argv, refusal, seed } of refusedUpFront) {
     it(`asks nothing for ${name}, which the command refuses`, async () => {
       const prompt = recorder();
       const run = deps(createFakeFs(seed ?? { '/app/package.json': '{}' }), prompt.ask);
       expect(await runCli([...argv], run.deps)).not.toBe(0);
       expect(prompt.asked).toEqual([]);
-      expect(run.err.join('\n')).not.toBe('');
+      expect(run.err.join('\n')).toContain(refusal);
     });
   }
 

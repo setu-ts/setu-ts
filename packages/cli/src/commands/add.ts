@@ -1802,6 +1802,14 @@ async function askOpenChoices(
   const flags: Record<string, string | boolean | readonly string[]> = { ...args.flags };
   const ask = deps.ask;
   if (ask === undefined || args.flags.yes === true || args.flags.y === true) return flags;
+  // No open choice, nothing to ask: skip the dry run, which would plan every package twice.
+  const open = ADD_CHOICES.some(
+    (choice) =>
+      flags[choice.flag] === undefined &&
+      packages.some((pkg) => choice.packages.includes(pkg)) &&
+      (choice.after === undefined || flags[choice.after.flag] === choice.after.value),
+  );
+  if (!open) return flags;
   const quiet: AddCommandDependencies = { ...deps, log: () => {}, error: () => {} };
   delete (quiet as { ask?: unknown }).ask;
   for (const bare of packages) {
