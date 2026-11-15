@@ -27,6 +27,15 @@ npx @setu-ts/cli@0.12.0 generate module billing
 npx @setu-ts/cli@0.12.0 generate --help
 ```
 
+## Development transports
+
+- Messaging and queue options come from `src/transport/index.ts`, which the CLI writes from the
+  workspace broker in setu.workspace.json. With the `memory` broker both are in-memory: one process,
+  lost on restart. `nats`, `kafka`, `pubsub` and `service-bus` have no queue arm, so with them the
+  queue stays in memory. Change the broker for every member with
+  `npx @setu-ts/cli@0.12.0 workspace broker <name>`.
+- Telemetry has no exporter: spans are dropped. Set the `TelemetryPlugin` `exporter` option.
+
 ## Production
 
 ```bash
