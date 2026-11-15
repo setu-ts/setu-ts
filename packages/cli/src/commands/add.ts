@@ -54,7 +54,13 @@ import { isMissingPath } from '../utils/filesystem-errors.ts';
 import { frameworkSpecifier } from '../templates/framework-specifier.ts';
 import { generateSecret } from '../templates/secret.ts';
 import { operatorSecretFiles } from '../workspace/operator-secrets.ts';
-import { BROKER_COMPOSE_FILE, cliInvocation, resolveHost } from '../templates/project-files.ts';
+import {
+  BROKER_COMPOSE_FILE,
+  cliInvocation,
+  LOCAL_TRANSPORT_HEADING,
+  renderLocalTransportSection,
+  resolveHost,
+} from '../templates/project-files.ts';
 import { MINIMAL_HOST } from '../templates/minimal.ts';
 import { envFileDeclaration, isCoveredDotenvName } from '../templates/env-file.ts';
 import type { EnvVariable } from '../templates/registry.ts';
@@ -117,6 +123,7 @@ import {
   brokerSpec,
   renderConnection,
   type RedisClient,
+  type BrokerName,
   type BrokerSpec,
 } from '../workspace/transport.ts';
 import { workspaceProfile } from '../workspace/runtime-profile.ts';
@@ -478,6 +485,38 @@ function providerCallArguments(source: string, bare: string, symbol: string): re
     }
   }
   return found;
+}
+
+/**
+ * The configuration with its one bare `Provider()` call given transport options.
+ *
+ * Only the zero-argument call the CLI itself writes, inside the factory, and only
+ * when it is the binding's one use in the file (comments and imports masked):
+ * then the user's choice of backend is applied rather than printed beside an
+ * unchanged in-memory call. A call that already has arguments is the user's and
+ * stays as it is, with the options printed.
+ *
+ * @param source - The configuration source
+ * @param bare - The plugin package, without the scope
+ * @param args - The transport options to pass
+ * @returns The rewritten source, or `undefined` when the call is not that bare call
+ */
+function withBareCallArguments(source: string, bare: string, args: string): string | undefined {
+  const symbol = ZERO_CONFIG_WIRINGS.get(bare)?.symbol;
+  if (symbol === undefined) return undefined;
+  const binding = providerBinding(source, bare, symbol);
+  const scope = factoryScope(source);
+  if (binding === undefined || scope === undefined) return undefined;
+  const body = scope.code.slice(scope.start, scope.end);
+  const bareCalls = [...body.matchAll(new RegExp(`(?<![\\w$.])${binding}\\(\\s*\\)`, 'g'))];
+  const uses = [
+    ...maskImportDeclarations(maskComments(source) ?? source).matchAll(
+      new RegExp(`(?<![\\w$.])${binding}\\b`, 'g'),
+    ),
+  ];
+  if (bareCalls.length !== 1 || uses.length !== 1) return undefined;
+  const at = scope.start + bareCalls[0]!.index;
+  return `${source.slice(0, at)}${binding}(${args})${source.slice(at + bareCalls[0]![0].length)}`;
 }
 
 /**
@@ -1671,9 +1710,59 @@ export const BACKEND_PEERS: Readonly<
   },
 };
 
-function backendRegistration(bare: string, arm: string): string | undefined {
-  if (bare === 'mail-plugin' && arm !== 'log')
-    return `MailPlugin({ provider: '${arm}', options: {} })`;
+/**
+ * The environment variables each mail provider's printed options read, with the
+ * local value `setu add mail` writes.
+ *
+ * SMTP without a host sends to localhost, and SendGrid refuses every send
+ * without an API key (mail-plugin's providers). SES needs none: with `{}` the
+ * AWS SDK resolves `AWS_REGION` and credentials from its own default chain, and
+ * an empty `AWS_REGION=` written here would only shadow that.
+ */
+const MAIL_ENV: Readonly<Record<string, readonly EnvVariable[]>> = {
+  smtp: [
+    {
+      name: 'SMTP_HOST',
+      develop: 'localhost',
+      description: 'SMTP_HOST is the server MailPlugin sends through.',
+    },
+    {
+      name: 'SMTP_PORT',
+      develop: '587',
+      description: 'SMTP_PORT is that server port: 587 for STARTTLS, or 465 with secure: true.',
+    },
+  ],
+  sendgrid: [
+    {
+      name: 'SENDGRID_API_KEY',
+      develop: '',
+      description:
+        'SENDGRID_API_KEY is required: the SendGrid provider refuses every send without it.',
+    },
+  ],
+};
+
+/** One environment read on one line, for a printed registration. */
+function inlineEnvRead(runtime: TargetRuntime, variable: string, fallback: string): string {
+  return workspaceProfile(runtime)
+    .envRead(variable, fallback)
+    .replace(/\s*\n\s*/g, ' ');
+}
+
+function backendRegistration(
+  bare: string,
+  arm: string,
+  runtime: TargetRuntime,
+): string | undefined {
+  if (bare === 'mail-plugin' && arm !== 'log') {
+    const options =
+      arm === 'smtp'
+        ? `{ host: ${inlineEnvRead(runtime, 'SMTP_HOST', 'localhost')}, port: Number(${inlineEnvRead(runtime, 'SMTP_PORT', '587')}) }`
+        : arm === 'sendgrid'
+          ? `{ apiKey: ${inlineEnvRead(runtime, 'SENDGRID_API_KEY', '')} }`
+          : '{}';
+    return `MailPlugin({ provider: '${arm}', options: ${options} })`;
+  }
   if (bare === 'database-plugin') {
     const options: Readonly<Record<string, string>> = {
       drizzle: '{ drizzleInstance, drizzleTables }',
@@ -1711,6 +1800,17 @@ function backendGuidance(line: string, config: string | undefined, bare: string)
 const DRIZZLE_DIALECTS: Readonly<Record<string, readonly string[]>> = {
   postgresql: ['pg'],
   sqlite: ['@libsql/client'],
+};
+
+/** How guidance names each connected backend. */
+const BROKER_LABELS: Readonly<Record<BrokerName, string>> = {
+  memory: 'memory',
+  redis: 'Redis',
+  rabbitmq: 'RabbitMQ',
+  nats: 'NATS',
+  kafka: 'Kafka',
+  pubsub: 'the Pub/Sub emulator',
+  'service-bus': 'the Service Bus emulator',
 };
 
 /** One `setu add` option that selects one of several values. */
@@ -2091,7 +2191,6 @@ async function addOne(
     );
     return EXIT_USAGE;
   }
-  const backendLine = backendRegistration(bare, backendArm);
   const dir = resolveDir(deps.cwd, stringFlag(args.flags, 'dir'));
   const specifier = `@setu-ts/${bare}`;
 
@@ -2512,6 +2611,8 @@ async function addOne(
   let configText: string | undefined;
   let configUnreadable = false;
   let configRetargeted = false;
+  // Set when the run gave the CLI's own bare provider call the chosen options.
+  let rewroteBareCall: string | undefined;
   try {
     const config = new TextDecoder().decode(await deps.fs.readFile(configPath));
     configText = config;
@@ -2527,12 +2628,15 @@ async function addOne(
             ? transportArgs === undefined
               ? withFactoryRegistration(config, bare)
               : undefined
-            : withPluginWiring(
+            : (withPluginWiring(
                 config,
                 bare,
                 seam,
                 transportArgs === undefined ? undefined : seam?.args,
-              );
+              ) ??
+              (transportArgs === undefined
+                ? undefined
+                : (rewroteBareCall = withBareCallArguments(config, bare, transportArgs))));
     // A member's options come from its transport module, which imports the
     // node-redis helper itself; the config only needs the module's export.
     const viaModule =
@@ -2830,13 +2934,42 @@ async function addOne(
     }
     // After the Compose plan: this run creates the file when it is absent, and an
     // existing one lacking the service has just been given the block to paste.
-    if (selected.name === 'redis' && configWired && searchDirs.length === 1) {
-      deps.log('  The app and generated tests now connect to Redis at REDIS_URL during startup.');
+    // Every connected backend, not Redis alone: the app and its generated tests
+    // connect during startup, so a run with the backend down fails on any of them.
+    if (configWired && searchDirs.length === 1) {
+      const label = BROKER_LABELS[selected.name];
       deps.log(
-        missing === undefined
-          ? `  Start Redis: docker compose -f ${BROKER_COMPOSE_FILE} up -d redis`
-          : `  After adding that service, start Redis: docker compose -f ${BROKER_COMPOSE_FILE} up -d redis`,
+        `  The app and generated tests now connect to ${label} at ${variable} during startup.`,
       );
+      const services = selected.compose?.dependsOn ?? [];
+      if (services.length > 0) {
+        // The README section `setu new --broker` writes: without it a fresh clone's
+        // `start:dev` fails against a backend nothing told the developer to start.
+        const readmePath = joinPath(dir, 'README.md');
+        const readme = await readProjectText(deps, readmePath, 'README.md');
+        if (readme === null) return EXIT_ERROR;
+        // An edit already planned for the README this run is the text to extend.
+        const pending = edits.find((edit) => edit.path === readmePath);
+        const base = pending?.contents ?? readme;
+        if (base !== undefined && !base.includes(`\n${LOCAL_TRANSPORT_HEADING}\n`)) {
+          const section = renderLocalTransportSection('');
+          const at = base.indexOf('\n## Run\n');
+          if (at >= 0) {
+            const contents = `${base.slice(0, at + 1)}${section.slice(1)}\n${base.slice(at + 1)}`;
+            if (pending === undefined) edits.push({ path: readmePath, contents });
+            else edits.splice(edits.indexOf(pending), 1, { path: readmePath, contents });
+            deps.log(`  README.md gains the ${LOCAL_TRANSPORT_HEADING.slice(3)} section.`);
+          } else {
+            deps.log(`  README.md has no "## Run" section; add this one before it:${section}`);
+          }
+        }
+        const start = `docker compose -f ${BROKER_COMPOSE_FILE} up -d ${services.join(' ')}`;
+        deps.log(
+          missing === undefined
+            ? `  Start ${label}: ${start}`
+            : `  After adding that service, start ${label}: ${start}`,
+        );
+      }
       if (!installedAfter.has('react-router-plugin')) {
         const factory = ZERO_CONFIG_WIRINGS.get(bare)!.symbol;
         deps.log(`  import { ${factory} } from '@setu-ts/${bare}';`);
@@ -2844,6 +2977,22 @@ async function addOne(
           `  createTestApp({ app: await createApp(), without: ['${bare}'], overrides: [${factory}()] })`,
         );
       }
+    }
+  }
+
+  // The variables the printed mail options read, so the pasted call has values to read.
+  if (bare === 'mail-plugin' && runtime !== 'cloudflare-workers') {
+    for (const variable of MAIL_ENV[backendArm] ?? []) {
+      const env = await planAddEnvVariable(
+        deps,
+        dir,
+        runtime,
+        configText,
+        edits,
+        variable,
+        variable.develop ?? '',
+      );
+      if (!env.ok) return EXIT_ERROR;
     }
   }
 
@@ -2879,13 +3028,55 @@ async function addOne(
         deps.log(
           `Set DATABASE_URL (local default ${config.localUrl}) in the environment that runs db:generate/db:migrate.`,
         );
+      // A file database lives in the project: never committed, never copied into an image.
+      if (config.localUrl.startsWith('file:')) {
+        const file = config.localUrl.slice('file:'.length).replace(/^\.\//, '');
+        for (const ignore of ['.gitignore', '.dockerignore'] as const)
+          if (
+            !(await planIgnoreEntries(
+              deps,
+              dir,
+              edits,
+              ignore,
+              [file, `${file}-*`],
+              'it is the local SQLite database',
+            ))
+          )
+            return EXIT_ERROR;
+      }
+      // drizzle-kit writes its snapshots with its own JSON layout, which the
+      // project's format check would otherwise reject after the first db:generate.
+      if (
+        backendArm === 'drizzle' &&
+        runtime !== 'deno' &&
+        !(await planIgnoreEntries(
+          deps,
+          dir,
+          edits,
+          '.prettierignore',
+          ['drizzle/'],
+          'drizzle-kit writes the migrations there',
+        ))
+      )
+        return EXIT_ERROR;
       deps.log(
         `Schema migrations expect ${config.schema}; create it using ${repositoryFileUrl(`packages/database-plugin/README.md#${backendArm === 'drizzle' ? 'drizzle-pool-setup' : 'prisma-7-setup'}`)} (${backendArm === 'drizzle' ? 'Drizzle pool setup' : 'Prisma 7 setup'}). Data migrations use setu g migration and src/migrations/run.ts.`,
       );
       const path = joinPath(dir, config.path);
-      if (runtime !== 'deno' && (await readExistingText(deps.fs, path)) === undefined) {
+      const existingConfig = runtime === 'deno' ? undefined : await readExistingText(deps.fs, path);
+      if (runtime !== 'deno' && existingConfig === undefined) {
         createOnlyPaths.add(path);
         edits.push({ path, contents: config.contents });
+      } else if (existingConfig !== undefined) {
+        // Create-only, so a re-add never rewrites it; say so, and say when it
+        // disagrees with this run's dialect, since the install line follows the run.
+        const requested = typeof dialectFlag === 'string' ? dialectFlag : 'postgresql';
+        const existing = /\bdialect:\s*['"]([\w-]+)['"]/.exec(existingConfig)?.[1];
+        deps.log(
+          backendArm === 'drizzle' && existing !== undefined && existing !== requested
+            ? `left ${config.path} unchanged: it uses dialect '${existing}', not '${requested}'. Edit it and DATABASE_URL to switch; until then the ${existing} driver is the one the app needs.`
+            : `left ${config.path} unchanged: already present.`,
+        );
       }
     }
   }
@@ -3040,7 +3231,10 @@ async function addOne(
     deps.log(`${specifier} is already installed in ${escapeName(dir)}.`);
     for (const line of seamGapLines(configSource, bare, seam)) deps.log(line);
     // A backend chosen for an installed plugin still needs its registration.
-    if (backendLine !== undefined) deps.log(backendGuidance(backendLine, configSource, bare));
+    {
+      const backendLine = backendRegistration(bare, backendArm, runtime);
+      if (backendLine !== undefined) deps.log(backendGuidance(backendLine, configSource, bare));
+    }
     if (bare === 'messaging-plugin' || bare === 'queue-plugin') {
       printWiringNote(configSource, bare, deps.log, seam, transportArgs);
       printNodeRedisImportNote(configSource, transport?.clients ?? [], deps.log);
@@ -3115,7 +3309,12 @@ async function addOne(
       ? composingStarter(configSource)?.arms.get(bare)
       : undefined;
   if (wiredArm !== undefined) deps.log(`wired ${wiredArm} in setu.config.ts`);
+  const backendLine = backendRegistration(bare, backendArm, runtime);
   if (backendLine !== undefined) deps.log(backendGuidance(backendLine, configSource, bare));
+  else if (rewroteBareCall !== undefined && configWired)
+    deps.log(
+      `  ${ZERO_CONFIG_WIRINGS.get(bare)!.symbol}() in setu.config.ts now takes the selected options.`,
+    );
   else if (
     !transportWritten &&
     wiredArm === undefined &&
@@ -3222,6 +3421,43 @@ function listedLast(text: string, entries: readonly string[]): boolean {
   return entry > negation;
 }
 
+/**
+ * Appends entries to one of the project's ignore files, unless each is already listed.
+ *
+ * Exact entries only, as for the signing-secret file above: no pattern is
+ * evaluated. A file the project does not have is left absent rather than
+ * created, except `.gitignore`. An edit already planned for the file this run
+ * is the text extended.
+ *
+ * @returns `false` after reporting an unreadable file, otherwise `true`
+ */
+async function planIgnoreEntries(
+  deps: AddCommandDependencies,
+  dir: string,
+  edits: { path: string; contents: string; secret?: boolean }[],
+  file: '.gitignore' | '.dockerignore' | '.prettierignore',
+  entries: readonly string[],
+  reason: string,
+): Promise<boolean> {
+  const path = joinPath(dir, file);
+  const read = await readProjectText(deps, path, file);
+  if (read === null) return false;
+  const pending = edits.find((edit) => edit.path === path);
+  const current = pending?.contents ?? read;
+  if (current === undefined && file !== '.gitignore') return true;
+  const missing = entries.filter((entry) => !listedLast(current ?? '', [entry, `/${entry}`]));
+  if (missing.length === 0) return true;
+  const base =
+    current === undefined || current === '' || current.endsWith('\n')
+      ? (current ?? '')
+      : `${current}\n`;
+  const contents = `${base}${missing.join('\n')}\n`;
+  if (pending === undefined) edits.push({ path, contents });
+  else edits.splice(edits.indexOf(pending), 1, { path, contents });
+  deps.log(`Added ${missing.join(', ')} to ${file}: ${reason}.`);
+  return true;
+}
+
 /** Plans the local/example pair through the same dotenv resolution for every add arm. */
 async function planAddEnvVariable(
   deps: AddCommandDependencies,
@@ -3250,11 +3486,18 @@ async function planAddEnvVariable(
     const path = joinPath(dir, file);
     const text = await readProjectText(deps, path, file);
     if (text === null) return { ok: false };
-    const contents = withEnvVariable(text ?? '', [variable], localValue);
+    // An edit this run already planned for the file is the text to extend, so a
+    // second variable (SMTP_PORT after SMTP_HOST) does not replace the first.
+    const pending = edits.findIndex((edit) => edit.path === path);
+    const base = pending >= 0 ? edits[pending]!.contents : (text ?? '');
+    const contents = withEnvVariable(base, [variable], localValue);
     // The local file holds the value, so it is created owner-only (M140c);
     // the committed example is not.
-    if (contents !== undefined)
-      edits.push({ path, contents, ...(file === envFile ? { secret: true } : {}) });
+    if (contents !== undefined) {
+      const edit = { path, contents, ...(file === envFile ? { secret: true } : {}) };
+      if (pending >= 0) edits.splice(pending, 1, edit);
+      else edits.push(edit);
+    }
   }
   return { ok: true, envFile };
 }

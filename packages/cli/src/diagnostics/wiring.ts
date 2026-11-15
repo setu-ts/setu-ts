@@ -127,7 +127,10 @@ export function importedCallNames(config: string, pkg: string, symbol: string): 
 }
 
 /**
- * Finds installed zero-config providers absent from this config's calls.
+ * Finds installed providers absent from this config's calls: every zero-config
+ * provider, plus the backends `setu add` cannot insert because they need options
+ * (`DatabasePlugin`, `VectorStorePlugin`), which an installed package left
+ * unregistered is just as likely to be.
  * Registration elsewhere can be silenced by id in the project's check config.
  * @since 0.13.0
  */
@@ -136,7 +139,12 @@ export function unregisteredPluginFindings(
   installed: ReadonlySet<string>,
 ): Finding[] {
   const starter = composingStarter(config);
-  const candidates = new Map([...ZERO_CONFIG_WIRINGS, ['mcp-plugin', { symbol: 'McpPlugin' }]]);
+  const candidates = new Map([
+    ...ZERO_CONFIG_WIRINGS,
+    ['mcp-plugin', { symbol: 'McpPlugin' }],
+    ['database-plugin', { symbol: 'DatabasePlugin' }],
+    ['vector-store-plugin', { symbol: 'VectorStorePlugin' }],
+  ]);
   const findings: Finding[] = [];
   for (const [pkg, { symbol }] of candidates) {
     if (

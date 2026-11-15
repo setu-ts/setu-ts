@@ -63,8 +63,8 @@ dedupe common so all packages share its unique-symbol brands.
 New full-stack scaffolds read `TRUST_FORWARDED_HOST`: leave it empty or `false` unless your listed
 `TRUSTED_PROXIES` overwrite `X-Forwarded-Host`. `true` requires a nonempty proxy list; other values
 fail configuration without echoing the value. `setu check` now warns with `setu.W006` when an
-installed zero-config provider or MCP plugin has no call in `setu.config.ts`; if another module
-registers it, silence that id in `.setu-ts/check.json`.
+installed zero-config provider, MCP, database or vector-store plugin has no call in
+`setu.config.ts`; if another module registers it, silence that id in `.setu-ts/check.json`.
 
 ### Form bodies and file uploads (M137c, `@setu-ts/validation-plugin`, `@setu-ts/openapi-plugin`, `@setu-ts/sdk`)
 

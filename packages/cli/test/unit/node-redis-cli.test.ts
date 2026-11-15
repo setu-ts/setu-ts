@@ -10,7 +10,7 @@ import { resolveNewChoices } from '../../src/commands/new-interactive.ts';
 import { readWorkspaceManifest, WORKSPACE_MANIFEST } from '../../src/workspace/manifest.ts';
 import { brokerSpec } from '../../src/workspace/transport.ts';
 import { withClientDependencies, CLIENT_RANGES } from '../../src/templates/client-dependencies.ts';
-import { resolveHost } from '../../src/templates/project-files.ts';
+import { renderLocalTransportSection, resolveHost } from '../../src/templates/project-files.ts';
 import { MINIMAL_HOST } from '../../src/templates/minimal.ts';
 import { nodeRedisClientCall } from '../../src/templates/node-redis.ts';
 import { formatForTarget } from '../../src/utils/prettier-format.ts';
@@ -240,6 +240,16 @@ describe('node-redis CLI', () => {
         );
       }
     }
+    // M140d: the local transport section also says a container needs each
+    // connection variable passed in. The `setu new --broker` captures already
+    // carry the section; the paragraph follows its Compose command.
+    const section = renderLocalTransportSection('');
+    const block = '```bash\ndocker compose -f docker/compose.yaml up -d\n```\n';
+    const paragraph = section.slice(section.indexOf(block) + block.length);
+    for (const path of Object.keys(expected)) {
+      if (path.endsWith('/README.md') && expected[path]!.includes(block))
+        expected[path] = expected[path]!.replace(block, `${block}${paragraph.trimEnd()}\n`);
+    }
     // The second deliberate change (X91-9): `setu add messaging --broker redis` and
     // `setu add queue --queue redis` append the REDIS_URL row `setu new --broker`
     // writes — the local default in `.env`, empty in the tracked example.
@@ -257,6 +267,14 @@ describe('node-redis CLI', () => {
           expect(expected[path], path).toBeDefined();
           expected[path] = `${expected[path]}\n${description}\nREDIS_URL=${value}\n`;
         }
+        // And M140d: the README gains the local transport section `setu new --broker`
+        // writes, before `## Run`, from the same renderer.
+        const readme = `${runtime}/${command}/work/app/README.md`;
+        const at = expected[readme]!.indexOf('\n## Run\n');
+        expect(at, readme).toBeGreaterThan(0);
+        expected[readme] =
+          `${expected[readme]!.slice(0, at + 1)}${renderLocalTransportSection('').slice(1)}\n` +
+          expected[readme]!.slice(at + 1);
       }
     }
     // M131c changes only tooling lock writes, the production strip list, and

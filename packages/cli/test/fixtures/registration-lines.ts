@@ -24,6 +24,9 @@ import { PgVectorStore, QdrantVectorStore } from '@setu-ts/vector-store-plugin';
 import { MailPlugin } from '@setu-ts/mail-plugin';
 import type { DatabasePluginOptions } from '@setu-ts/database-plugin';
 
+/** Stands in for the Deno global a Deno project's printed mail line reads. */
+declare const Deno: { readonly env: { get(name: string): string | undefined } };
+
 /** Stands in for the Workers environment the printed line names. */
 declare const env: Record<string, unknown>;
 
@@ -51,9 +54,13 @@ declare const instance: string;
 
 /** The printed registrations, constructed against the real option types. */
 export const PRINTED_REGISTRATIONS = [
-  MailPlugin({ provider: 'smtp', options: {} }),
+  // prettier-ignore
+  MailPlugin({ provider: 'smtp', options: { host: process.env.SMTP_HOST || 'localhost', port: Number(process.env.SMTP_PORT || '587') } }),
+  // prettier-ignore
+  MailPlugin({ provider: 'smtp', options: { host: Deno.env.get('SMTP_HOST') || 'localhost', port: Number(Deno.env.get('SMTP_PORT') || '587') } }),
   MailPlugin({ provider: 'ses', options: {} }),
-  MailPlugin({ provider: 'sendgrid', options: {} }),
+  MailPlugin({ provider: 'sendgrid', options: { apiKey: process.env.SENDGRID_API_KEY || '' } }),
+  MailPlugin({ provider: 'sendgrid', options: { apiKey: Deno.env.get('SENDGRID_API_KEY') || '' } }),
   DatabasePlugin({ type: 'drizzle', options: { drizzleInstance, drizzleTables } }),
   DatabasePlugin({ type: 'prisma', options: { prismaClient } }),
   DatabasePlugin({ type: 'mongodb', options: { url: databaseUrl, collections: {} } }),

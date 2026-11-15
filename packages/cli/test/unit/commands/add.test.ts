@@ -677,8 +677,12 @@ export function createApp(): IKernelApplication {
     });
     expect(await h.run(['messaging', '--broker', 'redis'])).toBe(0);
     const out = h.out.join('\n');
-    expect(out).toContain('Set MessagingPlugin(');
+    // The bare call takes the options; the unrelated object is not mistaken for them.
+    expect(out).toContain('MessagingPlugin() in setu.config.ts now takes the selected options.');
     expect(out).not.toContain('already passes these options');
+    expect(h.read('/app/setu.config.ts').replace(/\s+/g, ' ')).toContain(
+      "const unrelated = { broker: 'redis-streams', url: process.env.REDIS_URL || 'redis://127.0.0.1:6379', };",
+    );
   });
   // PR #519 review: an existing Compose file is never rewritten, and a selected service it
   // lacks is printed rather than silently skipped.

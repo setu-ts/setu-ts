@@ -138,7 +138,8 @@ The project is what `setu new --template rest`, `setu generate module support`,
   `respond`, `get`, `decide` and `cancel`.
 - `src/modules/support/support.database.ts` picks PostgreSQL through Drizzle when `DATABASE_URL` is
   set, otherwise the memory database. `support.tables.ts` maps the entities to the tables in
-  `schema.sql`.
+  `schema.sql`. `setu.config.ts` spreads its `DatabasePlugin` in, a call `setu check` cannot see
+  there, so `.setu-ts/check.json` silences that one `setu.W006`.
 - `src/plugins/support-model.plugin.ts` builds the model from the environment. Tests replace the
   capability with a scripted model.
 - `src/plugins/support-data.plugin.ts` inserts the demonstration orders on the memory database.

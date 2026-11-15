@@ -2067,6 +2067,31 @@ This runs \`wrangler deploy\`.
 `;
 }
 
+/** The README heading `setu new --broker` and a standalone `setu add` write for local backends. */
+export const LOCAL_TRANSPORT_HEADING = '## Local transport services';
+
+/**
+ * The README section for the local backing services in `docker/compose.yaml`.
+ *
+ * One renderer for `setu new --broker` and for a standalone `setu add` that
+ * selects a connected backend, so a project gets the same section either way.
+ * It includes no leading heading separator of its own beyond one blank line.
+ *
+ * @param transportNotes - Each selected transport's operational note, already
+ *   wrapped and joined, or the empty string
+ * @returns The section, starting with a newline and ending with one
+ * @since 0.13.0
+ */
+export function renderLocalTransportSection(transportNotes: string): string {
+  return (
+    `\n${LOCAL_TRANSPORT_HEADING}\n\nStart these FIRST: the transport plugins you selected ` +
+    `connect while the application registers, and\ndo not retry, so \`start\` fails against a ` +
+    `backend that is not listening yet.\n\n\`\`\`bash\ndocker compose -f ${BROKER_COMPOSE_FILE} up -d\n\`\`\`\n\n` +
+    `${wrapProse('Each connection variable in `.env.example` has a local default for these services. A container does not read `.env`: pass each variable to it, for example with `docker run -e NAME=value`.')}\n` +
+    transportNotes
+  );
+}
+
 /**
  * Builds the file set for one runtime target and host.
  *
@@ -2112,9 +2137,7 @@ ${
       // "the plugins you selected", never "the messaging and queue plugins":
       // the two flags are independent, so `--broker redis` alone leaves
       // `QueuePlugin()` in memory, connecting to nothing.
-      `\n## Local transport services\n\nStart these FIRST: the transport plugins you selected ` +
-      `connect while the application registers, and\ndo not retry, so \`start\` fails against a ` +
-      `backend that is not listening yet.\n\n\`\`\`bash\ndocker compose -f ${BROKER_COMPOSE_FILE} up -d\n\`\`\`\n${transportNotes}`
+      renderLocalTransportSection(transportNotes)
     : ''
 }
 ## Run
