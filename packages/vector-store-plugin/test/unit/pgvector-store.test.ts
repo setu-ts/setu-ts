@@ -606,3 +606,25 @@ describe('pgvector filter translation', () => {
     ).toThrow("unsupported filter operator 'contains'");
   });
 });
+
+describe('PgVectorStore.isHealthy', () => {
+  it('runs SELECT 1 through the database and rejects when it fails', async () => {
+    const h = await opened();
+    h.statements.length = 0;
+    expect(await h.store.isHealthy()).toBe(true);
+    expect(h.statements.map((s) => s.text)).toEqual(['SELECT 1']);
+    let fail = false;
+    const down = await opened((rendered) =>
+      fail && rendered.text === 'SELECT 1'
+        ? new Error('connection terminated')
+        : healthy()(rendered),
+    );
+    fail = true;
+    await expect(down.store.isHealthy()).rejects.toThrow();
+  });
+
+  it('refuses before open()', async () => {
+    const store = new PgVectorStore({ db: recordingDb().db });
+    await expect(store.isHealthy()).rejects.toThrow('open() must run before any other call');
+  });
+});

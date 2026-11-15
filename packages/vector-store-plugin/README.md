@@ -407,6 +407,23 @@ Vectorize cannot delete by namespace or by filter: `replaceSource` and `deleteSc
 `VectorOperationUnsupportedError` instead of being emulated. Upsert deterministic ids and delete the
 stale ones yourself, or give each tenant group its own index.
 
+## Readiness
+
+The plugin registers a `vector-store` health indicator, which joins `/ready` by default, so a
+replica whose backend stops answering leaves the load balancer instead of failing every search. It
+calls the adapter's `isHealthy()` through a probe cached for 5 seconds and bounded at 2:
+
+| Adapter                | Probe                                   |
+| ---------------------- | --------------------------------------- |
+| `QdrantVectorStore`    | the server's version endpoint (`GET /`) |
+| `PgVectorStore`        | `SELECT 1` through the application's db |
+| `VectorizeVectorStore` | the index's `describe()`                |
+| `MemoryVectorStore`    | always reachable                        |
+
+A custom adapter without `isHealthy()` stays `up` with `reachable: 'unknown'`. After shutdown the
+indicator reports `down` with `state: 'closed'`. To keep it out of readiness, exclude it in
+`HealthPlugin({ readiness: { exclude: ['vector-store'] } })`.
+
 ## Errors
 
 | Error                             | Thrown when                                                                              | Status hint |

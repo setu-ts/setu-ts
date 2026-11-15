@@ -329,6 +329,17 @@ export interface IVectorStoreAdapter {
    */
   deleteScope(spec: VectorCollectionSpec, scope: string): Promise<void>;
   /**
+   * Whether the backend answers now, for readiness. Optional: without it the
+   * plugin's `vector-store` indicator reports `reachable: 'unknown'` and stays
+   * up. The plugin calls it through a cached, time-bounded probe, so a slow
+   * call counts as unreachable and a rejection as `false`; it must not change
+   * data.
+   *
+   * @returns `true` when the backend answered
+   * @since 0.13.0
+   */
+  isHealthy?(): Promise<boolean>;
+  /**
    * Called once at application shutdown. Built-in adapters never close a
    * client the application injected; they call their `onClose` option.
    *

@@ -328,6 +328,17 @@ export class QdrantVectorStore implements IVectorStoreAdapter {
     );
   }
 
+  /**
+   * Reachability for readiness: the server's version endpoint (`GET /`), which
+   * reads no collection.
+   *
+   * @returns `true` once the server answered
+   */
+  async isHealthy(): Promise<boolean> {
+    await this.#client.versionInfo();
+    return true;
+  }
+
   /** @inheritdoc */
   async close(): Promise<void> {
     await this.#onClose?.();

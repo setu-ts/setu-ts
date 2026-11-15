@@ -294,3 +294,14 @@ describe('Vectorize filter translation', () => {
     );
   });
 });
+
+describe('VectorizeVectorStore.isHealthy', () => {
+  it("asks the index's describe(), which reads no vectors, and rejects when it fails", async () => {
+    const { store } = await opened();
+    expect(await store.isHealthy()).toBe(true);
+    const index = fakeIndex();
+    const { store: down } = await opened(index);
+    index.describe = () => Promise.reject(new Error('binding unavailable'));
+    await expect(down.isHealthy()).rejects.toThrow('binding unavailable');
+  });
+});

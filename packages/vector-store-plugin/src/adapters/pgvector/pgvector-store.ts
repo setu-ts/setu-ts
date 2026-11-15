@@ -322,6 +322,17 @@ export class PgVectorStore implements IVectorStoreAdapter {
     await this.#run(() => this.#db.execute(deleteScopeStatement(this.#tag(), spec, scope)));
   }
 
+  /**
+   * Reachability for readiness: `SELECT 1` through the application's database.
+   *
+   * @returns `true` once the database answered
+   */
+  async isHealthy(): Promise<boolean> {
+    const sql = this.#tag();
+    await this.#run(() => this.#db.execute(sql`SELECT 1`));
+    return true;
+  }
+
   /** @inheritdoc */
   async close(): Promise<void> {
     await this.#onClose?.();

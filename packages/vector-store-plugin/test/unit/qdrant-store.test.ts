@@ -516,3 +516,16 @@ describe('qdrant filter translation', () => {
     );
   });
 });
+
+describe('QdrantVectorStore.isHealthy', () => {
+  it('asks the version endpoint, which reads no collection, and rejects when it fails', async () => {
+    const { store, client } = await opened();
+    const before = client.calls.length;
+    expect(await store.isHealthy()).toBe(true);
+    expect(client.calls.slice(before).map((call) => call.method)).toEqual(['versionInfo']);
+    const down = await opened(
+      recordingClient({ versionFailures: [new Error('ECONNREFUSED'), new Error('ECONNREFUSED')] }),
+    );
+    await expect(down.store.isHealthy()).rejects.toThrow('ECONNREFUSED');
+  });
+});

@@ -16,6 +16,7 @@ import type {
   IVectorStoreAdapter,
   VectorCollectionSpec,
 } from '@setu-ts/common';
+import { createVectorStoreIndicator } from '../health/indicator.ts';
 import { resolveCollections } from '../services/collection-spec.ts';
 import { validateScope } from '../services/record-validation.ts';
 import { VectorStoreService } from '../services/vector-store-service.ts';
@@ -103,7 +104,9 @@ export function VectorStorePlugin(options: VectorStorePluginOptions): IPlugin {
       // Registered before the backend is touched, and on close rather than
       // shutdown: a failed start runs only the close hooks, so an adapter that
       // opened a connection and then failed to ensure a collection is closed.
+      let closed = false;
       ctx.lifecycle.onClose(async () => {
+        closed = true;
         await adapter.close?.();
       });
       // Optional: an adapter reports faults outside a call (a dropped pooled
@@ -116,6 +119,12 @@ export function VectorStorePlugin(options: VectorStorePluginOptions): IPlugin {
       ctx.services.register(
         CAPABILITIES.VECTOR_STORE,
         new VectorStoreService(adapter, collections, tenancy),
+      );
+      // In readiness by default: every vector call fails while the backend is
+      // unreachable, so the replica should stop receiving traffic.
+      ctx.health.register(
+        'vector-store',
+        createVectorStoreIndicator(adapter, ctx.runtime, () => closed),
       );
     },
   };

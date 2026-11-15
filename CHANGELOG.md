@@ -70,6 +70,12 @@ All notable changes to this project are documented here. The format follows
   `--redis-client` narrows the question to `--type drizzle` or `redis`; and nothing is asked when
   the flags given would be refused. One table drives the prompt and `setu add --help`. `--yes` and a
   non-terminal still take every default.
+- **`@setu-ts/vector-store-plugin`, `@setu-ts/common`, `@setu-ts/cloudflare-plugin` (M140d, PR
+  pending).** `VectorStorePlugin` registers a `vector-store` readiness indicator, so a replica whose
+  vector backend stops answering leaves `/ready` instead of failing every search. It calls the new
+  optional `IVectorStoreAdapter.isHealthy()` through a cached, time-bounded probe; the Qdrant,
+  pgvector, Vectorize and memory adapters implement it without touching data. An adapter without it
+  reports `reachable: 'unknown'` and stays up.
 - **`@setu-ts/cli` (M140d, PR pending).** `setu add` with a connected backend (RabbitMQ, NATS,
   Kafka, Pub/Sub, Service Bus, not only Redis) says the app and its tests connect at startup, prints
   the `docker compose` command and the `createTestApp` override, and gives a standalone README the
