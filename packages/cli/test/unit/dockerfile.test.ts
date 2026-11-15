@@ -283,7 +283,14 @@ describe('the credential-free registry settings (#592 review)', () => {
     expect(() => filter('@x:registry=not-a-url-SECRET\n')).not.toThrow(/SECRET/);
   });
 
-  it('keeps a bare environment reference as written', () => {
+  it('copies a value holding an environment reference as written', () => {
     expect(filter('registry=${PRIVATE_REGISTRY}\n')).toBe('registry=${PRIVATE_REGISTRY}\n');
+    expect(filter('@p:registry=https://${HOST}/npm/\n')).toBe('@p:registry=https://${HOST}/npm/\n');
+  });
+
+  it('copies a credential-free URL exactly as Deno read it', () => {
+    expect(filter('registry = https://Npm.Example.com:8443/a/b\n')).toBe(
+      'registry=https://Npm.Example.com:8443/a/b\n',
+    );
   });
 });

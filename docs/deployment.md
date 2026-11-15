@@ -737,9 +737,10 @@ locked dependencies with the `npmrc` secret into its global cache only
 a later step of its `frontend` stage without the secret, which is where approved scripts run (a
 member without a frontend but with a `check` task caches main.ts and setu.config.ts's graph in that
 same secret-mounted step). That step also copies the `npmrc`'s `registry` and `@scope:registry`
-lines, and nothing else, for the later steps: each value is read as Deno reads it and written back
-as a URL without its userinfo, query or fragment, so no token reaches them (a bare `${NAME}`
-reference is kept as written, and any other value that is not a URL fails the build). Deno files a
+lines, and nothing else, for the later steps. Each value is read as Deno reads it and copied as
+written, except that a URL's userinfo, query and fragment are removed; a value holding a `${NAME}`
+reference is copied as written, and any other value that is not a URL fails the build. Keep a
+registry token in an `_authToken` line: one placed in the URL's path is kept, because Deno files a
 package under its registry URL's host and path, so a step without the secret must resolve the same
 registries to find the cache. The runtime dependencies are fetched the same way, in a `fetch` stage
 the image never ships; the image's one install step bind-mounts that stage's cache, lockfile and
