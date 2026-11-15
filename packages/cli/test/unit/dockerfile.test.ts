@@ -247,7 +247,7 @@ describe('the credential-free registry settings (#592 review)', () => {
           '',
         ].join('\r\n'),
       ),
-    ).toBe('registry=https://npm.example.com/\n@acme:registry=https://pkgs.acme.dev/npm/\n');
+    ).toBe('registry="https://npm.example.com/"\n@acme:registry="https://pkgs.acme.dev/npm/"\n');
   });
 
   it('writes an empty file when no secret is mounted, so the bind mount always has a source', () => {
@@ -267,10 +267,10 @@ describe('the credential-free registry settings (#592 review)', () => {
       ),
     ).toBe(
       [
-        'registry=https://npm.example.com/',
-        '@a:registry=https://a.example/npm/',
-        '@b:registry=https://b.example/',
-        '@c:registry=https://c.example/npm/',
+        'registry="https://npm.example.com/"',
+        '@a:registry="https://a.example/npm/"',
+        '@b:registry="https://b.example/"',
+        '@c:registry="https://c.example/npm/"',
         '',
       ].join('\n'),
     );
@@ -284,10 +284,12 @@ describe('the credential-free registry settings (#592 review)', () => {
   });
 
   it('copies a value holding an environment reference as written', () => {
-    expect(filter('registry=${PRIVATE_REGISTRY}\n')).toBe('registry=${PRIVATE_REGISTRY}\n');
-    expect(filter('@p:registry=https://${HOST}/npm/\n')).toBe('@p:registry=https://${HOST}/npm/\n');
+    expect(filter('registry=${PRIVATE_REGISTRY}\n')).toBe('registry="${PRIVATE_REGISTRY}"\n');
+    expect(filter('@p:registry=https://${HOST}/npm/\n')).toBe(
+      '@p:registry="https://${HOST}/npm/"\n',
+    );
     expect(filter('@q:registry=https://npm.corp:${PORT}/npm/\n')).toBe(
-      '@q:registry=https://npm.corp:${PORT}/npm/\n',
+      '@q:registry="https://npm.corp:${PORT}/npm/"\n',
     );
   });
 
@@ -312,7 +314,43 @@ describe('the credential-free registry settings (#592 review)', () => {
 
   it('copies a credential-free URL exactly as Deno read it', () => {
     expect(filter('registry = https://Npm.Example.com:8443/a/b\n')).toBe(
-      'registry=https://Npm.Example.com:8443/a/b\n',
+      'registry="https://Npm.Example.com:8443/a/b"\n',
     );
+  });
+
+  it('writes every value in double quotes, so a ; or # in a quoted path survives', () => {
+    // Deno ends an unquoted value at ; or #, and keeps both inside quotes (measured, Deno 2.9).
+    expect(
+      filter(
+        [
+          'registry="https://registry.example/repo;tenant=acme/"',
+          "@a:registry='https://a.example/x;y/${SEG}/'",
+          '',
+        ].join('\n'),
+      ),
+    ).toBe(
+      [
+        'registry="https://registry.example/repo;tenant=acme/"',
+        '@a:registry="https://a.example/x;y/${SEG}/"',
+        '',
+      ].join('\n'),
+    );
+  });
+
+  it('fails closed on a double quote or a backslash in any branch, naming the key', () => {
+    // Deno reads a backslash as an escape, so a value ending in one would escape the closing quote.
+    for (const line of [
+      "@d:registry='https://d.example/${A}\"B/'",
+      'registry=https://h.example/a"b/',
+      'registry=https://u:SECRET@h.example/a"b/',
+      'registry=http://127.0.0.1:1/a/\\',
+      'registry="http://127.0.0.1:1/a\\"b/"',
+      'registry=http://127.0.0.1:1/a\\;b/',
+    ]) {
+      expect(() => filter(`${line}\n`)).toThrow(
+        /the npmrc (@d:)?registry setting contains a double quote or a backslash/,
+      );
+      expect(() => filter(`${line}\n`)).not.toThrow(/SECRET/);
+    }
   });
 });

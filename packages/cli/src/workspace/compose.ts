@@ -96,7 +96,8 @@ const NPMRC_MOUNT = '--mount=type=secret,id=npmrc,target=/root/.npmrc';
  * registries as the step that fetched with it, or it finds nothing. Only
  * `registry` and `@scope:registry` lines are kept. A value is read as Deno reads
  * it (surrounding quotes stripped, an unquoted `;` or `#` comment dropped) and
- * copied as written, unless its URL carries a username, password, query or
+ * copied as written, in double quotes so a `;` or `#` in it survives the
+ * cached-only step's parse, unless its URL carries a username, password, query or
  * fragment: then the URL is written back in normalized form (`URL.href`)
  * without them. A credential in a URL's path is kept, because the cache is filed
  * under that path. A value holding a `${NAME}` reference is copied as written,
@@ -104,11 +105,13 @@ const NPMRC_MOUNT = '--mount=type=secret,id=npmrc,target=/root/.npmrc';
  * fails the build if, with its references removed, it still contains `@`, `?`
  * or `#`: userinfo, a query or a fragment beside a reference cannot be removed
  * without changing what the reference resolves to, whoever wrote it. Any
- * other value that is not a URL fails the build. Each failure names the key and
+ * other value that is not a URL fails the build, and so does any value, in
+ * every branch, holding a double quote or a backslash, which Deno reads as an
+ * escape and a double-quoted line cannot carry as written. Each failure names the key and
  * never the value.
  * Imports nothing, so it fetches nothing.
  */
-const NPMRC_REGISTRIES = `printf '%s' '${String.raw`let source = ""; try { source = Deno.readTextFileSync("/root/.npmrc"); } catch (error) { if (!(error instanceof Deno.errors.NotFound)) throw error; } const lines = []; for (const line of source.split(/\r?\n/)) { const match = /^\s*((?:@[^\s:=]+:)?registry)\s*=(.*)$/.exec(line); if (!match) continue; const raw = match[2].trim(); const quoted = /^(["\x27])(.*?)\1/.exec(raw); const value = quoted ? quoted[2] : raw.split(/[;#]/)[0].trim(); if (value.includes("\${")) { if (/[@?#]/.test(value.replace(/\$\{[^}]*\}/g, ""))) throw new Error("the npmrc " + match[1] + " setting has an environment reference and userinfo, a query or a fragment; put the credential in an _authToken line"); lines.push(match[1] + "=" + value); continue; } let url; try { url = new URL(value); } catch { throw new Error("the npmrc " + match[1] + " setting is not a URL"); } if (url.username || url.password || url.search || url.hash) { url.username = ""; url.password = ""; url.search = ""; url.hash = ""; lines.push(match[1] + "=" + url.href); } else { lines.push(match[1] + "=" + value); } } Deno.writeTextFileSync("/tmp/.setu-npmrc", lines.join("\n") + "\n");`}' | DENO_DIR=/tmp/.setu-npmrc-cache deno run --no-config --no-lock --no-prompt --allow-read=/root/.npmrc --allow-write=/tmp/.setu-npmrc - && rm -rf /tmp/.setu-npmrc-cache`;
+const NPMRC_REGISTRIES = `printf '%s' '${String.raw`let source = ""; try { source = Deno.readTextFileSync("/root/.npmrc"); } catch (error) { if (!(error instanceof Deno.errors.NotFound)) throw error; } const lines = []; const put = (key, value) => lines.push(key + "=\"" + value + "\""); for (const line of source.split(/\r?\n/)) { const match = /^\s*((?:@[^\s:=]+:)?registry)\s*=(.*)$/.exec(line); if (!match) continue; const raw = match[2].trim(); const quoted = /^(["\x27])(.*?)\1/.exec(raw); const value = quoted ? quoted[2] : raw.split(/[;#]/)[0].trim(); if (/["\\]/.test(value)) throw new Error("the npmrc " + match[1] + " setting contains a double quote or a backslash"); if (value.includes("\${")) { if (/[@?#]/.test(value.replace(/\$\{[^}]*\}/g, ""))) throw new Error("the npmrc " + match[1] + " setting has an environment reference and userinfo, a query or a fragment; put the credential in an _authToken line"); put(match[1], value); continue; } let url; try { url = new URL(value); } catch { throw new Error("the npmrc " + match[1] + " setting is not a URL"); } if (url.username || url.password || url.search || url.hash) { url.username = ""; url.password = ""; url.search = ""; url.hash = ""; put(match[1], url.href); } else { put(match[1], value); } } Deno.writeTextFileSync("/tmp/.setu-npmrc", lines.join("\n") + "\n");`}' | DENO_DIR=/tmp/.setu-npmrc-cache deno run --no-config --no-lock --no-prompt --allow-read=/root/.npmrc --allow-write=/tmp/.setu-npmrc - && rm -rf /tmp/.setu-npmrc-cache`;
 
 /**
  * The glibc Deno image a full-stack member's frontend is built in (M120 §3.7).
