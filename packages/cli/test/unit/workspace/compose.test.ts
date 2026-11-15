@@ -60,12 +60,14 @@ describe('workspaceContainerFiles', () => {
       for (const workspace of [true, false]) {
         const dockerfile = renderDockerfile(workspaceProfile(runtime), workspace);
         const stages = dockerfile.split(/^FROM /m).slice(1);
-        // Deno: frontend, check, runtime. Bun and Node: build, runtime.
-        const runtimeStage = stages[stages.length - 1]!;
-        for (const stage of stages.slice(0, -1))
-          expect(stage).not.toContain('ENV NODE_ENV=production');
+        // Deno: frontend, check, runtime, then fetch and the image, both FROM runtime (so they
+        // inherit its ENV rather than repeating it). Bun and Node: build, runtime.
+        const runtimeIndex = runtime === 'deno' ? 2 : stages.length - 1;
+        const runtimeStage = stages[runtimeIndex]!;
+        for (const [index, stage] of stages.entries())
+          if (index !== runtimeIndex) expect(stage).not.toContain('ENV NODE_ENV=production');
         expect(runtimeStage).toContain('ENV NODE_ENV=production');
-        expect(stages).toHaveLength(runtime === 'deno' ? 3 : 2);
+        expect(stages).toHaveLength(runtime === 'deno' ? 5 : 2);
         if (runtime === 'bun') {
           expect(dockerfile.match(/FROM oven\/bun:1\.4\.0-alpine/g)).toHaveLength(2);
           expect(
@@ -92,7 +94,26 @@ describe('workspaceContainerFiles', () => {
           expect(stages[1]!.startsWith('frontend AS check\n')).toBe(true);
           expect(runtimeStage).toContain('COPY --from=frontend ');
           // Nothing is copied from the check stage, not even its marker (audit N3).
-          expect(runtimeStage).not.toContain('COPY --from=check');
+          for (const stage of stages.slice(2)) expect(stage).not.toContain('COPY --from=check');
+          // The token reaches only the fetch stage, which the image never ships; the image's one
+          // install step bind-mounts what the fetch cached and its credential-free registry
+          // settings, so approved scripts run without the token (#592 review).
+          expect(stages[3]!.startsWith('runtime AS fetch\n')).toBe(true);
+          expect(stages[4]!.startsWith('runtime\n')).toBe(true);
+          const fetchRuns = stages[3]!.split('\n').filter((line) => line.startsWith('RUN '));
+          expect(fetchRuns).toHaveLength(1);
+          expect(fetchRuns[0]!.startsWith(`RUN ${NPMRC_MOUNT} `)).toBe(true);
+          expect(fetchRuns[0]).toContain('--allow-write=/tmp/.setu-npmrc -');
+          const imageRuns = stages[4]!.split('\n').filter((line) => line.startsWith('RUN '));
+          expect(imageRuns).toHaveLength(1);
+          expect(imageRuns[0]).not.toContain('type=secret');
+          for (const mount of [
+            '--mount=type=bind,from=fetch,source=/deno-dir,target=/tmp/.setu-fetched-cache',
+            '--mount=type=bind,from=fetch,source=/srv,target=/tmp/.setu-fetched-srv',
+            '--mount=type=bind,from=fetch,source=/tmp/.setu-npmrc,target=/root/.npmrc',
+          ])
+            expect(imageRuns[0]).toContain(mount);
+          expect(stages[4]).not.toContain('COPY --from=fetch');
           expect(runtimeStage).toContain(
             'RUN --mount=type=bind,from=check,source=/tmp/.setu-checked,target=/tmp/.setu-checked true',
           );
@@ -117,6 +138,9 @@ describe('workspaceContainerFiles', () => {
           expect(mounted).toContain(
             'if [ -f .setu-check-cli ]; then deno cache --no-lock --node-modules-dir=none "$(cat .setu-check-cli)"; fi',
           );
+          // The build step installs the credential-free registry settings before reading the cache.
+          expect(runs[build]!.startsWith('RUN cp /tmp/.setu-npmrc /root/.npmrc && ')).toBe(true);
+          expect(mounted).toContain('--allow-write=/tmp/.setu-npmrc -');
           expect(check).not.toContain('--mount=type=secret');
           expect(check).toBe(
             'RUN if [ -z "$NPM_CONFIG_REGISTRY" ]; then unset NPM_CONFIG_REGISTRY; fi && if [ -f .setu-check-task ]; then deno task check; fi && touch /tmp/.setu-checked',
@@ -294,7 +318,9 @@ describe('workspaceContainerFiles', () => {
       );
       const install = lines.find((line) => line.includes('deno install --cached-only --frozen'));
       expect(fetch).toContain('deno install --node-modules-dir=none --frozen');
-      expect(fetch).not.toContain('--no-lock');
+      // Only the registry-settings filter, which imports nothing, runs unlocked.
+      for (const command of fetch!.match(/deno (?:install|cache)[^&;]*/g) ?? [])
+        expect(command).not.toContain('--no-lock');
       expect(install).not.toContain('--no-lock');
     });
 

@@ -9,6 +9,10 @@
  *
  * @module
  */
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   DOCKERFILE,
@@ -40,24 +44,25 @@ describe('generated Dockerfile chown fold (X10-5)', () => {
     expect(source).toContain('delete manifest.imports["@setu-ts/testing"]');
     expect(source).toContain('delete manifest.imports["@setu-ts/diagnostics-plugin"]');
   });
-  it('each RUN that writes files carries its own ownership fixup', () => {
+  it('one RUN carries the cache, node_modules and the ownership fixup', () => {
     const contents = dockerfile();
     const runLines = contents.split('\n').filter((line) => line.startsWith('RUN '));
 
-    const cacheRun = runLines.find((line) =>
-      line.includes('&& deno cache --node-modules-dir=none main.ts'),
-    );
     const installRun = runLines.find((line) =>
       line.includes('deno install --cached-only --frozen'),
     );
-    expect(cacheRun).toBeDefined();
+    expect(installRun).toBeDefined();
     // Same line, same layer: `&&`, not two instructions. DENO_UID interpolates
-    // to its numeric value in the emitted text.
-    expect(cacheRun).toContain('&& chown -R 1000:1000 /deno-dir');
-    // The second RUN changes only files it does not already find owned, so the
-    // cache written by the first is not copied up into a second layer.
-    expect(installRun).toContain('&& find /srv /deno-dir ! -user 1000 -exec chown 1000:1000 {} +');
-    expect(installRun).not.toContain('chown -R');
+    // to its numeric value in the emitted text. The cache is copied in by this
+    // RUN, so node_modules's hard links into it and the chown store each file once.
+    expect(installRun).toContain('cp -a /tmp/.setu-fetched-cache/. /deno-dir/');
+    expect(installRun).toContain('&& chown -R 1000:1000 /srv /deno-dir');
+    // The fetch stage is never shipped, so it carries no chown.
+    const fetchRun = runLines.find((line) =>
+      line.includes('&& deno cache --node-modules-dir=none main.ts'),
+    );
+    expect(fetchRun).toBeDefined();
+    expect(fetchRun).not.toContain('chown');
   });
 
   it('no standalone chown line remains', () => {
@@ -128,7 +133,7 @@ describe('generated Dockerfile lockfile verification', () => {
     expect(rewrite).toBeGreaterThan(
       buildRun.lastIndexOf('deno install --cached-only --entrypoint main.ts --frozen'),
     );
-    expect(rewrite).toBeLessThan(buildRun.indexOf('find /srv /deno-dir'));
+    expect(rewrite).toBeLessThan(buildRun.indexOf('chown -R'));
     expect(buildRun).toContain('manifest.nodeModulesDir = "manual"');
     expect(buildRun).toContain(
       '--allow-read=/srv/deno.json,/srv/deno.jsonc --allow-write=/srv/deno.json,/srv/deno.jsonc -',
@@ -196,5 +201,60 @@ describe('generated Dockerfile development-pin pruning (M101f audit F3)', () => 
     expect(pruning).toContain(`--allow-read=${manifests} --allow-write=${manifests} -`);
     expect(pruning).not.toMatch(/--allow-(read|write)=\/srv[ ,]/);
     expect(pruning).not.toMatch(/--allow-all|\s-A\s/);
+  });
+});
+
+describe('the credential-free registry settings (#592 review)', () => {
+  /**
+   * Runs the generated filter exactly as the Dockerfile embeds it, on Node with
+   * the two Deno calls it makes mapped onto files in a temporary directory.
+   */
+  function filter(npmrc: string | undefined): string {
+    const program = /printf '%s' '(let source = [^']*)'/.exec(dockerfile())?.[1];
+    expect(program).toBeDefined();
+    const dir = mkdtempSync(join(tmpdir(), 'setu-npmrc-'));
+    try {
+      const input = join(dir, 'npmrc');
+      const output = join(dir, 'out');
+      if (npmrc !== undefined) writeFileSync(input, npmrc);
+      const shim = [
+        "import { readFileSync, writeFileSync } from 'node:fs';",
+        'class NotFound extends Error {}',
+        `const paths = { '/root/.npmrc': ${JSON.stringify(input)}, '/tmp/.setu-npmrc': ${JSON.stringify(output)} };`,
+        'globalThis.Deno = {',
+        '  errors: { NotFound },',
+        "  readTextFileSync(path) { try { return readFileSync(paths[path], 'utf8'); } catch (error) { if (error.code === 'ENOENT') throw new NotFound(); throw error; } },",
+        '  writeTextFileSync(path, text) { writeFileSync(paths[path], text); },',
+        '};',
+      ].join('\n');
+      writeFileSync(join(dir, 'filter.mjs'), `${shim}\n${program!}\n`);
+      execFileSync(process.execPath, [join(dir, 'filter.mjs')]);
+      return readFileSync(output, 'utf8');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  it('keeps only registry and scope-registry lines, without userinfo', () => {
+    expect(
+      filter(
+        [
+          'registry=https://bob:s3cret@npm.example.com/',
+          '@acme:registry = https://pkgs.acme.dev/npm/',
+          '//npm.example.com/:_authToken=TOKEN-ABC',
+          'always-auth=true',
+          '; registry=https://commented.example.com/',
+          '',
+        ].join('\r\n'),
+      ),
+    ).toBe('registry=https://npm.example.com/\n@acme:registry=https://pkgs.acme.dev/npm/\n');
+  });
+
+  it('writes an empty file when no secret is mounted, so the bind mount always has a source', () => {
+    expect(filter(undefined)).toBe('\n');
+  });
+
+  it('keeps a value that is not a URL as written', () => {
+    expect(filter('registry=${PRIVATE_REGISTRY}\n')).toBe('registry=${PRIVATE_REGISTRY}\n');
   });
 });

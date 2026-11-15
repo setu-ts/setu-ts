@@ -736,11 +736,16 @@ locked dependencies with the `npmrc` secret into its global cache only
 `deno.json` approves with `allowScripts`), then creates `node_modules` from that cache and builds in
 a later step of its `frontend` stage without the secret, which is where approved scripts run (a
 member without a frontend but with a `check` task caches main.ts and setu.config.ts's graph in that
-same secret-mounted step). The final stage fetches the runtime dependencies the same way: the
-secret-mounted step fills the cache and the step after it, without the secret, installs and verifies
-the lockfile. The frontend stage runs on `denoland/deno:debian-2.9.5` (Vite's native bundler binding
-has no musl build, so it cannot run on the Alpine image), copies only `build/` into the Alpine image
-before caching main.ts, then retains the frozen, scoped source run. When the root sets
+same secret-mounted step). That step also copies the `npmrc`'s `registry` and `@scope:registry`
+lines, and nothing else (no token, no URL userinfo), for the later steps: Deno files a package under
+its registry's host, so a step without the secret must resolve the same registries to find the
+cache. The runtime dependencies are fetched the same way, in a `fetch` stage the image never ships;
+the image's one install step bind-mounts that stage's cache, lockfile and registry settings, copies
+the cache in, installs `node_modules` from it, verifies the lockfile and fixes ownership in one
+layer (`node_modules` hard-links into the cache, and a hard link cannot reach a lower layer). The
+frontend stage runs on `denoland/deno:debian-2.9.5` (Vite's native bundler binding has no musl
+build, so it cannot run on the Alpine image), copies only `build/` into the Alpine image before
+caching main.ts, then retains the frozen, scoped source run. When the root sets
 `nodeModulesDir: "auto"` (a workspace with a full-stack member does), the image switches it to
 `"manual"` after installing: under `"auto"` every start re-syncs `node_modules`, which a read-only
 root refuses. A full-stack socket server serves its own client bundle from `build/client/assets`.
@@ -779,10 +784,10 @@ read and write granted only to the member's and the root's `deno.json`/`deno.jso
 build cache removed in the same layer: it cannot float to a newer release, touch any other file in
 the image, alter the project lockfile, or add parser modules to the production cache.
 
-The build then fetches, with the registry secret mounted,
+The `fetch` stage then runs, with the registry secret mounted,
 `deno cache --node-modules-dir=none main.ts && deno install --node-modules-dir=none && deno install --node-modules-dir=none --frozen && deno install --node-modules-dir=none --entrypoint main.ts && deno install --node-modules-dir=none --entrypoint main.ts --frozen`,
-which fills only the global cache and runs no lifecycle script. A second step without the secret
-installs from that cache and verifies again:
+which fills only the global cache and runs no lifecycle script. The image's install step, without
+the secret, copies that cache in and runs
 `deno install --cached-only --frozen && deno install --cached-only --entrypoint main.ts --frozen`;
 any script the project approves with `allowScripts` runs there, never beside the token. The full-map
 install/frozen pair completes and verifies lazy broker npm edges; the entrypoint checks verify the
@@ -812,12 +817,13 @@ of changing it.
 For an existing generated workspace, regenerate the managed Dockerfile and `.dockerignore` with
 `setu devtool enable <member>` or `setu workspace ports --reallocate`, then rebuild the image. New
 member generation also refreshes these files. For a Dockerfile maintained by hand, keep the
-following three build steps after `WORKDIR /srv/apps/${MEMBER}` (the generated image uses UID 1000):
+following two build steps after `WORKDIR /srv/apps/${MEMBER}` (the generated image uses UID 1000).
+They mount no `npmrc` secret; a Dockerfile that does should copy the generated one's `fetch` stage,
+so that no install script runs beside the token:
 
 ```dockerfile
 RUN printf '%s' 'import { parse } from "jsr:@std/jsonc@1.0.3"; for (const directory of [".", "/srv"]) { for (const name of ["deno.json", "deno.jsonc"]) { const path = directory + "/" + name; let source; try { source = Deno.readTextFileSync(path); } catch (error) { if (error instanceof Deno.errors.NotFound) continue; throw error; } const manifest = parse(source); if (manifest.imports) delete manifest.imports["@setu-ts/diagnostics-plugin"]; Deno.writeTextFileSync(path, JSON.stringify(manifest)); break; } }' | DENO_DIR=/srv/.setu-build-cache deno run --no-config --no-lock --no-prompt --allow-read=./deno.json,./deno.jsonc,/srv/deno.json,/srv/deno.jsonc --allow-write=./deno.json,./deno.jsonc,/srv/deno.json,/srv/deno.jsonc - && rm -rf /srv/.setu-build-cache
-RUN --mount=type=secret,id=npmrc,target=/root/.npmrc deno cache --node-modules-dir=none main.ts && deno install --node-modules-dir=none && deno install --node-modules-dir=none --frozen && deno install --node-modules-dir=none --entrypoint main.ts && deno install --node-modules-dir=none --entrypoint main.ts --frozen && chown -R 1000:1000 /deno-dir
-RUN deno install --cached-only --frozen && deno install --cached-only --entrypoint main.ts --frozen && find /srv /deno-dir ! -user 1000 -exec chown 1000:1000 {} +
+RUN deno cache main.ts && deno install && deno install --frozen && deno install --entrypoint main.ts && deno install --entrypoint main.ts --frozen && chown -R 1000:1000 /srv /deno-dir
 ```
 
 Add `apps/*/main.dev.ts` to `.dockerignore` and keep `--frozen` on the start command.

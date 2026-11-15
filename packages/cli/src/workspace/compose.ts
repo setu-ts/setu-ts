@@ -88,6 +88,19 @@ const DENO_IMAGE = 'denoland/deno:alpine-2.9.5';
 const NPMRC_MOUNT = '--mount=type=secret,id=npmrc,target=/root/.npmrc';
 
 /**
+ * Copies the mounted `.npmrc`'s registry settings, and nothing else, to
+ * `/tmp/.setu-npmrc` (#592 review).
+ *
+ * Deno files a downloaded package under its registry's host, so a step that
+ * installs from the cache without the secret must resolve the same registries
+ * as the step that fetched with it, or it finds nothing. Only `registry` and
+ * `@scope:registry` lines are kept, and a registry URL's userinfo is dropped,
+ * so no credential reaches the token-free steps. Imports nothing, so it
+ * fetches nothing.
+ */
+const NPMRC_REGISTRIES = `printf '%s' '${String.raw`let source = ""; try { source = Deno.readTextFileSync("/root/.npmrc"); } catch (error) { if (!(error instanceof Deno.errors.NotFound)) throw error; } const lines = []; for (const line of source.split(/\r?\n/)) { const match = /^\s*((?:@[^\s:=]+:)?registry)\s*=\s*(\S+)\s*$/.exec(line); if (!match) continue; let value = match[2]; try { const url = new URL(value); url.username = ""; url.password = ""; value = url.href; } catch { /* not a URL: kept as written */ } lines.push(match[1] + "=" + value); } Deno.writeTextFileSync("/tmp/.setu-npmrc", lines.join("\n") + "\n");`}' | DENO_DIR=/tmp/.setu-npmrc-cache deno run --no-config --no-lock --no-prompt --allow-read=/root/.npmrc --allow-write=/tmp/.setu-npmrc - && rm -rf /tmp/.setu-npmrc-cache`;
+
+/**
  * The glibc Deno image a full-stack member's frontend is built in (M120 §3.7).
  *
  * Same Deno version as {@linkcode DENO_IMAGE}. Vite's bundler ships its native
@@ -162,11 +175,14 @@ export function renderDockerfile(profile: WorkspaceRuntimeProfile, workspace = t
 # task. Each runs with \`--node-modules-dir=none\`, which fills only the global
 # cache: Deno runs lifecycle scripts only into a node_modules directory, so even
 # a package the project approves with \`allowScripts\` runs nothing beside the
-# token (Deno reports "Ignored build scripts"). The next RUN, without the token,
-# creates node_modules from that cache (\`--cached-only\`: a fetch the first RUN
-# missed fails the build), which is where approved scripts run, then
+# token (Deno reports "Ignored build scripts"). The same RUN copies the npmrc's
+# registry settings, without any credential, to /tmp/.setu-npmrc. The next RUN,
+# without the token, installs them as /root/.npmrc (Deno files a package under
+# its registry's host, so it must resolve the same registries to find the
+# cache), creates node_modules from that cache (\`--cached-only\`: a fetch the
+# first RUN missed fails the build), which is where approved scripts run, then
 # \`deno task build\`. No later step in this stage, or in the check stage, mounts
-# the token (the final stage's fetch does, below, under the same rule).
+# the token (the fetch stage below does, under the same rule).
 FROM ${DENO_BUILD_IMAGE} AS frontend
 ARG MEMBER
 WORKDIR /srv
@@ -175,8 +191,8 @@ COPY lib[s] ./${LIBS_DIR}/
 COPY ${MEMBERS_DIR}/\${MEMBER} ./${MEMBERS_DIR}/\${MEMBER}
 WORKDIR /srv/${MEMBERS_DIR}/\${MEMBER}
 ARG NPM_CONFIG_REGISTRY=
-RUN ${NPMRC_MOUNT} printf '%s' 'import { parse } from "jsr:@std/jsonc@1.0.3"; for (const name of ["deno.json", "deno.jsonc"]) { let source; try { source = Deno.readTextFileSync(name); } catch (error) { if (error instanceof Deno.errors.NotFound) continue; throw error; } const manifest = parse(source); for (const task of ["build", "check"]) { if (manifest.tasks && task in manifest.tasks) Deno.writeTextFileSync(".setu-" + task + "-task", ""); } if (manifest.tasks && typeof manifest.tasks.check === "string" && manifest.tasks.check.includes(" main.dev.ts")) { manifest.tasks.check = manifest.tasks.check.replaceAll(" main.dev.ts", ""); Deno.writeTextFileSync(name, JSON.stringify(manifest)); } if (manifest.tasks && typeof manifest.tasks.check === "string" && manifest.tasks.check.includes("npm:@setu-ts/cli@")) Deno.writeTextFileSync(".setu-check-cli", manifest.tasks.check.slice(manifest.tasks.check.indexOf("npm:@setu-ts/cli@")).split(" ")[0]); break; }' | DENO_DIR=/tmp/.setu-build-cache deno run --no-config --no-lock --no-prompt --allow-read=./deno.json,./deno.jsonc --allow-write=./.setu-build-task,./.setu-check-task,./.setu-check-cli,./deno.json,./deno.jsonc - && if [ -z "$NPM_CONFIG_REGISTRY" ]; then unset NPM_CONFIG_REGISTRY; fi && if [ -f .setu-build-task ]; then deno install --node-modules-dir=none; elif [ -f .setu-check-task ]; then deno cache --node-modules-dir=none main.ts setu.config.ts; fi && if [ -f .setu-check-cli ]; then deno cache --no-lock --node-modules-dir=none "$(cat .setu-check-cli)"; fi
-RUN if [ -z "$NPM_CONFIG_REGISTRY" ]; then unset NPM_CONFIG_REGISTRY; fi && if [ -f .setu-build-task ]; then deno install --cached-only && deno task build; else mkdir -p build; fi
+RUN ${NPMRC_MOUNT} printf '%s' 'import { parse } from "jsr:@std/jsonc@1.0.3"; for (const name of ["deno.json", "deno.jsonc"]) { let source; try { source = Deno.readTextFileSync(name); } catch (error) { if (error instanceof Deno.errors.NotFound) continue; throw error; } const manifest = parse(source); for (const task of ["build", "check"]) { if (manifest.tasks && task in manifest.tasks) Deno.writeTextFileSync(".setu-" + task + "-task", ""); } if (manifest.tasks && typeof manifest.tasks.check === "string" && manifest.tasks.check.includes(" main.dev.ts")) { manifest.tasks.check = manifest.tasks.check.replaceAll(" main.dev.ts", ""); Deno.writeTextFileSync(name, JSON.stringify(manifest)); } if (manifest.tasks && typeof manifest.tasks.check === "string" && manifest.tasks.check.includes("npm:@setu-ts/cli@")) Deno.writeTextFileSync(".setu-check-cli", manifest.tasks.check.slice(manifest.tasks.check.indexOf("npm:@setu-ts/cli@")).split(" ")[0]); break; }' | DENO_DIR=/tmp/.setu-build-cache deno run --no-config --no-lock --no-prompt --allow-read=./deno.json,./deno.jsonc --allow-write=./.setu-build-task,./.setu-check-task,./.setu-check-cli,./deno.json,./deno.jsonc - && if [ -z "$NPM_CONFIG_REGISTRY" ]; then unset NPM_CONFIG_REGISTRY; fi && if [ -f .setu-build-task ]; then deno install --node-modules-dir=none; elif [ -f .setu-check-task ]; then deno cache --node-modules-dir=none main.ts setu.config.ts; fi && if [ -f .setu-check-cli ]; then deno cache --no-lock --node-modules-dir=none "$(cat .setu-check-cli)"; fi && ${NPMRC_REGISTRIES}
+RUN cp /tmp/.setu-npmrc /root/.npmrc && if [ -z "$NPM_CONFIG_REGISTRY" ]; then unset NPM_CONFIG_REGISTRY; fi && if [ -f .setu-build-task ]; then deno install --cached-only && deno task build; else mkdir -p build; fi
 
 # The check runs in a stage of its own: whatever its unlocked CLI writes stays
 # here. The final stage copies build/ from the frontend stage above and nothing
@@ -185,7 +201,9 @@ RUN if [ -z "$NPM_CONFIG_REGISTRY" ]; then unset NPM_CONFIG_REGISTRY; fi && if [
 FROM frontend AS check
 RUN if [ -z "$NPM_CONFIG_REGISTRY" ]; then unset NPM_CONFIG_REGISTRY; fi && if [ -f .setu-check-task ]; then deno task check; fi && touch /tmp/.setu-checked
 
-FROM ${DENO_IMAGE}
+# The image's files, shared by the fetch stage and the final image so both
+# resolve exactly the same manifests and the same frontend build.
+FROM ${DENO_IMAGE} AS runtime
 ENV NODE_ENV=production
 
 # Which member to build. Redeclared after FROM because an ARG before the first
@@ -217,6 +235,21 @@ COPY --from=frontend /srv/${MEMBERS_DIR}/\${MEMBER}/buil[d] ./build/
 # mounted for this one no-op step only, so nothing the check wrote reaches a layer.
 RUN --mount=type=bind,from=check,source=/tmp/.setu-checked,target=/tmp/.setu-checked true
 
+# Remove the development-only pin before resolving the production import map.
+# Deno 2.9 needs the full-map install pair to complete lazy broker npm edges;
+# an entrypoint-only frozen install can pass while the real broker later refuses.
+# The parser is pinned to an exact version and may read and write only the
+# member and root manifests, so this unlocked fetch cannot float or touch any
+# other file in the image.
+RUN printf '%s' 'import { parse } from "jsr:@std/jsonc@1.0.3"; for (const directory of [".", "/srv"]) { for (const name of ["deno.json", "deno.jsonc"]) { const path = directory + "/" + name; let source; try { source = Deno.readTextFileSync(path); } catch (error) { if (error instanceof Deno.errors.NotFound) continue; throw error; } const manifest = parse(source); if (manifest.imports) { delete manifest.imports["@setu-ts/diagnostics-plugin"]; delete manifest.imports["@setu-ts/testing"]; } Deno.writeTextFileSync(path, JSON.stringify(manifest)); break; } }' | DENO_DIR=/srv/.setu-build-cache deno run --no-config --no-lock --no-prompt --allow-read=./deno.json,./deno.jsonc,/srv/deno.json,/srv/deno.jsonc --allow-write=./deno.json,./deno.jsonc,/srv/deno.json,/srv/deno.jsonc - && rm -rf /srv/.setu-build-cache
+FROM runtime AS fetch
+# The registry the install step resolves from. Unset by default, which is the
+# public npm registry; a gate building against a local registry passes it with
+# \`--build-arg\`. An ARG never reaches the running container's environment, but
+# its value IS recorded in the image history: pass a registry URL here, never a
+# credential — an authenticated registry belongs in a \`--secret\` mount.
+ARG NPM_CONFIG_REGISTRY=
+
 # Three steps, and the LAST one is the guarantee. Deno records a jsr package's
 # npm edge list NONDETERMINISTICALLY on a cold cache: four \`--no-cache\` builds of
 # one unchanged workspace produced \`@setu-ts/messaging-plugin\` entries missing
@@ -237,22 +270,15 @@ RUN --mount=type=bind,from=check,source=/tmp/.setu-checked,target=/tmp/.setu-che
 # boots its real broker drivers under --read-only with no external network (shared
 # loopback).
 #
-# Each chown FOLDS into the RUN that wrote the files (X10-5): a standalone
-# \`chown -R\` rewrites metadata on every file the cache layer created, so
-# overlayfs copies the ENTIRE module cache into a second layer — measured at
-# 563 MB vs 362 MB with the fold, paid on every push and every node pull.
-# Remove the development-only pin before resolving the production import map.
-# Deno 2.9 needs the full-map install pair to complete lazy broker npm edges;
-# an entrypoint-only frozen install can pass while the real broker later refuses.
-# The parser is pinned to an exact version and may read and write only the
-# member and root manifests, so this unlocked fetch cannot float or touch any
-# other file in the image.
-RUN printf '%s' 'import { parse } from "jsr:@std/jsonc@1.0.3"; for (const directory of [".", "/srv"]) { for (const name of ["deno.json", "deno.jsonc"]) { const path = directory + "/" + name; let source; try { source = Deno.readTextFileSync(path); } catch (error) { if (error instanceof Deno.errors.NotFound) continue; throw error; } const manifest = parse(source); if (manifest.imports) { delete manifest.imports["@setu-ts/diagnostics-plugin"]; delete manifest.imports["@setu-ts/testing"]; } Deno.writeTextFileSync(path, JSON.stringify(manifest)); break; } }' | DENO_DIR=/srv/.setu-build-cache deno run --no-config --no-lock --no-prompt --allow-read=./deno.json,./deno.jsonc,/srv/deno.json,/srv/deno.jsonc --allow-write=./deno.json,./deno.jsonc,/srv/deno.json,/srv/deno.jsonc - && rm -rf /srv/.setu-build-cache
-# The registry the install step resolves from. Unset by default, which is the
-# public npm registry; a gate building against a local registry passes it with
-# \`--build-arg\`. An ARG never reaches the running container's environment, but
-# its value IS recorded in the image history: pass a registry URL here, never a
-# credential — an authenticated registry belongs in a \`--secret\` mount.
+# The registry token is mounted for this fetch alone, in a stage of its own that
+# the image never ships. Every command passes \`--node-modules-dir=none\`, so it
+# fills only the global cache and runs no lifecycle script, not even one the
+# project approves with \`allowScripts\` (Deno runs them only into a
+# node_modules directory). It also copies the npmrc's registry settings, without
+# any credential, to /tmp/.setu-npmrc for the install below.
+RUN ${NPMRC_MOUNT} if [ -z "$NPM_CONFIG_REGISTRY" ]; then unset NPM_CONFIG_REGISTRY; fi && deno cache --node-modules-dir=none main.ts && deno install --node-modules-dir=none && deno install --node-modules-dir=none --frozen && deno install --node-modules-dir=none --entrypoint main.ts && deno install --node-modules-dir=none --entrypoint main.ts --frozen && ${NPMRC_REGISTRIES}
+
+FROM runtime
 ARG NPM_CONFIG_REGISTRY=
 
 # After the installs, a root \`nodeModulesDir: "auto"\` (a workspace with a
@@ -263,16 +289,20 @@ ARG NPM_CONFIG_REGISTRY=
 # uses the node_modules this build installed. The root manifest is plain JSON
 # by now, rewritten by the step above.
 #
-# The registry token is mounted for the fetch alone. Every command in that RUN
-# passes \`--node-modules-dir=none\`, so it fills only the global cache and runs
-# no lifecycle script, not even one the project approves with \`allowScripts\`
-# (Deno runs them only into a node_modules directory). The next RUN, without
-# the token, creates node_modules from the cache (\`--cached-only\`), runs any
-# approved scripts there, and verifies the lockfile again with \`--frozen\`. The
-# cache is chowned in the RUN that wrote it; the second RUN chowns only files
-# not yet owned, so the cache is not copied into a second layer (X10-5).
-RUN ${NPMRC_MOUNT} if [ -z "$NPM_CONFIG_REGISTRY" ]; then unset NPM_CONFIG_REGISTRY; fi && deno cache --node-modules-dir=none main.ts && deno install --node-modules-dir=none && deno install --node-modules-dir=none --frozen && deno install --node-modules-dir=none --entrypoint main.ts && deno install --node-modules-dir=none --entrypoint main.ts --frozen && chown -R ${DENO_UID}:${DENO_UID} /deno-dir
-RUN if [ -z "$NPM_CONFIG_REGISTRY" ]; then unset NPM_CONFIG_REGISTRY; fi && deno install --cached-only --frozen && deno install --cached-only --entrypoint main.ts --frozen && printf '%s' 'for (const name of ["deno.json", "deno.jsonc"]) { const path = "/srv/" + name; let source; try { source = Deno.readTextFileSync(path); } catch (error) { if (error instanceof Deno.errors.NotFound) continue; throw error; } const manifest = JSON.parse(source); if (manifest.nodeModulesDir === "auto") { manifest.nodeModulesDir = "manual"; Deno.writeTextFileSync(path, JSON.stringify(manifest)); } break; }' | deno run --no-config --no-prompt --allow-read=/srv/deno.json,/srv/deno.jsonc --allow-write=/srv/deno.json,/srv/deno.jsonc - && find /srv /deno-dir ! -user ${DENO_UID} -exec chown ${DENO_UID}:${DENO_UID} {} +
+# The chown FOLDS into the RUN that writes the files (X10-5): a standalone
+# \`chown -R\` rewrites metadata on every file the cache layer created, so
+# overlayfs copies the ENTIRE module cache into a second layer — measured at
+# 563 MB vs 362 MB with the fold, paid on every push and every node pull.
+#
+# One RUN, without the token. The fetch stage's cache, its lockfile (which
+# \`deno install\` may have completed) and its registry settings are
+# bind-mounted, never copied into a layer of their own. The cache is copied in,
+# node_modules is created from it with \`--cached-only\` (any approved script
+# runs here), the lockfile is verified again with \`--frozen\`, and ownership is
+# fixed, all in one layer: node_modules hard-links into the cache, and a hard
+# link cannot reach a lower layer, so splitting these would store each package
+# twice.
+RUN --mount=type=bind,from=fetch,source=/deno-dir,target=/tmp/.setu-fetched-cache --mount=type=bind,from=fetch,source=/srv,target=/tmp/.setu-fetched-srv --mount=type=bind,from=fetch,source=/tmp/.setu-npmrc,target=/root/.npmrc if [ -z "$NPM_CONFIG_REGISTRY" ]; then unset NPM_CONFIG_REGISTRY; fi && cp -a /tmp/.setu-fetched-cache/. /deno-dir/ && if [ -f /tmp/.setu-fetched-srv/deno.lock ]; then cp /tmp/.setu-fetched-srv/deno.lock /srv/deno.lock; fi && deno install --cached-only --frozen && deno install --cached-only --entrypoint main.ts --frozen && printf '%s' 'for (const name of ["deno.json", "deno.jsonc"]) { const path = "/srv/" + name; let source; try { source = Deno.readTextFileSync(path); } catch (error) { if (error instanceof Deno.errors.NotFound) continue; throw error; } const manifest = JSON.parse(source); if (manifest.nodeModulesDir === "auto") { manifest.nodeModulesDir = "manual"; Deno.writeTextFileSync(path, JSON.stringify(manifest)); } break; }' | deno run --no-config --no-prompt --allow-read=/srv/deno.json,/srv/deno.jsonc --allow-write=/srv/deno.json,/srv/deno.jsonc - && chown -R ${DENO_UID}:${DENO_UID} /srv /deno-dir
 
 # NUMERIC, not \`USER deno\`: Kubernetes' runAsNonRoot refuses an image whose user
 # is a name — "cannot verify user is non-root" — while Docker resolves it happily,
