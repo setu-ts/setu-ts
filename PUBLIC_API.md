@@ -582,9 +582,10 @@ the adapter's optional `isHealthy()` through a cached probe (5 s cache, 2 s boun
 times out; `down` with `state: 'closed'` after shutdown; and `up` with `reachable: 'unknown'` for an
 adapter without the method or one whose `isHealthy()` resolves `undefined` (it could not tell). The
 built-in adapters probe without touching data: whether Qdrant's first declared collection exists (an
-endpoint that needs the API key), `SELECT 1` for pgvector (skipped, answering `undefined`, while a
-node-postgres pool has no idle connection and callers waiting), the Vectorize index's `describe()`,
-and always `true` in memory.
+endpoint that needs the API key), `SELECT 1` for pgvector (on a saturated node-postgres pool, or
+when the probe's own pool checkout times out, it answers `undefined` while its statements keep
+completing and `false` once they have stopped for 10 seconds, database-plugin's progress rule), the
+Vectorize index's `describe()`, and always `true` in memory.
 
 | Export                                                                                                                                                                 | Kind     | Purpose                                                                 |
 | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ----------------------------------------------------------------------- |

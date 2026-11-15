@@ -488,8 +488,8 @@ maintainer directed that they be fixed on this branch rather than in a follow-up
 - **Vector-store readiness** (`common`, `vector-store-plugin`, `cloudflare-plugin`): an optional
   `IVectorStoreAdapter.isHealthy(): Promise<boolean | undefined>`, implemented by every built-in
   adapter without touching data (Qdrant checks its first collection, so a revoked API key reads as
-  down; pgvector skips a saturated pool and answers `undefined`, as database-plugin does since
-  M101a), and a `vector-store` indicator in readiness by default, cached 5 s and bounded 2 s, `down`
-  with `state: 'closed'` after shutdown. Tests: unit (indicator states, cache, timeout, each probe),
-  kernel integration (registration and close), and a conformance row run against real pgvector and
-  Qdrant 1.16.
+  down; pgvector applies database-plugin's M101a progress rule to a saturated pool: `undefined`
+  while its statements keep completing, `false` once they stop for 10 s), and a `vector-store`
+  indicator in readiness by default, cached 5 s and bounded 2 s, `down` with `state: 'closed'` after
+  shutdown. Tests: unit (indicator states, cache, timeout, each probe), kernel integration
+  (registration and close), and a conformance row run against real pgvector and Qdrant 1.16.

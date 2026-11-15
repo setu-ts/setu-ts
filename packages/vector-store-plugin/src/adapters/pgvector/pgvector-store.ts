@@ -126,6 +126,12 @@ export class PgVectorStore implements IVectorStoreAdapter {
   readonly #onClose: (() => void | Promise<void>) | undefined;
   readonly #load: DrizzleLoader;
   #sql: SqlTag | undefined;
+  /** The runtime's monotonic clock, from `open()`; without it progress is unobservable. */
+  #hrtime: (() => number) | undefined;
+  /** This adapter's statements now running, for the readiness progress rule. */
+  #inFlight = 0;
+  /** When one of this adapter's statements last completed, on {@linkcode #hrtime}. */
+  #lastCompletedAt: number | undefined;
 
   /**
    * @param options - The database, ensure mode and shutdown callback
@@ -161,11 +167,13 @@ export class PgVectorStore implements IVectorStoreAdapter {
    * otherwise be an unhandled `'error'` event that exits the process. The
    * application's own pool listener is kept.
    *
-   * @param _runtime - Unused; part of the adapter contract
+   * @param runtime - Its monotonic clock dates statement completions for the
+   *   readiness progress rule (see {@linkcode isHealthy})
    * @param logger - Where a dropped connection is reported, when registered
    * @returns Once the extension is present and at least 0.8.0
    */
-  async open(_runtime?: IRuntimeServices, logger?: ILogger): Promise<void> {
+  async open(runtime?: IRuntimeServices, logger?: ILogger): Promise<void> {
+    this.#hrtime = runtime === undefined ? undefined : () => runtime.hrtime();
     attachPoolErrorListener(this.#db, (message, meta) => logger?.warn(message, meta));
     this.#sql = await this.#load();
     const version = await this.#versionOf();
@@ -325,12 +333,18 @@ export class PgVectorStore implements IVectorStoreAdapter {
   /**
    * Reachability for readiness: `SELECT 1` through the application's database.
    *
-   * A saturated pool (no idle connection and callers waiting, read from a
-   * node-postgres pool's own counters) is not an outage: no probe is queued
-   * behind that traffic, and the answer is `undefined`, as database-plugin's
-   * probe does (M101a V8-3). A pool that exposes no counters is probed.
+   * A saturated pool is not by itself an outage, so it gets database-plugin's
+   * progress rule (M101a V8-3, M139f): while the pool has no idle connection
+   * and callers waiting (a node-postgres pool's own counters), no probe is
+   * queued behind that traffic; and when the probe itself times out waiting for
+   * a busy connection (pg-pool drops the waiter first, so the counters no longer
+   * show it), the timeout is that same evidence. Either way the answer is
+   * `undefined` (could not tell) while this adapter's statements are still
+   * completing, and `false` once they have stopped for
+   * {@linkcode QUERY_PROGRESS_WINDOW_MS}. A pool exposing no counters is probed.
    *
-   * @returns `true` once the database answered, `undefined` for a saturated pool
+   * @returns `true` once the database answered, `undefined` for a saturated
+   *   pool that is still serving, `false` for one that has stopped
    */
   async isHealthy(): Promise<boolean | undefined> {
     const pool = (this.#db as { readonly $client?: unknown }).$client as
@@ -341,10 +355,15 @@ export class PgVectorStore implements IVectorStoreAdapter {
       pool.idleCount === 0 &&
       pool.waitingCount > 0
     ) {
-      return undefined;
+      return this.#progressing() ? undefined : false;
     }
     const sql = this.#tag();
-    await this.#run(() => this.#db.execute(sql`SELECT 1`));
+    try {
+      await this.#run(() => this.#db.execute(sql`SELECT 1`));
+    } catch (error) {
+      if (isPoolAcquireTimeout(error)) return this.#progressing() ? undefined : false;
+      throw error;
+    }
     return true;
   }
 
@@ -369,11 +388,31 @@ export class PgVectorStore implements IVectorStoreAdapter {
 
   /** Runs a driver call, turning a connection failure into a 503/504 backend fault. */
   async #run<T>(call: () => Promise<T>): Promise<T> {
+    this.#inFlight += 1;
     try {
-      return await call();
+      const result = await call();
+      this.#lastCompletedAt = this.#hrtime?.();
+      return result;
     } catch (error) {
       throw toBackendFault(error, 'vector-store-plugin: pgvector') ?? error;
+    } finally {
+      this.#inFlight -= 1;
     }
+  }
+
+  /**
+   * Whether a saturated pool is still serving, by database-plugin's rule
+   * (M101a): one of this adapter's statements completed within
+   * {@linkcode QUERY_PROGRESS_WINDOW_MS}, or none is running (the pool is busy
+   * with the application's own work, which this adapter cannot see), or there
+   * is no clock to tell.
+   */
+  #progressing(): boolean {
+    const now = this.#hrtime?.();
+    if (now === undefined || this.#inFlight === 0) return true;
+    return (
+      this.#lastCompletedAt !== undefined && now - this.#lastCompletedAt <= QUERY_PROGRESS_WINDOW_MS
+    );
   }
 
   #tag(): SqlTag {
@@ -387,4 +426,36 @@ export class PgVectorStore implements IVectorStoreAdapter {
 function atLeast(version: string, [major, minor]: readonly [number, number]): boolean {
   const [a, b] = version.split('.').map((part) => Number.parseInt(part, 10));
   return a !== undefined && b !== undefined && (a > major || (a === major && b >= minor));
+}
+
+/** How long a saturated pool may go without one of this adapter's statements completing. */
+export const QUERY_PROGRESS_WINDOW_MS = 10_000;
+
+/** pg-pool's text when a checkout waited for a busy client past `connectionTimeoutMillis`. */
+const PG_POOL_TIMEOUT_ANCHOR = 'timeout exceeded when trying to connect';
+
+/**
+ * Whether node-postgres's pool timed out waiting for a busy client: the exact
+ * pg-pool text anywhere in the cause chain, with no driver error code (a code
+ * means the database answered). database-plugin reads it the same way.
+ */
+export function isPoolAcquireTimeout(error: unknown): boolean {
+  let hasCode = false;
+  let anchored = false;
+  const seen = new Set<unknown>();
+  for (
+    let current = error;
+    current !== null && typeof current === 'object' && !seen.has(current);
+  ) {
+    seen.add(current);
+    const { code, message, cause } = current as {
+      code?: unknown;
+      message?: unknown;
+      cause?: unknown;
+    };
+    if (typeof code === 'string') hasCode = true;
+    if (message === PG_POOL_TIMEOUT_ANCHOR) anchored = true;
+    current = cause;
+  }
+  return anchored && !hasCode;
 }

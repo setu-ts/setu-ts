@@ -18,7 +18,11 @@ import {
   VectorVersionConflictError,
 } from '@setu-ts/common';
 import type { VectorCollectionSpec } from '@setu-ts/common';
-import { PgVectorStore } from '../../src/adapters/pgvector/pgvector-store.ts';
+import {
+  isPoolAcquireTimeout,
+  PgVectorStore,
+  QUERY_PROGRESS_WINDOW_MS,
+} from '../../src/adapters/pgvector/pgvector-store.ts';
 import type { SqlTag } from '../../src/adapters/pgvector/pgvector-sql.ts';
 import { filterCondition } from '../../src/adapters/pgvector/pgvector-sql.ts';
 
@@ -623,20 +627,80 @@ describe('PgVectorStore.isHealthy', () => {
     await expect(down.store.isHealthy()).rejects.toThrow();
   });
 
-  it('skips the query for a saturated pool and answers it could not tell', async () => {
-    for (const [idleCount, waitingCount, expected, queried] of [
-      [0, 3, undefined, false],
-      [0, 0, true, true],
-      [2, 3, true, true],
-    ] as const) {
-      const recording = recordingDb(healthy());
-      Object.assign(recording.db, { $client: { idleCount, waitingCount } });
-      const store = new PgVectorStore({ db: recording.db });
-      await store.open();
-      recording.statements.length = 0;
-      expect(await store.isHealthy()).toBe(expected);
-      expect(recording.statements.some((s) => s.text === 'SELECT 1')).toBe(queried);
+  /** A store over a pool reporting `counters`, opened with a clock the test moves. */
+  async function saturatedStore(
+    counters: { idleCount: number; waitingCount: number } | undefined,
+    respond: Responder = healthy(),
+  ) {
+    const recording = recordingDb(respond);
+    if (counters !== undefined) Object.assign(recording.db, { $client: counters });
+    const store = new PgVectorStore({ db: recording.db });
+    let now = 0;
+    await store.open({ hrtime: () => now } as never);
+    return { store, ...recording, advance: (ms: number) => (now += ms) };
+  }
+
+  it('probes a pool with an idle connection, or no waiter, or no counters', async () => {
+    for (const counters of [
+      { idleCount: 0, waitingCount: 0 },
+      { idleCount: 2, waitingCount: 3 },
+      undefined,
+    ]) {
+      const h = await saturatedStore(counters);
+      h.statements.length = 0;
+      expect(await h.store.isHealthy()).toBe(true);
+      expect(h.statements.map((s) => s.text)).toEqual(['SELECT 1']);
     }
+  });
+
+  it('answers it could not tell for a saturated pool while statements complete, and false once they stop', async () => {
+    // No statement of its own in flight: the pool is busy with the application's work.
+    const idle = await saturatedStore({ idleCount: 0, waitingCount: 3 });
+    idle.statements.length = 0;
+    expect(await idle.store.isHealthy()).toBeUndefined();
+    expect(idle.statements).toEqual([]);
+
+    // A statement in flight, and one completed within the window: still serving.
+    let release: () => void = () => {};
+    const hanging = new Promise<{ rows: [] }>((resolve) => (release = () => resolve({ rows: [] })));
+    const busy = await saturatedStore({ idleCount: 0, waitingCount: 3 }, (rendered) =>
+      rendered.text.startsWith('DELETE') ? hanging : healthy()(rendered),
+    );
+    const pending = busy.store.delete(spec, 'tenant-a', ['r1']);
+    busy.advance(QUERY_PROGRESS_WINDOW_MS);
+    expect(await busy.store.isHealthy()).toBeUndefined();
+    // Past the window with that statement still running: stopped.
+    busy.advance(1);
+    expect(await busy.store.isHealthy()).toBe(false);
+    release();
+    await pending;
+  });
+
+  it("reads the probe's own pool-acquire timeout as saturation, but not an answer with a code", async () => {
+    const timeout = Object.assign(new Error('timeout exceeded when trying to connect'), {});
+    const h = await saturatedStore({ idleCount: 0, waitingCount: 0 }, (rendered) =>
+      rendered.text === 'SELECT 1' ? timeout : healthy()(rendered),
+    );
+    expect(await h.store.isHealthy()).toBeUndefined();
+    expect(isPoolAcquireTimeout(new Error('wrapped', { cause: timeout }))).toBe(true);
+    expect(
+      isPoolAcquireTimeout(
+        Object.assign(new Error('timeout exceeded when trying to connect'), { code: '57014' }),
+      ),
+    ).toBe(false);
+    expect(isPoolAcquireTimeout(new Error('connection terminated'))).toBe(false);
+    const refused = await saturatedStore(undefined, (rendered) =>
+      rendered.text === 'SELECT 1' ? new Error('connection terminated') : healthy()(rendered),
+    );
+    await expect(refused.store.isHealthy()).rejects.toThrow();
+  });
+
+  it('answers it could not tell for a saturated pool when opened without a clock', async () => {
+    const recording = recordingDb(healthy());
+    Object.assign(recording.db, { $client: { idleCount: 0, waitingCount: 1 } });
+    const store = new PgVectorStore({ db: recording.db });
+    await store.open();
+    expect(await store.isHealthy()).toBeUndefined();
   });
 
   it('refuses before open()', async () => {

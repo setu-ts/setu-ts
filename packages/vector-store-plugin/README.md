@@ -421,12 +421,14 @@ probe that fails, rejects or runs past that bound reports `down` with `reachable
 | `VectorizeVectorStore` | the index's `describe()`                                                                 |
 | `MemoryVectorStore`    | always reachable                                                                         |
 
-A saturated node-postgres pool, with no idle connection and callers waiting, is not an outage:
-`PgVectorStore` queues no probe behind that traffic and answers that it cannot tell, and the
-indicator stays `up` with `reachable: 'unknown'`, as database-plugin's own probe does. An adapter
-without `isHealthy()` reports the same. After shutdown the indicator reports `down` with
-`state: 'closed'`. To keep it out of readiness, exclude it in
-`HealthPlugin({ readiness: { exclude: ['vector-store'] } })`.
+A saturated node-postgres pool, with no idle connection and callers waiting, is not by itself an
+outage. `PgVectorStore` queues no probe behind that traffic, and reads the probe's own pool-acquire
+timeout as the same saturation. The indicator stays `up` with `reachable: 'unknown'` while the
+adapter's own statements keep completing, or none is running. Once they have stopped completing for
+10 seconds it reports `down`. This is database-plugin's progress rule; database-plugin reports that
+last case as `degraded`, and both fail `/ready`. An adapter without `isHealthy()` stays `up` with
+`reachable: 'unknown'`. After shutdown the indicator reports `down` with `state: 'closed'`. To keep
+it out of readiness, exclude it in `HealthPlugin({ readiness: { exclude: ['vector-store'] } })`.
 
 ## Errors
 
