@@ -45,10 +45,10 @@ A conventional React Router application grows these, and this one has none of th
 | Hand-rolled logger                      | `logger-plugin`, resolved through `CAPABILITIES.LOGGER`          |
 | Module-level client caches              | the kernel service registry                                      |
 
-`app/server/session.server.ts` provides typed access to session, CSRF and signed-in-user values and holds **no
-state**. `test/removal.test.ts` asserts the absence of hand-rolled capabilities, stateless accessors
-and both directions of context-key wiring. Kernel services use `getService` instead of application
-context keys.
+`app/server/session.server.ts` provides typed access to session, CSRF and signed-in-user values and
+holds **no state**. `test/removal.test.ts` asserts the absence of hand-rolled capabilities,
+stateless accessors and both directions of context-key wiring. Kernel services use `getService`
+instead of application context keys.
 
 ## Layering
 
@@ -86,9 +86,10 @@ repository root with `pnpm install --frozen-lockfile`. Frontend tooling stays in
 dependencies, outside the published framework dependency graph (AI_GUIDELINES §12.2).
 
 `build/`, `.react-router/` and `node_modules/` are generated and ignored by repository formatting
-and linting. The app's `check` script runs the React Router build and then uses its generated `tsconfig.json`, which includes the `app/`
-and `src/` TypeScript and TSX files. `pnpm run check:apps` runs that check, then the smoke and test
-scripts. Vite's build strips types; the TypeScript check is separate.
+and linting. The app's `check` script runs the React Router build and then uses its generated
+`tsconfig.json`, which includes the `app/` and `src/` TypeScript and TSX files.
+`pnpm run check:apps` runs that check, then the smoke and test scripts. Vite's build strips types;
+the TypeScript check is separate.
 
 ## Browser verification
 
