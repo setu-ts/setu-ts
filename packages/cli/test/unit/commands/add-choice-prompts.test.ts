@@ -1,0 +1,205 @@
+/**
+ * Tests for the terminal prompt `setu add` shows for every option that selects one
+ * of several values, driven by the `ADD_CHOICES` table.
+ *
+ * @module
+ */
+
+import { describe, expect, it } from 'vitest';
+
+import { createFakeFs } from '../../fixtures/fake-fs.ts';
+import { ADD_CHOICES } from '../../../src/commands/add.ts';
+import { runCli } from '../../../src/cli.ts';
+import { EXIT_INTERRUPTED } from '../../../src/constants.ts';
+import type { PromptChoice, PromptSelection } from '../../../src/prompt.ts';
+import type { IFileSystem } from '@setu-ts/common';
+
+/** A recorded question: the text and the values offered, in order. */
+interface Asked {
+  readonly question: string;
+  readonly values: readonly string[];
+}
+
+/** A prompter that records every question and answers from `answer`. */
+function recorder(answer: (asked: Asked) => PromptSelection = () => ({ kind: 'unavailable' })): {
+  readonly asked: Asked[];
+  readonly ask: {
+    select: (question: string, choices: readonly PromptChoice[]) => Promise<PromptSelection>;
+  };
+} {
+  const asked: Asked[] = [];
+  return {
+    asked,
+    ask: {
+      select: (question, choices) => {
+        const entry = { question, values: choices.map((choice) => choice.value) };
+        asked.push(entry);
+        return Promise.resolve(answer(entry));
+      },
+    },
+  };
+}
+
+function deps(fs: IFileSystem, ask?: ReturnType<typeof recorder>['ask'], cwd = '/app') {
+  const out: string[] = [];
+  const err: string[] = [];
+  return {
+    out,
+    err,
+    deps: {
+      fs,
+      cwd,
+      now: () => 0,
+      log: (line: string) => out.push(line),
+      error: (line: string) => err.push(line),
+      ...(ask === undefined ? {} : { ask }),
+    },
+  };
+}
+
+/** The CLI name of a package (`cache-plugin` → `cache`). */
+const short = (pkg: string): string => pkg.replace(/-plugin$/, '');
+
+describe('setu add choice prompts', () => {
+  // Every row of the table, as data: each standalone choice is asked for its first
+  // package, with exactly the values the table lists, default first.
+  for (const choice of ADD_CHOICES.filter((entry) => entry.after === undefined)) {
+    it(`asks --${choice.flag} for ${short(choice.packages[0]!)} with every accepted value`, async () => {
+      const fs = createFakeFs({ '/app/package.json': '{}' });
+      const prompt = recorder();
+      const run = deps(fs, prompt.ask);
+      expect(await runCli(['add', short(choice.packages[0]!)], run.deps), run.err.join('\n')).toBe(
+        0,
+      );
+      expect(prompt.asked).toContainEqual({
+        question: `Choose the ${choice.flag} for ${choice.packages[0]}`,
+        values: choice.values(),
+      });
+      expect(choice.values().length).toBeGreaterThan(1);
+    });
+  }
+
+  it('lists memory (or log) first, so Enter keeps the documented default', () => {
+    for (const choice of ADD_CHOICES) {
+      const first = choice.values()[0];
+      expect(['memory', 'log', 'postgresql']).toContain(first);
+    }
+  });
+
+  it('passes the answer on: --store redis wires the Redis cache store', async () => {
+    const fs = createFakeFs({ '/app/package.json': '{}' });
+    const prompt = recorder(({ values }) => ({ kind: 'answer', value: values.at(-1)! }));
+    const run = deps(fs, prompt.ask);
+    expect(await runCli(['add', 'cache'], run.deps), run.err.join('\n')).toBe(0);
+    expect(prompt.asked.map((entry) => entry.question)).toEqual([
+      'Choose the store for cache-plugin',
+    ]);
+    expect(fs.read('/app/package.json')).toContain('ioredis');
+  });
+
+  it('asks --dialect only after --type drizzle is chosen', async () => {
+    for (const [type, expected] of [
+      ['drizzle', ['type', 'dialect']],
+      ['memory', ['type']],
+    ] as const) {
+      const fs = createFakeFs({ '/app/package.json': '{}' });
+      const prompt = recorder(({ question, values }) =>
+        question.startsWith('Choose the type')
+          ? { kind: 'answer', value: type }
+          : { kind: 'answer', value: values.at(-1)! },
+      );
+      const run = deps(fs, prompt.ask);
+      expect(await runCli(['add', 'database'], run.deps), run.err.join('\n')).toBe(0);
+      expect(prompt.asked.map((entry) => entry.question.split(' ')[2])).toEqual(expected);
+      // The answer reaches the command: the chosen dialect's driver is in the install line.
+      if (type === 'drizzle') expect(run.out.join('\n')).toContain('@libsql/client');
+    }
+  });
+
+  it('asks a shared flag once for every package that takes it', async () => {
+    const fs = createFakeFs({ '/app/package.json': '{}' });
+    const prompt = recorder();
+    const run = deps(fs, prompt.ask);
+    expect(await runCli(['add', 'cache', 'idempotency'], run.deps), run.err.join('\n')).toBe(0);
+    expect(prompt.asked.map((entry) => entry.question)).toEqual([
+      'Choose the store for cache-plugin',
+    ]);
+  });
+
+  it('does not ask for a flag already given, and asks nothing with --yes or -y', async () => {
+    const given = recorder();
+    const run = deps(createFakeFs({ '/app/package.json': '{}' }), given.ask);
+    expect(await runCli(['add', 'messaging', '--broker', 'memory'], run.deps)).toBe(0);
+    expect(given.asked).toEqual([]);
+    for (const yes of ['--yes', '-y']) {
+      const prompt = recorder();
+      const quiet = deps(createFakeFs({ '/app/package.json': '{}' }), prompt.ask);
+      expect(await runCli(['add', 'messaging', 'mail', 'database', yes], quiet.deps)).toBe(0);
+      expect(prompt.asked).toEqual([]);
+    }
+  });
+
+  it('keeps the default when the prompter has no terminal answer', async () => {
+    const fs = createFakeFs({ '/app/package.json': '{}' });
+    const prompt = recorder(() => ({ kind: 'unavailable' }));
+    const run = deps(fs, prompt.ask);
+    expect(await runCli(['add', 'mail'], run.deps)).toBe(0);
+    expect(prompt.asked).toHaveLength(1);
+    expect(fs.read('/app/package.json')).not.toContain('nodemailer');
+  });
+
+  it('stops with the interrupted code and writes nothing when a question is cancelled', async () => {
+    const fs = createFakeFs({ '/app/package.json': '{}' });
+    const prompt = recorder(() => ({ kind: 'cancelled' }));
+    const run = deps(fs, prompt.ask);
+    expect(await runCli(['add', 'queue'], run.deps)).toBe(EXIT_INTERRUPTED);
+    expect(fs.read('/app/package.json')).toBe('{}');
+  });
+
+  it('does not ask a Workers project for a transport backend, but still asks mail', async () => {
+    const fs = createFakeFs({ '/app/package.json': '{}', '/app/wrangler.toml': '' });
+    const prompt = recorder();
+    const run = deps(fs, prompt.ask);
+    expect(await runCli(['add', 'cache', 'mail'], run.deps), run.err.join('\n')).toBe(0);
+    expect(prompt.asked.map((entry) => entry.question)).toEqual([
+      'Choose the provider for mail-plugin',
+    ]);
+  });
+
+  it('does not ask a workspace member for a transport backend', async () => {
+    const fs = createFakeFs();
+    const setup = deps(fs);
+    expect(await runCli(['new', 'ws', '--workspace'], setup.deps)).toBe(0);
+    expect(
+      await runCli(['g', 'app', 'api', '--template', 'rest'], { ...setup.deps, cwd: '/app/ws' }),
+    ).toBe(0);
+    const prompt = recorder();
+    const member = deps(fs, prompt.ask, '/app/ws/apps/api');
+    expect(await runCli(['add', 'realtime-backplane'], member.deps), member.err.join('\n')).toBe(0);
+    expect(prompt.asked).toEqual([]);
+  });
+
+  it('asks no transport question when the runtime marker cannot be read', async () => {
+    const base = createFakeFs({ '/app/package.json': '{}' });
+    const fs: IFileSystem = {
+      ...base,
+      stat: (path: string) =>
+        path === '/app/deno.json'
+          ? Promise.reject(Object.assign(new Error('EACCES'), { code: 'EACCES' }))
+          : base.stat(path),
+    };
+    const prompt = recorder();
+    const run = deps(fs, prompt.ask);
+    expect(await runCli(['add', 'messaging'], run.deps)).not.toBe(0);
+    expect(prompt.asked).toEqual([]);
+  });
+
+  it('documents every choice in the help text, from the same table', async () => {
+    const run = deps(createFakeFs({}));
+    expect(await runCli(['add', '--help'], run.deps)).toBe(0);
+    const help = run.out.join('\n');
+    for (const choice of ADD_CHOICES)
+      expect(help).toContain(`--${choice.flag} ${choice.values().join('|')} selects`);
+    expect(help).toContain('--yes, -y takes every');
+  });
+});

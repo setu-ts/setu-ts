@@ -61,6 +61,7 @@ import type { EnvVariable } from '../templates/registry.ts';
 import {
   brokerComposeFiles,
   brokerEnvVariables,
+  armFlagValues,
   missingComposeServices,
   readArmFlag,
   redisClientRefusal,
@@ -1712,6 +1713,110 @@ const DRIZZLE_DIALECTS: Readonly<Record<string, readonly string[]>> = {
   sqlite: ['@libsql/client'],
 };
 
+/** One `setu add` option that selects one of several values. */
+interface AddChoice {
+  /** The flag, without dashes. */
+  readonly flag: string;
+  /** The packages it applies to. */
+  readonly packages: readonly string[];
+  /** The accepted values, default first. */
+  readonly values: () => readonly string[];
+  /**
+   * A transport backend: refused inside a workspace member (members share the
+   * workspace broker) and on Cloudflare Workers, so neither is asked.
+   */
+  readonly standaloneOnly?: boolean;
+  /** Asked only once another choice has this value. */
+  readonly after?: { readonly flag: string; readonly value: string };
+}
+
+/**
+ * Every `setu add` option with more than one value, in the order a terminal asks.
+ *
+ * One table for the prompt and the help text. Validation stays with each flag's
+ * own reader ({@linkcode BACKEND_PEERS}, {@linkcode DRIZZLE_DIALECTS},
+ * `readArmFlag`), and the values come from the same sources, so a prompt can
+ * only offer what the command then accepts.
+ */
+export const ADD_CHOICES: readonly AddChoice[] = [
+  ...Object.entries(BACKEND_PEERS).map(([pkg, backend]) => ({
+    flag: backend.flag,
+    packages: [pkg],
+    values: () => Object.keys(backend.arms),
+  })),
+  {
+    flag: 'dialect',
+    packages: ['database-plugin'],
+    values: () => Object.keys(DRIZZLE_DIALECTS),
+    after: { flag: 'type', value: 'drizzle' },
+  },
+  ...(
+    [
+      ['broker', ['messaging-plugin']],
+      ['queue', ['queue-plugin']],
+      ['store', ['cache-plugin', 'idempotency-plugin']],
+      ['lock', ['scheduler-plugin']],
+      ['backplane', ['realtime-backplane-plugin']],
+    ] as const
+  ).map(([flag, packages]) => ({
+    flag,
+    packages,
+    values: () => armFlagValues(flag),
+    standaloneOnly: true,
+  })),
+];
+
+/**
+ * Asks, in a terminal, for every choice the selected packages leave open.
+ *
+ * Nothing is asked with `--yes`, without a prompter (no terminal), for a flag
+ * already given, or for a transport backend the command would refuse here: a
+ * workspace member takes the workspace broker, and Workers has no wiring. A
+ * flag several packages share (`--store`) is asked once.
+ *
+ * @returns The flags with the answers added, or `undefined` when the user cancelled
+ */
+async function askOpenChoices(
+  args: ParsedArgs,
+  deps: AddCommandDependencies,
+  packages: readonly string[],
+): Promise<Record<string, string | boolean | readonly string[]> | undefined> {
+  const flags: Record<string, string | boolean | readonly string[]> = { ...args.flags };
+  const ask = deps.ask;
+  if (ask === undefined || args.flags.yes === true || args.flags.y === true) return flags;
+  let standalone: boolean | undefined;
+  const isStandalone = async (): Promise<boolean> => {
+    if (standalone !== undefined) return standalone;
+    const dir = resolveDir(deps.cwd, stringFlag(args.flags, 'dir'));
+    let runtime: TargetRuntime | undefined;
+    try {
+      runtime = await detectTargetRuntime(deps.fs, dir);
+    } catch {
+      // The command reports an unreadable runtime marker itself; asking first would hide it.
+      runtime = undefined;
+    }
+    standalone =
+      runtime !== undefined &&
+      runtime !== 'cloudflare-workers' &&
+      (await workspaceMemberOf(deps.fs, dir)) === undefined;
+    return standalone;
+  };
+  for (const choice of ADD_CHOICES) {
+    if (flags[choice.flag] !== undefined) continue;
+    const bare = packages.find((pkg) => choice.packages.includes(pkg));
+    if (bare === undefined) continue;
+    if (choice.after !== undefined && flags[choice.after.flag] !== choice.after.value) continue;
+    if (choice.standaloneOnly === true && !(await isStandalone())) continue;
+    const answer = await ask.select(
+      `Choose the ${choice.flag} for ${bare}`,
+      choice.values().map((value) => ({ value, label: value })),
+    );
+    if (answer.kind === 'cancelled') return undefined;
+    if (answer.kind === 'answer') flags[choice.flag] = answer.value;
+  }
+  return flags;
+}
+
 function appBackendPackages(bare: string, arm: string, dialect = 'postgresql'): readonly string[] {
   if (bare === 'database-plugin' && arm === 'prisma')
     return ['@prisma/client', '@prisma/adapter-pg', 'pg'];
@@ -1789,24 +1894,8 @@ export async function runAddCommand(
       return EXIT_USAGE;
     }
   }
-  const selectedFlags = { ...args.flags };
-  for (const bare of packages) {
-    const backend = BACKEND_PEERS[bare];
-    if (backend === undefined) continue;
-    if (
-      selectedFlags[backend.flag] === undefined &&
-      args.flags.yes !== true &&
-      args.flags.y !== true &&
-      deps.ask !== undefined
-    ) {
-      const answer = await deps.ask.select(
-        `Choose the ${backend.flag} for ${bare}`,
-        Object.keys(backend.arms).map((value) => ({ value, label: value })),
-      );
-      if (answer.kind === 'cancelled') return EXIT_INTERRUPTED;
-      if (answer.kind === 'answer') selectedFlags[backend.flag] = answer.value;
-    }
-  }
+  const selectedFlags = await askOpenChoices(args, deps, packages);
+  if (selectedFlags === undefined) return EXIT_INTERRUPTED;
   const requests = packages.map((bare) => ({
     positionals: [bare],
     flags: Object.fromEntries(
@@ -3215,13 +3304,16 @@ function printAddHelp(log: (message: string) => void): void {
   log(
     '--plugin-only installs view without examples (the full-stack default); incompatible with --module.',
   );
-  log(
-    '--provider log|smtp|ses|sendgrid selects mail; --type memory|drizzle|prisma|mongodb|dynamodb|cosmos|bigtable selects database.',
-  );
-  log(
-    '--adapter memory|pgvector|qdrant selects vector-store; --dialect postgresql|sqlite selects Drizzle schema tooling.',
-  );
-  log('--yes, -y takes backend defaults without prompting.');
+  // Generated from the table the prompt reads, so the two cannot list different values.
+  for (const choice of ADD_CHOICES) {
+    const targets = choice.packages.map((pkg) => pkg.replace(/-plugin$/, '')).join(' and ');
+    const after =
+      choice.after === undefined ? '' : ` (with --${choice.after.flag} ${choice.after.value})`;
+    log(`--${choice.flag} ${choice.values().join('|')} selects ${targets}${after}.`);
+  }
+  log('In a terminal, each of these that is left out is asked, default first; a workspace member');
+  log('and a Workers project are not asked for a transport backend. --yes, -y takes every');
+  log('default without prompting.');
   log('');
   log('Adds a Setu-TS package to this project, pinned to the version of the CLI');
   log("that added it — so a project's framework packages stay on one version.");

@@ -62,6 +62,12 @@ All notable changes to this project are documented here. The format follows
   diagnostics allowlist and says `dev` needs the launcher's credentials (V12-128); `start` says to
   build first whenever a build command exists; the Node devtool `dev` script loads the project's env
   files and the telemetry preload (V12-127).
+- **`@setu-ts/cli` (M140d, PR pending).** `setu add` at a terminal now asks for every left-out
+  choice, not only mail's provider, the database type and the vector-store adapter: `--dialect`
+  after Drizzle, and the transport backends `--broker`, `--queue`, `--store`, `--lock` and
+  `--backplane`, default first. A flag shared by two listed packages is asked once; a workspace
+  member and a Workers project are not asked for a transport backend. One table drives the prompt
+  and `setu add --help`. `--yes` and a non-terminal still take every default.
 - **`@setu-ts/cli` (M140a, #589).** Generated application bodies are bounded at 1 MiB; module names
   and ids have length limits. New projects generate local session secrets, ignore local secret files
   and Deno node_modules, and name required Docker environment variables. Session installation writes

@@ -873,13 +873,15 @@ and a light/dark/system toggle. Run `npx shadcn add <component>` to add more com
 
 `setu add` accepts several names and validates the complete request before writing. Backend flags
 are `--provider` (mail), `--type` (database), `--adapter` (vector-store), and `--dialect` for
-Drizzle. A terminal asks when no backend flag is supplied; `--yes` takes the default. Existing peer
-pins, scripts and config files are preserved. Drizzle and Prisma add schema migration scripts and
-create-only configs; schemas and client instances belong to the application. Deno prints schema
-commands and Workers writes none. `view --plugin-only` installs only the capability and compatible
-JSX settings; it is the full-stack default and refuses `--module`. `mcp` leaves `setu.config.ts`
-unchanged and prints `McpPlugin({})` with the note that the app boots with it only once at least one
-route is marked with `mcpTool()` or `@McpTool()`.
+Drizzle. A terminal asks for each one left out, and for each left-out transport backend (`--broker`,
+`--queue`, `--store`, `--lock`, `--backplane`) outside a workspace member or Workers project, and
+for `--dialect` after Drizzle is chosen; `--yes` takes every default. Existing peer pins, scripts
+and config files are preserved. Drizzle and Prisma add schema migration scripts and create-only
+configs; schemas and client instances belong to the application. Deno prints schema commands and
+Workers writes none. `view --plugin-only` installs only the capability and compatible JSX settings;
+it is the full-stack default and refuses `--module`. `mcp` leaves `setu.config.ts` unchanged and
+prints `McpPlugin({})` with the note that the app boots with it only once at least one route is
+marked with `mcpTool()` or `@McpTool()`.
 
 Worker tasks named `*.task.ts` referenced by a literal
 `new URL('./src/tasks/hash.task.ts', import.meta.url)` are built by `setu build` and their URLs

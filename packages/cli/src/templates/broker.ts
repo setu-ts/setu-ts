@@ -436,10 +436,14 @@ function armFor(
 }
 
 /**
- * The accepted set for a Redis arm flag, derived from the registry so help text,
- * refusal text and validation cannot drift from the arms that exist.
+ * The accepted set for a transport-backend flag, derived from the registry so
+ * help text, refusal text, validation and the `setu add` prompt cannot drift
+ * from the arms that exist. `memory` comes first: it is the default.
+ *
+ * @param flag - `broker`, `queue`, `store`, `lock` or `backplane`
+ * @returns The accepted values, default first
  */
-function acceptedFor(flag: string): readonly string[] {
+export function armFlagValues(flag: string): readonly string[] {
   if (flag === 'broker') return listBrokers();
   if (flag === 'queue') return listQueues();
   // The store/lock/backplane arms exist only on the Redis transport (and memory,
@@ -484,7 +488,7 @@ export function readArmFlag(
   const raw = args.flags[flag];
   if (raw === undefined) return { ok: true };
 
-  const accepted = acceptedFor(flag);
+  const accepted = armFlagValues(flag);
   if (typeof raw !== 'string') {
     return { ok: false, message: `--${flag} needs a value: ${accepted.join(' | ')}.` };
   }
