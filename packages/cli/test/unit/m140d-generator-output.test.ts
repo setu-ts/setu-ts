@@ -198,6 +198,26 @@ describe('M140d approved output', () => {
       }
   });
 
+  it('§3.5 tells a workspace member where its transports come from, for both styles', async () => {
+    // A member's options come from its CLI-owned transport module, so the call text
+    // says nothing about the broker; the section must hold for every workspace broker.
+    for (const template of [
+      getTemplate('microservice')!,
+      getTemplate('microservice')!.classBased!,
+    ]) {
+      const section = template.manifest!.readmeSection;
+      if (typeof section !== 'function') throw new Error('Missing development transport renderer');
+      const member = section('setu', 'node', true);
+      const prose = member.replace(/\n\s+/g, ' ');
+      expect(prose).toContain('`src/transport/index.ts`');
+      expect(prose).toContain('With the `memory` broker, or a broker without a queue arm');
+      expect(prose).toContain('`setu workspace broker <name>`');
+      expect(member).not.toContain('Messaging is in-memory');
+      expect(member).not.toContain('Discovery is static and empty');
+      expect(await format(member, { ...PRETTIER_OPTIONS, parser: 'markdown' })).toBe(member);
+    }
+  });
+
   it('§3.6 renders truthful README guidance and a shutdown fallback', () => {
     const minimal = projectFiles('api', 'node', resolveHost(MINIMAL_HOST, 'node'));
     expect(text(minimal, 'main.ts')).toContain(

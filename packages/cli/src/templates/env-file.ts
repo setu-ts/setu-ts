@@ -97,8 +97,9 @@ export function readEnvFilePath(
  * opaque, so a commented-out declaration (`// envFilePath: 'old.env'`) or one
  * inside a string (`"envFilePath: 'x'"`) never wins over the real one. Either
  * quote style is read, for a value and for the key, because a formatter can
- * rewrite the generated single-quoted literal. A regular-expression literal is
- * outside what this reader classifies, as for the CLI's other config readers.
+ * rewrite the generated single-quoted literal. A regular-expression literal
+ * elsewhere in the file is read past; one used as the `envFilePath` value is
+ * `unreadable`.
  *
  * @param configSource - The project's `setu.config.ts` text
  * @returns The declaration's kind, with its validated paths when it has them
