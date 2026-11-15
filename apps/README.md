@@ -18,8 +18,7 @@ example adds an empty barrel for an unused artifact family.
 The [examples guide](../docs/examples.md#how-every-example-is-laid-out) explains the layouts:
 single-route examples need no modules; GraphQL and gRPC keep their transport-specific files inside
 modules with generated indexes; worker-pool tasks have no CLI schematic; `microservices`
-deliberately keeps two factories under `src/service-a/` and `src/service-b/`. `mcp-tools` keeps the
-scaffold's compiled Node `start`; run its `build` script before `start`. The layout gate in
+deliberately keeps two factories under `src/service-a/` and `src/service-b/`. The layout gate in
 `test/apps-layout.test.ts` compares the examples with projects generated from this checkout.
 
 M37 kept the examples out of the Deno workspace so an application-only npm dependency could never
