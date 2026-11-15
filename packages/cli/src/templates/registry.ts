@@ -287,8 +287,9 @@ export interface TemplateManifest {
     /**
      * The equivalent Deno task body.
      *
-     * Not derivable from {@linkcode script}: that names a bin shim resolved
-     * from `node_modules`, while Deno needs the npm specifier that provides it.
+     * Kept apart from {@linkcode script} so a template can give Deno a
+     * different command; the full-stack template names the same installed bin,
+     * which Deno's task runner resolves from the nearest `node_modules`.
      */
     readonly denoCommand: string;
     /**

@@ -12,15 +12,15 @@ All notable changes to this project are documented here. The format follows
   `start` sets it too: Node keeps a value already set (a `data:` preload); Bun and Deno set it. Bun
   images build on `oven/bun:1.4.0-alpine` and refuse to build without a committed `bun.lock`; Bun
   and Deno images run the project's own `check` script or task, as Node's build already did. A Deno
-  full-stack `build` runs the project's own locked `@react-router/dev` from `node_modules` instead
-  of fetching the newest release with `--no-lock`, and the image fetches its dependencies with the
-  `npmrc` secret but builds without it. Compose gives a member with health probes a `/ready`
-  healthcheck and honours `--depends-on` (`service_healthy`, or `service_started` for a sibling
-  without probes). In Kubernetes, transport defaults move to a `<member>-transport` ConfigMap listed
-  before each member's Secret, so a Secret value overrides them; a `setu-ts.dev/transport-config`
-  annotation rolls members when they change. A member that serves gRPC now serves cleartext HTTP/2
-  beside HTTP/1.1 through the transport module's new `runtimeOptions()`, so Node callers can reach
-  it. Breaking: a member config made before this release must call `runtimeOptions()`;
+  full-stack `build` runs the project's own locked `react-router` bin instead of fetching the newest
+  release with `--no-lock`, and the image fetches its dependencies with the `npmrc` secret but
+  builds without it. Compose gives a member with health probes a `/ready` healthcheck and honours
+  `--depends-on` (`service_healthy`, or `service_started` for a sibling without probes). In
+  Kubernetes, transport defaults move to a `<member>-transport` ConfigMap listed before each
+  member's Secret, so a Secret value overrides them; a `setu-ts.dev/transport-config` annotation
+  rolls members when they change. A member that serves gRPC now serves cleartext HTTP/2 beside
+  HTTP/1.1 through the transport module's new `runtimeOptions()`, so Node callers can reach it.
+  Breaking: a member config made before this release must call `runtimeOptions()`;
   `setu workspace broker`, `setu workspace rpc` and `setu add grpc` refuse until it does and print
   the line to add. `generate app` and `setu add auth|session` in a member write a random value for
   each generated secret into `k8s/secrets/<member>/.env`, keeping existing entries and refusing

@@ -449,7 +449,7 @@ describe('a template with a frontend build, on a Deno target', () => {
     expect(tasks['install']).toBe('deno install');
     expect(tasks['build']).toContain('deno task install &&');
     // The project's own locked copy, never a fresh unversioned `npm:` fetch.
-    expect(tasks['build']).toContain('deno run -A node_modules/@react-router/dev/bin.cjs build');
+    expect(tasks['build']).toBe('deno task install && react-router build');
     expect(tasks['build']).not.toContain('--no-lock');
     expect(tasks['start']?.startsWith('NODE_ENV=production deno run ')).toBe(true);
     expect(tasks['start']).not.toContain('build');

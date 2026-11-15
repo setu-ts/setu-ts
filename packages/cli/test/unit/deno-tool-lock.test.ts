@@ -72,11 +72,9 @@ it('M2 X87-4 matches every Deno npm command including arrays and checks emitted 
   expect(buf).toContain(
     "local: ['deno', 'run', '-A', '--no-lock', 'npm:@bufbuild/protoc-gen-es@2.7.0']",
   );
-  // The frontend build fetches nothing: it runs the project's own copy, which `deno task install`
-  // resolves from package.json and deno.lock, so it cannot add entries to the lock (M140c).
-  expect(FULL_STACK_TEMPLATE.manifest!.npmBuild!.denoCommand).toBe(
-    'deno run -A node_modules/@react-router/dev/bin.cjs build',
-  );
+  // The frontend build fetches nothing: it runs the bin of the project's installed copy, locked by
+  // package.json and deno.lock, so it cannot add entries to the lock (M140c).
+  expect(FULL_STACK_TEMPLATE.manifest!.npmBuild!.denoCommand).toBe('react-router build');
   const existing = new Map(
     projectFiles('shop', 'deno', resolveHost(REST_TEMPLATE, 'deno')).map((file) => [
       file.path,

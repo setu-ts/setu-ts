@@ -336,11 +336,13 @@ headers, so any client can choose its own address and origin.
     // therefore carry an npm manifest on a Deno or Workers target.
     npmBuild: {
       script: 'react-router build',
-      // The project's own installed copy, which `deno task install` resolves from
-      // `package.json` and `deno.lock`: locked, matching the app's react-router
-      // range, and adding nothing to the lock. An unversioned `npm:` specifier with
+      // The bin of the project's own installed copy, resolved from `package.json`
+      // and `deno.lock`: locked, matching the app's react-router range, and adding
+      // nothing to the lock. Named rather than given as a path because a workspace
+      // member on Deno before 2.9 has no `node_modules` of its own; Deno's task
+      // runner finds the bin in the root's. An unversioned `npm:` specifier with
       // `--no-lock` fetched the newest release on every build.
-      denoCommand: 'deno run -A node_modules/@react-router/dev/bin.cjs build',
+      denoCommand: 'react-router build',
       outputDir: 'build',
       // React Router's typegen writes here (`react-router typegen`, and the Vite
       // plugin during dev/build). It is generated source, not the project's, so
