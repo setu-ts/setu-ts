@@ -254,7 +254,36 @@ describe('the credential-free registry settings (#592 review)', () => {
     expect(filter(undefined)).toBe('\n');
   });
 
-  it('keeps a value that is not a URL as written', () => {
+  it('reads quoted values and inline comments as Deno does, and drops query and fragment', () => {
+    expect(
+      filter(
+        [
+          'registry="https://bob:s3cret@npm.example.com/"',
+          "@a:registry='https://a.example/npm/?token=QQQ#frag'",
+          '@b:registry=https://b.example/ ; private',
+          '@c:registry = https://c.example/npm/ # comment',
+          '',
+        ].join('\n'),
+      ),
+    ).toBe(
+      [
+        'registry=https://npm.example.com/',
+        '@a:registry=https://a.example/npm/',
+        '@b:registry=https://b.example/',
+        '@c:registry=https://c.example/npm/',
+        '',
+      ].join('\n'),
+    );
+  });
+
+  it('fails closed on a value that is not a URL, naming the key and never the value', () => {
+    expect(() => filter('@x:registry=not-a-url-SECRET\n')).toThrow(
+      /the npmrc @x:registry setting is not a URL/,
+    );
+    expect(() => filter('@x:registry=not-a-url-SECRET\n')).not.toThrow(/SECRET/);
+  });
+
+  it('keeps a bare environment reference as written', () => {
     expect(filter('registry=${PRIVATE_REGISTRY}\n')).toBe('registry=${PRIVATE_REGISTRY}\n');
   });
 });

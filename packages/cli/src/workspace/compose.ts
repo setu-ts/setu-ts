@@ -91,14 +91,18 @@ const NPMRC_MOUNT = '--mount=type=secret,id=npmrc,target=/root/.npmrc';
  * Copies the mounted `.npmrc`'s registry settings, and nothing else, to
  * `/tmp/.setu-npmrc` (#592 review).
  *
- * Deno files a downloaded package under its registry's host, so a step that
- * installs from the cache without the secret must resolve the same registries
- * as the step that fetched with it, or it finds nothing. Only `registry` and
- * `@scope:registry` lines are kept, and a registry URL's userinfo is dropped,
- * so no credential reaches the token-free steps. Imports nothing, so it
- * fetches nothing.
+ * Deno files a downloaded package under its registry URL's host and path, so a
+ * step that installs from the cache without the secret must resolve the same
+ * registries as the step that fetched with it, or it finds nothing. Only
+ * `registry` and `@scope:registry` lines are kept. A value is read as Deno reads
+ * it (surrounding quotes stripped, an unquoted `;` or `#` comment dropped), and
+ * written back as a URL with its userinfo, query and fragment removed, so a
+ * credential placed in the URL does not reach the token-free steps either. A
+ * bare `${NAME}` reference is kept as written; any other value that is not a
+ * URL fails the build, naming the key and never the value. Imports nothing, so
+ * it fetches nothing.
  */
-const NPMRC_REGISTRIES = `printf '%s' '${String.raw`let source = ""; try { source = Deno.readTextFileSync("/root/.npmrc"); } catch (error) { if (!(error instanceof Deno.errors.NotFound)) throw error; } const lines = []; for (const line of source.split(/\r?\n/)) { const match = /^\s*((?:@[^\s:=]+:)?registry)\s*=\s*(\S+)\s*$/.exec(line); if (!match) continue; let value = match[2]; try { const url = new URL(value); url.username = ""; url.password = ""; value = url.href; } catch { /* not a URL: kept as written */ } lines.push(match[1] + "=" + value); } Deno.writeTextFileSync("/tmp/.setu-npmrc", lines.join("\n") + "\n");`}' | DENO_DIR=/tmp/.setu-npmrc-cache deno run --no-config --no-lock --no-prompt --allow-read=/root/.npmrc --allow-write=/tmp/.setu-npmrc - && rm -rf /tmp/.setu-npmrc-cache`;
+const NPMRC_REGISTRIES = `printf '%s' '${String.raw`let source = ""; try { source = Deno.readTextFileSync("/root/.npmrc"); } catch (error) { if (!(error instanceof Deno.errors.NotFound)) throw error; } const lines = []; for (const line of source.split(/\r?\n/)) { const match = /^\s*((?:@[^\s:=]+:)?registry)\s*=(.*)$/.exec(line); if (!match) continue; const raw = match[2].trim(); const quoted = /^(["\x27])(.*?)\1/.exec(raw); const value = quoted ? quoted[2] : raw.split(/[;#]/)[0].trim(); if (/^\$\{[A-Za-z_][A-Za-z0-9_]*\}$/.test(value)) { lines.push(match[1] + "=" + value); continue; } let url; try { url = new URL(value); } catch { throw new Error("the npmrc " + match[1] + " setting is not a URL"); } url.username = ""; url.password = ""; url.search = ""; url.hash = ""; lines.push(match[1] + "=" + url.href); } Deno.writeTextFileSync("/tmp/.setu-npmrc", lines.join("\n") + "\n");`}' | DENO_DIR=/tmp/.setu-npmrc-cache deno run --no-config --no-lock --no-prompt --allow-read=/root/.npmrc --allow-write=/tmp/.setu-npmrc - && rm -rf /tmp/.setu-npmrc-cache`;
 
 /**
  * The glibc Deno image a full-stack member's frontend is built in (M120 §3.7).
@@ -176,10 +180,10 @@ export function renderDockerfile(profile: WorkspaceRuntimeProfile, workspace = t
 # cache: Deno runs lifecycle scripts only into a node_modules directory, so even
 # a package the project approves with \`allowScripts\` runs nothing beside the
 # token (Deno reports "Ignored build scripts"). The same RUN copies the npmrc's
-# registry settings, without any credential, to /tmp/.setu-npmrc. The next RUN,
+# registry URLs, stripped of any credential, to /tmp/.setu-npmrc. The next RUN,
 # without the token, installs them as /root/.npmrc (Deno files a package under
-# its registry's host, so it must resolve the same registries to find the
-# cache), creates node_modules from that cache (\`--cached-only\`: a fetch the
+# its registry URL's host and path, so it must resolve the same registries to
+# find the cache), creates node_modules from that cache (\`--cached-only\`: a fetch the
 # first RUN missed fails the build), which is where approved scripts run, then
 # \`deno task build\`. No later step in this stage, or in the check stage, mounts
 # the token (the fetch stage below does, under the same rule).
@@ -274,7 +278,7 @@ ARG NPM_CONFIG_REGISTRY=
 # the image never ships. Every command passes \`--node-modules-dir=none\`, so it
 # fills only the global cache and runs no lifecycle script, not even one the
 # project approves with \`allowScripts\` (Deno runs them only into a
-# node_modules directory). It also copies the npmrc's registry settings, without
+# node_modules directory). It also copies the npmrc's registry URLs, stripped of
 # any credential, to /tmp/.setu-npmrc for the install below.
 RUN ${NPMRC_MOUNT} if [ -z "$NPM_CONFIG_REGISTRY" ]; then unset NPM_CONFIG_REGISTRY; fi && deno cache --node-modules-dir=none main.ts && deno install --node-modules-dir=none && deno install --node-modules-dir=none --frozen && deno install --node-modules-dir=none --entrypoint main.ts && deno install --node-modules-dir=none --entrypoint main.ts --frozen && ${NPMRC_REGISTRIES}
 
@@ -287,7 +291,7 @@ ARG NPM_CONFIG_REGISTRY=
 # symlink, which the read-only root refuses (measured: \`File exists (os error
 # 17), symlink '../../libs/shared'\`), so EVERY member failed to start. "manual"
 # uses the node_modules this build installed. The root manifest is plain JSON
-# by now, rewritten by the step above.
+# by now, rewritten by the manifest step in the runtime stage.
 #
 # The chown FOLDS into the RUN that writes the files (X10-5): a standalone
 # \`chown -R\` rewrites metadata on every file the cache layer created, so
