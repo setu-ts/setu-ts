@@ -97,6 +97,14 @@ describe('M140a installed signing secrets', () => {
     secretPaths.length = 0;
     expect(await runCli(['add', 'auth'], { ...deps, cwd: '/app/shop' }), h.err.join('\n')).toBe(0);
     expect(secretPaths).toEqual(['/app/shop/.env']);
+    // The DATABASE_URL arm shares the same env-file planner, so its local file is
+    // owner-only too and its example is not.
+    secretPaths.length = 0;
+    expect(
+      await runCli(['add', 'database', '--type', 'drizzle'], { ...deps, cwd: '/app/shop' }),
+      h.err.join('\n'),
+    ).toBe(0);
+    expect(secretPaths).toEqual(['/app/shop/.env']);
   });
 
   it('records member keys once and replans Compose and the owned README section', async () => {

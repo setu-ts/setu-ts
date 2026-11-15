@@ -8,7 +8,7 @@ import { seedProducts } from './src/modules/products/products.seed.ts';
 
 const app = await createApp();
 const runtime = createRuntimeServices();
-await app.start({ port: Number(runtime.env.PORT ?? '3000') });
+await app.start({ port: Number(runtime.env.PORT || '3000') });
 
 // Seeding after start(), because the database plugin connects during the
 // application's own startup hooks — before that there is no repository to

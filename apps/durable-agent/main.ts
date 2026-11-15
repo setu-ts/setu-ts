@@ -17,7 +17,7 @@ async function boot() {
   // Loopback only by default: the example trusts a demonstration identity
   // header, so it must not be reachable from the network unless you say so.
   await app.start({
-    port: Number(runtime.env.PORT ?? '3000'),
+    port: Number(runtime.env.PORT || '3000'),
     // `||`, not `??`: an empty HOST= must not mean every interface.
     hostname: runtime.env.HOST || '127.0.0.1',
   });
