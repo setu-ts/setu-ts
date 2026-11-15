@@ -243,9 +243,10 @@ describe('node-redis CLI', () => {
     // The second deliberate change (X91-9): `setu add messaging --broker redis` and
     // `setu add queue --queue redis` append the REDIS_URL row `setu new --broker`
     // writes — the local default in `.env`, empty in the tracked example.
+    // M140d (V12-100) names the variable rather than a transport.
     const description =
-      '# The redis connection URL. The local start scripts read this ' +
-      'value; a deployment sets REDIS_URL in its own environment.';
+      '# REDIS_URL configures the redis connection. The local start scripts read this ' +
+      'value; a deployment sets it in its own environment.';
     for (const runtime of ['deno', 'node', 'bun']) {
       for (const command of ['add-messaging', 'add-queue']) {
         for (const [file, value] of [

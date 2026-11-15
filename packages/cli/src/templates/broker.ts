@@ -232,8 +232,8 @@ export function brokerEnvVariables(spec: BrokerSpec): readonly EnvVariable[] {
     {
       name: connection.variable,
       description:
-        `The ${spec.name} connection URL. The local start scripts read this ` +
-        `value; a deployment sets ${connection.variable} in its own environment.`,
+        `${connection.variable} configures the ${spec.name} connection. The local start scripts ` +
+        `read this value; a deployment sets it in its own environment.`,
       develop: connection.localDefault,
     },
   ];

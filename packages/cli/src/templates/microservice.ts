@@ -201,7 +201,17 @@ new_classes = ["ReplyInboxObject"]
 /** Development-transport guidance shared by both microservice styles. */
 const MICROSERVICE_MANIFEST: TemplateManifest = {
   ...FUNCTIONAL_MODULE_MANIFEST,
-  readmeSection: (cli, runtime, _member, host) => {
+  readmeSection: (cli, runtime, member, host) => {
+    // A workspace member's messaging and queue options come from its CLI-owned
+    // transport module (the workspace broker), and its discovery map is generated,
+    // so neither the call text nor an empty map says anything about it.
+    if (member === true)
+      return `## Development transports\n\n${[
+        `- Messaging and queue use the workspace broker recorded in setu.workspace.json. Change it for every member with \`${cli} workspace broker <name>\`.`,
+        '- Telemetry has no exporter: spans are dropped. Set the `TelemetryPlugin` `exporter` option.',
+      ]
+        .map((line) => wrapProse(line, '  '))
+        .join('\n')}\n`;
     const memory = (pkg: string, option: string): boolean =>
       runtime !== 'cloudflare-workers' &&
       !host?.plugins.find((plugin) => plugin.pkg === pkg)?.args?.includes(option);

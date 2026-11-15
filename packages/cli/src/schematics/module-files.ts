@@ -55,10 +55,9 @@ export function moduleService(
   const records = classBased ? 'this.records' : 'records';
   const method = (name: string): string => (classBased ? name : `export function ${name}${p}`);
   const pad = classBased ? '  ' : '';
-  const signature = (name: string, params: readonly string[], result: string): string => {
-    const rendered = renderMethodSignature(method(name), params, result);
-    return classBased ? rendered : rendered.replace(/^ {2}/gm, '');
-  };
+  // Measured at the indent actually emitted: a top-level function has none.
+  const signature = (name: string, params: readonly string[], result: string): string =>
+    renderMethodSignature(method(name), params, result, pad);
   const queryParameter = `query: ${query}${validation ? '' : ' = {}'}`;
   return cleanSource(`${validation ? `${schemaImport(names, [`Create${p}Body`, `Update${p}Body`, `List${p}Query`, `${p}Response`], true)}\n` : ''}${classBased ? "import { Injectable } from '@setu-ts/decorator-plugin';\n" : ''}
 /**

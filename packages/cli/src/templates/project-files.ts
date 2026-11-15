@@ -2172,7 +2172,16 @@ ${wrapProse(runtime === 'node' ? `The build type-checks, checks CLI wiring and b
             ...(metrics ? ['`/metrics`'] : []),
             ...(openapi ? ['`/docs`', '`/openapi.json`'] : []),
           ];
-          return `\n\n${wrapProse(`${routes.join(', ')} are served on the application port. Restrict them at the proxy${openapi ? ", or turn the UI off with OpenApiPlugin's `swagger: false` and move a route with its `endpoint` option" : " or move the metrics route with MetricsPlugin's `endpoint` option"}.`)}`;
+          const options = [
+            ...(openapi
+              ? [
+                  "turn the UI off with OpenApiPlugin's `swagger: false`",
+                  'move `/docs` with its `endpoint` and `/openapi.json` with its `specEndpoint`',
+                ]
+              : []),
+            ...(metrics ? ["move `/metrics` with MetricsPlugin's `endpoint`"] : []),
+          ];
+          return `\n\n${wrapProse(`${routes.join(', ')} are served on the application port. Restrict them at the proxy, or ${options.join(', or ')}.`)}`;
         })()}
 ${
   port === undefined

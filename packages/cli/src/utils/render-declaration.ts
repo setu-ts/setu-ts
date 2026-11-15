@@ -146,19 +146,22 @@ function splitTopLevel(args: string): readonly string[] {
  * @param name - The method name
  * @param params - Each parameter as `name: Type`
  * @param returnType - The return type, without the colon
- * @returns The signature line(s) at a two-space indent, no trailing newline
+ * @param indent - The indent the line is emitted at: two spaces for a class method,
+ *   empty for a top-level function, so the width is measured where it lands
+ * @returns The signature line(s) at that indent, no trailing newline
  * @since 0.6.0
  */
 export function renderMethodSignature(
   name: string,
   params: readonly string[],
   returnType: string,
+  indent = '  ',
 ): string {
-  const oneLine = `  ${name}(${params.join(', ')}): ${returnType} {`;
+  const oneLine = `${indent}${name}(${params.join(', ')}): ${returnType} {`;
   if (oneLine.length <= LINE_WIDTH) {
     return oneLine;
   }
-  return `  ${name}(\n    ${params.join(',\n    ')},\n  ): ${returnType} {`;
+  return `${indent}${name}(\n${indent}  ${params.join(`,\n${indent}  `)},\n${indent}): ${returnType} {`;
 }
 
 /**

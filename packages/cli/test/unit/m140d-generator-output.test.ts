@@ -16,7 +16,7 @@ import { getTemplate } from '../../src/templates/registry.ts';
 import { MINIMAL_HOST } from '../../src/templates/minimal.ts';
 import { projectFiles, resolveHost } from '../../src/templates/project-files.ts';
 import { withBrokerArgs, withQueueArgs, brokerEnvVariables } from '../../src/templates/broker.ts';
-import { brokerSpec } from '../../src/workspace/transport.ts';
+import { BROKERS, brokerSpec } from '../../src/workspace/transport.ts';
 import { workspaceProfile } from '../../src/workspace/runtime-profile.ts';
 import { PRETTIER_OPTIONS } from '../../src/templates/npm-tooling.ts';
 import { ZERO_CONFIG_WIRINGS } from '../../src/utils/plugin-wirings.ts';
@@ -31,7 +31,6 @@ import { CachePlugin } from '@setu-ts/cache-plugin';
 import { QueuePlugin } from '@setu-ts/queue-plugin';
 import { MessagingPlugin } from '@setu-ts/messaging-plugin';
 import { SchedulerPlugin } from '@setu-ts/scheduler-plugin';
-import { IdempotencyPlugin } from '@setu-ts/idempotency-plugin';
 import { RealtimeBackplanePlugin } from '@setu-ts/realtime-backplane-plugin';
 import { createFakeFs, createRecorder } from '../fixtures/fake-fs.ts';
 import { agentFacts } from '../fixtures/agent-facts.ts';
@@ -115,23 +114,37 @@ describe('M140d approved output', () => {
       ['queue', QueuePlugin, '--queue'],
       ['messaging', MessagingPlugin, '--broker'],
       ['scheduler', SchedulerPlugin, '--lock'],
-      ['idempotency', IdempotencyPlugin, '--store'],
+      // Not a cli devDependency: its default name is pinned from the source
+      // (`idempotency-plugin/src/plugin/idempotency-plugin.ts`, `name: 'idempotency-plugin'`).
+      ['idempotency', undefined, '--store'],
       ['realtime-backplane', RealtimeBackplanePlugin, '--backplane'],
     ] as const) {
       const h = harness();
       expect(await h.run(['new', 'api', '--template', 'rest'])).toBe(0);
       expect(await h.run(['add', pkg, flag, 'redis'], '/work/api'), h.err.text()).toBe(0);
-      expect(factory().name).toBe(`${pkg}-plugin`);
-      expect(h.out.text()).toContain(`without: ['${factory().name}']`);
+      if (factory !== undefined) expect(factory().name).toBe(`${pkg}-plugin`);
+      expect(h.out.text()).toContain(`without: ['${pkg}-plugin']`);
       expect(h.out.text()).toContain(
         `overrides: [${ZERO_CONFIG_WIRINGS.get(`${pkg}-plugin`)!.symbol}()]`,
       );
       expect(h.out.text()).toContain('connect to Redis at REDIS_URL during startup');
-      expect(h.out.text()).toContain('Start a Redis server');
+      expect(h.out.text()).toContain(
+        'Start Redis: docker compose -f docker/compose.yaml up -d redis',
+      );
+      // The hint names a file this same run wrote.
+      expect(await h.fs.readFile('/work/api/docker/compose.yaml')).toBeDefined();
     }
-    expect(brokerEnvVariables(brokerSpec('redis')!)[0]!.description).toContain(
-      'The redis connection URL.',
-    );
+    for (const name of BROKERS) {
+      const spec = brokerSpec(name)!;
+      const [variable] = brokerEnvVariables(spec);
+      if (variable === undefined) continue;
+      // Every connection setting is named for what it is (a URL, a broker list, a
+      // project id, a connection string), never described as a transport.
+      expect(variable.description, name).toContain(
+        `${variable.name} configures the ${spec.name} connection.`,
+      );
+      expect(variable.description, name).not.toContain('transport');
+    }
   });
 
   it('§3.4 writes database URLs per dialect without replacing an existing value', async () => {
@@ -334,9 +347,22 @@ describe('M140d approved output', () => {
         const h = harness();
         expect(await h.run(['new', 'api'])).toBe(0);
         await h.fs.writeFile('/work/api/AGENTS.md', new TextEncoder().encode(marker));
+        if (command[0] === 'sync') {
+          // Give sync a stale barrel to rewrite: a sync that changes nothing stays quiet.
+          expect(await h.run(['g', 'middleware', 'timing'], '/work/api')).toBe(0);
+          await h.fs.writeFile(
+            '/work/api/src/middleware/index.ts',
+            new TextEncoder().encode('export {};\n'),
+          );
+        }
         const before = h.out.lines.length;
         expect(await h.run(command, '/work/api'), h.err.text()).toBe(0);
         expect(h.out.lines.slice(before).join('\n').includes('agents --check')).toBe(marker !== '');
+        if (command[0] === 'sync') {
+          const again = h.out.lines.length;
+          expect(await h.run(['sync'], '/work/api')).toBe(0);
+          expect(h.out.lines.slice(again).join('\n')).not.toContain('agents --check');
+        }
       }
     }
   });

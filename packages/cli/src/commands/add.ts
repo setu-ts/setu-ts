@@ -2597,27 +2597,6 @@ async function addOne(
       }
     }
     deps.log(`Connection: ${variable} (local default ${localDefault}).`);
-    if (selected.name === 'redis' && configWired && searchDirs.length === 1) {
-      deps.log('  The app and generated tests now connect to Redis at REDIS_URL during startup.');
-      const compose = await readProjectText(
-        deps,
-        joinPath(dir, BROKER_COMPOSE_FILE),
-        BROKER_COMPOSE_FILE,
-      );
-      if (compose === null) return EXIT_ERROR;
-      deps.log(
-        compose === undefined
-          ? '  Start a Redis server.'
-          : `  Start Redis: docker compose -f ${BROKER_COMPOSE_FILE} up -d redis`,
-      );
-      if (!installedAfter.has('react-router-plugin')) {
-        const factory = ZERO_CONFIG_WIRINGS.get(bare)!.symbol;
-        deps.log(`  import { ${factory} } from '@setu-ts/${bare}';`);
-        deps.log(
-          `  createTestApp({ app: await createApp(), without: ['${bare}'], overrides: [${factory}()] })`,
-        );
-      }
-    }
     if (updated.length > 0) {
       const verb = args.flags['dry-run'] === true ? 'Would add' : 'Added';
       deps.log(`  ${verb} ${variable} to ${updated.join(' and ')}.`);
@@ -2653,6 +2632,19 @@ async function addOne(
       );
       // Unprefixed: the block is printed at the file's own indentation, ready to paste.
       for (const line of missing.split('\n')) deps.log(line);
+    }
+    // After the Compose plan: this run creates the file when it is absent, and an
+    // existing one lacking the service has just been given the block to paste.
+    if (selected.name === 'redis' && configWired && searchDirs.length === 1) {
+      deps.log('  The app and generated tests now connect to Redis at REDIS_URL during startup.');
+      deps.log(`  Start Redis: docker compose -f ${BROKER_COMPOSE_FILE} up -d redis`);
+      if (!installedAfter.has('react-router-plugin')) {
+        const factory = ZERO_CONFIG_WIRINGS.get(bare)!.symbol;
+        deps.log(`  import { ${factory} } from '@setu-ts/${bare}';`);
+        deps.log(
+          `  createTestApp({ app: await createApp(), without: ['${bare}'], overrides: [${factory}()] })`,
+        );
+      }
     }
   }
 

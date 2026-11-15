@@ -27,6 +27,20 @@ it('V12-127 finishes scanning malformed template substitutions without stalling'
   });
 });
 
+it('M140d review: a quote inside a regex literal or a substitution does not hide the declaration', () => {
+  const call = "ConfigPlugin({ envFilePath: 'local.env' })";
+  for (const prefix of [
+    "const quote = /'/;",
+    "const text = `${/'/.source}`;",
+    "const text = `${'`'}`;",
+    'const slash = /"/u.test(value);',
+  ])
+    expect(envFileDeclaration(`${prefix}\n${call}`), prefix).toEqual({
+      kind: 'paths',
+      paths: ['local.env'],
+    });
+});
+
 describe('isCoveredDotenvName', () => {
   it('covers the default name and .env.* names the container rules match', () => {
     for (const name of ['.env', '.env.local', '.env.prod']) {
