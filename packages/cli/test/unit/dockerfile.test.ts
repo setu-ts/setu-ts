@@ -288,6 +288,16 @@ describe('the credential-free registry settings (#592 review)', () => {
     expect(filter('@p:registry=https://${HOST}/npm/\n')).toBe('@p:registry=https://${HOST}/npm/\n');
   });
 
+  it('fails closed on a literal credential beside an environment reference', () => {
+    for (const line of [
+      'registry=https://ci:hunter2@npm.corp/${SCOPE}/',
+      '@a:registry=https://npm.corp/${P}/?token=LITERAL',
+    ]) {
+      expect(() => filter(`${line}\n`)).toThrow(/has a credential beside an environment reference/);
+      expect(() => filter(`${line}\n`)).not.toThrow(/hunter2|LITERAL/);
+    }
+  });
+
   it('copies a credential-free URL exactly as Deno read it', () => {
     expect(filter('registry = https://Npm.Example.com:8443/a/b\n')).toBe(
       'registry=https://Npm.Example.com:8443/a/b\n',

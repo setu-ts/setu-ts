@@ -738,8 +738,9 @@ a later step of its `frontend` stage without the secret, which is where approved
 member without a frontend but with a `check` task caches main.ts and setu.config.ts's graph in that
 same secret-mounted step). That step also copies the `npmrc`'s `registry` and `@scope:registry`
 lines, and nothing else, for the later steps. Each value is read as Deno reads it and copied as
-written, except that a URL's userinfo, query and fragment are removed; a value holding a `${NAME}`
-reference is copied as written, and any other value that is not a URL fails the build. Keep a
+written; a URL that carries userinfo, a query or a fragment is written back in normalized form
+without them. A value holding a `${NAME}` reference is copied as written, but fails the build if it
+also carries a literal credential, and any other value that is not a URL fails the build. Keep a
 registry token in an `_authToken` line: one placed in the URL's path is kept, because Deno files a
 package under its registry URL's host and path, so a step without the secret must resolve the same
 registries to find the cache. The runtime dependencies are fetched the same way, in a `fetch` stage
