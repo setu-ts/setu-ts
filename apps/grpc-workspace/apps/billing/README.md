@@ -23,7 +23,7 @@ On the port `./src/discovery/services.ts` exports:
 ## Generate code
 
 ```bash
-npx @setu-ts/cli@0.12.0 generate service billing
+npx @setu-ts/cli@0.12.0 generate module billing
 npx @setu-ts/cli@0.12.0 generate --help
 ```
 
@@ -34,4 +34,9 @@ npm run build
 npm start
 ```
 
-The build type-checks, checks CLI wiring and bundles the service into dist/. Run npm test before building an image: DI graph validation happens at boot.
+The build type-checks, checks CLI wiring and bundles the service into dist/. Run npm test before
+building an image.
+
+`/metrics`, `/docs`, `/openapi.json` are served on the application port. Restrict them at the proxy,
+or turn the UI off with OpenApiPlugin's `swagger: false`, or move `/docs` with its `endpoint` and
+`/openapi.json` with its `specEndpoint`, or move `/metrics` with MetricsPlugin's `endpoint`.
