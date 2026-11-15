@@ -470,8 +470,9 @@ job.
 - **R2 cannot presign.** `getSignedUrl` rejects. Serve the object through a route (`getStream` gives
   you a zero-copy download) or put a custom domain in front of the bucket.
 - **Binding methods only work inside a request.** Cloudflare prohibits I/O in global scope. The
-  plugin holds bindings at `register()` and never reads through them there, and the health indicator
-  performs no binding I/O.
+  plugin holds bindings at `register()` and never reads through them there, and the plugin's own
+  health indicator performs no binding I/O. `VectorizeVectorStore.isHealthy()` does: it calls the
+  index's `describe()` for `VectorStorePlugin`'s `vector-store` readiness indicator.
 - **An unroutable queue message is retried, never acked.** A body that is not one of this package's
   job envelopes, or a job name with no registered processor, goes back for redelivery and is
   reported through the logger. Acking would discard it permanently and silently. Your queue's

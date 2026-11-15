@@ -126,6 +126,8 @@ export class QdrantVectorStore implements IVectorStoreAdapter {
   /** @inheritdoc */
   readonly versionedReplace = true;
   readonly #client: QdrantClientLike;
+  /** The collection the readiness probe checks: the first one ensured. */
+  #probeCollection: string | undefined;
   /** Settles once the server is known to take `update_filter`; reset after a failed probe. */
   #versionChecked: Promise<void> | undefined;
   readonly #onClose: (() => void | Promise<void>) | undefined;
@@ -160,6 +162,7 @@ export class QdrantVectorStore implements IVectorStoreAdapter {
   /** @inheritdoc */
   async ensureCollection(spec: VectorCollectionSpec): Promise<void> {
     const name = collectionName(spec);
+    this.#probeCollection ??= name;
     const { exists } = await this.#run(() => this.#client.collectionExists(name));
     if (!exists) {
       await this.#run(() =>
@@ -329,14 +332,21 @@ export class QdrantVectorStore implements IVectorStoreAdapter {
   }
 
   /**
-   * Reachability for readiness: the server's version endpoint (`GET /`), which
-   * reads no collection.
+   * Reachability for readiness: whether the first ensured collection exists
+   * (`GET /collections/{name}/exists`). That endpoint needs the API key, which
+   * the server's version endpoint does not check, so a revoked key or a deleted
+   * collection reads as unreachable. Before any collection is ensured, the
+   * version endpoint answers instead.
    *
-   * @returns `true` once the server answered
+   * @returns `true` once the collection answered as present
    */
   async isHealthy(): Promise<boolean> {
-    await this.#client.versionInfo();
-    return true;
+    const name = this.#probeCollection;
+    if (name === undefined) {
+      await this.#client.versionInfo();
+      return true;
+    }
+    return (await this.#client.collectionExists(name)).exists;
   }
 
   /** @inheritdoc */

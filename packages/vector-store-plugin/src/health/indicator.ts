@@ -27,7 +27,8 @@ export const PROBE_TIMEOUT_MS = 2_000;
  * @param runtime - Runtime services, for the probe's monotonic clock and timers
  * @param closed - Whether the application has closed the adapter
  * @returns The indicator: `down` once closed or when the probe fails, `up` with
- *   `reachable: 'unknown'` for an adapter without `isHealthy`
+ *   `reachable: 'unknown'` for an adapter without `isHealthy` or one that could
+ *   not tell
  */
 export function createVectorStoreIndicator(
   adapter: IVectorStoreAdapter,
@@ -40,6 +41,9 @@ export function createVectorStoreIndicator(
       ? undefined
       : createCachedProbe({
           probe: () => isHealthy.call(adapter),
+          // A timeout or rejection is unreachable; only the adapter's own
+          // `undefined` (it could not tell) leaves readiness alone.
+          fallback: false as boolean | undefined,
           ttlMs: PROBE_TTL_MS,
           timeoutMs: PROBE_TIMEOUT_MS,
           ...resolveProbeTiming(runtime),
@@ -50,6 +54,9 @@ export function createVectorStoreIndicator(
       return { status: 'up', data: { adapter: adapter.name, reachable: 'unknown' } };
     }
     const reachable = await probe();
+    if (reachable === undefined) {
+      return { status: 'up', data: { adapter: adapter.name, reachable: 'unknown' } };
+    }
     return { status: reachable ? 'up' : 'down', data: { adapter: adapter.name, reachable } };
   };
 }

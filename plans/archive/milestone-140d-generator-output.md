@@ -10,7 +10,8 @@ ROADMAP M140d: the generator and agent-brief rows of the 2026-11-12/13 generated
 (`smoke/GENERATED-CODE-REVIEW.md`, read on `develop` `1fa2996b9`; every claim below re-checked
 against `develop` `9ea4972f7`, after M140a and M140b merged). Each row is something `packages/cli`
 writes or prints that teaches the wrong thing, wires nothing, or goes stale. Every fix lands in the
-generator, the command output, or the brief renderer; no framework package changes.
+generator, the command output, or the brief renderer; no framework package changes — except the
+vector-store readiness addition in §10, made on this branch at the maintainer's direction.
 
 - **In scope (29 rows):**
   - **`setu add` output:** V12-62 (`add validation` registers nothing), V12-70 (a Redis store makes
@@ -469,3 +470,26 @@ runs in parallel).
 - Editing generated tests on `add` (V12-70): the developer's files; §3.3 prints the override.
 - A `setu check` brief-freshness finding (V12-125): `setu agents --check` owns it.
 - Docs pages, READMEs, agent cards: M140e.
+
+## 10. Additions after implementation (maintainer-directed, 2026-11-15/16)
+
+Hands-on checkups of the built CLI (a chained `setu add` run, then every other plugin added to rest,
+full-stack and Workers scaffolds, each booted and code-reviewed) found further defects. The
+maintainer directed that they be fixed on this branch rather than in a follow-up milestone:
+
+- **`setu add` prompts:** every option with two or more values is asked at a terminal, from one
+  table that also generates the help text; a dry run of the given flags runs first so no question is
+  followed by a refusal no answer could avoid; `--dialect` and `--redis-client` narrow the offer.
+- **`setu add` with a backend:** start and test guidance for every connected broker, the README
+  transport section on a standalone add, mail options read from the environment, a bare provider
+  call given the chosen options, SQLite and Drizzle ignore entries, the existing `drizzle.config.ts`
+  reported, W006 for `DatabasePlugin` and `VectorStorePlugin`.
+- **Example apps** brought up to current scaffold output (`full-stack` rebuilt on the template).
+- **Vector-store readiness** (`common`, `vector-store-plugin`, `cloudflare-plugin`): an optional
+  `IVectorStoreAdapter.isHealthy(): Promise<boolean | undefined>`, implemented by every built-in
+  adapter without touching data (Qdrant checks its first collection, so a revoked API key reads as
+  down; pgvector skips a saturated pool and answers `undefined`, as database-plugin does since
+  M101a), and a `vector-store` indicator in readiness by default, cached 5 s and bounded 2 s, `down`
+  with `state: 'closed'` after shutdown. Tests: unit (indicator states, cache, timeout, each probe),
+  kernel integration (registration and close), and a conformance row run against real pgvector and
+  Qdrant 1.16.

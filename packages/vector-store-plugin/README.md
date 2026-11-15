@@ -411,17 +411,21 @@ stale ones yourself, or give each tenant group its own index.
 
 The plugin registers a `vector-store` health indicator, which joins `/ready` by default, so a
 replica whose backend stops answering leaves the load balancer instead of failing every search. It
-calls the adapter's `isHealthy()` through a probe cached for 5 seconds and bounded at 2:
+calls the adapter's `isHealthy()` through a probe cached for 5 seconds and bounded at 2 seconds. A
+probe that fails, rejects or runs past that bound reports `down` with `reachable: false`:
 
-| Adapter                | Probe                                   |
-| ---------------------- | --------------------------------------- |
-| `QdrantVectorStore`    | the server's version endpoint (`GET /`) |
-| `PgVectorStore`        | `SELECT 1` through the application's db |
-| `VectorizeVectorStore` | the index's `describe()`                |
-| `MemoryVectorStore`    | always reachable                        |
+| Adapter                | Probe                                                                                    |
+| ---------------------- | ---------------------------------------------------------------------------------------- |
+| `QdrantVectorStore`    | whether the first declared collection exists, an endpoint that needs the API key         |
+| `PgVectorStore`        | `SELECT 1` through the application's db, skipped while the pool is saturated (see below) |
+| `VectorizeVectorStore` | the index's `describe()`                                                                 |
+| `MemoryVectorStore`    | always reachable                                                                         |
 
-A custom adapter without `isHealthy()` stays `up` with `reachable: 'unknown'`. After shutdown the
-indicator reports `down` with `state: 'closed'`. To keep it out of readiness, exclude it in
+A saturated node-postgres pool, with no idle connection and callers waiting, is not an outage:
+`PgVectorStore` queues no probe behind that traffic and answers that it cannot tell, and the
+indicator stays `up` with `reachable: 'unknown'`, as database-plugin's own probe does. An adapter
+without `isHealthy()` reports the same. After shutdown the indicator reports `down` with
+`state: 'closed'`. To keep it out of readiness, exclude it in
 `HealthPlugin({ readiness: { exclude: ['vector-store'] } })`.
 
 ## Errors

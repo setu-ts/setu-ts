@@ -12,6 +12,14 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### Vector-store readiness (M140d, `@setu-ts/vector-store-plugin`, `@setu-ts/common`, `@setu-ts/cloudflare-plugin`)
+
+`VectorStorePlugin` now registers a `vector-store` health indicator that joins `/ready`, so a
+replica leaves readiness while its vector backend is unreachable, or while Qdrant refuses its API
+key. To keep the previous behaviour, pass
+`HealthPlugin({ readiness: { exclude: ['vector-store'] } })`. A custom `IVectorStoreAdapter` needs
+no change: without the new optional `isHealthy()` it stays `up` as `reachable: 'unknown'`.
+
 ### Deployment output (M140c, `@setu-ts/cli`)
 
 A workspace member's config must call the transport module's `runtimeOptions()`, which serves gRPC

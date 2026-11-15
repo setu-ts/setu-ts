@@ -325,9 +325,24 @@ export class PgVectorStore implements IVectorStoreAdapter {
   /**
    * Reachability for readiness: `SELECT 1` through the application's database.
    *
-   * @returns `true` once the database answered
+   * A saturated pool (no idle connection and callers waiting, read from a
+   * node-postgres pool's own counters) is not an outage: no probe is queued
+   * behind that traffic, and the answer is `undefined`, as database-plugin's
+   * probe does (M101a V8-3). A pool that exposes no counters is probed.
+   *
+   * @returns `true` once the database answered, `undefined` for a saturated pool
    */
-  async isHealthy(): Promise<boolean> {
+  async isHealthy(): Promise<boolean | undefined> {
+    const pool = (this.#db as { readonly $client?: unknown }).$client as
+      { readonly idleCount?: unknown; readonly waitingCount?: unknown } | null | undefined;
+    if (
+      typeof pool?.idleCount === 'number' &&
+      typeof pool.waitingCount === 'number' &&
+      pool.idleCount === 0 &&
+      pool.waitingCount > 0
+    ) {
+      return undefined;
+    }
     const sql = this.#tag();
     await this.#run(() => this.#db.execute(sql`SELECT 1`));
     return true;

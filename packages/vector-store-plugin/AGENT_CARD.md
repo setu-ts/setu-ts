@@ -41,5 +41,7 @@ startup rather than the first request.
 - Adapters: `MemoryVectorStore`, `PgVectorStore`, `QdrantVectorStore`; `VectorizeVectorStore` is in
   `@setu-ts/cloudflare-plugin` and refuses `replaceSource` and `deleteScope` by name.
 - The store does not embed text: pass AI SDK vectors in, one model per collection.
+- Registers a `vector-store` readiness indicator over the adapter's optional `isHealthy()`; exclude
+  it with `HealthPlugin({ readiness: { exclude: ['vector-store'] } })`.
 
 See the README for adapter setup, the errors table and the full capability matrix.

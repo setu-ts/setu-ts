@@ -351,9 +351,11 @@ describe.each(ARMS.filter((arm) => arm.enabled).map((arm) => [arm.name, arm] as 
   'conformance: %s',
   (_name, arm) => {
     let store: VectorStoreService;
+    let adapter: IVectorStoreAdapter;
 
     beforeAll(async () => {
-      store = await storeFor(await arm.create());
+      adapter = await arm.create();
+      store = await storeFor(adapter);
       await store.upsert(COLLECTION, A, SEED_A);
       await store.upsert(COLLECTION, B, SEED_B);
     });
@@ -372,6 +374,12 @@ describe.each(ARMS.filter((arm) => arm.enabled).map((arm) => [arm.name, arm] as 
         expect(match.sourceId).toBe(expected[i]!.sourceId);
         expect(match.content).toBe(expected[i]!.content);
       });
+    });
+
+    // Real pgvector and Qdrant here when their URLs are set: the readiness probe
+    // must answer for a reachable backend whose collection was just ensured.
+    it('isHealthy answers true for the reachable backend', async () => {
+      expect(await adapter.isHealthy?.()).toBe(true);
     });
 
     it('delete in one scope leaves the other scope’s same id', async () => {

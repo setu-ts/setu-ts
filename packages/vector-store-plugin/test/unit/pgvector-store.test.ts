@@ -623,6 +623,22 @@ describe('PgVectorStore.isHealthy', () => {
     await expect(down.store.isHealthy()).rejects.toThrow();
   });
 
+  it('skips the query for a saturated pool and answers it could not tell', async () => {
+    for (const [idleCount, waitingCount, expected, queried] of [
+      [0, 3, undefined, false],
+      [0, 0, true, true],
+      [2, 3, true, true],
+    ] as const) {
+      const recording = recordingDb(healthy());
+      Object.assign(recording.db, { $client: { idleCount, waitingCount } });
+      const store = new PgVectorStore({ db: recording.db });
+      await store.open();
+      recording.statements.length = 0;
+      expect(await store.isHealthy()).toBe(expected);
+      expect(recording.statements.some((s) => s.text === 'SELECT 1')).toBe(queried);
+    }
+  });
+
   it('refuses before open()', async () => {
     const store = new PgVectorStore({ db: recordingDb().db });
     await expect(store.isHealthy()).rejects.toThrow('open() must run before any other call');

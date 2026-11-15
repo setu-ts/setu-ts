@@ -84,6 +84,16 @@ describe('createVectorStoreIndicator', () => {
     expect(adapter.calls).toBe(2);
   });
 
+  it('stays up with reachable unknown when the adapter could not tell', async () => {
+    const adapter: IVectorStoreAdapter = new MemoryVectorStore();
+    Object.defineProperty(adapter, 'isHealthy', { value: async () => undefined });
+    const check = createVectorStoreIndicator(adapter, clockedRuntime().runtime, () => false);
+    expect(await check()).toEqual({
+      status: 'up',
+      data: { adapter: 'memory', reachable: 'unknown' },
+    });
+  });
+
   it('stays up with reachable unknown for an adapter without a probe', async () => {
     const adapter = new MemoryVectorStore();
     Object.defineProperty(adapter, 'isHealthy', { value: undefined });

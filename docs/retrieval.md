@@ -471,6 +471,9 @@ pgvector and Qdrant when those URLs are set.
   reported through the application's logger instead of exiting the process.
 - A failed registration fails startup. That includes an unreachable backend, a missing extension, a
   dimension mismatch and a refused declaration.
+- After startup, the plugin's `vector-store` health indicator joins `/ready`: a backend that stops
+  answering takes the replica out of rotation. Its probe is cached for 5 seconds and bounded at 2;
+  see the plugin README's Readiness section, which also shows how to exclude it.
 - The pgvector and Qdrant adapters classify transport failures: an unreachable backend answers 503,
   an unanswered request answers 504, and the served detail carries no connection string.
 - Concurrent writes to one source are the application's concern. `replaceSource` serialises them on

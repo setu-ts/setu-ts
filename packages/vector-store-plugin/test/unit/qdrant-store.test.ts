@@ -518,7 +518,25 @@ describe('qdrant filter translation', () => {
 });
 
 describe('QdrantVectorStore.isHealthy', () => {
-  it('asks the version endpoint, which reads no collection, and rejects when it fails', async () => {
+  it('checks the first ensured collection, which needs the API key, and reads a missing one as down', async () => {
+    const present = await opened(
+      recordingClient({ exists: true, vectors: { size: 3, distance: 'Cosine' } }),
+    );
+    await present.store.ensureCollection({ name: 'documents', dimensions: 3, filterable: {} });
+    await present.store.ensureCollection({ name: 'notes', dimensions: 3, filterable: {} });
+    const before = present.client.calls.length;
+    expect(await present.store.isHealthy()).toBe(true);
+    const probe = present.client.calls.slice(before);
+    expect(probe.map((call) => call.method)).toEqual(['collectionExists']);
+    expect(probe[0]!.name).toBe(
+      present.client.calls.find((c) => c.method === 'collectionExists')!.name,
+    );
+    const missing = await opened(recordingClient({ exists: false }));
+    await missing.store.ensureCollection({ name: 'documents', dimensions: 3, filterable: {} });
+    expect(await missing.store.isHealthy()).toBe(false);
+  });
+
+  it('asks the version endpoint before any collection is ensured, and rejects when it fails', async () => {
     const { store, client } = await opened();
     const before = client.calls.length;
     expect(await store.isHealthy()).toBe(true);

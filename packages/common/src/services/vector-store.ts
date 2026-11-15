@@ -333,12 +333,16 @@ export interface IVectorStoreAdapter {
    * plugin's `vector-store` indicator reports `reachable: 'unknown'` and stays
    * up. The plugin calls it through a cached, time-bounded probe, so a slow
    * call counts as unreachable and a rejection as `false`; it must not change
-   * data.
+   * data. Resolve `undefined` when the adapter cannot tell without making
+   * things worse, such as a saturated connection pool, where one more queued
+   * probe would wait behind the traffic it measures: the indicator then stays
+   * up with `reachable: 'unknown'`.
    *
-   * @returns `true` when the backend answered
+   * @returns `true` when the backend answered, `false` when it refused, or
+   *   `undefined` when the adapter could not tell
    * @since 0.13.0
    */
-  isHealthy?(): Promise<boolean>;
+  isHealthy?(): Promise<boolean | undefined>;
   /**
    * Called once at application shutdown. Built-in adapters never close a
    * client the application injected; they call their `onClose` option.

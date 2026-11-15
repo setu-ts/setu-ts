@@ -834,11 +834,12 @@ here.
   Compose healthchecks and `--depends-on`, a per-member `<member>-transport` ConfigMap below member
   Secrets, `runtimeOptions()` serving h2c for gRPC members, operator secret values; V12-68, V12-110,
   V12-111, V12-113, V12-115, V12-116, V12-121, V12-122, V12-123) — complete (PR #592).
-- **Milestone 140d** (`packages/cli` — what the generators write, and the agent brief:
-  `add validation` registers `ValidationPlugin()`, `DATABASE_URL` and Redis guidance from `add`, a
-  strict `g schema`, a `Server-Timing` middleware, PascalCase event names, instance-owned
-  class-based module state, truthful README/comment text, brief refresh hints and devtool entries;
-  29 V12 rows) — complete (PR pending).
+- **Milestone 140d** (`packages/cli` + `vector-store-plugin` + `common` + `cloudflare-plugin` — what
+  the generators write, and the agent brief: `add validation` registers `ValidationPlugin()`,
+  `DATABASE_URL` and Redis guidance from `add`, a strict `g schema`, a `Server-Timing` middleware,
+  PascalCase event names, truthful README/comment text, brief refresh hints and devtool entries; 29
+  V12 rows; plus `setu add` prompts for every choice, backend guidance for every broker, example
+  apps on the current scaffold, and a `vector-store` readiness indicator) — complete (PR pending).
 - **Next milestone** — the remaining M139 letters, then M140e (generated code read as code).
 
 ## Verification (run before declaring any work done)
