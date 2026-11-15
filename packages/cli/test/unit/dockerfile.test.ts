@@ -40,15 +40,24 @@ describe('generated Dockerfile chown fold (X10-5)', () => {
     expect(source).toContain('delete manifest.imports["@setu-ts/testing"]');
     expect(source).toContain('delete manifest.imports["@setu-ts/diagnostics-plugin"]');
   });
-  it('one RUN carries both the cache and the ownership fixup', () => {
+  it('each RUN that writes files carries its own ownership fixup', () => {
     const contents = dockerfile();
     const runLines = contents.split('\n').filter((line) => line.startsWith('RUN '));
 
-    const cacheRun = runLines.find((line) => line.includes('&& deno cache main.ts'));
+    const cacheRun = runLines.find((line) =>
+      line.includes('&& deno cache --node-modules-dir=none main.ts'),
+    );
+    const installRun = runLines.find((line) =>
+      line.includes('deno install --cached-only --frozen'),
+    );
     expect(cacheRun).toBeDefined();
     // Same line, same layer: `&&`, not two instructions. DENO_UID interpolates
     // to its numeric value in the emitted text.
-    expect(cacheRun).toContain('&& chown -R 1000:1000 /srv /deno-dir');
+    expect(cacheRun).toContain('&& chown -R 1000:1000 /deno-dir');
+    // The second RUN changes only files it does not already find owned, so the
+    // cache written by the first is not copied up into a second layer.
+    expect(installRun).toContain('&& find /srv /deno-dir ! -user 1000 -exec chown 1000:1000 {} +');
+    expect(installRun).not.toContain('chown -R');
   });
 
   it('no standalone chown line remains', () => {
@@ -91,10 +100,12 @@ describe('generated Dockerfile lockfile verification', () => {
       '--allow-read=./deno.json,./deno.jsonc --allow-write=./.setu-build-task,./.setu-check-task,./.setu-check-cli,./deno.json,./deno.jsonc -',
     );
     expect(frontend).toContain(
-      'if [ -f .setu-build-task ]; then deno task build; else mkdir -p build; fi',
+      'if [ -f .setu-build-task ]; then deno install --cached-only && deno task build; else mkdir -p build; fi',
     );
     const runs = frontend.split('\n').filter((line) => line.startsWith('RUN '));
-    const cache = runs.find((line) => line.includes('deno cache main.ts setu.config.ts'));
+    const cache = runs.find((line) =>
+      line.includes('deno cache --node-modules-dir=none main.ts setu.config.ts'),
+    );
     const check = runs.find((line) => line.includes('deno task check'));
     expect(cache).toContain('--mount=type=secret');
     expect(cache).not.toContain('deno task check');
@@ -104,18 +115,20 @@ describe('generated Dockerfile lockfile verification', () => {
     const runtime = contents.slice(contents.indexOf('FROM denoland/deno:alpine-2.9.5'));
     const copy = runtime.indexOf('COPY --from=frontend /srv/apps/${MEMBER}/buil[d] ./build/');
     expect(copy).toBeGreaterThan(-1);
-    expect(copy).toBeLessThan(runtime.indexOf('deno cache main.ts'));
+    expect(copy).toBeLessThan(runtime.indexOf('deno cache --node-modules-dir=none main.ts'));
     expect(runtime).not.toContain('deno task build');
   });
   it('switches an auto node_modules root to manual after installing, before the chown', () => {
     const buildRun = dockerfile()
       .split('\n')
-      .find((line) => line.startsWith('RUN ') && line.includes('&& deno cache main.ts'))!;
+      .find(
+        (line) => line.startsWith('RUN ') && line.includes('deno install --cached-only --frozen'),
+      )!;
     const rewrite = buildRun.indexOf('manifest.nodeModulesDir === "auto"');
     expect(rewrite).toBeGreaterThan(
-      buildRun.lastIndexOf('deno install --entrypoint main.ts --frozen'),
+      buildRun.lastIndexOf('deno install --cached-only --entrypoint main.ts --frozen'),
     );
-    expect(rewrite).toBeLessThan(buildRun.indexOf('chown -R'));
+    expect(rewrite).toBeLessThan(buildRun.indexOf('find /srv /deno-dir'));
     expect(buildRun).toContain('manifest.nodeModulesDir = "manual"');
     expect(buildRun).toContain(
       '--allow-read=/srv/deno.json,/srv/deno.jsonc --allow-write=/srv/deno.json,/srv/deno.jsonc -',
@@ -123,9 +136,11 @@ describe('generated Dockerfile lockfile verification', () => {
   });
   it('completes the lockfile and then VERIFIES it, in one build layer', () => {
     const contents = dockerfile();
-    const buildRun = contents
-      .split('\n')
-      .find((line) => line.startsWith('RUN ') && line.includes('&& deno cache main.ts'));
+    const runLines = contents.split('\n').filter((line) => line.startsWith('RUN '));
+    const buildRun = runLines.find((line) =>
+      line.includes('&& deno cache --node-modules-dir=none main.ts'),
+    );
+    const verifyRun = runLines.find((line) => line.includes('deno install --cached-only --frozen'));
     expect(buildRun).toBeDefined();
 
     // Deno records a jsr package's npm edge list nondeterministically on a cold
@@ -144,8 +159,15 @@ describe('generated Dockerfile lockfile verification', () => {
     // repairing install fails the build (exit 1), and dropping `--frozen` is what
     // let the incomplete lockfile reach production in the first place.
     expect(buildRun).toContain(
-      'deno cache main.ts && deno install && deno install --frozen && deno install --entrypoint main.ts && deno install --entrypoint main.ts --frozen',
+      'deno cache --node-modules-dir=none main.ts && deno install --node-modules-dir=none && deno install --node-modules-dir=none --frozen && deno install --node-modules-dir=none --entrypoint main.ts && deno install --node-modules-dir=none --entrypoint main.ts --frozen',
     );
+    // The fetch fills only the cache; the step after it, without the registry
+    // token, installs from that cache and verifies the lockfile again.
+    expect(verifyRun).toContain(
+      'deno install --cached-only --frozen && deno install --cached-only --entrypoint main.ts --frozen',
+    );
+    expect(verifyRun).not.toContain('type=secret');
+    expect(runLines.indexOf(verifyRun!)).toBe(runLines.indexOf(buildRun!) + 1);
   });
 
   it('pairs that verification with a `--frozen` runtime', () => {

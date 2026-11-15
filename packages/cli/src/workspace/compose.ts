@@ -157,11 +157,16 @@ export function renderDockerfile(profile: WorkspaceRuntimeProfile, workspace = t
 # it runs (\`deno run --no-lock npm:@setu-ts/cli@<exact>\`) never executes beside
 # the registry token. Every fetch that needs the token happens in the first RUN,
 # before any project code runs, and executes nothing: \`deno install\` for a
-# member with a frontend (its locked dependencies; Deno runs no install scripts
-# unless approved), otherwise main.ts and setu.config.ts's graph, plus the CLI's
-# exact specifier read from the check task. \`deno task build\` then runs in a
-# RUN without the token, from that cache; no later step in this stage, or in the
-# check stage, mounts it (the final stage's runtime install does, below).
+# member with a frontend (its locked dependencies), otherwise main.ts and
+# setu.config.ts's graph, plus the CLI's exact specifier read from the check
+# task. Each runs with \`--node-modules-dir=none\`, which fills only the global
+# cache: Deno runs lifecycle scripts only into a node_modules directory, so even
+# a package the project approves with \`allowScripts\` runs nothing beside the
+# token (Deno reports "Ignored build scripts"). The next RUN, without the token,
+# creates node_modules from that cache (\`--cached-only\`: a fetch the first RUN
+# missed fails the build), which is where approved scripts run, then
+# \`deno task build\`. No later step in this stage, or in the check stage, mounts
+# the token (the final stage's fetch does, below, under the same rule).
 FROM ${DENO_BUILD_IMAGE} AS frontend
 ARG MEMBER
 WORKDIR /srv
@@ -170,8 +175,8 @@ COPY lib[s] ./${LIBS_DIR}/
 COPY ${MEMBERS_DIR}/\${MEMBER} ./${MEMBERS_DIR}/\${MEMBER}
 WORKDIR /srv/${MEMBERS_DIR}/\${MEMBER}
 ARG NPM_CONFIG_REGISTRY=
-RUN ${NPMRC_MOUNT} printf '%s' 'import { parse } from "jsr:@std/jsonc@1.0.3"; for (const name of ["deno.json", "deno.jsonc"]) { let source; try { source = Deno.readTextFileSync(name); } catch (error) { if (error instanceof Deno.errors.NotFound) continue; throw error; } const manifest = parse(source); for (const task of ["build", "check"]) { if (manifest.tasks && task in manifest.tasks) Deno.writeTextFileSync(".setu-" + task + "-task", ""); } if (manifest.tasks && typeof manifest.tasks.check === "string" && manifest.tasks.check.includes(" main.dev.ts")) { manifest.tasks.check = manifest.tasks.check.replaceAll(" main.dev.ts", ""); Deno.writeTextFileSync(name, JSON.stringify(manifest)); } if (manifest.tasks && typeof manifest.tasks.check === "string" && manifest.tasks.check.includes("npm:@setu-ts/cli@")) Deno.writeTextFileSync(".setu-check-cli", manifest.tasks.check.slice(manifest.tasks.check.indexOf("npm:@setu-ts/cli@")).split(" ")[0]); break; }' | DENO_DIR=/tmp/.setu-build-cache deno run --no-config --no-lock --no-prompt --allow-read=./deno.json,./deno.jsonc --allow-write=./.setu-build-task,./.setu-check-task,./.setu-check-cli,./deno.json,./deno.jsonc - && if [ -z "$NPM_CONFIG_REGISTRY" ]; then unset NPM_CONFIG_REGISTRY; fi && if [ -f .setu-build-task ]; then deno install; elif [ -f .setu-check-task ]; then deno cache main.ts setu.config.ts; fi && if [ -f .setu-check-cli ]; then deno cache --no-lock "$(cat .setu-check-cli)"; fi
-RUN if [ -z "$NPM_CONFIG_REGISTRY" ]; then unset NPM_CONFIG_REGISTRY; fi && if [ -f .setu-build-task ]; then deno task build; else mkdir -p build; fi
+RUN ${NPMRC_MOUNT} printf '%s' 'import { parse } from "jsr:@std/jsonc@1.0.3"; for (const name of ["deno.json", "deno.jsonc"]) { let source; try { source = Deno.readTextFileSync(name); } catch (error) { if (error instanceof Deno.errors.NotFound) continue; throw error; } const manifest = parse(source); for (const task of ["build", "check"]) { if (manifest.tasks && task in manifest.tasks) Deno.writeTextFileSync(".setu-" + task + "-task", ""); } if (manifest.tasks && typeof manifest.tasks.check === "string" && manifest.tasks.check.includes(" main.dev.ts")) { manifest.tasks.check = manifest.tasks.check.replaceAll(" main.dev.ts", ""); Deno.writeTextFileSync(name, JSON.stringify(manifest)); } if (manifest.tasks && typeof manifest.tasks.check === "string" && manifest.tasks.check.includes("npm:@setu-ts/cli@")) Deno.writeTextFileSync(".setu-check-cli", manifest.tasks.check.slice(manifest.tasks.check.indexOf("npm:@setu-ts/cli@")).split(" ")[0]); break; }' | DENO_DIR=/tmp/.setu-build-cache deno run --no-config --no-lock --no-prompt --allow-read=./deno.json,./deno.jsonc --allow-write=./.setu-build-task,./.setu-check-task,./.setu-check-cli,./deno.json,./deno.jsonc - && if [ -z "$NPM_CONFIG_REGISTRY" ]; then unset NPM_CONFIG_REGISTRY; fi && if [ -f .setu-build-task ]; then deno install --node-modules-dir=none; elif [ -f .setu-check-task ]; then deno cache --node-modules-dir=none main.ts setu.config.ts; fi && if [ -f .setu-check-cli ]; then deno cache --no-lock --node-modules-dir=none "$(cat .setu-check-cli)"; fi
+RUN if [ -z "$NPM_CONFIG_REGISTRY" ]; then unset NPM_CONFIG_REGISTRY; fi && if [ -f .setu-build-task ]; then deno install --cached-only && deno task build; else mkdir -p build; fi
 
 # The check runs in a stage of its own: whatever its unlocked CLI writes stays
 # here. The final stage copies build/ from the frontend stage above and nothing
@@ -232,10 +237,10 @@ RUN --mount=type=bind,from=check,source=/tmp/.setu-checked,target=/tmp/.setu-che
 # boots its real broker drivers under --read-only with no external network (shared
 # loopback).
 #
-# The chown FOLDS into this same RUN (X10-5): a standalone \`chown -R\` rewrites
-# metadata on every file the cache layer created, so overlayfs copies the
-# ENTIRE module cache into a second layer — measured at 563 MB vs 362 MB with
-# the fold, paid on every push and every node pull.
+# Each chown FOLDS into the RUN that wrote the files (X10-5): a standalone
+# \`chown -R\` rewrites metadata on every file the cache layer created, so
+# overlayfs copies the ENTIRE module cache into a second layer — measured at
+# 563 MB vs 362 MB with the fold, paid on every push and every node pull.
 # Remove the development-only pin before resolving the production import map.
 # Deno 2.9 needs the full-map install pair to complete lazy broker npm edges;
 # an entrypoint-only frozen install can pass while the real broker later refuses.
@@ -257,7 +262,17 @@ ARG NPM_CONFIG_REGISTRY=
 # 17), symlink '../../libs/shared'\`), so EVERY member failed to start. "manual"
 # uses the node_modules this build installed. The root manifest is plain JSON
 # by now, rewritten by the step above.
-RUN ${NPMRC_MOUNT} if [ -z "$NPM_CONFIG_REGISTRY" ]; then unset NPM_CONFIG_REGISTRY; fi && deno cache main.ts && deno install && deno install --frozen && deno install --entrypoint main.ts && deno install --entrypoint main.ts --frozen && printf '%s' 'for (const name of ["deno.json", "deno.jsonc"]) { const path = "/srv/" + name; let source; try { source = Deno.readTextFileSync(path); } catch (error) { if (error instanceof Deno.errors.NotFound) continue; throw error; } const manifest = JSON.parse(source); if (manifest.nodeModulesDir === "auto") { manifest.nodeModulesDir = "manual"; Deno.writeTextFileSync(path, JSON.stringify(manifest)); } break; }' | deno run --no-config --no-prompt --allow-read=/srv/deno.json,/srv/deno.jsonc --allow-write=/srv/deno.json,/srv/deno.jsonc - && chown -R ${DENO_UID}:${DENO_UID} /srv /deno-dir
+#
+# The registry token is mounted for the fetch alone. Every command in that RUN
+# passes \`--node-modules-dir=none\`, so it fills only the global cache and runs
+# no lifecycle script, not even one the project approves with \`allowScripts\`
+# (Deno runs them only into a node_modules directory). The next RUN, without
+# the token, creates node_modules from the cache (\`--cached-only\`), runs any
+# approved scripts there, and verifies the lockfile again with \`--frozen\`. The
+# cache is chowned in the RUN that wrote it; the second RUN chowns only files
+# not yet owned, so the cache is not copied into a second layer (X10-5).
+RUN ${NPMRC_MOUNT} if [ -z "$NPM_CONFIG_REGISTRY" ]; then unset NPM_CONFIG_REGISTRY; fi && deno cache --node-modules-dir=none main.ts && deno install --node-modules-dir=none && deno install --node-modules-dir=none --frozen && deno install --node-modules-dir=none --entrypoint main.ts && deno install --node-modules-dir=none --entrypoint main.ts --frozen && chown -R ${DENO_UID}:${DENO_UID} /deno-dir
+RUN if [ -z "$NPM_CONFIG_REGISTRY" ]; then unset NPM_CONFIG_REGISTRY; fi && deno install --cached-only --frozen && deno install --cached-only --entrypoint main.ts --frozen && printf '%s' 'for (const name of ["deno.json", "deno.jsonc"]) { const path = "/srv/" + name; let source; try { source = Deno.readTextFileSync(path); } catch (error) { if (error instanceof Deno.errors.NotFound) continue; throw error; } const manifest = JSON.parse(source); if (manifest.nodeModulesDir === "auto") { manifest.nodeModulesDir = "manual"; Deno.writeTextFileSync(path, JSON.stringify(manifest)); } break; }' | deno run --no-config --no-prompt --allow-read=/srv/deno.json,/srv/deno.jsonc --allow-write=/srv/deno.json,/srv/deno.jsonc - && find /srv /deno-dir ! -user ${DENO_UID} -exec chown ${DENO_UID}:${DENO_UID} {} +
 
 # NUMERIC, not \`USER deno\`: Kubernetes' runAsNonRoot refuses an image whose user
 # is a name — "cannot verify user is non-root" — while Docker resolves it happily,
