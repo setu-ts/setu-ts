@@ -15,6 +15,7 @@ const runtime = createRuntimeServices();
 async function boot() {
   const app = await createApp();
   await app.start({ port: Number(runtime.env.PORT || '3000') });
+  console.log(`Listening on http://localhost:${Number(runtime.env.PORT || '3000')}/`);
   return app;
 }
 

@@ -1112,6 +1112,9 @@ export function renderAppTsconfig(app: string): string {
           ? {
               compilerOptions: {
                 jsx: 'react-jsx',
+                // main.ts imports the compiled React Router server build, as the
+                // scaffold's own tsconfig allows.
+                allowJs: true,
                 paths: {
                   ...sourcePaths('../../'),
                   '~/*': ['./app/*'],

@@ -5,15 +5,25 @@ A React Router 8 framework-mode application served by a Setu-TS application, com
 `setu new --template full-stack`.
 
 ```bash
-pnpm --dir apps/full-stack run start   # builds the frontend, then serves on http://localhost:3000
-pnpm --dir apps/full-stack run smoke   # what CI runs
-pnpm --dir apps/full-stack run test    # the removal claim, asserted
+pnpm --dir apps/full-stack run start:dev  # Vite in middleware mode, served on http://localhost:3000
+pnpm --dir apps/full-stack run smoke      # what CI runs
+pnpm --dir apps/full-stack run test       # the removal claim and the app test, asserted
+pnpm --dir apps/full-stack run build      # frontend, type-check, setu check, then dist/main.js
+pnpm --dir apps/full-stack run start      # runs the built dist/main.js; build first
 ```
+
+The layout, theme toggle, `components/ui` Button and Card, the Dockerfile, `test/app.test.ts`,
+`test/e2e/` and `test/support/` are what the scaffold writes, unchanged. The example's own additions
+are the memory database and its startup seed (called from `main.ts` and `dev.ts`), the development
+session-secret fallback, the `/forbidden` route, `smoke.ts`, `test/removal.test.ts` and the browser
+harness.
 
 ## What the smoke check proves
 
 An SSR-rendered route returns HTML containing a row that was **written through the database
-capability** — not a string in a component. That is the whole point: it is evidence that
+capability** — not a string in a component. The products page sits behind the scaffold's
+`requireUser` route middleware, so the smoke check first proves a signed-out request is sent to
+`/login`, then signs in and reads the page. That is the whole point: it is evidence that
 `getService(context, PRODUCTS)` resolved the request-bound kernel module in a React Router loader.
 The smoke check first asserts the API catalogue is empty, then seeds rows and checks the sorted API
 response and page HTML.
@@ -35,7 +45,7 @@ A conventional React Router application grows these, and this one has none of th
 | Hand-rolled logger                      | `logger-plugin`, resolved through `CAPABILITIES.LOGGER`          |
 | Module-level client caches              | the kernel service registry                                      |
 
-`app/server/session.server.ts` provides typed access to session and CSRF values and holds **no
+`app/server/session.server.ts` provides typed access to session, CSRF and signed-in-user values and holds **no
 state**. `test/removal.test.ts` asserts the absence of hand-rolled capabilities, stateless accessors
 and both directions of context-key wiring. Kernel services use `getService` instead of application
 context keys.
@@ -45,7 +55,7 @@ context keys.
 Business logic lives under `src/modules/products/`; pages and page glue live under `app/`, matching
 the M130 full-stack template. The products service reads the DATABASE capability and logs through
 the LOGGER capability. Both the page and `GET /api/products` resolve that request-bound service in
-process. Seeding runs after startup, when the database has connected.
+process. Seeding runs in `main.ts` and `dev.ts` after startup, when the database has connected.
 
 - `src/modules/products/products.types.ts` — the plain `Product` interface.
 - `src/modules/products/products.token.ts` — the typed `PRODUCTS` service token.
@@ -54,23 +64,29 @@ process. Seeding runs after startup, when the database has connected.
 - `src/modules/products/products.seed.ts` — the repository name and startup seed.
 - `src/modules/products/index.ts` — service and route registration.
 - `src/modules/index.ts` — `registerModules`, called by `setu.config.ts` before startup.
-- `app/server/context-keys.server.ts` — session and CSRF keys created with `contextKeyFor`.
-- `app/server/session.server.ts` — stateless session and CSRF accessors.
+- `app/server/context-keys.server.ts` — request id, session, CSRF and signed-in-user keys created
+  with `contextKeyFor`.
+- `app/server/session.server.ts` — stateless session, CSRF and signed-in-user accessors.
+- `app/server/require-user.server.ts` — the route middleware that guards the products page.
 - `app/routes/_app/products._index.tsx` — `getService(context, PRODUCTS).list()` and price display.
 
 Pages import kernel code only as `import type` or from a `*.token.ts` module through `~kernel/*`.
 Token modules contain only the token and type imports; they never import the service by value.
-`populateLoadContext` sets only session and CSRF values. The price formatter stays in the page.
+`populateLoadContext` sets only the request id, session and CSRF values; `requireUser` sets the
+signed-in user. The price formatter stays in the page.
 
 ## Toolchain
 
-The repository uses Node 24 and pnpm. The `build` script runs React Router's Vite build; `start` and
-`smoke` both build first. Install dependencies at the repository root with
-`pnpm install --frozen-lockfile`. Frontend tooling stays in the app's dependencies, outside the
-published framework dependency graph (AI_GUIDELINES §12.2).
+The repository uses Node 24 and pnpm. The `build` script runs React Router's Vite build, the
+type-check and `setu build`; `start` runs the result and refuses when `dist/main.js` is missing, and
+`smoke` runs only the frontend build first, since it loads the framework from source. In this
+repository, `build` bundles against the framework packages' compiled output; in a fresh clone,
+compile them once from the repository root with `pnpm exec tsc -b`. Install dependencies at the
+repository root with `pnpm install --frozen-lockfile`. Frontend tooling stays in the app's
+dependencies, outside the published framework dependency graph (AI_GUIDELINES §12.2).
 
 `build/`, `.react-router/` and `node_modules/` are generated and ignored by repository formatting
-and linting. The app's `check` script uses its generated `tsconfig.json`, which includes the `app/`
+and linting. The app's `check` script runs the React Router build and then uses its generated `tsconfig.json`, which includes the `app/`
 and `src/` TypeScript and TSX files. `pnpm run check:apps` runs that check, then the smoke and test
 scripts. Vite's build strips types; the TypeScript check is separate.
 

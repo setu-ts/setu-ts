@@ -21,6 +21,9 @@ async function boot() {
     // `||`, not `??`: an empty HOST= must not mean every interface.
     hostname: runtime.env.HOST || '127.0.0.1',
   });
+  console.log(
+    `Listening on http://${runtime.env.HOST || '127.0.0.1'}:${Number(runtime.env.PORT || '3000')}/`,
+  );
   return app;
 }
 

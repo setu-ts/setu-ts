@@ -1,16 +1,19 @@
 # Setu-TS examples
 
 Each directory is a member of the pnpm workspace (`pnpm-workspace.yaml` lists `apps/*`) with a
-private `package.json`: `@setu-ts/*` as `workspace:^` dependencies, `start` and `smoke` scripts that
-run through `tsx`, and a generated `tsconfig.json` extending `../../tsconfig.apps.json`. `tsx`
-applies that config's `paths`, so framework imports run HEAD source. The full-stack example builds
-its frontend first. Run an example's `smoke` script to verify the claim below. Examples use the
-structure the CLI writes for their artifacts: `setu.config.ts`, `main.ts`, and CLI-owned module,
-plugin or CQRS barrels where those seams are used. Module compositions call
-`registerModules(app.router, app.services)`; class-based ones also pass `MODULES` to
-DecoratorPlugin, and custom plugins register through `GENERATED_PLUGINS`. `setu sync` regenerates
-those files and `setu check` checks their wiring. No example adds an empty barrel for an unused
-artifact family.
+private `package.json`: `@setu-ts/*` as `workspace:^` dependencies, `smoke` scripts that run through
+`tsx`, and a generated `tsconfig.json` extending `../../tsconfig.apps.json`. `tsx` applies that
+config's `paths`, so framework imports run HEAD source. Most `start` scripts run through `tsx` too;
+`ai-chat`, `durable-agent`, `full-stack`, `mcp-tools` and `semantic-search` keep the scaffold's
+`build` and a `start` that runs the built `dist/main.js`, with `start:dev` running source through
+`tsx`. Their `build` bundles against the framework packages' compiled output, so a fresh clone runs
+`pnpm exec tsc -b` once first. The full-stack `smoke` builds its frontend first. Run an example's
+`smoke` script to verify the claim below. Examples use the structure the CLI writes for their
+artifacts: `setu.config.ts`, `main.ts`, and CLI-owned module, plugin or CQRS barrels where those
+seams are used. Module compositions call `registerModules(app.router, app.services)`; class-based
+ones also pass `MODULES` to DecoratorPlugin, and custom plugins register through
+`GENERATED_PLUGINS`. `setu sync` regenerates those files and `setu check` checks their wiring. No
+example adds an empty barrel for an unused artifact family.
 
 The [examples guide](../docs/examples.md#how-every-example-is-laid-out) explains the layouts:
 single-route examples need no modules; GraphQL and gRPC keep their transport-specific files inside

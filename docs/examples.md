@@ -49,8 +49,12 @@ pnpm --dir apps/minimal run smoke       # run its proof
 ```
 
 Every app is a private pnpm workspace member. Its `package.json` uses `workspace:^` dependencies and
-its generated `tsconfig.json` maps framework imports to repository source. The scripts run with
-`tsx`, so an example exercises the current code.
+its generated `tsconfig.json` maps framework imports to repository source. `smoke` and `start:dev`
+run with `tsx`, so an example exercises the current code. `ai-chat`, `durable-agent`, `full-stack`,
+`mcp-tools` and `semantic-search` keep the scaffold's `build` and a `start` that runs the built
+`dist/main.js`; `build` bundles against the framework packages' compiled output, so compile them
+once from the repository root with `pnpm exec tsc -b` in a fresh clone. The other apps' `start`
+scripts run with `tsx`.
 
 Most apps listen on port `3000` unless you pass a port, but three do not: `graphql-demo` defaults to
 `4000`, `grpc` to `5000`, and `static-site` to `8000`. Three apps' `start` scripts do not serve:
@@ -398,10 +402,11 @@ The [AI chat example](../apps/ai-chat) follows the [AI guide](./ai.md): the SDK 
 structured output, UI streams and model fallback; Setu owns request identity, cancellation, quotas
 and outbox/inbox usage delivery. Run `pnpm --dir apps/ai-chat run smoke` for its Node-only proofs,
 including an in-process OTLP receiver and a content-capture positive control. A real endpoint is
-optional through `AI_COMPAT_BASE_URL`. With a model configured, `pnpm --dir apps/ai-chat run start`
-serves a minimal chat page at `/ui` that keeps the conversation, renders the streamed answer as it
-arrives, counts tokens per turn and per session, shows how much of the context window the last
-request filled, and stops the model call with **Stop**.
+optional through `AI_COMPAT_BASE_URL`. With a model configured,
+`pnpm --dir apps/ai-chat run start:dev` (or `build` then `start`) serves a minimal chat page at
+`/ui` that keeps the conversation, renders the streamed answer as it arrives, counts tokens per turn
+and per session, shows how much of the context window the last request filled, and stops the model
+call with **Stop**.
 
 ### semantic-search
 
@@ -860,16 +865,18 @@ writes rows through the database capability, and checks the sorted API response 
 also completes a `<Form>` login whose CSRF token round-trips through the session plugin.
 
 ```bash
-pnpm --dir apps/full-stack run start            # builds first, then serves on PORT or 3000
+pnpm --dir apps/full-stack run start:dev        # Vite in middleware mode, on PORT or 3000
+pnpm --dir apps/full-stack run build            # then `start` runs the built dist/main.js
 ```
 
-`start` runs the React Router / Vite build first using Node and pnpm.
+`build` runs the React Router / Vite build, the type-check and `setu build`; `start` refuses until
+it has run. The layout, theme and UI components are the full-stack scaffold's own.
 
 **Read, in order:**
 
 - [`setu.config.ts`](../apps/full-stack/setu.config.ts) — createApp enables SSR, session and the
   memory database, then calls registerModules(app.router, app.services). populateLoadContext sets
-  only the session and CSRF token.
+  only the request id, the session and the CSRF token.
 - [`src/modules/index.ts`](../apps/full-stack/src/modules/index.ts) and
   [`products/index.ts`](../apps/full-stack/src/modules/products/index.ts) — registerModules
   registers the products requestService factory and its API route before startup.
@@ -881,15 +888,18 @@ pnpm --dir apps/full-stack run start            # builds first, then serves on P
 - [`products.controller.ts`](../apps/full-stack/src/modules/products/products.controller.ts) — GET
   /api/products resolves the same service through resolveRequestService(ctx, PRODUCTS).
 - [`products.seed.ts`](../apps/full-stack/src/modules/products/products.seed.ts) — PRODUCTS_ENTITY
-  and startup seeding, called by main.ts and smoke.ts after the database connects.
+  and startup seeding, called by main.ts, dev.ts and smoke.ts after the database connects.
 - [`app/server/context-keys.server.ts`](../apps/full-stack/app/server/context-keys.server.ts) and
-  [`session.server.ts`](../apps/full-stack/app/server/session.server.ts) — stable session and CSRF
-  keys and their stateless accessors.
+  [`session.server.ts`](../apps/full-stack/app/server/session.server.ts) — stable request id,
+  session, CSRF and signed-in-user keys and their stateless accessors.
+- [`app/server/require-user.server.ts`](../apps/full-stack/app/server/require-user.server.ts) — the
+  route middleware that sends a signed-out visitor to `/login` and sets the signed-in user.
 - [`app/routes/_app/products._index.tsx`](../apps/full-stack/app/routes/_app/products._index.tsx) —
   the loader calls getService(context, PRODUCTS).list() and returns products and total. The page
   formats prices; kernel imports are types or the token only.
-- [`smoke.ts`](../apps/full-stack/smoke.ts) — checks database readback through the API and page,
-  then carries the session cookie and rendered CSRF token into a login form post.
+- [`smoke.ts`](../apps/full-stack/smoke.ts) — checks database readback through the API, that a
+  signed-out request for the page is sent to `/login`, and the page after signing in; the login
+  carries the session cookie and rendered CSRF token into a form post.
 
 ---
 

@@ -2,6 +2,7 @@
   "extends": "../../tsconfig.apps.json",
   "compilerOptions": {
     "jsx": "react-jsx",
+    "allowJs": true,
     "paths": {
       "@setu-ts/rest-starter": [
         "../../packages/starters/rest-starter/src/index.ts"

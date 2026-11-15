@@ -5,10 +5,16 @@
   "type": "module",
   "scripts": {
     "check": "tsc -p tsconfig.json --noEmit",
-    "smoke": "tsx smoke.ts",
-    "start": "tsx main.ts",
+    "lint": "eslint --config lint.config.js .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "build": "tsc --noEmit && setu build",
+    "start": "node --input-type=commonjs -e \"require('node:fs').existsSync('dist/main.js')||(console.error('dist/main.js is missing; run the build script first'),process.exitCode=1)\" && node --import \"data:text/javascript,process.env.NODE_ENV??='production'\" --import ./instrumentation.mjs --env-file-if-exists=.env --enable-source-maps dist/main.js",
+    "start:dev": "tsx watch --import ./instrumentation.mjs --env-file-if-exists=.env main.ts",
+    "start:debug": "node --import ./instrumentation.mjs --env-file-if-exists=.env --inspect --import tsx main.ts",
     "test": "tsx --test --test-force-exit '**/!(*.e2e).test.ts'",
-    "test:e2e": "tsx --test --test-force-exit '**/*.e2e.test.ts'"
+    "test:e2e": "tsx --test --test-force-exit '**/*.e2e.test.ts'",
+    "smoke": "tsx smoke.ts"
   },
   "dependencies": {
     "@setu-ts/common": "workspace:^",
@@ -44,6 +50,13 @@
     "swagger-ui-dist": "5.33.3"
   },
   "devDependencies": {
-    "@setu-ts/testing": "workspace:^"
+    "@setu-ts/testing": "workspace:^",
+    "@types/node": "^24.0.0",
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.12.0",
+    "prettier": "^3.9.10",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.71.1",
+    "@setu-ts/cli": "workspace:^"
   }
 }

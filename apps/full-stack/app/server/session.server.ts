@@ -1,9 +1,23 @@
 import type { ISession } from '@setu-ts/common';
-import type { AppLoadContext } from '~/lib/load-context.ts';
-import { csrfContext, sessionContext } from '~/server/context-keys.server.ts';
 
-/** Requires a request value without caching any state between requests. */
-function requireValue<T>(value: T | null, name: string): T {
+import type { AppLoadContext } from '~/lib/load-context.ts';
+import {
+  csrfContext,
+  type CurrentUser,
+  currentUserContext,
+  sessionContext,
+} from '~/server/context-keys.server.ts';
+
+/**
+ * Typed access to the request values that are not services.
+ *
+ * @param value - The value read from the request context
+ * @param name - The value's name, for the error message
+ * @returns The value, once known to be present
+ * @throws {Error} If the value is absent: its key is not set in
+ * populateLoadContext, or this ran outside a loader or action
+ */
+export function requireValue<T>(value: T | null, name: string): T {
   if (value === null) {
     throw new Error(
       `No ${name} on this request. Set its context key in populateLoadContext in ` +
@@ -26,4 +40,21 @@ export function getSession(context: AppLoadContext): ISession {
  */
 export function getCsrfToken(context: AppLoadContext): string {
   return requireValue(context.get(csrfContext), 'CSRF token');
+}
+
+/**
+ * Resolves the signed-in user the `requireUser` route middleware put on the context.
+ *
+ * Throws on a route that middleware does not guard. That is deliberate: a loader
+ * that needs a user should be unreachable without one.
+ */
+export function getCurrentUser(context: AppLoadContext): CurrentUser {
+  const user = context.get(currentUserContext);
+  if (user === null) {
+    throw new Error(
+      'No signed-in user on this request. Guard the route with ' +
+        '`export const middleware = [requireUser];` from ~/server/require-user.server.ts.',
+    );
+  }
+  return user;
 }

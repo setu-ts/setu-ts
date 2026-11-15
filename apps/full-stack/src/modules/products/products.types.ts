@@ -1,11 +1,11 @@
 /**
- * Domain model. Plain data, shared by server modules and components — so it
- * must not import anything server-only.
+ * The products module's data. Plain types, safe to import from a page with
+ * `import type` through the `~kernel/*` alias.
  */
 
 /** A product in the catalogue. */
 export interface Product {
-  /** Stable identifier, and the repository's primary key. */
+  /** Stable identifier. */
   readonly id: string;
   /** Display name. */
   readonly name: string;
