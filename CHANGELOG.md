@@ -8,6 +8,33 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **`@setu-ts/cli` (M140d, PR pending).** `setu add validation` registers `ValidationPlugin()`, and
+  `setu check` reports it when installed but unregistered (V12-62). `setu add database` writes
+  `DATABASE_URL` with a local default for Drizzle and Prisma (V12-82); a Redis store prints what now
+  connects to Redis at startup, how to start it, and the offline `createTestApp` override (V12-70),
+  and Redis comments no longer describe messaging in a cache-only project (V12-100). `setu generate`
+  accepts `--yes` (V12-101) and, like `sync` and `devtool enable`, reminds a project with an agent
+  brief to refresh it (V12-125).
+- **`@setu-ts/cli` (M140d, PR pending).** Generated code: `g schema` emits `z.strictObject({})` and
+  prints how to bind it (V12-65); `g middleware` sends a `Server-Timing` duration measured with
+  `runtime.hrtime()` (V12-87); event type names are PascalCase like command names, and event samples
+  state in-process, at-most-once delivery (V12-86, V12-84); `g job` prints `setu add queue` when the
+  queue is missing (V12-85); a class-based module service keeps its records on the injectable
+  instance (V12-95), validated services drop dead fallbacks (V12-99), and the service and showcase
+  comments no longer blame Deno or repeat a done step (V12-96, V12-97).
+- **`@setu-ts/cli` (M140d, PR pending).** Templates: READMEs name the microservice's in-memory
+  transports (V12-73), claim DI validation only for decorated projects (V12-78), use
+  `generate module billing` (V12-79) and say `/metrics`, `/docs` and `/openapi.json` are on the
+  application port (V12-94); `main.ts` reports a failed shutdown on stderr without a logger
+  (V12-81); the config's devtool JSDoc is true with or without `main.dev.ts` (V12-98). Full-stack:
+  module controllers throw `notFound`/`badRequest` (V12-90), the module unit test drives the service
+  without a port (V12-93), React is only in `dependencies` (V12-91), and the login, guard and nav
+  comments are accurate, with `g module --page` printing the `APP_NAV` entry (V12-89, V12-92).
+- **`@setu-ts/cli` (M140d, PR pending).** Agent brief and devtool: the validation rule appears only
+  with `validation-plugin` installed (V12-126); the brief lists `main.dev.ts` and the managed
+  diagnostics allowlist and says `dev` needs the launcher's credentials (V12-128); `start` says to
+  build first whenever a build command exists; the Node devtool `dev` script loads the project's env
+  files and the telemetry preload (V12-127).
 - **`@setu-ts/cli` (M140a, #589).** Generated application bodies are bounded at 1 MiB; module names
   and ids have length limits. New projects generate local session secrets, ignore local secret files
   and Deno node_modules, and name required Docker environment variables. Session installation writes

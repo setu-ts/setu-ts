@@ -7,6 +7,26 @@ import {
   readEnvFilePath,
 } from '../../src/templates/env-file.ts';
 
+it('V12-127 reads active dotenv declarations inside nested template substitutions', () => {
+  for (const quote of ["'", '"']) {
+    const call = `ConfigPlugin({ envFilePath: ${quote}local.env${quote} })`;
+    for (const source of [
+      'const text = `raw envFilePath: "wrong.env" ${' + call + '}`;',
+      'const text = `raw envFilePath: "wrong.env" ${`nested ${' + call + '}`}`;',
+    ])
+      expect(envFileDeclaration(source)).toEqual({ kind: 'paths', paths: ['local.env'] });
+  }
+});
+
+it('V12-127 finishes scanning malformed template substitutions without stalling', () => {
+  expect(
+    envFileDeclaration('const text = `${42; ConfigPlugin({ envFilePath: "local.env" })'),
+  ).toEqual({
+    kind: 'paths',
+    paths: ['local.env'],
+  });
+});
+
 describe('isCoveredDotenvName', () => {
   it('covers the default name and .env.* names the container rules match', () => {
     for (const name of ['.env', '.env.local', '.env.prod']) {

@@ -829,7 +829,13 @@ here.
   refused on Workers, a shared `withApplication` in the Workers entry with `wrangler.toml` comments
   that match it, no Workers `deno.json`, a Workers `## Deploy` section, an empty env value read as
   unset; V12-102…V12-109, V12-118, V12-80, V12-124) — complete (PR #591).
-- **Next milestone** — the remaining M139 letters, then M140c–M140e (generated code read as code).
+- **Milestone 140d** (`packages/cli` — what the generators write, and the agent brief:
+  `add validation` registers `ValidationPlugin()`, `DATABASE_URL` and Redis guidance from `add`, a
+  strict `g schema`, a `Server-Timing` middleware, PascalCase event names, instance-owned
+  class-based module state, truthful README/comment text, brief refresh hints and devtool entries;
+  29 V12 rows) — complete (PR pending).
+- **Next milestone** — the remaining M139 letters, then M140c and M140e (generated code read as
+  code).
 
 ## Verification (run before declaring any work done)
 

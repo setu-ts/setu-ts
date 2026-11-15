@@ -13,6 +13,7 @@
  */
 
 import { planNodeDevtool } from '../devtool/npm-manifest.ts';
+import { reportAgentsHint } from '../utils/agents-hint.ts';
 import { formatForTarget } from '../utils/prettier-format.ts';
 import type { IFileSystem } from '@setu-ts/common';
 
@@ -197,6 +198,7 @@ function printUsage(log: (message: string) => void): void {
   );
   log('  --dir <path>        The workspace root, instead of the working directory');
   log('  --dry-run           Print what would be created, write nothing');
+  log('  --yes, -y           Accepted for scripts; generate never prompts');
   log('');
   log(`The broker is the workspace's, recorded in ${WORKSPACE_MANIFEST}, and every member`);
   log('inherits it — services can only talk over a bus they share. Change it for every');
@@ -399,7 +401,11 @@ function planMember(
   if (devtoolPort !== undefined && profile.runtime === 'node') {
     const index = files.findIndex((file) => file.path === joinPath(memberRoot, 'package.json'));
     const manifest = files[index]!;
-    const plan = planNodeDevtool(manifest.contents, manifest.path);
+    const plan = planNodeDevtool(
+      manifest.contents,
+      manifest.path,
+      `--env-file-if-exists=${devHost.manifest?.envFilePath ?? '.env'} `,
+    );
     if (!plan.ok) return plan;
     if (plan.contents !== undefined) files[index] = { ...manifest, contents: plan.contents };
   }
@@ -997,5 +1003,6 @@ export async function runAppCommand(args: ParsedArgs, deps: AppDependencies): Pr
         `${profile.runScript('dev')} (the launcher supplies the session credentials)`,
     );
   }
+  await reportAgentsHint(deps, deps.dir, profile.runtime);
   return EXIT_OK;
 }

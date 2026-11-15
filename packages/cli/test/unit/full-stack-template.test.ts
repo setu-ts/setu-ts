@@ -587,7 +587,10 @@ describe('full-stack template | manifest contributions', () => {
     // project's server build; a v7 build against a v8 runtime installs cleanly
     // and then fails at request time.
     expect(FULL_STACK_NPM_DEPENDENCIES['react-router']).toBe('^8.0.0');
-    expect(FULL_STACK_NPM_DEV_DEPENDENCIES['react-router']).toBe('^8.0.0');
+    for (const pkg of ['react', 'react-dom', 'react-router']) {
+      expect(FULL_STACK_NPM_DEPENDENCIES[pkg]).toBeDefined();
+      expect(Object.hasOwn(FULL_STACK_NPM_DEV_DEPENDENCIES, pkg)).toBe(false);
+    }
     expect(FULL_STACK_NPM_DEV_DEPENDENCIES['@react-router/dev']).toBe('^8.0.0');
   });
 
@@ -891,7 +894,7 @@ it('M139a rotates the session before the template login raises privileges', () =
   const rotate = login.indexOf('session.regenerate()');
   expect(rotate).toBeGreaterThanOrEqual(0);
   expect(rotate).toBeLessThan(login.indexOf("session.set('userEmail'"));
-  expect(login).toContain('authSession.signIn');
+  expect(login).toContain('getService(context, <TOKEN>)');
 });
 
 it('renders workspace development ports for a full-stack member', () => {

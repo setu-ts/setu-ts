@@ -138,6 +138,7 @@ export const ${names.screaming} = requestServiceToken<${names.pascal}Service>('m
 function controller(names: DerivedNames): string {
   const p = names.pascal;
   return `import { type IRouterApi, type IServiceRegistry, resolveRequestService } from '@setu-ts/common';
+import { badRequest, notFound } from '@setu-ts/exceptions';
 
 import type { ${p}Input } from './${names.kebab}.types.ts';
 import { ${names.screaming} } from './${names.kebab}.token.ts';
@@ -167,14 +168,13 @@ export function ${routeRegistrarSymbol(names)}(router: IRouterApi, services?: IS
     routes.get('/:id', async (ctx) => {
       const service = resolveRequestService(ctx, ${names.screaming});
       const record = await service.get(ctx.params['id'] ?? '');
-      return record === undefined
-        ? ctx.response.status(404).json({ title: 'Not Found', status: 404 })
-        : ctx.response.json(record);
+      if (record === undefined) throw notFound('${p} not found.');
+      return ctx.response.json(record);
     });
     routes.post('/', async (ctx) => {
       const input = inputOf(await ctx.request.json<unknown>());
       if (input === undefined) {
-        return ctx.response.status(400).json({ title: 'Bad Request', status: 400 });
+        throw badRequest('A non-empty name is required.');
       }
       const service = resolveRequestService(ctx, ${names.screaming});
       return ctx.response.status(201).json(await service.create(input));
@@ -182,13 +182,12 @@ export function ${routeRegistrarSymbol(names)}(router: IRouterApi, services?: IS
     routes.patch('/:id', async (ctx) => {
       const input = inputOf(await ctx.request.json<unknown>());
       if (input === undefined) {
-        return ctx.response.status(400).json({ title: 'Bad Request', status: 400 });
+        throw badRequest('A non-empty name is required.');
       }
       const service = resolveRequestService(ctx, ${names.screaming});
       const record = await service.update(ctx.params['id'] ?? '', input);
-      return record === undefined
-        ? ctx.response.status(404).json({ title: 'Not Found', status: 404 })
-        : ctx.response.json(record);
+      if (record === undefined) throw notFound('${p} not found.');
+      return ctx.response.json(record);
     });
   });
 }
@@ -270,12 +269,27 @@ export async function signedSession(baseUrl: string): Promise<{
 
 function moduleTest(names: DerivedNames, runtime: TargetRuntime, e2e: boolean): string {
   const eq = (actual: string, expected: string): string => renderEquals(runtime, actual, expected);
+  if (!e2e)
+    return `${testHarnessFor(runtime).imports}
+import { createTestContext } from '@setu-ts/testing';
+import { ${names.camel}Service } from './${names.kebab}.service.ts';
+
+describe('${names.kebab} module', () => {
+  it('creates a record and reads it back through the service', async () => {
+    const service = ${names.camel}Service(createTestContext());
+    const record = await service.create({ name: 'Example' });
+    ${eq('record.name', "'Example'")}
+    ${eq('await service.get(record.id)', 'record')}
+    ${eq('(await service.list()).find((item) => item.id === record.id)', 'record')}
+  });
+});
+`;
   const base = `/api/${names.kebab}`;
   return `${testHarnessFor(runtime).imports}
 import { startTestServer } from '../../../test/support/server.ts';
 import { signedSession } from '../../../test/support/session.ts';
 
-describe('${names.kebab} ${e2e ? 'e2e' : 'module'}', () => {
+describe('${names.kebab} e2e', () => {
   it('creates a record with the session token and reads it back', async () => {
     const server = await startTestServer();
     try {
@@ -290,9 +304,7 @@ describe('${names.kebab} ${e2e ? 'e2e' : 'module'}', () => {
       ${eq('record.name', "'Example'")}
       const read = await fetch(server.baseUrl + '${base}/' + record.id);
       ${eq('read.status', '200')}
-      ${eq('await read.json()', 'record')}${
-        e2e
-          ? `
+      ${eq('await read.json()', 'record')}
       // Without the session token the CSRF check answers 403, by design.
       const refused = await fetch(server.baseUrl + '${base}', {
         method: 'POST',
@@ -300,9 +312,7 @@ describe('${names.kebab} ${e2e ? 'e2e' : 'module'}', () => {
         body: JSON.stringify({ name: 'Refused' }),
       });
       ${eq('refused.status', '403')}
-      await refused.text();`
-          : ''
-      }
+      await refused.text();
     } finally {
       await server.stop();
     }
@@ -351,7 +361,14 @@ export function generateFullStackModule(
       contents: renderFunctionalModuleBarrel([...(options.modules ?? []), names.kebab]),
     },
     ...(options.page === true ? [{ path: modulePagePath(names), contents: page(names) }] : []),
-    { path: `${dir}/${names.kebab}.test.ts`, contents: moduleTest(names, options.runtime, false) },
+    ...(options.runtime === 'cloudflare-workers'
+      ? []
+      : [
+          {
+            path: `${dir}/${names.kebab}.test.ts`,
+            contents: moduleTest(names, options.runtime, false),
+          },
+        ]),
     {
       path: `${dir}/${names.kebab}.e2e.test.ts`,
       contents: moduleTest(names, options.runtime, true),

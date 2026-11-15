@@ -26,7 +26,9 @@ describe('Node standalone devtool scaffold', () => {
     expect(dry.fs.writes).toEqual([]);
     expect(await real.run(['shop', '--devtool']), real.err.text()).toBe(0);
     const manifest = JSON.parse(real.fs.read('/work/shop/package.json'));
-    expect(manifest.scripts.dev).toBe('tsx main.dev.ts');
+    expect(manifest.scripts.dev).toBe(
+      'tsx --import ./instrumentation.mjs --env-file-if-exists=.env main.dev.ts',
+    );
     expect(manifest.scripts.check).toBe('tsc --noEmit && setu check');
     expect(manifest.devDependencies['@setu-ts/diagnostics-plugin']).toBe(`^${VERSION}`);
     expect(manifest.dependencies['@setu-ts/diagnostics-plugin']).toBeUndefined();

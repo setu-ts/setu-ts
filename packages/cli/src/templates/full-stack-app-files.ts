@@ -333,7 +333,7 @@ export interface NavItem {
   readonly label: string;
 }
 
-/** The signed-in application navigation. */
+/** The signed-in application navigation: add an entry for each signed-in page. */
 export const APP_NAV: readonly NavItem[] = [
   { to: '/products', label: 'Products' },
 ];
@@ -381,8 +381,8 @@ import { currentUserContext, sessionContext } from '~/server/context-keys.server
  * \`\`\`
  *
  * Exported from a LAYOUT module (\`app/components/layouts/AppLayout.tsx\`) it guards
- * every route in that group. This scaffold attaches it to \`/products\` alone,
- * because the same layout also serves the public landing page at \`/\`.
+ * every route in that group. This scaffold attaches it page by page: each guarded
+ * page exports \`middleware = [requireUser]\`.
  *
  * The \`.server.ts\` suffix is safe here: React Router strips the \`middleware\`
  * export — and the imports only it uses — from the browser bundle.
@@ -642,15 +642,14 @@ export async function action({ request, context }: { request: Request; context: 
   const form = await request.formData();
   const email = String(form.get('email') ?? '');
 
-  // Replace with a real credential check — resolve the auth service with
-  // getService(context, CAPABILITIES.AUTH), exactly as any service is resolved.
+  // Replace with a real credential check through a request-bound module service:
+  // getService(context, <TOKEN>). See auth-plugin's README, "In the full-stack template".
   if (email === '') {
     return { error: 'Email is required.' };
   }
 
   const session = getSession(context);
-  // Rotate against session fixation. A real login uses authSession.signIn,
-  // which regenerates the session itself.
+  // Rotate against session fixation before recording the signed-in user.
   session.regenerate();
   session.set('userEmail', email);
 

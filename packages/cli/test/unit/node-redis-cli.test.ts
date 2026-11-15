@@ -244,7 +244,7 @@ describe('node-redis CLI', () => {
     // `setu add queue --queue redis` append the REDIS_URL row `setu new --broker`
     // writes — the local default in `.env`, empty in the tracked example.
     const description =
-      '# Where the redis transport connects. The local start scripts read this ' +
+      '# The redis connection URL. The local start scripts read this ' +
       'value; a deployment sets REDIS_URL in its own environment.';
     for (const runtime of ['deno', 'node', 'bun']) {
       for (const command of ['add-messaging', 'add-queue']) {

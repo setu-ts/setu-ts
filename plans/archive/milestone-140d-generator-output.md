@@ -1,6 +1,6 @@
 # Milestone 140d — What the generators write, and the agent brief (`@setu-ts/cli`)
 
-> **Status:** Planning. Branch: `feat/m140d-generator-output`. `develop` and `main` are protected,
+> **Status:** Complete. Branch: `feat/m140d-generator-output`. `develop` and `main` are protected,
 > so all work, including fixes, stays on this one branch until it merges through a single PR into
 > `develop`.
 

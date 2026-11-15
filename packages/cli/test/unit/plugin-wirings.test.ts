@@ -5,6 +5,7 @@ import { ZERO_CONFIG_WIRINGS } from '../../src/utils/plugin-wirings.ts';
 
 it('keeps every moved factory entry and verifies each package exports its factory', async () => {
   expect([...ZERO_CONFIG_WIRINGS.keys()]).toEqual([
+    'validation-plugin',
     'worker-pool-plugin',
     'secrets-plugin',
     'storage-plugin',

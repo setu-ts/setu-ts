@@ -232,7 +232,7 @@ export function brokerEnvVariables(spec: BrokerSpec): readonly EnvVariable[] {
     {
       name: connection.variable,
       description:
-        `Where the ${spec.name} transport connects. The local start scripts read this ` +
+        `The ${spec.name} connection URL. The local start scripts read this ` +
         `value; a deployment sets ${connection.variable} in its own environment.`,
       develop: connection.localDefault,
     },

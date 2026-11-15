@@ -1,4 +1,5 @@
 /** Rewrites only CLI-managed barrels using their schematic renderers. @module */
+import { reportAgentsHint } from '../utils/agents-hint.ts';
 import { stringFlag, type ParsedArgs } from '../args.ts';
 import { forEachProject, type ICheckDependencies } from './check.ts';
 import { diagnoseProject } from '../diagnostics/diagnose.ts';
@@ -179,6 +180,7 @@ export async function runSyncCommand(args: ParsedArgs, deps: ICheckDependencies)
           ...(deps.interrupt === undefined ? {} : { signal: deps.interrupt }),
         });
         for (const outcome of outcomes) deps.log(`${outcome.outcome} ${escapeName(outcome.path)}`);
+        await reportAgentsHint(deps, dir, await detectTargetRuntime(deps.fs, dir));
         const result = await readSilence(
           deps.fs,
           dir,

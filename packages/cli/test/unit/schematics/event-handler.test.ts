@@ -43,8 +43,8 @@ describe('event-handler schematic', () => {
     expect(file.contents).toContain('implements IEventHandler<OrderItemPayload>');
   });
 
-  it('subscribes on the kebab event name', () => {
-    expect(file.contents).toContain("export const ORDER_ITEM_EVENT = 'order-item';");
+  it('subscribes on the PascalCase event type', () => {
+    expect(file.contents).toContain("export const ORDER_ITEM_EVENT = 'OrderItem';");
   });
 
   it('reads the committed IDomainEvent.data field', () => {

@@ -15,6 +15,7 @@ interface IPluginWiring {
  * @since 0.13.0
  */
 export const ZERO_CONFIG_WIRINGS: ReadonlyMap<string, IPluginWiring> = new Map([
+  ['validation-plugin', { symbol: 'ValidationPlugin' }],
   ['worker-pool-plugin', { symbol: 'WorkerPoolPlugin' }],
   ['secrets-plugin', { symbol: 'SecretsPlugin' }],
   ['storage-plugin', { symbol: 'StoragePlugin' }],

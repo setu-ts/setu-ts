@@ -159,7 +159,7 @@ describe('guidance and queue seam composition', () => {
         [...projectFiles('svc', runtime, resolveHost(MINIMAL_HOST, runtime))],
         'README.md',
       );
-      expect(readme).toContain(`${invocation}${VERSION} generate service billing`);
+      expect(readme).toContain(`${invocation}${VERSION} generate module billing`);
       expect(readme).toContain(`${invocation}${VERSION} generate --help`);
     });
   }
@@ -352,11 +352,12 @@ describe('the entry shutdown handler', () => {
       expect(main).not.toContain('Deno.exit');
       expect(main).not.toContain('process.on(');
       expect(main).not.toContain('process.exit');
-      // One console line, and only for a failed boot (M131a X88-8): no plugin
-      // has registered then, so there is no logger to report through. A failed
-      // shutdown still goes through the logger (next test).
-      expect(main.match(/console\.error/g)).toHaveLength(1);
+      // Startup has no logger yet; shutdown falls back to stderr when none is registered (V12-81).
+      expect(main.match(/console\.error/g)).toHaveLength(2);
       expect(main).toContain('console.error(`Startup failed: ${describeError(error)}`);');
+      expect(main).toContain(
+        'else console.error(`Graceful shutdown failed: ${describeError(error)}`);',
+      );
     });
 
     // Shutdown failures used to bypass structured logging entirely. The logger
@@ -365,7 +366,9 @@ describe('the entry shutdown handler', () => {
     it(`reports a failed shutdown through the logger on ${runtime}`, () => {
       const main = entryFor(runtime);
       expect(main).toContain('app.services.has(CAPABILITIES.LOGGER)');
-      expect(main).toContain("logger?.error('Graceful shutdown failed', { error });");
+      expect(main).toContain(
+        "if (logger !== undefined) logger.error('Graceful shutdown failed', { error });",
+      );
     });
   }
 

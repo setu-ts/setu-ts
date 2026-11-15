@@ -640,7 +640,9 @@ ${factoryPluginLines}${middlewareLines}${setupLines}
     ? `\n * @param _devtool - Accepted for one signature on every target; the diagnostics listener` +
       `\n * runs only on Deno and Node, so Workers never supplies it and nothing here reads it.`
     : `\n * @param devtool - The development-only composition — the diagnostics plugin and` +
-      `\n * the kernel diagnostics option — supplied by \`main.dev.ts\` alone. The SECOND` +
+      `\n * the kernel diagnostics option — supplied only by a development entry` +
+      `\n * (\`main.dev.ts\`, written by \`--devtool\` or \`setu devtool enable\`); \`main.ts\`` +
+      `\n * never passes it. The SECOND` +
       `\n * parameter deliberately: \`setu commands\` passes its inert discovery env as the` +
       `\n * FIRST argument on every target, which the unused \`_env\` above absorbs.`;
   const envDoc = onWorkers
@@ -812,7 +814,7 @@ export function shutdownBlock(runtime: TargetRuntime): string {
 // Windows has no SIGTERM to catch.
 //
 // The logger is resolved only if one is registered: a project scaffolded
-// without LoggerPlugin still shuts down cleanly, it just reports nothing.
+// without LoggerPlugin still shuts down cleanly; failures fall back to stderr.
 const logger = app.services.has(CAPABILITIES.LOGGER)
   ? app.services.get<ILogger>(CAPABILITIES.LOGGER)
   : undefined;
@@ -824,7 +826,8 @@ for (const signal of ['SIGTERM', 'SIGINT'] as const) {
     void app.stop()
       .then(() => runtime.exit(0))
       .catch((error: unknown) => {
-        logger?.error('Graceful shutdown failed', { error });
+        if (logger !== undefined) logger.error('Graceful shutdown failed', { error });
+        else console.error(\`Graceful shutdown failed: \${describeError(error)}\`);
         runtime.exit(1);
       });
   });
@@ -2144,10 +2147,10 @@ ${
   }## Generate code
 
 \`\`\`bash
-${cliInvocation(runtime)} generate service billing
+${cliInvocation(runtime)} generate module billing
 ${cliInvocation(runtime)} generate --help
 \`\`\`
-${manifest?.readmeSection === undefined ? '' : `\n${typeof manifest.readmeSection === 'string' ? manifest.readmeSection : manifest.readmeSection(cliInvocation(runtime), runtime, port !== undefined)}`}${
+${manifest?.readmeSection === undefined ? '' : `\n${typeof manifest.readmeSection === 'string' ? manifest.readmeSection : manifest.readmeSection(cliInvocation(runtime), runtime, port !== undefined, host)}`}${
     runtime === 'cloudflare-workers'
       ? ''
       : `
@@ -2157,7 +2160,20 @@ ${manifest?.readmeSection === undefined ? '' : `\n${typeof manifest.readmeSectio
 ${runtime === 'deno' ? `${manifest?.npmBuild === undefined ? '' : 'deno task build\n'}deno task start` : runtime === 'bun' ? `${manifest?.npmBuild === undefined ? '' : 'bun run build\n'}bun run start` : 'npm run build\nnpm start'}
 \`\`\`
 
-${runtime === 'node' ? 'The build type-checks, checks CLI wiring and bundles the service into dist/. Run npm test before building an image: DI graph validation happens at boot.' : 'The service runs TypeScript source; a full-stack project builds its frontend before production.'}
+${wrapProse(runtime === 'node' ? `The build type-checks, checks CLI wiring and bundles the service into dist/. Run npm test before building an image${host.plugins.some((plugin) => ['di-plugin', 'decorator-plugin'].includes(plugin.pkg)) ? ': DI graph validation happens at boot.' : '.'}` : 'The service runs TypeScript source; a full-stack project builds its frontend before production.')}${(() => {
+          const metrics =
+            host.appFactory !== undefined ||
+            host.plugins.some((plugin) => plugin.pkg === 'metrics-plugin');
+          const openapi =
+            host.appFactory !== undefined ||
+            host.plugins.some((plugin) => plugin.pkg === 'openapi-plugin');
+          if (!metrics && !openapi) return '';
+          const routes = [
+            ...(metrics ? ['`/metrics`'] : []),
+            ...(openapi ? ['`/docs`', '`/openapi.json`'] : []),
+          ];
+          return `\n\n${wrapProse(`${routes.join(', ')} are served on the application port. Restrict them at the proxy${openapi ? ", or turn the UI off with OpenApiPlugin's `swagger: false` and move a route with its `endpoint` option" : " or move the metrics route with MetricsPlugin's `endpoint` option"}.`)}`;
+        })()}
 ${
   port === undefined
     ? `

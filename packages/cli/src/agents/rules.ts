@@ -61,7 +61,13 @@ export const RULE_BLOCKS: readonly IRuleBlock[] = [
     id: 'functional',
     packages: [],
     applies: (f) => f.style === 'functional',
-    text: 'Routes: router.get or `RouteDefinition` (middleware, handler). Return ctx.response.json(value); status(code) chains. `MiddlewareFunction`: (ctx, next); await next() or respond and return. Schemas: <name>.schemas.ts. Bind const body = validateBody(S); use body as middleware, read body.value(ctx).',
+    text: 'Routes: router.get or `RouteDefinition` (middleware, handler). Return ctx.response.json(value); status(code) chains. `MiddlewareFunction`: (ctx, next); await next() or respond and return. Schemas: <name>.schemas.ts.',
+  },
+  {
+    id: 'functional-validation',
+    packages: ['validation-plugin'],
+    applies: (f) => f.style === 'functional' && f.installed.has('validation-plugin'),
+    text: 'Bind const body = validateBody(S); use body as middleware, read body.value(ctx).',
   },
   {
     id: 'class-based',
@@ -115,7 +121,7 @@ export const RULE_BLOCKS: readonly IRuleBlock[] = [
     id: 'full-stack',
     packages: ['react-router-plugin'],
     applies: (f) => f.installed.has('react-router-plugin') && f.runtime !== 'cloudflare-workers',
-    text: 'Routes: app/routes/. Loaders resolve services with `getService(context, TOKEN)` from `@setu-ts/react-router-plugin`; context keys carry only non-service values such as the session and CSRF token. No module-level caches. Dev: start:dev (Vite in-process; no build). Production: Node build then start; Deno start builds; Bun build then start. Style: Tailwind, app/components/ui/, cn. Kernel routes beat pages (setu generate refuses collisions); prefix APIs /api/.',
+    text: 'Routes: app/routes/. Loaders resolve services with `getService(context, TOKEN)` from `@setu-ts/react-router-plugin`; context keys carry only non-service values such as the session and CSRF token. No module-level caches. Dev: start:dev (Vite in-process; no build). Production: run build then start on Node, Deno and Bun. Style: Tailwind, app/components/ui/, cn. Kernel routes beat pages (setu generate refuses collisions); prefix APIs /api/.',
   },
   {
     id: 'full-stack-workers',

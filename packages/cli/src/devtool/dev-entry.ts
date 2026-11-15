@@ -224,11 +224,28 @@ export function devEntryVariants(devtoolPort: number, member = true): readonly s
     renderEntry(input, true, 'deno'),
     renderEntry(input, true, 'node'),
   ];
+  // V12-81 changes the shared shutdown body. Keep exact pre-M140d renderings
+  // eligible for re-enabling; never normalize arbitrary source into a match.
+  const shutdownVariants = [
+    ...variants,
+    ...variants.map((entry) =>
+      entry
+        .replace(
+          '// without LoggerPlugin still shuts down cleanly; failures fall back to stderr.',
+          '// without LoggerPlugin still shuts down cleanly, it just reports nothing.',
+        )
+        .replace(
+          "        if (logger !== undefined) logger.error('Graceful shutdown failed', { error });\n" +
+            '        else console.error(`Graceful shutdown failed: ${describeError(error)}`);',
+          "        logger?.error('Graceful shutdown failed', { error });",
+        ),
+    ),
+  ];
   // A member imports its port, so its nullish form is itself; the Set drops it.
   const released = [
     ...new Set([
-      ...variants,
-      ...variants.map((entry) => withNullishEnvReads(entry, [['PORT', '3000']])),
+      ...shutdownVariants,
+      ...shutdownVariants.map((entry) => withNullishEnvReads(entry, [['PORT', '3000']])),
     ]),
   ];
   return [

@@ -73,7 +73,7 @@ import {
   starterLiteralEntries,
 } from './starter-options.ts';
 import { stringFlag } from '../args.ts';
-import { BRIEF_BEGIN } from '../agents/brief-file.ts';
+import { reportAgentsHint } from '../utils/agents-hint.ts';
 import { detectTargetRuntime, RuntimeMarkerUnreadableError } from '../utils/runtime-detector.ts';
 import { findWorkspaceMarker } from '../utils/project-detector.ts';
 import { readJsonManifest } from '../utils/manifest-reader.ts';
@@ -2431,31 +2431,21 @@ async function addOne(
       generated: 'secret',
     };
     const declaration = configText === undefined ? undefined : envFileDeclaration(configText);
-    const envFile =
-      runtime === 'cloudflare-workers'
-        ? '.dev.vars'
-        : declaration?.kind === 'paths'
-          ? declaration.paths[declaration.paths.length - 1]
-          : // A config that declares no dotenv file still runs under a Node or Bun
-            // start script that loads `.env` (`--env-file-if-exists=.env`, Bun's own
-            // `.env`); Deno's start task loads none, so there is no file to write.
-            declaration === undefined || (declaration.kind === 'absent' && runtime !== 'deno')
-            ? '.env'
-            : undefined;
+    const envEdits: GeneratedFile[] = [];
+    const env = await planAddEnvVariable(
+      deps,
+      dir,
+      runtime,
+      configText,
+      envEdits,
+      variable,
+      deps.secret ?? generateSecret,
+    );
+    if (!env.ok) return EXIT_ERROR;
+    const { envFile } = env;
     if (envFile !== undefined) {
-      const value = (deps.secret ?? generateSecret)();
       const existing = await readProjectText(deps, joinPath(dir, envFile), envFile);
       if (existing === null) return EXIT_ERROR;
-      for (const [file, localValue] of [
-        [envFile, value],
-        [`${envFile}.example`, ''],
-      ] as const) {
-        const path = joinPath(dir, file);
-        const text = await readProjectText(deps, path, file);
-        if (text === null) return EXIT_ERROR;
-        const appended = withEnvVariable(text ?? '', [variable], localValue);
-        if (appended !== undefined) edits.push({ path, contents: appended });
-      }
       // The file now holds a usable signing secret, so it is listed in
       // .gitignore exactly as Rails lists `config/master.key`
       // (EncryptionKeyFileGenerator): an exact entry, appended when absent. No
@@ -2491,6 +2481,7 @@ async function addOne(
         edits.push({ path: dockerPath, contents: `${base}${envFile}\n` });
         deps.log(`Added ${escapeName(envFile)} to .dockerignore: images must not copy it.`);
       }
+      edits.push(...envEdits);
     } else {
       deps.log(
         declaration?.kind === 'absent'
@@ -2606,6 +2597,27 @@ async function addOne(
       }
     }
     deps.log(`Connection: ${variable} (local default ${localDefault}).`);
+    if (selected.name === 'redis' && configWired && searchDirs.length === 1) {
+      deps.log('  The app and generated tests now connect to Redis at REDIS_URL during startup.');
+      const compose = await readProjectText(
+        deps,
+        joinPath(dir, BROKER_COMPOSE_FILE),
+        BROKER_COMPOSE_FILE,
+      );
+      if (compose === null) return EXIT_ERROR;
+      deps.log(
+        compose === undefined
+          ? '  Start a Redis server.'
+          : `  Start Redis: docker compose -f ${BROKER_COMPOSE_FILE} up -d redis`,
+      );
+      if (!installedAfter.has('react-router-plugin')) {
+        const factory = ZERO_CONFIG_WIRINGS.get(bare)!.symbol;
+        deps.log(`  import { ${factory} } from '@setu-ts/${bare}';`);
+        deps.log(
+          `  createTestApp({ app: await createApp(), without: ['${bare}'], overrides: [${factory}()] })`,
+        );
+      }
+    }
     if (updated.length > 0) {
       const verb = args.flags['dry-run'] === true ? 'Would add' : 'Added';
       deps.log(`  ${verb} ${variable} to ${updated.join(' and ')}.`);
@@ -2656,6 +2668,26 @@ async function addOne(
           })(),
     );
     if (config !== undefined) {
+      const env = await planAddEnvVariable(
+        deps,
+        dir,
+        runtime,
+        configText,
+        edits,
+        {
+          name: 'DATABASE_URL',
+          develop: config.localUrl,
+          description: config.localUrl.startsWith('file:')
+            ? 'DATABASE_URL is a libsql file URL, for example file:./local.db.'
+            : 'DATABASE_URL is a PostgreSQL connection URL: postgresql://user:password@host:port/database.',
+        },
+        config.localUrl,
+      );
+      if (!env.ok) return EXIT_ERROR;
+      if (env.envFile === undefined)
+        deps.log(
+          `Set DATABASE_URL (local default ${config.localUrl}) in the environment that runs db:generate/db:migrate.`,
+        );
       deps.log(
         `Schema migrations expect ${config.schema}; create it using ${repositoryFileUrl(`packages/database-plugin/README.md#${backendArm === 'drizzle' ? 'drizzle-pool-setup' : 'prisma-7-setup'}`)} (${backendArm === 'drizzle' ? 'Drizzle pool setup' : 'Prisma 7 setup'}). Data migrations use setu g migration and src/migrations/run.ts.`,
       );
@@ -2999,6 +3031,40 @@ function listedLast(text: string, entries: readonly string[]): boolean {
   return entry > negation;
 }
 
+/** Plans the local/example pair through the same dotenv resolution for every add arm. */
+async function planAddEnvVariable(
+  deps: AddCommandDependencies,
+  dir: string,
+  runtime: TargetRuntime,
+  config: string | undefined,
+  edits: GeneratedFile[],
+  variable: EnvVariable,
+  value: string | (() => string),
+): Promise<{ readonly ok: true; readonly envFile?: string } | { readonly ok: false }> {
+  const declaration = config === undefined ? undefined : envFileDeclaration(config);
+  const envFile =
+    runtime === 'cloudflare-workers'
+      ? '.dev.vars'
+      : declaration?.kind === 'paths'
+        ? declaration.paths.at(-1)
+        : declaration === undefined || (declaration.kind === 'absent' && runtime !== 'deno')
+          ? '.env'
+          : undefined;
+  if (envFile === undefined) return { ok: true };
+  const local = typeof value === 'function' ? value() : value;
+  for (const [file, localValue] of [
+    [envFile, local],
+    [`${envFile}.example`, ''],
+  ] as const) {
+    const path = joinPath(dir, file);
+    const text = await readProjectText(deps, path, file);
+    if (text === null) return { ok: false };
+    const contents = withEnvVariable(text ?? '', [variable], localValue);
+    if (contents !== undefined) edits.push({ path, contents });
+  }
+  return { ok: true, envFile };
+}
+
 /**
  * An existing project file's text, `undefined` when it is absent, or `null` after
  * reporting why it cannot be used (unreadable, not UTF-8, over 1 MiB), so the
@@ -3014,21 +3080,6 @@ async function readProjectText(
   } catch (cause) {
     deps.error(`Cannot read ${escapeName(name)}: ${escapeName(String(cause))}`);
     return null;
-  }
-}
-
-/** An add is successful even when its advisory brief reminder cannot be read. */
-async function reportAgentsHint(
-  deps: AddCommandDependencies,
-  dir: string,
-  runtime: TargetRuntime,
-): Promise<void> {
-  try {
-    const brief = await readExistingText(deps.fs, joinPath(dir, 'AGENTS.md'));
-    if (brief?.includes(BRIEF_BEGIN) === true)
-      deps.log(`Run \`${cliInvocation(runtime)} agents\` to update AGENTS.md.`);
-  } catch (cause) {
-    deps.error(`Cannot inspect AGENTS.md: ${escapeName(String(cause))}`);
   }
 }
 

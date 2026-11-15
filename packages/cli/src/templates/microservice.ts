@@ -3,11 +3,18 @@
  *
  * @module
  */
-import type { RuntimeSwap, TemplateDefinition, Wiring } from './registry.ts';
+import type {
+  RuntimeSwap,
+  TemplateDefinition,
+  TemplateHost,
+  TemplateManifest,
+  Wiring,
+} from './registry.ts';
 import { REST_MIDDLEWARE, REST_PLUGINS } from './rest.ts';
 import { FUNCTIONAL_MODULE_MANIFEST } from './module-seam.ts';
 import type { TemplateRecipe } from './style.ts';
 import { composeHost } from './style.ts';
+import { wrapProse } from '../utils/wrap-prose.ts';
 
 /**
  * What `microservice` adds on top of the REST set.
@@ -191,6 +198,45 @@ new_classes = ["ReplyInboxObject"]
 `,
 } as const satisfies RuntimeSwap;
 
+/** Development-transport guidance shared by both microservice styles. */
+const MICROSERVICE_MANIFEST: TemplateManifest = {
+  ...FUNCTIONAL_MODULE_MANIFEST,
+  readmeSection: (cli, runtime, _member, host) => {
+    const memory = (pkg: string, option: string): boolean =>
+      runtime !== 'cloudflare-workers' &&
+      !host?.plugins.find((plugin) => plugin.pkg === pkg)?.args?.includes(option);
+    return `## Development transports\n\n${[
+      ...(memory('messaging-plugin', 'broker:')
+        ? [
+            `- Messaging is in-memory: one process, lost on restart. Change it with \`${cli} add messaging --broker <name>\`.`,
+          ]
+        : []),
+      ...(memory('queue-plugin', 'adapter:')
+        ? [
+            `- Queue is in-memory: one process, lost on restart. Change it with \`${cli} add queue --queue <name>\`.`,
+          ]
+        : []),
+      '- Telemetry has no exporter: spans are dropped. Set the `TelemetryPlugin` `exporter` option.',
+      '- Discovery is static and empty. Populate the discovery `services` map.',
+    ]
+      .map((line) => wrapProse(line, '  '))
+      .join('\n')}\n`;
+  },
+};
+
+/** Keeps the class-based host's own manifest and adds only the transport README section. */
+function withReadmeSection(host: TemplateHost): TemplateHost {
+  return {
+    ...host,
+    manifest: {
+      ...host.manifest,
+      ...(MICROSERVICE_MANIFEST.readmeSection === undefined
+        ? {}
+        : { readmeSection: MICROSERVICE_MANIFEST.readmeSection }),
+    },
+  };
+}
+
 /**
  * The microservice composition as data: the plugin set, middleware, manifest
  * and the shared Workers swap.
@@ -202,7 +248,7 @@ new_classes = ["ReplyInboxObject"]
 export const MICROSERVICE_RECIPE: TemplateRecipe = {
   plugins: MICROSERVICE_PLUGINS,
   middleware: REST_MIDDLEWARE,
-  manifest: FUNCTIONAL_MODULE_MANIFEST,
+  manifest: MICROSERVICE_MANIFEST,
   runtimeSwaps: { 'cloudflare-workers': WORKERS_SWAP },
 };
 
@@ -229,5 +275,5 @@ export const MICROSERVICE_TEMPLATE: TemplateDefinition = {
   description:
     'REST plus messaging, queues, resilience, telemetry, service discovery, CQRS, and events',
   ...composeHost(MICROSERVICE_RECIPE, 'functional'),
-  classBased: composeHost(MICROSERVICE_RECIPE, 'class-based'),
+  classBased: withReadmeSection(composeHost(MICROSERVICE_RECIPE, 'class-based')),
 };

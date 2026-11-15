@@ -1,4 +1,5 @@
 /** Dotenv flag validation shared by project and workspace-member scaffolding. */
+import { codeView } from '../build/task-entries.ts';
 
 /**
  * Renders the ConfigPlugin option literal for a generated dotenv path.
@@ -166,20 +167,26 @@ export function configuredEnvFilePath(configSource: string): string | undefined 
  * The source's code with comments removed and each string literal replaced by
  * a `\uE000<n>\uE000` placeholder, plus the literals themselves (quotes
  * included) indexed by `n`. A `//` or `/*` inside a string is therefore not a
- * comment, and text inside a string is never matched as code. One linear pass;
- * a template literal is treated as a string up to its closing backtick.
+ * comment, and text inside a string is never matched as code. The shared source
+ * scanner locates template chunks so their substitutions remain code, including nested templates.
  *
  * @param source - TypeScript source text
  * @returns The comment-free code and its string literals
  */
 function scanSource(source: string): { code: string; literals: string[] } {
+  const chunks = new Map(codeView(source).templates.map(({ start, end }) => [start, end]));
   let code = '';
   const literals: string[] = [];
   let index = 0;
   while (index < source.length) {
     const char = source[index] as string;
     const next = source[index + 1];
-    if (char === '/' && next === '/') {
+    const chunkEnd = chunks.get(index);
+    if (chunkEnd !== undefined) {
+      code += `\uE000${literals.length}\uE000`;
+      literals.push(source.slice(index, chunkEnd));
+      index = chunkEnd;
+    } else if (char === '/' && next === '/') {
       const end = source.indexOf('\n', index);
       index = end === -1 ? source.length : end;
     } else if (char === '/' && next === '*') {
