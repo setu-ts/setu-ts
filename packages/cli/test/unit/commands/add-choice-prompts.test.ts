@@ -220,44 +220,63 @@ describe('setu add choice prompts', () => {
     expect(prompt.asked).toEqual([]);
   });
 
-  it('offers only redis when --redis-client is given, and asks no transport for a bad client', async () => {
-    const fs = createFakeFs({ '/app/package.json': '{}' });
-    const prompt = recorder();
-    const run = deps(fs, prompt.ask);
-    expect(
-      await runCli(['add', 'cache', '--redis-client', 'node-redis'], run.deps),
-      run.err.join('\n'),
-    ).toBe(2);
-    expect(prompt.asked).toEqual([
-      { question: 'Choose the store for cache-plugin', values: ['redis'] },
-    ]);
-    const answered = recorder(({ values }) => ({ kind: 'answer', value: values[0]! }));
-    const ok = deps(createFakeFs({ '/app/package.json': '{}' }), answered.ask);
-    expect(
-      await runCli(['add', 'cache', '--redis-client', 'node-redis'], ok.deps),
-      ok.err.join('\n'),
-    ).toBe(0);
-    const bad = recorder();
-    const refused = deps(createFakeFs({ '/app/package.json': '{}' }), bad.ask);
-    // Nothing at all, not even mail's provider: the command refuses the client first.
-    expect(await runCli(['add', 'mail', 'cache', '--redis-client', 'bogus'], refused.deps)).toBe(2);
-    expect(bad.asked).toEqual([]);
-    const member = recorder();
-    const dialect = deps(createFakeFs({ '/app/package.json': '{}' }), member.ask);
-    expect(await runCli(['add', 'database', '--dialect', 'mysql'], dialect.deps)).toBe(2);
-    expect(member.asked).toEqual([]);
-  });
+  // Every given-flag refusal is caught by the silent dry run, so none of these asks
+  // a question it then refuses. Each row is a command the real run refuses.
+  const refusedUpFront: readonly (readonly [string, readonly string[], Record<string, string>?])[] =
+    [
+      ['an invalid --redis-client', ['add', 'mail', 'cache', '--redis-client', 'bogus']],
+      [
+        'a valid --redis-client with no Redis arm',
+        ['add', 'mail', 'cache', '--redis-client', 'ioredis'],
+      ],
+      [
+        'a valid --redis-client beside a non-Redis arm',
+        ['add', 'mail', 'cache', '--redis-client', 'ioredis', '--store', 'memory'],
+      ],
+      [
+        'a --redis-client that disagrees with the project client',
+        ['add', 'mail', 'queue', '--redis-client', 'node-redis'],
+        { '/app/package.json': '{"dependencies":{"ioredis":"^5.0.0"}}' },
+      ],
+      ['an unknown --dialect', ['add', 'database', '--dialect', 'mysql']],
+      ['--dialect without --type drizzle', ['add', 'mail', 'database', '--dialect', 'sqlite']],
+      [
+        '--dialect with a non-drizzle --type',
+        ['add', 'mail', 'database', '--type', 'prisma', '--dialect', 'sqlite'],
+      ],
+      [
+        'an unknown --provider beside another package',
+        ['add', 'cache', 'mail', '--provider', 'bogus'],
+      ],
+      [
+        'a --redis-client on Workers',
+        ['add', 'mail', 'cache', '--redis-client', 'ioredis'],
+        { '/app/package.json': '{}', '/app/wrangler.toml': '' },
+      ],
+    ];
+  for (const [name, argv, seed] of refusedUpFront) {
+    it(`asks nothing for ${name}, which the command refuses`, async () => {
+      const prompt = recorder();
+      const run = deps(createFakeFs(seed ?? { '/app/package.json': '{}' }), prompt.ask);
+      expect(await runCli([...argv], run.deps)).not.toBe(0);
+      expect(prompt.asked).toEqual([]);
+      expect(run.err.join('\n')).not.toBe('');
+    });
+  }
 
-  it('offers only drizzle for --type when --dialect is already given', async () => {
-    const prompt = recorder(({ values }) => ({ kind: 'answer', value: values[0]! }));
-    const run = deps(createFakeFs({ '/app/package.json': '{}' }), prompt.ask);
+  it('asks nothing for a --redis-client in a workspace member, which the command refuses', async () => {
+    const fs = createFakeFs();
+    const setup = deps(fs);
+    expect(await runCli(['new', 'ws', '--workspace'], setup.deps)).toBe(0);
     expect(
-      await runCli(['add', 'database', '--dialect', 'sqlite'], run.deps),
-      run.err.join('\n'),
+      await runCli(['g', 'app', 'api', '--template', 'rest'], { ...setup.deps, cwd: '/app/ws' }),
     ).toBe(0);
-    expect(prompt.asked).toEqual([
-      { question: 'Choose the type for database-plugin', values: ['drizzle'] },
-    ]);
+    const prompt = recorder();
+    const member = deps(fs, prompt.ask, '/app/ws/apps/api');
+    expect(
+      await runCli(['add', 'mail', 'cache', '--redis-client', 'ioredis'], member.deps),
+    ).not.toBe(0);
+    expect(prompt.asked).toEqual([]);
   });
 
   it('documents every choice in the help text, from the same table', async () => {

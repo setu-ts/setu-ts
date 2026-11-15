@@ -1769,17 +1769,28 @@ export const ADD_CHOICES: readonly AddChoice[] = [
   })),
 ];
 
+/** The flags one package's request carries: package-specific flags only where they apply. */
+function flagsFor(
+  flags: Readonly<Record<string, string | boolean | readonly string[]>>,
+  bare: string,
+): Record<string, string | boolean | readonly string[]> {
+  return Object.fromEntries(
+    Object.entries(flags).filter(
+      ([flag]) => ADD_FLAG_PACKAGES[flag] === undefined || ADD_FLAG_PACKAGES[flag]!.includes(bare),
+    ),
+  );
+}
+
 /**
  * Asks, in a terminal, for every choice the selected packages leave open.
  *
- * Nothing is asked with `--yes`, without a prompter (no terminal), for a flag
- * already given, or where the command refuses every package anyway (a workspace
- * root, a workspace naming an unknown Redis client). A transport backend is not
- * asked where the command would refuse one: a workspace member takes the
- * workspace broker, and Workers has no wiring. A flag several packages share
- * (`--store`) is asked once, naming each. The values offered are the ones the
- * other given flags leave valid: `--redis-client` leaves only `redis`, and
- * `--dialect` leaves only `--type drizzle`.
+ * Nothing is asked with `--yes`, without a prompter (no terminal), or for a flag
+ * already given. Before asking, every package is dry-run with the flags as given,
+ * silently: when the command would refuse them, nothing is asked and the real run
+ * reports that refusal, so a question is never followed by a refusal it could not
+ * change. A transport backend is not asked in a workspace member (members take the
+ * workspace broker) or on Workers (no wiring), where the command refuses one. A
+ * flag several packages share (`--store`) is asked once, naming each.
  *
  * @returns The flags with the answers added, or `undefined` when the user cancelled
  */
@@ -1791,50 +1802,30 @@ async function askOpenChoices(
   const flags: Record<string, string | boolean | readonly string[]> = { ...args.flags };
   const ask = deps.ask;
   if (ask === undefined || args.flags.yes === true || args.flags.y === true) return flags;
-  const dir = resolveDir(deps.cwd, stringFlag(args.flags, 'dir'));
-  let standalone: boolean;
-  try {
-    if (
-      (await findWorkspaceMarker(deps.fs, dir)) !== undefined ||
-      (await unknownWorkspaceRedisClient(deps.fs, dir)) !== undefined
-    )
-      return flags;
-    const runtime = await detectTargetRuntime(deps.fs, dir);
-    standalone =
-      runtime !== 'cloudflare-workers' && (await workspaceMemberOf(deps.fs, dir)) === undefined;
-  } catch {
-    // The command reports an unreadable project itself; asking first would only delay that.
-    return flags;
+  const quiet: AddCommandDependencies = { ...deps, log: () => {}, error: () => {} };
+  delete (quiet as { ask?: unknown }).ask;
+  for (const bare of packages) {
+    const preflight = await addOne(
+      { positionals: [bare], flags: { ...flagsFor(flags, bare), 'dry-run': true } },
+      quiet,
+      false,
+    );
+    if (preflight !== EXIT_OK) return flags;
   }
-  const redisClient = flags['redis-client'];
-  const dialect = flags.dialect;
-  // A given flag the command will refuse outright: asking anything first would
-  // only delay that refusal.
-  if (
-    (redisClient !== undefined &&
-      (!standalone || (redisClient !== 'ioredis' && redisClient !== 'node-redis'))) ||
-    (dialect !== undefined &&
-      (typeof dialect !== 'string' || !Object.hasOwn(DRIZZLE_DIALECTS, dialect)))
-  )
-    return flags;
+  const dir = resolveDir(deps.cwd, stringFlag(args.flags, 'dir'));
+  // The dry run above already read both, so neither can throw here.
+  const standalone =
+    (await detectTargetRuntime(deps.fs, dir)) !== 'cloudflare-workers' &&
+    (await workspaceMemberOf(deps.fs, dir)) === undefined;
   for (const choice of ADD_CHOICES) {
     if (flags[choice.flag] !== undefined) continue;
     const listed = packages.filter((pkg) => choice.packages.includes(pkg));
     if (listed.length === 0) continue;
     if (choice.after !== undefined && flags[choice.after.flag] !== choice.after.value) continue;
     if (choice.standaloneOnly === true && !standalone) continue;
-    const requiredBy = ADD_CHOICES.find(
-      (other) => other.after?.flag === choice.flag && flags[other.flag] !== undefined,
-    );
-    const values =
-      requiredBy !== undefined
-        ? [requiredBy.after!.value]
-        : choice.standaloneOnly === true && redisClient !== undefined
-          ? choice.values().filter((value) => value === 'redis')
-          : choice.values();
     const answer = await ask.select(
       `Choose the ${choice.flag} for ${listed.join(' and ')}`,
-      values.map((value) => ({ value, label: value })),
+      choice.values().map((value) => ({ value, label: value })),
     );
     if (answer.kind === 'cancelled') return undefined;
     if (answer.kind === 'answer') flags[choice.flag] = answer.value;
@@ -1923,12 +1914,7 @@ export async function runAddCommand(
   if (selectedFlags === undefined) return EXIT_INTERRUPTED;
   const requests = packages.map((bare) => ({
     positionals: [bare],
-    flags: Object.fromEntries(
-      Object.entries(selectedFlags).filter(
-        ([flag]) =>
-          ADD_FLAG_PACKAGES[flag] === undefined || ADD_FLAG_PACKAGES[flag]!.includes(bare),
-      ),
-    ),
+    flags: flagsFor(selectedFlags, bare),
   }));
   if (requests.length === 1) {
     deps.log(`@setu-ts/${packages[0]}:`);
@@ -3338,9 +3324,8 @@ function printAddHelp(log: (message: string) => void): void {
     log(`--${choice.flag} ${choice.values().join('|')} selects ${targets}${after}.`);
   }
   log('In a terminal, each of these that is left out is asked, default first; a workspace member');
-  log('and a Workers project are not asked for a transport backend. A given --redis-client');
-  log('leaves only redis on offer, and a given --dialect only --type drizzle. --yes, -y takes');
-  log('every default without prompting.');
+  log('and a Workers project are not asked for a transport backend. Nothing is asked when the');
+  log('flags given would be refused. --yes, -y takes every default without prompting.');
   log('');
   log('Adds a Setu-TS package to this project, pinned to the version of the CLI');
   log("that added it — so a project's framework packages stay on one version.");
