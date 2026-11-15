@@ -158,8 +158,10 @@ export function renderDockerfile(profile: WorkspaceRuntimeProfile, workspace = t
 # the registry token. Everything it needs is downloaded first, with the token
 # and without executing anything: main.ts and setu.config.ts's graph, and the
 # CLI's exact specifier read from the check task (\`deno cache\` runs no npm
-# install scripts). A full-stack member's frontend build above still runs with
-# the token mounted, as it has since the frontend stage was added.
+# install scripts). The frontend build gets the same treatment: \`deno install\`
+# fetches the locked dependencies with the token (Deno runs no install scripts
+# unless approved), and \`deno task build\` then runs in a RUN without it, from
+# the cache.
 FROM ${DENO_BUILD_IMAGE} AS frontend
 ARG MEMBER
 WORKDIR /srv
@@ -168,7 +170,9 @@ COPY lib[s] ./${LIBS_DIR}/
 COPY ${MEMBERS_DIR}/\${MEMBER} ./${MEMBERS_DIR}/\${MEMBER}
 WORKDIR /srv/${MEMBERS_DIR}/\${MEMBER}
 ARG NPM_CONFIG_REGISTRY=
-RUN ${NPMRC_MOUNT} printf '%s' 'import { parse } from "jsr:@std/jsonc@1.0.3"; for (const name of ["deno.json", "deno.jsonc"]) { let source; try { source = Deno.readTextFileSync(name); } catch (error) { if (error instanceof Deno.errors.NotFound) continue; throw error; } const manifest = parse(source); for (const task of ["build", "check"]) { if (manifest.tasks && task in manifest.tasks) Deno.writeTextFileSync(".setu-" + task + "-task", ""); } if (manifest.tasks && typeof manifest.tasks.check === "string" && manifest.tasks.check.includes(" main.dev.ts")) { manifest.tasks.check = manifest.tasks.check.replaceAll(" main.dev.ts", ""); Deno.writeTextFileSync(name, JSON.stringify(manifest)); } if (manifest.tasks && typeof manifest.tasks.check === "string" && manifest.tasks.check.includes("npm:@setu-ts/cli@")) Deno.writeTextFileSync(".setu-check-cli", manifest.tasks.check.slice(manifest.tasks.check.indexOf("npm:@setu-ts/cli@")).split(" ")[0]); break; }' | DENO_DIR=/tmp/.setu-build-cache deno run --no-config --no-lock --no-prompt --allow-read=./deno.json,./deno.jsonc --allow-write=./.setu-build-task,./.setu-check-task,./.setu-check-cli,./deno.json,./deno.jsonc - && if [ -z "$NPM_CONFIG_REGISTRY" ]; then unset NPM_CONFIG_REGISTRY; fi && if [ -f .setu-build-task ]; then deno task build; else mkdir -p build; fi && if [ -f .setu-check-task ]; then deno cache main.ts setu.config.ts; fi && if [ -f .setu-check-cli ]; then deno cache --no-lock "$(cat .setu-check-cli)"; fi
+RUN ${NPMRC_MOUNT} printf '%s' 'import { parse } from "jsr:@std/jsonc@1.0.3"; for (const name of ["deno.json", "deno.jsonc"]) { let source; try { source = Deno.readTextFileSync(name); } catch (error) { if (error instanceof Deno.errors.NotFound) continue; throw error; } const manifest = parse(source); for (const task of ["build", "check"]) { if (manifest.tasks && task in manifest.tasks) Deno.writeTextFileSync(".setu-" + task + "-task", ""); } if (manifest.tasks && typeof manifest.tasks.check === "string" && manifest.tasks.check.includes(" main.dev.ts")) { manifest.tasks.check = manifest.tasks.check.replaceAll(" main.dev.ts", ""); Deno.writeTextFileSync(name, JSON.stringify(manifest)); } if (manifest.tasks && typeof manifest.tasks.check === "string" && manifest.tasks.check.includes("npm:@setu-ts/cli@")) Deno.writeTextFileSync(".setu-check-cli", manifest.tasks.check.slice(manifest.tasks.check.indexOf("npm:@setu-ts/cli@")).split(" ")[0]); break; }' | DENO_DIR=/tmp/.setu-build-cache deno run --no-config --no-lock --no-prompt --allow-read=./deno.json,./deno.jsonc --allow-write=./.setu-build-task,./.setu-check-task,./.setu-check-cli,./deno.json,./deno.jsonc - && if [ -z "$NPM_CONFIG_REGISTRY" ]; then unset NPM_CONFIG_REGISTRY; fi && if [ -f .setu-build-task ]; then deno install; fi && if [ -f .setu-check-cli ]; then deno cache --no-lock "$(cat .setu-check-cli)"; fi
+RUN if [ -z "$NPM_CONFIG_REGISTRY" ]; then unset NPM_CONFIG_REGISTRY; fi && if [ -f .setu-build-task ]; then deno task build; else mkdir -p build; fi
+RUN ${NPMRC_MOUNT} if [ -z "$NPM_CONFIG_REGISTRY" ]; then unset NPM_CONFIG_REGISTRY; fi && if [ -f .setu-check-task ]; then deno cache main.ts setu.config.ts; fi
 
 # The check runs in a stage of its own: whatever its unlocked CLI writes stays
 # here. The final stage copies build/ from the frontend stage above and nothing

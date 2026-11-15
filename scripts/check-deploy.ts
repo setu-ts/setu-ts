@@ -912,18 +912,52 @@ async function checkGeneratedCompose(directory: string, registry: string): Promi
     });
     if (!installed.success) throw new Error(installed.stderr);
     const path = `${root}/docker/compose.yaml`;
-    const yaml = (await readFile(path, 'utf8'))
-      .replaceAll('      context: ..', '      network: host\n      context: ..')
-      .replace(/image: (billing|orders):dev/g, `image: ${resources.image}-$1`);
+    const yaml = (await readFile(path, 'utf8')).replace(
+      /image: (billing|orders):dev/g,
+      `image: ${resources.image}-$1`,
+    );
     await writeFile(path, yaml);
-    for (const args of [
-      ['config'],
-      ['build', '--build-arg', `NPM_CONFIG_REGISTRY=${registry}`],
-      ['up', '--wait', '--wait-timeout', '180', '--no-build'],
-    ]) {
-      const result = await compose(...args);
-      if (!result.success) throw new Error(result.stdout + result.stderr);
+    // The generated dependency is what this step proves: orders waits for billing to be HEALTHY,
+    // and billing has the healthcheck that condition needs (Compose refuses it otherwise).
+    const config = await compose('config', '--format', 'json');
+    if (!config.success) throw new Error(config.stdout + config.stderr);
+    const services = (
+      JSON.parse(config.stdout) as {
+        services: Record<
+          string,
+          { depends_on?: Record<string, { condition?: string }>; healthcheck?: unknown }
+        >;
+      }
+    ).services;
+    if (services['orders']?.depends_on?.['billing']?.condition !== 'service_healthy')
+      throw new Error('orders does not depend on billing with condition service_healthy');
+    if (services['billing']?.healthcheck === undefined)
+      throw new Error('billing has no healthcheck');
+    // Built with `docker build --network host` like the gate's other images, not `compose build`:
+    // Compose's bake builder refuses a host-network build without an explicit entitlement.
+    for (const member of ['billing', 'orders']) {
+      const built = await run(
+        [
+          'docker',
+          'build',
+          '--network',
+          'host',
+          '-f',
+          `${root}/docker/Dockerfile`,
+          '--build-arg',
+          `MEMBER=${member}`,
+          '--build-arg',
+          `NPM_CONFIG_REGISTRY=${registry}`,
+          '-t',
+          `${resources.image}-${member}`,
+          root,
+        ],
+        { quiet: true },
+      );
+      if (!built.success) throw new Error(built.stdout + built.stderr);
     }
+    const up = await compose('up', '--wait', '--wait-timeout', '180', '--no-build');
+    if (!up.success) throw new Error(up.stdout + up.stderr);
     const starts: string[] = [];
     for (const member of ['billing', 'orders']) {
       const id = await compose('ps', '-q', member);
@@ -943,7 +977,7 @@ async function checkGeneratedCompose(directory: string, registry: string): Promi
     }
     if (starts[0]! >= starts[1]!) throw new Error('orders did not start after billing');
     console.log(
-      '  ✓ Compose config accepted; billing started first; billing and orders are healthy',
+      '  ✓ Compose config gives orders service_healthy on billing; billing started first; both healthy',
     );
     return true;
   } catch (cause) {

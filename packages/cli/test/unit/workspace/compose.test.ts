@@ -99,10 +99,19 @@ describe('workspaceContainerFiles', () => {
           const runs = stages[0]!.split('\n').filter((line) => line.startsWith('RUN '));
           const mounted = runs.find((line) => line.includes('--mount=type=secret'));
           const check = stages[1]!.split('\n').find((line) => line.includes('deno task check'));
-          expect(mounted).toContain(
-            'if [ -f .setu-check-task ]; then deno cache main.ts setu.config.ts; fi',
-          );
+          // Fetch with the token, build without it, then cache the built graph with it (deno
+          // cache executes nothing): no unlocked tool or project code runs beside the token.
+          expect(mounted).toContain('if [ -f .setu-build-task ]; then deno install; fi');
+          expect(mounted).not.toContain('deno task build');
           expect(mounted).not.toContain('deno task check');
+          const build = runs.findIndex((line) => line.includes('then deno task build;'));
+          const graph = runs.findIndex((line) =>
+            line.includes('if [ -f .setu-check-task ]; then deno cache main.ts setu.config.ts; fi'),
+          );
+          expect(runs[build]).not.toContain('type=secret');
+          expect(runs[graph]).toContain('--mount=type=secret');
+          expect(runs.indexOf(mounted!)).toBeLessThan(build);
+          expect(build).toBeLessThan(graph);
           // The check's exact CLI is fetched with the token, never run beside it (audit F1).
           expect(mounted).toContain(
             'Deno.writeTextFileSync(".setu-check-cli", manifest.tasks.check.slice(manifest.tasks.check.indexOf("npm:@setu-ts/cli@")).split(" ")[0])',
@@ -628,7 +637,8 @@ describe('workspaceContainerFiles', () => {
 describe('the npmrc build secret (M120b)', () => {
   // Every RUN that installs packages mounts the optional secret; every other RUN
   // does not. The table is the claim: install steps per runtime, by what they run.
-  const INSTALLS = ['npm ci', 'bun install', 'deno task build', 'deno cache main.ts'];
+  // Steps that fetch with the token. The Deno frontend build runs without it, from the cache.
+  const INSTALLS = ['npm ci', 'bun install', 'then deno install; fi', 'deno cache main.ts'];
   const runs = (dockerfile: string): string[] =>
     dockerfile.split('\n').filter((line) => line.startsWith('RUN '));
   for (const runtime of ['node', 'bun', 'deno'] as const) {
@@ -636,8 +646,14 @@ describe('the npmrc build secret (M120b)', () => {
       it(`mounts it on exactly the install steps: ${runtime}, ${workspace ? 'workspace' : 'standalone'}`, () => {
         const lines = runs(renderDockerfile(workspaceProfile(runtime), workspace));
         const installs = lines.filter((line) => INSTALLS.some((step) => line.includes(step)));
-        expect(installs).toHaveLength(2);
+        // Deno: the frontend fetch, the post-build graph cache, and the runtime install.
+        expect(installs).toHaveLength(runtime === 'deno' ? 3 : 2);
         for (const line of installs) expect(line.startsWith(`RUN ${NPMRC_MOUNT} `)).toBe(true);
+        if (runtime === 'deno') {
+          const build = lines.find((line) => line.includes('then deno task build;'));
+          expect(build).toBeDefined();
+          expect(build).not.toContain('type=secret');
+        }
         for (const line of lines.filter((line) => !installs.includes(line)))
           expect(line).not.toContain('type=secret');
         // Never a required secret: an absent one is the no-op build.

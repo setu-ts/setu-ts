@@ -620,7 +620,7 @@ client-side apply stores every value in plaintext in the `last-applied-configura
 and `stringData` under a server-side apply keeps keys the file has dropped. Each generated
 Deployment reads `<member>-env` through `envFrom`, after its explicit `env:` entries, which keep
 precedence. When the broker has connection defaults (`REDIS_URL`, for one), `envFrom` lists the
-generated `setu-transport` ConfigMap before the Secret, so a value in the Secret overrides the
+generated `<member>-transport` ConfigMap before the Secret, so a value in the Secret overrides the
 default; a `setu-ts.dev/transport-config` annotation rolls members when the defaults change.
 `generate app` and `setu add auth|session` append a random value for each newly generated secret
 name to `k8s/secrets/<member>/.env`, keeping existing entries and refusing symbolic links; a file it
@@ -730,15 +730,16 @@ declared frontend script, then runs the member's `check` script, refuses to buil
 `NODE_ENV=production`. Deno runs the member's `check` task after `build` in a separate `check`
 stage, without the `npmrc` secret and without `main.dev.ts` (which the image excludes); the final
 image copies nothing from that stage (it only bind-mounts the stage's marker for one no-op step, so
-BuildKit runs the check), so nothing the check writes ships. Deno builds a declared frontend in its
-`frontend` stage on `denoland/deno:debian-2.9.5` (Vite's native bundler binding has no musl build,
-so it cannot run on the Alpine image), copies only `build/` into the Alpine image before caching
-main.ts, then retains the frozen, scoped source run. When the root sets `nodeModulesDir: "auto"` (a
-workspace with a full-stack member does), the image switches it to `"manual"` after installing:
-under `"auto"` every start re-syncs `node_modules`, which a read-only root refuses. A full-stack
-socket server serves its own client bundle from `build/client/assets`. Native bun build and deno
-compile are optional custom packaging choices, not generated commands. Workers continues using
-Wrangler.
+BuildKit runs the check), so nothing the check writes ships. Deno fetches a declared frontend's
+locked dependencies with the `npmrc` secret (`deno install`, which runs no install scripts) and
+builds it in its `frontend` stage without the secret, on `denoland/deno:debian-2.9.5` (Vite's native
+bundler binding has no musl build, so it cannot run on the Alpine image), copies only `build/` into
+the Alpine image before caching main.ts, then retains the frozen, scoped source run. When the root
+sets `nodeModulesDir: "auto"` (a workspace with a full-stack member does), the image switches it to
+`"manual"` after installing: under `"auto"` every start re-syncs `node_modules`, which a read-only
+root refuses. A full-stack socket server serves its own client bundle from `build/client/assets`.
+Native bun build and deno compile are optional custom packaging choices, not generated commands.
+Workers continues using Wrangler.
 
 Both standalone and workspace ignore files exclude host node_modules, dist, build, coverage, git and
 dotenv files, preserving .env.example, and every `.npmrc`. To use one in the image's install — a

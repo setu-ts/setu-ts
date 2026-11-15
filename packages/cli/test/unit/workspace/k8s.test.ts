@@ -145,7 +145,7 @@ describe('workspaceK8sFiles', () => {
     );
     for (const name of ['orders', 'portal']) {
       expect(yaml).toContain(
-        `          envFrom:\n            - configMapRef:\n                name: setu-transport\n            - secretRef:\n                name: ${name}-env\n                optional: true\n`,
+        `          envFrom:\n            - configMapRef:\n                name: ${name}-transport\n            - secretRef:\n                name: ${name}-env\n                optional: true\n`,
       );
     }
     expect(yaml).not.toContain('- name: REDIS_URL');
@@ -166,8 +166,27 @@ describe('workspaceK8sFiles', () => {
     expect(yaml).toContain("data:\n  REDIS_URL: 'redis://redis:6379'");
     expect(yaml).not.toContain('- name: REDIS_URL');
     expect(yaml).toContain(
-      'kind: ConfigMap\nmetadata:\n  name: setu-transport\n  namespace: ${NAMESPACE}',
+      'kind: ConfigMap\nmetadata:\n  name: orders-transport\n  namespace: ${NAMESPACE}',
     );
+  });
+
+  it('names each member its own transport ConfigMap, so workspaces cannot share one (CodeRabbit #592)', () => {
+    const yaml = objectsFor(
+      [
+        { name: 'orders', port: 3000 },
+        { name: 'portal', port: 3001 },
+      ],
+      'redis',
+    );
+    expect(yaml.match(/^kind: ConfigMap$/gm)).toHaveLength(2);
+    for (const name of ['orders', 'portal']) {
+      expect(yaml).toContain(`kind: ConfigMap\nmetadata:\n  name: ${name}-transport\n`);
+      // The ConfigMap is the document right before its member's Deployment.
+      expect(yaml.indexOf(`name: ${name}-transport\n  namespace`)).toBeLessThan(
+        yaml.indexOf(`kind: Deployment\nmetadata:\n  name: ${name}\n`),
+      );
+    }
+    expect(yaml).not.toContain('setu-transport');
   });
 
   it('stamps sorted transport defaults, changing the pod template with the broker', () => {
