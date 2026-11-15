@@ -224,9 +224,9 @@ describe('a template with a frontend build, on an npm target', () => {
     // runtime; Bun loads `.env` itself and takes no preload.
     [
       'node',
-      `${NODE_START_BUILD_CHECK} && node --import ./instrumentation.mjs --env-file-if-exists=.env --enable-source-maps dist/main.js`,
+      `${NODE_START_BUILD_CHECK} && node --import "data:text/javascript,process.env.NODE_ENV??='production'" --import ./instrumentation.mjs --env-file-if-exists=.env --enable-source-maps dist/main.js`,
     ],
-    ['bun', 'bun run main.ts'],
+    ['bun', 'NODE_ENV=production bun run main.ts'],
   ] as const) {
     it(`starts without rebuilding on ${runtime}; tests build the frontend only`, async () => {
       const h = harness();
@@ -249,7 +249,7 @@ describe('a template with a frontend build, on an npm target', () => {
       scripts: Record<string, string>;
     };
     expect(manifest.scripts['start']).toBe(
-      `${NODE_START_BUILD_CHECK} && node --import ./instrumentation.mjs --env-file-if-exists=.env --enable-source-maps dist/main.js`,
+      `${NODE_START_BUILD_CHECK} && node --import "data:text/javascript,process.env.NODE_ENV??='production'" --import ./instrumentation.mjs --env-file-if-exists=.env --enable-source-maps dist/main.js`,
     );
   });
 });
@@ -293,7 +293,7 @@ describe('the Node target can run decorated source', () => {
   it('gives no other target the Node transpiler', async () => {
     // Bun compiles TypeScript outright; Deno and Workers never invoke it.
     const bun = await manifestOf('bun');
-    expect(bun.scripts['start']).toBe('bun run main.ts');
+    expect(bun.scripts['start']).toBe('NODE_ENV=production bun run main.ts');
     expect(bun.devDependencies?.['tsx']).toBeUndefined();
   });
 
@@ -1493,7 +1493,7 @@ describe('--workspace --broker', () => {
 
   it('describes the chosen broker in the workspace README', async () => {
     const { h } = await workspaceWith(['--broker', 'redis']);
-    expect(h.fs.read('/work/acme/README.md')).toContain('Members share the **redis** broker');
+    expect(h.fs.read('/work/acme/README.md')).toContain('share the **redis** broker');
     expect(h.fs.read('/work/acme/README.md')).toContain('Redis Streams');
   });
 

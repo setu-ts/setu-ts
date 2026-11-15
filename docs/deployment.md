@@ -619,10 +619,15 @@ including one first made by hand), values base64-encoded under `data:`: measured
 client-side apply stores every value in plaintext in the `last-applied-configuration` annotation,
 and `stringData` under a server-side apply keeps keys the file has dropped. Each generated
 Deployment reads `<member>-env` through `envFrom`, after its explicit `env:` entries, which keep
-precedence. envFrom is read when a container starts, so deploy writes each Secret's
-`resourceVersion` into its member's pod-template annotation (`setu-ts.dev/secret-version`): a
-changed Secret changes the template and Kubernetes rolls the member out — a rotation on a clean tree
-keeps the tag and the manifest and would otherwise leave the old value live, and the annotation
+precedence. When the broker has connection defaults (`REDIS_URL`, for one), `envFrom` lists the
+generated `<member>-transport` ConfigMap before the Secret, so a value in the Secret overrides the
+default; a `setu-ts.dev/transport-config` annotation rolls members when the defaults change.
+`generate app` and `setu add auth|session` append a random value for each newly generated secret
+name to `k8s/secrets/<member>/.env`, keeping existing entries and refusing symbolic links; a file it
+creates is owner-only (`0600`). envFrom is read when a container starts, so deploy writes each
+Secret's `resourceVersion` into its member's pod-template annotation (`setu-ts.dev/secret-version`):
+a changed Secret changes the template and Kubernetes rolls the member out — a rotation on a clean
+tree keeps the tag and the manifest and would otherwise leave the old value live, and the annotation
 keeps a re-run after a partial failure from losing the rollout. After the apply, deploy reads each
 member's pod template back from the cluster and sets the annotation with `kubectl patch` wherever it
 is not current — a `members.yaml` from before the annotation, a hand-edited one, or an earlier
@@ -719,15 +724,40 @@ source; production start never rebuilds. Full-stack main.ts passes its compiled 
 createApp so its location survives bundling. User import.meta.url paths move with the bundle:
 resolve application data from process.cwd() or pass modules in explicitly.
 
-Bun runs source with production dependencies, builds a declared frontend script first, and copies
-the workspace's hoisted-linker bunfig.toml. Deno builds a declared frontend in a `frontend` stage on
-`denoland/deno:debian-2.9.5` (Vite's native bundler binding has no musl build, so it cannot run on
-the Alpine image), copies only `build/` into the Alpine image before caching main.ts, then retains
-the frozen, scoped source run. When the root sets `nodeModulesDir: "auto"` (a workspace with a
-full-stack member does), the image switches it to `"manual"` after installing: under `"auto"` every
-start re-syncs `node_modules`, which a read-only root refuses. A full-stack socket server serves its
-own client bundle from `build/client/assets`. Native bun build and deno compile are optional custom
-packaging choices, not generated commands. Workers continues using Wrangler.
+Bun runs source with production dependencies on the pinned `oven/bun:1.4.0-alpine`, builds a
+declared frontend script, then runs the member's `check` script, refuses to build without a
+`bun.lock`, and copies the workspace's hoisted-linker bunfig.toml. Every runtime stage sets
+`NODE_ENV=production`. Deno runs the member's `check` task after `build` in a separate `check`
+stage, without the `npmrc` secret and without `main.dev.ts` (which the image excludes); the final
+image copies nothing from that stage (it only bind-mounts the stage's marker for one no-op step, so
+BuildKit runs the check), so nothing the check writes ships. Deno fetches a declared frontend's
+locked dependencies with the `npmrc` secret into its global cache only
+(`deno install --node-modules-dir=none`, so no lifecycle script runs, even one the project's
+`deno.json` approves with `allowScripts`), then creates `node_modules` from that cache and builds in
+a later step of its `frontend` stage without the secret, which is where approved scripts run (a
+member without a frontend but with a `check` task caches main.ts and setu.config.ts's graph in that
+same secret-mounted step). That step also copies the `npmrc`'s `registry` and `@scope:registry`
+lines, and nothing else, for the later steps. Each value is read as Deno reads it and copied as
+written, in double quotes so a `;` or `#` inside it survives; a URL that carries userinfo, a query
+or a fragment is written back in normalized form without them. A value holding a `${NAME}` reference
+is copied as written, but fails the build if, with its references removed, it still contains `@`,
+`?` or a quoted `#` anywhere, a path segment such as `/@org/` included (an unquoted `#` or `;`
+starts an `.npmrc` comment and is dropped first; with a reference present the value cannot be
+parsed, so the characters are the rule), and any other value that is not a URL, fails the build, and
+so does any value holding a double quote or a backslash. Keep a registry token in an `_authToken`
+line: one placed in the URL's path is kept, because Deno files a package under its registry URL's
+host and path, so a step without the secret must resolve the same registries to find the cache. The
+runtime dependencies are fetched the same way, in a `fetch` stage the image never ships; the image's
+one install step bind-mounts that stage's cache, lockfile and registry settings, copies the cache
+in, installs `node_modules` from it, verifies the lockfile and fixes ownership in one layer
+(`node_modules` hard-links into the cache, and a hard link cannot reach a lower layer). The frontend
+stage runs on `denoland/deno:debian-2.9.5` (Vite's native bundler binding has no musl build, so it
+cannot run on the Alpine image), copies only `build/` into the Alpine image before caching main.ts,
+then retains the frozen, scoped source run. When the root sets `nodeModulesDir: "auto"` (a workspace
+with a full-stack member does), the image switches it to `"manual"` after installing: under `"auto"`
+every start re-syncs `node_modules`, which a read-only root refuses. A full-stack socket server
+serves its own client bundle from `build/client/assets`. Native bun build and deno compile are
+optional custom packaging choices, not generated commands. Workers continues using Wrangler.
 
 Both standalone and workspace ignore files exclude host node_modules, dist, build, coverage, git and
 dotenv files, preserving .env.example, and every `.npmrc`. To use one in the image's install — a
@@ -761,11 +791,15 @@ read and write granted only to the member's and the root's `deno.json`/`deno.jso
 build cache removed in the same layer: it cannot float to a newer release, touch any other file in
 the image, alter the project lockfile, or add parser modules to the production cache.
 
-The build then runs
-`deno cache main.ts && deno install && deno install --frozen && deno install --entrypoint main.ts && deno install --entrypoint main.ts --frozen`.
-The full-map install/frozen pair completes and verifies lazy broker npm edges; the entrypoint checks
-verify the production entry too. The remaining import map is cached, including dependencies not
-reachable from `main.ts`. The verified exclusion is the development connector.
+The `fetch` stage then runs, with the registry secret mounted,
+`deno cache --node-modules-dir=none main.ts && deno install --node-modules-dir=none && deno install --node-modules-dir=none --frozen && deno install --node-modules-dir=none --entrypoint main.ts && deno install --node-modules-dir=none --entrypoint main.ts --frozen`,
+which fills only the global cache and runs no lifecycle script. The image's install step, without
+the secret, copies that cache in and runs
+`deno install --cached-only --frozen && deno install --cached-only --entrypoint main.ts --frozen`;
+any script the project approves with `allowScripts` runs there, never beside the token. The full-map
+install/frozen pair completes and verifies lazy broker npm edges; the entrypoint checks verify the
+production entry too. The remaining import map is cached, including dependencies not reachable from
+`main.ts`. The verified exclusion is the development connector.
 
 Deno can record a jsr package's npm edge list incompletely on a cold cache. An entrypoint-only
 frozen install can pass while lazy `amqplib`/`ioredis` imports later fail at startup. Retaining the
@@ -790,7 +824,9 @@ of changing it.
 For an existing generated workspace, regenerate the managed Dockerfile and `.dockerignore` with
 `setu devtool enable <member>` or `setu workspace ports --reallocate`, then rebuild the image. New
 member generation also refreshes these files. For a Dockerfile maintained by hand, keep the
-following two build steps after `WORKDIR /srv/apps/${MEMBER}` (the generated image uses UID 1000):
+following two build steps after `WORKDIR /srv/apps/${MEMBER}` (the generated image uses UID 1000).
+They mount no `npmrc` secret; a Dockerfile that does should copy the generated one's `fetch` stage,
+so that no install script runs beside the token:
 
 ```dockerfile
 RUN printf '%s' 'import { parse } from "jsr:@std/jsonc@1.0.3"; for (const directory of [".", "/srv"]) { for (const name of ["deno.json", "deno.jsonc"]) { const path = directory + "/" + name; let source; try { source = Deno.readTextFileSync(path); } catch (error) { if (error instanceof Deno.errors.NotFound) continue; throw error; } const manifest = parse(source); if (manifest.imports) delete manifest.imports["@setu-ts/diagnostics-plugin"]; Deno.writeTextFileSync(path, JSON.stringify(manifest)); break; } }' | DENO_DIR=/srv/.setu-build-cache deno run --no-config --no-lock --no-prompt --allow-read=./deno.json,./deno.jsonc,/srv/deno.json,/srv/deno.jsonc --allow-write=./deno.json,./deno.jsonc,/srv/deno.json,/srv/deno.jsonc - && rm -rf /srv/.setu-build-cache

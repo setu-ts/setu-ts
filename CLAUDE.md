@@ -829,7 +829,12 @@ here.
   refused on Workers, a shared `withApplication` in the Workers entry with `wrangler.toml` comments
   that match it, no Workers `deno.json`, a Workers `## Deploy` section, an empty env value read as
   unset; V12-102…V12-109, V12-118, V12-80, V12-124) — complete (PR #591).
-- **Next milestone** — the remaining M139 letters, then M140c–M140e (generated code read as code).
+- **Milestone 140c** (`packages/cli` — images, Compose, Kubernetes and gRPC between workspace
+  members: `NODE_ENV=production`, a pinned Bun base with a lockfile refusal, Bun/Deno check stages,
+  Compose healthchecks and `--depends-on`, a per-member `<member>-transport` ConfigMap below member
+  Secrets, `runtimeOptions()` serving h2c for gRPC members, operator secret values; V12-68, V12-110,
+  V12-111, V12-113, V12-115, V12-116, V12-121, V12-122, V12-123) — complete (PR #592).
+- **Next milestone** — the remaining M139 letters, then M140d–M140e (generated code read as code).
 
 ## Verification (run before declaring any work done)
 

@@ -42,8 +42,7 @@
     "build": "tsc -b"
   },
   "dependencies": {
-    "@setu-ts/cli": "workspace:^",
-    "@setu-ts/runtime": "workspace:^"
+    "@setu-ts/cli": "workspace:^"
   },
   "devDependencies": {
     "@types/node": "^24",

@@ -65,5 +65,8 @@ data:
     expect(envFromBlock('portal')).toBe(
       '          envFrom:\n            - secretRef:\n                name: portal-env\n                optional: true',
     );
+    const transport = envFromBlock('portal', 'portal-transport');
+    expect(transport.indexOf('configMapRef:')).toBeLessThan(transport.indexOf('secretRef:'));
+    expect(transport).toContain('name: portal-transport');
   });
 });

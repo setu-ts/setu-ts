@@ -233,22 +233,26 @@ rolls out; or `build-<UTC timestamp>` outside git). `--registry <prefix>` names 
   `<member>-env` Secret, applied with `kubectl apply --server-side --force-conflicts` from stdin
   (deploy owns that Secret, so it takes over keys an earlier hand-made one set) with base64 `data:`
   — a client-side apply would store every value in plaintext in an annotation. Generated Deployments
-  read it through `envFrom`; explicit `env:` entries still win. Deploy writes each Secret's
-  `resourceVersion` into its member's pod-template annotation (`setu-ts.dev/secret-version`), so a
-  changed Secret rolls the member out even when the tag and manifest are unchanged, and a deploy
-  re-run after failing part-way still does. Afterwards deploy reads each member's pod template back
-  from the cluster and, when it does not carry the Secret's current version (a `members.yaml` from
-  before the annotation, a hand-edited one, an earlier deploy that failed part-way), sets it with
-  `kubectl patch`, which rolls the member out. `--force-conflicts` takes over keys another writer
-  set in `<member>-env`; keys only that writer owns are left in place, so remove them by hand (or
-  delete the Secret once) when moving an existing Secret to deploy. Compose follows a symbolic link
-  at `apps/<member>/.env`, so `setu check` refuses one. That is the only part of Compose it checks:
-  a branch can also edit `docker/compose.yaml` to name any host file, so review a branch's `docker/`
-  changes before running `docker compose up` on it. Values files, `.env.example` and
-  `k8s/members.yaml` are read only as regular files of at most 1 MiB inside the workspace — never
-  through a symbolic link — and a values file is refused when git cannot confirm it is uncommitted
-  (a missing `git` included; outside a repository there is nothing to commit). kubectl's message for
-  a failed Secret apply is never printed, because it can quote the values.
+  read it through `envFrom`; explicit `env:` entries still win. A broker's connection defaults are
+  in a generated `<member>-transport` ConfigMap listed before the Secret, so a Secret value
+  overrides them. `generate app` and `setu add auth|session` append a random value for each newly
+  generated secret name to `k8s/secrets/<member>/.env`, keeping existing entries. Deploy writes each
+  Secret's `resourceVersion` into its member's pod-template annotation
+  (`setu-ts.dev/secret-version`), so a changed Secret rolls the member out even when the tag and
+  manifest are unchanged, and a deploy re-run after failing part-way still does. Afterwards deploy
+  reads each member's pod template back from the cluster and, when it does not carry the Secret's
+  current version (a `members.yaml` from before the annotation, a hand-edited one, an earlier deploy
+  that failed part-way), sets it with `kubectl patch`, which rolls the member out.
+  `--force-conflicts` takes over keys another writer set in `<member>-env`; keys only that writer
+  owns are left in place, so remove them by hand (or delete the Secret once) when moving an existing
+  Secret to deploy. Compose follows a symbolic link at `apps/<member>/.env`, so `setu check` refuses
+  one. That is the only part of Compose it checks: a branch can also edit `docker/compose.yaml` to
+  name any host file, so review a branch's `docker/` changes before running `docker compose up` on
+  it. Values files, `.env.example` and `k8s/members.yaml` are read only as regular files of at most
+  1 MiB inside the workspace — never through a symbolic link — and a values file is refused when git
+  cannot confirm it is uncommitted (a missing `git` included; outside a repository there is nothing
+  to commit). kubectl's message for a failed Secret apply is never printed, because it can quote the
+  values.
 - **Where images go.** The context is `--context` or the current one. A `kind-<cluster>` context
   loads each image into that cluster; any other context needs `--registry`, and the images are
   pushed there.
@@ -434,7 +438,7 @@ install, and `setu generate --help` lists only what is available here.
 | `--redis-client <name>` | `new` and `add` with a Redis arm: `ioredis` (default) or `node-redis`. node-redis projects depend on `redis` and wire each plugin through a generated `src/node-redis.ts` (`nodeRedisClient(url)` over `fromNodeRedis`). A workspace records it as `redisClient`; members and `generate app` follow the workspace and refuse the flag. Refused without a Redis arm and on Workers.                                                                                                                                                                                                                                                          |
 | `--logger <name>`       | `new`, `generate app`: `console` or `pino` for templates with logging. Defaults to `pino` on Node, Deno and Bun, `console` on Cloudflare Workers. Adds `pino` at `10.x` only when chosen (the same range in Deno's import map). Pino on Workers, minimal hosts and workspace roots refuse the flag by name. `--dry-run` reports the choice. Since 0.11.0.                                                                                                                                                                                                                                                                                   |
 | `--yes`, `-y`           | `new` only: take every default and ask nothing. A no-op when no prompter is present.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `--depends-on <name>`   | `generate app`: repeat for prerequisites; root `dev` waits for their `/ready` endpoints.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `--depends-on <name>`   | `generate app`: repeat for prerequisites; root `dev` waits for their `/ready` endpoints, and Compose waits for a prerequisite with health probes to be healthy (started, otherwise).                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `--module <name>`       | `generate`: place a `controller`, `route`, `service`, `sse` or `schema` in the named feature module (required for the first four once the project has modules; refused while it has none); `add view`: place the views controller there. See [Controllers and modules](#controllers-and-modules).                                                                                                                                                                                                                                                                                                                                           |
 | `--adopt-controllers`   | `generate module`, first module only: move the flat controllers and services into it, rewriting imports and keeping URLs.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `--config <path>`       | Load the app from this module instead of `./setu.config.ts`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
@@ -790,6 +794,7 @@ MIT
 | --------------- | --------- |
 | `emitInterrupt` | function  |
 | `nodeProcess`   | function  |
+| `nodeRuntime`   | function  |
 | `runMain`       | function  |
 | `MainProcess`   | interface |
 | `MainRuntime`   | interface |

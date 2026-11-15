@@ -37,6 +37,12 @@ services:
         required: false
     environment:
       ORDERS_HOST: 'orders'
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1:3410/ready']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
     # The messaging plugin connects to its broker during plugin registration and
     # does not retry, so a member that loses the race to a backing service whose
     # image cannot be health-probed exits. Compose brings it back until the broker
@@ -73,6 +79,15 @@ services:
         required: false
     environment:
       BILLING_HOST: 'billing'
+    depends_on:
+      billing:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1:3411/ready']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
     # The messaging plugin connects to its broker during plugin registration and
     # does not retry, so a member that loses the race to a backing service whose
     # image cannot be health-probed exits. Compose brings it back until the broker

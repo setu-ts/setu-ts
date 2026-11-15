@@ -9,8 +9,17 @@
  *
  * @module
  */
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { DOCKERFILE, workspaceContainerFiles } from '../../src/workspace/compose.ts';
+import {
+  DOCKERFILE,
+  renderDockerfile,
+  workspaceContainerFiles,
+} from '../../src/workspace/compose.ts';
+import { workspaceProfile } from '../../src/workspace/runtime-profile.ts';
 import { WORKSPACE_VERSION, type WorkspaceManifest } from '../../src/workspace/manifest.ts';
 import { brokerSpec } from '../../src/workspace/transport.ts';
 
@@ -35,15 +44,25 @@ describe('generated Dockerfile chown fold (X10-5)', () => {
     expect(source).toContain('delete manifest.imports["@setu-ts/testing"]');
     expect(source).toContain('delete manifest.imports["@setu-ts/diagnostics-plugin"]');
   });
-  it('one RUN carries both the cache and the ownership fixup', () => {
+  it('one RUN carries the cache, node_modules and the ownership fixup', () => {
     const contents = dockerfile();
     const runLines = contents.split('\n').filter((line) => line.startsWith('RUN '));
 
-    const cacheRun = runLines.find((line) => line.includes('deno cache main.ts'));
-    expect(cacheRun).toBeDefined();
+    const installRun = runLines.find((line) =>
+      line.includes('deno install --cached-only --frozen'),
+    );
+    expect(installRun).toBeDefined();
     // Same line, same layer: `&&`, not two instructions. DENO_UID interpolates
-    // to its numeric value in the emitted text.
-    expect(cacheRun).toContain('&& chown -R 1000:1000 /srv /deno-dir');
+    // to its numeric value in the emitted text. The cache is copied in by this
+    // RUN, so node_modules's hard links into it and the chown store each file once.
+    expect(installRun).toContain('cp -a /tmp/.setu-fetched-cache/. /deno-dir/');
+    expect(installRun).toContain('&& chown -R 1000:1000 /srv /deno-dir');
+    // The fetch stage is never shipped, so it carries no chown.
+    const fetchRun = runLines.find((line) =>
+      line.includes('&& deno cache --node-modules-dir=none main.ts'),
+    );
+    expect(fetchRun).toBeDefined();
+    expect(fetchRun).not.toContain('chown');
   });
 
   it('no standalone chown line remains', () => {
@@ -60,6 +79,16 @@ describe('generated Dockerfile chown fold (X10-5)', () => {
 });
 
 describe('generated Dockerfile lockfile verification', () => {
+  it.each([true, false])(
+    'runs the Bun check without registry credentials (workspace %s)',
+    (workspace) => {
+      const check = renderDockerfile(workspaceProfile('bun'), workspace)
+        .split('\n')
+        .find((line) => line.startsWith('RUN ') && line.includes('bun run check'));
+      expect(check).toBeDefined();
+      expect(check).not.toContain('--mount=type=secret');
+    },
+  );
   it('builds a declared frontend on glibc and copies only its output before caching', () => {
     const contents = dockerfile();
     const frontend = contents.slice(
@@ -70,26 +99,39 @@ describe('generated Dockerfile lockfile verification', () => {
     // Parsed from the MEMBER manifest (the stage's working directory), never a
     // root task, and never by matching text.
     expect(frontend).toContain('"jsr:@std/jsonc@1.0.3"');
-    expect(frontend).toContain('if (manifest.tasks && "build" in manifest.tasks)');
+    expect(frontend).toContain('for (const task of ["build", "check"])');
+    expect(frontend).toContain('if (manifest.tasks && task in manifest.tasks)');
     expect(frontend).toContain(
-      '--allow-read=./deno.json,./deno.jsonc --allow-write=./.setu-build-task -',
+      '--allow-read=./deno.json,./deno.jsonc --allow-write=./.setu-build-task,./.setu-check-task,./.setu-check-cli,./deno.json,./deno.jsonc -',
     );
     expect(frontend).toContain(
-      'if [ -f .setu-build-task ]; then deno task build; else mkdir -p build; fi',
+      'if [ -f .setu-build-task ]; then deno install --cached-only && deno task build; else mkdir -p build; fi',
     );
+    const runs = frontend.split('\n').filter((line) => line.startsWith('RUN '));
+    const cache = runs.find((line) =>
+      line.includes('deno cache --node-modules-dir=none main.ts setu.config.ts'),
+    );
+    const check = runs.find((line) => line.includes('deno task check'));
+    expect(cache).toContain('--mount=type=secret');
+    expect(cache).not.toContain('deno task check');
+    expect(check).toBeDefined();
+    expect(check).not.toContain('--mount=type=secret');
+    expect(runs.indexOf(cache!)).toBeLessThan(runs.indexOf(check!));
     const runtime = contents.slice(contents.indexOf('FROM denoland/deno:alpine-2.9.5'));
     const copy = runtime.indexOf('COPY --from=frontend /srv/apps/${MEMBER}/buil[d] ./build/');
     expect(copy).toBeGreaterThan(-1);
-    expect(copy).toBeLessThan(runtime.indexOf('deno cache main.ts'));
+    expect(copy).toBeLessThan(runtime.indexOf('deno cache --node-modules-dir=none main.ts'));
     expect(runtime).not.toContain('deno task build');
   });
   it('switches an auto node_modules root to manual after installing, before the chown', () => {
     const buildRun = dockerfile()
       .split('\n')
-      .find((line) => line.startsWith('RUN ') && line.includes('deno cache main.ts'))!;
+      .find(
+        (line) => line.startsWith('RUN ') && line.includes('deno install --cached-only --frozen'),
+      )!;
     const rewrite = buildRun.indexOf('manifest.nodeModulesDir === "auto"');
     expect(rewrite).toBeGreaterThan(
-      buildRun.lastIndexOf('deno install --entrypoint main.ts --frozen'),
+      buildRun.lastIndexOf('deno install --cached-only --entrypoint main.ts --frozen'),
     );
     expect(rewrite).toBeLessThan(buildRun.indexOf('chown -R'));
     expect(buildRun).toContain('manifest.nodeModulesDir = "manual"');
@@ -99,9 +141,11 @@ describe('generated Dockerfile lockfile verification', () => {
   });
   it('completes the lockfile and then VERIFIES it, in one build layer', () => {
     const contents = dockerfile();
-    const buildRun = contents
-      .split('\n')
-      .find((line) => line.startsWith('RUN ') && line.includes('deno cache main.ts'));
+    const runLines = contents.split('\n').filter((line) => line.startsWith('RUN '));
+    const buildRun = runLines.find((line) =>
+      line.includes('&& deno cache --node-modules-dir=none main.ts'),
+    );
+    const verifyRun = runLines.find((line) => line.includes('deno install --cached-only --frozen'));
     expect(buildRun).toBeDefined();
 
     // Deno records a jsr package's npm edge list nondeterministically on a cold
@@ -120,8 +164,15 @@ describe('generated Dockerfile lockfile verification', () => {
     // repairing install fails the build (exit 1), and dropping `--frozen` is what
     // let the incomplete lockfile reach production in the first place.
     expect(buildRun).toContain(
-      'deno cache main.ts && deno install && deno install --frozen && deno install --entrypoint main.ts && deno install --entrypoint main.ts --frozen',
+      'deno cache --node-modules-dir=none main.ts && deno install --node-modules-dir=none && deno install --node-modules-dir=none --frozen && deno install --node-modules-dir=none --entrypoint main.ts && deno install --node-modules-dir=none --entrypoint main.ts --frozen',
     );
+    // The fetch fills only the cache; the step after it, without the registry
+    // token, installs from that cache and verifies the lockfile again.
+    expect(verifyRun).toContain(
+      'deno install --cached-only --frozen && deno install --cached-only --entrypoint main.ts --frozen',
+    );
+    expect(verifyRun).not.toContain('type=secret');
+    expect(runLines.indexOf(verifyRun!)).toBe(runLines.indexOf(buildRun!) + 1);
   });
 
   it('pairs that verification with a `--frozen` runtime', () => {
@@ -150,5 +201,156 @@ describe('generated Dockerfile development-pin pruning (M101f audit F3)', () => 
     expect(pruning).toContain(`--allow-read=${manifests} --allow-write=${manifests} -`);
     expect(pruning).not.toMatch(/--allow-(read|write)=\/srv[ ,]/);
     expect(pruning).not.toMatch(/--allow-all|\s-A\s/);
+  });
+});
+
+describe('the credential-free registry settings (#592 review)', () => {
+  /**
+   * Runs the generated filter exactly as the Dockerfile embeds it, on Node with
+   * the two Deno calls it makes mapped onto files in a temporary directory.
+   */
+  function filter(npmrc: string | undefined): string {
+    const program = /printf '%s' '(let source = [^']*)'/.exec(dockerfile())?.[1];
+    expect(program).toBeDefined();
+    const dir = mkdtempSync(join(tmpdir(), 'setu-npmrc-'));
+    try {
+      const input = join(dir, 'npmrc');
+      const output = join(dir, 'out');
+      if (npmrc !== undefined) writeFileSync(input, npmrc);
+      const shim = [
+        "import { readFileSync, writeFileSync } from 'node:fs';",
+        'class NotFound extends Error {}',
+        `const paths = { '/root/.npmrc': ${JSON.stringify(input)}, '/tmp/.setu-npmrc': ${JSON.stringify(output)} };`,
+        'globalThis.Deno = {',
+        '  errors: { NotFound },',
+        "  readTextFileSync(path) { try { return readFileSync(paths[path], 'utf8'); } catch (error) { if (error.code === 'ENOENT') throw new NotFound(); throw error; } },",
+        '  writeTextFileSync(path, text) { writeFileSync(paths[path], text); },',
+        '};',
+      ].join('\n');
+      writeFileSync(join(dir, 'filter.mjs'), `${shim}\n${program!}\n`);
+      execFileSync(process.execPath, [join(dir, 'filter.mjs')]);
+      return readFileSync(output, 'utf8');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  it('keeps only registry and scope-registry lines, without userinfo', () => {
+    expect(
+      filter(
+        [
+          'registry=https://bob:s3cret@npm.example.com/',
+          '@acme:registry = https://pkgs.acme.dev/npm/',
+          '//npm.example.com/:_authToken=TOKEN-ABC',
+          'always-auth=true',
+          '; registry=https://commented.example.com/',
+          '',
+        ].join('\r\n'),
+      ),
+    ).toBe('registry="https://npm.example.com/"\n@acme:registry="https://pkgs.acme.dev/npm/"\n');
+  });
+
+  it('writes an empty file when no secret is mounted, so the bind mount always has a source', () => {
+    expect(filter(undefined)).toBe('\n');
+  });
+
+  it('reads quoted values and inline comments as Deno does, and drops query and fragment', () => {
+    expect(
+      filter(
+        [
+          'registry="https://bob:s3cret@npm.example.com/"',
+          "@a:registry='https://a.example/npm/?token=QQQ#frag'",
+          '@b:registry=https://b.example/ ; private',
+          '@c:registry = https://c.example/npm/ # comment',
+          '',
+        ].join('\n'),
+      ),
+    ).toBe(
+      [
+        'registry="https://npm.example.com/"',
+        '@a:registry="https://a.example/npm/"',
+        '@b:registry="https://b.example/"',
+        '@c:registry="https://c.example/npm/"',
+        '',
+      ].join('\n'),
+    );
+  });
+
+  it('fails closed on a value that is not a URL, naming the key and never the value', () => {
+    expect(() => filter('@x:registry=not-a-url-SECRET\n')).toThrow(
+      /the npmrc @x:registry setting is not a URL/,
+    );
+    expect(() => filter('@x:registry=not-a-url-SECRET\n')).not.toThrow(/SECRET/);
+  });
+
+  it('copies a value holding an environment reference as written', () => {
+    expect(filter('registry=${PRIVATE_REGISTRY}\n')).toBe('registry="${PRIVATE_REGISTRY}"\n');
+    expect(filter('@p:registry=https://${HOST}/npm/\n')).toBe(
+      '@p:registry="https://${HOST}/npm/"\n',
+    );
+    expect(filter('@q:registry=https://npm.corp:${PORT}/npm/\n')).toBe(
+      '@q:registry="https://npm.corp:${PORT}/npm/"\n',
+    );
+  });
+
+  it('fails closed on userinfo, a query or a fragment beside an environment reference', () => {
+    for (const line of [
+      'registry=https://ci:hunter2@npm.corp/${SCOPE}/',
+      '@a:registry=https://npm.corp/${P}/?token=LITERAL',
+      // A reference where a host name is not valid, which a URL parse could not see past.
+      'registry=https://user:hunter2@host:${PORT}/npm/',
+      'registry=https://host:${PORT}/npm/?token=LITERAL',
+      'registry=https://user:hunter2@[${H}]/',
+      // A credential built from references is refused too: it cannot be removed either.
+      'registry=https://${U}:${P}@npm.corp/',
+      '@a:registry="https://npm.corp/a#${F}"',
+    ]) {
+      expect(() => filter(`${line}\n`)).toThrow(
+        /has an environment reference and userinfo, a query or a fragment/,
+      );
+      expect(() => filter(`${line}\n`)).not.toThrow(/hunter2|LITERAL/);
+    }
+  });
+
+  it('copies a credential-free URL exactly as Deno read it', () => {
+    expect(filter('registry = https://Npm.Example.com:8443/a/b\n')).toBe(
+      'registry="https://Npm.Example.com:8443/a/b"\n',
+    );
+  });
+
+  it('writes every value in double quotes, so a ; or # in a quoted path survives', () => {
+    // Deno ends an unquoted value at ; or #, and keeps both inside quotes (measured, Deno 2.9).
+    expect(
+      filter(
+        [
+          'registry="https://registry.example/repo;tenant=acme/"',
+          "@a:registry='https://a.example/x;y/${SEG}/'",
+          '',
+        ].join('\n'),
+      ),
+    ).toBe(
+      [
+        'registry="https://registry.example/repo;tenant=acme/"',
+        '@a:registry="https://a.example/x;y/${SEG}/"',
+        '',
+      ].join('\n'),
+    );
+  });
+
+  it('fails closed on a double quote or a backslash in any branch, naming the key', () => {
+    // Deno reads a backslash as an escape, so a value ending in one would escape the closing quote.
+    for (const line of [
+      "@d:registry='https://d.example/${A}\"B/'",
+      'registry=https://h.example/a"b/',
+      'registry=https://u:SECRET@h.example/a"b/',
+      'registry=http://127.0.0.1:1/a/\\',
+      'registry="http://127.0.0.1:1/a\\"b/"',
+      'registry=http://127.0.0.1:1/a\\;b/',
+    ]) {
+      expect(() => filter(`${line}\n`)).toThrow(
+        /the npmrc (@d:)?registry setting contains a double quote or a backslash/,
+      );
+      expect(() => filter(`${line}\n`)).not.toThrow(/SECRET/);
+    }
   });
 });

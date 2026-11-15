@@ -51,11 +51,12 @@ export const SECRET_VERSION_ANNOTATION = 'setu-ts.dev/secret-version';
  * it (Kubernetes' rule), so the Secret cannot override a generated sibling host.
  *
  * @param member - The member
+ * @param configMap - The transport defaults, when present
  * @returns The block, indented for a container in the generated manifest
  */
-export function envFromBlock(member: string): string {
+export function envFromBlock(member: string, configMap?: string): string {
   return `          envFrom:
-            - secretRef:
+${configMap === undefined ? '' : `            - configMapRef:\n                name: ${configMap}\n`}            - secretRef:
                 name: ${memberSecretName(member)}
                 optional: true`;
 }
@@ -64,7 +65,7 @@ export function envFromBlock(member: string): string {
  * The names a member's environment declares that the generated manifest does not already set.
  *
  * @param example - The member's `.env.example` contents
- * @param generated - The names the generated `env:` sets for this member
+ * @param generated - Names supplied by generated `env:` entries or transport `envFrom` defaults
  * @returns The declared names, in file order
  * @throws {Error} When the example file is not valid dotenv (the parser's message)
  */

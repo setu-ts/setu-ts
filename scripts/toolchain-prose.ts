@@ -204,11 +204,6 @@ export const TOOLCHAIN_PROSE_RULES: ToolchainProseRules = {
       reason: 'Recognizes or explains migration of pre-0.9 JSR pins.',
     },
     {
-      path: 'packages/cli/src/templates/full-stack.ts',
-      category: 'deno-target',
-      reason: 'Commands emitted for or exercised against supported Deno projects.',
-    },
-    {
       path: 'packages/cli/src/templates/project-files.ts',
       category: 'deno-target',
       reason: 'Commands emitted for or exercised against supported Deno projects.',
