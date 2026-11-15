@@ -9,10 +9,22 @@
  * @module
  */
 
+import type { RuntimeOptions } from '@setu-ts/runtime';
 import type { IPlugin } from '@setu-ts/common';
 import type { MessagingPluginOptions } from '@setu-ts/messaging-plugin';
 import type { QueuePluginOptions } from '@setu-ts/queue-plugin';
 import { GrpcPlugin } from '@setu-ts/grpc-plugin';
+
+/**
+ * No runtime options: this member does not serve gRPC. `setu workspace rpc`
+ * switching it to gRPC makes this return `{ http2: true }`.
+ *
+ * @returns The runtime options for this member's RPC style
+ * @since 0.13.0
+ */
+export function runtimeOptions(): RuntimeOptions {
+  return {};
+}
 
 /**
  * The memory broker's `MessagingPlugin` options.

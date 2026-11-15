@@ -57,6 +57,15 @@ describe('the transport module', () => {
           const value = input({ broker, host, rpc });
           const module = renderTransportModule(value);
           const shape = transportModuleShape(value);
+          expect(module).toContain("import type { RuntimeOptions } from '@setu-ts/runtime';");
+          expect(module).toContain(
+            `export function runtimeOptions(): RuntimeOptions {\n  return ${rpc === 'grpc' ? '{ http2: true }' : '{}'};\n}`,
+          );
+          // The TLS form is named only where it applies: a member that serves gRPC.
+          expect(
+            module.includes('RuntimePlugin({ http2: { key, cert } }) with discovery secure: true'),
+          ).toBe(rpc === 'grpc');
+          expect(module.includes('this member does not serve gRPC')).toBe(rpc !== 'grpc');
           expect(module.includes('export function messagingOptions(')).toBe(shape.messaging);
           expect(module.includes('export function queueOptions(')).toBe(shape.queue);
           expect(module.includes('export function csrfExclusions(')).toBe(shape.csrf);

@@ -21,7 +21,9 @@ describe('the generated Deno task set', () => {
       'test:e2e',
       'check',
     ]);
-    expect(manifest.tasks['start']).toMatch(/^deno run --allow-net --allow-env .* main\.ts$/);
+    expect(manifest.tasks['start']).toMatch(
+      /^NODE_ENV=production deno run --allow-net --allow-env .* main\.ts$/,
+    );
     expect(manifest.tasks['check']).toBe(
       `deno check main.ts setu.config.ts && deno run -A --no-lock npm:@setu-ts/cli@${VERSION} check`,
     );
@@ -40,7 +42,7 @@ describe('the generated Deno task set', () => {
 
     const start = manifest.tasks['start'];
     const dev = manifest.tasks['dev'];
-    expect(dev).toBe(start.replace(' main.ts', ' main.dev.ts'));
+    expect(dev).toBe(start.replace('NODE_ENV=production ', '').replace(' main.ts', ' main.dev.ts'));
     expect(dev).not.toContain('--allow-net=');
     expect(start).not.toContain('--allow-net=');
   });
@@ -59,7 +61,9 @@ describe('the generated Deno task set', () => {
     const manifest = JSON.parse(
       projectFiles('probe', 'deno', host).find((file) => file.path === 'deno.json')!.contents,
     ) as { tasks: Record<string, string> };
-    const derived = manifest.tasks['start'].replace(' main.ts', ' main.dev.ts');
+    const derived = manifest.tasks['start']
+      .replace('NODE_ENV=production ', '')
+      .replace(' main.ts', ' main.dev.ts');
     expect(devtoolTasks(host.manifest)['dev']).toBe(derived);
   });
 });

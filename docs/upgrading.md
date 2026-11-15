@@ -12,6 +12,20 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### Deployment output (M140c, `@setu-ts/cli`)
+
+A workspace member's config must call the transport module's `runtimeOptions()`, which serves gRPC
+members over cleartext HTTP/2: `runtime: runtimeOptions(),` in a full-stack starter's options, or
+`RuntimePlugin({ ...runtimeOptions(), <its existing options> })` in a plugin-list config, imported
+from `./src/transport/index.ts`. `setu workspace broker`, `setu workspace rpc` and `setu add grpc`
+refuse until it does and print the line to add. `setu sync` adds the export to each member's
+transport module; `setu workspace ports --reallocate` rewrites the Dockerfile, Compose file and
+Kubernetes manifest (it also reassigns every member's port). A Bun image now needs a `bun.lock`
+beside `package.json` (run `bun install` and commit it; a project with only `bun.lockb` converts
+with `bun install --save-text-lockfile`), and Bun and Deno images run the project's own `check`, so
+an image no longer builds from code that check refuses. Existing members get no values written into
+`k8s/secrets/<member>/.env`; only secrets recorded from now on are.
+
 ### Security defaults (M140a, `@setu-ts/auth-plugin`, `@setu-ts/session-plugin`, `@setu-ts/websocket-plugin`, `@setu-ts/sse-plugin`, `@setu-ts/cli`)
 
 Use HS256 keys of at least 32 UTF-8 bytes; a missing or shorter key now raises
@@ -132,7 +146,8 @@ to get the body.
   upgrade every machine that runs `setu` in the workspace together.
 - **Existing members.** Run `setu sync` in the workspace to write each member's
   `src/transport/index.ts`. Then make each `setu.config.ts` call it — `setu workspace broker` and
-  `setu workspace rpc` refuse until it does, and print exactly these lines:
+  `setu workspace rpc` refuse until it does, and print exactly these lines (since 0.13.0 also the
+  `runtimeOptions()` call; see Deployment output above):
   - `import { messagingOptions, queueOptions, transportPlugins } from './src/transport/index.ts';`
     (a full-stack member also imports `csrfExclusions`);
   - `MessagingPlugin(messagingOptions())` and `...queueOptions()` inside `QueuePlugin`, in place of

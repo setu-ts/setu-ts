@@ -827,6 +827,8 @@ export async function runNewCommand(args: ParsedArgs, deps: NewDependencies): Pr
   const files = plan.files.map((file) => ({
     path: joinPath(root, file.path),
     contents: file.contents,
+    // A file holding a generated secret is created owner-only (M140c audit F2).
+    ...(file.secret === true ? { secret: true } : {}),
   }));
 
   if (args.flags['dry-run'] === true) {

@@ -11152,13 +11152,14 @@ workspace root also refuses the flag because it registers no logger. Interactive
 `Logger?` only for a host with logging; `--yes` takes the runtime default. `--dry-run` reports the
 selected logger and writes nothing.
 
-| Export          | Kind      | Description                                                                                                                                   |
-| --------------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `runMain`       | function  | `(runtime: MainRuntime, host: MainProcess) => Promise<number>` — runs one invocation and returns its exit code; never exits                   |
-| `nodeProcess`   | function  | `(onInterrupt?) => MainProcess` — the Node host: `process.argv`, `process.cwd()`, console output, one shared `readline` reader                |
-| `emitInterrupt` | function  | Delivers an interrupt to this process's `SIGINT` handlers as an event, never as a real signal; `nodeProcess`'s default                        |
-| `MainRuntime`   | interface | The runtime services `runMain` reads (`fs`, the clock, `onSignal`)                                                                            |
-| `MainProcess`   | interface | The host: `args`, `cwd()`, `isTerminal()`, `prompt(message, signal?) => Promise<string \| null>`, `log`, `error`, `portAvailable`, `dispose?` |
+| Export          | Kind      | Description                                                                                                                                                             |
+| --------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `runMain`       | function  | `(runtime: MainRuntime, host: MainProcess) => Promise<number>` — runs one invocation and returns its exit code; never exits                                             |
+| `nodeProcess`   | function  | `(onInterrupt?) => MainProcess` — the Node host: `process.argv`, `process.cwd()`, console output, one shared `readline` reader                                          |
+| `nodeRuntime`   | function  | `() => MainRuntime` — the Node runtime both executables use: writes never follow a link, and a new file holding a generated secret is created owner-only (since 0.13.0) |
+| `emitInterrupt` | function  | Delivers an interrupt to this process's `SIGINT` handlers as an event, never as a real signal; `nodeProcess`'s default                                                  |
+| `MainRuntime`   | interface | The runtime services `runMain` reads (`fs`, the clock, `onSignal`)                                                                                                      |
+| `MainProcess`   | interface | The host: `args`, `cwd()`, `isTerminal()`, `prompt(message, signal?) => Promise<string \| null>`, `log`, `error`, `portAvailable`, `dispose?`                           |
 
 <!-- version:history -->
 
@@ -11704,10 +11705,11 @@ HTTP member and a gRPC member still reach each other over HTTP through the disco
 | `http` (default) | Nothing extra. Callers reach it at `discovery.resolveUrl(name)`.                                                                                                                               | Three members, one calling both peers, asserting `200` and the body.                                                                                                    |
 | `grpc`           | `GrpcPlugin({ basePath: '/grpc' })`, co-serving Connect/gRPC on the member's own port alongside HTTP. A full-stack member exempts this prefix from form CSRF, leaving its form routes guarded. | Three members, one calling both peers at `/grpc/grpc.health.v1.Health/Check`, asserting the decoded `SERVING`; after `workspace rpc billing http`, billing answers 404. |
 
-Both live in a CLI-owned `src/transport/index.ts` per member, which exports `messagingOptions()` and
-`queueOptions()` (where the member registers those plugins), `transportPlugins()`, and on a
-full-stack member `csrfExclusions()`. The member's `setu.config.ts` calls these, so it reads the
-same on every broker and style, and `setu workspace broker <name>` /
+Both live in a CLI-owned `src/transport/index.ts` per member, which exports `runtimeOptions()`
+(always: `{ http2: true }` for a member that serves gRPC, `{}` otherwise; since 0.13.0),
+`messagingOptions()` and `queueOptions()` (where the member registers those plugins),
+`transportPlugins()`, and on a full-stack member `csrfExclusions()`. The member's `setu.config.ts`
+calls these, so it reads the same on every broker and style, and `setu workspace broker <name>` /
 `setu workspace rpc <member> <style>` change either one by regenerating the module, the manifest,
 Compose, Kubernetes and the marked README section. They never write `setu.config.ts`: a config that
 does not call the module is refused, with the lines to add, and nothing is written. A change that

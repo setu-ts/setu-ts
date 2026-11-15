@@ -1299,7 +1299,7 @@ function denoTasks(
   // directly, never `npm start`), so this flag cannot reach a container.
   const denoEnvFile =
     manifest?.envFilePath !== undefined ? `--env-file=${manifest.envFilePath} ` : '';
-  const start = `deno run ${denoPermissions(manifest)} ${denoEnvFile}${entry}`;
+  const start = `NODE_ENV=production deno run ${denoPermissions(manifest)} ${denoEnvFile}${entry}`;
 
   // A3: every Deno template emits a `test` task now. `setu generate module`
   // writes a `<name>.test.ts`, and NO template declared a task that runs it — so
@@ -1383,7 +1383,8 @@ export const DEVTOOL_ENTRY_MODULE = 'main.dev.ts';
 /**
  * The tasks the devtool opt-in adds to a generated Deno project's `deno.json`.
  *
- * `dev` differs from `start` ONLY in the entry module — its flags come from
+ * `dev` differs from `start` only in the entry module and `start`'s
+ * `NODE_ENV=production` prefix — its flags come from
  * the same {@linkcode denoPermissions} call and its build prefix from the same
  * `npmBuild` check, so the two tasks cannot drift, and neither carries a
  * scoped `--allow-net`: on Deno 2.9.6 an allowlist governs OUTBOUND as well
@@ -1404,7 +1405,7 @@ export const DEVTOOL_ENTRY_MODULE = 'main.dev.ts';
 export function devtoolTasks(manifest?: TemplateManifest): Record<string, string> {
   // M131a X88-2: the local `dev` task loads `.env` through the runtime, exactly
   // as the `start` task does, so `dev` differs from `start` only in the entry
-  // module. Deno's `--env-file` is a hard error when the file is missing, so
+  // module and `start`'s `NODE_ENV=production` prefix (M140c). Deno's `--env-file` is a hard error when the file is missing, so
   // the flag is passed only when the manifest writes the dotenv.
   const envFile = manifest?.envFilePath !== undefined ? `--env-file=${manifest.envFilePath} ` : '';
   const run = `deno run ${denoPermissions(manifest)} ${envFile}${DEVTOOL_ENTRY_MODULE}`;
@@ -1740,8 +1741,8 @@ function npmScripts(
         : { build: frontend }
       : { build: `${frontend === undefined ? '' : `${frontend} && `}tsc --noEmit && setu build` }),
     start: bun
-      ? `bun ${envFile}run main.ts`
-      : `${NODE_START_BUILD_CHECK} && node ${nodeFlags}--enable-source-maps dist/main.js`,
+      ? `NODE_ENV=production bun ${envFile}run main.ts`
+      : `${NODE_START_BUILD_CHECK} && node --import "data:text/javascript,process.env.NODE_ENV??='production'" ${nodeFlags}--enable-source-maps dist/main.js`,
     'start:dev':
       devEntry === undefined
         ? bun
@@ -2160,7 +2161,7 @@ ${manifest?.readmeSection === undefined ? '' : `\n${typeof manifest.readmeSectio
 ${runtime === 'deno' ? `${manifest?.npmBuild === undefined ? '' : 'deno task build\n'}deno task start` : runtime === 'bun' ? `${manifest?.npmBuild === undefined ? '' : 'bun run build\n'}bun run start` : 'npm run build\nnpm start'}
 \`\`\`
 
-${wrapProse(runtime === 'node' ? `The build type-checks, checks CLI wiring and bundles the service into dist/. Run npm test before building an image${host.plugins.some((plugin) => ['di-plugin', 'decorator-plugin'].includes(plugin.pkg)) ? ': DI graph validation happens at boot.' : '.'}` : 'The service runs TypeScript source; a full-stack project builds its frontend before production.')}${(() => {
+${wrapProse(runtime === 'node' ? `The build type-checks, checks CLI wiring and bundles the service into dist/. The start script uses a data-URL preload to default NODE_ENV to production before imports, keeping any preset value. Run npm test before building an image${host.plugins.some((plugin) => ['di-plugin', 'decorator-plugin'].includes(plugin.pkg)) ? ': DI graph validation happens at boot.' : '.'}` : 'The service runs TypeScript source; a full-stack project builds its frontend before production.')}${(() => {
           const metrics =
             host.appFactory !== undefined ||
             host.plugins.some((plugin) => plugin.pkg === 'metrics-plugin');
@@ -2433,6 +2434,9 @@ describe('application composition', () => {
         options?.secret ?? generateSecret,
         manifest.envFilePath,
       ),
+      // Owner-only from creation: a later `setu add auth|session` writes a signing secret into
+      // it, and an existing file keeps its mode (M140c audit N2).
+      secret: true,
     });
     files.push({
       path: `${manifest.envFilePath}.example`,
@@ -2453,6 +2457,9 @@ describe('application composition', () => {
         options?.secret ?? generateSecret,
         '.dev.vars',
       ),
+      // Owner-only from creation: a later `setu add auth|session` writes a signing secret into
+      // it, and an existing file keeps its mode (M140c audit N2).
+      secret: true,
     });
     files.push({
       path: '.dev.vars.example',

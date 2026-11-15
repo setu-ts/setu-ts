@@ -198,7 +198,7 @@ it('refuses workspace roots, nonprojects and malformed manifests before bundling
 
 it.each([
   [{ '/app/deno.json': '{}', '/app/package.json': '{}' }, 'deno task start'],
-  [{ '/app/package.json': '{"scripts":{"start":"bun run main.ts"}}' }, 'bun run main.ts'],
+  [{ '/app/package.json': '{"scripts":{"start":"bun run main.ts"}}' }, 'bun run start'],
   [{ '/app/wrangler.toml': '' }, 'wrangler deploy'],
 ])('refuses other runtime targets with their own command', async (seed, command) => {
   const h = harness(seed);
@@ -206,6 +206,26 @@ it.each([
   expect(h.error.text()).toContain(command);
   expect(h.bundle).not.toHaveBeenCalled();
 });
+
+it.each([false, true])(
+  'refuses setu build in a fresh Bun scaffold (custom env file %s)',
+  async (customEnvFile) => {
+    const flags = customEnvFile ? ['--env-file', 'local.env'] : [];
+    const fs = createFakeFs();
+    const error = createRecorder();
+    const deps = { fs, cwd: '/work', now: () => 0, log: () => {}, error: error.sink };
+    expect(
+      await runCli(['new', 'shop', '--template', 'rest', '--runtime', 'bun', ...flags], deps),
+      error.text(),
+    ).toBe(0);
+    const writes = fs.writes.length;
+    expect(await runCli(['build', '--dir', '/work/shop'], deps)).toBe(2);
+    expect(error.text()).toContain(
+      'setu build supports Node projects; for bun, run bun run start.',
+    );
+    expect(fs.writes).toHaveLength(writes);
+  },
+);
 
 it('plans main and migrations, never main.dev, without any mutation', async () => {
   const h = harness({

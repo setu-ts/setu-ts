@@ -70,7 +70,9 @@ describe('generated start-task permissions', () => {
   it('grants the no-template host nothing beyond the base pair', () => {
     // It registers only the runtime plugin, so a wider grant would be
     // privilege it never exercises.
-    expect(startTaskOf(MINIMAL_HOST)).toBe('deno run --allow-net --allow-env main.ts');
+    expect(startTaskOf(MINIMAL_HOST)).toBe(
+      'NODE_ENV=production deno run --allow-net --allow-env main.ts',
+    );
   });
 });
 

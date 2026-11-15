@@ -196,6 +196,8 @@ export interface AppFactoryRenderContext {
    * workspace member's transport module (M138). Absent → no exclusions.
    */
   readonly csrfExclude?: string;
+  /** Runtime options from a workspace member's transport module. */
+  readonly runtimeOptions?: string;
   /** Rendered messaging options supplied by a transport. @since 0.11.0 */
   readonly messaging?: string;
   /** Rendered queue options supplied by a transport. @since 0.11.0 */
@@ -292,8 +294,9 @@ export interface TemplateManifest {
     /**
      * The equivalent Deno task body.
      *
-     * Not derivable from {@linkcode script}: that names a bin shim resolved
-     * from `node_modules`, while Deno needs the npm specifier that provides it.
+     * Kept apart from {@linkcode script} so a template can give Deno a
+     * different command; the full-stack template names the same installed bin,
+     * which Deno's task runner resolves from the nearest `node_modules`.
      */
     readonly denoCommand: string;
     /**

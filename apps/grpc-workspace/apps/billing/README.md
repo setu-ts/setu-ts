@@ -34,8 +34,9 @@ npm run build
 npm start
 ```
 
-The build type-checks, checks CLI wiring and bundles the service into dist/. Run npm test before
-building an image.
+The build type-checks, checks CLI wiring and bundles the service into dist/. The start script uses a
+data-URL preload to default NODE_ENV to production before imports, keeping any preset value. Run npm
+test before building an image.
 
 `/metrics`, `/docs`, `/openapi.json` are served on the application port. Restrict them at the proxy,
 or turn the UI off with OpenApiPlugin's `swagger: false`, or move `/docs` with its `endpoint` and

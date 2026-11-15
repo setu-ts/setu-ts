@@ -24,6 +24,33 @@ spec:
       image: orders-api:dev
 `;
 
+it('fills ConfigMap placeholders and still reads and stamps the member Secret', () => {
+  const text = workspaceK8sFiles(
+    {
+      version: WORKSPACE_VERSION,
+      runtime: 'node',
+      basePort: 3000,
+      broker: 'redis',
+      members: [{ name: 'api', port: 3000 }],
+    },
+    brokerSpec('redis'),
+  )[0]!.contents;
+  const result = prepareDeployManifest(text, {
+    namespace: 'shop',
+    workspace: 'shop',
+    images: new Map([['api', 'api:commit']]),
+  });
+  expect(result.ok).toBe(true);
+  if (!result.ok) throw new Error(result.message);
+  const configMap = result.text.split('---')[0]!;
+  expect(configMap).toContain('kind: ConfigMap');
+  expect(configMap).toContain('namespace: shop');
+  expect(result.text).not.toContain('${');
+  expect(readsMemberSecret(result.text, 'api')).toBe(true);
+  expect(stampSecretVersion(result.text, 'api', '12').stamped).toBe(true);
+  expect(unreadableSlot(result.text, 'api')).toBeUndefined();
+});
+
 it('X87-5 inserts pull Secrets once per member before filling images and refuses ambiguous anchors', () => {
   const text = ['api', 'api-gateway']
     .map(

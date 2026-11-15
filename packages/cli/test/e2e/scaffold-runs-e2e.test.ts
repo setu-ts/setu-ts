@@ -54,6 +54,30 @@ import {
 const runtime = createNodeRuntimeServices();
 const fs: IFileSystem = runtime.fs!;
 
+it('the full-stack Node production preload defaults NODE_ENV before imports and preserves a preset value', async () => {
+  expect(
+    await run(['new', 'production-start', '--template', 'full-stack', '--runtime', 'node']),
+  ).toBe(0);
+  const manifest = JSON.parse(
+    await nodeFs.readFile(`${root}/production-start/package.json`, 'utf8'),
+  ) as { scripts: Record<string, string> };
+  // \x22 for the double quote: the manifest generator's import scanner misreads a quote
+  // inside a regex literal as a string opening.
+  const token = new RegExp('--import \\x22([^\\x22]+)\\x22').exec(manifest.scripts['start']!)?.[1];
+  expect(token).toBeDefined();
+  for (const preset of [false, true]) {
+    const result = await runProcess(process.execPath, {
+      args: ['--import', token!, '-p', 'process.env.NODE_ENV'],
+      clearEnv: true,
+      env: preset ? { NODE_ENV: 'test' } : {},
+      stdout: 'piped',
+      stderr: 'piped',
+    });
+    expect(result.code, new TextDecoder().decode(result.stderr)).toBe(0);
+    expect(new TextDecoder().decode(result.stdout).trim()).toBe(preset ? 'test' : 'production');
+  }
+});
+
 it(
   'setu add auth then the project own tests boot with JWT_SECRET from config',
   { timeout: 900_000 },
@@ -1779,6 +1803,16 @@ describe('styled scaffolds (M123)', () => {
           const merged = await runIn(project, 'node', ['--import', 'tsx', '.tmp/cn-probe.ts']);
           expect(merged.code, merged.output).toBe(0);
           expect(merged.output.trim()).toBe('p-6');
+          const served = await withNodeServer(
+            project,
+            async (origin) => {
+              const response = await fetch(origin);
+              expect(response.status).toBe(200);
+              await response.text();
+            },
+            { NODE_ENV: 'production' },
+          );
+          expect(served.output).not.toMatch(/development build/i);
         }
         const assets = `${project}/build/client/assets`;
         const css = (

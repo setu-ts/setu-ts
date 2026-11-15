@@ -223,6 +223,12 @@ function missingCalls(config: string | undefined, input: TransportModuleInput): 
   const shape = transportModuleShape(input);
   const factory = input.host === 'app-factory';
   const wanted: readonly (readonly [string, string])[] = [
+    [
+      TRANSPORT_EXPORTS.runtime,
+      factory
+        ? 'runtime: runtimeOptions(),'
+        : 'RuntimePlugin({ ...runtimeOptions(), <its existing options> }),',
+    ],
     ...(shape.messaging
       ? [
           [

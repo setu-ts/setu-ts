@@ -54,6 +54,132 @@ const NPMRC_MOUNT = '--mount=type=secret,id=npmrc,target=/root/.npmrc';
 const GUARD = `RUN ${NPMRC_MOUNT} if [ -z "$NPM_CONFIG_REGISTRY" ]; then unset NPM_CONFIG_REGISTRY; fi && `;
 
 describe('workspaceContainerFiles', () => {
+  it.each(['node', 'bun', 'deno'] as const)(
+    'sets production only in the %s runtime stage for both shapes',
+    (runtime) => {
+      for (const workspace of [true, false]) {
+        const dockerfile = renderDockerfile(workspaceProfile(runtime), workspace);
+        const stages = dockerfile.split(/^FROM /m).slice(1);
+        // Deno: frontend, check, runtime, then fetch and the image, both FROM runtime (so they
+        // inherit its ENV rather than repeating it). Bun and Node: build, runtime.
+        const runtimeIndex = runtime === 'deno' ? 2 : stages.length - 1;
+        const runtimeStage = stages[runtimeIndex]!;
+        for (const [index, stage] of stages.entries())
+          if (index !== runtimeIndex) expect(stage).not.toContain('ENV NODE_ENV=production');
+        expect(runtimeStage).toContain('ENV NODE_ENV=production');
+        expect(stages).toHaveLength(runtime === 'deno' ? 5 : 2);
+        if (runtime === 'bun') {
+          expect(dockerfile.match(/FROM oven\/bun:1\.4\.0-alpine/g)).toHaveLength(2);
+          expect(
+            dockerfile.match(/bun.lock is missing: run bun install and commit bun.lock/g),
+          ).toHaveLength(2);
+          expect(stages[0]).toContain('then bun run check; fi');
+          const check = stages[0]!
+            .split('\n')
+            .find((line) => line.startsWith('RUN ') && line.includes('bun run check'));
+          expect(check).not.toContain('--mount=type=secret');
+          expect(stages[0]!.indexOf('then bun run check')).toBeGreaterThan(
+            stages[0]!.indexOf('then bun run build'),
+          );
+        } else if (runtime === 'deno') {
+          expect(stages[0]).toContain('for (const task of ["build", "check"])');
+          // main.dev.ts is excluded from the context, so the stage's check copy drops it.
+          expect(stages[0]).toContain('manifest.tasks.check.replaceAll(" main.dev.ts", "")');
+          expect(stages[0]).toContain(
+            '--allow-write=./.setu-build-task,./.setu-check-task,./.setu-check-cli,./deno.json,./deno.jsonc',
+          );
+          // The check runs in its own stage, so what its unlocked CLI writes never reaches the
+          // image: the runtime stage copies build/ from the frontend stage (audit N1).
+          expect(stages[0]).not.toContain('deno task check');
+          expect(stages[1]!.startsWith('frontend AS check\n')).toBe(true);
+          expect(runtimeStage).toContain('COPY --from=frontend ');
+          // Nothing is copied from the check stage, not even its marker (audit N3).
+          for (const stage of stages.slice(2)) expect(stage).not.toContain('COPY --from=check');
+          // The token reaches only the fetch stage, which the image never ships; the image's one
+          // install step bind-mounts what the fetch cached and its credential-free registry
+          // settings, so approved scripts run without the token (#592 review).
+          expect(stages[3]!.startsWith('runtime AS fetch\n')).toBe(true);
+          expect(stages[4]!.startsWith('runtime\n')).toBe(true);
+          const fetchRuns = stages[3]!.split('\n').filter((line) => line.startsWith('RUN '));
+          expect(fetchRuns).toHaveLength(1);
+          expect(fetchRuns[0]!.startsWith(`RUN ${NPMRC_MOUNT} `)).toBe(true);
+          expect(fetchRuns[0]).toContain('--allow-write=/tmp/.setu-npmrc -');
+          const imageRuns = stages[4]!.split('\n').filter((line) => line.startsWith('RUN '));
+          expect(imageRuns).toHaveLength(1);
+          expect(imageRuns[0]).not.toContain('type=secret');
+          for (const mount of [
+            '--mount=type=bind,from=fetch,source=/deno-dir,target=/tmp/.setu-fetched-cache',
+            '--mount=type=bind,from=fetch,source=/srv,target=/tmp/.setu-fetched-srv',
+            '--mount=type=bind,from=fetch,source=/tmp/.setu-npmrc,target=/root/.npmrc',
+          ])
+            expect(imageRuns[0]).toContain(mount);
+          expect(stages[4]).not.toContain('COPY --from=fetch');
+          expect(runtimeStage).toContain(
+            'RUN --mount=type=bind,from=check,source=/tmp/.setu-checked,target=/tmp/.setu-checked true',
+          );
+          const runs = stages[0]!.split('\n').filter((line) => line.startsWith('RUN '));
+          const mounted = runs.find((line) => line.includes('--mount=type=secret'));
+          const check = stages[1]!.split('\n').find((line) => line.includes('deno task check'));
+          // Every token fetch happens before any project code runs, and executes nothing; the
+          // build then runs without the token; no later frontend or check step mounts it (#592 review).
+          expect(mounted).toContain(
+            'if [ -f .setu-build-task ]; then deno install --node-modules-dir=none; elif [ -f .setu-check-task ]; then deno cache --node-modules-dir=none main.ts setu.config.ts; fi',
+          );
+          expect(mounted).not.toContain('deno task build');
+          expect(mounted).not.toContain('deno task check');
+          const build = runs.findIndex((line) => line.includes('deno task build;'));
+          expect(runs[build]).not.toContain('type=secret');
+          expect(runs.indexOf(mounted!)).toBeLessThan(build);
+          expect(runs.slice(build).some((line) => line.includes('type=secret'))).toBe(false);
+          // The check's exact CLI is fetched with the token, never run beside it (audit F1).
+          expect(mounted).toContain(
+            'Deno.writeTextFileSync(".setu-check-cli", manifest.tasks.check.slice(manifest.tasks.check.indexOf("npm:@setu-ts/cli@")).split(" ")[0])',
+          );
+          expect(mounted).toContain(
+            'if [ -f .setu-check-cli ]; then deno cache --no-lock --node-modules-dir=none "$(cat .setu-check-cli)"; fi',
+          );
+          // The build step installs the credential-free registry settings before reading the cache.
+          expect(runs[build]!.startsWith('RUN cp /tmp/.setu-npmrc /root/.npmrc && ')).toBe(true);
+          expect(mounted).toContain('--allow-write=/tmp/.setu-npmrc -');
+          expect(check).not.toContain('--mount=type=secret');
+          expect(check).toBe(
+            'RUN if [ -z "$NPM_CONFIG_REGISTRY" ]; then unset NPM_CONFIG_REGISTRY; fi && if [ -f .setu-check-task ]; then deno task check; fi && touch /tmp/.setu-checked',
+          );
+        }
+      }
+    },
+  );
+
+  it('merges broker and sibling dependencies with declared health support', () => {
+    const manifest: WorkspaceManifest = {
+      ...manifestOf([]),
+      members: [
+        {
+          name: 'orders',
+          port: 3000,
+          healthProbes: true,
+          dependsOn: ['billing', 'plain', 'billing'],
+        },
+        { name: 'billing', port: 3001, healthProbes: true },
+        { name: 'plain', port: 3002, healthProbes: false },
+      ],
+    };
+    const yaml = contentsOf(workspaceContainerFiles(manifest, brokerSpec('redis')), COMPOSE_FILE);
+    const orders = yaml.slice(yaml.indexOf('  orders:'), yaml.indexOf('\n  plain:'));
+    expect(orders).toContain('redis:\n        condition: service_healthy');
+    expect(orders).toContain('billing:\n        condition: service_healthy');
+    expect(orders.match(/ {6}billing:/g)).toHaveLength(1);
+    expect(orders).toContain('plain:\n        condition: service_started');
+    expect(orders).toContain(
+      "test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1:3000/ready']",
+    );
+    expect(orders).toContain(
+      'interval: 5s\n      timeout: 3s\n      retries: 10\n      start_period: 30s',
+    );
+    expect(yaml.slice(yaml.indexOf('\n  plain:'), yaml.indexOf('\n  redis:'))).not.toContain(
+      'healthcheck:',
+    );
+  });
   it('requires a separate shell key for each member generated secret', () => {
     const manifest: WorkspaceManifest = {
       ...manifestOf([]),
@@ -187,8 +313,14 @@ describe('workspaceContainerFiles', () => {
       const command = lines.find((line) => line.startsWith('CMD '));
       expect(command).toContain('"run", "--frozen"');
       expect(command).not.toContain('--no-lock');
-      const install = lines.find((line) => line.includes('&& deno cache main.ts'));
-      expect(install).toContain('deno install --frozen');
+      const fetch = lines.find((line) =>
+        line.includes('&& deno cache --node-modules-dir=none main.ts'),
+      );
+      const install = lines.find((line) => line.includes('deno install --cached-only --frozen'));
+      expect(fetch).toContain('deno install --node-modules-dir=none --frozen');
+      // Only the registry-settings filter, which imports nothing, runs unlocked.
+      for (const command of fetch!.match(/deno (?:install|cache)[^&;]*/g) ?? [])
+        expect(command).not.toContain('--no-lock');
       expect(install).not.toContain('--no-lock');
     });
 
@@ -199,7 +331,7 @@ describe('workspaceContainerFiles', () => {
     it('takes the install registry as an optional build argument', () => {
       const contents = dockerfile();
       expect(contents).toContain('ARG NPM_CONFIG_REGISTRY=');
-      expect(contents).toContain(`${GUARD}deno cache main.ts`);
+      expect(contents).toContain(`${GUARD}deno cache --node-modules-dir=none main.ts`);
       expect(contents).not.toMatch(/^ENV NPM_CONFIG_REGISTRY/m);
       // A build argument's value lands in image history, so the file says so.
       expect(contents).toContain('never a\n# credential');
@@ -210,8 +342,14 @@ describe('workspaceContainerFiles', () => {
     // egress — fetched packages have nowhere to persist. --cached-only would
     // change the error message and nothing else, so its absence is pinned to
     // make any later "harden the CMD" edit read this record first.
-    it('does not carry --cached-only, which could not work under a read-only root', () => {
-      expect(dockerfile()).not.toContain('--cached-only');
+    // The BUILD's token-free install uses --cached-only on purpose (it reads what the secret-mounted
+    // fetch cached); the record above is about the runtime command.
+    it('does not carry --cached-only on the start command, which could not work under a read-only root', () => {
+      const command = dockerfile()
+        .split('\n')
+        .find((line) => line.startsWith('CMD '));
+      expect(command).toBeDefined();
+      expect(command).not.toContain('--cached-only');
     });
 
     // The comment rewrite (plan §2 C2): the guarantee above the build step now
@@ -479,7 +617,7 @@ describe('workspaceContainerFiles', () => {
         DOCKERFILE,
       );
 
-    it('builds a Node member into the pinned Node image', () => {
+    it('builds a Node member into the Node 24 image', () => {
       const contents = dockerfileFor('node');
       expect(contents).toContain('FROM node:24-alpine');
       expect(contents).not.toContain('denoland/deno');
@@ -501,12 +639,13 @@ describe('workspaceContainerFiles', () => {
 
     it('builds a Bun member into the pinned Bun image', () => {
       const contents = dockerfileFor('bun');
-      expect(contents).toContain('FROM oven/bun:1-alpine');
+      expect(contents).toContain('FROM oven/bun:1.4.0-alpine');
       expect(contents).not.toContain('node:24');
       expect(contents).not.toContain('denoland/deno');
       // Bun installs into each member's own node_modules as well as the root,
       // and runs the entry with `bun`.
-      expect(contents).toContain(`${GUARD}bun install`);
+      expect(contents).toContain(`${GUARD}{ test -f bun.lock ||`);
+      expect(contents).toContain('&& bun install --frozen-lockfile');
       expect(contents).toContain('ARG NPM_CONFIG_REGISTRY=');
       expect(contents).toContain('USER 1000:1000');
       expect(contents).toContain('CMD ["bun", "run", "main.ts"]');
@@ -532,7 +671,13 @@ describe('workspaceContainerFiles', () => {
 describe('the npmrc build secret (M120b)', () => {
   // Every RUN that installs packages mounts the optional secret; every other RUN
   // does not. The table is the claim: install steps per runtime, by what they run.
-  const INSTALLS = ['npm ci', 'bun install', 'deno task build', 'deno cache main.ts'];
+  // Steps that fetch with the token. The Deno frontend build runs without it, from the cache.
+  const INSTALLS = [
+    'npm ci',
+    'bun install',
+    'then deno install --node-modules-dir=none; elif',
+    'deno cache --node-modules-dir=none main.ts',
+  ];
   const runs = (dockerfile: string): string[] =>
     dockerfile.split('\n').filter((line) => line.startsWith('RUN '));
   for (const runtime of ['node', 'bun', 'deno'] as const) {
@@ -540,8 +685,27 @@ describe('the npmrc build secret (M120b)', () => {
       it(`mounts it on exactly the install steps: ${runtime}, ${workspace ? 'workspace' : 'standalone'}`, () => {
         const lines = runs(renderDockerfile(workspaceProfile(runtime), workspace));
         const installs = lines.filter((line) => INSTALLS.some((step) => line.includes(step)));
+        // Two each: the build-side fetch and the runtime install.
         expect(installs).toHaveLength(2);
         for (const line of installs) expect(line.startsWith(`RUN ${NPMRC_MOUNT} `)).toBe(true);
+        if (runtime === 'deno') {
+          const build = lines.find((line) => line.includes('deno task build;'));
+          expect(build).toBeDefined();
+          expect(build).not.toContain('type=secret');
+          // Lifecycle scripts run only into a node_modules directory, so every Deno fetch beside
+          // the token fills the global cache alone: even an `allowScripts` package runs nothing
+          // there (#592 review). The table is every Deno command in a secret-mounted step.
+          for (const line of installs) {
+            const commands = line.match(/deno (?:install|cache)[^&;]*/g) ?? [];
+            expect(commands.length).toBeGreaterThan(0);
+            for (const command of commands) expect(command).toContain('--node-modules-dir=none');
+            expect(line).not.toContain('deno task');
+          }
+          // The token-free steps that create node_modules read only the cache.
+          for (const line of lines.filter((line) => line.includes('--cached-only')))
+            expect(line).not.toContain('type=secret');
+          expect(lines.filter((line) => line.includes('--cached-only'))).toHaveLength(2);
+        }
         for (const line of lines.filter((line) => !installs.includes(line)))
           expect(line).not.toContain('type=secret');
         // Never a required secret: an absent one is the no-op build.

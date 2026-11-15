@@ -152,7 +152,7 @@ export async function runBuildCommand(args: ParsedArgs, deps: IBuildDependencies
     const runtime = await detectTargetRuntime(deps.fs, dir);
     if (runtime !== 'node') {
       const instead = {
-        bun: 'bun run main.ts',
+        bun: 'bun run start',
         deno: 'deno task start (after deno task build in a full-stack project)',
         'cloudflare-workers': 'wrangler deploy',
       };

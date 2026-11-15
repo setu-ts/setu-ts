@@ -299,23 +299,24 @@ export function devtoolStarterRefusal(host: ResolvedHost): string | undefined {
 
 /**
  * Derives a project's `dev` task from its own `start` task by swapping the
- * entry module.
+ * entry module, removing exactly one generated production environment prefix.
  *
  * Used by `setu devtool enable`, which meets a project this CLI may have
  * scaffolded before this letter: reading the START task it already runs — not
- * recomputing permissions the enable command cannot know — is what guarantees
- * the two tasks differ only in the entry module, for any project whose start
- * names `main.ts`. A start task this cannot read (a different entry, or no
- * task at all) is refused by name with its current value.
+ * recomputing permissions the enable command cannot know — preserves its flags.
+ * One leading `NODE_ENV=production ` is removed so `dev` remains a development
+ * task; without that prefix only the entry changes. A start task this cannot read
+ * (a different entry, or no task at all) is refused by name with its current value.
  *
  * @param startTask - The project's current `start` task body
  * @returns The `dev` task body, or `undefined` when the start task names no
  * swappable `main.ts` entry
  */
 export function deriveDevTask(startTask: string): string | undefined {
+  const development = startTask.replace(/^NODE_ENV=production /, '');
   const suffix = ' main.ts';
-  if (!startTask.endsWith(suffix)) return undefined;
-  return `${startTask.slice(0, -suffix.length)} ${DEVTOOL_ENTRY_MODULE}`;
+  if (!development.endsWith(suffix)) return undefined;
+  return `${development.slice(0, -suffix.length)} ${DEVTOOL_ENTRY_MODULE}`;
 }
 
 /**

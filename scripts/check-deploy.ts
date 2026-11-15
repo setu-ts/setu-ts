@@ -769,6 +769,240 @@ export async function buildGeneratedNodeImage(
   );
 }
 
+/** Proves runtime NODE_ENV using the image's own executable, without starting the app. */
+async function checkImageEnvironment(
+  image: string,
+  runtime: 'node' | 'bun' | 'deno',
+): Promise<void> {
+  const expression =
+    runtime === 'deno'
+      ? "console.log(Deno.env.get('NODE_ENV'))"
+      : 'console.log(process.env.NODE_ENV)';
+  const result = await run(
+    [
+      'docker',
+      'run',
+      '--rm',
+      '--network',
+      'none',
+      '--entrypoint',
+      runtime,
+      image,
+      runtime === 'deno' ? 'eval' : '-e',
+      expression,
+    ],
+    { quiet: true },
+  );
+  if (!result.success || result.stdout.trim() !== 'production')
+    throw new Error(`${runtime} image NODE_ENV is not production`);
+}
+
+/** Negative builds must reach the project's check, and Bun must require its committed lock. */
+async function checkGeneratedBuildRefusals(
+  root: string,
+  image: string,
+  registry: string,
+  runtime: 'bun' | 'deno',
+  workspace: boolean,
+): Promise<void> {
+  const build = () =>
+    run(
+      [
+        'docker',
+        'build',
+        '--network',
+        'host',
+        '-f',
+        `${root}/${workspace ? 'docker/' : ''}Dockerfile`,
+        ...(workspace ? ['--build-arg', `MEMBER=${GENERATED_MEMBER}`] : []),
+        '--build-arg',
+        `NPM_CONFIG_REGISTRY=${registry}`,
+        '-t',
+        image,
+        root,
+      ],
+      { quiet: true },
+    );
+  const main = `${root}/${workspace ? `apps/${GENERATED_MEMBER}/` : ''}main.ts`;
+  const original = await readFile(main, 'utf8');
+  try {
+    await writeFile(
+      main,
+      original + '\nconst setuDeployTypeError: string = 123;\nconsole.log(setuDeployTypeError);\n',
+    );
+    const broken = await build();
+    if (broken.success || !/TS2322|not assignable/.test(broken.stdout + broken.stderr))
+      throw new Error(
+        `${runtime} image did not reject a type error through its check task: ${broken.stdout}${broken.stderr}`,
+      );
+  } finally {
+    await writeFile(main, original);
+  }
+  if (runtime === 'bun') {
+    const lock = `${root}/bun.lock`;
+    await rename(lock, `${lock}.saved`);
+    try {
+      const missing = await build();
+      if (
+        missing.success ||
+        !(missing.stdout + missing.stderr).includes(
+          'bun.lock is missing: run bun install and commit bun.lock',
+        )
+      )
+        throw new Error('Bun image did not refuse its missing lockfile');
+    } finally {
+      await rename(`${lock}.saved`, lock);
+    }
+  }
+  const clean = await build();
+  if (!clean.success) throw new Error(clean.stdout + clean.stderr);
+  console.log(
+    `  ✓ ${runtime} rejects a type error${runtime === 'bun' ? ' and a missing bun.lock' : ''}; clean image builds`,
+  );
+}
+
+/** Compose waits for the declared sibling to become healthy before starting its caller. */
+async function checkGeneratedCompose(directory: string, registry: string): Promise<boolean> {
+  const resources = generatedResources();
+  const name = 'compose-order';
+  const root = `${directory}/${name}`;
+  const cli = (args: readonly string[]) =>
+    run([...CLI_COMMAND, ...args], { quiet: true, cwd: directory });
+  const compose = (...args: string[]) =>
+    run(
+      [
+        'docker',
+        'compose',
+        '-p',
+        resources.container,
+        '-f',
+        `${root}/docker/compose.yaml`,
+        ...args,
+      ],
+      { quiet: true, cwd: directory },
+    );
+  try {
+    const created = await cli([
+      'new',
+      name,
+      '--workspace',
+      '--runtime',
+      'node',
+      '--port',
+      String(GENERATED_PORT + 100),
+    ]);
+    if (!created.success) throw new Error(created.stderr);
+    for (const member of ['billing', 'orders']) {
+      const added = await cli([
+        'generate',
+        'app',
+        member,
+        '--template',
+        'rest',
+        ...(member === 'orders' ? ['--depends-on', 'billing'] : []),
+        '--dir',
+        root,
+      ]);
+      if (!added.success) throw new Error(added.stderr);
+    }
+    const installed = await run(['npm', 'install', '--no-audit', '--no-fund'], {
+      quiet: true,
+      cwd: root,
+      env: { NPM_CONFIG_REGISTRY: registry },
+    });
+    if (!installed.success) throw new Error(installed.stderr);
+    const path = `${root}/docker/compose.yaml`;
+    const yaml = (await readFile(path, 'utf8')).replace(
+      /image: (billing|orders):dev/g,
+      `image: ${resources.image}-$1`,
+    );
+    await writeFile(path, yaml);
+    // The generated dependency is what this step proves: orders waits for billing to be HEALTHY,
+    // and billing has the healthcheck that condition needs (Compose refuses it otherwise).
+    const config = await compose('config', '--format', 'json');
+    if (!config.success) throw new Error(config.stdout + config.stderr);
+    const services = (
+      JSON.parse(config.stdout) as {
+        services: Record<
+          string,
+          {
+            depends_on?: Record<string, { condition?: string }>;
+            healthcheck?: unknown;
+            build?: { context?: string; dockerfile?: string; args?: Record<string, string> };
+          }
+        >;
+      }
+    ).services;
+    if (services['orders']?.depends_on?.['billing']?.condition !== 'service_healthy')
+      throw new Error('orders does not depend on billing with condition service_healthy');
+    if (services['billing']?.healthcheck === undefined)
+      throw new Error('billing has no healthcheck');
+    // Built with `docker build --network host` like the gate's other images, not `compose build`:
+    // Compose's bake builder refuses a host-network build without an explicit entitlement. The
+    // context, Dockerfile and MEMBER come from the generated `build:` block, so it is the one
+    // built.
+    for (const member of ['billing', 'orders']) {
+      const build = services[member]?.build;
+      if (build?.context === undefined || build.dockerfile === undefined)
+        throw new Error(`${member} has no generated build context and Dockerfile`);
+      if (build.args?.['MEMBER'] !== member)
+        throw new Error(`${member}'s generated build does not pass MEMBER=${member}`);
+      const built = await run(
+        [
+          'docker',
+          'build',
+          '--network',
+          'host',
+          '-f',
+          resolve(build.context, build.dockerfile),
+          ...Object.entries(build.args).flatMap(([name, value]) => [
+            '--build-arg',
+            `${name}=${value}`,
+          ]),
+          '--build-arg',
+          `NPM_CONFIG_REGISTRY=${registry}`,
+          '-t',
+          `${resources.image}-${member}`,
+          build.context,
+        ],
+        { quiet: true },
+      );
+      if (!built.success) throw new Error(built.stdout + built.stderr);
+    }
+    const up = await compose('up', '--wait', '--wait-timeout', '180', '--no-build');
+    if (!up.success) throw new Error(up.stdout + up.stderr);
+    const starts: string[] = [];
+    for (const member of ['billing', 'orders']) {
+      const id = await compose('ps', '-q', member);
+      const state = await run(
+        [
+          'docker',
+          'inspect',
+          '-f',
+          '{{.State.Health.Status}} {{.State.StartedAt}}',
+          id.stdout.trim(),
+        ],
+        { quiet: true },
+      );
+      if (!state.success || !state.stdout.startsWith('healthy '))
+        throw new Error(`${member} is not healthy`);
+      starts.push(state.stdout.trim().slice('healthy '.length));
+    }
+    if (starts[0]! >= starts[1]!) throw new Error('orders did not start after billing');
+    console.log(
+      '  ✓ Compose config gives orders service_healthy on billing; billing started first; both healthy',
+    );
+    return true;
+  } catch (cause) {
+    console.error(`  ✗ Compose order: ${cause instanceof Error ? cause.message : String(cause)}`);
+    return false;
+  } finally {
+    await compose('down', '--volumes');
+    for (const member of ['billing', 'orders'])
+      await run(['docker', 'image', 'rm', '-f', `${resources.image}-${member}`], { quiet: true });
+  }
+}
+
 /** Generated Node images must serve with no writable root and no external network. */
 async function checkGeneratedNode(
   directory: string,
@@ -835,6 +1069,9 @@ async function checkGeneratedNode(
       runtime,
     );
     if (!built.success) throw new Error(built.stdout + built.stderr);
+    await checkImageEnvironment(resources.image, runtime);
+    if (runtime === 'bun')
+      await checkGeneratedBuildRefusals(root, resources.image, registry, runtime, workspace);
     const started = await run(
       [
         'docker',
@@ -1071,6 +1308,9 @@ async function checkGenerated(): Promise<CheckOutcome> {
         console.error(built.stderr);
         return 'failed';
       }
+      await checkImageEnvironment(resources.image, 'deno');
+      if (layout === GENERATED_LAYOUTS[0])
+        await checkGeneratedBuildRefusals(root, resources.image, overlay.url, 'deno', true);
       const connectorCache = await run(
         [
           'docker',
@@ -1193,6 +1433,7 @@ async function checkGenerated(): Promise<CheckOutcome> {
       if (!(await checkGeneratedNode(workspace, overlay.url, workspaceCase))) return 'failed';
     }
     if (!(await checkGeneratedNode(workspace, overlay.url, false, 'node', true))) return 'failed';
+    if (!(await checkGeneratedCompose(workspace, overlay.url))) return 'failed';
     // M120 §3.11/§3.14: a Bun member importing a library, so the image proves the
     // root bunfig.toml's hoisted linker reaches the production install. The host
     // install needs Bun; without it the case is skipped by name, like a missing
@@ -1375,12 +1616,18 @@ async function checkWorkspace(clusterModeFollows: boolean): Promise<CheckOutcome
       'host',
     ];
 
-    // Without the portal's values file deploy refuses, and the cluster stays unchanged.
+    // Generated SESSION_SECRET is present; operator-owned TRUSTED_PROXIES is still missing.
     const refused = await cli(deployArgs);
     const absent = await run(kubectl('get', 'namespace', WORKSPACE_GATE.namespace), {
       quiet: true,
     });
-    if (refused.success || !refused.stderr.includes('portal needs') || absent.success) {
+    if (
+      refused.success ||
+      !refused.stderr.includes('portal needs') ||
+      !refused.stderr.includes('TRUSTED_PROXIES') ||
+      refused.stderr.includes('SESSION_SECRET') ||
+      absent.success
+    ) {
       console.error(
         `  ✗ deploy without k8s/secrets/portal/.env did not refuse cleanly\n${refused.stdout}${refused.stderr}`,
       );

@@ -577,6 +577,17 @@ describe('setu workspace deploy', () => {
     );
   });
 
+  it('sends an optional operator broker override to the Secret', async () => {
+    const h = harness({
+      files: {
+        '/ws/k8s/secrets/portal/.env': `TRUSTED_PROXIES=\nSESSION_SECRET="${SECRET}"\nREDIS_URL=redis://operator:6379\n`,
+      },
+    });
+    expect(await h.run(['deploy']), h.err.join('\n')).toBe(0);
+    const secret = h.calls.find((call) => call.input?.includes('kind: Secret') === true);
+    expect(secret?.input).toContain(`REDIS_URL: ${btoa('redis://operator:6379')}`);
+  });
+
   it('refuses before building when a declared value is missing, naming every one', async () => {
     const h = harness({
       files: { '/ws/k8s/secrets/portal/.env': 'TRUSTED_PROXIES=\n' },

@@ -16,6 +16,40 @@ import { workspaceProfile } from '../../../src/workspace/runtime-profile.ts';
 import { withPluginOptionSeams } from '../../../src/templates/seam.ts';
 import { JOBS_SEAM } from '../../../src/seams/jobs.ts';
 
+it.each(['node', 'bun', 'deno'] as const)(
+  'sets NODE_ENV only for the %s production start',
+  (runtime) => {
+    const files = projectFiles('shop', runtime, resolveHost(getTemplate('full-stack')!, runtime));
+    const manifest = JSON.parse(
+      contentsOf(files, runtime === 'deno' ? 'deno.json' : 'package.json'),
+    );
+    const scripts = manifest.scripts ?? manifest.tasks;
+    expect(scripts.start).toContain(
+      runtime === 'node'
+        ? `--import "data:text/javascript,process.env.NODE_ENV??='production'" --import ./instrumentation.mjs`
+        : `NODE_ENV=production ${runtime}`,
+    );
+    for (const name of ['start:dev', 'start:debug', 'test'])
+      expect(scripts[name]).not.toContain('NODE_ENV');
+    if (runtime === 'node') expect(contentsOf(files, 'README.md')).toContain('data-URL preload');
+  },
+);
+
+it('creates every local env file owner-only, and nothing else (audit F2, N2)', () => {
+  const fullStack = projectFiles('shop', 'node', resolveHost(getTemplate('full-stack')!, 'node'));
+  expect(fullStack.find((file) => file.path === '.env')?.secret).toBe(true);
+  expect(fullStack.find((file) => file.path === '.env.example')?.secret).toBeUndefined();
+  const worker = projectFiles(
+    'shop',
+    'cloudflare-workers',
+    resolveHost(getTemplate('full-stack')!, 'cloudflare-workers'),
+  );
+  expect(worker.find((file) => file.path === '.dev.vars')?.secret).toBe(true);
+  // A REST project's .env holds no secret yet; `setu add auth` writes one into it later.
+  const rest = projectFiles('api', 'node', resolveHost(getTemplate('rest')!, 'node'));
+  expect(rest.filter((file) => file.secret === true).map((file) => file.path)).toEqual(['.env']);
+});
+
 it('V11-3 names Node through tsx as the config loader on Workers', () => {
   const files = projectFiles(
     'worker',
@@ -417,8 +451,10 @@ describe('a template with a frontend build, on a Deno target', () => {
 
     expect(tasks['install']).toBe('deno install');
     expect(tasks['build']).toContain('deno task install &&');
-    expect(tasks['build']).toContain('npm:@react-router/dev build');
-    expect(tasks['start']?.startsWith('deno run ')).toBe(true);
+    // The project's own locked copy, never a fresh unversioned `npm:` fetch.
+    expect(tasks['build']).toBe('deno task install && react-router build');
+    expect(tasks['build']).not.toContain('--no-lock');
+    expect(tasks['start']?.startsWith('NODE_ENV=production deno run ')).toBe(true);
     expect(tasks['start']).not.toContain('build');
   });
 

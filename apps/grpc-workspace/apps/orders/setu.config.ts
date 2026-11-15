@@ -29,7 +29,12 @@ import { COMMAND_HANDLERS, QUERY_HANDLERS } from './src/cqrs/index.ts';
 import { EVENT_HANDLERS } from './src/events/index.ts';
 import { QUEUE_PROCESSORS } from './src/jobs/index.ts';
 import { SERVICE_ENDPOINTS } from './src/discovery/services.ts';
-import { messagingOptions, queueOptions, transportPlugins } from './src/transport/index.ts';
+import {
+  messagingOptions,
+  queueOptions,
+  runtimeOptions,
+  transportPlugins,
+} from './src/transport/index.ts';
 
 /**
  * Builds the application.
@@ -52,7 +57,7 @@ export function createApp(
 ): IKernelApplication {
   const app = createApplication({
     plugins: [
-      RuntimePlugin({ maxBodyBytes: 1_048_576 }),
+      RuntimePlugin({ ...runtimeOptions(), maxBodyBytes: 1_048_576 }),
       ConfigPlugin({ envFilePath: '.env', envFileOptional: true }),
       LoggerPlugin({
         requestLogging: true,

@@ -53,6 +53,7 @@ import {
 import { isMissingPath } from '../utils/filesystem-errors.ts';
 import { frameworkSpecifier } from '../templates/framework-specifier.ts';
 import { generateSecret } from '../templates/secret.ts';
+import { operatorSecretFiles } from '../workspace/operator-secrets.ts';
 import { BROKER_COMPOSE_FILE, cliInvocation, resolveHost } from '../templates/project-files.ts';
 import { MINIMAL_HOST } from '../templates/minimal.ts';
 import { envFileDeclaration, isCoveredDotenvName } from '../templates/env-file.ts';
@@ -1995,7 +1996,8 @@ async function addOne(
     },
   ];
 
-  const edits: { readonly path: string; readonly contents: string }[] = [];
+  const edits: { readonly path: string; readonly contents: string; readonly secret?: boolean }[] =
+    [];
   const createOnlyPaths = new Set<string>();
   let found = false;
   let alreadyPresent = false;
@@ -2523,6 +2525,28 @@ async function addOne(
         return EXIT_ERROR;
       }
       writeRoot = root;
+      if (!secrets.includes(variableName)) {
+        try {
+          const operator = await operatorSecretFiles(
+            deps.fs,
+            root,
+            member.name,
+            [variableName],
+            deps.secret,
+          );
+          if (operator.files.length > 0) {
+            edits.push(...operator.files);
+            deps.log(
+              `Operator secrets for ${member.name}: ${variableName} (k8s/secrets/${member.name}/.env).`,
+            );
+          }
+        } catch (cause) {
+          deps.error(
+            `Cannot prepare operator secrets: ${escapeName(cause instanceof Error ? cause.message : String(cause))}`,
+          );
+          return EXIT_ERROR;
+        }
+      }
       if (
         !secrets.includes(variableName) ||
         (memberEnvFile !== undefined && !(member.envFilePaths ?? []).includes(memberEnvFile))
@@ -3056,7 +3080,10 @@ async function planAddEnvVariable(
     const text = await readProjectText(deps, path, file);
     if (text === null) return { ok: false };
     const contents = withEnvVariable(text ?? '', [variable], localValue);
-    if (contents !== undefined) edits.push({ path, contents });
+    // The local file holds the value, so it is created owner-only (M140c);
+    // the committed example is not.
+    if (contents !== undefined)
+      edits.push({ path, contents, ...(file === envFile ? { secret: true } : {}) });
   }
   return { ok: true, envFile };
 }
