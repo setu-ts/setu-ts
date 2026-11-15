@@ -98,7 +98,7 @@ export function readEnvFilePath(
  * inside a string (`"envFilePath: 'x'"`) never wins over the real one. Either
  * quote style is read, for a value and for the key, because a formatter can
  * rewrite the generated single-quoted literal. A regular-expression literal
- * elsewhere in the file is read past; one used as the `envFilePath` value is
+ * elsewhere in the file is read past; a regex as the whole `envFilePath` value is
  * `unreadable`.
  *
  * @param configSource - The project's `setu.config.ts` text

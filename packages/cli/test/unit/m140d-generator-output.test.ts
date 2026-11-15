@@ -210,7 +210,13 @@ describe('M140d approved output', () => {
       const member = section('setu', 'node', true);
       const prose = member.replace(/\n\s+/g, ' ');
       expect(prose).toContain('`src/transport/index.ts`');
-      expect(prose).toContain('With the `memory` broker, or a broker without a queue arm');
+      expect(prose).toContain('With the `memory` broker both are in-memory');
+      // The queue-less brokers are named from the broker table, not from memory.
+      for (const name of BROKERS)
+        if (name !== 'memory')
+          expect(prose.includes(`\`${name}\``), name).toBe(
+            brokerSpec(name).queueArgs === undefined,
+          );
       expect(prose).toContain('`setu workspace broker <name>`');
       expect(member).not.toContain('Messaging is in-memory');
       expect(member).not.toContain('Discovery is static and empty');

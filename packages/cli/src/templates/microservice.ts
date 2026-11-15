@@ -207,7 +207,7 @@ const MICROSERVICE_MANIFEST: TemplateManifest = {
     // so neither the call text nor an empty map says anything about it.
     if (member === true)
       return `## Development transports\n\n${[
-        `- Messaging and queue options come from \`src/transport/index.ts\`, which the CLI writes from the workspace broker in setu.workspace.json. With the \`memory\` broker, or a broker without a queue arm, they are in-memory: one process, lost on restart. Change the broker for every member with \`${cli} workspace broker <name>\`.`,
+        `- Messaging and queue options come from \`src/transport/index.ts\`, which the CLI writes from the workspace broker in setu.workspace.json. With the \`memory\` broker both are in-memory: one process, lost on restart. \`nats\`, \`kafka\`, \`pubsub\` and \`service-bus\` have no queue arm, so with them the queue stays in memory. Change the broker for every member with \`${cli} workspace broker <name>\`.`,
         '- Telemetry has no exporter: spans are dropped. Set the `TelemetryPlugin` `exporter` option.',
       ]
         .map((line) => wrapProse(line, '  '))
