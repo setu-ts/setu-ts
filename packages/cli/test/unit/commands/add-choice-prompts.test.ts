@@ -235,11 +235,6 @@ describe('setu add choice prompts', () => {
       refusal: 'Unknown --redis-client "bogus"',
     },
     {
-      name: 'a valid --redis-client with no Redis arm',
-      argv: ['add', 'mail', 'cache', '--redis-client', 'ioredis'],
-      refusal: '--redis-client requires a Redis arm',
-    },
-    {
       name: 'a valid --redis-client beside a non-Redis arm',
       argv: ['add', 'mail', 'cache', '--redis-client', 'ioredis', '--store', 'memory'],
       refusal: '--redis-client requires a Redis arm',
@@ -254,11 +249,6 @@ describe('setu add choice prompts', () => {
       name: 'an unknown --dialect',
       // --type drizzle, so the dialect itself is what is refused; mail keeps a choice open.
       argv: ['add', 'mail', 'database', '--type', 'drizzle', '--dialect', 'mysql'],
-      refusal: '--dialect requires database --type drizzle',
-    },
-    {
-      name: '--dialect without --type drizzle',
-      argv: ['add', 'mail', 'database', '--dialect', 'sqlite'],
       refusal: '--dialect requires database --type drizzle',
     },
     {
@@ -285,6 +275,50 @@ describe('setu add choice prompts', () => {
       expect(await runCli([...argv], run.deps)).not.toBe(0);
       expect(prompt.asked).toEqual([]);
       expect(run.err.join('\n')).toContain(refusal);
+    });
+  }
+
+  // A given flag that works with only one value of an open choice narrows the
+  // offer to that value, so the user still chooses and the run succeeds.
+  const narrowed: readonly {
+    readonly name: string;
+    readonly argv: readonly string[];
+    readonly asked: readonly Asked[];
+  }[] = [
+    {
+      name: '--redis-client leaves only redis for the store',
+      argv: ['add', 'mail', 'cache', '--redis-client', 'ioredis'],
+      asked: [
+        {
+          question: 'Choose the provider for mail-plugin',
+          values: ['log', 'smtp', 'ses', 'sendgrid'],
+        },
+        { question: 'Choose the store for cache-plugin', values: ['redis'] },
+      ],
+    },
+    {
+      name: '--redis-client leaves only redis for the queue',
+      argv: ['add', 'queue', '--redis-client', 'node-redis'],
+      asked: [{ question: 'Choose the queue for queue-plugin', values: ['redis'] }],
+    },
+    {
+      name: '--dialect leaves only drizzle for the type',
+      argv: ['add', 'mail', 'database', '--dialect', 'sqlite'],
+      asked: [
+        {
+          question: 'Choose the provider for mail-plugin',
+          values: ['log', 'smtp', 'ses', 'sendgrid'],
+        },
+        { question: 'Choose the type for database-plugin', values: ['drizzle'] },
+      ],
+    },
+  ];
+  for (const { name, argv, asked } of narrowed) {
+    it(`asks when ${name}, and the default answer succeeds`, async () => {
+      const prompt = recorder(({ values }) => ({ kind: 'answer', value: values[0]! }));
+      const run = deps(createFakeFs({ '/app/package.json': '{}' }), prompt.ask);
+      expect(await runCli([...argv], run.deps), run.err.join('\n')).toBe(0);
+      expect(prompt.asked).toEqual(asked);
     });
   }
 

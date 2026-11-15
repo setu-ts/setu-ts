@@ -66,8 +66,9 @@ All notable changes to this project are documented here. The format follows
   choice, not only mail's provider, the database type and the vector-store adapter: `--dialect`
   after Drizzle, and the transport backends `--broker`, `--queue`, `--store`, `--lock` and
   `--backplane`, default first. A flag shared by two listed packages is asked once; a workspace
-  member and a Workers project are not asked for a transport backend, and nothing is asked when the
-  flags given would be refused. One table drives the prompt and `setu add --help`. `--yes` and a
+  member and a Workers project are not asked for a transport backend; a given `--dialect` or
+  `--redis-client` narrows the question to `--type drizzle` or `redis`; and nothing is asked when
+  the flags given would be refused. One table drives the prompt and `setu add --help`. `--yes` and a
   non-terminal still take every default.
 - **`@setu-ts/cli` (M140a, #589).** Generated application bodies are bounded at 1 MiB; module names
   and ids have length limits. New projects generate local session secrets, ignore local secret files

@@ -1782,15 +1782,74 @@ function flagsFor(
 }
 
 /**
+ * The values a choice can still take, given the flags already set.
+ *
+ * A given flag that only works with one value of another choice narrows it:
+ * `--dialect` needs `--type drizzle`, and `--redis-client` needs every
+ * transport backend to be `redis`. Otherwise every value is offered.
+ */
+function offeredValues(
+  choice: AddChoice,
+  flags: Readonly<Record<string, string | boolean | readonly string[]>>,
+): readonly string[] {
+  const needs = ADD_CHOICES.find(
+    (other) => other.after?.flag === choice.flag && flags[other.flag] !== undefined,
+  );
+  if (needs !== undefined) return [needs.after!.value];
+  if (choice.standaloneOnly === true && flags['redis-client'] !== undefined)
+    return choice.values().filter((value) => value === 'redis');
+  return choice.values();
+}
+
+/**
+ * The choices a terminal may ask, in order.
+ *
+ * A choice asked only after another (`--dialect` after `--type drizzle`) is
+ * included when that value is already given or the earlier question offers it;
+ * whether it is really asked is decided on the answer.
+ */
+function openChoices(
+  flags: Readonly<Record<string, string | boolean | readonly string[]>>,
+  packages: readonly string[],
+  standalone: boolean,
+): { readonly choice: AddChoice; readonly listed: readonly string[] }[] {
+  const open: { readonly choice: AddChoice; readonly listed: readonly string[] }[] = [];
+  for (const choice of ADD_CHOICES) {
+    if (flags[choice.flag] !== undefined) continue;
+    const listed = packages.filter((pkg) => choice.packages.includes(pkg));
+    if (listed.length === 0) continue;
+    if (choice.standaloneOnly === true && !standalone) continue;
+    if (offeredValues(choice, flags).length === 0) continue;
+    const after = choice.after;
+    if (
+      after !== undefined &&
+      flags[after.flag] !== after.value &&
+      !open.some(
+        (earlier) =>
+          earlier.choice.flag === after.flag &&
+          offeredValues(earlier.choice, flags).includes(after.value),
+      )
+    )
+      continue;
+    open.push({ choice, listed });
+  }
+  return open;
+}
+
+/**
  * Asks, in a terminal, for every choice the selected packages leave open.
  *
  * Nothing is asked with `--yes`, without a prompter (no terminal), or for a flag
- * already given. Before asking, every package is dry-run with the flags as given,
- * silently: when the command would refuse them, nothing is asked and the real run
- * reports that refusal, so a question is never followed by a refusal it could not
- * change. A transport backend is not asked in a workspace member (members take the
- * workspace broker) or on Workers (no wiring), where the command refuses one. A
- * flag several packages share (`--store`) is asked once, naming each.
+ * already given. A transport backend is not asked in a workspace member (members
+ * take the workspace broker) or on Workers (no wiring). A flag several packages
+ * share (`--store`) is asked once, naming each. A given flag that works with only
+ * one value of an open choice narrows what is offered: `--dialect` offers only
+ * `--type drizzle`, and `--redis-client` offers only `redis` backends.
+ *
+ * Before asking, every package is dry-run silently with the flags given plus the
+ * first value each open choice offers. When the command would refuse that,
+ * nothing is asked and the real run reports the refusal, so a question is never
+ * followed by a refusal no answer could avoid.
  *
  * @returns The flags with the answers added, or `undefined` when the user cancelled
  */
@@ -1802,38 +1861,42 @@ async function askOpenChoices(
   const flags: Record<string, string | boolean | readonly string[]> = { ...args.flags };
   const ask = deps.ask;
   if (ask === undefined || args.flags.yes === true || args.flags.y === true) return flags;
-  // No open choice, nothing to ask: skip the dry run, which would plan every package twice.
-  const open = ADD_CHOICES.some(
-    (choice) =>
-      flags[choice.flag] === undefined &&
-      packages.some((pkg) => choice.packages.includes(pkg)) &&
-      (choice.after === undefined || flags[choice.after.flag] === choice.after.value),
-  );
-  if (!open) return flags;
+  const dir = resolveDir(deps.cwd, stringFlag(args.flags, 'dir'));
+  let standalone: boolean;
+  try {
+    standalone =
+      (await detectTargetRuntime(deps.fs, dir)) !== 'cloudflare-workers' &&
+      (await workspaceMemberOf(deps.fs, dir)) === undefined;
+  } catch {
+    // The command reports an unreadable project itself; asking first would only delay that.
+    return flags;
+  }
+  const open = openChoices(flags, packages, standalone);
+  // Nothing to ask: skip the dry run, which would plan every package twice.
+  if (open.length === 0) return flags;
+  // The dry run takes each open choice's first offered value, as Enter would.
+  const tentative = { ...flags };
+  for (const { choice } of open) {
+    if (choice.after !== undefined && tentative[choice.after.flag] !== choice.after.value) continue;
+    tentative[choice.flag] = offeredValues(choice, tentative)[0]!;
+  }
   const quiet: AddCommandDependencies = { ...deps, log: () => {}, error: () => {} };
   delete (quiet as { ask?: unknown }).ask;
   for (const bare of packages) {
     const preflight = await addOne(
-      { positionals: [bare], flags: { ...flagsFor(flags, bare), 'dry-run': true } },
+      { positionals: [bare], flags: { ...flagsFor(tentative, bare), 'dry-run': true } },
       quiet,
       false,
     );
     if (preflight !== EXIT_OK) return flags;
   }
-  const dir = resolveDir(deps.cwd, stringFlag(args.flags, 'dir'));
-  // The dry run above already read both, so neither can throw here.
-  const standalone =
-    (await detectTargetRuntime(deps.fs, dir)) !== 'cloudflare-workers' &&
-    (await workspaceMemberOf(deps.fs, dir)) === undefined;
-  for (const choice of ADD_CHOICES) {
-    if (flags[choice.flag] !== undefined) continue;
-    const listed = packages.filter((pkg) => choice.packages.includes(pkg));
-    if (listed.length === 0) continue;
+  for (const { choice, listed } of open) {
+    // Judged again on the real answers: `--dialect` is asked only if drizzle was chosen.
     if (choice.after !== undefined && flags[choice.after.flag] !== choice.after.value) continue;
-    if (choice.standaloneOnly === true && !standalone) continue;
+    const values = offeredValues(choice, flags);
     const answer = await ask.select(
       `Choose the ${choice.flag} for ${listed.join(' and ')}`,
-      choice.values().map((value) => ({ value, label: value })),
+      values.map((value) => ({ value, label: value })),
     );
     if (answer.kind === 'cancelled') return undefined;
     if (answer.kind === 'answer') flags[choice.flag] = answer.value;
@@ -3332,7 +3395,8 @@ function printAddHelp(log: (message: string) => void): void {
     log(`--${choice.flag} ${choice.values().join('|')} selects ${targets}${after}.`);
   }
   log('In a terminal, each of these that is left out is asked, default first; a workspace member');
-  log('and a Workers project are not asked for a transport backend. Nothing is asked when the');
+  log('and a Workers project are not asked for a transport backend. A given --dialect offers only');
+  log('--type drizzle, and a given --redis-client only redis backends. Nothing is asked when the');
   log('flags given would be refused. --yes, -y takes every default without prompting.');
   log('');
   log('Adds a Setu-TS package to this project, pinned to the version of the CLI');
