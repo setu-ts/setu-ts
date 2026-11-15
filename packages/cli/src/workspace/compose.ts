@@ -160,7 +160,8 @@ export function renderDockerfile(profile: WorkspaceRuntimeProfile, workspace = t
 # member with a frontend (its locked dependencies; Deno runs no install scripts
 # unless approved), otherwise main.ts and setu.config.ts's graph, plus the CLI's
 # exact specifier read from the check task. \`deno task build\` then runs in a
-# RUN without the token, from that cache, and the token is never mounted again.
+# RUN without the token, from that cache; no later step in this stage, or in the
+# check stage, mounts it (the final stage's runtime install does, below).
 FROM ${DENO_BUILD_IMAGE} AS frontend
 ARG MEMBER
 WORKDIR /srv

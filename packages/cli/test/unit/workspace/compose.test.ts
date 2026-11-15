@@ -636,7 +636,7 @@ describe('the npmrc build secret (M120b)', () => {
   // Every RUN that installs packages mounts the optional secret; every other RUN
   // does not. The table is the claim: install steps per runtime, by what they run.
   // Steps that fetch with the token. The Deno frontend build runs without it, from the cache.
-  const INSTALLS = ['npm ci', 'bun install', 'then deno install; fi', 'deno cache main.ts'];
+  const INSTALLS = ['npm ci', 'bun install', 'then deno install; elif', 'deno cache main.ts'];
   const runs = (dockerfile: string): string[] =>
     dockerfile.split('\n').filter((line) => line.startsWith('RUN '));
   for (const runtime of ['node', 'bun', 'deno'] as const) {
