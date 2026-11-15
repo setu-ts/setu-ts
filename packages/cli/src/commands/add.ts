@@ -1728,6 +1728,8 @@ interface AddChoice {
   readonly standaloneOnly?: boolean;
   /** Asked only once another choice has this value. */
   readonly after?: { readonly flag: string; readonly value: string };
+  /** What the help text says it selects, when not the package names. */
+  readonly subject?: string;
 }
 
 /**
@@ -1749,6 +1751,7 @@ export const ADD_CHOICES: readonly AddChoice[] = [
     packages: ['database-plugin'],
     values: () => Object.keys(DRIZZLE_DIALECTS),
     after: { flag: 'type', value: 'drizzle' },
+    subject: 'Drizzle schema tooling',
   },
   ...(
     [
@@ -1770,9 +1773,13 @@ export const ADD_CHOICES: readonly AddChoice[] = [
  * Asks, in a terminal, for every choice the selected packages leave open.
  *
  * Nothing is asked with `--yes`, without a prompter (no terminal), for a flag
- * already given, or for a transport backend the command would refuse here: a
- * workspace member takes the workspace broker, and Workers has no wiring. A
- * flag several packages share (`--store`) is asked once.
+ * already given, or where the command refuses every package anyway (a workspace
+ * root, a workspace naming an unknown Redis client). A transport backend is not
+ * asked where the command would refuse one: a workspace member takes the
+ * workspace broker, and Workers has no wiring. A flag several packages share
+ * (`--store`) is asked once, naming each. The values offered are the ones the
+ * other given flags leave valid: `--redis-client` leaves only `redis`, and
+ * `--dialect` leaves only `--type drizzle`.
  *
  * @returns The flags with the answers added, or `undefined` when the user cancelled
  */
@@ -1784,32 +1791,45 @@ async function askOpenChoices(
   const flags: Record<string, string | boolean | readonly string[]> = { ...args.flags };
   const ask = deps.ask;
   if (ask === undefined || args.flags.yes === true || args.flags.y === true) return flags;
-  let standalone: boolean | undefined;
-  const isStandalone = async (): Promise<boolean> => {
-    if (standalone !== undefined) return standalone;
-    const dir = resolveDir(deps.cwd, stringFlag(args.flags, 'dir'));
-    let runtime: TargetRuntime | undefined;
-    try {
-      runtime = await detectTargetRuntime(deps.fs, dir);
-    } catch {
-      // The command reports an unreadable runtime marker itself; asking first would hide it.
-      runtime = undefined;
-    }
+  const dir = resolveDir(deps.cwd, stringFlag(args.flags, 'dir'));
+  let standalone: boolean;
+  try {
+    if (
+      (await findWorkspaceMarker(deps.fs, dir)) !== undefined ||
+      (await unknownWorkspaceRedisClient(deps.fs, dir)) !== undefined
+    )
+      return flags;
+    const runtime = await detectTargetRuntime(deps.fs, dir);
     standalone =
-      runtime !== undefined &&
-      runtime !== 'cloudflare-workers' &&
-      (await workspaceMemberOf(deps.fs, dir)) === undefined;
-    return standalone;
-  };
+      runtime !== 'cloudflare-workers' && (await workspaceMemberOf(deps.fs, dir)) === undefined;
+  } catch {
+    // The command reports an unreadable project itself; asking first would only delay that.
+    return flags;
+  }
+  const redisClient = flags['redis-client'];
   for (const choice of ADD_CHOICES) {
     if (flags[choice.flag] !== undefined) continue;
-    const bare = packages.find((pkg) => choice.packages.includes(pkg));
-    if (bare === undefined) continue;
+    const listed = packages.filter((pkg) => choice.packages.includes(pkg));
+    if (listed.length === 0) continue;
     if (choice.after !== undefined && flags[choice.after.flag] !== choice.after.value) continue;
-    if (choice.standaloneOnly === true && !(await isStandalone())) continue;
+    if (choice.standaloneOnly === true) {
+      if (!standalone) continue;
+      // An invalid client is refused before any arm is read; a valid one needs a Redis arm.
+      if (redisClient !== undefined && redisClient !== 'ioredis' && redisClient !== 'node-redis')
+        continue;
+    }
+    const requiredBy = ADD_CHOICES.find(
+      (other) => other.after?.flag === choice.flag && flags[other.flag] !== undefined,
+    );
+    const values =
+      requiredBy !== undefined
+        ? [requiredBy.after!.value]
+        : choice.standaloneOnly === true && redisClient !== undefined
+          ? choice.values().filter((value) => value === 'redis')
+          : choice.values();
     const answer = await ask.select(
-      `Choose the ${choice.flag} for ${bare}`,
-      choice.values().map((value) => ({ value, label: value })),
+      `Choose the ${choice.flag} for ${listed.join(' and ')}`,
+      values.map((value) => ({ value, label: value })),
     );
     if (answer.kind === 'cancelled') return undefined;
     if (answer.kind === 'answer') flags[choice.flag] = answer.value;
@@ -3306,7 +3326,8 @@ function printAddHelp(log: (message: string) => void): void {
   );
   // Generated from the table the prompt reads, so the two cannot list different values.
   for (const choice of ADD_CHOICES) {
-    const targets = choice.packages.map((pkg) => pkg.replace(/-plugin$/, '')).join(' and ');
+    const targets =
+      choice.subject ?? choice.packages.map((pkg) => pkg.replace(/-plugin$/, '')).join(' and ');
     const after =
       choice.after === undefined ? '' : ` (with --${choice.after.flag} ${choice.after.value})`;
     log(`--${choice.flag} ${choice.values().join('|')} selects ${targets}${after}.`);

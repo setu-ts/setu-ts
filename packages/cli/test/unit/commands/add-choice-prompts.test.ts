@@ -122,7 +122,7 @@ describe('setu add choice prompts', () => {
     const run = deps(fs, prompt.ask);
     expect(await runCli(['add', 'cache', 'idempotency'], run.deps), run.err.join('\n')).toBe(0);
     expect(prompt.asked.map((entry) => entry.question)).toEqual([
-      'Choose the store for cache-plugin',
+      'Choose the store for cache-plugin and idempotency-plugin',
     ]);
   });
 
@@ -192,6 +192,68 @@ describe('setu add choice prompts', () => {
     const run = deps(fs, prompt.ask);
     expect(await runCli(['add', 'messaging'], run.deps)).not.toBe(0);
     expect(prompt.asked).toEqual([]);
+  });
+
+  it('asks nothing at a workspace root, which the command refuses for every package', async () => {
+    const fs = createFakeFs({ '/app/package.json': '{"workspaces":["apps/*"]}' });
+    const prompt = recorder();
+    const run = deps(fs, prompt.ask);
+    expect(await runCli(['add', 'messaging', 'mail'], run.deps)).not.toBe(0);
+    expect(prompt.asked).toEqual([]);
+  });
+
+  it('asks nothing in a workspace that names an unknown Redis client', async () => {
+    const fs = createFakeFs();
+    const setup = deps(fs);
+    expect(await runCli(['new', 'ws', '--workspace'], setup.deps)).toBe(0);
+    expect(
+      await runCli(['g', 'app', 'api', '--template', 'rest'], { ...setup.deps, cwd: '/app/ws' }),
+    ).toBe(0);
+    const manifest = JSON.parse(fs.read('/app/ws/setu.workspace.json')) as Record<string, unknown>;
+    await fs.writeFile(
+      '/app/ws/setu.workspace.json',
+      new TextEncoder().encode(JSON.stringify({ ...manifest, redisClient: 'bogus' })),
+    );
+    const prompt = recorder();
+    const member = deps(fs, prompt.ask, '/app/ws/apps/api');
+    expect(await runCli(['add', 'mail'], member.deps)).not.toBe(0);
+    expect(prompt.asked).toEqual([]);
+  });
+
+  it('offers only redis when --redis-client is given, and asks no transport for a bad client', async () => {
+    const fs = createFakeFs({ '/app/package.json': '{}' });
+    const prompt = recorder();
+    const run = deps(fs, prompt.ask);
+    expect(prompt.asked).toEqual([]);
+    expect(
+      await runCli(['add', 'cache', '--redis-client', 'node-redis'], run.deps),
+      run.err.join('\n'),
+    ).toBe(2);
+    expect(prompt.asked).toEqual([
+      { question: 'Choose the store for cache-plugin', values: ['redis'] },
+    ]);
+    const answered = recorder(({ values }) => ({ kind: 'answer', value: values[0]! }));
+    const ok = deps(createFakeFs({ '/app/package.json': '{}' }), answered.ask);
+    expect(
+      await runCli(['add', 'cache', '--redis-client', 'node-redis'], ok.deps),
+      ok.err.join('\n'),
+    ).toBe(0);
+    const bad = recorder();
+    const refused = deps(createFakeFs({ '/app/package.json': '{}' }), bad.ask);
+    expect(await runCli(['add', 'cache', '--redis-client', 'bogus'], refused.deps)).toBe(2);
+    expect(bad.asked).toEqual([]);
+  });
+
+  it('offers only drizzle for --type when --dialect is already given', async () => {
+    const prompt = recorder(({ values }) => ({ kind: 'answer', value: values[0]! }));
+    const run = deps(createFakeFs({ '/app/package.json': '{}' }), prompt.ask);
+    expect(
+      await runCli(['add', 'database', '--dialect', 'sqlite'], run.deps),
+      run.err.join('\n'),
+    ).toBe(0);
+    expect(prompt.asked).toEqual([
+      { question: 'Choose the type for database-plugin', values: ['drizzle'] },
+    ]);
   });
 
   it('documents every choice in the help text, from the same table', async () => {
