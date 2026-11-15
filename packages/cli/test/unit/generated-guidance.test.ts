@@ -1,4 +1,4 @@
-/** Regression samples for each approved M140d section. @module */
+/** Generated code, README text and command guidance the CLI writes for each project shape. @module */
 import { describe, expect, it } from 'vitest';
 import { format } from 'prettier';
 import ts from 'typescript';
@@ -63,8 +63,8 @@ function harness() {
   };
 }
 
-describe('M140d approved output', () => {
-  it('§3.1 registers validation on minimal and diagnoses its missing registration', async () => {
+describe('generated code and guidance', () => {
+  it('registers validation on minimal and diagnoses its missing registration', async () => {
     expect(ZERO_CONFIG_WIRINGS.get('validation-plugin')).toEqual({ symbol: 'ValidationPlugin' });
     const installed = new Set(['validation-plugin']);
     expect(unregisteredPluginFindings('', installed)).toEqual([
@@ -82,7 +82,7 @@ describe('M140d approved output', () => {
     expect(h.fs.read('/work/api/setu.config.ts')).toContain('ValidationPlugin()');
   });
 
-  it('§3.2 refuses populated bodies until schema fields exist and prints both bindings', async () => {
+  it('refuses populated bodies until schema fields exist and prints both bindings', async () => {
     const contents = generateSchema(names, options(['validation-plugin']))[0]!.contents;
     expect(contents).toContain('z.strictObject({})');
     expect(contents).toContain('body.value(ctx)');
@@ -108,7 +108,7 @@ describe('M140d approved output', () => {
     }
   });
 
-  it('§3.3 names every real Redis provider and its offline replacement', async () => {
+  it('names every real Redis provider and its offline replacement', async () => {
     for (const [pkg, factory, flag] of [
       ['cache', CachePlugin, '--store'],
       ['queue', QueuePlugin, '--queue'],
@@ -147,7 +147,7 @@ describe('M140d approved output', () => {
     }
   });
 
-  it('§3.3 qualifies the start line when an existing Compose file lacks redis', async () => {
+  it('qualifies the start line when an existing Compose file lacks redis', async () => {
     const h = harness();
     expect(await h.run(['new', 'api', '--template', 'rest'])).toBe(0);
     await h.fs.mkdir('/work/api/docker', { recursive: true });
@@ -166,7 +166,7 @@ describe('M140d approved output', () => {
     );
   });
 
-  it('§3.4 writes database URLs per dialect without replacing an existing value', async () => {
+  it('writes database URLs per dialect without replacing an existing value', async () => {
     for (const [type, dialect, url] of [
       ['drizzle', 'postgresql', 'postgresql://postgres:postgres@127.0.0.1:5432/app'],
       ['drizzle', 'sqlite', 'file:./local.db'],
@@ -199,7 +199,7 @@ describe('M140d approved output', () => {
     );
   });
 
-  it('§3.5 reports each independent development transport and survives Prettier', async () => {
+  it('reports each independent development transport and survives Prettier', async () => {
     const section = getTemplate('microservice')!.manifest!.readmeSection;
     if (typeof section !== 'function') throw new Error('Missing development transport renderer');
     expect(section('setu', 'node')).toContain('Messaging is in-memory');
@@ -217,7 +217,7 @@ describe('M140d approved output', () => {
       }
   });
 
-  it('§3.5 tells a workspace member where its transports come from, for both styles', async () => {
+  it('tells a workspace member where its transports come from, for both styles', async () => {
     // A member's options come from its CLI-owned transport module, so the call text
     // says nothing about the broker; the section must hold for every workspace broker.
     for (const template of [
@@ -243,7 +243,7 @@ describe('M140d approved output', () => {
     }
   });
 
-  it('§3.6 renders truthful README guidance and a shutdown fallback', () => {
+  it('renders truthful README guidance and a shutdown fallback', () => {
     const minimal = projectFiles('api', 'node', resolveHost(MINIMAL_HOST, 'node'));
     expect(text(minimal, 'main.ts')).toContain(
       'else console.error(`Graceful shutdown failed: ${describeError(error)}`)',
@@ -263,7 +263,7 @@ describe('M140d approved output', () => {
     expect(decorated).toContain('DI graph validation happens at boot');
   });
 
-  it('§3.7 describes at-most-once delivery in both event arms and how jobs register', () => {
+  it('describes at-most-once delivery in both event arms and how jobs register', () => {
     for (const plugins of [[], ['decorator-plugin']]) {
       const event = generateEventHandler(names, options(plugins))[0]!.contents;
       expect(event).toContain('at-most-once');
@@ -275,21 +275,21 @@ describe('M140d approved output', () => {
     );
   });
 
-  it('§3.8 routes both event forms on PascalCase names', () => {
+  it('routes both event forms on PascalCase names', () => {
     for (const plugins of [[], ['decorator-plugin']])
       expect(generateEventHandler(names, options(plugins))[0]!.contents).toContain(
         "ORDER_CREATED_EVENT = 'OrderCreated'",
       );
   });
 
-  it('§3.9 measures Server-Timing with the runtime monotonic clock', () => {
+  it('measures Server-Timing with the runtime monotonic clock', () => {
     const source = generateMiddleware(names, options())[0]!.contents;
     expect(source).toContain('ctx.services.get(CAPABILITIES.RUNTIME)');
     expect(source).toContain('runtime.hrtime() - ctx.startTime');
     expect(source).toContain("'Server-Timing', `order-created;dur=${ms.toFixed(1)}`");
   });
 
-  it('§3.10 owns decorated module state per instance and removes dead validation fallbacks', () => {
+  it('owns decorated module state per instance and removes dead validation fallbacks', () => {
     const source = moduleService(names, true, true);
     expect(source).toContain('private readonly records = new Map');
     expect(source).toContain('this.records.get(id)');
@@ -299,7 +299,7 @@ describe('M140d approved output', () => {
     expect(moduleService(names, false)).toContain('query.offset ?? 0');
   });
 
-  it('§3.11 tells module consumers the provider is already registered', () => {
+  it('tells module consumers the provider is already registered', () => {
     const source = generateService(names, {
       ...options(['decorator-plugin']),
       targetModule: 'orders',
@@ -315,20 +315,20 @@ describe('M140d approved output', () => {
     );
   });
 
-  it('§3.12 makes the optional devtool entry explicit in the config JSDoc', () => {
+  it('makes the optional devtool entry explicit in the config JSDoc', () => {
     expect(
       text(projectFiles('api', 'node', resolveHost(MINIMAL_HOST, 'node')), 'setu.config.ts'),
     ).toContain('written by `--devtool` or `setu devtool enable`');
   });
 
-  it('§3.13 points login at a request-bound service and keeps nav/guard guidance current', () => {
+  it('points login at a request-bound service and keeps nav/guard guidance current', () => {
     const files = projectFiles('api', 'node', resolveHost(getTemplate('full-stack')!, 'node'));
     expect(text(files, 'app/routes/_auth/login.tsx')).toContain('getService(context, <TOKEN>)');
     expect(text(files, 'app/lib/nav-utils.ts')).toContain('add an entry for each signed-in page');
     expect(text(files, 'app/server/require-user.server.ts')).toContain('each guarded');
   });
 
-  it('§3.13 prints the exact APP_NAV entry after writing a module page', async () => {
+  it('prints the exact APP_NAV entry after writing a module page', async () => {
     const h = harness();
     expect(await h.run(['new', 'shop', '--template', 'full-stack'])).toBe(0);
     expect(await h.run(['g', 'module', 'orders', '--page'], '/work/shop'), h.err.text()).toBe(0);
@@ -337,7 +337,7 @@ describe('M140d approved output', () => {
     );
   });
 
-  it('§3.14 uses exception factories and a service-only unit test, omitted on Workers', () => {
+  it('uses exception factories and a service-only unit test, omitted on Workers', () => {
     const files = generateFullStackModule(names, { runtime: 'node' });
     const controller = text(files, 'src/modules/order-created/order-created.controller.ts');
     expect(controller).toContain("import { badRequest, notFound } from '@setu-ts/exceptions'");
@@ -351,7 +351,7 @@ describe('M140d approved output', () => {
     expect(workers.some((file) => file.path.endsWith('.e2e.test.ts'))).toBe(true);
   });
 
-  it('§3.15 installs React only as a runtime dependency', () => {
+  it('installs React only as a runtime dependency', () => {
     const files = projectFiles('api', 'node', resolveHost(getTemplate('full-stack')!, 'node'));
     const manifest = JSON.parse(text(files, 'package.json'));
     for (const pkg of ['react', 'react-dom', 'react-router']) {
@@ -360,7 +360,7 @@ describe('M140d approved output', () => {
     }
   });
 
-  it('§3.16 accepts generate --yes and -y without changing its writes', async () => {
+  it('accepts generate --yes and -y without changing its writes', async () => {
     for (const verb of [undefined, 'custom', 'app', 'library']) {
       const spec = commandFlagsFor('generate', verb)!;
       expect(spec.documented).toContain('yes');
@@ -374,7 +374,7 @@ describe('M140d approved output', () => {
     }
   });
 
-  it('§3.17 reports an unreadable brief without failing a successful generation', async () => {
+  it('reports an unreadable brief without failing a successful generation', async () => {
     const h = harness();
     expect(await h.run(['new', 'api'])).toBe(0);
     await h.fs.writeFile('/work/api/AGENTS.md', new TextEncoder().encode(BRIEF_BEGIN));
@@ -386,7 +386,7 @@ describe('M140d approved output', () => {
     expect(h.err.text()).toContain('blocked');
   });
 
-  it('§3.17 reminds brief owners after generate, sync and devtool writes', async () => {
+  it('reminds brief owners after generate, sync and devtool writes', async () => {
     for (const marker of ['', BRIEF_BEGIN]) {
       for (const command of [['g', 'service', 'billing'], ['sync'], ['devtool', 'enable']]) {
         const h = harness();
@@ -412,7 +412,7 @@ describe('M140d approved output', () => {
     }
   });
 
-  it('§3.18 gathers devtool facts and gates validation/start guidance by project facts', async () => {
+  it('gathers devtool facts and gates validation/start guidance by project facts', async () => {
     const h = harness();
     expect(await h.run(['new', 'api', '--devtool'])).toBe(0);
     const facts = await gatherFacts(h.fs, '/work/api');
@@ -431,7 +431,7 @@ describe('M140d approved output', () => {
     );
   });
 
-  it('§3.17 reminds workspace brief owners after app and library writes, never dry runs', async () => {
+  it('reminds workspace brief owners after app and library writes, never dry runs', async () => {
     for (const marker of ['', BRIEF_BEGIN])
       for (const dry of [false, true]) {
         for (const verb of ['app', 'library']) {
@@ -450,7 +450,7 @@ describe('M140d approved output', () => {
       }
   });
 
-  it('§3.17 reminds workspace devtool owners once when either brief carries the marker', async () => {
+  it('reminds workspace devtool owners once when either brief carries the marker', async () => {
     for (const root of [false, true])
       for (const member of [false, true]) {
         const h = harness();
@@ -469,7 +469,7 @@ describe('M140d approved output', () => {
       }
   });
 
-  it('§3.19 loads the env file and instrumentation before the Node devtool entry', () => {
+  it('loads the env file and instrumentation before the Node devtool entry', () => {
     const plan = planNodeDevtool(
       JSON.stringify({
         devDependencies: { tsx: '^4', '@setu-ts/diagnostics-plugin': FRAMEWORK_RANGE },
@@ -484,7 +484,7 @@ describe('M140d approved output', () => {
     );
   });
 
-  it('§3.19 refuses the old dev script and uses custom env declarations in both quote styles', async () => {
+  it('refuses the old dev script and uses custom env declarations in both quote styles', async () => {
     expect(
       planNodeDevtool(
         JSON.stringify({ devDependencies: { tsx: '^4' }, scripts: { dev: 'tsx main.dev.ts' } }),
