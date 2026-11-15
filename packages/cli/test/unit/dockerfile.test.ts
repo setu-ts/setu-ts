@@ -286,14 +286,26 @@ describe('the credential-free registry settings (#592 review)', () => {
   it('copies a value holding an environment reference as written', () => {
     expect(filter('registry=${PRIVATE_REGISTRY}\n')).toBe('registry=${PRIVATE_REGISTRY}\n');
     expect(filter('@p:registry=https://${HOST}/npm/\n')).toBe('@p:registry=https://${HOST}/npm/\n');
+    expect(filter('@q:registry=https://npm.corp:${PORT}/npm/\n')).toBe(
+      '@q:registry=https://npm.corp:${PORT}/npm/\n',
+    );
   });
 
-  it('fails closed on a literal credential beside an environment reference', () => {
+  it('fails closed on userinfo, a query or a fragment beside an environment reference', () => {
     for (const line of [
       'registry=https://ci:hunter2@npm.corp/${SCOPE}/',
       '@a:registry=https://npm.corp/${P}/?token=LITERAL',
+      // A reference where a host name is not valid, which a URL parse could not see past.
+      'registry=https://user:hunter2@host:${PORT}/npm/',
+      'registry=https://host:${PORT}/npm/?token=LITERAL',
+      'registry=https://user:hunter2@[${H}]/',
+      // A credential built from references is refused too: it cannot be removed either.
+      'registry=https://${U}:${P}@npm.corp/',
+      '@a:registry="https://npm.corp/a#${F}"',
     ]) {
-      expect(() => filter(`${line}\n`)).toThrow(/has a credential beside an environment reference/);
+      expect(() => filter(`${line}\n`)).toThrow(
+        /has an environment reference and userinfo, a query or a fragment/,
+      );
       expect(() => filter(`${line}\n`)).not.toThrow(/hunter2|LITERAL/);
     }
   });

@@ -16,15 +16,16 @@ All notable changes to this project are documented here. The format follows
   release with `--no-lock`, and the image fetches its dependencies with the `npmrc` secret but
   builds without it: no install script runs beside the token, even one approved with `allowScripts`.
   A Deno image build now fails on an `npmrc` `registry` or `@scope:registry` line whose value is
-  empty or not an absolute URL; give it a full URL or a `${NAME}` reference. Compose gives a member
-  with health probes a `/ready` healthcheck and honours `--depends-on` (`service_healthy`, or
-  `service_started` for a sibling without probes). In Kubernetes, transport defaults move to a
-  `<member>-transport` ConfigMap listed before each member's Secret, so a Secret value overrides
-  them; a `setu-ts.dev/transport-config` annotation rolls members when they change. A member that
-  serves gRPC now serves cleartext HTTP/2 beside HTTP/1.1 through the transport module's new
-  `runtimeOptions()`, so Node callers can reach it. Breaking: a member config made before this
-  release must call `runtimeOptions()`; `setu workspace broker`, `setu workspace rpc` and
-  `setu add grpc` refuse until it does and print the line to add. `generate app` and
+  empty or not an absolute URL, or that pairs a `${NAME}` reference with userinfo, a query or a
+  fragment; give it a full URL or a reference, and put a credential in an `_authToken` line. Compose
+  gives a member with health probes a `/ready` healthcheck and honours `--depends-on`
+  (`service_healthy`, or `service_started` for a sibling without probes). In Kubernetes, transport
+  defaults move to a `<member>-transport` ConfigMap listed before each member's Secret, so a Secret
+  value overrides them; a `setu-ts.dev/transport-config` annotation rolls members when they change.
+  A member that serves gRPC now serves cleartext HTTP/2 beside HTTP/1.1 through the transport
+  module's new `runtimeOptions()`, so Node callers can reach it. Breaking: a member config made
+  before this release must call `runtimeOptions()`; `setu workspace broker`, `setu workspace rpc`
+  and `setu add grpc` refuse until it does and print the line to add. `generate app` and
   `setu add auth|session` in a member write a random value for each generated secret into
   `k8s/secrets/<member>/.env`, keeping existing entries and refusing symbolic links. Every local env
   file the CLI creates (`.env`, a Workers `.dev.vars`, or the dotenv path the project declares,
