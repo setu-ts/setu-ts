@@ -15,6 +15,8 @@ import { FUNCTIONAL_MODULE_MANIFEST } from './module-seam.ts';
 import type { TemplateRecipe } from './style.ts';
 import { composeHost } from './style.ts';
 import { wrapProse } from '../utils/wrap-prose.ts';
+import type { TargetRuntime } from '../constants.ts';
+import type { ResolvedHost } from './project-files.ts';
 
 /**
  * What `microservice` adds on top of the REST set.
@@ -199,9 +201,9 @@ new_classes = ["ReplyInboxObject"]
 } as const satisfies RuntimeSwap;
 
 /** Development-transport guidance shared by both microservice styles. */
-const MICROSERVICE_MANIFEST: TemplateManifest = {
+const MICROSERVICE_MANIFEST = {
   ...FUNCTIONAL_MODULE_MANIFEST,
-  readmeSection: (cli, runtime, member, host) => {
+  readmeSection: (cli: string, runtime: TargetRuntime, member?: boolean, host?: ResolvedHost) => {
     // A workspace member's messaging and queue options come from its CLI-owned
     // transport module (the workspace broker), and its discovery map is generated,
     // so neither the call text nor an empty map says anything about it.
@@ -232,7 +234,7 @@ const MICROSERVICE_MANIFEST: TemplateManifest = {
       .map((line) => wrapProse(line, '  '))
       .join('\n')}\n`;
   },
-};
+} satisfies TemplateManifest;
 
 /** Keeps the class-based host's own manifest and adds only the transport README section. */
 function withReadmeSection(host: TemplateHost): TemplateHost {
@@ -240,9 +242,7 @@ function withReadmeSection(host: TemplateHost): TemplateHost {
     ...host,
     manifest: {
       ...host.manifest,
-      ...(MICROSERVICE_MANIFEST.readmeSection === undefined
-        ? {}
-        : { readmeSection: MICROSERVICE_MANIFEST.readmeSection }),
+      readmeSection: MICROSERVICE_MANIFEST.readmeSection,
     },
   };
 }

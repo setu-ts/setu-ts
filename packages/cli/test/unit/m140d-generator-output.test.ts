@@ -147,6 +147,25 @@ describe('M140d approved output', () => {
     }
   });
 
+  it('§3.3 qualifies the start line when an existing Compose file lacks redis', async () => {
+    const h = harness();
+    expect(await h.run(['new', 'api', '--template', 'rest'])).toBe(0);
+    await h.fs.mkdir('/work/api/docker', { recursive: true });
+    await h.fs.writeFile(
+      '/work/api/docker/compose.yaml',
+      new TextEncoder().encode('services:\n  db:\n    image: postgres:17\n'),
+    );
+    expect(await h.run(['add', 'cache', '--store', 'redis'], '/work/api'), h.err.text()).toBe(0);
+    const out = h.out.text();
+    expect(out).toContain('exists and has no redis service');
+    expect(out).toContain(
+      'After adding that service, start Redis: docker compose -f docker/compose.yaml up -d redis',
+    );
+    expect(out.indexOf('exists and has no redis service')).toBeLessThan(
+      out.indexOf('After adding that service'),
+    );
+  });
+
   it('§3.4 writes database URLs per dialect without replacing an existing value', async () => {
     for (const [type, dialect, url] of [
       ['drizzle', 'postgresql', 'postgresql://postgres:postgres@127.0.0.1:5432/app'],

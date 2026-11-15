@@ -2637,7 +2637,11 @@ async function addOne(
     // existing one lacking the service has just been given the block to paste.
     if (selected.name === 'redis' && configWired && searchDirs.length === 1) {
       deps.log('  The app and generated tests now connect to Redis at REDIS_URL during startup.');
-      deps.log(`  Start Redis: docker compose -f ${BROKER_COMPOSE_FILE} up -d redis`);
+      deps.log(
+        missing === undefined
+          ? `  Start Redis: docker compose -f ${BROKER_COMPOSE_FILE} up -d redis`
+          : `  After adding that service, start Redis: docker compose -f ${BROKER_COMPOSE_FILE} up -d redis`,
+      );
       if (!installedAfter.has('react-router-plugin')) {
         const factory = ZERO_CONFIG_WIRINGS.get(bare)!.symbol;
         deps.log(`  import { ${factory} } from '@setu-ts/${bare}';`);
