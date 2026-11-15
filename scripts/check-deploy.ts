@@ -925,7 +925,11 @@ async function checkGeneratedCompose(directory: string, registry: string): Promi
       JSON.parse(config.stdout) as {
         services: Record<
           string,
-          { depends_on?: Record<string, { condition?: string }>; healthcheck?: unknown }
+          {
+            depends_on?: Record<string, { condition?: string }>;
+            healthcheck?: unknown;
+            build?: { context?: string; dockerfile?: string; args?: Record<string, string> };
+          }
         >;
       }
     ).services;
@@ -934,8 +938,15 @@ async function checkGeneratedCompose(directory: string, registry: string): Promi
     if (services['billing']?.healthcheck === undefined)
       throw new Error('billing has no healthcheck');
     // Built with `docker build --network host` like the gate's other images, not `compose build`:
-    // Compose's bake builder refuses a host-network build without an explicit entitlement.
+    // Compose's bake builder refuses a host-network build without an explicit entitlement. The
+    // context, Dockerfile and MEMBER come from the generated `build:` block, so it is the one
+    // built.
     for (const member of ['billing', 'orders']) {
+      const build = services[member]?.build;
+      if (build?.context === undefined || build.dockerfile === undefined)
+        throw new Error(`${member} has no generated build context and Dockerfile`);
+      if (build.args?.['MEMBER'] !== member)
+        throw new Error(`${member}'s generated build does not pass MEMBER=${member}`);
       const built = await run(
         [
           'docker',
@@ -943,14 +954,16 @@ async function checkGeneratedCompose(directory: string, registry: string): Promi
           '--network',
           'host',
           '-f',
-          `${root}/docker/Dockerfile`,
-          '--build-arg',
-          `MEMBER=${member}`,
+          resolve(build.context, build.dockerfile),
+          ...Object.entries(build.args).flatMap(([name, value]) => [
+            '--build-arg',
+            `${name}=${value}`,
+          ]),
           '--build-arg',
           `NPM_CONFIG_REGISTRY=${registry}`,
           '-t',
           `${resources.image}-${member}`,
-          root,
+          build.context,
         ],
         { quiet: true },
       );

@@ -99,19 +99,17 @@ describe('workspaceContainerFiles', () => {
           const runs = stages[0]!.split('\n').filter((line) => line.startsWith('RUN '));
           const mounted = runs.find((line) => line.includes('--mount=type=secret'));
           const check = stages[1]!.split('\n').find((line) => line.includes('deno task check'));
-          // Fetch with the token, build without it, then cache the built graph with it (deno
-          // cache executes nothing): no unlocked tool or project code runs beside the token.
-          expect(mounted).toContain('if [ -f .setu-build-task ]; then deno install; fi');
+          // Every token fetch happens before any project code runs, and executes nothing; the
+          // build then runs without the token, which is never mounted again (review of #592).
+          expect(mounted).toContain(
+            'if [ -f .setu-build-task ]; then deno install; elif [ -f .setu-check-task ]; then deno cache main.ts setu.config.ts; fi',
+          );
           expect(mounted).not.toContain('deno task build');
           expect(mounted).not.toContain('deno task check');
           const build = runs.findIndex((line) => line.includes('then deno task build;'));
-          const graph = runs.findIndex((line) =>
-            line.includes('if [ -f .setu-check-task ]; then deno cache main.ts setu.config.ts; fi'),
-          );
           expect(runs[build]).not.toContain('type=secret');
-          expect(runs[graph]).toContain('--mount=type=secret');
           expect(runs.indexOf(mounted!)).toBeLessThan(build);
-          expect(build).toBeLessThan(graph);
+          expect(runs.slice(build).some((line) => line.includes('type=secret'))).toBe(false);
           // The check's exact CLI is fetched with the token, never run beside it (audit F1).
           expect(mounted).toContain(
             'Deno.writeTextFileSync(".setu-check-cli", manifest.tasks.check.slice(manifest.tasks.check.indexOf("npm:@setu-ts/cli@")).split(" ")[0])',
@@ -646,8 +644,8 @@ describe('the npmrc build secret (M120b)', () => {
       it(`mounts it on exactly the install steps: ${runtime}, ${workspace ? 'workspace' : 'standalone'}`, () => {
         const lines = runs(renderDockerfile(workspaceProfile(runtime), workspace));
         const installs = lines.filter((line) => INSTALLS.some((step) => line.includes(step)));
-        // Deno: the frontend fetch, the post-build graph cache, and the runtime install.
-        expect(installs).toHaveLength(runtime === 'deno' ? 3 : 2);
+        // Two each: the build-side fetch and the runtime install.
+        expect(installs).toHaveLength(2);
         for (const line of installs) expect(line.startsWith(`RUN ${NPMRC_MOUNT} `)).toBe(true);
         if (runtime === 'deno') {
           const build = lines.find((line) => line.includes('then deno task build;'));
