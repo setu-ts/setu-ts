@@ -413,7 +413,7 @@ describe('M101f lifecycle refusals and allocation', () => {
     expect(fs.read('/ws/apps/orders/main.dev.ts')).toContain('port: 6000,');
     expect(fs.read('/ws/.dockerignore')).toContain('apps/*/main.dev.ts');
     expect(fs.read('/ws/docker/Dockerfile')).toContain(
-      'deno install --entrypoint main.ts --frozen',
+      'deno install --cached-only --entrypoint main.ts --frozen',
     );
   });
 
