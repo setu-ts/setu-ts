@@ -1042,11 +1042,12 @@ Backend choices are `--provider log|smtp|ses|sendgrid` for mail,
 `--backplane memory|redis` for realtime-backplane. At a terminal, every one of these left out is
 asked, default first, and a flag two listed packages share is asked once; `--dialect` is asked only
 after Drizzle is chosen. A workspace member and a Workers project are not asked for a transport
-backend, because the command refuses one there. `--yes` or a non-terminal takes the defaults: `log`
-for mail, `postgresql` for the dialect and `memory` for everything else. Only plugin peers are
-recorded. App-owned clients such as `pg`, `@prisma/client` and `@prisma/adapter-pg` appear in the
-install guidance. Backend configuration remains application-owned; only mail's default
-`MailPlugin()` is inserted.
+backend, because the command refuses one there. A given flag that narrows a choice leaves only the
+values it allows: `--redis-client` offers only `redis`, and `--dialect` offers only
+`--type drizzle`. `--yes` or a non-terminal takes the defaults: `log` for mail, `postgresql` for the
+dialect and `memory` for everything else. Only plugin peers are recorded. App-owned clients such as
+`pg`, `@prisma/client` and `@prisma/adapter-pg` appear in the install guidance. Backend
+configuration remains application-owned; only mail's default `MailPlugin()` is inserted.
 
 `setu add view --plugin-only` installs and wires the view capability and compatible JSX settings
 without examples, controllers, Tailwind or StaticPlugin. It cannot be combined with `--module`. This

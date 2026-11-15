@@ -1807,17 +1807,22 @@ async function askOpenChoices(
     return flags;
   }
   const redisClient = flags['redis-client'];
+  const dialect = flags.dialect;
+  // A given flag the command will refuse outright: asking anything first would
+  // only delay that refusal.
+  if (
+    (redisClient !== undefined &&
+      (!standalone || (redisClient !== 'ioredis' && redisClient !== 'node-redis'))) ||
+    (dialect !== undefined &&
+      (typeof dialect !== 'string' || !Object.hasOwn(DRIZZLE_DIALECTS, dialect)))
+  )
+    return flags;
   for (const choice of ADD_CHOICES) {
     if (flags[choice.flag] !== undefined) continue;
     const listed = packages.filter((pkg) => choice.packages.includes(pkg));
     if (listed.length === 0) continue;
     if (choice.after !== undefined && flags[choice.after.flag] !== choice.after.value) continue;
-    if (choice.standaloneOnly === true) {
-      if (!standalone) continue;
-      // An invalid client is refused before any arm is read; a valid one needs a Redis arm.
-      if (redisClient !== undefined && redisClient !== 'ioredis' && redisClient !== 'node-redis')
-        continue;
-    }
+    if (choice.standaloneOnly === true && !standalone) continue;
     const requiredBy = ADD_CHOICES.find(
       (other) => other.after?.flag === choice.flag && flags[other.flag] !== undefined,
     );
@@ -3333,8 +3338,9 @@ function printAddHelp(log: (message: string) => void): void {
     log(`--${choice.flag} ${choice.values().join('|')} selects ${targets}${after}.`);
   }
   log('In a terminal, each of these that is left out is asked, default first; a workspace member');
-  log('and a Workers project are not asked for a transport backend. --yes, -y takes every');
-  log('default without prompting.');
+  log('and a Workers project are not asked for a transport backend. A given --redis-client');
+  log('leaves only redis on offer, and a given --dialect only --type drizzle. --yes, -y takes');
+  log('every default without prompting.');
   log('');
   log('Adds a Setu-TS package to this project, pinned to the version of the CLI');
   log("that added it — so a project's framework packages stay on one version.");

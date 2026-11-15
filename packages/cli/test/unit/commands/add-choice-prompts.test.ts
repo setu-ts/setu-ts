@@ -179,7 +179,7 @@ describe('setu add choice prompts', () => {
     expect(prompt.asked).toEqual([]);
   });
 
-  it('asks no transport question when the runtime marker cannot be read', async () => {
+  it('asks nothing when the runtime marker cannot be read', async () => {
     const base = createFakeFs({ '/app/package.json': '{}' });
     const fs: IFileSystem = {
       ...base,
@@ -190,7 +190,7 @@ describe('setu add choice prompts', () => {
     };
     const prompt = recorder();
     const run = deps(fs, prompt.ask);
-    expect(await runCli(['add', 'messaging'], run.deps)).not.toBe(0);
+    expect(await runCli(['add', 'messaging', 'mail'], run.deps)).not.toBe(0);
     expect(prompt.asked).toEqual([]);
   });
 
@@ -224,7 +224,6 @@ describe('setu add choice prompts', () => {
     const fs = createFakeFs({ '/app/package.json': '{}' });
     const prompt = recorder();
     const run = deps(fs, prompt.ask);
-    expect(prompt.asked).toEqual([]);
     expect(
       await runCli(['add', 'cache', '--redis-client', 'node-redis'], run.deps),
       run.err.join('\n'),
@@ -240,8 +239,13 @@ describe('setu add choice prompts', () => {
     ).toBe(0);
     const bad = recorder();
     const refused = deps(createFakeFs({ '/app/package.json': '{}' }), bad.ask);
-    expect(await runCli(['add', 'cache', '--redis-client', 'bogus'], refused.deps)).toBe(2);
+    // Nothing at all, not even mail's provider: the command refuses the client first.
+    expect(await runCli(['add', 'mail', 'cache', '--redis-client', 'bogus'], refused.deps)).toBe(2);
     expect(bad.asked).toEqual([]);
+    const member = recorder();
+    const dialect = deps(createFakeFs({ '/app/package.json': '{}' }), member.ask);
+    expect(await runCli(['add', 'database', '--dialect', 'mysql'], dialect.deps)).toBe(2);
+    expect(member.asked).toEqual([]);
   });
 
   it('offers only drizzle for --type when --dialect is already given', async () => {
@@ -262,6 +266,6 @@ describe('setu add choice prompts', () => {
     const help = run.out.join('\n');
     for (const choice of ADD_CHOICES)
       expect(help).toContain(`--${choice.flag} ${choice.values().join('|')} selects`);
-    expect(help).toContain('--yes, -y takes every');
+    expect(help).toContain('--yes, -y takes');
   });
 });
