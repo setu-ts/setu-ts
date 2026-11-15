@@ -252,7 +252,8 @@ describe('setu add choice prompts', () => {
     },
     {
       name: 'an unknown --dialect',
-      argv: ['add', 'database', '--dialect', 'mysql'],
+      // --type drizzle, so the dialect itself is what is refused; mail keeps a choice open.
+      argv: ['add', 'mail', 'database', '--type', 'drizzle', '--dialect', 'mysql'],
       refusal: '--dialect requires database --type drizzle',
     },
     {
