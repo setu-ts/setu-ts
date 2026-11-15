@@ -100,7 +100,7 @@ describe('workspaceContainerFiles', () => {
           const mounted = runs.find((line) => line.includes('--mount=type=secret'));
           const check = stages[1]!.split('\n').find((line) => line.includes('deno task check'));
           // Every token fetch happens before any project code runs, and executes nothing; the
-          // build then runs without the token, which is never mounted again (review of #592).
+          // build then runs without the token; no later frontend or check step mounts it (#592 review).
           expect(mounted).toContain(
             'if [ -f .setu-build-task ]; then deno install; elif [ -f .setu-check-task ]; then deno cache main.ts setu.config.ts; fi',
           );
