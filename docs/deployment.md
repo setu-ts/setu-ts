@@ -740,21 +740,23 @@ same secret-mounted step). That step also copies the `npmrc`'s `registry` and `@
 lines, and nothing else, for the later steps. Each value is read as Deno reads it and copied as
 written; a URL that carries userinfo, a query or a fragment is written back in normalized form
 without them. A value holding a `${NAME}` reference is copied as written, but fails the build if,
-with its references removed, it still contains `@`, `?` or `#` (userinfo, a query or a fragment),
-and any other value that is not a URL fails the build. Keep a registry token in an `_authToken`
-line: one placed in the URL's path is kept, because Deno files a package under its registry URL's
-host and path, so a step without the secret must resolve the same registries to find the cache. The
-runtime dependencies are fetched the same way, in a `fetch` stage the image never ships; the image's
-one install step bind-mounts that stage's cache, lockfile and registry settings, copies the cache
-in, installs `node_modules` from it, verifies the lockfile and fixes ownership in one layer
-(`node_modules` hard-links into the cache, and a hard link cannot reach a lower layer). The frontend
-stage runs on `denoland/deno:debian-2.9.5` (Vite's native bundler binding has no musl build, so it
-cannot run on the Alpine image), copies only `build/` into the Alpine image before caching main.ts,
-then retains the frozen, scoped source run. When the root sets `nodeModulesDir: "auto"` (a workspace
-with a full-stack member does), the image switches it to `"manual"` after installing: under `"auto"`
-every start re-syncs `node_modules`, which a read-only root refuses. A full-stack socket server
-serves its own client bundle from `build/client/assets`. Native bun build and deno compile are
-optional custom packaging choices, not generated commands. Workers continues using Wrangler.
+with its references removed, it still contains `@`, `?` or a quoted `#` anywhere, a path segment
+such as `/@org/` included (an unquoted `#` or `;` starts an `.npmrc` comment and is dropped first;
+with a reference present the value cannot be parsed, so the characters are the rule), and any other
+value that is not a URL fails the build. Keep a registry token in an `_authToken` line: one placed
+in the URL's path is kept, because Deno files a package under its registry URL's host and path, so a
+step without the secret must resolve the same registries to find the cache. The runtime dependencies
+are fetched the same way, in a `fetch` stage the image never ships; the image's one install step
+bind-mounts that stage's cache, lockfile and registry settings, copies the cache in, installs
+`node_modules` from it, verifies the lockfile and fixes ownership in one layer (`node_modules`
+hard-links into the cache, and a hard link cannot reach a lower layer). The frontend stage runs on
+`denoland/deno:debian-2.9.5` (Vite's native bundler binding has no musl build, so it cannot run on
+the Alpine image), copies only `build/` into the Alpine image before caching main.ts, then retains
+the frozen, scoped source run. When the root sets `nodeModulesDir: "auto"` (a workspace with a
+full-stack member does), the image switches it to `"manual"` after installing: under `"auto"` every
+start re-syncs `node_modules`, which a read-only root refuses. A full-stack socket server serves its
+own client bundle from `build/client/assets`. Native bun build and deno compile are optional custom
+packaging choices, not generated commands. Workers continues using Wrangler.
 
 Both standalone and workspace ignore files exclude host node_modules, dist, build, coverage, git and
 dotenv files, preserving .env.example, and every `.npmrc`. To use one in the image's install — a
