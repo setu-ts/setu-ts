@@ -1,12 +1,7 @@
 /** Pure, additive setup for server-rendered views. Existing user choices always win. */
 import type { TargetRuntime } from '../constants.ts';
 import type { GeneratedFile } from '../utils/file-writer.ts';
-import {
-  factoryScope,
-  maskComments,
-  maskSourceCode,
-  referencesIdentifier,
-} from '../devtool/sources.ts';
+import { maskComments, referencesIdentifier } from '../devtool/sources.ts';
 import { frameworkSpecifier } from '../templates/framework-specifier.ts';
 import {
   renderThemeScript,
@@ -254,10 +249,10 @@ export function planViewSetup(input: IViewSetupInput): IViewSetupPlan {
       );
     }
     const readme = existing.get('README.md');
-    // `/assets` is listed only when StaticPlugin serves it: this run wired it, or
-    // the config already registers exactly that call. A StaticPlugin serving
-    // another directory is left alone, so the README does not claim the route.
-    const assetsServed = wired !== undefined || registersAssets(config ?? '');
+    // `/assets` is listed only when this run wired the CSS StaticPlugin call.
+    // Whether an existing call is a live registration cannot be read from the
+    // text (an unused helper can hold the same call), so it is never inferred.
+    const assetsServed = wired !== undefined;
     const served = readme === undefined ? undefined : withServedRoutes(readme, assetsServed);
     if (served !== undefined) configEdits.push({ path: 'README.md', contents: served });
     const ignore = existing.get('.gitignore');
@@ -409,33 +404,6 @@ export function Layout({ title, children }: { title: string; children: Child }) 
   );
 }
 `;
-}
-
-/**
- * Whether a config already calls `StaticPlugin` with the CSS arguments, as
- * code inside `createApp`'s body: the call is matched in the comment-masked
- * text (its string arguments kept), must start where the string-masked text
- * still has code, so the same words inside a string literal do not count, and
- * must lie in the factory, so a helper that is never called does not count
- * either. A config whose factory cannot be read counts as not registering it.
- * Whitespace and a trailing comma may differ; the keys must come in this order.
- *
- * @param config - Existing `setu.config.ts` contents
- * @returns Whether the call is registered
- */
-export function registersAssets(config: string): boolean {
-  const visible = maskComments(config);
-  const code = maskSourceCode(config);
-  const scope = factoryScope(config);
-  if (visible === undefined || code === undefined || scope === undefined) return false;
-  const call =
-    /(?<![\w$.])StaticPlugin\(\s*\{\s*root:\s*(['"])\.\/build\/assets\1\s*,\s*urlPrefix:\s*(['"])\/assets\2\s*,?\s*\}\s*,?\s*\)/g;
-  for (const match of visible.matchAll(call)) {
-    if (code[match.index] === 'S' && match.index >= scope.start && match.index < scope.end) {
-      return true;
-    }
-  }
-  return false;
 }
 
 /**

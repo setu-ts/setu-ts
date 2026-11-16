@@ -14,7 +14,7 @@ import { createFakeFs, createRecorder } from '../../fixtures/fake-fs.ts';
 import { runCli } from '../../../src/cli.ts';
 import { unregisteredPluginFindings } from '../../../src/diagnostics/wiring.ts';
 import { LOCAL_TRANSPORT_HEADING } from '../../../src/templates/project-files.ts';
-import { registersAssets, withServedRoutes } from '../../../src/commands/add-view.ts';
+import { withServedRoutes } from '../../../src/commands/add-view.ts';
 import { CONFIGURED_PROVIDERS, ZERO_CONFIG_WIRINGS } from '../../../src/utils/plugin-wirings.ts';
 
 /** A Node rest project scaffolded into a fake filesystem, and a runner for it. */
@@ -441,58 +441,43 @@ describe('setu add backend guidance', () => {
     );
   });
 
-  it('counts the CSS StaticPlugin call only as code in the factory, not a string, comment or helper', async () => {
+  it('lists /assets only when this run wired the CSS StaticPlugin call', async () => {
     const call = "StaticPlugin({ root: './build/assets', urlPrefix: '/assets' })";
-    /** A config whose factory body holds `body`, with `before` above it. */
-    const app = (body: string, before = '') =>
-      `${before}export function createApp(): IKernelApplication {\n  ${body}\n}\n`;
-    expect(registersAssets(app(`return createApplication({ plugins: [${call}] });`))).toBe(true);
-    expect(
-      registersAssets(
-        app(
-          'const plugins = [\n    StaticPlugin({\n      root: "./build/assets",\n      urlPrefix: "/assets",\n    }),\n  ];',
+    // Each config already has a StaticPlugin, so `add view` wires nothing; the
+    // text cannot tell whether a matching call is a live registration.
+    const shapes: readonly (readonly [string, string, string])[] = [
+      // A string naming the call, beside a StaticPlugin serving another directory.
+      [`export const NOTE = "${call}";\n`, "StaticPlugin({ root: './public' }),", ''],
+      // An unused helper inside the factory holding the exact call.
+      [
+        '',
+        "StaticPlugin({ root: './public' }),",
+        `const unused = () => ${call};\n  void unused;\n  `,
+      ],
+      // The exact call already registered: still not inferred.
+      ['', `${call},`, ''],
+    ];
+    for (const [before, registration, inside] of shapes) {
+      const p = await project();
+      const config = p
+        .read('setu.config.ts')
+        .replace(
+          '...(devtool?.plugins ?? [])',
+          `${registration}\n      ...(devtool?.plugins ?? [])`,
+        )
+        .replace('  const app = createApplication(', `  ${inside}const app = createApplication(`);
+      expect(config).toContain(registration);
+      if (inside !== '') expect(config).toContain('const unused = () =>');
+      await p.fs.writeFile(
+        '/work/shop/setu.config.ts',
+        new TextEncoder().encode(
+          `import { StaticPlugin } from '@setu-ts/static-plugin';\n${before}${config}`,
         ),
-      ),
-    ).toBe(true);
-    expect(registersAssets(app(`const note = "${call}";`))).toBe(false);
-    expect(registersAssets(app(`// ${call}\n  const x = 1;`))).toBe(false);
-    expect(
-      registersAssets(app("return [StaticPlugin({ root: './public', urlPrefix: '/assets' })];")),
-    ).toBe(false);
-    expect(
-      registersAssets(app(`return [MyStaticPlugin(${call.slice('StaticPlugin'.length)})];`)),
-    ).toBe(false);
-    // A helper nobody calls, beside a factory that registers another directory.
-    expect(
-      registersAssets(
-        app(
-          "return [StaticPlugin({ root: './public' })];",
-          `function unused() {\n  return ${call};\n}\n`,
-        ),
-      ),
-    ).toBe(false);
-    // No readable factory at all: fail closed.
-    expect(registersAssets(`const plugins = [${call}];`)).toBe(false);
-    expect(registersAssets("const broken = 'unterminated")).toBe(false);
-
-    // Through `add view`: a string naming the call, beside a StaticPlugin serving
-    // another directory, does not make the README claim /assets.
-    const p = await project();
-    const config = p.read('setu.config.ts');
-    await p.fs.writeFile(
-      '/work/shop/setu.config.ts',
-      new TextEncoder().encode(
-        "import { StaticPlugin } from '@setu-ts/static-plugin';\n" +
-          `export const NOTE = "${call}";\n` +
-          config.replace(
-            '...(devtool?.plugins ?? [])',
-            "StaticPlugin({ root: './public' }),\n      ...(devtool?.plugins ?? [])",
-          ),
-      ),
-    );
-    expect(await p.run(['add', 'view']), p.err.text()).toBe(0);
-    expect(p.read('README.md')).toContain('- `/ui` — the example page');
-    expect(p.read('README.md')).not.toContain('- `/assets`');
+      );
+      expect(await p.run(['add', 'view']), p.err.text()).toBe(0);
+      expect(p.read('README.md')).toContain('- `/ui` — the example page');
+      expect(p.read('README.md')).not.toContain('- `/assets`');
+    }
   });
 
   it('adds the view routes after the last bullet, wrapped or at the end of the file', () => {
