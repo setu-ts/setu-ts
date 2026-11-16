@@ -136,6 +136,12 @@ export class PgVectorStore implements IVectorStoreAdapter {
    * begun waiting for a connection is not yet evidence of a stall.
    */
   #lastProgressAt: number | undefined;
+  /**
+   * When a readiness probe still unsettled was started: a probe the indicator
+   * gave up on keeps its pool checkout pending, and enough of them fill the
+   * pool, so one outstanding past the window is evidence of a stall too.
+   */
+  #probeStartedAt: number | undefined;
 
   /**
    * @param options - The database, ensure mode and shutdown callback
@@ -357,13 +363,18 @@ export class PgVectorStore implements IVectorStoreAdapter {
       return this.#progressing() ? undefined : false;
     }
     const sql = this.#tag();
+    // Outside #run: the probe is not one of the application's statements, so a
+    // probe still queued must not count as a stalled statement next poll. Its
+    // own start is kept instead, until it settles (only the oldest matters).
+    const started = this.#hrtime?.();
+    this.#probeStartedAt ??= started;
     try {
-      // Outside #run: the probe is not one of the application's statements, so
-      // a probe still queued must not count as a stalled statement next poll.
       await this.#db.execute(sql`SELECT 1`);
     } catch (error) {
       if (isPoolAcquireTimeout(error)) return this.#progressing() ? undefined : false;
       throw toBackendFault(error, 'vector-store-plugin: pgvector') ?? error;
+    } finally {
+      if (this.#probeStartedAt === started) this.#probeStartedAt = undefined;
     }
     return true;
   }
@@ -412,7 +423,14 @@ export class PgVectorStore implements IVectorStoreAdapter {
    */
   #progressing(): boolean {
     const now = this.#hrtime?.();
-    if (now === undefined || this.#inFlight === 0) return true;
+    if (now === undefined) return true;
+    if (
+      this.#probeStartedAt !== undefined &&
+      now - this.#probeStartedAt > QUERY_PROGRESS_WINDOW_MS
+    ) {
+      return false;
+    }
+    if (this.#inFlight === 0) return true;
     return (
       this.#lastProgressAt !== undefined && now - this.#lastProgressAt <= QUERY_PROGRESS_WINDOW_MS
     );

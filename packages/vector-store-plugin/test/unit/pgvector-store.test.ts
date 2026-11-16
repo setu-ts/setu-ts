@@ -709,6 +709,26 @@ describe('PgVectorStore.isHealthy', () => {
     await pending;
   });
 
+  it('reads a probe left outstanding past the window as a stall once its checkouts fill the pool', async () => {
+    let release: () => void = () => {};
+    const hanging = new Promise<{ rows: [] }>((resolve) => (release = () => resolve({ rows: [] })));
+    const counters = { idleCount: 1, waitingCount: 0, totalCount: 1, options: { max: 3 } };
+    const h = await saturatedStore(counters, (rendered) =>
+      rendered.text === 'SELECT 1' ? hanging : healthy()(rendered),
+    );
+    // The indicator gives up on this probe; its checkout stays pending.
+    const abandoned = h.store.isHealthy();
+    Object.assign(counters, { idleCount: 0, totalCount: 3 });
+    h.advance(QUERY_PROGRESS_WINDOW_MS);
+    expect(await h.store.isHealthy()).toBeUndefined();
+    h.advance(1);
+    expect(await h.store.isHealthy()).toBe(false);
+    // Once it settles the pool is serving again, and a full pool reads as unknown.
+    release();
+    expect(await abandoned).toBe(true);
+    expect(await h.store.isHealthy()).toBeUndefined();
+  });
+
   it("reads the probe's own pool-acquire timeout as saturation, but not an answer with a code", async () => {
     const timeout = Object.assign(new Error('timeout exceeded when trying to connect'), {});
     const h = await saturatedStore({ idleCount: 0, waitingCount: 0 }, (rendered) =>
