@@ -75,6 +75,7 @@ import {
   starterOptionLiteral,
 } from '../templates/broker.ts';
 import {
+  starterArmSet,
   starterOptionValue,
   withStarterOption,
   withStarterArmEntry,
@@ -87,7 +88,7 @@ import { findWorkspaceMarker } from '../utils/project-detector.ts';
 import { readJsonManifest } from '../utils/manifest-reader.ts';
 import { interruptionMessage } from '../utils/interruption.ts';
 import { detectPlugins } from '../utils/plugin-detector.ts';
-import { composingStarter } from '../utils/starter-arms.ts';
+import { composingStarter, GATED_STARTER_ARMS } from '../utils/starter-arms.ts';
 import { repositoryFileUrl, siteUrl } from '../utils/repository-links.ts';
 import { hostSeamSpecs } from '../seams/registry.ts';
 import {
@@ -664,6 +665,36 @@ function printWiringNote(
         for (const item of seam.imports) {
           log(`  Import ${item.symbols.join(', ')} from '${item.from}' for it.`);
         }
+      }
+      // A gated arm passes its value straight to the plugin's factory, so the
+      // registration printed elsewhere gives the arm's shape. Full-stack's auth arm
+      // gets the password sign-in recipe below instead.
+      const fullStack = starter.pkg === 'full-stack-starter';
+      const line =
+        seam === undefined && GATED_STARTER_ARMS.has(bare) && !(bare === 'auth-plugin' && fullStack)
+          ? registrationLine(bare)
+          : undefined;
+      if (line !== undefined) {
+        // `static` is a full-stack arm only, where React Router already serves GET /*.
+        const value =
+          bare === 'static-plugin'
+            ? "{ root: '<public-directory>', urlPrefix: '/files' }"
+            : line.slice(line.indexOf('(') + 1, -1).trim() || '{}';
+        const [parent, child] = arm.split('.');
+        // A second realtime arm goes inside the existing `realtime` object: a
+        // second `realtime:` property would be a duplicate key.
+        log(
+          child === undefined
+            ? `  Its arm: ${arm}: ${value}`
+            : source !== undefined && starterArmSet(source, parent!) === true
+              ? `  Inside its existing ${parent} arm, add: ${child}: ${value}`
+              : `  Its arm: ${parent}: { ${child}: ${value} }`,
+        );
+      }
+      if (bare === 'static-plugin') {
+        log(
+          '  The urlPrefix is required here: React Router already serves GET /*, and a root prefix would claim it too (static-plugin README: "A root urlPrefix claims the bare wildcard").',
+        );
       }
       log(`  See ${repositoryFileUrl(`packages/starters/${starter.pkg}/README.md`)}`);
       // X89-3: the full-stack template's own login writes `userEmail`, so a
@@ -1295,6 +1326,53 @@ export function withPluginWiring(
   return withRegistration(source, bare, seam, args);
 }
 
+/** The options the Workers factory passes CloudflarePlugin: its env and platform sink. */
+const CLOUDFLARE_ARGS = '{ env, ...(waitUntil ? { waitUntil } : {}) }';
+
+/**
+ * Registers CloudflarePlugin in a generated Workers config and renames the
+ * factory's unread `_waitUntil` parameter to the `waitUntil` the call reads.
+ *
+ * Both happen or neither does: the rename alone would leave `waitUntil` unread,
+ * which the project's lint refuses, and the call alone reads a name the factory
+ * does not declare. So `createApp` must take `env` first and declare the
+ * parameter once, as `_waitUntil?:` or already as `waitUntil?:`, with no other
+ * `waitUntil` or `_waitUntil` in the code. A project scaffolded before 0.10.0,
+ * with no such parameter, and a starter-composed config get the printed
+ * guidance instead.
+ *
+ * @param source - Existing `setu.config.ts` contents
+ * @returns The updated config, or `undefined` when the shape is not certain
+ */
+export function withCloudflareWiring(source: string): string | undefined {
+  const scope = factoryScope(source);
+  if (scope === undefined) return undefined;
+  const { code } = scope;
+  const names = [...code.matchAll(/(?<![\w$.])_?waitUntil(?![\w$])/g)];
+  if (names.length !== 1 || !/^\?\s*:/.test(code.slice(names[0]!.index + names[0]![0].length)))
+    return undefined;
+  const at = names[0]!.index;
+  // `createApp`'s own parameter list, which must also declare the `env` the call reads.
+  const parameters = code.slice(scope.header, scope.start);
+  if (
+    at < scope.header ||
+    at >= scope.start ||
+    !/^export function createApp\s*\(\s*env(?![\w$])/.test(parameters)
+  )
+    return undefined;
+  if (names[0]![0] === 'waitUntil')
+    return withRegistration(source, 'cloudflare-plugin', undefined, CLOUDFLARE_ARGS);
+  // The factory's JSDoc names the parameter too; its tag follows the rename.
+  const renamed = `${source.slice(0, at)}${source.slice(at + 1)}`;
+  const tags = renamed.split('@param _waitUntil ');
+  return withRegistration(
+    tags.length === 2 ? tags.join('@param waitUntil ') : renamed,
+    'cloudflare-plugin',
+    undefined,
+    CLOUDFLARE_ARGS,
+  );
+}
+
 /** Inserts a zero-config provider above the full-stack generated-plugin loop. */
 export function withFactoryRegistration(
   source: string,
@@ -1313,7 +1391,10 @@ function withRegistration(
 ): string | undefined {
   const provider =
     ZERO_CONFIG_WIRINGS.get(bare) ??
-    (bare === 'static-plugin' && args !== undefined ? { symbol: 'StaticPlugin' } : undefined);
+    (bare === 'static-plugin' && args !== undefined ? { symbol: 'StaticPlugin' } : undefined) ??
+    (bare === 'cloudflare-plugin' && args !== undefined
+      ? { symbol: 'CloudflarePlugin' }
+      : undefined);
   if (provider === undefined) return undefined;
 
   // The Workers template has no devtool spread (it has no devtool), so its plugin
@@ -2858,19 +2939,21 @@ async function addOne(
         ? undefined
         : composingStarter(config)?.arms.has(bare) === true
           ? withStarterWiring(config, bare, artifactSeam, transportArgs)
-          : starter
-            ? transportArgs === undefined
-              ? withFactoryRegistration(config, bare)
-              : undefined
-            : (withPluginWiring(
-                config,
-                bare,
-                seam,
-                transportArgs === undefined ? undefined : seam?.args,
-              ) ??
-              (transportArgs === undefined
-                ? undefined
-                : (rewroteBareCall = withBareCallArguments(config, bare, transportArgs))));
+          : bare === 'cloudflare-plugin'
+            ? withCloudflareWiring(config)
+            : starter
+              ? transportArgs === undefined
+                ? withFactoryRegistration(config, bare)
+                : undefined
+              : (withPluginWiring(
+                  config,
+                  bare,
+                  seam,
+                  transportArgs === undefined ? undefined : seam?.args,
+                ) ??
+                (transportArgs === undefined
+                  ? undefined
+                  : (rewroteBareCall = withBareCallArguments(config, bare, transportArgs))));
     // A member's options come from its transport module, which imports the
     // node-redis helper itself; the config only needs the module's export.
     const viaModule =
@@ -3634,14 +3717,24 @@ async function addOne(
     );
   }
   if (bare === 'cloudflare-plugin') {
-    // M113d §3.8: the generated factory names its second parameter `_waitUntil`
-    // while nothing reads it (a read-free parameter must be underscored to pass
-    // the project's own lint), and a project scaffolded before 0.10.0 has no
-    // such parameter at all. The printed registration reads `waitUntil`, so
-    // both cases are named here rather than detected in the developer's file.
-    deps.log("  In createApp (setu.config.ts), rename the '_waitUntil' parameter to 'waitUntil'.");
-    deps.log('  No such parameter (a project scaffolded before 0.10.0)? Add it as the second');
-    deps.log('  parameter, as docs/upgrading.md describes ("Workers projects: thread waitUntil").');
+    // The generated factory names its second parameter `_waitUntil` while nothing
+    // reads it (an unread parameter must be underscored to pass the project's own
+    // lint). `withCloudflareWiring` renames it as it inserts the call that reads
+    // it; a config it cannot edit, such as one scaffolded before 0.10.0 with no
+    // such parameter, gets both steps as guidance.
+    if (configWired) {
+      deps.log(
+        "  Registered CloudflarePlugin in setu.config.ts; createApp's sink parameter is now 'waitUntil', which the call reads.",
+      );
+    } else {
+      deps.log(
+        "  In createApp (setu.config.ts), rename the '_waitUntil' parameter to 'waitUntil'.",
+      );
+      deps.log('  No such parameter (a project scaffolded before 0.10.0)? Add it as the second');
+      deps.log(
+        '  parameter, as docs/upgrading.md describes ("Workers projects: thread waitUntil").',
+      );
+    }
     deps.log(
       '  To consume a queue or a Cron Trigger, add a `queue` or `scheduled` export to src/index.ts through withApplication — wrangler.toml shows both.',
     );

@@ -40,6 +40,8 @@ interface IReturnedObject {
   readonly start: number;
   /** The index of the object's closing brace. */
   readonly end: number;
+  /** Set for the generated callback when its body holds a `return` besides this one. */
+  readonly otherReturns?: true;
 }
 
 /**
@@ -81,7 +83,14 @@ function returnedObject(source: string): IReturnedObject | undefined {
   }
   if (returned === undefined) return undefined;
   // The callback body balances, so the object opened inside it closes inside it too.
-  return { code, visible, start: returned, end: closingBrace(code, returned)! };
+  const returns = [...code.slice(bodyStart, bodyEnd).matchAll(/(?<![\w$.])return\b/g)].length;
+  return {
+    code,
+    visible,
+    start: returned,
+    end: closingBrace(code, returned)!,
+    ...(returns > 1 ? { otherReturns: true as const } : {}),
+  };
 }
 
 /**
@@ -150,6 +159,46 @@ export function starterOptionValue(
     }
   });
   return valueStart === undefined ? undefined : source.slice(valueStart, valueEnd).trim();
+}
+
+/** A value that leaves a gated starter arm off. */
+const UNSET_VALUE = /^(?:undefined|null|false)$/;
+
+/**
+ * Whether the starter's options set an arm, for `setu check`'s unregistered-plugin warning.
+ *
+ * Read from the generated callback's returned object, else from the object passed to the
+ * starter's single call; a single call with no argument sets nothing. A dotted arm
+ * (`realtime.websocket`) is read inside its parent's object literal. Any shape the masked
+ * walker cannot split into `key: value` entries (a top-level spread, a method, a parent arm
+ * that is not a literal), and a callback with another `return` (which may return a different
+ * object), answers `undefined`, so the check stays quiet rather than guessing.
+ * @param source - Developer-owned configuration
+ * @param arm - The starter option, as `STARTER_ARMS` names it
+ * @returns `true` when set, `false` when absent or `undefined`/`null`/`false`, `undefined` when unknown
+ */
+export function starterArmSet(source: string, arm: string): boolean | undefined {
+  const object = returnedObject(source) ?? callObject(source);
+  if (object === undefined) {
+    const code = maskSourceCode(source);
+    const symbol = composingStarter(source)?.symbol;
+    if (code === undefined || symbol === undefined) return undefined;
+    const calls = callArguments(code, symbol);
+    return calls.length === 1 && calls[0]!.trim() === '' ? false : undefined;
+  }
+  if (object.otherReturns === true) return undefined;
+  const entries = literalEntries(object);
+  if (entries === undefined) return undefined;
+  const [parent = arm, child] = arm.split('.');
+  const entry = entries.find(({ key }) => key === parent);
+  if (entry === undefined) return false;
+  const value = source.slice(entry.start, entry.end).trim();
+  if (UNSET_VALUE.test(value)) return false;
+  if (child === undefined) return true;
+  const inner = starterLiteralEntries(value);
+  if (inner === undefined) return undefined;
+  const nested = inner.find(([key]) => key === child);
+  return nested !== undefined && !UNSET_VALUE.test(nested[1]);
 }
 
 /**

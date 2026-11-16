@@ -25,7 +25,13 @@ import { composingStarter } from '../utils/starter-arms.ts';
 
 /** Typed findings carry facts; renderers own prose and exit policy. */
 export type Finding =
-  | { readonly kind: 'plugin-unregistered'; readonly pkg: string; readonly symbol: string }
+  | {
+      readonly kind: 'plugin-unregistered';
+      readonly pkg: string;
+      readonly symbol: string;
+      /** Set when a starter composes the app: the gated arm left unset. */
+      readonly starterArm?: { readonly arm: string; readonly starter: string };
+    }
   | { readonly kind: 'module-rejected' | 'artifact-invalid'; readonly path: string }
   | {
       readonly kind: 'module-skipped';

@@ -1,8 +1,10 @@
 # @setu-ts/cloudflare-plugin — use Workers bindings
 
-**Add it:** `setu add cloudflare` adds it on Workers and prints the registration for
-`setu.config.ts`; other runtimes are refused. `CloudflarePlugin` provides `CAPABILITIES.CLOUDFLARE`
-(`ICloudflareBindings`), plus the capabilities selected by its arms.
+**Add it:** `setu add cloudflare` adds it on Workers and registers it in a generated
+`setu.config.ts`, renaming the factory's `_waitUntil` parameter to the `waitUntil` the call reads; a
+config it cannot edit gets the registration printed, and other runtimes are refused.
+`CloudflarePlugin` provides `CAPABILITIES.CLOUDFLARE` (`ICloudflareBindings`), plus the capabilities
+selected by its arms.
 
 ## Register platform cache and storage
 

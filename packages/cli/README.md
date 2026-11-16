@@ -853,12 +853,12 @@ package.json.
 
 <!-- version:history -->
 
-On a `cloudflare-workers` project, `setu add cloudflare` prints the registration that reads the
-platform sink — `CloudflarePlugin({ env, ...(waitUntil ? { waitUntil } : {}) })` — because the
-generated entry passes `waitUntil` to `createApp` as its second parameter (M113d §3.8). The factory
-names that parameter `_waitUntil` while nothing reads it, so the command also tells you to rename
-it. A project scaffolded before 0.10.0 has no such parameter, and its entry does not pass one; the
-command points at
+On a `cloudflare-workers` project, `setu add cloudflare` registers the plugin with the platform sink
+— `CloudflarePlugin({ env, ...(waitUntil ? { waitUntil } : {}) })` — because the generated entry
+passes `waitUntil` to `createApp` as its second parameter (M113d §3.8). The factory names that
+parameter `_waitUntil` while nothing reads it, so the same edit renames it, and its JSDoc tag, to
+`waitUntil`. A configuration the command cannot edit gets both steps printed instead: one scaffolded
+before 0.10.0 has no such parameter and its entry does not pass one, and the command points at
 [docs/upgrading.md](https://github.com/setu-ts/setu-ts/blob/main/docs/upgrading.md) for both edits.
 
 ### Styled server-rendered views

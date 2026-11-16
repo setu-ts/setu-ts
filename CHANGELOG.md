@@ -80,7 +80,12 @@ All notable changes to this project are documented here. The format follows
   Compose image's release. The MCP note names the security guard; `di`, `sdk` and full-stack `auth`
   print what to do; `add view` lists `/ui` and `/assets` in the README. `setu check` W006 covers
   every provider whose registration `add` prints except `auth-plugin`, whose helpers work without
-  the plugin.
+  the plugin, and on a starter-composed config every installed package whose gated starter arm
+  (`graphql`, `static`, `realtime.websocket` and the like) is unset. A starter-composed `add` of
+  such a package prints the arm's shape, with `urlPrefix` on full-stack's `static`. On Workers
+  `add cloudflare` registers `CloudflarePlugin` with `waitUntil` in a generated minimal, `rest` or
+  class-based config and renames the factory's `_waitUntil` parameter; other configs get both steps
+  printed.
 - **`@setu-ts/cli` (M140d, PR pending).** `setu add` at a terminal now asks for every left-out
   choice, not only mail's provider, the database type and the vector-store adapter: `--dialect`
   after Drizzle, and the transport backends `--broker`, `--queue`, `--store`, `--lock` and

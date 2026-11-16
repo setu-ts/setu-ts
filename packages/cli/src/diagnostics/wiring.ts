@@ -4,7 +4,8 @@ import { maskComments, maskSourceCode } from '../devtool/sources.ts';
 import { referenceMask } from './reference-mask.ts';
 import { hostSeamSpecs, scanSeamSpecs } from '../seams/registry.ts';
 import { decoratorKeyFor, decoratorExportFor } from '../templates/seam.ts';
-import { composingStarter } from '../utils/starter-arms.ts';
+import { starterArmSet } from '../commands/starter-options.ts';
+import { composingStarter, GATED_STARTER_ARMS } from '../utils/starter-arms.ts';
 import type { Finding } from './diagnose.ts';
 import { withoutImports } from './modules.ts';
 
@@ -160,6 +161,26 @@ export function unregisteredPluginFindings(
     ) {
       findings.push({ kind: 'plugin-unregistered', pkg, symbol });
     }
+  }
+  // A starter registers its gated arms only when they are set, so an installed
+  // package whose arm is absent is as unregistered as an inline one with no call.
+  // `auth-plugin` stays exempt here too: its quota helpers work without the plugin.
+  for (const [pkg, arm] of starter?.arms ?? []) {
+    const symbol = GATED_STARTER_ARMS.get(pkg);
+    if (symbol === undefined || pkg === 'auth-plugin' || !installed.has(pkg)) continue;
+    if (starterArmSet(config, arm) !== false) continue;
+    if (
+      importedCallNames(config, pkg, symbol).some(
+        (name) => calledOutsideImports(config, name) !== false,
+      )
+    )
+      continue;
+    findings.push({
+      kind: 'plugin-unregistered',
+      pkg,
+      symbol,
+      starterArm: { arm, starter: starter!.symbol },
+    });
   }
   return findings;
 }
