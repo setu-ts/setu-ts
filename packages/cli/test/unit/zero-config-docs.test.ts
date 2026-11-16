@@ -34,4 +34,11 @@ describe('zero-configuration provider list in the docs', () => {
     expect(lists, `${document} has no zero-configuration list`).toHaveLength(1);
     expect(lists[0]).toEqual(EXPECTED);
   });
+  it.each(['packages/cli/README.md', 'PUBLIC_API.md'])(
+    '%s states the wiring map’s count',
+    async (document) => {
+      const text = await readFile(new URL(`../../../../${document}`, import.meta.url), 'utf8');
+      expect(text).toContain(`${ZERO_CONFIG_WIRINGS.size} safe zero-configuration providers`);
+    },
+  );
 });

@@ -41,8 +41,9 @@ Provide `CAPABILITIES.CONFIG`.
 - `@McpTool(meta?)` enables @setu-ts/mcp-plugin discovery; register `McpPlugin({})`. Name falls back
   to operationId, then method; description to operation description, then summary. Tools need a
   security brand or `schema.security`; `@Public()` declares public intent.
-- `Gateway(path, { guards })` supplies handshake options. Gateways refuse `Roles`, `Permissions` and
-  method-level `Public` at startup; use handshake guards.
+- `Gateway(path, { guards })` supplies handshake options. HTTP auth decorators (`Roles`, `Public`…)
+  on gateway handlers fail startup; at class level too, unless the class serves HTTP routes and the
+  gateway has guards.
 
 ## Other options
 

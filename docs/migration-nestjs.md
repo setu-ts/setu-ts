@@ -801,9 +801,10 @@ app.register(DecoratorPlugin({ ingress: [EventsGateway] }));
 ```
 
 NestJS's `@UseGuards` has no gateway equivalent: use `@Gateway('/ws', { guards: [guard] })` to
-authorize the handshake. `@Roles`, `@Permissions`, `@RequirePolicy`, the scoped variants and `@Public` on a gateway's
-WebSocket handler methods fail startup, and so does class-level authorization, unless the class also
-serves HTTP routes and the gateway declares its own handshake guards.
+authorize the handshake. `@Roles`, `@Permissions`, `@RequirePolicy`, the scoped variants and
+`@Public` on a gateway's WebSocket handler methods fail startup, and so does class-level
+authorization, unless the class also serves HTTP routes and the gateway declares its own handshake
+guards.
 
 A `@Gateway` class is registered through `DecoratorPlugin`'s `ingress` list, not `controllers`. To
 broadcast, resolve `CAPABILITIES.WEBSOCKET` and use `room(name).broadcast(data, { except })`.

@@ -32,10 +32,12 @@ docker run --rm -p 3000:3000 my-app # PORT still selects the port at run time
 
 A project with a generated secret passes it from the shell, because `**/.env` is excluded from the
 image and the development value in `.env` is not copied in. A `full-stack` project has
-`SESSION_SECRET`; after `setu add session` or `setu add auth` a project also has `SESSION_SECRET` or
-`JWT_SECRET`. Set each in the shell to a value of at least 32 characters, then name it with `-e`, as
-the generated README shows: `docker run --rm -p 3000:3000 -e SESSION_SECRET my-app`. A name that is
-not set in the shell passes nothing, and the application refuses to start without its secret.
+`SESSION_SECRET`, and its generated README shows the command:
+`docker run --rm -p 3000:3000 -e SESSION_SECRET my-app`. `setu add session` adds `SESSION_SECRET`
+and `setu add auth` adds `JWT_SECRET`; those commands do not rewrite the README, so add `-e` for
+each yourself. Set every such variable in the shell to a value of at least 32 characters first: a
+name that is not set in the shell passes nothing, and the application refuses to start without its
+secret.
 
 The image installs from the project's lockfile, which `setu new` does not write: install once first
 (`npm install`, `bun install` or `deno install`, which write `package-lock.json`, `bun.lock` or
@@ -876,14 +878,13 @@ address as the fallback.
 A standalone non-Workers `setu new` emits a `Dockerfile` and `.dockerignore` beside the project, so
 `docker build -t app .` and `docker run --rm -p 3000:3000 app` work without adding anything, except
 that a generated secret is set in the shell and passed with `-e` (see
-[Deploy a scaffolded project](#deploy-a-scaffolded-project)); the
-image installs and builds inside its own build stage. A Workers project emits neither, because it is
-not a container. A standalone template with `--broker` or `--queue` can additionally emit
-`docker/compose.yaml` for the selected backing services; that does not supply a Kubernetes manifest.
-Use a workspace (`setu new --workspace`, then `setu generate app`) for generated per-member
-deployment artifacts, or `setu adopt` to bring an existing project into a workspace. For an
-independently maintained image, adapt the generated `Dockerfile`'s entrypoint and dependency
-installation to your runtime.
+[Deploy a scaffolded project](#deploy-a-scaffolded-project)); the image installs and builds inside
+its own build stage. A Workers project emits neither, because it is not a container. A standalone
+template with `--broker` or `--queue` can additionally emit `docker/compose.yaml` for the selected
+backing services; that does not supply a Kubernetes manifest. Use a workspace
+(`setu new --workspace`, then `setu generate app`) for generated per-member deployment artifacts, or
+`setu adopt` to bring an existing project into a workspace. For an independently maintained image,
+adapt the generated `Dockerfile`'s entrypoint and dependency installation to your runtime.
 
 ## Backup and restore
 
