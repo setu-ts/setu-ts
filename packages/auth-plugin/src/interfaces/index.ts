@@ -51,7 +51,7 @@ export interface JwtOptions {
   readonly audience?: string;
   /** Expected issuer for verification. */
   readonly issuer?: string;
-  /** Header name for token extraction (default: 'authorization'). */
+  /** Header name for token extraction (default: 'authorization'); Cookie in any case is refused. */
   readonly header?: string;
   /** Token scheme prefix (default: 'bearer'). */
   readonly scheme?: string;
@@ -68,12 +68,13 @@ export interface JwtOptions {
  * @since 0.1.0
  */
 export interface ApiKeyOptions {
-  /** Header name for API key (default: 'X-API-Key'). */
+  /** Header name for API key (default: 'X-API-Key'); Cookie in any case is refused. */
   readonly header?: string;
   /**
    * Callback to validate the API key and return a principal.
    * Return `null` if the key is invalid. Under multi-tenancy, bind the key to
    * `request.tenant`: `tenantClaim` covers bearer tokens only.
+   * A thrown failure becomes AuthenticationUnavailableError (503 with errorHandler).
    * @param key - The key from the configured header
    * @param request - The request being authenticated
    * @returns The principal, or `null` when the key is invalid

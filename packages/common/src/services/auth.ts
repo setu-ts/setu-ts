@@ -170,6 +170,8 @@ export interface IAuthService {
    *
    * @param request - The incoming request
    * @returns The authenticated principal, or `null` if unauthenticated
+   * @throws An authentication-unavailable error when an API-key validator throws;
+   * the auth plugin retains its cause and supplies a fixed HTTP 503 hint.
    */
   authenticate(request: IRequest): Promise<IPrincipal | null>;
   /**

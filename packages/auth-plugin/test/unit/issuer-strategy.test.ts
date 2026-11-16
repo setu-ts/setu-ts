@@ -3,8 +3,22 @@ import type { IPrincipal } from '@setu-ts/common';
 import { encodeBase64Url } from '../../src/utils/base64url.ts';
 import { generateTestKey, rawToken, signToken } from '../fixtures/issuer-tokens.ts';
 import { request, setupStrategy, valid } from '../fixtures/issuer-strategy-setup.ts';
+import { AuthPluginConfigurationError } from '../../src/errors.ts';
+import { IssuerStrategy } from '../../src/strategies/issuer-strategy.ts';
+import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 
 describe('IssuerStrategy routing', () => {
+  it.each(['cookie', 'COOKIE', 'Cookie'])('refuses ambient issuer header %s', (header) => {
+    expect(
+      () =>
+        new IssuerStrategy({
+          bindings: [],
+          runtime: createFakeRuntime(0),
+          report: () => {},
+          header,
+        }),
+    ).toThrow(AuthPluginConfigurationError);
+  });
   it('authenticates a token from the configured issuer', async () => {
     const t = await setupStrategy();
     const token = await signToken(t.key, valid());

@@ -12,6 +12,23 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### `csrf.exemptBearer` and `IAgentRunService` (0.13.0)
+
+Custom `IAgentRunService` implementations must add the required
+`startAs({ tenantId, principalId }, definition, { messages })` member. It starts without a request
+and calls no background hook; a later sweep recovers work after process eviction. Tenant is a
+string; principal is a non-empty string or null.
+
+`apiKey.header` and `jwt.header` set to `cookie` in any case now fail registration with
+`AuthPluginConfigurationError`. Use a dedicated header such as `X-API-Key`, or session
+authentication for cookies. Authenticated header credentials with a new session skip form CSRF by
+default; a restored session or any non-Bearer Authorization still needs a token.
+`csrf.exemptBearer: false` checks every unsafe request. An exempt request also commits no session
+and sends no `Set-Cookie`, even on a `csrf.exclude`d path, so an API-key-to-cookie exchange route
+needs `csrf.exemptBearer: false`, as a bearer exchange route already does. API-key validator throws
+now propagate as `AuthenticationUnavailableError` (503 with `errorHandler`), including public
+key-bearing routes; return null to reject an invalid key.
+
 ### Vector-store readiness (M140d, `@setu-ts/vector-store-plugin`, `@setu-ts/common`, `@setu-ts/cloudflare-plugin`)
 
 `VectorStorePlugin` now registers a `vector-store` health indicator that joins `/ready`, so a
@@ -351,8 +368,8 @@ with 0.11 keeps working but does not match what `setu new` now writes. To port o
 - Add `"~kernel/*": ["./src/*"]` to `tsconfig.json` `paths` (a Deno project also adds the prefix
   entry `"~kernel/": "./src/"` to `imports` in `deno.json`), and import kernel code from `app/` only
   as `import type` or from a `*.token.ts` module. `setu check` now reports any other value import as
-  `setu.E017`, and a page it cannot parse as `setu.E018`; silence either in `.setu-ts/check.json`
-  while porting.
+  `setu.E017` (except React Router `.server` modules), and a page it cannot parse as `setu.E018`;
+  silence either in `.setu-ts/check.json` while porting.
 - Unsafe `/api` requests still pass the session's CSRF check. Browser code sends the page's token in
   `x-csrf-token`; generated tests sign a session through `/login` first.
 - The full-stack starter now adds `react-router-plugin` to `openapi.excludeOwners` and `/__vite/*`

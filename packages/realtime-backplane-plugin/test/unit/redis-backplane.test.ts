@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import { readFile } from 'node:fs/promises';
 /**
  * Tests for the Redis pub/sub backplane transport.
  *
@@ -157,6 +158,240 @@ class FakeRedisClient implements IRedisBackplaneClient {
 }
 
 const FRAME: RealtimeFrame = { kind: 'ws-room', origin: 'node-b', name: 'lobby', data: 'hi' };
+
+describe('V12-54 injected connect cancellation', () => {
+  it('keeps a newer attempt in charge of the injected connect wait', async () => {
+    const releases: Array<() => void> = [];
+    let underlyingFinished = 0;
+    const client = Object.assign(new FakeRedisClient(), {
+      status: 'wait',
+      connect: () =>
+        new Promise<void>((resolve) => {
+          releases.push(resolve);
+        }).then(() => {
+          underlyingFinished++;
+        }),
+    });
+    const backplane = new RedisBackplane(
+      { transport: 'redis', client, subscriber: new FakeRedisClient() },
+      'a',
+      'topic',
+    );
+    let firstDone = false;
+    let secondDone = false;
+    const first = backplane.connect().then(() => {
+      firstDone = true;
+    });
+    const closing = backplane.close();
+    const second = backplane.connect().then(() => {
+      secondDone = true;
+    });
+    await closing;
+    await setImmediate();
+    expect(firstDone).toBe(true);
+    expect(secondDone).toBe(false);
+    await backplane.close();
+    await setImmediate();
+    expect(secondDone).toBe(true);
+    await Promise.all([first, second]);
+    expect(underlyingFinished).toBe(0);
+    expect(releases).toHaveLength(2);
+    for (const release of releases) release();
+    await setImmediate();
+    expect(underlyingFinished).toBe(2);
+    expect(client.eventListeners.get('error')).toHaveLength(0);
+    expect(client.eventListeners.get('ready')).toHaveLength(0);
+  });
+  it('V12-55 documents injected reporting watches and both close ownership paths', async () => {
+    const readme = (await readFile(new URL('../../README.md', import.meta.url), 'utf8')).replace(
+      /\s+/g,
+      ' ',
+    );
+    expect(readme).toContain('Both pairs get reporting watches');
+    expect(readme).toContain('`close()` QUITs an injected pair too');
+    expect(readme).toContain('open overtaken by `close()` leaves the injected pair');
+    expect(readme).not.toContain('Ignored for an injected pair');
+    expect(readme).not.toContain('gets no listener');
+  });
+  it('V12-54 close releases a never-settling connect and absorbs a late rejection', async () => {
+    let rejectConnect: (error: Error) => void = () => {};
+    const client = Object.assign(new FakeRedisClient(), {
+      status: 'wait',
+      connect: () =>
+        new Promise<void>((_resolve, reject) => {
+          rejectConnect = reject;
+        }),
+    });
+    const subscriber = Object.assign(new FakeRedisClient(), {
+      status: 'wait',
+      connect: vi.fn(() => Promise.resolve()),
+    });
+    const backplane = new RedisBackplane(
+      { transport: 'redis', client, subscriber },
+      'node-a',
+      'realtime',
+    );
+    let finished = false;
+    const connecting = backplane.connect().then(() => {
+      finished = true;
+    });
+    await setImmediate();
+    expect(finished).toBe(false);
+    await backplane.close();
+    await setImmediate();
+    expect(finished).toBe(true);
+    await connecting;
+    rejectConnect(new Error('late connect failure'));
+    await setImmediate();
+    for (const fake of [client, subscriber]) {
+      expect(fake.eventListeners.get('error')).toHaveLength(0);
+      expect(fake.eventListeners.get('ready')).toHaveLength(0);
+      expect(fake.quitCount).toBe(0);
+    }
+    expect(subscriber.connect).not.toHaveBeenCalled();
+  });
+  it('V12-54 close before the connect wait starts leaves no listeners', async () => {
+    const client = new FakeRedisClient();
+    const subscriber = new FakeRedisClient();
+    const connect = vi.fn(() => Promise.resolve());
+    Object.assign(client, { status: 'wait', connect });
+    const backplane = new RedisBackplane(
+      { transport: 'redis', client, subscriber },
+      'node-a',
+      'realtime',
+    );
+    const on = client.on.bind(client);
+    client.on = (event, listener) => {
+      on(event, listener);
+      if (event === 'ready') void backplane.close();
+    };
+    await backplane.connect();
+    expect(connect).not.toHaveBeenCalled();
+    for (const fake of [client, subscriber]) {
+      expect(fake.eventListeners.get('error')).toHaveLength(0);
+      expect(fake.eventListeners.get('ready')).toHaveLength(0);
+    }
+  });
+  it('V12-55 successful injected open is QUIT by close and reports connection events', async () => {
+    const client = new FakeRedisClient();
+    const subscriber = new FakeRedisClient();
+    const report = vi.fn();
+    const backplane = new RedisBackplane(
+      {
+        transport: 'redis',
+        client,
+        subscriber,
+        connectionErrorReporter: { report, recovered: () => {} },
+      },
+      'node-a',
+      'realtime',
+    );
+    await backplane.connect();
+    const error = new Error('outage');
+    client.emitEvent('error', error);
+    expect(report).toHaveBeenCalledWith(error);
+    await backplane.close();
+    expect([client.quitCount, subscriber.quitCount]).toEqual([1, 1]);
+    for (const fake of [client, subscriber])
+      expect(fake.eventListeners.get('error')).toHaveLength(0);
+  });
+});
+
+class RetiringClient extends EventEmitter implements IRedisBackplaneClient {
+  status = 'ready';
+  publish(): Promise<number> {
+    return Promise.resolve(0);
+  }
+  subscribe(): Promise<unknown> {
+    return Promise.resolve(1);
+  }
+  unsubscribe(): Promise<unknown> {
+    return Promise.resolve(0);
+  }
+  quit(): Promise<unknown> {
+    return Promise.reject(new Error('QUIT failed'));
+  }
+  disconnect(): void {}
+}
+
+describe('V12-56 owned client retirement', () => {
+  it('tolerates a retired client with no listener removal method', async () => {
+    const clients: RetiringClient[] = [];
+    const module: IRedisModule = {
+      create: () => {
+        const client = new RetiringClient();
+        clients.push(client);
+        return client;
+      },
+    };
+    const backplane = new RedisBackplane(
+      { transport: 'redis', url: 'redis://localhost', module },
+      'a',
+      'topic',
+    );
+    await backplane.connect();
+    await expect(backplane.close()).rejects.toThrow('QUIT failed');
+    for (const client of clients) {
+      const off = client.off;
+      const removeListener = client.removeListener;
+      Object.defineProperty(client, 'off', { value: undefined, configurable: true });
+      Object.defineProperty(client, 'removeListener', { value: undefined, configurable: true });
+      expect(() => client.emit('end')).not.toThrow();
+      expect(() => client.emit('error', new Error('late'))).not.toThrow();
+      Object.defineProperty(client, 'off', { value: off, configurable: true });
+      Object.defineProperty(client, 'removeListener', {
+        value: removeListener,
+        configurable: true,
+      });
+      client.removeAllListeners();
+    }
+  });
+  it.each(['successful-open', 'rejected-open', 'already-ended', 'removeListener'] as const)(
+    'V12-56 retains an error sink until end after %s',
+    async (mode) => {
+      const clients: RetiringClient[] = [];
+      const module: IRedisModule = {
+        create: () => {
+          const client = new RetiringClient();
+          if (mode === 'rejected-open' && clients.length === 1)
+            client.subscribe = () => Promise.reject(new Error('subscribe failed'));
+          if (mode === 'already-ended')
+            client.quit = () => {
+              client.status = 'end';
+              return Promise.resolve();
+            };
+          clients.push(client);
+          return client;
+        },
+      };
+      const backplane = new RedisBackplane(
+        { transport: 'redis', url: 'redis://localhost:6379', module, commandTimeoutMs: 500 },
+        'node-a',
+        'realtime',
+      );
+      if (mode === 'rejected-open')
+        await expect(backplane.connect()).rejects.toThrow('subscribe failed');
+      else await backplane.connect();
+      if (mode === 'successful-open' || mode === 'removeListener')
+        await expect(backplane.close()).rejects.toThrow('QUIT failed');
+      else await backplane.close();
+      for (const client of clients) {
+        if (mode === 'already-ended') {
+          expect(client.listenerCount('error')).toBe(0);
+          continue;
+        }
+        expect(() => client.emit('error', new Error('late EPIPE'))).not.toThrow();
+        expect(client.listenerCount('ready')).toBe(0);
+        expect(client.listenerCount('error')).toBe(1);
+        if (mode === 'removeListener') Object.defineProperty(client, 'off', { value: undefined });
+        client.status = 'end';
+        client.emit('end');
+        expect(client.listenerCount('error')).toBe(0);
+        expect(client.listenerCount('end')).toBe(0);
+      }
+    },
+  );
+});
 
 /**
  * A publisher whose `publish` rejects with a caller-supplied error, standing in
@@ -415,7 +650,11 @@ describe('RedisBackplane injected lazy startup', () => {
     );
     await expect(backplane.connect()).rejects.toThrow('subscribe refused');
     expect(reported.some((e) => (e as Error).message === 'write EPIPE')).toBe(true);
-    for (const client of clients) expect(client.listenerCount('error')).toBe(0);
+    for (const client of clients) {
+      expect(client.listenerCount('error')).toBe(1);
+      client.emit('end');
+      expect(client.listenerCount('error')).toBe(0);
+    }
   });
 
   it('does not connect clients the backplane builds even if they report wait', async () => {
@@ -1865,6 +2104,8 @@ describe('RedisBackplane close() during a SUBSCRIBE that never answers (V12-53)'
     expect(clients.map((client) => client.disconnectCount)).toEqual([1, 1]);
     expect(clients.map((client) => client.quitCount)).toEqual([0, 0]);
     expect(clients[1]!.listenerCount).toBe(0);
+    expect(clients[0]!.eventListeners.get('error') ?? []).toHaveLength(1);
+    clients[0]!.emitEvent('end');
     expect(clients[0]!.eventListeners.get('error') ?? []).toHaveLength(0);
   });
 

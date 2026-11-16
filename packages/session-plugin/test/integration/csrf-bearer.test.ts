@@ -120,6 +120,89 @@ async function readBack(
 }
 
 describe('form CSRF beside a bearer API (V9-27)', () => {
+  it.each([true, false])(
+    'API-key exchange commits on an excluded path only with exemptBearer false: %s',
+    async (exemptBearer) => {
+      const app = createApplication({
+        plugins: [
+          RuntimePlugin(),
+          SessionPlugin({
+            secret: SECRET,
+            cookie: { secure: false },
+            csrf: { exclude: ['/exchange'], exemptBearer },
+          }),
+          AuthPlugin({ apiKey: { validate: () => Promise.resolve({ id: 'api' }) } }),
+        ],
+      });
+      app.router.post('/exchange', {
+        middleware: [requireAuth()],
+        handler: (ctx) => {
+          getSession(ctx).set('sub', 'api');
+          return ctx.response.status(201).json({ ok: true });
+        },
+      });
+      app.router.get('/session', (ctx) =>
+        ctx.response.json({ sub: getSession(ctx).get('sub') ?? null }),
+      );
+      await app.start();
+      try {
+        const response = await app.fetch(
+          new Request('http://localhost/exchange', {
+            method: 'POST',
+            headers: { 'X-API-Key': 'key' },
+          }),
+        );
+        expect(response.status).toBe(201);
+        await response.body?.cancel();
+        const cookies = response.headers.getSetCookie();
+        expect(cookies.length > 0).toBe(!exemptBearer);
+        const cookie = cookies.map((value) => value.split(';')[0]).join('; ');
+        const read = await app.fetch(
+          new Request('http://localhost/session', { headers: { cookie } }),
+        );
+        expect(await read.json()).toEqual({ sub: exemptBearer ? null : 'api' });
+      } finally {
+        await app.stop();
+      }
+    },
+  );
+  it('V12-136 admits X-API-Key without committing a session and refuses ambient Authorization', async () => {
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        SessionPlugin({ secret: SECRET, cookie: { secure: false }, csrf: {} }),
+        AuthPlugin({
+          apiKey: { validate: (key) => Promise.resolve(key === 'key' ? { id: 'api' } : null) },
+        }),
+      ],
+    });
+    let calls = 0;
+    app.router.post('/api', {
+      middleware: [requireAuth()],
+      handler: (ctx) => {
+        calls++;
+        getSession(ctx).set('sub', 'api');
+        return ctx.response.status(201).json({ ok: true });
+      },
+    });
+    await app.start();
+    try {
+      for (const authorization of [undefined, 'Basic x']) {
+        const response = await app.fetch(
+          new Request('http://localhost/api', {
+            method: 'POST',
+            headers: { 'X-API-Key': 'key', ...(authorization ? { authorization } : {}) },
+          }),
+        );
+        expect(response.status).toBe(authorization ? 403 : 201);
+        expect(response.headers.getSetCookie()).toEqual([]);
+        await response.body?.cancel();
+      }
+      expect(calls).toBe(1);
+    } finally {
+      await app.stop();
+    }
+  });
   it('lets a JWT request through with no form token (default)', async () => {
     const { app, ran } = await start();
     try {

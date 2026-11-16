@@ -14,6 +14,7 @@
  */
 
 import type { FormBody, HttpMethod, IRequest, ResponseSnapshot } from '@setu-ts/common';
+import { detectRuntime } from '../../detector/runtime-detector.ts';
 import {
   installRequestIdentityGuard,
   parseFormBody,
@@ -294,7 +295,8 @@ class FrameworkRequest implements IRequest {
         (error: unknown) => bodyReadFailure(error),
       );
     }
-    return readBounded(this.#raw, this.#maxBodyBytes).catch((error: unknown) =>
+    const cancelOnRefusal = !releasesOnRefusal(this.ip, this.#raw.headers.get('content-type'));
+    return readBounded(this.#raw, this.#maxBodyBytes, cancelOnRefusal).catch((error: unknown) =>
       bodyReadFailure(error, this.#maxBodyBytes),
     );
   }
@@ -314,7 +316,9 @@ class FrameworkRequest implements IRequest {
  * at most one chunk beyond the limit is ever held. The reader is cancelled on
  * refusal rather than merely abandoned: an abandoned `ReadableStream` holds its
  * source open (the M70k HEAD-descriptor-leak class), which on a server means
- * the connection stays draining.
+ * the connection stays draining. The one exception is
+ * {@linkcode releasesOnRefusal}: Node's in-memory undici FormData producer can
+ * enqueue after cancel and crash the process, so that body releases its lock.
  *
  * `raw.body` is read only on this path. That matters on Node, where touching
  * `.body` materializes the full undici `Request` the lightweight facade exists
@@ -322,10 +326,15 @@ class FrameworkRequest implements IRequest {
  *
  * @param raw - The web-standard request
  * @param maxBodyBytes - The cap, in bytes
+ * @param cancelOnRefusal - False only where {@linkcode releasesOnRefusal} holds
  * @returns The body bytes
  * @throws {RequestBodyTooLargeError} When the body exceeds the cap
  */
-async function readBounded(raw: Request, maxBodyBytes: number): Promise<Uint8Array> {
+async function readBounded(
+  raw: Request,
+  maxBodyBytes: number,
+  cancelOnRefusal: boolean,
+): Promise<Uint8Array> {
   const stream = raw.body;
   if (stream === null) {
     // Framing headers were present but there is no stream: an empty body.
@@ -351,7 +360,17 @@ async function readBounded(raw: Request, maxBodyBytes: number): Promise<Uint8Arr
     // Releasing the lock is not enough — the source stays open until the
     // stream is cancelled. `cancel()` rejects on an already-errored stream,
     // which must not replace the refusal with a different failure.
-    await reader.cancel().catch(() => {});
+    if (cancelOnRefusal) await reader.cancel().catch(() => {});
+    else {
+      // undici's in-memory FormData producer can enqueue after cancel and crash Node.
+      // A request with a socket peer, or any request off Node, still cancels, so its
+      // socket stops draining on refusal.
+      try {
+        reader.releaseLock();
+      } catch {
+        /* Preserve the original body-read result. */
+      }
+    }
   }
 
   // One chunk is the overwhelmingly common case; returning it directly avoids
@@ -366,6 +385,36 @@ async function readBounded(raw: Request, maxBodyBytes: number): Promise<Uint8Arr
     offset += chunk.byteLength;
   }
   return body;
+}
+
+/** Only undici's generated, unquoted FormData content type; media types are case-insensitive. */
+const UNDICI_FORM_DATA = /^multipart\/form-data; boundary=----formdata-undici-0\d{11}$/i;
+
+/**
+ * Whether a capped read that refuses a body releases its reader instead of cancelling it.
+ *
+ * Only Node's in-memory undici FormData producer can enqueue after cancel and crash the
+ * process (`ERR_INVALID_STATE`), so only a Node host releases. There, a request with no socket
+ * peer is in-process (`app.fetch` on any adapter, including one forced by `platform`) or its
+ * socket is already closed, where cancelling drains nothing. A served request with a peer, and
+ * every request on Bun, Deno or Workers, cancels: their hosts can serve a peer-less request.
+ *
+ * @param ip - The request's normalized socket peer, if any
+ * @param contentType - The request's `content-type` header
+ * @param globals - Injectable global scope for host detection
+ * @returns True only for a peer-less undici FormData body on a Node host
+ * @internal
+ */
+export function releasesOnRefusal(
+  ip: string | undefined,
+  contentType: string | null,
+  globals: typeof globalThis = globalThis,
+): boolean {
+  return (
+    ip === undefined &&
+    UNDICI_FORM_DATA.test(contentType ?? '') &&
+    detectRuntime(globals) === 'node'
+  );
 }
 
 /**

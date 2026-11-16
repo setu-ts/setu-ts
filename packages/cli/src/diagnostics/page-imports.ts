@@ -54,6 +54,11 @@ const PAGE_ALIAS = '~/';
  */
 const TOKEN_MODULE = /^src\/modules\/[^/]+\/[^/]+\.token(?:\.[jt]s)?$/;
 
+// React Router @react-router/dev 8.5.1 vite.js server-only module rules.
+// Its client build refuses imports of these modules before they can enter the browser.
+const SERVER_FILE = /\.server(\.[cm]?[jt]sx?)?$/;
+const SERVER_DIRECTORY = /\/\.server\//;
+
 /**
  * Reports whether a token import written without `.ts` (`x.token` or
  * `x.token.js`) resolves to `x.token.ts`, as the bundler and type-checker see
@@ -366,6 +371,30 @@ interface PageWalk {
   appReal?: string;
 }
 
+/** Whether a path below `app/` (starting with `/`) matches React Router's two server-only rules. */
+function serverOnlyInApp(inApp: string): boolean {
+  return SERVER_FILE.test(inApp) || SERVER_DIRECTORY.test(inApp);
+}
+
+/**
+ * Whether a page file is a React Router server-only module under both of the
+ * ids a bundler may test: its real path (Vite's default) and the path it was
+ * reached by (`resolve.preserveSymlinks: true`). A file server-only under only
+ * one of them is scanned, so a symlink cannot move a page out of the check.
+ *
+ * @param walk - The walk, holding the real path of `app/`
+ * @param relative - The page's path as walked, starting with `app/`
+ * @param real - The page's real path, already confirmed inside `app/`
+ * @returns `true` only when both paths are a `.server` file or under a `.server/` directory
+ */
+function isServerOnly(walk: PageWalk, relative: string, real: string): boolean {
+  // realInsideApp records app/'s real path before it confirms any path inside it.
+  return (
+    serverOnlyInApp(real.slice(walk.appReal!.length)) &&
+    serverOnlyInApp(relative.slice('app'.length))
+  );
+}
+
 /**
  * Resolves a path through `realPath` and reports whether it stays inside
  * `app/`; the first path resolved is `app/` itself. Returns 'missing' for a
@@ -394,9 +423,10 @@ async function realInsideApp(
  * directory past {@linkcode MAX_PAGE_DEPTH} or beyond
  * {@linkcode MAX_PAGE_DIRECTORIES}, a directory or page a symlink places outside
  * `app/`, and an entry whose `stat` or `readdir` fails (`ELOOP`, `EACCES`). With
- * `realPath` available a directory reached twice through symlinks is walked
- * once, so a link loop costs one visit; without it the directory bound ends the
- * walk.
+ * `realPath` available a real directory is walked at most twice, once through a
+ * server-only path and once through any other, so a link loop costs at most two
+ * visits and a client-path alias of a `.server/` directory is still scanned;
+ * without it the directory bound ends the walk.
  */
 async function pageFiles(walk: PageWalk, prefix: string, depth = 0): Promise<void> {
   const { fs, dir } = walk;
@@ -413,8 +443,12 @@ async function pageFiles(walk: PageWalk, prefix: string, depth = 0): Promise<voi
       walk.unreadable.push(prefix);
       return;
     }
-    if (walk.seen.has(real)) return;
-    walk.seen.add(real);
+    // Keyed by whether the walked path is server-only too: under preserveSymlinks a
+    // client-path alias of a `.server/` directory is a client id, so it must not be
+    // skipped because the `.server/` path was walked first.
+    const key = `${SERVER_DIRECTORY.test(`${prefix.slice('app'.length)}/`) ? 's' : 'c'}:${real}`;
+    if (walk.seen.has(key)) return;
+    walk.seen.add(key);
   }
   let entries: readonly string[];
   try {
@@ -438,9 +472,21 @@ async function pageFiles(walk: PageWalk, prefix: string, depth = 0): Promise<voi
     } else if (stat.isFile && PAGE_FILE.test(entry)) {
       // A page file linked from outside `app/` is bundled like any other, so it
       // is resolved too: one that leaves `app/` is reported, never scanned as a page.
-      const outside =
-        fs.realPath !== undefined &&
-        (await realInsideApp(walk, fs.realPath.bind(fs), joinPath(dir, relative))) === 'outside';
+      const real =
+        fs.realPath === undefined
+          ? undefined
+          : await realInsideApp(walk, fs.realPath.bind(fs), joinPath(dir, relative));
+      const outside = real === 'outside';
+      // React Router tests the module id: the real path by default, the walked path
+      // under preserveSymlinks. Only a file server-only under both is skipped. A link
+      // inside a `.server/` directory that leaves app/ stays reported above.
+      if (
+        real !== undefined &&
+        real !== 'missing' &&
+        !outside &&
+        isServerOnly(walk, relative, real)
+      )
+        continue;
       (outside || stat.size > MAX_EXISTING_FILE_BYTES ? walk.unreadable : walk.pages).push(
         relative,
       );
@@ -456,7 +502,9 @@ export interface PageImportScan {
 }
 
 /**
- * Scans every `app/**\/*.{ts,tsx}` for kernel value imports. A project without
+ * Scans page modules under `app/` for kernel value imports, excluding React Router
+ * `.server` files and directories only after realpath confirms containment in `app/`.
+ * A project without
  * `app/` has no pages and yields nothing.
  *
  * @param fs - The filesystem to read through

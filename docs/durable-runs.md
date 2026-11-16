@@ -149,7 +149,10 @@ On Workers use `sweepIntervalMs: 0` and call `sweep()` from a Cron Trigger. Supp
 `background: (ctx, work) => ctx.services.get<ICloudflareBindings>(CAPABILITIES.CLOUDFLARE).waitUntil(work)`
 in application code, importing that interface from the Cloudflare plugin. A host may cut off work
 after its background lifetime; the sweep resumes from stored state. Runs do not execute in
-`ctx.defer`. Node, Deno and Bun keep the detached promise in process.
+`ctx.defer`. Node, Deno and Bun keep the detached promise in process. To start a run outside a
+request, for example from a queue job, call `startAs({ tenantId, principalId }, definition, input)`
+with a server-owned identity; it calls no background hook, so on Workers a run cut off by eviction
+resumes at the next sweep.
 
 Await `sweep()` or pass its promise to the Cron Trigger's execution context. It claims its whole
 batch and purges retention first, then waits for the work it recovered to finish or park, keeping

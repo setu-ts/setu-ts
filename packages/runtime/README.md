@@ -118,13 +118,16 @@ the one way to say unbounded. A value that is not a non-negative integer throws 
 `RuntimePlugin(...)`; `NaN` in particular would make every comparison against the cap `false` and
 silently disable the bound, and `Number()` of an unset environment variable is exactly `NaN`.
 
-For in-process oversized-upload tests on Node 24 or Node 26 (up to 26.12.0), build the multipart
-request body from a `Blob` or use `inject()` instead of
-`app.fetch(new Request(..., { body: formData }))` with a file. Those releases bundle undici
-7.20.0–8.11.2, whose `FormData` request body throws an uncaught `ERR_INVALID_STATE` when the runtime
-cancels it after the cap is exceeded; undici 8.12.0 fixes it, and no released Node bundles that yet.
-Node 22, Bun and Deno are unaffected, as are real-socket uploads and `inject()`. The runtime still
-cancels oversized bodies to enforce the read bound.
+In-process oversized `FormData` requests on Node still reject with the same 413. On a Node host, a
+request with no socket peer (an in-process `app.fetch()`, on any adapter `platform` selects) that
+carries undici's exact generated multipart content type releases the reader lock instead of
+cancelling: undici's in-memory producer can enqueue after cancel and throw an uncaught
+`ERR_INVALID_STATE`. A request with a peer, every other body, and every request on Bun, Deno or
+Workers keep cancellation, so an oversized socket upload stops draining. Two cases also release, and
+the 413 still holds in both: socket traffic an application forwards through `app.fetch()` itself,
+which has no peer, and a Worker without a global `navigator` (`no_global_navigator`, or a
+compatibility date before 2022-03-21), which is detected as Node. No Blob or `inject()` workaround
+is required.
 
 A client- or bidi-streaming gRPC call is the exception: the kernel hands its unread body to the
 procedure, and `GrpcPlugin({ readMaxBytes })` bounds each message instead. A total cap would end

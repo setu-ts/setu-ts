@@ -65,6 +65,7 @@ export class RedisBackplane implements IRealtimeBackplane {
 
   #publisher: IRedisBackplaneClient | undefined;
   #subscriber: IRedisBackplaneClient | undefined;
+  #owned = false;
   /** Watches on the publisher (first) and subscriber; detached on close. */
   #watches: ConnectionWatch[] = [];
   #listener: ((channel: string, message: string) => void) | undefined;
@@ -82,8 +83,8 @@ export class RedisBackplane implements IRealtimeBackplane {
    */
   #generation = 0;
   /**
-   * Ends an open's pending SUBSCRIBE (V12-53) or publisher-ready wait (M139f
-   * audit L1) when `close()` lands. The two are sequential, so one field holds
+   * Ends injected connect, SUBSCRIBE or publisher-ready waits when `close()` lands.
+   * These waits are sequential, so one field holds
    * whichever is in flight.
    */
   #openWait: AbortController | undefined;
@@ -223,7 +224,10 @@ export class RedisBackplane implements IRealtimeBackplane {
     // Detached on every path that does not keep the connections.
     const watches: ConnectionWatch[] = [];
     const detachAll = (): void => {
-      for (const watch of watches) watch.detach();
+      retireWatches(
+        watches,
+        owned ? [publisher, subscriber].filter((client) => client !== undefined) : [],
+      );
     };
 
     if (this.#options.client !== undefined && this.#options.subscriber !== undefined) {
@@ -235,16 +239,28 @@ export class RedisBackplane implements IRealtimeBackplane {
       // built one's; the attach is structural, so a client without `on` is
       // left alone.
       watches.push(watchConnection(publisher, reporter), watchConnection(subscriber, reporter));
+      const wait = new AbortController();
+      this.#openWait = wait;
       try {
         for (const client of [publisher, subscriber]) {
+          if (generation !== this.#generation) {
+            detachAll();
+            return;
+          }
           if (client.status === 'wait' && typeof client.connect === 'function') {
-            await client.connect();
+            const connected = await settledUnlessCancelled(client.connect(), wait.signal);
+            if (!connected) {
+              detachAll();
+              return;
+            }
           }
         }
       } catch (error) {
         // The injected pair stays the caller's; only our listeners come off (N-3).
         detachAll();
         throw error;
+      } finally {
+        if (this.#openWait === wait) this.#openWait = undefined;
       }
     } else {
       const module = this.#options.module ?? (await loadRedisModule());
@@ -349,6 +365,7 @@ export class RedisBackplane implements IRealtimeBackplane {
 
     this.#publisher = publisher;
     this.#subscriber = subscriber;
+    this.#owned = owned;
     this.#listener = listener;
     this.#watches = watches;
     this.#installProbe(publisher, subscriber);
@@ -539,6 +556,8 @@ export class RedisBackplane implements IRealtimeBackplane {
     this.#handlers.clear();
     const subscriber = this.#subscriber;
     const publisher = this.#publisher;
+    const owned = this.#owned;
+    this.#owned = false;
     const listener = this.#listener;
     this.#subscriber = undefined;
     this.#publisher = undefined;
@@ -575,7 +594,10 @@ export class RedisBackplane implements IRealtimeBackplane {
       await this.#release(publisher, failures);
     }
     // A shared injected client must not report into this closed backplane.
-    for (const watch of watches) watch.detach();
+    retireWatches(
+      watches,
+      owned ? [subscriber, publisher].filter((client) => client !== undefined) : [],
+    );
     if (failures.length > 0) {
       throw failures[0];
     }
@@ -762,6 +784,30 @@ function forceClose(clients: readonly IRedisBackplaneClient[]): void {
     } catch {
       // Best-effort: the backplane is closing and has no caller to inform.
     }
+  }
+}
+
+/** Keeps retiring owned clients quiet until their final end event, then removes the sink. */
+function retireWatches(
+  watches: readonly ConnectionWatch[],
+  ownedClients: readonly IRedisBackplaneClient[],
+): void {
+  for (const watch of watches) watch.detach();
+  for (const client of ownedClients) {
+    if (client.status === 'end' || typeof client.on !== 'function') continue;
+    const ignoreError = (): void => {};
+    const onEnd = (): void => {
+      const target = client as {
+        off?: (event: string, listener: () => void) => unknown;
+        removeListener?: (event: string, listener: () => void) => unknown;
+      };
+      const remove = typeof target.off === 'function' ? target.off : target.removeListener;
+      if (typeof remove !== 'function') return;
+      remove.call(client, 'error', ignoreError);
+      remove.call(client, 'end', onEnd);
+    };
+    client.on('error', ignoreError);
+    client.on('end', onEnd);
   }
 }
 

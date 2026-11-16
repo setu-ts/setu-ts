@@ -1,15 +1,15 @@
 /**
- * Shared form-CSRF exemption: path exclusion and the credential-based bearer
+ * Shared form-CSRF exemption: path exclusion and the header-credential
  * rule.
  *
- * A bearer request is exempt ONLY when a header-credential strategy
+ * A header-credential request is exempt ONLY when a header-credential strategy
  * authenticated it AND the request restored no session (the session parked under
  * `SESSION_STATE_KEY`, if any, is new). A request carrying a valid session
  * cookie must present a CSRF token even with a valid bearer token, because the
  * handler would otherwise act on that browser's session (M113e, L3). A
  * non-browser API client sends no session cookie, so its new session keeps the
  * exemption. It fails closed when the session or the credential source is
- * missing.
+ * missing. Non-Bearer Authorization prevents exemption, even with X-API-Key.
  *
  * The middleware and {@linkcode verifyCsrfToken} use this one implementation
  * so an action verifying inline cannot disagree with the global policy.
@@ -46,14 +46,14 @@ export function isCsrfExcluded(ctx: IRequestContext, exclude: CsrfFormOptions['e
 }
 
 /**
- * Whether the request carries a bearer credential (M113e, V9-27).
+ * Whether Authorization carries an ambient or unrecognized credential.
  *
  * @param headers - The request headers
- * @returns `true` for `Authorization: Bearer <token>`
+ * @returns `true` for any present non-Bearer Authorization value
  */
-export function isBearerRequest(headers: Headers): boolean {
+function carriesAmbientAuthorization(headers: Headers): boolean {
   const value = headers.get('authorization');
-  return value !== null && BEARER.test(value);
+  return value !== null && !BEARER.test(value);
 }
 
 /**
@@ -67,7 +67,7 @@ export const NO_COMMIT_STATE_KEY = 'session-plugin:no-commit';
 
 /**
  * Whether the bearer rule exempts this request: `exemptBearer` is on, the
- * request carries `Authorization: Bearer <token>`, a `'header'`-credential
+ * request carries no non-Bearer `Authorization`, a `'header'`-credential
  * strategy authenticated it (recorded under `CREDENTIAL_SOURCE_STATE_KEY` by the
  * authentication middleware), AND it restored no session — the session
  * `session-plugin` parked under `SESSION_STATE_KEY` is new (`isNew === true`).
@@ -88,7 +88,7 @@ export function isBearerExempt(ctx: IRequestContext, config: ResolvedCsrfConfig)
   const session = ctx.state.get(SESSION_STATE_KEY) as ISession | undefined;
   return (
     config.exemptBearer &&
-    isBearerRequest(ctx.request.headers) &&
+    !carriesAmbientAuthorization(ctx.request.headers) &&
     ctx.state.get(CREDENTIAL_SOURCE_STATE_KEY) === 'header' &&
     session?.isNew === true
   );

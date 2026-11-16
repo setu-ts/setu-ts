@@ -129,7 +129,7 @@ import type { ${names.pascal}Service } from './${names.kebab}.service.ts';
 /**
  * The ${names.kebab} service's token. Pages import this module by value, so it
  * holds nothing else: \`setu check\` admits \`*.token.ts\` imports from \`~kernel/*\`
- * and refuses every other value import (setu.E017).
+ * and refuses every other value import (setu.E017), except in React Router .server modules.
  */
 export const ${names.screaming} = requestServiceToken<${names.pascal}Service>('module.${names.kebab}');
 `;
@@ -211,7 +211,7 @@ export const middleware = [requireUser];
 /**
  * Reads the ${names.kebab} module's service for THIS request: the same instance
  * \`/api/${names.kebab}\` uses. Only the type and the token are imported from
- * \`~kernel/*\`; \`setu check\` refuses any other value import (setu.E017).
+ * \`~kernel/*\`; \`setu check\` refuses any other value import (setu.E017), except in React Router .server modules.
  */
 export async function loader({ context }: { context: AppLoadContext }) {
   const items: readonly ${p}[] = await getService(context, ${names.screaming}).list();

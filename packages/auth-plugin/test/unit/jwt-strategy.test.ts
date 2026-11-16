@@ -8,6 +8,7 @@ import { JwtService } from '../../src/services/jwt-service.ts';
 import { MemoryAccessTokenRevocationStore } from '../../src/stores/access-token-revocation-store.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 import type { IRequest } from '@setu-ts/common';
+import { AuthPluginConfigurationError } from '../../src/errors.ts';
 
 describe('JwtStrategy', () => {
   let jwt: JwtService;
@@ -20,6 +21,11 @@ describe('JwtStrategy', () => {
       algorithm: 'HS256',
     });
     strategy = new JwtStrategy({ jwtService: jwt });
+  });
+  it.each(['cookie', 'COOKIE', 'Cookie'])('refuses ambient JWT header %s', (header) => {
+    expect(() => new JwtStrategy({ jwtService: jwt, header })).toThrow(
+      AuthPluginConfigurationError,
+    );
   });
 
   function createRequest(headers: Record<string, string> = {}): IRequest {

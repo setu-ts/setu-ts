@@ -10,7 +10,12 @@ import type {
   IPluginContext,
   IServiceDiscovery,
 } from '@setu-ts/common';
-import { CAPABILITIES, createConnectionErrorReporter, PLUGIN_PRIORITY } from '@setu-ts/common';
+import {
+  CAPABILITIES,
+  createConnectionErrorReporter,
+  describeError,
+  PLUGIN_PRIORITY,
+} from '@setu-ts/common';
 import type { DiscoveryProvider, SelfRegistration } from '../interfaces/index.ts';
 import type { ServiceDiscoveryPluginOptions } from '../options.ts';
 import { resolveOptions } from '../options.ts';
@@ -186,7 +191,7 @@ async function deregister(
     await provider.deregisterSelf?.(registration);
   } catch (error) {
     ctx.logger?.warn('service-discovery: deregistration failed', {
-      error: error instanceof Error ? error.message : String(error),
+      error: describeError(error),
     });
     return;
   }
