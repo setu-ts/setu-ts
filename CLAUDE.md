@@ -839,7 +839,7 @@ here.
   `DATABASE_URL` and Redis guidance from `add`, a strict `g schema`, a `Server-Timing` middleware,
   PascalCase event names, truthful README/comment text, brief refresh hints and devtool entries; 29
   V12 rows; plus `setu add` prompts for every choice, backend guidance for every broker, example
-  apps on the current scaffold, and a `vector-store` readiness indicator) — complete (PR pending).
+  apps on the current scaffold, and a `vector-store` readiness indicator) — complete (PR #594).
 - **Next milestone** — the remaining M139 letters, then M140e (generated code read as code).
 
 ## Verification (run before declaring any work done)

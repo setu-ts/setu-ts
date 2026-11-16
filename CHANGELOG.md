@@ -35,42 +35,42 @@ All notable changes to this project are documented here. The format follows
   existing file keep their mode. `@setu-ts/cli/main` exports `nodeRuntime()`, the Node runtime both
   executables share. The workspace READMEs say which members use the broker, why the `:dev` tag can
   go stale, and why Kubernetes needs no start order.
-- **`@setu-ts/cli` (M140d, PR pending).** `setu add validation` registers `ValidationPlugin()`, and
+- **`@setu-ts/cli` (M140d, #594).** `setu add validation` registers `ValidationPlugin()`, and
   `setu check` reports it when installed but unregistered (V12-62). `setu add database` writes
   `DATABASE_URL` with a local default for Drizzle and Prisma (V12-82); a Redis store prints what now
   connects to Redis at startup, how to start it, and the offline `createTestApp` override (V12-70),
   and Redis comments no longer describe messaging in a cache-only project (V12-100). `setu generate`
   accepts `--yes` (V12-101) and, like `sync` and `devtool enable`, reminds a project with an agent
   brief to refresh it (V12-125).
-- **`@setu-ts/cli` (M140d, PR pending).** Generated code: `g schema` emits `z.strictObject({})` and
-  prints how to bind it (V12-65); `g middleware` sends a `Server-Timing` duration measured with
+- **`@setu-ts/cli` (M140d, #594).** Generated code: `g schema` emits `z.strictObject({})` and prints
+  how to bind it (V12-65); `g middleware` sends a `Server-Timing` duration measured with
   `runtime.hrtime()` (V12-87); event type names are PascalCase like command names, and event samples
   state in-process, at-most-once delivery (V12-86, V12-84); `g job` prints `setu add queue` when the
   queue is missing (V12-85); a class-based module service keeps its records on the injectable
   instance (V12-95), validated services drop dead fallbacks (V12-99), and the service and showcase
   comments no longer blame Deno or repeat a done step (V12-96, V12-97).
-- **`@setu-ts/cli` (M140d, PR pending).** Templates: READMEs name the microservice's in-memory
-  transports (V12-73), claim DI validation only for decorated projects (V12-78), use
-  `generate module billing` (V12-79) and say `/metrics`, `/docs` and `/openapi.json` are on the
-  application port (V12-94); `main.ts` reports a failed shutdown on stderr without a logger
-  (V12-81); the config's devtool JSDoc is true with or without `main.dev.ts` (V12-98). Full-stack:
-  module controllers throw `notFound`/`badRequest` (V12-90), the module unit test drives the service
-  without a port (V12-93), React is only in `dependencies` (V12-91), and the login, guard and nav
-  comments are accurate, with `g module --page` printing the `APP_NAV` entry (V12-89, V12-92).
-- **`@setu-ts/cli` (M140d, PR pending).** Agent brief and devtool: the validation rule appears only
-  with `validation-plugin` installed (V12-126); the brief lists `main.dev.ts` and the managed
-  diagnostics allowlist and says `dev` needs the launcher's credentials (V12-128); `start` says to
-  build first whenever a build command exists; the Node devtool `dev` script loads the project's env
-  files and the telemetry preload (V12-127).
-- **`@setu-ts/cli` (M140d, PR pending).** Interactive questions (`setu new`, `setu add`) are an
-  arrow-key list: ↑/↓ or `j`/`k` move, a number jumps, Enter chooses, Escape or Ctrl+C cancels. The
-  highlight is a 24-bit gradient, bold cyan on a 16/256-colour terminal, plain under `NO_COLOR`, and
-  a chosen answer collapses to one line, which `setu new` no longer prints a second time
-  (`PromptSelection`'s answer carries `shown: true`). A redraw counts the rows a wrapped line fills,
-  and keys pasted in one chunk are each read. A terminal that cannot read single keys, or
-  `TERM=dumb`, keeps the typed answer.
-- **`@setu-ts/cli` (M140d, PR pending).** `setu add` guidance runs as printed. The `qdrant` and
-  `pgvector` vector stores get a CLI-written `src/vector-store.ts`, so the config stays readable to
+- **`@setu-ts/cli` (M140d, #594).** Templates: READMEs name the microservice's in-memory transports
+  (V12-73), claim DI validation only for decorated projects (V12-78), use `generate module billing`
+  (V12-79) and say `/metrics`, `/docs` and `/openapi.json` are on the application port (V12-94);
+  `main.ts` reports a failed shutdown on stderr without a logger (V12-81); the config's devtool
+  JSDoc is true with or without `main.dev.ts` (V12-98). Full-stack: module controllers throw
+  `notFound`/`badRequest` (V12-90), the module unit test drives the service without a port (V12-93),
+  React is only in `dependencies` (V12-91), and the login, guard and nav comments are accurate, with
+  `g module --page` printing the `APP_NAV` entry (V12-89, V12-92).
+- **`@setu-ts/cli` (M140d, #594).** Agent brief and devtool: the validation rule appears only with
+  `validation-plugin` installed (V12-126); the brief lists `main.dev.ts` and the managed diagnostics
+  allowlist and says `dev` needs the launcher's credentials (V12-128); `start` says to build first
+  whenever a build command exists; the Node devtool `dev` script loads the project's env files and
+  the telemetry preload (V12-127).
+- **`@setu-ts/cli` (M140d, #594).** Interactive questions (`setu new`, `setu add`) are an arrow-key
+  list: ↑/↓ or `j`/`k` move, a number jumps, Enter chooses, Escape or Ctrl+C cancels. The highlight
+  is a 24-bit gradient, bold cyan on a 16/256-colour terminal, plain under `NO_COLOR`, and a chosen
+  answer collapses to one line, which `setu new` no longer prints a second time (`PromptSelection`'s
+  answer carries `shown: true`). A redraw counts the rows a wrapped line fills, and keys pasted in
+  one chunk are each read. A terminal that cannot read single keys, or `TERM=dumb`, keeps the typed
+  answer.
+- **`@setu-ts/cli` (M140d, #594).** `setu add` guidance runs as printed. The `qdrant` and `pgvector`
+  vector stores get a CLI-written `src/vector-store.ts`, so the config stays readable to
   `setu check`, plus their connection variable, a Compose service, the client package and import
   lines. `smtp` mail gets a local Mailpit and the test override. Every printed registration names
   its imports. Mailpit, Qdrant and pgvector add the README's local services section.
@@ -86,28 +86,28 @@ All notable changes to this project are documented here. The format follows
   `add cloudflare` registers `CloudflarePlugin` with `waitUntil` in a generated minimal, `rest` or
   class-based config and renames the factory's `_waitUntil` parameter; other configs get both steps
   printed.
-- **`@setu-ts/cli` (M140d, PR pending).** `setu add` at a terminal now asks for every left-out
-  choice, not only mail's provider, the database type and the vector-store adapter: `--dialect`
-  after Drizzle, and the transport backends `--broker`, `--queue`, `--store`, `--lock` and
-  `--backplane`, default first. A flag shared by two listed packages is asked once; a workspace
-  member and a Workers project are not asked for a transport backend; a given `--dialect` or
-  `--redis-client` narrows the question to `--type drizzle` or `redis`; and nothing is asked when
-  the flags given would be refused. One table drives the prompt and `setu add --help`. `--yes` and a
-  non-terminal still take every default.
-- **`@setu-ts/vector-store-plugin`, `@setu-ts/common`, `@setu-ts/cloudflare-plugin` (M140d, PR
-  pending).** `VectorStorePlugin` registers a `vector-store` readiness indicator, so a replica whose
-  vector backend stops answering leaves `/ready` instead of failing every search. It calls the new
-  optional `IVectorStoreAdapter.isHealthy()` through a cached, time-bounded probe; the Qdrant,
-  pgvector, Vectorize and memory adapters implement it without touching data; Qdrant's checks a
-  collection, so a revoked API key reads as down, and pgvector's reports a saturated pool as
-  `reachable: 'unknown'` while its statements keep completing or none of its own is running, as
-  database-plugin does. An adapter without it also stays up as `reachable: 'unknown'`. To keep the
-  previous behaviour, `HealthPlugin({ readiness: { exclude: ['vector-store'] } })`.
-- **`@setu-ts/cli` (M140d, PR pending).** `setu add` with a connected backend (RabbitMQ, NATS,
-  Kafka, Pub/Sub, Service Bus, not only Redis) that writes the call says the app and its tests
-  connect at startup, prints the `docker compose` command and the `createTestApp` override, and
-  gives a standalone README the "Local transport services" section, which now also says a container
-  needs each connection variable passed in. A re-add with a backend rewrites the bare
+- **`@setu-ts/cli` (M140d, #594).** `setu add` at a terminal now asks for every left-out choice, not
+  only mail's provider, the database type and the vector-store adapter: `--dialect` after Drizzle,
+  and the transport backends `--broker`, `--queue`, `--store`, `--lock` and `--backplane`, default
+  first. A flag shared by two listed packages is asked once; a workspace member and a Workers
+  project are not asked for a transport backend; a given `--dialect` or `--redis-client` narrows the
+  question to `--type drizzle` or `redis`; and nothing is asked when the flags given would be
+  refused. One table drives the prompt and `setu add --help`. `--yes` and a non-terminal still take
+  every default.
+- **`@setu-ts/vector-store-plugin`, `@setu-ts/common`, `@setu-ts/cloudflare-plugin` (M140d, #594).**
+  `VectorStorePlugin` registers a `vector-store` readiness indicator, so a replica whose vector
+  backend stops answering leaves `/ready` instead of failing every search. It calls the new optional
+  `IVectorStoreAdapter.isHealthy()` through a cached, time-bounded probe; the Qdrant, pgvector,
+  Vectorize and memory adapters implement it without touching data; Qdrant's checks a collection, so
+  a revoked API key reads as down, and pgvector's reports a saturated pool as `reachable: 'unknown'`
+  while its statements keep completing or none of its own is running, as database-plugin does. An
+  adapter without it also stays up as `reachable: 'unknown'`. To keep the previous behaviour,
+  `HealthPlugin({ readiness: { exclude: ['vector-store'] } })`.
+- **`@setu-ts/cli` (M140d, #594).** `setu add` with a connected backend (RabbitMQ, NATS, Kafka,
+  Pub/Sub, Service Bus, not only Redis) that writes the call says the app and its tests connect at
+  startup, prints the `docker compose` command and the `createTestApp` override, and gives a
+  standalone README the "Local transport services" section, which now also says a container needs
+  each connection variable passed in. A re-add with a backend rewrites the bare
   `CachePlugin()`-style call the CLI wrote rather than printing beside it. The printed `smtp` and
   `sendgrid` mail calls read `SMTP_HOST`/`SMTP_PORT` or `SENDGRID_API_KEY`, written to the dotenv
   file (on Workers, supply them as vars or secrets). A SQLite database is ignored by Git and Docker,
