@@ -881,7 +881,8 @@ and a light/dark/system toggle. Run `npx shadcn add <component>` to add more com
 are `--provider` (mail), `--type` (database), `--adapter` (vector-store), and `--dialect` for
 Drizzle. A terminal asks for each one left out, and for each left-out transport backend (`--broker`,
 `--queue`, `--store`, `--lock`, `--backplane`) outside a workspace member or Workers project, and
-for `--dialect` after Drizzle is chosen; `--yes` takes every default. Existing peer pins, scripts
+for `--dialect` after Drizzle is chosen; a Workers project is not asked for the vector-store
+adapter, since only `memory` applies there. `--yes` takes every default. Existing peer pins, scripts
 and config files are preserved. Drizzle and Prisma add schema migration scripts and create-only
 configs; schemas and client instances belong to the application. Deno prints schema commands and
 Workers writes none. `view --plugin-only` installs only the capability and compatible JSX settings;

@@ -341,7 +341,9 @@ describe('setu add backend guidance', () => {
       expect(p.err.text()).toContain("VectorizeVectorStore from '@setu-ts/cloudflare-plugin'");
       expect(p.read('package.json')).not.toContain('vector-store-plugin');
     }
+    (p.out.lines as string[]).length = 0;
     expect(await p.run(['add', 'vector-store', '--adapter', 'memory']), p.err.text()).toBe(0);
+    expect(p.out.text()).toContain('new VectorizeVectorStore({ index: env.DOCUMENTS_INDEX })');
   });
 
   it('names the security guard a marked MCP route needs, and prints di and sdk guidance', async () => {

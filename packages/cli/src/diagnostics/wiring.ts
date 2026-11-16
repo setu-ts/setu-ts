@@ -146,7 +146,7 @@ export function unregisteredPluginFindings(
   const transportModule = calledOutsideImports(config, 'transportPlugins') === true;
   // A Workers config's createApp takes `waitUntil` (or `_waitUntil`); there the
   // cache and store come from CloudflarePlugin's KV and R2 arms, never an
-  // in-memory CachePlugin or StoragePlugin, which `setu add` declines to insert.
+  // in-memory CachePlugin or StoragePlugin, which `setu add` refuses there.
   const workers = /\b_?waitUntil\??\s*:/.test(maskComments(config) ?? config);
   for (const [pkg, { symbol }] of candidates) {
     if (pkg === 'grpc-plugin' && transportModule) continue;

@@ -2193,8 +2193,9 @@ async function askOpenChoices(
 
 /**
  * The Qdrant client, pinned to the release of the Compose image
- * (`VECTOR_STORE_COMPOSE.qdrant`): the client refuses a server more than one
- * minor version away, so an unpinned install drifts out of range of the image.
+ * (`VECTOR_STORE_COMPOSE.qdrant`): the client warns on every start against a
+ * server more than one minor version away, so an unpinned install drifts out
+ * of range of the image.
  */
 const QDRANT_CLIENT_SPEC = '@qdrant/js-client-rest@1.20.0';
 
@@ -3235,6 +3236,13 @@ async function addOne(
   // module, its connection in the dotenv pair, and a local Compose service, so
   // the printed registration runs as pasted and `setu check` can still read the
   // configuration (templates/vector-store-module.ts).
+  // Workers takes only the memory adapter from this command, and an isolate's
+  // memory does not outlive it: name the durable index the platform offers.
+  if (bare === 'vector-store-plugin' && runtime === 'cloudflare-workers') {
+    deps.log(
+      "  MemoryVectorStore keeps vectors in one isolate's memory, lost between requests. For a durable index, pass a Vectorize binding: adapter: new VectorizeVectorStore({ index: env.DOCUMENTS_INDEX }), from '@setu-ts/cloudflare-plugin' (its README's Vectorize section).",
+    );
+  }
   if (bare === 'vector-store-plugin' && (backendArm === 'qdrant' || backendArm === 'pgvector')) {
     const modulePath = joinPath(dir, VECTOR_STORE_MODULE_PATH);
     if ((await readExistingText(deps.fs, modulePath)) === undefined) {
@@ -3925,7 +3933,8 @@ function printAddHelp(log: (message: string) => void): void {
     log(`--${choice.flag} ${choice.values().join('|')} selects ${targets}${after}.`);
   }
   log('In a terminal, each of these that is left out is asked, default first; a workspace member');
-  log('and a Workers project are not asked for a transport backend. A given --dialect offers only');
+  log('and a Workers project are not asked for a transport backend, nor Workers for the');
+  log('vector-store adapter (only memory applies there). A given --dialect offers only');
   log('--type drizzle, and a given --redis-client only redis backends. Nothing is asked when the');
   log('flags given would be refused. --yes, -y takes every default without prompting.');
   log('');
