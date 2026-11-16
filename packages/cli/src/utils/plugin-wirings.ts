@@ -37,3 +37,32 @@ export const ZERO_CONFIG_WIRINGS: ReadonlyMap<string, IPluginWiring> = new Map([
   ['sse-plugin', { symbol: 'SsePlugin' }],
   ['realtime-backplane-plugin', { symbol: 'RealtimeBackplanePlugin' }],
 ]);
+
+/**
+ * Providers that need options, so `setu add` prints their registration rather
+ * than inserting it. `setu check` (W006) reports an installed one with no call,
+ * like a zero-config provider: an installed package nothing registers is the
+ * same mistake whichever way the call was meant to arrive. `auth-plugin` is not
+ * listed: its quota and error helpers (`createQuota`, `respondQuotaExceeded`)
+ * are used without registering `AuthPlugin`, so an installed copy with no call
+ * is not evidence of a missing registration.
+ * @since 0.13.0
+ */
+export const CONFIGURED_PROVIDERS: ReadonlyMap<string, IPluginWiring> = new Map([
+  ['session-plugin', { symbol: 'SessionPlugin' }],
+  ['telemetry-plugin', { symbol: 'TelemetryPlugin' }],
+  ['feature-flags-plugin', { symbol: 'FeatureFlagsPlugin' }],
+  ['localization-plugin', { symbol: 'LocalizationPlugin' }],
+  ['multi-tenancy-plugin', { symbol: 'MultiTenancyPlugin' }],
+  ['notification-plugin', { symbol: 'NotificationPlugin' }],
+  ['service-discovery-plugin', { symbol: 'ServiceDiscoveryPlugin' }],
+  ['static-plugin', { symbol: 'StaticPlugin' }],
+  ['graphql-plugin', { symbol: 'GraphqlPlugin' }],
+  ['grpc-plugin', { symbol: 'GrpcPlugin' }],
+  ['database-plugin', { symbol: 'DatabasePlugin' }],
+  ['vector-store-plugin', { symbol: 'VectorStorePlugin' }],
+  ['mcp-plugin', { symbol: 'McpPlugin' }],
+  ['di-plugin', { symbol: 'DiPlugin' }],
+  ['cloudflare-plugin', { symbol: 'CloudflarePlugin' }],
+  ['react-router-plugin', { symbol: 'ReactRouterPlugin' }],
+]);

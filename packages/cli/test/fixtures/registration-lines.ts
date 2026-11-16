@@ -20,7 +20,7 @@ import { ServiceDiscoveryPlugin } from '@setu-ts/service-discovery-plugin';
 import { SessionPlugin } from '@setu-ts/session-plugin';
 import { StaticPlugin } from '@setu-ts/static-plugin';
 import { MemoryVectorStore, VectorStorePlugin } from '@setu-ts/vector-store-plugin';
-import { PgVectorStore, QdrantVectorStore } from '@setu-ts/vector-store-plugin';
+import type { IVectorStoreAdapter } from '@setu-ts/common';
 import { MailPlugin } from '@setu-ts/mail-plugin';
 import type { DatabasePluginOptions } from '@setu-ts/database-plugin';
 
@@ -42,8 +42,8 @@ declare const prismaClient: Extract<
   DatabasePluginOptions,
   { type: 'prisma' }
 >['options']['prismaClient'];
-declare const db: ConstructorParameters<typeof PgVectorStore>[0]['db'];
-declare const client: ConstructorParameters<typeof QdrantVectorStore>[0]['client'];
+/** Stands in for the factory `setu add vector-store` writes to src/vector-store.ts. */
+declare function vectorStoreAdapter(): IVectorStoreAdapter;
 declare const databaseUrl: string;
 declare const region: string;
 declare const endpoint: string;
@@ -68,9 +68,7 @@ export const PRINTED_REGISTRATIONS = [
   DatabasePlugin({ type: 'cosmos', options: { endpoint, key, database, containers: {} } }),
   DatabasePlugin({ type: 'bigtable', options: { projectId, instance, tables: {} } }),
   // prettier-ignore
-  VectorStorePlugin({ adapter: new PgVectorStore({ db }), collections: [{ name: 'documents', dimensions: 768 }] }),
-  // prettier-ignore
-  VectorStorePlugin({ adapter: new QdrantVectorStore({ client }), collections: [{ name: 'documents', dimensions: 768 }] }),
+  VectorStorePlugin({ adapter: vectorStoreAdapter(), collections: [{ name: 'documents', dimensions: 768 }] }),
   AuthPlugin({ jwt: {}, rbac: { roles: {} } }),
   SessionPlugin(),
   GrpcPlugin({ services: [] }),

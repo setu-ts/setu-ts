@@ -749,6 +749,11 @@ host with logging also asks `Logger?`, with the runtime's default first; Workers
 only. Every prompted value is expressible as a flag, so prompts are never a second way to configure
 a project, and `--dry-run` stays exact.
 
+Each question is a list: ↑/↓ (or `j`/`k`) moves the highlight, a number jumps to that option, Enter
+chooses and Escape or Ctrl+C cancels. The highlight is a cyan-to-violet gradient on a 24-bit colour
+terminal, bold cyan on a 16/256-colour one, and plain under `NO_COLOR`. A terminal that cannot read
+single keys gets a typed answer instead. `setu add` asks its backend questions the same way.
+
 Non-interactive by construction in three layers: `runCli`'s dependency bundle takes prompting as an
 OPTIONAL `ask` member no programmatic caller passes; the installed executable supplies it only when
 stdin is a terminal; and the reader answers `null` once input ends. All three fail closed to the
@@ -881,7 +886,8 @@ configs; schemas and client instances belong to the application. Deno prints sch
 Workers writes none. `view --plugin-only` installs only the capability and compatible JSX settings;
 it is the full-stack default and refuses `--module`. `mcp` leaves `setu.config.ts` unchanged and
 prints `McpPlugin({})` with the note that the app boots with it only once at least one route is
-marked with `mcpTool()` or `@McpTool()`.
+marked with `mcpTool()` or `@McpTool()`, and that each marked route also needs a security guard
+(`publicRoute()` or `requireAuth()`, or `@Public()`) or `schema.security`.
 
 Worker tasks named `*.task.ts` referenced by a literal
 `new URL('./src/tasks/hash.task.ts', import.meta.url)` are built by `setu build` and their URLs

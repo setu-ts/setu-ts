@@ -125,6 +125,7 @@ import {
   type RedisClient,
   type BrokerName,
   type BrokerSpec,
+  type ComposeBacking,
 } from '../workspace/transport.ts';
 import { workspaceProfile } from '../workspace/runtime-profile.ts';
 import { CLIENT_RANGES } from '../templates/client-dependencies.ts';
@@ -135,6 +136,13 @@ import {
   NODE_REDIS_MODULE_PATH,
   nodeRedisModuleFile,
 } from '../templates/node-redis.ts';
+import {
+  VECTOR_STORE_COMPOSE,
+  VECTOR_STORE_CONNECTION,
+  VECTOR_STORE_FACTORY,
+  VECTOR_STORE_MODULE_PATH,
+  vectorStoreModuleFile,
+} from '../templates/vector-store-module.ts';
 import {
   callArguments,
   callsIdentifier,
@@ -396,6 +404,7 @@ function registrationLine(bare: string): string | undefined {
   const zero = ZERO_CONFIG_WIRINGS.get(bare);
   if (zero !== undefined) return `${zero.symbol}()`;
   if (bare === 'mcp-plugin') return 'McpPlugin({})';
+  if (bare === 'di-plugin') return 'DiPlugin()';
   // `rbac` is what registers the authorization service a generated guard asks;
   // without it every permission check answers 501.
   if (bare === 'auth-plugin') {
@@ -592,11 +601,37 @@ function printWiringNote(
   log: (line: string) => void,
   seam?: AddSeam,
   transportArgs?: string,
+  runtime?: TargetRuntime,
 ): void {
-  if (bare === 'mcp-plugin')
+  // On Workers an in-memory cache or store lives in one isolate, so a write one
+  // request makes is missing in the next; CloudflarePlugin serves both from KV
+  // and R2, and a second provider of the capability would refuse startup.
+  const workersArm =
+    runtime === 'cloudflare-workers'
+      ? bare === 'cache-plugin'
+        ? { option: "cache: { binding: 'CACHE_KV' }", block: 'KV' }
+        : bare === 'storage-plugin'
+          ? { option: "storage: { binding: 'UPLOADS' }", block: 'R2' }
+          : undefined
+      : undefined;
+  if (workersArm !== undefined) {
+    log(
+      `  On Cloudflare Workers, back it with CloudflarePlugin instead of an in-memory ${bare === 'cache-plugin' ? 'CachePlugin()' : 'StoragePlugin()'}: CloudflarePlugin({ env, ${workersArm.option} }).`,
+    );
+    log(
+      `  Declare the binding as wrangler.toml's commented ${workersArm.block} block shows; an isolate's memory does not outlive it.`,
+    );
+    return;
+  }
+  if (bare === 'mcp-plugin') {
     log(
       '  The app boots with it only once at least one route is marked with mcpTool() or @McpTool().',
     );
+    // McpPlugin refuses a marked route without declared security intent at startup.
+    log(
+      '  Each marked route also needs a security guard (publicRoute() or requireAuth() from @setu-ts/auth-plugin, or @Public()) or schema.security.',
+    );
+  }
   const starter = source === undefined ? undefined : composingStarter(source);
   if (starter !== undefined) {
     const arm = starter.arms.get(bare);
@@ -640,6 +675,12 @@ function printWiringNote(
           `  The full-stack password sign-in recipe: ${siteUrl(
             'packages/auth-plugin/#in-the-full-stack-template',
           )}`,
+        );
+        log(
+          '  Its arm: auth: { signIn: { providers: [] }, local: { verify: (email, password, request) => <your credential check> } }',
+        );
+        log(
+          '  JWT_SECRET (written to the dotenv file) is read only when the arm also configures jwt; that recipe does not.',
         );
       }
       log(
@@ -692,10 +733,35 @@ function printWiringNote(
             `  Register ${call} where config is in scope; do not put it after the factory.`
           : `  Register it after the factory returns: app.register(${call});`,
     );
+    for (const line of registrationImports(call, bare)) log(line);
     for (const item of seam?.imports ?? []) {
       log(`  Import ${item.symbols.join(', ')} from '${item.from}' for it.`);
     }
   }
+}
+
+/**
+ * The import lines a printed registration needs: its plugin call and every
+ * `new X(...)` class from the plugin's package, and the vector-store factory
+ * from the module `setu add vector-store` wrote. Named, because a symbol such as
+ * `MemoryVectorStore` or `QdrantVectorStore` is not named after its package.
+ *
+ * @param call - The printed call expression
+ * @param bare - The plugin package, without the scope
+ * @returns The import guidance lines
+ */
+function registrationImports(call: string, bare: string): readonly string[] {
+  const head = /^([A-Z][\w$]*)\(/.exec(call)?.[1];
+  const classes = [...call.matchAll(/\bnew ([A-Z][\w$]*)\(/g)].map((match) => match[1]!);
+  const symbols = [...new Set([...(head === undefined ? [] : [head]), ...classes])].sort();
+  return [
+    ...(symbols.length === 0
+      ? []
+      : [`  Import { ${symbols.join(', ')} } from '@setu-ts/${bare}' for it.`]),
+    ...(call.includes(`${VECTOR_STORE_FACTORY}(`)
+      ? [`  Import { ${VECTOR_STORE_FACTORY} } from './${VECTOR_STORE_MODULE_PATH}' for it.`]
+      : []),
+  ];
 }
 
 /**
@@ -1252,9 +1318,14 @@ function withRegistration(
     (bare === 'static-plugin' && args !== undefined ? { symbol: 'StaticPlugin' } : undefined);
   if (provider === undefined) return undefined;
 
+  // The Workers template has no devtool spread (it has no devtool), so its plugin
+  // list ends at the generated plugins; the call goes in before them there.
+  const workersList = !factoryMode && !source.includes('...(devtool?.plugins ?? [])');
   const anchor = factoryMode
     ? 'for (const generated of GENERATED_PLUGINS) app.register(generated);'
-    : '...(devtool?.plugins ?? [])';
+    : workersList
+      ? '...GENERATED_PLUGINS'
+      : '...(devtool?.plugins ?? [])';
   // The full-stack scaffold is async. Preserve offsets while presenting its
   // explicit Promise annotation to the existing strict factory recognizer.
   const scope = factoryScope(
@@ -1276,7 +1347,9 @@ function withRegistration(
           ...code.matchAll(
             factoryMode
               ? /for \(const generated of GENERATED_PLUGINS\) app\.register\(generated\);/g
-              : /\.\.\.\(devtool\?\.plugins \?\? \[\]\)(?=[ \t]*(?:,|\]))/g,
+              : workersList
+                ? /\.\.\.GENERATED_PLUGINS(?=[ \t]*(?:,|\]))/g
+                : /\.\.\.\(devtool\?\.plugins \?\? \[\]\)(?=[ \t]*(?:,|\]))/g,
           ),
         ];
   const anchorMatch = anchors.length === 1 ? anchors[0]! : null;
@@ -1728,8 +1801,9 @@ const MAIL_ENV: Readonly<Record<string, readonly EnvVariable[]>> = {
     },
     {
       name: 'SMTP_PORT',
-      develop: '587',
-      description: 'SMTP_PORT is that server port: 587 for STARTTLS, or 465 with secure: true.',
+      develop: '1025',
+      description:
+        'SMTP_PORT is that server port: 1025 for the local Mailpit; 587 (STARTTLS) or 465 (secure: true) for a real server.',
     },
   ],
   sendgrid: [
@@ -1741,6 +1815,69 @@ const MAIL_ENV: Readonly<Record<string, readonly EnvVariable[]>> = {
     },
   ],
 };
+
+/**
+ * The local SMTP catcher `setu add mail --provider smtp` puts in Compose: mail
+ * the app sends locally lands in Mailpit's inbox (port 8025) instead of failing,
+ * so the `mail` health indicator and the generated `/health` test stay up.
+ */
+const MAILPIT_BACKING: { readonly name: string; readonly compose: ComposeBacking } = {
+  name: 'mailpit',
+  compose: {
+    services: `  mailpit:
+    image: axllent/mailpit:v1.27
+    ports:
+      - '\${SMTP_PORT:-1025}:1025'
+      - '\${MAILPIT_UI_PORT:-8025}:8025'
+`,
+    dependsOn: ['mailpit'],
+    condition: 'service_started',
+    memberEnv: { SMTP_HOST: 'mailpit', SMTP_PORT: '1025' },
+  },
+};
+
+/**
+ * Plans a local backing service in `docker/compose.yaml`: creates the file when
+ * it is absent, otherwise prints the block an existing file lacks (the file is
+ * create-only, as for the broker arms), and prints how to start it.
+ *
+ * @returns `false` after reporting an unreadable Compose file, otherwise `true`
+ */
+async function planComposeService(
+  deps: AddCommandDependencies,
+  dir: string,
+  edits: { path: string; contents: string; secret?: boolean }[],
+  createOnlyPaths: Set<string>,
+  backing: { readonly name: string; readonly compose: ComposeBacking },
+  sentence: string,
+): Promise<boolean> {
+  const start = `docker compose -f ${BROKER_COMPOSE_FILE} up -d ${backing.compose.dependsOn.join(' ')}`;
+  const composePath = joinPath(dir, BROKER_COMPOSE_FILE);
+  const pending = edits.find((edit) => edit.path === composePath);
+  const existing =
+    pending?.contents ?? (await readProjectText(deps, composePath, BROKER_COMPOSE_FILE));
+  if (existing === null) return false;
+  if (existing === undefined) {
+    for (const file of brokerComposeFiles([backing])) {
+      const path = joinPath(dir, file.path);
+      createOnlyPaths.add(path);
+      edits.push({ path, contents: file.contents });
+    }
+    deps.log(`  ${sentence} Start it: ${start}`);
+    return true;
+  }
+  const missing = missingComposeServices(existing, backing);
+  if (missing === undefined) {
+    deps.log(`  ${sentence} Start it: ${start}`);
+    return true;
+  }
+  deps.log(
+    `  ${BROKER_COMPOSE_FILE} exists and has no ${backing.name} service; add this under services: and keep the rest:`,
+  );
+  for (const line of missing.split('\n')) deps.log(line);
+  deps.log(`  After adding that service: ${sentence} Start it: ${start}`);
+  return true;
+}
 
 /** One environment read on one line, for a printed registration. */
 function inlineEnvRead(runtime: TargetRuntime, variable: string, fallback: string): string {
@@ -1775,7 +1912,7 @@ function backendRegistration(
     if (options[arm]) return `DatabasePlugin({ type: '${arm}', options: ${options[arm]} })`;
   }
   if (bare === 'vector-store-plugin' && arm !== 'memory')
-    return `VectorStorePlugin({ adapter: new ${arm === 'pgvector' ? 'PgVectorStore({ db })' : 'QdrantVectorStore({ client })'}, collections: [{ name: 'documents', dimensions: 768 }] })`;
+    return `VectorStorePlugin({ adapter: ${VECTOR_STORE_FACTORY}(), collections: [{ name: 'documents', dimensions: 768 }] })`;
   return undefined;
 }
 
@@ -1783,10 +1920,17 @@ function backendRegistration(
  * The registration line for a chosen backend: the starter's own option when a
  * composing starter owns the plugin, otherwise the plugin call.
  */
-function backendGuidance(line: string, config: string | undefined, bare: string): string {
+function backendGuidance(
+  line: string,
+  config: string | undefined,
+  bare: string,
+): readonly string[] {
   const owner = config === undefined ? undefined : composingStarter(config)?.arms.get(bare);
   const value = line.slice(line.indexOf('(') + 1, -1);
-  return `  In setu.config.ts: ${owner === undefined ? line : `${owner}: ${value}`}`;
+  const imports = registrationImports(owner === undefined ? line : value, bare).filter(
+    (entry) => owner === undefined || !entry.includes(`'@setu-ts/${bare}'`),
+  );
+  return [`  In setu.config.ts: ${owner === undefined ? line : `${owner}: ${value}`}`, ...imports];
 }
 
 /**
@@ -2008,6 +2152,7 @@ function appBackendPackages(bare: string, arm: string, dialect = 'postgresql'): 
   if (bare === 'database-plugin' && arm === 'prisma')
     return ['@prisma/client', '@prisma/adapter-pg', 'pg'];
   if (bare === 'database-plugin' && arm === 'drizzle') return DRIZZLE_DIALECTS[dialect] ?? [];
+  if (bare === 'vector-store-plugin' && arm === 'qdrant') return ['@qdrant/js-client-rest'];
   return bare === 'vector-store-plugin' && arm === 'pgvector' ? ['pg'] : [];
 }
 
@@ -2300,6 +2445,27 @@ async function addOne(
     );
     return EXIT_ERROR;
   }
+  // The decorator plugin is what makes a project class-based (`generatorMode`):
+  // installing it into a functional scaffold switches every later `generate`
+  // and `setu check` to class-based rules its functional services and
+  // controllers fail, and nothing registers the DecoratorPlugin they expect.
+  if (
+    bare === 'decorator-plugin' &&
+    initialConfig !== undefined &&
+    /\bregister(?:GeneratedRoutes|Modules)\s*\(/.test(initialConfig) &&
+    !new Set(await detectPlugins(deps.fs, dir)).has('decorator-plugin')
+  ) {
+    deps.error(
+      'This project uses the functional style. Installing @setu-ts/decorator-plugin switches ' +
+        '`generate` and `setu check` to class-based rules, which its functional services and ' +
+        'controllers fail. Start a class-based project instead: ' +
+        `${cliInvocation(runtime)} ` +
+        (searchDirs.length > 1
+          ? 'generate app <name> --template rest --style class-based.'
+          : 'new <name> --template rest --style class-based.'),
+    );
+    return EXIT_ERROR;
+  }
   let selected: BrokerSpec | undefined;
   let selectedArm: ArmSelector | undefined;
   if (args.flags['redis-client'] !== undefined && searchDirs.length > 1) {
@@ -2479,7 +2645,13 @@ async function addOne(
     // Only the manifest the runtime runs scripts from: Workers uses
     // package.json for plugin gating and its npm scripts.
     if (bare === 'sdk' && (target.file === 'package.json') === (runtime !== 'deno')) {
-      updated = withClientScripts(updated ?? source, target.file, runtime, deps.log) ?? updated;
+      const withScripts = withClientScripts(updated ?? source, target.file, runtime, deps.log);
+      if (withScripts !== undefined) {
+        updated = withScripts;
+        deps.log(
+          '  The client script boots the app and writes its typed client to src/clientsdk/api.ts (createApi); client:check fails when that file is stale.',
+        );
+      }
     }
     if (bare === 'database-plugin' && (target.file === 'package.json') === (runtime !== 'deno')) {
       updated = withDatabaseScripts(updated ?? source, backendArm, runtime, deps.log) ?? updated;
@@ -2620,7 +2792,10 @@ async function addOne(
     // imports mean something its text does not say: no automatic wiring then.
     configRetargeted = await frameworkImportsRetargeted(deps.fs, dir);
     const wired =
-      configRetargeted || (bare === 'mail-plugin' && backendArm !== 'log')
+      configRetargeted ||
+      (bare === 'mail-plugin' && backendArm !== 'log') ||
+      // Not in-memory on Workers: CloudflarePlugin's KV and R2 arms serve these.
+      (runtime === 'cloudflare-workers' && (bare === 'cache-plugin' || bare === 'storage-plugin'))
         ? undefined
         : composingStarter(config)?.arms.has(bare) === true
           ? withStarterWiring(config, bare, artifactSeam, transportArgs)
@@ -2994,6 +3169,77 @@ async function addOne(
       );
       if (!env.ok) return EXIT_ERROR;
     }
+    if (backendArm === 'smtp') {
+      if (
+        !(await planComposeService(
+          deps,
+          dir,
+          edits,
+          createOnlyPaths,
+          MAILPIT_BACKING,
+          'Local mail goes to Mailpit (inbox at http://localhost:8025); the mail health indicator and /health stay up only while it runs.',
+        ))
+      )
+        return EXIT_ERROR;
+      deps.log('  To keep generated tests offline, replace the provider in them:');
+      deps.log("  import { MailPlugin } from '@setu-ts/mail-plugin';");
+      deps.log(
+        "  createTestApp({ app: await createApp(), without: ['mail-plugin'], overrides: [MailPlugin()] })",
+      );
+    }
+  }
+
+  // The adapters that need an application-owned client get it in a CLI-written
+  // module, its connection in the dotenv pair, and a local Compose service, so
+  // the printed registration runs as pasted and `setu check` can still read the
+  // configuration (templates/vector-store-module.ts).
+  if (
+    bare === 'vector-store-plugin' &&
+    runtime !== 'cloudflare-workers' &&
+    (backendArm === 'qdrant' || backendArm === 'pgvector')
+  ) {
+    const modulePath = joinPath(dir, VECTOR_STORE_MODULE_PATH);
+    if ((await readExistingText(deps.fs, modulePath)) === undefined) {
+      createOnlyPaths.add(modulePath);
+      edits.push({
+        path: modulePath,
+        contents: vectorStoreModuleFile(backendArm, runtime).contents,
+      });
+      deps.log(
+        `${VECTOR_STORE_MODULE_PATH} builds the ${backendArm} adapter; pass ${VECTOR_STORE_FACTORY}() as the plugin's adapter.`,
+      );
+    } else {
+      deps.log(`left ${VECTOR_STORE_MODULE_PATH} unchanged: already present.`);
+    }
+    const { variable, localDefault } = VECTOR_STORE_CONNECTION[backendArm];
+    const env = await planAddEnvVariable(
+      deps,
+      dir,
+      runtime,
+      configText,
+      edits,
+      {
+        name: variable,
+        develop: localDefault,
+        description:
+          backendArm === 'qdrant'
+            ? `${variable} is the Qdrant URL the vector store connects to.`
+            : `${variable} is the PostgreSQL connection URL the vector store connects to.`,
+      },
+      localDefault,
+    );
+    if (!env.ok) return EXIT_ERROR;
+    if (
+      !(await planComposeService(
+        deps,
+        dir,
+        edits,
+        createOnlyPaths,
+        VECTOR_STORE_COMPOSE[backendArm],
+        `The app connects to ${backendArm === 'qdrant' ? 'Qdrant' : 'PostgreSQL with pgvector'} at ${variable} during startup.`,
+      ))
+    )
+      return EXIT_ERROR;
   }
 
   if (bare === 'database-plugin' && runtime !== 'cloudflare-workers') {
@@ -3175,6 +3421,7 @@ async function addOne(
       'tsconfig.json',
       'setu.config.ts',
       '.gitignore',
+      'README.md',
       'src/views/styles.css',
       'src/views/layout.tsx',
       'src/views/home.tsx',
@@ -3233,10 +3480,11 @@ async function addOne(
     // A backend chosen for an installed plugin still needs its registration.
     {
       const backendLine = backendRegistration(bare, backendArm, runtime);
-      if (backendLine !== undefined) deps.log(backendGuidance(backendLine, configSource, bare));
+      if (backendLine !== undefined)
+        for (const guidance of backendGuidance(backendLine, configSource, bare)) deps.log(guidance);
     }
     if (bare === 'messaging-plugin' || bare === 'queue-plugin') {
-      printWiringNote(configSource, bare, deps.log, seam, transportArgs);
+      printWiringNote(configSource, bare, deps.log, seam, transportArgs, runtime);
       printNodeRedisImportNote(configSource, transport?.clients ?? [], deps.log);
     }
     if (summary && args.flags['dry-run'] !== true) await reportAgentsHint(deps, dir, runtime);
@@ -3300,17 +3548,18 @@ async function addOne(
   // When this run wrote the transport into setu.config.ts, the guidance would ask
   // for the very option it just wrote (PR #519 review). Any other config edit —
   // a bare plugin insertion — still needs its note.
-  const transportWritten =
-    configWired &&
-    transportArgs !== undefined &&
-    (bare === 'messaging-plugin' || bare === 'queue-plugin');
+  // Any transport plugin whose options this run wrote (scheduler, cache,
+  // idempotency and backplane as well as messaging and queue): its note would
+  // otherwise read the just-written call back as "already passes these options".
+  const transportWritten = configWired && transportArgs !== undefined;
   const wiredArm =
     configWired && configSource !== undefined
       ? composingStarter(configSource)?.arms.get(bare)
       : undefined;
   if (wiredArm !== undefined) deps.log(`wired ${wiredArm} in setu.config.ts`);
   const backendLine = backendRegistration(bare, backendArm, runtime);
-  if (backendLine !== undefined) deps.log(backendGuidance(backendLine, configSource, bare));
+  if (backendLine !== undefined)
+    for (const guidance of backendGuidance(backendLine, configSource, bare)) deps.log(guidance);
   else if (rewroteBareCall !== undefined && configWired)
     deps.log(
       `  ${ZERO_CONFIG_WIRINGS.get(bare)!.symbol}() in setu.config.ts now takes the selected options.`,
@@ -3320,7 +3569,7 @@ async function addOne(
     wiredArm === undefined &&
     !(configWired && starter && transportArgs === undefined)
   )
-    printWiringNote(configSource, bare, deps.log, seam, transportArgs);
+    printWiringNote(configSource, bare, deps.log, seam, transportArgs, runtime);
   const appPackages = appBackendPackages(
     bare,
     backendArm,

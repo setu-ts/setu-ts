@@ -62,6 +62,19 @@ All notable changes to this project are documented here. The format follows
   diagnostics allowlist and says `dev` needs the launcher's credentials (V12-128); `start` says to
   build first whenever a build command exists; the Node devtool `dev` script loads the project's env
   files and the telemetry preload (V12-127).
+- **`@setu-ts/cli` (M140d, PR pending).** Interactive questions (`setu new`, `setu add`) are an
+  arrow-key list: ↑/↓ or `j`/`k` move, a number jumps, Enter chooses, Escape or Ctrl+C cancels. The
+  highlight is a 24-bit gradient, bold cyan on a 16/256-colour terminal, plain under `NO_COLOR`, and
+  a chosen answer collapses to one line. A terminal that cannot read single keys keeps the typed
+  answer.
+- **`@setu-ts/cli` (M140d, PR pending).** `setu add` guidance runs as printed. The `qdrant` and
+  `pgvector` vector stores get a CLI-written `src/vector-store.ts`, so the config stays readable to
+  `setu check`, plus their connection variable, a Compose service, the client package and import
+  lines. `smtp` mail gets a local Mailpit and the test override. Every printed registration names
+  its imports. `setu add decorator` refuses a functional project. On Workers zero-config providers
+  are wired, while `cache` and `storage` point at `CloudflarePlugin`'s KV and R2. The MCP note names
+  the security guard; `di`, `sdk` and full-stack `auth` print what to do; `add view` lists `/ui` and
+  `/assets` in the README. `setu check` W006 covers every provider whose registration `add` prints.
 - **`@setu-ts/cli` (M140d, PR pending).** `setu add` at a terminal now asks for every left-out
   choice, not only mail's provider, the database type and the vector-store adapter: `--dialect`
   after Drizzle, and the transport backends `--broker`, `--queue`, `--store`, `--lock` and

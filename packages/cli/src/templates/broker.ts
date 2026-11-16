@@ -251,7 +251,10 @@ export function brokerEnvVariables(spec: BrokerSpec): readonly EnvVariable[] {
  * @param spec - The selected transport
  * @returns The block to add under `services:`, or undefined when nothing is missing
  */
-export function missingComposeServices(existing: string, spec: BrokerSpec): string | undefined {
+export function missingComposeServices(
+  existing: string,
+  spec: Pick<BrokerSpec, 'compose'>,
+): string | undefined {
   const block = spec.compose?.services;
   if (block === undefined) return undefined;
   // One entry per service the block declares (a two-space key), so only the absent ones
@@ -294,7 +297,9 @@ export function missingComposeServices(existing: string, spec: BrokerSpec): stri
  * @param specs - The selected transports, in flag order
  * @returns The compose file plus any backing-service config files
  */
-export function brokerComposeFiles(specs: readonly BrokerSpec[]): readonly GeneratedFile[] {
+export function brokerComposeFiles(
+  specs: readonly { readonly name: string; readonly compose?: BrokerSpec['compose'] }[],
+): readonly GeneratedFile[] {
   // One arm can serve both flags (`--broker redis --queue redis`); its service
   // block must appear once, not twice.
   const backing = [

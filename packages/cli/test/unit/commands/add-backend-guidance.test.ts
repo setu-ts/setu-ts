@@ -14,9 +14,11 @@ import { createFakeFs, createRecorder } from '../../fixtures/fake-fs.ts';
 import { runCli } from '../../../src/cli.ts';
 import { unregisteredPluginFindings } from '../../../src/diagnostics/wiring.ts';
 import { LOCAL_TRANSPORT_HEADING } from '../../../src/templates/project-files.ts';
+import { withServedRoutes } from '../../../src/commands/add-view.ts';
+import { CONFIGURED_PROVIDERS, ZERO_CONFIG_WIRINGS } from '../../../src/utils/plugin-wirings.ts';
 
 /** A Node rest project scaffolded into a fake filesystem, and a runner for it. */
-async function project(args: readonly string[] = [], template = 'rest') {
+async function project(args: readonly string[] = [], template = 'rest', runtime = 'node') {
   const fs = createFakeFs();
   const out = createRecorder();
   const err = createRecorder();
@@ -32,7 +34,15 @@ async function project(args: readonly string[] = [], template = 'rest') {
     });
   expect(
     await run(
-      ['new', 'shop', '--template', template, '--runtime', 'node', '--yes', ...args],
+      [
+        'new',
+        'shop',
+        ...(template === 'minimal' ? [] : ['--template', template]),
+        '--runtime',
+        runtime,
+        '--yes',
+        ...args,
+      ],
       '/work',
     ),
     err.text(),
@@ -95,7 +105,7 @@ describe('setu add backend guidance', () => {
     for (const [provider, variables, line] of [
       [
         'smtp',
-        { SMTP_HOST: 'localhost', SMTP_PORT: '587' },
+        { SMTP_HOST: 'localhost', SMTP_PORT: '1025' },
         "options: { host: process.env.SMTP_HOST || 'localhost', port: Number(process.env.SMTP_PORT || '587') }",
       ],
       [
@@ -220,5 +230,139 @@ describe('setu add backend guidance', () => {
         ),
       ).toEqual([]);
     }
+  });
+
+  it('refuses the decorator plugin in a functional project, naming the class-based scaffold', async () => {
+    const p = await project();
+    expect(await p.run(['add', 'decorator'])).toBe(1);
+    expect(p.err.text()).toContain('This project uses the functional style.');
+    expect(p.err.text()).toContain('new <name> --template rest --style class-based');
+    expect(p.read('package.json')).not.toContain('decorator-plugin');
+    const classBased = await project(['--style', 'class-based']);
+    expect(await classBased.run(['add', 'decorator']), classBased.err.text()).toBe(0);
+  });
+
+  for (const [adapter, variable, imports, service, client] of [
+    ['qdrant', 'QDRANT_URL', 'QdrantClient', 'qdrant', '@qdrant/js-client-rest'],
+    ['pgvector', 'DATABASE_URL', "drizzle } from 'drizzle-orm/node-postgres'", 'pgvector', 'pg'],
+  ] as const) {
+    it(`writes the ${adapter} adapter module, its connection and a Compose service`, async () => {
+      const p = await project();
+      expect(await p.run(['add', 'vector-store', '--adapter', adapter]), p.err.text()).toBe(0);
+      const module = p.read('src/vector-store.ts');
+      expect(module).toContain(imports);
+      expect(module).toContain(`process.env.${variable} ||`);
+      expect(module).toContain('export function vectorStoreAdapter()');
+      expect(p.read('.env')).toContain(`\n${variable}=`);
+      expect(p.read('.env.example')).toContain(`\n${variable}=\n`);
+      expect(p.read('docker/compose.yaml')).toContain(`  ${service}:`);
+      const text = p.out.text();
+      expect(text).toContain(
+        "In setu.config.ts: VectorStorePlugin({ adapter: vectorStoreAdapter(), collections: [{ name: 'documents', dimensions: 768 }] })",
+      );
+      expect(text).toContain(
+        "Import { VectorStorePlugin } from '@setu-ts/vector-store-plugin' for it.",
+      );
+      expect(text).toContain("Import { vectorStoreAdapter } from './src/vector-store.ts' for it.");
+      expect(text).toContain(client);
+      // A second run keeps the module and prints the service the file lacks no more.
+      (p.out.lines as string[]).length = 0;
+      expect(await p.run(['add', 'vector-store', '--adapter', adapter]), p.err.text()).toBe(0);
+      expect(p.out.text()).toContain('left src/vector-store.ts unchanged: already present.');
+    });
+  }
+
+  it('prints the service an existing Compose file lacks for the vector store', async () => {
+    const p = await project();
+    expect(await p.run(['add', 'messaging', '--broker', 'nats']), p.err.text()).toBe(0);
+    (p.out.lines as string[]).length = 0;
+    expect(await p.run(['add', 'vector-store', '--adapter', 'qdrant']), p.err.text()).toBe(0);
+    expect(p.out.text()).toContain('docker/compose.yaml exists and has no qdrant service');
+    expect(p.read('docker/compose.yaml')).not.toContain('qdrant:');
+  });
+
+  it('gives smtp mail a local Mailpit, its port and the offline test override', async () => {
+    const p = await project();
+    expect(await p.run(['add', 'mail', '--provider', 'smtp']), p.err.text()).toBe(0);
+    expect(p.read('docker/compose.yaml')).toContain('  mailpit:');
+    expect(p.read('.env')).toContain('\nSMTP_PORT=1025\n');
+    expect(p.out.text()).toContain(
+      "createTestApp({ app: await createApp(), without: ['mail-plugin'], overrides: [MailPlugin()] })",
+    );
+  });
+
+  it('says nothing is already passed right after writing a Redis lock', async () => {
+    const p = await project();
+    expect(await p.run(['add', 'scheduler', '--lock', 'redis']), p.err.text()).toBe(0);
+    expect(p.read('setu.config.ts')).toContain('distributedLock');
+    expect(p.out.text()).not.toContain('already passes these options');
+  });
+
+  it('wires zero-config providers on Workers, but not an in-memory cache or store', async () => {
+    const p = await project([], 'minimal', 'cloudflare-workers');
+    expect(await p.run(['add', 'resilience']), p.err.text()).toBe(0);
+    expect(p.read('setu.config.ts')).toContain('ResiliencePlugin(),');
+    for (const [pkg, call, arm] of [
+      ['cache', 'CachePlugin', "cache: { binding: 'CACHE_KV' }"],
+      ['storage', 'StoragePlugin', "storage: { binding: 'UPLOADS' }"],
+    ] as const) {
+      (p.out.lines as string[]).length = 0;
+      expect(await p.run(['add', pkg]), p.err.text()).toBe(0);
+      expect(p.read('setu.config.ts')).not.toContain(`${call}()`);
+      expect(p.out.text()).toContain(`CloudflarePlugin({ env, ${arm} })`);
+    }
+  });
+
+  it('names the security guard a marked MCP route needs, and prints di and sdk guidance', async () => {
+    const p = await project();
+    expect(await p.run(['add', 'mcp']), p.err.text()).toBe(0);
+    expect(p.out.text()).toContain('Each marked route also needs a security guard');
+    (p.out.lines as string[]).length = 0;
+    expect(await p.run(['add', 'di']), p.err.text()).toBe(0);
+    expect(p.out.text()).toContain('Register DiPlugin() in setu.config.ts.');
+    expect(p.out.text()).toContain("Import { DiPlugin } from '@setu-ts/di-plugin' for it.");
+    (p.out.lines as string[]).length = 0;
+    expect(await p.run(['add', 'sdk']), p.err.text()).toBe(0);
+    expect(p.out.text()).toContain('The client script boots the app and writes its typed client');
+  });
+
+  it('prints the full-stack auth arm and when JWT_SECRET is read', async () => {
+    const p = await project([], 'full-stack');
+    expect(await p.run(['add', 'auth']), p.err.text()).toBe(0);
+    expect(p.out.text()).toContain('auth: { signIn: { providers: [] }, local: { verify:');
+    expect(p.out.text()).toContain('JWT_SECRET (written to the dotenv file) is read only when');
+  });
+
+  it('adds the view routes to the README and names the one StaticPlugin', async () => {
+    const p = await project();
+    expect(await p.run(['add', 'view']), p.err.text()).toBe(0);
+    const readme = p.read('README.md');
+    expect(readme).toContain('- `/ui` — the example page');
+    expect(readme).toContain('- `/assets` — its built CSS');
+    expect(p.out.text()).toContain("It is the project's one StaticPlugin");
+    expect(withServedRoutes(readme)).toBeUndefined();
+    expect(withServedRoutes('# x\n')).toBeUndefined();
+    expect(withServedRoutes('# x\n\n## What it serves\n\nNothing yet.\n')).toBeUndefined();
+  });
+
+  it('reports every printed-registration provider that nothing registers, with three exceptions', () => {
+    for (const [pkg, { symbol }] of CONFIGURED_PROVIDERS) {
+      expect(unregisteredPluginFindings('', new Set([pkg]))).toEqual([
+        { kind: 'plugin-unregistered', pkg, symbol },
+      ]);
+      expect(ZERO_CONFIG_WIRINGS.has(pkg)).toBe(false);
+    }
+    expect(CONFIGURED_PROVIDERS.has('auth-plugin')).toBe(false);
+    expect(
+      unregisteredPluginFindings(
+        "import { transportPlugins } from './src/transport/index.ts';\nexport const p = [...transportPlugins()];",
+        new Set(['grpc-plugin']),
+      ),
+    ).toEqual([]);
+    const workers = 'export function createApp(env = {}, waitUntil?: () => void) {}';
+    expect(
+      unregisteredPluginFindings(workers, new Set(['cache-plugin', 'storage-plugin'])),
+    ).toEqual([]);
+    expect(unregisteredPluginFindings('', new Set(['cache-plugin']))).toHaveLength(1);
   });
 });

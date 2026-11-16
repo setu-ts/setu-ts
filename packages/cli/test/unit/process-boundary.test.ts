@@ -21,6 +21,7 @@ const PATTERNS = [
 const ALLOWLIST = [
   'src/bin.ts',
   'src/main.ts',
+  'src/terminal-keys.ts',
   'src/terminal-line.ts',
   'src/workspace/dev-runner.ts',
   'src/devtool/dev-entry.ts',
@@ -47,6 +48,7 @@ describe('the process boundary of packages/cli/src', () => {
       'src/bin.ts',
       'src/devtool/dev-entry.ts',
       'src/main.ts',
+      'src/terminal-keys.ts',
       'src/terminal-line.ts',
       'src/workspace/dev-runner.ts',
     ]);

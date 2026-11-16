@@ -274,7 +274,10 @@ describe('M139d add request and backend contracts', () => {
     expect(output).toContain(
       `${property}: { ${property === 'mail' ? 'provider' : 'type'}: '${arm}'`,
     );
-    expect(output).not.toContain(`${symbol}(`);
+    // No plugin registration line: the starter owns the arm. (The smtp arm's
+    // test-override line names MailPlugin() for createTestApp, which is not one.)
+    expect(output).not.toContain(`In setu.config.ts: ${symbol}(`);
+    expect(output).not.toContain(`Register ${symbol}(`);
   });
   it('L5 refuses named modules on full-stack view', async () => {
     const h = await stack();
