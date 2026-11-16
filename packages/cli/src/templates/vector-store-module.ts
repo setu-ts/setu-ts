@@ -45,7 +45,7 @@ export const VECTOR_STORE_COMPOSE: Readonly<
     name: 'qdrant',
     compose: {
       services: `  qdrant:
-    image: qdrant/qdrant:v1.16.3
+    image: qdrant/qdrant:v1.20.0
     ports:
       - '\${QDRANT_PORT:-6333}:6333'
 `,
@@ -58,7 +58,7 @@ export const VECTOR_STORE_COMPOSE: Readonly<
     name: 'pgvector',
     compose: {
       services: `  pgvector:
-    image: pgvector/pgvector:pg17
+    image: pgvector/pgvector:0.8.1-pg16
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres

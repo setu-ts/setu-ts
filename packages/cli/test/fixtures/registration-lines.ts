@@ -55,9 +55,9 @@ declare const instance: string;
 /** The printed registrations, constructed against the real option types. */
 export const PRINTED_REGISTRATIONS = [
   // prettier-ignore
-  MailPlugin({ provider: 'smtp', options: { host: process.env.SMTP_HOST || 'localhost', port: Number(process.env.SMTP_PORT || '587') } }),
+  MailPlugin({ provider: 'smtp', options: { host: process.env.SMTP_HOST || 'localhost', port: Number(process.env.SMTP_PORT || '1025') } }),
   // prettier-ignore
-  MailPlugin({ provider: 'smtp', options: { host: Deno.env.get('SMTP_HOST') || 'localhost', port: Number(Deno.env.get('SMTP_PORT') || '587') } }),
+  MailPlugin({ provider: 'smtp', options: { host: Deno.env.get('SMTP_HOST') || 'localhost', port: Number(Deno.env.get('SMTP_PORT') || '1025') } }),
   MailPlugin({ provider: 'ses', options: {} }),
   MailPlugin({ provider: 'sendgrid', options: { apiKey: process.env.SENDGRID_API_KEY || '' } }),
   MailPlugin({ provider: 'sendgrid', options: { apiKey: Deno.env.get('SENDGRID_API_KEY') || '' } }),

@@ -106,7 +106,7 @@ describe('setu add backend guidance', () => {
       [
         'smtp',
         { SMTP_HOST: 'localhost', SMTP_PORT: '1025' },
-        "options: { host: process.env.SMTP_HOST || 'localhost', port: Number(process.env.SMTP_PORT || '587') }",
+        "options: { host: process.env.SMTP_HOST || 'localhost', port: Number(process.env.SMTP_PORT || '1025') }",
       ],
       [
         'sendgrid',
@@ -243,7 +243,7 @@ describe('setu add backend guidance', () => {
   });
 
   for (const [adapter, variable, imports, service, client] of [
-    ['qdrant', 'QDRANT_URL', 'QdrantClient', 'qdrant', '@qdrant/js-client-rest'],
+    ['qdrant', 'QDRANT_URL', 'QdrantClient', 'qdrant', '@qdrant/js-client-rest@1.20.0'],
     ['pgvector', 'DATABASE_URL', "drizzle } from 'drizzle-orm/node-postgres'", 'pgvector', 'pg'],
   ] as const) {
     it(`writes the ${adapter} adapter module, its connection and a Compose service`, async () => {
@@ -271,6 +271,15 @@ describe('setu add backend guidance', () => {
       expect(p.out.text()).toContain('left src/vector-store.ts unchanged: already present.');
     });
   }
+
+  it('pins the Qdrant client to the minor release of the Compose image', async () => {
+    const p = await project();
+    expect(await p.run(['add', 'vector-store', '--adapter', 'qdrant']), p.err.text()).toBe(0);
+    const image = /image: qdrant\/qdrant:v(\d+\.\d+)\./.exec(p.read('docker/compose.yaml'))?.[1];
+    const client = /@qdrant\/js-client-rest@(\d+\.\d+)\./.exec(p.out.text())?.[1];
+    expect(image).toBeDefined();
+    expect(client).toBe(image);
+  });
 
   it('prints the service an existing Compose file lacks for the vector store', async () => {
     const p = await project();

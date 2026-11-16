@@ -1875,7 +1875,7 @@ async function planComposeService(
     `  ${BROKER_COMPOSE_FILE} exists and has no ${backing.name} service; add this under services: and keep the rest:`,
   );
   for (const line of missing.split('\n')) deps.log(line);
-  deps.log(`  After adding that service: ${sentence} Start it: ${start}`);
+  deps.log(`  ${sentence} After adding that service, start it: ${start}`);
   return true;
 }
 
@@ -1894,7 +1894,7 @@ function backendRegistration(
   if (bare === 'mail-plugin' && arm !== 'log') {
     const options =
       arm === 'smtp'
-        ? `{ host: ${inlineEnvRead(runtime, 'SMTP_HOST', 'localhost')}, port: Number(${inlineEnvRead(runtime, 'SMTP_PORT', '587')}) }`
+        ? `{ host: ${inlineEnvRead(runtime, 'SMTP_HOST', 'localhost')}, port: Number(${inlineEnvRead(runtime, 'SMTP_PORT', '1025')}) }`
         : arm === 'sendgrid'
           ? `{ apiKey: ${inlineEnvRead(runtime, 'SENDGRID_API_KEY', '')} }`
           : '{}';
@@ -2148,11 +2148,18 @@ async function askOpenChoices(
   return flags;
 }
 
+/**
+ * The Qdrant client, pinned to the release of the Compose image
+ * (`VECTOR_STORE_COMPOSE.qdrant`): the client refuses a server more than one
+ * minor version away, so an unpinned install drifts out of range of the image.
+ */
+const QDRANT_CLIENT_SPEC = '@qdrant/js-client-rest@1.20.0';
+
 function appBackendPackages(bare: string, arm: string, dialect = 'postgresql'): readonly string[] {
   if (bare === 'database-plugin' && arm === 'prisma')
     return ['@prisma/client', '@prisma/adapter-pg', 'pg'];
   if (bare === 'database-plugin' && arm === 'drizzle') return DRIZZLE_DIALECTS[dialect] ?? [];
-  if (bare === 'vector-store-plugin' && arm === 'qdrant') return ['@qdrant/js-client-rest'];
+  if (bare === 'vector-store-plugin' && arm === 'qdrant') return [QDRANT_CLIENT_SPEC];
   return bare === 'vector-store-plugin' && arm === 'pgvector' ? ['pg'] : [];
 }
 
