@@ -6,7 +6,8 @@
  * @module
  */
 import * as nodeFs from 'node:fs/promises';
-import { describe, expect, it } from 'vitest';
+import { transform } from 'esbuild';
+import { describe, expect, it, vi } from 'vitest';
 import { createNodeRuntimeServices } from '@setu-ts/runtime';
 import { tempDir } from '../../../../../test/node-helpers.ts';
 import {
@@ -17,6 +18,12 @@ import {
   type PageImportReason,
 } from '../../../src/diagnostics/page-imports.ts';
 import { createFakeFs } from '../../fixtures/fake-fs.ts';
+
+// Pass-through, so a test can count how often a scan runs esbuild.
+vi.mock('esbuild', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('esbuild')>();
+  return { ...actual, transform: vi.fn(actual.transform) };
+});
 
 const PAGE = 'app/routes/_app/products._index.tsx';
 
@@ -692,7 +699,10 @@ describe('scanPageImports over real symlinks (review finding 6)', () => {
       );
       await nodeFs.symlink('lib', `${root}/app/x`);
       await nodeFs.symlink('lib', `${root}/app/y`);
+      vi.mocked(transform).mockClear();
       const scan = await scanPageImports(createNodeRuntimeServices().fs!, root);
+      // One file by three paths: esbuild runs once, only the specifiers resolve per path.
+      expect(transform).toHaveBeenCalledTimes(1);
       expect(scan.unreadable).toEqual([]);
       expect(scan.violations.map((v) => v.path)).toEqual([
         'app/lib/page.ts',

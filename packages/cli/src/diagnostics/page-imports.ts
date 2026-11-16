@@ -22,7 +22,11 @@
 
 import { transform } from 'esbuild';
 import type { IFileSystem } from '@setu-ts/common';
-import { lexImportSpecifiers, type ISpecifierSpan } from '../utils/import-specifiers.ts';
+import {
+  lexImportSpecifiers,
+  type ISpecifierSpan,
+  type LexedImports,
+} from '../utils/import-specifiers.ts';
 import { maskComments } from '../devtool/sources.ts';
 import { normalizeRelative } from '../utils/artifact-path.ts';
 import { joinPath, MAX_EXISTING_FILE_BYTES } from '../utils/file-writer.ts';
@@ -274,6 +278,27 @@ export async function scanPageSource(
   root?: string,
   resolveToken?: TokenResolver,
 ): Promise<readonly PageImportViolation[] | 'unreadable'> {
+  const page = await lexPage(path, source);
+  return page === 'unreadable' ? page : resolvePage(path, page, root, resolveToken);
+}
+
+/** A page as esbuild emits it, with its lexed imports: the path-independent half of a scan. */
+interface LexedPage {
+  readonly source: string;
+  readonly emitted: string;
+  readonly lexed: Extract<LexedImports, { kind: 'ok' }>;
+}
+
+/**
+ * Transforms and lexes one page source. Nothing here depends on where the page
+ * sits, only on its loader (its extension) and text, so one result serves every
+ * path a symlink gives the same file.
+ *
+ * @param path - The page, for its loader
+ * @param source - Its contents
+ * @returns The emitted code and its imports, or `unreadable` when esbuild or the lexer refuses it
+ */
+async function lexPage(path: string, source: string): Promise<LexedPage | 'unreadable'> {
   let emitted: string;
   try {
     emitted = (
@@ -288,7 +313,24 @@ export async function scanPageSource(
     return 'unreadable';
   }
   const lexed = lexImportSpecifiers(emitted);
-  if (lexed.kind !== 'ok') return 'unreadable';
+  return lexed.kind === 'ok' ? { source, emitted, lexed } : 'unreadable';
+}
+
+/**
+ * Resolves a lexed page's imports from one path: the path-dependent half of a scan.
+ *
+ * @param path - The page as walked, project-relative
+ * @param page - Its lexed form
+ * @param root - The project's absolute directory
+ * @param resolveToken - Checks a token import written without `.ts`
+ * @returns The violations, or `unreadable` when a glob call cannot be read
+ */
+async function resolvePage(
+  path: string,
+  { source, emitted, lexed }: LexedPage,
+  root?: string,
+  resolveToken?: TokenResolver,
+): Promise<readonly PageImportViolation[] | 'unreadable'> {
   const violations: PageImportViolation[] = [];
   const occurrences = new Map<string, number>();
   for (const span of lexed.spans) {
@@ -365,7 +407,8 @@ const MAX_PAGE_DIRECTORIES = 4096;
 interface PageWalk {
   readonly fs: IFileSystem;
   readonly dir: string;
-  readonly pages: string[];
+  /** Each page as walked, with its real path when `realPath` resolved one. */
+  readonly pages: { readonly path: string; readonly real?: string }[];
   readonly unreadable: string[];
   directories: number;
   appReal?: string;
@@ -498,9 +541,11 @@ async function pageFiles(
         isServerOnly(walk, relative, real)
       )
         continue;
-      (outside || stat.size > MAX_EXISTING_FILE_BYTES ? walk.unreadable : walk.pages).push(
-        relative,
-      );
+      if (outside || stat.size > MAX_EXISTING_FILE_BYTES) walk.unreadable.push(relative);
+      else
+        walk.pages.push(
+          real === undefined || real === 'missing' ? { path: relative } : { path: relative, real },
+        );
     }
   }
 }
@@ -529,17 +574,38 @@ export async function scanPageImports(fs: IFileSystem, dir: string): Promise<Pag
   const unreadable = walk.unreadable.sort();
   const decoder = new TextDecoder();
   const resolveToken = tokenResolverFor(fs, dir);
-  for (const path of walk.pages.sort()) {
+  const root = dir.replace(/\/+$/, '');
+  // Every symlink path to a file is scanned, so a file is read once per real path
+  // and esbuild and the lexer run once per loader and text; only resolving the
+  // specifiers happens once per path.
+  const sources = new Map<string, Promise<string | undefined>>();
+  const lexedPages = new Map<string, Promise<LexedPage | 'unreadable'>>();
+  const read = (path: string): Promise<string | undefined> =>
+    fs.readFile(joinPath(dir, path)).then(
+      (bytes) => decoder.decode(bytes),
+      () => undefined,
+    );
+  for (const { path, real } of walk.pages.sort((a, b) => (a.path < b.path ? -1 : 1))) {
+    let reading = real === undefined ? undefined : sources.get(real);
+    if (reading === undefined) {
+      reading = read(path);
+      if (real !== undefined) sources.set(real, reading);
+    }
     // A page `stat` could see may still fail to read (EACCES, or removed since
     // the walk): it is reported like any other page the check cannot read.
-    let source: string;
-    try {
-      source = decoder.decode(await fs.readFile(joinPath(dir, path)));
-    } catch {
+    const source = await reading;
+    if (source === undefined) {
       unreadable.push(path);
       continue;
     }
-    const result = await scanPageSource(path, source, dir.replace(/\/+$/, ''), resolveToken);
+    const key = `${loaderFor(path)}\0${source}`;
+    let lexing = lexedPages.get(key);
+    if (lexing === undefined) {
+      lexing = lexPage(path, source);
+      lexedPages.set(key, lexing);
+    }
+    const page = await lexing;
+    const result = page === 'unreadable' ? page : await resolvePage(path, page, root, resolveToken);
     if (result === 'unreadable') unreadable.push(path);
     else violations.push(...result);
   }
