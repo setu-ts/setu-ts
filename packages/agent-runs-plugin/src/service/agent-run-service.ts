@@ -134,10 +134,50 @@ export class AgentRunService implements IAgentRunService {
     if (ctx) this.deps.background?.(ctx, work);
     return true;
   }
+  /** Creates a run using the request identity and its background hook. */
   async start(
     ctx: IRequestContext,
     name: string,
     input: { messages: readonly AgentRunJson[] },
+  ): Promise<{ runId: string }> {
+    return await this.#create(
+      ctx.request.tenant?.id ?? '',
+      ctx.request.user?.id ?? null,
+      name,
+      input,
+      ctx,
+    );
+  }
+  /**
+   * Creates a run without a request or background hook; a later sweep recovers evicted work.
+   * @param identity - Explicit server-owned tenant and principal identity
+   * @param name - Registered definition name
+   * @param input - Initial JSON messages
+   * @returns The persisted run id
+   * @throws {AgentRunStateError} For an invalid identity or input, before storing it
+   * @since 0.13.0
+   */
+  async startAs(
+    identity: { readonly tenantId: string; readonly principalId: string | null },
+    name: string,
+    input: { messages: readonly AgentRunJson[] },
+  ): Promise<{ runId: string }> {
+    if (
+      !identity ||
+      typeof identity.tenantId !== 'string' ||
+      (identity.principalId !== null &&
+        (typeof identity.principalId !== 'string' || identity.principalId.length === 0))
+    ) {
+      throw new AgentRunStateError();
+    }
+    return await this.#create(identity.tenantId, identity.principalId, name, input);
+  }
+  async #create(
+    tenantId: string,
+    principalId: string | null,
+    name: string,
+    input: { messages: readonly AgentRunJson[] },
+    ctx?: IRequestContext,
   ): Promise<{ runId: string }> {
     const definition = this.deps.definitions.get(name);
     if (!definition || this.#closed) throw new AgentRunDefinitionError();
@@ -148,8 +188,8 @@ export class AgentRunService implements IAgentRunService {
     const now = this.deps.runtime.now();
     const run: AgentRunRow = {
       id: this.deps.runtime.uuid(),
-      tenantId: ctx.request.tenant?.id ?? '',
-      principalId: ctx.request.user?.id ?? null,
+      tenantId,
+      principalId,
       definition: definition.name,
       version: definition.version,
       status: 'running',

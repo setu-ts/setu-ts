@@ -576,8 +576,9 @@ request-bound module instead: `<name>.token.ts`, a service factory taking the re
 `/api/<name>` routes and tests that sign a session and send its CSRF token. `--page` also writes a
 guarded page, `app/routes/_app/<name>._index.tsx`, whose loader reads the service with `getService`.
 Pages may import kernel code only as `import type` or from a `*.token.ts` module; `setu check`
-refuses any other value import (`setu.E017`) and a page it cannot parse (`setu.E018`). It reads only
-a page's own imports, not re-exports in files outside `app/`.
+refuses other value imports (`setu.E017`), except in React Router `.server` modules confirmed inside
+`app/`. That exemption applies only to E017: a page the scanner cannot read safely is still reported
+as `setu.E018`. It reads only a page's own imports, not re-exports in files outside `app/`.
 
 A module holds `<name>.controller.ts` (`GET /<name>`, `GET /<name>/:id`, `POST /<name>`,
 `PATCH /<name>/:id`), `<name>.service.ts` (an in-memory `Map` the JSDoc says to replace with a

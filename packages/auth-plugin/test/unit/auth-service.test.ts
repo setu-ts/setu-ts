@@ -5,6 +5,8 @@
 import { describe, expect, it } from 'vitest';
 import { AuthService, LocalStrategy } from '../../src/services/auth-service.ts';
 import type { IAuthStrategy, IPrincipal, IRequest } from '@setu-ts/common';
+import { ApiKeyStrategy } from '../../src/strategies/api-key-strategy.ts';
+import { AuthenticationUnavailableError } from '../../src/errors.ts';
 
 function createRequest(): IRequest {
   return {
@@ -19,6 +21,23 @@ function createRequest(): IRequest {
 }
 
 describe('AuthService', () => {
+  it('R1-9 propagates API-key validator outages through both authentication methods', async () => {
+    const cause = new Error('backend down');
+    const service = new AuthService(
+      [new ApiKeyStrategy({ validate: () => Promise.reject(cause) })],
+      new LocalStrategy(() => Promise.resolve(null)),
+    );
+    const request = createRequest();
+    request.headers.set('X-API-Key', 'key');
+    for (const call of [
+      () => service.authenticate(request),
+      () => service.authenticateWithSource(request),
+    ]) {
+      const error = await call().catch((error: unknown) => error);
+      expect(error).toBeInstanceOf(AuthenticationUnavailableError);
+      expect((error as AuthenticationUnavailableError).cause).toBe(cause);
+    }
+  });
   describe('authenticateWithSource', () => {
     it('returns the first match with the header credential of a header strategy', async () => {
       const principal: IPrincipal = { id: 'p1' };

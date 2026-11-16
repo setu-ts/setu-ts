@@ -294,7 +294,8 @@ class FrameworkRequest implements IRequest {
         (error: unknown) => bodyReadFailure(error),
       );
     }
-    return readBounded(this.#raw, this.#maxBodyBytes).catch((error: unknown) =>
+    const cancelOnRefusal = !(this.ip === undefined && isUndiciFormData(this.#raw.headers));
+    return readBounded(this.#raw, this.#maxBodyBytes, cancelOnRefusal).catch((error: unknown) =>
       bodyReadFailure(error, this.#maxBodyBytes),
     );
   }
@@ -314,7 +315,8 @@ class FrameworkRequest implements IRequest {
  * at most one chunk beyond the limit is ever held. The reader is cancelled on
  * refusal rather than merely abandoned: an abandoned `ReadableStream` holds its
  * source open (the M70k HEAD-descriptor-leak class), which on a server means
- * the connection stays draining.
+ * the connection stays draining. Peer-less undici FormData instead releases its
+ * lock: that in-memory producer can enqueue after cancel and crash Node.
  *
  * `raw.body` is read only on this path. That matters on Node, where touching
  * `.body` materializes the full undici `Request` the lightweight facade exists
@@ -322,10 +324,15 @@ class FrameworkRequest implements IRequest {
  *
  * @param raw - The web-standard request
  * @param maxBodyBytes - The cap, in bytes
+ * @param cancelOnRefusal - False only for peer-less undici FormData, whose producer cannot cancel safely
  * @returns The body bytes
  * @throws {RequestBodyTooLargeError} When the body exceeds the cap
  */
-async function readBounded(raw: Request, maxBodyBytes: number): Promise<Uint8Array> {
+async function readBounded(
+  raw: Request,
+  maxBodyBytes: number,
+  cancelOnRefusal: boolean,
+): Promise<Uint8Array> {
   const stream = raw.body;
   if (stream === null) {
     // Framing headers were present but there is no stream: an empty body.
@@ -351,7 +358,16 @@ async function readBounded(raw: Request, maxBodyBytes: number): Promise<Uint8Arr
     // Releasing the lock is not enough — the source stays open until the
     // stream is cancelled. `cancel()` rejects on an already-errored stream,
     // which must not replace the refusal with a different failure.
-    await reader.cancel().catch(() => {});
+    if (cancelOnRefusal) await reader.cancel().catch(() => {});
+    else {
+      // undici's in-memory FormData producer can enqueue after cancel and crash Node.
+      // Served peers still cancel, so their sockets stop draining on refusal.
+      try {
+        reader.releaseLock();
+      } catch {
+        /* Preserve the original body-read result. */
+      }
+    }
   }
 
   // One chunk is the overwhelmingly common case; returning it directly avoids
@@ -366,6 +382,13 @@ async function readBounded(raw: Request, maxBodyBytes: number): Promise<Uint8Arr
     offset += chunk.byteLength;
   }
   return body;
+}
+
+/** Matches only undici's generated, unquoted FormData content type. */
+function isUndiciFormData(headers: Headers): boolean {
+  return /^multipart\/form-data; boundary=----formdata-undici-0\d{11}$/.test(
+    headers.get('content-type') ?? '',
+  );
 }
 
 /**

@@ -8,10 +8,75 @@ import {
   mapSnapshotToWebResponse,
   mapWebRequestToFrameworkRequest,
   mapWebRequestWithTarget,
+  RequestBodyTooLargeError,
 } from '../../src/adapters/shared/fetch-mapping.ts';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import type { FormBody, IRequest, ResponseSnapshot } from '@setu-ts/common';
 import { UnsupportedFormEncodingError } from '@setu-ts/common';
+
+describe('V12-139 in-process undici FormData refusal', () => {
+  const faults: unknown[] = [];
+  const record = (error: unknown): void => {
+    faults.push(error);
+  };
+  afterEach(() => {
+    process.off('uncaughtException', record);
+    process.off('unhandledRejection', record);
+    faults.length = 0;
+  });
+  it('V12-139 refuses an over-limit FormData without an asynchronous process fault', async () => {
+    process.on('uncaughtException', record);
+    process.on('unhandledRejection', record);
+    const form = new FormData();
+    form.set('first', 'x'.repeat(1024));
+    form.set('file', new Blob(['y'.repeat(1024)]), 'file.txt');
+    form.set('last', 'end');
+    const request = new Request('http://localhost/upload', { method: 'POST', body: form });
+    await expect(mapWebRequestToFrameworkRequest(request, 1).bytes()).rejects.toBeInstanceOf(
+      RequestBodyTooLargeError,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(faults).toEqual([]);
+    expect(request.body?.locked).toBe(false);
+  });
+  it.each([
+    ['multipart/form-data; boundary=----formdata-undici-012345678901', undefined, false],
+    ['multipart/form-data; boundary=----formdata-undici-012345678901', '127.0.0.1', true],
+    ['application/octet-stream', undefined, true],
+    ['multipart/form-data; boundary=----1234567890', undefined, true],
+    ['multipart/form-data; boundary=----WebKitFormBoundaryabc', undefined, true],
+    ['multipart/form-data; boundary="----formdata-undici-012345678901"', undefined, true],
+    [
+      'multipart/form-data; boundary=----formdata-undici-012345678901; charset=utf-8',
+      undefined,
+      true,
+    ],
+    ['Multipart/Form-Data; boundary=----formdata-undici-012345678901', undefined, true],
+    ['multipart/form-data; boundary=----formdata-undici-01234567890', undefined, true],
+    [undefined, undefined, true],
+  ])('cancellation for %s with peer %s is %s', async (contentType, peer, expected) => {
+    let cancelled = false;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(10));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const raw = new Request('http://localhost/', {
+      method: 'POST',
+      body: stream,
+      duplex: 'half',
+      headers: contentType ? { 'content-type': contentType } : {},
+    } as RequestInit);
+    await expect(mapWebRequestToFrameworkRequest(raw, 1, peer).bytes()).rejects.toBeInstanceOf(
+      RequestBodyTooLargeError,
+    );
+    expect(cancelled).toBe(expected);
+    if (!cancelled) await stream.cancel();
+  });
+});
 
 describe('fetch-mapping original diagnostics targets', () => {
   for (const [target, path] of [

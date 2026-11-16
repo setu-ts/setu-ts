@@ -7,6 +7,23 @@
 import { withHttpStatusHint } from '@setu-ts/common';
 
 /**
+ * An authentication validator failure carrying a fixed HTTP 503 hint.
+ * The underlying fault is retained as cause, never included in the public detail.
+ * @since 0.13.0
+ */
+export class AuthenticationUnavailableError extends Error {
+  /** Stable discriminant across realms. */
+  override readonly name = 'AuthenticationUnavailableError';
+
+  /** @param cause - Original validator failure, preserved unchanged */
+  constructor(cause: unknown) {
+    const detail = 'Authentication is temporarily unavailable.';
+    super(detail, { cause });
+    withHttpStatusHint(this, { status: 503, title: 'Service Unavailable', detail });
+  }
+}
+
+/**
  * Thrown when AuthPlugin is configured without a usable passive
  * authentication strategy or with an invalid middleware priority.
  *

@@ -27,7 +27,11 @@
 export { AuthPlugin } from './plugin/auth-plugin.ts';
 export type { AuthMiddlewareOption, AuthPluginOptions } from './interfaces/index.ts';
 export type { ResourceServerOptions } from './interfaces/index.ts';
-export { AuthPluginConfigurationError, SamlRuntimeLoadError } from './errors.ts';
+export {
+  AuthenticationUnavailableError,
+  AuthPluginConfigurationError,
+  SamlRuntimeLoadError,
+} from './errors.ts';
 
 // Option types
 export type { JwtOptions } from './interfaces/index.ts';

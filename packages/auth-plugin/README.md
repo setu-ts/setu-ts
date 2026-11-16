@@ -130,10 +130,12 @@ seconds and is at most 300 seconds.
 
 ## Strategies
 
-- **JwtStrategy** — passive bearer-token authentication. Extracts `Authorization: Bearer <token>`,
-  calls `IJwtService.verify`, and maps the claims to an `IPrincipal`. A token whose `sub` is
-  missing, not a string or empty is refused (RFC 9068 §2.2 requires it), so no two callers can share
-  a principal id. With `jwt.tenantClaim`, the token is also bound to the request's tenant (see
+- **JwtStrategy** — passive bearer-token authentication. `jwt.header: 'cookie'` (any case) is
+  refused with `AuthPluginConfigurationError`, for both JWT and issuer strategies. Extracts
+  `Authorization: Bearer <token>`, calls `IJwtService.verify`, and maps the claims to an
+  `IPrincipal`. A token whose `sub` is missing, not a string or empty is refused (RFC 9068 §2.2
+  requires it), so no two callers can share a principal id. With `jwt.tenantClaim`, the token is
+  also bound to the request's tenant (see
   [Binding tokens to the tenant](#binding-tokens-to-the-tenant)).
 - **IssuerStrategy** — passive bearer-token authentication for tokens an **outside identity
   provider** issued (Auth0, Entra ID, Google, Keycloak, Cognito). Configured by the `issuers`
@@ -142,6 +144,18 @@ seconds and is at most 300 seconds.
   [Accepting tokens from an identity provider](#accepting-tokens-from-an-identity-provider).
 - **ApiKeyStrategy** — passive API-key authentication. Reads the key from a configurable header
   (default `X-API-Key`) and calls the app-supplied `apiKey.validate(key, request)` callback.
+  `cookie` in any case is refused with `AuthPluginConfigurationError` at registration: cookies are
+  ambient credentials. Since 0.13.0, a thrown validator failure becomes
+  `AuthenticationUnavailableError`, retaining the cause with the fixed detail
+  `Authentication is temporarily unavailable.` Register `errorHandler()` to answer 503; its 5xx
+  logging preserves the cause with URL userinfo masked. The response contains only the fixed detail.
+  This applies to public routes too, only when the API-key header is present. Return `null` for an
+  invalid key; a request without the header never calls the validator. A validator that throws for a
+  malformed or unknown key now yields 503 instead of 401. Check key format and return `null` before
+  querying: a driver error that echoes the key would also put that key in the log. An authenticated
+  X-API-Key request with a new session commits no session and sends no `Set-Cookie`, even on a
+  `csrf.exclude`d path. An API-key-to-cookie exchange route needs `csrf.exemptBearer: false`, as a
+  bearer exchange route already does.
 - **SessionStrategy** — passive cookie-session authentication. Reads the session cookie through
   `ISessionService.fromHeaders` and maps the opened `SessionView` to an `IPrincipal` through the
   required `session.toPrincipal` callback; it returns `null` when no session opened or the session
@@ -342,8 +356,8 @@ guide:
 Guards are free `MiddlewareFunction` factories (imported from the plugin, not methods on
 `IAuthService`). The authorization guards resolve `IAuthorizationService` from `'authorization'`,
 return **401** when no principal is attached and **403** when the check fails, and short-circuit
-(they do **not** call `next()`). `authMiddleware` always calls `next()`, so an unauthenticated
-request still reaches the guard.
+(they do **not** call `next()`). `authMiddleware` calls `next()` unless an API-key validator is
+unavailable, so an unauthenticated request still reaches the guard.
 
 ```typescript
 import {
@@ -484,7 +498,7 @@ Workers application passes `new PasswordHasher(runtime, { iterations: 100_000 })
 | `jwt.accessTokenRevocationStore` | `IAccessTokenRevocationStore`                                   | -                   | Shared store that rejects revoked typed access tokens.                                                                                                                                                                                          |
 | `jwt.tenantClaim`                | `string`                                                        | -                   | Claim that binds a token to the request's tenant. See [Binding tokens to the tenant](#binding-tokens-to-the-tenant).                                                                                                                            |
 | `confineScopedTokens`            | `boolean`                                                       | `true`              | Refuse a principal carrying OAuth scopes at every role, permission and scoped-RBAC check. See [Scoped tokens are confined](#scoped-tokens-are-confined).                                                                                        |
-| `apiKey.header`                  | `string`                                                        | `'X-API-Key'`       | Header holding the API key.                                                                                                                                                                                                                     |
+| `apiKey.header`                  | `string`                                                        | `'X-API-Key'`       | Header holding the API key; Cookie in any case is refused with AuthPluginConfigurationError.                                                                                                                                                    |
 | `apiKey.validate`                | `(key, request?) => Promise<IPrincipal \| null>`                | -                   | App-supplied API-key lookup. `request` (0.13.0) lets a multi-tenant application bind the key to `request.tenant`.                                                                                                                               |
 | `local.verify`                   | `(identifier, secret, request?) => Promise<IPrincipal \| null>` | -                   | App-supplied credential check. `request` is the one passed to `verifyCredentials`; scope the user lookup by `request?.tenant?.id` under multi-tenancy.                                                                                          |
 | `rbac.roles`                     | `Record<string, RoleDefinition>`                                | -                   | Role → permissions + `inherits` hierarchy.                                                                                                                                                                                                      |
@@ -1027,7 +1041,8 @@ the plugin sets on every authenticated request, and keep setting `currentUserCon
 products loader reads through `getCurrentUser`. The session cookie reaches the browser on the
 action's redirect, because the session plugin commits the session after the page has rendered. A
 page may import only a module's `*.token.ts` by value (`setu check` refuses anything else as
-`setu.E017`), through the template's aliases, `~kernel/*` for `src/` and `~/*` for `app/`:
+`setu.E017`, except in React Router `.server` files and `.server/` directories), through the
+template's aliases, `~kernel/*` for `src/` and `~/*` for `app/`:
 
 `app/routes/_auth/login.tsx` — the action:
 
@@ -1880,12 +1895,16 @@ for a hard cap, so active rate limits survive cleanup.
 ## Weighted quotas (M134)
 
 `createQuota({ name, store, limit, window, runtime })` is a standalone reserve-then-settle quota.
-Choose non-negative safe integer units (tokens or micro-dollars). `reserve(key, amount)` atomically
-admits only within the limit and returns a frozen `QuotaReservation`; `settle(receipt, actual)`
-refunds or adds the difference to the original window, keeping usage between zero and
-`Number.MAX_SAFE_INTEGER`. `release(receipt)` settles zero. Settlement is idempotent, including
-concurrent calls; fabricated and foreign receipts throw `TypeError`. A store failure fails closed
-with `QuotaStoreUnavailableError`, which carries a value-free 503 status hint like
+Since 0.13.0, optional `message` sets the 429 Problem `detail`, defaulting to
+`The quota for this request is spent.` Empty or non-string values throw `TypeError` at creation and
+in `new QuotaExceededError(policyName, retryAfterSeconds, message?)`. The error keeps `detail` and
+uses it for its message, HTTP hint and `respondQuotaExceeded` alike. Choose non-negative safe
+integer units (tokens or micro-dollars). `reserve(key, amount)` atomically admits only within the
+limit and returns a frozen `QuotaReservation`; `settle(receipt, actual)` refunds or adds the
+difference to the original window, keeping usage between zero and `Number.MAX_SAFE_INTEGER`.
+`release(receipt)` settles zero. Settlement is idempotent, including concurrent calls; fabricated
+and foreign receipts throw `TypeError`. A store failure fails closed with
+`QuotaStoreUnavailableError`, which carries a value-free 503 status hint like
 `RateLimitStoreUnavailableError`.
 
 `name` matches `[a-z0-9-]+`; keys are non-empty, well-formed Unicode strings of at most 512 UTF-8
@@ -2028,6 +2047,7 @@ MIT
 | `respondQuotaExceeded`              | function  |
 | `safeReturnTo`                      | function  |
 | `AuthorizationDeniedError`          | class     |
+| `AuthenticationUnavailableError`    | class     |
 | `AuthPluginConfigurationError`      | class     |
 | `GrantResolutionError`              | class     |
 | `MalformedPasswordHashError`        | class     |

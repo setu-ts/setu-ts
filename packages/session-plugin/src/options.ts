@@ -81,8 +81,8 @@ export interface CsrfFormOptions {
    */
   readonly exclude?: readonly (string | RegExp)[];
   /**
-   * Skip verification for a bearer request ONLY when a bearer (header-credential)
-   * strategy authenticated it AND the request restored no session — the session
+   * Skip verification for header credentials (including X-API-Key) ONLY when a
+   * header-credential strategy authenticated it AND the request restored no session — the session
    * `session-plugin` parked for the request is new (M113e, V9-27, L3). Default
    * `true`. A request the bearer rule exempts also gets no browser session: whatever
    * its handler writes to the session is not committed and no `Set-Cookie` is
@@ -90,8 +90,8 @@ export interface CsrfFormOptions {
    * restores.
    *
    * Form CSRF defends credentials the BROWSER attaches by itself — the session
-   * cookie. A bearer token is never attached by the browser, and a page on
-   * another origin cannot add an `Authorization` header without a CORS
+   * cookie. Header API keys and bearer tokens are never attached by the browser, and a
+   * page on another origin cannot add an `Authorization` or `X-API-Key` header without a CORS
    * preflight the server approves, so a cross-site form cannot forge a
    * bearer-authenticated API call. The exemption is decided by the credential
    * that actually authenticated the request AND the session it restored, not by
@@ -103,7 +103,8 @@ export interface CsrfFormOptions {
    * victim's session (M113e, L3). A non-browser API client sends no session
    * cookie, so its new session keeps the exemption. It fails closed when the
    * session or the credential source is missing. `Basic` credentials are NOT
-   * exempt: browsers re-send cached Basic credentials automatically. `false`
+   * exempt: any present non-Bearer Authorization header prevents exemption, even beside
+   * X-API-Key. Browsers re-send cached Basic credentials automatically. `false`
    * verifies every unsafe request, the behaviour before 0.10.0.
    *
    * Requires authentication to run before form CSRF, which the default

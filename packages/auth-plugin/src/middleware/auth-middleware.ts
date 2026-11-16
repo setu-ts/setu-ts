@@ -36,7 +36,8 @@ type AuthServiceWithSource = IAuthService & {
 /**
  * Authentication middleware that runs passive strategies and populates ctx.request.user.
  * Revokes definite session-stamp mismatches before continuing; reader faults
- * leave the session unchanged. Always calls next() - it authenticates only, does not authorize.
+ * leave the session unchanged. Calls next() unless the authentication backend is unavailable.
+ * @throws {AuthenticationUnavailableError} When the API-key validator fails
  *
  * @returns Middleware function
  *
@@ -80,7 +81,15 @@ export function authMiddleware(): MiddlewareFunction {
       } else {
         principal = await authService.authenticate(ctx.request);
       }
-    } catch {
+    } catch (error) {
+      // Use the stable discriminant for errors from another realm or package copy.
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'name' in error &&
+        error.name === 'AuthenticationUnavailableError'
+      )
+        throw error;
       // Authentication error - don't set user, but continue
       // Authorization guards will handle the 401
       principal = null;

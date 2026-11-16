@@ -54,6 +54,11 @@ const PAGE_ALIAS = '~/';
  */
 const TOKEN_MODULE = /^src\/modules\/[^/]+\/[^/]+\.token(?:\.[jt]s)?$/;
 
+// React Router @react-router/dev 8.5.1 vite.js server-only module rules.
+// Its client build refuses imports of these modules before they can enter the browser.
+const SERVER_FILE = /\.server(\.[cm]?[jt]sx?)?$/;
+const SERVER_DIRECTORY = /\/\.server\//;
+
 /**
  * Reports whether a token import written without `.ts` (`x.token` or
  * `x.token.js`) resolves to `x.token.ts`, as the bundler and type-checker see
@@ -367,6 +372,20 @@ interface PageWalk {
 }
 
 /**
+ * Whether a real path inside `app/` is a React Router server-only module, by
+ * the same two rules React Router applies to the resolved module id.
+ *
+ * @param walk - The walk, holding the real path of `app/`
+ * @param real - The page's real path, already confirmed inside `app/`
+ * @returns `true` for a `.server` file or a file under a `.server/` directory
+ */
+function isServerOnly(walk: PageWalk, real: string): boolean {
+  // realInsideApp records app/'s real path before it confirms any path inside it.
+  const inApp = real.slice(walk.appReal!.length);
+  return SERVER_FILE.test(inApp) || SERVER_DIRECTORY.test(inApp);
+}
+
+/**
  * Resolves a path through `realPath` and reports whether it stays inside
  * `app/`; the first path resolved is `app/` itself. Returns 'missing' for a
  * path that is gone and 'outside' for one that cannot be resolved or that a
@@ -438,9 +457,16 @@ async function pageFiles(walk: PageWalk, prefix: string, depth = 0): Promise<voi
     } else if (stat.isFile && PAGE_FILE.test(entry)) {
       // A page file linked from outside `app/` is bundled like any other, so it
       // is resolved too: one that leaves `app/` is reported, never scanned as a page.
-      const outside =
-        fs.realPath !== undefined &&
-        (await realInsideApp(walk, fs.realPath.bind(fs), joinPath(dir, relative))) === 'outside';
+      const real =
+        fs.realPath === undefined
+          ? undefined
+          : await realInsideApp(walk, fs.realPath.bind(fs), joinPath(dir, relative));
+      const outside = real === 'outside';
+      // Vite resolves symlinks before React Router applies its server-only rule,
+      // so the rule is tested against the REAL path inside app/, per file. A link
+      // inside a `.server/` directory that leaves app/ stays reported above.
+      if (real !== undefined && real !== 'missing' && !outside && isServerOnly(walk, real))
+        continue;
       (outside || stat.size > MAX_EXISTING_FILE_BYTES ? walk.unreadable : walk.pages).push(
         relative,
       );
@@ -456,7 +482,9 @@ export interface PageImportScan {
 }
 
 /**
- * Scans every `app/**\/*.{ts,tsx}` for kernel value imports. A project without
+ * Scans page modules under `app/` for kernel value imports, excluding React Router
+ * `.server` files and directories only after realpath confirms containment in `app/`.
+ * A project without
  * `app/` has no pages and yields nothing.
  *
  * @param fs - The filesystem to read through

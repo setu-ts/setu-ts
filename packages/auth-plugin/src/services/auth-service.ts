@@ -23,6 +23,7 @@ export class AuthService implements IAuthService {
   /**
    * Run configured passive strategies in order.
    * First non-null principal wins, null if none match.
+   * @throws {AuthenticationUnavailableError} When an API-key validator throws
    */
   async authenticate(request: IRequest): Promise<IPrincipal | null> {
     return (await this.authenticateWithSource(request))?.principal ?? null;
@@ -36,6 +37,7 @@ export class AuthService implements IAuthService {
    * `CREDENTIAL_SOURCE_STATE_KEY` so form CSRF can exempt only header-credential
    * authentication; a replaced `IAuthService` without this method simply records no
    * source and every request stays verified.
+   * @throws {AuthenticationUnavailableError} When an API-key validator throws
    */
   async authenticateWithSource(
     request: IRequest,

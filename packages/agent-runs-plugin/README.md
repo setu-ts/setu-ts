@@ -34,6 +34,17 @@ Scheduled idempotency purging instead needs a scheduler. The run plugin provides
 [complete route guide](https://github.com/setu-ts/setu-ts/blob/main/docs/durable-runs.md) and
 [public API](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#durable-agent-runs-setu-tscommon--setu-tsagent-runs-plugin--setu-tsdatabase-plugin).
 
+## Starting from a job or scheduler
+
+Since 0.13.0, `runs.startAs({ tenantId: 't1', principalId: 'u1' }, 'assistant', { messages: [] })`
+creates a run without retaining a request context. Resolve `runs` from `CAPABILITIES.AGENT_RUNS`.
+The tenant must be a string (empty means no tenant), and the principal must be a non-empty string or
+`null`; invalid identity fails with `AgentRunStateError` before storage. Request reads, streams and
+decisions retain the same tenant and principal access rules. `startAs` does not invoke
+`background(ctx, work)`: on a runtime that ends work with a request, such as Workers, execution
+continues in that process or is picked up by the next sweep. Custom implementations of
+`IAgentRunService` must add this required member when upgrading.
+
 ## Configuration
 
 | Option            | Default  | Meaning                                                                                        |

@@ -264,6 +264,9 @@ describe('full-stack template | the layering it emits', () => {
 
   it('keeps the token module to its token (pages import it by value)', () => {
     const token = contentsOf('src/modules/products/products.token.ts');
+    expect(token).toContain(
+      'refuses every other value import from `~kernel/*` (setu.E017), except in React Router `.server` modules.',
+    );
     const valueImports = [
       ...token.matchAll(/^import\s+(?!type\b)\{([^}]*)\}\s+from\s+'([^']+)'/gm),
     ];

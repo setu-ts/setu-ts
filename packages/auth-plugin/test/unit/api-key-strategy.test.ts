@@ -5,6 +5,8 @@
 import { describe, expect, it } from 'vitest';
 import { ApiKeyStrategy } from '../../src/strategies/api-key-strategy.ts';
 import type { IPrincipal, IRequest } from '@setu-ts/common';
+import { httpStatusHintOf } from '@setu-ts/common';
+import { AuthenticationUnavailableError, AuthPluginConfigurationError } from '../../src/index.ts';
 
 describe('ApiKeyStrategy', () => {
   function createRequest(headers: Record<string, string> = {}): IRequest {
@@ -70,13 +72,36 @@ describe('ApiKeyStrategy', () => {
     expect(principal).toBeNull();
   });
 
-  it('returns null when validate throws', async () => {
+  it('V12-138 preserves validator failures as fixed 503 errors', async () => {
+    const cause = new Error('lookup failed');
     const strategy = new ApiKeyStrategy({
-      validate: () => Promise.reject(new Error('lookup failed')),
+      validate: () => Promise.reject(cause),
     });
     const request = createRequest({ 'X-API-Key': 'some-key' });
-    const principal = await strategy.authenticate(request);
-    expect(principal).toBeNull();
+    const error = await strategy.authenticate(request).catch((error: unknown) => error);
+    expect(error).toBeInstanceOf(AuthenticationUnavailableError);
+    expect(error).toHaveProperty('cause', cause);
+    expect(httpStatusHintOf(error)).toEqual({
+      status: 503,
+      title: 'Service Unavailable',
+      detail: 'Authentication is temporarily unavailable.',
+    });
+  });
+
+  it.each(['cookie', 'COOKIE', 'Cookie'])('V12-136 refuses ambient API-key header %s', (header) => {
+    expect(() => new ApiKeyStrategy({ header, validate: () => Promise.resolve(null) })).toThrow(
+      AuthPluginConfigurationError,
+    );
+  });
+
+  it('accepts Authorization as an API-key header', async () => {
+    const strategy = new ApiKeyStrategy({
+      header: 'authorization',
+      validate: () => Promise.resolve({ id: 'api-user' }),
+    });
+    await expect(
+      strategy.authenticate(createRequest({ authorization: 'Bearer key' })),
+    ).resolves.toEqual({ id: 'api-user' });
   });
 
   it('respects a custom header name', async () => {
