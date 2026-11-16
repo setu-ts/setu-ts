@@ -651,6 +651,80 @@ describe('scanPageImports over real symlinks (review finding 6)', () => {
       await nodeFs.rm(root, { recursive: true, force: true });
     }
   });
+  // V12-140: two client-path aliases of one directory resolve relative imports differently under
+  // preserveSymlinks, so each must be walked whichever comes first.
+  it.each([
+    ['the deeper alias first', ['a', 'client', '.server']],
+    ['the shallower alias first', ['client', 'a', '.server']],
+  ])('scans every alias of one directory, walking %s', async (_, order) => {
+    const root = await tempDir({ prefix: 'page-alias-depth-' });
+    try {
+      await nodeFs.mkdir(`${root}/app/.server`, { recursive: true });
+      await nodeFs.mkdir(`${root}/app/a`, { recursive: true });
+      await nodeFs.mkdir(`${root}/src/modules/p`, { recursive: true });
+      await nodeFs.writeFile(`${root}/src/modules/p/p.service.ts`, 'export const s = 1;\n');
+      await nodeFs.writeFile(
+        `${root}/app/.server/real.ts`,
+        "import { s } from '../../src/modules/p/p.service.ts';\nvoid s;\n",
+      );
+      await nodeFs.symlink('../.server', `${root}/app/a/link`);
+      await nodeFs.symlink('.server', `${root}/app/client`);
+      const fs = { ...createNodeRuntimeServices().fs! };
+      const readdir = fs.readdir.bind(fs);
+      fs.readdir = (path: string) =>
+        path === `${root}/app` ? Promise.resolve(order) : readdir(path);
+      const scan = await scanPageImports(fs, root);
+      expect(scan.unreadable).toEqual([]);
+      // From app/a/link/ the import reaches app/src/…, not kernel code; from app/client/ it
+      // reaches src/…; app/.server/real.ts is server-only on both paths and skipped.
+      expect(scan.violations.map((v) => v.path)).toEqual(['app/client/real.ts']);
+    } finally {
+      await nodeFs.rm(root, { recursive: true, force: true });
+    }
+  });
+  it('reports a page once for each alias of its directory', async () => {
+    const root = await tempDir({ prefix: 'page-alias-diamond-' });
+    try {
+      await nodeFs.mkdir(`${root}/app/lib`, { recursive: true });
+      await nodeFs.writeFile(
+        `${root}/app/lib/page.ts`,
+        "import { s } from '~kernel/modules/p/p.service.ts';\nvoid s;\n",
+      );
+      await nodeFs.symlink('lib', `${root}/app/x`);
+      await nodeFs.symlink('lib', `${root}/app/y`);
+      const scan = await scanPageImports(createNodeRuntimeServices().fs!, root);
+      expect(scan.unreadable).toEqual([]);
+      expect(scan.violations.map((v) => v.path)).toEqual([
+        'app/lib/page.ts',
+        'app/x/page.ts',
+        'app/y/page.ts',
+      ]);
+    } finally {
+      await nodeFs.rm(root, { recursive: true, force: true });
+    }
+  });
+  it('walks each directory of a cross-link loop by both paths, then stops at the cycle', async () => {
+    const root = await tempDir({ prefix: 'page-alias-cross-' });
+    try {
+      await nodeFs.mkdir(`${root}/app/a`, { recursive: true });
+      await nodeFs.mkdir(`${root}/app/b`, { recursive: true });
+      await nodeFs.symlink('../b', `${root}/app/a/up`);
+      await nodeFs.symlink('../a', `${root}/app/b/up`);
+      const fs = { ...createNodeRuntimeServices().fs! };
+      const readdir = fs.readdir.bind(fs);
+      const reads = new Map<string, number>();
+      fs.readdir = async (path: string) => {
+        const real = await nodeFs.realpath(path);
+        reads.set(real, (reads.get(real) ?? 0) + 1);
+        return readdir(path);
+      };
+      const scan = await scanPageImports(fs, root);
+      expect(scan.unreadable).toEqual([]);
+      expect(Math.max(...reads.values())).toBe(2);
+    } finally {
+      await nodeFs.rm(root, { recursive: true, force: true });
+    }
+  });
   it('scans server-only paths when realpath containment cannot be confirmed', async () => {
     const fs = createFakeFs({
       '/p/app/lib/x.server.ts': "import { x } from '~kernel/x.ts';",

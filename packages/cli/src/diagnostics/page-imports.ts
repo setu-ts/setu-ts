@@ -354,17 +354,17 @@ function globLine(
 const MAX_PAGE_DEPTH = 32;
 
 /**
- * Directories one walk reads. Without `realPath` a directory reached twice
- * through symlinks cannot be recognised, so several link loops multiply the
- * walk; this bound ends it whatever the links do.
+ * Directories one walk reads, aliases included. Every path a symlink gives a
+ * directory is walked unless it closes a cycle, and without `realPath` a cycle
+ * cannot be recognised at all, so cross-links can multiply the walk; this bound
+ * ends it whatever the links do, reporting the cut-off prefix as unreadable.
  */
 const MAX_PAGE_DIRECTORIES = 4096;
 
-/** One walk's state: what it has seen and what it has collected so far. */
+/** One walk's state: what it has collected so far. */
 interface PageWalk {
   readonly fs: IFileSystem;
   readonly dir: string;
-  readonly seen: Set<string>;
   readonly pages: string[];
   readonly unreadable: string[];
   directories: number;
@@ -422,13 +422,25 @@ async function realInsideApp(
  * none becomes a silent pass: a page over {@linkcode MAX_EXISTING_FILE_BYTES}, a
  * directory past {@linkcode MAX_PAGE_DEPTH} or beyond
  * {@linkcode MAX_PAGE_DIRECTORIES}, a directory or page a symlink places outside
- * `app/`, and an entry whose `stat` or `readdir` fails (`ELOOP`, `EACCES`). With
- * `realPath` available a real directory is walked at most twice, once through a
- * server-only path and once through any other, so a link loop costs at most two
- * visits and a client-path alias of a `.server/` directory is still scanned;
- * without it the directory bound ends the walk.
+ * `app/`, and an entry whose `stat` or `readdir` fails (`ELOOP`, `EACCES`).
+ *
+ * Every path a symlink gives a directory is walked, because under
+ * `resolve.preserveSymlinks` each is its own module id and resolves relative
+ * imports from its own location. With `realPath` available a directory is
+ * skipped only when its real path is one of its own ancestors' (a link cycle
+ * such as `app/x -> .`); without it the directory bound ends the walk.
+ *
+ * @param walk - The walk's shared state
+ * @param prefix - The directory as walked, starting with `app`
+ * @param depth - Directories below `app/`
+ * @param ancestors - Real paths of the directories from `app/` down to this one's parent
  */
-async function pageFiles(walk: PageWalk, prefix: string, depth = 0): Promise<void> {
+async function pageFiles(
+  walk: PageWalk,
+  prefix: string,
+  depth = 0,
+  ancestors: ReadonlySet<string> = new Set(),
+): Promise<void> {
   const { fs, dir } = walk;
   const path = joinPath(dir, prefix);
   if (walk.directories >= MAX_PAGE_DIRECTORIES) {
@@ -436,6 +448,7 @@ async function pageFiles(walk: PageWalk, prefix: string, depth = 0): Promise<voi
     return;
   }
   walk.directories += 1;
+  let below = ancestors;
   if (fs.realPath !== undefined) {
     const real = await realInsideApp(walk, fs.realPath.bind(fs), path);
     if (real === 'missing') return;
@@ -443,12 +456,10 @@ async function pageFiles(walk: PageWalk, prefix: string, depth = 0): Promise<voi
       walk.unreadable.push(prefix);
       return;
     }
-    // Keyed by whether the walked path is server-only too: under preserveSymlinks a
-    // client-path alias of a `.server/` directory is a client id, so it must not be
-    // skipped because the `.server/` path was walked first.
-    const key = `${SERVER_DIRECTORY.test(`${prefix.slice('app'.length)}/`) ? 's' : 'c'}:${real}`;
-    if (walk.seen.has(key)) return;
-    walk.seen.add(key);
+    // Only a cycle is skipped: a second, non-cycle path to a real directory is a
+    // second module location under preserveSymlinks, so it is scanned too.
+    if (ancestors.has(real)) return;
+    below = new Set([...ancestors, real]);
   }
   let entries: readonly string[];
   try {
@@ -468,7 +479,7 @@ async function pageFiles(walk: PageWalk, prefix: string, depth = 0): Promise<voi
     }
     if (stat.isDirectory) {
       if (depth >= MAX_PAGE_DEPTH) walk.unreadable.push(relative);
-      else await pageFiles(walk, relative, depth + 1);
+      else await pageFiles(walk, relative, depth + 1, below);
     } else if (stat.isFile && PAGE_FILE.test(entry)) {
       // A page file linked from outside `app/` is bundled like any other, so it
       // is resolved too: one that leaves `app/` is reported, never scanned as a page.
@@ -513,7 +524,7 @@ export interface PageImportScan {
  */
 export async function scanPageImports(fs: IFileSystem, dir: string): Promise<PageImportScan> {
   const violations: PageImportViolation[] = [];
-  const walk: PageWalk = { fs, dir, seen: new Set(), pages: [], unreadable: [], directories: 0 };
+  const walk: PageWalk = { fs, dir, pages: [], unreadable: [], directories: 0 };
   await pageFiles(walk, 'app');
   const unreadable = walk.unreadable.sort();
   const decoder = new TextDecoder();
