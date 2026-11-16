@@ -38,7 +38,7 @@ describe('API-key validator outage', () => {
   );
   it('V12-138 answers fixed Problem Details on protected and public key-bearing requests', async () => {
     const validate = vi.fn(() => {
-      throw new Error('db down http://user:pass@db/x');
+      throw new Error('db down http://user:pass@db/x for key canary-KEY-77');
     });
     const logs: unknown[] = [];
     const logger: ILogger = {
@@ -77,7 +77,7 @@ describe('API-key validator outage', () => {
         const response = await app.inject({
           method: 'GET',
           url: `http://localhost${path}`,
-          headers: { 'X-API-Key': 'key' },
+          headers: { 'X-API-Key': 'canary-KEY-77' },
         });
         expect(response.statusCode).toBe(503);
         expect(response.headers.get('content-type')).toBe('application/problem+json');
@@ -98,6 +98,9 @@ describe('API-key validator outage', () => {
       expect(JSON.stringify(logs)).toContain('db down');
       expect(JSON.stringify(logs)).not.toContain('user:pass');
       expect(JSON.stringify(logs)).toContain('***');
+      // F2: the presented key, echoed by the validator's error, never reaches the log.
+      expect(JSON.stringify(logs)).not.toContain('canary-KEY-77');
+      expect(JSON.stringify(logs)).toContain('for key ***');
       const response = await app.inject({ method: 'GET', url: 'http://localhost/public' });
       expect(response.statusCode).toBe(200);
       expect(response.body).toBe('public');

@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import { ApiKeyStrategy } from '../../src/strategies/api-key-strategy.ts';
 import type { IPrincipal, IRequest } from '@setu-ts/common';
-import { httpStatusHintOf } from '@setu-ts/common';
+import { httpStatusHintOf, serializeError } from '@setu-ts/common';
 import { AuthenticationUnavailableError, AuthPluginConfigurationError } from '../../src/index.ts';
 
 describe('ApiKeyStrategy', () => {
@@ -86,6 +86,37 @@ describe('ApiKeyStrategy', () => {
       title: 'Service Unavailable',
       detail: 'Authentication is temporarily unavailable.',
     });
+  });
+
+  it('F2 keeps the presented key out of the message and the serialized error', async () => {
+    const key = 'k3y-CANARY-0042';
+    const cause = Object.assign(new Error(`invalid input syntax for type uuid: "${key}"`), {
+      code: '22P02',
+    });
+    const strategy = new ApiKeyStrategy({ validate: () => Promise.reject(cause) });
+    const error = (await strategy
+      .authenticate(createRequest({ 'X-API-Key': key }))
+      .catch((caught: unknown) => caught)) as AuthenticationUnavailableError;
+    expect(error.message).toContain('invalid input syntax for type uuid: "***"');
+    expect(error.message).toContain('22P02');
+    expect(error.message).not.toContain(key);
+    expect(error.cause).toBe(cause);
+    const serialized = JSON.stringify(serializeError(error));
+    expect(serialized).not.toContain(key);
+    expect(serialized).toContain('invalid input syntax');
+  });
+
+  it('F2 removes a key in its rendered whitespace form and a key cut by the bound', () => {
+    const spaced = new AuthenticationUnavailableError(new Error('bad key a\tb  c'), 'a\tb  c');
+    expect(spaced.message).toContain('bad key ***');
+    // A cause long enough that describeError cuts the description inside the key.
+    const key = 'K'.repeat(40);
+    for (let pad = 8150; pad < 8200; pad++) {
+      const cut = new AuthenticationUnavailableError(new Error(`${'x'.repeat(pad)}${key}`), key);
+      expect(cut.message).not.toMatch(/K{1,}… \[truncated\]$/);
+    }
+    const plain = new AuthenticationUnavailableError(new Error('lookup failed'));
+    expect(plain.message).toBe('Authentication is temporarily unavailable. Error: lookup failed');
   });
 
   it.each(['cookie', 'COOKIE', 'Cookie'])('V12-136 refuses ambient API-key header %s', (header) => {

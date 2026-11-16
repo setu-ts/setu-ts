@@ -27,8 +27,10 @@ All notable changes to this project are documented here. The format follows
   X-API-Key requests with new sessions on `csrf.exclude`d paths, now commit no session and send no
   `Set-Cookie`: configure `csrf.exemptBearer: false` for an API-key-to-cookie exchange, as for a
   bearer exchange. A validator throwing for a malformed or unknown key now yields 503 with
-  `errorHandler` instead of 401. Check key format and return `null` before querying; a driver error
-  that echoes the key would otherwise also put the client's key in the error log.
+  `errorHandler` instead of 401. Check key format and return `null` before querying. The logged
+  error describes the fault with the presented key replaced by `***`, and its cause carries the
+  serializer's redact-cause brand, so a driver error that echoes the key does not write it to the
+  log.
 
 - **BREAKING — `@setu-ts/cli` (M140c, #592).** Generated images set `NODE_ENV=production`, and
   `start` sets it too: Node keeps a value already set (a `data:` preload); Bun and Deno set it. Bun

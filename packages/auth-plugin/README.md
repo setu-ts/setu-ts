@@ -152,10 +152,11 @@ seconds and is at most 300 seconds.
   This applies to public routes too, only when the API-key header is present. Return `null` for an
   invalid key; a request without the header never calls the validator. A validator that throws for a
   malformed or unknown key now yields 503 instead of 401. Check key format and return `null` before
-  querying: a driver error that echoes the key would also put that key in the log. An authenticated
-  X-API-Key request with a new session commits no session and sends no `Set-Cookie`, even on a
-  `csrf.exclude`d path. An API-key-to-cookie exchange route needs `csrf.exemptBearer: false`, as a
-  bearer exchange route already does.
+  querying. The logged error describes the fault with the presented key replaced by `***`, so a
+  driver error that echoes the key does not write it to the log. An authenticated X-API-Key request
+  with a new session commits no session and sends no `Set-Cookie`, even on a `csrf.exclude`d path.
+  An API-key-to-cookie exchange route needs `csrf.exemptBearer: false`, as a bearer exchange route
+  already does.
 - **SessionStrategy** — passive cookie-session authentication. Reads the session cookie through
   `ISessionService.fromHeaders` and maps the opened `SessionView` to an `IPrincipal` through the
   required `session.toPrincipal` callback; it returns `null` when no session opened or the session

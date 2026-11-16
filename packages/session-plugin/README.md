@@ -315,8 +315,8 @@ session to commit.
 
 API-key validators must return `null` for malformed or unknown keys. A thrown validation error now
 becomes 503 with `errorHandler()` instead of an anonymous 401. Check key format and return `null`
-before querying; if a driver error echoes the key, that client key would also reach the error log.
-URL userinfo masking does not remove arbitrary key text.
+before querying. The logged error describes the validator's fault with the presented key replaced by
+`***`, so a driver error that echoes the key does not write it to the error log.
 
 **An endpoint with its own browser protection can opt out in-process** (0.13.0). Middleware that
 runs before form CSRF (priority 325) may set `ctx.state.set(CSRF_EXEMPT_STATE_KEY, true)` (from

@@ -57,7 +57,7 @@ export class ApiKeyStrategy implements IAuthStrategy {
     try {
       return await this.validate(key, request);
     } catch (error) {
-      throw new AuthenticationUnavailableError(error);
+      throw new AuthenticationUnavailableError(error, key);
     }
   }
 }

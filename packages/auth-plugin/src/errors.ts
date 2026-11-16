@@ -4,22 +4,75 @@
  * @module
  */
 
-import { withHttpStatusHint } from '@setu-ts/common';
+import { describeError, withHttpStatusHint } from '@setu-ts/common';
+
+/** The fixed public detail of {@linkcode AuthenticationUnavailableError}. */
+const UNAVAILABLE_DETAIL = 'Authentication is temporarily unavailable.';
+
+/** The marker that ends a description `describeError` had to cut. */
+const TRUNCATION_MARKER = '… [truncated]';
+
+/** Characters `describeError` renders as one space; a credential is matched as rendered. */
+const NON_PRINTING_RUN = /[\s\p{Cc}\p{Cf}]+/gu;
+
+/**
+ * Replaces every occurrence of a presented credential in a one-line description with `***`.
+ *
+ * The credential is matched both as sent and as `describeError` renders it (whitespace
+ * and control runs collapsed to one space). When the description was cut, a tail that
+ * is the start of the credential is replaced too, so a cut cannot leave part of it.
+ *
+ * @param text - The `describeError` output
+ * @param credential - The credential the client presented; empty leaves the text unchanged
+ * @returns The text with the credential replaced
+ */
+function withoutCredential(text: string, credential: string): string {
+  if (credential === '') return text;
+  let out = text;
+  for (const form of new Set([credential, credential.replace(NON_PRINTING_RUN, ' ')])) {
+    if (form !== '') out = out.split(form).join('***');
+  }
+  if (!out.endsWith(TRUNCATION_MARKER)) return out;
+  const body = out.slice(0, -TRUNCATION_MARKER.length);
+  for (let length = credential.length - 1; length > 0; length--) {
+    if (body.endsWith(credential.slice(0, length))) {
+      return `${body.slice(0, -length)}***${TRUNCATION_MARKER}`;
+    }
+  }
+  return out;
+}
 
 /**
  * An authentication validator failure carrying a fixed HTTP 503 hint.
- * The underlying fault is retained as cause, never included in the public detail.
+ *
+ * The public detail is fixed. The error's own message, which the error handler logs, adds a
+ * one-line description of the underlying fault with the presented credential replaced by
+ * `***`: a database error that echoes a malformed key (`invalid input syntax for type uuid`)
+ * must not write the client's key to the log. The cause is kept on the error for application
+ * code, and carries the serializer's redact-cause brand, so a log built with `serializeError`
+ * shows only its class and this message.
  * @since 0.13.0
  */
 export class AuthenticationUnavailableError extends Error {
   /** Stable discriminant across realms. */
   override readonly name = 'AuthenticationUnavailableError';
 
-  /** @param cause - Original validator failure, preserved unchanged */
-  constructor(cause: unknown) {
-    const detail = 'Authentication is temporarily unavailable.';
-    super(detail, { cause });
-    withHttpStatusHint(this, { status: 503, title: 'Service Unavailable', detail });
+  /**
+   * @param cause - Original validator failure, kept unchanged on `cause`
+   * @param credential - The credential the client presented, removed from the message
+   */
+  constructor(cause: unknown, credential = '') {
+    super(`${UNAVAILABLE_DETAIL} ${withoutCredential(describeError(cause), credential)}`, {
+      cause,
+    });
+    // Same brand, same registration as the runtime's RequestBodyReadError (common's
+    // serialize-error.ts): the serialized cause keeps only its class and this message.
+    Object.defineProperty(this, Symbol.for('setu.serialize.redact-cause'), { value: true });
+    withHttpStatusHint(this, {
+      status: 503,
+      title: 'Service Unavailable',
+      detail: UNAVAILABLE_DETAIL,
+    });
   }
 }
 
