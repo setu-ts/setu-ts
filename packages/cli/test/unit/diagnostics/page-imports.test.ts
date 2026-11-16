@@ -623,25 +623,34 @@ describe('scanPageImports over real symlinks (review finding 6)', () => {
       await nodeFs.rm(root, { recursive: true, force: true });
     }
   });
-  it.each(['aaa', 'zzz'])(
-    'scans a client-path directory alias %s of a .server/ directory',
-    async (alias) => {
-      const root = await tempDir({ prefix: 'page-server-alias-' });
-      try {
-        await nodeFs.mkdir(`${root}/app/.server`, { recursive: true });
-        await nodeFs.writeFile(
-          `${root}/app/.server/real.ts`,
-          "import { s } from '~kernel/modules/p/p.service.ts';\nvoid s;\n",
-        );
-        await nodeFs.symlink('.server', `${root}/app/${alias}`);
-        const scan = await scanPageImports(createNodeRuntimeServices().fs!, root);
-        expect(scan.unreadable).toEqual([]);
-        expect(scan.violations.map((v) => v.path)).toEqual([`app/${alias}/real.ts`]);
-      } finally {
-        await nodeFs.rm(root, { recursive: true, force: true });
-      }
-    },
-  );
+  // The walk order is forced, because readdir promises none: the alias first, then `.server` first.
+  it.each([
+    ['the alias first', ['client', '.server']],
+    ['.server first', ['.server', 'client']],
+  ])('scans a client-path directory alias of a .server/ directory walked %s', async (_, order) => {
+    const root = await tempDir({ prefix: 'page-server-alias-' });
+    try {
+      await nodeFs.mkdir(`${root}/app/.server`, { recursive: true });
+      await nodeFs.writeFile(
+        `${root}/app/.server/real.ts`,
+        "import { s } from '~kernel/modules/p/p.service.ts';\nvoid s;\n",
+      );
+      await nodeFs.symlink('.server', `${root}/app/client`);
+      const fs = { ...createNodeRuntimeServices().fs! };
+      const readdir = fs.readdir.bind(fs);
+      const listed: string[] = [];
+      fs.readdir = (path: string) => {
+        listed.push(path);
+        return path === `${root}/app` ? Promise.resolve(order) : readdir(path);
+      };
+      const scan = await scanPageImports(fs, root);
+      expect(listed.slice(1)).toEqual(order.map((entry) => `${root}/app/${entry}`));
+      expect(scan.unreadable).toEqual([]);
+      expect(scan.violations.map((v) => v.path)).toEqual(['app/client/real.ts']);
+    } finally {
+      await nodeFs.rm(root, { recursive: true, force: true });
+    }
+  });
   it('scans server-only paths when realpath containment cannot be confirmed', async () => {
     const fs = createFakeFs({
       '/p/app/lib/x.server.ts': "import { x } from '~kernel/x.ts';",
