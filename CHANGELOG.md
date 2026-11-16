@@ -76,9 +76,9 @@ All notable changes to this project are documented here. The format follows
   optional `IVectorStoreAdapter.isHealthy()` through a cached, time-bounded probe; the Qdrant,
   pgvector, Vectorize and memory adapters implement it without touching data; Qdrant's checks a
   collection, so a revoked API key reads as down, and pgvector's reports a saturated pool as
-  `reachable: 'unknown'` while its statements keep completing, as database-plugin does. An adapter
-  without it also stays up as `reachable: 'unknown'`. To keep the previous behaviour,
-  `HealthPlugin({ readiness: { exclude: ['vector-store'] } })`.
+  `reachable: 'unknown'` while its statements keep completing or none of its own is running, as
+  database-plugin does. An adapter without it also stays up as `reachable: 'unknown'`. To keep the
+  previous behaviour, `HealthPlugin({ readiness: { exclude: ['vector-store'] } })`.
 - **`@setu-ts/cli` (M140d, PR pending).** `setu add` with a connected backend (RabbitMQ, NATS,
   Kafka, Pub/Sub, Service Bus, not only Redis) says the app and its tests connect at startup, prints
   the `docker compose` command and the `createTestApp` override, and gives a standalone README the
