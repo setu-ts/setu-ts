@@ -320,6 +320,9 @@ ctx.environment.validate({
 const greeting = ctx.config?.get<string>('MY_PLUGIN_GREETING', { default: 'Hello' }) ?? 'Hello';
 ```
 
+The default applies only to an absent key: an empty value, such as `PORT=` in a dotenv file, is
+returned as `''`, so use `config.get(key) || fallback` where an empty value means unset.
+
 ## Using Runtime Services
 
 ```typescript

@@ -63,6 +63,14 @@ continues in that process or is picked up by the next sweep. Custom implementati
 | `maxInputBytes`   | 262144   | UTF-8 JSON input bound; refusal carries 413                                                    |
 | `background`      | absent   | Receives `(ctx, work)` for hosts requiring explicit background lifetime                        |
 
+Input messages may be `user` or `assistant`; their parts pass through except tool parts
+(`tool-call`, `tool-result`, `tool-approval-*`), and `role: 'tool'` messages are dropped. `image`
+and `file` parts survive a JSON round trip, so their `data` must already be a JSON value: a base64
+string or a URL. A `Uint8Array` becomes an index-keyed object, not bytes. The whole encoded input
+counts against `maxInputBytes` (default 262144; over it, `start` is refused with 413). A tool's
+result reaches the model as `{ type: 'json' }` or `{ type: 'error-text' }`, so a tool cannot return
+an image to the model as an image.
+
 Definitions require `name`, `version`, `model(run)` and `maxOutputTokens`; `maxSteps` defaults to 20
 (1–1000). Optional `system`, `tools`, `toolsContext`, `compatibleVersions`, `approval`,
 `canAccess(principal, run)` and `timeouts: { modelMs?, toolMs?, toolAttempts? }` are consumed on the

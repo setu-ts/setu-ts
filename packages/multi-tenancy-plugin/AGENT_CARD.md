@@ -51,7 +51,8 @@ export function registerOrderRoutes(router: IRouterApi): void {
 
 ## Other options
 
-- `resolver` also accepts header, path, JWT or resolver instances tried in order.
+- `resolver` takes one built-in name (`'subdomain'`, `'header'`, `'path'` or `'jwt'`), one
+  `ITenantResolver`, or an array of resolver instances tried in order; only instances chain.
 - `database` selects column, schema or database isolation; `dataStore` accepts an instance or
   factory.
 - `tenants` also takes a registry or factory; `tenantCache` bounds its cache.

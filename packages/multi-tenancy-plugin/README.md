@@ -52,7 +52,9 @@ The resolved tenant is also available as `ctx.request.tenant`.
 
 ## Resolvers
 
-`'subdomain'`, `'header'`, `'path'`, and `'jwt'` — or an array of them, tried in order.
+One name string (`'subdomain'`, `'header'`, `'path'` or `'jwt'`), one custom `ITenantResolver`, or a
+readonly array of `ITenantResolver` instances tried in order. Only resolver instances chain: an
+array of name strings is refused by the type.
 
 **`subdomain` takes an optional `baseDomain`.** With one, it constrains resolution to that domain: a
 request for an unrelated host does not resolve a tenant. Without one, the first label of any

@@ -45,7 +45,9 @@ sse.peek('deploys')?.publish({ id: '412', event: 'deployment', data: { build: 41
 - Channels are process-local without a cross-process backplane. A backplane failure logs and
   preserves local delivery; channel size still counts only local connections.
 - `heartbeatMs` defaults to 30000 milliseconds; `0` disables its comment heartbeat. `retryMs` is
-  omitted by default and sends the browser's reconnect delay when configured.
+  omitted by default and sends the browser's reconnect delay when configured. `heartbeatMs` must be
+  a whole number from 0 to 2147483647; a NaN, negative, fractional or larger value is refused at
+  registration.
 
 ## Other options
 

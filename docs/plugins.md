@@ -257,8 +257,8 @@ management.
 - `@Body`, `@Query`, `@Param`
 - `@UseGuards`, `@UseInterceptors`, `@UseFilters`
 
-**Note:** Decorators are **optional** and require explicit token injection (no
-emitDecoratorMetadata).
+**Note:** Decorators are **optional** and require explicit token injection (standard decorators
+carry no parameter type information).
 
 **Links:**
 

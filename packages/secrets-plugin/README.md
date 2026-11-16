@@ -75,9 +75,10 @@ Config values retain ConfigPlugin's loading rules:
 The fallback also applies to `SessionPlugin`'s `SESSION_SECRET` and full-stack starter apps, which
 always compose `SecretsPlugin`. A consequence to check: `SessionPlugin` used to refuse to start when
 no `SESSION_SECRET` existed outside a dotenv file; a dotenv file present at runtime now satisfies
-that check. If a deployment relied on the refusal, keep dotenv files out of production or set
-`configFallback: false`. Found values use the normal `options.cacheTtl` read cache; missing values
-are never cached. `EnvProvider` remains read-only and its health is lifecycle-only.
+that check. If a deployment relied on the refusal, keep dotenv files out of production or pass
+`secret` explicitly; `configFallback` affects only `EnvProvider` reads. Found values use the normal
+`options.cacheTtl` read cache; missing values are never cached. `EnvProvider` remains read-only and
+its health is lifecycle-only.
 
 Dotenv files are for local development only. In production, inject variables through the
 orchestrator or secret store; see

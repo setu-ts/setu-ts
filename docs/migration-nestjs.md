@@ -800,6 +800,10 @@ app.register(WebSocketPlugin({ heartbeatMs: 30_000 }));
 app.register(DecoratorPlugin({ ingress: [EventsGateway] }));
 ```
 
+NestJS's `@UseGuards` has no gateway equivalent: use `@Gateway('/ws', { guards: [guard] })` to
+authorize the handshake. `@Roles`, `@Permissions`, `@RequirePolicy`, the scoped variants and
+method-level `@Public` on a `@Gateway` class fail startup.
+
 A `@Gateway` class is registered through `DecoratorPlugin`'s `ingress` list, not `controllers`. To
 broadcast, resolve `CAPABILITIES.WEBSOCKET` and use `room(name).broadcast(data, { except })`.
 Without decorators, pass the same handlers as `WebSocketPlugin({ routes: [...] })`.

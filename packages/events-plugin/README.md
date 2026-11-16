@@ -77,7 +77,7 @@ function orderPlaced(
   orderId: string,
 ): IDomainEvent<{ readonly orderId: string }> {
   return {
-    type: 'order.placed',
+    type: 'OrderPlaced',
     id: 'event-1',
     occurredOn: new Date(runtime.now()),
     data: { orderId },
@@ -139,7 +139,7 @@ EventsPlugin({
   diagnostics: {
     enabled: true,
     alias: 'orders',
-    events: { 'order.placed': 'OrderPlaced', 'order.cancelled': 'OrderCancelled' },
+    events: { OrderPlaced: 'OrderPlaced', OrderCancelled: 'OrderCancelled' },
   },
 });
 ```

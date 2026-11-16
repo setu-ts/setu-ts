@@ -1135,6 +1135,9 @@ app.router.get('/config', (ctx) => {
 });
 ```
 
+The default applies only to an absent key: an empty value, such as `PORT=` in a dotenv file, is
+returned as `''`, so use `config.get(key) || fallback` where an empty value means unset.
+
 ### Config Interface
 
 ```typescript
@@ -1200,6 +1203,9 @@ const config = await loadConfig(createRuntimeServices(), {
 });
 const port = config.get<number>('PORT', { default: 3000 });
 ```
+
+The default applies only to an absent key: an empty value, such as `PORT=` in a dotenv file, is
+returned as `''`, so use `config.get(key) || fallback` where an empty value means unset.
 
 `(runtime: IRuntimeServices, options?: ConfigPluginOptions) => Promise<IConfig>` — the same
 implementation `ConfigPlugin.register` uses, reachable without an application. Use it when
@@ -12091,9 +12097,10 @@ set a status code, or to stream) declares `Ctx()` among its sources, which is ho
 `create` answers `201`.
 
 The service's `@Injectable` token is explicit (`'<name>-service'`) and the controller's `@Inject`
-names that exact string, because `emitDecoratorMetadata` is unavailable under Deno, so a parameter's
-type cannot be read. The module works with and without `DiPlugin`: with a container the service is
-constructed through it, without one it resolves from the kernel's service registry.
+names that exact string: TC39 standard decorators carry no parameter type information on any
+runtime, so a parameter's type cannot be read. The module works with and without `DiPlugin`: with a
+container the service is constructed through it, without one it resolves from the kernel's service
+registry.
 
 ### Project templates
 
@@ -15373,11 +15380,12 @@ Contract notes:
   }
   ```
 
-  A token cannot be inferred from the parameter's type: that needs `emitDecoratorMetadata`, which
-  Deno does not support, and no source in this repo reads `design:paramtypes`. A list shorter than
-  the constructor leaves the trailing arguments `undefined` — a positional list cannot have gaps, so
-  the legacy "parameter N has no `@Inject` token" and "declares both `@Inject` forms" refusals no
-  longer have any reachable input and are gone. Method parameters bind with `@Params(...)`.
+  A token cannot be inferred from the parameter's type: TC39 standard decorators carry no parameter
+  type information on any runtime, and no source in this repo reads `design:paramtypes`. A list
+  shorter than the constructor leaves the trailing arguments `undefined` — a positional list cannot
+  have gaps, so the legacy "parameter N has no `@Inject` token" and "declares both `@Inject` forms"
+  refusals no longer have any reachable input and are gone. Method parameters bind with
+  `@Params(...)`.
 
   The list is read in declaration order and reaches the constructor in that order. The legacy
   index-keyed assembly is gone with the parameter form it existed for: parameter decorators
@@ -15388,8 +15396,8 @@ Contract notes:
   `DiPlugin` application resolves through the container — where its dependencies live.
 - **`Optional(token)` marks an injected dependency absent-tolerant, not construction fallible.** It
   wraps an entry inside the class-level `@Inject(...)` list, in the position of the argument it
-  describes, and never replaces the token — one is still required, for the same
-  `emitDecoratorMetadata` reason above:
+  describes, and never replaces the token — one is still required, for the same standard-decorators
+  reason above:
 
   ```typescript
   @Injectable({ token: 'report-service' })

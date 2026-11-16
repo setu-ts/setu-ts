@@ -51,7 +51,8 @@ ctx.response.json(pools);
 
 ## Other options
 
-- `maxWorkers` caps all pools together; `Infinity` disables that cap.
+- `maxWorkers` caps all pools together; `Infinity` disables that cap. The bound counts pool slots,
+  and OS worker threads can briefly exceed it at a hand-over (measured in the README).
 - `defaultPoolSize` sets per-module sizing; `pools` overrides `size`, `maxQueue` and `taskTimeoutMs`
   by specifier.
 - `host` injects a worker host; `WorkerQueueFullError` and `WorkerTaskTimeoutError` identify

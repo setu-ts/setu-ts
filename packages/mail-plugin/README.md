@@ -8,6 +8,17 @@ Workers-portable).
 
 ## Installation
 
+```bash
+npm install @setu-ts/mail-plugin
+# SMTP only
+npm install nodemailer
+# SES only
+npm install @aws-sdk/client-sesv2
+```
+
+`nodemailer` (SMTP) and `@aws-sdk/client-sesv2` (SES) are optional peer dependencies, loaded lazily
+when that provider connects. A missing peer throws `OptionalDependencyUnavailableError`.
+
 ```typescript
 import { MailPlugin } from '@setu-ts/mail-plugin';
 ```

@@ -23,8 +23,9 @@ wrapper's return type to consume that type without a separate provider dependenc
 
 ## Stream a UI response
 
-This is the example's whole controller, compiled as written; its imports point at the example's
-files. In an application it is `src/modules/chat/chat.controller.ts`, created by
+This block is the example's controller, shortened: it omits the `GET /chat/model` route, the
+`history` handling and `messageMetadata: usageMetadata`. Its imports point at the example's files.
+In an application it is `src/modules/chat/chat.controller.ts`, created by
 `setu generate module chat`, with `registerChatRoutes(router, services?)` kept as generated. The
 models come from the `CHAT_MODELS` capability of a plugin made with
 `setu generate plugin chat-models`, which reads the provider settings from the environment, and the

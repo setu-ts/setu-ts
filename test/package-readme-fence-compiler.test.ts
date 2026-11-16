@@ -90,7 +90,8 @@ const READMES: Readonly<Record<string, number>> = {
   // M101h: +1 for the authorization-diagnostics registration example.
   // M131d: +4 for the full-stack password sign-in recipe (the arm, the account module's
   // request-bound service, the login action, and the requireUser guard).
-  'packages/auth-plugin/README.md': 32,
+  // M140e: +1 for the sign-out route action.
+  'packages/auth-plugin/README.md': 33,
   'packages/static-plugin/README.md': 3,
   // M94c: +1 for the escaping Hono-template `raw(csrfTokenField(ctx))` example.
   // M101c: +1 for the Tenant binding opt-out example.
@@ -150,6 +151,7 @@ const READMES: Readonly<Record<string, number>> = {
   'packages/kernel/README.md': 3,
   'packages/logger-plugin/README.md': 4,
   // M102: +1 for the component-template example rendered through the view engine.
+  // M140e: the Installation bash fence is skipped, so the compilable count stays 4.
   'packages/mail-plugin/README.md': 4,
   'packages/metrics-plugin/README.md': 2,
   'packages/runtime/README.md': 4,

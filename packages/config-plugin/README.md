@@ -35,6 +35,9 @@ const config = app.services.get<IConfig>(CAPABILITIES.CONFIG);
 const port = config.get('PORT', { default: '3000' });
 ```
 
+The default applies only to an absent key: an empty value, such as `PORT=` in a dotenv file, is
+returned as `''`, so use `config.get(key) || fallback` where an empty value means unset.
+
 ## Configuration a plugin needs at construction
 
 Factory arguments are evaluated before `app.start()` registers `ConfigPlugin` and loads `.env`. Load

@@ -140,6 +140,10 @@ class UpdatesGateway {
 }
 ```
 
+A `@Gateway` class declares no HTTP authorization decorators: `@Gateway('/ws', { guards: [guard] })`
+is what authorizes a WebSocket handshake, while `@Roles`, `@Permissions`, `@RequirePolicy`, the
+scoped variants and method-level `@Public` on a `@Gateway` class fail startup.
+
 Register the provider plugins that a class uses (`QueuePlugin`, `SchedulerPlugin`, `EventsPlugin`,
 `MessagingPlugin`, `WebSocketPlugin`, or `CqrsPlugin`) alongside the decorator plugin:
 `DecoratorPlugin({ ingress: [BackgroundWork, UpdatesGateway] })`. `@UseIngressBehaviors(...)` wraps
@@ -343,8 +347,8 @@ project without `DiPlugin`**. With a container, reach it by injecting it
 — the Nth entry binds the Nth parameter. There is no parameter-level form: the TC39 proposal has no
 parameter position, so a decorator cannot be attached to an argument at all.
 
-A token is always explicit, because type-inferred injection needs `emitDecoratorMetadata`, which
-Deno does not support — so a parameter's type cannot be read.
+A token is always explicit, because TC39 standard decorators carry no parameter type information on
+any runtime, so a parameter's type cannot be read.
 
 ```typescript
 import { Inject, Injectable } from '@setu-ts/decorator-plugin';

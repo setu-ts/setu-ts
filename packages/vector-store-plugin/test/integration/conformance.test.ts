@@ -27,7 +27,6 @@ import type {
 } from '@setu-ts/common';
 import { MemoryVectorStore } from '../../src/adapters/memory/memory-vector-store.ts';
 import { PgVectorStore } from '../../src/adapters/pgvector/pgvector-store.ts';
-import type { PgVectorDatabase } from '../../src/adapters/pgvector/pgvector-store.ts';
 import { QdrantVectorStore } from '../../src/adapters/qdrant/qdrant-store.ts';
 import type { QdrantClientLike } from '../../src/adapters/qdrant/qdrant-store.ts';
 import { resolveCollections } from '../../src/services/collection-spec.ts';
@@ -177,7 +176,7 @@ const ARMS: readonly Arm[] = [
     refuses: new Set(),
     create: async () => {
       pool = new pg.Pool({ connectionString: PGVECTOR_URL });
-      return new PgVectorStore({ db: drizzle(pool) as unknown as PgVectorDatabase });
+      return new PgVectorStore({ db: drizzle(pool) });
     },
     cleanup: async () => {
       await pool?.query(`DROP TABLE IF EXISTS "vs_${COLLECTION}"`);
@@ -258,7 +257,7 @@ it.skipIf(!PGVECTOR_URL)(
     const name = `shape_${RUN}`;
     const spec = { name, dimensions: 4 };
     const table = `vs_${name}`;
-    const db = drizzle(admin) as unknown as PgVectorDatabase;
+    const db = drizzle(admin);
     const create = new PgVectorStore({ db });
     const verify = new PgVectorStore({ db, ensure: 'verify' });
     try {

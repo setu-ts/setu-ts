@@ -66,7 +66,13 @@ run started without a principal. A definition's `canAccess(principal, run)` repl
 example to let a support role read every run in the tenant. Every refusal, like another tenant's
 run, is the same 404 as a missing id. `get` supplies status, rebuilt messages and pending approvals
 for a page reload. Input messages may be `user` or `assistant`; the system prompt belongs to the
-definition's `system`, and a `system` message is refused at `start`.
+definition's `system`, and a `system` message is refused at `start`. Their parts pass through except
+tool parts (`tool-call`, `tool-result`, `tool-approval-*`), and `role: 'tool'` messages are dropped.
+`image` and `file` parts survive a JSON round trip, so their `data` must already be a JSON value: a
+base64 string or a URL. A `Uint8Array` becomes an index-keyed object, not bytes. The whole encoded
+input counts against `maxInputBytes` (default 262144; over it, `start` is refused with 413). A
+tool's result reaches the model as `{ type: 'json' }` or `{ type: 'error-text' }`, so a tool cannot
+return an image to the model as an image.
 
 ## Tools and approvals
 
@@ -99,9 +105,10 @@ Event ids are `<batch>.<index>.<epoch>`, the epoch being the lease version of th
 wrote the chunk. `Last-Event-ID` resumes after that exact chunk while the log agrees with it.
 Without a header, the SDK replays from the start; its transport's default `resumeStreamIsReplay`
 applies that replay to the same message. A waiting response ends after the approval request without
-a finish chunk; the decide route returns another `respond` stream. A terminal run without an event
-id returns 204, the SDK's nothing-to-resume signal. A terminal run with an event id serves the
-retained remainder.
+a finish chunk; the guide's sample decide route streams the continued run from the decide request,
+while the example app answers `202` and its client reopens `GET /runs/:id/stream` with
+`Last-Event-ID` and backoff. A terminal run without an event id returns 204, the SDK's
+nothing-to-resume signal. A terminal run with an event id serves the retained remainder.
 
 An id the log cannot honour means the client's view has diverged: it names a position past the
 committed log, or one a different instance wrote, which happens when an instance dies with chunks it

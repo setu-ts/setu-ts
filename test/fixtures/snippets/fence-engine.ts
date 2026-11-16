@@ -922,6 +922,7 @@ export async function writeProjectStubs(scratchDir: string): Promise<void> {
     "import { serviceToken } from '@setu-ts/common';\n" +
     'export interface AccountService {\n' +
     '  signIn(email: string, password: string): Promise<boolean>;\n' +
+    '  signOut(): void;\n' +
     '}\n' +
     "export const ACCOUNT = serviceToken<AccountService>('module.account');\n";
   const contextKeys =
