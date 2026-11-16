@@ -11,15 +11,15 @@ All notable changes to this project are documented here. The format follows
 - **BREAKING — open defect fixes (`@setu-ts/common`, `@setu-ts/agent-runs-plugin`,
   `@setu-ts/auth-plugin`, `@setu-ts/session-plugin`, `@setu-ts/runtime`,
   `@setu-ts/realtime-backplane-plugin`, `@setu-ts/service-discovery-plugin`, `@setu-ts/cli`; V12-54,
-  V12-55, V12-56, V12-57, V12-130, V12-134, V12-136, V12-137, V12-138, V12-139).** Form CSRF exempts
-  authenticated header credentials with a new session, including X-API-Key; non-Bearer Authorization
-  and restored sessions remain verified. API-key validator faults preserve their cause as
-  `AuthenticationUnavailableError` (503 with `errorHandler`, fixed public detail). In-process undici
-  FormData size refusals avoid a producer crash. Redis close cancels injected connection waits, and
-  retired owned clients retain an error sink until end; injected-client reporting and close
-  ownership are documented. Discovery deregistration warnings mask URL userinfo. E017 skips React
-  Router `.server` modules. Quotas accept a non-empty `message` for the shared 429 detail. `startAs`
-  starts durable runs with explicit server-owned identity and no request background hook.
+  V12-55, V12-56, V12-57, V12-130, V12-134, V12-136, V12-137, V12-138, V12-139, #593).** Form CSRF
+  exempts authenticated header credentials with a new session, including X-API-Key; non-Bearer
+  Authorization and restored sessions remain verified. API-key validator faults preserve their cause
+  as `AuthenticationUnavailableError` (503 with `errorHandler`, fixed public detail). In-process
+  undici FormData size refusals avoid a producer crash. Redis close cancels injected connection
+  waits, and retired owned clients retain an error sink until end; injected-client reporting and
+  close ownership are documented. Discovery deregistration warnings mask URL userinfo. E017 skips
+  React Router `.server` modules. Quotas accept a non-empty `message` for the shared 429 detail.
+  `startAs` starts durable runs with explicit server-owned identity and no request background hook.
   **Upgrade:** custom `IAgentRunService` implementations must add the required
   `startAs(identity, definition, input)` member. `apiKey.header` and `jwt.header` set to `cookie`
   (any case) now fail registration; use a dedicated non-ambient header such as `X-API-Key`, or
