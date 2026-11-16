@@ -550,6 +550,47 @@ async function pageFiles(
   }
 }
 
+/**
+ * Loads shared by several walked paths. A key one path uses is never held; a
+ * key several paths use is held from its first take to its last, then dropped,
+ * so a project without aliases holds one page at a time.
+ *
+ * @internal - exported for its unit test, not from the package index
+ */
+export class SharedLoads<T> {
+  readonly #remaining = new Map<string, number>();
+  readonly #held = new Map<string, T>();
+
+  /** @param keys - Every key the walk will take, once per path; undefined is never shared */
+  constructor(keys: Iterable<string | undefined>) {
+    for (const key of keys)
+      if (key !== undefined) this.#remaining.set(key, (this.#remaining.get(key) ?? 0) + 1);
+  }
+
+  /** Loads currently held. */
+  get size(): number {
+    return this.#held.size;
+  }
+
+  /**
+   * The load for one path: the held one for a shared key, else a fresh one.
+   *
+   * @param key - The path's key, or undefined for a path that is never shared
+   * @param load - Starts the load
+   * @returns The load
+   */
+  take(key: string | undefined, load: () => T): T {
+    if (key === undefined) return load();
+    const left = this.#remaining.get(key)! - 1;
+    this.#remaining.set(key, left);
+    const held = this.#held.get(key);
+    const value = held ?? load();
+    if (left === 0) this.#held.delete(key);
+    else if (held === undefined) this.#held.set(key, value);
+    return value;
+  }
+}
+
 /** The result of scanning a project's pages. */
 export interface PageImportScan {
   readonly violations: readonly PageImportViolation[];
@@ -577,16 +618,12 @@ export async function scanPageImports(fs: IFileSystem, dir: string): Promise<Pag
   const root = dir.replace(/\/+$/, '');
   // Every symlink path to a file is scanned, so a file several paths reach is read
   // and lexed once, keyed by loader and real path; only resolving its specifiers
-  // happens per path. A file one path reaches is not cached, and a shared entry is
-  // dropped after its last path, so a project without aliases holds one page at a time.
+  // happens per path.
   const keyOf = ({ path, real }: { path: string; real?: string }): string | undefined =>
     real === undefined ? undefined : `${loaderFor(path)}\0${real}`;
-  const remaining = new Map<string, number>();
-  for (const page of walk.pages) {
-    const key = keyOf(page);
-    if (key !== undefined) remaining.set(key, (remaining.get(key) ?? 0) + 1);
-  }
-  const shared = new Map<string, Promise<LexedPage | 'unreadable' | undefined>>();
+  const shared = new SharedLoads<Promise<LexedPage | 'unreadable' | undefined>>(
+    walk.pages.map(keyOf),
+  );
   const load = async (path: string): Promise<LexedPage | 'unreadable' | undefined> => {
     let source: string;
     try {
@@ -597,17 +634,7 @@ export async function scanPageImports(fs: IFileSystem, dir: string): Promise<Pag
     return lexPage(path, source);
   };
   for (const page of walk.pages.sort((a, b) => (a.path < b.path ? -1 : 1))) {
-    const key = keyOf(page);
-    let loading = key === undefined ? undefined : shared.get(key);
-    if (loading === undefined) {
-      loading = load(page.path);
-      if (key !== undefined && remaining.get(key)! > 1) shared.set(key, loading);
-    }
-    if (key !== undefined) {
-      const left = remaining.get(key)! - 1;
-      remaining.set(key, left);
-      if (left === 0) shared.delete(key);
-    }
+    const loading = shared.take(keyOf(page), () => load(page.path));
     // A page `stat` could see may still fail to read (EACCES, or removed since
     // the walk): it is reported like any other page the check cannot read.
     const lexed = await loading;

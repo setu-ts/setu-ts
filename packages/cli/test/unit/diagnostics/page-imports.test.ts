@@ -15,6 +15,7 @@ import {
   kernelTarget,
   scanPageImports,
   scanPageSource,
+  SharedLoads,
   type PageImportReason,
 } from '../../../src/diagnostics/page-imports.ts';
 import { createFakeFs } from '../../fixtures/fake-fs.ts';
@@ -864,5 +865,35 @@ describe('the full-stack output passes its own E017 check', () => {
     expect(pages.some((file) => file.contents.includes('~kernel/'))).toBe(true);
     for (const file of pages)
       expect(await scanPageSource(file.path, file.contents), file.path).toEqual([]);
+  });
+});
+
+describe('SharedLoads', () => {
+  it('never holds a key one path uses', () => {
+    const loads = new SharedLoads<number>(['one', undefined]);
+    let started = 0;
+    expect(loads.take('one', () => ++started)).toBe(1);
+    expect(loads.take(undefined, () => ++started)).toBe(2);
+    expect(started).toBe(2);
+    expect(loads.size).toBe(0);
+  });
+  it('holds a key several paths use from its first take until its last', () => {
+    const loads = new SharedLoads<number>(['shared', 'shared', 'shared']);
+    let started = 0;
+    expect(loads.take('shared', () => ++started)).toBe(1);
+    expect(loads.size).toBe(1);
+    expect(loads.take('shared', () => ++started)).toBe(1);
+    expect(loads.size).toBe(1);
+    expect(loads.take('shared', () => ++started)).toBe(1);
+    expect(loads.size).toBe(0);
+    expect(started).toBe(1);
+  });
+  it('keeps one real path read by two loaders apart', () => {
+    const loads = new SharedLoads<string>(['ts\0/r', 'tsx\0/r', 'ts\0/r', 'tsx\0/r']);
+    expect(loads.take('ts\0/r', () => 'ts')).toBe('ts');
+    expect(loads.take('tsx\0/r', () => 'tsx')).toBe('tsx');
+    expect(loads.take('ts\0/r', () => 'other')).toBe('ts');
+    expect(loads.take('tsx\0/r', () => 'other')).toBe('tsx');
+    expect(loads.size).toBe(0);
   });
 });
