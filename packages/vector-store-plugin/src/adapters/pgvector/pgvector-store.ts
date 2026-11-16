@@ -130,8 +130,12 @@ export class PgVectorStore implements IVectorStoreAdapter {
   #hrtime: (() => number) | undefined;
   /** This adapter's statements now running, for the readiness progress rule. */
   #inFlight = 0;
-  /** When one of this adapter's statements last completed, on {@linkcode #hrtime}. */
-  #lastCompletedAt: number | undefined;
+  /**
+   * When one of this adapter's statements last completed, or the first of a
+   * busy spell started, on {@linkcode #hrtime}: a statement that has only just
+   * begun waiting for a connection is not yet evidence of a stall.
+   */
+  #lastProgressAt: number | undefined;
 
   /**
    * @param options - The database, ensure mode and shutdown callback
@@ -335,10 +339,12 @@ export class PgVectorStore implements IVectorStoreAdapter {
    *
    * A saturated pool is not by itself an outage, so it gets database-plugin's
    * progress rule (M101a V8-3, M139f): while the pool has no idle connection
-   * and callers waiting (a node-postgres pool's own counters), no probe is
-   * queued behind that traffic; and when the probe itself times out waiting for
-   * a busy connection (pg-pool drops the waiter first, so the counters no longer
-   * show it), the timeout is that same evidence. Either way the answer is
+   * and either callers waiting or every connection it may open already open (a
+   * node-postgres pool's own counters), no probe is queued behind that traffic;
+   * and when the probe itself times out waiting for a busy connection (pg-pool
+   * drops the waiter first, so the counters no longer show it; only possible
+   * when `connectionTimeoutMillis` is under the 2 s probe bound), the timeout is
+   * that same evidence. Either way the answer is
    * `undefined` (could not tell) while this adapter's statements are still
    * completing, and `false` once they have stopped for
    * {@linkcode QUERY_PROGRESS_WINDOW_MS}. A pool exposing no counters is probed.
@@ -347,22 +353,17 @@ export class PgVectorStore implements IVectorStoreAdapter {
    *   pool that is still serving, `false` for one that has stopped
    */
   async isHealthy(): Promise<boolean | undefined> {
-    const pool = (this.#db as { readonly $client?: unknown }).$client as
-      { readonly idleCount?: unknown; readonly waitingCount?: unknown } | null | undefined;
-    if (
-      typeof pool?.idleCount === 'number' &&
-      typeof pool.waitingCount === 'number' &&
-      pool.idleCount === 0 &&
-      pool.waitingCount > 0
-    ) {
+    if (poolSaturated((this.#db as { readonly $client?: unknown }).$client)) {
       return this.#progressing() ? undefined : false;
     }
     const sql = this.#tag();
     try {
-      await this.#run(() => this.#db.execute(sql`SELECT 1`));
+      // Outside #run: the probe is not one of the application's statements, so
+      // a probe still queued must not count as a stalled statement next poll.
+      await this.#db.execute(sql`SELECT 1`);
     } catch (error) {
       if (isPoolAcquireTimeout(error)) return this.#progressing() ? undefined : false;
-      throw error;
+      throw toBackendFault(error, 'vector-store-plugin: pgvector') ?? error;
     }
     return true;
   }
@@ -388,10 +389,11 @@ export class PgVectorStore implements IVectorStoreAdapter {
 
   /** Runs a driver call, turning a connection failure into a 503/504 backend fault. */
   async #run<T>(call: () => Promise<T>): Promise<T> {
+    if (this.#inFlight === 0) this.#lastProgressAt = this.#hrtime?.();
     this.#inFlight += 1;
     try {
       const result = await call();
-      this.#lastCompletedAt = this.#hrtime?.();
+      this.#lastProgressAt = this.#hrtime?.();
       return result;
     } catch (error) {
       throw toBackendFault(error, 'vector-store-plugin: pgvector') ?? error;
@@ -403,7 +405,8 @@ export class PgVectorStore implements IVectorStoreAdapter {
   /**
    * Whether a saturated pool is still serving, by database-plugin's rule
    * (M101a): one of this adapter's statements completed within
-   * {@linkcode QUERY_PROGRESS_WINDOW_MS}, or none is running (the pool is busy
+   * {@linkcode QUERY_PROGRESS_WINDOW_MS} (or the first of the current busy spell
+   * started within it), or none is running (the pool is busy
    * with the application's own work, which this adapter cannot see), or there
    * is no clock to tell.
    */
@@ -411,7 +414,7 @@ export class PgVectorStore implements IVectorStoreAdapter {
     const now = this.#hrtime?.();
     if (now === undefined || this.#inFlight === 0) return true;
     return (
-      this.#lastCompletedAt !== undefined && now - this.#lastCompletedAt <= QUERY_PROGRESS_WINDOW_MS
+      this.#lastProgressAt !== undefined && now - this.#lastProgressAt <= QUERY_PROGRESS_WINDOW_MS
     );
   }
 
@@ -458,4 +461,24 @@ export function isPoolAcquireTimeout(error: unknown): boolean {
     current = cause;
   }
   return anchored && !hasCode;
+}
+
+/**
+ * Whether a node-postgres pool is saturated by its own counters: no idle
+ * connection, and either callers waiting or every connection it may open
+ * (`options.max`, pg's default 10) already open. A pool exposing no counters
+ * is not judged saturated, so it is probed.
+ */
+export function poolSaturated(client: unknown): boolean {
+  if (client === null || typeof client !== 'object') return false;
+  const pool = client as {
+    readonly idleCount?: unknown;
+    readonly waitingCount?: unknown;
+    readonly totalCount?: unknown;
+    readonly options?: { readonly max?: unknown };
+  };
+  if (typeof pool.idleCount !== 'number' || pool.idleCount !== 0) return false;
+  if (typeof pool.waitingCount === 'number' && pool.waitingCount > 0) return true;
+  const max = typeof pool.options?.max === 'number' ? pool.options.max : 10;
+  return typeof pool.totalCount === 'number' && pool.totalCount >= max;
 }
