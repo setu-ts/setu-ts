@@ -613,10 +613,13 @@ export class NodeHttpServerHandle {
   createFetchHandler(): NodeFetchCallback {
     return (request: Request, env?: NodeFetchEnv): Response | Promise<Response> => {
       // Served requests only: an in-process `fetch` (no `env`) owns its URL
-      // and has no connection to carry trailers.
+      // and has no connection to carry trailers. It is marked in-process so a
+      // capped read of undici's FormData releases rather than cancels (V12-139).
       const frameworkRequest =
         env === undefined
-          ? mapWebRequestToFrameworkRequest(request, this.#maxBodyBytes)
+          ? mapWebRequestToFrameworkRequest(request, this.#maxBodyBytes, undefined, {
+              inProcess: true,
+            })
           : mapWebRequestToFrameworkRequest(
               request,
               this.#maxBodyBytes,

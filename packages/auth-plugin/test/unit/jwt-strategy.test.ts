@@ -22,7 +22,7 @@ describe('JwtStrategy', () => {
     });
     strategy = new JwtStrategy({ jwtService: jwt });
   });
-  it.each(['cookie', 'COOKIE', 'Cookie'])('R1-7 refuses ambient JWT header %s', (header) => {
+  it.each(['cookie', 'COOKIE', 'Cookie'])('refuses ambient JWT header %s', (header) => {
     expect(() => new JwtStrategy({ jwtService: jwt, header })).toThrow(
       AuthPluginConfigurationError,
     );

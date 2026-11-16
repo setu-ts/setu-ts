@@ -577,8 +577,10 @@ request-bound module instead: `<name>.token.ts`, a service factory taking the re
 guarded page, `app/routes/_app/<name>._index.tsx`, whose loader reads the service with `getService`.
 Pages may import kernel code only as `import type` or from a `*.token.ts` module; `setu check`
 refuses other value imports (`setu.E017`), except in React Router `.server` modules confirmed inside
-`app/`. That exemption applies only to E017: a page the scanner cannot read safely is still reported
-as `setu.E018`. It reads only a page's own imports, not re-exports in files outside `app/`.
+`app/`. Those modules are skipped entirely, so neither E017 nor an oversized-file `setu.E018` is
+reported for them; a symlink leaving `app/` is still E018. Where the file system cannot resolve real
+paths, nothing is confirmed and `.server` modules are scanned like any page. It reads only a page's
+own imports, not re-exports in files outside `app/`.
 
 A module holds `<name>.controller.ts` (`GET /<name>`, `GET /<name>/:id`, `POST /<name>`,
 `PATCH /<name>/:id`), `<name>.service.ts` (an in-memory `Map` the JSDoc says to replace with a

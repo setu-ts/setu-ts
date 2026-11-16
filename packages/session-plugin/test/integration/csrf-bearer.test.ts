@@ -121,7 +121,7 @@ async function readBack(
 
 describe('form CSRF beside a bearer API (V9-27)', () => {
   it.each([true, false])(
-    'R1-14 API-key exchange commits on an excluded path only with exemptBearer false: %s',
+    'API-key exchange commits on an excluded path only with exemptBearer false: %s',
     async (exemptBearer) => {
       const app = createApplication({
         plugins: [

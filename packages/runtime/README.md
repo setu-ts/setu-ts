@@ -118,11 +118,12 @@ the one way to say unbounded. A value that is not a non-negative integer throws 
 `RuntimePlugin(...)`; `NaN` in particular would make every comparison against the cap `false` and
 silently disable the bound, and `Number()` of an unset environment variable is exactly `NaN`.
 
-In-process oversized `FormData` requests on Node still reject with the same 413. For a request with
-no socket peer and undici's exact generated multipart content type, the runtime releases the reader
-lock instead of cancelling: undici's in-memory producer can enqueue after cancel and throw an
-uncaught `ERR_INVALID_STATE`. Served peers and every other body keep cancellation, so an oversized
-socket upload stops draining. No Blob or `inject()` workaround is required.
+In-process oversized `FormData` requests on Node still reject with the same 413. For an in-process
+`adapter.fetch()` request (no Node `env`) carrying undici's exact generated multipart content type,
+the runtime releases the reader lock instead of cancelling: undici's in-memory producer can enqueue
+after cancel and throw an uncaught `ERR_INVALID_STATE`. Every served request, with or without a
+known peer, and every other body keep cancellation, so an oversized socket upload stops draining. No
+Blob or `inject()` workaround is required.
 
 A client- or bidi-streaming gRPC call is the exception: the kernel hands its unread body to the
 procedure, and `GrpcPlugin({ readMaxBytes })` bounds each message instead. A total cap would end

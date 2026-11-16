@@ -155,6 +155,7 @@ export class AgentRunService implements IAgentRunService {
    * @param input - Initial JSON messages
    * @returns The persisted run id
    * @throws {AgentRunStateError} For an invalid identity or input, before storing it
+   * @throws {AgentRunDefinitionError} For an unknown definition or a closed service
    * @since 0.13.0
    */
   async startAs(

@@ -21,7 +21,7 @@ function createRequest(): IRequest {
 }
 
 describe('AuthService', () => {
-  it('R1-9 propagates API-key validator outages through both authentication methods', async () => {
+  it('propagates API-key validator outages through both authentication methods', async () => {
     const cause = new Error('backend down');
     const service = new AuthService(
       [new ApiKeyStrategy({ validate: () => Promise.reject(cause) })],

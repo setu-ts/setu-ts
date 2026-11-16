@@ -160,7 +160,7 @@ class FakeRedisClient implements IRedisBackplaneClient {
 const FRAME: RealtimeFrame = { kind: 'ws-room', origin: 'node-b', name: 'lobby', data: 'hi' };
 
 describe('V12-54 injected connect cancellation', () => {
-  it('R1-16 keeps a newer attempt in charge of the injected connect wait', async () => {
+  it('keeps a newer attempt in charge of the injected connect wait', async () => {
     const releases: Array<() => void> = [];
     let underlyingFinished = 0;
     const client = Object.assign(new FakeRedisClient(), {
@@ -315,7 +315,7 @@ class RetiringClient extends EventEmitter implements IRedisBackplaneClient {
 }
 
 describe('V12-56 owned client retirement', () => {
-  it('R1-16 tolerates a retired client with no listener removal method', async () => {
+  it('tolerates a retired client with no listener removal method', async () => {
     const clients: RetiringClient[] = [];
     const module: IRedisModule = {
       create: () => {

@@ -564,7 +564,7 @@ describe('scanPageImports bounds', () => {
 
 describe('scanPageImports over real symlinks (review finding 6)', () => {
   it.each(['file', 'directory'] as const)(
-    'R1-6 refuses a server-only %s symlink escaping app/',
+    'refuses a server-only %s symlink escaping app/',
     async (kind) => {
       const root = await tempDir({ prefix: 'page-server-link-' });
       try {
@@ -584,7 +584,7 @@ describe('scanPageImports over real symlinks (review finding 6)', () => {
       }
     },
   );
-  it('R2 decides server-only by each file real path inside a real .server/ directory', async () => {
+  it('decides server-only by each file real path inside a real .server/ directory', async () => {
     const root = await tempDir({ prefix: 'page-server-inner-' });
     try {
       const kernelImport = "import { s } from '~kernel/modules/p/p.service.ts';\nvoid s;\n";
@@ -619,7 +619,7 @@ describe('scanPageImports over real symlinks (review finding 6)', () => {
       await nodeFs.rm(root, { recursive: true, force: true });
     }
   });
-  it('R1-6 scans server-only paths when realpath containment cannot be confirmed', async () => {
+  it('scans server-only paths when realpath containment cannot be confirmed', async () => {
     const fs = createFakeFs({
       '/p/app/lib/x.server.ts': "import { x } from '~kernel/x.ts';",
       '/p/app/.server/db.ts': "import { x } from '~kernel/x.ts';",

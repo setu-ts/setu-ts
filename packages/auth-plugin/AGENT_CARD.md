@@ -42,7 +42,8 @@ if (principal === null) {
 - Passive auth runs at 300; add guards. Missing principal: 401; denied permission: 403; no
   RBAC: 501.
 - API-key `validate`: return null for invalid keys; throws become `AuthenticationUnavailableError`
-  (503 with `errorHandler`, cause logged), even on public key-bearing routes. Validate format first.
+  (503 with `errorHandler`; log names the cause's class only), even on public key-bearing routes.
+  Validate format first.
 - API-key, JWT and issuer headers refuse Cookie in any case. Use session authentication for cookies.
 - JWT_SECRET: option → secrets → config → environment. HS256 needs ≥32 UTF-8/raw bytes.
   Missing/short keys throw `AuthPluginConfigurationError`; RS256 skips lookup.

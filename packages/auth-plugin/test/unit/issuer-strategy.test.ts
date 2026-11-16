@@ -8,7 +8,7 @@ import { IssuerStrategy } from '../../src/strategies/issuer-strategy.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 
 describe('IssuerStrategy routing', () => {
-  it.each(['cookie', 'COOKIE', 'Cookie'])('R1-7 refuses ambient issuer header %s', (header) => {
+  it.each(['cookie', 'COOKIE', 'Cookie'])('refuses ambient issuer header %s', (header) => {
     expect(
       () =>
         new IssuerStrategy({

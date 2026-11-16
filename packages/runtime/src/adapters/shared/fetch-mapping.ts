@@ -138,6 +138,7 @@ class FrameworkRequest implements IRequest {
   #form: Promise<FormBody> | undefined;
   #headers: Headers | undefined;
   readonly #maxBodyBytes: number | undefined;
+  readonly #inProcess: boolean;
 
   constructor(
     raw: Request,
@@ -147,6 +148,7 @@ class FrameworkRequest implements IRequest {
     maxBodyBytes?: number,
     peerAddress?: string,
     responseTrailers = false,
+    inProcess = false,
   ) {
     // The single-write guard over `user`, `tenant` and `locale` lives on this
     // class's prototype, installed by the first construction (idempotent after
@@ -161,6 +163,7 @@ class FrameworkRequest implements IRequest {
     this.path = path;
     this.#maxBodyBytes = maxBodyBytes;
     this.responseTrailers = responseTrailers;
+    this.#inProcess = inProcess;
     const ip = normalizePeerAddress(peerAddress);
     if (ip !== undefined) this.ip = ip;
   }
@@ -294,7 +297,7 @@ class FrameworkRequest implements IRequest {
         (error: unknown) => bodyReadFailure(error),
       );
     }
-    const cancelOnRefusal = !(this.ip === undefined && isUndiciFormData(this.#raw.headers));
+    const cancelOnRefusal = !(this.#inProcess && isUndiciFormData(this.#raw.headers));
     return readBounded(this.#raw, this.#maxBodyBytes, cancelOnRefusal).catch((error: unknown) =>
       bodyReadFailure(error, this.#maxBodyBytes),
     );
@@ -315,8 +318,10 @@ class FrameworkRequest implements IRequest {
  * at most one chunk beyond the limit is ever held. The reader is cancelled on
  * refusal rather than merely abandoned: an abandoned `ReadableStream` holds its
  * source open (the M70k HEAD-descriptor-leak class), which on a server means
- * the connection stays draining. Peer-less undici FormData instead releases its
- * lock: that in-memory producer can enqueue after cancel and crash Node.
+ * the connection stays draining. An in-process undici FormData body instead
+ * releases its lock: that in-memory producer can enqueue after cancel and crash
+ * Node. Only the adapter marks a request in-process; a served request with no
+ * known peer still cancels.
  *
  * `raw.body` is read only on this path. That matters on Node, where touching
  * `.body` materializes the full undici `Request` the lightweight facade exists
@@ -324,7 +329,7 @@ class FrameworkRequest implements IRequest {
  *
  * @param raw - The web-standard request
  * @param maxBodyBytes - The cap, in bytes
- * @param cancelOnRefusal - False only for peer-less undici FormData, whose producer cannot cancel safely
+ * @param cancelOnRefusal - False only for in-process undici FormData, whose producer cannot cancel safely
  * @returns The body bytes
  * @throws {RequestBodyTooLargeError} When the body exceeds the cap
  */
@@ -361,7 +366,7 @@ async function readBounded(
     if (cancelOnRefusal) await reader.cancel().catch(() => {});
     else {
       // undici's in-memory FormData producer can enqueue after cancel and crash Node.
-      // Served peers still cancel, so their sockets stop draining on refusal.
+      // Served requests still cancel, so their sockets stop draining on refusal.
       try {
         reader.releaseLock();
       } catch {
@@ -480,6 +485,11 @@ export interface ListenerTransport {
   readonly scheme?: 'http' | 'https';
   /** Whether the response to this request can carry trailers. */
   readonly responseTrailers?: boolean;
+  /**
+   * True for an in-process call with no connection (Node's `app.fetch`). Only then may a capped
+   * read of undici's own FormData body release its reader instead of cancelling it.
+   */
+  readonly inProcess?: boolean;
 }
 
 /**
@@ -532,6 +542,7 @@ export function mapWebRequestToFrameworkRequest(
     maxBodyBytes,
     peerAddress,
     transport?.responseTrailers === true,
+    transport?.inProcess === true,
   );
 }
 

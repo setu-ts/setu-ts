@@ -8,7 +8,7 @@ import { AuthPlugin, AuthPluginConfigurationError, requireAuth } from '../../src
 
 describe('API-key validator outage', () => {
   it.each(['cookie', 'COOKIE', 'Cookie'])(
-    'R1-7 refuses Cookie at registration with and without issuers: %s',
+    'refuses Cookie at registration with and without issuers: %s',
     async (header) => {
       for (const withIssuers of [false, true]) {
         const app = createApplication({

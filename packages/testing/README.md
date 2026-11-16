@@ -258,7 +258,7 @@ const res3 = await inject(app, req);
 > cause rather than quietly sending no body. Build a separate `Request` per call.
 
 On Node, an in-process oversized `FormData` passed to `app.fetch(new Request(...))` now receives the
-same 413 refusal. The runtime releases the peer-less undici reader without cancelling its producer;
+same 413 refusal. The runtime releases the in-process undici reader without cancelling its producer;
 no `Blob` or `inject()` workaround is needed. Served uploads still cancel at the cap.
 
 ### createMockPlugin

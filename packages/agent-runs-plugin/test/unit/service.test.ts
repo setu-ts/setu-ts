@@ -6,7 +6,7 @@ import { claim, Lease } from '../../src/lease/lease.ts';
 import { ChunkLog } from '../../src/log/chunk-log.ts';
 import type { IRequestContext } from '@setu-ts/common';
 describe('AgentRunService', () => {
-  it('R1-8 rejects a malformed context without throwing synchronously', async () => {
+  it('rejects a malformed context without throwing synchronously', async () => {
     const h = await harness();
     try {
       let pending: Promise<{ runId: string }> | undefined;

@@ -33,6 +33,53 @@ describe('Node socket peer', () => {
     });
     expect(peer).toBe('10.1.2.3');
   });
+  it('V12-139 marks only an in-process fetch, so a served FormData of the same shape cancels', async () => {
+    const faults: unknown[] = [];
+    const record = (error: unknown): void => {
+      faults.push(error);
+    };
+    process.on('uncaughtException', record);
+    process.on('unhandledRejection', record);
+    try {
+      const handle = new NodeHttpServerHandle(undefined, { maxBodyBytes: 1 });
+      let refused: unknown;
+      handle.setHandler(async (request) => {
+        refused = await request.bytes().catch((error: unknown) => error);
+        return createTestContext().response;
+      });
+      const fetch = handle.createFetchHandler();
+      const form = new FormData();
+      form.set('file', new Blob(['y'.repeat(4096)]), 'file.txt');
+      const inProcess = new Request('http://localhost/upload', { method: 'POST', body: form });
+      await fetch(inProcess);
+      expect(refused).toHaveProperty('name', 'RequestBodyTooLargeError');
+      expect(inProcess.body?.locked).toBe(false);
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(faults).toEqual([]);
+
+      let cancelled = false;
+      const served = new Request('http://localhost/upload', {
+        method: 'POST',
+        body: new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new Uint8Array(10));
+          },
+          cancel() {
+            cancelled = true;
+          },
+        }),
+        duplex: 'half',
+        headers: { 'content-type': inProcess.headers.get('content-type') ?? '' },
+      } as RequestInit);
+      // A served request whose socket reports no peer: it must still cancel.
+      await fetch(served, { incoming: { socket: {} } } as never);
+      expect(refused).toHaveProperty('name', 'RequestBodyTooLargeError');
+      expect(cancelled).toBe(true);
+    } finally {
+      process.off('uncaughtException', record);
+      process.off('unhandledRejection', record);
+    }
+  });
   it('carries the peer through the raw upgrade pipeline', async () => {
     const handle = new NodeHttpServerHandle();
     const seen = Promise.withResolvers<string | undefined>();
