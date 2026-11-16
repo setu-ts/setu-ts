@@ -699,9 +699,17 @@ describe('scanPageImports over real symlinks (review finding 6)', () => {
       );
       await nodeFs.symlink('lib', `${root}/app/x`);
       await nodeFs.symlink('lib', `${root}/app/y`);
+      const fs = { ...createNodeRuntimeServices().fs! };
+      const readFile = fs.readFile.bind(fs);
+      let reads = 0;
+      fs.readFile = (path: string) => {
+        reads += 1;
+        return readFile(path);
+      };
       vi.mocked(transform).mockClear();
-      const scan = await scanPageImports(createNodeRuntimeServices().fs!, root);
-      // One file by three paths: esbuild runs once, only the specifiers resolve per path.
+      const scan = await scanPageImports(fs, root);
+      // One file by three paths: read and transformed once, only the specifiers resolve per path.
+      expect(reads).toBe(1);
       expect(transform).toHaveBeenCalledTimes(1);
       expect(scan.unreadable).toEqual([]);
       expect(scan.violations.map((v) => v.path)).toEqual([

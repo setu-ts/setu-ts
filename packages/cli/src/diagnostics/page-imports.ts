@@ -575,38 +575,47 @@ export async function scanPageImports(fs: IFileSystem, dir: string): Promise<Pag
   const decoder = new TextDecoder();
   const resolveToken = tokenResolverFor(fs, dir);
   const root = dir.replace(/\/+$/, '');
-  // Every symlink path to a file is scanned, so a file is read once per real path
-  // and esbuild and the lexer run once per loader and text; only resolving the
-  // specifiers happens once per path.
-  const sources = new Map<string, Promise<string | undefined>>();
-  const lexedPages = new Map<string, Promise<LexedPage | 'unreadable'>>();
-  const read = (path: string): Promise<string | undefined> =>
-    fs.readFile(joinPath(dir, path)).then(
-      (bytes) => decoder.decode(bytes),
-      () => undefined,
-    );
-  for (const { path, real } of walk.pages.sort((a, b) => (a.path < b.path ? -1 : 1))) {
-    let reading = real === undefined ? undefined : sources.get(real);
-    if (reading === undefined) {
-      reading = read(path);
-      if (real !== undefined) sources.set(real, reading);
+  // Every symlink path to a file is scanned, so a file several paths reach is read
+  // and lexed once, keyed by loader and real path; only resolving its specifiers
+  // happens per path. A file one path reaches is not cached, and a shared entry is
+  // dropped after its last path, so a project without aliases holds one page at a time.
+  const keyOf = ({ path, real }: { path: string; real?: string }): string | undefined =>
+    real === undefined ? undefined : `${loaderFor(path)}\0${real}`;
+  const remaining = new Map<string, number>();
+  for (const page of walk.pages) {
+    const key = keyOf(page);
+    if (key !== undefined) remaining.set(key, (remaining.get(key) ?? 0) + 1);
+  }
+  const shared = new Map<string, Promise<LexedPage | 'unreadable' | undefined>>();
+  const load = async (path: string): Promise<LexedPage | 'unreadable' | undefined> => {
+    let source: string;
+    try {
+      source = decoder.decode(await fs.readFile(joinPath(dir, path)));
+    } catch {
+      return undefined;
+    }
+    return lexPage(path, source);
+  };
+  for (const page of walk.pages.sort((a, b) => (a.path < b.path ? -1 : 1))) {
+    const key = keyOf(page);
+    let loading = key === undefined ? undefined : shared.get(key);
+    if (loading === undefined) {
+      loading = load(page.path);
+      if (key !== undefined && remaining.get(key)! > 1) shared.set(key, loading);
+    }
+    if (key !== undefined) {
+      const left = remaining.get(key)! - 1;
+      remaining.set(key, left);
+      if (left === 0) shared.delete(key);
     }
     // A page `stat` could see may still fail to read (EACCES, or removed since
     // the walk): it is reported like any other page the check cannot read.
-    const source = await reading;
-    if (source === undefined) {
-      unreadable.push(path);
-      continue;
-    }
-    const key = `${loaderFor(path)}\0${source}`;
-    let lexing = lexedPages.get(key);
-    if (lexing === undefined) {
-      lexing = lexPage(path, source);
-      lexedPages.set(key, lexing);
-    }
-    const page = await lexing;
-    const result = page === 'unreadable' ? page : await resolvePage(path, page, root, resolveToken);
-    if (result === 'unreadable') unreadable.push(path);
+    const lexed = await loading;
+    const result =
+      lexed === undefined || lexed === 'unreadable'
+        ? 'unreadable'
+        : await resolvePage(page.path, lexed, root, resolveToken);
+    if (result === 'unreadable') unreadable.push(page.path);
     else violations.push(...result);
   }
   return { violations, unreadable };
