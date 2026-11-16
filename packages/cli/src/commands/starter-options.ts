@@ -192,7 +192,8 @@ export function starterArmSet(source: string, arm: string): boolean | undefined 
   const [parent = arm, child] = arm.split('.');
   const entry = entries.find(({ key }) => key === parent);
   if (entry === undefined) return false;
-  const value = source.slice(entry.start, entry.end).trim();
+  // Comments masked (offsets unchanged), so `undefined /* off */` still reads as unset.
+  const value = object.visible.slice(entry.start, entry.end).trim();
   if (UNSET_VALUE.test(value)) return false;
   if (child === undefined) return true;
   const inner = starterLiteralEntries(value);

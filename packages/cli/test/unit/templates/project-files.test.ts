@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { parseEnvRead } from '../../fixtures/env-read-shape.ts';
 import {
   BROKER_COMPOSE_FILE,
+  exposureParagraph,
   projectFiles,
   resolveHost,
   servedRoutes,
@@ -1057,5 +1058,29 @@ describe('M140b runtime output', () => {
       variable: 'PORT',
       fallback: '3000',
     });
+  });
+});
+
+describe('exposureParagraph', () => {
+  // Pinned as literals: the redis capture test rebuilds its expected text with this
+  // function, so a defect here would otherwise pass on both sides of that test.
+  it('names the proxy as the only access control, for every route combination', () => {
+    expect(exposureParagraph(false, false)).toBe('');
+    expect(exposureParagraph(true, true)).toBe(
+      '\n\n`/metrics`, `/docs`, `/openapi.json` are served on the application port to anyone who can reach it:\n' +
+        "restrict them at the proxy. Turning the UI off with OpenApiPlugin's `swagger: false`, moving `/docs`\n" +
+        'with its `endpoint` and `/openapi.json` with its `specEndpoint` or moving `/metrics` with\n' +
+        "MetricsPlugin's `endpoint` changes a path or a page, not who can reach it.",
+    );
+    expect(exposureParagraph(true, false)).toBe(
+      '\n\n`/metrics` is served on the application port to anyone who can reach it: restrict it at the proxy.\n' +
+        "Moving `/metrics` with MetricsPlugin's `endpoint` changes a path or a page, not who can reach it.",
+    );
+    expect(exposureParagraph(false, true)).toBe(
+      '\n\n`/docs`, `/openapi.json` are served on the application port to anyone who can reach it: restrict\n' +
+        "them at the proxy. Turning the UI off with OpenApiPlugin's `swagger: false` or moving `/docs` with\n" +
+        'its `endpoint` and `/openapi.json` with its `specEndpoint` changes a path or a page, not who can\n' +
+        'reach it.',
+    );
   });
 });

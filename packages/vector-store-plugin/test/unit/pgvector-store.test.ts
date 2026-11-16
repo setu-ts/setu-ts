@@ -752,6 +752,27 @@ describe('PgVectorStore.isHealthy', () => {
     expect(await second).toBe(true);
   });
 
+  it('reads a probe queued behind statements that keep completing as unknown, not a stall', async () => {
+    const releases: (() => void)[] = [];
+    const counters = { idleCount: 1, waitingCount: 0, totalCount: 1, options: { max: 3 } };
+    const h = await saturatedStore(counters, (rendered) =>
+      rendered.text === 'SELECT 1'
+        ? new Promise<{ rows: [] }>((resolve) => releases.push(() => resolve({ rows: [] })))
+        : healthy()(rendered),
+    );
+    const queued = h.store.isHealthy();
+    Object.assign(counters, { idleCount: 0, totalCount: 3 });
+    h.advance(QUERY_PROGRESS_WINDOW_MS + 1);
+    // A statement completes now: the pool is serving, so the old probe is queued, not stalled.
+    await h.store.delete(spec, 'tenant-a', ['r1']);
+    expect(await h.store.isHealthy()).toBeUndefined();
+    // Once no statement has completed for a whole window, the old probe is a stall again.
+    h.advance(QUERY_PROGRESS_WINDOW_MS + 1);
+    expect(await h.store.isHealthy()).toBe(false);
+    releases[0]!();
+    expect(await queued).toBe(true);
+  });
+
   it('counts each completed statement of a long replaceSource as progress', async () => {
     const releases: (() => void)[] = [];
     const h = await saturatedStore({ idleCount: 0, waitingCount: 2 }, (rendered) =>

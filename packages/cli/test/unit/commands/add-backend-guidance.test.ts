@@ -140,6 +140,24 @@ describe('setu add backend guidance', () => {
     expect(p.out.text()).not.toContain('the existing call was preserved');
   });
 
+  it('keeps the jobs barrel when it rewrites a bare QueuePlugin() call', async () => {
+    const p = await project();
+    expect(await p.run(['add', 'queue']), p.err.text()).toBe(0);
+    // A config whose QueuePlugin() was written bare, with no jobs barrel import.
+    const wired = p.read('setu.config.ts');
+    const bare = wired
+      .replace(/QueuePlugin\(\{\s*processors: \[\.\.\.QUEUE_PROCESSORS\]\s*\}\)/, 'QueuePlugin()')
+      .replace(/import \{ QUEUE_PROCESSORS \} from '[^']+';\n/, '');
+    expect(bare).toContain('QueuePlugin(),');
+    expect(bare).not.toContain('QUEUE_PROCESSORS');
+    await p.fs.writeFile('/work/shop/setu.config.ts', new TextEncoder().encode(bare));
+    expect(await p.run(['add', 'queue', '--queue', 'redis']), p.err.text()).toBe(0);
+    const config = p.read('setu.config.ts').replace(/\s+/g, ' ');
+    expect(config).toMatch(/QueuePlugin\(\{ processors: \[\.\.\.QUEUE_PROCESSORS\], /);
+    expect(config).toContain("adapter: 'redis'");
+    expect(config).toMatch(/import \{ QUEUE_PROCESSORS \} from '\.\/src\/jobs\/index\.ts';/);
+  });
+
   it('adds the node-redis import when the rewritten call needs it', async () => {
     const p = await project();
     expect(await p.run(['add', 'cache']), p.err.text()).toBe(0);
@@ -378,6 +396,29 @@ describe('setu add backend guidance', () => {
     expect(withServedRoutes(readme)).toBeUndefined();
     expect(withServedRoutes('# x\n')).toBeUndefined();
     expect(withServedRoutes('# x\n\n## What it serves\n\nNothing yet.\n')).toBeUndefined();
+  });
+
+  it('lists /assets only when StaticPlugin serves it', async () => {
+    const p = await project();
+    // A StaticPlugin serving another directory: the CSS registration is refused.
+    const config = p.read('setu.config.ts');
+    await p.fs.writeFile(
+      '/work/shop/setu.config.ts',
+      new TextEncoder().encode(
+        "import { StaticPlugin } from '@setu-ts/static-plugin';\n" +
+          config.replace(
+            '...(devtool?.plugins ?? [])',
+            "StaticPlugin({ root: './public' }),\n      ...(devtool?.plugins ?? [])",
+          ),
+      ),
+    );
+    expect(await p.run(['add', 'view']), p.err.text()).toBe(0);
+    const readme = p.read('README.md');
+    expect(readme).toContain('- `/ui` — the example page');
+    expect(readme).not.toContain('- `/assets`');
+    expect(withServedRoutes('# x\n\n## What it serves\n\n- `/` — hello\n', false)).not.toContain(
+      '/assets',
+    );
   });
 
   it('adds the view routes after the last bullet, wrapped or at the end of the file', () => {

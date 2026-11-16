@@ -93,6 +93,21 @@ describe('starter arms in setu check', () => {
     expect(reported(fullStack("'graphql': {},"), ['graphql-plugin'])).toEqual([]);
   });
 
+  it('reads an unset value through a trailing comment, top-level or nested', () => {
+    for (const comment of ['/* disabled */', '// off\n']) {
+      for (const value of ['undefined', 'null', 'false']) {
+        expect(reported(fullStack(`graphql: ${value} ${comment},`), ['graphql-plugin'])).toEqual([
+          'graphql-plugin',
+        ]);
+        expect(
+          reported(fullStack(`realtime: { websocket: ${value} ${comment} },`), [
+            'websocket-plugin',
+          ]),
+        ).toEqual(['websocket-plugin']);
+      }
+    }
+  });
+
   it('stays quiet on a shape it cannot read', () => {
     // Another `return` may hand back an object that does set the arm.
     const branched = fullStack('session: {},').replace(

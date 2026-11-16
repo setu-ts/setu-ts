@@ -549,6 +549,26 @@ function withBareCallArguments(source: string, bare: string, args: string): stri
 }
 
 /**
+ * Gives the CLI's own bare provider call the selected options together with the
+ * generated artifacts it consumes (the jobs barrel's `processors`, say), and
+ * imports that barrel, so a rewrite never drops the wiring a fresh insert has.
+ *
+ * @param source - Existing `setu.config.ts` contents
+ * @param bare - Bare package name being added
+ * @param seam - The combined options and barrel imports
+ * @returns The updated config, or `undefined` when the call or the imports
+ *   cannot be edited safely, which leaves the printed guidance
+ */
+function withBareCallSeam(source: string, bare: string, seam: AddSeam): string | undefined {
+  const plan = barrelImportPlan(source, seam.imports, true);
+  if (plan === undefined) return undefined;
+  const rewritten = withBareCallArguments(source, bare, seam.args);
+  if (rewritten === undefined) return undefined;
+  // The import goes after the last import, before the call this rewrote.
+  return `${rewritten.slice(0, plan.at)}${plan.text}${rewritten.slice(plan.at)}`;
+}
+
+/**
  * Whether a configuration imports the node-redis helper, in either quote style;
  * comments are masked so a commented-out import does not count.
  *
@@ -2953,7 +2973,7 @@ async function addOne(
                 ) ??
                 (transportArgs === undefined
                   ? undefined
-                  : (rewroteBareCall = withBareCallArguments(config, bare, transportArgs))));
+                  : (rewroteBareCall = withBareCallSeam(config, bare, seam!))));
     // A member's options come from its transport module, which imports the
     // node-redis helper itself; the config only needs the module's export.
     const viaModule =

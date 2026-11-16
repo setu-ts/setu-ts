@@ -249,7 +249,14 @@ export function planViewSetup(input: IViewSetupInput): IViewSetupPlan {
       );
     }
     const readme = existing.get('README.md');
-    const served = readme === undefined ? undefined : withServedRoutes(readme);
+    // `/assets` is listed only when StaticPlugin serves it: this run wired it, or
+    // the config already registers exactly that call. A StaticPlugin serving
+    // another directory is left alone, so the README does not claim the route.
+    const squash = (text: string): string => text.replace(/\s+/g, '').replace(/,(?=[})])/g, '');
+    const assetsServed =
+      wired !== undefined ||
+      squash(maskComments(config ?? '') ?? '').includes(squash(`StaticPlugin(${STATIC_ARGS})`));
+    const served = readme === undefined ? undefined : withServedRoutes(readme, assetsServed);
     if (served !== undefined) configEdits.push({ path: 'README.md', contents: served });
     const ignore = existing.get('.gitignore');
     if (ignore !== undefined) {
@@ -408,9 +415,10 @@ export function Layout({ title, children }: { title: string; children: Child }) 
  * already names `/ui`.
  *
  * @param readme - The project's README
+ * @param assets - Whether StaticPlugin serves `/assets`; without it only `/ui` is listed
  * @returns The updated README, or `undefined` to leave it as it is
  */
-export function withServedRoutes(readme: string): string | undefined {
+export function withServedRoutes(readme: string, assets = true): string | undefined {
   const heading = readme.indexOf('\n## What it serves\n');
   if (heading < 0 || readme.includes('- `/ui`')) return undefined;
   const next = readme.indexOf('\n## ', heading + 1);
@@ -428,6 +436,9 @@ export function withServedRoutes(readme: string): string | undefined {
   const at = heading + end;
   return (
     `${readme.slice(0, at)}\n- \`/ui\` — the example page \`setu add view\` wrote, rendered by ViewPlugin` +
-    `\n- \`/assets\` — its built CSS, served by StaticPlugin from \`build/assets\`${readme.slice(at)}`
+    (assets
+      ? `\n- \`/assets\` — its built CSS, served by StaticPlugin from \`build/assets\``
+      : '') +
+    readme.slice(at)
   );
 }

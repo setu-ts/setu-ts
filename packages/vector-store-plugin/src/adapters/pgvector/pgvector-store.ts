@@ -443,15 +443,15 @@ export class PgVectorStore implements IVectorStoreAdapter {
   #progressing(): boolean {
     const now = this.#hrtime?.();
     if (now === undefined) return true;
+    const recent =
+      this.#lastProgressAt !== undefined && now - this.#lastProgressAt <= QUERY_PROGRESS_WINDOW_MS;
     // Starts are pushed in clock order, so the first is the oldest outstanding.
+    // A probe waiting past the window is a stall only when no statement has
+    // completed within it: behind traffic that is still completing, it is queued.
     const oldestProbe = this.#probeStarts[0];
-    if (oldestProbe !== undefined && now - oldestProbe > QUERY_PROGRESS_WINDOW_MS) {
-      return false;
-    }
+    if (oldestProbe !== undefined && now - oldestProbe > QUERY_PROGRESS_WINDOW_MS) return recent;
     if (this.#inFlight === 0) return true;
-    return (
-      this.#lastProgressAt !== undefined && now - this.#lastProgressAt <= QUERY_PROGRESS_WINDOW_MS
-    );
+    return recent;
   }
 
   #tag(): SqlTag {
