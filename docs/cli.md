@@ -1072,19 +1072,19 @@ App-owned clients such as `pg`, `@prisma/client` and `@prisma/adapter-pg` appear
 guidance. Backend configuration remains application-owned; only mail's default `MailPlugin()` is
 inserted. The printed `smtp` and `sendgrid` calls read `SMTP_HOST` and `SMTP_PORT`, or
 `SENDGRID_API_KEY`, which `add` writes to the dotenv file and its example (on Workers it writes
-nothing and the printed call reads `process.env`, so supply the value as a Workers var or secret);
-`ses` passes `{}`, since the AWS SDK reads `AWS_REGION` and credentials from its own default chain.
-`smtp` also gets a local Mailpit in `docker/compose.yaml` (`SMTP_PORT=1025`, inbox at
-`http://localhost:8025`) and the `createTestApp` override that keeps generated tests offline. The
-`qdrant` and `pgvector` vector-store adapters get a CLI-written `src/vector-store.ts` that builds
-the adapter on its application-owned client, so `setu.config.ts` keeps only framework and relative
-imports and stays readable to `setu check`; `QDRANT_URL` or `DATABASE_URL` in the dotenv pair; a
-Compose service; and the printed call `VectorStorePlugin({ adapter: vectorStoreAdapter(), … })` with
-its imports. Every printed registration names its imports. Mailpit, Qdrant and pgvector also get the
-README's "Local transport services" section, as a broker does. On Cloudflare Workers, zero-config
-providers are inserted like elsewhere, but `setu add cache` and `setu add storage` are refused,
-because their in-memory stores would live in one isolate: the refusal names `CloudflarePlugin`'s KV
-and R2 arms (`setu add cloudflare`) instead. The vector-store adapter is not asked on Workers, and
+nothing, so supply the value as a Workers var or secret); `ses` passes `{}`, since the AWS SDK reads
+`AWS_REGION` and credentials from its own default chain. `smtp` also gets a local Mailpit in
+`docker/compose.yaml` (`SMTP_PORT=1025`, inbox at `http://localhost:8025`) and the `createTestApp`
+override that keeps generated tests offline. The `qdrant` and `pgvector` vector-store adapters get a
+CLI-written `src/vector-store.ts` that builds the adapter on its application-owned client, so
+`setu.config.ts` keeps only framework and relative imports and stays readable to `setu check`;
+`QDRANT_URL` or `DATABASE_URL` in the dotenv pair; a Compose service; and the printed call
+`VectorStorePlugin({ adapter: vectorStoreAdapter(), … })` with its imports. Every printed
+registration names its imports. Mailpit, Qdrant and pgvector also get the README's "Local transport
+services" section, as a broker does. On Cloudflare Workers, zero-config providers are inserted like
+elsewhere, but `setu add cache` and `setu add storage` are refused, because their in-memory stores
+would live in one isolate: the refusal names `CloudflarePlugin`'s KV and R2 arms
+(`setu add cloudflare`) instead. The vector-store adapter is not asked on Workers, and
 `--adapter qdrant` or `pgvector` is refused there in favour of `VectorizeVectorStore`. In a
 generated minimal, `rest` or class-based Workers config, `setu add cloudflare` inserts
 `CloudflarePlugin({ env, ...(waitUntil ? { waitUntil } : {}) })` and renames the factory's unread
