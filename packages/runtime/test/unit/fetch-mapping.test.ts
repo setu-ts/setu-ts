@@ -70,7 +70,7 @@ describe('V12-139 in-process undici FormData refusal', () => {
     ['multipart/form-data; boundary=----WebKitFormBoundaryabc', undefined, true],
     ['multipart/form-data; boundary="----formdata-undici-012345678901"', undefined, true],
     [`${undici}; charset=utf-8`, undefined, true],
-    ['Multipart/Form-Data; boundary=----formdata-undici-012345678901', undefined, true],
+    ['Multipart/Form-Data; boundary=----formdata-undici-012345678901', undefined, false],
     ['multipart/form-data; boundary=----formdata-undici-01234567890', undefined, true],
     [undefined, undefined, true],
   ])('on Node, cancellation for %s with peer %s is %s', async (contentType, peer, expected) => {

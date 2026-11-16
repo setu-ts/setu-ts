@@ -8,11 +8,20 @@ import type { IPrincipal, IRequest } from '@setu-ts/common';
 import { httpStatusHintOf, serializeError } from '@setu-ts/common';
 import { AuthenticationUnavailableError, AuthPluginConfigurationError } from '../../src/index.ts';
 
-/** An Error whose constructor name is the given text. */
+/** An instance of an Error subclass whose class name is the given text. */
 function named(name: string): Error {
-  const error = new Error('k3y');
-  Object.defineProperty(error, 'constructor', { value: { name } });
-  return error;
+  const Named = { [name]: class extends Error {} }[name]!;
+  return new Named('k3y');
+}
+
+/** An instance of an Error subclass whose class `name` getter throws. */
+function throwingName(): Error {
+  class Trap extends Error {
+    static override get name(): never {
+      throw new Error('trap');
+    }
+  }
+  return new Trap('k3y');
 }
 
 describe('ApiKeyStrategy', () => {
@@ -114,7 +123,32 @@ describe('ApiKeyStrategy', () => {
 
   it.each([
     ['a thrown string', 'k3y in a string', 'string'],
-    ['an Error whose constructor name is not an identifier', named('bad name k3y'), 'Error'],
+    ['an Error whose class name is not an identifier', named('bad name k3y'), 'Error'],
+    ['an Error whose class name is an identifier', named('LookupError'), 'LookupError'],
+    [
+      'an Error with an own constructor field the thrower set',
+      Object.assign(new Error('k3y'), { constructor: { name: 'KEY_CANARY_0042' } }),
+      'Error',
+    ],
+    ['an Error whose class name getter throws', throwingName(), 'Error'],
+    [
+      'an Error on a prototype with a planted constructor',
+      Object.create(
+        Object.create(Error.prototype, {
+          constructor: { value: { name: 'KEY_CANARY_0042' } },
+        }),
+      ) as Error,
+      'Error',
+    ],
+    [
+      'an Error on a prototype whose constructor does not own it',
+      Object.create(
+        Object.create(Error.prototype, {
+          constructor: { value: function KEY_CANARY_0042(): void {} },
+        }),
+      ) as Error,
+      'Error',
+    ],
     ['an Error with no constructor', Object.setPrototypeOf(new Error('k3y'), null), 'object'],
     ['a plain Error', new Error('k3y'), 'Error'],
     [

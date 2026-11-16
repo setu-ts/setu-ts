@@ -605,6 +605,9 @@ describe('scanPageImports over real symlinks (review finding 6)', () => {
       // A link inside .server/ to an ordinary page resolves to a bundled path: scanned.
       await nodeFs.writeFile(`${root}/app/lib/page.ts`, kernelImport);
       await nodeFs.symlink('../lib/page.ts', `${root}/app/.server/alias.ts`);
+      // An ordinary path linked to a server-only file is a client id under
+      // preserveSymlinks: scanned too.
+      await nodeFs.symlink('../.server/real.ts', `${root}/app/lib/value.ts`);
       const scan = await scanPageImports(createNodeRuntimeServices().fs!, root);
       expect([...scan.unreadable].sort()).toEqual([
         'app/.server/lib',
@@ -614,6 +617,7 @@ describe('scanPageImports over real symlinks (review finding 6)', () => {
       expect(scan.violations.map((v) => v.path).sort()).toEqual([
         'app/.server/alias.ts',
         'app/lib/page.ts',
+        'app/lib/value.ts',
       ]);
     } finally {
       await nodeFs.rm(root, { recursive: true, force: true });

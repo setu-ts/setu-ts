@@ -387,8 +387,8 @@ async function readBounded(
   return body;
 }
 
-/** Only undici's generated, unquoted FormData content type. */
-const UNDICI_FORM_DATA = /^multipart\/form-data; boundary=----formdata-undici-0\d{11}$/;
+/** Only undici's generated, unquoted FormData content type; media types are case-insensitive. */
+const UNDICI_FORM_DATA = /^multipart\/form-data; boundary=----formdata-undici-0\d{11}$/i;
 
 /**
  * Whether a capped read that refuses a body releases its reader instead of cancelling it.
