@@ -25,8 +25,9 @@ npm install @setu-ts/vector-store-plugin
 ```
 
 `setu add vector-store` installs the package and prints a registration to paste into
-`setu.config.ts`; it never inserts one, because collections and the adapter's client belong to the
-application.
+`setu.config.ts`; it never inserts one, because the collections belong to the application. With
+`--adapter qdrant` or `pgvector` it also writes `src/vector-store.ts`, which builds the client, plus
+the connection variable and a Compose service.
 
 The pgvector adapter loads `drizzle-orm` lazily and declares it as an optional peer (`0.45.2`).
 Install it beside the plugin, then install your PostgreSQL driver (`pg` or `postgres`):

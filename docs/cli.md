@@ -288,19 +288,21 @@ only to their named package; Workers and workspace members refuse them. Members 
 workspace transport. `add` records the selected client in the manifest (run the install command it
 prints), writes an absent inline call or generated full-stack option, gives the bare zero-argument
 call it wrote earlier (`CachePlugin()`) the chosen options, and prints the exact configuration when
-the call already has arguments or cannot safely be edited. It then says that the app and its
-generated tests connect to the backend at startup, prints the `docker compose` command that starts
-it, and prints the `createTestApp` override that keeps tests offline. A standalone README without a
-"Local transport services" section gets the one `setu new --broker` writes, before `## Run`. An
-absent `docker/compose.yaml` is created for a standalone selection; an existing one is preserved.
-The connection variable is appended to the project's dotenv file (with its local default) and to
-that file's `.example` (empty) — the rows `setu new --broker` writes — only where the file exists
-and does not already assign it; a file the project does not have is named, not created. The file is
-the `envFilePath` that `setu.config.ts` declares (the last entry of an array, which ConfigPlugin
-overrides with the earlier ones). When the configuration declares none, or names it in a form the
-CLI cannot read (a variable, a template literal), nothing is written and the command says where to
-set the variable instead. Without a selection the full-stack starter uses memory. Changing an
-existing value is a manual edit.
+the call already has arguments or cannot safely be edited. When `add` writes or rewrites the call,
+it then says that the app and its generated tests connect to the backend at startup, prints the
+`docker compose` command that starts it and the `createTestApp` override that keeps tests offline,
+and gives a standalone README without a "Local transport services" section the one
+`setu new --broker` writes, before `## Run`. When it only prints the configuration, it still writes
+the dotenv rows and creates an absent `docker/compose.yaml`, and prints a Compose block only when
+the file exists without the service. An absent `docker/compose.yaml` is created for a standalone
+selection; an existing one is preserved. The connection variable is appended to the project's dotenv
+file (with its local default) and to that file's `.example` (empty) — the rows `setu new --broker`
+writes — only where the file exists and does not already assign it; a file the project does not have
+is named, not created. The file is the `envFilePath` that `setu.config.ts` declares (the last entry
+of an array, which ConfigPlugin overrides with the earlier ones). When the configuration declares
+none, or names it in a form the CLI cannot read (a variable, a template literal), nothing is written
+and the command says where to set the variable instead. Without a selection the full-stack starter
+uses memory. Changing an existing value is a manual edit.
 
 #### Choosing the Redis client
 
@@ -478,10 +480,12 @@ handlers arrive through the ingress barrel. Other shapes receive registration gu
 compositions receive their named option arm and a link to the starter README; configure that arm
 rather than registering the same plugin twice.
 
-`setu add vector-store` installs `@setu-ts/vector-store-plugin` and prints a registration using the
-memory adapter and one `documents` collection. Collections and backend clients belong to the
-application, so the command does not insert the call. See
-[Retrieval (vector search)](./retrieval.md).
+`setu add vector-store` installs `@setu-ts/vector-store-plugin` and prints a registration with one
+`documents` collection, using the memory adapter by default. With `--adapter qdrant` or `pgvector`
+it also writes `src/vector-store.ts`, which builds the client, plus the connection variable, a
+Compose service and the README's local-services section, and prints
+`VectorStorePlugin({ adapter: vectorStoreAdapter(), … })`. It never inserts the call, because the
+collections are the application's. See [Retrieval (vector search)](./retrieval.md).
 
 Class-based `generate job` requires queue; functional projects keep the standalone job recipe.
 Generated guards use `requirePermission` from auth-plugin. The permission is evaluated by the
@@ -1067,19 +1071,20 @@ refusal no answer could avoid. `--yes` or a non-terminal takes the defaults: `lo
 App-owned clients such as `pg`, `@prisma/client` and `@prisma/adapter-pg` appear in the install
 guidance. Backend configuration remains application-owned; only mail's default `MailPlugin()` is
 inserted. The printed `smtp` and `sendgrid` calls read `SMTP_HOST` and `SMTP_PORT`, or
-`SENDGRID_API_KEY`, which `add` writes to the dotenv file and its example; `ses` passes `{}`, since
-the AWS SDK reads `AWS_REGION` and credentials from its own default chain. `smtp` also gets a local
-Mailpit in `docker/compose.yaml` (`SMTP_PORT=1025`, inbox at `http://localhost:8025`) and the
-`createTestApp` override that keeps generated tests offline. The `qdrant` and `pgvector`
-vector-store adapters get a CLI-written `src/vector-store.ts` that builds the adapter on its
-application-owned client, so `setu.config.ts` keeps only framework and relative imports and stays
-readable to `setu check`; `QDRANT_URL` or `DATABASE_URL` in the dotenv pair; a Compose service; and
-the printed call `VectorStorePlugin({ adapter: vectorStoreAdapter(), … })` with its imports. Every
-printed registration names its imports. Mailpit, Qdrant and pgvector also get the README's "Local
-transport services" section, as a broker does. On Cloudflare Workers, zero-config providers are
-inserted like elsewhere, but `setu add cache` and `setu add storage` are refused, because their
-in-memory stores would live in one isolate: the refusal names `CloudflarePlugin`'s KV and R2 arms
-(`setu add cloudflare`) instead. The vector-store adapter is not asked on Workers, and
+`SENDGRID_API_KEY`, which `add` writes to the dotenv file and its example (on Workers it writes
+nothing and the printed call reads `process.env`, so supply the value as a Workers var or secret);
+`ses` passes `{}`, since the AWS SDK reads `AWS_REGION` and credentials from its own default chain.
+`smtp` also gets a local Mailpit in `docker/compose.yaml` (`SMTP_PORT=1025`, inbox at
+`http://localhost:8025`) and the `createTestApp` override that keeps generated tests offline. The
+`qdrant` and `pgvector` vector-store adapters get a CLI-written `src/vector-store.ts` that builds
+the adapter on its application-owned client, so `setu.config.ts` keeps only framework and relative
+imports and stays readable to `setu check`; `QDRANT_URL` or `DATABASE_URL` in the dotenv pair; a
+Compose service; and the printed call `VectorStorePlugin({ adapter: vectorStoreAdapter(), … })` with
+its imports. Every printed registration names its imports. Mailpit, Qdrant and pgvector also get the
+README's "Local transport services" section, as a broker does. On Cloudflare Workers, zero-config
+providers are inserted like elsewhere, but `setu add cache` and `setu add storage` are refused,
+because their in-memory stores would live in one isolate: the refusal names `CloudflarePlugin`'s KV
+and R2 arms (`setu add cloudflare`) instead. The vector-store adapter is not asked on Workers, and
 `--adapter qdrant` or `pgvector` is refused there in favour of `VectorizeVectorStore`. In a
 generated minimal, `rest` or class-based Workers config, `setu add cloudflare` inserts
 `CloudflarePlugin({ env, ...(waitUntil ? { waitUntil } : {}) })` and renames the factory's unread

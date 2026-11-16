@@ -291,8 +291,9 @@ export function missingComposeServices(
  * The messaging plugin connects during `register()` and does not retry, so a
  * fresh scaffold cannot complete `app.start()` with nothing listening — the
  * file exists so the flag's promise ("this project talks to redis") is true the
- * first time it boots. Broker services ONLY: the deployable image and the full
- * orchestration story are M39's, and the header says so in its own words.
+ * first time it boots. Local backing services only (brokers, and the Mailpit,
+ * Qdrant and pgvector services `setu add` writes): the deployable image and the
+ * full orchestration story are M39's, and the header says so in its own words.
  *
  * @param specs - The selected transports, in flag order
  * @returns The compose file plus any backing-service config files
@@ -317,9 +318,10 @@ export function brokerComposeFiles(
 #
 #   docker compose -f ${BROKER_COMPOSE_FILE} up -d
 #
-# Broker services ONLY: they exist so the transports this project selected can
-# connect at app.start(). The deployable image and the orchestration objects
-# (Kubernetes, the full stack) are separate concerns this file does not own.
+# Local backing services only (brokers, Mailpit, Qdrant, pgvector): they exist so
+# the backends this project selected are listening at app.start(). The deployable
+# image and the orchestration objects (Kubernetes, the full stack) are separate
+# concerns this file does not own.
 services:
 ${backing.map((spec) => (spec.compose?.services ?? '').replace(/\n$/, '')).join('\n')}
 `,

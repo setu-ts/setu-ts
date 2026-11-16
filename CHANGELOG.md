@@ -104,15 +104,18 @@ All notable changes to this project are documented here. The format follows
   database-plugin does. An adapter without it also stays up as `reachable: 'unknown'`. To keep the
   previous behaviour, `HealthPlugin({ readiness: { exclude: ['vector-store'] } })`.
 - **`@setu-ts/cli` (M140d, PR pending).** `setu add` with a connected backend (RabbitMQ, NATS,
-  Kafka, Pub/Sub, Service Bus, not only Redis) says the app and its tests connect at startup, prints
-  the `docker compose` command and the `createTestApp` override, and gives a standalone README the
-  "Local transport services" section, which now also says a container needs each connection variable
-  passed in. A re-add with a backend rewrites the bare `CachePlugin()`-style call the CLI wrote
-  rather than printing beside it. The printed `smtp` and `sendgrid` mail calls read
-  `SMTP_HOST`/`SMTP_PORT` or `SENDGRID_API_KEY`, written to the dotenv file. A SQLite database is
-  ignored by Git and Docker, Drizzle's `drizzle/` by Prettier, and an existing `drizzle.config.ts`
-  is reported, with its dialect when it differs. `setu check` W006 also covers `DatabasePlugin` and
-  `VectorStorePlugin`. Two env variables planned in one run no longer overwrite each other.
+  Kafka, Pub/Sub, Service Bus, not only Redis) that writes the call says the app and its tests
+  connect at startup, prints the `docker compose` command and the `createTestApp` override, and
+  gives a standalone README the "Local transport services" section, which now also says a container
+  needs each connection variable passed in. A re-add with a backend rewrites the bare
+  `CachePlugin()`-style call the CLI wrote rather than printing beside it. The printed `smtp` and
+  `sendgrid` mail calls read `SMTP_HOST`/`SMTP_PORT` or `SENDGRID_API_KEY`, written to the dotenv
+  file (on Workers, supply them as vars or secrets). A SQLite database is ignored by Git and Docker,
+  Drizzle's `drizzle/` by Prettier, and an existing `drizzle.config.ts` is reported, with its
+  dialect when it differs. `setu check` W006 also covers `DatabasePlugin` and `VectorStorePlugin`.
+  With vector-store-plugin installed, `setu generate health-indicator vector-store` refuses the name
+  the plugin claims, and the devtool reports the `vector-store` indicator. Two env variables planned
+  in one run no longer overwrite each other.
 - **`@setu-ts/cli` (M140a, #589).** Generated application bodies are bounded at 1 MiB; module names
   and ids have length limits. New projects generate local session secrets, ignore local secret files
   and Deno node_modules, and name required Docker environment variables. Session installation writes

@@ -240,6 +240,26 @@ describe('node-redis CLI', () => {
         );
       }
     }
+    // M140d: the Compose header names every backing service `setu add` writes
+    // there (Mailpit, Qdrant, pgvector), not brokers alone.
+    const BROKER_HEADER =
+      '# Broker services ONLY: they exist so the transports this project selected can\n' +
+      '# connect at app.start(). The deployable image and the orchestration objects\n' +
+      '# (Kubernetes, the full stack) are separate concerns this file does not own.';
+    const BACKING_HEADER =
+      '# Local backing services only (brokers, Mailpit, Qdrant, pgvector): they exist so\n' +
+      '# the backends this project selected are listening at app.start(). The deployable\n' +
+      '# image and the orchestration objects (Kubernetes, the full stack) are separate\n' +
+      '# concerns this file does not own.';
+    // `setu generate app` writes a workspace Compose file with its own header.
+    const brokerCompose = Object.keys(expected).filter(
+      (path) => path.endsWith('/docker/compose.yaml') && !path.includes('/--workspace/'),
+    );
+    expect(brokerCompose).toHaveLength(12);
+    for (const path of brokerCompose) {
+      expect(expected[path]).toContain(BROKER_HEADER);
+      expected[path] = expected[path]!.replace(BROKER_HEADER, BACKING_HEADER);
+    }
     // M140d: the local transport section also says a container needs each
     // connection variable passed in. The `setu new --broker` captures already
     // carry the section; the paragraph follows its Compose command.

@@ -23,7 +23,7 @@ import type { KeyReader, PickerKey } from './terminal-keys.ts';
 export interface PromptChoice {
   /** The value written into the flag record when chosen. */
   readonly value: string;
-  /** One line describing what the choice does, shown above the question. */
+  /** One line describing what the choice does, shown beside the option (above the prompt in the typed fallback). */
   readonly label: string;
 }
 

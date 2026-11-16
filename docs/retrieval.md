@@ -21,7 +21,9 @@ npm install @setu-ts/vector-store-plugin
 ```
 
 `setu add vector-store` installs the package and prints the registration; it does not insert one,
-because collections and the adapter's client belong to the application.
+because the collections belong to the application. With `--adapter qdrant` or `pgvector` it also
+writes `src/vector-store.ts`, which builds the client, plus the connection variable and a Compose
+service.
 
 Compose the plugin after the multi-tenancy plugin. Collections are validated when the plugin is
 created, and the adapter creates or verifies them during registration, so a bad backend fails
