@@ -17,14 +17,21 @@ const CLASS_NAME = /^[A-Za-z_$][A-Za-z0-9_$]{0,63}$/;
  *
  * Read from the constructor, not `name`, which is an ordinary writable field. A name that is
  * not a plain identifier is logged as `Error`; a thrown non-`Error` is logged by its `typeof`.
+ * Every read is guarded: a failure whose prototype, constructor or name throws (a Proxy, an
+ * accessor) is logged as `Error`, so building this error can never throw and turn an outage
+ * back into an anonymous request.
  *
  * @param cause - The validator failure
  * @returns The class name to log
  */
 function causeClass(cause: unknown): string {
-  if (!(cause instanceof Error)) return typeof cause;
-  const name: unknown = (cause.constructor as { name?: unknown } | undefined)?.name;
-  return typeof name === 'string' && CLASS_NAME.test(name) ? name : 'Error';
+  try {
+    if (!(cause instanceof Error)) return typeof cause;
+    const name: unknown = (cause.constructor as { name?: unknown } | undefined)?.name;
+    return typeof name === 'string' && CLASS_NAME.test(name) ? name : 'Error';
+  } catch {
+    return 'Error';
+  }
 }
 
 /**
@@ -33,9 +40,9 @@ function causeClass(cause: unknown): string {
  * The public detail is fixed. The error's own message, which the error handler logs, adds only
  * the underlying failure's class, for example `(DatabaseError)`: no text from the failure is
  * logged, because a database error can echo the malformed key the client sent (`invalid input
- * syntax for type uuid`). The cause is kept on the error for application code, and carries the
- * serializer's redact-cause brand, so a log built with `serializeError` shows only its class and
- * this message. A validator that needs the fault's text logs it itself, where it knows what is
+ * syntax for type uuid`). The cause is kept on the error for application code. This error carries
+ * the serializer's redact-cause brand, so a log built with `serializeError` replaces the cause with
+ * a generic class name and this message. A validator that needs the fault's text logs it itself, where it knows what is
  * safe to log.
  * @since 0.13.0
  */
@@ -47,7 +54,7 @@ export class AuthenticationUnavailableError extends Error {
   constructor(cause: unknown) {
     super(`${UNAVAILABLE_DETAIL} (${causeClass(cause)})`, { cause });
     // Same brand, same registration as the runtime's RequestBodyReadError (common's
-    // serialize-error.ts): the serialized cause keeps only its class and this message.
+    // serialize-error.ts): the serialized cause becomes a generic class name and this message.
     Object.defineProperty(this, Symbol.for('setu.serialize.redact-cause'), { value: true });
     withHttpStatusHint(this, {
       status: 503,

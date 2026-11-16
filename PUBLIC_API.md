@@ -3285,12 +3285,12 @@ Since 0.13.0, an API-key validator failure throws exported `AuthenticationUnavai
 with stable name, preserved cause, hinted detail `Authentication is temporarily unavailable.`,
 status 503 and title `Service Unavailable`. Its message is that detail followed by the cause's class
 in parentheses, `(DatabaseError)`, never the cause's text, and it carries the serializer's
-redact-cause brand, so a logged cause shows only its class and that message. Authentication
-middleware rethrows by name; all other strategy failures retain anonymous continuation. With
-`errorHandler()` this answers 503 on every key-bearing route, public routes included, with only the
-fixed detail in the response. A missing header never calls validate, and a null result remains an
-invalid key. `apiKey.header` and `jwt.header` (also the API-key, JWT and issuer strategy
-constructors) refuse `cookie` in any case with `AuthPluginConfigurationError` at
+redact-cause brand, so a serialized log replaces the cause with a generic class name and that
+message. Authentication middleware rethrows by name; all other strategy failures retain anonymous
+continuation. With `errorHandler()` this answers 503 on every key-bearing route, public routes
+included, with only the fixed detail in the response. A missing header never calls validate, and a
+null result remains an invalid key. `apiKey.header` and `jwt.header` (also the API-key, JWT and
+issuer strategy constructors) refuse `cookie` in any case with `AuthPluginConfigurationError` at
 construction/registration; configure session authentication for cookies instead.
 
 Sign-in and MFA promotion regenerate the session and clear its form-CSRF token. Fetch a fresh token

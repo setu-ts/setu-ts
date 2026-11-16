@@ -117,6 +117,24 @@ describe('ApiKeyStrategy', () => {
     ['an Error whose constructor name is not an identifier', named('bad name k3y'), 'Error'],
     ['an Error with no constructor', Object.setPrototypeOf(new Error('k3y'), null), 'object'],
     ['a plain Error', new Error('k3y'), 'Error'],
+    [
+      'an Error whose constructor accessor throws',
+      Object.defineProperty(new Error('k3y'), 'constructor', {
+        get(): never {
+          throw new Error('trap');
+        },
+      }),
+      'Error',
+    ],
+    [
+      'a Proxy whose prototype read throws',
+      new Proxy(new Error('k3y'), {
+        getPrototypeOf(): never {
+          throw new Error('trap');
+        },
+      }),
+      'Error',
+    ],
   ])('F2 logs %s by class only', (_, cause, expected) => {
     const error = new AuthenticationUnavailableError(cause);
     expect(error.message).toBe(`Authentication is temporarily unavailable. (${expected})`);
