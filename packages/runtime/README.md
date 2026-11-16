@@ -123,8 +123,11 @@ request with no socket peer (an in-process `app.fetch()`, on any adapter `platfo
 carries undici's exact generated multipart content type releases the reader lock instead of
 cancelling: undici's in-memory producer can enqueue after cancel and throw an uncaught
 `ERR_INVALID_STATE`. A request with a peer, every other body, and every request on Bun, Deno or
-Workers keep cancellation, so an oversized socket upload stops draining. No Blob or `inject()`
-workaround is required.
+Workers keep cancellation, so an oversized socket upload stops draining. Two cases also release, and
+the 413 still holds in both: socket traffic an application forwards through `app.fetch()` itself,
+which has no peer, and a Worker without a global `navigator` (`no_global_navigator`, or a
+compatibility date before 2022-03-21), which is detected as Node. No Blob or `inject()` workaround
+is required.
 
 A client- or bidi-streaming gRPC call is the exception: the kernel hands its unread body to the
 procedure, and `GrpcPlugin({ readMaxBytes })` bounds each message instead. A total cap would end
