@@ -115,8 +115,8 @@ rejection unobserved would surface as an unhandled rejection. A run started with
 `A server-resolved tenant is required`, so the run ends `execution-failed`: start budgeted
 definitions only with a tenant. `chatQuota()` builds a separate in-memory quota per call, and the
 example's chat route builds its own, so as written the chat route and this definition keep separate
-budgets. An application that wants one budget creates the quota once and passes that instance to
-both.
+budgets. For one budget, call `chatQuota()` once and give the resolver it returns to both the run
+definition and the chat route (the example's `registerChatRoutes` would need a parameter for it).
 
 ### Approvals
 

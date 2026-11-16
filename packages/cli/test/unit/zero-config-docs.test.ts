@@ -38,7 +38,9 @@ describe('zero-configuration provider list in the docs', () => {
     '%s states the wiring map’s count',
     async (document) => {
       const text = await readFile(new URL(`../../../../${document}`, import.meta.url), 'utf8');
-      expect(text).toContain(`${ZERO_CONFIG_WIRINGS.size} safe zero-configuration providers`);
+      expect(text.replace(/\s+/g, ' ')).toContain(
+        `${ZERO_CONFIG_WIRINGS.size} safe zero-configuration providers`,
+      );
     },
   );
 });
