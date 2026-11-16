@@ -152,6 +152,15 @@ export class MemoryVectorStore implements IVectorStoreAdapter {
     return Promise.resolve();
   }
 
+  /**
+   * Always reachable: the records live in this process.
+   *
+   * @returns `true`
+   */
+  isHealthy(): Promise<boolean> {
+    return Promise.resolve(true);
+  }
+
   /** @inheritdoc */
   async close(): Promise<void> {
     await this.#onClose?.();

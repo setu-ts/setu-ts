@@ -5,6 +5,7 @@ export function agentFacts(overrides: Partial<ProjectFacts> = {}): ProjectFacts 
   return {
     version: '0.10.0',
     runtime: 'node',
+    devtool: false,
     style: 'functional',
     installed: new Set(['common', 'runtime']),
     commands: ['start', 'check', 'test'],

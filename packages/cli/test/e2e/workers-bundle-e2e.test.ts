@@ -13,9 +13,10 @@
  * workerd, and no fake can show them:
  *
  * - `rest`, with `setu add database` and `setu add cloudflare` applied and a
- *   route behind `cacheApiMiddleware`, booted TWICE from one install: wired
- *   exactly as `setu add cloudflare` instructs (the `waitUntil` threading,
- *   §3.8), then as the bare `CloudflarePlugin({ env })` with no host — the V9-23
+ *   route behind `cacheApiMiddleware`, booted TWICE from one install: as
+ *   `setu add cloudflare` wired it (the call threading `waitUntil`, and the
+ *   factory's parameter renamed to match), then as the bare
+ *   `CloudflarePlugin({ env })` with no host — the V9-23
  *   reproduction, which only the hostless await (§3.6) makes cache a body. In
  *   both, `/` and `/health` answer 200 and the cached route answers its full
  *   body on a second request with `X-Cache-Api: HIT`.
@@ -23,11 +24,10 @@
  *   and the client entry chunk under `/assets/` answers 200
  *   `text/javascript` (§3.10).
  *
- * The `rest` case follows the guidance `setu add` prints, word for word —
- * the printed registration plus the rename of the factory's `_waitUntil`
- * parameter — because `setu add` pins the package and prints the registration
- * rather than rewriting a non-starter configuration. Following it literally is
- * what proves the printed line compiles in the project it is printed for.
+ * The `rest` case keeps the `CloudflarePlugin` call and the parameter rename
+ * `setu add cloudflare` writes, and pastes only the `DatabasePlugin` line it
+ * prints, so the bundle proves that both the edit and the printed line compile
+ * and boot in the project they are made for.
  *
  * Guarded like `workers-install-e2e`: skips without `npm` off CI, fails on
  * CI.
@@ -232,19 +232,21 @@ async function withWranglerDev<T>(
 }
 
 /** How the `rest` case registers `CloudflarePlugin`. */
-type CloudflareWiring = 'printed' | 'hostless';
+type CloudflareWiring = 'wired' | 'hostless';
 
 /**
- * Wires the two `setu add`-ed plugins into the generated `rest`
- * configuration and puts one route behind `cacheApiMiddleware`.
+ * Finishes the generated `rest` configuration `setu add` left: registers the
+ * printed `DatabasePlugin` line and puts one route behind `cacheApiMiddleware`.
  *
- * `printed` follows `setu add cloudflare` literally: the printed registration,
- * and the rename of the factory's `_waitUntil` parameter it names. `hostless`
- * registers `CloudflarePlugin({ env })`, the line 0.9.0 printed (V9-23).
+ * `wired` keeps what `setu add cloudflare` wrote, which this asserts first: the
+ * `CloudflarePlugin` call threading `waitUntil`, and the factory's `_waitUntil`
+ * parameter renamed to the `waitUntil` it reads. `hostless` swaps that call for
+ * `CloudflarePlugin({ env })`, the line 0.9.0 printed (V9-23), and restores the
+ * underscore on the parameter nothing then reads.
  *
  * @param project - The scaffolded project directory
- * @param source - The generated configuration, before any wiring
- * @param wiring - Which registration to apply
+ * @param source - The configuration as `setu add` left it
+ * @param wiring - Which registration to boot
  */
 async function wireRestConfig(
   project: string,
@@ -253,21 +255,23 @@ async function wireRestConfig(
 ): Promise<void> {
   let out = source;
 
-  const importAnchor = "import { OpenApiPlugin } from '@setu-ts/openapi-plugin';";
-  expect(out, 'the generated config lost its OpenAPI import').toContain(importAnchor);
-  out = out.replace(
-    importAnchor,
-    `${importAnchor}\nimport { DatabasePlugin } from '@setu-ts/database-plugin';\nimport { CloudflarePlugin, cacheApiMiddleware } from '@setu-ts/cloudflare-plugin';`,
+  const registration = 'CloudflarePlugin({ env, ...(waitUntil ? { waitUntil } : {}) })';
+  const parameter = 'waitUntil?: (promise: Promise<unknown>) => void,';
+  const cloudflareImport = "import { CloudflarePlugin } from '@setu-ts/cloudflare-plugin';";
+  expect(out, 'setu add cloudflare did not register CloudflarePlugin').toContain(registration);
+  expect(out, 'setu add cloudflare did not import CloudflarePlugin').toContain(cloudflareImport);
+  expect(out, "setu add cloudflare did not rename the factory's _waitUntil").toContain(
+    `  ${parameter}`,
   );
-
-  const registration =
-    wiring === 'printed'
-      ? 'CloudflarePlugin({ env, ...(waitUntil ? { waitUntil } : {}) })'
-      : 'CloudflarePlugin({ env })';
-  if (wiring === 'printed') {
-    const parameter = '_waitUntil?: (promise: Promise<unknown>) => void,';
-    expect(out, 'the generated factory lost its _waitUntil parameter').toContain(parameter);
-    out = out.replace(parameter, 'waitUntil?: (promise: Promise<unknown>) => void,');
+  expect(out).not.toContain('_waitUntil?:');
+  out = out.replace(
+    cloudflareImport,
+    "import { CloudflarePlugin, cacheApiMiddleware } from '@setu-ts/cloudflare-plugin';\nimport { DatabasePlugin } from '@setu-ts/database-plugin';",
+  );
+  if (wiring === 'hostless') {
+    out = out
+      .replace(registration, 'CloudflarePlugin({ env })')
+      .replace(`  ${parameter}`, `  _${parameter}`);
   }
 
   const pluginAnchor = '...GENERATED_PLUGINS,';
@@ -277,7 +281,7 @@ async function wireRestConfig(
   const indent = out.slice(lineStart, anchorIndex);
   out =
     out.slice(0, anchorIndex) +
-    `DatabasePlugin({ type: 'memory' }),\n${indent}${registration},\n${indent}` +
+    `DatabasePlugin({ type: 'memory' }),\n${indent}` +
     out.slice(anchorIndex);
 
   const routeRe =
@@ -400,7 +404,7 @@ describe("the CLI's Workers templates build and boot on workerd", () => {
       expect(reinstall.code, reinstall.output).toBe(0);
       const generated = await nodeFs.readFile(`${project}/setu.config.ts`, 'utf8');
 
-      await wireRestConfig(project, generated, 'printed');
+      await wireRestConfig(project, generated, 'wired');
       await wranglerDryRun(project);
       await assertRestServesAndCaches(project);
 

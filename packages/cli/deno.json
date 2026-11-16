@@ -37,6 +37,7 @@
     "prettier": "npm:prettier@^3.9.10",
     "tsx/esm/api": "npm:tsx@^4.23.0/esm/api",
     "typescript": "npm:typescript@6.0.3",
-    "vitest": "npm:vitest@5.0.3"
+    "vitest": "npm:vitest@5.0.3",
+    "zod": "npm:zod@^4.6.6"
   }
 }

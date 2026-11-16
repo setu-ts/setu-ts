@@ -107,7 +107,7 @@ describe('project brief rendering', () => {
             `\`${runner} start:debug\` — development entry with the inspector`,
           );
           expect(text).toContain(
-            `\`${runner} start\` — production entry${runtime === 'node' ? '; on Node, run build first' : '\n'}`,
+            `\`${runner} start\` — production entry${facts.commands.includes('build') ? '; run build first' : '\n'}`,
           );
           expect(facts.commands.slice(0, 3)).toEqual(['start', 'start:dev', 'start:debug']);
           expect(facts.commandBodies['start:dev']).toBeTruthy();
@@ -132,7 +132,7 @@ describe('project brief rendering', () => {
       }),
     ).toBe(0);
     expect(renderBrief(await gatherFacts(fs, '/work/app'))).toContain(
-      '`deno task dev` — development entry for a devtool session',
+      '`deno task dev` — devtool entry; launcher credentials required',
     );
   });
   it('leaves an unrecognized dev script without a gloss when no start:dev exists', () => {

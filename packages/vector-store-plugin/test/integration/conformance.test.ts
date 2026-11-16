@@ -36,7 +36,12 @@ import { vectorizeFake } from '../fixtures/vectorize-fake.ts';
 
 const PGVECTOR_URL = process.env['PGVECTOR_URL'];
 const QDRANT_URL = process.env['QDRANT_URL'];
-const runtime = { subtle: globalThis.crypto.subtle } as IRuntimeServices;
+// The runtime surface the adapters read: `subtle` for ids, and `hrtime` (the
+// monotonic clock pgvector's readiness probe dates statements with).
+const runtime = {
+  subtle: globalThis.crypto.subtle,
+  hrtime: () => performance.now(),
+} as IRuntimeServices;
 const RUN = Math.floor(Math.random() * 1e9).toString(36);
 const COLLECTION = `conf_${RUN}`;
 // `constructor` is the one Object.prototype member the field grammar admits;
@@ -351,9 +356,11 @@ describe.each(ARMS.filter((arm) => arm.enabled).map((arm) => [arm.name, arm] as 
   'conformance: %s',
   (_name, arm) => {
     let store: VectorStoreService;
+    let adapter: IVectorStoreAdapter;
 
     beforeAll(async () => {
-      store = await storeFor(await arm.create());
+      adapter = await arm.create();
+      store = await storeFor(adapter);
       await store.upsert(COLLECTION, A, SEED_A);
       await store.upsert(COLLECTION, B, SEED_B);
     });
@@ -372,6 +379,12 @@ describe.each(ARMS.filter((arm) => arm.enabled).map((arm) => [arm.name, arm] as 
         expect(match.sourceId).toBe(expected[i]!.sourceId);
         expect(match.content).toBe(expected[i]!.content);
       });
+    });
+
+    // Real pgvector and Qdrant here when their URLs are set: the readiness probe
+    // must answer for a reachable backend whose collection was just ensured.
+    it('isHealthy answers true for the reachable backend', async () => {
+      expect(await adapter.isHealthy?.()).toBe(true);
     });
 
     it('delete in one scope leaves the other scope’s same id', async () => {

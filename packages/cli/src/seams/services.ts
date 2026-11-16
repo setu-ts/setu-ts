@@ -52,8 +52,8 @@ function importSymbols(names: DerivedNames): readonly string[] {
  *
  * Derived from the artifact name rather than the class name, matching the module
  * schematic, so the token a developer types in `@Inject` is predictable. An explicit
- * token is mandatory because `emitDecoratorMetadata` is unavailable under Deno, so a
- * parameter's type cannot be read.
+ * token is mandatory because TC39 standard decorators carry no parameter type
+ * information on any runtime.
  *
  * @param kebab - The artifact's kebab-case name
  * @returns The token, e.g. `user-profile-service`

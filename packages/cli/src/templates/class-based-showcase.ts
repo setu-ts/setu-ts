@@ -52,9 +52,8 @@ import type { GreetingService } from '../services/greeting.service.ts';
  * arguments in \`@Params\`. Both are positional: the Nth entry binds the Nth
  * argument.
  *
- * The token in \`@Inject\` is required because type-inferred injection needs
- * \`emitDecoratorMetadata\`, which Deno does not support, so the parameter's
- * type cannot be read.
+ * TC39 standard decorators carry no parameter type information on any runtime,
+ * so \`@Inject\` names the token.
  */
 @Controller('/greetings')
 @Inject('greeting-service')

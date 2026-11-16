@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { planNodeDevtool, NODE_DEVTOOL_DEV_SCRIPT } from '../../src/devtool/npm-manifest.ts';
+import { planNodeDevtool, nodeDevtoolDevScript } from '../../src/devtool/npm-manifest.ts';
 import { FRAMEWORK_RANGE } from '../../src/templates/framework-specifier.ts';
 
 const plugin = '@setu-ts/diagnostics-plugin';
+const NODE_DEVTOOL_DEV_SCRIPT = nodeDevtoolDevScript('--env-file-if-exists=.env ');
 const base = { devDependencies: { tsx: '^4.20.0' } };
 const complete = {
   scripts: { dev: NODE_DEVTOOL_DEV_SCRIPT },

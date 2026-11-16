@@ -41,6 +41,34 @@ class LifecycleAdapter extends MemoryVectorStore implements IVectorStoreAdapter 
 }
 
 describe('VectorStorePlugin', () => {
+  it('registers a vector-store readiness indicator that probes the adapter and goes down at close', async () => {
+    const adapter = new LifecycleAdapter();
+    let reachable = true;
+    adapter.isHealthy = async () => reachable;
+    const app = createApplication({
+      plugins: [RuntimePlugin(), VectorStorePlugin({ adapter, collections })],
+    });
+    await app.start();
+    const indicator = app.services
+      .getAll<{ name: string; check: () => Promise<unknown>; readiness?: boolean }>(
+        CAPABILITIES.HEALTH_INDICATOR,
+      )
+      .find((entry) => entry.name === 'vector-store');
+    expect(indicator).toBeDefined();
+    // No readiness option: the indicator joins readiness by default.
+    expect(indicator!.readiness).toBeUndefined();
+    expect(await indicator!.check()).toEqual({
+      status: 'up',
+      data: { adapter: 'memory', reachable: true },
+    });
+    reachable = false;
+    await app.stop();
+    expect(await indicator!.check()).toEqual({
+      status: 'down',
+      data: { adapter: 'memory', state: 'closed' },
+    });
+  });
+
   it('opens the adapter, ensures each collection in order, serves, and closes at shutdown', async () => {
     const adapter = new LifecycleAdapter();
     const app = createApplication({

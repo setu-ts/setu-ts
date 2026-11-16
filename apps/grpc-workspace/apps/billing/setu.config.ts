@@ -46,7 +46,9 @@ import {
  * every target; accepted and unused, because a socket project reads configuration
  * from the process environment.
  * @param devtool - The development-only composition — the diagnostics plugin and
- * the kernel diagnostics option — supplied by `main.dev.ts` alone. The SECOND
+ * the kernel diagnostics option — supplied only by a development entry
+ * (`main.dev.ts`, written by `--devtool` or `setu devtool enable`); `main.ts`
+ * never passes it. The SECOND
  * parameter deliberately: `setu commands` passes its inert discovery env as the
  * FIRST argument on every target, which the unused `_env` above absorbs.
  * @returns The configured, unstarted application

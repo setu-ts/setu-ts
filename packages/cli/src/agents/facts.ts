@@ -18,6 +18,7 @@ export type ProjectFacts = {
   readonly installed: ReadonlySet<string>;
   readonly style: GeneratorMode;
   readonly runtime: TargetRuntime;
+  readonly devtool: boolean;
   readonly commands: readonly string[];
   readonly commandBodies: Readonly<Record<string, string>>;
   readonly schematics: readonly string[];
@@ -49,6 +50,12 @@ export async function gatherFacts(fs: IFileSystem, dir: string): Promise<Project
     }
   }
   const directories: string[] = [];
+  let devtool = false;
+  try {
+    devtool = (await fs.stat(joinPath(dir, 'main.dev.ts'))).isFile;
+  } catch (cause) {
+    if (!isMissingPath(cause)) throw cause;
+  }
   for (const path of ['src/modules', 'src/shared']) {
     try {
       if ((await fs.stat(joinPath(dir, path))).isDirectory) directories.push(path);
@@ -61,6 +68,7 @@ export async function gatherFacts(fs: IFileSystem, dir: string): Promise<Project
     installed,
     style: generatorMode(installed),
     runtime,
+    devtool,
     commands: [
       'start',
       'start:dev',

@@ -21,7 +21,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * @param value - The parsed JSON value
  * @returns `true` when the M98b client would accept the body
  */
-export function m98bIsStatusBody(value: unknown): value is {
+export function originalIsStatusBody(value: unknown): value is {
   version: 1;
   instanceId: string;
   expiresInMs: number;

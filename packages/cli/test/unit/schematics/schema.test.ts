@@ -9,7 +9,7 @@ describe('schema schematic', () => {
     const [file] = generateSchema(deriveNames('price'), options(['validation-plugin']));
     expect(file?.path).toBe('src/shared/schemas/price.schemas.ts');
     expect(file?.contents).toContain("import { z } from 'zod'");
-    expect(file?.contents).toContain('export const Price = z.object({})');
+    expect(file?.contents).toContain('export const Price = z.strictObject({})');
     expect(file?.contents).toContain('export type Price = z.infer<typeof Price>');
     expect(file?.managed).toBeUndefined();
   });

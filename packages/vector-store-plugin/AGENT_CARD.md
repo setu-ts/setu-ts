@@ -1,8 +1,8 @@
 # @setu-ts/vector-store-plugin — tenant-scoped vector retrieval
 
-**Add it:** `setu add vector-store` installs the package and prints the registration; collections
-are required, so it never inserts one. `VectorStorePlugin` provides `CAPABILITIES.VECTOR_STORE`
-(`IVectorStore`).
+**Add it:** `setu add vector-store` prints the registration and never inserts it;
+`--adapter qdrant|pgvector` also writes `src/vector-store.ts` and a Compose service.
+`VectorStorePlugin` provides `CAPABILITIES.VECTOR_STORE` (`IVectorStore`).
 
 ## Register
 
@@ -16,30 +16,30 @@ export const vectorStore = VectorStorePlugin({
 ```
 
 An adapter may be a factory `(runtime) => adapter | Promise<adapter>`. Collections are validated at
-construction; the adapter creates or verifies them during registration, so a bad backend fails
-startup rather than the first request.
+construction and created or verified at registration, so a bad backend fails startup.
 
 ## Behavior
 
 - The scope is a required second argument of every data method, never a filter key.
-  `IVectorStore.scopeFor` returns the request's tenant id, or the `{ fixed }` scope for every
-  request. Tenancy defaults to `'required'`; a tenant-less request refuses with
-  `VectorScopeRequiredError` before any adapter call.
+  `IVectorStore.scopeFor` returns the request's tenant id, or a `{ fixed }` scope. Tenancy defaults
+  to `'required'`; a tenant-less request refuses with `VectorScopeRequiredError`.
 - Methods: `upsert`, `replaceSource`, `query`, `delete`, `deleteScope`. `replaceSource` writes the
   source's new records, then deletes its stale ones in the same scope, so a re-run leaves one copy.
-  Pass `{ version }` when retries can arrive out of order: an older version is refused with
+  Pass `{ version }` for out-of-order retries: an older one is refused with
   `VectorVersionConflictError` (409); an equal one is rewritten. Vectorize refuses versions.
-- Cosine similarity only, in `[-1, 1]`. Results are ordered by score descending, then id ascending.
-  `topK` is 1–50 and an adapter may return fewer.
+- Cosine similarity only, in `[-1, 1]`, ordered by score descending, then id ascending. `topK` is
+  1–50 and an adapter may return fewer.
 - Filters use `eq`, `in`, `gt`, `gte`, `lt`, `lte` and `and` over declared `filterable` fields.
   Ranges need a `number` field; string values are at most 64 UTF-8 bytes; `in` takes 1–100 values;
   `and` nests at most 4 deep, 32 clauses total. No `or`, substring match or negation; anything else
   throws `VectorFilterError`.
 - Limits: 4,096 dimensions, 10 filterable fields, 500 records per `upsert`, 5,000 per
-  `replaceSource` (one call = the whole source), 1,000 ids per delete, 64-byte scope, 256-byte ids,
-  8 KiB content.
+  `replaceSource` (the whole source), 1,000 ids per delete, 64-byte scope, 256-byte ids, 8 KiB
+  content.
 - Adapters: `MemoryVectorStore`, `PgVectorStore`, `QdrantVectorStore`; `VectorizeVectorStore` is in
-  `@setu-ts/cloudflare-plugin` and refuses `replaceSource` and `deleteScope` by name.
-- The store does not embed text: pass AI SDK vectors in, one model per collection.
+  `@setu-ts/cloudflare-plugin` and refuses `replaceSource` and `deleteScope`.
+- It does not embed text: pass vectors in, one model per collection.
+- Registers a `vector-store` readiness indicator over the adapter's optional health probe; opt out
+  with `HealthPlugin({ readiness: { exclude: ['vector-store'] } })`.
 
-See the README for adapter setup, the errors table and the full capability matrix.
+README: adapters, errors, capabilities.

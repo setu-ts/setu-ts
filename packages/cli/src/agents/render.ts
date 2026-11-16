@@ -41,8 +41,8 @@ function commandGloss(name: string, facts: ProjectFacts): string {
     case 'format:check':
       return 'check formatting without writing';
     case 'start':
-      return facts.runtime === 'node'
-        ? 'production entry; on Node, run build first'
+      return facts.commands.includes('build')
+        ? 'production entry; run build first'
         : 'production entry';
     case 'start:dev':
       return 'development loop; use this while editing';
@@ -60,7 +60,8 @@ function commandGloss(name: string, facts: ProjectFacts): string {
       const body = facts.commandBodies[name] ?? '';
       if (body.includes('wrangler dev'))
         return `development loop on workerd${facts.commands.includes('build') ? ' (builds first)' : ''}`;
-      if (body.includes('main.dev.ts')) return 'development entry for a devtool session';
+      if (facts.devtool || body.includes('main.dev.ts'))
+        return 'devtool entry; launcher credentials required';
       return facts.commands.includes('start:dev')
         ? 'development entry that does not restart on server edits; prefer start:dev'
         : '';
@@ -108,6 +109,12 @@ export function renderBrief(facts: ProjectFacts, member = false): string {
     '\n## Project map\n',
     '- `setu.config.ts` — Composition root; creates the app',
     `- \`${facts.runtime === 'cloudflare-workers' ? 'src/index.ts' : 'main.ts'}\` — Runtime entry`,
+    ...(facts.devtool
+      ? [
+          "- `main.dev.ts` — devtool entry; needs the launcher's SETU_DEVTOOL_SESSION_ID and SETU_DEVTOOL_SESSION_KEY and exits 1 without them",
+          '- `src/devtool/diagnostics.ts` — CLI-managed allowlist; change it with setu devtool',
+        ]
+      : []),
     ...facts.seams.map((path) => `- \`${path}/\` — Generated artifacts; CLI owns the barrel`),
     '- `test/` — Application tests',
     ...facts.directories.map((path) =>

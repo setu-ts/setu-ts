@@ -141,6 +141,11 @@ function lines(finding: Finding): readonly string[] {
           : '  A page imports kernel code only as `import type`, or a `*.token.ts` module; reach the service with getService(context, TOKEN).',
       ];
     case 'plugin-unregistered':
+      if (f.starterArm !== undefined)
+        return [
+          `Installed @setu-ts/${escapeName(f.pkg)} is not composed: ${escapeName(f.starterArm.starter)} registers ${escapeName(f.symbol)} only when its \`${escapeName(f.starterArm.arm)}\` option is set, and setu.config.ts does not set it.`,
+          `  Set \`${escapeName(f.starterArm.arm)}\` in the starter's options. If registered in another module, silence setu.W006 in .setu-ts/check.json.`,
+        ];
       return [
         `Installed @setu-ts/${escapeName(f.pkg)} has no ${escapeName(f.symbol)} call in setu.config.ts.`,
         `  Add ${escapeName(f.symbol)}({ … }) in that config factory. If registered in another module, silence setu.W006 in .setu-ts/check.json.`,

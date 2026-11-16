@@ -24,6 +24,8 @@ interface ICodeView {
   readonly code: string;
   /** The source with only comments and regex bodies blanked: template text kept. */
   readonly text: string;
+  /** Template text spans, including their backtick or substitution delimiters. */
+  readonly templates: readonly { readonly start: number; readonly end: number }[];
   /** Quoted string literals, kept in `code`. */
   readonly strings: readonly { readonly start: number; readonly end: number }[];
 }
@@ -35,15 +37,22 @@ interface ICodeView {
  * strings are kept and recorded; a template's `${…}` substitutions stay code,
  * nested templates included. Offsets are unchanged, so a match in `code` is a
  * match at the same offset in the source. A `/` is a regex after `(`, `,`, `=`,
- * `:`, `[`, `!`, `&`, `|`, `?`, `{`, `}`, `;`, the start, or `return`/`typeof`/
- * `default`; otherwise division.
+ * `:`, `[`, `!`, `&`, `|`, `?`, `{`, `}`, `;`, `=>`, the start, or one of
+ * `return`, `typeof`, `default`, `else`, `yield`, `await`, `void`, `case`;
+ * otherwise division. A regex directly after `)` (`if (x) /re/.test(y)`) is
+ * read as division, the one case a token lexer cannot tell apart.
+ *
+ * @param source - TypeScript source text
+ * @returns The code and literal spans, without changing source offsets
  */
-function codeView(source: string): ICodeView {
+export function codeView(source: string): ICodeView {
   const code = source.split('');
   const text = source.split('');
   const strings: { start: number; end: number }[] = [];
+  const templates: { start: number; end: number }[] = [];
   // Template text is blanked in `code` only; a comment or a regex body in both.
   const blank = (from: number, to: number, both = false): void => {
+    if (!both) templates.push({ start: from, end: to });
     for (let at = from; at < to; at++) {
       if (code[at] === '\n' || code[at] === '\r') continue;
       code[at] = ' ';
@@ -106,7 +115,9 @@ function codeView(source: string): ICodeView {
       char === '/' &&
       (previous === '' ||
         '(,=:[!&|?{};'.includes(previous) ||
-        ['return', 'typeof', 'default'].includes(previous))
+        ['return', 'typeof', 'default', 'else', 'yield', 'await', 'void', 'case', '=>'].includes(
+          previous,
+        ))
     ) {
       const start = at;
       let inClass = false;
@@ -133,11 +144,13 @@ function codeView(source: string): ICodeView {
     } else {
       if (char === '{') depth++;
       else if (char === '}') depth--;
-      if (!/\s/.test(char)) previous = /[0-9)\]]/.test(char) ? 'value' : char;
+      // An arrow's body may open with a regex literal: `=>` is its own token.
+      if (char === '>' && previous === '=') previous = '=>';
+      else if (!/\s/.test(char)) previous = /[0-9)\]]/.test(char) ? 'value' : char;
       at++;
     }
   }
-  return { code: code.join(''), text: text.join(''), strings };
+  return { code: code.join(''), text: text.join(''), strings, templates };
 }
 
 /**

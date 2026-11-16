@@ -62,6 +62,30 @@ const FULL_STACK_ARMS: ReadonlyMap<string, string> = new Map([
   ['static-plugin', 'static'],
 ]);
 
+/**
+ * The arms a starter registers only when they are set, by package, with the
+ * plugin factory the arm stands in for. Every other arm is always registered
+ * (`ConfigPlugin(options.config)` and the like), so an unset one is not missing.
+ * `test/unit/starter-arm-wiring.test.ts` reads the starters' sources and keeps this in
+ * step with their `...(options.<arm> ? […] : [])` entries.
+ */
+export const GATED_STARTER_ARMS: ReadonlyMap<string, string> = new Map([
+  ['database-plugin', 'DatabasePlugin'],
+  ['auth-plugin', 'AuthPlugin'],
+  ['session-plugin', 'SessionPlugin'],
+  ['di-plugin', 'DiPlugin'],
+  ['graphql-plugin', 'GraphqlPlugin'],
+  ['service-discovery-plugin', 'ServiceDiscoveryPlugin'],
+  ['realtime-backplane-plugin', 'RealtimeBackplanePlugin'],
+  ['websocket-plugin', 'WebSocketPlugin'],
+  ['sse-plugin', 'SsePlugin'],
+  ['feature-flags-plugin', 'FeatureFlagsPlugin'],
+  ['notification-plugin', 'NotificationPlugin'],
+  ['multi-tenancy-plugin', 'MultiTenancyPlugin'],
+  ['react-router-plugin', 'ReactRouterPlugin'],
+  ['static-plugin', 'StaticPlugin'],
+]);
+
 /** The starter factories whose import marks a starter-composed configuration. */
 export const STARTER_ARMS: readonly {
   readonly symbol: string;

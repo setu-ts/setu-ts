@@ -138,7 +138,9 @@ describe('Node workspace devtool scaffold', () => {
     const rootBefore = h.fs.read('/ws/package.json');
     expect(await h.run(['app', 'a', '--devtool']), h.err.text()).toBe(0);
     const member = JSON.parse(h.fs.read('/ws/apps/a/package.json'));
-    expect(member.scripts.dev).toBe('tsx main.dev.ts');
+    expect(member.scripts.dev).toBe(
+      'tsx --import ./instrumentation.mjs --env-file-if-exists=.env main.dev.ts',
+    );
     expect(member.devDependencies['@setu-ts/diagnostics-plugin']).toBeDefined();
     expect(member.dependencies['@setu-ts/diagnostics-plugin']).toBeUndefined();
     expect(h.fs.read('/ws/package.json')).toBe(rootBefore);

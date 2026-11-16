@@ -25,8 +25,9 @@ npm install @setu-ts/vector-store-plugin
 ```
 
 `setu add vector-store` installs the package and prints a registration to paste into
-`setu.config.ts`; it never inserts one, because collections and the adapter's client belong to the
-application.
+`setu.config.ts`; it never inserts one, because the collections belong to the application. With
+`--adapter qdrant` or `pgvector` it also writes `src/vector-store.ts`, which builds the client, plus
+the connection variable and a Compose service.
 
 The pgvector adapter loads `drizzle-orm` lazily and declares it as an optional peer (`0.45.2`).
 Install it beside the plugin, then install your PostgreSQL driver (`pg` or `postgres`):
@@ -406,6 +407,31 @@ may simply match nothing. Writes are applied asynchronously, so a read may not s
 Vectorize cannot delete by namespace or by filter: `replaceSource` and `deleteScope` throw
 `VectorOperationUnsupportedError` instead of being emulated. Upsert deterministic ids and delete the
 stale ones yourself, or give each tenant group its own index.
+
+## Readiness
+
+The plugin registers a `vector-store` health indicator, which joins `/ready` by default, so a
+replica whose backend stops answering leaves the load balancer instead of failing every search. It
+calls the adapter's `isHealthy()` through a probe cached for 5 seconds and bounded at 2 seconds. A
+probe that fails, rejects or runs past that bound reports `down` with `reachable: false`:
+
+| Adapter                | Probe                                                                                    |
+| ---------------------- | ---------------------------------------------------------------------------------------- |
+| `QdrantVectorStore`    | whether the first declared collection exists, an endpoint that needs the API key         |
+| `PgVectorStore`        | `SELECT 1` through the application's db, skipped while the pool is saturated (see below) |
+| `VectorizeVectorStore` | the index's `describe()`                                                                 |
+| `MemoryVectorStore`    | always reachable                                                                         |
+
+A saturated node-postgres pool, with no idle connection and either callers waiting or every
+connection it may open already open, is not by itself an outage. `PgVectorStore` queues no probe
+behind that traffic. When the pool's `connectionTimeoutMillis` is under the 2-second probe bound, it
+also reads the probe's own pool-acquire timeout as the same saturation. The indicator stays `up`
+with `reachable: 'unknown'` while the adapter's own statements keep completing, or none is running.
+Once they have stopped completing for 10 seconds it reports `down`. This is database-plugin's
+progress rule; database-plugin reports that last case as `degraded`, and both fail `/ready`. An
+adapter without `isHealthy()` stays `up` with `reachable: 'unknown'`. After shutdown the indicator
+reports `down` with `state: 'closed'`. To keep it out of readiness, exclude it in
+`HealthPlugin({ readiness: { exclude: ['vector-store'] } })`.
 
 ## Errors
 

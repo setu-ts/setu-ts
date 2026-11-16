@@ -62,8 +62,8 @@ export function ${functionalServiceSymbol(names)}(): string {
  * Renders the injectable class.
  *
  * The token is explicit rather than inferred from the class name, matching the module
- * schematic: `emitDecoratorMetadata` is unavailable under Deno, so a consumer's
- * `@Inject` cannot read a parameter's type and must name the token as a string.
+ * schematic: TC39 standard decorators carry no parameter type information on any
+ * runtime, so a consumer's `@Inject` must name the token as a string.
  *
  * @param names - Naming forms derived from the user's input
  * @returns The file contents
@@ -72,7 +72,10 @@ function renderInjectableService(names: DerivedNames, module?: string): string {
   if (module !== undefined) {
     return `import { Injectable } from '@setu-ts/decorator-plugin';
 
-/** Add this provider to ${module}.module.ts and inject '${serviceSeamToken(`${module}.${names.kebab}`)}'. */
+/**
+ * Registered in ${module}.module.ts's providers;
+ * inject it with \`@Inject('${serviceSeamToken(`${module}.${names.kebab}`)}')\`.
+ */
 @Injectable({ token: '${serviceSeamToken(`${module}.${names.kebab}`)}' })
 export class ${names.pascal}Service {
   /** Replace with the service's real behavior. */

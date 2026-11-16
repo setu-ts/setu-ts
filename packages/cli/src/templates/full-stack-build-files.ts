@@ -230,9 +230,6 @@ export function buildFullStackBuildFiles(
 export const FULL_STACK_NPM_DEV_DEPENDENCIES: Readonly<Record<string, string>> = {
   '@react-router/dev': REACT_ROUTER_RANGE,
   '@react-router/fs-routes': REACT_ROUTER_RANGE,
-  'react-router': REACT_ROUTER_RANGE,
-  react: '^19.2.0',
-  'react-dom': '^19.2.0',
   '@types/react': '^19.2.0',
   '@types/react-dom': '^19.2.0',
   // The tooling's pin, not a second opinion: `npm-tooling.ts` holds the whole

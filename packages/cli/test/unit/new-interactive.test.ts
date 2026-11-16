@@ -59,6 +59,23 @@ async function offered(argv: readonly string[], answers: readonly (string | unde
 }
 
 describe('resolveNewChoices', () => {
+  it('echoes an answer the prompter did not show, and not one it did', async () => {
+    for (const shown of [false, true]) {
+      const lines: string[] = [];
+      const prompter: Prompter = {
+        select: (_question, choices) =>
+          Promise.resolve({
+            kind: 'answer' as const,
+            value: choices[0]!.value,
+            ...(shown ? { shown: true as const } : {}),
+          }),
+      };
+      await resolveNewChoices(parseArgs(['new', 'app']), prompter, (line) => lines.push(line));
+      const echoes = lines.filter((line) => /^(Runtime|Template)\? /.test(line));
+      expect(echoes.length > 0).toBe(!shown);
+    }
+  });
+
   it('returns the input unchanged when no prompter is supplied', async () => {
     const args = parseArgs(['svc']);
     expect(await resolveNewChoices(args, undefined, () => {})).toEqual({ kind: 'resolved', args });

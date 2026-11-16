@@ -605,7 +605,11 @@ async function planProject(
   if (runtime === 'node') {
     const index = files.findIndex((file) => file.path === 'package.json');
     const manifest = files[index]!;
-    const plan = planNodeDevtool(manifest.contents);
+    const plan = planNodeDevtool(
+      manifest.contents,
+      manifest.path,
+      `--env-file-if-exists=${devHost.manifest?.envFilePath ?? '.env'} `,
+    );
     if (!plan.ok) return plan;
     if (plan.contents !== undefined) files[index] = { ...manifest, contents: plan.contents };
   }

@@ -31,11 +31,45 @@ function readCookies(response: Response): string {
   return cookies.join('; ');
 }
 
+/** Merges the cookies a response set into an existing cookie header. */
+function mergeCookies(header: string, response: Response): string {
+  const jar = new Map(
+    header
+      .split('; ')
+      .filter((pair) => pair !== '')
+      .map((pair) => [pair.split('=', 1)[0]!, pair] as const),
+  );
+  for (const cookie of response.headers.getSetCookie()) {
+    const pair = cookie.split(';', 1)[0]!;
+    jar.set(pair.split('=', 1)[0]!, pair);
+  }
+  return [...jar.values()].join('; ');
+}
+
 describe('full-stack example', () => {
   let app: IKernelApplication;
   let seeded: readonly Product[];
 
   const get = (path: string): Promise<Response> => app.fetch(new Request(`${ORIGIN}${path}`));
+
+  /** Signs in through the login form, returning the session cookie header. */
+  const signIn = async (): Promise<string> => {
+    const loginPage = await get('/login');
+    const cookie = readCookies(loginPage);
+    const submitted = await app.fetch(
+      new Request(`${ORIGIN}/login`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded', cookie },
+        body: new URLSearchParams({
+          _csrf: readCsrfToken(await loginPage.text()),
+          email: 'reader@example.test',
+          password: 'x',
+        }),
+      }),
+    );
+    assert.equal(submitted.status, 302);
+    return mergeCookies(cookie, submitted);
+  };
 
   before(async () => {
     app = await createApp();
@@ -63,12 +97,21 @@ describe('full-stack example', () => {
     });
   });
 
-  it('server-renders the products written through the database capability', async () => {
+  it('sends a visitor who is not signed in from the products page to /login', async () => {
     const response = await get('/products');
+    assert.equal(response.status, 302);
+    assert.match(response.headers.get('location') ?? '', /^\/login/);
+  });
+
+  it('server-renders the products written through the database capability', async () => {
+    const response = await app.fetch(
+      new Request(`${ORIGIN}/products`, { headers: { cookie: await signIn() } }),
+    );
     assert.equal(response.status, 200);
     const html = await response.text();
 
-    assert.match(html, /<h1>Products/);
+    assert.match(html, /<h1[^>]*>Products/);
+    assert.ok(html.includes('reader@example.test'), 'the page did not read the signed-in user');
     // Asserted by name and price rather than by count: React splits rendered
     // numbers with comment markers, so `Products (2)` is not a literal substring.
     for (const product of seeded) {
@@ -89,7 +132,7 @@ describe('full-stack example', () => {
     const html = await response.text();
 
     // A missing index route answers 200 with an empty <body>, so assert content.
-    assert.match(html, /<h1>/);
+    assert.match(html, /<h1[\s>]/);
     assert.match(html, /href="\/products"/);
   });
 

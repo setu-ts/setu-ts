@@ -6,7 +6,7 @@
  * metadata keys never appear in the text, and the scope is bound in every
  * data statement.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { sql } from 'drizzle-orm';
 import { PgDialect } from 'drizzle-orm/pg-core';
 import type { SQL } from 'drizzle-orm';
@@ -18,7 +18,12 @@ import {
   VectorVersionConflictError,
 } from '@setu-ts/common';
 import type { VectorCollectionSpec } from '@setu-ts/common';
-import { PgVectorStore } from '../../src/adapters/pgvector/pgvector-store.ts';
+import {
+  isPoolAcquireTimeout,
+  PgVectorStore,
+  poolSaturated,
+  QUERY_PROGRESS_WINDOW_MS,
+} from '../../src/adapters/pgvector/pgvector-store.ts';
 import type { SqlTag } from '../../src/adapters/pgvector/pgvector-sql.ts';
 import { filterCondition } from '../../src/adapters/pgvector/pgvector-sql.ts';
 
@@ -604,5 +609,239 @@ describe('pgvector filter translation', () => {
     expect(() =>
       filterCondition(tag, { field: 'tag', op: 'contains', value: 'x' } as never),
     ).toThrow("unsupported filter operator 'contains'");
+  });
+});
+
+describe('PgVectorStore.isHealthy', () => {
+  it('runs SELECT 1 through the database and rejects when it fails', async () => {
+    const h = await opened();
+    h.statements.length = 0;
+    expect(await h.store.isHealthy()).toBe(true);
+    expect(h.statements.map((s) => s.text)).toEqual(['SELECT 1']);
+    let fail = false;
+    const down = await opened((rendered) =>
+      fail && rendered.text === 'SELECT 1'
+        ? new Error('connection terminated')
+        : healthy()(rendered),
+    );
+    fail = true;
+    await expect(down.store.isHealthy()).rejects.toThrow();
+  });
+
+  /** A store over a pool reporting `counters`, opened with a clock the test moves. */
+  async function saturatedStore(
+    counters: Record<string, unknown> | undefined,
+    respond: Responder = healthy(),
+  ) {
+    const recording = recordingDb(respond);
+    if (counters !== undefined) Object.assign(recording.db, { $client: counters });
+    const store = new PgVectorStore({ db: recording.db });
+    let now = 0;
+    await store.open({ hrtime: () => now } as never);
+    return { store, ...recording, advance: (ms: number) => (now += ms) };
+  }
+
+  it('probes a pool with an idle connection, or no waiter, or no counters', async () => {
+    for (const counters of [
+      { idleCount: 0, waitingCount: 0 },
+      { idleCount: 2, waitingCount: 3 },
+      undefined,
+    ]) {
+      const h = await saturatedStore(counters);
+      h.statements.length = 0;
+      expect(await h.store.isHealthy()).toBe(true);
+      expect(h.statements.map((s) => s.text)).toEqual(['SELECT 1']);
+    }
+  });
+
+  it('answers it could not tell for a saturated pool while statements complete, and false once they stop', async () => {
+    // No statement of its own in flight: the pool is busy with the application's work.
+    const idle = await saturatedStore({ idleCount: 0, waitingCount: 3 });
+    idle.statements.length = 0;
+    expect(await idle.store.isHealthy()).toBeUndefined();
+    expect(idle.statements).toEqual([]);
+
+    // A statement in flight, and one completed within the window: still serving.
+    let release: () => void = () => {};
+    const hanging = new Promise<{ rows: [] }>((resolve) => (release = () => resolve({ rows: [] })));
+    const busy = await saturatedStore({ idleCount: 0, waitingCount: 3 }, (rendered) =>
+      rendered.text.startsWith('DELETE') ? hanging : healthy()(rendered),
+    );
+    const pending = busy.store.delete(spec, 'tenant-a', ['r1']);
+    busy.advance(QUERY_PROGRESS_WINDOW_MS);
+    expect(await busy.store.isHealthy()).toBeUndefined();
+    // Past the window with that statement still running: stopped.
+    busy.advance(1);
+    expect(await busy.store.isHealthy()).toBe(false);
+    release();
+    await pending;
+  });
+
+  it('skips the probe for a full pool with no waiter yet, and judges by its counters', async () => {
+    for (const [counters, saturated] of [
+      [{ idleCount: 0, waitingCount: 0, totalCount: 10 }, true],
+      [{ idleCount: 0, waitingCount: 0, totalCount: 4, options: { max: 4 } }, true],
+      [{ idleCount: 0, waitingCount: 0, totalCount: 3, options: { max: 4 } }, false],
+      [{ idleCount: 1, waitingCount: 0, totalCount: 10 }, false],
+    ] as const) {
+      expect(poolSaturated(counters)).toBe(saturated);
+      const h = await saturatedStore(counters);
+      h.statements.length = 0;
+      expect(await h.store.isHealthy()).toBe(saturated ? undefined : true);
+      expect(h.statements.length).toBe(saturated ? 0 : 1);
+    }
+    expect(poolSaturated(null)).toBe(false);
+    expect(poolSaturated({ waitingCount: 3 })).toBe(false);
+  });
+
+  it('gives the first statement of a busy spell one window before it reads as stalled', async () => {
+    let release: () => void = () => {};
+    const hanging = new Promise<{ rows: [] }>((resolve) => (release = () => resolve({ rows: [] })));
+    const h = await saturatedStore({ idleCount: 0, waitingCount: 2 }, (rendered) =>
+      rendered.text.startsWith('DELETE') ? hanging : healthy()(rendered),
+    );
+    h.advance(60_000);
+    const pending = h.store.delete(spec, 'tenant-a', ['r1']);
+    expect(await h.store.isHealthy()).toBeUndefined();
+    h.advance(QUERY_PROGRESS_WINDOW_MS + 1);
+    expect(await h.store.isHealthy()).toBe(false);
+    release();
+    await pending;
+  });
+
+  it('reads a probe left outstanding past the window as a stall once its checkouts fill the pool', async () => {
+    let release: () => void = () => {};
+    const hanging = new Promise<{ rows: [] }>((resolve) => (release = () => resolve({ rows: [] })));
+    const counters = { idleCount: 1, waitingCount: 0, totalCount: 1, options: { max: 3 } };
+    const h = await saturatedStore(counters, (rendered) =>
+      rendered.text === 'SELECT 1' ? hanging : healthy()(rendered),
+    );
+    // The indicator gives up on this probe; its checkout stays pending.
+    const abandoned = h.store.isHealthy();
+    Object.assign(counters, { idleCount: 0, totalCount: 3 });
+    h.advance(QUERY_PROGRESS_WINDOW_MS);
+    expect(await h.store.isHealthy()).toBeUndefined();
+    h.advance(1);
+    expect(await h.store.isHealthy()).toBe(false);
+    // Once it settles the pool is serving again, and a full pool reads as unknown.
+    release();
+    expect(await abandoned).toBe(true);
+    expect(await h.store.isHealthy()).toBeUndefined();
+  });
+
+  it('keeps a later probe outstanding after an earlier one settles', async () => {
+    const releases: (() => void)[] = [];
+    const counters = { idleCount: 1, waitingCount: 0, totalCount: 1, options: { max: 3 } };
+    const h = await saturatedStore(counters, (rendered) =>
+      rendered.text === 'SELECT 1'
+        ? new Promise<{ rows: [] }>((resolve) => releases.push(() => resolve({ rows: [] })))
+        : healthy()(rendered),
+    );
+    const first = h.store.isHealthy();
+    h.advance(5_000);
+    const second = h.store.isHealthy();
+    releases[0]!();
+    expect(await first).toBe(true);
+    // Only the second probe is outstanding now; its own start is what counts.
+    Object.assign(counters, { idleCount: 0, totalCount: 3 });
+    h.advance(QUERY_PROGRESS_WINDOW_MS);
+    expect(await h.store.isHealthy()).toBeUndefined();
+    h.advance(1);
+    expect(await h.store.isHealthy()).toBe(false);
+    releases[1]!();
+    expect(await second).toBe(true);
+  });
+
+  it('reads a probe queued behind statements that keep completing as unknown, not a stall', async () => {
+    const releases: (() => void)[] = [];
+    const counters = { idleCount: 1, waitingCount: 0, totalCount: 1, options: { max: 3 } };
+    const h = await saturatedStore(counters, (rendered) =>
+      rendered.text === 'SELECT 1'
+        ? new Promise<{ rows: [] }>((resolve) => releases.push(() => resolve({ rows: [] })))
+        : healthy()(rendered),
+    );
+    const queued = h.store.isHealthy();
+    Object.assign(counters, { idleCount: 0, totalCount: 3 });
+    h.advance(QUERY_PROGRESS_WINDOW_MS + 1);
+    // A statement completes now: the pool is serving, so the old probe is queued, not stalled.
+    await h.store.delete(spec, 'tenant-a', ['r1']);
+    expect(await h.store.isHealthy()).toBeUndefined();
+    // Once no statement has completed for a whole window, the old probe is a stall again.
+    h.advance(QUERY_PROGRESS_WINDOW_MS + 1);
+    expect(await h.store.isHealthy()).toBe(false);
+    releases[0]!();
+    expect(await queued).toBe(true);
+  });
+
+  it('counts each completed statement of a long replaceSource as progress', async () => {
+    const releases: (() => void)[] = [];
+    const h = await saturatedStore({ idleCount: 0, waitingCount: 2 }, (rendered) =>
+      rendered.inTransaction
+        ? new Promise<{ rows: [] }>((resolve) => releases.push(() => resolve({ rows: [] })))
+        : healthy()(rendered),
+    );
+    const pending = h.store.replaceSource(spec, 'tenant-a', 'doc-1', [
+      { id: 'r1', vector: [1, 0, 0] },
+    ]);
+    // The lock completes nine seconds in, then the upsert waits.
+    h.advance(9_000);
+    releases.shift()!();
+    await vi.waitFor(() => expect(releases).toHaveLength(1));
+    h.advance(9_000);
+    // Eighteen seconds into the transaction, nine since a statement completed.
+    expect(await h.store.isHealthy()).toBeUndefined();
+    h.advance(QUERY_PROGRESS_WINDOW_MS - 9_000 + 1);
+    expect(await h.store.isHealthy()).toBe(false);
+    releases.shift()!();
+    await vi.waitFor(() => expect(releases).toHaveLength(1));
+    releases.shift()!();
+    await pending;
+  });
+
+  it("reads the probe's own pool-acquire timeout as saturation, but not an answer with a code", async () => {
+    const timeout = Object.assign(new Error('timeout exceeded when trying to connect'), {});
+    const h = await saturatedStore({ idleCount: 0, waitingCount: 0 }, (rendered) =>
+      rendered.text === 'SELECT 1' ? timeout : healthy()(rendered),
+    );
+    expect(await h.store.isHealthy()).toBeUndefined();
+    // The same timeout with a statement stalled past the window: stopped.
+    let release: () => void = () => {};
+    const hanging = new Promise<{ rows: [] }>((resolve) => (release = () => resolve({ rows: [] })));
+    const stalled = await saturatedStore({ idleCount: 0, waitingCount: 0 }, (rendered) =>
+      rendered.text === 'SELECT 1'
+        ? timeout
+        : rendered.text.startsWith('DELETE')
+          ? hanging
+          : healthy()(rendered),
+    );
+    const pending = stalled.store.delete(spec, 'tenant-a', ['r1']);
+    stalled.advance(QUERY_PROGRESS_WINDOW_MS + 1);
+    expect(await stalled.store.isHealthy()).toBe(false);
+    release();
+    await pending;
+    expect(isPoolAcquireTimeout(new Error('wrapped', { cause: timeout }))).toBe(true);
+    expect(
+      isPoolAcquireTimeout(
+        Object.assign(new Error('timeout exceeded when trying to connect'), { code: '57014' }),
+      ),
+    ).toBe(false);
+    expect(isPoolAcquireTimeout(new Error('connection terminated'))).toBe(false);
+    const refused = await saturatedStore(undefined, (rendered) =>
+      rendered.text === 'SELECT 1' ? new Error('connection terminated') : healthy()(rendered),
+    );
+    await expect(refused.store.isHealthy()).rejects.toThrow();
+  });
+
+  it('answers it could not tell for a saturated pool when opened without a clock', async () => {
+    const recording = recordingDb(healthy());
+    Object.assign(recording.db, { $client: { idleCount: 0, waitingCount: 1 } });
+    const store = new PgVectorStore({ db: recording.db });
+    await store.open();
+    expect(await store.isHealthy()).toBeUndefined();
+  });
+
+  it('refuses before open()', async () => {
+    const store = new PgVectorStore({ db: recordingDb().db });
+    await expect(store.isHealthy()).rejects.toThrow('open() must run before any other call');
   });
 });

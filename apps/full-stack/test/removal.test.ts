@@ -9,12 +9,13 @@
  *
  * Here those concerns belong to the session, SSE, cache and logger plugins,
  * reached through the service registry the SSR plugin puts on every request.
- * `server/session.server.ts` provides stateless access to session and CSRF
- * values; business services live in kernel modules and pages use getService.
+ * `server/session.server.ts` provides stateless access to session, CSRF and
+ * signed-in-user values; business services live in kernel modules and pages use getService.
  */
 import { readFile, stat } from 'node:fs/promises';
 import { isNotFound } from '../../../scripts/lib/run.ts';
-import { describe, it, expect } from 'vitest';
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
 
 const APP_ROOT = new URL('../app/', import.meta.url);
 
@@ -41,10 +42,11 @@ async function exists(relativePath: string): Promise<boolean> {
 describe('the full-stack example', () => {
   it('hand-rolls none of the modules a capability already provides', async () => {
     for (const module of REPLACED_BY_CAPABILITIES) {
-      expect(
+      assert.equal(
         await exists(module),
+        false,
         `app/${module} exists — that concern belongs to a plugin, not to app code`,
-      ).toBe(false);
+      );
     }
   });
 
@@ -70,32 +72,43 @@ describe('the full-stack example', () => {
           TOP_LEVEL.test(line) && (MUTABLE_BINDING.test(line) || CACHE_CONSTRUCTOR.test(line)),
       );
 
-    expect(cached, `module-level state found: ${cached.join(' | ')}`).toEqual([]);
+    assert.deepEqual(cached, [], `module-level state found: ${cached.join(' | ')}`);
   });
 
-  it('reads every context key it sets', async () => {
-    // A key set in populateLoadContext but never read is dead surface; a key
-    // read but never set silently returns its default and renders an empty
-    // page. Both directions are checked, because neither type-checks.
+  it('sets every context key it reads, and reads every key it sets', async () => {
+    // A key set but never read is dead surface; a key read but never set
+    // silently returns its default and renders an empty page. Both directions
+    // are checked, because neither type-checks. `setu.config.ts` sets the
+    // request values; the `requireUser` route middleware sets the signed-in user.
     const keys = await readFile(new URL('server/context-keys.server.ts', APP_ROOT), 'utf8');
-    const accessors = await readFile(new URL('server/session.server.ts', APP_ROOT), 'utf8');
-    const config = await readFile(new URL('../setu.config.ts', import.meta.url), 'utf8');
+    const sources = await Promise.all(
+      [
+        '../setu.config.ts',
+        'server/require-user.server.ts',
+        'server/session.server.ts',
+        'entry.server.tsx',
+      ].map((path) => readFile(new URL(path, APP_ROOT), 'utf8')),
+    );
+    const all = sources.join('\n');
 
     const exported = [...keys.matchAll(/export const (\w+Context)\b/g)].map((match) => match[1]);
-    expect(exported.sort()).toEqual(['csrfContext', 'sessionContext']);
-    const set = [...config.matchAll(/context\.set\(\s*(\w+Context)\b/g)].map((match) => match[1]);
-    expect(set.sort()).toEqual(exported);
+    assert.deepEqual(exported.sort(), [
+      'csrfContext',
+      'currentUserContext',
+      'requestIdContext',
+      'sessionContext',
+    ]);
 
     for (const key of exported) {
       // Whitespace-tolerant: Prettier wraps a long `context.set(...)` call
       // across lines, and the test must assert the wiring, not the formatting.
-      const isSet = new RegExp(String.raw`context\.set\(\s*${key}\b`).test(config);
-      expect(isSet, `${key} is never set in setu.config.ts`).toBe(true);
-      // `accessors.includes(key)` would be satisfied by the import statement
-      // alone, so a key imported and never read would pass while the message
-      // claimed otherwise. Assert the access shape the accessors actually use.
-      const isRead = new RegExp(String.raw`context\.get\(\s*${key}\b`).test(accessors);
-      expect(isRead, `${key} is never read through context.get()`).toBe(true);
+      // `includes(key)` would be satisfied by the import statement alone, so
+      // assert the access shape instead.
+      assert.ok(new RegExp(String.raw`context\.set\(\s*${key}\b`).test(all), `${key} is never set`);
+      assert.ok(
+        new RegExp(String.raw`context\.get\(\s*${key}\b`).test(all),
+        `${key} is never read through context.get()`,
+      );
     }
   });
 
@@ -107,13 +120,17 @@ describe('the full-stack example', () => {
     // empty with no error anywhere.
     const source = await readFile(new URL('server/context-keys.server.ts', APP_ROOT), 'utf8');
 
-    expect(source).toContain('contextKeyFor');
-    expect(source).not.toMatch(/=\s*\{\s*defaultValue/);
+    assert.ok(source.includes('contextKeyFor'));
+    assert.doesNotMatch(source, /=\s*\{\s*defaultValue/);
   });
 
   it('keeps business modules outside the page tree', async () => {
     for (const directory of ['features', 'services', 'models', 'config']) {
-      expect(await exists(directory), `app/${directory} must move into kernel modules`).toBe(false);
+      assert.equal(
+        await exists(directory),
+        false,
+        `app/${directory} must move into kernel modules`,
+      );
     }
   });
 });

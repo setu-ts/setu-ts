@@ -147,7 +147,9 @@ request-derived host.
 
 This section describes the images that build the examples in this repository.
 
-Two Dockerfiles cover every example, selected with `--build-arg APP=<name>`:
+Two Dockerfiles cover the server examples, selected with `--build-arg APP=<name>`. The examples that
+need another image shape, such as `full-stack` (its frontend builds first) and `cloudflare`, are
+listed with their reasons in `scripts/check-deploy.ts`:
 
 | File                                                          | Base                            | Use it when                                                            |
 | ------------------------------------------------------------- | ------------------------------- | ---------------------------------------------------------------------- |
@@ -155,7 +157,7 @@ Two Dockerfiles cover every example, selected with `--build-arg APP=<name>`:
 | [`docker/Dockerfile.compiled`](../docker/Dockerfile.compiled) | `gcr.io/distroless/cc-debian12` | You want no shell, no package manager and no interpreter in the image. |
 
 ```bash
-# Any example under apps/
+# A server example under apps/
 docker build -f docker/Dockerfile --build-arg APP=rest-api -t setu/rest-api:m39 .
 
 # The single-binary variant

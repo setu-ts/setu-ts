@@ -23,6 +23,14 @@ apps/*/.wrangler
 # Legacy compiled executable; current Node SEA output is excluded under .tmp below.
 apps/compiled-binary/hono-example
 
+# Dotenv files and registry credentials, as a generated project's .dockerignore
+# excludes them: `COPY apps ./apps` would otherwise carry an app's local .env or
+# .npmrc into the build stage. .env.example stays, for the image.
+**/.env
+**/.env.*
+!**/.env.example
+**/.npmrc
+
 # Editor and OS noise.
 .vscode
 .idea
