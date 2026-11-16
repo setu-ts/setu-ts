@@ -32,12 +32,17 @@ describe('composition-specific rule blocks', () => {
       ['react-router-plugin', 'messaging-plugin'],
       ['functional', 'deno-tests', 'full-stack', 'messaging'],
     ],
-    ['cloudflare-workers', 'class-based', ['decorator-plugin'], ['class-based', 'workers']],
+    [
+      'cloudflare-workers',
+      'class-based',
+      ['decorator-plugin'],
+      ['class-based', 'workers-tests', 'workers'],
+    ],
     [
       'cloudflare-workers',
       'functional',
       ['react-router-plugin'],
-      ['functional', 'full-stack-workers', 'workers'],
+      ['functional', 'workers-tests', 'full-stack-workers', 'workers'],
     ],
     ['node', 'functional', ['full-stack-starter'], ['functional', 'node-tests', 'messaging']],
     ['bun', 'functional', ['microservice-starter'], ['functional', 'bun-tests', 'messaging']],
@@ -57,6 +62,19 @@ describe('composition-specific rule blocks', () => {
     expect(text).toContain('wrangler dev');
     expect(text).not.toContain('start:dev');
   });
+  it('states the absent-key default and empty-value fallback in the config rule', () => {
+    const text = RULE_BLOCKS.find((rule) => rule.id === 'config')!.text;
+    expect(text).toContain('`config.get(k, { default })` absent keys only');
+    expect(text).toContain('`config.get(k) || v` if blank');
+  });
+  it('gives Workers the generated server test harness after the Deno rule', () => {
+    const index = RULE_BLOCKS.findIndex((rule) => rule.id === 'workers-tests');
+    expect(RULE_BLOCKS[index - 1]!.id).toBe('deno-tests');
+    expect(RULE_BLOCKS[index]!.packages).toEqual(['testing']);
+    expect(RULE_BLOCKS[index]!.text).toBe(
+      'Tests: node:test, node:assert under `tsx --test`; `startTestServer()` from `./support/server.ts`, `fetch(server.baseUrl + path)`; `await server.stop()` in finally.',
+    );
+  });
   it('tells agents to add a listed package rather than hand-write it, only while one is listed', () => {
     const rule = RULE_BLOCKS.find((r) => r.id === 'add-first')!;
     expect(rule.text).toContain('Never hand-write what a package under Not installed provides');
@@ -74,6 +92,8 @@ describe('composition-specific rule blocks', () => {
       const allowed = new Set(
         ['common', ...rule.packages].flatMap((pkg) => [...inventory.get(`packages/${pkg}`)!]),
       );
+      // The Workers rule names a generated project helper, not a package export.
+      if (rule.id === 'workers-tests') allowed.add('startTestServer');
       expect(identifierProblems(rule.text, allowed), rule.id).toEqual([]);
       expect(await checkFences(rule.id, rule.text, '.tmp/agent-rule-fences')).toBe(0);
     }

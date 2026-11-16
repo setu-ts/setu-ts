@@ -57,6 +57,7 @@ export class SseService implements IService {
    *   channel publish is also sent to it; when absent, channels stay purely
    *   in-process, which is the behavior before the backplane existed.
    * @param logger - Optional logger used to report a failed fan-out
+   * @throws {Error} If `heartbeatMs` is not a whole number from 0 to 2^31-1; the plugin constructs this service when it registers
    * @since 0.1.0
    */
   constructor(

@@ -41,7 +41,7 @@ export interface JwtOptions {
    * RS256 does not resolve this value.
    */
   readonly secret?: string | Uint8Array;
-  /** Private key for RS256 signing (PEM format). Required if HS256 secret not provided. */
+  /** Private key for RS256 signing (PEM). Required, with `publicKey`, for RS256. */
   readonly privateKey?: string;
   /** Public key for RS256 verification (PEM format). Required for RS256 verification. */
   readonly publicKey?: string;

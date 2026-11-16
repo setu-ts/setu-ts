@@ -39,6 +39,11 @@ no change: without the new optional `isHealthy()` it stays `up` as `reachable: '
 
 ### Deployment output (M140c, `@setu-ts/cli`)
 
+Images and new projects' `start` scripts set `NODE_ENV=production`. A regenerated Compose file adds
+healthchecks and `depends_on`. Broker defaults move from Deployment `env:` entries to a
+`<member>-transport` ConfigMap listed before the Secret, so a value in `k8s/secrets/<member>/.env`
+now takes effect.
+
 A workspace member's config must call the transport module's `runtimeOptions()`, which serves gRPC
 members over cleartext HTTP/2: `runtime: runtimeOptions(),` in a full-stack starter's options, or
 `RuntimePlugin({ ...runtimeOptions(), <its existing options> })` in a plugin-list config, imported
@@ -59,10 +64,33 @@ configuration or the environment. Fetch a fresh form-CSRF token after session re
 including sign-in and MFA promotion. WebSocket messages default to a 1 MiB bound (`0` opts out); SSE
 defaults to a 30-second heartbeat (`heartbeatMs: 0` opts out).
 
+`@Roles`, `@Permissions`, `@RequirePolicy`, `@ScopedRoles`, `@ScopedPermissions` and method-level
+`@Public` on a `@Gateway`'s WebSocket handlers now fail startup. Class-level HTTP authorization is
+also refused unless the class also serves HTTP routes and the gateway declares its own handshake
+guards. Authorize the handshake with `@Gateway(path, { guards })`.
+
+`SessionPlugin` now reads `SESSION_SECRET` from configuration before the environment, and the
+secrets plugin's `configFallback: false` no longer prevents a dotenv value from reaching it. An
+invalid `maxMessageBytes` or `heartbeatMs` now throws instead of becoming unlimited or a 1 ms timer.
+A generated `migration --down` reverses the newest migration; `--down=<n>` and `--down=all` reverse
+more.
+
 When upgrading a generated Deno project, update the exact CLI version in its `check` task alongside
 the `@setu-ts/*` dependency versions. There is no `setu upgrade` command. Run the full-stack `build`
 task before `start`; `start` no longer installs or builds. Installation runs without blanket
 lifecycle-script permission, and third-party dependencies retain a one-day cooldown.
+
+### Workers, Deno and Bun output (M140b, `@setu-ts/cli`)
+
+`setu add queue` is refused on Workers. Use `CloudflarePlugin({ queue: { binding } })` with a
+`queue` export. An empty `PORT`, broker, Redis or discovery value now falls back to its default.
+Workers projects carry no `deno.json`.
+
+### Generated code (M140d, `@setu-ts/cli`)
+
+Generated event type names are PascalCase. `setu g schema` writes `z.strictObject({})`, which
+refuses bodies with fields until fields are added. The devtool `dev` script runs `tsx` with the
+telemetry preload and the project's dotenv flag.
 
 ### Typed capability lookups (M139g, `@setu-ts/common`, `@setu-ts/kernel`, `@setu-ts/testing`, `@setu-ts/react-router-plugin`, `@setu-ts/cli`)
 

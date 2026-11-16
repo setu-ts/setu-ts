@@ -140,23 +140,23 @@ All notable changes to this project are documented here. The format follows
   With vector-store-plugin installed, `setu generate health-indicator vector-store` refuses the name
   the plugin claims, and the devtool reports the `vector-store` indicator. Two env variables planned
   in one run no longer overwrite each other.
-- **`@setu-ts/cli` (M140a, #589).** Generated application bodies are bounded at 1 MiB; module names
-  and ids have length limits. New projects generate local session secrets, ignore local secret files
-  and Deno node_modules, and name required Docker environment variables. Session installation writes
-  an ignored secret; auth installation enables environment-resolved JWTs. Workspace members record
-  generated secret names; Compose requires separate member-prefixed shell values, listed in the
-  README. Both WebSocket schematics show handshake guards. Rollback defaults to one migration; use
-  `--down=<n>` or `--down=all` explicitly. SSE generators retain a connection and send ready. Deno
-  full-stack installation runs without blanket scripts; build before start. Third-party dependencies
-  keep a one-day cooldown, check pins the exact CLI, and the devtool key is removed before
-  application creation. `setu add auth|session` adds an exact `.gitignore` entry for the env file
-  when there is none (as Rails does for `config/master.key`), with a `git rm --cached` hint when the
-  file already existed; a custom `--env-file` path is excluded from the generated `.dockerignore`,
-  and `setu add auth|session` lists a custom env path in an existing `.dockerignore` (a workspace
-  member's paths are recorded in `envFilePaths`, append-only, and listed in the managed root
-  `.dockerignore`; an env path ending in `.example` is refused); a manifest whose members' secrets
-  map to one Compose variable is refused; and the generated `runMigrations` refuses a rollback count
-  that is not a positive whole number or `Infinity`.
+- **BREAKING — `@setu-ts/cli` (M140a, #589).** Generated application bodies are bounded at 1 MiB;
+  module names and ids have length limits. New projects generate local session secrets, ignore local
+  secret files and Deno node_modules, and name required Docker environment variables. Session
+  installation writes an ignored secret; auth installation enables environment-resolved JWTs.
+  Workspace members record generated secret names; Compose requires separate member-prefixed shell
+  values, listed in the README. Both WebSocket schematics show handshake guards. Rollback defaults
+  to one migration; use `--down=<n>` or `--down=all` explicitly. SSE generators retain a connection
+  and send ready. Deno full-stack installation runs without blanket scripts; build before start.
+  Third-party dependencies keep a one-day cooldown, check pins the exact CLI, and the devtool key is
+  removed before application creation. `setu add auth|session` adds an exact `.gitignore` entry for
+  the env file when there is none (as Rails does for `config/master.key`), with a `git rm --cached`
+  hint when the file already existed; a custom `--env-file` path is excluded from the generated
+  `.dockerignore`, and `setu add auth|session` lists a custom env path in an existing
+  `.dockerignore` (a workspace member's paths are recorded in `envFilePaths`, append-only, and
+  listed in the managed root `.dockerignore`; an env path ending in `.example` is refused); a
+  manifest whose members' secrets map to one Compose variable is refused; and the generated
+  `runMigrations` refuses a rollback count that is not a positive whole number or `Infinity`.
 - **BREAKING — `@setu-ts/session-plugin` (M140a, #589).** Regeneration clears form CSRF while
   preserving other data. Fetch a fresh token after sign-in or MFA promotion. Secret resolution now
   checks configuration before the environment; supply an explicit option to override it.
@@ -171,14 +171,14 @@ All notable changes to this project are documented here. The format follows
 - **BREAKING — `@setu-ts/websocket-plugin` (M140a, #589).** The message limit defaults to 1 MiB. Set
   `maxMessageBytes: 0` to opt out, or configure a larger bound. Node bounds the transport read; Bun
   and Deno close oversized messages after buffering. A value that is not a whole number from 0 to
-  2^31 - 1 (NaN, a negative, Infinity) is refused at registration instead of becoming unlimited.
+  2^31 - 1 (NaN, a negative, Infinity) is refused at construction instead of becoming unlimited.
 - **BREAKING — `@setu-ts/sse-plugin` (M140a, #589).** Heartbeats default to 30 seconds. Set
   `heartbeatMs: 0` to disable them. A NaN, negative, fractional or over-2^31-1 value is refused at
-  construction.
-- **`@setu-ts/decorator-plugin` (M140a, #589).** Gateway route options reach handshake admission.
-  Use `@Gateway(path, { guards })`; ignored HTTP authorization decorators on gateways now fail
-  startup. On a class that also serves HTTP routes, only its WebSocket handlers are checked, and
-  class-level authorization is accepted only when the gateway declares its own handshake guards.
+  registration.
+- **BREAKING — `@setu-ts/decorator-plugin` (M140a, #589).** Gateway route options reach handshake
+  admission. Use `@Gateway(path, { guards })`; ignored HTTP authorization decorators on gateways now
+  fail startup. On a class that also serves HTTP routes, only its WebSocket handlers are checked,
+  and class-level authorization is accepted only when the gateway declares its own handshake guards.
 - **`@setu-ts/react-router-plugin` (M140a, #589).** A missing server build names the build task to
   run before starting the application.
 - **Form routes document their encodings and codegen refuses unsupported request bodies (M137c,
@@ -466,6 +466,19 @@ All notable changes to this project are documented here. The format follows
   generated discovery module, and code that calls the member by name.
 
 ### Fixed
+
+- **Documentation (M140e, M139e; `@setu-ts/agent-runs-plugin`, `@setu-ts/auth-plugin`,
+  `@setu-ts/config-plugin`, `@setu-ts/decorator-plugin`, `@setu-ts/events-plugin`,
+  `@setu-ts/mail-plugin`, `@setu-ts/multi-tenancy-plugin`, `@setu-ts/secrets-plugin`,
+  `@setu-ts/session-plugin`, `@setu-ts/sse-plugin`, `@setu-ts/vector-store-plugin`,
+  `@setu-ts/websocket-plugin`, `@setu-ts/worker-pool-plugin`, `@setu-ts/full-stack-starter`,
+  `@setu-ts/cli`; V12-5, V12-6, V12-7, V12-8, V12-13, V12-14, V12-15, V12-17, V12-38, V12-88,
+  V9-29).** The docs, READMEs, agent cards and PUBLIC_API now match the M140a–d output. The
+  session-secret error names configuration as a source, and the decorator-plugin injection error
+  gives the standard-decorators reason. The agent brief's `config.get` rule says the default applies
+  only to an absent key, and Workers projects get a test rule. Auth-plugin's full-stack recipe gains
+  sign-out, and the ai-chat example's budget middleware takes a budget scope so a durable run can be
+  budgeted. The website counts its packages from the published list.
 
 - **V12-102, V12-103, V12-104, V12-105, V12-106, V12-107, V12-109, V12-118, V12-80, V12-124 (M140b,
   #591, `@setu-ts/cli`).** Workers projects no longer emit `deno.json`. `setu add queue` is refused

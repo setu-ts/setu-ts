@@ -269,8 +269,8 @@ function effectiveOptional(
       throw new Error(
         `${className(target)} marks constructor parameter ${index} optional, but the ` +
           `@Inject(...) list names no token for it. Optional marks an injected dependency as ` +
-          `absent-tolerant; it does not name one — type-inferred injection needs ` +
-          `emitDecoratorMetadata, which Deno does not support.`,
+          `absent-tolerant; it does not name one — TC39 standard decorators carry no ` +
+          `parameter type information on any runtime, so @Inject must name the token.`,
       );
     }
   }

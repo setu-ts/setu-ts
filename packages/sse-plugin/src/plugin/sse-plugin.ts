@@ -45,6 +45,7 @@ const PLUGIN_NAME = 'sse-plugin';
  * ```
  * @param options - Plugin configuration
  * @returns The plugin instance
+ * @throws {Error} When the plugin registers, if `heartbeatMs` is not a whole number from 0 to 2^31-1
  * @since 0.1.0
  */
 export function SsePlugin(options?: SsePluginOptions): IPlugin {

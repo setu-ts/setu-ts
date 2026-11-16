@@ -91,7 +91,7 @@ export const RULE_BLOCKS: readonly IRuleBlock[] = [
     id: 'config',
     packages: [],
     applies: () => true,
-    text: 'Read `IConfig` via `CAPABILITIES.CONFIG`: config.get(key, { default: value }) or config.getOrThrow(key). Options precede config loading; never resolve loaded config in them.',
+    text: '`IConfig` (`CAPABILITIES.CONFIG`): `config.get(k, { default })` absent keys only; `config.get(k) || v` if blank; `config.getOrThrow(k)`. Options run before config loads.',
   },
   {
     id: 'imports',
@@ -116,6 +116,12 @@ export const RULE_BLOCKS: readonly IRuleBlock[] = [
     packages: ['testing'],
     applies: (f) => f.runtime === 'deno',
     text: 'Tests: `@std/testing/bdd`, `@std/expect`; `createTestApp({ app: await createApp() })` from `@setu-ts/testing`. Inject requests; await app.stop() in finally.',
+  },
+  {
+    id: 'workers-tests',
+    packages: ['testing'],
+    applies: (f) => f.runtime === 'cloudflare-workers',
+    text: 'Tests: node:test, node:assert under `tsx --test`; `startTestServer()` from `./support/server.ts`, `fetch(server.baseUrl + path)`; `await server.stop()` in finally.',
   },
   {
     id: 'full-stack',

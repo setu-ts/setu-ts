@@ -134,13 +134,13 @@ function toStringEnv(
  * by `secrets-plugin` under `CAPABILITIES.SECRETS`, which exists only after
  * registration, so a plugin needing one resolves it lazily at use time.
  *
- * @example Choosing a database and a mail provider from the environment
+ * @example Choosing a mail provider from the environment
  * ```typescript
  * import { createFullStackAppFromConfig } from '@setu-ts/full-stack-starter';
  *
  * const app = await createFullStackAppFromConfig((config) => ({
- *   database: { adapter: 'prisma', url: config.getOrThrow<string>('DATABASE_URL') },
- *   mail: { provider: 'sendgrid', apiKey: config.getOrThrow<string>('SENDGRID_KEY') },
+ *   database: { type: 'memory' },
+ *   mail: { provider: 'sendgrid', options: { apiKey: config.getOrThrow<string>('SENDGRID_KEY') } },
  * }), { config: { envFilePath: ['.env.local', '.env'] } });
  *
  * app.router.get('/health', (ctx) => ctx.response.text('ok'));

@@ -1022,6 +1022,9 @@ describe('M140b runtime output', () => {
         expect(readme).toContain('Everything in `build/client`');
         const devVars = contentsOf(files, '.dev.vars');
         expect(devVars).toContain(
+          '# The values below are for local development and stay local; generated secrets are random. A deployed Worker\n',
+        );
+        expect(devVars).toContain(
           'takes secrets from wrangler secret put and plain values from [vars]',
         );
         expect(devVars).not.toContain('Replace them before deploying');
@@ -1037,6 +1040,11 @@ describe('M140b runtime output', () => {
         );
         if (name === 'full-stack') {
           const env = contentsOf(files, runtime === 'cloudflare-workers' ? '.dev.vars' : '.env');
+          if (runtime !== 'cloudflare-workers') {
+            expect(env).toContain(
+              '# The values below are for local development; generated secrets are random. Set real values before deploying.\n',
+            );
+          }
           expect(env).toContain(
             runtime === 'cloudflare-workers'
               ? "wrangler dev reads this file into the Worker's env"
