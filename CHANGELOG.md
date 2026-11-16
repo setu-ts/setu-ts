@@ -467,6 +467,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **V12-140 (`@setu-ts/cli`, #595).** `setu check` E017 scans every path a symlink gives a page
+  directory under `app/`, not only the first one walked, so a relative kernel import reached through
+  a second alias is reported. Each alias resolves relative imports from its own location, as Vite
+  does with `resolve.preserveSymlinks: true`; only a link back to one of its own parent directories
+  is skipped, and the 4,096-directory cap reports a larger walk as `setu.E018`.
+
 - **V12-102, V12-103, V12-104, V12-105, V12-106, V12-107, V12-109, V12-118, V12-80, V12-124 (M140b,
   #591, `@setu-ts/cli`).** Workers projects no longer emit `deno.json`. `setu add queue` is refused
   on Workers, because its default queue lives in one isolate's memory, and `setu generate job` there

@@ -6,7 +6,8 @@
  * @module
  */
 import * as nodeFs from 'node:fs/promises';
-import { describe, expect, it } from 'vitest';
+import { transform } from 'esbuild';
+import { describe, expect, it, vi } from 'vitest';
 import { createNodeRuntimeServices } from '@setu-ts/runtime';
 import { tempDir } from '../../../../../test/node-helpers.ts';
 import {
@@ -14,9 +15,16 @@ import {
   kernelTarget,
   scanPageImports,
   scanPageSource,
+  SharedLoads,
   type PageImportReason,
 } from '../../../src/diagnostics/page-imports.ts';
 import { createFakeFs } from '../../fixtures/fake-fs.ts';
+
+// Pass-through, so a test can count how often a scan runs esbuild.
+vi.mock('esbuild', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('esbuild')>();
+  return { ...actual, transform: vi.fn(actual.transform) };
+});
 
 const PAGE = 'app/routes/_app/products._index.tsx';
 
@@ -651,6 +659,118 @@ describe('scanPageImports over real symlinks (review finding 6)', () => {
       await nodeFs.rm(root, { recursive: true, force: true });
     }
   });
+  // V12-140: two client-path aliases of one directory resolve relative imports differently under
+  // preserveSymlinks, so each must be walked whichever comes first.
+  it.each([
+    ['the deeper alias first', ['a', 'client', '.server']],
+    ['the shallower alias first', ['client', 'a', '.server']],
+  ])('scans every alias of one directory, walking %s', async (_, order) => {
+    const root = await tempDir({ prefix: 'page-alias-depth-' });
+    try {
+      await nodeFs.mkdir(`${root}/app/.server`, { recursive: true });
+      await nodeFs.mkdir(`${root}/app/a`, { recursive: true });
+      await nodeFs.mkdir(`${root}/src/modules/p`, { recursive: true });
+      await nodeFs.writeFile(`${root}/src/modules/p/p.service.ts`, 'export const s = 1;\n');
+      await nodeFs.writeFile(
+        `${root}/app/.server/real.ts`,
+        "import { s } from '../../src/modules/p/p.service.ts';\nvoid s;\n",
+      );
+      await nodeFs.symlink('../.server', `${root}/app/a/link`);
+      await nodeFs.symlink('.server', `${root}/app/client`);
+      const fs = { ...createNodeRuntimeServices().fs! };
+      const readdir = fs.readdir.bind(fs);
+      fs.readdir = (path: string) =>
+        path === `${root}/app` ? Promise.resolve(order) : readdir(path);
+      const scan = await scanPageImports(fs, root);
+      expect(scan.unreadable).toEqual([]);
+      // From app/a/link/ the import reaches app/src/…, not kernel code; from app/client/ it
+      // reaches src/…; app/.server/real.ts is server-only on both paths and skipped.
+      expect(scan.violations.map((v) => v.path)).toEqual(['app/client/real.ts']);
+    } finally {
+      await nodeFs.rm(root, { recursive: true, force: true });
+    }
+  });
+  it('reports a page once for each alias of its directory', async () => {
+    const root = await tempDir({ prefix: 'page-alias-diamond-' });
+    try {
+      await nodeFs.mkdir(`${root}/app/lib`, { recursive: true });
+      await nodeFs.writeFile(
+        `${root}/app/lib/page.ts`,
+        "import { s } from '~kernel/modules/p/p.service.ts';\nvoid s;\n",
+      );
+      await nodeFs.symlink('lib', `${root}/app/x`);
+      await nodeFs.symlink('lib', `${root}/app/y`);
+      const fs = { ...createNodeRuntimeServices().fs! };
+      const readFile = fs.readFile.bind(fs);
+      let reads = 0;
+      fs.readFile = (path: string) => {
+        reads += 1;
+        return readFile(path);
+      };
+      vi.mocked(transform).mockClear();
+      const scan = await scanPageImports(fs, root);
+      // One file by three paths: read and transformed once, only the specifiers resolve per path.
+      expect(reads).toBe(1);
+      expect(transform).toHaveBeenCalledTimes(1);
+      expect(scan.unreadable).toEqual([]);
+      expect(scan.violations.map((v) => v.path)).toEqual([
+        'app/lib/page.ts',
+        'app/x/page.ts',
+        'app/y/page.ts',
+      ]);
+    } finally {
+      await nodeFs.rm(root, { recursive: true, force: true });
+    }
+  });
+  it('walks each directory of a cross-link loop by both paths, then stops at the cycle', async () => {
+    const root = await tempDir({ prefix: 'page-alias-cross-' });
+    try {
+      await nodeFs.mkdir(`${root}/app/a`, { recursive: true });
+      await nodeFs.mkdir(`${root}/app/b`, { recursive: true });
+      await nodeFs.symlink('../b', `${root}/app/a/up`);
+      await nodeFs.symlink('../a', `${root}/app/b/up`);
+      const fs = { ...createNodeRuntimeServices().fs! };
+      const readdir = fs.readdir.bind(fs);
+      const reads = new Map<string, number>();
+      fs.readdir = async (path: string) => {
+        const real = await nodeFs.realpath(path);
+        reads.set(real, (reads.get(real) ?? 0) + 1);
+        return readdir(path);
+      };
+      const scan = await scanPageImports(fs, root);
+      expect(scan.unreadable).toEqual([]);
+      expect(Math.max(...reads.values())).toBe(2);
+    } finally {
+      await nodeFs.rm(root, { recursive: true, force: true });
+    }
+  });
+  it('stops a realPath walk at the 4,096-directory cap, every symlink path counted', async () => {
+    const root = await tempDir({ prefix: 'page-alias-cap-' });
+    try {
+      // Each directory links only to later ones: no path closes a cycle, so every
+      // counted path is read, and 13 directories give more paths than the cap.
+      const names = Array.from({ length: 13 }, (_, i) => `d${String(i).padStart(2, '0')}`);
+      for (const name of names) await nodeFs.mkdir(`${root}/app/${name}`, { recursive: true });
+      for (const [i, name] of names.entries())
+        for (const later of names.slice(i + 1))
+          await nodeFs.symlink(`../${later}`, `${root}/app/${name}/${later}`);
+      const fs = { ...createNodeRuntimeServices().fs! };
+      expect(fs.realPath).toBeDefined();
+      const readdir = fs.readdir.bind(fs);
+      let listed = 0;
+      fs.readdir = (path: string) => {
+        listed += 1;
+        return readdir(path);
+      };
+      const scan = await scanPageImports(fs, root);
+      expect(listed).toBe(4096);
+      expect(scan.violations).toEqual([]);
+      expect(scan.unreadable.length).toBeGreaterThan(0);
+      expect(scan.unreadable.every((path) => /^app(\/d\d\d)+$/.test(path))).toBe(true);
+    } finally {
+      await nodeFs.rm(root, { recursive: true, force: true });
+    }
+  });
   it('scans server-only paths when realpath containment cannot be confirmed', async () => {
     const fs = createFakeFs({
       '/p/app/lib/x.server.ts': "import { x } from '~kernel/x.ts';",
@@ -772,5 +892,35 @@ describe('the full-stack output passes its own E017 check', () => {
     expect(pages.some((file) => file.contents.includes('~kernel/'))).toBe(true);
     for (const file of pages)
       expect(await scanPageSource(file.path, file.contents), file.path).toEqual([]);
+  });
+});
+
+describe('SharedLoads', () => {
+  it('never holds a key one path uses', () => {
+    const loads = new SharedLoads<number>(['one', undefined]);
+    let started = 0;
+    expect(loads.take('one', () => ++started)).toBe(1);
+    expect(loads.take(undefined, () => ++started)).toBe(2);
+    expect(started).toBe(2);
+    expect(loads.size).toBe(0);
+  });
+  it('holds a key several paths use from its first take until its last', () => {
+    const loads = new SharedLoads<number>(['shared', 'shared', 'shared']);
+    let started = 0;
+    expect(loads.take('shared', () => ++started)).toBe(1);
+    expect(loads.size).toBe(1);
+    expect(loads.take('shared', () => ++started)).toBe(1);
+    expect(loads.size).toBe(1);
+    expect(loads.take('shared', () => ++started)).toBe(1);
+    expect(loads.size).toBe(0);
+    expect(started).toBe(1);
+  });
+  it('keeps one real path read by two loaders apart', () => {
+    const loads = new SharedLoads<string>(['ts\0/r', 'tsx\0/r', 'ts\0/r', 'tsx\0/r']);
+    expect(loads.take('ts\0/r', () => 'ts')).toBe('ts');
+    expect(loads.take('tsx\0/r', () => 'tsx')).toBe('tsx');
+    expect(loads.take('ts\0/r', () => 'other')).toBe('ts');
+    expect(loads.take('tsx\0/r', () => 'other')).toBe('tsx');
+    expect(loads.size).toBe(0);
   });
 });

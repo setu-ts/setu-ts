@@ -578,11 +578,15 @@ guarded page, `app/routes/_app/<name>._index.tsx`, whose loader reads the servic
 Pages may import kernel code only as `import type` or from a `*.token.ts` module; `setu check`
 refuses other value imports (`setu.E017`), except in React Router `.server` modules confirmed inside
 `app/`: both the path the page is reached by and its real path must be server-only, so a file or
-directory symlink cannot move a page out of the check. Those modules are skipped entirely, so
-neither E017 nor an oversized-file `setu.E018` is reported for them; a symlink leaving `app/` is
-still E018. Where the file system cannot resolve real paths, nothing is confirmed and `.server`
-modules are scanned like any page. It reads only a page's own imports, not re-exports in files
-outside `app/`.
+directory symlink cannot move a page out of the check. Confirmed `.server` modules are skipped
+entirely, so neither E017 nor an oversized-file `setu.E018` is reported for them; a symlink leaving
+`app/` is still E018. Where the file system cannot resolve real paths, nothing is confirmed and
+`.server` modules are scanned like any page. Every path a symlink gives a page directory is scanned,
+each resolving its relative imports from where it sits, as Vite does under
+`resolve.preserveSymlinks`, and each path's findings are reported (and silenced) separately; only a
+link back to one of its own parent directories is skipped. A walk past 4,096 directories, every
+symlink path counted, reports the rest as `setu.E018`. It reads only a page's own imports, not
+re-exports in files outside `app/`.
 
 A module holds `<name>.controller.ts` (`GET /<name>`, `GET /<name>/:id`, `POST /<name>`,
 `PATCH /<name>/:id`), `<name>.service.ts` (an in-memory `Map` the JSDoc says to replace with a

@@ -418,34 +418,13 @@ describe('setu add backend guidance', () => {
     expect(withServedRoutes('# x\n\n## What it serves\n\nNothing yet.\n')).toBeUndefined();
   });
 
-  it('lists /assets only when StaticPlugin serves it', async () => {
-    const p = await project();
-    // A StaticPlugin serving another directory: the CSS registration is refused.
-    const config = p.read('setu.config.ts');
-    await p.fs.writeFile(
-      '/work/shop/setu.config.ts',
-      new TextEncoder().encode(
-        "import { StaticPlugin } from '@setu-ts/static-plugin';\n" +
-          config.replace(
-            '...(devtool?.plugins ?? [])',
-            "StaticPlugin({ root: './public' }),\n      ...(devtool?.plugins ?? [])",
-          ),
-      ),
-    );
-    expect(await p.run(['add', 'view']), p.err.text()).toBe(0);
-    const readme = p.read('README.md');
-    expect(readme).toContain('- `/ui` — the example page');
-    expect(readme).not.toContain('- `/assets`');
-    expect(withServedRoutes('# x\n\n## What it serves\n\n- `/` — hello\n', false)).not.toContain(
-      '/assets',
-    );
-  });
-
   it('lists /assets only when this run wired the CSS StaticPlugin call', async () => {
     const call = "StaticPlugin({ root: './build/assets', urlPrefix: '/assets' })";
     // Each config already has a StaticPlugin, so `add view` wires nothing; the
     // text cannot tell whether a matching call is a live registration.
     const shapes: readonly (readonly [string, string, string])[] = [
+      // A StaticPlugin serving another directory.
+      ['', "StaticPlugin({ root: './public' }),", ''],
       // A string naming the call, beside a StaticPlugin serving another directory.
       [`export const NOTE = "${call}";\n`, "StaticPlugin({ root: './public' }),", ''],
       // An unused helper inside the factory holding the exact call.
@@ -478,6 +457,9 @@ describe('setu add backend guidance', () => {
       expect(p.read('README.md')).toContain('- `/ui` — the example page');
       expect(p.read('README.md')).not.toContain('- `/assets`');
     }
+    expect(withServedRoutes('# x\n\n## What it serves\n\n- `/` — hello\n', false)).not.toContain(
+      '/assets',
+    );
   });
 
   it('adds the view routes after the last bullet, wrapped or at the end of the file', () => {
