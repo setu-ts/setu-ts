@@ -72,7 +72,7 @@ describe('composition-specific rule blocks', () => {
     expect(RULE_BLOCKS[index - 1]!.id).toBe('deno-tests');
     expect(RULE_BLOCKS[index]!.packages).toEqual(['testing']);
     expect(RULE_BLOCKS[index]!.text).toBe(
-      'Tests: node:test, node:assert under `tsx --test`; `startTestServer()` from `./support/server.ts`, `fetch(server.baseUrl + path)`; `await server.stop()` in finally.',
+      'Tests: node:test, node:assert under `tsx --test`; `startTestServer()` from `test/support/server.ts`, `fetch(server.baseUrl + path)`; `await server.stop()` in finally.',
     );
   });
   it('tells agents to add a listed package rather than hand-write it, only while one is listed', () => {

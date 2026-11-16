@@ -111,8 +111,12 @@ export const assistant = defineAgentRun({
 
 `ready` is consumed only because a failing call already fails the run's step, so leaving its
 rejection unobserved would surface as an unhandled rejection. A run started without a tenant
-(`tenantId: ''`) is refused by the middleware's `A server-resolved tenant is required` check, so
-start budgeted definitions only with a tenant.
+(`tenantId: ''`) is still accepted by `start`, but its first model call throws the middleware's
+`A server-resolved tenant is required`, so the run ends `execution-failed`: start budgeted
+definitions only with a tenant. `chatQuota()` builds one in-memory quota per call; share a single
+instance between the chat route and run definitions, or each holds a separate budget per tenant.
+
+### Approvals
 
 Set `approval.tools` to a map of tool names to `true` or
 `(input, run) => boolean | Promise<boolean>`. The policy outcome is stored before execution.

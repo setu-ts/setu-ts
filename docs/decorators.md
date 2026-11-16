@@ -141,8 +141,9 @@ class UpdatesGateway {
 ```
 
 A `@Gateway` class declares no HTTP authorization decorators: `@Gateway('/ws', { guards: [guard] })`
-is what authorizes a WebSocket handshake, while `@Roles`, `@Permissions`, `@RequirePolicy`, the
-scoped variants and method-level `@Public` on a `@Gateway` class fail startup.
+is what authorizes a WebSocket handshake. `@Roles`, `@Permissions`, `@RequirePolicy`, the scoped variants and `@Public` on a gateway's
+WebSocket handler methods fail startup, and so does class-level authorization, unless the class also
+serves HTTP routes and the gateway declares its own handshake guards.
 
 Register the provider plugins that a class uses (`QueuePlugin`, `SchedulerPlugin`, `EventsPlugin`,
 `MessagingPlugin`, `WebSocketPlugin`, or `CqrsPlugin`) alongside the decorator plugin:

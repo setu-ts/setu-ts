@@ -121,7 +121,7 @@ export const RULE_BLOCKS: readonly IRuleBlock[] = [
     id: 'workers-tests',
     packages: ['testing'],
     applies: (f) => f.runtime === 'cloudflare-workers',
-    text: 'Tests: node:test, node:assert under `tsx --test`; `startTestServer()` from `./support/server.ts`, `fetch(server.baseUrl + path)`; `await server.stop()` in finally.',
+    text: 'Tests: node:test, node:assert under `tsx --test`; `startTestServer()` from `test/support/server.ts`, `fetch(server.baseUrl + path)`; `await server.stop()` in finally.',
   },
   {
     id: 'full-stack',

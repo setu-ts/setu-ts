@@ -27,13 +27,15 @@ Deno project:
 ```bash
 npm install                         # Bun: bun install; Deno: deno install — writes the lockfile
 docker build -t my-app .            # the generated Dockerfile at the project root
-docker run --rm -p 3000:3000 -e SESSION_SECRET my-app # PORT still selects the port at run time
+docker run --rm -p 3000:3000 my-app # PORT still selects the port at run time
 ```
 
-A `full-stack` project's generated README passes its generated secret this way —
-`docker run --rm -p 3000:3000 -e SESSION_SECRET <name>` — because `**/.env` is excluded from the
-image. A project that ran `setu add auth` also passes `-e JWT_SECRET`; each value must be at least
-32 characters.
+A project with a generated secret passes it from the shell, because `**/.env` is excluded from the
+image and the development value in `.env` is not copied in. A `full-stack` project has
+`SESSION_SECRET`; after `setu add session` or `setu add auth` a project also has `SESSION_SECRET` or
+`JWT_SECRET`. Set each in the shell to a value of at least 32 characters, then name it with `-e`, as
+the generated README shows: `docker run --rm -p 3000:3000 -e SESSION_SECRET my-app`. A name that is
+not set in the shell passes nothing, and the application refuses to start without its secret.
 
 The image installs from the project's lockfile, which `setu new` does not write: install once first
 (`npm install`, `bun install` or `deno install`, which write `package-lock.json`, `bun.lock` or
@@ -872,9 +874,9 @@ address as the fallback.
 ### A standalone project
 
 A standalone non-Workers `setu new` emits a `Dockerfile` and `.dockerignore` beside the project, so
-`docker build -t app .` and `docker run --rm -p 3000:3000 -e SESSION_SECRET app` work without adding
-anything (a `full-stack` project passes its generated secret because `**/.env` is excluded from the
-image; after `setu add auth`, pass `-e JWT_SECRET` too, each value at least 32 characters); the
+`docker build -t app .` and `docker run --rm -p 3000:3000 app` work without adding anything, except
+that a generated secret is set in the shell and passed with `-e` (see
+[Deploy a scaffolded project](#deploy-a-scaffolded-project)); the
 image installs and builds inside its own build stage. A Workers project emits neither, because it is
 not a container. A standalone template with `--broker` or `--queue` can additionally emit
 `docker/compose.yaml` for the selected backing services; that does not supply a Kubernetes manifest.
