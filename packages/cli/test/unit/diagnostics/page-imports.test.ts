@@ -20,6 +20,32 @@ import { createFakeFs } from '../../fixtures/fake-fs.ts';
 
 const PAGE = 'app/routes/_app/products._index.tsx';
 
+it('V12-130 skips React Router server-only files while refusing neighbouring page names', async () => {
+  const skipped = [
+    'app/server/i18n.server.ts',
+    'app/x.server.tsx',
+    'app/.server/db.ts',
+    'app/routes/.server/a/b.ts',
+    'app/y.server.mts',
+    'app/z.server.cjsx',
+  ];
+  const refused = [
+    'app/serverless.ts',
+    'app/x.servers.ts',
+    'app/server/i18n.ts',
+    'app/x.server/index.ts',
+    'app/components.server.ts/ui.ts',
+  ];
+  const fs = createFakeFs(
+    Object.fromEntries(
+      [...skipped, ...refused].map((path) => [`/p/${path}`, "import { x } from '~kernel/x.ts';"]),
+    ),
+  );
+  const scan = await scanPageImports(fs, '/p');
+  expect(scan.unreadable).toEqual([]);
+  expect(scan.violations.map((v) => v.path)).toEqual([...refused].sort());
+});
+
 /** Shapes a page may write: nothing is reported. */
 const ACCEPTED: readonly (readonly [label: string, source: string])[] = [
   ['type import', "import type { Product } from '~kernel/modules/products/products.types.ts';"],
@@ -537,6 +563,106 @@ describe('scanPageImports bounds', () => {
 });
 
 describe('scanPageImports over real symlinks (review finding 6)', () => {
+  it.each(['file', 'directory'] as const)(
+    'refuses a server-only %s symlink escaping app/',
+    async (kind) => {
+      const root = await tempDir({ prefix: 'page-server-link-' });
+      try {
+        await nodeFs.mkdir(`${root}/app/lib`, { recursive: true });
+        await nodeFs.mkdir(`${root}/src/modules/p`, { recursive: true });
+        await nodeFs.writeFile(`${root}/src/modules/p/p.service.ts`, 'export const s = 1;\n');
+        const link = kind === 'file' ? 'app/lib/svc.server.ts' : 'app/.server';
+        await nodeFs.symlink(
+          kind === 'file' ? '../../src/modules/p/p.service.ts' : '../src',
+          `${root}/${link}`,
+        );
+        const scan = await scanPageImports(createNodeRuntimeServices().fs!, root);
+        expect(scan.violations).toEqual([]);
+        expect(scan.unreadable).toEqual([link]);
+      } finally {
+        await nodeFs.rm(root, { recursive: true, force: true });
+      }
+    },
+  );
+  it('decides server-only by each file real path inside a real .server/ directory', async () => {
+    const root = await tempDir({ prefix: 'page-server-inner-' });
+    try {
+      const kernelImport = "import { s } from '~kernel/modules/p/p.service.ts';\nvoid s;\n";
+      await nodeFs.mkdir(`${root}/app/.server`, { recursive: true });
+      await nodeFs.mkdir(`${root}/app/routes/.server`, { recursive: true });
+      await nodeFs.mkdir(`${root}/app/lib`, { recursive: true });
+      await nodeFs.mkdir(`${root}/src/modules/p`, { recursive: true });
+      await nodeFs.writeFile(`${root}/src/modules/p/p.service.ts`, 'export const s = 1;\n');
+      // A real server-only file is skipped even with a kernel value import.
+      await nodeFs.writeFile(`${root}/app/.server/real.ts`, kernelImport);
+      // Links inside real .server/ directories that leave app/ are reported.
+      await nodeFs.symlink('../../src/modules/p/p.service.ts', `${root}/app/.server/svc.ts`);
+      await nodeFs.symlink('../../src', `${root}/app/.server/lib`);
+      await nodeFs.symlink(
+        '../../../src/modules/p/p.service.ts',
+        `${root}/app/routes/.server/svc.ts`,
+      );
+      // A link inside .server/ to an ordinary page resolves to a bundled path: scanned.
+      await nodeFs.writeFile(`${root}/app/lib/page.ts`, kernelImport);
+      await nodeFs.symlink('../lib/page.ts', `${root}/app/.server/alias.ts`);
+      // An ordinary path linked to a server-only file is a client id under
+      // preserveSymlinks: scanned too.
+      await nodeFs.symlink('../.server/real.ts', `${root}/app/lib/value.ts`);
+      const scan = await scanPageImports(createNodeRuntimeServices().fs!, root);
+      expect([...scan.unreadable].sort()).toEqual([
+        'app/.server/lib',
+        'app/.server/svc.ts',
+        'app/routes/.server/svc.ts',
+      ]);
+      expect(scan.violations.map((v) => v.path).sort()).toEqual([
+        'app/.server/alias.ts',
+        'app/lib/page.ts',
+        'app/lib/value.ts',
+      ]);
+    } finally {
+      await nodeFs.rm(root, { recursive: true, force: true });
+    }
+  });
+  // The walk order is forced, because readdir promises none: the alias first, then `.server` first.
+  it.each([
+    ['the alias first', ['client', '.server']],
+    ['.server first', ['.server', 'client']],
+  ])('scans a client-path directory alias of a .server/ directory walked %s', async (_, order) => {
+    const root = await tempDir({ prefix: 'page-server-alias-' });
+    try {
+      await nodeFs.mkdir(`${root}/app/.server`, { recursive: true });
+      await nodeFs.writeFile(
+        `${root}/app/.server/real.ts`,
+        "import { s } from '~kernel/modules/p/p.service.ts';\nvoid s;\n",
+      );
+      await nodeFs.symlink('.server', `${root}/app/client`);
+      const fs = { ...createNodeRuntimeServices().fs! };
+      const readdir = fs.readdir.bind(fs);
+      const listed: string[] = [];
+      fs.readdir = (path: string) => {
+        listed.push(path);
+        return path === `${root}/app` ? Promise.resolve(order) : readdir(path);
+      };
+      const scan = await scanPageImports(fs, root);
+      expect(listed.slice(1)).toEqual(order.map((entry) => `${root}/app/${entry}`));
+      expect(scan.unreadable).toEqual([]);
+      expect(scan.violations.map((v) => v.path)).toEqual(['app/client/real.ts']);
+    } finally {
+      await nodeFs.rm(root, { recursive: true, force: true });
+    }
+  });
+  it('scans server-only paths when realpath containment cannot be confirmed', async () => {
+    const fs = createFakeFs({
+      '/p/app/lib/x.server.ts': "import { x } from '~kernel/x.ts';",
+      '/p/app/.server/db.ts': "import { x } from '~kernel/x.ts';",
+    });
+    delete fs.realPath;
+    const scan = await scanPageImports(fs, '/p');
+    expect(scan.violations.map((v) => v.path)).toEqual([
+      'app/.server/db.ts',
+      'app/lib/x.server.ts',
+    ]);
+  });
   it('walks a looped directory once and refuses a link out of app/', async () => {
     const root = await tempDir({ prefix: 'page-walk-' });
     try {

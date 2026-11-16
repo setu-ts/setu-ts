@@ -287,29 +287,37 @@ Connect/gRPC — never use it for an application form route.
 
 <!-- version:history -->
 
-**A bearer API beside forms needs no exclusion** (M113e). A request carrying
-`Authorization: Bearer <token>` skips form CSRF when a bearer (header-credential) strategy
-authenticated it AND it restored no session — the session is new — so a JWT- or
+**A header-authenticated API beside forms needs no exclusion**. Header credentials, including
+`Authorization: Bearer <token>` and `X-API-Key`, skip form CSRF when a header-credential strategy
+authenticated the request AND it restored no session — the session is new — so a JWT- or
 API-token-authenticated JSON route in the same application reaches its guard rather than answering
-`403`. That is safe because a browser never attaches a bearer token by itself, and a page on another
-origin cannot add an `Authorization` header without a CORS preflight your server approves. The
-exemption is decided by the credential that authenticated the request AND the session it restored,
-not by the header's presence: the form check runs at 325, after authentication (300), and reads the
-credential source recorded and the session `session-plugin` parks. A request carrying a valid
-session cookie must present a CSRF token even with a valid bearer token, because the handler would
-otherwise act on that browser's session — an origin CORS lets send credentials can send its own
-valid bearer token beside the victim's cookie, authenticating as the attacker while the session
-middleware restored the victim's session (M113e, L3). A non-browser API client sends no session
-cookie, so its new session keeps the exemption; a junk bearer header beside a session cookie is
-still verified, and an unauthenticated bearer header is verified too (it fails closed when the
+`403`. That is safe because a browser never attaches these credentials by itself, and a page on
+another origin cannot add an `Authorization` or `X-API-Key` header without a CORS preflight your
+server approves. The exemption is decided by the credential that authenticated the request AND the
+session it restored, not by the header's presence: the form check runs at 325, after authentication
+(300), and reads the credential source recorded and the session `session-plugin` parks. A request
+carrying a valid session cookie must present a CSRF token even with a valid bearer token, because
+the handler would otherwise act on that browser's session — an origin CORS lets send credentials can
+send its own valid bearer token beside the victim's cookie, authenticating as the attacker while the
+session middleware restored the victim's session (M113e, L3). A non-browser API client sends no
+session cookie, so its new session keeps the exemption; a junk bearer header beside a session cookie
+is still verified, and an unauthenticated bearer header is verified too (it fails closed when the
 session or the credential source is missing). `Basic` credentials are NOT exempt, because browsers
-re-send cached Basic credentials automatically. `exemptBearer: false` verifies every unsafe request,
-the behaviour before 0.10.0. A request the bearer rule exempts also gets no browser session:
-whatever its handler writes to the session is not committed and no `Set-Cookie` is sent (M113e, L4),
-so it cannot plant a session in a browser whose cookie no longer restores. **This holds even on a
-path listed in `csrf.exclude`**: the bearer rule is checked first, so a bearer→cookie "exchange"
-login route issues no cookie and logs nothing (V10-14). For such a route set `exemptBearer: false`,
-which commits the session as releases before 0.10.0 did.
+re-send cached Basic credentials automatically. Any present non-Bearer `Authorization` prevents
+exemption, even beside an authenticated `X-API-Key`. `exemptBearer: false` verifies every unsafe
+request, the behaviour before 0.10.0. A request the bearer rule exempts also gets no browser
+session: whatever its handler writes to the session is not committed and no `Set-Cookie` is sent
+(M113e, L4), so it cannot plant a session in a browser whose cookie no longer restores. **This holds
+even on a path listed in `csrf.exclude`**: the header-credential rule is checked first, so a
+bearer-to-cookie or API-key-to-cookie exchange login route with a new session issues no cookie and
+logs nothing (V10-14). For such a route set `exemptBearer: false`, which permits the exchange
+session to commit.
+
+API-key validators must return `null` for malformed or unknown keys. A thrown validation error now
+becomes 503 with `errorHandler()` instead of an anonymous 401. Check key format and return `null`
+before querying. The logged error names only the validator failure's class, never its text, so a
+driver error that echoes the key does not write it to the error log; log the fault inside `validate`
+if you need its text.
 
 **An endpoint with its own browser protection can opt out in-process** (0.13.0). Middleware that
 runs before form CSRF (priority 325) may set `ctx.state.set(CSRF_EXEMPT_STATE_KEY, true)` (from
@@ -403,25 +411,25 @@ must run at a priority **above** 260, or `getSession` throws `SessionMiddlewareM
 
 ## Options
 
-| Option              | Default          | Notes                                                                                                                                                                                                                        |
-| ------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `secret`            | resolved         | `string` or rotation list; index 0 seals                                                                                                                                                                                     |
-| `secretName`        | `SESSION_SECRET` | Looked up in the secrets manager, configuration, then the environment                                                                                                                                                        |
-| `mode`              | `'encrypt'`      | `'sign'` exposes its payload                                                                                                                                                                                                 |
-| `store`             | —                | `'memory'`, `'cache'`, or an `ISessionStore`                                                                                                                                                                                 |
-| `maxAge`            | `7200`           | Seconds; also the cookie's `Max-Age`                                                                                                                                                                                         |
-| `rolling`           | `false`          | Re-issue on every response                                                                                                                                                                                                   |
-| `idleTimeoutMs`     | —                | No-request expiry; any request refreshes it, so it commits every response                                                                                                                                                    |
-| `maxCookieBytes`    | `4096`           | Throws `SessionTooLargeError` rather than dropping silently                                                                                                                                                                  |
-| `cookie.name`       | `setu_session`   | Renamed from `hono_session`; pin the old name to preserve in-flight sessions                                                                                                                                                 |
-| `cookie.path`       | `/`              |                                                                                                                                                                                                                              |
-| `cookie.domain`     | —                | Omitted means a host-only cookie                                                                                                                                                                                             |
-| `cookie.sameSite`   | `'lax'`          | `'none'` forces `Secure`                                                                                                                                                                                                     |
-| `cookie.secure`     | `true`           | `boolean \| 'auto'`; auto follows the trusted protocol and conflicts with `sameSite: 'none'`                                                                                                                                 |
-| `cookie.httpOnly`   | `true`           |                                                                                                                                                                                                                              |
-| `csrf`              | —                | Presence enables form CSRF                                                                                                                                                                                                   |
-| `csrf.exemptBearer` | `true`           | Only a bearer request a header-credential strategy authenticated AND that restored no session (a new session) skips form CSRF; a valid session cookie still needs a token even with a valid bearer token; `Basic` never does |
-| `tenantBinding`     | `true`           | Seal the tenant on commit and refuse a session presented under another                                                                                                                                                       |
+| Option              | Default          | Notes                                                                                                                                                                                                                                                                                      |
+| ------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `secret`            | resolved         | `string` or rotation list; index 0 seals                                                                                                                                                                                                                                                   |
+| `secretName`        | `SESSION_SECRET` | Looked up in the secrets manager, configuration, then the environment                                                                                                                                                                                                                      |
+| `mode`              | `'encrypt'`      | `'sign'` exposes its payload                                                                                                                                                                                                                                                               |
+| `store`             | —                | `'memory'`, `'cache'`, or an `ISessionStore`                                                                                                                                                                                                                                               |
+| `maxAge`            | `7200`           | Seconds; also the cookie's `Max-Age`                                                                                                                                                                                                                                                       |
+| `rolling`           | `false`          | Re-issue on every response                                                                                                                                                                                                                                                                 |
+| `idleTimeoutMs`     | —                | No-request expiry; any request refreshes it, so it commits every response                                                                                                                                                                                                                  |
+| `maxCookieBytes`    | `4096`           | Throws `SessionTooLargeError` rather than dropping silently                                                                                                                                                                                                                                |
+| `cookie.name`       | `setu_session`   | Renamed from `hono_session`; pin the old name to preserve in-flight sessions                                                                                                                                                                                                               |
+| `cookie.path`       | `/`              |                                                                                                                                                                                                                                                                                            |
+| `cookie.domain`     | —                | Omitted means a host-only cookie                                                                                                                                                                                                                                                           |
+| `cookie.sameSite`   | `'lax'`          | `'none'` forces `Secure`                                                                                                                                                                                                                                                                   |
+| `cookie.secure`     | `true`           | `boolean \| 'auto'`; auto follows the trusted protocol and conflicts with `sameSite: 'none'`                                                                                                                                                                                               |
+| `cookie.httpOnly`   | `true`           |                                                                                                                                                                                                                                                                                            |
+| `csrf`              | —                | Presence enables form CSRF                                                                                                                                                                                                                                                                 |
+| `csrf.exemptBearer` | `true`           | Only header credentials (Bearer or X-API-Key) with no non-Bearer Authorization that a header-credential strategy authenticated AND that restored no session (a new session) skips form CSRF; a valid session cookie still needs a token even with a valid bearer token; `Basic` never does |
+| `tenantBinding`     | `true`           | Seal the tenant on commit and refuse a session presented under another                                                                                                                                                                                                                     |
 
 ## Health
 

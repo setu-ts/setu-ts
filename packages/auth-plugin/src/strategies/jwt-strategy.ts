@@ -7,12 +7,14 @@
 import type { IAuthStrategy, IJwtService, IPrincipal, IRequest } from '@setu-ts/common';
 import type { IAccessTokenRevocationStore } from '../stores/access-token-revocation-store.ts';
 import { parseActClaim, parseScopeClaim } from '../resource-server/claims.ts';
+import { AuthPluginConfigurationError } from '../errors.ts';
 
 /**
  * JWT strategy options.
  */
 export interface JwtStrategyOptions {
   readonly jwtService: IJwtService;
+  /** Token header; Cookie in any case is refused because it is ambient. */
   readonly header?: string;
   readonly scheme?: string;
   /** Verified tenant claim; absent disables binding. @since 0.13.0 */
@@ -32,10 +34,17 @@ export class JwtStrategy implements IAuthStrategy {
   private readonly tenantClaim: string | undefined;
   private readonly accessTokenRevocationStore: IAccessTokenRevocationStore | undefined;
 
+  /**
+   * @param options - Token verifier and header configuration
+   * @throws {AuthPluginConfigurationError} When the token header is Cookie
+   */
   constructor(options: JwtStrategyOptions) {
     this.jwtService = options.jwtService;
     this.tenantClaim = options.tenantClaim;
     this.header = options.header ?? 'authorization';
+    if (this.header.toLowerCase() === 'cookie') {
+      throw new AuthPluginConfigurationError('JWT header must not be Cookie');
+    }
     // Lowercased once: the request's scheme is compared lowercased, so a
     // configured `'Token'` would otherwise refuse every token sent with it.
     this.scheme = (options.scheme ?? 'bearer').toLowerCase();

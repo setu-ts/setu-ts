@@ -1,6 +1,27 @@
 import { describe, it, expect } from 'vitest';
 import { harness, definition } from '../fixtures/harness.ts';
 describe('tenant isolation', () => {
+  it('V12-137 preserves request access rules for explicitly started runs', async () => {
+    const h = await harness();
+    try {
+      const { runId } = await h.service.startAs({ tenantId: 't1', principalId: 'u1' }, 'demo', {
+        messages: [],
+      });
+      await h.settle();
+      expect((await h.service.get(h.ctx('t1', 'u1'), runId)).status).toBe('completed');
+      await h.service.respond(h.ctx('t1', 'u1'), runId);
+      for (const context of [h.ctx('t2', 'u1'), h.ctx('t1', 'other')]) {
+        await expect(h.service.get(context, runId)).rejects.toMatchObject({
+          name: 'AgentRunNotFoundError',
+        });
+        await expect(h.service.respond(context, runId)).rejects.toMatchObject({
+          name: 'AgentRunNotFoundError',
+        });
+      }
+    } finally {
+      await h.close();
+    }
+  });
   it('returns identical 404s for missing and cross-tenant actions', async () => {
     const h = await harness();
     try {

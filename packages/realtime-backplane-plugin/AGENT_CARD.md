@@ -1,12 +1,11 @@
 # @setu-ts/realtime-backplane-plugin — share room and channel broadcasts
 
-**Add it:** `setu add realtime-backplane` adds it and wires `RealtimeBackplanePlugin()` in a
-recognized functional config. It provides `CAPABILITIES.REALTIME_BACKPLANE` (`IRealtimeBackplane`);
-use a cross-process transport for replicas.
+**Add it:** `setu add realtime-backplane` wires `RealtimeBackplanePlugin()` in functional config.
+Provides `CAPABILITIES.REALTIME_BACKPLANE` (`IRealtimeBackplane`); replicas need Redis or messaging.
 
 ## Connect replicas through Redis
 
-Replace the default registration in `setu.config.ts`:
+In `setu.config.ts`:
 
 ```ts
 import { RealtimeBackplanePlugin } from '@setu-ts/realtime-backplane-plugin';
@@ -37,18 +36,17 @@ export function registerDeployRoutes(router: IRouterApi): void {
 
 ## Behaviour the types do not show
 
-- The default `'memory'` transport shares frames only inside one process. Its default bus name is
-  `default`; a bare registration does not connect replicas.
+- Default `'memory'`: process-local, bus `default`; it does not connect replicas.
 - Redis needs two connections: injected `client` and `subscriber` must be supplied together
   (node-redis: `client: nodeRedisClient(url)` and `subscriber`). Otherwise the transport loads
   `ioredis` and builds both.
-- Instances must share `topic`, default `setu-ts.realtime`; a generated `origin` stops an instance
-  replaying its own frames.
-- The plugin orders before its WebSocket and SSE consumers. Their room/channel broadcasts fan out
-  automatically; membership counts stay local and exclusions apply only on the sender.
-- Health remains up during a backend outage; inspect `data.reachable`. Local delivery continues.
-- Redis commands on built connections have a 15000 ms bound. A timed-out publication can still
-  arrive later, so failure is not proof of non-delivery.
+- Built/injected pairs get error/ready watches, detached on close. Successful injected opens QUIT on
+  close. An overtaken open only stops waiting: the caller's connect keeps running and remains
+  caller-owned. Retired owned clients keep an error sink until end.
+- Replicas share `topic` (default `setu-ts.realtime`); generated `origin` prevents self-replay.
+- WebSocket/SSE broadcasts fan out automatically. Membership counts stay local.
+- Outages keep health up and local delivery working; inspect `data.reachable`.
+- Built Redis commands default to 15000 ms. A timed-out publish can still arrive later.
 
 ## Other options
 

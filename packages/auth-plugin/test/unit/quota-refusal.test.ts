@@ -1,14 +1,18 @@
 /* eslint-disable require-await -- Test doubles preserve asynchronous provider and service contracts. */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { errorHandler } from '@setu-ts/exceptions';
 import type { ErrorFormat } from '@setu-ts/exceptions';
+import { httpStatusHintOf } from '@setu-ts/common';
+import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 import {
   QuotaExceededError,
   QuotaStoreUnavailableError,
   rateLimitMiddleware,
   respondQuotaExceeded,
+  createQuota,
+  MemoryQuotaStore,
 } from '../../src/index.ts';
 import before from '../fixtures/limiter-429-before.json' with { type: 'json' };
 
@@ -50,6 +54,68 @@ async function boot(format: ErrorFormat) {
 }
 
 describe('quota refusals', () => {
+  it('V12-134 refuses a non-string message without coercing it', () => {
+    const toString = vi.fn(() => {
+      throw new Error('must not run');
+    });
+    expect(() => new QuotaExceededError('policy', 1, { toString } as unknown as string)).toThrow(
+      TypeError,
+    );
+    expect(toString).not.toHaveBeenCalled();
+  });
+  it.each(['', 1, null])('V12-134 constructor refuses invalid message %j', (message) => {
+    expect(() => new QuotaExceededError('policy', 1, message as string)).toThrow(
+      'Quota message must be a non-empty string',
+    );
+  });
+  it('V12-134 shares configured detail through reserve, hint and response helper', async () => {
+    const runtime = createFakeRuntime(0);
+    const quota = createQuota({
+      name: 'budget-policy',
+      store: new MemoryQuotaStore(runtime),
+      runtime,
+      window: 7000,
+      limit: 0,
+      message: 'Quotum op',
+    });
+    const refusal = await quota.reserve('tenant', 1).catch((error: unknown) => error);
+    expect(refusal).toBeInstanceOf(QuotaExceededError);
+    const error = refusal as QuotaExceededError;
+    expect(error.message).toBe('Quotum op');
+    expect(error.detail).toBe('Quotum op');
+    expect(httpStatusHintOf(error)?.detail).toBe('Quotum op');
+    const app = createApplication({ plugins: [RuntimePlugin()] });
+    app.middleware.add(errorHandler({ format: 'rfc9457', logErrors: false }), { priority: 0 });
+    app.router.get('/quota', (ctx) => {
+      if (ctx.request.headers.has('helper')) {
+        respondQuotaExceeded(ctx, error);
+        return { __handlerResult: true };
+      }
+      throw error;
+    });
+    await app.start();
+    try {
+      const bodies = [];
+      for (const headers of [{}, { helper: 'true' }]) {
+        const response = await app.fetch(new Request('http://localhost/quota', { headers }));
+        expect(response.status).toBe(429);
+        bodies.push(await response.json());
+      }
+      expect(bodies[0]).toEqual({
+        type: 'https://iana.org/assignments/http-problem-types#quota-exceeded',
+        title: 'Quota Exceeded',
+        status: 429,
+        detail: 'Quotum op',
+        instance: '/quota',
+        'violated-policies': ['budget-policy'],
+        'retry-after': 7,
+      });
+      expect(bodies[1]).toEqual(bodies[0]);
+      expect(bodies[1]).not.toHaveProperty('message');
+    } finally {
+      await app.stop();
+    }
+  });
   it.each([NaN, -3, 0, 1.5, Infinity, Number.MAX_SAFE_INTEGER + 1])(
     'rejects invalid retryAfterSeconds %s (F6)',
     (seconds) => {
@@ -64,6 +130,7 @@ describe('quota refusals', () => {
     const error = new QuotaExceededError('budget-policy', 7);
     expect(error.name).toBe('QuotaExceededError');
     expect(error.policyName).toBe('budget-policy');
+    expect(error.detail).toBe('The quota for this request is spent.');
     expect(String(error)).toBe('QuotaExceededError: The quota for this request is spent.');
   });
 

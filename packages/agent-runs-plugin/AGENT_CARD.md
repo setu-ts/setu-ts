@@ -17,16 +17,17 @@ export function runs(model: LanguageModel) {
 }
 ```
 
-Register a database and transactional idempotency store before this plugin; without `transactional`,
-startup throws a TypeError. Resolve the service in handlers: `start`, `respond`, `decide`, `cancel`,
-`get`; call `sweep` from cron on Workers.
+Register a database and transactional idempotency store first; missing `transactional` throws
+TypeError. Handlers use `start`, `respond`, `decide`, `cancel`, `get`; Workers cron calls `sweep`.
+Jobs use `startAs({ tenantId, principalId }, definition, { messages })` (0.13.0): tenant is a
+string, principal non-empty or null. No background hook runs; a sweep recovers evicted work. Custom
+`IAgentRunService` implementations must add `startAs`.
 
-- Model messages commit before tool execution. Tools sent to the SDK have no execution hooks.
-- Every holder write is fenced by a lease version; renewal runs before each model/tool call.
-- Tools execute in transactional idempotency. Use the supplied unit of work for database writes and
-  the stable idempotency key for outside API calls.
-- Approval rows have deadlines and single-use decisions. Default decision authorization requires the
-  original, defined principal. Tenant mismatch returns the same 404 as a missing run.
+- Model messages commit before tools. SDK tools have no execution hooks; writes use fenced leases.
+- Tools use transactional idempotency: use the supplied unit of work for database writes and stable
+  idempotency key for outside calls.
+- Approvals have deadlines and single-use decisions; default deciders match the original principal.
+  Tenant mismatch is the same 404 as a missing run.
 - Definitions are frozen and versioned. Supply `compatibleVersions` for deliberate migrations.
 - Reading, streaming and cancelling default to the starting principal; `canAccess` widens it.
 - `decide`: 404 unless `canAccess` or `canDecide` passes, 403 when visible but not decidable;
@@ -36,6 +37,5 @@ startup throws a TypeError. Resolve the service in handlers: `start`, `respond`,
   `data-setu-replay` chunk and a full replay. Idle terminal reconnect returns 204.
 - `background(ctx, work)` integrates with host lifetime. `ctx.defer` does not run the agent.
 
-Runnable example: `setu new my-agent --example durable-agent` (approval, restart, PostgreSQL). See
-README for limits, database schema requirements, options and errors. Edit loop:
-`pnpm test:coverage agent-runs-plugin --no-tooling`.
+Example: `setu new my-agent --example durable-agent`. See README for schema, limits and options.
+Edit loop: `pnpm test:coverage agent-runs-plugin --no-tooling`.

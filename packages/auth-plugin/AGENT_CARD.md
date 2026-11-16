@@ -19,7 +19,7 @@ export function registerOrderRoutes(router: IRouterApi): void {
 
 ## Sign a token
 
-Configure `local.verify(identifier, secret, request)`.
+Needs `local: { verify }`.
 
 ```ts
 import { CAPABILITIES } from '@setu-ts/common';
@@ -37,24 +37,21 @@ if (principal === null) {
 }
 ```
 
-## Behaviour
+## Behaviour and options
 
-- Passive auth: priority 300; add route guards.
-- Missing principal: 401; denied role/permission: 403; no `rbac`: those guards return 501.
-- `requireAuth({ signInPage })` redirects anonymous browser navigations with `returnTo`, except that
-  page; APIs keep 401.
-- JWT_SECRET resolves option → secrets manager → config → environment. HS256 needs ≥32 UTF-8/raw
-  bytes; missing/short keys throw `AuthPluginConfigurationError`. RS256 skips lookup.
-- Sign-in/MFA clear form CSRF; fetch a new token before posting.
-- JWTs need a string `sub` and expire at `exp`; `local` needs a passive strategy. Scoped tokens fail
-  role/permission guards (`confineScopedTokens`).
-- `requireAuth({ credentials: 'header' })` restricts credential kind; `tenantClaim` refuses other
-  tenants.
-
-## Options
-
-- Passive auth: `apiKey`, `session`, `issuers`, `strategies`.
-- Token APIs: `requireScopes` (ALL-of), `resourceServer` (RFC 9728).
-- Policies: `definePolicy`, `requirePolicy`; scoped guards use `scopedRbac`.
-- Factors: `signIn.mfa`/`signIn.passkeys`; budgets: `createQuota`, `quota.usage(key)`.
-- `signIn` with `providers: []` is password-only; advance `signIn.sessionStamp` to revoke sessions.
+- Passive auth runs at 300; add guards. Missing principal: 401; denied permission: 403; no
+  RBAC: 501.
+- API-key `validate`: return null for invalid keys; throws become `AuthenticationUnavailableError`
+  (503 with `errorHandler`; log names the cause's class only), even on public key-bearing routes.
+  Validate format first.
+- API-key, JWT and issuer headers refuse Cookie in any case. Use session authentication for cookies.
+- JWT_SECRET: option → secrets → config → environment. HS256 needs ≥32 UTF-8/raw bytes.
+  Missing/short keys throw `AuthPluginConfigurationError`; RS256 skips lookup.
+- Sign-in/MFA clear CSRF. Fetch a fresh token. `signIn.sessionStamp` revokes sessions.
+- JWTs need non-empty `sub`; scoped tokens fail RBAC guards. `tenantClaim` binds tokens to tenants.
+- `requireAuth({ credentials: 'header' })` restricts credential kind; `signInPage` redirects browser
+  navigations with `returnTo`. APIs keep 401.
+- `requireScopes` is ALL-of; `definePolicy`/`requirePolicy` cover policies; `scopedRbac` scopes
+  roles.
+- `createQuota({ message })` sets the shared 429 detail; empty/non-string messages are refused.
+  `quota.usage(key)` reads budgets. See README for factors and exchanges.

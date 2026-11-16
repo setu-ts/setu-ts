@@ -4,7 +4,68 @@ import { AgentRunService } from '../../src/service/agent-run-service.ts';
 import { row } from '../fixtures/harness.ts';
 import { claim, Lease } from '../../src/lease/lease.ts';
 import { ChunkLog } from '../../src/log/chunk-log.ts';
+import type { IRequestContext } from '@setu-ts/common';
 describe('AgentRunService', () => {
+  it('rejects a malformed context without throwing synchronously', async () => {
+    const h = await harness();
+    try {
+      let pending: Promise<{ runId: string }> | undefined;
+      expect(() => {
+        pending = h.service.start({} as IRequestContext, 'demo', { messages: [] });
+      }).not.toThrow();
+      await expect(pending).rejects.toThrow(TypeError);
+    } finally {
+      await h.close();
+    }
+  });
+  it('V12-137 starts for an explicit identity with the same result and no background hook', async () => {
+    const h = await harness();
+    const background = vi.fn();
+    const service = new AgentRunService({ ...h.deps, background });
+    try {
+      const input = { messages: [{ role: 'user', content: 'hi' }] };
+      const direct = await service.startAs({ tenantId: 't1', principalId: 'u1' }, 'demo', input);
+      await Promise.all([...service.work]);
+      expect(background).not.toHaveBeenCalled();
+      expect(await h.store.get(direct.runId)).toMatchObject({
+        tenantId: 't1',
+        principalId: 'u1',
+        status: 'completed',
+      });
+      const request = await service.start(h.ctx('t1', 'u1'), 'demo', input);
+      await Promise.all([...service.work]);
+      const left = await service.get(h.ctx('t1', 'u1'), direct.runId);
+      const right = await service.get(h.ctx('t1', 'u1'), request.runId);
+      expect({ ...left, id: '' }).toEqual({ ...right, id: '' });
+      expect(background).toHaveBeenCalledOnce();
+      await service.startAs({ tenantId: '', principalId: null }, 'demo', { messages: [] });
+      await Promise.all([...service.work]);
+    } finally {
+      service.close();
+      await h.close();
+    }
+  });
+  it.each([
+    null,
+    {},
+    { tenantId: 1, principalId: null },
+    { tenantId: 't1', principalId: '' },
+    { tenantId: 't1', principalId: 1 },
+    { tenantId: 't1' },
+  ])('V12-137 refuses invalid identity %j before creating a row', async (identity) => {
+    const h = await harness();
+    const create = vi.spyOn(h.store, 'create');
+    try {
+      await expect(
+        h.service.startAs(identity as { tenantId: string; principalId: string | null }, 'demo', {
+          messages: [],
+        }),
+      ).rejects.toMatchObject({ name: 'AgentRunStateError' });
+      expect(create).not.toHaveBeenCalled();
+    } finally {
+      await h.close();
+    }
+  });
   it('repairs a decision whose process died before waking the waiting run', async () => {
     const h = await harness();
     try {

@@ -83,10 +83,14 @@ Two connections, deliberately: a Redis connection in subscriber mode refuses eve
 than (un)subscribe, so one connection cannot both publish and subscribe. Injecting a `client`
 without a `subscriber` throws at construction rather than failing at the first publish.
 
-Connection errors of the `ioredis` clients the transport builds go to the application logger — the
-first error of an outage at `warn`, identical repeats at `debug`, the recovery at `info` — instead
-of `ioredis` printing every reconnect failure to `console.error`. An injected client gets no
-listener: it belongs to the caller. Set `connectionErrorReporter` to route them elsewhere.
+Connection errors of both built and injected Redis clients go to the application logger — the first
+error of an outage at `warn`, identical repeats at `debug`, the recovery at `info` — instead of
+`ioredis` printing every reconnect failure to `console.error`. Both pairs get reporting watches,
+removed on close. Set `connectionErrorReporter` to route them elsewhere. After a successful open,
+`close()` QUITs an injected pair too. An open overtaken by `close()` leaves the injected pair with
+its caller and removes only its watches. Close stops the backplane waiting for an injected connect;
+the caller's client.connect() keeps running and the connection remains caller-owned. Retired owned
+clients keep a no-op error sink until their `end` event, when it is removed.
 
 **node-redis.** To use node-redis instead of ioredis, pass two adapters —
 `client: fromNodeRedis(base)` and `subscriber: fromNodeRedis(base.duplicate())`, where
@@ -107,7 +111,7 @@ from the start. See
 | `client` / `subscriber`   | `'redis'`          | —                        | Injected client pair; required together                                                                                                                           |
 | `module`                  | `'redis'`          | —                        | An `ioredis`-shaped module, for testing without the real driver                                                                                                   |
 | `commandTimeoutMs`        | `'redis'`          | `15000`                  | Per-command timeout on the two connections the lazy path builds; `0` disables. Must be `0`–`2147483647` (above that the timer overflows to 1 ms). See Limitations |
-| `connectionErrorReporter` | `'redis'`          | logger-backed            | Receives the two built connections' `'error'`/`'ready'` events (see above). Ignored for an injected pair                                                          |
+| `connectionErrorReporter` | `'redis'`          | logger-backed            | Receives built and injected connections' `'error'`/`'ready'` events (see above)                                                                                   |
 | `instance`                | `'custom'`         | —                        | The transport to register, used as-is                                                                                                                             |
 | `localNotice`             | `'memory'`         | `true`                   | Logs one `info` line at registration when the transport is the process-local `'memory'`, naming `'redis'`/`'messaging'`. `false` suppresses it                    |
 | `diagnostics`             | all but `'custom'` | omitted                  | Opt-in realtime observations (M98l); see below                                                                                                                    |

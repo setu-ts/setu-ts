@@ -252,14 +252,13 @@ export interface RedisBackplaneOptions extends BackplaneCommonOptions {
   readonly commandTimeoutMs?: number;
   /**
    * Receives the connection errors (`ioredis` `'error'` events) of the two
-   * connections this transport BUILDS, instead of `ioredis` printing each
+   * built or injected connections, instead of `ioredis` printing each
    * reconnect failure to the console. Defaults, through
    * `RealtimeBackplanePlugin`, to one backed by the application's logger;
    * supply your own to route them elsewhere.
    *
-   * Read only on the lazy `ioredis` path: an injected `client` /
-   * `subscriber` pair belongs to the caller and gets no listener, since one
-   * would silence the caller's own `'error'` handling.
+   * Watches attach to both built and injected pairs and detach on close.
+   * An injected pair keeps its caller's own listeners and connection settings.
    *
    * @since 0.8.0
    */

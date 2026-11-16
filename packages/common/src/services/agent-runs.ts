@@ -191,6 +191,23 @@ export interface IAgentRunService {
     definition: string,
     input: { messages: readonly AgentRunJson[] },
   ): Promise<{ runId: string }>;
+  /**
+   * Create and detach a run for an explicit server-owned identity, without a request.
+   * No request background hook is called. On Workers execution continues in this process,
+   * or the next sweep picks it up after eviction.
+   * @param identity - Tenant id and non-empty principal id, or null for no principal
+   * @param definition - Registered definition name
+   * @param input - Initial JSON messages
+   * @returns The persisted run id
+   * @throws {AgentRunStateError} For an invalid identity or input
+   * @throws {AgentRunDefinitionError} For an unknown definition or a closed service
+   * @since 0.13.0
+   */
+  startAs(
+    identity: { readonly tenantId: string; readonly principalId: string | null },
+    definition: string,
+    input: { messages: readonly AgentRunJson[] },
+  ): Promise<{ runId: string }>;
   /** Replay and tail the SDK UI stream. */
   respond(ctx: IRequestContext, runId: string): Promise<HandlerResult>;
   /** Authorize and atomically decide one pending approval. */

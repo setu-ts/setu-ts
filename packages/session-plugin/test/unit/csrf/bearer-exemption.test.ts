@@ -15,7 +15,7 @@ import { CREDENTIAL_SOURCE_STATE_KEY, SESSION_STATE_KEY } from '@setu-ts/common'
 import {
   applyCsrfExemption,
   NO_COMMIT_STATE_KEY,
-  isBearerRequest,
+  isBearerExempt,
   isCsrfExempt,
 } from '../../../src/csrf/exclude.ts';
 import { resolveCsrfConfig } from '../../../src/options.ts';
@@ -48,7 +48,7 @@ function stateFor(source: 'header' | 'cookie' | undefined, isNew?: boolean): Map
   return state;
 }
 
-describe('isBearerRequest', () => {
+describe('Bearer Authorization recognition', () => {
   it.each([
     ['Bearer abc', true],
     ['bearer abc', true],
@@ -61,15 +61,39 @@ describe('isBearerRequest', () => {
     ['Basic dXNlcjpwYXNz', false],
     ['Token abc', false],
   ])('%j → %s', (value, expected) => {
-    expect(isBearerRequest(headers(value))).toBe(expected);
+    expect(isBearerExempt(ctx('/api', value, stateFor('header', true)), resolveCsrfConfig())).toBe(
+      expected,
+    );
   });
 
-  it('is false with no Authorization header', () => {
-    expect(isBearerRequest(headers())).toBe(false);
+  it('requires a recorded authenticating credential source even without Authorization', () => {
+    expect(
+      isBearerExempt(ctx('/api', undefined, stateFor(undefined, true)), resolveCsrfConfig()),
+    ).toBe(false);
   });
 });
 
 describe('isCsrfExempt — the credential-based bearer rule', () => {
+  it.each([
+    ['header', true, undefined, true, true],
+    ['header', false, undefined, true, false],
+    ['header', true, 'Basic x', true, false],
+    ['header', true, 'Digest x', true, false],
+    ['header', true, 'Negotiate x', true, false],
+    ['cookie', true, 'Bearer x', true, false],
+    ['header', true, undefined, false, false],
+  ] as const)(
+    'V12-136 applies the header-credential rule: %s %s %s %s',
+    (source, isNew, authorization, exemptBearer, expected) => {
+      const request = ctx('/api', authorization, stateFor(source, isNew));
+      request.request.headers.set('X-API-Key', 'key');
+      expect(isBearerExempt(request, resolveCsrfConfig({ exemptBearer }))).toBe(expected);
+      expect(applyCsrfExemption(request, resolveCsrfConfig({ exemptBearer }), undefined)).toBe(
+        expected,
+      );
+      expect(request.state.get(NO_COMMIT_STATE_KEY)).toBe(expected ? true : undefined);
+    },
+  );
   it('exempts a bearer request a header strategy authenticated, with a new session', () => {
     expect(
       isCsrfExempt(

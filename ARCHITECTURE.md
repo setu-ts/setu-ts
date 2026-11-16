@@ -2471,8 +2471,8 @@ Authentication middleware extracts credentials and populates `ctx.request.user`.
 Authorization is handled via free `MiddlewareFunction` factories (imported from the plugin, not
 methods on `IAuthService`). The role/permission guards resolve `IAuthorizationService` from the
 `'authorization'` token and short-circuit — they return a 401/403 response and do **not** call
-`next()`; `authMiddleware` always calls `next()` so an unauthenticated request still reaches the
-guard.
+`next()`; `authMiddleware` calls `next()` so an unauthenticated request still reaches the guard,
+except that an unavailable API-key validator propagates its fixed 503 hint to `errorHandler`.
 
 - `requireAuth()` — Require any authenticated user (401).
 - `requireRole(role)` — Require a specific role, honoring the configured hierarchy (401/403).

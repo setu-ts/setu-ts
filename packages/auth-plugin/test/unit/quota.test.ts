@@ -19,6 +19,11 @@ function setup(overrides: Partial<QuotaOptions> = {}) {
 }
 
 describe('createQuota', () => {
+  it.each(['', 1, null])('V12-134 refuses invalid message %j before storing', (message) => {
+    expect(() => setup({ message: message as string })).toThrow(
+      'Quota message must be a non-empty string',
+    );
+  });
   it.each(['utc-day', 'utc-month', 1000] as const)(
     'M139c reads settled usage and a new %s window without charging',
     async (window) => {

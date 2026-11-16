@@ -779,7 +779,7 @@ const products: readonly Product[] = await getService(context, PRODUCTS).list();
 \`\`\`
 
 \`app/\` imports kernel code only through \`~kernel/*\`, and only types and \`*.token.ts\` modules:
-\`setu check\` refuses any other value import (setu.E017), so no server code reaches the browser
+\`setu check\` refuses any other value import (setu.E017), except in React Router .server modules, so no server code reaches the browser
 bundle. Keep a token file to its token. Add a module, and optionally its page, with
 \`${invocation} generate module <name> --page\`.
 

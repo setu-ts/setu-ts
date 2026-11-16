@@ -53,3 +53,4 @@ export function registerBillingRoutes(router: IRouterApi): void {
 - `strategy` also accepts `'random'` and `'weighted-random'`; `ejection: false` disables ejection.
 - `selfRegistration` is Consul-only; other providers reject it with
   `SelfRegistrationNotSupportedError`. DNS requires the runtime DNS surface.
+- A failed self-deregistration warns with `describeError`: one line, URL userinfo masked.

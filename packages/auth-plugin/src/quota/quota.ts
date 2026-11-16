@@ -32,6 +32,8 @@ export interface IQuotaStore {
 
 /** Weighted quota configuration. @since 0.12.0 */
 export type QuotaOptions = {
+  /** Non-empty 429 Problem detail; defaults to 'The quota for this request is spent.'. @since 0.13.0 */
+  readonly message?: string;
   /** Non-empty lowercase policy name, matching [a-z0-9-]+. */
   readonly name: string;
   /** Atomic counter storage. */
@@ -129,7 +131,10 @@ function currentWindow(now: number, window: QuotaOptions['window']) {
  * @since 0.12.0
  */
 export function createQuota(options: QuotaOptions): IQuota {
-  const { name, store, limit, window, runtime } = options;
+  const { name, store, limit, window, runtime, message } = options;
+  if (message !== undefined && (typeof message !== 'string' || message.length === 0)) {
+    throw new TypeError('Quota message must be a non-empty string');
+  }
   if (typeof name !== 'string' || !/^[a-z0-9-]+$/.test(name))
     throw new TypeError('Quota name must match [a-z0-9-]+');
   if (typeof limit !== 'function') validateAmount(limit);
@@ -186,7 +191,11 @@ export function createQuota(options: QuotaOptions): IQuota {
         period.expireAt,
       );
       if (!result.admitted)
-        throw new QuotaExceededError(name, Math.max(1, Math.ceil((period.end - now) / 1000)));
+        throw new QuotaExceededError(
+          name,
+          Math.max(1, Math.ceil((period.end - now) / 1000)),
+          message,
+        );
       const reservation = Object.freeze({ key, windowId: period.id, amount });
       issued.add(reservation);
       expiries.set(reservation, period.expireAt);
