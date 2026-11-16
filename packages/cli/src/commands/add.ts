@@ -564,8 +564,13 @@ function withBareCallSeam(source: string, bare: string, seam: AddSeam): string |
   if (plan === undefined) return undefined;
   const rewritten = withBareCallArguments(source, bare, seam.args);
   if (rewritten === undefined) return undefined;
-  // The import goes after the last import, before the call this rewrote.
-  return `${rewritten.slice(0, plan.at)}${plan.text}${rewritten.slice(plan.at)}`;
+  // The rewrite inserted the options inside the call's parentheses. A top-level
+  // import may follow createApp, so the planned position can lie after the call:
+  // it then moves by the inserted length.
+  let changed = 0;
+  while (changed < source.length && source[changed] === rewritten[changed]) changed++;
+  const at = plan.at > changed ? plan.at + rewritten.length - source.length : plan.at;
+  return `${rewritten.slice(0, at)}${plan.text}${rewritten.slice(at)}`;
 }
 
 /**

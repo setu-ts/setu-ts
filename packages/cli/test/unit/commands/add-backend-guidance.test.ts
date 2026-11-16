@@ -158,6 +158,26 @@ describe('setu add backend guidance', () => {
     expect(config).toMatch(/import \{ QUEUE_PROCESSORS \} from '\.\/src\/jobs\/index\.ts';/);
   });
 
+  it('places the jobs barrel import correctly when an import follows createApp', async () => {
+    const p = await project();
+    expect(await p.run(['add', 'queue']), p.err.text()).toBe(0);
+    const bare = p
+      .read('setu.config.ts')
+      .replace(/QueuePlugin\(\{\s*processors: \[\.\.\.QUEUE_PROCESSORS\]\s*\}\)/, 'QueuePlugin()')
+      .replace(/import \{ QUEUE_PROCESSORS \} from '[^']+';\n/, '');
+    // A valid config whose last import, a side-effect one, comes after the factory.
+    const trailing = `${bare}\nimport './src/polyfill.ts';\nexport const id = 1;\n`;
+    await p.fs.writeFile('/work/shop/setu.config.ts', new TextEncoder().encode(trailing));
+    expect(await p.run(['add', 'queue', '--queue', 'redis']), p.err.text()).toBe(0);
+    const config = p.read('setu.config.ts');
+    expect(config).toContain(
+      "import './src/polyfill.ts';\nimport { QUEUE_PROCESSORS } from './src/jobs/index.ts';\nexport const id = 1;",
+    );
+    expect(config.replace(/\s+/g, ' ')).toMatch(
+      /QueuePlugin\(\{ processors: \[\.\.\.QUEUE_PROCESSORS\], /,
+    );
+  });
+
   it('adds the node-redis import when the rewritten call needs it', async () => {
     const p = await project();
     expect(await p.run(['add', 'cache']), p.err.text()).toBe(0);
