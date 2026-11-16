@@ -47,12 +47,8 @@ export function registerWelcomeRoutes(router: IRouterApi): void {
 - Sending resolves when the provider accepts the message; it does not prove recipient delivery.
 - `attachments: [{ filename, content, contentType?, contentId? }]` takes `Uint8Array` or UTF-8 text;
   a `contentId` makes it inline (`cid:`). Invalid header fields are refused with a TypeError.
-- `nodemailer` (SMTP) and `@aws-sdk/client-sesv2` (SES) are optional peers, loaded lazily. Install
-  the one your provider needs; a missing peer throws `OptionalDependencyUnavailableError`.
-- SMTP needs raw sockets on Node, Deno or Bun; the other providers also work on Workers.
-
-## Other options
-
+- SMTP: raw sockets (Node, Deno, Bun), peer `nodemailer`; SES: peer `@aws-sdk/client-sesv2`. Others
+  run on Workers too.
 - `provider` also selects `'log'`, `'smtp'` or `'ses'`; `send` sends an untemplated message.
 - SMTP uses `host`, `port`, `secure`, `auth` or injected `transport`; SES uses `region`,
   `accessKeyId`, `secretAccessKey` or injected `client` inside `options`.
