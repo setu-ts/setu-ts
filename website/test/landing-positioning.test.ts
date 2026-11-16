@@ -9,3 +9,12 @@ it('landing page foregrounds that Setu-TS is built on Hono', async () => {
   expect(page).toContain("Hono's performance and runtime portability");
   expect(page).toContain('npm create @setu-ts');
 });
+
+it('landing page counts its packages from the published list, never a literal', async () => {
+  const pageUrl = new URL('../src/pages/index.astro', import.meta.url);
+  const page = await readFile(pageUrl, 'utf8');
+
+  expect(page).toContain('{PACKAGES.length} published packages');
+  expect(page).not.toMatch(/\b\d+ published packages/);
+  expect(page).not.toMatch(/\b\d+ plugins\b/);
+});
