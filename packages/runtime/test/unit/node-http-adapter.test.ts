@@ -74,6 +74,29 @@ describe('Node socket peer', () => {
       await fetch(served, { incoming: { socket: { remoteAddress: '203.0.113.7' } } } as never);
       expect(refused).toHaveProperty('name', 'RequestBodyTooLargeError');
       expect(cancelled).toBe(true);
+
+      // A served Node request whose socket reports no address (already closed) releases,
+      // like an in-process call: there is no connection left to drain.
+      let closedCancelled = false;
+      const closed = new Request('http://localhost/upload', {
+        method: 'POST',
+        body: new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new Uint8Array(10));
+          },
+          cancel() {
+            closedCancelled = true;
+          },
+        }),
+        duplex: 'half',
+        headers: { 'content-type': inProcess.headers.get('content-type') ?? '' },
+      } as RequestInit);
+      refused = undefined;
+      await fetch(closed, { incoming: { socket: {} } } as never);
+      expect(refused).toHaveProperty('name', 'RequestBodyTooLargeError');
+      expect(closedCancelled).toBe(false);
+      expect(closed.body?.locked).toBe(false);
+      await closed.body?.cancel();
     } finally {
       process.off('uncaughtException', record);
       process.off('unhandledRejection', record);

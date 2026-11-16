@@ -363,7 +363,8 @@ async function readBounded(
     if (cancelOnRefusal) await reader.cancel().catch(() => {});
     else {
       // undici's in-memory FormData producer can enqueue after cancel and crash Node.
-      // Served requests still cancel, so their sockets stop draining on refusal.
+      // A request with a socket peer, or any request off Node, still cancels, so its
+      // socket stops draining on refusal.
       try {
         reader.releaseLock();
       } catch {
