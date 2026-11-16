@@ -196,6 +196,7 @@ describe('a scaffolded Node devtool project, driven end to end', () => {
       const appPort = await unusedPort();
       expect(await run(['new', 'node-shop', '--devtool', '--devtool-port', String(port)])).toBe(0);
       const project = `${root}/node-shop`;
+      await nodeFs.writeFile(`${project}/.env`, `PORT=${appPort}\n`);
       // The same registry fixture as the Deno cases serves packages packed from
       // this exact worktree, including its current CLI, runtime and connector.
       const installed = await npmInstall(project, overlay);
@@ -208,7 +209,6 @@ describe('a scaffolded Node devtool project, driven end to end', () => {
       const launched = launchGroup('npm', ['run', 'dev'], project, {
         ...pair.env,
         SETU_DEVTOOL_MEMBER: '',
-        PORT: String(appPort),
       });
       const client = nodeClient(port, pair);
       try {

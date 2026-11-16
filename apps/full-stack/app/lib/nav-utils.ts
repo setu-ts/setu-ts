@@ -8,11 +8,8 @@ export interface NavItem {
   readonly label: string;
 }
 
-/** The signed-in application navigation. */
-export const APP_NAV: readonly NavItem[] = [
-  { to: '/', label: 'Home' },
-  { to: '/products', label: 'Products' },
-];
+/** The signed-in application navigation: add an entry for each signed-in page. */
+export const APP_NAV: readonly NavItem[] = [{ to: '/products', label: 'Products' }];
 
 /** Reports whether a nav entry matches the current path. */
 export function isActive(item: NavItem, pathname: string): boolean {

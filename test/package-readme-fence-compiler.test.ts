@@ -243,32 +243,39 @@ describe('package README fences compile (X8-8, X6-2/X7-1)', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('should compile every Setu-TS fence in every listed README', async () => {
-    await mkdir(SCRATCH_DIR, { recursive: true });
-    await writeProjectStubs(SCRATCH_DIR);
-    const failures: string[] = [];
-    const compiler = {};
+  // Measured on CI's tooling shard: 374 s and 455 s, then over the member's
+  // 600 s default twice on slower runners, with no change to the fences
+  // (326 TypeScript fences on both develop and the branch that timed out).
+  it(
+    'should compile every Setu-TS fence in every listed README',
+    { timeout: 1_200_000 },
+    async () => {
+      await mkdir(SCRATCH_DIR, { recursive: true });
+      await writeProjectStubs(SCRATCH_DIR);
+      const failures: string[] = [];
+      const compiler = {};
 
-    for (const readme of Object.keys(READMES)) {
-      for (const { fence, classified } of await compilableFences(readme)) {
-        const file =
-          `${SCRATCH_DIR}/${readme.replaceAll('/', '_')}-${fence.index}` +
-          `.${fenceExtension(fence.lang)}`;
-        await writeFile(file, assembleSource(fence, classified));
-        const { code, stderr } = await compileFence(file, compiler);
-        if (code !== 0) {
-          failures.push(
-            `${readme} fence #${fence.index} at line ${fence.line} ` +
-              `(heading: "${fence.heading}") failed deno check (exit ${code}):\n${stderr}`,
-          );
+      for (const readme of Object.keys(READMES)) {
+        for (const { fence, classified } of await compilableFences(readme)) {
+          const file =
+            `${SCRATCH_DIR}/${readme.replaceAll('/', '_')}-${fence.index}` +
+            `.${fenceExtension(fence.lang)}`;
+          await writeFile(file, assembleSource(fence, classified));
+          const { code, stderr } = await compileFence(file, compiler);
+          if (code !== 0) {
+            failures.push(
+              `${readme} fence #${fence.index} at line ${fence.line} ` +
+                `(heading: "${fence.heading}") failed deno check (exit ${code}):\n${stderr}`,
+            );
+          }
         }
       }
-    }
 
-    if (failures.length > 0) {
-      throw new Error(
-        `${failures.length} README fence(s) failed:\n\n${failures.join('\n\n---\n\n')}`,
-      );
-    }
-  });
+      if (failures.length > 0) {
+        throw new Error(
+          `${failures.length} README fence(s) failed:\n\n${failures.join('\n\n---\n\n')}`,
+        );
+      }
+    },
+  );
 });

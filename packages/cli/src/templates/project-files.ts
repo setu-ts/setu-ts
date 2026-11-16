@@ -640,7 +640,9 @@ ${factoryPluginLines}${middlewareLines}${setupLines}
     ? `\n * @param _devtool - Accepted for one signature on every target; the diagnostics listener` +
       `\n * runs only on Deno and Node, so Workers never supplies it and nothing here reads it.`
     : `\n * @param devtool - The development-only composition — the diagnostics plugin and` +
-      `\n * the kernel diagnostics option — supplied by \`main.dev.ts\` alone. The SECOND` +
+      `\n * the kernel diagnostics option — supplied only by a development entry` +
+      `\n * (\`main.dev.ts\`, written by \`--devtool\` or \`setu devtool enable\`); \`main.ts\`` +
+      `\n * never passes it. The SECOND` +
       `\n * parameter deliberately: \`setu commands\` passes its inert discovery env as the` +
       `\n * FIRST argument on every target, which the unused \`_env\` above absorbs.`;
   const envDoc = onWorkers
@@ -812,7 +814,7 @@ export function shutdownBlock(runtime: TargetRuntime): string {
 // Windows has no SIGTERM to catch.
 //
 // The logger is resolved only if one is registered: a project scaffolded
-// without LoggerPlugin still shuts down cleanly, it just reports nothing.
+// without LoggerPlugin still shuts down cleanly; failures fall back to stderr.
 const logger = app.services.has(CAPABILITIES.LOGGER)
   ? app.services.get<ILogger>(CAPABILITIES.LOGGER)
   : undefined;
@@ -824,7 +826,8 @@ for (const signal of ['SIGTERM', 'SIGINT'] as const) {
     void app.stop()
       .then(() => runtime.exit(0))
       .catch((error: unknown) => {
-        logger?.error('Graceful shutdown failed', { error });
+        if (logger !== undefined) logger.error('Graceful shutdown failed', { error });
+        else console.error(\`Graceful shutdown failed: \${describeError(error)}\`);
         runtime.exit(1);
       });
   });
@@ -2064,6 +2067,70 @@ This runs \`wrangler deploy\`.
 `;
 }
 
+/** The README heading `setu new --broker` and a standalone `setu add` write for local backends. */
+export const LOCAL_TRANSPORT_HEADING = '## Local transport services';
+
+/**
+ * The README section for the local backing services in `docker/compose.yaml`.
+ *
+ * One renderer for `setu new --broker` and for a standalone `setu add` that
+ * selects a connected backend, so a project gets the same section either way.
+ * It includes no leading heading separator of its own beyond one blank line.
+ *
+ * @param transportNotes - Each selected transport's operational note, already
+ *   wrapped and joined, or the empty string
+ * @param lead - The opening sentence for services that are not all transports
+ *   (Mailpit, Qdrant, pgvector from `setu add`); the transport sentence otherwise
+ * @returns The section, starting with a newline and ending with one
+ * @since 0.13.0
+ */
+export function renderLocalTransportSection(transportNotes: string, lead?: string): string {
+  const opening =
+    lead === undefined
+      ? 'Start these FIRST: the transport plugins you selected ' +
+        'connect while the application registers, and\ndo not retry, so `start` fails against a ' +
+        'backend that is not listening yet.'
+      : wrapProse(lead);
+  return (
+    `\n${LOCAL_TRANSPORT_HEADING}\n\n${opening}\n\n\`\`\`bash\ndocker compose -f ${BROKER_COMPOSE_FILE} up -d\n\`\`\`\n\n` +
+    `${wrapProse('Each connection variable in `.env.example` has a local default for these services. A container does not read `.env`: pass each variable to it, for example with `docker run -e NAME=value`.')}\n` +
+    transportNotes
+  );
+}
+
+/**
+ * The README's production note on the operational routes served on the
+ * application port. Only a proxy restriction limits who reaches them; moving a
+ * route or turning the UI off changes its path or page, not its reach.
+ *
+ * @param metrics - Whether MetricsPlugin serves `/metrics`
+ * @param openapi - Whether OpenApiPlugin serves `/docs` and `/openapi.json`
+ * @returns The paragraph with its leading blank line, or `''` when neither is served
+ */
+export function exposureParagraph(metrics: boolean, openapi: boolean): string {
+  if (!metrics && !openapi) return '';
+  const routes = [
+    ...(metrics ? ['`/metrics`'] : []),
+    ...(openapi ? ['`/docs`', '`/openapi.json`'] : []),
+  ];
+  const changes = [
+    ...(openapi
+      ? [
+          "turning the UI off with OpenApiPlugin's `swagger: false`",
+          'moving `/docs` with its `endpoint` and `/openapi.json` with its `specEndpoint`',
+        ]
+      : []),
+    ...(metrics ? ["moving `/metrics` with MetricsPlugin's `endpoint`"] : []),
+  ];
+  const list =
+    changes.length === 1
+      ? changes[0]!
+      : `${changes.slice(0, -1).join(', ')} or ${changes[changes.length - 1]!}`;
+  const sentence = `${list.charAt(0).toUpperCase()}${list.slice(1)} changes a path or a page, not who can reach it.`;
+  const one = routes.length === 1;
+  return `\n\n${wrapProse(`${routes.join(', ')} ${one ? 'is' : 'are'} served on the application port to anyone who can reach it: restrict ${one ? 'it' : 'them'} at the proxy. ${sentence}`)}`;
+}
+
 /**
  * Builds the file set for one runtime target and host.
  *
@@ -2109,9 +2176,7 @@ ${
       // "the plugins you selected", never "the messaging and queue plugins":
       // the two flags are independent, so `--broker redis` alone leaves
       // `QueuePlugin()` in memory, connecting to nothing.
-      `\n## Local transport services\n\nStart these FIRST: the transport plugins you selected ` +
-      `connect while the application registers, and\ndo not retry, so \`start\` fails against a ` +
-      `backend that is not listening yet.\n\n\`\`\`bash\ndocker compose -f ${BROKER_COMPOSE_FILE} up -d\n\`\`\`\n${transportNotes}`
+      renderLocalTransportSection(transportNotes)
     : ''
 }
 ## Run
@@ -2145,10 +2210,10 @@ ${
   }## Generate code
 
 \`\`\`bash
-${cliInvocation(runtime)} generate service billing
+${cliInvocation(runtime)} generate module billing
 ${cliInvocation(runtime)} generate --help
 \`\`\`
-${manifest?.readmeSection === undefined ? '' : `\n${typeof manifest.readmeSection === 'string' ? manifest.readmeSection : manifest.readmeSection(cliInvocation(runtime), runtime, port !== undefined)}`}${
+${manifest?.readmeSection === undefined ? '' : `\n${typeof manifest.readmeSection === 'string' ? manifest.readmeSection : manifest.readmeSection(cliInvocation(runtime), runtime, port !== undefined, host)}`}${
     runtime === 'cloudflare-workers'
       ? ''
       : `
@@ -2158,7 +2223,12 @@ ${manifest?.readmeSection === undefined ? '' : `\n${typeof manifest.readmeSectio
 ${runtime === 'deno' ? `${manifest?.npmBuild === undefined ? '' : 'deno task build\n'}deno task start` : runtime === 'bun' ? `${manifest?.npmBuild === undefined ? '' : 'bun run build\n'}bun run start` : 'npm run build\nnpm start'}
 \`\`\`
 
-${runtime === 'node' ? 'The build type-checks, checks CLI wiring and bundles the service into dist/. The start script uses a data-URL preload to default NODE_ENV to production before imports, keeping any preset value. Run npm test before building an image: DI graph validation happens at boot.' : 'The service runs TypeScript source; a full-stack project builds its frontend before production.'}
+${wrapProse(runtime === 'node' ? `The build type-checks, checks CLI wiring and bundles the service into dist/. The start script uses a data-URL preload to default NODE_ENV to production before imports, keeping any preset value. Run npm test before building an image${host.plugins.some((plugin) => ['di-plugin', 'decorator-plugin'].includes(plugin.pkg)) ? ': DI graph validation happens at boot.' : '.'}` : 'The service runs TypeScript source; a full-stack project builds its frontend before production.')}${exposureParagraph(
+          host.appFactory !== undefined ||
+            host.plugins.some((plugin) => plugin.pkg === 'metrics-plugin'),
+          host.appFactory !== undefined ||
+            host.plugins.some((plugin) => plugin.pkg === 'openapi-plugin'),
+        )}
 ${
   port === undefined
     ? `

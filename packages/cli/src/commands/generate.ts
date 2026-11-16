@@ -4,6 +4,7 @@
  * @module
  */
 
+import { reportAgentsHint } from '../utils/agents-hint.ts';
 import { formatForTarget } from '../utils/prettier-format.ts';
 import { moduleRouteBase } from '../schematics/module-route-base.ts';
 import type { IFileSystem } from '@setu-ts/common';
@@ -143,6 +144,7 @@ function printSchematics(installed: ReadonlySet<string>, log: (message: string) 
   log('');
   log('Options:');
   log('  --dry-run          Print what would be created, write nothing');
+  log('  --yes, -y          Accepted for scripts; generate never prompts');
   log('  --dir <path>       Generate into this directory instead of the CWD');
   log(
     `  --runtime <target>  ${TARGET_RUNTIMES.join(' | ')} (detected from the project by default)`,
@@ -774,6 +776,19 @@ export async function runGenerateCommand(
         ? await write(deps.fs)
         : await applyModuleSwitch(deps, dir, moduleSwitch, write);
     for (const outcome of outcomes) deps.log(`${outcome.outcome} ${escapeName(outcome.path)}`);
+    if (schematicName === 'schema') {
+      const file = generated.find((entry) => entry.path.endsWith('.schemas.ts'))!;
+      deps.log(
+        `Bind ${file.path}: ${mode === 'class-based' ? `@ValidateBody(${names.pascal})` : `const body = validateBody(${names.pascal}); use body as route middleware and read body.value(ctx)`}.`,
+      );
+    }
+    if (schematicName === 'job' && !installed.has('queue-plugin'))
+      deps.log(`Install the queue: ${cliInvocation(runtime)} add queue`);
+    if (schematicName === 'module' && args.flags['page'] === true)
+      deps.log(
+        `Add { to: '/${names.kebab}', label: '${names.pascal}' } to APP_NAV in app/lib/nav-utils.ts to link the page.`,
+      );
+    await reportAgentsHint(deps, dir, runtime);
     if (schematicName === 'migration' && customName === undefined) {
       deps.log(
         `Add readiness: { migrations: MIGRATION_NAMES } from ./src/migrations/index.ts to DatabasePlugin(...) and create the setu_migrations table: ${repositoryFileUrl('packages/database-plugin/README.md#migrations-and-readiness')}`,

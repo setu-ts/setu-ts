@@ -69,7 +69,14 @@ export function databaseConfig(
   type: string,
   dialect: string,
   envFiles: readonly string[] = ['.env'],
-): { readonly path: string; readonly contents: string; readonly schema: string } | undefined {
+):
+  | {
+      readonly path: string;
+      readonly contents: string;
+      readonly schema: string;
+      readonly localUrl: string;
+    }
+  | undefined {
   const loadEnv = `import { existsSync } from 'node:fs';
 import process from 'node:process';
 
@@ -81,6 +88,10 @@ for (const file of ${JSON.stringify(envFiles)}) {
     return {
       path: 'drizzle.config.ts',
       schema: 'src/database/schema.ts',
+      localUrl:
+        dialect === 'sqlite'
+          ? 'file:./local.db'
+          : 'postgresql://postgres:postgres@127.0.0.1:5432/app',
       contents: `import { defineConfig } from 'drizzle-kit';
 ${loadEnv}
 
@@ -96,6 +107,7 @@ export default defineConfig({
     return {
       path: 'prisma.config.ts',
       schema: 'prisma/schema.prisma',
+      localUrl: 'postgresql://postgres:postgres@127.0.0.1:5432/app',
       contents: `${loadEnv}
 
 export default {

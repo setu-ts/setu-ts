@@ -291,20 +291,20 @@ The gauges are written from the same snapshot the health indicator reads, on eve
 
 `task_module` on every series, and `task` in the health payload, is a task label — never the
 specifier you pass to `run()`. That specifier is normally
-`new URL('./tasks/resize-image.ts', import.meta.url).href`, a `file:` URL naming the machine's
+`new URL('./tasks/resize-image.task.ts', import.meta.url).href`, a `file:` URL naming the machine's
 directories and its user, and `/metrics` and `/health` leave the process. The label is
-`pools[<specifier>].label` when set, otherwise the module's file name without its extension
-(`resize-image`). A `data:` or `blob:` module is `inline`. If two modules share a file name, the
-second one used becomes `resize-image_2` and the plugin warns once; give each a `label` to make the
-names stable. A `label` must be 1–64 characters of letters, digits, `_`, `.` or `-` and unique
-across pools, or the plugin throws `RangeError` when constructed. `stats()`, errors and warning logs
-keep the specifier.
+`pools[<specifier>].label` when set, otherwise the module's file name without its final extension
+(`resize-image.task`, for both the source `.task.ts` and the `.task.js` that `setu build` emits). A
+`data:` or `blob:` module is `inline`. If two modules share a file name, the second one used becomes
+`resize-image.task_2` and the plugin warns once; give each a `label` to make the names stable. A
+`label` must be 1–64 characters of letters, digits, `_`, `.` or `-` and unique across pools, or the
+plugin throws `RangeError` when constructed. `stats()`, errors and warning logs keep the specifier.
 
 ```typescript
 import { WorkerPoolPlugin } from '@setu-ts/worker-pool-plugin';
 
 WorkerPoolPlugin({
-  pools: { [new URL('./tasks/resize.ts', import.meta.url).href]: { label: 'thumbnails' } },
+  pools: { [new URL('./tasks/resize.task.ts', import.meta.url).href]: { label: 'thumbnails' } },
 });
 ```
 

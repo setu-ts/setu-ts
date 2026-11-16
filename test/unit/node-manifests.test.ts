@@ -784,6 +784,7 @@ describe('app type-check configurations', () => {
     expect(full.extends).toBe(minimal.extends);
     expect(full.include).toEqual([...minimal.include, 'node_modules/vite/client.d.ts']);
     expect(full.compilerOptions.jsx).toBe('react-jsx');
+    expect(full.compilerOptions.allowJs).toBe(true);
     const { '~/*': alias, '~kernel/*': kernel, ...paths } = full.compilerOptions.paths;
     expect(alias).toEqual(['./app/*']);
     expect(kernel).toEqual(['./src/*']);

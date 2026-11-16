@@ -229,7 +229,7 @@ describe('feature-scoped generation', () => {
     expect(scoped).toContain("token: 'billing.invoice-service'");
     expect(topLevel).toContain("token: 'billing-invoice-service'");
     expect(scoped).not.toContain("token: 'billing-invoice-service'");
-    expect(scoped).toContain("inject 'billing.invoice-service'");
+    expect(scoped).toContain("@Inject('billing.invoice-service')");
     expect(h.out.text()).toContain("@Inject('billing.invoice-service')");
     const writes = h.fs.writes.length;
     expect(await h.run(['service', 'billing.invoice'])).toBe(2);

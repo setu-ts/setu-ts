@@ -2,6 +2,7 @@
 import type { DerivedNames } from './registry.ts';
 import { routeRegistrarSymbol } from '../seams/http.ts';
 import { renderImport, renderSeamImports } from '../seams/seam-spec.ts';
+import { renderMethodSignature } from '../utils/render-declaration.ts';
 
 function schemaImport(names: DerivedNames, symbols: readonly string[], typeOnly = false): string {
   return renderImport(symbols, `./${names.kebab}.schemas.ts`, typeOnly);
@@ -51,6 +52,13 @@ export function moduleService(
   const query = validation
     ? `List${p}Query`
     : '{ readonly limit?: number; readonly offset?: number }';
+  const records = classBased ? 'this.records' : 'records';
+  const method = (name: string): string => (classBased ? name : `export function ${name}${p}`);
+  const pad = classBased ? '  ' : '';
+  // Measured at the indent actually emitted: a top-level function has none.
+  const signature = (name: string, params: readonly string[], result: string): string =>
+    renderMethodSignature(method(name), params, result, pad);
+  const queryParameter = `query: ${query}${validation ? '' : ' = {}'}`;
   return cleanSource(`${validation ? `${schemaImport(names, [`Create${p}Body`, `Update${p}Body`, `List${p}Query`, `${p}Response`], true)}\n` : ''}${classBased ? "import { Injectable } from '@setu-ts/decorator-plugin';\n" : ''}
 /**
  * Sample storage: replace it with a repository before deploying.
@@ -61,63 +69,35 @@ export function moduleService(
  * fill it. Add authentication to the routes and a real store before the module
  * serves real traffic.
  */
-const records = new Map<string, ${record}>();
+${classBased ? `@Injectable({ token: '${names.kebab}-service' })\nexport class ${p}Service {\n  private readonly` : 'const'} records = new Map<string, ${record}>();
 
-/** Lists records with pagination. */
-export function list${p}(
-  query: ${query} = ${validation ? '{ limit: 20, offset: 0 }' : '{}'},
-): readonly ${record}[] {
-  const offset = query.offset ?? 0;
-  return [...records.values()].slice(offset, offset + (query.limit ?? 20));
-}
+${pad}/** Lists records with pagination. */
+${signature('list', [queryParameter], `readonly ${record}[]`)}
+${pad}  const offset = query.offset${validation ? '' : ' ?? 0'};
+${pad}  return [...${records}.values()].slice(offset, offset + ${validation ? 'query.limit' : '(query.limit ?? 20)'});
+${pad}}
 
-/** Reads one record. */
-export function get${p}(id: string): ${record} | undefined {
-  return records.get(id);
-}
+${pad}/** Reads one record. */
+${signature('get', ['id: string'], `${record} | undefined`)}
+${pad}  return ${records}.get(id);
+${pad}}
 
-/** Creates a record. */
-export function create${p}(body: ${create}): ${record} {
-  const record = { ...body, id: crypto.randomUUID() };
-  records.set(record.id, record);
-  return record;
-}
+${pad}/** Creates a record. */
+${signature('create', [`body: ${create}`], record)}
+${pad}  const record = { ...body, id: crypto.randomUUID() };
+${pad}  ${records}.set(record.id, record);
+${pad}  return record;
+${pad}}
 
-/** Updates an existing record. */
-export function update${p}(
-  id: string,
-  body: ${update},
-): ${record} | undefined {
-  const current = records.get(id);
-  if (current === undefined) return undefined;
-  const record = { ...current, ...body, ${validation ? 'name: body.name ?? current.name, ' : ''}id };
-  records.set(id, record);
-  return record;
-}
-${
-  classBased
-    ? `
-/** Domain service for ${names.kebab}. */
-@Injectable({ token: '${names.kebab}-service' })
-export class ${p}Service {
-  list(
-    query?: ${query},
-  ): readonly ${record}[] {
-    return list${p}(query);
-  }
-  get(id: string): ${record} | undefined {
-    return get${p}(id);
-  }
-  create(body: ${create}): ${record} {
-    return create${p}(body);
-  }
-  update(id: string, body: ${update}): ${record} | undefined {
-    return update${p}(id, body);
-  }
-}
-`
-    : ''
-}`);
+${pad}/** Updates an existing record. */
+${signature('update', ['id: string', `body: ${update}`], `${record} | undefined`)}
+${pad}  const current = ${records}.get(id);
+${pad}  if (current === undefined) return undefined;
+${pad}  const record = { ...current, ${validation ? 'name: body.name ?? current.name' : '...body'}, id };
+${pad}  ${records}.set(id, record);
+${pad}  return record;
+${pad}}
+${classBased ? '}\n' : ''}`);
 }
 
 /**

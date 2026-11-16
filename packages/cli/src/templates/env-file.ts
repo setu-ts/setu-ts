@@ -1,4 +1,5 @@
 /** Dotenv flag validation shared by project and workspace-member scaffolding. */
+import { codeView } from '../build/task-entries.ts';
 
 /**
  * Renders the ConfigPlugin option literal for a generated dotenv path.
@@ -96,8 +97,9 @@ export function readEnvFilePath(
  * opaque, so a commented-out declaration (`// envFilePath: 'old.env'`) or one
  * inside a string (`"envFilePath: 'x'"`) never wins over the real one. Either
  * quote style is read, for a value and for the key, because a formatter can
- * rewrite the generated single-quoted literal. A regular-expression literal is
- * outside what this reader classifies, as for the CLI's other config readers.
+ * rewrite the generated single-quoted literal. A regular-expression literal
+ * elsewhere in the file is read past; a regex as the whole `envFilePath` value is
+ * `unreadable`.
  *
  * @param configSource - The project's `setu.config.ts` text
  * @returns The declaration's kind, with its validated paths when it has them
@@ -166,33 +168,32 @@ export function configuredEnvFilePath(configSource: string): string | undefined 
  * The source's code with comments removed and each string literal replaced by
  * a `\uE000<n>\uE000` placeholder, plus the literals themselves (quotes
  * included) indexed by `n`. A `//` or `/*` inside a string is therefore not a
- * comment, and text inside a string is never matched as code. One linear pass;
- * a template literal is treated as a string up to its closing backtick.
+ * comment, and text inside a string is never matched as code. Every span comes from
+ * the shared source scanner, so template substitutions stay code (nested ones too)
+ * and a quote inside a regex literal is not read as a string.
  *
  * @param source - TypeScript source text
  * @returns The comment-free code and its string literals
  */
 function scanSource(source: string): { code: string; literals: string[] } {
+  // One lexer decides: comments and regex bodies arrive blanked in `view.code`, and
+  // every string and template chunk is a span, so a quote inside a regex or a
+  // backtick inside a substitution cannot desynchronise a second scanner.
+  const view = codeView(source);
+  const spans = new Map(
+    [...view.strings, ...view.templates].map(({ start, end }) => [start, end] as const),
+  );
   let code = '';
   const literals: string[] = [];
   let index = 0;
   while (index < source.length) {
-    const char = source[index] as string;
-    const next = source[index + 1];
-    if (char === '/' && next === '/') {
-      const end = source.indexOf('\n', index);
-      index = end === -1 ? source.length : end;
-    } else if (char === '/' && next === '*') {
-      const end = source.indexOf('*/', index + 2);
-      index = end === -1 ? source.length : end + 2;
-    } else if (char === "'" || char === '"' || char === '`') {
-      let end = index + 1;
-      while (end < source.length && source[end] !== char) end += source[end] === '\\' ? 2 : 1;
+    const end = spans.get(index);
+    if (end !== undefined && end > index) {
       code += `\uE000${literals.length}\uE000`;
-      literals.push(source.slice(index, end + 1));
-      index = end + 1;
+      literals.push(source.slice(index, end));
+      index = end;
     } else {
-      code += char;
+      code += view.code[index];
       index += 1;
     }
   }

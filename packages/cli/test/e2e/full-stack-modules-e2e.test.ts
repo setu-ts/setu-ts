@@ -131,6 +131,28 @@ it(
           body: JSON.stringify({ name: 'Hello from the module' }),
         });
         const record = (await seeded.json()) as { id: string; name: string };
+        // V12-90: application errors pass through the starter's RFC 9457 renderer.
+        for (const [path, init, status, title, detail] of [
+          ['/api/articles/missing', {}, 404, 'Not Found', 'Articles not found.'],
+          [
+            '/api/articles',
+            {
+              method: 'POST',
+              headers: { cookie, 'x-csrf-token': freshToken, 'content-type': 'application/json' },
+              body: JSON.stringify({ name: '' }),
+            },
+            400,
+            'Bad Request',
+            'A non-empty name is required.',
+          ],
+        ] as const) {
+          const response = await fetch(`${origin}${path}`, init);
+          expect(response.status).toBe(status);
+          expect(response.headers.get('content-type')).toContain('application/problem+json');
+          const problem = await response.json();
+          expect(problem).toMatchObject({ type: 'about:blank', title, status, detail });
+          expect(problem).not.toHaveProperty('message');
+        }
 
         // (2) The page lists what the module's service holds.
         const page = await fetch(`${origin}/articles`, { headers: { cookie } });

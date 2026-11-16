@@ -557,7 +557,7 @@ argument; the service refuses a versioned call to any other adapter with
 | Export                                       | Kind       | Purpose                                                                                                                                                                                                                                                                                                                                                   |
 | -------------------------------------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `IVectorStore`                               | interface  | The registered service                                                                                                                                                                                                                                                                                                                                    |
-| `IVectorStoreAdapter`                        | interface  | A backend: `open(runtime, logger?)`, `ensureCollection`, the five data methods, `close?()`                                                                                                                                                                                                                                                                |
+| `IVectorStoreAdapter`                        | interface  | A backend: `open(runtime, logger?)`, `ensureCollection`, the five data methods, `isHealthy?()` resolving a boolean or `undefined` (since 0.13.0), `close?()`                                                                                                                                                                                              |
 | `attachPoolErrorListener(database, warn)`    | function   | Gives a Drizzle database's node-postgres (or mysql2) pool an `'error'` listener once, keeping the application's own: an idle error reaches the pool listener and a checked-out client gets one per checkout, so a dropped connection is reported through `warn` instead of exiting the process. Used by database-plugin's Drizzle arm and `PgVectorStore` |
 | `VectorCollectionSpec`                       | interface  | `name`, `dimensions`, `filterable?`                                                                                                                                                                                                                                                                                                                       |
 | `VectorReplaceOptions`                       | interface  | `replaceSource` options: `version?`, the submission's version                                                                                                                                                                                                                                                                                             |
@@ -581,6 +581,18 @@ depends on the runtime, provides `CAPABILITIES.VECTOR_STORE`, and is single-inst
 registration it resolves an adapter or adapter factory, calls `open`, creates or verifies every
 declared collection in order, registers the service, and closes the adapter at shutdown. A failure
 in any step fails application startup.
+
+It also registers a `vector-store` health indicator, in readiness by default. The indicator calls
+the adapter's optional `isHealthy()` through a cached probe (5 s cache, 2 s bound): `up` with
+`{ adapter, reachable: true }`; `down` with `reachable: false` when the probe fails, rejects or
+times out; `down` with `state: 'closed'` after shutdown; and `up` with `reachable: 'unknown'` for an
+adapter without the method or one whose `isHealthy()` resolves `undefined` (it could not tell). The
+built-in adapters probe without touching data: whether Qdrant's first declared collection exists (an
+endpoint that needs the API key), `SELECT 1` for pgvector (on a saturated node-postgres pool, with
+no idle connection and callers waiting or every connection open, or when the probe's own pool
+checkout times out, it answers `undefined` while its statements keep completing or none of its own
+is running, and `false` once they have stopped for 10 seconds: database-plugin's progress rule), the
+Vectorize index's `describe()`, and always `true` in memory.
 
 | Export                                                                                                                                                                 | Kind     | Purpose                                                                 |
 | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ----------------------------------------------------------------------- |
@@ -11500,18 +11512,18 @@ as a flag, so prompts are never a second configuration surface, and `--dry-run` 
 
 Non-interactive by construction in three layers, all failing closed to the documented defaults:
 `CliDependencies.ask` is OPTIONAL and no programmatic caller passes it; `src/main.ts` supplies the
-terminal implementation only behind `Deno.stdin.isTerminal()`; and Deno's own `prompt()` returns
-`null` on a non-terminal.
+terminal implementation only when `process.stdin.isTTY === true`, and leaves the prompter undefined
+otherwise; and the line reader resolves `null` when it cannot read a line.
 
 The two exported types:
 
 <!-- version:history -->
 
-| Export            | Kind      | Members                                                                                                         |
-| ----------------- | --------- | --------------------------------------------------------------------------------------------------------------- |
-| `Prompter`        | interface | Since 0.9.0, `select(question, choices): Promise<PromptSelection>` — answer, unavailable, or cancelled.         |
-| `PromptChoice`    | interface | `{ value, label }` — the value written into the flag record, and one descriptive line shown above the question. |
-| `PromptSelection` | type      | Since 0.9.0, `{ kind: 'answer', value } \| { kind: 'unavailable' } \| { kind: 'cancelled' }`.                   |
+| Export            | Kind      | Members                                                                                                                                                                                                       |
+| ----------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Prompter`        | interface | Since 0.9.0, `select(question, choices): Promise<PromptSelection>` — answer, unavailable, or cancelled.                                                                                                       |
+| `PromptChoice`    | interface | `{ value, label }` — the value written into the flag record, and one descriptive line shown beside the option (above the prompt in the typed fallback).                                                       |
+| `PromptSelection` | type      | Since 0.9.0, `{ kind: 'answer', value, shown? } \| { kind: 'unavailable' } \| { kind: 'cancelled' }`; `shown: true` (0.13.0) means the prompter already displayed the answer, so the caller does not echo it. |
 
 `createTerminalPrompter` is deliberately NOT exported: its only consumer is the executable entry
 point, which imports it directly.

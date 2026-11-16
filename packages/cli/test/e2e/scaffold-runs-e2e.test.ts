@@ -948,14 +948,15 @@ try {
       const readme = await nodeFs.readFile(`${project}/README.md`, 'utf8');
       const command = readme
         .split('\n')
-        .find((line) => /^npx @setu-ts\/cli@\S+ generate service billing$/.test(line));
+        .find((line) => /^npx @setu-ts\/cli@\S+ generate module billing$/.test(line));
       expect(command).toBeDefined();
       const [executable, ...args] = command!.split(' ');
       const generated = await runIn(project, executable!, args, overlay);
       expect(generated.code, generated.output).toBe(0);
-      expect(await nodeFs.readFile(`${project}/src/services/billing.service.ts`, 'utf8')).toContain(
-        'billing',
-      );
+      expect(
+        await nodeFs.readFile(`${project}/src/modules/billing/billing.service.ts`, 'utf8'),
+      ).toContain('billing');
+      expect(await run(['g', 'middleware', 'timing', '--dir', project])).toBe(0);
       const built = await npmRun(project, 'build');
       expect(built.code, built.output).toBe(0);
       const booted = await withNodeServer(project, async (origin) => {
@@ -1114,6 +1115,39 @@ try {
     const tested = await denoRun(project, ['task', 'test']);
     expect(tested.code, tested.output).toBe(0);
     expect(tested.output).toContain('1 passed');
+    // V12-62/V12-65: installing validation on minimal must make a real route answer 400.
+    expect(await run(['add', 'validation', '--dir', project])).toBe(0);
+    expect(await run(['g', 'schema', 'request-body', '--dir', project])).toBe(0);
+    await useWorkspacePackages(project);
+    await nodeFs.writeFile(
+      `${project}/validation-proof.ts`,
+      `import { createApp } from './setu.config.ts';
+import { createTestApp } from '@setu-ts/testing';
+import { validateBody } from '@setu-ts/validation-plugin';
+import { RequestBody } from './src/shared/schemas/request-body.schemas.ts';
+
+const app = await createApp();
+const body = validateBody(RequestBody);
+app.router.post('/validated', {
+  middleware: [body],
+  handler: (ctx) => ctx.response.json(body.value(ctx)),
+});
+const test = await createTestApp({ app });
+try {
+  const response = await test.inject({
+    method: 'POST', url: '/validated',
+    headers: { 'content-type': 'application/json' }, body: { unexpected: true },
+  });
+  if (response.statusCode !== 400) throw new Error('Expected 400, got ' + response.statusCode);
+  console.log('M140d validation refused the body with 400');
+} finally {
+  await test.stop();
+}
+`,
+    );
+    const validated = await denoRun(project, ['run', '-A', 'validation-proof.ts']);
+    expect(validated.code, validated.output).toBe(0);
+    expect(validated.output).toContain('M140d validation refused the body with 400');
   });
 
   // The styled host gets its OWN boot case rather than a `HOSTS` entry: `HOSTS`
@@ -1497,12 +1531,14 @@ describe('a scaffolded full-stack project runs both middleware layers', () => {
       expect(await run(['g', 'middleware', 'audit', '--dir', project])).toBe(0);
       const auditPath = `${project}/src/middleware/audit.middleware.ts`;
       const auditSource = await nodeFs.readFile(auditPath, 'utf8');
+      const timingHeader = "ctx.response.header('Server-Timing', `audit;dur=${ms.toFixed(1)}`);";
+      expect(auditSource).toContain(timingHeader);
       await nodeFs.writeFile(
         auditPath,
         "import { getSession } from '@setu-ts/session-plugin';\n" +
           auditSource.replace(
-            "ctx.response.header('X-Audit', 'true');",
-            "ctx.response.header('X-Audit', 'true');\n    ctx.response.header('X-Session-Id', getSession(ctx).id);",
+            timingHeader,
+            `${timingHeader}\n    ctx.response.header('X-Session-Id', getSession(ctx).id);`,
           ),
       );
       await useWorkspacePackages(project);
@@ -1547,7 +1583,7 @@ describe('a scaffolded full-stack project runs both middleware layers', () => {
         await planted.body?.cancel();
 
         return {
-          audit: [health, landing, anonymous, signedIn].map((r) => r.headers.get('x-audit')),
+          audit: [health, landing, anonymous, signedIn].map((r) => r.headers.get('server-timing')),
           landing: landing.status,
           anonymous: { status: anonymous.status, location: anonymous.headers.get('location') },
           submitted: submitted.status,
@@ -1562,7 +1598,7 @@ describe('a scaffolded full-stack project runs both middleware layers', () => {
 
       // Kernel layer: on a non-SSR route, an SSR page, a route-middleware redirect and
       // a rendered page alike — it wraps everything the application serves.
-      expect(result.audit, output).toEqual(['true', 'true', 'true', 'true']);
+      for (const timing of result.audit) expect(timing, output).toMatch(/^audit;dur=\d+\.\d$/);
       // Route layer: `/` shares the layout but is not guarded…
       expect(result.landing).toBe(200);
       // …while `/products` sends an anonymous visitor to sign in, before its loader runs.

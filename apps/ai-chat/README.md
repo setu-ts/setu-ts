@@ -20,8 +20,15 @@ The project is what `setu new --template rest`, `setu generate module chat` and
 pnpm --dir apps/ai-chat run check
 pnpm --dir apps/ai-chat run test
 pnpm --dir apps/ai-chat run smoke
+pnpm --dir apps/ai-chat run build
 pnpm --dir apps/ai-chat run start
 ```
+
+Build before start: the generated start command runs `dist/main.js` with `instrumentation.mjs`. In
+this repository, `build` bundles against the framework packages' compiled output, and the `setu`
+command it calls is itself one of them. In a fresh clone, compile them once from the repository
+root with `pnpm exec tsc -b` before `build`; otherwise `build` cannot find `setu` and `start` cannot
+find the packages. `start:dev` runs the source with tsx and needs no build.
 
 Set `AI_COMPAT_BASE_URL`, `AI_COMPAT_MODEL` and optionally `AI_COMPAT_API_KEY` and
 `AI_COMPAT_CONTEXT_TOKENS` on the server. The models default to `http://localhost:8080/v1` and model

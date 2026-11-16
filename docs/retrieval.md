@@ -21,7 +21,9 @@ npm install @setu-ts/vector-store-plugin
 ```
 
 `setu add vector-store` installs the package and prints the registration; it does not insert one,
-because collections and the adapter's client belong to the application.
+because the collections belong to the application. With `--adapter qdrant` or `pgvector` it also
+writes `src/vector-store.ts`, which builds the client, plus the connection variable and a Compose
+service.
 
 Compose the plugin after the multi-tenancy plugin. Collections are validated when the plugin is
 created, and the adapter creates or verifies them during registration, so a bad backend fails
@@ -471,6 +473,9 @@ pgvector and Qdrant when those URLs are set.
   reported through the application's logger instead of exiting the process.
 - A failed registration fails startup. That includes an unreachable backend, a missing extension, a
   dimension mismatch and a refused declaration.
+- After startup, the plugin's `vector-store` health indicator joins `/ready`: a backend that stops
+  answering takes the replica out of rotation. Its probe is cached for 5 seconds and bounded at 2;
+  see the plugin README's Readiness section, which also shows how to exclude it.
 - The pgvector and Qdrant adapters classify transport failures: an unreachable backend answers 503,
   an unanswered request answers 504, and the served detail carries no connection string.
 - Concurrent writes to one source are the application's concern. `replaceSource` serialises them on

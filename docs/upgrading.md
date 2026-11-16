@@ -29,6 +29,14 @@ needs `csrf.exemptBearer: false`, as a bearer exchange route already does. API-k
 now propagate as `AuthenticationUnavailableError` (503 with `errorHandler`), including public
 key-bearing routes; return null to reject an invalid key.
 
+### Vector-store readiness (M140d, `@setu-ts/vector-store-plugin`, `@setu-ts/common`, `@setu-ts/cloudflare-plugin`)
+
+`VectorStorePlugin` now registers a `vector-store` health indicator that joins `/ready`, so a
+replica leaves readiness while its vector backend is unreachable, or while Qdrant refuses its API
+key. To keep the previous behaviour, pass
+`HealthPlugin({ readiness: { exclude: ['vector-store'] } })`. A custom `IVectorStoreAdapter` needs
+no change: without the new optional `isHealthy()` it stays `up` as `reachable: 'unknown'`.
+
 ### Deployment output (M140c, `@setu-ts/cli`)
 
 A workspace member's config must call the transport module's `runtimeOptions()`, which serves gRPC
@@ -80,8 +88,17 @@ dedupe common so all packages share its unique-symbol brands.
 New full-stack scaffolds read `TRUST_FORWARDED_HOST`: leave it empty or `false` unless your listed
 `TRUSTED_PROXIES` overwrite `X-Forwarded-Host`. `true` requires a nonempty proxy list; other values
 fail configuration without echoing the value. `setu check` now warns with `setu.W006` when an
-installed zero-config provider or MCP plugin has no call in `setu.config.ts`; if another module
-registers it, silence that id in `.setu-ts/check.json`.
+installed plugin has no call in `setu.config.ts`: a zero-config provider, or one whose registration
+`setu add` prints (`session`, `telemetry`, `feature-flags`, `localization`, `multi-tenancy`,
+`notification`, `service-discovery`, `static`, `graphql`, `grpc`, `database`, `vector-store`, `mcp`,
+`di`, `cloudflare`, `react-router`). `auth-plugin` is not checked, because its quota helpers work
+without the plugin. A config built on a starter gets the warning for an installed package whose
+starter arm is unset, for the arms the starter registers only when set (`database`, `session`, `di`,
+`graphql`, `serviceDiscovery`, `realtime.backplane`, `realtime.websocket`, `realtime.sse`,
+`featureFlags`, `notifications`, `multiTenancy`, `reactRouter`, `static`). A project that registers
+one of these from another module now gets the warning, and `setu check --strict` fails on it:
+silence that id in `.setu-ts/check.json`. On Cloudflare Workers, `setu add cache` and
+`setu add storage` are refused; serve both from `CloudflarePlugin`'s KV and R2 arms instead.
 
 ### Form bodies and file uploads (M137c, `@setu-ts/validation-plugin`, `@setu-ts/openapi-plugin`, `@setu-ts/sdk`)
 
@@ -1496,7 +1513,9 @@ return createApp(env, waitUntil);
 <!-- version:history -->
 
 A project scaffolded by 0.10.0 already has the parameter, named `_waitUntil` while nothing reads it;
-rename it to `waitUntil` when you add the registration.
+rename it to `waitUntil` when you add the registration. From 0.13.0, `setu add cloudflare` adds the
+`CloudflarePlugin` call and renames the parameter itself in a generated minimal, `rest` or
+class-based configuration.
 
 Without `waitUntil`, `CloudflarePlugin` now logs one warning at startup on Workers, and
 `cacheApiMiddleware` awaits its cache write before answering instead of losing it.

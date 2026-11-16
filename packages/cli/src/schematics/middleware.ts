@@ -120,7 +120,7 @@ export function generateMiddleware(
   options: SchematicOptions,
 ): readonly GeneratedFile[] {
   const priorityConst = middlewarePriorityExport(names.screaming);
-  const contents = `import type { MiddlewareFunction } from '@setu-ts/common';
+  const contents = `import { CAPABILITIES, type MiddlewareFunction } from '@setu-ts/common';
 
 /**
  * Where this middleware sits in the pipeline. Lower runs earlier, so lower is
@@ -150,9 +150,11 @@ export function ${names.camel}Middleware(): MiddlewareFunction {
   return async (ctx, next) => {
     // Runs before the handler. To short-circuit, write a response here and return
     // without calling next() — nothing after this stage, the handler included, runs.
+    const runtime = ctx.services.get(CAPABILITIES.RUNTIME);
     await next();
-    // Runs after the handler.
-    ctx.response.header('X-${names.pascal}', 'true');
+    // ctx.startTime is monotonic; never subtract it from Date.now().
+    const ms = runtime.hrtime() - ctx.startTime;
+    ctx.response.header('Server-Timing', \`${names.kebab};dur=\${ms.toFixed(1)}\`);
   };
 }
 `;

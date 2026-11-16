@@ -23,9 +23,18 @@ On the port `./src/discovery/services.ts` exports:
 ## Generate code
 
 ```bash
-npx @setu-ts/cli@0.12.0 generate service billing
+npx @setu-ts/cli@0.12.0 generate module billing
 npx @setu-ts/cli@0.12.0 generate --help
 ```
+
+## Development transports
+
+- Messaging and queue options come from `src/transport/index.ts`, which the CLI writes from the
+  workspace broker in setu.workspace.json. With the `memory` broker both are in-memory: one process,
+  lost on restart. `nats`, `kafka`, `pubsub` and `service-bus` have no queue arm, so with them the
+  queue stays in memory. Change the broker for every member with
+  `npx @setu-ts/cli@0.12.0 workspace broker <name>`.
+- Telemetry has no exporter: spans are dropped. Set the `TelemetryPlugin` `exporter` option.
 
 ## Production
 
@@ -34,4 +43,11 @@ npm run build
 npm start
 ```
 
-The build type-checks, checks CLI wiring and bundles the service into dist/. The start script uses a data-URL preload to default NODE_ENV to production before imports, keeping any preset value. Run npm test before building an image: DI graph validation happens at boot.
+The build type-checks, checks CLI wiring and bundles the service into dist/. The start script uses a
+data-URL preload to default NODE_ENV to production before imports, keeping any preset value. Run npm
+test before building an image.
+
+`/metrics`, `/docs`, `/openapi.json` are served on the application port to anyone who can reach it:
+restrict them at the proxy. Turning the UI off with OpenApiPlugin's `swagger: false`, moving `/docs`
+with its `endpoint` and `/openapi.json` with its `specEndpoint` or moving `/metrics` with
+MetricsPlugin's `endpoint` changes a path or a page, not who can reach it.

@@ -1,5 +1,6 @@
 import { Form, redirect, useActionData, useLoaderData } from 'react-router';
 
+import { Button } from '~/components/ui/button.tsx';
 import type { AppLoadContext } from '~/lib/load-context.ts';
 import { getCsrfToken, getSession } from '~/server/session.server.ts';
 
@@ -21,10 +22,9 @@ export function loader({ context }: { context: AppLoadContext }) {
  * Handles the sign-in post.
  *
  * The CSRF token is NOT checked here: the session plugin's form-CSRF
- * middleware runs before this route is ever reached and answers 403 on a
- * missing or mismatched token. So this action only runs for a request that
- * already passed the check — which is what `smoke.ts` step 3 proves, by
- * observing a 302 rather than a 403.
+ * middleware runs at priority 325, before this route is ever reached, and
+ * answers 403 on a missing or mismatched token. So this action only runs for a
+ * request that already passed the check.
  *
  * The session write is what makes the login stick — the plugin commits the
  * session onto the response after the handler returns, so the redirect below
@@ -34,13 +34,15 @@ export async function action({ request, context }: { request: Request; context: 
   const form = await request.formData();
   const email = String(form.get('email') ?? '');
 
-  // Replace with a real credential check — resolve the auth service with
-  // getService(context, TOKEN), exactly as the products service is resolved.
+  // Replace with a real credential check through a request-bound module service:
+  // getService(context, <TOKEN>). See auth-plugin's README, "In the full-stack template".
   if (email === '') {
     return { error: 'Email is required.' };
   }
 
   const session = getSession(context);
+  // Rotate against session fixation before recording the signed-in user.
+  session.regenerate();
   session.set('userEmail', email);
 
   return redirect('/products');
@@ -51,16 +53,32 @@ export default function LoginRoute() {
   const actionData = useActionData<typeof action>();
 
   return (
-    <Form method="post">
-      {actionData?.error ? <p role="alert">{actionData.error}</p> : null}
+    <Form method="post" className="grid gap-4">
+      {actionData?.error ? (
+        <p role="alert" className="text-sm text-destructive">
+          {actionData.error}
+        </p>
+      ) : null}
       <input type="hidden" name="_csrf" value={csrfToken} />
-      <label>
-        Email <input type="email" name="email" required />
+      <label className="grid gap-2 text-sm font-medium">
+        Email
+        <input
+          type="email"
+          name="email"
+          required
+          className="h-9 w-full rounded-md border border-input bg-transparent px-3 shadow-xs"
+        />
       </label>
-      <label>
-        Password <input type="password" name="password" required />
+      <label className="grid gap-2 text-sm font-medium">
+        Password
+        <input
+          type="password"
+          name="password"
+          required
+          className="h-9 w-full rounded-md border border-input bg-transparent px-3 shadow-xs"
+        />
       </label>
-      <button type="submit">Sign in</button>
+      <Button type="submit">Sign in</Button>
     </Form>
   );
 }

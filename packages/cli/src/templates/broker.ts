@@ -232,8 +232,8 @@ export function brokerEnvVariables(spec: BrokerSpec): readonly EnvVariable[] {
     {
       name: connection.variable,
       description:
-        `Where the ${spec.name} transport connects. The local start scripts read this ` +
-        `value; a deployment sets ${connection.variable} in its own environment.`,
+        `${connection.variable} configures the ${spec.name} connection. The local start scripts ` +
+        `read this value; a deployment sets it in its own environment.`,
       develop: connection.localDefault,
     },
   ];
@@ -251,7 +251,10 @@ export function brokerEnvVariables(spec: BrokerSpec): readonly EnvVariable[] {
  * @param spec - The selected transport
  * @returns The block to add under `services:`, or undefined when nothing is missing
  */
-export function missingComposeServices(existing: string, spec: BrokerSpec): string | undefined {
+export function missingComposeServices(
+  existing: string,
+  spec: Pick<BrokerSpec, 'compose'>,
+): string | undefined {
   const block = spec.compose?.services;
   if (block === undefined) return undefined;
   // One entry per service the block declares (a two-space key), so only the absent ones
@@ -288,13 +291,16 @@ export function missingComposeServices(existing: string, spec: BrokerSpec): stri
  * The messaging plugin connects during `register()` and does not retry, so a
  * fresh scaffold cannot complete `app.start()` with nothing listening — the
  * file exists so the flag's promise ("this project talks to redis") is true the
- * first time it boots. Broker services ONLY: the deployable image and the full
- * orchestration story are M39's, and the header says so in its own words.
+ * first time it boots. Local backing services only (brokers, and the Mailpit,
+ * Qdrant and pgvector services `setu add` writes): the deployable image and the
+ * full orchestration story are M39's, and the header says so in its own words.
  *
  * @param specs - The selected transports, in flag order
  * @returns The compose file plus any backing-service config files
  */
-export function brokerComposeFiles(specs: readonly BrokerSpec[]): readonly GeneratedFile[] {
+export function brokerComposeFiles(
+  specs: readonly { readonly name: string; readonly compose?: BrokerSpec['compose'] }[],
+): readonly GeneratedFile[] {
   // One arm can serve both flags (`--broker redis --queue redis`); its service
   // block must appear once, not twice.
   const backing = [
@@ -312,9 +318,10 @@ export function brokerComposeFiles(specs: readonly BrokerSpec[]): readonly Gener
 #
 #   docker compose -f ${BROKER_COMPOSE_FILE} up -d
 #
-# Broker services ONLY: they exist so the transports this project selected can
-# connect at app.start(). The deployable image and the orchestration objects
-# (Kubernetes, the full stack) are separate concerns this file does not own.
+# Local backing services only (brokers, Mailpit, Qdrant, pgvector): they exist so
+# the backends this project selected are listening at app.start(). The deployable
+# image and the orchestration objects (Kubernetes, the full stack) are separate
+# concerns this file does not own.
 services:
 ${backing.map((spec) => (spec.compose?.services ?? '').replace(/\n$/, '')).join('\n')}
 `,
@@ -436,10 +443,14 @@ function armFor(
 }
 
 /**
- * The accepted set for a Redis arm flag, derived from the registry so help text,
- * refusal text and validation cannot drift from the arms that exist.
+ * The accepted set for a transport-backend flag, derived from the registry so
+ * help text, refusal text, validation and the `setu add` prompt cannot drift
+ * from the arms that exist. `memory` comes first: it is the default.
+ *
+ * @param flag - `broker`, `queue`, `store`, `lock` or `backplane`
+ * @returns The accepted values, default first
  */
-function acceptedFor(flag: string): readonly string[] {
+export function armFlagValues(flag: string): readonly string[] {
   if (flag === 'broker') return listBrokers();
   if (flag === 'queue') return listQueues();
   // The store/lock/backplane arms exist only on the Redis transport (and memory,
@@ -484,7 +495,7 @@ export function readArmFlag(
   const raw = args.flags[flag];
   if (raw === undefined) return { ok: true };
 
-  const accepted = acceptedFor(flag);
+  const accepted = armFlagValues(flag);
   if (typeof raw !== 'string') {
     return { ok: false, message: `--${flag} needs a value: ${accepted.join(' | ')}.` };
   }

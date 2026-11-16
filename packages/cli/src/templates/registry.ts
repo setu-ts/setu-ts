@@ -12,6 +12,7 @@
 import type { TargetRuntime, TemplateName } from '../constants.ts';
 import type { SeamArtifacts, SeamSpec } from '../seams/seam-spec.ts';
 import type { GeneratedFile } from '../utils/file-writer.ts';
+import type { ResolvedHost } from './project-files.ts';
 import { FULL_STACK_TEMPLATE } from './full-stack.ts';
 import { MICROSERVICE_TEMPLATE } from './microservice.ts';
 import { CLASS_BASED_TEMPLATE } from './class-based.ts';
@@ -251,7 +252,13 @@ export interface TemplateManifest {
    * scaffold is gated on passing its own `fmt --check`.
    */
   readonly readmeSection?:
-    string | ((invocation: string, runtime: TargetRuntime, member?: boolean) => string);
+    | string
+    | ((
+        invocation: string,
+        runtime: TargetRuntime,
+        member?: boolean,
+        host?: ResolvedHost,
+      ) => string);
   /**
    * npm packages the running application needs, merged into `dependencies`
    * on npm targets and into the Deno target's import map.

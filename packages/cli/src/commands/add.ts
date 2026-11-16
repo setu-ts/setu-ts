@@ -54,13 +54,20 @@ import { isMissingPath } from '../utils/filesystem-errors.ts';
 import { frameworkSpecifier } from '../templates/framework-specifier.ts';
 import { generateSecret } from '../templates/secret.ts';
 import { operatorSecretFiles } from '../workspace/operator-secrets.ts';
-import { BROKER_COMPOSE_FILE, cliInvocation, resolveHost } from '../templates/project-files.ts';
+import {
+  BROKER_COMPOSE_FILE,
+  cliInvocation,
+  LOCAL_TRANSPORT_HEADING,
+  renderLocalTransportSection,
+  resolveHost,
+} from '../templates/project-files.ts';
 import { MINIMAL_HOST } from '../templates/minimal.ts';
 import { envFileDeclaration, isCoveredDotenvName } from '../templates/env-file.ts';
 import type { EnvVariable } from '../templates/registry.ts';
 import {
   brokerComposeFiles,
   brokerEnvVariables,
+  armFlagValues,
   missingComposeServices,
   readArmFlag,
   redisClientRefusal,
@@ -68,19 +75,20 @@ import {
   starterOptionLiteral,
 } from '../templates/broker.ts';
 import {
+  starterArmSet,
   starterOptionValue,
   withStarterOption,
   withStarterArmEntry,
   starterLiteralEntries,
 } from './starter-options.ts';
 import { stringFlag } from '../args.ts';
-import { BRIEF_BEGIN } from '../agents/brief-file.ts';
+import { reportAgentsHint } from '../utils/agents-hint.ts';
 import { detectTargetRuntime, RuntimeMarkerUnreadableError } from '../utils/runtime-detector.ts';
 import { findWorkspaceMarker } from '../utils/project-detector.ts';
 import { readJsonManifest } from '../utils/manifest-reader.ts';
 import { interruptionMessage } from '../utils/interruption.ts';
 import { detectPlugins } from '../utils/plugin-detector.ts';
-import { composingStarter } from '../utils/starter-arms.ts';
+import { composingStarter, GATED_STARTER_ARMS } from '../utils/starter-arms.ts';
 import { repositoryFileUrl, siteUrl } from '../utils/repository-links.ts';
 import { hostSeamSpecs } from '../seams/registry.ts';
 import {
@@ -116,7 +124,9 @@ import {
   brokerSpec,
   renderConnection,
   type RedisClient,
+  type BrokerName,
   type BrokerSpec,
+  type ComposeBacking,
 } from '../workspace/transport.ts';
 import { workspaceProfile } from '../workspace/runtime-profile.ts';
 import { CLIENT_RANGES } from '../templates/client-dependencies.ts';
@@ -127,6 +137,13 @@ import {
   NODE_REDIS_MODULE_PATH,
   nodeRedisModuleFile,
 } from '../templates/node-redis.ts';
+import {
+  VECTOR_STORE_COMPOSE,
+  VECTOR_STORE_CONNECTION,
+  VECTOR_STORE_FACTORY,
+  VECTOR_STORE_MODULE_PATH,
+  vectorStoreModuleFile,
+} from '../templates/vector-store-module.ts';
 import {
   callArguments,
   callsIdentifier,
@@ -331,6 +348,25 @@ export const RUNTIME_RESTRICTIONS: ReadonlyMap<
       reason: 'the scheduler is unavailable on Cloudflare Workers',
     },
   ],
+  // An in-memory cache or store lives in one isolate, so a write one request
+  // makes is missing in the next; CloudflarePlugin serves both capabilities
+  // from KV and R2, and a second provider of either would refuse startup.
+  [
+    'cache-plugin',
+    {
+      runtimes: ['deno', 'node', 'bun'],
+      reason:
+        "its stores live in one isolate's memory or need a Redis socket; on Workers, serve the cache from KV with CloudflarePlugin({ env, cache: { binding: 'CACHE_KV' } }) (setu add cloudflare registers it; wrangler.toml's commented KV block declares the binding)",
+    },
+  ],
+  [
+    'storage-plugin',
+    {
+      runtimes: ['deno', 'node', 'bun'],
+      reason:
+        "its default store lives in one isolate's memory; on Workers, serve storage from R2 with CloudflarePlugin({ env, storage: { binding: 'UPLOADS' } }) (setu add cloudflare registers it; wrangler.toml's commented R2 block declares the binding)",
+    },
+  ],
 ]);
 
 /**
@@ -388,6 +424,7 @@ function registrationLine(bare: string): string | undefined {
   const zero = ZERO_CONFIG_WIRINGS.get(bare);
   if (zero !== undefined) return `${zero.symbol}()`;
   if (bare === 'mcp-plugin') return 'McpPlugin({})';
+  if (bare === 'di-plugin') return 'DiPlugin()';
   // `rbac` is what registers the authorization service a generated guard asks;
   // without it every permission check answers 501.
   if (bare === 'auth-plugin') {
@@ -480,6 +517,63 @@ function providerCallArguments(source: string, bare: string, symbol: string): re
 }
 
 /**
+ * The configuration with its one bare `Provider()` call given transport options.
+ *
+ * Only the zero-argument call the CLI itself writes, inside the factory, and only
+ * when it is the binding's one use in the file (comments and imports masked):
+ * then the user's choice of backend is applied rather than printed beside an
+ * unchanged in-memory call. A call that already has arguments is the user's and
+ * stays as it is, with the options printed.
+ *
+ * @param source - The configuration source
+ * @param bare - The plugin package, without the scope
+ * @param args - The transport options to pass
+ * @returns The rewritten source, or `undefined` when the call is not that bare call
+ */
+function withBareCallArguments(source: string, bare: string, args: string): string | undefined {
+  const symbol = ZERO_CONFIG_WIRINGS.get(bare)?.symbol;
+  if (symbol === undefined) return undefined;
+  const binding = providerBinding(source, bare, symbol);
+  const scope = factoryScope(source);
+  if (binding === undefined || scope === undefined) return undefined;
+  const body = scope.code.slice(scope.start, scope.end);
+  const bareCalls = [...body.matchAll(new RegExp(`(?<![\\w$.])${binding}\\(\\s*\\)`, 'g'))];
+  const uses = [
+    ...maskImportDeclarations(maskComments(source) ?? source).matchAll(
+      new RegExp(`(?<![\\w$.])${binding}\\b`, 'g'),
+    ),
+  ];
+  if (bareCalls.length !== 1 || uses.length !== 1) return undefined;
+  const at = scope.start + bareCalls[0]!.index;
+  return `${source.slice(0, at)}${binding}(${args})${source.slice(at + bareCalls[0]![0].length)}`;
+}
+
+/**
+ * Gives the CLI's own bare provider call the selected options together with the
+ * generated artifacts it consumes (the jobs barrel's `processors`, say), and
+ * imports that barrel, so a rewrite never drops the wiring a fresh insert has.
+ *
+ * @param source - Existing `setu.config.ts` contents
+ * @param bare - Bare package name being added
+ * @param seam - The combined options and barrel imports
+ * @returns The updated config, or `undefined` when the call or the imports
+ *   cannot be edited safely, which leaves the printed guidance
+ */
+function withBareCallSeam(source: string, bare: string, seam: AddSeam): string | undefined {
+  const plan = barrelImportPlan(source, seam.imports, true);
+  if (plan === undefined) return undefined;
+  const rewritten = withBareCallArguments(source, bare, seam.args);
+  if (rewritten === undefined) return undefined;
+  // The rewrite inserted the options inside the call's parentheses. A top-level
+  // import may follow createApp, so the planned position can lie after the call:
+  // it then moves by the inserted length.
+  let changed = 0;
+  while (changed < source.length && source[changed] === rewritten[changed]) changed++;
+  const at = plan.at > changed ? plan.at + rewritten.length - source.length : plan.at;
+  return `${rewritten.slice(0, at)}${plan.text}${rewritten.slice(at)}`;
+}
+
+/**
  * Whether a configuration imports the node-redis helper, in either quote style;
  * comments are masked so a commented-out import does not count.
  *
@@ -553,10 +647,15 @@ function printWiringNote(
   seam?: AddSeam,
   transportArgs?: string,
 ): void {
-  if (bare === 'mcp-plugin')
+  if (bare === 'mcp-plugin') {
     log(
       '  The app boots with it only once at least one route is marked with mcpTool() or @McpTool().',
     );
+    // McpPlugin refuses a marked route without declared security intent at startup.
+    log(
+      '  Each marked route also needs a security guard (publicRoute() or requireAuth() from @setu-ts/auth-plugin, or @Public()) or schema.security.',
+    );
+  }
   const starter = source === undefined ? undefined : composingStarter(source);
   if (starter !== undefined) {
     const arm = starter.arms.get(bare);
@@ -592,6 +691,36 @@ function printWiringNote(
           log(`  Import ${item.symbols.join(', ')} from '${item.from}' for it.`);
         }
       }
+      // A gated arm passes its value straight to the plugin's factory, so the
+      // registration printed elsewhere gives the arm's shape. Full-stack's auth arm
+      // gets the password sign-in recipe below instead.
+      const fullStack = starter.pkg === 'full-stack-starter';
+      const line =
+        seam === undefined && GATED_STARTER_ARMS.has(bare) && !(bare === 'auth-plugin' && fullStack)
+          ? registrationLine(bare)
+          : undefined;
+      if (line !== undefined) {
+        // `static` is a full-stack arm only, where React Router already serves GET /*.
+        const value =
+          bare === 'static-plugin'
+            ? "{ root: '<public-directory>', urlPrefix: '/files' }"
+            : line.slice(line.indexOf('(') + 1, -1).trim() || '{}';
+        const [parent, child] = arm.split('.');
+        // A second realtime arm goes inside the existing `realtime` object: a
+        // second `realtime:` property would be a duplicate key.
+        log(
+          child === undefined
+            ? `  Its arm: ${arm}: ${value}`
+            : source !== undefined && starterArmSet(source, parent!) === true
+              ? `  Inside its existing ${parent} arm, add: ${child}: ${value}`
+              : `  Its arm: ${parent}: { ${child}: ${value} }`,
+        );
+      }
+      if (bare === 'static-plugin') {
+        log(
+          '  The urlPrefix is required here: React Router already serves GET /*, and a root prefix would claim it too (static-plugin README: "A root urlPrefix claims the bare wildcard").',
+        );
+      }
       log(`  See ${repositoryFileUrl(`packages/starters/${starter.pkg}/README.md`)}`);
       // X89-3: the full-stack template's own login writes `userEmail`, so a
       // password-only sign-in needs the recipe, not the starter README.
@@ -600,6 +729,12 @@ function printWiringNote(
           `  The full-stack password sign-in recipe: ${siteUrl(
             'packages/auth-plugin/#in-the-full-stack-template',
           )}`,
+        );
+        log(
+          '  Its arm: auth: { signIn: { providers: [] }, local: { verify: (email, password, request) => <your credential check> } }',
+        );
+        log(
+          '  JWT_SECRET (written to the dotenv file) is read only when the arm also configures jwt; that recipe does not.',
         );
       }
       log(
@@ -652,10 +787,35 @@ function printWiringNote(
             `  Register ${call} where config is in scope; do not put it after the factory.`
           : `  Register it after the factory returns: app.register(${call});`,
     );
+    for (const line of registrationImports(call, bare)) log(line);
     for (const item of seam?.imports ?? []) {
       log(`  Import ${item.symbols.join(', ')} from '${item.from}' for it.`);
     }
   }
+}
+
+/**
+ * The import lines a printed registration needs: its plugin call and every
+ * `new X(...)` class from the plugin's package, and the vector-store factory
+ * from the module `setu add vector-store` wrote. Named, because a symbol such as
+ * `MemoryVectorStore` or `QdrantVectorStore` is not named after its package.
+ *
+ * @param call - The printed call expression
+ * @param bare - The plugin package, without the scope
+ * @returns The import guidance lines
+ */
+function registrationImports(call: string, bare: string): readonly string[] {
+  const head = /^([A-Z][\w$]*)\(/.exec(call)?.[1];
+  const classes = [...call.matchAll(/\bnew ([A-Z][\w$]*)\(/g)].map((match) => match[1]!);
+  const symbols = [...new Set([...(head === undefined ? [] : [head]), ...classes])].sort();
+  return [
+    ...(symbols.length === 0
+      ? []
+      : [`  Import { ${symbols.join(', ')} } from '@setu-ts/${bare}' for it.`]),
+    ...(call.includes(`${VECTOR_STORE_FACTORY}(`)
+      ? [`  Import { ${VECTOR_STORE_FACTORY} } from './${VECTOR_STORE_MODULE_PATH}' for it.`]
+      : []),
+  ];
 }
 
 /**
@@ -1191,6 +1351,53 @@ export function withPluginWiring(
   return withRegistration(source, bare, seam, args);
 }
 
+/** The options the Workers factory passes CloudflarePlugin: its env and platform sink. */
+const CLOUDFLARE_ARGS = '{ env, ...(waitUntil ? { waitUntil } : {}) }';
+
+/**
+ * Registers CloudflarePlugin in a generated Workers config and renames the
+ * factory's unread `_waitUntil` parameter to the `waitUntil` the call reads.
+ *
+ * Both happen or neither does: the rename alone would leave `waitUntil` unread,
+ * which the project's lint refuses, and the call alone reads a name the factory
+ * does not declare. So `createApp` must take `env` first and declare the
+ * parameter once, as `_waitUntil?:` or already as `waitUntil?:`, with no other
+ * `waitUntil` or `_waitUntil` in the code. A project scaffolded before 0.10.0,
+ * with no such parameter, and a starter-composed config get the printed
+ * guidance instead.
+ *
+ * @param source - Existing `setu.config.ts` contents
+ * @returns The updated config, or `undefined` when the shape is not certain
+ */
+export function withCloudflareWiring(source: string): string | undefined {
+  const scope = factoryScope(source);
+  if (scope === undefined) return undefined;
+  const { code } = scope;
+  const names = [...code.matchAll(/(?<![\w$.])_?waitUntil(?![\w$])/g)];
+  if (names.length !== 1 || !/^\?\s*:/.test(code.slice(names[0]!.index + names[0]![0].length)))
+    return undefined;
+  const at = names[0]!.index;
+  // `createApp`'s own parameter list, which must also declare the `env` the call reads.
+  const parameters = code.slice(scope.header, scope.start);
+  if (
+    at < scope.header ||
+    at >= scope.start ||
+    !/^export function createApp\s*\(\s*env(?![\w$])/.test(parameters)
+  )
+    return undefined;
+  if (names[0]![0] === 'waitUntil')
+    return withRegistration(source, 'cloudflare-plugin', undefined, CLOUDFLARE_ARGS);
+  // The factory's JSDoc names the parameter too; its tag follows the rename.
+  const renamed = `${source.slice(0, at)}${source.slice(at + 1)}`;
+  const tags = renamed.split('@param _waitUntil ');
+  return withRegistration(
+    tags.length === 2 ? tags.join('@param waitUntil ') : renamed,
+    'cloudflare-plugin',
+    undefined,
+    CLOUDFLARE_ARGS,
+  );
+}
+
 /** Inserts a zero-config provider above the full-stack generated-plugin loop. */
 export function withFactoryRegistration(
   source: string,
@@ -1209,12 +1416,20 @@ function withRegistration(
 ): string | undefined {
   const provider =
     ZERO_CONFIG_WIRINGS.get(bare) ??
-    (bare === 'static-plugin' && args !== undefined ? { symbol: 'StaticPlugin' } : undefined);
+    (bare === 'static-plugin' && args !== undefined ? { symbol: 'StaticPlugin' } : undefined) ??
+    (bare === 'cloudflare-plugin' && args !== undefined
+      ? { symbol: 'CloudflarePlugin' }
+      : undefined);
   if (provider === undefined) return undefined;
 
+  // The Workers template has no devtool spread (it has no devtool), so its plugin
+  // list ends at the generated plugins; the call goes in before them there.
+  const workersList = !factoryMode && !source.includes('...(devtool?.plugins ?? [])');
   const anchor = factoryMode
     ? 'for (const generated of GENERATED_PLUGINS) app.register(generated);'
-    : '...(devtool?.plugins ?? [])';
+    : workersList
+      ? '...GENERATED_PLUGINS'
+      : '...(devtool?.plugins ?? [])';
   // The full-stack scaffold is async. Preserve offsets while presenting its
   // explicit Promise annotation to the existing strict factory recognizer.
   const scope = factoryScope(
@@ -1236,7 +1451,9 @@ function withRegistration(
           ...code.matchAll(
             factoryMode
               ? /for \(const generated of GENERATED_PLUGINS\) app\.register\(generated\);/g
-              : /\.\.\.\(devtool\?\.plugins \?\? \[\]\)(?=[ \t]*(?:,|\]))/g,
+              : workersList
+                ? /\.\.\.GENERATED_PLUGINS(?=[ \t]*(?:,|\]))/g
+                : /\.\.\.\(devtool\?\.plugins \?\? \[\]\)(?=[ \t]*(?:,|\]))/g,
           ),
         ];
   const anchorMatch = anchors.length === 1 ? anchors[0]! : null;
@@ -1670,9 +1887,162 @@ export const BACKEND_PEERS: Readonly<
   },
 };
 
-function backendRegistration(bare: string, arm: string): string | undefined {
-  if (bare === 'mail-plugin' && arm !== 'log')
-    return `MailPlugin({ provider: '${arm}', options: {} })`;
+/**
+ * The environment variables each mail provider's printed options read, with the
+ * local value `setu add mail` writes.
+ *
+ * SMTP without a host sends to localhost, and SendGrid refuses every send
+ * without an API key (mail-plugin's providers). SES needs none: with `{}` the
+ * AWS SDK resolves `AWS_REGION` and credentials from its own default chain, and
+ * an empty `AWS_REGION=` written here would only shadow that.
+ */
+const MAIL_ENV: Readonly<Record<string, readonly EnvVariable[]>> = {
+  smtp: [
+    {
+      name: 'SMTP_HOST',
+      develop: 'localhost',
+      description: 'SMTP_HOST is the server MailPlugin sends through.',
+    },
+    {
+      name: 'SMTP_PORT',
+      develop: '1025',
+      description:
+        'SMTP_PORT is that server port: 1025 for the local Mailpit; 587 (STARTTLS) or 465 (secure: true) for a real server.',
+    },
+  ],
+  sendgrid: [
+    {
+      name: 'SENDGRID_API_KEY',
+      develop: '',
+      description:
+        'SENDGRID_API_KEY is required: the SendGrid provider refuses every send without it.',
+    },
+  ],
+};
+
+/**
+ * The local SMTP catcher `setu add mail --provider smtp` puts in Compose: mail
+ * the app sends locally lands in Mailpit's inbox (port 8025) instead of failing,
+ * so the `mail` health indicator and the generated `/health` test stay up.
+ */
+const MAILPIT_BACKING: { readonly name: string; readonly compose: ComposeBacking } = {
+  name: 'mailpit',
+  compose: {
+    services: `  mailpit:
+    image: axllent/mailpit:v1.27
+    ports:
+      - '\${SMTP_PORT:-1025}:1025'
+      - '\${MAILPIT_UI_PORT:-8025}:8025'
+`,
+    dependsOn: ['mailpit'],
+    condition: 'service_started',
+    memberEnv: { SMTP_HOST: 'mailpit', SMTP_PORT: '1025' },
+  },
+};
+
+/**
+ * Plans the README section `setu new --broker` writes about the local Compose
+ * services, before `## Run`: without it a fresh clone's `start:dev` meets a
+ * backend nothing told the developer to start. Extends a README edit already
+ * planned this run, and leaves a README that has the section alone.
+ *
+ * @param lead - The section's opening sentence, when not the transport one
+ * @returns `false` after reporting an unreadable README, otherwise `true`
+ */
+async function planLocalServicesReadme(
+  deps: AddCommandDependencies,
+  dir: string,
+  edits: { path: string; contents: string; secret?: boolean }[],
+  lead?: string,
+): Promise<boolean> {
+  const readmePath = joinPath(dir, 'README.md');
+  const readme = await readProjectText(deps, readmePath, 'README.md');
+  if (readme === null) return false;
+  const pending = edits.find((edit) => edit.path === readmePath);
+  const base = pending?.contents ?? readme;
+  if (base === undefined || base.includes(`\n${LOCAL_TRANSPORT_HEADING}\n`)) return true;
+  const section = renderLocalTransportSection('', lead);
+  const at = base.indexOf('\n## Run\n');
+  if (at < 0) {
+    deps.log(`  README.md has no "## Run" section; add this one before it:${section}`);
+    return true;
+  }
+  const contents = `${base.slice(0, at + 1)}${section.slice(1)}\n${base.slice(at + 1)}`;
+  if (pending === undefined) edits.push({ path: readmePath, contents });
+  else edits.splice(edits.indexOf(pending), 1, { path: readmePath, contents });
+  deps.log(`  README.md gains the ${LOCAL_TRANSPORT_HEADING.slice(3)} section.`);
+  return true;
+}
+
+/** The README lead for services the app checks rather than a transport it connects at registration. */
+const BACKING_SERVICES_LEAD =
+  'Start these before the application: `/health` reports each one down until it is listening, and a plugin that connects at startup fails `start` without its service.';
+
+/**
+ * Plans a local backing service in `docker/compose.yaml`: creates the file when
+ * it is absent, otherwise prints the block an existing file lacks (the file is
+ * create-only, as for the broker arms), and prints how to start it.
+ *
+ * @returns `false` after reporting an unreadable Compose file, otherwise `true`
+ */
+async function planComposeService(
+  deps: AddCommandDependencies,
+  dir: string,
+  edits: { path: string; contents: string; secret?: boolean }[],
+  createOnlyPaths: Set<string>,
+  backing: { readonly name: string; readonly compose: ComposeBacking },
+  sentence: string,
+): Promise<boolean> {
+  const start = `docker compose -f ${BROKER_COMPOSE_FILE} up -d ${backing.compose.dependsOn.join(' ')}`;
+  const composePath = joinPath(dir, BROKER_COMPOSE_FILE);
+  const pending = edits.find((edit) => edit.path === composePath);
+  const existing =
+    pending?.contents ?? (await readProjectText(deps, composePath, BROKER_COMPOSE_FILE));
+  if (existing === null) return false;
+  if (!(await planLocalServicesReadme(deps, dir, edits, BACKING_SERVICES_LEAD))) return false;
+  if (existing === undefined) {
+    for (const file of brokerComposeFiles([backing])) {
+      const path = joinPath(dir, file.path);
+      createOnlyPaths.add(path);
+      edits.push({ path, contents: file.contents });
+    }
+    deps.log(`  ${sentence} Start it: ${start}`);
+    return true;
+  }
+  const missing = missingComposeServices(existing, backing);
+  if (missing === undefined) {
+    deps.log(`  ${sentence} Start it: ${start}`);
+    return true;
+  }
+  deps.log(
+    `  ${BROKER_COMPOSE_FILE} exists and has no ${backing.name} service; add this under services: and keep the rest:`,
+  );
+  for (const line of missing.split('\n')) deps.log(line);
+  deps.log(`  ${sentence} After adding that service, start it: ${start}`);
+  return true;
+}
+
+/** One environment read on one line, for a printed registration. */
+function inlineEnvRead(runtime: TargetRuntime, variable: string, fallback: string): string {
+  return workspaceProfile(runtime)
+    .envRead(variable, fallback)
+    .replace(/\s*\n\s*/g, ' ');
+}
+
+function backendRegistration(
+  bare: string,
+  arm: string,
+  runtime: TargetRuntime,
+): string | undefined {
+  if (bare === 'mail-plugin' && arm !== 'log') {
+    const options =
+      arm === 'smtp'
+        ? `{ host: ${inlineEnvRead(runtime, 'SMTP_HOST', 'localhost')}, port: Number(${inlineEnvRead(runtime, 'SMTP_PORT', '1025')}) }`
+        : arm === 'sendgrid'
+          ? `{ apiKey: ${inlineEnvRead(runtime, 'SENDGRID_API_KEY', '')} }`
+          : '{}';
+    return `MailPlugin({ provider: '${arm}', options: ${options} })`;
+  }
   if (bare === 'database-plugin') {
     const options: Readonly<Record<string, string>> = {
       drizzle: '{ drizzleInstance, drizzleTables }',
@@ -1685,7 +2055,7 @@ function backendRegistration(bare: string, arm: string): string | undefined {
     if (options[arm]) return `DatabasePlugin({ type: '${arm}', options: ${options[arm]} })`;
   }
   if (bare === 'vector-store-plugin' && arm !== 'memory')
-    return `VectorStorePlugin({ adapter: new ${arm === 'pgvector' ? 'PgVectorStore({ db })' : 'QdrantVectorStore({ client })'}, collections: [{ name: 'documents', dimensions: 768 }] })`;
+    return `VectorStorePlugin({ adapter: ${VECTOR_STORE_FACTORY}(), collections: [{ name: 'documents', dimensions: 768 }] })`;
   return undefined;
 }
 
@@ -1693,10 +2063,17 @@ function backendRegistration(bare: string, arm: string): string | undefined {
  * The registration line for a chosen backend: the starter's own option when a
  * composing starter owns the plugin, otherwise the plugin call.
  */
-function backendGuidance(line: string, config: string | undefined, bare: string): string {
+function backendGuidance(
+  line: string,
+  config: string | undefined,
+  bare: string,
+): readonly string[] {
   const owner = config === undefined ? undefined : composingStarter(config)?.arms.get(bare);
   const value = line.slice(line.indexOf('(') + 1, -1);
-  return `  In setu.config.ts: ${owner === undefined ? line : `${owner}: ${value}`}`;
+  const imports = registrationImports(owner === undefined ? line : value, bare).filter(
+    (entry) => owner === undefined || !entry.includes(`'@setu-ts/${bare}'`),
+  );
+  return [`  In setu.config.ts: ${owner === undefined ? line : `${owner}: ${value}`}`, ...imports];
 }
 
 /**
@@ -1712,10 +2089,227 @@ const DRIZZLE_DIALECTS: Readonly<Record<string, readonly string[]>> = {
   sqlite: ['@libsql/client'],
 };
 
+/** How guidance names each connected backend. */
+const BROKER_LABELS: Readonly<Record<BrokerName, string>> = {
+  memory: 'memory',
+  redis: 'Redis',
+  rabbitmq: 'RabbitMQ',
+  nats: 'NATS',
+  kafka: 'Kafka',
+  pubsub: 'the Pub/Sub emulator',
+  'service-bus': 'the Service Bus emulator',
+};
+
+/** One `setu add` option that selects one of several values. */
+interface AddChoice {
+  /** The flag, without dashes. */
+  readonly flag: string;
+  /** The packages it applies to. */
+  readonly packages: readonly string[];
+  /** The accepted values, default first. */
+  readonly values: () => readonly string[];
+  /**
+   * A transport backend: refused inside a workspace member (members share the
+   * workspace broker) and on Cloudflare Workers, so neither is asked.
+   */
+  readonly standaloneOnly?: boolean;
+  /** Asked only once another choice has this value. */
+  readonly after?: { readonly flag: string; readonly value: string };
+  /** On Cloudflare Workers only the default applies (the others are refused), so it is not asked. */
+  readonly defaultOnWorkers?: boolean;
+  /** What the help text says it selects, when not the package names. */
+  readonly subject?: string;
+}
+
+/**
+ * Every `setu add` option with more than one value, in the order a terminal asks.
+ *
+ * One table for the prompt and the help text. Validation stays with each flag's
+ * own reader ({@linkcode BACKEND_PEERS}, {@linkcode DRIZZLE_DIALECTS},
+ * `readArmFlag`), and the values come from the same sources, so a prompt can
+ * only offer what the command then accepts.
+ */
+export const ADD_CHOICES: readonly AddChoice[] = [
+  ...Object.entries(BACKEND_PEERS).map(([pkg, backend]) => ({
+    flag: backend.flag,
+    packages: [pkg],
+    values: () => Object.keys(backend.arms),
+    ...(pkg === 'vector-store-plugin' ? { defaultOnWorkers: true } : {}),
+  })),
+  {
+    flag: 'dialect',
+    packages: ['database-plugin'],
+    values: () => Object.keys(DRIZZLE_DIALECTS),
+    after: { flag: 'type', value: 'drizzle' },
+    subject: 'Drizzle schema tooling',
+  },
+  ...(
+    [
+      ['broker', ['messaging-plugin']],
+      ['queue', ['queue-plugin']],
+      ['store', ['cache-plugin', 'idempotency-plugin']],
+      ['lock', ['scheduler-plugin']],
+      ['backplane', ['realtime-backplane-plugin']],
+    ] as const
+  ).map(([flag, packages]) => ({
+    flag,
+    packages,
+    values: () => armFlagValues(flag),
+    standaloneOnly: true,
+  })),
+];
+
+/** The flags one package's request carries: package-specific flags only where they apply. */
+function flagsFor(
+  flags: Readonly<Record<string, string | boolean | readonly string[]>>,
+  bare: string,
+): Record<string, string | boolean | readonly string[]> {
+  return Object.fromEntries(
+    Object.entries(flags).filter(
+      ([flag]) => ADD_FLAG_PACKAGES[flag] === undefined || ADD_FLAG_PACKAGES[flag]!.includes(bare),
+    ),
+  );
+}
+
+/**
+ * The values a choice can still take, given the flags already set.
+ *
+ * A given flag that only works with one value of another choice narrows it:
+ * `--dialect` needs `--type drizzle`, and `--redis-client` needs every
+ * transport backend to be `redis`. Otherwise every value is offered.
+ */
+function offeredValues(
+  choice: AddChoice,
+  flags: Readonly<Record<string, string | boolean | readonly string[]>>,
+): readonly string[] {
+  const needs = ADD_CHOICES.find(
+    (other) => other.after?.flag === choice.flag && flags[other.flag] !== undefined,
+  );
+  if (needs !== undefined) return [needs.after!.value];
+  if (choice.standaloneOnly === true && flags['redis-client'] !== undefined)
+    return choice.values().filter((value) => value === 'redis');
+  return choice.values();
+}
+
+/**
+ * The choices a terminal may ask, in order.
+ *
+ * A choice asked only after another (`--dialect` after `--type drizzle`) is
+ * included when that value is already given or the earlier question offers it;
+ * whether it is really asked is decided on the answer.
+ */
+function openChoices(
+  flags: Readonly<Record<string, string | boolean | readonly string[]>>,
+  packages: readonly string[],
+  standalone: boolean,
+  workers: boolean,
+): { readonly choice: AddChoice; readonly listed: readonly string[] }[] {
+  const open: { readonly choice: AddChoice; readonly listed: readonly string[] }[] = [];
+  for (const choice of ADD_CHOICES) {
+    if (flags[choice.flag] !== undefined) continue;
+    const listed = packages.filter((pkg) => choice.packages.includes(pkg));
+    if (listed.length === 0) continue;
+    if (choice.standaloneOnly === true && !standalone) continue;
+    if (choice.defaultOnWorkers === true && workers) continue;
+    if (offeredValues(choice, flags).length === 0) continue;
+    const after = choice.after;
+    if (
+      after !== undefined &&
+      flags[after.flag] !== after.value &&
+      !open.some(
+        (earlier) =>
+          earlier.choice.flag === after.flag &&
+          offeredValues(earlier.choice, flags).includes(after.value),
+      )
+    )
+      continue;
+    open.push({ choice, listed });
+  }
+  return open;
+}
+
+/**
+ * Asks, in a terminal, for every choice the selected packages leave open.
+ *
+ * Nothing is asked with `--yes`, without a prompter (no terminal), or for a flag
+ * already given. A transport backend is not asked in a workspace member (members
+ * take the workspace broker) or on Workers (no wiring), and the vector-store
+ * adapter is not asked on Workers, which refuses all but `memory`. A flag several packages
+ * share (`--store`) is asked once, naming each. A given flag that works with only
+ * one value of an open choice narrows what is offered: `--dialect` offers only
+ * `--type drizzle`, and `--redis-client` offers only `redis` backends.
+ *
+ * Before asking, every package is dry-run silently with the flags given plus the
+ * first value each open choice offers. When the command would refuse that,
+ * nothing is asked and the real run reports the refusal, so a question is never
+ * followed by a refusal no answer could avoid.
+ *
+ * @returns The flags with the answers added, or `undefined` when the user cancelled
+ */
+async function askOpenChoices(
+  args: ParsedArgs,
+  deps: AddCommandDependencies,
+  packages: readonly string[],
+): Promise<Record<string, string | boolean | readonly string[]> | undefined> {
+  const flags: Record<string, string | boolean | readonly string[]> = { ...args.flags };
+  const ask = deps.ask;
+  if (ask === undefined || args.flags.yes === true || args.flags.y === true) return flags;
+  const dir = resolveDir(deps.cwd, stringFlag(args.flags, 'dir'));
+  let standalone: boolean;
+  let workers: boolean;
+  try {
+    workers = (await detectTargetRuntime(deps.fs, dir)) === 'cloudflare-workers';
+    standalone = !workers && (await workspaceMemberOf(deps.fs, dir)) === undefined;
+  } catch {
+    // The command reports an unreadable project itself; asking first would only delay that.
+    return flags;
+  }
+  const open = openChoices(flags, packages, standalone, workers);
+  // Nothing to ask: skip the dry run, which would plan every package twice.
+  if (open.length === 0) return flags;
+  // The dry run takes each open choice's first offered value, as Enter would.
+  const tentative = { ...flags };
+  for (const { choice } of open) {
+    if (choice.after !== undefined && tentative[choice.after.flag] !== choice.after.value) continue;
+    tentative[choice.flag] = offeredValues(choice, tentative)[0]!;
+  }
+  const quiet: AddCommandDependencies = { ...deps, log: () => {}, error: () => {} };
+  delete (quiet as { ask?: unknown }).ask;
+  for (const bare of packages) {
+    const preflight = await addOne(
+      { positionals: [bare], flags: { ...flagsFor(tentative, bare), 'dry-run': true } },
+      quiet,
+      false,
+    );
+    if (preflight !== EXIT_OK) return flags;
+  }
+  for (const { choice, listed } of open) {
+    // Judged again on the real answers: `--dialect` is asked only if drizzle was chosen.
+    if (choice.after !== undefined && flags[choice.after.flag] !== choice.after.value) continue;
+    const values = offeredValues(choice, flags);
+    const answer = await ask.select(
+      `Choose the ${choice.flag} for ${listed.join(' and ')}`,
+      values.map((value) => ({ value, label: value })),
+    );
+    if (answer.kind === 'cancelled') return undefined;
+    if (answer.kind === 'answer') flags[choice.flag] = answer.value;
+  }
+  return flags;
+}
+
+/**
+ * The Qdrant client, pinned to the release of the Compose image
+ * (`VECTOR_STORE_COMPOSE.qdrant`): the client warns on every start against a
+ * server more than one minor version away, so an unpinned install drifts out
+ * of range of the image.
+ */
+const QDRANT_CLIENT_SPEC = '@qdrant/js-client-rest@1.20.0';
+
 function appBackendPackages(bare: string, arm: string, dialect = 'postgresql'): readonly string[] {
   if (bare === 'database-plugin' && arm === 'prisma')
     return ['@prisma/client', '@prisma/adapter-pg', 'pg'];
   if (bare === 'database-plugin' && arm === 'drizzle') return DRIZZLE_DIALECTS[dialect] ?? [];
+  if (bare === 'vector-store-plugin' && arm === 'qdrant') return [QDRANT_CLIENT_SPEC];
   return bare === 'vector-store-plugin' && arm === 'pgvector' ? ['pg'] : [];
 }
 
@@ -1789,32 +2383,11 @@ export async function runAddCommand(
       return EXIT_USAGE;
     }
   }
-  const selectedFlags = { ...args.flags };
-  for (const bare of packages) {
-    const backend = BACKEND_PEERS[bare];
-    if (backend === undefined) continue;
-    if (
-      selectedFlags[backend.flag] === undefined &&
-      args.flags.yes !== true &&
-      args.flags.y !== true &&
-      deps.ask !== undefined
-    ) {
-      const answer = await deps.ask.select(
-        `Choose the ${backend.flag} for ${bare}`,
-        Object.keys(backend.arms).map((value) => ({ value, label: value })),
-      );
-      if (answer.kind === 'cancelled') return EXIT_INTERRUPTED;
-      if (answer.kind === 'answer') selectedFlags[backend.flag] = answer.value;
-    }
-  }
+  const selectedFlags = await askOpenChoices(args, deps, packages);
+  if (selectedFlags === undefined) return EXIT_INTERRUPTED;
   const requests = packages.map((bare) => ({
     positionals: [bare],
-    flags: Object.fromEntries(
-      Object.entries(selectedFlags).filter(
-        ([flag]) =>
-          ADD_FLAG_PACKAGES[flag] === undefined || ADD_FLAG_PACKAGES[flag]!.includes(bare),
-      ),
-    ),
+    flags: flagsFor(selectedFlags, bare),
   }));
   if (requests.length === 1) {
     deps.log(`@setu-ts/${packages[0]}:`);
@@ -1920,7 +2493,6 @@ async function addOne(
     );
     return EXIT_USAGE;
   }
-  const backendLine = backendRegistration(bare, backendArm);
   const dir = resolveDir(deps.cwd, stringFlag(args.flags, 'dir'));
   const specifier = `@setu-ts/${bare}`;
 
@@ -1975,6 +2547,17 @@ async function addOne(
     deps.error(`Cannot add ${specifier} to a ${runtime} project: ${restriction.reason}.`);
     return EXIT_USAGE;
   }
+  if (
+    bare === 'vector-store-plugin' &&
+    runtime === 'cloudflare-workers' &&
+    (backendArm === 'qdrant' || backendArm === 'pgvector')
+  ) {
+    deps.error(
+      `--adapter ${backendArm} cannot apply on Cloudflare Workers: the client module this command writes opens a socket connection. ` +
+        "On Workers, pass a Vectorize binding: VectorStorePlugin({ adapter: new VectorizeVectorStore({ index: env.DOCUMENTS_INDEX }), collections: [...] }), with VectorizeVectorStore from '@setu-ts/cloudflare-plugin' (its README's Vectorize section).",
+    );
+    return EXIT_USAGE;
+  }
 
   // Update every manifest that exists. Workers projects carry package.json;
   // Deno projects gate plugins through deno.json imports, with package.json
@@ -2027,6 +2610,27 @@ async function addOne(
         (searchDirs.length > 1
           ? 'generate app <name> --template full-stack.'
           : 'new <name> --template full-stack.'),
+    );
+    return EXIT_ERROR;
+  }
+  // The decorator plugin is what makes a project class-based (`generatorMode`):
+  // installing it into a functional scaffold switches every later `generate`
+  // and `setu check` to class-based rules its functional services and
+  // controllers fail, and nothing registers the DecoratorPlugin they expect.
+  if (
+    bare === 'decorator-plugin' &&
+    initialConfig !== undefined &&
+    /\bregister(?:GeneratedRoutes|Modules)\s*\(/.test(initialConfig) &&
+    !new Set(await detectPlugins(deps.fs, dir)).has('decorator-plugin')
+  ) {
+    deps.error(
+      'This project uses the functional style. Installing @setu-ts/decorator-plugin switches ' +
+        '`generate` and `setu check` to class-based rules, which its functional services and ' +
+        'controllers fail. Start a class-based project instead: ' +
+        `${cliInvocation(runtime)} ` +
+        (searchDirs.length > 1 ? 'generate app' : 'new') +
+        ' <name> --template rest --style class-based (or --template microservice;' +
+        ' full-stack has no class-based variant).',
     );
     return EXIT_ERROR;
   }
@@ -2209,7 +2813,13 @@ async function addOne(
     // Only the manifest the runtime runs scripts from: Workers uses
     // package.json for plugin gating and its npm scripts.
     if (bare === 'sdk' && (target.file === 'package.json') === (runtime !== 'deno')) {
-      updated = withClientScripts(updated ?? source, target.file, runtime, deps.log) ?? updated;
+      const withScripts = withClientScripts(updated ?? source, target.file, runtime, deps.log);
+      if (withScripts !== undefined) {
+        updated = withScripts;
+        deps.log(
+          '  The client script boots the app and writes its typed client to src/clientsdk/api.ts (createApi); client:check fails when that file is stale.',
+        );
+      }
     }
     if (bare === 'database-plugin' && (target.file === 'package.json') === (runtime !== 'deno')) {
       updated = withDatabaseScripts(updated ?? source, backendArm, runtime, deps.log) ?? updated;
@@ -2341,6 +2951,8 @@ async function addOne(
   let configText: string | undefined;
   let configUnreadable = false;
   let configRetargeted = false;
+  // Set when the run gave the CLI's own bare provider call the chosen options.
+  let rewroteBareCall: string | undefined;
   try {
     const config = new TextDecoder().decode(await deps.fs.readFile(configPath));
     configText = config;
@@ -2352,16 +2964,21 @@ async function addOne(
         ? undefined
         : composingStarter(config)?.arms.has(bare) === true
           ? withStarterWiring(config, bare, artifactSeam, transportArgs)
-          : starter
-            ? transportArgs === undefined
-              ? withFactoryRegistration(config, bare)
-              : undefined
-            : withPluginWiring(
-                config,
-                bare,
-                seam,
-                transportArgs === undefined ? undefined : seam?.args,
-              );
+          : bare === 'cloudflare-plugin'
+            ? withCloudflareWiring(config)
+            : starter
+              ? transportArgs === undefined
+                ? withFactoryRegistration(config, bare)
+                : undefined
+              : (withPluginWiring(
+                  config,
+                  bare,
+                  seam,
+                  transportArgs === undefined ? undefined : seam?.args,
+                ) ??
+                (transportArgs === undefined
+                  ? undefined
+                  : (rewroteBareCall = withBareCallSeam(config, bare, seam!))));
     // A member's options come from its transport module, which imports the
     // node-redis helper itself; the config only needs the module's export.
     const viaModule =
@@ -2433,32 +3050,21 @@ async function addOne(
       generated: 'secret',
     };
     const declaration = configText === undefined ? undefined : envFileDeclaration(configText);
-    const envFile =
-      runtime === 'cloudflare-workers'
-        ? '.dev.vars'
-        : declaration?.kind === 'paths'
-          ? declaration.paths[declaration.paths.length - 1]
-          : // A config that declares no dotenv file still runs under a Node or Bun
-            // start script that loads `.env` (`--env-file-if-exists=.env`, Bun's own
-            // `.env`); Deno's start task loads none, so there is no file to write.
-            declaration === undefined || (declaration.kind === 'absent' && runtime !== 'deno')
-            ? '.env'
-            : undefined;
+    const envEdits: GeneratedFile[] = [];
+    const env = await planAddEnvVariable(
+      deps,
+      dir,
+      runtime,
+      configText,
+      envEdits,
+      variable,
+      deps.secret ?? generateSecret,
+    );
+    if (!env.ok) return EXIT_ERROR;
+    const { envFile } = env;
     if (envFile !== undefined) {
-      const value = (deps.secret ?? generateSecret)();
       const existing = await readProjectText(deps, joinPath(dir, envFile), envFile);
       if (existing === null) return EXIT_ERROR;
-      for (const [file, localValue] of [
-        [envFile, value],
-        [`${envFile}.example`, ''],
-      ] as const) {
-        const path = joinPath(dir, file);
-        const text = await readProjectText(deps, path, file);
-        if (text === null) return EXIT_ERROR;
-        const appended = withEnvVariable(text ?? '', [variable], localValue);
-        if (appended !== undefined)
-          edits.push({ path, contents: appended, ...(file === envFile ? { secret: true } : {}) });
-      }
       // The file now holds a usable signing secret, so it is listed in
       // .gitignore exactly as Rails lists `config/master.key`
       // (EncryptionKeyFileGenerator): an exact entry, appended when absent. No
@@ -2494,6 +3100,7 @@ async function addOne(
         edits.push({ path: dockerPath, contents: `${base}${envFile}\n` });
         deps.log(`Added ${escapeName(envFile)} to .dockerignore: images must not copy it.`);
       }
+      edits.push(...envEdits);
     } else {
       deps.log(
         declaration?.kind === 'absent'
@@ -2667,6 +3274,126 @@ async function addOne(
       // Unprefixed: the block is printed at the file's own indentation, ready to paste.
       for (const line of missing.split('\n')) deps.log(line);
     }
+    // After the Compose plan: this run creates the file when it is absent, and an
+    // existing one lacking the service has just been given the block to paste.
+    // Every connected backend, not Redis alone: the app and its generated tests
+    // connect during startup, so a run with the backend down fails on any of them.
+    if (configWired && searchDirs.length === 1) {
+      const label = BROKER_LABELS[selected.name];
+      deps.log(
+        `  The app and generated tests now connect to ${label} at ${variable} during startup.`,
+      );
+      const services = selected.compose?.dependsOn ?? [];
+      if (services.length > 0) {
+        if (!(await planLocalServicesReadme(deps, dir, edits))) return EXIT_ERROR;
+        const start = `docker compose -f ${BROKER_COMPOSE_FILE} up -d ${services.join(' ')}`;
+        deps.log(
+          missing === undefined
+            ? `  Start ${label}: ${start}`
+            : `  After adding that service, start ${label}: ${start}`,
+        );
+      }
+      if (!installedAfter.has('react-router-plugin')) {
+        const factory = ZERO_CONFIG_WIRINGS.get(bare)!.symbol;
+        deps.log(`  import { ${factory} } from '@setu-ts/${bare}';`);
+        deps.log(
+          `  createTestApp({ app: await createApp(), without: ['${bare}'], overrides: [${factory}()] })`,
+        );
+      }
+    }
+  }
+
+  // The variables the printed mail options read, so the pasted call has values to read.
+  if (bare === 'mail-plugin' && runtime !== 'cloudflare-workers') {
+    for (const variable of MAIL_ENV[backendArm] ?? []) {
+      const env = await planAddEnvVariable(
+        deps,
+        dir,
+        runtime,
+        configText,
+        edits,
+        variable,
+        variable.develop ?? '',
+      );
+      if (!env.ok) return EXIT_ERROR;
+    }
+    if (backendArm === 'smtp') {
+      if (
+        !(await planComposeService(
+          deps,
+          dir,
+          edits,
+          createOnlyPaths,
+          MAILPIT_BACKING,
+          'Local mail goes to Mailpit (inbox at http://localhost:8025); the mail health indicator and /health stay up only while it runs.',
+        ))
+      )
+        return EXIT_ERROR;
+      // A full-stack project generates no createTestApp test (the broker path's rule).
+      if (!installedAfter.has('react-router-plugin')) {
+        deps.log('  To keep generated tests offline, replace the provider in them:');
+        deps.log("  import { MailPlugin } from '@setu-ts/mail-plugin';");
+        deps.log(
+          "  createTestApp({ app: await createApp(), without: ['mail-plugin'], overrides: [MailPlugin()] })",
+        );
+      }
+    }
+  }
+
+  // The adapters that need an application-owned client get it in a CLI-written
+  // module, its connection in the dotenv pair, and a local Compose service, so
+  // the printed registration runs as pasted and `setu check` can still read the
+  // configuration (templates/vector-store-module.ts).
+  // Workers takes only the memory adapter from this command, and an isolate's
+  // memory does not outlive it: name the durable index the platform offers.
+  if (bare === 'vector-store-plugin' && runtime === 'cloudflare-workers') {
+    deps.log(
+      "  MemoryVectorStore keeps vectors in one isolate's memory, lost between requests. For a durable index, pass a Vectorize binding: adapter: new VectorizeVectorStore({ index: env.DOCUMENTS_INDEX }), from '@setu-ts/cloudflare-plugin' (its README's Vectorize section).",
+    );
+  }
+  if (bare === 'vector-store-plugin' && (backendArm === 'qdrant' || backendArm === 'pgvector')) {
+    const modulePath = joinPath(dir, VECTOR_STORE_MODULE_PATH);
+    if ((await readExistingText(deps.fs, modulePath)) === undefined) {
+      createOnlyPaths.add(modulePath);
+      edits.push({
+        path: modulePath,
+        contents: vectorStoreModuleFile(backendArm, runtime).contents,
+      });
+      deps.log(
+        `${VECTOR_STORE_MODULE_PATH} builds the ${backendArm} adapter; pass ${VECTOR_STORE_FACTORY}() as the plugin's adapter.`,
+      );
+    } else {
+      deps.log(`left ${VECTOR_STORE_MODULE_PATH} unchanged: already present.`);
+    }
+    const { variable, localDefault } = VECTOR_STORE_CONNECTION[backendArm];
+    const env = await planAddEnvVariable(
+      deps,
+      dir,
+      runtime,
+      configText,
+      edits,
+      {
+        name: variable,
+        develop: localDefault,
+        description:
+          backendArm === 'qdrant'
+            ? `${variable} is the Qdrant URL the vector store connects to.`
+            : `${variable} is the PostgreSQL connection URL the vector store connects to.`,
+      },
+      localDefault,
+    );
+    if (!env.ok) return EXIT_ERROR;
+    if (
+      !(await planComposeService(
+        deps,
+        dir,
+        edits,
+        createOnlyPaths,
+        VECTOR_STORE_COMPOSE[backendArm],
+        `The app connects to ${backendArm === 'qdrant' ? 'Qdrant' : 'PostgreSQL with pgvector'} at ${variable} during startup.`,
+      ))
+    )
+      return EXIT_ERROR;
   }
 
   if (bare === 'database-plugin' && runtime !== 'cloudflare-workers') {
@@ -2681,13 +3408,75 @@ async function addOne(
           })(),
     );
     if (config !== undefined) {
+      const env = await planAddEnvVariable(
+        deps,
+        dir,
+        runtime,
+        configText,
+        edits,
+        {
+          name: 'DATABASE_URL',
+          develop: config.localUrl,
+          description: config.localUrl.startsWith('file:')
+            ? 'DATABASE_URL is a libsql file URL, for example file:./local.db.'
+            : 'DATABASE_URL is a PostgreSQL connection URL: postgresql://user:password@host:port/database.',
+        },
+        config.localUrl,
+      );
+      if (!env.ok) return EXIT_ERROR;
+      if (env.envFile === undefined)
+        deps.log(
+          `Set DATABASE_URL (local default ${config.localUrl}) in the environment that runs db:generate/db:migrate.`,
+        );
+      // A file database lives in the project: never committed, never copied into an image.
+      if (config.localUrl.startsWith('file:')) {
+        const file = config.localUrl.slice('file:'.length).replace(/^\.\//, '');
+        for (const ignore of ['.gitignore', '.dockerignore'] as const)
+          if (
+            !(await planIgnoreEntries(
+              deps,
+              dir,
+              edits,
+              ignore,
+              [file, `${file}-*`],
+              'it is the local SQLite database',
+            ))
+          )
+            return EXIT_ERROR;
+      }
+      // drizzle-kit writes its snapshots with its own JSON layout, which the
+      // project's format check would otherwise reject after the first db:generate.
+      if (
+        backendArm === 'drizzle' &&
+        runtime !== 'deno' &&
+        !(await planIgnoreEntries(
+          deps,
+          dir,
+          edits,
+          '.prettierignore',
+          ['drizzle/'],
+          'drizzle-kit writes the migrations there',
+        ))
+      )
+        return EXIT_ERROR;
       deps.log(
         `Schema migrations expect ${config.schema}; create it using ${repositoryFileUrl(`packages/database-plugin/README.md#${backendArm === 'drizzle' ? 'drizzle-pool-setup' : 'prisma-7-setup'}`)} (${backendArm === 'drizzle' ? 'Drizzle pool setup' : 'Prisma 7 setup'}). Data migrations use setu g migration and src/migrations/run.ts.`,
       );
       const path = joinPath(dir, config.path);
-      if (runtime !== 'deno' && (await readExistingText(deps.fs, path)) === undefined) {
+      const existingConfig = runtime === 'deno' ? undefined : await readExistingText(deps.fs, path);
+      if (runtime !== 'deno' && existingConfig === undefined) {
         createOnlyPaths.add(path);
         edits.push({ path, contents: config.contents });
+      } else if (existingConfig !== undefined) {
+        // Create-only, so a re-add never rewrites it; say so, and say when it
+        // disagrees with this run's dialect, since the install line follows the run.
+        const requested = typeof dialectFlag === 'string' ? dialectFlag : 'postgresql';
+        const existing = /\bdialect:\s*['"]([\w-]+)['"]/.exec(existingConfig)?.[1];
+        deps.log(
+          backendArm === 'drizzle' && existing !== undefined && existing !== requested
+            ? `left ${config.path} unchanged: it uses dialect '${existing}', not '${requested}'. Edit it and DATABASE_URL to switch; until then the ${existing} driver is the one the app needs.`
+            : `left ${config.path} unchanged: already present.`,
+        );
       }
     }
   }
@@ -2786,6 +3575,7 @@ async function addOne(
       'tsconfig.json',
       'setu.config.ts',
       '.gitignore',
+      'README.md',
       'src/views/styles.css',
       'src/views/layout.tsx',
       'src/views/home.tsx',
@@ -2842,7 +3632,11 @@ async function addOne(
     deps.log(`${specifier} is already installed in ${escapeName(dir)}.`);
     for (const line of seamGapLines(configSource, bare, seam)) deps.log(line);
     // A backend chosen for an installed plugin still needs its registration.
-    if (backendLine !== undefined) deps.log(backendGuidance(backendLine, configSource, bare));
+    {
+      const backendLine = backendRegistration(bare, backendArm, runtime);
+      if (backendLine !== undefined)
+        for (const guidance of backendGuidance(backendLine, configSource, bare)) deps.log(guidance);
+    }
     if (bare === 'messaging-plugin' || bare === 'queue-plugin') {
       printWiringNote(configSource, bare, deps.log, seam, transportArgs);
       printNodeRedisImportNote(configSource, transport?.clients ?? [], deps.log);
@@ -2908,16 +3702,22 @@ async function addOne(
   // When this run wrote the transport into setu.config.ts, the guidance would ask
   // for the very option it just wrote (PR #519 review). Any other config edit —
   // a bare plugin insertion — still needs its note.
-  const transportWritten =
-    configWired &&
-    transportArgs !== undefined &&
-    (bare === 'messaging-plugin' || bare === 'queue-plugin');
+  // Any transport plugin whose options this run wrote (scheduler, cache,
+  // idempotency and backplane as well as messaging and queue): its note would
+  // otherwise read the just-written call back as "already passes these options".
+  const transportWritten = configWired && transportArgs !== undefined;
   const wiredArm =
     configWired && configSource !== undefined
       ? composingStarter(configSource)?.arms.get(bare)
       : undefined;
   if (wiredArm !== undefined) deps.log(`wired ${wiredArm} in setu.config.ts`);
-  if (backendLine !== undefined) deps.log(backendGuidance(backendLine, configSource, bare));
+  const backendLine = backendRegistration(bare, backendArm, runtime);
+  if (backendLine !== undefined)
+    for (const guidance of backendGuidance(backendLine, configSource, bare)) deps.log(guidance);
+  else if (rewroteBareCall !== undefined && configWired)
+    deps.log(
+      `  ${ZERO_CONFIG_WIRINGS.get(bare)!.symbol}() in setu.config.ts now takes the selected options.`,
+    );
   else if (
     !transportWritten &&
     wiredArm === undefined &&
@@ -2942,14 +3742,24 @@ async function addOne(
     );
   }
   if (bare === 'cloudflare-plugin') {
-    // M113d §3.8: the generated factory names its second parameter `_waitUntil`
-    // while nothing reads it (a read-free parameter must be underscored to pass
-    // the project's own lint), and a project scaffolded before 0.10.0 has no
-    // such parameter at all. The printed registration reads `waitUntil`, so
-    // both cases are named here rather than detected in the developer's file.
-    deps.log("  In createApp (setu.config.ts), rename the '_waitUntil' parameter to 'waitUntil'.");
-    deps.log('  No such parameter (a project scaffolded before 0.10.0)? Add it as the second');
-    deps.log('  parameter, as docs/upgrading.md describes ("Workers projects: thread waitUntil").');
+    // The generated factory names its second parameter `_waitUntil` while nothing
+    // reads it (an unread parameter must be underscored to pass the project's own
+    // lint). `withCloudflareWiring` renames it as it inserts the call that reads
+    // it; a config it cannot edit, such as one scaffolded before 0.10.0 with no
+    // such parameter, gets both steps as guidance.
+    if (configWired) {
+      deps.log(
+        "  Registered CloudflarePlugin in setu.config.ts; createApp's sink parameter is now 'waitUntil', which the call reads.",
+      );
+    } else {
+      deps.log(
+        "  In createApp (setu.config.ts), rename the '_waitUntil' parameter to 'waitUntil'.",
+      );
+      deps.log('  No such parameter (a project scaffolded before 0.10.0)? Add it as the second');
+      deps.log(
+        '  parameter, as docs/upgrading.md describes ("Workers projects: thread waitUntil").',
+      );
+    }
     deps.log(
       '  To consume a queue or a Cron Trigger, add a `queue` or `scheduled` export to src/index.ts through withApplication — wrangler.toml shows both.',
     );
@@ -3025,6 +3835,87 @@ function listedLast(text: string, entries: readonly string[]): boolean {
 }
 
 /**
+ * Appends entries to one of the project's ignore files, unless each is already listed.
+ *
+ * Exact entries only, as for the signing-secret file above: no pattern is
+ * evaluated. A file the project does not have is left absent rather than
+ * created, except `.gitignore`. An edit already planned for the file this run
+ * is the text extended.
+ *
+ * @returns `false` after reporting an unreadable file, otherwise `true`
+ */
+async function planIgnoreEntries(
+  deps: AddCommandDependencies,
+  dir: string,
+  edits: { path: string; contents: string; secret?: boolean }[],
+  file: '.gitignore' | '.dockerignore' | '.prettierignore',
+  entries: readonly string[],
+  reason: string,
+): Promise<boolean> {
+  const path = joinPath(dir, file);
+  const read = await readProjectText(deps, path, file);
+  if (read === null) return false;
+  const pending = edits.find((edit) => edit.path === path);
+  const current = pending?.contents ?? read;
+  if (current === undefined && file !== '.gitignore') return true;
+  const missing = entries.filter((entry) => !listedLast(current ?? '', [entry, `/${entry}`]));
+  if (missing.length === 0) return true;
+  const base =
+    current === undefined || current === '' || current.endsWith('\n')
+      ? (current ?? '')
+      : `${current}\n`;
+  const contents = `${base}${missing.join('\n')}\n`;
+  if (pending === undefined) edits.push({ path, contents });
+  else edits.splice(edits.indexOf(pending), 1, { path, contents });
+  deps.log(`Added ${missing.join(', ')} to ${file}: ${reason}.`);
+  return true;
+}
+
+/** Plans the local/example pair through the same dotenv resolution for every add arm. */
+async function planAddEnvVariable(
+  deps: AddCommandDependencies,
+  dir: string,
+  runtime: TargetRuntime,
+  config: string | undefined,
+  edits: GeneratedFile[],
+  variable: EnvVariable,
+  value: string | (() => string),
+): Promise<{ readonly ok: true; readonly envFile?: string } | { readonly ok: false }> {
+  const declaration = config === undefined ? undefined : envFileDeclaration(config);
+  const envFile =
+    runtime === 'cloudflare-workers'
+      ? '.dev.vars'
+      : declaration?.kind === 'paths'
+        ? declaration.paths.at(-1)
+        : declaration === undefined || (declaration.kind === 'absent' && runtime !== 'deno')
+          ? '.env'
+          : undefined;
+  if (envFile === undefined) return { ok: true };
+  const local = typeof value === 'function' ? value() : value;
+  for (const [file, localValue] of [
+    [envFile, local],
+    [`${envFile}.example`, ''],
+  ] as const) {
+    const path = joinPath(dir, file);
+    const text = await readProjectText(deps, path, file);
+    if (text === null) return { ok: false };
+    // An edit this run already planned for the file is the text to extend, so a
+    // second variable (SMTP_PORT after SMTP_HOST) does not replace the first.
+    const pending = edits.findIndex((edit) => edit.path === path);
+    const base = pending >= 0 ? edits[pending]!.contents : (text ?? '');
+    const contents = withEnvVariable(base, [variable], localValue);
+    // The local file holds the value, so it is created owner-only (M140c);
+    // the committed example is not.
+    if (contents !== undefined) {
+      const edit = { path, contents, ...(file === envFile ? { secret: true } : {}) };
+      if (pending >= 0) edits.splice(pending, 1, edit);
+      else edits.push(edit);
+    }
+  }
+  return { ok: true, envFile };
+}
+
+/**
  * An existing project file's text, `undefined` when it is absent, or `null` after
  * reporting why it cannot be used (unreadable, not UTF-8, over 1 MiB), so the
  * command fails with its error code before anything is written.
@@ -3039,21 +3930,6 @@ async function readProjectText(
   } catch (cause) {
     deps.error(`Cannot read ${escapeName(name)}: ${escapeName(String(cause))}`);
     return null;
-  }
-}
-
-/** An add is successful even when its advisory brief reminder cannot be read. */
-async function reportAgentsHint(
-  deps: AddCommandDependencies,
-  dir: string,
-  runtime: TargetRuntime,
-): Promise<void> {
-  try {
-    const brief = await readExistingText(deps.fs, joinPath(dir, 'AGENTS.md'));
-    if (brief?.includes(BRIEF_BEGIN) === true)
-      deps.log(`Run \`${cliInvocation(runtime)} agents\` to update AGENTS.md.`);
-  } catch (cause) {
-    deps.error(`Cannot inspect AGENTS.md: ${escapeName(String(cause))}`);
   }
 }
 
@@ -3166,13 +4042,19 @@ function printAddHelp(log: (message: string) => void): void {
   log(
     '--plugin-only installs view without examples (the full-stack default); incompatible with --module.',
   );
-  log(
-    '--provider log|smtp|ses|sendgrid selects mail; --type memory|drizzle|prisma|mongodb|dynamodb|cosmos|bigtable selects database.',
-  );
-  log(
-    '--adapter memory|pgvector|qdrant selects vector-store; --dialect postgresql|sqlite selects Drizzle schema tooling.',
-  );
-  log('--yes, -y takes backend defaults without prompting.');
+  // Generated from the table the prompt reads, so the two cannot list different values.
+  for (const choice of ADD_CHOICES) {
+    const targets =
+      choice.subject ?? choice.packages.map((pkg) => pkg.replace(/-plugin$/, '')).join(' and ');
+    const after =
+      choice.after === undefined ? '' : ` (with --${choice.after.flag} ${choice.after.value})`;
+    log(`--${choice.flag} ${choice.values().join('|')} selects ${targets}${after}.`);
+  }
+  log('In a terminal, each of these that is left out is asked, default first; a workspace member');
+  log('and a Workers project are not asked for a transport backend, nor Workers for the');
+  log('vector-store adapter (only memory applies there). A given --dialect offers only');
+  log('--type drizzle, and a given --redis-client only redis backends. Nothing is asked when the');
+  log('flags given would be refused. --yes, -y takes every default without prompting.');
   log('');
   log('Adds a Setu-TS package to this project, pinned to the version of the CLI');
   log("that added it — so a project's framework packages stay on one version.");

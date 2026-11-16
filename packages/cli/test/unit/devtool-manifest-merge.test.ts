@@ -105,7 +105,7 @@ describe('the devtool manifest merge', () => {
         start: 'node dist/main.js',
         check: 'my-check',
         custom: 'mine',
-        dev: 'tsx main.dev.ts',
+        dev: 'tsx --import ./instrumentation.mjs --env-file-if-exists=.env main.dev.ts',
       });
       expect(manifest.devDependencies).toEqual({
         tsx: '^4.20.0',

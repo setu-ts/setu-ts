@@ -1,10 +1,11 @@
-import { ZERO_CONFIG_WIRINGS } from '../utils/plugin-wirings.ts';
+import { CONFIGURED_PROVIDERS, ZERO_CONFIG_WIRINGS } from '../utils/plugin-wirings.ts';
 /** Three-outcome config wiring inspection shared by the command renderers. @module */
 import { maskComments, maskSourceCode } from '../devtool/sources.ts';
 import { referenceMask } from './reference-mask.ts';
 import { hostSeamSpecs, scanSeamSpecs } from '../seams/registry.ts';
 import { decoratorKeyFor, decoratorExportFor } from '../templates/seam.ts';
-import { composingStarter } from '../utils/starter-arms.ts';
+import { starterArmSet } from '../commands/starter-options.ts';
+import { composingStarter, GATED_STARTER_ARMS } from '../utils/starter-arms.ts';
 import type { Finding } from './diagnose.ts';
 import { withoutImports } from './modules.ts';
 
@@ -127,7 +128,10 @@ export function importedCallNames(config: string, pkg: string, symbol: string): 
 }
 
 /**
- * Finds installed zero-config providers absent from this config's calls.
+ * Finds installed providers absent from this config's calls: every zero-config
+ * provider, plus every provider `setu add` prints a registration for because it
+ * needs options (`CONFIGURED_PROVIDERS`), which an installed package left
+ * unregistered is just as likely to be.
  * Registration elsewhere can be silenced by id in the project's check config.
  * @since 0.13.0
  */
@@ -136,9 +140,18 @@ export function unregisteredPluginFindings(
   installed: ReadonlySet<string>,
 ): Finding[] {
   const starter = composingStarter(config);
-  const candidates = new Map([...ZERO_CONFIG_WIRINGS, ['mcp-plugin', { symbol: 'McpPlugin' }]]);
+  const candidates = new Map([...ZERO_CONFIG_WIRINGS, ...CONFIGURED_PROVIDERS]);
   const findings: Finding[] = [];
+  // A workspace member's CLI-owned transport module registers `GrpcPlugin`, and
+  // the config reaches it only through `...transportPlugins()` (M138).
+  const transportModule = calledOutsideImports(config, 'transportPlugins') === true;
+  // A Workers config's createApp takes `waitUntil` (or `_waitUntil`); there the
+  // cache and store come from CloudflarePlugin's KV and R2 arms, never an
+  // in-memory CachePlugin or StoragePlugin, which `setu add` refuses there.
+  const workers = /\b_?waitUntil\??\s*:/.test(maskComments(config) ?? config);
   for (const [pkg, { symbol }] of candidates) {
+    if (pkg === 'grpc-plugin' && transportModule) continue;
+    if (workers && (pkg === 'cache-plugin' || pkg === 'storage-plugin')) continue;
     if (
       installed.has(pkg) &&
       !starter?.arms.has(pkg) &&
@@ -148,6 +161,26 @@ export function unregisteredPluginFindings(
     ) {
       findings.push({ kind: 'plugin-unregistered', pkg, symbol });
     }
+  }
+  // A starter registers its gated arms only when they are set, so an installed
+  // package whose arm is absent is as unregistered as an inline one with no call.
+  // `auth-plugin` stays exempt here too: its quota helpers work without the plugin.
+  for (const [pkg, arm] of starter?.arms ?? []) {
+    const symbol = GATED_STARTER_ARMS.get(pkg);
+    if (symbol === undefined || pkg === 'auth-plugin' || !installed.has(pkg)) continue;
+    if (starterArmSet(config, arm) !== false) continue;
+    if (
+      importedCallNames(config, pkg, symbol).some(
+        (name) => calledOutsideImports(config, name) !== false,
+      )
+    )
+      continue;
+    findings.push({
+      kind: 'plugin-unregistered',
+      pkg,
+      symbol,
+      starterArm: { arm, starter: starter!.symbol },
+    });
   }
   return findings;
 }

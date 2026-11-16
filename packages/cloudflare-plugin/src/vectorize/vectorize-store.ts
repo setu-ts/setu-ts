@@ -265,6 +265,16 @@ export class VectorizeVectorStore implements IVectorStoreAdapter {
     );
   }
 
+  /**
+   * Reachability for readiness: the index's `describe()`, which reads no vectors.
+   *
+   * @returns `true` once the binding answered
+   */
+  async isHealthy(): Promise<boolean> {
+    await this.#index.describe();
+    return true;
+  }
+
   /** @inheritdoc */
   async close(): Promise<void> {
     await this.#onClose?.();

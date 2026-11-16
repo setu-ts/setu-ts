@@ -268,8 +268,8 @@ const BROKER_SPECS: Readonly<Record<BrokerName, BrokerSpec>> = {
     ports:
       - '\${REDIS_PORT:-6379}:6379'
     healthcheck:
-      # Members wait on this: the messaging plugin connects during registration,
-      # so a member that starts first fails at app.start() rather than retrying.
+      # Plugins that use Redis connect during registration, so a service started
+      # before Redis is healthy fails at app.start() rather than retrying.
       test: ['CMD', 'redis-cli', 'ping']
       interval: 5s
       timeout: 3s

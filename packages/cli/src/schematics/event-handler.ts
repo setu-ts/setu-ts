@@ -36,14 +36,19 @@ export function generateEventHandler(
 import { OnEvent } from '@setu-ts/decorator-plugin';
 
 /** Event type name the bus routes on. */
-${renderConstAssignment(`${names.screaming}_EVENT`, `'${names.kebab}'`)}
+${renderConstAssignment(`${names.screaming}_EVENT`, `'${names.pascal}'`)}
 
 /** Payload carried by the ${names.kebab} event. */
 export interface ${names.pascal}Payload {
   readonly id: string;
 }
 
-/** Decorated event subscriber, registered through the ingress barrel. */
+/**
+ * Decorated event subscriber, registered through the ingress barrel.
+ * Delivery is in-process and at-most-once: a handler that throws is logged and
+ * the event is not redelivered. Cross-service events belong in messaging-plugin's
+ * \`defineIntegrationEvent\`.
+ */
 export class ${ingress.pascal}Ingress {
   @OnEvent(${names.screaming}_EVENT)
   async handle(event: IDomainEvent<${names.pascal}Payload>): Promise<void> {
@@ -65,7 +70,7 @@ export class ${ingress.pascal}Ingress {
 import type { IEventHandler } from '@setu-ts/events-plugin';
 
 /** Event type name the bus routes on. */
-${renderConstAssignment(`${names.screaming}_EVENT`, `'${names.kebab}'`)}
+${renderConstAssignment(`${names.screaming}_EVENT`, `'${names.pascal}'`)}
 
 /** Payload carried by the ${names.kebab} event. */
 export interface ${names.pascal}Payload {
@@ -75,6 +80,10 @@ export interface ${names.pascal}Payload {
 
 /**
  * Handles the ${names.kebab} event.
+ *
+ * Delivery is in-process and at-most-once: a handler that throws is logged and
+ * the event is not redelivered. Cross-service events belong in messaging-plugin's
+ * \`defineIntegrationEvent\`.
  *
  * Subscribed through the \`${EVENT_HANDLERS_EXPORT}\` barrel in \`src/events/index.ts\`,
  * which \`setu.config.ts\` passes to \`EventsPlugin\` — so this class needs no further

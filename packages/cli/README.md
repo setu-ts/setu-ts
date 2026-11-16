@@ -437,7 +437,7 @@ install, and `setu generate --help` lists only what is available here.
 | `--queue <name>`        | `new` and `add queue`: the job queue backend (`memory`, `redis`, `rabbitmq`). Same overlay as `--broker`, for the queue wiring.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `--redis-client <name>` | `new` and `add` with a Redis arm: `ioredis` (default) or `node-redis`. node-redis projects depend on `redis` and wire each plugin through a generated `src/node-redis.ts` (`nodeRedisClient(url)` over `fromNodeRedis`). A workspace records it as `redisClient`; members and `generate app` follow the workspace and refuse the flag. Refused without a Redis arm and on Workers.                                                                                                                                                                                                                                                          |
 | `--logger <name>`       | `new`, `generate app`: `console` or `pino` for templates with logging. Defaults to `pino` on Node, Deno and Bun, `console` on Cloudflare Workers. Adds `pino` at `10.x` only when chosen (the same range in Deno's import map). Pino on Workers, minimal hosts and workspace roots refuse the flag by name. `--dry-run` reports the choice. Since 0.11.0.                                                                                                                                                                                                                                                                                   |
-| `--yes`, `-y`           | `new` only: take every default and ask nothing. A no-op when no prompter is present.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `--yes`, `-y`           | `new` and `add`: take every default and ask nothing; `generate` accepts it and never prompts. A no-op when no prompter is present.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `--depends-on <name>`   | `generate app`: repeat for prerequisites; root `dev` waits for their `/ready` endpoints, and Compose waits for a prerequisite with health probes to be healthy (started, otherwise).                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `--module <name>`       | `generate`: place a `controller`, `route`, `service`, `sse` or `schema` in the named feature module (required for the first four once the project has modules; refused while it has none); `add view`: place the views controller there. See [Controllers and modules](#controllers-and-modules).                                                                                                                                                                                                                                                                                                                                           |
 | `--adopt-controllers`   | `generate module`, first module only: move the flat controllers and services into it, rewriting imports and keeping URLs.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
@@ -469,11 +469,11 @@ The devtool supports Deno and Node projects. `setu new --devtool`, `setu generat
 `setu devtool enable` opt a project into the
 [local diagnostics connector](https://github.com/setu-ts/setu-ts/blob/main/packages/diagnostics-plugin/README.md).
 They emit a runtime-neutral `main.dev.ts` development entry the production graph never imports. Node
-adds the non-watching `dev` script (`tsx main.dev.ts`) and pins `@setu-ts/diagnostics-plugin` in
-`devDependencies`; its existing `check` script already covers the entry. Deno adds `dev` and widens
-`check`. A workspace member also records a `devtoolPort` in `setu.workspace.json`, allocated without
-colliding with any member's application port (`setu workspace ports --reallocate` moves both
-together).
+adds the non-watching `dev` script (`tsx` with the telemetry preload and the project's dotenv flag,
+then `main.dev.ts`) and pins `@setu-ts/diagnostics-plugin` in `devDependencies`; its existing
+`check` script already covers the entry. Deno adds `dev` and widens `check`. A workspace member also
+records a `devtoolPort` in `setu.workspace.json`, allocated without colliding with any member's
+application port (`setu workspace ports --reallocate` moves both together).
 
 ```bash
 setu new my-app --devtool               # Node by default; connector probes from 4919
@@ -758,6 +758,12 @@ host with logging also asks `Logger?`, with the runtime's default first; Workers
 only. Every prompted value is expressible as a flag, so prompts are never a second way to configure
 a project, and `--dry-run` stays exact.
 
+Each question is a list: ↑/↓ (or `j`/`k`) moves the highlight, a number jumps to that option, Enter
+chooses and Escape or Ctrl+C cancels. The highlight is a cyan-to-violet gradient on a 24-bit colour
+terminal, bold cyan on a 16/256-colour one, and plain under `NO_COLOR`. A terminal that cannot read
+single keys, or one with `TERM=dumb`, gets a typed answer instead. `setu add` asks its backend
+questions the same way.
+
 Non-interactive by construction in three layers: `runCli`'s dependency bundle takes prompting as an
 OPTIONAL `ask` member no programmatic caller passes; the installed executable supplies it only when
 stdin is a terminal; and the reader answers `null` once input ends. All three fail closed to the
@@ -856,12 +862,12 @@ package.json.
 
 <!-- version:history -->
 
-On a `cloudflare-workers` project, `setu add cloudflare` prints the registration that reads the
-platform sink — `CloudflarePlugin({ env, ...(waitUntil ? { waitUntil } : {}) })` — because the
-generated entry passes `waitUntil` to `createApp` as its second parameter (M113d §3.8). The factory
-names that parameter `_waitUntil` while nothing reads it, so the command also tells you to rename
-it. A project scaffolded before 0.10.0 has no such parameter, and its entry does not pass one; the
-command points at
+On a `cloudflare-workers` project, `setu add cloudflare` registers the plugin with the platform sink
+— `CloudflarePlugin({ env, ...(waitUntil ? { waitUntil } : {}) })` — because the generated entry
+passes `waitUntil` to `createApp` as its second parameter (M113d §3.8). The factory names that
+parameter `_waitUntil` while nothing reads it, so the same edit renames it, and its JSDoc tag, to
+`waitUntil`. A configuration the command cannot edit gets both steps printed instead: one scaffolded
+before 0.10.0 has no such parameter and its entry does not pass one, and the command points at
 [docs/upgrading.md](https://github.com/setu-ts/setu-ts/blob/main/docs/upgrading.md) for both edits.
 
 ### Styled server-rendered views
@@ -882,13 +888,17 @@ and a light/dark/system toggle. Run `npx shadcn add <component>` to add more com
 
 `setu add` accepts several names and validates the complete request before writing. Backend flags
 are `--provider` (mail), `--type` (database), `--adapter` (vector-store), and `--dialect` for
-Drizzle. A terminal asks when no backend flag is supplied; `--yes` takes the default. Existing peer
-pins, scripts and config files are preserved. Drizzle and Prisma add schema migration scripts and
-create-only configs; schemas and client instances belong to the application. Deno prints schema
-commands and Workers writes none. `view --plugin-only` installs only the capability and compatible
-JSX settings; it is the full-stack default and refuses `--module`. `mcp` leaves `setu.config.ts`
-unchanged and prints `McpPlugin({})` with the note that the app boots with it only once at least one
-route is marked with `mcpTool()` or `@McpTool()`.
+Drizzle. A terminal asks for each one left out, and for each left-out transport backend (`--broker`,
+`--queue`, `--store`, `--lock`, `--backplane`) outside a workspace member or Workers project, and
+for `--dialect` after Drizzle is chosen; a Workers project is not asked for the vector-store
+adapter, since only `memory` applies there. `--yes` takes every default. Existing peer pins, scripts
+and config files are preserved. Drizzle and Prisma add schema migration scripts and create-only
+configs; schemas and client instances belong to the application. Deno prints schema commands and
+Workers writes none. `view --plugin-only` installs only the capability and compatible JSX settings;
+it is the full-stack default and refuses `--module`. `mcp` leaves `setu.config.ts` unchanged and
+prints `McpPlugin({})` with the note that the app boots with it only once at least one route is
+marked with `mcpTool()` or `@McpTool()`, and that each marked route also needs a security guard
+(`publicRoute()` or `requireAuth()`, or `@Public()`) or `schema.security`.
 
 Worker tasks named `*.task.ts` referenced by a literal
 `new URL('./src/tasks/hash.task.ts', import.meta.url)` are built by `setu build` and their URLs
