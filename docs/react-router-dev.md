@@ -237,7 +237,7 @@ instead of updating it in place. The `dev.ts` that `setu new --template full-sta
 therefore pins the socket to Vite's port explicitly (since 0.12.0):
 
 ```typescript
-const vitePort = Number(runtime.env.VITE_PORT ?? '5173');
+const vitePort = Number(runtime.env.VITE_PORT || '5173');
 
 server: {
   host: '127.0.0.1',

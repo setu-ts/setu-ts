@@ -627,7 +627,8 @@ const runtime = createRuntimeServices();
 // REDIS_URL's TypeError carries the URL, password included, as `input`.
 async function boot() {
   const app = await createApp();
-  await app.start({ port: Number(runtime.env.PORT ?? '3000') });
+  await app.start({ port: Number(runtime.env.PORT || '3000') });
+  console.log(`Listening on http://localhost:${Number(runtime.env.PORT || '3000')}/`);
   return app;
 }
 
@@ -645,7 +646,7 @@ const app = await boot().catch((error: unknown) => {
 // Windows has no SIGTERM to catch.
 //
 // The logger is resolved only if one is registered: a project scaffolded
-// without LoggerPlugin still shuts down cleanly, it just reports nothing.
+// without LoggerPlugin still shuts down cleanly; failures fall back to stderr.
 const logger = app.services.has(CAPABILITIES.LOGGER)
   ? app.services.get<ILogger>(CAPABILITIES.LOGGER)
   : undefined;
@@ -658,7 +659,8 @@ for (const signal of ['SIGTERM', 'SIGINT'] as const) {
       .stop()
       .then(() => runtime.exit(0))
       .catch((error: unknown) => {
-        logger?.error('Graceful shutdown failed', { error });
+        if (logger !== undefined) logger.error('Graceful shutdown failed', { error });
+        else console.error(`Graceful shutdown failed: ${describeError(error)}`);
         runtime.exit(1);
       });
   });

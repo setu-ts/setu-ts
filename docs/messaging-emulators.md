@@ -168,6 +168,10 @@ of its own:
 docker compose -f docker/compose.yaml up -d          # emulator + every member
 ```
 
+A member with generated secrets still needs them exported first: Compose maps each to a required
+`${<MEMBER>_SESSION_SECRET:?…}` variable and refuses to start until it is set. See
+[Deploying a project the CLI scaffolded](./deployment.md#deploying-a-project-the-cli-scaffolded).
+
 Neither arm needs a credential. Each reads its connection value from the environment
 (`PUBSUB_PROJECT_ID`, `SERVICE_BUS_CONNECTION_STRING`) and falls back to the vendor's documented
 local-emulator setting, which is what makes an unconfigured workspace work.
