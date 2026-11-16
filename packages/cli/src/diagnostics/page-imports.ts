@@ -423,9 +423,10 @@ async function realInsideApp(
  * directory past {@linkcode MAX_PAGE_DEPTH} or beyond
  * {@linkcode MAX_PAGE_DIRECTORIES}, a directory or page a symlink places outside
  * `app/`, and an entry whose `stat` or `readdir` fails (`ELOOP`, `EACCES`). With
- * `realPath` available a directory reached twice through symlinks is walked
- * once, so a link loop costs one visit; without it the directory bound ends the
- * walk.
+ * `realPath` available a real directory is walked at most twice, once through a
+ * server-only path and once through any other, so a link loop costs at most two
+ * visits and a client-path alias of a `.server/` directory is still scanned;
+ * without it the directory bound ends the walk.
  */
 async function pageFiles(walk: PageWalk, prefix: string, depth = 0): Promise<void> {
   const { fs, dir } = walk;
@@ -442,8 +443,12 @@ async function pageFiles(walk: PageWalk, prefix: string, depth = 0): Promise<voi
       walk.unreadable.push(prefix);
       return;
     }
-    if (walk.seen.has(real)) return;
-    walk.seen.add(real);
+    // Keyed by whether the walked path is server-only too: under preserveSymlinks a
+    // client-path alias of a `.server/` directory is a client id, so it must not be
+    // skipped because the `.server/` path was walked first.
+    const key = `${SERVER_DIRECTORY.test(`${prefix.slice('app'.length)}/`) ? 's' : 'c'}:${real}`;
+    if (walk.seen.has(key)) return;
+    walk.seen.add(key);
   }
   let entries: readonly string[];
   try {

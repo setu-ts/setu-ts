@@ -623,6 +623,25 @@ describe('scanPageImports over real symlinks (review finding 6)', () => {
       await nodeFs.rm(root, { recursive: true, force: true });
     }
   });
+  it.each(['aaa', 'zzz'])(
+    'scans a client-path directory alias %s of a .server/ directory',
+    async (alias) => {
+      const root = await tempDir({ prefix: 'page-server-alias-' });
+      try {
+        await nodeFs.mkdir(`${root}/app/.server`, { recursive: true });
+        await nodeFs.writeFile(
+          `${root}/app/.server/real.ts`,
+          "import { s } from '~kernel/modules/p/p.service.ts';\nvoid s;\n",
+        );
+        await nodeFs.symlink('.server', `${root}/app/${alias}`);
+        const scan = await scanPageImports(createNodeRuntimeServices().fs!, root);
+        expect(scan.unreadable).toEqual([]);
+        expect(scan.violations.map((v) => v.path)).toEqual([`app/${alias}/real.ts`]);
+      } finally {
+        await nodeFs.rm(root, { recursive: true, force: true });
+      }
+    },
+  );
   it('scans server-only paths when realpath containment cannot be confirmed', async () => {
     const fs = createFakeFs({
       '/p/app/lib/x.server.ts': "import { x } from '~kernel/x.ts';",
