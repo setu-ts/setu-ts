@@ -441,18 +441,38 @@ describe('setu add backend guidance', () => {
     );
   });
 
-  it('counts the CSS StaticPlugin call only as code, not inside a string or comment', async () => {
+  it('counts the CSS StaticPlugin call only as code in the factory, not a string, comment or helper', async () => {
     const call = "StaticPlugin({ root: './build/assets', urlPrefix: '/assets' })";
-    expect(registersAssets(`const plugins = [${call}];`)).toBe(true);
+    /** A config whose factory body holds `body`, with `before` above it. */
+    const app = (body: string, before = '') =>
+      `${before}export function createApp(): IKernelApplication {\n  ${body}\n}\n`;
+    expect(registersAssets(app(`return createApplication({ plugins: [${call}] });`))).toBe(true);
     expect(
       registersAssets(
-        'const plugins = [\n  StaticPlugin({\n    root: "./build/assets",\n    urlPrefix: "/assets",\n  }),\n];',
+        app(
+          'const plugins = [\n    StaticPlugin({\n      root: "./build/assets",\n      urlPrefix: "/assets",\n    }),\n  ];',
+        ),
       ),
     ).toBe(true);
-    expect(registersAssets(`const note = "${call}";`)).toBe(false);
-    expect(registersAssets(`// ${call}\nconst x = 1;`)).toBe(false);
-    expect(registersAssets("StaticPlugin({ root: './public', urlPrefix: '/assets' })")).toBe(false);
-    expect(registersAssets(`MyStaticPlugin(${call.slice('StaticPlugin'.length)})`)).toBe(false);
+    expect(registersAssets(app(`const note = "${call}";`))).toBe(false);
+    expect(registersAssets(app(`// ${call}\n  const x = 1;`))).toBe(false);
+    expect(
+      registersAssets(app("return [StaticPlugin({ root: './public', urlPrefix: '/assets' })];")),
+    ).toBe(false);
+    expect(
+      registersAssets(app(`return [MyStaticPlugin(${call.slice('StaticPlugin'.length)})];`)),
+    ).toBe(false);
+    // A helper nobody calls, beside a factory that registers another directory.
+    expect(
+      registersAssets(
+        app(
+          "return [StaticPlugin({ root: './public' })];",
+          `function unused() {\n  return ${call};\n}\n`,
+        ),
+      ),
+    ).toBe(false);
+    // No readable factory at all: fail closed.
+    expect(registersAssets(`const plugins = [${call}];`)).toBe(false);
     expect(registersAssets("const broken = 'unterminated")).toBe(false);
 
     // Through `add view`: a string naming the call, beside a StaticPlugin serving
