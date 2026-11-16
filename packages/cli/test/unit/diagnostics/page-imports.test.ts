@@ -744,6 +744,33 @@ describe('scanPageImports over real symlinks (review finding 6)', () => {
       await nodeFs.rm(root, { recursive: true, force: true });
     }
   });
+  it('stops a realPath walk at the 4,096-directory cap, every symlink path counted', async () => {
+    const root = await tempDir({ prefix: 'page-alias-cap-' });
+    try {
+      // Each directory links only to later ones: no path closes a cycle, so every
+      // counted path is read, and 13 directories give more paths than the cap.
+      const names = Array.from({ length: 13 }, (_, i) => `d${String(i).padStart(2, '0')}`);
+      for (const name of names) await nodeFs.mkdir(`${root}/app/${name}`, { recursive: true });
+      for (const [i, name] of names.entries())
+        for (const later of names.slice(i + 1))
+          await nodeFs.symlink(`../${later}`, `${root}/app/${name}/${later}`);
+      const fs = { ...createNodeRuntimeServices().fs! };
+      expect(fs.realPath).toBeDefined();
+      const readdir = fs.readdir.bind(fs);
+      let listed = 0;
+      fs.readdir = (path: string) => {
+        listed += 1;
+        return readdir(path);
+      };
+      const scan = await scanPageImports(fs, root);
+      expect(listed).toBe(4096);
+      expect(scan.violations).toEqual([]);
+      expect(scan.unreadable.length).toBeGreaterThan(0);
+      expect(scan.unreadable.every((path) => /^app(\/d\d\d)+$/.test(path))).toBe(true);
+    } finally {
+      await nodeFs.rm(root, { recursive: true, force: true });
+    }
+  });
   it('scans server-only paths when realpath containment cannot be confirmed', async () => {
     const fs = createFakeFs({
       '/p/app/lib/x.server.ts': "import { x } from '~kernel/x.ts';",
