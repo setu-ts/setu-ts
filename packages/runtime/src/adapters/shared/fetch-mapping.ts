@@ -14,6 +14,7 @@
  */
 
 import type { FormBody, HttpMethod, IRequest, ResponseSnapshot } from '@setu-ts/common';
+import { detectRuntime } from '../../detector/runtime-detector.ts';
 import {
   installRequestIdentityGuard,
   parseFormBody,
@@ -138,7 +139,6 @@ class FrameworkRequest implements IRequest {
   #form: Promise<FormBody> | undefined;
   #headers: Headers | undefined;
   readonly #maxBodyBytes: number | undefined;
-  readonly #inProcess: boolean;
 
   constructor(
     raw: Request,
@@ -148,7 +148,6 @@ class FrameworkRequest implements IRequest {
     maxBodyBytes?: number,
     peerAddress?: string,
     responseTrailers = false,
-    inProcess = false,
   ) {
     // The single-write guard over `user`, `tenant` and `locale` lives on this
     // class's prototype, installed by the first construction (idempotent after
@@ -163,7 +162,6 @@ class FrameworkRequest implements IRequest {
     this.path = path;
     this.#maxBodyBytes = maxBodyBytes;
     this.responseTrailers = responseTrailers;
-    this.#inProcess = inProcess;
     const ip = normalizePeerAddress(peerAddress);
     if (ip !== undefined) this.ip = ip;
   }
@@ -297,7 +295,7 @@ class FrameworkRequest implements IRequest {
         (error: unknown) => bodyReadFailure(error),
       );
     }
-    const cancelOnRefusal = !(this.#inProcess && isUndiciFormData(this.#raw.headers));
+    const cancelOnRefusal = !releasesOnRefusal(this.ip, this.#raw.headers.get('content-type'));
     return readBounded(this.#raw, this.#maxBodyBytes, cancelOnRefusal).catch((error: unknown) =>
       bodyReadFailure(error, this.#maxBodyBytes),
     );
@@ -318,10 +316,9 @@ class FrameworkRequest implements IRequest {
  * at most one chunk beyond the limit is ever held. The reader is cancelled on
  * refusal rather than merely abandoned: an abandoned `ReadableStream` holds its
  * source open (the M70k HEAD-descriptor-leak class), which on a server means
- * the connection stays draining. An in-process undici FormData body instead
- * releases its lock: that in-memory producer can enqueue after cancel and crash
- * Node. Only the adapter marks a request in-process; a served request with no
- * known peer still cancels.
+ * the connection stays draining. The one exception is
+ * {@linkcode releasesOnRefusal}: Node's in-memory undici FormData producer can
+ * enqueue after cancel and crash the process, so that body releases its lock.
  *
  * `raw.body` is read only on this path. That matters on Node, where touching
  * `.body` materializes the full undici `Request` the lightweight facade exists
@@ -329,7 +326,7 @@ class FrameworkRequest implements IRequest {
  *
  * @param raw - The web-standard request
  * @param maxBodyBytes - The cap, in bytes
- * @param cancelOnRefusal - False only for in-process undici FormData, whose producer cannot cancel safely
+ * @param cancelOnRefusal - False only where {@linkcode releasesOnRefusal} holds
  * @returns The body bytes
  * @throws {RequestBodyTooLargeError} When the body exceeds the cap
  */
@@ -389,10 +386,33 @@ async function readBounded(
   return body;
 }
 
-/** Matches only undici's generated, unquoted FormData content type. */
-function isUndiciFormData(headers: Headers): boolean {
-  return /^multipart\/form-data; boundary=----formdata-undici-0\d{11}$/.test(
-    headers.get('content-type') ?? '',
+/** Only undici's generated, unquoted FormData content type. */
+const UNDICI_FORM_DATA = /^multipart\/form-data; boundary=----formdata-undici-0\d{11}$/;
+
+/**
+ * Whether a capped read that refuses a body releases its reader instead of cancelling it.
+ *
+ * Only Node's in-memory undici FormData producer can enqueue after cancel and crash the
+ * process (`ERR_INVALID_STATE`), so only a Node host releases. There, a request with no socket
+ * peer is in-process (`app.fetch` on any adapter, including one forced by `platform`) or its
+ * socket is already closed, where cancelling drains nothing. A served request with a peer, and
+ * every request on Bun, Deno or Workers, cancels: their hosts can serve a peer-less request.
+ *
+ * @param ip - The request's normalized socket peer, if any
+ * @param contentType - The request's `content-type` header
+ * @param globals - Injectable global scope for host detection
+ * @returns True only for a peer-less undici FormData body on a Node host
+ * @internal
+ */
+export function releasesOnRefusal(
+  ip: string | undefined,
+  contentType: string | null,
+  globals: typeof globalThis = globalThis,
+): boolean {
+  return (
+    ip === undefined &&
+    UNDICI_FORM_DATA.test(contentType ?? '') &&
+    detectRuntime(globals) === 'node'
   );
 }
 
@@ -485,11 +505,6 @@ export interface ListenerTransport {
   readonly scheme?: 'http' | 'https';
   /** Whether the response to this request can carry trailers. */
   readonly responseTrailers?: boolean;
-  /**
-   * True for an in-process call with no connection (Node's `app.fetch`). Only then may a capped
-   * read of undici's own FormData body release its reader instead of cancelling it.
-   */
-  readonly inProcess?: boolean;
 }
 
 /**
@@ -542,7 +557,6 @@ export function mapWebRequestToFrameworkRequest(
     maxBodyBytes,
     peerAddress,
     transport?.responseTrailers === true,
-    transport?.inProcess === true,
   );
 }
 

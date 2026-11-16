@@ -33,7 +33,7 @@ describe('Node socket peer', () => {
     });
     expect(peer).toBe('10.1.2.3');
   });
-  it('V12-139 marks only an in-process fetch, so a served FormData of the same shape cancels', async () => {
+  it('V12-139 releases an in-process FormData and cancels a served one of the same shape', async () => {
     const faults: unknown[] = [];
     const record = (error: unknown): void => {
       faults.push(error);
@@ -71,8 +71,7 @@ describe('Node socket peer', () => {
         duplex: 'half',
         headers: { 'content-type': inProcess.headers.get('content-type') ?? '' },
       } as RequestInit);
-      // A served request whose socket reports no peer: it must still cancel.
-      await fetch(served, { incoming: { socket: {} } } as never);
+      await fetch(served, { incoming: { socket: { remoteAddress: '203.0.113.7' } } } as never);
       expect(refused).toHaveProperty('name', 'RequestBodyTooLargeError');
       expect(cancelled).toBe(true);
     } finally {
