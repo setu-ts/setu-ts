@@ -366,6 +366,23 @@ describe('rowsFor', () => {
 });
 
 describe('createPicker', () => {
+  it('takes the input from the line reader before a key read waits', async () => {
+    const { input } = fakeInput();
+    let taken = 0;
+    const output = { isTTY: true, write: () => {} };
+    const picker = createPicker(
+      input as never,
+      output,
+      () => {},
+      {},
+      () => (taken += 1),
+    )!;
+    const read = picker.keys.read();
+    expect(taken).toBe(1);
+    input.emit('keypress', undefined, { name: 'enter' });
+    expect(await read).toEqual({ kind: 'enter' });
+  });
+
   it('needs an interactive output and a raw-mode input, and writes raw to the output', () => {
     const written: string[] = [];
     const output = {

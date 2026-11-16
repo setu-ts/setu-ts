@@ -37,8 +37,10 @@ interface ICodeView {
  * strings are kept and recorded; a template's `${…}` substitutions stay code,
  * nested templates included. Offsets are unchanged, so a match in `code` is a
  * match at the same offset in the source. A `/` is a regex after `(`, `,`, `=`,
- * `:`, `[`, `!`, `&`, `|`, `?`, `{`, `}`, `;`, the start, or `return`/`typeof`/
- * `default`; otherwise division.
+ * `:`, `[`, `!`, `&`, `|`, `?`, `{`, `}`, `;`, `=>`, the start, or one of
+ * `return`, `typeof`, `default`, `else`, `yield`, `await`, `void`, `case`;
+ * otherwise division. A regex directly after `)` (`if (x) /re/.test(y)`) is
+ * read as division, the one case a token lexer cannot tell apart.
  *
  * @param source - TypeScript source text
  * @returns The code and literal spans, without changing source offsets
@@ -113,7 +115,9 @@ export function codeView(source: string): ICodeView {
       char === '/' &&
       (previous === '' ||
         '(,=:[!&|?{};'.includes(previous) ||
-        ['return', 'typeof', 'default', '=>'].includes(previous))
+        ['return', 'typeof', 'default', 'else', 'yield', 'await', 'void', 'case', '=>'].includes(
+          previous,
+        ))
     ) {
       const start = at;
       let inClass = false;

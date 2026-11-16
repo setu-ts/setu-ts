@@ -256,6 +256,8 @@ describe('setu add backend guidance', () => {
       expect(module).toContain(imports);
       expect(module).toContain(`process.env.${variable} ||`);
       expect(module).toContain('export function vectorStoreAdapter()');
+      // pgvector's factory builds the pool from the URL, so it ends it at shutdown.
+      if (adapter === 'pgvector') expect(module).toContain('onClose: () => db.$client.end()');
       expect(p.read('.env')).toContain(`\n${variable}=`);
       expect(p.read('.env.example')).toContain(`\n${variable}=\n`);
       expect(p.read('docker/compose.yaml')).toContain(`  ${service}:`);

@@ -247,6 +247,15 @@ describe('worker task entries', () => {
         '/app/main.ts',
       ).map((ref) => ref.target),
     ).toEqual(['/app/a.task.ts']);
+    for (const keyword of ['else', 'yield', 'await', 'void', 'case']) {
+      expect(
+        taskReferences(
+          `${keyword} /a\`b/; const u = new URL('./c.task.ts', import.meta.url);`,
+          '/app/main.ts',
+        ).map((ref) => ref.target),
+        keyword,
+      ).toEqual(['/app/c.task.ts']);
+    }
     // `>=` and `x > y / 2` stay comparison and division.
     expect(
       taskReferences(
