@@ -8,6 +8,13 @@ import type { IPrincipal, IRequest } from '@setu-ts/common';
 import { httpStatusHintOf, serializeError } from '@setu-ts/common';
 import { AuthenticationUnavailableError, AuthPluginConfigurationError } from '../../src/index.ts';
 
+/** An Error whose constructor name is the given text. */
+function named(name: string): Error {
+  const error = new Error('k3y');
+  Object.defineProperty(error, 'constructor', { value: { name } });
+  return error;
+}
+
 describe('ApiKeyStrategy', () => {
   function createRequest(headers: Record<string, string> = {}): IRequest {
     const h = new Headers();
@@ -88,35 +95,32 @@ describe('ApiKeyStrategy', () => {
     });
   });
 
-  it('F2 keeps the presented key out of the message and the serialized error', async () => {
+  it('F2 logs only the failure class, never its text or the presented key', async () => {
     const key = 'k3y-CANARY-0042';
-    const cause = Object.assign(new Error(`invalid input syntax for type uuid: "${key}"`), {
+    class DatabaseError extends Error {}
+    const cause = Object.assign(new DatabaseError(`invalid input syntax for type uuid: "${key}"`), {
       code: '22P02',
     });
     const strategy = new ApiKeyStrategy({ validate: () => Promise.reject(cause) });
     const error = (await strategy
       .authenticate(createRequest({ 'X-API-Key': key }))
       .catch((caught: unknown) => caught)) as AuthenticationUnavailableError;
-    expect(error.message).toContain('invalid input syntax for type uuid: "***"');
-    expect(error.message).toContain('22P02');
-    expect(error.message).not.toContain(key);
+    expect(error.message).toBe('Authentication is temporarily unavailable. (DatabaseError)');
     expect(error.cause).toBe(cause);
     const serialized = JSON.stringify(serializeError(error));
     expect(serialized).not.toContain(key);
-    expect(serialized).toContain('invalid input syntax');
+    expect(serialized).not.toContain('invalid input syntax');
   });
 
-  it('F2 removes a key in its rendered whitespace form and a key cut by the bound', () => {
-    const spaced = new AuthenticationUnavailableError(new Error('bad key a\tb  c'), 'a\tb  c');
-    expect(spaced.message).toContain('bad key ***');
-    // A cause long enough that describeError cuts the description inside the key.
-    const key = 'K'.repeat(40);
-    for (let pad = 8150; pad < 8200; pad++) {
-      const cut = new AuthenticationUnavailableError(new Error(`${'x'.repeat(pad)}${key}`), key);
-      expect(cut.message).not.toMatch(/K{1,}… \[truncated\]$/);
-    }
-    const plain = new AuthenticationUnavailableError(new Error('lookup failed'));
-    expect(plain.message).toBe('Authentication is temporarily unavailable. Error: lookup failed');
+  it.each([
+    ['a thrown string', 'k3y in a string', 'string'],
+    ['an Error whose constructor name is not an identifier', named('bad name k3y'), 'Error'],
+    ['an Error with no constructor', Object.setPrototypeOf(new Error('k3y'), null), 'object'],
+    ['a plain Error', new Error('k3y'), 'Error'],
+  ])('F2 logs %s by class only', (_, cause, expected) => {
+    const error = new AuthenticationUnavailableError(cause);
+    expect(error.message).toBe(`Authentication is temporarily unavailable. (${expected})`);
+    expect(JSON.stringify(serializeError(error))).not.toContain('k3y');
   });
 
   it.each(['cookie', 'COOKIE', 'Cookie'])('V12-136 refuses ambient API-key header %s', (header) => {

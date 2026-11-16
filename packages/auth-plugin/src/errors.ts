@@ -4,67 +4,48 @@
  * @module
  */
 
-import { describeError, withHttpStatusHint } from '@setu-ts/common';
+import { withHttpStatusHint } from '@setu-ts/common';
 
 /** The fixed public detail of {@linkcode AuthenticationUnavailableError}. */
 const UNAVAILABLE_DETAIL = 'Authentication is temporarily unavailable.';
 
-/** The marker that ends a description `describeError` had to cut. */
-const TRUNCATION_MARKER = '… [truncated]';
-
-/** Characters `describeError` renders as one space; a credential is matched as rendered. */
-const NON_PRINTING_RUN = /[\s\p{Cc}\p{Cf}]+/gu;
+/** A class name safe to log: an identifier, bounded, never request-derived text. */
+const CLASS_NAME = /^[A-Za-z_$][A-Za-z0-9_$]{0,63}$/;
 
 /**
- * Replaces every occurrence of a presented credential in a one-line description with `***`.
+ * The class of a validator failure, as the only part of it that reaches a log.
  *
- * The credential is matched both as sent and as `describeError` renders it (whitespace
- * and control runs collapsed to one space). When the description was cut, a tail that
- * is the start of the credential is replaced too, so a cut cannot leave part of it.
+ * Read from the constructor, not `name`, which is an ordinary writable field. A name that is
+ * not a plain identifier is logged as `Error`; a thrown non-`Error` is logged by its `typeof`.
  *
- * @param text - The `describeError` output
- * @param credential - The credential the client presented; empty leaves the text unchanged
- * @returns The text with the credential replaced
+ * @param cause - The validator failure
+ * @returns The class name to log
  */
-function withoutCredential(text: string, credential: string): string {
-  if (credential === '') return text;
-  let out = text;
-  for (const form of new Set([credential, credential.replace(NON_PRINTING_RUN, ' ')])) {
-    if (form !== '') out = out.split(form).join('***');
-  }
-  if (!out.endsWith(TRUNCATION_MARKER)) return out;
-  const body = out.slice(0, -TRUNCATION_MARKER.length);
-  for (let length = credential.length - 1; length > 0; length--) {
-    if (body.endsWith(credential.slice(0, length))) {
-      return `${body.slice(0, -length)}***${TRUNCATION_MARKER}`;
-    }
-  }
-  return out;
+function causeClass(cause: unknown): string {
+  if (!(cause instanceof Error)) return typeof cause;
+  const name: unknown = (cause.constructor as { name?: unknown } | undefined)?.name;
+  return typeof name === 'string' && CLASS_NAME.test(name) ? name : 'Error';
 }
 
 /**
  * An authentication validator failure carrying a fixed HTTP 503 hint.
  *
- * The public detail is fixed. The error's own message, which the error handler logs, adds a
- * one-line description of the underlying fault with the presented credential replaced by
- * `***`: a database error that echoes a malformed key (`invalid input syntax for type uuid`)
- * must not write the client's key to the log. The cause is kept on the error for application
- * code, and carries the serializer's redact-cause brand, so a log built with `serializeError`
- * shows only its class and this message.
+ * The public detail is fixed. The error's own message, which the error handler logs, adds only
+ * the underlying failure's class, for example `(DatabaseError)`: no text from the failure is
+ * logged, because a database error can echo the malformed key the client sent (`invalid input
+ * syntax for type uuid`). The cause is kept on the error for application code, and carries the
+ * serializer's redact-cause brand, so a log built with `serializeError` shows only its class and
+ * this message. A validator that needs the fault's text logs it itself, where it knows what is
+ * safe to log.
  * @since 0.13.0
  */
 export class AuthenticationUnavailableError extends Error {
   /** Stable discriminant across realms. */
   override readonly name = 'AuthenticationUnavailableError';
 
-  /**
-   * @param cause - Original validator failure, kept unchanged on `cause`
-   * @param credential - The credential the client presented, removed from the message
-   */
-  constructor(cause: unknown, credential = '') {
-    super(`${UNAVAILABLE_DETAIL} ${withoutCredential(describeError(cause), credential)}`, {
-      cause,
-    });
+  /** @param cause - Original validator failure, kept unchanged on `cause` */
+  constructor(cause: unknown) {
+    super(`${UNAVAILABLE_DETAIL} (${causeClass(cause)})`, { cause });
     // Same brand, same registration as the runtime's RequestBodyReadError (common's
     // serialize-error.ts): the serialized cause keeps only its class and this message.
     Object.defineProperty(this, Symbol.for('setu.serialize.redact-cause'), { value: true });

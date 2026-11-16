@@ -95,12 +95,11 @@ describe('API-key validator outage', () => {
       }
       expect(handler).not.toHaveBeenCalled();
       expect(logs).toHaveLength(2);
-      expect(JSON.stringify(logs)).toContain('db down');
       expect(JSON.stringify(logs)).not.toContain('user:pass');
-      expect(JSON.stringify(logs)).toContain('***');
-      // F2: the presented key, echoed by the validator's error, never reaches the log.
+      // F2: no text of the validator's error, and so not the key it echoes, reaches the log.
       expect(JSON.stringify(logs)).not.toContain('canary-KEY-77');
-      expect(JSON.stringify(logs)).toContain('for key ***');
+      expect(JSON.stringify(logs)).not.toContain('db down');
+      expect(JSON.stringify(logs)).toContain('Authentication is temporarily unavailable. (Error)');
       const response = await app.inject({ method: 'GET', url: 'http://localhost/public' });
       expect(response.statusCode).toBe(200);
       expect(response.body).toBe('public');

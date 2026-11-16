@@ -28,7 +28,7 @@ All notable changes to this project are documented here. The format follows
   `Set-Cookie`: configure `csrf.exemptBearer: false` for an API-key-to-cookie exchange, as for a
   bearer exchange. A validator throwing for a malformed or unknown key now yields 503 with
   `errorHandler` instead of 401. Check key format and return `null` before querying. The logged
-  error describes the fault with the presented key replaced by `***`, and its cause carries the
+  error names only the validator failure's class, never its text, and its cause carries the
   serializer's redact-cause brand, so a driver error that echoes the key does not write it to the
   log.
 
