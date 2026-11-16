@@ -36,7 +36,12 @@ import { vectorizeFake } from '../fixtures/vectorize-fake.ts';
 
 const PGVECTOR_URL = process.env['PGVECTOR_URL'];
 const QDRANT_URL = process.env['QDRANT_URL'];
-const runtime = { subtle: globalThis.crypto.subtle } as IRuntimeServices;
+// The runtime surface the adapters read: `subtle` for ids, and `hrtime` (the
+// monotonic clock pgvector's readiness probe dates statements with).
+const runtime = {
+  subtle: globalThis.crypto.subtle,
+  hrtime: () => performance.now(),
+} as IRuntimeServices;
 const RUN = Math.floor(Math.random() * 1e9).toString(36);
 const COLLECTION = `conf_${RUN}`;
 // `constructor` is the one Object.prototype member the field grammar admits;
