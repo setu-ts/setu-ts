@@ -143,21 +143,34 @@ the cited code, never from the old doc.
 
 ### 3.4 The run-budget recipe (V12-8)
 
-- **Decision:** Add a recipe to `docs/durable-runs.md`, after the `model(run)` paragraph (around
-  76-77), that budgets a run by its server-owned identity. It wraps the run's model with an AI SDK
-  middleware that:
-  - builds the quota key from `run.tenantId`, refusing a tenant-less run (`tenantId === ''`) with a
-    named error;
-  - calls `quota.reserve(key, estimate)` before the call, then `settle` with the actual usage, or
-    `release` on failure;
-  - resolves its dependencies from `run.services`, never from a request.
-
-  The fence is a complete module that the guide fence compiler type-checks. The README line at
-  `packages/agent-runs-plugin/README.md:85-86` links to it.
-
-- **Why:** the docs tell readers to budget inside `model(run)`, but the only budget recipe needs an
-  `IRequestContext`, which a run does not have. The recipe uses only the surfaces in §1.
-- **Test home:** `test/guide-fence-compiler.test.ts` compiles the fence; `check:docs`.
+- **Decision:** The example's budget code stops depending on a request.
+  - **New type.** `apps/ai-chat/src/modules/chat/chat.budget.ts` gains
+    `BudgetScope { tenantId: string | undefined; principalId: string | null | undefined; signal: AbortSignal; services: IServiceRegistry }`
+    and `requestScope(ctx: IRequestContext): BudgetScope`.
+  - **Changed signatures.** `budgetMiddleware(scope, …)` and `budgetedModel(scope, …)` take a
+    `BudgetScope` where they took an `IRequestContext`. They read `scope.tenantId`,
+    `scope.principalId`, `scope.signal` and `scope.services` where they read
+    `ctx.request.tenant?.id`, `ctx.request.user?.id`, `ctx.signal` and `ctx.services`. `chatQuota()`
+    returns a function of `{ services }`.
+  - **Callers updated.** The controller passes `requestScope(ctx)`. `apps/ai-chat/smoke.ts` and
+    `docs/ai.md`'s copy of the middleware are updated to match.
+  - **The recipe.** `AgentRunContext` (`runId`, `tenantId`, `principalId`, `services`, `signal`)
+    already satisfies `BudgetScope` structurally. So the recipe in `docs/durable-runs.md`, after the
+    `model(run)` paragraph, is
+    `model: (run) => { const { model, ready } = budgetedModel(run, models, quota(run)); void ready.catch(() => undefined); return model; }`.
+    The run's step loop sees a failing call itself; `ready` is consumed so it cannot surface as an
+    unhandled rejection.
+  - **Tenant-less runs.** A run started with `tenantId: ''` is refused by the middleware's existing
+    "A server-resolved tenant is required" check. The recipe says so.
+  - **Links.** `packages/agent-runs-plugin/README.md:85-86` links the recipe.
+- **Why:** the guide tells readers to budget inside `model(run)`, but the only budget code needs an
+  `IRequestContext`, which a run does not have. The fields it actually reads are exactly the ones a
+  run carries, so a small refactor makes one middleware serve both. A second, near-identical
+  middleware would drift from the first.
+- **Test home:** the `ai-chat` smoke test (`check:apps`) passes with the refactor. A smoke case
+  drives `budgetedModel` with an `AgentRunContext`-shaped scope, then asserts a reservation keyed by
+  its tenant and settlement against it. `test/guide-fence-compiler.test.ts` compiles the new fence,
+  with the inventory updated. `pnpm run check` passes.
 
 ### 3.5 The sign-out recipe (V12-88's lever)
 
