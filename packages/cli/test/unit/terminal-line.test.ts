@@ -118,4 +118,22 @@ describe('createLineReader', () => {
     h.reader.close();
     expect(await answer).toBeNull();
   });
+
+  it('suspends between questions without ending, keeping queued lines', async () => {
+    const h = harness(true);
+    // Nothing open yet: suspending is a no-op.
+    h.reader.suspend();
+    const first = h.reader.read('Name? ');
+    // A question waiting keeps its interface.
+    h.reader.suspend();
+    h.input.write('shop\nqueued\n');
+    expect(await first).toBe('shop');
+    h.reader.suspend();
+    expect(h.input.listenerCount('keypress')).toBe(0);
+    expect(await h.reader.read('Next? ')).toBe('queued');
+    const third = h.reader.read('Third? ');
+    h.input.write('done\n');
+    expect(await third).toBe('done');
+    h.reader.close();
+  });
 });

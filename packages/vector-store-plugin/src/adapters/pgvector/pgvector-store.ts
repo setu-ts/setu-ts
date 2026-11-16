@@ -137,11 +137,11 @@ export class PgVectorStore implements IVectorStoreAdapter {
    */
   #lastProgressAt: number | undefined;
   /**
-   * When a readiness probe still unsettled was started: a probe the indicator
+   * When each readiness probe still unsettled was started: a probe the indicator
    * gave up on keeps its pool checkout pending, and enough of them fill the
    * pool, so one outstanding past the window is evidence of a stall too.
    */
-  #probeStartedAt: number | undefined;
+  readonly #probeStarts: number[] = [];
 
   /**
    * @param options - The database, ensure mode and shutdown callback
@@ -264,7 +264,7 @@ export class PgVectorStore implements IVectorStoreAdapter {
     const sql = this.#tag();
     await this.#run(() =>
       this.#db.transaction(async (tx) => {
-        await tx.execute(sourceLockStatement(sql, spec, scope, sourceId));
+        await this.#step(() => tx.execute(sourceLockStatement(sql, spec, scope, sourceId)));
         if (version !== undefined) {
           const [row] = await this.#rows<{ version: number | string | null }>(
             tx,
@@ -279,23 +279,27 @@ export class PgVectorStore implements IVectorStoreAdapter {
           }
         }
         for (let start = 0; start < records.length; start += MAX_RECORDS_PER_CALL) {
-          await tx.execute(
-            upsertStatement(
-              sql,
-              spec,
-              scope,
-              records.slice(start, start + MAX_RECORDS_PER_CALL),
-              version,
+          await this.#step(() =>
+            tx.execute(
+              upsertStatement(
+                sql,
+                spec,
+                scope,
+                records.slice(start, start + MAX_RECORDS_PER_CALL),
+                version,
+              ),
             ),
           );
         }
-        await tx.execute(
-          deleteStaleStatement(
-            sql,
-            spec,
-            scope,
-            sourceId,
-            records.map((record) => record.id),
+        await this.#step(() =>
+          tx.execute(
+            deleteStaleStatement(
+              sql,
+              spec,
+              scope,
+              sourceId,
+              records.map((record) => record.id),
+            ),
           ),
         );
       }),
@@ -311,7 +315,9 @@ export class PgVectorStore implements IVectorStoreAdapter {
     const sql = this.#tag();
     const rows = await this.#run(() =>
       this.#db.transaction(async (tx) => {
-        for (const setting of querySettings(sql, query.topK)) await tx.execute(setting);
+        for (const setting of querySettings(sql, query.topK)) {
+          await this.#step(() => tx.execute(setting));
+        }
         return await this.#rows<{
           id: string;
           source_id: string | null;
@@ -365,16 +371,17 @@ export class PgVectorStore implements IVectorStoreAdapter {
     const sql = this.#tag();
     // Outside #run: the probe is not one of the application's statements, so a
     // probe still queued must not count as a stalled statement next poll. Its
-    // own start is kept instead, until it settles (only the oldest matters).
+    // own start is kept instead, until it settles; the oldest one counts.
     const started = this.#hrtime?.();
-    this.#probeStartedAt ??= started;
+    if (started !== undefined) this.#probeStarts.push(started);
     try {
       await this.#db.execute(sql`SELECT 1`);
     } catch (error) {
       if (isPoolAcquireTimeout(error)) return this.#progressing() ? undefined : false;
       throw toBackendFault(error, 'vector-store-plugin: pgvector') ?? error;
     } finally {
-      if (this.#probeStartedAt === started) this.#probeStartedAt = undefined;
+      const at = started === undefined ? -1 : this.#probeStarts.indexOf(started);
+      if (at >= 0) this.#probeStarts.splice(at, 1);
     }
     return true;
   }
@@ -414,6 +421,18 @@ export class PgVectorStore implements IVectorStoreAdapter {
   }
 
   /**
+   * One statement inside a transaction {@linkcode #run} already counts: its
+   * completion is progress, so a long transaction is not read as a stall.
+   */
+  async #step<T>(call: () => Promise<T>): Promise<T> {
+    try {
+      return await call();
+    } finally {
+      this.#lastProgressAt = this.#hrtime?.();
+    }
+  }
+
+  /**
    * Whether a saturated pool is still serving, by database-plugin's rule
    * (M101a): one of this adapter's statements completed within
    * {@linkcode QUERY_PROGRESS_WINDOW_MS} (or the first of the current busy spell
@@ -424,10 +443,9 @@ export class PgVectorStore implements IVectorStoreAdapter {
   #progressing(): boolean {
     const now = this.#hrtime?.();
     if (now === undefined) return true;
-    if (
-      this.#probeStartedAt !== undefined &&
-      now - this.#probeStartedAt > QUERY_PROGRESS_WINDOW_MS
-    ) {
+    // Starts are pushed in clock order, so the first is the oldest outstanding.
+    const oldestProbe = this.#probeStarts[0];
+    if (oldestProbe !== undefined && now - oldestProbe > QUERY_PROGRESS_WINDOW_MS) {
       return false;
     }
     if (this.#inFlight === 0) return true;

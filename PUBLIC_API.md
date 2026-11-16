@@ -11512,8 +11512,8 @@ as a flag, so prompts are never a second configuration surface, and `--dry-run` 
 
 Non-interactive by construction in three layers, all failing closed to the documented defaults:
 `CliDependencies.ask` is OPTIONAL and no programmatic caller passes it; `src/main.ts` supplies the
-terminal implementation only behind `Deno.stdin.isTerminal()`; and Deno's own `prompt()` returns
-`null` on a non-terminal.
+terminal implementation only when `process.stdin.isTTY === true`, and leaves the prompter undefined
+otherwise; and the line reader resolves `null` when it cannot read a line.
 
 The two exported types:
 

@@ -6,7 +6,7 @@
  * metadata keys never appear in the text, and the scope is bound in every
  * data statement.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { sql } from 'drizzle-orm';
 import { PgDialect } from 'drizzle-orm/pg-core';
 import type { SQL } from 'drizzle-orm';
@@ -727,6 +727,54 @@ describe('PgVectorStore.isHealthy', () => {
     release();
     expect(await abandoned).toBe(true);
     expect(await h.store.isHealthy()).toBeUndefined();
+  });
+
+  it('keeps a later probe outstanding after an earlier one settles', async () => {
+    const releases: (() => void)[] = [];
+    const counters = { idleCount: 1, waitingCount: 0, totalCount: 1, options: { max: 3 } };
+    const h = await saturatedStore(counters, (rendered) =>
+      rendered.text === 'SELECT 1'
+        ? new Promise<{ rows: [] }>((resolve) => releases.push(() => resolve({ rows: [] })))
+        : healthy()(rendered),
+    );
+    const first = h.store.isHealthy();
+    h.advance(5_000);
+    const second = h.store.isHealthy();
+    releases[0]!();
+    expect(await first).toBe(true);
+    // Only the second probe is outstanding now; its own start is what counts.
+    Object.assign(counters, { idleCount: 0, totalCount: 3 });
+    h.advance(QUERY_PROGRESS_WINDOW_MS);
+    expect(await h.store.isHealthy()).toBeUndefined();
+    h.advance(1);
+    expect(await h.store.isHealthy()).toBe(false);
+    releases[1]!();
+    expect(await second).toBe(true);
+  });
+
+  it('counts each completed statement of a long replaceSource as progress', async () => {
+    const releases: (() => void)[] = [];
+    const h = await saturatedStore({ idleCount: 0, waitingCount: 2 }, (rendered) =>
+      rendered.inTransaction
+        ? new Promise<{ rows: [] }>((resolve) => releases.push(() => resolve({ rows: [] })))
+        : healthy()(rendered),
+    );
+    const pending = h.store.replaceSource(spec, 'tenant-a', 'doc-1', [
+      { id: 'r1', vector: [1, 0, 0] },
+    ]);
+    // The lock completes nine seconds in, then the upsert waits.
+    h.advance(9_000);
+    releases.shift()!();
+    await vi.waitFor(() => expect(releases).toHaveLength(1));
+    h.advance(9_000);
+    // Eighteen seconds into the transaction, nine since a statement completed.
+    expect(await h.store.isHealthy()).toBeUndefined();
+    h.advance(QUERY_PROGRESS_WINDOW_MS - 9_000 + 1);
+    expect(await h.store.isHealthy()).toBe(false);
+    releases.shift()!();
+    await vi.waitFor(() => expect(releases).toHaveLength(1));
+    releases.shift()!();
+    await pending;
   });
 
   it("reads the probe's own pool-acquire timeout as saturation, but not an answer with a code", async () => {

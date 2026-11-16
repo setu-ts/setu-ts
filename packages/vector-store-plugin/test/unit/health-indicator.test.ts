@@ -104,6 +104,20 @@ describe('createVectorStoreIndicator', () => {
     });
   });
 
+  it('reports closed when the adapter closes while the probe is in flight', async () => {
+    let isClosed = false;
+    const adapter = probed(async () => {
+      isClosed = true;
+      return true;
+    });
+    const check = createVectorStoreIndicator(adapter, clockedRuntime().runtime, () => isClosed);
+    expect(await check()).toEqual({
+      status: 'down',
+      data: { adapter: 'memory', state: 'closed' },
+    });
+    expect(adapter.calls).toBe(1);
+  });
+
   it('reports down once the adapter is closed, without probing', async () => {
     const adapter = probed(async () => true);
     const check = createVectorStoreIndicator(adapter, clockedRuntime().runtime, () => true);

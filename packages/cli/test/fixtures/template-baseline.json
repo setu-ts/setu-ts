@@ -1,6 +1,6 @@
 {
   "rest/node": {
-    "README.md": "42fe1e65df3ad8756959f75db0b56611adf21acba28b895002c899c55ab23833",
+    "README.md": "c9c0e17c77f70daad079a4ac12ebafd3d23141357810595029002138b8c0cced",
     ".gitignore": "27cf11bc451a2d828fef995f70f6dd1770caa2171290b3c4b31e849a06030a89",
     "Dockerfile": "062ce7dda96e61191bc8d68580f0ab4a0dc4220d464b53ab7151b86bf8e9dcc8",
     ".dockerignore": "7205d39ea9c6a71f98ba42f92e09b484cdddcd1bc806b2616ed8de52f11202d6",
@@ -26,7 +26,7 @@
     "src/metrics/index.ts": "19689d1d27c17e83cf3d14455de53aab3f9c6b641820a0ed60d7bddeaf0cbcee"
   },
   "rest/deno": {
-    "README.md": "613b62dee94365b92acd91dd7109ce20ffd71df19bdbf68f52e037e271553381",
+    "README.md": "b2de1fdf7c18f6e174d21a0e1e5830dbab17f077375d6d1f3e2b7659c55b8e3a",
     ".gitignore": "74608d5564fef13c5aa0525034a06ddfe6be6b5999cb2cfa58f7c0b18b26dc69",
     "Dockerfile": "66a538f008e5c94ca4a602a9084697d85749e05935939bd912807a94d5d0b919",
     ".dockerignore": "7205d39ea9c6a71f98ba42f92e09b484cdddcd1bc806b2616ed8de52f11202d6",
@@ -47,7 +47,7 @@
     "src/metrics/index.ts": "19689d1d27c17e83cf3d14455de53aab3f9c6b641820a0ed60d7bddeaf0cbcee"
   },
   "rest/bun": {
-    "README.md": "6271290a692e9fd29db0a90ee884d9bd6efae6170a84b59183d88c24a81d8ee7",
+    "README.md": "7733da5fd8fa43d6c419673ab613c73a6577a28e14a07d84b62a34dca965a50f",
     ".gitignore": "74608d5564fef13c5aa0525034a06ddfe6be6b5999cb2cfa58f7c0b18b26dc69",
     "Dockerfile": "904c687a257b0d85c3fc7852afe3c24db33e21d58c936010490264a9a809a916",
     ".dockerignore": "7205d39ea9c6a71f98ba42f92e09b484cdddcd1bc806b2616ed8de52f11202d6",
@@ -94,7 +94,7 @@
     "src/metrics/index.ts": "19689d1d27c17e83cf3d14455de53aab3f9c6b641820a0ed60d7bddeaf0cbcee"
   },
   "microservice/node": {
-    "README.md": "9f5c7919a47feae82eb61f47e6a4ff62e1327cd7249567a389a734f22151f050",
+    "README.md": "9ea6060a4a5c39f149bdd3722f904870f220bfdb83b180e879d6ef37d1b1b8de",
     ".gitignore": "27cf11bc451a2d828fef995f70f6dd1770caa2171290b3c4b31e849a06030a89",
     "Dockerfile": "062ce7dda96e61191bc8d68580f0ab4a0dc4220d464b53ab7151b86bf8e9dcc8",
     ".dockerignore": "7205d39ea9c6a71f98ba42f92e09b484cdddcd1bc806b2616ed8de52f11202d6",
@@ -121,7 +121,7 @@
     "src/jobs/index.ts": "a3536efae42d1898f9ed0388ad1cda267b9d96e03788020dc949337699efec6d"
   },
   "microservice/deno": {
-    "README.md": "3d258f561dcaf957e3310d03cfb360eeb973688e52096c0c60429a46a0f4e02c",
+    "README.md": "32586d3252685be7fe2bab73096657f48af05d8e2468a76fff68c118d8f726fa",
     ".gitignore": "74608d5564fef13c5aa0525034a06ddfe6be6b5999cb2cfa58f7c0b18b26dc69",
     "Dockerfile": "66a538f008e5c94ca4a602a9084697d85749e05935939bd912807a94d5d0b919",
     ".dockerignore": "7205d39ea9c6a71f98ba42f92e09b484cdddcd1bc806b2616ed8de52f11202d6",
@@ -143,7 +143,7 @@
     "src/jobs/index.ts": "a3536efae42d1898f9ed0388ad1cda267b9d96e03788020dc949337699efec6d"
   },
   "microservice/bun": {
-    "README.md": "946273c2f7cf714256ead02b9032132a54000299ba38dabe402f1a7456793553",
+    "README.md": "68a83ca41189edfdc4454880baa96d6bbd84fc62d25da45e5c532f60034eb80c",
     ".gitignore": "74608d5564fef13c5aa0525034a06ddfe6be6b5999cb2cfa58f7c0b18b26dc69",
     "Dockerfile": "904c687a257b0d85c3fc7852afe3c24db33e21d58c936010490264a9a809a916",
     ".dockerignore": "7205d39ea9c6a71f98ba42f92e09b484cdddcd1bc806b2616ed8de52f11202d6",
@@ -192,7 +192,7 @@
     "src/reply-inbox-object.ts": "559d170056610d95c89c5d38ac8b79c1dd62fdaf1f1c2c064ef7a890bf7ef56b"
   },
   "class-based/node": {
-    "README.md": "c03277b5ad5bdbe747902827d4ebba01b0cc35c3a042abc1c7ef6d1d0138b4fb",
+    "README.md": "c8b7534474d84a7b7ce5ad1b6fde7de5b336162bef865813e46b839f690b0f05",
     ".gitignore": "27cf11bc451a2d828fef995f70f6dd1770caa2171290b3c4b31e849a06030a89",
     "Dockerfile": "062ce7dda96e61191bc8d68580f0ab4a0dc4220d464b53ab7151b86bf8e9dcc8",
     ".dockerignore": "7205d39ea9c6a71f98ba42f92e09b484cdddcd1bc806b2616ed8de52f11202d6",
@@ -220,7 +220,7 @@
     "src/ingress/index.ts": "6ab6f035d5f4398adb996e6ee1a132dd45276e7bc97b0dc0c45c5855ba0809e4"
   },
   "class-based/deno": {
-    "README.md": "613b62dee94365b92acd91dd7109ce20ffd71df19bdbf68f52e037e271553381",
+    "README.md": "b2de1fdf7c18f6e174d21a0e1e5830dbab17f077375d6d1f3e2b7659c55b8e3a",
     ".gitignore": "74608d5564fef13c5aa0525034a06ddfe6be6b5999cb2cfa58f7c0b18b26dc69",
     "Dockerfile": "66a538f008e5c94ca4a602a9084697d85749e05935939bd912807a94d5d0b919",
     ".dockerignore": "7205d39ea9c6a71f98ba42f92e09b484cdddcd1bc806b2616ed8de52f11202d6",
@@ -243,7 +243,7 @@
     "src/ingress/index.ts": "6ab6f035d5f4398adb996e6ee1a132dd45276e7bc97b0dc0c45c5855ba0809e4"
   },
   "class-based/bun": {
-    "README.md": "6271290a692e9fd29db0a90ee884d9bd6efae6170a84b59183d88c24a81d8ee7",
+    "README.md": "7733da5fd8fa43d6c419673ab613c73a6577a28e14a07d84b62a34dca965a50f",
     ".gitignore": "74608d5564fef13c5aa0525034a06ddfe6be6b5999cb2cfa58f7c0b18b26dc69",
     "Dockerfile": "904c687a257b0d85c3fc7852afe3c24db33e21d58c936010490264a9a809a916",
     ".dockerignore": "7205d39ea9c6a71f98ba42f92e09b484cdddcd1bc806b2616ed8de52f11202d6",

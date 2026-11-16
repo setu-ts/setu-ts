@@ -47,6 +47,7 @@ The build type-checks, checks CLI wiring and bundles the service into dist/. The
 data-URL preload to default NODE_ENV to production before imports, keeping any preset value. Run npm
 test before building an image.
 
-`/metrics`, `/docs`, `/openapi.json` are served on the application port. Restrict them at the proxy,
-or turn the UI off with OpenApiPlugin's `swagger: false`, or move `/docs` with its `endpoint` and
-`/openapi.json` with its `specEndpoint`, or move `/metrics` with MetricsPlugin's `endpoint`.
+`/metrics`, `/docs`, `/openapi.json` are served on the application port to anyone who can reach it:
+restrict them at the proxy. Turning the UI off with OpenApiPlugin's `swagger: false`, moving `/docs`
+with its `endpoint` and `/openapi.json` with its `specEndpoint` or moving `/metrics` with
+MetricsPlugin's `endpoint` changes a path or a page, not who can reach it.

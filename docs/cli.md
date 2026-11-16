@@ -297,12 +297,13 @@ the dotenv rows and creates an absent `docker/compose.yaml`, and prints a Compos
 the file exists without the service. An absent `docker/compose.yaml` is created for a standalone
 selection; an existing one is preserved. The connection variable is appended to the project's dotenv
 file (with its local default) and to that file's `.example` (empty) — the rows `setu new --broker`
-writes — only where the file exists and does not already assign it; a file the project does not have
-is named, not created. The file is the `envFilePath` that `setu.config.ts` declares (the last entry
-of an array, which ConfigPlugin overrides with the earlier ones). When the configuration declares
-none, or names it in a form the CLI cannot read (a variable, a template literal), nothing is written
-and the command says where to set the variable instead. Without a selection the full-stack starter
-uses memory. Changing an existing value is a manual edit.
+writes — unless the file already assigns it; a missing file is created with the row. The file is the
+`envFilePath` that `setu.config.ts` declares (the last entry of an array, which ConfigPlugin
+overrides with the earlier ones). When the configuration declares none, the file is `.env`, except
+on Deno with a `setu.config.ts`, where nothing is written; on Cloudflare Workers it is `.dev.vars`.
+When the configuration names the path in a form the CLI cannot read (a variable, a template
+literal), nothing is written and the command says where to set the variable instead. Without a
+selection the full-stack starter uses memory. Changing an existing value is a manual edit.
 
 #### Choosing the Redis client
 
@@ -1078,7 +1079,8 @@ nothing, so supply the value as a Workers var or secret); `ses` passes `{}`, sin
 override that keeps generated tests offline. The `qdrant` and `pgvector` vector-store adapters get a
 CLI-written `src/vector-store.ts` that builds the adapter on its application-owned client, so
 `setu.config.ts` keeps only framework and relative imports and stays readable to `setu check`;
-`QDRANT_URL` or `DATABASE_URL` in the dotenv pair; a Compose service; and the printed call
+`QDRANT_URL` or `PGVECTOR_URL` in the dotenv pair (pgvector's own variable, so an application
+database on `DATABASE_URL` is left alone); a Compose service; and the printed call
 `VectorStorePlugin({ adapter: vectorStoreAdapter(), … })` with its imports. Every printed
 registration names its imports. Mailpit, Qdrant and pgvector also get the README's "Local transport
 services" section, as a broker does. On Cloudflare Workers, zero-config providers are inserted like

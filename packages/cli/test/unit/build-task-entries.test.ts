@@ -240,6 +240,21 @@ describe('worker task entries', () => {
       'worker task references must use',
     );
   });
+  it('reads a regex literal as an arrow body, so a backtick in it opens no template', () => {
+    expect(
+      taskReferences(
+        "const has = (x: string) => /a`b/.test(x);\nconst u = new URL('./a.task.ts', import.meta.url);",
+        '/app/main.ts',
+      ).map((ref) => ref.target),
+    ).toEqual(['/app/a.task.ts']);
+    // `>=` and `x > y / 2` stay comparison and division.
+    expect(
+      taskReferences(
+        "const ok = a >= b / 2; const u = new URL('./b.task.ts', import.meta.url);",
+        '/app/main.ts',
+      ).map((ref) => ref.target),
+    ).toEqual(['/app/b.task.ts']);
+  });
   it('scans a large file without semicolons in linear time (M139d audit F3)', () => {
     const source = Array.from(
       { length: 40_000 },

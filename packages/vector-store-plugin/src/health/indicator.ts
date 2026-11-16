@@ -48,12 +48,18 @@ export function createVectorStoreIndicator(
           timeoutMs: PROBE_TIMEOUT_MS,
           ...resolveProbeTiming(runtime),
         });
+  const closedResult = (): HealthCheckResult => ({
+    status: 'down',
+    data: { adapter: adapter.name, state: 'closed' },
+  });
   return async (): Promise<HealthCheckResult> => {
-    if (closed()) return { status: 'down', data: { adapter: adapter.name, state: 'closed' } };
+    if (closed()) return closedResult();
     if (probe === undefined) {
       return { status: 'up', data: { adapter: adapter.name, reachable: 'unknown' } };
     }
     const reachable = await probe();
+    // Shutdown can close the adapter while the probe is in flight.
+    if (closed()) return closedResult();
     if (reachable === undefined) {
       return { status: 'up', data: { adapter: adapter.name, reachable: 'unknown' } };
     }

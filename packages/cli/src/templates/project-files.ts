@@ -2099,6 +2099,39 @@ export function renderLocalTransportSection(transportNotes: string, lead?: strin
 }
 
 /**
+ * The README's production note on the operational routes served on the
+ * application port. Only a proxy restriction limits who reaches them; moving a
+ * route or turning the UI off changes its path or page, not its reach.
+ *
+ * @param metrics - Whether MetricsPlugin serves `/metrics`
+ * @param openapi - Whether OpenApiPlugin serves `/docs` and `/openapi.json`
+ * @returns The paragraph with its leading blank line, or `''` when neither is served
+ */
+export function exposureParagraph(metrics: boolean, openapi: boolean): string {
+  if (!metrics && !openapi) return '';
+  const routes = [
+    ...(metrics ? ['`/metrics`'] : []),
+    ...(openapi ? ['`/docs`', '`/openapi.json`'] : []),
+  ];
+  const changes = [
+    ...(openapi
+      ? [
+          "turning the UI off with OpenApiPlugin's `swagger: false`",
+          'moving `/docs` with its `endpoint` and `/openapi.json` with its `specEndpoint`',
+        ]
+      : []),
+    ...(metrics ? ["moving `/metrics` with MetricsPlugin's `endpoint`"] : []),
+  ];
+  const list =
+    changes.length === 1
+      ? changes[0]!
+      : `${changes.slice(0, -1).join(', ')} or ${changes[changes.length - 1]!}`;
+  const sentence = `${list.charAt(0).toUpperCase()}${list.slice(1)} changes a path or a page, not who can reach it.`;
+  const one = routes.length === 1;
+  return `\n\n${wrapProse(`${routes.join(', ')} ${one ? 'is' : 'are'} served on the application port to anyone who can reach it: restrict ${one ? 'it' : 'them'} at the proxy. ${sentence}`)}`;
+}
+
+/**
  * Builds the file set for one runtime target and host.
  *
  * @param projectName - The project directory and manifest name
@@ -2190,29 +2223,12 @@ ${manifest?.readmeSection === undefined ? '' : `\n${typeof manifest.readmeSectio
 ${runtime === 'deno' ? `${manifest?.npmBuild === undefined ? '' : 'deno task build\n'}deno task start` : runtime === 'bun' ? `${manifest?.npmBuild === undefined ? '' : 'bun run build\n'}bun run start` : 'npm run build\nnpm start'}
 \`\`\`
 
-${wrapProse(runtime === 'node' ? `The build type-checks, checks CLI wiring and bundles the service into dist/. The start script uses a data-URL preload to default NODE_ENV to production before imports, keeping any preset value. Run npm test before building an image${host.plugins.some((plugin) => ['di-plugin', 'decorator-plugin'].includes(plugin.pkg)) ? ': DI graph validation happens at boot.' : '.'}` : 'The service runs TypeScript source; a full-stack project builds its frontend before production.')}${(() => {
-          const metrics =
-            host.appFactory !== undefined ||
-            host.plugins.some((plugin) => plugin.pkg === 'metrics-plugin');
-          const openapi =
-            host.appFactory !== undefined ||
-            host.plugins.some((plugin) => plugin.pkg === 'openapi-plugin');
-          if (!metrics && !openapi) return '';
-          const routes = [
-            ...(metrics ? ['`/metrics`'] : []),
-            ...(openapi ? ['`/docs`', '`/openapi.json`'] : []),
-          ];
-          const options = [
-            ...(openapi
-              ? [
-                  "turn the UI off with OpenApiPlugin's `swagger: false`",
-                  'move `/docs` with its `endpoint` and `/openapi.json` with its `specEndpoint`',
-                ]
-              : []),
-            ...(metrics ? ["move `/metrics` with MetricsPlugin's `endpoint`"] : []),
-          ];
-          return `\n\n${wrapProse(`${routes.join(', ')} are served on the application port. Restrict them at the proxy, or ${options.join(', or ')}.`)}`;
-        })()}
+${wrapProse(runtime === 'node' ? `The build type-checks, checks CLI wiring and bundles the service into dist/. The start script uses a data-URL preload to default NODE_ENV to production before imports, keeping any preset value. Run npm test before building an image${host.plugins.some((plugin) => ['di-plugin', 'decorator-plugin'].includes(plugin.pkg)) ? ': DI graph validation happens at boot.' : '.'}` : 'The service runs TypeScript source; a full-stack project builds its frontend before production.')}${exposureParagraph(
+          host.appFactory !== undefined ||
+            host.plugins.some((plugin) => plugin.pkg === 'metrics-plugin'),
+          host.appFactory !== undefined ||
+            host.plugins.some((plugin) => plugin.pkg === 'openapi-plugin'),
+        )}
 ${
   port === undefined
     ? `

@@ -73,9 +73,14 @@ export function launchGroup(
   cwd: string,
   env: Readonly<Record<string, string>>,
 ): RunningProcessGroup {
+  // A PORT the test runner happens to define would shadow the one a project
+  // reads from its .env (Node never lets .env replace a set variable), so it
+  // reaches the child only when the caller passes it.
+  const inherited: NodeJS.ProcessEnv = { ...process.env };
+  if (!Object.hasOwn(env, 'PORT')) delete inherited['PORT'];
   const child = spawn(executable, [...args], {
     cwd,
-    env: { ...process.env, ...env },
+    env: { ...inherited, ...env },
     detached: process.platform !== 'win32',
     stdio: ['ignore', 'pipe', 'pipe'],
   });

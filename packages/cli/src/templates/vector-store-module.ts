@@ -32,7 +32,7 @@ export const VECTOR_STORE_CONNECTION: Readonly<
 > = {
   qdrant: { variable: 'QDRANT_URL', localDefault: 'http://127.0.0.1:6333' },
   pgvector: {
-    variable: 'DATABASE_URL',
+    variable: 'PGVECTOR_URL',
     localDefault: 'postgresql://postgres:postgres@127.0.0.1:5432/app',
   },
 };
@@ -73,7 +73,7 @@ export const VECTOR_STORE_COMPOSE: Readonly<
 `,
       dependsOn: ['pgvector'],
       condition: 'service_healthy',
-      memberEnv: { DATABASE_URL: 'postgresql://postgres:postgres@pgvector:5432/app' },
+      memberEnv: { PGVECTOR_URL: 'postgresql://postgres:postgres@pgvector:5432/app' },
     },
   },
 };
@@ -135,7 +135,9 @@ import { PgVectorStore } from '@setu-ts/vector-store-plugin';
  * @returns The adapter the plugin's \`adapter\` option takes
  */
 export function ${VECTOR_STORE_FACTORY}(): PgVectorStore {
-  return new PgVectorStore({ db: drizzle(${url}) });
+  const db = drizzle(${url});
+  // Drizzle built the pool from the URL, so the adapter ends it at shutdown.
+  return new PgVectorStore({ db, onClose: () => db.$client.end() });
 }
 `;
   return { path: VECTOR_STORE_MODULE_PATH, contents };

@@ -10,7 +10,11 @@ import { resolveNewChoices } from '../../src/commands/new-interactive.ts';
 import { readWorkspaceManifest, WORKSPACE_MANIFEST } from '../../src/workspace/manifest.ts';
 import { brokerSpec } from '../../src/workspace/transport.ts';
 import { withClientDependencies, CLIENT_RANGES } from '../../src/templates/client-dependencies.ts';
-import { renderLocalTransportSection, resolveHost } from '../../src/templates/project-files.ts';
+import {
+  exposureParagraph,
+  renderLocalTransportSection,
+  resolveHost,
+} from '../../src/templates/project-files.ts';
 import { MINIMAL_HOST } from '../../src/templates/minimal.ts';
 import { nodeRedisClientCall } from '../../src/templates/node-redis.ts';
 import { formatForTarget } from '../../src/utils/prettier-format.ts';
@@ -260,6 +264,21 @@ describe('node-redis CLI', () => {
       expect(expected[path]).toContain(BROKER_HEADER);
       expected[path] = expected[path]!.replace(BROKER_HEADER, BACKING_HEADER);
     }
+    // M140d review: only a proxy restriction limits who reaches the operational
+    // routes; moving one or turning the UI off is named as a path or page change.
+    const OLD_EXPOSURE =
+      /\n\n(`\/metrics`[^\n]*?|`\/docs`[^\n]*?) are served on the application port\. Restrict them at the proxy,[\s\S]*?`endpoint`\.(?=\n)/;
+    let exposures = 0;
+    for (const path of Object.keys(expected)) {
+      const match = OLD_EXPOSURE.exec(expected[path]!);
+      if (match === null) continue;
+      exposures++;
+      expected[path] = expected[path]!.replace(
+        match[0],
+        exposureParagraph(match[1]!.includes('/metrics'), match[1]!.includes('/docs')),
+      );
+    }
+    expect(exposures).toBe(15);
     // M140d: the local transport section also says a container needs each
     // connection variable passed in. The `setu new --broker` captures already
     // carry the section; the paragraph follows its Compose command.

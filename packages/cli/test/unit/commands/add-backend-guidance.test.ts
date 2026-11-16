@@ -247,7 +247,7 @@ describe('setu add backend guidance', () => {
 
   for (const [adapter, variable, imports, service, client] of [
     ['qdrant', 'QDRANT_URL', 'QdrantClient', 'qdrant', '@qdrant/js-client-rest@1.20.0'],
-    ['pgvector', 'DATABASE_URL', "drizzle } from 'drizzle-orm/node-postgres'", 'pgvector', 'pg'],
+    ['pgvector', 'PGVECTOR_URL', "drizzle } from 'drizzle-orm/node-postgres'", 'pgvector', 'pg'],
   ] as const) {
     it(`writes the ${adapter} adapter module, its connection and a Compose service`, async () => {
       const p = await project();

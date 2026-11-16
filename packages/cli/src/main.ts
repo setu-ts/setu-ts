@@ -123,10 +123,14 @@ export function nodeProcess(onInterrupt: () => void = emitInterrupt): MainProces
     terminal: process.stdin.isTTY === true,
     onInterrupt,
   });
+  // One reader owns stdin at a time: a picker read closes the line reader's
+  // interface first, and the next text question opens a new one.
   const picker = createPicker(
     process.stdin as Parameters<typeof createPicker>[0],
     process.stdout,
     onInterrupt,
+    process.env,
+    () => reader.suspend(),
   );
   return {
     ...(picker === undefined ? {} : { picker }),

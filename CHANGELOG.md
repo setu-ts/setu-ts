@@ -74,12 +74,12 @@ All notable changes to this project are documented here. The format follows
   comments no longer blame Deno or repeat a done step (V12-96, V12-97).
 - **`@setu-ts/cli` (M140d, #594).** Templates: READMEs name the microservice's in-memory transports
   (V12-73), claim DI validation only for decorated projects (V12-78), use `generate module billing`
-  (V12-79) and say `/metrics`, `/docs` and `/openapi.json` are on the application port (V12-94);
-  `main.ts` reports a failed shutdown on stderr without a logger (V12-81); the config's devtool
-  JSDoc is true with or without `main.dev.ts` (V12-98). Full-stack: module controllers throw
-  `notFound`/`badRequest` (V12-90), the module unit test drives the service without a port (V12-93),
-  React is only in `dependencies` (V12-91), and the login, guard and nav comments are accurate, with
-  `g module --page` printing the `APP_NAV` entry (V12-89, V12-92).
+  (V12-79) and say `/metrics`, `/docs` and `/openapi.json` are on the application port, which only a
+  proxy restriction limits (V12-94); `main.ts` reports a failed shutdown on stderr without a logger
+  (V12-81); the config's devtool JSDoc is true with or without `main.dev.ts` (V12-98). Full-stack:
+  module controllers throw `notFound`/`badRequest` (V12-90), the module unit test drives the service
+  without a port (V12-93), React is only in `dependencies` (V12-91), and the login, guard and nav
+  comments are accurate, with `g module --page` printing the `APP_NAV` entry (V12-89, V12-92).
 - **`@setu-ts/cli` (M140d, #594).** Agent brief and devtool: the validation rule appears only with
   `validation-plugin` installed (V12-126); the brief lists `main.dev.ts` and the managed diagnostics
   allowlist and says `dev` needs the launcher's credentials (V12-128); `start` says to build first
@@ -93,22 +93,23 @@ All notable changes to this project are documented here. The format follows
   one chunk are each read. A terminal that cannot read single keys, or `TERM=dumb`, keeps the typed
   answer.
 - **`@setu-ts/cli` (M140d, #594).** `setu add` guidance runs as printed. The `qdrant` and `pgvector`
-  vector stores get a CLI-written `src/vector-store.ts`, so the config stays readable to
-  `setu check`, plus their connection variable, a Compose service, the client package and import
-  lines. `smtp` mail gets a local Mailpit and the test override. Every printed registration names
-  its imports. Mailpit, Qdrant and pgvector add the README's local services section.
-  `setu add decorator` refuses a functional project. On Workers zero-config providers are wired,
-  while `cache` and `storage` are refused in favour of `CloudflarePlugin`'s KV and R2, and the
-  vector store takes only `memory` or `VectorizeVectorStore`. The Qdrant client is pinned to the
-  Compose image's release. The MCP note names the security guard; `di`, `sdk` and full-stack `auth`
-  print what to do; `add view` lists `/ui` and `/assets` in the README. `setu check` W006 covers
-  every provider whose registration `add` prints except `auth-plugin`, whose helpers work without
-  the plugin, and on a starter-composed config every installed package whose gated starter arm
-  (`graphql`, `static`, `realtime.websocket` and the like) is unset. A starter-composed `add` of
-  such a package prints the arm's shape, with `urlPrefix` on full-stack's `static`. On Workers
-  `add cloudflare` registers `CloudflarePlugin` with `waitUntil` in a generated minimal, `rest` or
-  class-based config and renames the factory's `_waitUntil` parameter; other configs get both steps
-  printed.
+  vector stores get a CLI-written `src/vector-store.ts` (pgvector's ends the pool it creates at
+  shutdown), so the config stays readable to `setu check`, plus their connection variable
+  (`QDRANT_URL`, or `PGVECTOR_URL` so an application database on `DATABASE_URL` is left alone), a
+  Compose service, the client package and import lines. `smtp` mail gets a local Mailpit and the
+  test override. Every printed registration names its imports. Mailpit, Qdrant and pgvector add the
+  README's local services section. `setu add decorator` refuses a functional project. On Workers
+  zero-config providers are wired, while `cache` and `storage` are refused in favour of
+  `CloudflarePlugin`'s KV and R2, and the vector store takes only `memory` or
+  `VectorizeVectorStore`. The Qdrant client is pinned to the Compose image's release. The MCP note
+  names the security guard; `di`, `sdk` and full-stack `auth` print what to do; `add view` lists
+  `/ui` and `/assets` in the README. `setu check` W006 covers every provider whose registration
+  `add` prints except `auth-plugin`, whose helpers work without the plugin, and on a
+  starter-composed config every installed package whose gated starter arm (`graphql`, `static`,
+  `realtime.websocket` and the like) is unset. A starter-composed `add` of such a package prints the
+  arm's shape, with `urlPrefix` on full-stack's `static`. On Workers `add cloudflare` registers
+  `CloudflarePlugin` with `waitUntil` in a generated minimal, `rest` or class-based config and
+  renames the factory's `_waitUntil` parameter; other configs get both steps printed.
 - **`@setu-ts/cli` (M140d, #594).** `setu add` at a terminal now asks for every left-out choice, not
   only mail's provider, the database type and the vector-store adapter: `--dialect` after Drizzle,
   and the transport backends `--broker`, `--queue`, `--store`, `--lock` and `--backplane`, default

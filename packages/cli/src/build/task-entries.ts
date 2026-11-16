@@ -113,7 +113,7 @@ export function codeView(source: string): ICodeView {
       char === '/' &&
       (previous === '' ||
         '(,=:[!&|?{};'.includes(previous) ||
-        ['return', 'typeof', 'default'].includes(previous))
+        ['return', 'typeof', 'default', '=>'].includes(previous))
     ) {
       const start = at;
       let inClass = false;
@@ -140,7 +140,9 @@ export function codeView(source: string): ICodeView {
     } else {
       if (char === '{') depth++;
       else if (char === '}') depth--;
-      if (!/\s/.test(char)) previous = /[0-9)\]]/.test(char) ? 'value' : char;
+      // An arrow's body may open with a regex literal: `=>` is its own token.
+      if (char === '>' && previous === '=') previous = '=>';
+      else if (!/\s/.test(char)) previous = /[0-9)\]]/.test(char) ? 'value' : char;
       at++;
     }
   }

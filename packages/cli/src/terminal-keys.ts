@@ -7,7 +7,10 @@
  * without echo. Ctrl+C is delivered through `onInterrupt`, the same path a
  * process signal takes (see `nodeProcess` in `main.ts`). Keys that arrive in
  * one chunk (a paste, or input typed ahead) are queued for the next reads
- * rather than dropped.
+ * rather than dropped. The listener is held only while a read is waiting and
+ * the chunk that settled it is delivered, so keys typed at a later text
+ * question never reach the picker; `beforeRead` lets the text reader step
+ * aside before a picker read, so the two never own the input at once.
  *
  * @module
  */
@@ -103,9 +106,15 @@ export function toPickerKey(
  *
  * @param input - The terminal input (`process.stdin`)
  * @param onInterrupt - Called on Ctrl+C, before the read settles with `null`
+ * @param beforeRead - Called before a read that waits on the input, to take it
+ *   from any other reader (the line reader's interface)
  * @returns The reader, or `undefined` when the input cannot enter raw mode
  */
-export function createKeyReader(input: RawInput, onInterrupt: () => void): KeyReader | undefined {
+export function createKeyReader(
+  input: RawInput,
+  onInterrupt: () => void,
+  beforeRead?: () => void,
+): KeyReader | undefined {
   if (input.isTTY !== true || typeof input.setRawMode !== 'function') return undefined;
   emitKeypressEvents(input as Parameters<typeof emitKeypressEvents>[0]);
   // `readline` emits every key of one chunk synchronously, so the keys after
@@ -114,6 +123,7 @@ export function createKeyReader(input: RawInput, onInterrupt: () => void): KeyRe
   const queued: (PickerKey | null)[] = [];
   let pending: ((value: PickerKey | null) => void) | undefined;
   let listening = false;
+  let endListening = false;
   const deliver = (value: PickerKey | null): void => {
     if (pending === undefined) queued.push(value);
     else pending(value);
@@ -130,13 +140,27 @@ export function createKeyReader(input: RawInput, onInterrupt: () => void): KeyRe
     }
   };
   const onEnd = (): void => deliver(null);
+  // Detached once the read has settled and the chunk that settled it has been
+  // delivered: readline emits a chunk's keys synchronously, so a microtask runs
+  // after the last of them.
+  const release = (): void => {
+    queueMicrotask(() => {
+      if (pending !== undefined || !listening) return;
+      // `end` stays: it consumes no keys, and an end of input between reads
+      // must still settle the next read.
+      input.off('keypress', onKey);
+      listening = false;
+    });
+  };
   return {
     read(signal) {
       if (signal?.aborted === true) return Promise.resolve(null);
       if (queued.length > 0) return Promise.resolve(queued.shift()!);
+      beforeRead?.();
       if (!listening) {
         input.on('keypress', onKey);
-        input.on('end', onEnd);
+        if (!endListening) input.on('end', onEnd);
+        endListening = true;
         listening = true;
       }
       return new Promise((resolve) => {
@@ -145,6 +169,7 @@ export function createKeyReader(input: RawInput, onInterrupt: () => void): KeyRe
           signal?.removeEventListener('abort', onAbort);
           input.setRawMode?.(false);
           input.pause();
+          release();
           resolve(value);
         };
         const onAbort = (): void => finish(null);
@@ -189,6 +214,8 @@ export interface PickerOutput {
  * @param output - The terminal output (`process.stdout`)
  * @param onInterrupt - Called on Ctrl+C
  * @param env - The environment, for `NO_COLOR`
+ * @param beforeRead - Called before each key read that waits, to take the input
+ *   from the line reader (see `nodeProcess` in `main.ts`)
  * @returns The picker terminal, or `undefined` to keep the typed answer, also
  * for `TERM=dumb`, which cannot move the cursor to redraw the list
  */
@@ -197,9 +224,10 @@ export function createPicker(
   output: PickerOutput,
   onInterrupt: () => void,
   env: Readonly<Record<string, string | undefined>> = process.env,
+  beforeRead?: () => void,
 ): PickerTerminal | undefined {
   if (output.isTTY !== true || env['TERM'] === 'dumb') return undefined;
-  const keys = createKeyReader(input, onInterrupt);
+  const keys = createKeyReader(input, onInterrupt, beforeRead);
   if (keys === undefined) return undefined;
   return {
     keys,

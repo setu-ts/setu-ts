@@ -240,9 +240,33 @@ describe('createKeyReader', () => {
     input.emit('keypress', undefined, { name: 'down' });
     expect(await read).toEqual({ kind: 'down' });
     expect(modes).toEqual([true, false]);
-    // One listener for the reader's life, however many keys it reads.
+    // The listener goes once the read has settled, and comes back for the next.
+    await Promise.resolve();
+    expect(input.listenerCount('keypress')).toBe(0);
     await Promise.all([reader.read(), Promise.resolve(input.emit('keypress', 'x', { name: 'x' }))]);
-    expect(input.listenerCount('keypress')).toBe(1);
+    await Promise.resolve();
+    expect(input.listenerCount('keypress')).toBe(0);
+  });
+
+  it('never queues keys typed after a read settles, for a later text question', async () => {
+    const { input } = fakeInput();
+    let taken = 0;
+    const reader = createKeyReader(
+      input as never,
+      () => {},
+      () => (taken += 1),
+    )!;
+    const first = reader.read();
+    expect(taken).toBe(1);
+    input.emit('keypress', undefined, { name: 'down' });
+    expect(await first).toEqual({ kind: 'down' });
+    await Promise.resolve();
+    // A text question's Enter, typed between two picker reads, is not the picker's.
+    input.emit('keypress', '\r', { name: 'return' });
+    const second = reader.read();
+    expect(taken).toBe(2);
+    input.emit('keypress', undefined, { name: 'up' });
+    expect(await second).toEqual({ kind: 'up' });
   });
 
   it('queues the keys of one chunk for the next reads instead of dropping them', async () => {
