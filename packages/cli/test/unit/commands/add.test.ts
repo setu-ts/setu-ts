@@ -2936,7 +2936,7 @@ describe('setu add — install command per runtime', () => {
       '/app/deno.json': DENO_MANIFEST,
       '/app/package.json': pkg('wrangler dev'),
     });
-    await h.run(['cache']);
+    await h.run(['resilience']);
     expect(h.out.join('\n')).toContain('  npm install');
   });
 

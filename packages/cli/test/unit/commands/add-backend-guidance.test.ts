@@ -237,6 +237,9 @@ describe('setu add backend guidance', () => {
     expect(await p.run(['add', 'decorator'])).toBe(1);
     expect(p.err.text()).toContain('This project uses the functional style.');
     expect(p.err.text()).toContain('new <name> --template rest --style class-based');
+    expect(p.err.text()).toContain(
+      '(or --template microservice; full-stack has no class-based variant)',
+    );
     expect(p.read('package.json')).not.toContain('decorator-plugin');
     const classBased = await project(['--style', 'class-based']);
     expect(await classBased.run(['add', 'decorator']), classBased.err.text()).toBe(0);
@@ -307,19 +310,38 @@ describe('setu add backend guidance', () => {
     expect(p.out.text()).not.toContain('already passes these options');
   });
 
-  it('wires zero-config providers on Workers, but not an in-memory cache or store', async () => {
+  it('wires zero-config providers on Workers, and refuses an in-memory cache or store there', async () => {
     const p = await project([], 'minimal', 'cloudflare-workers');
     expect(await p.run(['add', 'resilience']), p.err.text()).toBe(0);
     expect(p.read('setu.config.ts')).toContain('ResiliencePlugin(),');
-    for (const [pkg, call, arm] of [
-      ['cache', 'CachePlugin', "cache: { binding: 'CACHE_KV' }"],
-      ['storage', 'StoragePlugin', "storage: { binding: 'UPLOADS' }"],
+    for (const [pkg, arm, block] of [
+      ['cache', "cache: { binding: 'CACHE_KV' }", 'KV'],
+      ['storage', "storage: { binding: 'UPLOADS' }", 'R2'],
     ] as const) {
-      (p.out.lines as string[]).length = 0;
-      expect(await p.run(['add', pkg]), p.err.text()).toBe(0);
-      expect(p.read('setu.config.ts')).not.toContain(`${call}()`);
-      expect(p.out.text()).toContain(`CloudflarePlugin({ env, ${arm} })`);
+      (p.err.lines as string[]).length = 0;
+      const manifest = p.read('package.json');
+      expect(await p.run(['add', pkg])).toBe(2);
+      expect(p.err.text()).toContain(
+        `Cannot add @setu-ts/${pkg}-plugin to a cloudflare-workers project`,
+      );
+      expect(p.err.text()).toContain(
+        `CloudflarePlugin({ env, ${arm} }) (setu add cloudflare registers it`,
+      );
+      expect(p.err.text()).toContain(`commented ${block} block`);
+      expect(p.read('package.json')).toBe(manifest);
     }
+  });
+
+  it('refuses the socket vector-store adapters on Workers and does not ask for one there', async () => {
+    const p = await project([], 'minimal', 'cloudflare-workers');
+    for (const adapter of ['qdrant', 'pgvector']) {
+      (p.err.lines as string[]).length = 0;
+      expect(await p.run(['add', 'vector-store', '--adapter', adapter])).toBe(2);
+      expect(p.err.text()).toContain(`--adapter ${adapter} cannot apply on Cloudflare Workers`);
+      expect(p.err.text()).toContain("VectorizeVectorStore from '@setu-ts/cloudflare-plugin'");
+      expect(p.read('package.json')).not.toContain('vector-store-plugin');
+    }
+    expect(await p.run(['add', 'vector-store', '--adapter', 'memory']), p.err.text()).toBe(0);
   });
 
   it('names the security guard a marked MCP route needs, and prints di and sdk guidance', async () => {
@@ -352,6 +374,47 @@ describe('setu add backend guidance', () => {
     expect(withServedRoutes(readme)).toBeUndefined();
     expect(withServedRoutes('# x\n')).toBeUndefined();
     expect(withServedRoutes('# x\n\n## What it serves\n\nNothing yet.\n')).toBeUndefined();
+  });
+
+  it('adds the view routes after the last bullet, wrapped or at the end of the file', () => {
+    const routes = '- `/ui` — the example page `setu add view` wrote, rendered by ViewPlugin';
+    // A last bullet with no line feed after it: the routes follow it, after the heading.
+    const unterminated = withServedRoutes('# x\n\n## What it serves\n\n- `/` — hello')!;
+    expect(unterminated.indexOf(routes)).toBeGreaterThan(unterminated.indexOf('- `/` — hello'));
+    expect(unterminated.startsWith('# x\n\n## What it serves\n\n- `/` — hello\n- `/ui`')).toBe(
+      true,
+    );
+    // A wrapped last bullet keeps its continuation line, and the next section stays after.
+    const wrapped = withServedRoutes(
+      '# x\n\n## What it serves\n\n- `/` — a long line\n  that wraps here\n\n## Run\n',
+    )!;
+    expect(wrapped).toContain('- `/` — a long line\n  that wraps here\n- `/ui`');
+    expect(wrapped.indexOf('## Run')).toBeGreaterThan(wrapped.indexOf('- `/assets`'));
+  });
+
+  it('adds the local services section for Mailpit and Qdrant, and no test override on full-stack', async () => {
+    for (const [args, service] of [
+      [['add', 'mail', '--provider', 'smtp'], 'mailpit'],
+      [['add', 'vector-store', '--adapter', 'qdrant'], 'qdrant'],
+    ] as const) {
+      const p = await project();
+      expect(await p.run([...args]), p.err.text()).toBe(0);
+      const readme = p.read('README.md');
+      expect(readme).toContain('## Local transport services');
+      expect(readme).toContain('`/health` reports each one down until it is listening');
+      expect(readme.indexOf('## Local transport services')).toBeLessThan(readme.indexOf('## Run'));
+      expect(p.read('docker/compose.yaml')).toContain(`  ${service}:`);
+      expect(p.out.text()).toContain('README.md gains the Local transport services section.');
+    }
+    const rest = await project();
+    expect(await rest.run(['add', 'mail', '--provider', 'smtp']), rest.err.text()).toBe(0);
+    expect(rest.out.text()).toContain("without: ['mail-plugin']");
+    const fullStack = await project([], 'full-stack');
+    expect(await fullStack.run(['add', 'mail', '--provider', 'smtp']), fullStack.err.text()).toBe(
+      0,
+    );
+    expect(fullStack.out.text()).toContain('Local mail goes to Mailpit');
+    expect(fullStack.out.text()).not.toContain('createTestApp');
   });
 
   it('reports every printed-registration provider that nothing registers, with three exceptions', () => {

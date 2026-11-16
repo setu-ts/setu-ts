@@ -417,7 +417,15 @@ export function withServedRoutes(readme: string): string | undefined {
   const section = readme.slice(heading, next < 0 ? readme.length : next);
   const lastBullet = section.lastIndexOf('\n- ');
   if (lastBullet < 0) return undefined;
-  const at = heading + section.indexOf('\n', lastBullet + 1);
+  // The list ends where the last bullet does: past its indented continuation
+  // lines when it wraps, and at the section's end when no line feed follows it.
+  const lines = section.slice(lastBullet + 1).split('\n');
+  let end = lastBullet + 1 + lines[0]!.length;
+  for (const line of lines.slice(1)) {
+    if (!/^\s+\S/.test(line)) break;
+    end += 1 + line.length;
+  }
+  const at = heading + end;
   return (
     `${readme.slice(0, at)}\n- \`/ui\` — the example page \`setu add view\` wrote, rendered by ViewPlugin` +
     `\n- \`/assets\` — its built CSS, served by StaticPlugin from \`build/assets\`${readme.slice(at)}`

@@ -5,7 +5,9 @@
  * terminal is put in raw mode only while one key is awaited, and restored
  * before the promise settles, so a key read can never leave the user's shell
  * without echo. Ctrl+C is delivered through `onInterrupt`, the same path a
- * process signal takes (see `nodeProcess` in `main.ts`).
+ * process signal takes (see `nodeProcess` in `main.ts`). Keys that arrive in
+ * one chunk (a paste, or input typed ahead) are queued for the next reads
+ * rather than dropped.
  *
  * @module
  */
@@ -106,33 +108,47 @@ export function toPickerKey(
 export function createKeyReader(input: RawInput, onInterrupt: () => void): KeyReader | undefined {
   if (input.isTTY !== true || typeof input.setRawMode !== 'function') return undefined;
   emitKeypressEvents(input as Parameters<typeof emitKeypressEvents>[0]);
+  // `readline` emits every key of one chunk synchronously, so the keys after
+  // the first arrive once the read that took the first has settled: they wait
+  // here for the next reads. `null` stands for Ctrl+D or the end of input.
+  const queued: (PickerKey | null)[] = [];
+  let pending: ((value: PickerKey | null) => void) | undefined;
+  let listening = false;
+  const deliver = (value: PickerKey | null): void => {
+    if (pending === undefined) queued.push(value);
+    else pending(value);
+  };
+  const onKey = (text: string | undefined, key: KeyInfo | undefined): void => {
+    const mapped = toPickerKey(text, key);
+    if (mapped === 'interrupt') {
+      // Ctrl+C acts at once, whether a read is waiting or not.
+      queued.length = 0;
+      deliver(null);
+      onInterrupt();
+    } else {
+      deliver(mapped === 'eof' ? null : mapped);
+    }
+  };
+  const onEnd = (): void => deliver(null);
   return {
     read(signal) {
       if (signal?.aborted === true) return Promise.resolve(null);
+      if (queued.length > 0) return Promise.resolve(queued.shift()!);
+      if (!listening) {
+        input.on('keypress', onKey);
+        input.on('end', onEnd);
+        listening = true;
+      }
       return new Promise((resolve) => {
         const finish = (value: PickerKey | null): void => {
-          input.off('keypress', onKey);
-          input.off('end', onEnd);
+          pending = undefined;
           signal?.removeEventListener('abort', onAbort);
           input.setRawMode?.(false);
           input.pause();
           resolve(value);
         };
-        const onKey = (text: string | undefined, key: KeyInfo | undefined): void => {
-          const mapped = toPickerKey(text, key);
-          if (mapped === 'interrupt') {
-            finish(null);
-            onInterrupt();
-          } else if (mapped === 'eof') {
-            finish(null);
-          } else {
-            finish(mapped);
-          }
-        };
-        const onEnd = (): void => finish(null);
         const onAbort = (): void => finish(null);
-        input.on('keypress', onKey);
-        input.on('end', onEnd);
+        pending = finish;
         signal?.addEventListener('abort', onAbort, { once: true });
         input.setRawMode?.(true);
         input.resume();
@@ -159,6 +175,8 @@ export function supportsColor(
 /** The parts of a TTY output stream the picker needs. */
 export interface PickerOutput {
   readonly isTTY?: boolean;
+  /** The terminal's width, read again for every frame (it changes on resize). */
+  readonly columns?: number;
   write(text: string): unknown;
   hasColors?(count: number): boolean;
 }
@@ -171,7 +189,8 @@ export interface PickerOutput {
  * @param output - The terminal output (`process.stdout`)
  * @param onInterrupt - Called on Ctrl+C
  * @param env - The environment, for `NO_COLOR`
- * @returns The picker terminal, or `undefined` to keep the typed answer
+ * @returns The picker terminal, or `undefined` to keep the typed answer, also
+ * for `TERM=dumb`, which cannot move the cursor to redraw the list
  */
 export function createPicker(
   input: RawInput,
@@ -179,7 +198,7 @@ export function createPicker(
   onInterrupt: () => void,
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): PickerTerminal | undefined {
-  if (output.isTTY !== true) return undefined;
+  if (output.isTTY !== true || env['TERM'] === 'dumb') return undefined;
   const keys = createKeyReader(input, onInterrupt);
   if (keys === undefined) return undefined;
   return {
@@ -188,5 +207,6 @@ export function createPicker(
       output.write(text);
     },
     color: supportsColor(env, output),
+    columns: () => output.columns,
   };
 }

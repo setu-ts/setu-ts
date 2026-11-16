@@ -347,6 +347,25 @@ export const RUNTIME_RESTRICTIONS: ReadonlyMap<
       reason: 'the scheduler is unavailable on Cloudflare Workers',
     },
   ],
+  // An in-memory cache or store lives in one isolate, so a write one request
+  // makes is missing in the next; CloudflarePlugin serves both capabilities
+  // from KV and R2, and a second provider of either would refuse startup.
+  [
+    'cache-plugin',
+    {
+      runtimes: ['deno', 'node', 'bun'],
+      reason:
+        "its stores live in one isolate's memory or need a Redis socket; on Workers, serve the cache from KV with CloudflarePlugin({ env, cache: { binding: 'CACHE_KV' } }) (setu add cloudflare registers it; wrangler.toml's commented KV block declares the binding)",
+    },
+  ],
+  [
+    'storage-plugin',
+    {
+      runtimes: ['deno', 'node', 'bun'],
+      reason:
+        "its default store lives in one isolate's memory; on Workers, serve storage from R2 with CloudflarePlugin({ env, storage: { binding: 'UPLOADS' } }) (setu add cloudflare registers it; wrangler.toml's commented R2 block declares the binding)",
+    },
+  ],
 ]);
 
 /**
@@ -601,28 +620,7 @@ function printWiringNote(
   log: (line: string) => void,
   seam?: AddSeam,
   transportArgs?: string,
-  runtime?: TargetRuntime,
 ): void {
-  // On Workers an in-memory cache or store lives in one isolate, so a write one
-  // request makes is missing in the next; CloudflarePlugin serves both from KV
-  // and R2, and a second provider of the capability would refuse startup.
-  const workersArm =
-    runtime === 'cloudflare-workers'
-      ? bare === 'cache-plugin'
-        ? { option: "cache: { binding: 'CACHE_KV' }", block: 'KV' }
-        : bare === 'storage-plugin'
-          ? { option: "storage: { binding: 'UPLOADS' }", block: 'R2' }
-          : undefined
-      : undefined;
-  if (workersArm !== undefined) {
-    log(
-      `  On Cloudflare Workers, back it with CloudflarePlugin instead of an in-memory ${bare === 'cache-plugin' ? 'CachePlugin()' : 'StoragePlugin()'}: CloudflarePlugin({ env, ${workersArm.option} }).`,
-    );
-    log(
-      `  Declare the binding as wrangler.toml's commented ${workersArm.block} block shows; an isolate's memory does not outlive it.`,
-    );
-    return;
-  }
   if (bare === 'mcp-plugin') {
     log(
       '  The app boots with it only once at least one route is marked with mcpTool() or @McpTool().',
@@ -1837,6 +1835,44 @@ const MAILPIT_BACKING: { readonly name: string; readonly compose: ComposeBacking
 };
 
 /**
+ * Plans the README section `setu new --broker` writes about the local Compose
+ * services, before `## Run`: without it a fresh clone's `start:dev` meets a
+ * backend nothing told the developer to start. Extends a README edit already
+ * planned this run, and leaves a README that has the section alone.
+ *
+ * @param lead - The section's opening sentence, when not the transport one
+ * @returns `false` after reporting an unreadable README, otherwise `true`
+ */
+async function planLocalServicesReadme(
+  deps: AddCommandDependencies,
+  dir: string,
+  edits: { path: string; contents: string; secret?: boolean }[],
+  lead?: string,
+): Promise<boolean> {
+  const readmePath = joinPath(dir, 'README.md');
+  const readme = await readProjectText(deps, readmePath, 'README.md');
+  if (readme === null) return false;
+  const pending = edits.find((edit) => edit.path === readmePath);
+  const base = pending?.contents ?? readme;
+  if (base === undefined || base.includes(`\n${LOCAL_TRANSPORT_HEADING}\n`)) return true;
+  const section = renderLocalTransportSection('', lead);
+  const at = base.indexOf('\n## Run\n');
+  if (at < 0) {
+    deps.log(`  README.md has no "## Run" section; add this one before it:${section}`);
+    return true;
+  }
+  const contents = `${base.slice(0, at + 1)}${section.slice(1)}\n${base.slice(at + 1)}`;
+  if (pending === undefined) edits.push({ path: readmePath, contents });
+  else edits.splice(edits.indexOf(pending), 1, { path: readmePath, contents });
+  deps.log(`  README.md gains the ${LOCAL_TRANSPORT_HEADING.slice(3)} section.`);
+  return true;
+}
+
+/** The README lead for services the app checks rather than a transport it connects at registration. */
+const BACKING_SERVICES_LEAD =
+  'Start these before the application: `/health` reports each one down until it is listening, and a plugin that connects at startup fails `start` without its service.';
+
+/**
  * Plans a local backing service in `docker/compose.yaml`: creates the file when
  * it is absent, otherwise prints the block an existing file lacks (the file is
  * create-only, as for the broker arms), and prints how to start it.
@@ -1857,6 +1893,7 @@ async function planComposeService(
   const existing =
     pending?.contents ?? (await readProjectText(deps, composePath, BROKER_COMPOSE_FILE));
   if (existing === null) return false;
+  if (!(await planLocalServicesReadme(deps, dir, edits, BACKING_SERVICES_LEAD))) return false;
   if (existing === undefined) {
     for (const file of brokerComposeFiles([backing])) {
       const path = joinPath(dir, file.path);
@@ -1972,6 +2009,8 @@ interface AddChoice {
   readonly standaloneOnly?: boolean;
   /** Asked only once another choice has this value. */
   readonly after?: { readonly flag: string; readonly value: string };
+  /** On Cloudflare Workers only the default applies (the others are refused), so it is not asked. */
+  readonly defaultOnWorkers?: boolean;
   /** What the help text says it selects, when not the package names. */
   readonly subject?: string;
 }
@@ -1989,6 +2028,7 @@ export const ADD_CHOICES: readonly AddChoice[] = [
     flag: backend.flag,
     packages: [pkg],
     values: () => Object.keys(backend.arms),
+    ...(pkg === 'vector-store-plugin' ? { defaultOnWorkers: true } : {}),
   })),
   {
     flag: 'dialect',
@@ -2056,6 +2096,7 @@ function openChoices(
   flags: Readonly<Record<string, string | boolean | readonly string[]>>,
   packages: readonly string[],
   standalone: boolean,
+  workers: boolean,
 ): { readonly choice: AddChoice; readonly listed: readonly string[] }[] {
   const open: { readonly choice: AddChoice; readonly listed: readonly string[] }[] = [];
   for (const choice of ADD_CHOICES) {
@@ -2063,6 +2104,7 @@ function openChoices(
     const listed = packages.filter((pkg) => choice.packages.includes(pkg));
     if (listed.length === 0) continue;
     if (choice.standaloneOnly === true && !standalone) continue;
+    if (choice.defaultOnWorkers === true && workers) continue;
     if (offeredValues(choice, flags).length === 0) continue;
     const after = choice.after;
     if (
@@ -2085,7 +2127,8 @@ function openChoices(
  *
  * Nothing is asked with `--yes`, without a prompter (no terminal), or for a flag
  * already given. A transport backend is not asked in a workspace member (members
- * take the workspace broker) or on Workers (no wiring). A flag several packages
+ * take the workspace broker) or on Workers (no wiring), and the vector-store
+ * adapter is not asked on Workers, which refuses all but `memory`. A flag several packages
  * share (`--store`) is asked once, naming each. A given flag that works with only
  * one value of an open choice narrows what is offered: `--dialect` offers only
  * `--type drizzle`, and `--redis-client` offers only `redis` backends.
@@ -2107,15 +2150,15 @@ async function askOpenChoices(
   if (ask === undefined || args.flags.yes === true || args.flags.y === true) return flags;
   const dir = resolveDir(deps.cwd, stringFlag(args.flags, 'dir'));
   let standalone: boolean;
+  let workers: boolean;
   try {
-    standalone =
-      (await detectTargetRuntime(deps.fs, dir)) !== 'cloudflare-workers' &&
-      (await workspaceMemberOf(deps.fs, dir)) === undefined;
+    workers = (await detectTargetRuntime(deps.fs, dir)) === 'cloudflare-workers';
+    standalone = !workers && (await workspaceMemberOf(deps.fs, dir)) === undefined;
   } catch {
     // The command reports an unreadable project itself; asking first would only delay that.
     return flags;
   }
-  const open = openChoices(flags, packages, standalone);
+  const open = openChoices(flags, packages, standalone, workers);
   // Nothing to ask: skip the dry run, which would plan every package twice.
   if (open.length === 0) return flags;
   // The dry run takes each open choice's first offered value, as Enter would.
@@ -2397,6 +2440,17 @@ async function addOne(
     deps.error(`Cannot add ${specifier} to a ${runtime} project: ${restriction.reason}.`);
     return EXIT_USAGE;
   }
+  if (
+    bare === 'vector-store-plugin' &&
+    runtime === 'cloudflare-workers' &&
+    (backendArm === 'qdrant' || backendArm === 'pgvector')
+  ) {
+    deps.error(
+      `--adapter ${backendArm} cannot apply on Cloudflare Workers: the client module this command writes opens a socket connection. ` +
+        "On Workers, pass a Vectorize binding: VectorStorePlugin({ adapter: new VectorizeVectorStore({ index: env.DOCUMENTS_INDEX }), collections: [...] }), with VectorizeVectorStore from '@setu-ts/cloudflare-plugin' (its README's Vectorize section).",
+    );
+    return EXIT_USAGE;
+  }
 
   // Update every manifest that exists. Workers projects carry package.json;
   // Deno projects gate plugins through deno.json imports, with package.json
@@ -2467,9 +2521,9 @@ async function addOne(
         '`generate` and `setu check` to class-based rules, which its functional services and ' +
         'controllers fail. Start a class-based project instead: ' +
         `${cliInvocation(runtime)} ` +
-        (searchDirs.length > 1
-          ? 'generate app <name> --template rest --style class-based.'
-          : 'new <name> --template rest --style class-based.'),
+        (searchDirs.length > 1 ? 'generate app' : 'new') +
+        ' <name> --template rest --style class-based (or --template microservice;' +
+        ' full-stack has no class-based variant).',
     );
     return EXIT_ERROR;
   }
@@ -2799,10 +2853,7 @@ async function addOne(
     // imports mean something its text does not say: no automatic wiring then.
     configRetargeted = await frameworkImportsRetargeted(deps.fs, dir);
     const wired =
-      configRetargeted ||
-      (bare === 'mail-plugin' && backendArm !== 'log') ||
-      // Not in-memory on Workers: CloudflarePlugin's KV and R2 arms serve these.
-      (runtime === 'cloudflare-workers' && (bare === 'cache-plugin' || bare === 'storage-plugin'))
+      configRetargeted || (bare === 'mail-plugin' && backendArm !== 'log')
         ? undefined
         : composingStarter(config)?.arms.has(bare) === true
           ? withStarterWiring(config, bare, artifactSeam, transportArgs)
@@ -3125,26 +3176,7 @@ async function addOne(
       );
       const services = selected.compose?.dependsOn ?? [];
       if (services.length > 0) {
-        // The README section `setu new --broker` writes: without it a fresh clone's
-        // `start:dev` fails against a backend nothing told the developer to start.
-        const readmePath = joinPath(dir, 'README.md');
-        const readme = await readProjectText(deps, readmePath, 'README.md');
-        if (readme === null) return EXIT_ERROR;
-        // An edit already planned for the README this run is the text to extend.
-        const pending = edits.find((edit) => edit.path === readmePath);
-        const base = pending?.contents ?? readme;
-        if (base !== undefined && !base.includes(`\n${LOCAL_TRANSPORT_HEADING}\n`)) {
-          const section = renderLocalTransportSection('');
-          const at = base.indexOf('\n## Run\n');
-          if (at >= 0) {
-            const contents = `${base.slice(0, at + 1)}${section.slice(1)}\n${base.slice(at + 1)}`;
-            if (pending === undefined) edits.push({ path: readmePath, contents });
-            else edits.splice(edits.indexOf(pending), 1, { path: readmePath, contents });
-            deps.log(`  README.md gains the ${LOCAL_TRANSPORT_HEADING.slice(3)} section.`);
-          } else {
-            deps.log(`  README.md has no "## Run" section; add this one before it:${section}`);
-          }
-        }
+        if (!(await planLocalServicesReadme(deps, dir, edits))) return EXIT_ERROR;
         const start = `docker compose -f ${BROKER_COMPOSE_FILE} up -d ${services.join(' ')}`;
         deps.log(
           missing === undefined
@@ -3188,11 +3220,14 @@ async function addOne(
         ))
       )
         return EXIT_ERROR;
-      deps.log('  To keep generated tests offline, replace the provider in them:');
-      deps.log("  import { MailPlugin } from '@setu-ts/mail-plugin';");
-      deps.log(
-        "  createTestApp({ app: await createApp(), without: ['mail-plugin'], overrides: [MailPlugin()] })",
-      );
+      // A full-stack project generates no createTestApp test (the broker path's rule).
+      if (!installedAfter.has('react-router-plugin')) {
+        deps.log('  To keep generated tests offline, replace the provider in them:');
+        deps.log("  import { MailPlugin } from '@setu-ts/mail-plugin';");
+        deps.log(
+          "  createTestApp({ app: await createApp(), without: ['mail-plugin'], overrides: [MailPlugin()] })",
+        );
+      }
     }
   }
 
@@ -3200,11 +3235,7 @@ async function addOne(
   // module, its connection in the dotenv pair, and a local Compose service, so
   // the printed registration runs as pasted and `setu check` can still read the
   // configuration (templates/vector-store-module.ts).
-  if (
-    bare === 'vector-store-plugin' &&
-    runtime !== 'cloudflare-workers' &&
-    (backendArm === 'qdrant' || backendArm === 'pgvector')
-  ) {
+  if (bare === 'vector-store-plugin' && (backendArm === 'qdrant' || backendArm === 'pgvector')) {
     const modulePath = joinPath(dir, VECTOR_STORE_MODULE_PATH);
     if ((await readExistingText(deps.fs, modulePath)) === undefined) {
       createOnlyPaths.add(modulePath);
@@ -3491,7 +3522,7 @@ async function addOne(
         for (const guidance of backendGuidance(backendLine, configSource, bare)) deps.log(guidance);
     }
     if (bare === 'messaging-plugin' || bare === 'queue-plugin') {
-      printWiringNote(configSource, bare, deps.log, seam, transportArgs, runtime);
+      printWiringNote(configSource, bare, deps.log, seam, transportArgs);
       printNodeRedisImportNote(configSource, transport?.clients ?? [], deps.log);
     }
     if (summary && args.flags['dry-run'] !== true) await reportAgentsHint(deps, dir, runtime);
@@ -3576,7 +3607,7 @@ async function addOne(
     wiredArm === undefined &&
     !(configWired && starter && transportArgs === undefined)
   )
-    printWiringNote(configSource, bare, deps.log, seam, transportArgs, runtime);
+    printWiringNote(configSource, bare, deps.log, seam, transportArgs);
   const appPackages = appBackendPackages(
     bare,
     backendArm,

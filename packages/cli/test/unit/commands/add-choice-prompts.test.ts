@@ -156,11 +156,14 @@ describe('setu add choice prompts', () => {
     expect(fs.read('/app/package.json')).toBe('{}');
   });
 
-  it('does not ask a Workers project for a transport backend, but still asks mail', async () => {
+  it('does not ask a Workers project for a transport backend or a vector-store adapter, but still asks mail', async () => {
     const fs = createFakeFs({ '/app/package.json': '{}', '/app/wrangler.toml': '' });
     const prompt = recorder();
     const run = deps(fs, prompt.ask);
-    expect(await runCli(['add', 'cache', 'mail'], run.deps), run.err.join('\n')).toBe(0);
+    expect(
+      await runCli(['add', 'idempotency', 'vector-store', 'mail'], run.deps),
+      run.err.join('\n'),
+    ).toBe(0);
     expect(prompt.asked.map((entry) => entry.question)).toEqual([
       'Choose the provider for mail-plugin',
     ]);
@@ -263,7 +266,7 @@ describe('setu add choice prompts', () => {
     },
     {
       name: 'a --redis-client on Workers',
-      argv: ['add', 'mail', 'cache', '--redis-client', 'ioredis'],
+      argv: ['add', 'mail', 'idempotency', '--redis-client', 'ioredis'],
       refusal: '--redis-client cannot apply on Cloudflare Workers',
       seed: { '/app/package.json': '{}', '/app/wrangler.toml': '' },
     },

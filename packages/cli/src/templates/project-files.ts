@@ -2079,14 +2079,20 @@ export const LOCAL_TRANSPORT_HEADING = '## Local transport services';
  *
  * @param transportNotes - Each selected transport's operational note, already
  *   wrapped and joined, or the empty string
+ * @param lead - The opening sentence for services that are not all transports
+ *   (Mailpit, Qdrant, pgvector from `setu add`); the transport sentence otherwise
  * @returns The section, starting with a newline and ending with one
  * @since 0.13.0
  */
-export function renderLocalTransportSection(transportNotes: string): string {
+export function renderLocalTransportSection(transportNotes: string, lead?: string): string {
+  const opening =
+    lead === undefined
+      ? 'Start these FIRST: the transport plugins you selected ' +
+        'connect while the application registers, and\ndo not retry, so `start` fails against a ' +
+        'backend that is not listening yet.'
+      : wrapProse(lead);
   return (
-    `\n${LOCAL_TRANSPORT_HEADING}\n\nStart these FIRST: the transport plugins you selected ` +
-    `connect while the application registers, and\ndo not retry, so \`start\` fails against a ` +
-    `backend that is not listening yet.\n\n\`\`\`bash\ndocker compose -f ${BROKER_COMPOSE_FILE} up -d\n\`\`\`\n\n` +
+    `\n${LOCAL_TRANSPORT_HEADING}\n\n${opening}\n\n\`\`\`bash\ndocker compose -f ${BROKER_COMPOSE_FILE} up -d\n\`\`\`\n\n` +
     `${wrapProse('Each connection variable in `.env.example` has a local default for these services. A container does not read `.env`: pass each variable to it, for example with `docker run -e NAME=value`.')}\n` +
     transportNotes
   );

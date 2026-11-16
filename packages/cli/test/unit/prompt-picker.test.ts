@@ -15,6 +15,7 @@ import {
   highlight,
   pickerStep,
   renderPicker,
+  rowsFor,
   type PickerColor,
 } from '../../src/prompt.ts';
 import {
@@ -157,6 +158,7 @@ describe('createTerminalPrompter with the arrow-key list', () => {
     expect(await prompterOver(terminal).select('Choose the broker', CHOICES)).toEqual({
       kind: 'answer',
       value: 'rabbitmq',
+      shown: true,
     });
     expect(writes[0]).toBe('\x1b[?25l');
     expect(writes.at(-1)).toBe('\x1b[?25h');
@@ -238,7 +240,41 @@ describe('createKeyReader', () => {
     input.emit('keypress', undefined, { name: 'down' });
     expect(await read).toEqual({ kind: 'down' });
     expect(modes).toEqual([true, false]);
-    expect(input.listenerCount('keypress')).toBe(0);
+    // One listener for the reader's life, however many keys it reads.
+    await Promise.all([reader.read(), Promise.resolve(input.emit('keypress', 'x', { name: 'x' }))]);
+    expect(input.listenerCount('keypress')).toBe(1);
+  });
+
+  it('queues the keys of one chunk for the next reads instead of dropping them', async () => {
+    const { input, modes } = fakeInput();
+    const reader = createKeyReader(input as never, () => {})!;
+    const first = reader.read();
+    // readline emits a pasted chunk's keys synchronously, one after another.
+    input.emit('keypress', undefined, { name: 'down' });
+    input.emit('keypress', undefined, { name: 'down' });
+    input.emit('keypress', '2', { name: '2' });
+    input.emit('keypress', undefined, { name: 'd', ctrl: true });
+    expect(await first).toEqual({ kind: 'down' });
+    expect(await reader.read()).toEqual({ kind: 'down' });
+    expect(await reader.read()).toEqual({ kind: 'digit', value: 2 });
+    expect(await reader.read()).toBeNull();
+    // Queued keys are served without entering raw mode again.
+    expect(modes).toEqual([true, false]);
+  });
+
+  it('acts on a queued Ctrl+C at once and drops the keys queued before it', async () => {
+    const { input } = fakeInput();
+    let interrupts = 0;
+    const reader = createKeyReader(input as never, () => (interrupts += 1))!;
+    const first = reader.read();
+    input.emit('keypress', undefined, { name: 'down' });
+    input.emit('keypress', undefined, { name: 'up' });
+    input.emit('keypress', undefined, { name: 'c', ctrl: true });
+    expect(await first).toEqual({ kind: 'down' });
+    expect(interrupts).toBe(1);
+    expect(await reader.read()).toBeNull();
+    input.emit('end');
+    expect(await reader.read()).toBeNull();
   });
 
   it('reports Ctrl+C through onInterrupt, and settles null on Ctrl+D, end of input and abort', async () => {
@@ -277,6 +313,34 @@ describe('supportsColor', () => {
   });
 });
 
+describe('rowsFor', () => {
+  it('counts the rows wrapped lines fill, ignoring escape sequences', () => {
+    const long = 'x'.repeat(100);
+    expect(rowsFor(['a', 'b'], 80)).toBe(2);
+    expect(rowsFor([long, 'b'], 80)).toBe(3);
+    expect(rowsFor(['x'.repeat(80)], 80)).toBe(1);
+    expect(rowsFor(['x'.repeat(161)], 80)).toBe(3);
+    expect(rowsFor([gradient('x'.repeat(80))], 80)).toBe(1);
+    expect(rowsFor([''], 80)).toBe(1);
+    expect(rowsFor([long], undefined)).toBe(1);
+    expect(rowsFor([long], 0)).toBe(1);
+  });
+
+  it('rewinds the list past every wrapped row on a redraw', async () => {
+    const { writes, terminal } = fakeTerminal([{ kind: 'down' }, { kind: 'enter' }]);
+    const narrow = { ...terminal, columns: () => 40 };
+    const answer = await prompterOver(narrow).select('Choose the broker for messaging-plugin', [
+      ...CHOICES,
+    ]);
+    expect(answer).toEqual({ kind: 'answer', value: 'redis', shown: true });
+    const frame = renderPicker('Choose the broker for messaging-plugin', CHOICES, 0, 'none');
+    const rows = rowsFor(frame, 40);
+    // The question alone wraps, so the list takes more rows than it has lines.
+    expect(rows).toBeGreaterThan(frame.length);
+    expect(writes.filter((w) => w.startsWith(`\x1b[${rows}A`))).toHaveLength(2);
+  });
+});
+
 describe('createPicker', () => {
   it('needs an interactive output and a raw-mode input, and writes raw to the output', () => {
     const written: string[] = [];
@@ -296,5 +360,18 @@ describe('createPicker', () => {
     expect(
       createPicker(fakeInput().input as never, output, () => {}, { NO_COLOR: '1' })!.color,
     ).toBe('none');
+    // A dumb terminal cannot move the cursor, so it keeps the typed answer.
+    expect(
+      createPicker(fakeInput().input as never, output, () => {}, { TERM: 'dumb' }),
+    ).toBeUndefined();
+    expect(picker.columns?.()).toBeUndefined();
+    expect(
+      createPicker(
+        fakeInput().input as never,
+        { ...output, columns: 72 },
+        () => {},
+        {},
+      )!.columns?.(),
+    ).toBe(72);
   });
 });

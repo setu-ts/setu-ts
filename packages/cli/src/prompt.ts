@@ -33,7 +33,15 @@ export interface PromptChoice {
  * @since 0.9.0
  */
 export type PromptSelection =
-  | { readonly kind: 'answer'; readonly value: string }
+  | {
+      readonly kind: 'answer';
+      readonly value: string;
+      /**
+       * The prompter already showed the answer (the arrow-key list collapses to
+       * it), so the caller does not print it again. Since 0.13.0.
+       */
+      readonly shown?: true;
+    }
   | { readonly kind: 'unavailable' }
   | { readonly kind: 'cancelled' };
 
@@ -152,6 +160,27 @@ export interface PickerTerminal {
    * (bold cyan) on a 16/256-colour terminal, or none (`NO_COLOR`, no colours).
    */
   readonly color: PickerColor;
+  /** The terminal's current width, when it reports one; lines wider than it wrap. */
+  readonly columns?: () => number | undefined;
+}
+
+/** Every escape sequence the list writes, for measuring what shows. */
+const ESCAPE_SEQUENCE = new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[A-Za-z]`, 'g');
+
+/**
+ * How many terminal rows lines take once a terminal `columns` wide wraps them,
+ * so the redraw moves up past every row a long question or option used.
+ *
+ * @param lines - The lines drawn, escape sequences included
+ * @param columns - The terminal's width, or `undefined` when it reports none
+ * @returns The rows the lines fill
+ */
+export function rowsFor(lines: readonly string[], columns: number | undefined): number {
+  const width = columns !== undefined && columns > 0 ? columns : Infinity;
+  return lines.reduce((rows, line) => {
+    const shown = [...line.replace(ESCAPE_SEQUENCE, '')].length;
+    return rows + Math.max(1, Math.ceil(shown / width));
+  }, 0);
 }
 
 /** One step of the arrow-key list: where the highlight moves, and whether that settles it. */
@@ -270,7 +299,9 @@ async function pick(
   const draw = (): void => {
     const lines = renderPicker(question, choices, index, terminal.color);
     terminal.write(`${rewind()}${lines.join('\n')}\n`);
-    drawn = lines.length;
+    // Measured at the width this frame is drawn at, so the next redraw moves up
+    // past every row a wrapped question or option filled.
+    drawn = rowsFor(lines, terminal.columns?.());
   };
   // A settled question collapses to one line, so the scrollback keeps the answer
   // (or the cancellation) rather than a stale list.
@@ -298,7 +329,7 @@ async function pick(
           `${rewind()}${terminal.color === 'none' ? '✔' : '\x1b[32m✔\x1b[0m'} ${escapeTerminalControls(question)} · ${highlight(shown, terminal.color)}\n`,
         );
         drawn = 0;
-        return { kind: 'answer', value };
+        return { kind: 'answer', value, shown: true };
       }
       draw();
     }

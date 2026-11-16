@@ -71,8 +71,14 @@ dedupe common so all packages share its unique-symbol brands.
 New full-stack scaffolds read `TRUST_FORWARDED_HOST`: leave it empty or `false` unless your listed
 `TRUSTED_PROXIES` overwrite `X-Forwarded-Host`. `true` requires a nonempty proxy list; other values
 fail configuration without echoing the value. `setu check` now warns with `setu.W006` when an
-installed zero-config provider, MCP, database or vector-store plugin has no call in
-`setu.config.ts`; if another module registers it, silence that id in `.setu-ts/check.json`.
+installed plugin has no call in `setu.config.ts`: a zero-config provider (now including
+`validation-plugin`), or one whose registration `setu add` prints (`session`, `telemetry`,
+`feature-flags`, `localization`, `multi-tenancy`, `notification`, `service-discovery`, `static`,
+`graphql`, `grpc`, `database`, `vector-store`, `mcp`, `di`, `cloudflare`, `react-router`).
+`auth-plugin` is not checked, because its quota helpers work without the plugin. A project that
+registers one of these from another module now gets the warning, and `setu check --strict` fails on
+it: silence that id in `.setu-ts/check.json`. On Cloudflare Workers, `setu add cache` and
+`setu add storage` are refused; serve both from `CloudflarePlugin`'s KV and R2 arms instead.
 
 ### Form bodies and file uploads (M137c, `@setu-ts/validation-plugin`, `@setu-ts/openapi-plugin`, `@setu-ts/sdk`)
 

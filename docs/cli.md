@@ -358,13 +358,13 @@ Each question is a list: ↑ and ↓ (or `j` and `k`) move the highlight and wra
 that option, Enter chooses it, and Escape or Ctrl+C cancels. The default is highlighted first. The
 highlighted option is drawn in a cyan-to-violet gradient on a 24-bit colour terminal, in bold cyan
 on a 16- or 256-colour one, and plain under `NO_COLOR`; a chosen answer collapses to one line. A
-terminal that cannot read single keys gets a typed answer instead: the option's value, or Enter for
-the default. `setu add` asks its backend questions the same way.
+terminal that cannot read single keys, or one with `TERM=dumb`, gets a typed answer instead: the
+option's value, or Enter for the default. `setu add` asks its backend questions the same way.
 
 It fails closed in three layers, so scripts, CI and editors are never blocked: programmatic callers
 pass no prompter at all; the installed executable supplies one only when stdin is a terminal; and
-Deno's own prompt returns `null` on a non-terminal anyway. `--yes` (or `-y`) is the explicit escape
-hatch: take every default and ask nothing.
+its line reader resolves `null` when it cannot read, which ends the question unanswered. `--yes` (or
+`-y`) is the explicit escape hatch: take every default and ask nothing.
 
 ## Generating code
 
@@ -1071,14 +1071,18 @@ vector-store adapters get a CLI-written `src/vector-store.ts` that builds the ad
 application-owned client, so `setu.config.ts` keeps only framework and relative imports and stays
 readable to `setu check`; `QDRANT_URL` or `DATABASE_URL` in the dotenv pair; a Compose service; and
 the printed call `VectorStorePlugin({ adapter: vectorStoreAdapter(), … })` with its imports. Every
-printed registration names its imports. On Cloudflare Workers, zero-config providers are inserted
-like elsewhere, except `cache` and `storage`, whose in-memory stores would live in one isolate:
-`add` points at `CloudflarePlugin`'s KV and R2 arms instead. `setu add decorator` refuses a
-functional project, because the installed plugin is what switches `generate` and `setu check` to
-class-based rules; start a class-based project with `--style class-based`. A SQLite database file is
-added to `.gitignore` and `.dockerignore`, and Drizzle's `drizzle/` output to `.prettierignore`. An
-existing `drizzle.config.ts` is left as it is, and `add` says so, naming its dialect when it differs
-from the one chosen.
+printed registration names its imports. Mailpit, Qdrant and pgvector also get the README's "Local
+transport services" section, as a broker does. On Cloudflare Workers, zero-config providers are
+inserted like elsewhere, but `setu add cache` and `setu add storage` are refused, because their
+in-memory stores would live in one isolate: the refusal names `CloudflarePlugin`'s KV and R2 arms
+(`setu add cloudflare`) instead. The vector-store adapter is not asked on Workers, and
+`--adapter qdrant` or `pgvector` is refused there in favour of `VectorizeVectorStore`.
+`setu add decorator` refuses a functional project, because the installed plugin is what switches
+`generate` and `setu check` to class-based rules; start a class-based `rest` or `microservice`
+project with `--style class-based` (full-stack has no class-based variant). A SQLite database file
+is added to `.gitignore` and `.dockerignore`, and Drizzle's `drizzle/` output to `.prettierignore`.
+An existing `drizzle.config.ts` is left as it is, and `add` says so, naming its dialect when it
+differs from the one chosen.
 
 `setu add view --plugin-only` installs and wires the view capability and compatible JSX settings
 without examples, controllers, Tailwind or StaticPlugin. It cannot be combined with `--module`. This
