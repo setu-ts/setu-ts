@@ -82,6 +82,38 @@ includes `idempotencyKey` and `unitOfWork`; the run includes the persisted tenan
 identity, services and abort signal. The `model(run)` callback is evaluated per model call, so wrap
 tenant budgeting there using that identity rather than a request that no longer exists.
 
+### Budgeting a run
+
+A run has no request, but `AgentRunContext` already carries the tenant, principal, abort signal and
+services the budget middleware reads, so it satisfies `BudgetScope` as it is.
+
+```ts
+import { defineAgentRun } from '@setu-ts/agent-runs-plugin';
+import { budgetedModel } from '../../apps/ai-chat/src/modules/chat/chat.budget.ts';
+import { chatQuota } from '../../apps/ai-chat/src/modules/chat/chat.service.ts';
+import { CHAT_MODELS } from '../../apps/ai-chat/src/plugins/chat-models.plugin.ts';
+import type { IChatModelsService } from '../../apps/ai-chat/src/plugins/chat-models.plugin.ts';
+
+const quota = chatQuota();
+
+export const assistant = defineAgentRun({
+  name: 'assistant',
+  version: '1',
+  maxOutputTokens: 1024,
+  model: (run) => {
+    const { models } = run.services.get<IChatModelsService>(CHAT_MODELS);
+    const { model, ready } = budgetedModel(run, models, quota(run));
+    void ready.catch(() => undefined);
+    return model;
+  },
+});
+```
+
+`ready` is consumed only because a failing call already fails the run's step, so leaving its
+rejection unobserved would surface as an unhandled rejection. A run started without a tenant
+(`tenantId: ''`) is refused by the middleware's `A server-resolved tenant is required` check, so
+start budgeted definitions only with a tenant.
+
 Set `approval.tools` to a map of tool names to `true` or
 `(input, run) => boolean | Promise<boolean>`. The policy outcome is stored before execution.
 Approval deadlines default to a day, with a 30-day maximum. Default authorization requires a defined

@@ -91,7 +91,8 @@ on something else, and `statement_timeout` bounds a single SQL statement that is
 first covers a hung tool, the second only a slow query. Bound outside calls inside the tool itself.
 `canAccess` governs `get`, `respond` and `cancel`; by default only the starting principal (or, for a
 run started without one, anyone in the tenant) passes, and a refusal is a 404. Models are supplied
-per call, so tenant quotas and budget middleware can wrap them using the persisted run identity.
+per call, so tenant quotas and budget middleware can wrap them using the persisted run identity; see
+[Budgeting a run](https://github.com/setu-ts/setu-ts/blob/main/docs/durable-runs.md#budgeting-a-run).
 Approval policies map tool names to `true` or an async predicate, with `timeoutMs` default 86400000,
 maximum 2592000000, and optional `canDecide(principal, run)`. The default requires matching, defined
 principal ids. Custom tool context comes only from that tool's entry in `toolsContext(run, call)`.
