@@ -14,7 +14,7 @@ import { createFakeFs, createRecorder } from '../../fixtures/fake-fs.ts';
 import { runCli } from '../../../src/cli.ts';
 import { unregisteredPluginFindings } from '../../../src/diagnostics/wiring.ts';
 import { LOCAL_TRANSPORT_HEADING } from '../../../src/templates/project-files.ts';
-import { withServedRoutes } from '../../../src/commands/add-view.ts';
+import { registersAssets, withServedRoutes } from '../../../src/commands/add-view.ts';
 import { CONFIGURED_PROVIDERS, ZERO_CONFIG_WIRINGS } from '../../../src/utils/plugin-wirings.ts';
 
 /** A Node rest project scaffolded into a fake filesystem, and a runner for it. */
@@ -419,6 +419,40 @@ describe('setu add backend guidance', () => {
     expect(withServedRoutes('# x\n\n## What it serves\n\n- `/` — hello\n', false)).not.toContain(
       '/assets',
     );
+  });
+
+  it('counts the CSS StaticPlugin call only as code, not inside a string or comment', async () => {
+    const call = "StaticPlugin({ root: './build/assets', urlPrefix: '/assets' })";
+    expect(registersAssets(`const plugins = [${call}];`)).toBe(true);
+    expect(
+      registersAssets(
+        'const plugins = [\n  StaticPlugin({\n    root: "./build/assets",\n    urlPrefix: "/assets",\n  }),\n];',
+      ),
+    ).toBe(true);
+    expect(registersAssets(`const note = "${call}";`)).toBe(false);
+    expect(registersAssets(`// ${call}\nconst x = 1;`)).toBe(false);
+    expect(registersAssets("StaticPlugin({ root: './public', urlPrefix: '/assets' })")).toBe(false);
+    expect(registersAssets(`MyStaticPlugin(${call.slice('StaticPlugin'.length)})`)).toBe(false);
+    expect(registersAssets("const broken = 'unterminated")).toBe(false);
+
+    // Through `add view`: a string naming the call, beside a StaticPlugin serving
+    // another directory, does not make the README claim /assets.
+    const p = await project();
+    const config = p.read('setu.config.ts');
+    await p.fs.writeFile(
+      '/work/shop/setu.config.ts',
+      new TextEncoder().encode(
+        "import { StaticPlugin } from '@setu-ts/static-plugin';\n" +
+          `export const NOTE = "${call}";\n` +
+          config.replace(
+            '...(devtool?.plugins ?? [])',
+            "StaticPlugin({ root: './public' }),\n      ...(devtool?.plugins ?? [])",
+          ),
+      ),
+    );
+    expect(await p.run(['add', 'view']), p.err.text()).toBe(0);
+    expect(p.read('README.md')).toContain('- `/ui` — the example page');
+    expect(p.read('README.md')).not.toContain('- `/assets`');
   });
 
   it('adds the view routes after the last bullet, wrapped or at the end of the file', () => {

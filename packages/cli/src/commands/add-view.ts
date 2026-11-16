@@ -1,7 +1,7 @@
 /** Pure, additive setup for server-rendered views. Existing user choices always win. */
 import type { TargetRuntime } from '../constants.ts';
 import type { GeneratedFile } from '../utils/file-writer.ts';
-import { maskComments, referencesIdentifier } from '../devtool/sources.ts';
+import { maskComments, maskSourceCode, referencesIdentifier } from '../devtool/sources.ts';
 import { frameworkSpecifier } from '../templates/framework-specifier.ts';
 import {
   renderThemeScript,
@@ -252,10 +252,7 @@ export function planViewSetup(input: IViewSetupInput): IViewSetupPlan {
     // `/assets` is listed only when StaticPlugin serves it: this run wired it, or
     // the config already registers exactly that call. A StaticPlugin serving
     // another directory is left alone, so the README does not claim the route.
-    const squash = (text: string): string => text.replace(/\s+/g, '').replace(/,(?=[})])/g, '');
-    const assetsServed =
-      wired !== undefined ||
-      squash(maskComments(config ?? '') ?? '').includes(squash(`StaticPlugin(${STATIC_ARGS})`));
+    const assetsServed = wired !== undefined || registersAssets(config ?? '');
     const served = readme === undefined ? undefined : withServedRoutes(readme, assetsServed);
     if (served !== undefined) configEdits.push({ path: 'README.md', contents: served });
     const ignore = existing.get('.gitignore');
@@ -407,6 +404,28 @@ export function Layout({ title, children }: { title: string; children: Child }) 
   );
 }
 `;
+}
+
+/**
+ * Whether a config already calls `StaticPlugin` with the CSS arguments, as
+ * code: the call is matched in the comment-masked text (its string arguments
+ * kept) and must start where the string-masked text still has code, so the same
+ * words inside a string literal do not count. Whitespace and a trailing comma
+ * may differ; the keys must come in this order.
+ *
+ * @param config - Existing `setu.config.ts` contents
+ * @returns Whether the call is registered
+ */
+export function registersAssets(config: string): boolean {
+  const visible = maskComments(config);
+  const code = maskSourceCode(config);
+  if (visible === undefined || code === undefined) return false;
+  const call =
+    /(?<![\w$.])StaticPlugin\(\s*\{\s*root:\s*(['"])\.\/build\/assets\1\s*,\s*urlPrefix:\s*(['"])\/assets\2\s*,?\s*\}\s*,?\s*\)/g;
+  for (const match of visible.matchAll(call)) {
+    if (code[match.index] === 'S') return true;
+  }
+  return false;
 }
 
 /**
