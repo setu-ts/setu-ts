@@ -167,7 +167,7 @@ export const frontend = ReactRouterPlugin({
   pagePolicies: {
     // Five sign-in attempts a minute per caller; page views are not limited.
     'routes/_auth/login': {
-      methods: ['POST'],
+      on: 'action',
       middleware: [rateLimitMiddleware({ windowMs: 60_000, max: 5 })],
     },
   },
@@ -180,18 +180,30 @@ export const frontend = ReactRouterPlugin({
   and an index action (`?index`) alike. Guarding a page by its path instead misses those shapes.
 - **Layouts and the root apply beneath them.** A policy on a layout route or on `root` runs for
   every page under it; when several match, they run outer first. A `POST` to a layout's path without
-  `?index` also runs its index child's policy, as React Router runs that child's middleware.
-- **`methods`** limits a policy to those HTTP methods; omitted means every method. A listed `GET`
-  also covers `HEAD`, because React Router runs the same loaders for both.
+  `?index` also runs its index child's policy, as React Router runs that child's middleware. Two
+  more cases err the same way: an `'all'` policy also runs on an `OPTIONS` request, which React
+  Router refuses with `405`, and when the only policy that applies is on `root`, it runs for every
+  catch-all request, including one that matches no page.
+- **`on`** says what the policy guards. `'action'` runs it on every request React Router treats as a
+  mutation (`POST`, `PUT`, `PATCH`, `DELETE`), which is every request that can run the route's
+  action; page views are not affected. `'all'`, the default, runs it on every request that reaches
+  the route. There is no loader-only setting: a mutation document request runs the action and then
+  the loaders, so a guard on loader data needs `'all'`.
 - **Same semantics as kernel route middleware.** Policies run after the global pipeline, in the
   kernel, with the page render as the terminal: a policy that answers without calling `next()` ends
   the request (the action never runs), and its own response is what the client receives, not a React
   Router error boundary. Middleware that reads the response after `next()` sees the rendered page. A
   policy may read `ctx.request.formData()`; the action still receives the same body.
 - **Refused at startup:** an id naming no route in the build (the message lists known ids), an empty
-  `middleware` or `methods` array, or a custom `loadRequestHandler` that returns no `pageRoutes`. A
-  `requirePolicy` naming an unregistered policy is refused by `AuthPlugin` as it is on any route.
+  `middleware` array, an `on` value other than `'action'` or `'all'`, or a custom
+  `loadRequestHandler` that returns no `pageRoutes`. A `requirePolicy` naming an unregistered policy
+  is refused by `AuthPlugin` as it is on any route.
 - **Public files** (`/robots.txt`) are served before policies run, as before.
+- **Cost.** With no `pagePolicies`, nothing changes. With them, a request whose method no policy
+  applies to (a page view, with only `on: 'action'` policies) skips matching, and one that cannot
+  reach a policied route is answered by a small tree holding only those routes. A request that can
+  reach one is matched with React Router's `matchRoutes` over the whole tree, which ranks every
+  route on each call; those results are cached per path (1,000 paths, each up to 512 bytes).
 - Route ids are file paths without the extension, relative to `app/`: `app/routes/_auth/login.tsx`
   is `routes/_auth/login`. The conformance test runs against the installed `react-router`, which
   must be in the plugin's peer range (`^8`).

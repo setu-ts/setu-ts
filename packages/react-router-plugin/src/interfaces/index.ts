@@ -5,7 +5,7 @@
  * @since 0.1.0
  */
 
-import type { HttpMethod, IRequestContext, MiddlewareFunction } from '@setu-ts/common';
+import type { IRequestContext, MiddlewareFunction } from '@setu-ts/common';
 export type { IRequestContext } from '@setu-ts/common';
 
 /**
@@ -93,8 +93,8 @@ export interface SsrRuntime {
 export type PagePolicy = {
   /** Runs in order through the kernel's route middleware chain. */
   readonly middleware: readonly MiddlewareFunction[];
-  /** Omitted means all methods; an empty array is refused at registration. */
-  readonly methods?: readonly HttpMethod[];
+  /** 'action' covers POST, PUT, PATCH and DELETE; 'all' (the default) covers every request. */
+  readonly on?: 'action' | 'all';
 };
 
 /**
@@ -134,8 +134,8 @@ export type PopulateLoadContext = (ctx: IRequestContext, context: RouterLoadCont
  */
 export interface ReactRouterCommonOptions {
   /**
-   * Kernel middleware keyed by React Router route id. Unknown ids and empty
-   * middleware or method arrays refuse registration. Omitted or empty installs
+   * Kernel middleware keyed by React Router route id. Unknown ids, empty
+   * middleware arrays and invalid on values refuse registration. Omitted or empty installs
    * no selector; a custom loader must supply pageRoutes when policies are set.
    * @since 0.13.0
    */

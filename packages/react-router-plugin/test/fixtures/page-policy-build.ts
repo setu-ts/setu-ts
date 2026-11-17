@@ -4,6 +4,7 @@ import type { ServerBuild } from 'react-router';
 export interface PageProbe {
   readonly middleware: string[];
   readonly actions: string[];
+  readonly loaders?: string[];
   readonly errors: unknown[];
   readonly onAction?: (request: Request) => Promise<unknown>;
   readonly emptyDocument?: boolean;
@@ -20,6 +21,7 @@ export function pagePolicyBuild(basename: string, probe: PageProbe): ServerBuild
     { id: 'routes/param', parentId: 'routes/app', path: ':id' },
     { id: 'routes/index', parentId: 'root', index: true },
     { id: 'routes/splat', parentId: 'root', path: 'files/*' },
+    { id: 'routes/readme', parentId: 'root', path: 'files/readme' },
   ];
   return {
     basename,
@@ -46,7 +48,10 @@ export function pagePolicyBuild(basename: string, probe: PageProbe): ServerBuild
           ...definition,
           module: {
             default: () => null,
-            loader: () => ({ loaded: definition.id }),
+            loader: () => {
+              probe.loaders?.push(definition.id);
+              return { loaded: definition.id };
+            },
             action: async ({ request }: { request: Request }) => {
               probe.actions.push(definition.id);
               return probe.onAction ? await probe.onAction(request) : { action: definition.id };

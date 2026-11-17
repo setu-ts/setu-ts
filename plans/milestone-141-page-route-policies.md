@@ -51,6 +51,8 @@ plugin owns matching; nothing runs inside React Router's own middleware.
 | Starter pass-through                             | `packages/starters/full-stack-starter/src/app.ts:139`                                                                                                                                                                                                                       | `ReactRouterPlugin(options.reactRouter)` — a new plugin option reaches the starter with no starter change                                                                                                                                   |
 | Template login route id                          | `packages/cli/src/templates/full-stack-app-files.ts` (`app/routes.ts`: `flatRoutes({ rootDirectory: 'routes/_auth' })`)                                                                                                                                                     | the login file is `app/routes/_auth/login.tsx`; its id is expected to be `routes/_auth/login` — **verified by the conformance and scaffold tests, not assumed** (§6)                                                                        |
 | `idempotent()` reads the response after `next()` | `packages/idempotency-plugin/src/middleware/http-middleware.ts:250-255`                                                                                                                                                                                                     | `await next()`, then `ctx.response.snapshot()` decides store or release — so it needs the rendered response on `ctx.response` when `next()` resolves                                                                                        |
+| React Router mutation methods                    | `react-router@8.5.1` `dist/production/lib/router/router.js:19-24,2962`                                                                                                                                                                                                      | `validMutationMethodsArr = ['POST','PUT','PATCH','DELETE']`; `isMutationMethod` upper-cases the method — the set `on: 'action'` selects                                                                                                     |
+| React Router's ranked matcher                    | `react-router@8.5.1` `dist/production/lib/router/matcher.js:13-31`; `lib/router/utils.js:237-262`                                                                                                                                                                           | public `matchRoutes` calls `flattenAndRankRoutes` on every call; the precomputed `V6RegExMatcher` is internal and not exported — the cost §3.10 avoids                                                                                      |
 | Agent card size cap                              | `test/agent-card-gate.test.ts:151`                                                                                                                                                                                                                                          | every `AGENT_CARD.md` is at most 2,560 bytes; the react-router card is 2,393 today, so the addition must stay under 167 bytes or trim                                                                                                       |
 
 **Probe (2026-11-17, plan time).** A fixture `ServerBuild` with seven routes (root, a plain route, a
@@ -131,9 +133,11 @@ ARCHITECTURE §10 and the plugin table row at line 1649).
      which a flat route such as `app.settings._index` with no parent layout carries; else
      `{ id, path, caseSensitive, children }`), cached per build object in a `WeakMap`, so a
      development build re-read per request rebuilds only when Vite hands back a new object;
-  2. if `build.routeDiscovery?.mode === 'lazy'` and the pathname equals
-     `joinPaths([build.basename, build.routeDiscovery.manifestPath || '/__manifest'])`, returns
-     `[]`;
+  2. if `build.routeDiscovery?.mode === 'lazy'` and the pathname equals React Router's
+     `getManifestPath` (`fog-of-war.js:120-123`): `manifestPath || '/__manifest'` as-is when
+     `build.basename == null`, else `joinPaths([build.basename, manifestPath || '/__manifest'])`,
+     returns `[]` (the 2026-11-17 audit's F3: joining `basename ?? '/'` diverged for a build without
+     a basename and a slash-less `manifestPath`);
   3. normalizes the pathname as `urls.js:12-26` (`/_.data` → `/`, else strip `.data`);
   4. returns `matchRoutes(tree, pathname, build.basename)` mapped to ids, root first, or `[]`. The
      pathname is `new URL(ctx.request.url).pathname`, undecoded, as React Router receives it.
@@ -149,30 +153,36 @@ ARCHITECTURE §10 and the plugin table row at line 1649).
 
 - **Decision:** `ReactRouterCommonOptions.pagePolicies?: Readonly<Record<string, PagePolicy>>`,
   keyed by route id;
-  `PagePolicy = { readonly middleware: readonly MiddlewareFunction[]; readonly methods?: readonly HttpMethod[] }`.
-  Omitted `methods` means every method. A listed `GET` also selects `HEAD`: React Router answers a
-  `HEAD` request by running the same loaders as `GET`, so a `GET`-only guard that skipped `HEAD`
-  would let a loader run unguarded (fail closed). When `pagePolicies` is absent or `{}`, the
-  catch-all is registered exactly as today (no `middlewareGroups`, no per-request matching).
-  Otherwise each catch-all verb registers `{ handler, middlewareGroups: { groups, select } }` with
-  one group per route id; `select(ctx)` matches (§3.4) and returns, root first, the ids that have a
-  policy whose `methods` include `ctx.request.method`. A policy on a layout or on `root` therefore
-  applies to every page beneath it, and both the layout's and the page's policies run, outer first.
-  Static `publicFiles` GETs keep their current order: a public file is served before SSR, so page
-  policies do not run for `/robots.txt`. Today the public-file lookup lives inside the GET handler,
-  which runs AFTER route middleware (`react-router-plugin.ts:191`), so a root policy would refuse
-  `/robots.txt` (measured: 200 → 429). When policies are installed and public files are enabled, the
-  GET route therefore carries the lookup as its static `middleware` stage — it answers a hit (or the
-  `400` for an undecodable path) and ends the response, else calls `next()` — and its handler is
-  `renderRoute`; static middleware runs before the groups (§3.2). With no policies the GET route is
-  registered exactly as today.
+  `PagePolicy = { readonly middleware: readonly MiddlewareFunction[]; readonly on?: 'action' | 'all' }`.
+  `on` names what React Router runs, not an HTTP verb list: `'action'` selects the policy for every
+  request React Router treats as a mutation — `POST`, `PUT`, `PATCH`, `DELETE`, the set of
+  `isMutationMethod` (`router.js:19-24,2962`), on every URL shape — and `'all'` (the default) for
+  every request that reaches the route. There is no loader-only value: a mutation document request
+  runs the action and then the loaders, so a guard on loader data must run on every method.
+  **Superseded:** the first implementation took `methods?: readonly HttpMethod[]`; the 2026-11-17
+  committed-tree audit (F1, High) showed it fails open — `methods: ['POST']` let `PUT`/`PATCH`/
+  `DELETE` run the action unguarded, and `methods: ['GET']` let a `POST` document request run the
+  loaders. `on` cannot name a partial verb set. When `pagePolicies` is absent or `{}`, the catch-all
+  is registered exactly as today (no `middlewareGroups`, no per-request matching). Otherwise each
+  catch-all verb registers `{ handler, middlewareGroups: { groups, select } }` with one group per
+  route id; `select(ctx)` returns, root first, the matched ids (§3.4, §3.10) whose policy applies to
+  the request (`'all'`, or `'action'` on a mutation method). A policy on a layout or on `root`
+  therefore applies to every page beneath it, and both the layout's and the page's policies run,
+  outer first. Static `publicFiles` GETs keep their current order: a public file is served before
+  SSR, so page policies do not run for `/robots.txt`. Today the public-file lookup lives inside the
+  GET handler, which runs AFTER route middleware (`react-router-plugin.ts:191`), so a root policy
+  would refuse `/robots.txt` (measured: 200 → 429). When policies are installed and public files are
+  enabled, the GET route therefore carries the lookup as its static `middleware` stage — it answers
+  a hit (or the `400` for an undecodable path) and ends the response, else calls `next()` — and its
+  handler is `renderRoute`; static middleware runs before the groups (§3.2). With no policies the
+  GET route is registered exactly as today.
 - **Validation at registration** (all reported in one internal `PagePolicyConfigurationError`, NOT
   exported — nothing outside the plugin branches on it, so tests match its message): a key naming no
   route id in the build (the message lists the unknown ids and up to ten known ones), an empty
-  `middleware` array, an empty `methods` array, a non-function middleware.
+  `middleware` array, a non-function middleware, an `on` value other than `'action'` or `'all'`.
 - **Why:** route ids are React Router's stable identity for a route (the same ids its own
-  `middleware` export is attached to); a method filter is what lets a sign-in page rate-limit its
-  `POST` without limiting page views.
+  `middleware` export is attached to); `on: 'action'` is what lets a sign-in page rate-limit its
+  submissions without limiting page views.
 - **Test home:** `test/unit/page-policies.test.ts`; `test/integration/page-policies-kernel.test.ts`.
 
 ### 3.6 Where the build comes from: `SsrRuntime.pageRoutes`
@@ -229,6 +239,51 @@ ARCHITECTURE §10 and the plugin table row at line 1649).
   `packages/cli/test/e2e/scaffold-runs-e2e.test.ts` (the full-stack scaffold boots and serves its
   pages with the changed entry).
 
+### 3.10 Selecting without matching the whole tree on every request
+
+- **Measured problem (2026-11-17, cores 8–15):** React Router's public `matchRoutes` flattens and
+  ranks the tree it is given on every call; its own handler ranks once in the internal, unexported
+  `V6RegExMatcher` (`lib/router/matcher.js`). The first `select` therefore cost 30 µs per request at
+  12 routes, 250 µs at 102 and 1,284 µs at 502 — more than React Router's whole handler (29, 61, 209
+  µs on a fixed-string page), on every catch-all request, and an attacker-triggerable CPU cost.
+- **Decision:** `select` runs four steps, all prepared once per build object (WeakMap, as §3.4):
+  1. **Method exit.** The policies that apply to this request's method are the `'all'` policies,
+     plus the `'action'` ones on a mutation method. If none exist, return `[]` without parsing the
+     URL. (A sign-in throttle with `on: 'action'` costs nothing on a page view: 0.05 µs measured.)
+  2. **Root shortcut.** If the only applicable policy is on the build's root route (the route with
+     no `parentId`), return `[that id]` without matching: React Router's root matches every request
+     the catch-all serves, and running it on an unmatched path too errs closed.
+  3. **Prefilter.** Match against a reduced tree (built with the same rules as §3.4 step 1) holding
+     only the routes that have an applicable policy, their ancestors and their descendants — one
+     reduced tree per method class (`'all'`-only, and all policies). An empty result returns `[]`.
+     **Exactness:** React Router returns the highest-ranked branch that matches. If that branch in
+     the full tree contains a policied route, the same branch is in the reduced tree and still
+     outranks every other reduced branch, so a non-empty full answer is never missed; an empty
+     reduced answer therefore proves no policy applies. (Measured: a post to an unguarded page, 3.9
+     µs at every size.)
+  4. **Full match.** Otherwise match the full tree (§3.4) and filter to applicable ids — the reduced
+     match may differ from React Router's (a policied splat beside an unpolicied static sibling), so
+     it is never returned itself. The result is cached in a per-build LRU keyed by method class and
+     normalized pathname: at most 1,000 entries, and only pathnames of at most 512 bytes are cached,
+     so the cache holds at most ~0.5 MB however the keys are chosen; a longer path is matched
+     uncached.
+- **Why:** steps 1–3 remove the cost from requests that cannot reach a policy, which is most
+  traffic; step 4 keeps the answer exactly React Router's for those that can. Mirroring React
+  Router's flatten-and-rank to precompute branches was rejected: it is ~80 more lines of internals
+  for the conformance test to police.
+- **Test home:** `test/unit/page-policies.test.ts` (each step; the cache bound and eviction; a
+  512-byte and a 513-byte path); `test/integration/page-policies-conformance.test.ts` (the shape
+  table also run with policies on SUBSETS of the routes — each single route, a layout only, root
+  only, a splat beside a static sibling — not only on every route, so the prefilter and the shortcut
+  are exercised against the real handler).
+- **Conformance rule (what the table asserts per row):** the selected ids are always a SUPERSET of
+  React Router's recorded middleware ids restricted to routes with an applicable policy — never
+  fewer — and EQUAL to that set except in exactly two documented over-application cases, each
+  asserted by name: (a) `OPTIONS` with an `'all'` policy, which React Router answers `405` before
+  any route middleware runs; (b) the root shortcut on a path React Router matches nothing for (it
+  answers `404` with no route middleware). In both, nothing guarded runs, so the extra policy run
+  errs closed and is documented in the README.
+
 ## 4. Exported surface — every symbol names its consumer
 
 **Breaking for implementors:** none for callers. An implementor that dispatches `RouteDefinition`
@@ -251,7 +306,7 @@ repository (checked: §1 readers). Ships in minor 0.13.0, recorded under CHANGEL
 | ----------------------------- | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | `pagePolicies`                | `page-policies.ts` via `register()`             | absent or `{}`: catch-all unchanged; else groups + `select` installed on all seven verbs; refused per §3.5/§3.6               |
 | `PagePolicy.middleware`       | the group for that route id                     | run in order through `executeChain`, after the catch-all's static middleware (none today) and after ancestor routes' policies |
-| `PagePolicy.methods`          | `select`                                        | omitted: every method; listed: the group is selected only when `ctx.request.method` is listed; `[]` refused                   |
+| `PagePolicy.on`               | `select`                                        | `'all'` (default): every request; `'action'`: `POST`/`PUT`/`PATCH`/`DELETE` only; any other value refused                     |
 | `PageRouteSource.build`       | registration (id validation) and every `select` | awaited; a rejection at registration fails `register()`, per request answers `500`                                            |
 | `PageRouteSource.matchRoutes` | `page-route-matcher.ts`                         | called with the cached tree, the normalized pathname and `build.basename`                                                     |
 
@@ -276,20 +331,20 @@ repository (checked: §1 readers). Ships in minor 0.13.0, recorded under CHANGEL
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
-| Test file                                                                                                              | src covered                                                  | Key assertions (and the signature each call type-checks against)                                                                                                                                                                                                                                                                                                                                                             |
-| ---------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/common/test/unit/route-middleware.test.ts`                                                                   | `route-middleware.ts`                                        | `routeMiddlewareOf({ handler })` → `[]`; static only; groups only; static then groups in key order (`routeMiddlewareOf(definition: RouteDefinition)`)                                                                                                                                                                                                                                                                        |
-| `packages/kernel/test/integration/route-middleware-groups.test.ts`                                                     | `application.ts` dispatch                                    | groups run after static middleware in `select` order; empty selection runs the handler (bypass); a group that responds without `next()` stops later groups AND the handler (short-circuit, mandatory); an undeclared key → `500`, handler not run; `select` throwing / rejecting → `500`; static stage short-circuit means `select` is never called; diagnostics positions continue `n…`                                     |
-| `packages/auth-plugin/test/unit/policies/startup-scan.test.ts` (new cases)                                             | `startup-scan.ts`                                            | a `requirePolicy` naming an unregistered ability inside `middlewareGroups` is refused; a registered one passes                                                                                                                                                                                                                                                                                                               |
-| `packages/react-router-plugin/test/unit/page-route-matcher.test.ts`                                                    | `page-route-matcher.ts`                                      | tree shape from a manifest (index, `caseSensitive`, nesting); `.data` / `_.data` normalization; manifest path skipped only in `lazy` mode, with and without basename; no match → `[]`; `WeakMap` reuse for the same build object, rebuild for a new one                                                                                                                                                                      |
-| `packages/react-router-plugin/test/unit/page-policies.test.ts`                                                         | `page-policies.ts`                                           | every refusal of §3.5 and §3.6 in ONE error listing all problems; `select` method filter (omitted = all, listed, other method excluded); layout + page both selected, root first; `pagePolicies: {}` installs nothing                                                                                                                                                                                                        |
-| `packages/react-router-plugin/test/unit/server-build.test.ts` (new cases)                                              | `server-build.ts`                                            | default loader returns `pageRoutes.build()` === the unwrapped build and `pageRoutes.matchRoutes` === the module's; a module without `matchRoutes` → the named load error                                                                                                                                                                                                                                                     |
-| `packages/react-router-plugin/test/unit/react-router-plugin.test.ts` (new cases)                                       | `react-router-plugin.ts`                                     | with no policies the seven routes carry no `middlewareGroups` (unchanged); with policies all seven carry them; refusal propagates from `register()`                                                                                                                                                                                                                                                                          |
-| `packages/react-router-plugin/test/integration/page-policies-conformance.test.ts`                                      | matcher + plugin, real `react-router`                        | the §1 probe as a table: a fixture build whose route modules record their middleware ids, every URL shape on basenames `/`, `/shop/`; the plugin's `select` ids (with a policy on every route) equal React Router's recorded set, manifest path included; a refusing policy on `routes/login` stops the action (its side effect absent) on `/login`, `/login.data`, `/login/_.data`, and on `/app?index` for the index route |
-| `packages/react-router-plugin/test/integration/page-policies-kernel.test.ts`                                           | plugin through a kernel app (`createApplication` + `inject`) | a `rateLimitMiddleware`-shaped refusing policy answers `429` and the fake handler did not render; an after-`next()` middleware reads the rendered status; a middleware reads a multipart field and the action receives the same field and file bytes; the dev-style seam (`build` returning a new object) is honoured; `build()` rejecting per request → `500`                                                               |
-| `packages/react-router-plugin/test/unit/barrel-exports.test.ts` and the common barrel test (existing, extended)        | both `src/index.ts` barrels                                  | `PagePolicy` / `PageRouteSource` are type exports only; `routeMiddlewareOf` is exported from `@setu-ts/common`; `PagePolicyConfigurationError` is NOT exported                                                                                                                                                                                                                                                               |
-| `packages/cli/test/unit/templates/project-files.test.ts` + `test/fixtures/full-stack-dev-entry-develop-{node,bun}.txt` | `full-stack-build-files.ts`                                  | the dev entry returns `pageRoutes: { build: loadServerBuild, matchRoutes }` and imports `matchRoutes`                                                                                                                                                                                                                                                                                                                        |
-| `packages/cli/test/e2e/scaffold-runs-e2e.test.ts` (existing)                                                           | generated full-stack project                                 | the full-stack scaffold installs, type-checks and boots with the changed entry, and its advertised pages answer; the implementer also prints the built manifest's ids once and confirms `routes/_auth/login` (the id the README example uses)                                                                                                                                                                                |
+| Test file                                                                                                              | src covered                                                  | Key assertions (and the signature each call type-checks against)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ---------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/common/test/unit/route-middleware.test.ts`                                                                   | `route-middleware.ts`                                        | `routeMiddlewareOf({ handler })` → `[]`; static only; groups only; static then groups in key order (`routeMiddlewareOf(definition: RouteDefinition)`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `packages/kernel/test/integration/route-middleware-groups.test.ts`                                                     | `application.ts` dispatch                                    | groups run after static middleware in `select` order; empty selection runs the handler (bypass); a group that responds without `next()` stops later groups AND the handler (short-circuit, mandatory); an undeclared key → `500`, handler not run; `select` throwing / rejecting → `500`; static stage short-circuit means `select` is never called; diagnostics positions continue `n…`                                                                                                                                                                                                                                                                                                                                      |
+| `packages/auth-plugin/test/unit/policies/startup-scan.test.ts` (new cases)                                             | `startup-scan.ts`                                            | a `requirePolicy` naming an unregistered ability inside `middlewareGroups` is refused; a registered one passes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `packages/react-router-plugin/test/unit/page-route-matcher.test.ts`                                                    | `page-route-matcher.ts`                                      | tree shape from a manifest (index, `caseSensitive`, nesting); `.data` / `_.data` normalization; manifest path skipped only in `lazy` mode, with and without basename; no match → `[]`; `WeakMap` reuse for the same build object, rebuild for a new one                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `packages/react-router-plugin/test/unit/page-policies.test.ts`                                                         | `page-policies.ts`                                           | every refusal of §3.5 and §3.6 in ONE error listing all problems (an unknown `on` included); `on` selection (`'all'` on every method, `'action'` on `POST`/`PUT`/`PATCH`/`DELETE` and never on `GET`/`HEAD`/`OPTIONS`); layout + page both selected, root first; §3.10 steps — method exit with no URL parse, root shortcut, prefilter empty → `[]`, full match filtered, cache hit, eviction at 1,000, a 512-byte path cached and a 513-byte one not; `pagePolicies: {}` installs nothing                                                                                                                                                                                                                                    |
+| `packages/react-router-plugin/test/unit/server-build.test.ts` (new cases)                                              | `server-build.ts`                                            | default loader returns `pageRoutes.build()` === the unwrapped build and `pageRoutes.matchRoutes` === the module's; a module without `matchRoutes` → the named load error                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `packages/react-router-plugin/test/unit/react-router-plugin.test.ts` (new cases)                                       | `react-router-plugin.ts`                                     | with no policies the seven routes carry no `middlewareGroups` (unchanged); with policies all seven carry them; refusal propagates from `register()`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `packages/react-router-plugin/test/integration/page-policies-conformance.test.ts`                                      | matcher + plugin, real `react-router`                        | the §1 probe as a table: a fixture build whose route modules record their middleware ids, every URL shape on basenames `/`, `/shop/`; the plugin's `select` ids (with a policy on every route) equal React Router's recorded set, manifest path included; a refusing policy on `routes/login` stops the action (its side effect absent) on `/login`, `/login.data`, `/login/_.data`, and on `/app?index` for the index route; the same table with policies on subsets (§3.10 test home); every shape on all seven methods with `on: 'action'` and `'all'`, the action/loader side effect absent wherever the policy applies (the audit's F1 reproduction: `PUT`/`PATCH`/`DELETE` to `/login` with `on: 'action'` are refused) |
+| `packages/react-router-plugin/test/integration/page-policies-kernel.test.ts`                                           | plugin through a kernel app (`createApplication` + `inject`) | a `rateLimitMiddleware`-shaped refusing policy answers `429` and the fake handler did not render; an after-`next()` middleware reads the rendered status; a middleware reads a multipart field and the action receives the same field and file bytes; the dev-style seam (`build` returning a new object) is honoured; `build()` rejecting per request → `500`                                                                                                                                                                                                                                                                                                                                                                |
+| `packages/react-router-plugin/test/unit/barrel-exports.test.ts` and the common barrel test (existing, extended)        | both `src/index.ts` barrels                                  | `PagePolicy` / `PageRouteSource` are type exports only; `routeMiddlewareOf` is exported from `@setu-ts/common`; `PagePolicyConfigurationError` is NOT exported                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `packages/cli/test/unit/templates/project-files.test.ts` + `test/fixtures/full-stack-dev-entry-develop-{node,bun}.txt` | `full-stack-build-files.ts`                                  | the dev entry returns `pageRoutes: { build: loadServerBuild, matchRoutes }` and imports `matchRoutes`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `packages/cli/test/e2e/scaffold-runs-e2e.test.ts` (existing)                                                           | generated full-stack project                                 | the full-stack scaffold installs, type-checks and boots with the changed entry, and its advertised pages answer; the implementer also prints the built manifest's ids once and confirms `routes/_auth/login` (the id the README example uses)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 
 External dependency: `react-router` is the only one, already a devDependency of the plugin; the
 conformance test is the guarded REAL-import test, and the matcher's branching is unit-tested with a
@@ -317,6 +372,43 @@ runs before the PR (this change decides whether a guard runs on network input): 
 following `.roo/skills/security-audit/SKILL.md`, probes every URL shape for a bypass with a refusing
 policy as the positive control.
 
+## 7a. Design security review
+
+Completed 2026-11-17, after the first committed-tree audit failed it for lacking one (F0); the
+design changes it records (§3.5 `on`, §3.10) are reviewed here before they are implemented.
+
+- **Reviewed flows:**
+  - F1 a page request on the SSR catch-all, through the global pipeline, the public-file stage, the
+    selected groups and the render;
+  - F2 `select`: method exit, root shortcut, prefilter, full match and its cache;
+  - F3 registration: route-id validation against `await build()`, refusal without `pageRoutes`;
+  - F4 a development build re-read per request (a new build object per Vite update);
+  - F5 the `requirePolicy` startup scan over `routeMiddlewareOf`.
+- **Assets:** the guarded action or loader not running when its policy refuses (rate-limit budgets,
+  authorization, idempotency, upload limits); the server's CPU and memory under hostile URLs.
+- **Attackers:** an unauthenticated client choosing the method, the path (encodings, `.data`,
+  `/_.data`, `?index`, `?_routes`, case, dot segments, double slashes, manifest paths), headers and
+  body; a client sending many distinct paths to churn the cache or cost CPU.
+- **Obligations the audit probes** (each with a positive control: the side effect happens when the
+  policy is removed):
+  - **O1** For every URL shape and all seven methods, with `on: 'action'` and with `'all'`: wherever
+    React Router runs the route's action (or, for `'all'`, its action or loader), the refusing
+    policy ran and the side effect did not happen — against the real `react-router` handler, with
+    policies on every route AND on subsets (§3.10).
+  - **O2** No path the prefilter answers `[]` reaches a policied route's action or loader.
+  - **O3** Fail closed: `select` throwing, `build()` rejecting or not a build, a match without an
+    id, an undeclared group key — `500`, nothing rendered, no error text in the body.
+  - **O4** Inherited names (`constructor`, `__proto__`, `toString`) as route ids, group keys and
+    cache keys neither bypass nor crash.
+  - **O5** The cache holds at most 1,000 entries and no key over 512 bytes; 10,000 distinct
+    policied-subtree paths leave the process's selector cache at that bound.
+  - **O6** A public file never stands in for a page that has a policy unless a file with that exact
+    path exists in the client build root (the operator's own build output).
+  - **O7** The body a policy reads is the body the action receives.
+- **Accepted residual:** a request to a policied route with a parameterised path pays one full
+  `matchRoutes` (~1.3 ms at 502 routes, §3.10); the prefilter confines it to requests that can reach
+  a policy.
+
 ## 8. Risks & mitigations
 
 - **React Router changes its URL normalization or manifest rule in a later version** → a policy is
@@ -326,9 +418,10 @@ policy as the positive control.
 - **Over-application:** a POST to a layout's path with no `?index` also selects the index child's
   policy (React Router runs that child's middleware too, §1 probe). This matches React Router and
   errs closed; documented in the README.
-- **Per-request cost:** matching runs on every page request once `pagePolicies` is set. Mitigation:
-  the tree is cached per build object, `select` returns precomputed keys, and nothing is installed
-  when no policy is configured.
+- **Per-request cost:** §3.10 — the method exit, root shortcut and prefilter, with a byte-bounded
+  cache for the full match; nothing is installed when no policy is configured. A request that does
+  reach a policied route with a parameterised path still pays one full match (~1.3 ms at 502
+  routes); a later React Router export of its ranked matcher would remove it.
 - **A custom `IRouterApi` dispatcher ignoring `middlewareGroups` fails open.** Mitigation: none
   exists in the repository; the `RouteDefinition` JSDoc and CHANGELOG state the obligation.
 - **Route ids differ from what a developer guesses** (`routes/_auth/login` vs `_auth/login`).

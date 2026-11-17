@@ -18,7 +18,12 @@ try {
 }
 
 describe('page policies through kernel dispatch', () => {
-  const build = { routes: { root: { id: 'root' }, login: { id: 'login' } } };
+  const build = {
+    routes: {
+      root: { id: 'root', path: '' },
+      login: { id: 'login', parentId: 'root', path: 'login' },
+    },
+  };
   const matchRoutes: PageRouteSource['matchRoutes'] = () => [{ route: { id: 'login' } }];
 
   function fakeApp(middleware: readonly MiddlewareFunction[], source?: PageRouteSource) {
@@ -193,7 +198,12 @@ describe('page policies through kernel dispatch', () => {
 
   it('honors new development builds, rebuilding the matched tree', async () => {
     const seen: unknown[] = [];
-    let current = { routes: { login: { id: 'login', path: 'login' } } };
+    let current = {
+      routes: {
+        root: { id: 'root', path: '' },
+        login: { id: 'login', parentId: 'root', path: 'login' },
+      },
+    };
     const { app, renders } = fakeApp([(ctx) => ctx.response.status(429).text('blocked')], {
       build: () => current,
       matchRoutes: (tree) => {
@@ -206,8 +216,13 @@ describe('page policies through kernel dispatch', () => {
       expect((await app.inject({ method: 'POST', url: '/login' })).statusCode).toBe(429);
       const first = seen[0];
       expect((await app.inject({ method: 'POST', url: '/login' })).statusCode).toBe(429);
-      expect(seen[1]).toBe(first);
-      current = { routes: { login: { id: 'login', path: 'moved' } } };
+      expect(seen).toHaveLength(2);
+      current = {
+        routes: {
+          root: { id: 'root', path: '' },
+          login: { id: 'login', parentId: 'root', path: 'moved' },
+        },
+      };
       expect((await app.inject({ method: 'POST', url: '/login' })).statusCode).toBe(202);
       expect(seen[2]).not.toBe(first);
       expect(renders()).toBe(1);
@@ -215,6 +230,27 @@ describe('page policies through kernel dispatch', () => {
       await app.stop();
     }
   });
+
+  it.each([null, 42, {}, { routes: null }, { routes: { bad: { id: 42 } } }])(
+    'an invalid development build %j answers 500 without rendering or error details',
+    async (invalid) => {
+      let registration = true;
+      const { app, renders } = fakeApp([(_ctx, next) => next()], {
+        build: () => (registration ? build : invalid),
+        matchRoutes,
+      });
+      await app.start();
+      registration = false;
+      try {
+        const response = await app.inject({ method: 'POST', url: '/login' });
+        expect(response.statusCode).toBe(500);
+        expect(response.body).not.toContain('page policies require');
+        expect(renders()).toBe(0);
+      } finally {
+        await app.stop();
+      }
+    },
+  );
 
   it('a match without a string route id answers 500 without rendering', async () => {
     const { app, renders } = fakeApp([(_ctx, next) => next()], {
