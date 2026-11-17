@@ -12,6 +12,48 @@ const MESSAGE: OutgoingMail = {
 };
 
 describe('LogProvider', () => {
+  it('M139c logs attachment metadata without content and retains bytes in message/sink', async () => {
+    const logs: unknown[] = [];
+    const sunk: OutgoingMail[] = [];
+    const provider = new LogProvider({
+      logger: {
+        info: (_message: string, meta: unknown) => {
+          logs.push(meta);
+        },
+      } as ILogger,
+      sink: (m) => {
+        sunk.push(m);
+      },
+    });
+    await provider.connect();
+    try {
+      const message: OutgoingMail = {
+        ...MESSAGE,
+        attachments: [
+          {
+            filename: 'secret.txt',
+            content: new TextEncoder().encode('secret-content'),
+            contentType: 'text/plain',
+          },
+          { filename: 'empty', content: new Uint8Array() },
+        ],
+      };
+      await provider.send(message);
+      expect(logs[0]).toMatchObject({
+        attachments: [
+          { filename: 'secret.txt', contentType: 'text/plain', bytes: 14 },
+          { filename: 'empty', bytes: 0 },
+        ],
+      });
+      expect(JSON.stringify(logs)).not.toContain('secret-content');
+      expect(provider.messages[0]).toBe(message);
+      expect(sunk[0]).toBe(message);
+      await provider.send(MESSAGE);
+      expect(logs[1]).not.toHaveProperty('attachments');
+    } finally {
+      await provider.disconnect();
+    }
+  });
   it('D5 retains the latest 1,000 messages in order while forwarding all 1,001 to the sink', async () => {
     const sunk: OutgoingMail[] = [];
     const provider = new LogProvider({ sink: (message) => sunk.push(message) });

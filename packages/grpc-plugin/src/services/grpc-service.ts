@@ -9,21 +9,29 @@
  */
 
 import type {
+  GrpcClientOptions,
   GrpcServiceDefinition,
   IGrpcService,
   IHealthService,
   ILogger,
+  RpcCall,
   RpcFetchHandler,
+  RpcReply,
+  RpcTransport,
 } from '@setu-ts/common';
 import type { ConnectRuntime } from '../interfaces/connect-runtime.ts';
+import type { GrpcClients } from '../client/grpc-client.ts';
 import type { GrpcPluginOptions } from '../interfaces/index.ts';
+import { DEFAULT_READ_MAX_BYTES } from '../interfaces/index.ts';
+import type { DispatchEntry } from '../transports/rpc-dispatcher.ts';
 import {
   DEFAULT_BASE_PATH,
-  dispatchRequest,
+  dispatchRpc,
   isWithinBasePath,
   normalizeBasePath,
 } from '../transports/rpc-dispatcher.ts';
 import { buildConnectRouter, type ServiceEntry } from '../transports/connect-router-builder.ts';
+import { callFromRequest, responseFromReply, textReply } from '../transports/rpc-call.ts';
 import type { EmbeddedDescriptors } from '../descriptors/embedded-descriptors.ts';
 import {
   isNativeGrpcContentType,
@@ -42,6 +50,11 @@ export interface GrpcServiceOptions {
    * log handler failures (X7-5).
    */
   readonly resolveLogger?: () => ILogger | undefined;
+  /**
+   * The plugin's clients (§3.12). Absent, `client()` throws: a service built
+   * without the plugin has no transports to call with.
+   */
+  readonly clients?: GrpcClients;
 }
 
 /**
@@ -53,8 +66,9 @@ export interface GrpcServiceOptions {
  * asks for. At the root, `claims()` reports only registered procedure paths, so
  * the kernel consults this service before route matching without shadowing
  * ordinary routes. Connect and gRPC-Web are then served at their natural
- * addresses; native `application/grpc` is refused with a Trailers-Only
- * `UNIMPLEMENTED`. Pass `basePath: '/grpc'` to restore the pre-M70i prefix.
+ * addresses; native `application/grpc` is served where the connection carries
+ * trailers and refused with a Trailers-Only `UNIMPLEMENTED` elsewhere. Pass
+ * `basePath: '/grpc'` to restore the pre-M70i prefix.
  *
  * @example
  * ```typescript
@@ -70,8 +84,11 @@ export class GrpcService implements IGrpcService {
   readonly #options: GrpcPluginOptions;
   readonly #healthService: IHealthService | undefined;
   readonly #resolveLogger: (() => ILogger | undefined) | undefined;
+  readonly #clients: GrpcClients | undefined;
+  /** `GrpcPluginOptions.serve`: `false` serves nothing and claims nothing (§3.12). */
+  readonly #serve: boolean;
 
-  #dispatchMap: Map<string, (request: Request) => Promise<Response>> | null = null;
+  #dispatchMap: Map<string, DispatchEntry> | null = null;
   #closed = false;
   /**
    * Procedure paths the router served before shutdown. Retained so a drained
@@ -93,6 +110,8 @@ export class GrpcService implements IGrpcService {
     this.#options = init.options;
     this.#healthService = init.healthService;
     this.#resolveLogger = init.resolveLogger;
+    this.#clients = init.clients;
+    this.#serve = init.options.serve ?? true;
     this.#basePath = normalizeBasePath(init.options.basePath ?? DEFAULT_BASE_PATH);
 
     for (const entry of init.options.services ?? []) {
@@ -129,7 +148,7 @@ export class GrpcService implements IGrpcService {
    * contains every path, so a prefix test would claim the entire application.
    * The kernel consults `claims` before route matching, so that would 404 every
    * ordinary route. At the root this therefore claims only paths it can
-   * actually serve, mirroring the asymmetry `dispatchRequest` already
+   * actually serve, mirroring the asymmetry `dispatchRpc` already
    * documents — "not a known procedure" and "an ordinary application route"
    * are indistinguishable there, so both fall through.
    *
@@ -142,6 +161,7 @@ export class GrpcService implements IGrpcService {
    * @since 0.3.0
    */
   claims(request: Request): boolean {
+    if (!this.#serve) return false;
     const path = new URL(request.url).pathname;
     if (!isWithinBasePath(path, this.#basePath)) {
       return false;
@@ -175,11 +195,16 @@ export class GrpcService implements IGrpcService {
    * Deciding this from headers costs nothing: the content type is all the
    * answer depends on, and the path check is the same `claims` already made.
    *
+   * Since M139b a native request is NOT refused when the transport carries
+   * trailers (an HTTP/2 connection to an adapter that writes them): it is
+   * served, with its status in real trailers.
+   *
    * @param request - The native fetch request, body untouched
+   * @param transport - What the connection can carry; absent means no trailers
    * @returns The Trailers-Only refusal, or `null` to dispatch normally
    * @since 0.6.0
    */
-  refuses(request: Request): Response | null {
+  refuses(request: Request, transport?: RpcTransport): Response | null {
     if (!isNativeGrpcContentType(request.headers.get('content-type'))) {
       return null;
     }
@@ -199,7 +224,22 @@ export class GrpcService implements IGrpcService {
     if (this.#closed) {
       return new Response('Service Unavailable', { status: 503 });
     }
-    return trailersOnlyUnimplemented();
+    return transport?.trailers === true ? null : trailersOnlyUnimplemented();
+  }
+
+  /**
+   * Whether the procedure a request names streams its request messages — a
+   * client-streaming or bidirectional method (M139b §3.2). The kernel then
+   * hands the dispatch the unread body, so the call progresses while the
+   * client is still sending; each message is bounded by `readMaxBytes`.
+   *
+   * @param request - The native fetch request, body untouched
+   * @returns `true` for a client-streaming or bidirectional procedure
+   * @since 0.13.0
+   */
+  streamsRequest(request: Request): boolean {
+    if (this.#closed) return false;
+    return this.#buildDispatchMap().get(new URL(request.url).pathname)?.streamsRequest === true;
   }
 
   /**
@@ -208,10 +248,28 @@ export class GrpcService implements IGrpcService {
    * Returns a 404 response when the request does not match any registered
    * service path. Callers routing traffic should consult
    * {@linkcode GrpcService.claims} first.
+   *
+   * The same dispatch as {@linkcode GrpcService.handleRpc} with
+   * `{ trailers: false }`: the request becomes an `RpcCall` and the reply a
+   * `Response`, so the two entry points cannot disagree.
    */
   handleRequest(request: Request): Promise<Response> {
-    return Promise.resolve(this.#dispatch(request)).then(
-      (response) => response ?? new Response('Not Found', { status: 404 }),
+    return this.#handleFetch(request).then((response) => response ?? notFoundResponse());
+  }
+
+  /**
+   * Handles an RPC with knowledge of the transport (M139b): the reply says
+   * whether its body streams, and carries trailers for a native call on a
+   * connection that delivers them.
+   *
+   * @param call - The call, as the kernel built it from the live request
+   * @param transport - What the connection can carry, and the client's signal
+   * @returns The reply; a `404` reply for a path no procedure serves
+   * @since 0.13.0
+   */
+  handleRpc(call: RpcCall, transport: RpcTransport): Promise<RpcReply> {
+    return Promise.resolve(this.#dispatch(call, transport)).then(
+      (reply) => reply ?? textReply(404, 'Not Found'),
     );
   }
 
@@ -227,15 +285,62 @@ export class GrpcService implements IGrpcService {
    * {@linkcode GrpcService} is published surface (AI_GUIDELINES §9.2).
    */
   createFetchHandler(): RpcFetchHandler {
-    return (request: Request): Promise<Response | null> => Promise.resolve(this.#dispatch(request));
+    return (request: Request): Promise<Response | null> => this.#handleFetch(request);
+  }
+
+  /**
+   * A fetch `Request` through the dispatch, with no trailers: `null` when the
+   * request falls through. The body is read only for a request that is
+   * dispatched, so a fall-through request keeps its body for whoever is next.
+   */
+  async #handleFetch(request: Request): Promise<Response | null> {
+    if (this.#fallsThrough(new URL(request.url).pathname)) {
+      return null;
+    }
+    const call = await callFromRequest(request, this.streamsRequest(request));
+    const reply = await this.#dispatch(call, { trailers: false });
+    return reply === null ? null : responseFromReply(reply);
+  }
+
+  /**
+   * Whether `#dispatch` answers `null` for this path, decided without the
+   * body: outside the base path, a non-procedure at the root, or — once
+   * closed — a path this server never served.
+   */
+  #fallsThrough(path: string): boolean {
+    if (this.#closed) return !this.#servedPaths.has(path);
+    if (!isWithinBasePath(path, this.#basePath)) return true;
+    return this.#basePath === '' && !this.#buildDispatchMap().has(path);
+  }
+
+  /**
+   * A client for a service another process serves (§3.12). See
+   * {@linkcode IGrpcService.client}.
+   *
+   * @param definition - The service descriptor
+   * @param target - An absolute URL, or a service name known to discovery
+   * @param options - Overrides for this client
+   * @returns The Connect client
+   * @throws {TypeError} When an option is out of range, the target is a name
+   *   with no discovery registered, or this service was built without clients
+   */
+  client(definition: GrpcServiceDefinition, target: string, options?: GrpcClientOptions): unknown {
+    if (this.#clients === undefined) {
+      throw new TypeError(
+        'GrpcService: this service was built without clients; register GrpcPlugin',
+      );
+    }
+    return this.#clients.client(definition, target, options);
   }
 
   /**
    * Releases the built router and its handlers. Afterwards the plugin's own
    * procedures answer `503` instead of rebuilding a router for an application
    * that is shutting down, while every other path falls through untouched.
+   * Every client's sessions close too, and later calls are refused.
    */
   close(): void {
+    this.#clients?.close();
     if (this.#closed) {
       // Idempotent: a second call must not wipe the served-path set captured by
       // the first, which would silently turn every 503 into a fall-through.
@@ -268,7 +373,12 @@ export class GrpcService implements IGrpcService {
    * Built on demand because `addService` may be called after `register()`, and
    * cached until the next `addService` invalidates it.
    */
-  #buildDispatchMap(): Map<string, (request: Request) => Promise<Response>> {
+  #buildDispatchMap(): Map<string, DispatchEntry> {
+    if (!this.#serve) {
+      // Calling only: no procedures, and no health or reflection service.
+      this.#dispatchMap ??= new Map();
+      return this.#dispatchMap;
+    }
     this.#dispatchMap ??= buildConnectRouter({
       connectRuntime: this.#connectRuntime,
       basePath: this.#basePath,
@@ -279,20 +389,23 @@ export class GrpcService implements IGrpcService {
       healthService: this.#healthService,
       resolveLogger: this.#resolveLogger,
       interceptors: this.#options.interceptors,
+      readMaxBytes: this.#options.readMaxBytes ?? DEFAULT_READ_MAX_BYTES,
     }).dispatchMap;
     return this.#dispatchMap;
   }
 
-  /** Resolves a request against the dispatch map, building the router on demand. */
-  #dispatch(request: Request): Response | Promise<Response | null> | null {
+  /** Resolves a call against the dispatch map, building the router on demand. */
+  #dispatch(call: RpcCall, transport?: RpcTransport): RpcReply | Promise<RpcReply | null> | null {
     if (this.#closed) {
       // Claim only paths this server actually served; ordinary application
       // routes must keep answering while the app drains.
-      const path = new URL(request.url).pathname;
-      return this.#servedPaths.has(path)
-        ? new Response('Service Unavailable', { status: 503 })
-        : null;
+      return this.#servedPaths.has(call.path) ? textReply(503, 'Service Unavailable') : null;
     }
-    return dispatchRequest(request, this.#buildDispatchMap(), this.#basePath);
+    return dispatchRpc(call, this.#buildDispatchMap(), this.#basePath, transport);
   }
+}
+
+/** The `404` `handleRequest` answers for a path no procedure serves. */
+function notFoundResponse(): Response {
+  return new Response('Not Found', { status: 404 });
 }

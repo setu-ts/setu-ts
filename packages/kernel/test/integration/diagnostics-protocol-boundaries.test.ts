@@ -78,6 +78,8 @@ describe('diagnostics protocol boundaries', () => {
       provides: [CAPABILITIES.GRPC],
       register(ctx) {
         ctx.services.register(CAPABILITIES.GRPC, {
+          addService() {},
+          handleRequest: () => Promise.resolve(new Response(null, { status: 404 })),
           available: true,
           claims: () => true,
           refuses: () => new Response('{"code":"refused"}', { status: 400 }),
@@ -107,6 +109,8 @@ describe('diagnostics protocol boundaries', () => {
       provides: [CAPABILITIES.GRPC],
       register(ctx) {
         ctx.services.register(CAPABILITIES.GRPC, {
+          addService() {},
+          handleRequest: () => Promise.resolve(new Response(null, { status: 404 })),
           available: true,
           claims: () => false,
         });
@@ -143,6 +147,7 @@ describe('diagnostics protocol boundaries', () => {
       provides: [CAPABILITIES.GRPC],
       register(ctx) {
         ctx.services.register(CAPABILITIES.GRPC, {
+          addService() {},
           available: true,
           claims: () => true,
           refuses: () => null,

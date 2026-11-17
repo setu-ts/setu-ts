@@ -190,10 +190,10 @@ describe('workflow checkout credentials', () => {
   it('reads each step in isolation', async () => {
     // The step bound is load-bearing: without it, one job's
     // `persist-credentials: false` would satisfy the assertion for every
-    // checkout after it in the same file. `ci.yml` has ten, including the browser job,
-    // the node-build job, Deno runtime lane and CLI coverage merge.
+    // checkout after it in the same file. `ci.yml` has eleven, including the browser job,
+    // the node-build job, Deno runtime lane, CLI coverage merge and main-branch tree check.
     const steps = (await checkoutSteps()).filter((step) => step.workflow === 'ci.yml');
-    expect(steps.length).toBe(10);
+    expect(steps.length).toBe(11);
     for (const step of steps) {
       const body = step.body.join('\n');
       expect(body.match(/uses:\s*actions\/checkout@/g)?.length).toBe(1);

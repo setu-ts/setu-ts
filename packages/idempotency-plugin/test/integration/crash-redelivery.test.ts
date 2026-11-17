@@ -63,7 +63,7 @@ describe('crash redelivery (M109a §3.7)', () => {
 
     const defaults = resolveDefaults(undefined);
     const behavior = createIngressBehavior(
-      { store, runtime, logger: () => logger, defaults },
+      { transactionalConfigured: false, store, runtime, logger: () => logger, defaults },
       resolveIngressOptions({ jobNames: ['email.send'], leaseMs: 30_000 }, defaults),
     );
     const envelope: IngressContext = {

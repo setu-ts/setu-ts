@@ -2,8 +2,7 @@
  * Adds a generated class to a class-based module's `@Module` declaration.
  *
  * `<module>.module.ts` is the developer's file. The CLI edits it only in the
- * shapes it can read exactly, following the NestJS CLI (`@nestjs/schematics`
- * `utils/metadata.manager.js`): a missing `controllers` or `providers` property
+ * shapes it can read exactly: a missing `controllers` or `providers` property
  * is added, a plain array literal gets the class appended (once), and anything
  * else is left unchanged. Unchanged means the caller prints the line to add, so
  * an uncertain edit never corrupts the declaration.
@@ -122,7 +121,7 @@ export function withModuleDeclarationEntry(
 
   let edited: string;
   if (named.length === 0) {
-    // Absent: added as the first property, as the NestJS CLI does.
+    // Absent: added as the first property.
     edited = `${source.slice(0, objectStart + 1)}\n  ${property}: [${symbol}],${source.slice(objectStart + 1)}`;
   } else {
     const entry = named[0]!;

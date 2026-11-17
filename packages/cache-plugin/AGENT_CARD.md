@@ -50,6 +50,7 @@ const rates = await cache.get<{ eur: number }>('rates');
   `maxSize`, `commandTimeoutMs`.
 - `cacheMiddleware` also takes `key(ctx)`, `vary(ctx)`, `bypass(ctx)` and `store` (a named instance:
   `CachePlugin({ name: 'pages' })` registers `cache.pages`).
-- `CacheService.getOrSet(key, factory, ttl)` coalesces concurrent cold reads of one key.
+- `CacheService.getOrSet(key, factory, ttl)` coalesces concurrent cold reads of one key. The
+  capability is typed as `ICacheStore`: narrow with `cache instanceof CacheService` to call it.
 
 <!-- card-allow: X MISS HIT COALESCED key vary bypass -->

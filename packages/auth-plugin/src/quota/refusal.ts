@@ -34,13 +34,21 @@ export class QuotaExceededError extends Error {
   readonly policyName: string;
   /** Whole seconds until the reserved window resets (at least one). */
   readonly retryAfterSeconds: number;
+  /** Public Problem detail shared by the hint and response helper. @since 0.13.0 */
+  readonly detail: string;
 
   /**
    * @param policyName - Violated policy name
    * @param retryAfterSeconds - Seconds until reset
+   * @param message - Non-empty Problem detail; defaults to the standard quota detail (0.13.0)
+   * @throws {TypeError} For an invalid policy, reset interval or message
+   * @since 0.13.0 - Optional message parameter
    */
-  constructor(policyName: string, retryAfterSeconds: number) {
-    super(QUOTA_DETAIL);
+  constructor(policyName: string, retryAfterSeconds: number, message: string = QUOTA_DETAIL) {
+    if (typeof message !== 'string' || message.length === 0) {
+      throw new TypeError('Quota message must be a non-empty string');
+    }
+    super(message);
     if (typeof policyName !== 'string' || policyName.length === 0) {
       throw new TypeError('Quota policyName must be a non-empty string');
     }
@@ -49,7 +57,8 @@ export class QuotaExceededError extends Error {
     }
     this.policyName = policyName;
     this.retryAfterSeconds = retryAfterSeconds;
-    withHttpStatusHint(this, quotaProblemInit(policyName, QUOTA_DETAIL, retryAfterSeconds));
+    this.detail = message;
+    withHttpStatusHint(this, quotaProblemInit(policyName, this.detail, retryAfterSeconds));
   }
 }
 
@@ -62,5 +71,5 @@ export class QuotaExceededError extends Error {
  */
 export function respondQuotaExceeded(ctx: IRequestContext, error: QuotaExceededError): void {
   ctx.response.header('Retry-After', String(error.retryAfterSeconds));
-  respondWithError(ctx, quotaProblemInit(error.policyName, QUOTA_DETAIL, error.retryAfterSeconds));
+  respondWithError(ctx, quotaProblemInit(error.policyName, error.detail, error.retryAfterSeconds));
 }

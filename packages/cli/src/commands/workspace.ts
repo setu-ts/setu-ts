@@ -33,6 +33,7 @@ import {
   renderWorkspaceManifest,
   WORKSPACE_MANIFEST,
   type WorkspaceManifest,
+  manifestProblemDetail,
 } from '../workspace/manifest.ts';
 import { assumePortAvailable, type PortProbe } from '../workspace/port-probe.ts';
 import { workspaceProfile } from '../workspace/runtime-profile.ts';
@@ -305,6 +306,8 @@ export async function applyTransportChange(
     deps.error(
       `No usable ${WORKSPACE_MANIFEST} in ${escapeName(dir)}, so this is not a Setu workspace.`,
     );
+    const detail = manifestProblemDetail(manifest.problem);
+    if (detail !== undefined) deps.error(detail);
     return EXIT_ERROR;
   }
   if (change.kind === 'rpc' && !manifest.manifest.members.some((m) => m.name === change.member)) {
@@ -424,6 +427,8 @@ export async function runWorkspaceCommand(
     deps.error(
       `No usable ${WORKSPACE_MANIFEST} in ${escapeName(dir)}, so this is not a Setu workspace.`,
     );
+    const detail = manifestProblemDetail(read.problem);
+    if (detail !== undefined) deps.error(detail);
     return EXIT_ERROR;
   }
   const reconciliation = await reconcileMembers(deps.fs, dir, read.manifest);

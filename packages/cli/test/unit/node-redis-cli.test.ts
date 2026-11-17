@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { TELEMETRY_PRELOAD_CONTENTS } from '../../src/templates/telemetry-preload.ts';
 import { VERSION } from '../../src/version.ts';
 import baseline from '../fixtures/redis-develop-outputs.json' with { type: 'json' };
 import { redisDefaultOutputs } from '../fixtures/redis-default-outputs.ts';
@@ -9,7 +10,11 @@ import { resolveNewChoices } from '../../src/commands/new-interactive.ts';
 import { readWorkspaceManifest, WORKSPACE_MANIFEST } from '../../src/workspace/manifest.ts';
 import { brokerSpec } from '../../src/workspace/transport.ts';
 import { withClientDependencies, CLIENT_RANGES } from '../../src/templates/client-dependencies.ts';
-import { resolveHost } from '../../src/templates/project-files.ts';
+import {
+  exposureParagraph,
+  renderLocalTransportSection,
+  resolveHost,
+} from '../../src/templates/project-files.ts';
 import { MINIMAL_HOST } from '../../src/templates/minimal.ts';
 import { nodeRedisClientCall } from '../../src/templates/node-redis.ts';
 import { formatForTarget } from '../../src/utils/prettier-format.ts';
@@ -39,14 +44,14 @@ const VERSION_PIN = new RegExp(
 describe('node-redis CLI', () => {
   it('renders the client call in the layout each project formatter keeps', () => {
     // Short single-line read: one line.
-    expect(nodeRedisClientCall("process.env.REDIS_URL ?? 'redis://127.0.0.1:6379'")).toBe(
-      "nodeRedisClient(process.env.REDIS_URL ?? 'redis://127.0.0.1:6379')",
+    expect(nodeRedisClientCall("process.env.REDIS_URL || 'redis://127.0.0.1:6379'")).toBe(
+      "nodeRedisClient(process.env.REDIS_URL || 'redis://127.0.0.1:6379')",
     );
     // A Deno read continues at 10 for a property at 8: the argument moves one level in.
     expect(
-      nodeRedisClientCall("Deno.env.get('REDIS_URL') ??\n          'redis://127.0.0.1:6379'"),
+      nodeRedisClientCall("Deno.env.get('REDIS_URL') ||\n          'redis://127.0.0.1:6379'"),
     ).toBe(
-      "nodeRedisClient(\n          Deno.env.get('REDIS_URL') ??\n            'redis://127.0.0.1:6379',\n        )",
+      "nodeRedisClient(\n          Deno.env.get('REDIS_URL') ||\n            'redis://127.0.0.1:6379',\n        )",
     );
     // A single-line read too wide for column 10 after `client: ` wraps as deno fmt does.
     const read = "config.get<string>('REDIS_URL', { default: 'redis://127.0.0.1:6379' })";
@@ -191,8 +196,9 @@ describe('node-redis CLI', () => {
   });
 
   it('keeps every ioredis variant byte-identical to captured develop output', async () => {
-    // Except the one deliberate change: `setu add` on Deno wrote its call on one
-    // line, which the project's own `deno fmt --check` refused; it is laid out now.
+    // Except the deliberate changes declared below. The first: `setu add` on Deno
+    // wrote its call on one line, which the project's own `deno fmt --check`
+    // refused; it is laid out now.
     const read = "url: Deno.env.get('REDIS_URL') ??\n          'redis://127.0.0.1:6379'";
     const joined = "url: Deno.env.get('REDIS_URL') ?? 'redis://127.0.0.1:6379'";
     const relaid: Record<string, readonly [string, string]> = {
@@ -220,12 +226,76 @@ describe('node-redis CLI', () => {
       expect(expected[path]).toContain(before);
       expected[path] = expected[path]!.replace(before, after);
     }
+    // The third deliberate change (M140b V12-124): an empty connection value
+    // means unset, so every generated read falls back with a logical-or. The
+    // capture holds the earlier nullish form; only the operator changes.
+    const ENV_READ_NULLISH =
+      /(Deno\.env\.get\('[A-Z_]+'\)|(?:process|runtime)\.env\.[A-Z_]+) \?\?/g;
+    for (const path of Object.keys(expected)) {
+      expected[path] = expected[path]!.replace(ENV_READ_NULLISH, '$1 ||');
+    }
+    // And M140b V12-118: a Deno README names `deno task build` only when the
+    // project has that task, and none of these microservice projects does.
+    for (const path of Object.keys(expected)) {
+      if (path.startsWith('deno/') && path.endsWith('/README.md')) {
+        expected[path] = expected[path]!.replace(
+          '```bash\ndeno task build\ndeno task start\n```',
+          '```bash\ndeno task start\n```',
+        );
+      }
+    }
+    // M140d: the Compose header names every backing service `setu add` writes
+    // there (Mailpit, Qdrant, pgvector), not brokers alone.
+    const BROKER_HEADER =
+      '# Broker services ONLY: they exist so the transports this project selected can\n' +
+      '# connect at app.start(). The deployable image and the orchestration objects\n' +
+      '# (Kubernetes, the full stack) are separate concerns this file does not own.';
+    const BACKING_HEADER =
+      '# Local backing services only (brokers, Mailpit, Qdrant, pgvector): they exist so\n' +
+      '# the backends this project selected are listening at app.start(). The deployable\n' +
+      '# image and the orchestration objects (Kubernetes, the full stack) are separate\n' +
+      '# concerns this file does not own.';
+    // `setu generate app` writes a workspace Compose file with its own header.
+    const brokerCompose = Object.keys(expected).filter(
+      (path) => path.endsWith('/docker/compose.yaml') && !path.includes('/--workspace/'),
+    );
+    expect(brokerCompose).toHaveLength(12);
+    for (const path of brokerCompose) {
+      expect(expected[path]).toContain(BROKER_HEADER);
+      expected[path] = expected[path]!.replace(BROKER_HEADER, BACKING_HEADER);
+    }
+    // M140d review: only a proxy restriction limits who reaches the operational
+    // routes; moving one or turning the UI off is named as a path or page change.
+    const OLD_EXPOSURE =
+      /\n\n(`\/metrics`[^\n]*?|`\/docs`[^\n]*?) are served on the application port\. Restrict them at the proxy,[\s\S]*?`endpoint`\.(?=\n)/;
+    let exposures = 0;
+    for (const path of Object.keys(expected)) {
+      const match = OLD_EXPOSURE.exec(expected[path]!);
+      if (match === null) continue;
+      exposures++;
+      expected[path] = expected[path]!.replace(
+        match[0],
+        exposureParagraph(match[1]!.includes('/metrics'), match[1]!.includes('/docs')),
+      );
+    }
+    expect(exposures).toBe(15);
+    // M140d: the local transport section also says a container needs each
+    // connection variable passed in. The `setu new --broker` captures already
+    // carry the section; the paragraph follows its Compose command.
+    const section = renderLocalTransportSection('');
+    const block = '```bash\ndocker compose -f docker/compose.yaml up -d\n```\n';
+    const paragraph = section.slice(section.indexOf(block) + block.length);
+    for (const path of Object.keys(expected)) {
+      if (path.endsWith('/README.md') && expected[path]!.includes(block))
+        expected[path] = expected[path]!.replace(block, `${block}${paragraph.trimEnd()}\n`);
+    }
     // The second deliberate change (X91-9): `setu add messaging --broker redis` and
     // `setu add queue --queue redis` append the REDIS_URL row `setu new --broker`
     // writes — the local default in `.env`, empty in the tracked example.
+    // M140d (V12-100) names the variable rather than a transport.
     const description =
-      '# Where the redis transport connects. The local start scripts read this ' +
-      'value; a deployment sets REDIS_URL in its own environment.';
+      '# REDIS_URL configures the redis connection. The local start scripts read this ' +
+      'value; a deployment sets it in its own environment.';
     for (const runtime of ['deno', 'node', 'bun']) {
       for (const command of ['add-messaging', 'add-queue']) {
         for (const [file, value] of [
@@ -236,6 +306,14 @@ describe('node-redis CLI', () => {
           expect(expected[path], path).toBeDefined();
           expected[path] = `${expected[path]}\n${description}\nREDIS_URL=${value}\n`;
         }
+        // And M140d: the README gains the local transport section `setu new --broker`
+        // writes, before `## Run`, from the same renderer.
+        const readme = `${runtime}/${command}/work/app/README.md`;
+        const at = expected[readme]!.indexOf('\n## Run\n');
+        expect(at, readme).toBeGreaterThan(0);
+        expected[readme] =
+          `${expected[readme]!.slice(0, at + 1)}${renderLocalTransportSection('').slice(1)}\n` +
+          expected[readme]!.slice(at + 1);
       }
     }
     // M131c changes only tooling lock writes, the production strip list, and
@@ -294,7 +372,65 @@ describe('node-redis CLI', () => {
         );
         contents = JSON.stringify(manifest, null, 2) + '\n';
       }
+      // M139d deliberate deltas: startup banners, scoped preload, prose preservation,
+      // and the deploy flag. Barrel wording is captured explicitly in the fixture.
+      if (runtime !== 'deno' && path.endsWith('/main.ts'))
+        contents = contents.replace(
+          /( {2}await app.start\(\{ port: (.+) \}\);\n)/,
+          (_line, start: string, port: string) =>
+            `${start}  console.log(\`Listening on http://localhost:\${${port}}/\`);\n`,
+        );
+      if (path.endsWith('/instrumentation.mjs')) contents = TELEMETRY_PRELOAD_CONTENTS;
+      if (runtime === 'deno' && /\/deno\.json$/.test(path)) {
+        const manifest = JSON.parse(contents) as { fmt?: Record<string, unknown> };
+        if (manifest.fmt) manifest.fmt = { proseWrap: 'preserve', ...manifest.fmt };
+        contents = JSON.stringify(manifest, null, 2) + '\n';
+      }
+      // M137b: the template documents its RFC 9457 error bodies in OpenAPI.
+      if (path.endsWith('/setu.config.ts'))
+        contents = contents.replace(
+          '      OpenApiPlugin(),\n',
+          "      OpenApiPlugin({ errorSchema: 'rfc9457' }),\n",
+        );
+      if (path.endsWith('/k8s/README.md'))
+        contents = contents.replace(
+          '`--build-arg`, `--network`.',
+          '`--build-arg`, `--network`, and `--pull-secret <name>` (repeatable; an existing registry\nSecret in the namespace).',
+        );
       const file = path.slice(path.indexOf('/work/') + '/work/app/'.length);
+      // M140a deliberately changes only the body bound, local ignores, and Deno cooldown/check pin.
+      if (file.endsWith('setu.config.ts')) {
+        contents = contents
+          .replaceAll('RuntimePlugin()', 'RuntimePlugin({ maxBodyBytes: 1_048_576 })')
+          .replaceAll(
+            'HttpSecurityPlugin()',
+            'HttpSecurityPlugin({ requestSize: { maxBodySize: 1_048_576 } })',
+          );
+      }
+      if (
+        file.endsWith('.gitignore') &&
+        !path.includes('/--workspace/work/app/.gitignore') &&
+        contents.split('\n').includes('coverage/')
+      ) {
+        const rest = contents
+          .trimEnd()
+          .split('\n')
+          .filter((line) => !['node_modules/', 'coverage/', '.env'].includes(line));
+        contents = `node_modules/\ncoverage/\n.env\n.env.*\n!.env.example\n${rest.length === 0 ? '' : `${rest.join('\n')}\n`}`;
+      }
+      if (runtime === 'deno' && file.endsWith('deno.json')) {
+        const manifest = JSON.parse(contents);
+        if (manifest.minimumDependencyAge === 0) {
+          manifest.minimumDependencyAge = { age: 'P1D', exclude: ['npm:@setu-ts/*'] };
+          manifest['//minimumDependencyAge'] =
+            'setu pins this project to the CLI version that generated it. Deno refuses a dependency published in the last 24 hours. Excluding only @setu-ts/* permits release-day framework installs while third-party dependencies keep the one-day cooldown.';
+        }
+        contents = JSON.stringify(manifest, null, 2) + '\n';
+        contents = contents.replaceAll(
+          `npm:@setu-ts/cli@^${VERSION} check`,
+          `npm:@setu-ts/cli@${VERSION} check`,
+        );
+      }
       expected[path] = (
         await formatForTarget([{ path: file, contents }], runtime, '/work/app', () => {})
       )[0]!.contents;

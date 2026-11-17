@@ -9,7 +9,7 @@
  */
 import { spawn, type ChildProcess } from 'node:child_process';
 import * as nodeFs from 'node:fs/promises';
-import { connect } from 'node:net';
+import { connect, createServer } from 'node:net';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import { createNodeRuntimeServices } from '@setu-ts/runtime';
 import { tempDir } from '../../../../test/node-helpers.ts';
@@ -170,6 +170,42 @@ it(
     for (const { member, run } of debug) {
       await until(() => listening(member.inspectPort), `${member.name} inspector`, run.output);
       await until(() => healthy(member.port), `${member.name} debug /health`, run.output);
+    }
+  },
+);
+
+it(
+  'V12-48 refuses an occupied VITE_PORT without dumping a stack',
+  { timeout: 900_000 },
+  async () => {
+    const occupant = createServer();
+    await new Promise<void>((resolve, reject) => {
+      occupant.once('error', reject);
+      occupant.listen(0, '127.0.0.1', resolve);
+    });
+    const address = occupant.address();
+    if (address === null || typeof address === 'string') throw new Error('no occupied port');
+    const overlay = await startOverlay();
+    try {
+      expect(await cli(['new', 'shop', '--template', 'full-stack'])).toBe(0);
+      const project = `${root}/shop`;
+      const installed = await npmInstall(project, overlay);
+      expect(installed.code, installed.output).toBe(0);
+      await nodeFs.writeFile(
+        `${project}/.env`,
+        `SESSION_SECRET=development-only-secret\nVITE_PORT=${address.port}\n`,
+      );
+      const run = start(project, ['run', 'start:dev']);
+      await until(() => Promise.resolve(run.child.exitCode !== null), 'Vite refusal', run.output);
+      expect(run.child.exitCode, run.output()).toBe(1);
+      expect(run.output()).toContain('Startup failed: Vite could not listen on');
+      expect(run.output()).toContain('VITE_PORT');
+      expect(run.output()).not.toMatch(/\n\s+at /);
+    } finally {
+      await overlay.close();
+      await new Promise<void>((resolve, reject) =>
+        occupant.close((error) => (error ? reject(error) : resolve())),
+      );
     }
   },
 );

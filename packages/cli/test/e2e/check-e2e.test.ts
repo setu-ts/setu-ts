@@ -145,7 +145,9 @@ for (const template of ['rest', 'class-based', 'microservice']) {
     expect((await check()).code).toBe(0);
     await nodeFs.writeFile(
       `${project}/setu.config.ts`,
-      `${modularConfig}\nconst label = \`unclassifiable\`;`,
+      // A template literal no longer stops the check (V12-32); a global reflection
+      // identifier still does.
+      `${modularConfig}\nconst label = globalThis;`,
     );
     expect((await check()).code).toBe(0);
     expect((await run(['check', '--strict', '--dir', project])).code).toBe(1);

@@ -11,7 +11,7 @@
 import { describe, expect, it } from 'vitest';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
-import { CAPABILITIES } from '@setu-ts/common';
+import { CAPABILITIES, describeError } from '@setu-ts/common';
 import type { ILogger } from '@setu-ts/common';
 
 import { ServiceDiscoveryPlugin } from '../../src/index.ts';
@@ -34,6 +34,28 @@ function appWith(http: FakeHttp, extra: { drainDelayMs?: number } = {}) {
 }
 
 describe('Consul self-registration through the application lifecycle', () => {
+  it('V12-57 masks URL credentials in deregistration warnings', async () => {
+    const error = new Error('failed http://user:pass@consul:8500/x');
+    const http = createFakeHttp([{ text: '' }, { error }]);
+    const warnings: Array<{ message: string; meta: unknown }> = [];
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        FakeLoggerPlugin((message, meta) => warnings.push({ message, meta })),
+        ServiceDiscoveryPlugin({
+          provider: 'consul',
+          address: 'http://consul:8500',
+          http,
+          selfRegistration: SELF,
+        }),
+      ],
+    });
+    await app.start();
+    await app.stop();
+    const warning = warnings.find((w) => w.message === 'service-discovery: deregistration failed');
+    expect(warning?.meta).toEqual({ error: describeError(error) });
+    expect(JSON.stringify(warning)).not.toContain('pass');
+  });
   it('registers during start() with the mandatory default check', async () => {
     const http = createFakeHttp([{ text: '' }]);
     const app = appWith(http);
@@ -130,13 +152,13 @@ describe('Consul self-registration through the application lifecycle', () => {
 });
 
 /** A logger plugin stand-in that captures warnings. */
-function FakeLoggerPlugin(onWarn: (message: string) => void) {
+function FakeLoggerPlugin(onWarn: (message: string, meta?: unknown) => void) {
   const logger: ILogger = {
     level: 'info',
     trace: () => {},
     debug: () => {},
     info: () => {},
-    warn: (message: string) => onWarn(message),
+    warn: (message: string, meta) => onWarn(message, meta),
     error: () => {},
     fatal: () => {},
     child: () => logger,
@@ -150,3 +172,37 @@ function FakeLoggerPlugin(onWarn: (message: string) => void) {
     },
   };
 }
+
+describe('a Consul address with credentials (V12-52)', () => {
+  it('fails start() with a fixed message and sends nothing', async () => {
+    const http = createFakeHttp([{ text: '' }]);
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        ServiceDiscoveryPlugin({
+          provider: 'consul',
+          address: 'http://ops:canary-pw-52@consul:8500',
+          http,
+          selfRegistration: SELF,
+        }),
+      ],
+    });
+
+    let caught: unknown;
+    try {
+      await app.start();
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    const chain: string[] = [];
+    for (let link: unknown = caught; link instanceof Error; link = link.cause) {
+      chain.push(String(link), link.message, link.stack ?? '');
+    }
+    expect(chain.join('\n')).toContain(
+      'The Consul address must be an absolute URL without credentials',
+    );
+    expect(chain.join('\n')).not.toContain('canary');
+    expect(http.calls).toHaveLength(0);
+  });
+});

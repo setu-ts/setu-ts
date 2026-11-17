@@ -512,7 +512,8 @@ jobs:
         run: pnpm test:coverage --no-tooling cli --shard 1/3
 
       - uses: actions/upload-artifact@v4
-        if: matrix.shard == 'cli-1'
+        # always(): a failing shard's blob is what lets cli-coverage name the failing tests.
+        if: always() && matrix.shard == 'cli-1'
         with:
           name: cli-blob-1
           path: .vitest-reports/cli/blob-1.json
@@ -525,7 +526,8 @@ jobs:
         run: pnpm test:coverage --no-tooling cli --shard 2/3
 
       - uses: actions/upload-artifact@v4
-        if: matrix.shard == 'cli-2'
+        # always(): a failing shard's blob is what lets cli-coverage name the failing tests.
+        if: always() && matrix.shard == 'cli-2'
         with:
           name: cli-blob-2
           path: .vitest-reports/cli/blob-2.json
@@ -538,7 +540,8 @@ jobs:
         run: pnpm test:coverage --no-tooling cli --shard 3/3
 
       - uses: actions/upload-artifact@v4
-        if: matrix.shard == 'cli-3'
+        # always(): a failing shard's blob is what lets cli-coverage name the failing tests.
+        if: always() && matrix.shard == 'cli-3'
         with:
           name: cli-blob-3
           path: .vitest-reports/cli/blob-3.json
@@ -553,6 +556,15 @@ jobs:
       - name: Node package tests with coverage (all other members)
         if: matrix.shard == 'packages'
         run: pnpm test:coverage --no-tooling --skip cli --skip messaging-plugin
+
+      # script-entrypoints runs `check-deploy.ts --render`, which compares the
+      # committed manifests with `helm template`. Pinned to the deploy job's
+      # version: the runner image's own helm moves with the image, and the
+      # ubuntu-26.04 image's helm renders the chart differently.
+      - uses: azure/setup-helm@v4
+        if: matrix.shard == 'tooling'
+        with:
+          version: v3.16.3
 
       - name: Root and script tests with coverage
         if: matrix.shard == 'tooling'
@@ -884,3 +896,26 @@ jobs:
       # `--ignore-registry-errors` is deliberately not used.
       - name: Audit
         run: pnpm run audit:ci
+
+  # `plans/` and `ROADMAP.md` are develop's working documents and never reach `main`
+  # (docs/releasing.md, "Keep plans and the roadmap off `main`"). A release branch removes them in
+  # its last commit; this job fails a pull request into `main`, or a push to it, that still holds
+  # either. It is skipped for every other event, and for fork pull requests like the jobs above.
+  main-branch-tree:
+    if: >-
+      (github.base_ref == 'main' || github.ref == 'refs/heads/main') &&
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    name: Main branch tree
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Refuse plans and the roadmap on main
+        run: |
+          found=$(git ls-files -- plans ROADMAP.md)
+          if [ -n "$found" ]; then
+            echo "These paths must not reach main; remove them on the release branch:"
+            echo "$found"
+            exit 1
+          fi

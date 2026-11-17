@@ -478,7 +478,7 @@ error[private-type-ref]: public type references private type
   });
 
   describe('DOC_LINT_BASELINE constant', () => {
-    it('is the re-measured baseline of 236 on pinned TypeDoc 0.28.20', () => {
+    it('is the re-measured baseline of 235 on pinned TypeDoc 0.28.20', () => {
       // 776 when the plan was written against a pre-M56 tree; merging
       // origin/main brought M56-M61's JSDoc and the real count fell to 775.
       // M59 then added four diagnostics and removed five, so it fell to 774.
@@ -535,7 +535,8 @@ error[private-type-ref]: public type references private type
       // are members of anonymous object types that `deno doc --lint` never
       // required (inRatchetScope) — 237 in scope.
       // M119a documented the messaging publish paths it touched: 236.
-      expect(DOC_LINT_BASELINE).toBe(236);
+      // M139b's plain RpcCall/RpcReply contract measured one fewer: 235.
+      expect(DOC_LINT_BASELINE).toBe(235);
       // The pin and the baseline are only meaningful together, so the version
       // is asserted beside the count: moving one without the other is exactly
       // the drift this pair exists to make impossible.
@@ -625,7 +626,7 @@ error[private-type-ref]: public type references private type
       expect(result.targets).toHaveLength(new Set(result.targets).size);
     });
 
-    it('has the expected authoritative count of 57 targets', async () => {
+    it('has the expected authoritative count of 59 targets', async () => {
       const fs = {
         readTextFile: async (path: string) => await readFile(path, 'utf8'),
         readDir: async (path: string) => await readdir(path, { withFileTypes: true }),
@@ -635,9 +636,10 @@ error[private-type-ref]: public type references private type
       // 54 published packages (M109a added idempotency-plugin, M111d added
       // create, M135 vector-store-plugin), runtime has 2 exports (./src/index.ts
       // + ./worker), cli has 2 exports (./src/index.ts + ./main),
-      // localization-plugin has 2 (./src/index.ts + ./format, M103), rest have 1
-      // each = 54 + 1 (extra runtime) + 1 (extra cli) + 1 (extra localization) = 57
-      expect(result.targets).toHaveLength(58);
+      // localization-plugin has 2 (./src/index.ts + ./format, M103),
+      // validation-plugin has 2 (./src/index.ts + ./zod, M137c), rest have 1 each:
+      // 55 published packages + runtime + cli + localization + validation = 59
+      expect(result.targets).toHaveLength(59);
     });
 
     it('maps each target to its correct package name', async () => {

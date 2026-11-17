@@ -38,6 +38,7 @@ import {
   readWorkspaceManifest,
   WORKSPACE_MANIFEST,
   type WorkspaceManifest,
+  manifestProblemDetail,
 } from '../workspace/manifest.ts';
 import { describeReconcileFailure, reconcileMembers } from '../workspace/reconcile.ts';
 import { workspaceProfile } from '../workspace/runtime-profile.ts';
@@ -267,6 +268,8 @@ async function openWorkspace(
     deps.error(
       `No usable ${WORKSPACE_MANIFEST} in ${escapeName(options.dir)}, so this is not a Setu workspace.`,
     );
+    const detail = manifestProblemDetail(read.problem);
+    if (detail !== undefined) deps.error(detail);
     return { ok: false, code: EXIT_ERROR };
   }
   const reconciliation = await reconcileMembers(deps.fs, options.dir, read.manifest);

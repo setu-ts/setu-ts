@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { parseEnvRead } from '../../fixtures/env-read-shape.ts';
 import {
   BROKER_COMPOSE_FILE,
+  exposureParagraph,
   projectFiles,
   resolveHost,
   servedRoutes,
@@ -14,6 +16,40 @@ import { getBroker } from '../../../src/workspace/transport.ts';
 import { workspaceProfile } from '../../../src/workspace/runtime-profile.ts';
 import { withPluginOptionSeams } from '../../../src/templates/seam.ts';
 import { JOBS_SEAM } from '../../../src/seams/jobs.ts';
+
+it.each(['node', 'bun', 'deno'] as const)(
+  'sets NODE_ENV only for the %s production start',
+  (runtime) => {
+    const files = projectFiles('shop', runtime, resolveHost(getTemplate('full-stack')!, runtime));
+    const manifest = JSON.parse(
+      contentsOf(files, runtime === 'deno' ? 'deno.json' : 'package.json'),
+    );
+    const scripts = manifest.scripts ?? manifest.tasks;
+    expect(scripts.start).toContain(
+      runtime === 'node'
+        ? `--import "data:text/javascript,process.env.NODE_ENV??='production'" --import ./instrumentation.mjs`
+        : `NODE_ENV=production ${runtime}`,
+    );
+    for (const name of ['start:dev', 'start:debug', 'test'])
+      expect(scripts[name]).not.toContain('NODE_ENV');
+    if (runtime === 'node') expect(contentsOf(files, 'README.md')).toContain('data-URL preload');
+  },
+);
+
+it('creates every local env file owner-only, and nothing else (audit F2, N2)', () => {
+  const fullStack = projectFiles('shop', 'node', resolveHost(getTemplate('full-stack')!, 'node'));
+  expect(fullStack.find((file) => file.path === '.env')?.secret).toBe(true);
+  expect(fullStack.find((file) => file.path === '.env.example')?.secret).toBeUndefined();
+  const worker = projectFiles(
+    'shop',
+    'cloudflare-workers',
+    resolveHost(getTemplate('full-stack')!, 'cloudflare-workers'),
+  );
+  expect(worker.find((file) => file.path === '.dev.vars')?.secret).toBe(true);
+  // A REST project's .env holds no secret yet; `setu add auth` writes one into it later.
+  const rest = projectFiles('api', 'node', resolveHost(getTemplate('rest')!, 'node'));
+  expect(rest.filter((file) => file.secret === true).map((file) => file.path)).toEqual(['.env']);
+});
 
 it('V11-3 names Node through tsx as the config loader on Workers', () => {
   const files = projectFiles(
@@ -100,13 +136,10 @@ describe('functional hosts and generated test tasks', () => {
         const tasks = manifest.tasks ?? manifest.scripts!;
         if (name === 'full-stack' || name === 'rest' || name === 'microservice') {
           const dependencies = JSON.parse(
-            contentsOf(
-              files,
-              target === 'deno' || target === 'cloudflare-workers' ? 'deno.json' : 'package.json',
-            ),
+            contentsOf(files, target === 'deno' ? 'deno.json' : 'package.json'),
           ) as { imports?: Record<string, string>; dependencies?: Record<string, string> };
           expect(dependencies.imports?.['zod'] ?? dependencies.dependencies?.['zod']).toBe(
-            target === 'deno' || target === 'cloudflare-workers' ? 'npm:zod@^4.6.6' : '^4.6.6',
+            target === 'deno' ? 'npm:zod@^4.6.6' : '^4.6.6',
           );
         }
         const unit =
@@ -161,7 +194,7 @@ describe('guidance and queue seam composition', () => {
         [...projectFiles('svc', runtime, resolveHost(MINIMAL_HOST, runtime))],
         'README.md',
       );
-      expect(readme).toContain(`${invocation}${VERSION} generate service billing`);
+      expect(readme).toContain(`${invocation}${VERSION} generate module billing`);
       expect(readme).toContain(`${invocation}${VERSION} generate --help`);
     });
   }
@@ -247,7 +280,7 @@ describe('the entry port', () => {
   // reads PORT, defaulting to 3000 so a project with no `.env` is unchanged.
   it('reads PORT from the environment, defaulting to 3000', () => {
     const main = contentsOf([...projectFiles('svc', 'deno', host)], 'main.ts');
-    expect(main).toContain("await app.start({ port: Number(runtime.env.PORT ?? '3000') });");
+    expect(main).toContain("await app.start({ port: Number(runtime.env.PORT || '3000') });");
   });
 
   // The read goes through IRuntimeServices, never `Deno.env`/`process.env`:
@@ -321,13 +354,13 @@ describe('the entry shutdown handler', () => {
   // time, so moving a project between runtimes meant rewriting the file by
   // hand. All three socket targets now emit the same body, through capabilities
   // that already existed.
-  it('emits ONE portable body, byte-identical across all three socket targets', () => {
+  it('emits portable entries with a banner only where the runtime needs it', () => {
     const deno = entryFor('deno');
     const node = entryFor('node');
     const bun = entryFor('bun');
 
-    expect(node).toBe(deno);
-    expect(bun).toBe(deno);
+    expect(node).toBe(bun);
+    expect(node.replace(/^.*console.log\(`Listening on.*\n/m, '')).toBe(deno);
   });
 
   for (const runtime of ['deno', 'node', 'bun'] as const) {
@@ -354,11 +387,12 @@ describe('the entry shutdown handler', () => {
       expect(main).not.toContain('Deno.exit');
       expect(main).not.toContain('process.on(');
       expect(main).not.toContain('process.exit');
-      // One console line, and only for a failed boot (M131a X88-8): no plugin
-      // has registered then, so there is no logger to report through. A failed
-      // shutdown still goes through the logger (next test).
-      expect(main.match(/console\.error/g)).toHaveLength(1);
+      // Startup has no logger yet; shutdown falls back to stderr when none is registered (V12-81).
+      expect(main.match(/console\.error/g)).toHaveLength(2);
       expect(main).toContain('console.error(`Startup failed: ${describeError(error)}`);');
+      expect(main).toContain(
+        'else console.error(`Graceful shutdown failed: ${describeError(error)}`);',
+      );
     });
 
     // Shutdown failures used to bypass structured logging entirely. The logger
@@ -367,7 +401,9 @@ describe('the entry shutdown handler', () => {
     it(`reports a failed shutdown through the logger on ${runtime}`, () => {
       const main = entryFor(runtime);
       expect(main).toContain('app.services.has(CAPABILITIES.LOGGER)');
-      expect(main).toContain("logger?.error('Graceful shutdown failed', { error });");
+      expect(main).toContain(
+        "if (logger !== undefined) logger.error('Graceful shutdown failed', { error });",
+      );
     });
   }
 
@@ -407,21 +443,20 @@ describe('a template with a frontend build, on a Deno target', () => {
   const manifestOf = (runtime: TargetRuntime): Record<string, never> =>
     JSON.parse(contentsOf([...projectFiles('shop', runtime, host)], 'deno.json'));
 
-  it('emits install and build tasks, with start depending on build', () => {
+  it('emits a script-free install and separate build and start tasks', () => {
     const tasks = (
       manifestOf('deno') as unknown as {
         tasks: Record<string, string>;
       }
     ).tasks;
 
-    // `--min-dep-age 0` for D1: the project is pinned to the CLI's own version,
-    // which on release day is younger than Deno's 24-hour policy allows.
-    expect(tasks['install']).toBe('deno install --allow-scripts --min-dep-age 0');
+    expect(tasks['install']).toBe('deno install');
     expect(tasks['build']).toContain('deno task install &&');
-    expect(tasks['build']).toContain('npm:@react-router/dev build');
-    // The dependency is the point: `deno task start` on a fresh clone has to
-    // produce the server build before importing it.
-    expect(tasks['start']?.startsWith('deno task build && ')).toBe(true);
+    // The project's own locked copy, never a fresh unversioned `npm:` fetch.
+    expect(tasks['build']).toBe('deno task install && react-router build');
+    expect(tasks['build']).not.toContain('--no-lock');
+    expect(tasks['start']?.startsWith('NODE_ENV=production deno run ')).toBe(true);
+    expect(tasks['start']).not.toContain('build');
   });
 
   it('sets nodeModulesDir so a COLD checkout type-checks', () => {
@@ -470,6 +505,10 @@ describe('a template with a frontend build, on a Deno target', () => {
     expect(dev).toContain('packages: [...frameworkPackages, ...workspaceLibraries]');
     expect(dev).toContain('resolve: (specifier) => import.meta.resolve(specifier)');
     expect(dev).toContain("mode: 'development'");
+    expect(dev).toContain(
+      "  matchRoutes,\n  RouterContextProvider,\n  type ServerBuild,\n} from 'react-router';",
+    );
+    expect(dev).toContain('pageRoutes: { build: loadServerBuild, matchRoutes }');
     // The externals list dev.ts imports is the one the server build uses.
     const vite = contentsOf(files, 'vite.config.ts');
     expect(vite).toContain('export const frameworkPackages = [');
@@ -500,7 +539,15 @@ describe('a template with a frontend build, on a Deno target', () => {
       const files = [
         ...projectFiles('shop', runtime, resolveHost(getTemplate('full-stack')!, runtime)),
       ];
-      expect(contentsOf(files, 'dev.ts')).toBe(deno);
+      expect(contentsOf(files, 'dev.ts')).toContain(
+        "  matchRoutes,\n  RouterContextProvider,\n  type ServerBuild,\n} from 'react-router';",
+      );
+      expect(contentsOf(files, 'dev.ts')).toContain(
+        'pageRoutes: { build: loadServerBuild, matchRoutes }',
+      );
+      expect(contentsOf(files, 'dev.ts').replace(/^.*console.log\(`Listening on.*\n/m, '')).toBe(
+        deno,
+      );
       const scripts = (
         JSON.parse(contentsOf(files, 'package.json')) as {
           scripts: Record<string, string>;
@@ -599,13 +646,13 @@ describe('the Cloudflare Workers target', () => {
     expect(entry).toContain('createApp(env, waitUntil)');
   });
 
-  it('starts with deno serve, which actually binds (X9-7)', () => {
-    // `deno run` on a `fetch` default export binds nothing and exits 0, so a CI
-    // step and a developer's first instinct both read as success.
-    const manifest = JSON.parse(contentsOf(filesOf(rest), 'deno.json')) as {
-      tasks: Record<string, string>;
+  it('uses the npm toolchain without a Deno manifest on Workers', () => {
+    expect(filesOf(rest).some((file) => file.path === 'deno.json')).toBe(false);
+    const pkg = JSON.parse(contentsOf(filesOf(rest), 'package.json')) as {
+      scripts: Record<string, string>;
     };
-    expect(manifest.tasks['start']?.startsWith('deno serve ')).toBe(true);
+    expect(pkg.scripts['dev']).toBe('wrangler dev');
+    expect(pkg.scripts['deploy']).toBe('wrangler deploy');
   });
 
   it('ships a type-check path, which the target had none of (X9-4)', () => {
@@ -927,5 +974,131 @@ describe('the emitted smoke test', () => {
     expect(smokeTest('full-stack', 'node')).toContain('assert.deepStrictEqual(page.status, 200);');
     expect(smokeTest('full-stack', 'bun')).toContain('expect(page.status).toEqual(200);');
     expect(smokeTest('full-stack', 'deno')).toContain('expect(page.status).toEqual(200);');
+  });
+});
+
+describe('M140b runtime output', () => {
+  const hosts = ['minimal', 'rest', 'microservice', 'class-based', 'full-stack'] as const;
+  for (const name of hosts) {
+    it(`${name}: Deno Production commands name real tasks`, () => {
+      const definition = name === 'minimal' ? MINIMAL_HOST : getTemplate(name)!;
+      const files = projectFiles('svc', 'deno', resolveHost(definition, 'deno'));
+      const manifest = JSON.parse(contentsOf(files, 'deno.json')) as {
+        tasks: Record<string, string>;
+      };
+      const production = contentsOf(files, 'README.md').split('## Production')[1]!;
+      const commands = [...production.matchAll(/deno task ([\w:-]+)/g)].map((match) => match[1]!);
+      expect(commands).toContain('start');
+      expect(commands.includes('build')).toBe(name === 'full-stack');
+      for (const command of commands) expect(manifest.tasks).toHaveProperty(command);
+    });
+    it(`${name}: Workers deployment matches the host`, () => {
+      const definition = name === 'minimal' ? MINIMAL_HOST : getTemplate(name)!;
+      const files = projectFiles(
+        'worker',
+        'cloudflare-workers',
+        resolveHost(definition, 'cloudflare-workers'),
+      );
+      expect(files.some((file) => file.path === 'deno.json')).toBe(false);
+      const readme = contentsOf(files, 'README.md');
+      expect(readme.match(/## Deploy\n/g)).toHaveLength(1);
+      expect(readme).toContain('npm run deploy');
+      // Only full-stack declares variables, so only it writes `.dev.vars`.
+      expect(readme.includes('`.dev.vars` is local only')).toBe(name === 'full-stack');
+      expect(files.some((file) => file.path === '.dev.vars')).toBe(name === 'full-stack');
+      expect(readme).toContain('the commented\nstanzas there are placeholders');
+      expect(readme.includes('Cloudflare does not probe a Worker')).toBe(name !== 'minimal');
+      expect(readme.includes('only the isolate that answers')).toBe(name !== 'minimal');
+      const wrangler = contentsOf(files, 'wrangler.toml');
+      expect(wrangler.includes('CONSUMER — drives the `queue` export')).toBe(
+        name === 'microservice',
+      );
+      if (name !== 'microservice') {
+        expect(wrangler).toContain('src/index.ts does not have yet');
+        expect(wrangler).toContain('withApplication(env, (app) => createQueueHandler(app)(batch))');
+        expect(wrangler).toContain('IQueueMessageBatch');
+      }
+      expect(wrangler).toContain('`scheduled` export, which src/index.ts does not have');
+      expect(wrangler).toContain('createScheduledHandler(cron)(controller)');
+      expect(wrangler).toContain('IScheduledController');
+      expect(wrangler).toContain('name = "REALTIME"');
+      expect(wrangler).toContain("durableObject: { binding: 'REALTIME', topic: '…' }");
+      if (name === 'microservice') {
+        for (const queue of ['messages', 'jobs'])
+          expect(readme).toContain(`npx wrangler queues create ${queue}`);
+      }
+      if (name === 'full-stack') {
+        expect(readme.match(/npx wrangler secret put SESSION_SECRET/g)).toHaveLength(1);
+        expect(readme).toContain('Everything in `build/client`');
+        const devVars = contentsOf(files, '.dev.vars');
+        expect(devVars).toContain(
+          '# The values below are for local development and stay local; generated secrets are random. A deployed Worker\n',
+        );
+        expect(devVars).toContain(
+          'takes secrets from wrangler secret put and plain values from [vars]',
+        );
+        expect(devVars).not.toContain('Replace them before deploying');
+      }
+    });
+  }
+  for (const runtime of ['deno', 'node', 'bun', 'cloudflare-workers'] as const) {
+    for (const name of ['rest', 'full-stack']) {
+      it(`${runtime}/${name}: factory docs name the entry and local env reader`, () => {
+        const files = projectFiles('svc', runtime, resolveHost(getTemplate(name)!, runtime));
+        expect(contentsOf(files, 'setu.config.ts')).toContain(
+          `\`${runtime === 'cloudflare-workers' ? 'src/index.ts' : 'main.ts'}\` owns that`,
+        );
+        if (name === 'full-stack') {
+          const env = contentsOf(files, runtime === 'cloudflare-workers' ? '.dev.vars' : '.env');
+          if (runtime !== 'cloudflare-workers') {
+            expect(env).toContain(
+              '# The values below are for local development; generated secrets are random. Set real values before deploying.\n',
+            );
+          }
+          expect(env).toContain(
+            runtime === 'cloudflare-workers'
+              ? "wrangler dev reads this file into the Worker's env"
+              : 'before the process starts',
+          );
+          if (runtime === 'cloudflare-workers') expect(env).toContain('wrangler secret put');
+        }
+      });
+    }
+  }
+  it('an empty PORT in the generated main.ts falls back to 3000', () => {
+    const files = projectFiles('svc', 'node', resolveHost(MINIMAL_HOST, 'node'));
+    const expression = contentsOf(files, 'main.ts').match(
+      /port: (Number\(runtime\.env\.PORT[^)]+\))/,
+    )![1]!;
+    // Parsed, not executed: `||` is what makes an empty PORT take the fallback.
+    expect(parseEnvRead(expression)).toEqual({
+      operator: '||',
+      variable: 'PORT',
+      fallback: '3000',
+    });
+  });
+});
+
+describe('exposureParagraph', () => {
+  // Pinned as literals: the redis capture test rebuilds its expected text with this
+  // function, so a defect here would otherwise pass on both sides of that test.
+  it('names the proxy as the only access control, for every route combination', () => {
+    expect(exposureParagraph(false, false)).toBe('');
+    expect(exposureParagraph(true, true)).toBe(
+      '\n\n`/metrics`, `/docs`, `/openapi.json` are served on the application port to anyone who can reach it:\n' +
+        "restrict them at the proxy. Turning the UI off with OpenApiPlugin's `swagger: false`, moving `/docs`\n" +
+        'with its `endpoint` and `/openapi.json` with its `specEndpoint` or moving `/metrics` with\n' +
+        "MetricsPlugin's `endpoint` changes a path or a page, not who can reach it.",
+    );
+    expect(exposureParagraph(true, false)).toBe(
+      '\n\n`/metrics` is served on the application port to anyone who can reach it: restrict it at the proxy.\n' +
+        "Moving `/metrics` with MetricsPlugin's `endpoint` changes a path or a page, not who can reach it.",
+    );
+    expect(exposureParagraph(false, true)).toBe(
+      '\n\n`/docs`, `/openapi.json` are served on the application port to anyone who can reach it: restrict\n' +
+        "them at the proxy. Turning the UI off with OpenApiPlugin's `swagger: false` or moving `/docs` with\n" +
+        'its `endpoint` and `/openapi.json` with its `specEndpoint` changes a path or a page, not who can\n' +
+        'reach it.',
+    );
   });
 });

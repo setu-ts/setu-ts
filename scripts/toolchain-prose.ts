@@ -204,11 +204,6 @@ export const TOOLCHAIN_PROSE_RULES: ToolchainProseRules = {
       reason: 'Recognizes or explains migration of pre-0.9 JSR pins.',
     },
     {
-      path: 'packages/cli/src/templates/full-stack.ts',
-      category: 'deno-target',
-      reason: 'Commands emitted for or exercised against supported Deno projects.',
-    },
-    {
       path: 'packages/cli/src/templates/project-files.ts',
       category: 'deno-target',
       reason: 'Commands emitted for or exercised against supported Deno projects.',
@@ -370,6 +365,11 @@ export const TOOLCHAIN_PROSE_RULES: ToolchainProseRules = {
       reason: 'Commands emitted for or exercised against supported Deno projects.',
     },
     {
+      path: 'packages/cli/test/unit/node-redis-cli.test.ts',
+      category: 'deno-target',
+      reason: 'Commands emitted for or exercised against supported Deno projects.',
+    },
+    {
       path: 'packages/cli/test/unit/templates/project-files.test.ts',
       category: 'deno-target',
       reason: 'Commands emitted for or exercised against supported Deno projects.',
@@ -490,9 +490,7 @@ const DENO_INSTALL = /\bdeno\s+(?:add|install)\b[^\n`<>;|&]*/g;
 const CONTINUED = /\\\s*$/;
 
 function history(path: string): boolean {
-  return /^(?:CHANGELOG\.md$|ROADMAP\.md$|plans\/(?:archive\/|reviews\/|milestone-[^/]+\.md$))/.test(
-    path,
-  );
+  return /^(?:CHANGELOG\.md$|ROADMAP\.md$|plans\/(?:reviews\/|milestone-[^/]+\.md$))/.test(path);
 }
 
 function instructions(path: string): boolean {

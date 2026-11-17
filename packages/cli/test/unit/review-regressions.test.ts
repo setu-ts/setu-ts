@@ -1,3 +1,4 @@
+import { generateSecret } from '../../src/templates/secret.ts';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { createNodeRuntimeServices } from '@setu-ts/runtime';
@@ -84,7 +85,14 @@ describe('M113i review regressions', () => {
     const fs = createFakeFs();
     const out = createRecorder();
     const error = createRecorder();
-    const deps = { fs, cwd: '/work', now: () => 0, log: out.sink, error: error.sink };
+    const deps = {
+      secret: generateSecret,
+      fs,
+      cwd: '/work',
+      now: () => 0,
+      log: out.sink,
+      error: error.sink,
+    };
     const url = 'redis://:p{a}ss@127.0.0.1:6379';
     expect(
       await runNewCommand(
@@ -124,6 +132,7 @@ describe('M113i review regressions', () => {
     const error = createRecorder();
     expect(
       await runNewCommand(parseArgs(['app', '--dry-run']), {
+        secret: generateSecret,
         fs: createNodeRuntimeServices().fs!,
         cwd,
         log: out.sink,
@@ -172,12 +181,14 @@ describe('M113i review regressions', () => {
     ['bun', `bunx @setu-ts/cli@${VERSION}`],
     ['cloudflare-workers', `npx @setu-ts/cli@${VERSION}`],
   ] as const) {
-    it(`pins Deno-only diagnostics refusal for ${runtime}`, async () => {
+    it(`pins the diagnostics refusal for ${runtime}`, async () => {
       const fs = createFakeFs(
         runtime === 'deno'
           ? { '/app/deno.json': '{}' }
           : {
               '/app/package.json': JSON.stringify({ scripts: { start: `${runtime} main.ts` } }),
+              // A Workers project is detected by its Wrangler config.
+              ...(runtime === 'cloudflare-workers' ? { '/app/wrangler.jsonc': '{}' } : {}),
             },
       );
       const error = createRecorder();
@@ -189,8 +200,12 @@ describe('M113i review regressions', () => {
           error: error.sink,
         }),
       ).toBe(2);
+      // The devtool runs on Deno and Node (M126), so those get their own runner;
+      // Bun and Workers get the devtool's refusal instead of a command that refuses.
       expect(error.text()).toContain(
-        `\`deno run -A --no-lock npm:@setu-ts/cli@${VERSION} devtool enable\``,
+        runtime === 'deno' || runtime === 'node'
+          ? `\`${invocation} devtool enable\``
+          : `This project targets ${runtime}; the devtool can only be enabled on Deno or Node.`,
       );
     });
     it(`pins generated middleware guidance for ${runtime}`, () => {

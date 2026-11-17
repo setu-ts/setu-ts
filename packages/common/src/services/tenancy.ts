@@ -7,6 +7,12 @@ import type { IRequest, IRequestContext } from '../http.ts';
 import type { Option } from '../option.ts';
 import type { WritePrecondition } from './write-precondition.ts';
 
+/** Structural transaction scope supplied by the database unit of work. @since 0.13.0 */
+export interface ITenantUnitOfWork {
+  /** Returns a transaction-scoped repository for the entity. @since 0.13.0 */
+  getRepository(entity: string): unknown;
+}
+
 /**
  * A resolved tenant.
  *
@@ -84,11 +90,16 @@ export interface IMultiTenancyService {
    *
    * @param ctx - The current request context
    * @param entity - Entity name for scoping
+   * @param unitOfWork - Optional transaction scope (since 0.13.0); requires store support
    * @returns A tenant-scoped repository
+   * @throws {Error} When `unitOfWork` is given and the data store has no
+   *   {@linkcode ITenantDataStore.withUnitOfWork} (multi-tenancy-plugin's
+   *   `TenantUnitOfWorkUnsupportedError`, status hint 500)
    */
   getRepository<Entity, Id = string>(
     ctx: IRequestContext,
     entity: string,
+    unitOfWork?: ITenantUnitOfWork,
   ): ITenantRepository<Entity, Id>;
   /**
    * Create a tenant-scoped repository for the given entity type, scoped to
@@ -106,12 +117,17 @@ export interface IMultiTenancyService {
    *
    * @param tenantId - The tenant id to scope the repository to (trusted input)
    * @param entity - Entity name for scoping
+   * @param unitOfWork - Optional transaction scope (since 0.13.0); requires store support
    * @returns A tenant-scoped repository
+   * @throws {Error} When `unitOfWork` is given and the data store has no
+   *   {@linkcode ITenantDataStore.withUnitOfWork} (multi-tenancy-plugin's
+   *   `TenantUnitOfWorkUnsupportedError`, status hint 500)
    * @since 0.4.0
    */
   getRepositoryFor<Entity, Id = string>(
     tenantId: string,
     entity: string,
+    unitOfWork?: ITenantUnitOfWork,
   ): ITenantRepository<Entity, Id>;
   /**
    * With no `tenants` registry configured, answers `some({ id })` for any
@@ -224,6 +240,16 @@ export interface ITenantRegistry {
  * @since 0.9.0
  */
 export interface ITenantDataStore {
+  /**
+   * Binds operations to the caller's transaction while retaining tenant isolation.
+   * The returned view must apply every tenant guard the store itself applies
+   * (stamping, stripping and the foreign-row refusal) through the unit of
+   * work's repositories. Optional: a store with no transaction to join omits it.
+   * @param unitOfWork - The transaction's repository source
+   * @returns A view whose operations join the transaction
+   * @since 0.13.0
+   */
+  withUnitOfWork?(unitOfWork: ITenantUnitOfWork): ITenantDataStore;
   /**
    * Receives the resolved isolation strategy once, during `register()`.
    * Optional so a store may ignore isolation metadata entirely.

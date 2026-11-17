@@ -92,6 +92,17 @@ export class LogProvider implements MailProvider {
       from: message.from,
       to: Array.isArray(message.to) ? message.to.join(', ') : message.to,
       subject: message.subject,
+      ...(message.attachments === undefined
+        ? {}
+        : {
+            attachments: message.attachments.map((attachment) => ({
+              filename: attachment.filename,
+              ...(attachment.contentType === undefined
+                ? {}
+                : { contentType: attachment.contentType }),
+              bytes: attachment.content.byteLength,
+            })),
+          }),
     });
     return Promise.resolve();
   }

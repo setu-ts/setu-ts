@@ -5,6 +5,8 @@
  * @module
  */
 import { describe, expect, it } from 'vitest';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any;
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
@@ -13,6 +15,58 @@ import { ReactRouterPlugin } from '../../src/plugin/react-router-plugin.ts';
 import { SsrService } from '../../src/services/ssr-service.ts';
 import { createFakeLoadContextFactory } from '../fixtures/fake-handler.ts';
 import manifest from '../../deno.json' with { type: 'json' };
+
+describe('page policy route registration', () => {
+  const runtime: SsrRuntime = {
+    handler: () => Promise.resolve(new Response('page')),
+    createLoadContext: createFakeLoadContextFactory(),
+    pageRoutes: {
+      build: () => ({ routes: { root: { id: 'root' } } }),
+      matchRoutes: () => [{ route: { id: 'root' } }],
+    },
+  };
+  it.each([
+    undefined,
+    {},
+    { root: { middleware: [(_ctx: unknown, next: () => Promise<void>) => next()] } },
+  ])('only installs groups for non-empty policies %j', async (pagePolicies) => {
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        ReactRouterPlugin({
+          serverBuild: {},
+          ...(pagePolicies === undefined ? {} : { pagePolicies }),
+          loadRequestHandler: () => Promise.resolve(runtime),
+        }),
+      ],
+    });
+    await app.start();
+    try {
+      const routes = app.router.listRoutes();
+      expect(routes).toHaveLength(7);
+      for (const route of routes) {
+        expect(route.definition.middlewareGroups !== undefined).toBe(
+          pagePolicies !== undefined && Object.keys(pagePolicies).length > 0,
+        );
+      }
+    } finally {
+      await app.stop();
+    }
+  });
+  it('propagates a policy refusal from registration', async () => {
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        ReactRouterPlugin({
+          serverBuild: {},
+          pagePolicies: { typo: { middleware: [] } },
+          loadRequestHandler: () => Promise.resolve(runtime),
+        }),
+      ],
+    });
+    await expect(app.start()).rejects.toThrow("unknown route id 'typo'");
+  });
+});
 
 describe('react-router-plugin', () => {
   function buildFakeCtx(): Any {

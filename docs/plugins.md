@@ -257,8 +257,8 @@ management.
 - `@Body`, `@Query`, `@Param`
 - `@UseGuards`, `@UseInterceptors`, `@UseFilters`
 
-**Note:** Decorators are **optional** and require explicit token injection (no
-emitDecoratorMetadata).
+**Note:** Decorators are **optional** and require explicit token injection (standard decorators
+carry no parameter type information).
 
 **Links:**
 
@@ -1145,6 +1145,8 @@ pipeline.
 | Deno | Node | Bun | Workers |
 | ---- | ---- | --- | ------- |
 | ✅   | ✅   | ✅  | ✅      |
+
+<!-- version:history -->
 
 Node has the full integration suite and Deno one native list/call proof. Bun is unproven until the
 0.12.0 published-artifact row runs. Workers has a workerd-condition bundle-resolution proof; a live

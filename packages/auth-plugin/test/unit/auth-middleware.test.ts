@@ -4,6 +4,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { authMiddleware } from '../../src/middleware/auth-middleware.ts';
+import { AuthenticationUnavailableError } from '../../src/index.ts';
 import { AuthService, LocalStrategy } from '../../src/services/auth-service.ts';
 import { CREDENTIAL_SOURCE_STATE_KEY, sealRequestIdentity } from '@setu-ts/common';
 import type {
@@ -84,6 +85,39 @@ function createContext(authService: IAuthService): {
 }
 
 describe('authMiddleware', () => {
+  it.each([
+    new AuthenticationUnavailableError(new Error('db down')),
+    { name: 'AuthenticationUnavailableError' },
+  ])('V12-138 rethrows an unavailable backend across realms', async (error) => {
+    const service: IAuthService = {
+      authenticate: () => Promise.reject(error),
+      verifyCredentials: () => Promise.resolve(null),
+    };
+    const { ctx, request } = createContext(service);
+    let called = false;
+    await expect(
+      authMiddleware()(ctx, () => {
+        called = true;
+        return Promise.resolve();
+      }),
+    ).rejects.toBe(error);
+    expect(called).toBe(false);
+    expect(request.user).toBeUndefined();
+  });
+  it.each([null, 'fault'])('continues anonymously on other thrown values %j', async (error) => {
+    const service: IAuthService = {
+      authenticate: () => Promise.reject(error),
+      verifyCredentials: () => Promise.resolve(null),
+    };
+    const { ctx, request } = createContext(service);
+    let called = false;
+    await authMiddleware()(ctx, () => {
+      called = true;
+      return Promise.resolve();
+    });
+    expect(called).toBe(true);
+    expect(request.user).toBeUndefined();
+  });
   it('sets ctx.request.user when authenticate returns a principal', async () => {
     const principal: IPrincipal = { id: 'user1', roles: ['user'] };
     const middleware = authMiddleware();
@@ -243,4 +277,24 @@ describe('authMiddleware', () => {
     expect(ctx.state.get(CREDENTIAL_SOURCE_STATE_KEY)).toBeUndefined();
     expect(nextCalled).toBe(true);
   });
+});
+
+it('audit F2 records no credential source for an authenticated undeclared strategy', async () => {
+  const principal: IPrincipal = { id: 'custom-header-user' };
+  const strategy: IAuthStrategy = {
+    name: 'undeclared-header',
+    authenticate: (request) =>
+      Promise.resolve(request.headers.get('authorization') === 'Bearer custom' ? principal : null),
+  };
+  const service = new AuthService([strategy], new LocalStrategy(() => Promise.resolve(null)));
+  const { ctx, request } = createContext(service);
+  ctx.request.headers.set('authorization', 'Bearer custom');
+  let continued = false;
+  await authMiddleware()(ctx, () => {
+    continued = true;
+    return Promise.resolve();
+  });
+  expect(request.user).toBe(principal);
+  expect(ctx.state.has(CREDENTIAL_SOURCE_STATE_KEY)).toBe(false);
+  expect(continued).toBe(true);
 });

@@ -3,6 +3,25 @@ import { runCli } from '../../../src/cli.ts';
 import { createFakeFs } from '../../fixtures/fake-fs.ts';
 
 describe('freshness independent of install and personal instructions', () => {
+  it('V12-1 treats formatter whitespace as fresh and leaves its bytes untouched', async () => {
+    const fs = createFakeFs({ '/app/package.json': '{}' });
+    const output: string[] = [];
+    const run = (...args: string[]) =>
+      runCli(['agents', ...args], {
+        fs,
+        cwd: '/app',
+        now: () => 0,
+        log: (line) => output.push(line),
+        error: () => {},
+      });
+    expect(await run()).toBe(0);
+    const formatted = fs.read('/app/AGENTS.md').replace('## Commands', '\n\n##   Commands');
+    await fs.writeFile('/app/AGENTS.md', new TextEncoder().encode(formatted));
+    expect(await run('--check')).toBe(0);
+    expect(await run()).toBe(0);
+    expect(fs.read('/app/AGENTS.md')).toBe(formatted);
+    expect(output.join('\n')).toContain('unchanged');
+  });
   it('ignores personal edits and card presence, but detects manifest and version changes', async () => {
     const fs = createFakeFs({ '/app/package.json': '{"dependencies":{"@setu-ts/common":"1"}}' });
     const errors: string[] = [];

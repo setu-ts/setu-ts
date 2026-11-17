@@ -34,6 +34,15 @@ describe('createSession', () => {
 });
 
 describe('Session data access', () => {
+  it('regeneration removes the CSRF token and preserves all other keys', () => {
+    const session = createSession(NOW, HOUR, makeClock(NOW).uuid);
+    session.set('__csrf', 'old-token');
+    session.set('__setu_tenant', 'tenant-a');
+    session.set('cart', ['item']);
+    session.regenerate();
+    expect(session.toJSON()).toEqual({ __setu_tenant: 'tenant-a', cart: ['item'] });
+    expect(session.wasRegenerated).toBe(true);
+  });
   const build = () => {
     const clock = makeClock(NOW);
     return createSession(NOW, HOUR, clock.uuid);

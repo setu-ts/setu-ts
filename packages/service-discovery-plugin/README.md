@@ -207,34 +207,39 @@ inside the process — point the runtime at the mounted CA bundle:
 
 The `http` option is the alternative: supply your own `IDiscoveryHttp` over a TLS-configured client.
 
+Without the CA the pod never becomes ready, and since 0.13.0 the readiness probe says why: the first
+failure logs one `warn` under `service-discovery-plugin: kubernetes` naming the cause (Deno's
+`UnknownIssuer`, or the API server's HTTP status), repeats log at `debug`, and the recovery logs one
+`info`. A cold resolve's `DiscoveryUnavailableError` message ends with the same cause.
+
 Service-account tokens are re-read from disk (memoized for 60 s) rather than read once at startup,
 because Kubernetes rotates projected tokens roughly hourly — a token captured at registration stops
 working while the pod is still healthy.
 
 ## Options
 
-| Option             | Arms               | Default                      | Notes                                         |
-| ------------------ | ------------------ | ---------------------------- | --------------------------------------------- |
-| `provider`         | all                | —                            | Discriminant; always explicit                 |
-| `cacheTtlMs`       | all                | `30_000`                     | `0` disables caching                          |
-| `strategy`         | all                | `'round-robin'`              | Overridable per `pick()` call                 |
-| `ejection`         | all                | see above                    | `false` disables                              |
-| `selfRegistration` | consul (+ custom)  | —                            | Throws on the other arms                      |
-| `watchIntervalMs`  | static, dns        | `30_000`                     | Absent from the push-based arms               |
-| `services`         | static             | —                            | Unknown name resolves to `[]`                 |
-| `address`          | consul             | —                            | Agent base URL                                |
-| `token`            | consul, kubernetes | — / projected token file     | Consul: `X-Consul-Token`; Kubernetes: bearer  |
-| `datacenter`       | consul             | —                            | Sent as `?dc=`                                |
-| `waitSeconds`      | consul             | `30`                         | Clamped to Consul's maximum of `600`          |
-| `namespace`        | kubernetes         | —                            | Required                                      |
-| `apiServer`        | kubernetes         | in-cluster env               | Required outside a cluster                    |
-| `portName`         | kubernetes         | —                            | Required when a service exposes several ports |
-| `mode`             | dns                | —                            | `'srv'` or `'a'`                              |
-| `domainTemplate`   | dns                | `'{service}.service.consul'` | `{service}` is substituted                    |
-| `port`             | dns (`'a'` only)   | —                            | Mandatory: address records carry no port      |
-| `secure`           | consul, k8s, dns   | `false`                      | Decides the `https` scheme                    |
-| `http`             | consul, kubernetes | `fetch`                      | Injectable transport                          |
-| `discovery`        | custom             | —                            | Your `DiscoveryProvider`, used as supplied    |
+| Option             | Arms               | Default                      | Notes                                                                                                                      |
+| ------------------ | ------------------ | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `provider`         | all                | —                            | Discriminant; always explicit                                                                                              |
+| `cacheTtlMs`       | all                | `30_000`                     | `0` disables caching                                                                                                       |
+| `strategy`         | all                | `'round-robin'`              | Overridable per `pick()` call                                                                                              |
+| `ejection`         | all                | see above                    | `false` disables                                                                                                           |
+| `selfRegistration` | consul (+ custom)  | —                            | Throws on the other arms                                                                                                   |
+| `watchIntervalMs`  | static, dns        | `30_000`                     | Absent from the push-based arms                                                                                            |
+| `services`         | static             | —                            | Unknown name resolves to `[]`                                                                                              |
+| `address`          | consul             | —                            | Agent base URL; one that does not parse or holds credentials is refused at startup, with any `http` transport; use `token` |
+| `token`            | consul, kubernetes | — / projected token file     | Consul: `X-Consul-Token`; Kubernetes: bearer                                                                               |
+| `datacenter`       | consul             | —                            | Sent as `?dc=`                                                                                                             |
+| `waitSeconds`      | consul             | `30`                         | Clamped to Consul's maximum of `600`                                                                                       |
+| `namespace`        | kubernetes         | —                            | Required                                                                                                                   |
+| `apiServer`        | kubernetes         | in-cluster env               | Required outside a cluster; one that does not parse or holds credentials is refused at startup                             |
+| `portName`         | kubernetes         | —                            | Required when a service exposes several ports                                                                              |
+| `mode`             | dns                | —                            | `'srv'` or `'a'`                                                                                                           |
+| `domainTemplate`   | dns                | `'{service}.service.consul'` | `{service}` is substituted                                                                                                 |
+| `port`             | dns (`'a'` only)   | —                            | Mandatory: address records carry no port                                                                                   |
+| `secure`           | consul, k8s, dns   | `false`                      | Decides the `https` scheme                                                                                                 |
+| `http`             | consul, kubernetes | `fetch`                      | Injectable transport                                                                                                       |
+| `discovery`        | custom             | —                            | Your `DiscoveryProvider`, used as supplied                                                                                 |
 
 ## Health indicator
 
@@ -246,10 +251,10 @@ Registered as `service-discovery`. Since M70c it composes three facts:
 - `isHealthy()` — the provider's reachability probe (Consul `GET /v1/status/leader`, Kubernetes a
   `limit=1` EndpointSlice LIST).
 
-| Status | Meaning                                                                                                                                                                              |
-| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `up`   | The provider is reachable, or has resolved at least one service before. A name never cached still fails while the backend is down, so alert on `data.degraded` and `data.reachable`. |
-| `down` | The provider has never resolved and is unreachable.                                                                                                                                  |
+| Status | Meaning                                                                                                                                                                                                                                         |
+| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `up`   | The provider is reachable, or has resolved at least one service before. A name never cached still fails while the backend is down, so alert on `data.degraded` and `data.reachable` (in `/health` only with `HealthPlugin({ details: true })`). |
+| `down` | The provider has never resolved and is unreachable.                                                                                                                                                                                             |
 
 `data` reports
 `{ provider, cachedServices, watchedServices, ejectedInstances, degraded, reachable, everResolved }`.
@@ -316,6 +321,10 @@ Provider reachability probes are invoked as methods, retaining their receiver. H
 and Consul providers therefore report reachable and allow `/ready` to return 200. Since M113o, a
 warm-cache outage also reports `up`, keeping serving replicas in rotation. `data.degraded` still
 signals a failed refresh serving stale data; `data.reachable` exposes backend reachability.
+`/health` includes `data` only with `HealthPlugin({ details: true })`; the default body carries each
+check's `status` alone. Detailed reports expose every indicator's data, so protect the health
+endpoints when they carry it
+([Statuses](https://github.com/setu-ts/setu-ts/blob/main/packages/health-plugin/README.md#statuses)).
 
 The discovery service caches reachability for 5 s, coalesces concurrent reads, and bounds each probe
 at 2 s; a hung or rejecting probe reports `false`. Consul and Kubernetes probe requests carry an

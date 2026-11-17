@@ -1,3 +1,4 @@
+import { loggerDouble } from '../../../../test/fixtures/capability-doubles.ts';
 /* eslint-disable require-await -- interface methods must be async (IPlugin) */
 /**
  * Integration test for DatabasePlugin registration flow.
@@ -159,9 +160,12 @@ function createTestRuntimePlugin(logs: string[]): IPlugin {
     provides: [CAPABILITIES.RUNTIME, CAPABILITIES.LOGGER],
     register(ctx: IPluginContext) {
       ctx.services.register(CAPABILITIES.RUNTIME, runtime);
-      ctx.services.register(CAPABILITIES.LOGGER, {
-        debug: (msg: string) => logs.push(msg),
-      });
+      ctx.services.register(
+        CAPABILITIES.LOGGER,
+        loggerDouble({
+          debug: (msg: string) => logs.push(msg),
+        }),
+      );
     },
   };
 }

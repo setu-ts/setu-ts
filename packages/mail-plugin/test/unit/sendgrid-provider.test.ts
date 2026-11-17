@@ -17,6 +17,34 @@ function fakeHttp(status = 202): {
 }
 
 describe('toSendGridBody', () => {
+  it('M139c maps the SendGrid v3 attachments shape and omits absent fields', () => {
+    // SendGrid v3 reference: https://www.twilio.com/docs/sendgrid/api-reference/mail-send/mail-send#attachments
+    const envelope = { from: 'from@x.com', to: 'to@x.com', subject: 'file' };
+    expect(
+      toSendGridBody({
+        ...envelope,
+        attachments: [
+          { filename: 'file', content: new Uint8Array([0, 255]) },
+          {
+            filename: 'inline',
+            content: new Uint8Array([1, 2, 3]),
+            contentId: 'image@x',
+            contentType: 'image/png',
+          },
+        ],
+      })['attachments'],
+    ).toEqual([
+      { filename: 'file', content: 'AP8=', disposition: 'attachment' },
+      {
+        filename: 'inline',
+        content: 'AQID',
+        disposition: 'inline',
+        content_id: 'image@x',
+        type: 'image/png',
+      },
+    ]);
+    expect(toSendGridBody(envelope)).not.toHaveProperty('attachments');
+  });
   it('maps recipients, sender, subject, and both content types', () => {
     const message: OutgoingMail = {
       from: 'me@x.com',

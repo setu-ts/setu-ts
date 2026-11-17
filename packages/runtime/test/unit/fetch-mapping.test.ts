@@ -8,10 +8,105 @@ import {
   mapSnapshotToWebResponse,
   mapWebRequestToFrameworkRequest,
   mapWebRequestWithTarget,
+  releasesOnRefusal,
+  RequestBodyTooLargeError,
 } from '../../src/adapters/shared/fetch-mapping.ts';
-import { describe, expect, it } from 'vitest';
+import { CloudflareWorkersHttpAdapter } from '../../src/adapters/workers/cf-http-adapter.ts';
+import { createTestContext } from '@setu-ts/testing';
+import { afterEach, describe, expect, it } from 'vitest';
 import type { FormBody, IRequest, ResponseSnapshot } from '@setu-ts/common';
 import { UnsupportedFormEncodingError } from '@setu-ts/common';
+
+describe('V12-139 in-process undici FormData refusal', () => {
+  const faults: unknown[] = [];
+  const record = (error: unknown): void => {
+    faults.push(error);
+  };
+  afterEach(() => {
+    process.off('uncaughtException', record);
+    process.off('unhandledRejection', record);
+    faults.length = 0;
+  });
+  /** An oversized undici FormData request, as `app.fetch(new Request(...))` builds it. */
+  function formRequest(): Request {
+    const form = new FormData();
+    form.set('first', 'x'.repeat(1024));
+    form.set('file', new Blob(['y'.repeat(64 * 1024)]), 'file.txt');
+    form.set('last', 'end');
+    return new Request('http://localhost/upload', { method: 'POST', body: form });
+  }
+  it('V12-139 refuses an over-limit FormData without an asynchronous process fault', async () => {
+    process.on('uncaughtException', record);
+    process.on('unhandledRejection', record);
+    const request = formRequest();
+    await expect(mapWebRequestToFrameworkRequest(request, 1).bytes()).rejects.toBeInstanceOf(
+      RequestBodyTooLargeError,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(faults).toEqual([]);
+    expect(request.body?.locked).toBe(false);
+  });
+  it('V12-139 refuses through a non-Node adapter on a Node host without a process fault', async () => {
+    process.on('uncaughtException', record);
+    process.on('unhandledRejection', record);
+    // RuntimePlugin({ platform }) can force the Workers adapter on Node; its fetch has no peer.
+    const adapter = new CloudflareWorkersHttpAdapter(undefined, { maxBodyBytes: 1 });
+    let refused: unknown;
+    adapter.setHandler(async (request) => {
+      refused = await request.bytes().catch((error: unknown) => error);
+      return createTestContext().response;
+    });
+    await adapter.fetch(formRequest());
+    expect(refused).toBeInstanceOf(RequestBodyTooLargeError);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(faults).toEqual([]);
+  });
+  const undici = 'multipart/form-data; boundary=----formdata-undici-012345678901';
+  it.each([
+    [undici, undefined, false],
+    [undici, '127.0.0.1', true],
+    ['application/octet-stream', undefined, true],
+    ['multipart/form-data; boundary=----1234567890', undefined, true],
+    ['multipart/form-data; boundary=----WebKitFormBoundaryabc', undefined, true],
+    ['multipart/form-data; boundary="----formdata-undici-012345678901"', undefined, true],
+    [`${undici}; charset=utf-8`, undefined, true],
+    ['Multipart/Form-Data; boundary=----formdata-undici-012345678901', undefined, false],
+    ['multipart/form-data; boundary=----formdata-undici-01234567890', undefined, true],
+    [undefined, undefined, true],
+  ])('on Node, cancellation for %s with peer %s is %s', async (contentType, peer, expected) => {
+    let cancelled = false;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(10));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const raw = new Request('http://localhost/', {
+      method: 'POST',
+      body: stream,
+      duplex: 'half',
+      headers: contentType ? { 'content-type': contentType } : {},
+    } as RequestInit);
+    await expect(mapWebRequestToFrameworkRequest(raw, 1, peer).bytes()).rejects.toBeInstanceOf(
+      RequestBodyTooLargeError,
+    );
+    expect(cancelled).toBe(expected);
+    if (!cancelled) await stream.cancel();
+  });
+  // Bun, Deno and Workers can serve a request with no peer, so a peer-less body still cancels.
+  it.each([
+    ['node', {}, true],
+    ['bun', { Bun: {} }, false],
+    ['deno', { Deno: {} }, false],
+    ['workers', { caches: {}, navigator: { userAgent: 'Cloudflare-Workers' } }, false],
+  ])('on a %s host, a peer-less undici FormData releases: %s', (_host, globals, expected) => {
+    expect(releasesOnRefusal(undefined, undici, globals as typeof globalThis)).toBe(expected);
+    expect(releasesOnRefusal('127.0.0.1', undici, globals as typeof globalThis)).toBe(false);
+    expect(releasesOnRefusal(undefined, null, globals as typeof globalThis)).toBe(false);
+  });
+});
 
 describe('fetch-mapping original diagnostics targets', () => {
   for (const [target, path] of [

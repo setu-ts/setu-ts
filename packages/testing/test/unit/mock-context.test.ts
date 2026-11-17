@@ -670,3 +670,24 @@ describe('MockResponse', () => {
     expect(headers.get('x-two')).toBe('2');
   });
 });
+
+describe('MockResponse stream trailers (M139b)', () => {
+  it('records trailers on the streaming snapshot and omits the key without them', async () => {
+    const trailers = Promise.resolve(new Headers({ 'grpc-status': '0' }));
+    const withTrailers = new MockResponse();
+    withTrailers.stream(new ReadableStream<Uint8Array>(), { trailers });
+    const snap = withTrailers.snapshot();
+    if (!snap.streaming) throw new Error('expected a stream');
+    expect(snap.trailers).toBe(trailers);
+
+    const without = new MockResponse();
+    without.stream(new ReadableStream<Uint8Array>());
+    expect('trailers' in without.snapshot()).toBe(false);
+
+    const rejecting = new MockResponse();
+    rejecting.stream(new ReadableStream<Uint8Array>(), {
+      trailers: Promise.reject(new Error('observed')),
+    });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  });
+});

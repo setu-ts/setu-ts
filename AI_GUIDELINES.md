@@ -173,7 +173,7 @@ interface IPlugin {
 ### 3.3 Plugin Independence
 
 - A plugin must never import from another plugin's internal modules.
-- A plugin accesses other plugins' capabilities only via `ctx.services.get<T>(token)`.
+- A plugin accesses other plugins' capabilities only via `ctx.services.get(CAPABILITIES.X)`.
 - A plugin must function correctly when optional dependencies are absent.
 - A plugin must declare all required dependencies in `dependencies[]`.
 
@@ -973,6 +973,9 @@ Closes #123
   hotfix PR).
 - `main` holds only the last release: it changes only through a release or hotfix PR, merged with a
   merge commit, and every merge into it is followed by a back-merge PR from `main` into `develop`.
+- `plans/` and `ROADMAP.md` never reach `main`. A release branch removes them in its last commit, CI
+  fails a PR into `main` whose tree holds either, and the back-merge restores them on `develop`
+  (`docs/releasing.md`, "Keep plans and the roadmap off `main`").
 - No direct commits to `develop`, `main` or `master`.
 - All PRs require review and CI to pass.
 
@@ -1065,32 +1068,13 @@ findings as **inline review comments on specific lines**. Answer them the same w
 5. **A summary comment is optional and additional** — never a substitute for the per-thread replies.
    Use one only to state the round's overall result and the gate evidence.
 
-6. **Decline a finding against an ARCHIVED plan document unless it also impacts the
-   implementation.** A milestone plan under `plans/` is a **design record written before the code**,
-   not a specification the code is checked against. Once the milestone ships, the code, its tests,
-   `PUBLIC_API.md` and `CHANGELOG.md` are the living contract; the plan is history, and it is moved
-   to `plans/archive/` for exactly that reason — so the directory a plan sits in is the test for
-   which rule applies, and it needs no judgement call. Editing it after the fact to satisfy a
-   reviewer rewrites the record of what was decided and when, which is the opposite of what an
-   archive is for.
-
-   So a finding whose entire subject is a plan file — a stale `Status:` header, a path that moved
-   during implementation, a table that no longer matches the shipped file list, prose polish — is
-   **declined, with that reason stated in the thread**. It is not ignored and it is not silently
-   resolved; the thread gets a reply saying the plan is an archived design record and the shipped
-   artifact governs.
-
-   The exception is the whole point of the rule: **if the plan finding also lands on the
-   implementation, the implementation half is in scope and gets fixed.** A reviewer noticing that
-   the plan's §4 exported-surface table names a symbol the barrel never exported has found a real
-   defect in `src/index.ts` or in `PUBLIC_API.md` — fix that, reply with the commit, and leave the
-   plan alone. The test is always: _does anything a consumer can run or read change if I act on
-   this?_ If nothing does, it is plan-only.
-
-   **A plan at `plans/` root is still corrected normally** — it belongs to a milestone under
-   construction, and a plan that misstates a contract there is a defect that will produce wrong
-   code, so §16.5's verify-first rule applies with no decline. This clause governs `plans/archive/`
-   only.
+6. **A plan is corrected normally while it exists, and deleted when its milestone ships.** A
+   milestone plan under `plans/` belongs to a milestone under construction; a plan that misstates a
+   contract will produce wrong code, so §16.5's verify-first rule applies to it like any file. The
+   milestone's own PR deletes the plan when it flips the status — there is no `plans/archive/` — so
+   a finding against a plan that PR deletes is declined with that reason, and any half of it that
+   lands on the implementation (a symbol the plan names that the barrel never exported, say) is
+   fixed. Plans and `ROADMAP.md` live on `develop` only and never reach `main`.
 
 The same rules apply to a human reviewer's inline comments.
 

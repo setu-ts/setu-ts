@@ -191,13 +191,14 @@ describe('requirePolicy — construction and brands', () => {
 
   it('brands a non-anonymous ability as authenticated for OpenAPI', () => {
     const guard = requirePolicy(docPolicy, 'edit');
-    expect(securityMetadataOf(guard)).toEqual({ authenticated: true });
+    expect(securityMetadataOf(guard)).toEqual({ authenticated: true, forbids: true });
     expect(policyGuardOf(guard)).toEqual({ policy: 'doc', abilities: ['edit'], anonymous: false });
   });
 
   it('brands an anonymous ability as not requiring authentication', () => {
     const guard = requirePolicy(docPolicy, 'view');
-    expect(securityMetadataOf(guard)).toEqual({ authenticated: false });
+    // Still 403-capable: a denied principal is refused (M137b §3.1).
+    expect(securityMetadataOf(guard)).toEqual({ authenticated: false, forbids: true });
     expect(policyGuardOf(guard)?.anonymous).toBe(true);
   });
 

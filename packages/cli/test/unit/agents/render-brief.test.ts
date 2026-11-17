@@ -1,11 +1,44 @@
 import { describe, expect, it } from 'vitest';
-import { renderBrief } from '../../../src/agents/render.ts';
+import { renderBrief, renderWorkspaceRoot } from '../../../src/agents/render.ts';
+import { format } from 'prettier';
+import { PRETTIER_OPTIONS } from '../../../src/templates/npm-tooling.ts';
 import { agentFacts } from '../../fixtures/agent-facts.ts';
 import { gatherFacts } from '../../../src/agents/facts.ts';
 import { runCli } from '../../../src/cli.ts';
 import { createFakeFs } from '../../fixtures/fake-fs.ts';
 
 describe('project brief rendering', () => {
+  it('V12-1 survives real Prettier with the scaffold options', async () => {
+    const fs = createFakeFs();
+    const deps = { fs, cwd: '/work', now: () => 0, log: () => {}, error: () => {} };
+    expect(await runCli(['new', 'shop', '--template', 'full-stack', '--agents'], deps)).toBe(0);
+    const written = fs.read('/work/shop/AGENTS.md');
+    expect(await format(written, { ...PRETTIER_OPTIONS, parser: 'markdown' })).toBe(written);
+    const brief = renderBrief(await gatherFacts(fs, '/work/shop'));
+    const workspace = renderWorkspaceRoot(
+      {
+        version: 2,
+        runtime: 'node',
+        basePort: 3000,
+        broker: 'memory',
+        members: [{ name: 'shop', port: 3000 }],
+      },
+      '0.12.0',
+    );
+    for (const text of [brief, workspace])
+      expect(await format(text, { ...PRETTIER_OPTIONS, parser: 'markdown' })).toBe(text);
+  });
+  it('V12-22 lists starter-provided queue separately from Not installed', () => {
+    const text = renderBrief(agentFacts({ installed: new Set(['full-stack-starter']) }));
+    const [provided, absent] = text.split('## Not installed');
+    expect(provided).toContain('Provided by `@setu-ts/full-stack-starter`');
+    expect(provided).toContain('`@setu-ts/queue-plugin`');
+    expect(absent).not.toContain('`@setu-ts/queue-plugin`');
+    expect(provided).toContain(
+      '(`setu add <name>` edits that option where it supports the starter); never register a second instance.',
+    );
+    expect(provided).not.toContain('never `setu add`');
+  });
   it('V11-9 renders lint/format glosses and runtime-specific verification instructions', () => {
     for (const runtime of ['node', 'bun', 'deno'] as const) {
       const text = renderBrief(
@@ -74,7 +107,7 @@ describe('project brief rendering', () => {
             `\`${runner} start:debug\` — development entry with the inspector`,
           );
           expect(text).toContain(
-            `\`${runner} start\` — production entry${runtime === 'node' ? '; on Node, run build first' : '\n'}`,
+            `\`${runner} start\` — production entry${facts.commands.includes('build') ? '; run build first' : '\n'}`,
           );
           expect(facts.commands.slice(0, 3)).toEqual(['start', 'start:dev', 'start:debug']);
           expect(facts.commandBodies['start:dev']).toBeTruthy();
@@ -99,7 +132,7 @@ describe('project brief rendering', () => {
       }),
     ).toBe(0);
     expect(renderBrief(await gatherFacts(fs, '/work/app'))).toContain(
-      '`deno task dev` — development entry for a devtool session',
+      '`deno task dev` — devtool entry; launcher credentials required',
     );
   });
   it('leaves an unrecognized dev script without a gloss when no start:dev exists', () => {
@@ -125,9 +158,9 @@ describe('project brief rendering', () => {
     const text = renderBrief(
       agentFacts({ installed: new Set(['kernel', 'cache-plugin', 'third.party_2', ...bad]) }),
     );
-    expect(text).toContain('| @setu-ts/kernel |');
-    expect(text).toContain('| @setu-ts/cache-plugin |');
-    expect(text).toContain('| @setu-ts/third.party_2 |');
+    expect(text).toContain('- @setu-ts/kernel —');
+    expect(text).toContain('- @setu-ts/cache-plugin —');
+    expect(text).toContain('- @setu-ts/third.party_2 —');
     for (const pkg of bad) expect(text).not.toContain(`@setu-ts/${pkg}`);
     expect(text).not.toContain('CANARY-INSTR');
   });
@@ -204,4 +237,13 @@ describe('project brief rendering', () => {
       }
     }
   });
+});
+
+it('M140b offers queue installation only on server runtimes', () => {
+  for (const runtime of ['node', 'deno', 'bun', 'cloudflare-workers'] as const) {
+    const brief = renderBrief(agentFacts({ runtime, installed: new Set(['runtime']) }));
+    expect(brief.includes('- `queue` (`@setu-ts/queue-plugin`)')).toBe(
+      runtime !== 'cloudflare-workers',
+    );
+  }
 });

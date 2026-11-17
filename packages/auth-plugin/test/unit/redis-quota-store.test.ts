@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createApplication } from '@setu-ts/kernel';
-import { RuntimePlugin } from '@setu-ts/runtime';
+import { createNodeRuntimeServices, RuntimePlugin } from '@setu-ts/runtime';
 import { errorHandler } from '@setu-ts/exceptions';
 import { RedisQuotaStore, QuotaStoreUnavailableError } from '../../src/index.ts';
 import type { IQuotaRedisClient } from '../../src/index.ts';
@@ -13,7 +13,82 @@ function setup(reply: unknown = [1, 3]) {
   return { client, store: new RedisQuotaStore({ client, namespace: 'app' }) };
 }
 
+it.skipIf(!process.env['REDIS_URL'])(
+  'M139c real Redis read returns current, absent and expired usage',
+  async () => {
+    const { Redis } = await import('ioredis');
+    const client = new Redis(process.env['REDIS_URL']!, {
+      lazyConnect: true,
+      maxRetriesPerRequest: 1,
+      commandTimeout: 2000,
+    });
+    const store = new RedisQuotaStore({ client, namespace: `m139c-${crypto.randomUUID()}` });
+    const runtime = createNodeRuntimeServices();
+    try {
+      await client.connect();
+      const expireAt = runtime.now() + 60_000;
+      expect(await store.read('spend:tenant', '0')).toBe(0);
+      await store.reserve('spend:tenant', '0', 40, 100, expireAt);
+      await store.adjust('spend:tenant', '0', -10, expireAt);
+      expect(await store.read('spend:tenant', '0')).toBe(30);
+      expect(await store.read('other', '0')).toBe(0);
+      expect(await store.read('spend:tenant', '1')).toBe(0);
+      await store.adjust('spend:tenant', '0', 0, runtime.now() - 1);
+      expect(await store.read('spend:tenant', '0')).toBe(0);
+    } finally {
+      await store.close();
+    }
+  },
+);
+
 describe('RedisQuotaStore', () => {
+  it('M139c reads non-negative safe integer replies with a constant GET script', async () => {
+    for (const [reply, expected] of [
+      ['0', 0],
+      ['30', 30],
+      [7, 7],
+      [String(Number.MAX_SAFE_INTEGER), Number.MAX_SAFE_INTEGER],
+    ] as const) {
+      const { store, client } = setup(reply);
+      expect(await store.read('spend:tenant', '2026-01')).toBe(expected);
+      expect(client.eval).toHaveBeenCalledWith(
+        "return redis.call('GET', KEYS[1]) or '0'",
+        1,
+        '3:app12:spend:tenant7:2026-01',
+      );
+    }
+  });
+  it('M139c wraps malformed reads and backend failures', async () => {
+    for (const reply of [
+      null,
+      undefined,
+      [],
+      {},
+      true,
+      '',
+      ' ',
+      '-1',
+      '1.2',
+      'NaN',
+      'Infinity',
+      '1e2',
+      '9007199254740992',
+      -1,
+      0.5,
+      NaN,
+      Infinity,
+    ])
+      await expect(setup(reply).store.read('tenant', '0')).rejects.toBeInstanceOf(
+        QuotaStoreUnavailableError,
+      );
+    const { store, client } = setup();
+    const fault = new Error('private backend message');
+    client.eval.mockRejectedValue(fault);
+    await expect(store.read('tenant', '0')).rejects.toMatchObject({
+      name: 'QuotaStoreUnavailableError',
+      cause: fault,
+    });
+  });
   it('passes keys and values through KEYS/ARGV and keeps script text constant (O6)', async () => {
     const { client, store } = setup();
     expect(await store.reserve('spend:tenant', '2026-01', 3, 10, 1000)).toEqual({

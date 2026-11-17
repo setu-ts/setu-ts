@@ -9,7 +9,7 @@
  *
  * @module
  */
-import { SCOPED_RBAC_POLICY } from '@setu-ts/common';
+import { routeMiddlewareOf, SCOPED_RBAC_POLICY } from '@setu-ts/common';
 import type { IAuthorizationPolicyService, RouteInfo } from '@setu-ts/common';
 import { AuthPluginConfigurationError } from '../errors.ts';
 import { policyGuardOf } from './policy-guard.ts';
@@ -36,7 +36,7 @@ export function scanPolicyGuards(
 ): void {
   const problems: string[] = [];
   for (const route of routes) {
-    for (const middleware of route.definition.middleware ?? []) {
+    for (const middleware of routeMiddlewareOf(route.definition)) {
       const brand = policyGuardOf(middleware);
       if (brand === undefined) {
         continue;

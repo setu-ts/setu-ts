@@ -28,8 +28,7 @@ import type { MetadataStore } from '../metadata/metadata-store.ts';
  * The decorator `Render(Component)` returns: assignable to a handler whose
  * return is the component's props bag, sync or async, with any parameter
  * list. A handler returning the WRONG shape fails compilation naming the
- * mismatch — strictly stronger than NestJS's `@Render('users/index')`, a
- * string checked against nothing.
+ * mismatch, where a string-based view name is checked against nothing.
  *
  * @typeParam P - The decorated component's props bag
  * @since 0.6.0

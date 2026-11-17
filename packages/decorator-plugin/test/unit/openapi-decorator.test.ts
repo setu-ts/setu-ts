@@ -10,6 +10,33 @@ describe('OpenAPI decorators', () => {
     metadataStore.clear();
   });
 
+  it.each([true, false])('stores both document flags when %s', (flag) => {
+    @Controller('/flags')
+    class C {
+      @Get('/')
+      @ApiOperation({ deprecated: flag, excludeFromDocument: flag })
+      list() {
+        return [];
+      }
+    }
+    expect(metadataStore.getRoutesFor(C)[0].openapi).toEqual({
+      deprecated: flag,
+      excludeFromDocument: flag,
+    });
+  });
+
+  it('omits document flags when absent', () => {
+    @Controller('/flags')
+    class C {
+      @Get('/')
+      @ApiOperation({})
+      list() {
+        return [];
+      }
+    }
+    expect(metadataStore.getRoutesFor(C)[0].openapi).toEqual({});
+  });
+
   it('@ApiTags stores tags on the controller', () => {
     @Controller('/x')
     @ApiTags('users', 'admin')
@@ -128,5 +155,18 @@ describe('OpenAPI decorators', () => {
     }
     const resp = metadataStore.getRoutesFor(C)[0].openapi?.responses?.['200'];
     expect(resp).toMatchObject({ schema: { type: 'string' } });
+  });
+  it('@ApiResponse stores headers (M137b)', () => {
+    const headers = { Location: { description: 'New item', required: true } };
+    @Controller('/x')
+    class C {
+      @Get('/')
+      @ApiResponse({ status: 201, headers })
+      create() {
+        return {};
+      }
+    }
+    const resp = metadataStore.getRoutesFor(C)[0].openapi?.responses?.['201'];
+    expect(resp).toEqual({ headers });
   });
 });

@@ -1,3 +1,4 @@
+import { generateSecret } from '../../src/templates/secret.ts';
 import { describe, expect, it } from 'vitest';
 
 import { createFakeFs, createRecorder, type FakeFs } from '../fixtures/fake-fs.ts';
@@ -446,6 +447,7 @@ describe('the devtool opt-in refusals on the creating commands', () => {
     const fs = createFakeFs({});
     const err = createRecorder();
     const code = await runNewCommand(parseArgs(['shop', '--devtool', '--runtime', 'bun']), {
+      secret: generateSecret,
       fs,
       cwd: '/ws',
       log: () => {},
@@ -460,6 +462,7 @@ describe('the devtool opt-in refusals on the creating commands', () => {
     const fs = createFakeFs({});
     const err = createRecorder();
     const code = await runNewCommand(parseArgs(['shop', '--workspace', '--devtool']), {
+      secret: generateSecret,
       fs,
       cwd: '/ws',
       log: () => {},
@@ -475,6 +478,7 @@ describe('the devtool opt-in refusals on the creating commands', () => {
     const fs = createFakeFs({});
     const err = createRecorder();
     const code = await runNewCommand(parseArgs(['shop', '--devtool-port', '4919']), {
+      secret: generateSecret,
       fs,
       cwd: '/ws',
       log: () => {},
@@ -1010,7 +1014,7 @@ describe('devtool enable derives the dev task, refusing when it cannot', () => {
         tasks: {
           start: 'deno run --allow-net --allow-env main.ts',
           dev: 'deno run --allow-net --allow-env main.dev.ts',
-          check: `deno check main.ts setu.config.ts main.dev.ts && deno run -A --no-lock npm:@setu-ts/cli@^${VERSION} check`,
+          check: `deno check main.ts setu.config.ts main.dev.ts && deno run -A --no-lock npm:@setu-ts/cli@${VERSION} check`,
         },
         // The pin the enable flow merges: byte-identical, so the whole run is
         // a no-op, which is what makes the command idempotent.

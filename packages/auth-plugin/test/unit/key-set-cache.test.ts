@@ -389,3 +389,12 @@ describe('IssuerKeySet', () => {
     expect(t.calls.length).toBe(2);
   });
 });
+
+it('M139a refuses a discovered jwks_uri on a localhost subdomain before fetching it', async () => {
+  const t = discoverySetup(() => ({
+    body: { issuer: 'https://idp.test', jwks_uri: 'http://acme.localhost/keys' },
+  }));
+  expect(await t.keySet.keys()).toBeNull();
+  expect(t.calls).toEqual(['https://idp.test/.well-known/openid-configuration']);
+  expect(t.failures).toContain('discovery-jwks-uri-invalid');
+});

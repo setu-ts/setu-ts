@@ -24,6 +24,7 @@ import { ConsulProvider } from './consul-provider.ts';
 import { KubernetesProvider } from './kubernetes-provider.ts';
 import { DnsProvider } from './dns-provider.ts';
 import { DiscoveryUnavailableError } from '../errors.ts';
+import { credentialFreeUrl } from '../url/url-credentials.ts';
 
 /** Default SRV domain template — Consul's own DNS layout. */
 const DEFAULT_DOMAIN_TEMPLATE = '{service}.service.consul';
@@ -67,7 +68,8 @@ export function createProvider(
  * @returns The provider
  * @throws {DiscoveryUnavailableError} If the `'dns'` arm is configured on a
  * runtime with no resolver, or the `'kubernetes'` arm cannot find an API
- * server or a way to read its token
+ * server or a way to read its token, or the Consul `address` or Kubernetes
+ * API server URL does not parse or carries URL credentials (V12-52)
  * @since 0.2.0
  */
 export function createProvider(
@@ -82,7 +84,11 @@ export function createProvider(
     case 'consul':
       return new ConsulProvider(
         {
-          address: options.address,
+          address: credentialFreeUrl(
+            options.address,
+            'The Consul address must be an absolute URL without credentials ' +
+              '(user:password@host); pass the ACL token through the token option.',
+          ),
           ...(options.token !== undefined ? { token: options.token } : {}),
           ...(options.datacenter !== undefined ? { datacenter: options.datacenter } : {}),
           waitSeconds: resolved.waitSeconds,
@@ -105,7 +111,12 @@ export function createProvider(
       return new KubernetesProvider(
         {
           namespace: options.namespace,
-          apiServer: resolveApiServer(options, runtime),
+          apiServer: credentialFreeUrl(
+            resolveApiServer(options, runtime),
+            'The Kubernetes API server URL (apiServer, or KUBERNETES_SERVICE_HOST and ' +
+              'KUBERNETES_SERVICE_PORT) must be an absolute URL without credentials ' +
+              '(user:password@host); pass the service-account token through the token option.',
+          ),
           ...(options.token !== undefined ? { token: options.token } : {}),
           ...(options.portName !== undefined ? { portName: options.portName } : {}),
           ...(options.secure !== undefined ? { secure: options.secure } : {}),

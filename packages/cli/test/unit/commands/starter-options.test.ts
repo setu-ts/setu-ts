@@ -13,6 +13,23 @@ const config = projectFiles('portal', 'deno', resolveHost(FULL_STACK_TEMPLATE, '
 )!.contents;
 
 describe('withStarterOption', () => {
+  it.each([
+    'const note = "import { CUSTOM_METRICS } from \'./other.ts\'";',
+    'const note = "import { CUSTOM_METRICS } from \'./src/metrics/index.ts\'";',
+    "import './side.ts'\nconst note = \"CUSTOM_METRICS from './other.ts'\"",
+  ])('reads only real import declarations when adding a seam: %s', (prefix) => {
+    const inserted = withStarterOption(
+      `${prefix}\n${config}`,
+      'metrics',
+      '{ customMetrics: [...CUSTOM_METRICS] }',
+      [{ symbols: ['CUSTOM_METRICS'], from: './src/metrics/index.ts' }],
+    );
+    expect(inserted).toBeDefined();
+    expect(
+      inserted!.match(/^import \{ CUSTOM_METRICS \} from '\.\/src\/metrics\/index\.ts';$/gm),
+    ).toHaveLength(1);
+    expect(inserted).toContain('metrics: { customMetrics: [...CUSTOM_METRICS] }');
+  });
   for (const key of ['messaging', 'queue'] as const) {
     it(`inserts absent ${key} first in the generated return object, only once`, () => {
       const literal = key === 'messaging' ? "{ broker: 'memory' }" : "{ adapter: 'memory' }";
@@ -52,6 +69,111 @@ describe('withStarterOption', () => {
       'return {\n        messaging: {},\n        reactRouter',
     );
   });
+  it('inserts a dotted arm as a nested literal and never merges an existing parent', () => {
+    const inserted = withStarterOption(config, 'realtime.sse', '{}')!;
+    expect(inserted).toContain('return {\n        realtime: { sse: {} },');
+    expect(withStarterOption(inserted, 'realtime.websocket', '{}')).toBeUndefined();
+    for (const parent of ['realtime: undefined', "'realtime': {}", 'realtime', '[key]: value']) {
+      const source = config.replace('return {', `return { ${parent},`);
+      expect(withStarterOption(source, 'realtime.sse', '{}')).toBeUndefined();
+    }
+  });
+  it('adds seam imports and the arm atomically, reusing a complete import', () => {
+    const imports = [{ symbols: ['CUSTOM_METRICS'], from: './src/metrics/index.ts' }];
+    const inserted = withStarterOption(
+      config,
+      'metrics',
+      '{ customMetrics: [...CUSTOM_METRICS] }',
+      imports,
+    )!;
+    expect(inserted).toContain("import { CUSTOM_METRICS } from './src/metrics/index.ts';");
+    expect(inserted).toContain('metrics: { customMetrics: [...CUSTOM_METRICS] }');
+    const existing = `import { CUSTOM_METRICS } from './src/metrics/index.ts';\n${config}`;
+    expect(
+      withStarterOption(existing, 'metrics', '{}', imports)!.match(/import \{ CUSTOM_METRICS \}/g),
+    ).toHaveLength(1);
+    expect(withStarterOption(inserted, 'metrics', '{}', imports)).toBeUndefined();
+  });
+  it('places a missing import after an import declared below the callback', () => {
+    const source = `${config}\nimport { OTHER } from './other.ts';\n`;
+    const inserted = withStarterOption(source, 'metrics', '{}', [
+      { symbols: ['CUSTOM_METRICS'], from: './src/metrics/index.ts' },
+    ])!;
+    expect(inserted).toContain(
+      "import { OTHER } from './other.ts';\nimport { CUSTOM_METRICS } from './src/metrics/index.ts';",
+    );
+  });
+  it.each([
+    'const CUSTOM_METRICS = [];',
+    'let CUSTOM_METRICS = [];',
+    'var CUSTOM_METRICS = [];',
+    'function CUSTOM_METRICS() {}',
+    'class CUSTOM_METRICS {}',
+    'const { metrics: CUSTOM_METRICS } = config;',
+    'const [CUSTOM_METRICS] = [];',
+    'const other = 1, CUSTOM_METRICS = [];',
+    'var after = 1; if (after) { var CUSTOM_METRICS = []; }',
+  ])('refuses a reused import shadowed inside the callback: %s', (declaration) => {
+    const source = `import { CUSTOM_METRICS } from './src/metrics/index.ts';\n${config.replace('return {', `${declaration}\n      return {`)}`;
+    expect(
+      withStarterOption(source, 'metrics', '{ customMetrics: [...CUSTOM_METRICS] }', [
+        { symbols: ['CUSTOM_METRICS'], from: './src/metrics/index.ts' },
+      ]),
+    ).toBeUndefined();
+  });
+  it('reuses an unshadowed import referenced before the returned options', () => {
+    const source = `import { CUSTOM_METRICS } from './src/metrics/index.ts';\n${config.replace('return {', 'const count = CUSTOM_METRICS.length;\n      return {')}`;
+    expect(
+      withStarterOption(source, 'metrics', '{ customMetrics: [...CUSTOM_METRICS] }', [
+        { symbols: ['CUSTOM_METRICS'], from: './src/metrics/index.ts' },
+      ]),
+    ).toContain('metrics: { customMetrics: [...CUSTOM_METRICS] }');
+  });
+  it.each([
+    ' /* note\ncontinued */',
+    ' /* first\ncontinued */ /* second\ncontinued */',
+    ' // note',
+    ' // note /* this is a line comment',
+    '',
+  ])('keeps an inserted import outside trailing comments %j', (comment) => {
+    const statement = `import { OTHER } from './other.ts';${comment}`;
+    const source = `${config}\n${statement}\n`;
+    const inserted = withStarterOption(source, 'metrics', '{}', [
+      { symbols: ['CUSTOM_METRICS'], from: './src/metrics/index.ts' },
+    ])!;
+    expect(inserted).toContain(
+      `${statement}\nimport { CUSTOM_METRICS } from './src/metrics/index.ts';\n`,
+    );
+  });
+  it('does not treat a block-comment marker in a trailing string as a comment', () => {
+    const statement = "import { OTHER } from './other.ts'; const note = '/*';";
+    const inserted = withStarterOption(`${config}\n${statement}\n`, 'metrics', '{}', [
+      { symbols: ['CUSTOM_METRICS'], from: './src/metrics/index.ts' },
+    ])!;
+    expect(inserted).toContain(
+      `${statement}\nimport { CUSTOM_METRICS } from './src/metrics/index.ts';\n`,
+    );
+  });
+  it.each([
+    "import { CUSTOM_METRICS } from './other.ts';",
+    "import { VALUE as CUSTOM_METRICS } from './other.ts';",
+    "import { CUSTOM_METRICS } from './src/metrics/index.ts';\nimport { VALUE as CUSTOM_METRICS } from './other.ts';",
+    'const CUSTOM_METRICS = [];',
+    "import { OTHER } from './src/metrics/index.ts';",
+    "import * as metrics from './src/metrics/index.ts';",
+    'const note = `${CUSTOM_METRICS}`;',
+    'const note = `${(() => { const CUSTOM_METRICS = []; return CUSTOM_METRICS; })()}`;',
+  ])('refuses uncertain or conflicting import bindings: %s', (prefix) => {
+    expect(
+      withStarterOption(`${prefix}\n${config}`, 'metrics', '{}', [
+        { symbols: ['CUSTOM_METRICS'], from: './src/metrics/index.ts' },
+      ]),
+    ).toBeUndefined();
+  });
+  it('retains the existing text-mention refusal for edits without seam imports', () => {
+    const source = config.replace('return {', "return { note: 'messaging',");
+    expect(withStarterOption(source, 'messaging', '{}')).toBeUndefined();
+  });
   const cases = [
     ['unbalanced callback', config.slice(0, config.indexOf('return {'))],
     ['no callback', config.replace('(config): FullStackStarterOptions =>', '(config) =>')],
@@ -77,6 +199,14 @@ describe('withStarterOption', () => {
       ),
     ],
     ['unclassifiable', config + '\nconst extra = /regex/;'],
+    [
+      'template substitution in callback',
+      config.replace('return {', 'const note = `${config}`; return {'),
+    ],
+    [
+      'nested return',
+      config.replace('return {', 'if (config.get("OTHER")) { return {}; } return {'),
+    ],
     ['no factory', 'export const createApp = () => ({});'],
     ['another starter', config.replaceAll('full-stack-starter', 'microservice-starter')],
     ['no factory call', config.replace('await createFullStackAppFromConfig(', 'await makeApp(')],

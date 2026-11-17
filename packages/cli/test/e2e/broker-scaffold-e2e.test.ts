@@ -175,10 +175,10 @@ describe('a --broker redis --queue redis scaffold', () => {
   });
 
   // KAFKA specifically, because it is the ONE arm that nests the connection
-  // inside a bracket (`brokers: [...]`). `envRead` bakes a fixed continuation
-  // indent suited to a value at eight spaces, so the unshifted form made this
-  // scaffold fail its OWN `deno fmt --check` — the M63 bar, and invisible to
-  // every other arm. Reverting `nestConnection` fails exactly this case.
+  // inside a bracket (`brokers: [...]`), where `deno fmt` lays out a multi-line
+  // connection differently from a plain option value. A wrong continuation
+  // indent there fails this scaffold's OWN `deno fmt --check` — the M63 bar,
+  // and invisible to every other arm.
   it('emits a --broker kafka scaffold that passes its own deno fmt --check', async () => {
     expect(
       await run([

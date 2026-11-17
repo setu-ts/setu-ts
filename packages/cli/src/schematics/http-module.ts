@@ -1,9 +1,14 @@
 /** The function controller body shared by `g controller` and `g route`. @module */
+import { moduleRouteBase } from './module-route-base.ts';
 import type { DerivedNames } from '../utils/names.ts';
 import { routeRegistrarSymbol } from '../seams/http.ts';
 
 /** Renders a function controller; its filename supplies the exported registrar name. */
-export function renderHttpModule(names: DerivedNames, module?: string): string {
+export function renderHttpModule(
+  names: DerivedNames,
+  module?: string,
+  plugins: ReadonlySet<string> = new Set(),
+): string {
   return `import type { IRouterApi, IServiceRegistry } from '@setu-ts/common';
 
 /**
@@ -25,7 +30,7 @@ export function ${routeRegistrarSymbol(names)}(
   services?: IServiceRegistry,
 ): void {
   void services;
-  router.group('/${module === undefined ? '' : `${module}/`}${names.kebab}', (routes) => {
+  router.group('${module === undefined ? '' : moduleRouteBase(module, plugins)}/${names.kebab}', (routes) => {
     routes.get('/', (ctx) => ctx.response.json({ items: [] }));
 
     routes.get('/:id', (ctx) => ctx.response.json({ id: ctx.params['id'] }));

@@ -26,11 +26,15 @@ describe('Node standalone devtool scaffold', () => {
     expect(dry.fs.writes).toEqual([]);
     expect(await real.run(['shop', '--devtool']), real.err.text()).toBe(0);
     const manifest = JSON.parse(real.fs.read('/work/shop/package.json'));
-    expect(manifest.scripts.dev).toBe('tsx main.dev.ts');
+    expect(manifest.scripts.dev).toBe(
+      'tsx --import ./instrumentation.mjs --env-file-if-exists=.env main.dev.ts',
+    );
     expect(manifest.scripts.check).toBe('tsc --noEmit && setu check');
     expect(manifest.devDependencies['@setu-ts/diagnostics-plugin']).toBe(`^${VERSION}`);
     expect(manifest.dependencies['@setu-ts/diagnostics-plugin']).toBeUndefined();
-    expect(real.fs.read('/work/shop/main.dev.ts')).not.toMatch(/Deno\.|process\./);
+    expect(real.fs.read('/work/shop/main.dev.ts')).toContain(
+      "delete process.env['SETU_DEVTOOL_SESSION_KEY'];",
+    );
     // The runnable next step needs no credentials; `dev` is named as the launcher's.
     expect(real.out.text()).toContain('npm install && npm run start:dev');
     expect(real.out.text()).toContain(
@@ -60,6 +64,7 @@ function harness(seed: Readonly<Record<string, string>> = {}, portAvailable?: Po
     err,
     run: (argv) =>
       runNewCommand(parseArgs(argv), {
+        secret: () => 'a'.repeat(64),
         fs,
         cwd: '/work',
         log: out.sink,
@@ -184,9 +189,10 @@ describe('the Workers target is deployable as documented', () => {
     expect(manifest.scripts?.['deploy']).toBe('wrangler deploy');
   });
 
-  it('keeps its deno.json too, which is what generate reads for plugin gating', async () => {
+  it('uses package.json for plugin gating without a Deno manifest', async () => {
     const h = await workers('rest');
-    expect(h.fs.has('/work/app/deno.json')).toBe(true);
+    expect(h.fs.has('/work/app/deno.json')).toBe(false);
+    expect(h.fs.has('/work/app/package.json')).toBe(true);
   });
 
   // The trap this must not reintroduce: a package.json switches Deno to
@@ -220,9 +226,9 @@ describe('a template with a frontend build, on an npm target', () => {
     // runtime; Bun loads `.env` itself and takes no preload.
     [
       'node',
-      `${NODE_START_BUILD_CHECK} && node --import ./instrumentation.mjs --env-file-if-exists=.env --enable-source-maps dist/main.js`,
+      `${NODE_START_BUILD_CHECK} && node --import "data:text/javascript,process.env.NODE_ENV??='production'" --import ./instrumentation.mjs --env-file-if-exists=.env --enable-source-maps dist/main.js`,
     ],
-    ['bun', 'bun run main.ts'],
+    ['bun', 'NODE_ENV=production bun run main.ts'],
   ] as const) {
     it(`starts without rebuilding on ${runtime}; tests build the frontend only`, async () => {
       const h = harness();
@@ -245,7 +251,7 @@ describe('a template with a frontend build, on an npm target', () => {
       scripts: Record<string, string>;
     };
     expect(manifest.scripts['start']).toBe(
-      `${NODE_START_BUILD_CHECK} && node --import ./instrumentation.mjs --env-file-if-exists=.env --enable-source-maps dist/main.js`,
+      `${NODE_START_BUILD_CHECK} && node --import "data:text/javascript,process.env.NODE_ENV??='production'" --import ./instrumentation.mjs --env-file-if-exists=.env --enable-source-maps dist/main.js`,
     );
   });
 });
@@ -289,7 +295,7 @@ describe('the Node target can run decorated source', () => {
   it('gives no other target the Node transpiler', async () => {
     // Bun compiles TypeScript outright; Deno and Workers never invoke it.
     const bun = await manifestOf('bun');
-    expect(bun.scripts['start']).toBe('bun run main.ts');
+    expect(bun.scripts['start']).toBe('NODE_ENV=production bun run main.ts');
     expect(bun.devDependencies?.['tsx']).toBeUndefined();
   });
 
@@ -371,7 +377,7 @@ describe('runNewCommand', () => {
       const h = harness();
       await h.run(['app']);
       const config = h.fs.read('/work/app/setu.config.ts');
-      expect(config).toContain('RuntimePlugin()');
+      expect(config).toContain('RuntimePlugin({ maxBodyBytes: 1_048_576 })');
       expect(config).not.toContain('ConfigPlugin');
       expect(config).not.toContain('errorHandler');
     });
@@ -388,7 +394,7 @@ describe('runNewCommand', () => {
       await h.run(['app']);
       const main = h.fs.read('/work/app/main.ts');
       expect(main).toContain("import { createApp } from './setu.config.ts'");
-      expect(main).toContain("app.start({ port: Number(runtime.env.PORT ?? '3000') })");
+      expect(main).toContain("app.start({ port: Number(runtime.env.PORT || '3000') })");
       expect(main).not.toContain('RuntimePlugin');
       expect(main).not.toContain('createApplication');
     });
@@ -494,7 +500,7 @@ describe('runNewCommand', () => {
       expect(h.fs.has('/work/shop/.dev.vars')).toBe(true);
       expect(h.fs.has('/work/shop/.dev.vars.example')).toBe(true);
       expect(h.fs.read('/work/shop/.dev.vars')).toContain(
-        'SESSION_SECRET=dev-only-insecure-session-secret-change-me',
+        'SESSION_SECRET=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
       );
       expect(h.fs.read('/work/shop/.gitignore')).toContain('.dev.vars');
       // M113d §10 D2: assets bypass the application's middleware, and both
@@ -555,7 +561,7 @@ describe('runNewCommand', () => {
       expect(config).toContain(
         'export function createApp(\n  env: Readonly<Record<string, unknown>> = {},',
       );
-      expect(config).toContain('RuntimePlugin({ env })');
+      expect(config).toContain('RuntimePlugin({ env, maxBodyBytes: 1_048_576 })');
     });
 
     it('renders the plugin-list factory with the devtool parameter on every target', async () => {
@@ -609,7 +615,9 @@ describe('runNewCommand', () => {
       expect(example).toContain('SESSION_SECRET=');
       // The gitignored file carries a working development value; the COMMITTED
       // example carries none, so nothing here can be deployed by accident.
-      expect(env).toContain('SESSION_SECRET=dev-only-insecure-session-secret-change-me');
+      expect(env).toContain(
+        'SESSION_SECRET=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      );
       expect(example).toContain('SESSION_SECRET=\n');
     });
 
@@ -635,13 +643,23 @@ describe('runNewCommand', () => {
         'HttpSecurityPlugin',
         'OpenApiPlugin',
       ]) {
-        if (symbol !== 'ValidationPlugin' && symbol !== 'LoggerPlugin') {
+        if (
+          ![
+            'ValidationPlugin',
+            'LoggerPlugin',
+            'RuntimePlugin',
+            'HttpSecurityPlugin',
+            'OpenApiPlugin',
+          ].includes(symbol)
+        ) {
           expect(config).toContain(`${symbol}()`);
         }
       }
       // M70f (C3): validation answers in the same Problem Details shape the
       // `errorHandler` emits for thrown errors, so it is NOT argument-free.
       expect(config).toContain("ValidationPlugin({ errorFormat: 'rfc9457' })");
+      // M137b §3.8: the document describes that Problem Details body.
+      expect(config).toContain("OpenApiPlugin({ errorSchema: 'rfc9457' })");
       // M113h §3.9: the scaffold opts in to request logging, excluding the probe
       // and scrape paths so a kubelet does not write a line per poll. The file
       // has been through Prettier, so the call is wrapped.
@@ -688,7 +706,7 @@ describe('runNewCommand', () => {
       const h = harness();
       expect(await h.run(['bare'])).toBe(0);
       const config = h.fs.read('/work/bare/setu.config.ts');
-      expect(config).toContain('RuntimePlugin(),');
+      expect(config).toContain('RuntimePlugin({ maxBodyBytes: 1_048_576 }),');
       // route: a call; plugin: an array spread; middleware: a loop.
       expect(config).toContain('registerGeneratedRoutes(app.router, app.services);');
       expect(config).toContain('...GENERATED_PLUGINS,');
@@ -879,10 +897,12 @@ describe('runNewCommand', () => {
       const h = harness();
       await h.run(['app', '--runtime', 'deno']);
       const main = h.fs.read('/work/app/main.ts');
-      expect(main).toContain("await app.start({ port: Number(runtime.env.PORT ?? '3000') })");
+      expect(main).toContain("await app.start({ port: Number(runtime.env.PORT || '3000') })");
       // The plugin list lives in setu.config.ts, not here.
       expect(main).toContain("from './setu.config.ts'");
-      expect(h.fs.read('/work/app/setu.config.ts')).toContain('RuntimePlugin()');
+      expect(h.fs.read('/work/app/setu.config.ts')).toContain(
+        'RuntimePlugin({ maxBodyBytes: 1_048_576 })',
+      );
     });
 
     it('emits no package.json', async () => {
@@ -979,7 +999,7 @@ describe('runNewCommand', () => {
         const h = harness();
         await h.run(['app', '--runtime', runtime]);
         expect(h.fs.read('/work/app/main.ts')).toContain(
-          "app.start({ port: Number(runtime.env.PORT ?? '3000') })",
+          "app.start({ port: Number(runtime.env.PORT || '3000') })",
         );
         expect(h.fs.has('/work/app/deno.json')).toBe(false);
       });
@@ -1224,6 +1244,7 @@ describe('runNewCommand', () => {
     const fs = createFakeFs();
     const err = createRecorder();
     const code = await runNewCommand(parseArgs(['app']), {
+      secret: () => 'a'.repeat(64),
       fs: { ...fs, writeFile: () => Promise.reject(new Error('read-only fs')) },
       cwd: '/work',
       log: () => {},
@@ -1237,6 +1258,7 @@ describe('runNewCommand', () => {
     const fs = createFakeFs();
     const err = createRecorder();
     const code = await runNewCommand(parseArgs(['app']), {
+      secret: () => 'a'.repeat(64),
       fs: { ...fs, writeFile: () => Promise.reject('EROFS') },
       cwd: '/work',
       log: () => {},
@@ -1473,7 +1495,7 @@ describe('--workspace --broker', () => {
 
   it('describes the chosen broker in the workspace README', async () => {
     const { h } = await workspaceWith(['--broker', 'redis']);
-    expect(h.fs.read('/work/acme/README.md')).toContain('Members share the **redis** broker');
+    expect(h.fs.read('/work/acme/README.md')).toContain('share the **redis** broker');
     expect(h.fs.read('/work/acme/README.md')).toContain('Redis Streams');
   });
 
@@ -1631,6 +1653,7 @@ describe('the interactive seam on setu new', () => {
     const out = createRecorder();
     const err = createRecorder();
     const code = await runNewCommand(parseArgs(['svc', '--yes']), {
+      secret: () => 'a'.repeat(64),
       fs,
       cwd: '/work',
       log: out.sink,
@@ -1660,6 +1683,7 @@ describe('the interactive seam on setu new', () => {
     };
     const fs = createFakeFs();
     const code = await runNewCommand(parseArgs(['svc']), {
+      secret: () => 'a'.repeat(64),
       fs,
       cwd: '/work',
       log: () => {},
@@ -1678,6 +1702,7 @@ describe('the interactive seam on setu new', () => {
     // and pins both worlds to one byte-identical file set.
     const enter = createFakeFs();
     const code = await runNewCommand(parseArgs(['svc']), {
+      secret: () => 'a'.repeat(64),
       fs: enter,
       cwd: '/work',
       log: () => {},
@@ -1700,6 +1725,7 @@ describe('the interactive seam on setu new', () => {
     const fs = createFakeFs();
     const errors: string[] = [];
     const code = await runNewCommand(parseArgs(['svc']), {
+      secret: () => 'a'.repeat(64),
       fs,
       cwd: '/work',
       log: () => {},

@@ -707,9 +707,10 @@ trust it already holds over the schema.
 
 `setu generate migration` maintains `run.ts` and `index.ts` and exports `MIGRATION_NAMES` from the
 barrel. Migrations receive `{ database }`. The runner applies only pending names oldest first;
-`--down` reverses only applied names newest first. It writes/removes the row after each successful
-change, outside any transaction. A crash between a change and its ledger write re-runs that change:
-make migrations idempotent. A failure stops the run and names the migration.
+`--down` reverses the newest applied name, `--down=<n>` the newest n, and `--down=all` every one,
+newest first; any other value exits before the database is touched. It writes/removes the row after
+each successful change, outside any transaction. A crash between a change and its ledger write
+re-runs that change: make migrations idempotent. A failure stops the run and names the migration.
 
 On socket targets, executing `run.ts` dynamically loads `setu.config.ts`, awaits `createApp()`,
 starts the whole app without a port, resolves the default database and stops the app in `finally`.
@@ -755,6 +756,13 @@ and the `'bigtable'` arm its `BigtableAdapterOptions` — see
 | `drizzleTables`      | `Record<string, unknown>` | —       | Drizzle. Required; entity name → real table definition.                                                                                                              |
 | `transactionTimeout` | `number` (ms)             | `30000` | Prisma only. Raises Prisma's ~5 s interactive-transaction default, which is too short for a full Unit of Work. Unread by Memory and Drizzle.                         |
 | `url`                | `string`                  | —       | **Deprecated and unread by Prisma** — a v7 client carries its own connection configuration; see below. The `'mongodb'` arm reads it as the driver connection string. |
+
+Schema migrations use the scripts `setu add database --type drizzle|prisma` adds; data migrations
+use `setu g migration` and `src/migrations/run.ts`. The schema files remain application-owned. The
+scripts are written to `package.json` on Node and Bun; on Deno the command prints them instead, to
+add as `deno.json` tasks yourself; a Cloudflare Workers project gets neither scripts nor a schema
+config (D1 migrates with `wrangler d1 migrations`). Drizzle's `--dialect` is `postgresql` (the
+default) or `sqlite`: the adapter writes through `RETURNING`, which MySQL lacks.
 
 ### Prisma 7 setup
 
@@ -1490,7 +1498,9 @@ own, enforced by the driver that owns the connection; on node-postgres a query t
 `query_timeout` rejects with the driver's `Query read timeout`, and the timed-out client is released
 with the error and removed from the pool, so the bound does not leak a connection. A call that hits
 the bound is answered `504 Gateway Timeout` with `DatabaseTimeoutError`; the statement may have run,
-so a write's outcome is unknown and a retry of a write must be idempotent.
+so a write's outcome is unknown and a retry of a write must be idempotent. A connection lost under a
+statement is answered the same way for the same reason, but its message says the connection closed
+before the call completed, so the log does not claim a bound fired (since 0.13.0).
 
 | Adapter                  | The driver's own call bound                                                                                                                  | Status               |
 | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- |
@@ -1526,11 +1536,16 @@ The rows are the whole decision. **Since M101a** a saturated pool is not an outa
 adapter's `poolStats` reports every connection busy with callers waiting (`idle === 0` and
 `waiting > 0`), the probe queues no `SELECT 1` behind the callers it would be measuring, and the
 indicator reports `up` with `reachable: 'unknown'` and the snapshot in `data.capacity` — failing
-`/ready` there would pull every saturated replica out of rotation at once. A full pool is ALSO what
-a hung database looks like (every connection stuck on a server that never answers, callers piling
-up), so the row additionally requires that a query through the adapter completed within the last 10
-seconds. The indicator samples the adapter's completed-query count on each poll, so a hang is
-detected at most one poll interval plus that window after the last completion; a saturated pool
+`/ready` there would pull every saturated replica out of rotation at once. **Since 0.13.0** a probe
+that timed out waiting for a pool client (node-postgres's `timeout exceeded when trying to connect`)
+is the same evidence: pg-pool removes the timed-out waiter before it rejects, so with
+`connectionTimeoutMillis` under the 2-second probe bound the snapshot already reads `waiting: 0`.
+This needs `poolStats` to return a valid snapshot: a callback that throws or returns malformed data
+leaves the indicator `degraded`. A new-connection handshake timeout does not count. A full pool is
+ALSO what a hung database looks like (every connection stuck on a server that never answers, callers
+piling up), so the row additionally requires that a query through the adapter completed within the
+last 10 seconds. The indicator samples the adapter's completed-query count on each poll, so a hang
+is detected at most one poll interval plus that window after the last completion; a saturated pool
 whose queries have all stopped completing reports `degraded` and `/ready` answers 503. Only queries
 the adapter runs are counted (`query()`, repositories, the Unit of Work's data sources): once
 `getDrizzleDatabase` or `getDrizzleTransaction` has handed out the native instance, its queries
@@ -1539,14 +1554,14 @@ indicator cannot then tell a hang from load. Queries the application runs on its
 instance are not counted either; an application that queries mainly that way should expect a busy
 pool to read `degraded`. That row needs `poolStats`: without it the indicator cannot tell saturation
 from trouble, so a pool connection timeout or a probe that does not answer reports `degraded`. A
-pool connection timeout used to report `down` (it answered `false`); it is now `degraded`, because
-the database never answered either way. A probe that **exists and did not answer** inside the
-2-second bound is evidence of trouble and reports `degraded` — never `up`, which is the claim that
-let a stopped database keep taking traffic (X51-1: the indicator used to read the lifecycle
-`isReady()`, which only says `connect()` once succeeded). An adapter that ships **no probe** is the
-opposite case: a probe that was never written is evidence of nothing, so the payload omits
-`reachable` and the status is today's — mapping a missing probe to `degraded` would fail `/ready`
-for every healthy Cosmos, Bigtable and DynamoDB application on upgrade.
+pool connection timeout used to report `down` (it answered `false`); without `poolStats` it is now
+`degraded`, because the database never answered either way. A probe that **exists and did not
+answer** inside the 2-second bound is evidence of trouble and reports `degraded` — never `up`, which
+is the claim that let a stopped database keep taking traffic (X51-1: the indicator used to read the
+lifecycle `isReady()`, which only says `connect()` once succeeded). An adapter that ships **no
+probe** is the opposite case: a probe that was never written is evidence of nothing, so the payload
+omits `reachable` and the status is today's — mapping a missing probe to `degraded` would fail
+`/ready` for every healthy Cosmos, Bigtable and DynamoDB application on upgrade.
 
 Shipped probes: MongoDB (`db.command({ ping: 1 })` through the optional `IMongoDatabase.command?`
 facade member), Prisma and Drizzle (`SELECT 1`; Drizzle omits the probe for instances without

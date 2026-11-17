@@ -147,9 +147,50 @@ throw `TypeError` at construction. `SwaggerUiOptions.assets` selects the same mo
 | `exclude`              | `readonly string[]`              | —                                     | Router paths to omit; matches the resolved pattern.          |
 | `excludeOwners`        | `readonly string[]`              | `['health-plugin', 'metrics-plugin']` | Plugin names whose routes are omitted, by `RouteInfo.owner`. |
 | `deriveRequestSchemas` | `boolean`                        | `true`                                | Fill `requestBody`/`parameters` from validation middleware.  |
+| `deriveErrorResponses` | `boolean`                        | `true`                                | Document the errors a route's own middleware answers with.   |
+| `errorSchema`          | `'rfc9457'`                      | —                                     | Give generated error responses an RFC 9457 body.             |
 
 The remaining options come from `OpenApiGeneratorOptions` (title, version, servers,
 `securitySchemes`, and the rest of the document metadata).
+
+### Document metadata
+
+`OpenApiPlugin`, `OpenApiService` and `OpenApiGenerator` accept the same optional metadata:
+
+| Option           | Shape                                                 | Emitted field            |
+| ---------------- | ----------------------------------------------------- | ------------------------ |
+| `contact`        | `{ name?: string; url?: string; email?: string }`     | `info.contact`           |
+| `license`        | `{ name: string; identifier?: string; url?: string }` | `info.license`           |
+| `termsOfService` | `string`                                              | `info.termsOfService`    |
+| `tags`           | `readonly OpenApiTag[]`                               | top-level `tags`         |
+| `externalDocs`   | `OpenApiExternalDocs`                                 | top-level `externalDocs` |
+
+`OpenApiExternalDocs` is `{ readonly url: string; readonly description?: string }`. `OpenApiTag` is
+`{ readonly name: string; readonly description?: string; readonly externalDocs?: OpenApiExternalDocs }`.
+Tag names must be unique within this list; route tags may use names absent from it. An empty list is
+omitted. Metadata objects are copied with only defined keys; no URL or email format validation is
+performed. Fields that are absent produce no new document keys.
+
+OpenAPI 3.1 makes `license.identifier` and `license.url` mutually exclusive. Supplying both throws
+`OpenApiDocumentOptionsError` with `reason: 'license-identifier-and-url'`. Repeating a document tag
+name throws the same class with `reason: 'duplicate-tag'` and a message naming the tag. Both are
+refused during `OpenApiPlugin` registration (so `app.start()` rejects before any spec request), and
+at construction for direct `OpenApiService` and `OpenApiGenerator` use.
+
+### Deprecation and per-route exclusion
+
+Set `schema: { deprecated: true }` on a route or `@ApiOperation({ deprecated: true })` on a
+controller method to emit the operation's `deprecated: true`. The generated SDK client marks its
+interface member `@deprecated`, so editors flag calls; its factory method says "Deprecated
+operation." without the tag, so the generated module never uses its own deprecated symbol. False and
+absent flags leave the document and generated client unchanged. Deprecation is documentation only
+and adds no `Deprecation` or `Sunset` response headers.
+
+Set `schema: { excludeFromDocument: true }` or `@ApiOperation({ excludeFromDocument: true })` to
+omit just that operation: a hidden `DELETE /users/:id` can coexist with a documented `GET` on the
+same path. A hidden route does not claim an operation id, so its id can duplicate a visible one. It
+stays registered, served, listed by `router.listRoutes()`, and discoverable as an MCP tool when
+marked as one. Hiding a route does not enforce access control.
 
 `exclude` matches the **fully-resolved** router pattern — router-style (`/todos/:id`, not
 `/todos/{id}`) and including any `router.group()` prefix, so a route registered as `get('/metrics')`
@@ -209,7 +250,8 @@ Rules and limits:
   client generator refuses an `in: 'cookie'` parameter outright, so emitting one would turn a
   working document into a codegen failure for its consumers.
 - The derived `400` carries a description and no schema — the body shape depends on the validation
-  plugin's configured `errorFormat`, which this plugin cannot see.
+  plugin's configured `errorFormat`, which this plugin cannot see. Set `errorSchema: 'rfc9457'` when
+  that format is RFC 9457 (see [Derived error responses](#derived-error-responses)).
 - `deriveRequestSchemas: false` disables derivation only. It does NOT restore the rest of the
   pre-derivation document: owner exclusion, the `operationId` format and schema deduplication are
   unconditional. To document the operational routes again, pass `excludeOwners: []`.
@@ -225,6 +267,101 @@ header, so nothing is added, and a header the route declares in its own `headers
 Swagger UI therefore shows a field for the key, and a request sent from it is not refused for
 lacking one. This is not governed by `deriveRequestSchemas`: the middleware refuses the request
 either way.
+
+## Form bodies and file uploads
+
+For a body validated by `validateBody(schema, { forms: true })` or
+`@ValidateBody(schema, { forms: true })`, the document lists the media types the route accepts:
+
+- Without a file field, `application/json`, `application/x-www-form-urlencoded` and
+  `multipart/form-data` appear in that order, with the same schema under each.
+- With a `formFile()` field or an array of them, only `multipart/form-data` is listed. A file is
+  described as `{ type: 'string', format: 'binary', contentMediaType: 'application/octet-stream' }`;
+  an array contains those binary strings. `formFile` comes from `@setu-ts/validation-plugin/zod`.
+- Each file field that sets `mimeTypes` gets an `encoding` entry whose `contentType` joins those
+  types with `", "`. Fields without that option have no encoding entry.
+- If any body validator on the route omits `forms: true`, only `application/json` is listed: that
+  validator answers 415 to a form body. A JSON route's document is unchanged.
+
+For example, a file field accepting PNG and JPEG produces this request body:
+
+```json
+{
+  "required": true,
+  "content": {
+    "multipart/form-data": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string",
+            "format": "binary",
+            "contentMediaType": "application/octet-stream"
+          }
+        },
+        "required": ["file"]
+      },
+      "encoding": {
+        "file": { "contentType": "image/png, image/jpeg" }
+      }
+    }
+  }
+}
+```
+
+## Derived error responses
+
+`deriveErrorResponses` (default `true`) documents the statuses and headers a route's **own**
+middleware answers with, read from the brands that middleware carries:
+
+| Route middleware                                                                                                                   | Documented                                                                                                                     |
+| ---------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| A guard requiring a principal (`requireAuth()`, every `@setu-ts/auth-plugin` guard)                                                | `401`                                                                                                                          |
+| A guard that can refuse a signed-in caller (roles, permissions, scopes, policies, MFA, scoped RBAC, `requireAuth({ delegation })`) | `403` as well. `requireAuth()` alone documents no `403`.                                                                       |
+| A body validator (`validateBody`, `@ValidateBody`)                                                                                 | `415`                                                                                                                          |
+| `rateLimitMiddleware`                                                                                                              | `429` with `Retry-After`, plus `RateLimit` and `RateLimit-Policy` on the `429` and every `2xx` unless `standardHeaders: false` |
+| `idempotent()` / `IdempotencyService.middleware()` (not on GET, HEAD, OPTIONS)                                                     | `400`, `409`, `422`, `429`, `401` unless `principal: 'optional'`, and `Idempotent-Replayed` on every `2xx`                     |
+
+`401` (and a scope guard's `403`) carries `WWW-Authenticate` only when `deriveSecurity` names an
+HTTP bearer, OAuth 2.0 or OpenID Connect scheme, because only bearer-token authentication sends that
+header; a session-cookie app's `401` lists none. A status the route **declares** in its `response`
+map is never changed. A derived success header joins a declared `2xx`, and a declared header of the
+same name (any case) wins. Statuses are listed in ascending order. `501` (no authorization service),
+`503` (idempotency store down) and the `signInPage` redirect are not documented.
+
+Only the route's own `middleware` array is visible. Middleware added app-wide with
+`app.middleware.add(...)` — the usual home of `rateLimitMiddleware` — cannot be seen, so declare its
+`429` on the routes it governs, or attach the limiter per route. A middleware that wraps a branded
+one carries no brand; re-brand the wrapper with `withRateLimitMetadata` or `withSecurityMetadata`
+from `@setu-ts/common`. Quota refusals (`createQuota`) happen inside handlers and are declared the
+same way.
+
+`errorSchema: 'rfc9457'` adds one `ProblemDetails` component (`type`, `title`, `status`, `detail`,
+`instance`; all optional, extension members allowed) and points every generated error response at it
+under `application/problem+json`. Set it when the application answers errors in RFC 9457 format
+(`ValidationPlugin({ errorFormat: 'rfc9457' })` and `errorHandler({ format: 'rfc9457' })`); the REST
+starter and the CLI templates set it. A schema the application registers as `ProblemDetails` keeps
+the name. Any other value throws `OpenApiDocumentOptionsError` with `reason: 'error-schema'`.
+
+### Declaring response headers
+
+A `response` entry may be a `RouteResponseDocumentation` (from `@setu-ts/common`) instead of a bare
+schema, and `@ApiResponse` takes the same `headers`:
+
+```typescript
+import { z } from 'zod';
+import type { RouteResponseDocumentation } from '@setu-ts/common';
+
+const created: RouteResponseDocumentation = {
+  schema: z.object({ id: z.string() }),
+  description: 'Created',
+  headers: { Location: { description: 'The new item URL', required: true } },
+};
+app.router.post('/items', { schema: { response: { 201: created } }, handler });
+```
+
+Each header's `schema` is converted like a body schema (a string when omitted); `description` and
+`required` are copied when set.
 
 ## Operation ids
 
@@ -243,10 +380,10 @@ Declared ids are reserved before derived ones, regardless of registration order.
 `get-users` becomes `get-users-2` if another included route declares `get-users`. A blank id (empty
 or whitespace-only) or duplicate declared id throws exported `OperationIdError` with
 `reason: 'blank' | 'duplicate'` at `app.start()`; direct `OpenApiGenerator.generate()` calls throw
-the same error. Its message names the id and routes as `METHOD path`. Excluded paths and owners
-neither claim nor collide. A route added after bootstrap is validated when the document is first
-built; invalid declarations then produce a request-time `500`. The startup scan does not build or
-cache the document.
+the same error. Its message names the id and routes as `METHOD path`. Excluded routes, paths and
+owners neither claim nor collide. A route added after bootstrap is validated when the document is
+first built; invalid declarations then produce a request-time `500`. The startup scan does not build
+or cache the document.
 
 Distinct ids can still sanitize to the same SDK method: declared `getUsers` beside undeclared
 `GET /users` (derived `get-users`) is valid OpenAPI, but `@setu-ts/sdk` refuses it with
@@ -329,29 +466,35 @@ and the `@ApiTags`/`@ApiOperation`/`@ApiResponse` decorators from
 
 ## Exports
 
-| Export                    | Kind      |
-| ------------------------- | --------- |
-| `OpenApiPlugin`           | function  |
-| `swaggerUiHtml`           | function  |
-| `zodToOpenApi`            | function  |
-| `OpenApiGenerator`        | class     |
-| `OpenApiService`          | class     |
-| `OperationIdError`        | class     |
-| `ZodToOpenApi`            | class     |
-| `IOpenApiService`         | interface |
-| `OpenApiDocument`         | interface |
-| `OpenApiGeneratorOptions` | interface |
-| `OpenApiOperation`        | interface |
-| `OpenApiParameter`        | interface |
-| `OpenApiPluginOptions`    | interface |
-| `OpenApiRequestBody`      | interface |
-| `OpenApiResponse`         | interface |
-| `OpenApiSchemaObject`     | interface |
-| `OpenApiServiceOptions`   | interface |
-| `SwaggerUiOptions`        | interface |
-| `SchemaIo`                | type      |
-| `SchemaNodeHook`          | type      |
-| `SwaggerOptions`          | type      |
+| Export                        | Kind      |
+| ----------------------------- | --------- |
+| `OpenApiPlugin`               | function  |
+| `swaggerUiHtml`               | function  |
+| `zodToOpenApi`                | function  |
+| `OpenApiDocumentOptionsError` | class     |
+| `OpenApiGenerator`            | class     |
+| `OpenApiService`              | class     |
+| `OperationIdError`            | class     |
+| `ZodToOpenApi`                | class     |
+| `IOpenApiService`             | interface |
+| `OpenApiDocument`             | interface |
+| `OpenApiEncoding`             | interface |
+| `OpenApiExternalDocs`         | interface |
+| `OpenApiGeneratorOptions`     | interface |
+| `OpenApiHeader`               | interface |
+| `OpenApiMediaTypeObject`      | interface |
+| `OpenApiOperation`            | interface |
+| `OpenApiParameter`            | interface |
+| `OpenApiPluginOptions`        | interface |
+| `OpenApiRequestBody`          | interface |
+| `OpenApiResponse`             | interface |
+| `OpenApiSchemaObject`         | interface |
+| `OpenApiServiceOptions`       | interface |
+| `OpenApiTag`                  | interface |
+| `SwaggerUiOptions`            | interface |
+| `SchemaIo`                    | type      |
+| `SchemaNodeHook`              | type      |
+| `SwaggerOptions`              | type      |
 
 Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.

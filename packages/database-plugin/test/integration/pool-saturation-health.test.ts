@@ -44,11 +44,15 @@ async function boot(poolStats?: () => DatabasePoolCapacity) {
   const queries: string[] = [];
   const releases: Array<() => void> = [];
   let hang = false;
+  let failure: string | undefined;
   // While `hang` is set every query blocks until the test releases it — the
   // transport of a pool with no free connection, or of a database that has
   // stopped answering. Until then queries answer at once.
   const database = drizzle((sql) => {
     queries.push(sql);
+    if (failure !== undefined) {
+      return Promise.reject(new Error(failure));
+    }
     if (!hang) {
       return Promise.resolve({ rows: [] });
     }
@@ -84,6 +88,10 @@ async function boot(poolStats?: () => DatabasePoolCapacity) {
     },
     block(): void {
       hang = true;
+    },
+    /** Makes every later query reject with this pg error text. */
+    failWith(message: string): void {
+      failure = message;
     },
     async stop(): Promise<void> {
       for (const release of releases) release();
@@ -145,6 +153,96 @@ describe('database indicator under pool saturation (M101a V8-3)', () => {
 
       expect(database?.status).toBe('degraded');
       expect(database?.data?.reachable).toBe('unknown');
+      expect(ready).toBe(503);
+    } finally {
+      await booted.stop();
+    }
+  });
+});
+
+describe('M139f V8-3: a pg acquire timeout under the probe bound is saturation', () => {
+  // pg-pool drops the timed-out waiter before rejecting, so the snapshot reads
+  // `waiting: 0` — the shape the 0.12.0 run measured with
+  // `connectionTimeoutMillis: 1000`.
+  const drained = (): DatabasePoolCapacity => ({ total: 3, idle: 0, waiting: 0 });
+  const ACQUIRE = 'timeout exceeded when trying to connect';
+
+  it('reads up with reachable unknown while queries are completing', async () => {
+    const booted = await boot(drained);
+    try {
+      const service = booted.app.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+      await service.getRepository('Tenant').findAll();
+      booted.failWith(ACQUIRE);
+      const { ready, database } = await read(booted.app);
+
+      expect(database?.status).toBe('up');
+      expect(database?.data?.reachable).toBe('unknown');
+      expect(database?.data?.capacity?.waiting).toBe(0);
+      expect(ready).toBe(200);
+    } finally {
+      await booted.stop();
+    }
+  });
+
+  it('stays degraded when no query has completed: a hung database, not a busy one', async () => {
+    const booted = await boot(drained);
+    booted.failWith(ACQUIRE);
+    try {
+      const { ready, database } = await read(booted.app);
+
+      expect(database?.status).toBe('degraded');
+      expect(ready).toBe(503);
+    } finally {
+      await booted.stop();
+    }
+  });
+
+  it('stays degraded for a new-connection handshake timeout', async () => {
+    const booted = await boot(drained);
+    try {
+      const service = booted.app.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+      await service.getRepository('Tenant').findAll();
+      booted.failWith('Connection terminated due to connection timeout');
+      const { ready, database } = await read(booted.app);
+
+      expect(database?.status).toBe('degraded');
+      expect(ready).toBe(503);
+    } finally {
+      await booted.stop();
+    }
+  });
+
+  it('stays degraded when poolStats cannot be read, even with progress unobservable', async () => {
+    for (const poolStats of [
+      () => {
+        throw new Error('pool closed');
+      },
+      () => ({ total: -1, idle: 0, waiting: 0 }) as DatabasePoolCapacity,
+    ]) {
+      const booted = await boot(poolStats);
+      try {
+        const service = booted.app.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+        await service.getRepository('Tenant').findAll();
+        booted.failWith(ACQUIRE);
+        const { ready, database } = await read(booted.app);
+
+        expect(database?.status).toBe('degraded');
+        expect(ready).toBe(503);
+      } finally {
+        await booted.stop();
+      }
+    }
+  });
+
+  it('stays degraded without poolStats, as documented', async () => {
+    const booted = await boot();
+    try {
+      const service = booted.app.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+      await service.getRepository('Tenant').findAll();
+      booted.failWith(ACQUIRE);
+      const { ready, database } = await read(booted.app);
+
+      expect(database?.status).toBe('degraded');
       expect(ready).toBe(503);
     } finally {
       await booted.stop();

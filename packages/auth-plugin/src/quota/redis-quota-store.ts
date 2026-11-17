@@ -36,6 +36,8 @@ redis.call('PEXPIREAT', KEYS[1], ARGV[2])
 return 1
 `;
 
+const READ_SCRIPT = "return redis.call('GET', KEYS[1]) or '0'";
+
 /**
  * Redis quota counters, with one atomic script per operation.
  * The injected client must bound commands; this store never times out a call itself.
@@ -66,6 +68,28 @@ export class RedisQuotaStore implements IQuotaStore {
       throw new TypeError('RedisQuotaStore namespace must be non-empty and well-formed');
     this.#client = options.client;
     this.#namespace = options.namespace;
+  }
+
+  /** Reads the current window without changing it. @since 0.13.0 */
+  async read(key: string, windowId: string): Promise<number> {
+    try {
+      const reply = await this.#client.eval(
+        READ_SCRIPT,
+        1,
+        quotaStoreKey(this.#namespace, key, windowId),
+      );
+      if (
+        (typeof reply !== 'string' && typeof reply !== 'number') ||
+        (typeof reply === 'string' && !/^[0-9]+$/.test(reply))
+      )
+        throw new Error('Unexpected Redis quota read reply');
+      const used = Number(reply);
+      if (!Number.isSafeInteger(used) || used < 0)
+        throw new Error('Unexpected Redis quota read reply');
+      return used;
+    } catch (cause) {
+      throw new QuotaStoreUnavailableError(cause);
+    }
   }
 
   /** @inheritdoc */

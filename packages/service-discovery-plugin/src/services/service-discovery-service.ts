@@ -7,8 +7,14 @@
  *
  * @module
  */
-import { createCachedProbe, resolveProbeTiming, withHttpStatusHint } from '@setu-ts/common';
+import {
+  createCachedProbe,
+  describeError,
+  resolveProbeTiming,
+  withHttpStatusHint,
+} from '@setu-ts/common';
 import type {
+  ConnectionErrorReporter,
   IRuntimeServices,
   IServiceDiscovery,
   PickOptions,
@@ -22,6 +28,9 @@ import { createLoadBalancer, type LoadBalancer } from '../balancer/load-balancer
 import { EjectionTracker } from './ejection-tracker.ts';
 import { instanceUrl } from '../url/instance-url.ts';
 import { DiscoveryUnavailableError } from '../errors.ts';
+
+/** A reporter that drops every report, for a service built without one. */
+const SILENT_REPORTER: ConnectionErrorReporter = { report() {}, recovered() {} };
 
 /** One cached instance list with the monotonic reading it was taken at. */
 interface CacheEntry {
@@ -58,11 +67,14 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
    * @param provider - The discovery backend
    * @param runtime - Supplies the monotonic clock and randomness
    * @param options - Options after defaults
+   * @param reporter - Receives each probe failure's reason and each recovery
+   *   (M139f X10-3); the plugin passes a logging reporter
    */
   constructor(
     provider: DiscoveryProvider,
     runtime: IRuntimeServices,
     options: ResolvedDiscoveryOptions,
+    reporter: ConnectionErrorReporter = SILENT_REPORTER,
   ) {
     this.#provider = provider;
     this.#runtime = runtime;
@@ -72,9 +84,21 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
       options.ejection === false ? null : new EjectionTracker(runtime, options.ejection);
     this.#probe = createCachedProbe({
       probe: async () => {
+        const isHealthy = this.#provider.isHealthy;
+        if (isHealthy === undefined) return true;
         try {
-          return (await this.#provider.isHealthy?.()) ?? true;
-        } catch {
+          if (await isHealthy.call(this.#provider)) {
+            reporter.recovered();
+            return true;
+          }
+          reporter.report(
+            new Error(`${this.#provider.kind} discovery backend reported unreachable`),
+          );
+          return false;
+        } catch (error) {
+          // M139f X10-3: the provider's reason (a TLS UnknownIssuer, an HTTP
+          // status) reaches the log once per outage instead of nowhere.
+          reporter.report(error);
           return false;
         }
       },
@@ -239,7 +263,7 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
       }
       throw withHttpStatusHint(
         new DiscoveryUnavailableError(
-          `Service discovery could not resolve '${serviceName}' and has nothing cached`,
+          `Service discovery could not resolve '${serviceName}' and has nothing cached: ${describeError(error)}`,
           { cause: error },
         ),
         {

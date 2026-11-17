@@ -1,25 +1,25 @@
 # Decorators Guide
 
-The Setu-TS framework provides optional decorator support for a NestJS-like development experience.
-Decorators are **optional** - all capabilities can be accessed programmatically.
+The Setu-TS framework provides optional decorator support for a decorator-based development
+experience. Decorators are **optional** - all capabilities can be accessed programmatically.
 
 ## Overview
 
 Decorators in Setu-TS are **metadata-only**. They do not automatically register routes or services.
 The `DecoratorPlugin` reads the metadata and translates it into framework capabilities.
 
-### Key Differences from NestJS
+### Key Differences from a Decorator-First Framework
 
 - **No reflection metadata**: Setu-TS does not use `reflect-metadata`. You must provide explicit
   injection tokens.
 - **No emitted design metadata**: Constructor parameter types are not automatically available. Use
   `@Inject(Token)` for disambiguation.
 - **Plugin-required**: Decorators are inert without `DecoratorPlugin` registration.
-- **No `ExecutionContext`/`CanActivate`/`NestInterceptor`**: Setu-TS has no NestJS-shaped guard or
-  interceptor interfaces. Guards and interceptors are bare
+- **No framework-shaped guard or interceptor contract**: Setu-TS has no
+  `ExecutionContext`/`CanActivate`/`NestInterceptor` interfaces. Guards and interceptors are bare
   [`MiddlewareFunction`](../packages/common/src/http.ts)s attached with `@UseGuards` /
   `@UseInterceptors` (or registered programmatically via `app.middleware.add`). Prose below explains
-  the NestJS differences; the copyable Setu-TS blocks never import those NestJS names.
+  the differences; the copyable Setu-TS blocks never import those names.
 
 ## Setup
 
@@ -139,6 +139,11 @@ class UpdatesGateway {
   message(_connection: IWebSocketConnection, _data: string | Uint8Array): void {}
 }
 ```
+
+`@Gateway('/ws', { guards: [guard] })` is what authorizes a WebSocket handshake. `@Roles`,
+`@Permissions`, `@RequirePolicy`, the scoped variants and `@Public` on a gateway's WebSocket handler
+methods fail startup, and so does class-level authorization, unless the class also serves HTTP
+routes and the gateway declares its own handshake guards.
 
 Register the provider plugins that a class uses (`QueuePlugin`, `SchedulerPlugin`, `EventsPlugin`,
 `MessagingPlugin`, `WebSocketPlugin`, or `CqrsPlugin`) alongside the decorator plugin:
@@ -343,8 +348,8 @@ project without `DiPlugin`**. With a container, reach it by injecting it
 — the Nth entry binds the Nth parameter. There is no parameter-level form: the TC39 proposal has no
 parameter position, so a decorator cannot be attached to an argument at all.
 
-A token is always explicit, because type-inferred injection needs `emitDecoratorMetadata`, which
-Deno does not support — so a parameter's type cannot be read.
+A token is always explicit, because TC39 standard decorators carry no parameter type information on
+any runtime, so a parameter's type cannot be read.
 
 ```typescript
 import { Inject, Injectable } from '@setu-ts/decorator-plugin';
@@ -796,11 +801,11 @@ export class UserController {
 
 ## Error Handling
 
-Setu-TS does not ship a NestJS-shaped `ExceptionFilter`/`ArgumentsHost` contract. Errors are handled
-by a single global error-handler middleware from `@setu-ts/exceptions`, registered as the outermost
-middleware so it wraps the whole pipeline. The `@UseFilters(...)` decorator attaches per-route
-filter middleware (bare `MiddlewareFunction`s or `IMiddleware` classes) that run last in the route's
-middleware chain, but the canonical, source-valid surface for global error handling is
+Setu-TS does not ship a framework-shaped `ExceptionFilter`/`ArgumentsHost` contract. Errors are
+handled by a single global error-handler middleware from `@setu-ts/exceptions`, registered as the
+outermost middleware so it wraps the whole pipeline. The `@UseFilters(...)` decorator attaches
+per-route filter middleware (bare `MiddlewareFunction`s or `IMiddleware` classes) that run last in
+the route's middleware chain, but the canonical, source-valid surface for global error handling is
 `errorHandler()`:
 
 ```typescript

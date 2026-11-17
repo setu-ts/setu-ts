@@ -50,6 +50,7 @@ function behavior(
 ) {
   return createIngressBehavior(
     {
+      transactionalConfigured: false,
       store,
       runtime: createClockRuntime(),
       logger: () => logger,

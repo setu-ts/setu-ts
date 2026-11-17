@@ -16,7 +16,7 @@ restarting the application; the browser gets Hot Module Replacement and React Fa
 production build runs in this loop.
 
 For production, Node runs `npm run build` then `npm start`; Bun runs `bun run build` then
-`bun run start`. Deno runs `deno task start`, which builds first. These entries use the compiled
+`bun run start`. Deno runs `deno task build` then `deno task start`. These entries use the compiled
 frontend; Node also builds the service entry.
 
 Cloudflare Workers projects have no `dev.ts`: `npm run dev` runs `wrangler dev`, which builds the
@@ -131,7 +131,12 @@ The React Router Vite plugin also **requires a real config file**: passing `conf
 
 ```typescript
 import * as vite from 'vite';
-import { createRequestHandler, RouterContextProvider, type ServerBuild } from 'react-router';
+import {
+  createRequestHandler,
+  matchRoutes,
+  RouterContextProvider,
+  type ServerBuild,
+} from 'react-router';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { ReactRouterPlugin, viteDevExternals } from '@setu-ts/react-router-plugin';
@@ -178,6 +183,9 @@ app.register(
         // Must come from the same react-router module as the handler — RR checks
         // `context instanceof RouterContextProvider` nominally.
         createLoadContext: () => new RouterContextProvider(),
+        // The build and matcher `pagePolicies` match each request against. The
+        // build is re-read per request, so a policy follows Vite's rebuilds.
+        pageRoutes: { build: loadServerBuild, matchRoutes },
       });
     },
   }),
@@ -187,7 +195,10 @@ app.register(
 Note the two halves of `SsrRuntime`. `createLoadContext` is not optional busywork: React Router 8
 rejects any context that is not a real `RouterContextProvider` instance with a 500, so a dev seam
 that returns only a handler cannot work. See the Notes section of PUBLIC_API.md for the full
-rationale.
+rationale. The third field, `pageRoutes`, is optional until the application sets `pagePolicies`: the
+plugin then refuses to start without it, because it cannot match a request to a route id without the
+build React Router serves. Return it whenever the seam can, so adding a page policy later needs no
+change here.
 
 #### 4. Add the single proxy route
 
@@ -231,13 +242,15 @@ being explicit about:
 - If the browser cannot reach Vite's port directly (containers, remote dev), set `server.hmr.port` /
   `server.hmr.clientPort` in the Vite config rather than trying to route the socket through the app.
 
+<!-- version:history -->
+
 Leaving `hmr` unset is not enough on every runtime: on Node and Deno the client first tried the
 app's port, failed the upgrade and fell back, and on Bun the app-port socket reloaded the page
 instead of updating it in place. The `dev.ts` that `setu new --template full-stack` generates
 therefore pins the socket to Vite's port explicitly (since 0.12.0):
 
 ```typescript
-const vitePort = Number(runtime.env.VITE_PORT ?? '5173');
+const vitePort = Number(runtime.env.VITE_PORT || '5173');
 
 server: {
   host: '127.0.0.1',

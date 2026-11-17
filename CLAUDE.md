@@ -124,9 +124,10 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
 ## Current status
 
 One line per entry. The full account of each entry — what shipped, what verification and review
-found, and every recorded decision — is in
-[`plans/archive/status-history.md`](plans/archive/status-history.md), unchanged from the text that
-stood here until 2026-10-24.
+found, and every recorded decision — was moved out of the repository on 2026-11-17 and is kept by
+the maintainer (`status-history.md` in their local plans folder), unchanged from the text that stood
+here until 2026-10-24. Git history before `v0.13.0` also holds it at
+`plans/archive/status-history.md`.
 
 Write a new entry the same way: one or two lines naming the packages, the change and the PR. The
 long account of what verification and review found belongs in the milestone's PR description, not
@@ -273,7 +274,7 @@ here.
   registering an `ISessionService` under a new `CAPABILITIES.SESSION` token, the capability the
   framework had none of —…) — complete (PR #105).
 - **Milestone 36b** (`packages/starters/*` + `packages/decorator-plugin` + `packages/cli` — starter
-  integration: realtime, DI, and NestJS familiarity) — complete (PR #107).
+  integration: realtime, DI, and decorator-based composition) — complete (PR #107).
 - **Milestone 36c** (`packages/cli` + `packages/starters/*` + `packages/config-plugin` +
   `packages/runtime` — React Router app skeleton and config-driven composition) — complete (PR
   #108).
@@ -778,7 +779,84 @@ here.
   member that its config calls, `setu workspace broker` and `setu workspace rpc`, and one planner
   behind them, `generate app`, `setu sync` and a member's `setu add`) — complete (PR #568).
 - **Release `v0.12.0`** — cut 2026-11-07 (PR #571); 55 packages.
-- **Next milestone** — to be chosen after the `0.12.0` release.
+- **Milestone 139a** (`auth-plugin` + `common` + `session-plugin` + `mcp-plugin` +
+  `multi-tenancy-plugin` docs + `cli` — identity and authorization a token or a tenant can escape:
+  scoped tokens confined by default, `requireAuth({ credentials })`, `tenantClaim`, `sub` refusal,
+  the request on `local.verify`, the template login's `regenerate()`, MCP exempt from form CSRF,
+  `*.localhost` for non-fetched URLs; V12-37, V12-18, V12-19, V12-11, V12-35, V12-34; ships in
+  `0.13.0`) — complete (PR #576).
+- **Milestone 139c** (`agent-runs-plugin` + `idempotency-plugin` + `vector-store-plugin` +
+  `auth-plugin` + `multi-tenancy-plugin` + `database-plugin` + `mail-plugin` + `common` — AI-layer
+  and data contracts with a missing half: agent-runs refuses without a transactional store,
+  5,000-record `replaceSource`, pgvector index-shape verify, `quota.usage`, tenant repositories in a
+  unit of work, mail attachments; V12-4, V12-9, V12-10, V12-36, V12-20, V12-21; ships in `0.13.0`) —
+  complete (PR #578).
+- **Milestone 139f** (`service-discovery-plugin` + `database-plugin` + `realtime-backplane-plugin`
+  - `queue-plugin` + READMEs — health and failure signals that mislead the operator: the discovery
+    probe logs its cause, a pg acquire timeout reads as saturation, the backplane publisher drops
+    rather than delivers late, queue outages at `warn`/`info`, a lost connection named as one, and
+    `details: true` in alerting advice; X10-3, V8-3, X3-3, X88-9, V12-50, V12-49; ships in `0.13.0`)
+    — complete (PR #579).
+- **Milestone 139b** (`common` + `kernel` + `runtime` + `grpc-plugin` + `cli` — gRPC over HTTP/2:
+  streamed RPC bodies and replies, an HTTP/2 listener beside HTTP/1.1 on Node and Bun, response
+  trailers and native gRPC, `grpcClient` with refused-stream retry; V12-39, V12-40, V12-51; ships in
+  `0.13.0`) — complete (PR #581).
+- **Milestone 139d** (`cli` + the `kernel` duplicate-plugin message — the CLI on a full-stack
+  project: `--module` routes under `/api/<m>`, a scoped telemetry preload, `setu add` with several
+  packages, backend peers and migration scripts, full-stack wiring, task builds in `setu build`, a
+  formatter-stable brief and a check-only reference mask; 27 V12/V8/X91/X93 rows, X91-9 already
+  fixed; ships in `0.13.0`) — complete (PR #582).
+- **Milestone 139g** (`common` + `kernel` + `testing` + `react-router-plugin` + `cli` + four
+  augmenting plugins — capability lookups typed by their token: branded `CAPABILITIES`, an
+  augmentable `CapabilityServices` map, token-checked registry overloads, `requestServiceToken`;
+  plus V12-58, V12-59, V12-61; V12-41; ships in `0.13.0`) — complete (PR #585).
+- **Milestone 137a** (`common` + `openapi-plugin` + `decorator-plugin` + `sdk` — OpenAPI document
+  metadata (`contact`, `license`, `termsOfService`, `tags`, `externalDocs`), `deprecated` and
+  per-route `excludeFromDocument`, `@deprecated` in generated clients) — complete (PR #587).
+- **Milestone 137b** (`common` + `openapi-plugin` + `auth-plugin` + `decorator-plugin` +
+  `idempotency-plugin` + `rest-starter` + `cli` — derived 401/403/415/429 and idempotency errors
+  from route middleware brands, declared response headers, `errorSchema: 'rfc9457'`) — complete (PR
+  #588).
+- **Milestone 137c** (`common` + `validation-plugin` + `openapi-plugin` + `sdk` — form bodies and
+  file uploads: `forms` in the validation brand, `formFile()` from `@setu-ts/validation-plugin/zod`
+  with `zod` as an optional peer, the document listing JSON/urlencoded/multipart or multipart alone
+  with `format: binary` and `encoding`, the SDK sending `FormData`) — complete (PR #590).
+- **Milestone 140a** (`cli` + `session-plugin` + `auth-plugin` + `common` + `runtime` + four more —
+  security defaults a generated project starts with: random per-project secrets with per-member
+  Compose refusals, `JWT_SECRET` resolution with a 32-byte HS256 floor, CSRF rotation on
+  `regenerate()`, 1 MiB WebSocket and REST bounds, a 30 s SSE heartbeat, gateway guards, bounded
+  `migration --down`; 16 V12 rows; ships in `0.13.0`) — complete (PR #589).
+- **Milestone 140b** (`packages/cli` — Workers, Deno and Bun project output: `setu add queue`
+  refused on Workers, a shared `withApplication` in the Workers entry with `wrangler.toml` comments
+  that match it, no Workers `deno.json`, a Workers `## Deploy` section, an empty env value read as
+  unset; V12-102…V12-109, V12-118, V12-80, V12-124) — complete (PR #591).
+- **Milestone 140c** (`packages/cli` — images, Compose, Kubernetes and gRPC between workspace
+  members: `NODE_ENV=production`, a pinned Bun base with a lockfile refusal, Bun/Deno check stages,
+  Compose healthchecks and `--depends-on`, a per-member `<member>-transport` ConfigMap below member
+  Secrets, `runtimeOptions()` serving h2c for gRPC members, operator secret values; V12-68, V12-110,
+  V12-111, V12-113, V12-115, V12-116, V12-121, V12-122, V12-123) — complete (PR #592).
+- **Milestone 140d** (`packages/cli` + `vector-store-plugin` + `common` + `cloudflare-plugin` — what
+  the generators write, and the agent brief: `add validation` registers `ValidationPlugin()`,
+  `DATABASE_URL` and Redis guidance from `add`, a strict `g schema`, a `Server-Timing` middleware,
+  PascalCase event names, truthful README/comment text, brief refresh hints and devtool entries; 29
+  V12 rows; plus `setu add` prompts for every choice, backend guidance for every broker, example
+  apps on the current scaffold, and a `vector-store` readiness indicator) — complete (PR #594).
+- **Milestone 140e** (docs + agent cards + `PUBLIC_API.md` + `CHANGELOG.md` + the website, also
+  closing **Milestone 139e** — documentation the code letters change: the CLI, deployment and
+  package docs matched to M140a–d output, the session-secret and `@Inject` error texts, agent-brief
+  rules for `config.get` and Workers tests, the full-stack sign-out recipe, a run-budget recipe
+  through the ai-chat example's budget scope, the homepage package count computed from the package
+  list, and a test that keeps the zero-config `setu add` list matching its source; V12-5…V12-8,
+  V12-13…V12-15, V12-17, V12-38, V12-88, V9-29) — complete (PR #597).
+- **Milestone 141** (`react-router-plugin` + `kernel` + `common` + `auth-plugin` + `cli` — page
+  route policies: `pagePolicies` by React Router route id, matched with React Router's `matchRoutes`
+  after its `.data` normalization, run by the kernel through `RouteDefinition.middlewareGroups`;
+  `routeMiddlewareOf` for the `requirePolicy` scan; `pageRoutes` from the default loader and the dev
+  entry; `setu add` wiring value-free and generated-seam full-stack arms itself) — complete (PR
+  #599).
+- **Release `v0.13.0`** — cut 2026-11-17 (PR #600); 55 packages. From this release `plans/` and
+  `ROADMAP.md` stay off `main` and completed plans are deleted, not archived.
+- **Next milestone** — not yet chosen.
 
 ## Verification (run before declaring any work done)
 
@@ -939,10 +1017,10 @@ because nothing defined what one was.
   ignored the plugin's configured `errorFormat` shipped green once). Add a test that drives BOTH
   entry points under a NON-default configuration and asserts identical output.
 - **Output that implements a named spec is asserted field-by-field, forbidden fields included.** For
-  any body claiming to be RFC 7807 Problem Details, a NestJS error, an OpenAPI fragment, etc., a
-  test must assert the exact documented shape from PUBLIC_API.md: required fields PRESENT and fields
-  that must NOT appear ABSENT (Problem Details carries `detail`, never `message`). Stray fields and
-  shape drift type-check and lint clean.
+  any body claiming to be RFC 7807 Problem Details, a compatibility error body, an OpenAPI fragment,
+  etc., a test must assert the exact documented shape from PUBLIC_API.md: required fields PRESENT
+  and fields that must NOT appear ABSENT (Problem Details carries `detail`, never `message`). Stray
+  fields and shape drift type-check and lint clean.
 - **Hoist per-request work to registration time**: parse route patterns, compile chains, and build
   lookup structures once at startup, never per request (AI_GUIDELINES §14).
 - **Test doubles must honor the real contract, or they hide the bug.** A fixture that stands in for
@@ -1015,8 +1093,8 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
   literally (`&amp;`/`&lt;`), never the raw characters — identity-replacement and entity-collapse
   bugs type-check and lint clean; (2) for each option or parameter you added, grep that it is READ
   somewhere other than its declaration and assignment; (3) diff each spec-named output (RFC 7807,
-  NestJS, OpenAPI) field-by-field against its PUBLIC_API.md example; (4) if a behavior has two entry
-  points, confirm one test drives BOTH under a non-default configuration.
+  compatibility, OpenAPI) field-by-field against its PUBLIC_API.md example; (4) if a behavior has
+  two entry points, confirm one test drives BOTH under a non-default configuration.
 - **Run the two publish gates on the committed tree.** `pnpm run release:publish --dry-run` and
   `pnpm run release:verify <version>` — see the Verification section for the three M51 defects that
   every other gate passed over. A milestone whose package cannot publish is not done, and CI's
@@ -1038,21 +1116,24 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
   `git add` it. M10 shipped four `plans/milestone-10-*.md` files into the tree (main plan + three
   fix/continuation prompts) because scratch was committed — do not repeat this. Before every commit
   run `git status --short` and `git diff --cached --name-only`; if a transient plan/prompt file is
-  staged, `git rm --cached` (or delete) it. **A completed milestone's plan is ARCHIVED, never
-  deleted** — move it to `plans/archive/milestone-<N>-<desc>.md` in the same PR that flips the
-  status, so `plans/` root holds only the plan being built. Deleting a plan is the maintainer's call
-  and theirs alone: do not remove one unless asked, even when the milestone has shipped. (A previous
-  revision of this file mandated `git rm` here, on the reasoning that a shipped plan is a fourth
-  copy of what the code, tests, ROADMAP and CHANGELOG already say, and that
-  `git log --diff-filter=D --name-only -- plans/` recovers it. That reasoning is superseded: an
-  archived plan stays readable without an archaeology step.)
+  staged, `git rm --cached` (or delete) it. **A completed milestone's plan is DELETED** — `git rm`
+  it in the same PR that flips the status, so `plans/` holds only `TEMPLATE.md` and the plans being
+  built. There is no `plans/archive/` (maintainer decision, 2026-11-17): a shipped plan is a copy of
+  what the code, tests, ROADMAP and CHANGELOG already say, and
+  `git log --diff-filter=D --name-only -- plans/` recovers it.
+- **No plan file and no `ROADMAP.md` ever reach `main`.** Both are working documents of `develop`.
+  The release branch removes them as its last commit, a CI job fails any pull request into `main`
+  whose tree still holds them, and the back-merge restores them on `develop`. `docs/releasing.md`
+  ("Keep plans and the roadmap off `main`") has the commands. So no file outside `plans/` and
+  `ROADMAP.md` may link into either — not even to the `develop` copy on GitHub, which `check:docs`
+  resolves locally. Name them in text.
 
 ## Key conventions
 
-- Plans: one committed plan per milestone (`plans/milestone-<N>-<desc>.md`), moved to
-  `plans/archive/` on completion in the milestone's own PR — archived, never deleted; removal is the
-  maintainer's call. All other prompts/notes are scratchpad only and never committed (see the
-  plan-cleanup rule in "Before reporting a task done").
+- Plans: one committed plan per milestone (`plans/milestone-<N>-<desc>.md`), deleted on completion
+  in the milestone's own PR; plans and `ROADMAP.md` live on `develop` only, never on `main`. All
+  other prompts/notes are scratchpad only and never committed (see the plan-cleanup rule in "Before
+  reporting a task done").
 - Package tests use `describe`, `it`, hooks, and `expect` from `vitest` in
   `test/{unit,integration,e2e}/` and run on Node 24. Root `test/` also imports `vitest` and runs in
   the `tooling` member. Deno-only proofs use the same Vitest-shaped files through the Deno-lane
@@ -1093,7 +1174,7 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
   a defect in merged code, nor documentation-only work (for example, CI/release reproducibility
   across several packages). Record that approval and the scope in the PR; do not silently invent a
   `chore/…` branch type. A doc edit that belongs to a milestone still ships on that milestone's own
-  `feat/…` branch — the status flip, the PUBLIC_API correction, and the plan archival are part of
+  `feat/…` branch — the status flip, the PUBLIC_API correction, and the plan deletion are part of
   the milestone, not separate work. Commits: conventional format (`feat(scope): subject`); **no
   commit message may exceed 100 words** in total (AI_GUIDELINES §15.1) — the plan, the PR body, and
   the code comments are where the long reasoning goes; no direct commits to `develop` or `main`.
@@ -1128,15 +1209,13 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
   (`gh api repos/<owner>/<repo>/pulls/<pr>/comments/<id>/replies -f body='…'`), stating fixed (with
   the commit), refuted (with the evidence), or deferred (with the owning milestone). Verify before
   agreeing — several such findings have been correct about the defect and wrong about the mechanism,
-  and one was wholly refuted. **A finding whose entire subject is an ARCHIVED plan
-  (`plans/archive/`) is DECLINED** — it is a design record, not a spec the code is checked against —
-  unless the finding ALSO lands on the implementation, in which case the implementation half is
-  fixed and the plan is left alone. A plan still at `plans/` root belongs to a milestone under
-  construction and is corrected normally. AI_GUIDELINES §16.5 is canonical and binds every agent
-  (Claude, ChatGPT/Codex, Roo).
+  and one was wholly refuted. A plan in `plans/` belongs to a milestone under construction and is
+  corrected normally; a finding against a plan the PR deletes is declined, and any implementation
+  half of it is fixed. AI_GUIDELINES §16.5 is canonical and binds every agent (Claude,
+  ChatGPT/Codex, Roo).
 - **Record the PR number in the same PR.** The CLAUDE.md "Current status" entry needs the number,
   which does not exist until the PR does, so the order is: commit the status entry as "complete (PR
   pending)" → push → `gh pr create` → edit the entry to the real number → commit and push again →
   only then post `@coderabbitai review` (see above). That second commit lands on the same branch
   before merge, so the merged history never carries "PR pending". Same for the ROADMAP row and the
-  plan archival — all of it ships in the milestone's own PR (see "Before reporting a task done").
+  plan deletion — all of it ships in the milestone's own PR (see "Before reporting a task done").

@@ -1,6 +1,6 @@
 # @setu-ts/decorator-plugin
 
-Optional NestJS-style decorators as syntactic sugar over the kernel's programmatic API.
+Optional decorators as syntactic sugar over the kernel's programmatic API.
 
 Decorators capture metadata in a plain `MetadataStore` — **no `reflect-metadata`, no reflection
 polyfill**. `DecoratorPlugin` reads that store at registration time and registers routes, services,
@@ -255,7 +255,10 @@ pipeline has finished, or a `TypeError` while headers are written, answering `50
 `@setu-ts/openapi-plugin` derives an operation's success status from `@HttpCode`/`@Redirect` (on by
 default, `deriveResponseStatus`), so a `201` route is documented under `201` rather than the assumed
 `200`. `@ResponseHeader` is deliberately not derived: an OpenAPI response-header entry needs a
-schema and a description the declaration does not carry.
+schema and a description the declaration does not carry. Document a header with
+`@ApiResponse({ status, headers: { Location: { description, required } } })` instead (since 0.13.0).
+`@Roles`, `@Permissions`, `@RequirePolicy`, `@ScopedRoles` and `@ScopedPermissions` carry the
+`forbids` security brand, so the generated document lists their `401` and `403`.
 
 ## What it exports
 
@@ -263,7 +266,11 @@ schema and a description the declaration does not carry.
   `@Get`/`@Post`/`@Put`/`@Patch`/`@Delete`/`@Head`/`@Options`
 - **Parameters** — `@Params(...)`, taking the sources `Body`, `Query`, `Param`, `Header`, `Cookie`,
   `CurrentUser`, `Ctx`, `Service` (a DI service from the request's scope), `Custom`
-- **Modules** — `@Module({ controllers, providers, imports })`
+- **Modules** — `@Module({ controllers, providers, imports })`; `providers` takes classes and
+  factory entries (`{ provide, useFactory, inject?, scope? }`, since 0.13.0) for a value no class
+  constructs — a gRPC client from `grpcClientProvider()`, say. Entries register before classes, so a
+  class `@Inject`s one by its (string) token. With `DiPlugin` the entry is a container provider;
+  without it the factory runs once against the service registry, with string tokens only
 - **Non-HTTP ingress** — `@Processor`, `@Cron`, `@Every`, `@OnEvent`, `@Subscribe`,
   `@CommandHandler`, `@QueryHandler`, `@Gateway` (+ `@OnOpen`/`@OnMessage`/`@OnClose`)
 - **Injection** — `@Injectable`, `@Inject`, `@Optional`
@@ -280,10 +287,18 @@ schema and a description the declaration does not carry.
   `@setu-ts/view-plugin`)
 - **Response shaping** — `@HttpCode`, `@ResponseHeader`, `@Redirect`
 - **OpenAPI** — `@ApiTags`, `@ApiOperation`, `@ApiResponse` (`@ApiOperation` forwards `operationId`,
-  `summary` and `description` into the route schema; OpenAPI uses a declared id verbatim and derives
-  one from method and path when it is absent.)
+  `summary`, `description`, `deprecated` and `excludeFromDocument` into the route schema; OpenAPI
+  uses a declared id verbatim and derives one from method and path when it is absent.)
 - **Extension** — `createDecorator`, `Custom`, `registerParameterResolver`
 - **Discovery** — `discoverControllers`
+
+`@ApiOperation({ deprecated: true })` marks only the OpenAPI operation deprecated; generated SDK
+interface members carry `@deprecated`, while generated factory methods say "Deprecated operation."
+without the tag. It does not change serving behavior or add deprecation response headers.
+`@ApiOperation({ excludeFromDocument: true })` hides only that operation from the document. It stays
+served, listed in `router.listRoutes()` and discoverable as an MCP tool when marked; the flag is not
+access control. False and omitted flags have no effect. Either flag works as the method's only
+OpenAPI metadata.
 
 ## Options
 
@@ -535,6 +550,14 @@ checked through the permissions it bundles). They run after `@Roles`/`@Permissio
 
 Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.
+
+`@Gateway(path, options)` accepts WebSocket route options, including handshake guards, protocols and
+heartbeat participation. Use `@Gateway('/ws', { guards: [guard] })` to authorize an upgrade. HTTP
+`@Roles`, `@Permissions`, `@RequirePolicy`, `@ScopedRoles`, `@ScopedPermissions` and method-level
+`@Public` declarations on gateways fail registration; use handshake guards instead. `@UseGuards`
+remains invalid on non-HTTP ingress. On a class that also serves HTTP routes, only the WebSocket
+handler methods are checked, and class-level authorization, which applies to those routes, is
+accepted only when `@Gateway(path, { guards })` declares the handshake's own guards.
 
 ## Full API
 

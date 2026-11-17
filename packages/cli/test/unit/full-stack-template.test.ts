@@ -1,5 +1,8 @@
 import { run as runProcess, tempDir } from '../../../../test/node-helpers.ts';
 import * as nodeFs from 'node:fs/promises';
+import ts from 'typescript';
+import type { IConfig } from '@setu-ts/common';
+import { configDouble } from '../../../../test/fixtures/capability-doubles.ts';
 /**
  * Tests for the `full-stack` template definition and the files it emits.
  *
@@ -18,7 +21,10 @@ import { describe, expect, it } from 'vitest';
 import type { TargetRuntime } from '../../src/constants.ts';
 import { FULL_STACK_TEMPLATE } from '../../src/templates/full-stack.ts';
 import { projectFiles, resolveHost } from '../../src/templates/project-files.ts';
-import { FULL_STACK_APP_FILES } from '../../src/templates/full-stack-app-files.ts';
+import {
+  FULL_STACK_APP_FILES,
+  FULL_STACK_README_SECTION,
+} from '../../src/templates/full-stack-app-files.ts';
 import {
   FULL_STACK_NPM_DEPENDENCIES,
   FULL_STACK_NPM_DEV_DEPENDENCIES,
@@ -29,6 +35,65 @@ import { getTemplate, listTemplates } from '../../src/templates/registry.ts';
 import { withBrokerArgs, withQueueArgs } from '../../src/templates/broker.ts';
 import { brokerSpec } from '../../src/workspace/transport.ts';
 import { workspaceProfile } from '../../src/workspace/runtime-profile.ts';
+
+it('V12-61 evaluates the rendered proxy switch for every accepted and refused value', async () => {
+  for (const runtime of ['node', 'deno', 'bun', 'cloudflare-workers'] as const) {
+    const args = FULL_STACK_TEMPLATE.appFactory!.args!({ runtime });
+    const callback = args.slice(0, args.indexOf('\n    { env')).trim().replace(/,$/, '');
+    const source = `const ssr = { serverBuild: {} }; export const configure = ${callback};`;
+    const code = ts.transpileModule(source, {
+      compilerOptions: { target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.ESNext },
+    }).outputText;
+    const loaded: {
+      configure: (config: IConfig) => {
+        httpSecurity: {
+          ipSecurity?: {
+            trustProxy: boolean;
+            trustedProxies: string[];
+            trustForwardedHost: boolean;
+          };
+        };
+      };
+    } = await import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}`);
+    const configure = (value: string, proxies = '127.0.0.1/32') =>
+      loaded.configure(
+        configDouble({
+          TRUST_FORWARDED_HOST: value,
+          TRUSTED_PROXIES: proxies,
+          SESSION_SECRET: 'test-secret-at-least-32-characters',
+        }),
+      );
+    for (const [value, expected] of [
+      ['', false],
+      ['false', false],
+      ['true', true],
+    ] as const) {
+      expect(configure(value).httpSecurity.ipSecurity).toEqual({
+        trustProxy: true,
+        trustedProxies: ['127.0.0.1/32'],
+        trustForwardedHost: expected,
+      });
+    }
+    expect(configure('', '').httpSecurity.ipSecurity).toBeUndefined();
+    expect(configure('false', '').httpSecurity.ipSecurity).toBeUndefined();
+    expect(() => configure('yes')).toThrow("TRUST_FORWARDED_HOST must be 'true', 'false' or empty");
+    expect(() => configure('yes')).not.toThrow('yes');
+    expect(() => configure('true', '')).toThrow('TRUST_FORWARDED_HOST=true needs TRUSTED_PROXIES:');
+    const files = projectFiles('proxy-shop', runtime, resolveHost(FULL_STACK_TEMPLATE, runtime));
+    {
+      expect(
+        files.find(
+          (file) => file.path === (runtime === 'cloudflare-workers' ? '.dev.vars' : '.env'),
+        )!.contents,
+      ).toContain('TRUST_FORWARDED_HOST=');
+    }
+    expect(
+      files
+        .find((file) => file.path === 'README.md')!
+        .contents.includes('TRUST_FORWARDED_HOST=true'),
+    ).toBe(runtime !== 'cloudflare-workers');
+  }
+});
 
 it('X87-2 renders member app and Vite ports from discovery and preserves standalone defaults', () => {
   for (const runtime of ['node', 'bun', 'deno'] as const) {
@@ -45,8 +110,8 @@ it('X87-2 renders member app and Vite ports from discovery and preserves standal
     const standalone = projectFiles('web', runtime, host).find(
       (file) => file.path === 'dev.ts',
     )!.contents;
-    expect(standalone).toContain("Number(runtime.env.PORT ?? '3000')");
-    expect(standalone).toContain("Number(runtime.env.VITE_PORT ?? '5173')");
+    expect(standalone).toContain("Number(runtime.env.PORT || '3000')");
+    expect(standalone).toContain("Number(runtime.env.VITE_PORT || '5173')");
   }
 });
 
@@ -67,7 +132,9 @@ it('renders both transport options after logger on every starter-composed templa
       ),
     );
     expect(connected).toContain("messaging: {\n          broker: 'redis-streams'");
-    expect(connected).toContain("queue: {\n          adapter: 'redis'");
+    expect(connected.replace(/\s+/g, ' ')).toContain(
+      "queue: { processors: [...QUEUE_PROCESSORS], adapter: 'redis'",
+    );
     expect(connected.indexOf('messaging:')).toBeGreaterThan(connected.indexOf('logger:'));
     expect(connected.indexOf('queue:')).toBeGreaterThan(connected.indexOf('messaging:'));
   }
@@ -83,9 +150,21 @@ it('passes the same static server-build module from every socket entry', () => {
     expect(config.compilerOptions.allowJs).toBe(true);
     return files.find((file) => file.path === 'main.ts')!.contents;
   });
-  expect(new Set(entries).size).toBe(1);
+  expect(entries[0]).toContain('Listening on http://localhost:');
+  expect(entries[1]).toContain('Listening on http://localhost:');
+  expect(entries[2]).not.toContain('Listening on http://localhost:');
   expect(entries[0]).toContain("import * as serverBuild from './build/server/index.js'");
   expect(entries[0]).toContain('createApp(undefined, undefined, { serverBuild })');
+});
+
+it('V12-30 declares exceptions directly without an unused config import', () => {
+  const files = projectFiles('probe', 'node', resolveHost(FULL_STACK_TEMPLATE, 'node'));
+  expect(files.find((file) => file.path === 'package.json')?.contents).toContain(
+    '@setu-ts/exceptions',
+  );
+  expect(files.find((file) => file.path === 'setu.config.ts')?.contents).not.toContain(
+    "from '@setu-ts/exceptions'",
+  );
 });
 
 /** Every path the template emits. */
@@ -185,14 +264,17 @@ describe('full-stack template | the layering it emits', () => {
 
   it('keeps the token module to its token (pages import it by value)', () => {
     const token = contentsOf('src/modules/products/products.token.ts');
+    expect(token).toContain(
+      'refuses every other value import from `~kernel/*` (setu.E017), except in React Router `.server` modules.',
+    );
     const valueImports = [
       ...token.matchAll(/^import\s+(?!type\b)\{([^}]*)\}\s+from\s+'([^']+)'/gm),
     ];
     expect(valueImports.map((m) => [m[1]!.trim(), m[2]])).toEqual([
-      ['serviceToken', '@setu-ts/common'],
+      ['requestServiceToken', '@setu-ts/common'],
     ]);
     expect(token).toContain("import type { ProductsService } from './products.service.ts';");
-    expect(token).toContain("serviceToken<ProductsService>('module.products')");
+    expect(token).toContain("requestServiceToken<ProductsService>('module.products')");
   });
 
   it('emits both layout groups and a route in each', () => {
@@ -342,6 +424,15 @@ describe('full-stack template | what the plugins own is NOT reimplemented', () =
     expect(entry).toContain('if (isRouteErrorResponse(error) && error.status === 404) return;');
     expect(entry).toContain('getService<ILogger>(context, CAPABILITIES.LOGGER).error(');
     expect(entry).toContain('error: describeError(error)');
+    expect(entry).toContain('requestId: context.get(requestIdContext)');
+    const config = projectFiles('shop', 'node', resolveHost(FULL_STACK_TEMPLATE, 'node')).find(
+      (file) => file.path === 'setu.config.ts',
+    )!.contents;
+    expect(config).toContain('context.set(requestIdContext, ctx.id)');
+    expect(entry).toContain('stack: maskUrlUserinfo(error.stack).slice(0, 8192)');
+    expect(contentsOf('app/server/context-keys.server.ts')).toContain(
+      "contextKeyFor<string | null>('app.request-id', null)",
+    );
   });
 
   it('gives the login form an action, so its CSRF token is actually consumed', () => {
@@ -499,7 +590,10 @@ describe('full-stack template | manifest contributions', () => {
     // project's server build; a v7 build against a v8 runtime installs cleanly
     // and then fails at request time.
     expect(FULL_STACK_NPM_DEPENDENCIES['react-router']).toBe('^8.0.0');
-    expect(FULL_STACK_NPM_DEV_DEPENDENCIES['react-router']).toBe('^8.0.0');
+    for (const pkg of ['react', 'react-dom', 'react-router']) {
+      expect(FULL_STACK_NPM_DEPENDENCIES[pkg]).toBeDefined();
+      expect(Object.hasOwn(FULL_STACK_NPM_DEV_DEPENDENCIES, pkg)).toBe(false);
+    }
     expect(FULL_STACK_NPM_DEV_DEPENDENCIES['@react-router/dev']).toBe('^8.0.0');
   });
 
@@ -794,4 +888,107 @@ describe('full-stack styling foundation (M123)', () => {
     );
     expect(contentsOf('app/app.css')).toContain('--primary:');
   });
+});
+
+it('M139a rotates the session before the template login raises privileges', () => {
+  const login = FULL_STACK_APP_FILES.find(
+    (file) => file.path === 'app/routes/_auth/login.tsx',
+  )!.contents;
+  const rotate = login.indexOf('session.regenerate()');
+  expect(rotate).toBeGreaterThanOrEqual(0);
+  expect(rotate).toBeLessThan(login.indexOf("session.set('userEmail'"));
+  expect(login).toContain('getService(context, <TOKEN>)');
+});
+
+it('renders workspace development ports for a full-stack member', () => {
+  const readme = FULL_STACK_README_SECTION('setu', 'node', true);
+  expect(readme).toContain('Application and Vite ports come from `setu.workspace.json`');
+});
+
+it('M139a executes the generated login with a real session and rotates its id', async () => {
+  const { transform } = await import('esbuild');
+  const { createApplication } = await import('@setu-ts/kernel');
+  const { RuntimePlugin } = await import('@setu-ts/runtime');
+  const { SessionPlugin, getSession } = await import('@setu-ts/session-plugin');
+  const login = contentsOf('app/routes/_auth/login.tsx');
+  const action = login.slice(
+    login.indexOf('export async function action('),
+    login.indexOf('export default function LoginRoute'),
+  );
+  const compiled = await transform(
+    `
+    const getSession = (context) => context.session;
+    const redirect = (path) => new Response(null, { status: 302, headers: { location: path } });
+    ${action}
+  `,
+    { loader: 'ts', format: 'esm' },
+  );
+  const module = (await import(`data:text/javascript;base64,${btoa(compiled.code)}`)) as {
+    action: (args: {
+      request: Request;
+      context: { session: import('@setu-ts/common').ISession };
+    }) => Promise<Response>;
+  };
+  const app = createApplication({
+    plugins: [
+      RuntimePlugin(),
+      SessionPlugin({
+        secret: 'm139a-session-secret-at-least-32-characters',
+        cookie: { secure: false },
+      }),
+    ],
+  });
+  const ids: string[] = [];
+  app.router.get('/before', (ctx) => {
+    const session = getSession(ctx);
+    ids.push(session.id);
+    session.set('preLogin', true);
+    return ctx.response.send();
+  });
+  app.router.post('/login', async (ctx) => {
+    const session = getSession(ctx);
+    expect(session.id).toBe(ids[0]);
+    const result = await module.action({
+      request: new Request('http://localhost/login', {
+        method: 'POST',
+        body: new URLSearchParams({ email: 'ada@example.com' }),
+      }),
+      context: { session },
+    });
+    ids.push(session.id);
+    expect(session.get('userEmail')).toBe('ada@example.com');
+    return ctx.response
+      .status(result.status)
+      .header('Location', result.headers.get('location') ?? '')
+      .send();
+  });
+  await app.start();
+  try {
+    const before = await app.fetch(new Request('http://localhost/before'));
+    const cookie = before.headers
+      .getSetCookie()
+      .map((line) => line.split(';')[0])
+      .join('; ');
+    await before.text();
+    const after = await app.fetch(
+      new Request('http://localhost/login', { method: 'POST', headers: { cookie } }),
+    );
+    expect(after.status).toBe(302);
+    expect(ids).toHaveLength(2);
+    expect(ids[1]).not.toBe(ids[0]);
+    await after.text();
+  } finally {
+    await app.stop();
+  }
+});
+
+it('M140b describes SSR neutrally and omits TLS proxy instructions on Workers', () => {
+  for (const runtime of ['node', 'cloudflare-workers'] as const) {
+    const files = projectFiles('shop', runtime, resolveHost(getTemplate('full-stack')!, runtime));
+    const config = files.find((file) => file.path === 'setu.config.ts')!.contents;
+    expect(config).toContain('Supplied by the entry: the compiled server build in production');
+    expect(
+      files.find((file) => file.path === 'README.md')!.contents.includes('## Behind a TLS proxy'),
+    ).toBe(runtime === 'node');
+  }
 });

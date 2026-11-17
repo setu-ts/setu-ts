@@ -26,7 +26,7 @@ function makeContext(): {
   // capability (that is the integration suite's job), and a `never` return is the
   // only shape assignable to the generic `get<T extends object>(token): T`.
   const registry: IServiceRegistry = {
-    register: (token, service) => {
+    register: (token: string, service: object) => {
       services.set(token, service);
     },
     registerFactory: () => {},

@@ -36,6 +36,21 @@ function passthrough(): MiddlewareFunction {
 const TARGETS: readonly ValidationTarget[] = ['body', 'query', 'params', 'headers', 'cookies'];
 
 describe('route validation metadata', () => {
+  it('round-trips forms and rejects foreign forms values', () => {
+    const branded = withValidationMetadata(passthrough(), {
+      target: 'body',
+      schema: {},
+      forms: true,
+    });
+    expect(validationMetadataOf(branded)?.forms).toBe(true);
+    for (const forms of ['yes', false, undefined, null, 1]) {
+      const fn = passthrough();
+      Object.defineProperty(fn, VALIDATION_METADATA, {
+        value: { target: 'body', schema: {}, forms },
+      });
+      expect(validationMetadataOf(fn)).toBeUndefined();
+    }
+  });
   it('should round-trip every validation target', () => {
     for (const target of TARGETS) {
       const schema = { marker: target };

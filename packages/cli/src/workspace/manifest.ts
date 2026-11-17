@@ -12,11 +12,12 @@
  */
 
 import type { IFileSystem } from '@setu-ts/common';
-import { escapeName } from '../utils/names.ts';
+import { deriveNames, escapeName, isIdentifierSafe } from '../utils/names.ts';
 
 import { isTargetRuntime, type TargetRuntime } from '../constants.ts';
 
 import { joinPath } from '../utils/file-writer.ts';
+import { readEnvFilePath } from '../templates/env-file.ts';
 import { isWorkspaceRuntime } from './runtime-profile.ts';
 import { DEFAULT_BROKER, getBroker, type BrokerName } from './transport.ts';
 
@@ -134,6 +135,20 @@ export interface WorkspaceMember {
   /** The port this member binds, and the port its siblings dial. */
   readonly port: number;
   /**
+   * Generated secret variable names required from the shell by Compose.
+   * @since 0.13.0
+   */
+  readonly generatedSecrets?: readonly string[];
+  /**
+   * Custom dotenv paths, relative to the member's directory, that the generated
+   * `.env`/`.env.*` rules do not already cover. The managed root
+   * `.dockerignore` lists each, so an image never copies the member's secrets.
+   * Append-only: a path is never dropped, because the file it names may still
+   * hold a secret the CLI generated.
+   * @since 0.13.0
+   */
+  readonly envFilePaths?: readonly string[];
+  /**
    * The IPv4 loopback port this member's local diagnostics connector listens
    * on, when the devtool opt-in recorded one.
    *
@@ -194,6 +209,18 @@ export interface WorkspaceMember {
    * reach each other over HTTP — unlike two members on different brokers.
    */
   readonly rpc?: 'grpc';
+}
+
+/** Names the shell variable supplying one member's own secret. */
+export function memberSecretVariable(member: string, variable: string): string {
+  return `${member.toUpperCase().replaceAll('-', '_')}_${variable}`;
+}
+
+/** Lists the member-specific shell variables the workspace README must export. */
+export function workspaceSecretVariables(members: readonly WorkspaceMember[]): readonly string[] {
+  return members.flatMap((member) =>
+    (member.generatedSecrets ?? []).map((variable) => memberSecretVariable(member.name, variable)),
+  );
 }
 
 /** A workspace's CLI-owned record of itself. */
@@ -280,12 +307,99 @@ export type WorkspaceManifestProblem =
    * quietly rebuilding a workspace with a different toolchain would rewrite every
    * member's manifest and its image.
    */
-  | { readonly kind: 'unknown-runtime'; readonly runtime: string };
+  | { readonly kind: 'unknown-runtime'; readonly runtime: string }
+  /**
+   * Well-formed, but a member's name is not one `generate app` could write
+   * (M139b): lowercase kebab-case whose derived identifiers are safe. Reported
+   * by name, so a workspace that used to accept it does not read as corrupt.
+   */
+  | { readonly kind: 'invalid-member-name'; readonly name: string }
+  /**
+   * Well-formed, but two members' generated secrets map to one Compose shell
+   * variable (member `admin` with `WEB_SESSION_SECRET` and member `admin-web`
+   * with `SESSION_SECRET` both need `ADMIN_WEB_SESSION_SECRET`), so Compose would
+   * hand both the same signing key.
+   */
+  | {
+      readonly kind: 'secret-collision';
+      readonly variable: string;
+      readonly first: string;
+      readonly second: string;
+    };
 
 /** The result of reading a workspace manifest. */
 export type WorkspaceManifestResult =
   | { readonly ok: true; readonly manifest: WorkspaceManifest }
   | { readonly ok: false; readonly problem: WorkspaceManifestProblem };
+
+/**
+ * Whether a manifest member name is one `setu generate app` could have
+ * written: its own kebab form, and safe as an identifier and a path segment.
+ * A member name becomes a directory under `apps/` and is rendered into
+ * generated TypeScript (object keys, JSDoc) unquoted: a separator, a dot
+ * segment, a quote or a comment terminator would put a member's writes
+ * elsewhere or inject code into a caller's `src/transport/index.ts`.
+ *
+ * @param name - The parsed name
+ * @returns `true` when the name is safe to write and render
+ */
+export function isMemberName(name: string): boolean {
+  if (name === '') return false;
+  const names = deriveNames(name);
+  return names.kebab === name && isIdentifierSafe(names);
+}
+
+/**
+ * The first pair of members whose generated secrets map to one Compose shell
+ * variable (member `admin` with `WEB_SESSION_SECRET` and member `admin-web`
+ * with `SESSION_SECRET` both need `ADMIN_WEB_SESSION_SECRET`), so Compose would
+ * hand both the same signing key. Checked by the reader and by every command
+ * that writes `generatedSecrets`, so no command writes a manifest the reader
+ * then refuses.
+ *
+ * @param members - The members as they are, or would be after a write
+ * @returns The collision, or undefined when every shell variable is distinct
+ */
+export function findSecretCollision(
+  members: readonly WorkspaceMember[],
+): Extract<WorkspaceManifestProblem, { kind: 'secret-collision' }> | undefined {
+  const owners = new Map<string, string>();
+  for (const member of members)
+    for (const variable of member.generatedSecrets ?? []) {
+      const shell = memberSecretVariable(member.name, variable);
+      const owner = `${member.name} (${variable})`;
+      const first = owners.get(shell);
+      if (first !== undefined)
+        return { kind: 'secret-collision', variable: shell, first, second: owner };
+      owners.set(shell, owner);
+    }
+  return undefined;
+}
+
+/**
+ * The sentence naming a manifest problem the generic "not a workspace" refusal
+ * does not explain, for every command that reads the manifest.
+ *
+ * @param problem - Why the manifest could not be used
+ * @returns The sentence, or undefined when the generic refusal says enough
+ */
+export function manifestProblemDetail(problem: WorkspaceManifestProblem): string | undefined {
+  if (problem.kind === 'secret-collision') {
+    return (
+      `Members ${problem.first} and ${problem.second} both need the Compose variable ` +
+      `${problem.variable}, so they would share one signing key. Rename a member or its ` +
+      'generated secret in the manifest.'
+    );
+  }
+  if (problem.kind !== 'invalid-member-name') return undefined;
+  const kebab = deriveNames(problem.name).kebab;
+  const rename = isMemberName(kebab) ? ` (for example to "${escapeName(kebab)}")` : '';
+  return (
+    `Its member "${escapeName(problem.name)}" is not a name \`generate app\` could write: ` +
+    'a member name is the lowercase kebab-case form of itself, and every name derived from it is ' +
+    `a safe identifier. Rename it${rename} in the manifest and on disk.`
+  );
+}
 
 /**
  * Narrows one parsed `members` entry to the right SHAPE.
@@ -303,13 +417,30 @@ function toMember(value: unknown): WorkspaceMember | undefined {
   const name = record['name'];
   const port = record['port'];
   const dependsOn = record['dependsOn'];
-  if (typeof name !== 'string' || name === '') return undefined;
-  // A member name becomes one directory under apps/: a separator or a dot
-  // segment would put a member, and every write for it, somewhere else.
-  if (name.includes('/') || name.includes('\\') || name === '.' || name === '..') {
+  const generatedSecrets = record['generatedSecrets'];
+  const envFilePaths = record['envFilePaths'];
+  if (typeof name !== 'string' || !isMemberName(name)) return undefined;
+  // The path is rendered into the managed .dockerignore, so it is held to the
+  // same grammar `--env-file` is: relative segments of [A-Za-z0-9._-] only.
+  if (
+    envFilePaths !== undefined &&
+    (!Array.isArray(envFilePaths) ||
+      !envFilePaths.every((entry) => {
+        if (typeof entry !== 'string') return false;
+        const parsed = readEnvFilePath({ 'env-file': entry });
+        return parsed.ok && parsed.path === entry;
+      }))
+  )
     return undefined;
-  }
   if (typeof port !== 'number') return undefined;
+  if (
+    generatedSecrets !== undefined &&
+    (!Array.isArray(generatedSecrets) ||
+      !generatedSecrets.every(
+        (entry) => typeof entry === 'string' && /^[A-Z][A-Z0-9_]*$/.test(entry),
+      ))
+  )
+    return undefined;
   if (
     dependsOn !== undefined &&
     (!Array.isArray(dependsOn) ||
@@ -344,6 +475,10 @@ function toMember(value: unknown): WorkspaceMember | undefined {
   return {
     name,
     port,
+    ...(generatedSecrets === undefined || generatedSecrets.length === 0
+      ? {}
+      : { generatedSecrets }),
+    ...(envFilePaths === undefined || envFilePaths.length === 0 ? {} : { envFilePaths }),
     ...(devtoolPort === undefined ? {} : { devtoolPort }),
     ...(dependsOn === undefined ? {} : { dependsOn }),
     ...(typeof healthProbes === 'boolean' ? { healthProbes } : {}),
@@ -526,6 +661,13 @@ export async function readWorkspaceManifest(
 
   const members: WorkspaceMember[] = [];
   for (const entry of rawMembers) {
+    const rawName =
+      typeof entry === 'object' && entry !== null
+        ? (entry as Record<string, unknown>)['name']
+        : undefined;
+    if (typeof rawName === 'string' && rawName !== '' && !isMemberName(rawName)) {
+      return { ok: false, problem: { kind: 'invalid-member-name', name: rawName } };
+    }
     const parsedMember = toMember(entry);
     // A version-1 `grpc` transport meant every member co-served gRPC; version 2
     // records that on each member, so the mapping happens here, once.
@@ -574,6 +716,9 @@ export async function readWorkspaceManifest(
         };
     members.push(member);
   }
+
+  const collision = findSecretCollision(members);
+  if (collision !== undefined) return { ok: false, problem: collision };
 
   const names = new Set(members.map((member) => member.name));
   for (const member of members) {

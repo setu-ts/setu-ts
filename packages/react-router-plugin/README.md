@@ -99,20 +99,22 @@ use `getService` below: the registry holds such a service as its `requestService
 
 ### `getService` — a request-bound kernel service in one line
 
+<!-- version:history -->
+
 Since 0.12.0 the context also carries a resolver bound to the current request (never the kernel
 request context itself). `getService(context, token)` resolves through `resolveRequestService` from
 `@setu-ts/common`, so a module's request-bound service is built once per request and the page and a
 kernel `/api` route resolving the same token in that request share one instance:
 
 ```typescript
-import { serviceToken } from '@setu-ts/common';
+import { requestServiceToken } from '@setu-ts/common';
 import { getService, type RouterLoadContext } from '@setu-ts/react-router-plugin';
 
 interface ProductsService {
   list(): Promise<readonly { name: string }[]>;
 }
 // In a scaffolded project this lives in src/modules/products/products.token.ts.
-const PRODUCTS = serviceToken<ProductsService>('module.products');
+const PRODUCTS = requestServiceToken<ProductsService>('module.products');
 
 export async function loader({ context }: { context: RouterLoadContext }) {
   return { products: await getService(context, PRODUCTS).list() };
@@ -149,6 +151,76 @@ responder terminals; the plugin does not rewrite a route boundary's HTML into Pr
 For document navigation, throw `redirect('/login')` when the user is anonymous or
 `data(..., { status: 403 })` when the page is forbidden. A fetch caller that requires the API error
 shape should call the corresponding kernel API route.
+
+## Protecting page actions
+
+Every page is served by one kernel catch-all route, so route-level middleware such as
+`rateLimitMiddleware`, `requirePolicy`, `requireScopes`, `idempotent()` or an upload limit does not
+reach a page's loader or action by default. `pagePolicies` attaches ordinary Setu middleware to a
+page by its React Router **route id**:
+
+```typescript
+import { rateLimitMiddleware } from '@setu-ts/auth-plugin';
+import { ReactRouterPlugin } from '@setu-ts/react-router-plugin';
+
+export const frontend = ReactRouterPlugin({
+  serverBuildPath: new URL('./build/server/index.js', import.meta.url).href,
+  assetsDir: './build/client/assets',
+  pagePolicies: {
+    // Five sign-in attempts a minute per caller; page views are not limited.
+    'routes/_auth/login': {
+      on: 'action',
+      middleware: [rateLimitMiddleware({ windowMs: 60_000, max: 5 })],
+    },
+  },
+});
+```
+
+- **Matched by React Router's own rules.** The plugin matches each request with the `matchRoutes` of
+  the `react-router` module that serves it, after the same `.data` normalization, so a policy
+  applies to the document request (`/login`), the single-fetch request (`/login.data`, `/_.data`)
+  and an index action (`?index`) alike. Guarding a page by its path instead misses those shapes.
+- **Layouts and the root apply beneath them.** A policy on a layout route or on `root` runs for
+  every page under it; when several match, they run outer first. A `POST` to a layout's path without
+  `?index` also runs its index child's policy, as React Router runs that child's middleware. Two
+  more cases err the same way: an `'all'` policy also runs on an `OPTIONS` request, which React
+  Router refuses with `405`, and a policy on `root` runs for every catch-all request, including one
+  that matches no page. The one exception is React Router's route-discovery manifest request
+  (`/__manifest` under the basename), which React Router answers before any route middleware; it
+  carries route metadata, not loader or action data.
+- **`on`** says what the policy guards. `'action'` runs it on every request React Router treats as a
+  mutation (`POST`, `PUT`, `PATCH`, `DELETE`), which is every request that can run the route's
+  action; page views are not affected. `'all'`, the default, runs it on every request that reaches
+  the route. There is no loader-only setting: a mutation document request runs the action and then
+  the loaders, so a guard on loader data needs `'all'`.
+- **Same semantics as kernel route middleware.** Policies run after the global pipeline, in the
+  kernel, with the page render as the terminal: a policy that answers without calling `next()` ends
+  the request (the action never runs), and the client receives that policy's own response (the
+  limiter's `429` with its Problem Details body, for example). A plain HTML form post shows that
+  response as is. A hydrated page submitting through React Router's client fetches the route's
+  `.data` URL, and React Router turns a non-data response into a route error, so the nearest
+  `ErrorBoundary` renders with that status; check
+  `isRouteErrorResponse(error) && error.status === 429` there to show a friendly message. Middleware
+  that reads the response after `next()` sees the rendered page. A policy may read
+  `ctx.request.formData()`; the action still receives the same body.
+- **Refused at startup:** an id naming no route in the build (the message lists known ids), an empty
+  `middleware` array or a non-function entry in it, an `on` value other than `'action'` or `'all'`,
+  or a custom `loadRequestHandler` that returns no `pageRoutes`, a build without a `routes`
+  manifest, and a build with React Router's `future.unstable_routePatternMatching`, which ranks
+  routes differently from `matchRoutes`. In development, a rebuild that drops a page holding a
+  policy makes every request a policy applies to answer `500` (the server log names the missing id)
+  until the policy is removed or the page restored, rather than silently leaving the page unguarded.
+  A `requirePolicy` naming an unregistered policy is refused by `AuthPlugin` as it is on any route.
+- **Public files** (`/robots.txt`) are served before policies run, as before.
+- **Cost.** With no `pagePolicies`, nothing changes. With them, a request whose method no policy
+  applies to (a page view, with only `on: 'action'` policies) skips matching, and one that cannot
+  reach a policied route is answered by a small tree holding only those routes. A request that can
+  reach one is matched with React Router's `matchRoutes` over the whole tree, which ranks every
+  route on each call; those results are cached per path, up to 1,000 entries per build (a path seen
+  both as a page view and as an action counts twice), each path up to 512 bytes.
+- Route ids are file paths without the extension, relative to `app/`: `app/routes/_auth/login.tsx`
+  is `routes/_auth/login`. The conformance test runs against the installed `react-router`, which
+  must be in the plugin's peer range (`^8`).
 
 ## Routing
 
@@ -213,16 +285,18 @@ application's choice.
 | `ISsrService`                     | interface |
 | `RouterContextKey`                | interface |
 | `RouterLoadContext`               | interface |
+| `ServiceResolver`                 | interface |
 | `SsrRuntime`                      | interface |
 | `ViteDevExternalId`               | interface |
 | `ViteDevExternalsOptions`         | interface |
 | `ViteDevExternalsPlugin`          | interface |
 | `ViteHookContext`                 | interface |
 | `ViteResolvedEnvironments`        | interface |
+| `PagePolicy`                      | type      |
+| `PageRouteSource`                 | type      |
 | `PopulateLoadContext`             | type      |
 | `ReactRouterPluginOptions`        | type      |
 | `RouteHandler`                    | type      |
-| `ServiceResolver`                 | type      |
 | `SsrRequestHandler`               | type      |
 
 Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it

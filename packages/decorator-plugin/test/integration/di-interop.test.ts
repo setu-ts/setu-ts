@@ -297,6 +297,8 @@ describe('@Optional injection (real container and real registry)', () => {
       plugins: [RuntimePlugin(), DiPlugin(), DecoratorPlugin({ services: [Untokened] })],
     });
 
-    return expect(app.start()).rejects.toThrow(/the @Inject\(\.\.\.\) list names no token for it/);
+    return expect(app.start()).rejects.toThrow(
+      /the @Inject\(\.\.\.\) list names no token for it.*TC39 standard decorators carry no parameter type information on any runtime, so @Inject must name the token\./,
+    );
   });
 });

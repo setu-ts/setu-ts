@@ -9,6 +9,7 @@
 import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 import type { ISmtpTransport, MailProvider, OutgoingMail } from '../interfaces/index.ts';
 import { hasMethods } from './shape.ts';
+import { toBase64 } from './encoding.ts';
 
 /** Methods an injected transport facade must expose. */
 const REQUIRED_METHODS = ['sendMail'] as const;
@@ -117,6 +118,15 @@ export function toNodemailerMessage(
   }
   if (message.bcc !== undefined) {
     mail.bcc = message.bcc.join(', ');
+  }
+  if (message.attachments !== undefined) {
+    mail.attachments = message.attachments.map((attachment) => ({
+      filename: attachment.filename,
+      content: toBase64(attachment.content),
+      encoding: 'base64',
+      ...(attachment.contentType === undefined ? {} : { contentType: attachment.contentType }),
+      ...(attachment.contentId === undefined ? {} : { cid: attachment.contentId }),
+    }));
   }
   return mail;
 }

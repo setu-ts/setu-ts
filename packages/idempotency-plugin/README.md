@@ -98,6 +98,12 @@ The middleware runs these steps in this order:
 | capacity exceeded              | `429`  |
 | claim failed / bad record      | `503`  |
 
+`@setu-ts/openapi-plugin` documents this table for every non-GET/HEAD/OPTIONS route that carries the
+middleware (`deriveErrorResponses`, on by default): `400`, `409`, `422`, `429`, and `401` unless the
+route sets `principal: 'optional'`, plus `Idempotent-Replayed` on its success responses. The brand
+records the principal rule as `principalRequired` (since 0.13.0). `503` is a store fault and is not
+documented.
+
 ## Failure classification
 
 After a claim, the middleware runs the handler and then:
@@ -198,6 +204,9 @@ scope and namespace are never stored — only their derived hashes.
 Configure it with `IdempotencyPlugin({ transactional: { store } })`, where `store` is
 `createDatabaseIdempotencyStore()` from `@setu-ts/database-plugin` (or any
 `ITransactionalIdempotencyStore`). The store is resolved and `verify()`d at `onInit`.
+`idempotency.transactional` is `true` exactly when the option was given, from registration on: it
+reports configuration, not readiness, so a plugin that needs `within` can refuse at its own
+`register` (AgentRunsPlugin does).
 
 The default purge is scheduled, so the example registers `SchedulerPlugin()`. Without
 `CAPABILITIES.SCHEDULER`, startup rejects with `IdempotencyConfigurationError`. Alternatively set

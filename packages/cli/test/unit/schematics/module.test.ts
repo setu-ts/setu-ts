@@ -22,6 +22,8 @@ describe('generateModule', () => {
         const source = (name: string): string =>
           files.find((file) => file.path === `src/modules/invoices/${name}`)!.contents;
         expect(gateOf('module')).toBeUndefined();
+        expect(source('invoices.service.ts')).toContain('isolate: other isolates do not see it');
+        expect(source('invoices.service.ts')).not.toContain('process restarts');
         expect(files.some((file) => file.path.startsWith('src/controllers/'))).toBe(false);
         expect(files.map((file) => file.path)).toEqual(
           expect.arrayContaining([
@@ -142,6 +144,36 @@ describe('generateModule', () => {
       expect(files.find((file) => file.path === 'src/modules/index.ts')?.contents).toBe(
         duplicate.find((file) => file.path === 'src/modules/index.ts')?.contents,
       );
+    }
+  });
+});
+
+describe('moduleService signature width', () => {
+  // M140d review: a top-level signature was measured at a class method's indent, so
+  // one of 99–100 columns wrapped and Prettier joined it back. Names chosen so the
+  // functional `list`/`create` signatures land on either side of the 100 limit.
+  it('renders every signature as Prettier would, for both styles and boundary names', async () => {
+    const prettier = await import('prettier');
+    const { moduleService } = await import('../../../src/schematics/module-files.ts');
+    const { PRETTIER_OPTIONS } = await import('../../../src/templates/npm-tooling.ts');
+    for (const raw of ['subscriptions', 'notifications', 'notification-logs', 'products', 'a']) {
+      for (const validation of [true, false]) {
+        for (const classBased of [false, true]) {
+          const source = moduleService(deriveNames(raw), validation, classBased);
+          const formatted = await prettier.format(source, {
+            ...PRETTIER_OPTIONS,
+            parser: 'typescript',
+          });
+          const signatures = (text: string): string[] =>
+            text
+              .split('\n')
+              .filter((line) => /^\s*(export function |list|get|create|update)\w*\(/.test(line));
+          expect(
+            signatures(source),
+            `${raw} validation=${validation} classBased=${classBased}`,
+          ).toEqual(signatures(formatted));
+        }
+      }
     }
   });
 });

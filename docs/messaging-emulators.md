@@ -162,7 +162,10 @@ workflow.
 
 `setu new acme --workspace --broker pubsub` (or `--broker service-bus`) wires every member to the
 broker and emits a Compose stack that starts the emulator beside them, so this needs no `docker run`
-of its own:
+of its own. Export each member's generated secrets first: Compose maps every generated secret to a
+required `<MEMBER>_<VARIABLE>` shell variable, such as `ADMIN_SESSION_SECRET` or `ADMIN_JWT_SECRET`
+for a member named `admin`, and refuses to start until each is set (see
+[Deploying a project the CLI scaffolded](./deployment.md#deploying-a-project-the-cli-scaffolded)).
 
 ```bash
 docker compose -f docker/compose.yaml up -d          # emulator + every member

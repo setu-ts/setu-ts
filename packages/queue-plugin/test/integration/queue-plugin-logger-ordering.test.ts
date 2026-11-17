@@ -5,12 +5,18 @@
  * proving that kernel ordering resolves LoggerPlugin before QueuePlugin when both
  * are registered, and that QueuePlugin works without any logger.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import type { IPlugin, IPluginContext, IQueue } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 import { QueuePlugin } from '../../src/plugin/queue-plugin.ts';
+import { MemoryQueue } from '../../src/adapters/memory-queue.ts';
+import { FakeRuntimeServices } from '../fixtures/fake-runtime.ts';
+import {
+  loggerPlugin,
+  RecordingLogger,
+} from '../../../common/test/fixtures/redis-connection-errors.ts';
 
 /**
  * A minimal test plugin that provides CAPABILITIES.LOGGER with recording
@@ -157,5 +163,36 @@ describe('B5: QueuePlugin logger ordering through real kernel', () => {
     expect(app.services.get<IQueue>('queue')).toBeDefined();
     // Logger is available
     expect(app.services.has(CAPABILITIES.LOGGER)).toBe(true);
+  });
+});
+
+describe('M139f X88-9: a loop outage through the plugin logs warn, then info', () => {
+  it('warns once when recurring scheduling starts failing, logs info on recovery, never error', async () => {
+    const runtime = new FakeRuntimeServices();
+    const logger = new RecordingLogger();
+    const fetchDue = vi
+      .spyOn(MemoryQueue.prototype, 'fetchRecurringDue')
+      .mockRejectedValue(new Error('backend down'));
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin({ platform: 'node', adapters: { node: () => runtime } }),
+        loggerPlugin(logger),
+        QueuePlugin({ adapter: 'memory', pollIntervalMs: 100 }),
+      ],
+    });
+    await app.start();
+    try {
+      await runtime.advanceMs(100 * 20);
+      fetchDue.mockResolvedValue([]);
+      await runtime.advanceMs(100);
+      const recurring = logger.entries.filter((entry) => entry.message.includes('recurring'));
+      expect(recurring.map((entry) => [entry.level, entry.message])).toEqual([
+        ['warn', 'queue recurring failed'],
+        ['info', 'queue recurring recovered'],
+      ]);
+    } finally {
+      fetchDue.mockRestore();
+      await app.stop();
+    }
   });
 });

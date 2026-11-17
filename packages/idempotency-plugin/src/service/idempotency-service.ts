@@ -33,6 +33,8 @@ import { runWithin } from '../within/within.ts';
 
 /** Everything the service needs, resolved once at `register()`. */
 export interface ServiceDeps {
+  /** Whether the plugin was given a transactional option. @since 0.13.0 */
+  readonly transactionalConfigured: boolean;
   /** The store. */
   readonly store: IIdempotencyStore;
   /** The runtime services (clock, uuid, subtle). */
@@ -63,6 +65,8 @@ function withinDeps(deps: ServiceDeps, state: TransactionalRuntimeState): Within
  * @since 0.9.0
  */
 export class IdempotencyService implements IIdempotencyService {
+  /** Whether a transactional store is configured; does not report readiness. @since 0.13.0 */
+  readonly transactional: boolean;
   readonly #deps: ServiceDeps;
 
   /**
@@ -70,6 +74,7 @@ export class IdempotencyService implements IIdempotencyService {
    */
   constructor(deps: ServiceDeps) {
     this.#deps = deps;
+    this.transactional = deps.transactionalConfigured;
   }
 
   /** @inheritdoc */

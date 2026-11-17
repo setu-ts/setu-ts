@@ -1,9 +1,24 @@
 import type { IFileSystem } from '@setu-ts/common';
 import { describe, expect, it } from 'vitest';
+import { renderBrief } from '../../../src/agents/render.ts';
 import { gatherFacts } from '../../../src/agents/facts.ts';
 import { createFakeFs } from '../../fixtures/fake-fs.ts';
 
 describe('read-only project facts', () => {
+  it('V12-28 distinguishes schema commands from data migrations', async () => {
+    const facts = await gatherFacts(
+      createFakeFs({
+        '/app/package.json': JSON.stringify({
+          scripts: { 'db:generate': 'drizzle-kit generate', 'db:deploy': 'prisma migrate deploy' },
+        }),
+      }),
+      '/app',
+    );
+    expect(facts.commands).toEqual(['db:generate', 'db:deploy']);
+    expect(renderBrief(facts)).toContain(
+      'schema migrations; data migrations use setu g migration and src/migrations/run.ts',
+    );
+  });
   it('V11-9 includes only the present lint and formatting scripts', async () => {
     const facts = await gatherFacts(
       createFakeFs({

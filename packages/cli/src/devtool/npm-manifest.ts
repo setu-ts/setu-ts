@@ -2,9 +2,16 @@
 import { withDependency } from '../commands/add.ts';
 import { FRAMEWORK_RANGE } from '../templates/framework-specifier.ts';
 import { escapeName } from '../utils/names.ts';
+import { TELEMETRY_PRELOAD_FLAG } from '../templates/telemetry-preload.ts';
 
-/** The non-watching development script reserved for the Node connector. */
-export const NODE_DEVTOOL_DEV_SCRIPT = 'tsx main.dev.ts';
+/**
+ * The non-watching development script reserved for the Node connector.
+ * @param envFileFlag - The same dotenv flag, including its trailing space, as the start script
+ * @returns The script with instrumentation and dotenv loaded before the entry
+ */
+export function nodeDevtoolDevScript(envFileFlag: string): string {
+  return `tsx ${TELEMETRY_PRELOAD_FLAG} ${envFileFlag}main.dev.ts`;
+}
 
 /** A refused manifest or its optional replacement; absent contents means no write. */
 export type NodeDevtoolPlan =
@@ -22,9 +29,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  *
  * @param source - The member's own package.json, optionally prefixed by a BOM
  * @param path - Its display path, used in terminal-safe refusals
+ * @param envFileFlag - The project's validated dotenv flag, including its trailing space
  * @returns A refusal, replacement contents, or a successful no-op
  */
-export function planNodeDevtool(source: string, path = 'package.json'): NodeDevtoolPlan {
+export function planNodeDevtool(
+  source: string,
+  path = 'package.json',
+  envFileFlag = '--env-file-if-exists=.env ',
+): NodeDevtoolPlan {
+  const devScript = nodeDevtoolDevScript(envFileFlag);
   const clean = source.replace(/^\uFEFF/, '');
   let parsed: unknown;
   try {
@@ -76,10 +89,10 @@ export function planNodeDevtool(source: string, path = 'package.json'): NodeDevt
       message: `${escapeName(path)} requires tsx in devDependencies to run the development entry.`,
     };
   }
-  if (scripts['dev'] !== undefined && scripts['dev'] !== NODE_DEVTOOL_DEV_SCRIPT) {
+  if (scripts['dev'] !== undefined && scripts['dev'] !== devScript) {
     return {
       ok: false,
-      message: `Refusing to replace the existing "dev" script in ${escapeName(path)}:\n  current: ${escapeName(scripts['dev'])}\n  would write: ${NODE_DEVTOOL_DEV_SCRIPT}\nA script you wrote is yours to change; update it to match, or remove it, and run this again.`,
+      message: `Refusing to replace the existing "dev" script in ${escapeName(path)}:\n  current: ${escapeName(scripts['dev'])}\n  would write: ${devScript}\nA script you wrote is yours to change; update it to match, or remove it, and run this again.`,
     };
   }
   const updated = withDependency(
@@ -88,12 +101,12 @@ export function planNodeDevtool(source: string, path = 'package.json'): NodeDevt
     '@setu-ts/diagnostics-plugin',
     FRAMEWORK_RANGE,
   );
-  if (scripts['dev'] === NODE_DEVTOOL_DEV_SCRIPT) {
+  if (scripts['dev'] === devScript) {
     return updated === undefined ? { ok: true } : { ok: true, contents: updated };
   }
   const manifest = JSON.parse(updated ?? clean) as Record<string, unknown>;
   return {
     ok: true,
-    contents: `${JSON.stringify({ ...manifest, scripts: { ...scripts, dev: NODE_DEVTOOL_DEV_SCRIPT } }, null, 2)}\n`,
+    contents: `${JSON.stringify({ ...manifest, scripts: { ...scripts, dev: devScript } }, null, 2)}\n`,
   };
 }

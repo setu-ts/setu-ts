@@ -29,7 +29,12 @@ import { COMMAND_HANDLERS, QUERY_HANDLERS } from './src/cqrs/index.ts';
 import { EVENT_HANDLERS } from './src/events/index.ts';
 import { QUEUE_PROCESSORS } from './src/jobs/index.ts';
 import { SERVICE_ENDPOINTS } from './src/discovery/services.ts';
-import { messagingOptions, queueOptions, transportPlugins } from './src/transport/index.ts';
+import {
+  messagingOptions,
+  queueOptions,
+  runtimeOptions,
+  transportPlugins,
+} from './src/transport/index.ts';
 
 /**
  * Builds the application.
@@ -41,7 +46,9 @@ import { messagingOptions, queueOptions, transportPlugins } from './src/transpor
  * every target; accepted and unused, because a socket project reads configuration
  * from the process environment.
  * @param devtool - The development-only composition — the diagnostics plugin and
- * the kernel diagnostics option — supplied by `main.dev.ts` alone. The SECOND
+ * the kernel diagnostics option — supplied only by a development entry
+ * (`main.dev.ts`, written by `--devtool` or `setu devtool enable`); `main.ts`
+ * never passes it. The SECOND
  * parameter deliberately: `setu commands` passes its inert discovery env as the
  * FIRST argument on every target, which the unused `_env` above absorbs.
  * @returns The configured, unstarted application
@@ -52,7 +59,7 @@ export function createApp(
 ): IKernelApplication {
   const app = createApplication({
     plugins: [
-      RuntimePlugin(),
+      RuntimePlugin({ ...runtimeOptions(), maxBodyBytes: 1_048_576 }),
       ConfigPlugin({ envFilePath: '.env', envFileOptional: true }),
       LoggerPlugin({
         requestLogging: true,
@@ -60,10 +67,10 @@ export function createApp(
         transport: 'pino',
       }),
       ValidationPlugin({ errorFormat: 'rfc9457' }),
-      HttpSecurityPlugin(),
+      HttpSecurityPlugin({ requestSize: { maxBodySize: 1_048_576 } }),
       HealthPlugin({ indicators: [...HEALTH_INDICATORS] }),
       MetricsPlugin({ customMetrics: [...CUSTOM_METRICS] }),
-      OpenApiPlugin(),
+      OpenApiPlugin({ errorSchema: 'rfc9457' }),
       MessagingPlugin(messagingOptions()),
       QueuePlugin({ processors: [...QUEUE_PROCESSORS], ...queueOptions() }),
       ResiliencePlugin(),

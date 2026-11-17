@@ -24,6 +24,18 @@ export interface TaskPoolOptions {
    * at construction.
    */
   readonly taskTimeoutMs?: number;
+  /**
+   * The name this pool goes by outside the process: the `task_module` label on
+   * `/metrics` and `task` in the `/health` payload. Defaults to the module's
+   * file name without its extension (`resize-image` for
+   * `file:///…/tasks/resize-image.ts`), so neither output carries a path. Set
+   * it when two task modules share a file name; otherwise the second one used
+   * gets a `_2` suffix and a warning. Must be 1–64 characters of letters,
+   * digits, `_`, `.` or `-`, and unique across pools; anything else throws
+   * `RangeError` at construction.
+   * @since 0.13.0
+   */
+  readonly label?: string;
 }
 
 /**

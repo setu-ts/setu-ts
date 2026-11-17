@@ -20,7 +20,10 @@ describe('root manifest settings', () => {
     // dependency published in the last 24 hours, so without this a project
     // scaffolded on the day of a release cannot install the versions it was
     // just pinned to — the failure is total, not a warning.
-    expect(rootManifestSettings()['minimumDependencyAge']).toBe(0);
+    expect(rootManifestSettings()['minimumDependencyAge']).toEqual({
+      age: 'P1D',
+      exclude: ['npm:@setu-ts/*'],
+    });
   });
 
   it('explains the opt-out beside it', () => {
@@ -41,6 +44,7 @@ describe('root manifest settings', () => {
     // this a fresh scaffold fails `deno fmt --check` on files the CLI itself
     // just wrote.
     expect(rootManifestSettings()['fmt']).toEqual({
+      proseWrap: 'preserve',
       lineWidth: 100,
       indentWidth: 2,
       singleQuote: true,
@@ -107,7 +111,7 @@ describe('where the root settings are emitted', () => {
       'deno.json',
     );
 
-    expect(manifest['minimumDependencyAge']).toBe(0);
+    expect(manifest['minimumDependencyAge']).toEqual({ age: 'P1D', exclude: ['npm:@setu-ts/*'] });
     expect(manifest['fmt']).toBeDefined();
     // The keys the root already carried are untouched.
     expect(manifest['workspace']).toEqual(['./apps/*', './libs/*']);
@@ -117,7 +121,7 @@ describe('where the root settings are emitted', () => {
     const host = resolveHost(getTemplate('rest')!, 'deno');
     const manifest = manifestOf(projectFiles('shop', 'deno', host), 'deno.json');
 
-    expect(manifest['minimumDependencyAge']).toBe(0);
+    expect(manifest['minimumDependencyAge']).toEqual({ age: 'P1D', exclude: ['npm:@setu-ts/*'] });
     expect(manifest['fmt']).toBeDefined();
   });
 

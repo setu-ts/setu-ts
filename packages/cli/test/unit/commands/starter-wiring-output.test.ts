@@ -1,3 +1,4 @@
+import { generateSecret } from '../../../src/templates/secret.ts';
 import { expect, it } from 'vitest';
 import * as ts from 'typescript';
 import { runNewCommand } from '../../../src/commands/new.ts';
@@ -10,12 +11,12 @@ const CONFIG_PATH = '/app/shop/setu.config.ts';
 const REDIS_ARM = `        queue: {
           processors: [...QUEUE_PROCESSORS],
           adapter: 'redis',
-          url: config.get<string>('REDIS_URL', { default: 'redis://127.0.0.1:6379' }),
+          url: config.get<string>('REDIS_URL') || 'redis://127.0.0.1:6379',
         },`;
 
 async function scaffold() {
   const fs = createFakeFs();
-  const deps = { fs, cwd: '/app', log: () => {}, error: () => {} };
+  const deps = { secret: generateSecret, fs, cwd: '/app', log: () => {}, error: () => {} };
   expect(
     await runNewCommand(parseArgs(['shop', '--template', 'full-stack', '--runtime', 'node']), deps),
   ).toBe(0);
@@ -27,6 +28,31 @@ async function scaffold() {
       runAddCommand(parseArgs([...args, '--dir', '/app/shop']), deps),
   };
 }
+
+it('V12-3 inserts worker-pool above the full-stack loop, preserving starter arm guidance', async () => {
+  const h = await scaffold();
+  expect(await h.add(['worker-pool'])).toBe(0);
+  const config = h.fs.read(CONFIG_PATH);
+  expect(config).toContain("import { WorkerPoolPlugin } from '@setu-ts/worker-pool-plugin';");
+  expect(config).toContain(
+    '  app.register(WorkerPoolPlugin());\n  for (const generated of GENERATED_PLUGINS) app.register(generated);',
+  );
+  expect(await h.add(['worker-pool'])).toBe(0);
+  expect(h.fs.read(CONFIG_PATH)).toBe(config);
+  expect(await h.add(['storage'])).toBe(0);
+  expect(h.fs.read(CONFIG_PATH)).not.toContain('StoragePlugin(');
+});
+
+it('V12-26 defaults full-stack view to the capability without examples or CSS', async () => {
+  const h = await scaffold();
+  expect(await h.add(['view'])).toBe(0);
+  expect(h.fs.read(CONFIG_PATH)).toContain('app.register(ViewPlugin());');
+  expect(h.fs.has('/app/shop/src/views/home.tsx')).toBe(false);
+  const manifest = JSON.parse(h.fs.read('/app/shop/package.json')) as {
+    dependencies: Record<string, string>;
+  };
+  expect(manifest.dependencies['hono']).toBeDefined();
+});
 
 function expected(base: string, imports: readonly string[], arms: readonly string[]): string {
   expect(base).toContain(LAST_IMPORT);

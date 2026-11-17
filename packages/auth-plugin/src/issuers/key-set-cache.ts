@@ -16,7 +16,7 @@ import type { IRuntimeServices } from '@setu-ts/common';
 import type { IAuthHttp } from '../interfaces/index.ts';
 import type { Jwk } from './key-selection.ts';
 import type { CompiledIssuer } from './trusted-issuer.ts';
-import { isAcceptableUrl } from './trusted-issuer.ts';
+import { isAcceptableFetchUrl } from './trusted-issuer.ts';
 
 /** Largest key-set or discovery response accepted, in bytes. */
 export const MAX_RESPONSE_BYTES: number = 64 * 1024;
@@ -298,7 +298,7 @@ export class IssuerKeySet {
   async #discover(): Promise<string> {
     await this.#ensureDiscovery();
     const jwksUri = this.#discovery?.jwks_uri;
-    if (typeof jwksUri !== 'string' || !isAcceptableUrl(jwksUri)) {
+    if (typeof jwksUri !== 'string' || !isAcceptableFetchUrl(jwksUri)) {
       throw new RefreshError('discovery-jwks-uri-invalid');
     }
     return jwksUri;

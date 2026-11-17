@@ -240,8 +240,10 @@ describe.each(REDIS_CLIENTS)('%s', (redisVariant) => {
         // Frames from another origin come back through this backplane's own
         // subscription, which shows the subscriber connection is live.
         let received = 0;
-        await backplane.subscribe(() => {
+        const receivedData: unknown[] = [];
+        await backplane.subscribe((delivered) => {
           received++;
+          receivedData.push(delivered.data);
         });
         let paused = false;
         let failure: unknown;
@@ -290,13 +292,30 @@ describe.each(REDIS_CLIENTS)('%s', (redisVariant) => {
           // timeout, which starts when the command is queued.
           const before = publishRecord(source!)!;
           await docker(['stop', containerId]);
-          const dropped = await settleWithin(backplane.publish(frame), COMMAND_TIMEOUT_MS * 4);
-          // Queued while disconnected and rejected by the bound: a driver would
-          // have written it as soon as a socket opened, so the outcome is
-          // unknown (504; M131a audits).
-          expect(dropped).toBe(
-            'rejected: realtime-backplane-plugin: redis transport: the backend did not answer; the request may have been applied',
-          );
+          if (redisVariant === 'ioredis') {
+            // M139f X3-3: the plugin's own publisher has no offline queue. Once
+            // it has seen the connection close, a publish is refused at once
+            // (503, never applied) instead of being held and delivered late.
+            await waitTrue(async () => (await backplane.isHealthy!()) === false, 'down', 15_000);
+            const started = performance.now();
+            const dropped = await settleWithin(
+              backplane.publish({ ...frame, data: 'dropped' }),
+              COMMAND_TIMEOUT_MS * 4,
+            );
+            expect(performance.now() - started).toBeLessThan(1_000);
+            expect(dropped).toBe(
+              'rejected: realtime-backplane-plugin: redis transport: the backend refused the request before it could be applied',
+            );
+          } else {
+            const dropped = await settleWithin(backplane.publish(frame), COMMAND_TIMEOUT_MS * 4);
+            // An injected node-redis pair keeps its own queue: queued while
+            // disconnected and rejected by the bound, so a driver would have
+            // written it as soon as a socket opened and the outcome is unknown
+            // (504; M131a audits).
+            expect(dropped).toBe(
+              'rejected: realtime-backplane-plugin: redis transport: the backend did not answer; the request may have been applied',
+            );
+          }
           expect(publishRecord(source!)).toMatchObject({ failed: before.failed + 1 });
 
           // Restarted, the same connections carry the next publish. Wait until one
@@ -319,6 +338,9 @@ describe.each(REDIS_CLIENTS)('%s', (redisVariant) => {
             30_000,
           );
           expect(publishRecord(source!)!.succeeded).toBeGreaterThan(before.succeeded);
+          // Nothing published during the outage arrives after it (M139f X3-3).
+          await wait(1_000);
+          expect(receivedData).not.toContain('dropped');
         } catch (error) {
           failure = error;
           throw error;

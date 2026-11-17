@@ -6,7 +6,7 @@ it('assigns exactly one unique stable id to each finding kind and wiring outcome
   const ids = Object.values(FINDING_IDS).flatMap((value) =>
     typeof value === 'string' ? [value] : Object.values(value),
   );
-  expect(new Set(ids).size).toBe(23);
+  expect(new Set(ids).size).toBe(24);
   expect(CHECK_FINDINGS.map(findingId).sort()).toEqual([...ids].sort());
   expect(ids).toEqual([
     'setu.E001',
@@ -32,6 +32,7 @@ it('assigns exactly one unique stable id to each finding kind and wiring outcome
     'setu.E017',
     'setu.E018',
     'setu.W005',
+    'setu.W006',
   ]);
 });
 
@@ -60,5 +61,6 @@ it('uses project-relative primary paths for path entries and ordering', () => {
     'app/routes/_app/products._index.tsx',
     'app/routes/broken.tsx',
     'src/services/plain.service.ts',
+    'setu.config.ts',
   ]);
 });

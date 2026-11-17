@@ -32,7 +32,7 @@ import type { IAuthHttp } from '../interfaces/index.ts';
 import type { CompiledProvider, CompiledSignIn } from './config.ts';
 import type { IssuerKeySet } from '../issuers/key-set-cache.ts';
 import { JwtVerifier } from '../issuers/jwt-verifier.ts';
-import { isAcceptableUrl } from '../issuers/trusted-issuer.ts';
+import { isAcceptableUrl, isAcceptableFetchUrl } from '../issuers/trusted-issuer.ts';
 import { encodeBase64Url } from '../utils/base64url.ts';
 import { ID_TOKEN_SESSION_KEY, RP_PROVIDER_SESSION_KEY } from './auth-session-service.ts';
 import { addPending, takePending } from './pending-state.ts';
@@ -174,7 +174,7 @@ async function resolveEndpoints(
   // The same https-or-loopback rule `jwks_uri` gets: an `http` token endpoint
   // would receive the client secret in cleartext, and an authorization endpoint
   // becomes a `Location` header the user's browser follows.
-  if (!isEndpoint(authorizationEndpoint) || !isEndpoint(tokenEndpoint)) {
+  if (!isBrowserEndpoint(authorizationEndpoint) || !isFetchEndpoint(tokenEndpoint)) {
     return { ok: false, reason: 'discovery-endpoint-invalid' };
   }
   const endSession = document.end_session_endpoint;
@@ -183,13 +183,18 @@ async function resolveEndpoints(
     endpoints: {
       authorizationEndpoint,
       tokenEndpoint,
-      endSessionEndpoint: isEndpoint(endSession) ? endSession : null,
+      endSessionEndpoint: isBrowserEndpoint(endSession) ? endSession : null,
     },
   };
 }
 
 /** A discovery-supplied endpoint: a string that is https, or http on loopback. */
-function isEndpoint(value: unknown): value is string {
+function isFetchEndpoint(value: unknown): value is string {
+  return typeof value === 'string' && isAcceptableFetchUrl(value);
+}
+
+/** A browser endpoint may use a localhost subdomain. */
+function isBrowserEndpoint(value: unknown): value is string {
   return typeof value === 'string' && isAcceptableUrl(value);
 }
 

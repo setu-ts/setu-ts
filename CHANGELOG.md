@@ -6,6 +6,677 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.13.0] — 2026-11-17
+
+### Changed
+
+- **BREAKING — open defect fixes (`@setu-ts/common`, `@setu-ts/agent-runs-plugin`,
+  `@setu-ts/auth-plugin`, `@setu-ts/session-plugin`, `@setu-ts/runtime`,
+  `@setu-ts/realtime-backplane-plugin`, `@setu-ts/service-discovery-plugin`, `@setu-ts/cli`; V12-54,
+  V12-55, V12-56, V12-57, V12-130, V12-134, V12-136, V12-137, V12-138, V12-139, #593).** Form CSRF
+  exempts authenticated header credentials with a new session, including X-API-Key; non-Bearer
+  Authorization and restored sessions remain verified. API-key validator faults preserve their cause
+  as `AuthenticationUnavailableError` (503 with `errorHandler`, fixed public detail). In-process
+  undici FormData size refusals avoid a producer crash. Redis close cancels injected connection
+  waits, and retired owned clients retain an error sink until end; injected-client reporting and
+  close ownership are documented. Discovery deregistration warnings mask URL userinfo. E017 skips
+  React Router `.server` modules. Quotas accept a non-empty `message` for the shared 429 detail.
+  `startAs` starts durable runs with explicit server-owned identity and no request background hook.
+  **Upgrade:** custom `IAgentRunService` implementations must add the required
+  `startAs(identity, definition, input)` member. `apiKey.header` and `jwt.header` set to `cookie`
+  (any case) now fail registration; use a dedicated non-ambient header such as `X-API-Key`, or
+  configure session authentication for cookies. Header-authenticated exchange routes, including
+  X-API-Key requests with new sessions on `csrf.exclude`d paths, now commit no session and send no
+  `Set-Cookie`: configure `csrf.exemptBearer: false` for an API-key-to-cookie exchange, as for a
+  bearer exchange. A validator throwing for a malformed or unknown key now yields 503 with
+  `errorHandler` instead of 401. Check key format and return `null` before querying. The logged
+  error names only the validator failure's class, never its text, and carries the serializer's
+  redact-cause brand, so a driver error that echoes the key does not write it to the log.
+
+- **BREAKING — `@setu-ts/cli` (M140c, #592).** Generated images set `NODE_ENV=production`, and
+  `start` sets it too: Node keeps a value already set (a `data:` preload); Bun and Deno set it. Bun
+  images build on `oven/bun:1.4.0-alpine` and refuse to build without a committed `bun.lock`; Bun
+  and Deno images run the project's own `check` script or task, as Node's build already did. A Deno
+  full-stack `build` runs the project's own locked `react-router` bin instead of fetching the newest
+  release with `--no-lock`, and the image fetches its dependencies with the `npmrc` secret but
+  builds without it: no install script runs beside the token, even one approved with `allowScripts`.
+  A Deno image build now fails on an `npmrc` `registry` or `@scope:registry` line whose value is
+  empty or not an absolute URL, or that pairs a `${NAME}` reference with an `@` or `?` anywhere in
+  the value, or a `#` in a quoted value, or that contains a double quote or a backslash; give it a
+  full URL or a reference, and put a credential in an `_authToken` line. Compose gives a member with
+  health probes a `/ready` healthcheck and honours `--depends-on` (`service_healthy`, or
+  `service_started` for a sibling without probes). In Kubernetes, transport defaults move to a
+  `<member>-transport` ConfigMap listed before each member's Secret, so a Secret value overrides
+  them; a `setu-ts.dev/transport-config` annotation rolls members when they change. A member that
+  serves gRPC now serves cleartext HTTP/2 beside HTTP/1.1 through the transport module's new
+  `runtimeOptions()`, so Node callers can reach it. Breaking: a member config made before this
+  release must call `runtimeOptions()`; `setu workspace broker`, `setu workspace rpc` and
+  `setu add grpc` refuse until it does and print the line to add. `generate app` and
+  `setu add auth|session` in a member write a random value for each generated secret into
+  `k8s/secrets/<member>/.env`, keeping existing entries and refusing symbolic links. Every local env
+  file the CLI creates (`.env`, a Workers `.dev.vars`, or the dotenv path the project declares,
+  which a later `setu add auth|session` writes a secret into) and `k8s/secrets/<member>/.env` are
+  owner-only (`0600`), through `setu` and `npm create @setu-ts` alike; `.env.example` and an
+  existing file keep their mode. `@setu-ts/cli/main` exports `nodeRuntime()`, the Node runtime both
+  executables share. The workspace READMEs say which members use the broker, why the `:dev` tag can
+  go stale, and why Kubernetes needs no start order.
+- **`@setu-ts/cli` (M140d, #594).** `setu add validation` registers `ValidationPlugin()`, and
+  `setu check` reports it when installed but unregistered (V12-62). `setu add database` writes
+  `DATABASE_URL` with a local default for Drizzle and Prisma (V12-82); a Redis store prints what now
+  connects to Redis at startup, how to start it, and the offline `createTestApp` override (V12-70),
+  and Redis comments no longer describe messaging in a cache-only project (V12-100). `setu generate`
+  accepts `--yes` (V12-101) and, like `sync` and `devtool enable`, reminds a project with an agent
+  brief to refresh it (V12-125).
+- **`@setu-ts/cli` (M140d, #594).** Generated code: `g schema` emits `z.strictObject({})` and prints
+  how to bind it (V12-65); `g middleware` sends a `Server-Timing` duration measured with
+  `runtime.hrtime()` (V12-87); event type names are PascalCase like command names, and event samples
+  state in-process, at-most-once delivery (V12-86, V12-84); `g job` prints `setu add queue` when the
+  queue is missing (V12-85); a class-based module service keeps its records on the injectable
+  instance (V12-95), validated services drop dead fallbacks (V12-99), and the service and showcase
+  comments no longer blame Deno or repeat a done step (V12-96, V12-97).
+- **`@setu-ts/cli` (M140d, #594).** Templates: READMEs name the microservice's in-memory transports
+  (V12-73), claim DI validation only for decorated projects (V12-78), use `generate module billing`
+  (V12-79) and say `/metrics`, `/docs` and `/openapi.json` are on the application port, which only a
+  proxy restriction limits (V12-94); `main.ts` reports a failed shutdown on stderr without a logger
+  (V12-81); the config's devtool JSDoc is true with or without `main.dev.ts` (V12-98). Full-stack:
+  module controllers throw `notFound`/`badRequest` (V12-90), the module unit test drives the service
+  without a port (V12-93), React is only in `dependencies` (V12-91), and the login, guard and nav
+  comments are accurate, with `g module --page` printing the `APP_NAV` entry (V12-89, V12-92).
+- **`@setu-ts/cli` (M140d, #594).** Agent brief and devtool: the validation rule appears only with
+  `validation-plugin` installed (V12-126); the brief lists `main.dev.ts` and the managed diagnostics
+  allowlist and says `dev` needs the launcher's credentials (V12-128); `start` says to build first
+  whenever a build command exists; the Node devtool `dev` script loads the project's env files and
+  the telemetry preload (V12-127).
+- **`@setu-ts/cli` (M140d, #594).** Interactive questions (`setu new`, `setu add`) are an arrow-key
+  list: ↑/↓ or `j`/`k` move, a number jumps, Enter chooses, Escape or Ctrl+C cancels. The highlight
+  is a 24-bit gradient, bold cyan on a 16/256-colour terminal, plain under `NO_COLOR`, and a chosen
+  answer collapses to one line, which `setu new` no longer prints a second time (`PromptSelection`'s
+  answer carries `shown: true`). A redraw counts the rows a wrapped line fills, and keys pasted in
+  one chunk are each read. A terminal that cannot read single keys, or `TERM=dumb`, keeps the typed
+  answer.
+- **`@setu-ts/cli` (M140d, #594).** `setu add` guidance runs as printed. The `qdrant` and `pgvector`
+  vector stores get a CLI-written `src/vector-store.ts` (pgvector's ends the pool it creates at
+  shutdown), so the config stays readable to `setu check`, plus their connection variable
+  (`QDRANT_URL`, or `PGVECTOR_URL` so an application database on `DATABASE_URL` is left alone), a
+  Compose service, the client package and import lines. `smtp` mail gets a local Mailpit and the
+  test override. Every printed registration names its imports. Mailpit, Qdrant and pgvector add the
+  README's local services section. `setu add decorator` refuses a functional project. On Workers
+  zero-config providers are wired, while `cache` and `storage` are refused in favour of
+  `CloudflarePlugin`'s KV and R2, and the vector store takes only `memory` or
+  `VectorizeVectorStore`. The Qdrant client is pinned to the Compose image's release. The MCP note
+  names the security guard; `di`, `sdk` and full-stack `auth` print what to do; `add view` lists
+  `/ui` and `/assets` in the README. `setu check` W006 covers every provider whose registration
+  `add` prints except `auth-plugin`, whose helpers work without the plugin, and on a
+  starter-composed config every installed package whose gated starter arm (`graphql`, `static`,
+  `realtime.websocket` and the like) is unset. A starter-composed `add` of such a package prints the
+  arm's shape, with `urlPrefix` on full-stack's `static`. On Workers `add cloudflare` registers
+  `CloudflarePlugin` with `waitUntil` in a generated minimal, `rest` or class-based config and
+  renames the factory's `_waitUntil` parameter; other configs get both steps printed.
+- **`@setu-ts/cli` (M140d, #594).** `setu add` at a terminal now asks for every left-out choice, not
+  only mail's provider, the database type and the vector-store adapter: `--dialect` after Drizzle,
+  and the transport backends `--broker`, `--queue`, `--store`, `--lock` and `--backplane`, default
+  first. A flag shared by two listed packages is asked once; a workspace member and a Workers
+  project are not asked for a transport backend; a given `--dialect` or `--redis-client` narrows the
+  question to `--type drizzle` or `redis`; and nothing is asked when the flags given would be
+  refused. One table drives the prompt and `setu add --help`. `--yes` and a non-terminal still take
+  every default.
+- **`@setu-ts/vector-store-plugin`, `@setu-ts/common`, `@setu-ts/cloudflare-plugin` (M140d, #594).**
+  `VectorStorePlugin` registers a `vector-store` readiness indicator, so a replica whose vector
+  backend stops answering leaves `/ready` instead of failing every search. It calls the new optional
+  `IVectorStoreAdapter.isHealthy()` through a cached, time-bounded probe; the Qdrant, pgvector,
+  Vectorize and memory adapters implement it without touching data; Qdrant's checks a collection, so
+  a revoked API key reads as down, and pgvector's reports a saturated pool as `reachable: 'unknown'`
+  while its statements keep completing or none of its own is running, as database-plugin does. An
+  adapter without it also stays up as `reachable: 'unknown'`. To keep the previous behaviour,
+  `HealthPlugin({ readiness: { exclude: ['vector-store'] } })`.
+- **`@setu-ts/cli` (M140d, #594).** `setu add` with a connected backend (RabbitMQ, NATS, Kafka,
+  Pub/Sub, Service Bus, not only Redis) that writes the call says the app and its tests connect at
+  startup, prints the `docker compose` command and the `createTestApp` override, and gives a
+  standalone README the "Local transport services" section, which now also says a container needs
+  each connection variable passed in. A re-add with a backend rewrites the bare
+  `CachePlugin()`-style call the CLI wrote rather than printing beside it. The printed `smtp` and
+  `sendgrid` mail calls read `SMTP_HOST`/`SMTP_PORT` or `SENDGRID_API_KEY`, written to the dotenv
+  file (on Workers, supply them as vars or secrets). A SQLite database is ignored by Git and Docker,
+  Drizzle's `drizzle/` by Prettier, and an existing `drizzle.config.ts` is reported, with its
+  dialect when it differs. `setu check` W006 also covers `DatabasePlugin` and `VectorStorePlugin`.
+  With vector-store-plugin installed, `setu generate health-indicator vector-store` refuses the name
+  the plugin claims, and the devtool reports the `vector-store` indicator. Two env variables planned
+  in one run no longer overwrite each other.
+- **BREAKING — `@setu-ts/cli` (M140a, #589).** Generated application bodies are bounded at 1 MiB;
+  module names and ids have length limits. New projects generate local session secrets, ignore local
+  secret files and Deno node_modules, and name required Docker environment variables. Session
+  installation writes an ignored secret; auth installation enables environment-resolved JWTs.
+  Workspace members record generated secret names; Compose requires separate member-prefixed shell
+  values, listed in the README. Both WebSocket schematics show handshake guards. Rollback defaults
+  to one migration; use `--down=<n>` or `--down=all` explicitly. SSE generators retain a connection
+  and send ready. Deno full-stack installation runs without blanket scripts; build before start.
+  Third-party dependencies keep a one-day cooldown, check pins the exact CLI, and the devtool key is
+  removed before application creation. `setu add auth|session` adds an exact `.gitignore` entry for
+  the env file when there is none, with a `git rm --cached` hint when the file already existed; a
+  custom `--env-file` path is excluded from the generated `.dockerignore`, and
+  `setu add auth|session` lists a custom env path in an existing `.dockerignore` (a workspace
+  member's paths are recorded in `envFilePaths`, append-only, and listed in the managed root
+  `.dockerignore`; an env path ending in `.example` is refused); a manifest whose members' secrets
+  map to one Compose variable is refused; and the generated `runMigrations` refuses a rollback count
+  that is not a positive whole number or `Infinity`.
+- **BREAKING — `@setu-ts/session-plugin` (M140a, #589).** Regeneration clears form CSRF while
+  preserving other data. Fetch a fresh token after sign-in or MFA promotion. Secret resolution now
+  checks configuration before the environment; supply an explicit option to override it.
+- **BREAKING — `@setu-ts/auth-plugin` (M140a, #589).** Missing or under-32-byte HS256 secrets raise
+  `AuthPluginConfigurationError` during registration; use at least 32 UTF-8 or raw bytes. Configure
+  `jwt: {}` to resolve JWT_SECRET from secrets, configuration, then the environment.
+- **`@setu-ts/common` (M140a, #589).** Documents CSRF clearing on session regeneration and adds
+  optional `WebSocketEventSink.maxMessageBytes` for transport admission limits.
+- **`@setu-ts/runtime` (M140a, #589).** Node WebSocket upgrades use one ws server per message limit
+  and enforce that limit while reading. Omit the sink limit for the transport default; `0` is
+  unlimited.
+- **BREAKING — `@setu-ts/websocket-plugin` (M140a, #589).** The message limit defaults to 1 MiB. Set
+  `maxMessageBytes: 0` to opt out, or configure a larger bound. Node bounds the transport read; Bun
+  and Deno close oversized messages after buffering. A value that is not a whole number from 0 to
+  2^31 - 1 (NaN, a negative, Infinity) is refused at construction instead of becoming unlimited.
+- **BREAKING — `@setu-ts/sse-plugin` (M140a, #589).** Heartbeats default to 30 seconds. Set
+  `heartbeatMs: 0` to disable them. A NaN, negative, fractional or over-2^31-1 value is refused at
+  registration.
+- **BREAKING — `@setu-ts/decorator-plugin` (M140a, #589).** Gateway route options reach handshake
+  admission. Use `@Gateway(path, { guards })`; ignored HTTP authorization decorators on gateways now
+  fail startup. On a class that also serves HTTP routes, only its WebSocket handlers are checked,
+  and class-level authorization is accepted only when the gateway declares its own handshake guards.
+- **`@setu-ts/react-router-plugin` (M140a, #589).** A missing server build names the build task to
+  run before starting the application.
+- **Form routes document their encodings and codegen refuses unsupported request bodies (M137c,
+  #590, `@setu-ts/common`, `@setu-ts/validation-plugin`, `@setu-ts/openapi-plugin`,
+  `@setu-ts/sdk`).** A `forms: true` route's document now lists `application/json`,
+  `application/x-www-form-urlencoded` and `multipart/form-data`, or multipart alone when it has a
+  file field. `setu client --check` reports drift once; regenerate with `setu client`. Codegen now
+  refuses an operation whose only request body media types it cannot send, instead of silently
+  generating a method without a body argument. `OpenApiRequestBody.content['application/json']` is
+  now optional, since a file route lists `multipart/form-data` alone: code reading
+  `requestBody.content['application/json'].schema` from `OpenApiDocument` needs `?.` or a check for
+  the media type.
+
+- **Generated OpenAPI documents list derived errors and order responses by status (M137b, #588,
+  `@setu-ts/openapi-plugin`, `@setu-ts/rest-starter`, `@setu-ts/cli`).** A route carrying a guard,
+  body validator, route-level rate limiter or idempotency middleware now documents the errors that
+  middleware answers with; `deriveErrorResponses: false` stops adding those statuses, but responses
+  are still emitted in ascending status order and a declared 409, 415, 422 or 429 without a
+  description now reads by its status name. `createRestApp()`, when its validation format is RFC
+  9457, and the `rest` and `microservice` templates set `errorSchema: 'rfc9457'`;
+  `buildRestPlugins()` and `createMicroserviceApp()` do not, since the first installs no error
+  handler. `setu client --check` reports the changed document as drift once; regenerate the client
+  with `setu client`.
+
+- **BREAKING — typed capability registry (M139g, #585, 0.13.0, `@setu-ts/common`, `@setu-ts/kernel`,
+  `@setu-ts/testing`, `@setu-ts/react-router-plugin`, `@setu-ts/cli`).** Standard tokens carry a
+  required brand and infer their interfaces through `CapabilityServices`; reads reject wrong
+  explicit pairings and downcasts, and writes require the bound contract: an empty, partial or wider
+  object is refused, and a write under a `ServiceToken` or `RequestServiceToken` reads its entry
+  type from the token (`TokenEntry`). Database, Cloudflare, static and messaging plugins augment the
+  map. Singleton `ServiceToken` is now branded; request-bound entries use `requestServiceToken` and
+  resolve through `resolveRequestService` or `getService`. Raw registry reads refuse request tokens.
+  CLI modules and the full-stack app emit the request token constructor. Correct explicit interfaces
+  and single generic registry implementations remain supported; see the upgrading guide. The new
+  public types are `StandardCapabilityToken`, `CapabilityKey`, `RequestServiceToken`, `KeysServing`,
+  `KeysAccepting`, `TokenEntry`, `UnboundCapability` and `UnboundToken`.
+
+- **BREAKING — `X-Forwarded-Host` is believed only on opt-in (#583,
+  `@setu-ts/http-security-plugin`).** Behind a trusted proxy, `ipSecurityMiddleware` published the
+  LEFTMOST `X-Forwarded-Host` as the public origin. A proxy that passes a client's copy through
+  (Cloudflare Tunnel's cloudflared) let the client choose the host of every absolute URL the
+  application built, sign-in links included. The host now comes from `X-Forwarded-Host` only with
+  the new `IpSecurityOptions.trustForwardedHost: true`, and then from the rightmost entry, the one
+  the nearest proxy wrote; otherwise it is the `Host` the proxy sent. `X-Forwarded-Proto` is still
+  read by default, now from its rightmost entry. CSRF's zero-configuration same-origin candidate,
+  whose trust source is the browser's `Sec-Fetch-Site`, is unchanged. **Migration:** an application
+  whose proxy rewrites `Host` and writes `X-Forwarded-Host` (some load balancers and ingresses) sets
+  `ipSecurity: { trustForwardedHost: true }`; see `docs/deployment.md`.
+- **BREAKING — worker-pool metrics and health name pools by label, not path (#583,
+  `@setu-ts/worker-pool-plugin`).** The `task_module` metric label and the `/health` payload carried
+  the task-module specifier, normally a `file:///home/<user>/…` URL. Both now carry a task label:
+  the new `TaskPoolOptions.label`, or the module's file name without its extension. Health `pools`
+  entries are `{ task, workers, busy, queued, completed, failed }` (was `taskModule`).
+  `IWorkerPool.stats()`, errors and logs keep the specifier. **Migration:** update dashboards and
+  alerts that match `task_module` values; set `pools[<specifier>].label` where two modules share a
+  file name.
+- **BREAKING — the starters bound the request body at 1 MiB (#583, `@setu-ts/rest-starter`,
+  `@setu-ts/microservice-starter`, `@setu-ts/full-stack-starter`).** They called `RuntimePlugin()`
+  with no body bound and offered no way to set one, so a fresh application parsed a body of any
+  size, declared or chunked. The new `runtime` arm is spread over `{ maxBodyBytes: 1_048_576 }` (its
+  `platform` also drives the starters' own platform choices), and the same value fills
+  `httpSecurity.requestSize` unless the application sets its own bound. Client- and bidi-streaming
+  gRPC calls are bounded per message by `GrpcPlugin({ readMaxBytes })` instead. **Migration:**
+  routes that take larger bodies raise `runtime: { maxBodyBytes }`.
+- **BREAKING — a malformed `Content-Length` is refused (#583, `@setu-ts/http-security-plugin`).**
+  `requestSizeMiddleware` treated a `Content-Length` that is not plain decimal digits as absent and
+  let the body through unbounded; it now answers `400`. A `maxBodySize` that is not a non-negative
+  integer (`NaN` from an unset environment variable, `Infinity`) now throws `RangeError` when the
+  middleware is built, where before it disabled the bound. A chunked body (no `Content-Length`)
+  still passes the middleware and is bounded by `RuntimePlugin({ maxBodyBytes })`.
+
+- **BREAKING — scoped tokens are confined by default (M139a, #576, `@setu-ts/auth-plugin`,
+  `@setu-ts/common`, V12-37).** `AuthPlugin({ confineScopedTokens })` defaults to `true`: a
+  principal whose `scopes` is an array (a bearer token carrying a `scope` or `scp` claim) fails
+  every role and permission check (`requireRole`, `requirePermission`, `requireAnyRole`,
+  `requireAllPermissions`, `@Roles`, `@Permissions`, direct `hasRole` calls) and every scoped-RBAC
+  check (`requireScopedRole`, `requireScopedPermission`), whatever its subject holds. Before, a
+  token minted `envelopes:read` for an admin passed every admin route. Such a token reaches routes
+  guarded by `requireScopes`, which is unchanged; sessions and tokens with no scope claim are
+  unaffected. Authorization diagnostics record the refusal as the new `AuthorizationDecisionReason`
+  `token-confined`; scoped RBAC reports it with the same name. A `scope` or `scp` claim that is
+  present but malformed counts as an empty scope list, so it confines rather than escapes.
+  **Migration:** guard token routes with `requireScopes`, or sign browsers in with a session. An
+  application whose identity provider stamps every access token with scopes (`openid profile`) and
+  authorizes those tokens by role sets `confineScopedTokens: false` to keep the 0.12 behaviour.
+  `requirePolicy` is not capped. A consumer switching exhaustively on `AuthorizationDecisionReason`
+  needs a `token-confined` case. The diagnostics connector's authorization pages can now carry that
+  reason, and a diagnostics client (such as a devtool) built on 0.12 refuses a page containing it:
+  upgrade the client together with the application.
+- **BREAKING — a JWT without a subject is refused (M139a, #576, `@setu-ts/auth-plugin`, V12-18).**
+  The JWT strategy refuses a verified token whose `sub` is missing, not a string or empty. Before,
+  every such token authenticated as one shared principal, `'unknown'`, so grants, idempotency
+  records and ownership keyed by the principal id were shared across their callers. **Migration:**
+  put a subject in every token you mint; for a service token, the client id (RFC 9068 §2.2).
+
+- **BREAKING — `IIdempotencyService.transactional` is a required member (M139c, #578,
+  `@setu-ts/common`, `@setu-ts/idempotency-plugin`, `@setu-ts/agent-runs-plugin`, V12-4).** It is
+  `true` exactly when the provider was configured with a transactional store. `AgentRunsPlugin` now
+  reads it in `register` and refuses to start without one; before, the application booted healthy
+  and every tool-calling run failed at its first tool call. **Migration:** a custom
+  `IIdempotencyService` adds the member; an application registering `AgentRunsPlugin` passes
+  `IdempotencyPlugin({ transactional: { store: createDatabaseIdempotencyStore() } })`.
+- **BREAKING — quotas can be read (M139c, #578, `@setu-ts/auth-plugin`, V12-36).**
+  `IQuota.usage(key)` returns a `QuotaUsage`, `{ used, limit, remaining, windowEndsAt }`, from the
+  counter `reserve` charges, without charging it, so a budget meter needs no second ledger.
+  `IQuotaStore` gains a required `read(key, windowId)`, implemented by `MemoryQuotaStore` and
+  `RedisQuotaStore`. **Migration:** a custom `IQuotaStore` implements `read`, answering `0` for an
+  absent or expired window; a custom `IQuota` implements `usage`.
+
+- **A Redis backplane frame published while disconnected is lost, never delivered late (M139f, #579,
+  `@setu-ts/realtime-backplane-plugin`, X3-3).** The publisher connection the plugin builds now has
+  no offline queue, so a publish while it reconnects is refused at once (`503`, one `warn` per frame
+  in the WebSocket and SSE consumers) instead of being held and flushed seconds later, or lost
+  anyway to the reconnect race. `IRedisModule.create`'s options gain `enableOfflineQueue`. With an
+  injected pair, create the ioredis publisher with `enableOfflineQueue: false` or the node-redis
+  client with `disableOfflineQueue: true` for the same behaviour.
+- **`KubernetesProvider.isHealthy()` rejects with the reason (M139f, #579,
+  `@setu-ts/service-discovery-plugin`, X10-3).** A failed probe rejects with the fetch error, the
+  abort, or `Kubernetes EndpointSlice probe failed with HTTP <status>` instead of resolving `false`.
+  The plugin's indicator is unchanged; a caller of the provider directly must handle the rejection.
+
+- **gRPC replies stream; streamed request bodies reach the procedure (M139b, #581,
+  `@setu-ts/kernel`, `@setu-ts/grpc-plugin`).** A server-streaming or bidi reply, or one with
+  trailers, is written with `IResponse.stream`, so middleware that inspects RPC replies now sees
+  `streaming: true` for them, `inject()` refuses them (use `app.fetch()`), and the request logger,
+  metrics and telemetry time them to the first message. Connect and gRPC-Web unary replies stay
+  buffered; a native gRPC unary reply carries its status in trailers, so it streams too. A client-
+  or bidi-streaming call whose body nothing read gets the unread body, bounded per message by
+  `readMaxBytes` rather than `RuntimePlugin({ maxBodyBytes })`; unary and server-streaming bodies
+  keep the `maxBodyBytes` bound. The client's abort signal reaches every call, unary included, on
+  the new `RpcTransport.signal`. The kernel and `GrpcPlugin` now pass each call and reply as plain
+  fields (`RpcCall`, `RpcReply`) instead of building a fetch `Request` and `Response` per RPC, which
+  lifts Connect unary throughput on Node. An `IGrpcService` without `handleRpc` keeps the buffered
+  write. The `grpc-workspace` example's orders member calls billing through `grpcClient`.
+
+### Added
+
+- **`setu add` finishes full-stack wiring it can do safely (`@setu-ts/cli`, M141, #599).** On a
+  project composed by `createFullStackAppFromConfig`, `setu add health` and `setu add metrics` now
+  wire their generated barrels into the starter's arm, and `setu add sse`, `websocket` and
+  `realtime-backplane` set their opt-in arm to `{}`. The note for every other arm says whether the
+  starter already registers the plugin with defaults or registers it only once the arm is set. An
+  existing arm is never rewritten.
+
+- **Page route policies (M141, #599, `@setu-ts/react-router-plugin`, `@setu-ts/kernel`,
+  `@setu-ts/common`, `@setu-ts/auth-plugin`).** `pagePolicies` on `ReactRouterPlugin` attaches Setu
+  middleware (a rate limit, `requirePolicy`, `idempotent()`) to a page by its React Router route id;
+  `on: 'action'` limits one to the requests that can run the action, leaving page views alone.
+  Requests are matched with React Router's own `matchRoutes` after its `.data` normalization, so
+  document, single-fetch and `?index` requests all select the route; the kernel runs the policies
+  after the global pipeline with the page render as terminal. `PagePolicy` and `PageRouteSource` are
+  exported; `SsrRuntime.pageRoutes` is supplied by the default loader and by the generated
+  full-stack development entry. In `common`, `RouteDefinition.middlewareGroups`
+  (`RouteMiddlewareGroups`) selects static middleware groups per request, and `routeMiddlewareOf`
+  returns a route's whole middleware set, which `AuthPlugin`'s `requirePolicy` startup check now
+  reads. **Upgrade:** a custom `loadRequestHandler` must return `pageRoutes` before `pagePolicies`
+  can be used (`register()` refuses otherwise); anything that dispatches a `RouteDefinition` itself
+  must also run `middlewareGroups`, or its guards fail open.
+
+- **Form bodies and file uploads in the document and the client (M137c, #590, `@setu-ts/common`,
+  `@setu-ts/validation-plugin`, `@setu-ts/openapi-plugin`, `@setu-ts/sdk`).** `formFile` and
+  `FormFileOptions` from `@setu-ts/validation-plugin/zod` validate a file field's shape, accepted
+  media types and parsed byte length; `zod` is an optional peer needed only by that subpath.
+  `FORM_FILE_METADATA`, `FormFileMetadata`, `withFormFileMetadata` and `formFileMetadataOf` carry
+  its constraints without a Zod dependency in common. `RouteValidationMetadata.forms` records the
+  form opt-in. `OpenApiEncoding` and `OpenApiMediaTypeObject` describe multipart encoding and
+  request-body content; binary fields carry `format: binary` and
+  `OpenApiSchemaObject.contentMediaType`. `multipart` on `ClientRequest` sends flat form fields and
+  files with a runtime-generated boundary, and generated clients select JSON when listed, otherwise
+  multipart, with binary strings typed as `Blob`.
+
+- **Derived error responses and declared response headers (M137b, #588, `@setu-ts/common`,
+  `@setu-ts/openapi-plugin`, `@setu-ts/auth-plugin`, `@setu-ts/decorator-plugin`,
+  `@setu-ts/idempotency-plugin`, `@setu-ts/rest-starter`, `@setu-ts/cli`).** The generated document
+  lists the errors a route's own middleware answers with, read from its brands
+  (`deriveErrorResponses`, default `true`): `401` for a guard that needs a principal, `403` for one
+  that can refuse a signed-in caller (new `RouteSecurityMetadata.forbids`, set by every role,
+  permission, scope, policy, MFA and scoped guard and by `requireAuth({ delegation })`), `415` for a
+  body validator, `429` with `Retry-After` and the `RateLimit` fields for a route-level
+  `rateLimitMiddleware` (new `RATE_LIMIT_METADATA`, `RouteRateLimitMetadata`,
+  `withRateLimitMetadata` and `rateLimitMetadataOf`), and the idempotency middleware's `400`, `401`,
+  `409`, `422` and `429` with `Idempotent-Replayed` on success (new
+  `RouteIdempotencyMetadata.principalRequired`). `WWW-Authenticate` is listed only for a bearer,
+  OAuth 2.0 or OpenID Connect `deriveSecurity` scheme. `errorSchema: 'rfc9457'` points every
+  generated error at one `ProblemDetails` component; an unknown value refuses with
+  `OpenApiDocumentOptionsError` reason `'error-schema'`. New `RouteResponseDocumentation`,
+  `RouteResponseHeader`, `ApiResponseConfig.headers` and `OpenApiHeader` declare response headers. A
+  declared status is never changed. App-wide middleware and quota refusals are not visible to the
+  generator; declare their `429` on the route.
+
+- **OpenAPI document metadata, deprecation and per-route exclusion (M137a, #587, `@setu-ts/common`,
+  `@setu-ts/openapi-plugin`, `@setu-ts/decorator-plugin`, `@setu-ts/sdk`).** Document options
+  `contact`, `license`, `termsOfService`, `tags` and `externalDocs` describe the API; new
+  `OpenApiTag` and `OpenApiExternalDocs` types name their shapes. New `OpenApiDocumentOptionsError`
+  refuses duplicate document tag names and a license carrying both `identifier` and `url` at startup
+  or direct service/generator construction. `RouteSchema` and `ApiOperationConfig` gain `deprecated`
+  and `excludeFromDocument`: generated clients mark deprecated interface members `@deprecated` (the
+  method JSDoc carries a plain sentence, so the file stays clean under `no-deprecated`), and a
+  hidden operation neither claims an id nor produces a client method. Hidden routes remain served,
+  router-listed and discoverable as marked MCP tools. Neither flag changes access control or adds
+  response headers.
+
+- **M139d (#582, `@setu-ts/cli`, V12-25).** `setu add` accepts several validated package names, with
+  ordered progress and one install command.
+- **M139d (#582, `@setu-ts/cli`, V12-26).** `setu add view --plugin-only` installs the rendering
+  capability without example pages; this is the full-stack default.
+- **M139d (#582, `@setu-ts/cli`, V12-27).** Backend flags `--provider`, `--type`, `--adapter`,
+  `--dialect` and `--yes` select optional peers and schema-tool configuration while preserving
+  application-owned credentials and clients.
+- **M139d (#582, `@setu-ts/cli`, V12-12).** `setu build` emits literal worker-pool task URL targets
+  and relocates their `.js` URLs separately for each entry bundle, including tasks and migrations; a
+  task reached through a `.js` import of a `.ts` source is found, a Prettier-wrapped literal is
+  accepted, and a non-literal reference naming `.task.ts` in the call is refused (a path held in a
+  variable is not detected).
+
+- **Tenant repositories join a transaction (M139c, #578, `@setu-ts/common`,
+  `@setu-ts/multi-tenancy-plugin`, `@setu-ts/database-plugin`, V12-20).** `getRepository` and
+  `getRepositoryFor` take an optional third argument, the unit of work `db.transaction` hands out
+  (`ITenantUnitOfWork`). `DatabaseTenantDataStore` implements the new optional
+  `ITenantDataStore.withUnitOfWork` with every tenant guard intact; a store without it throws
+  `TenantUnitOfWorkUnsupportedError`.
+- **Mail attachments (M139c, #578, `@setu-ts/common`, `@setu-ts/mail-plugin`, V12-21).**
+  `MailMessage.attachments` takes `MailAttachment` in-memory files (`Uint8Array` or UTF-8 text),
+  inline with a `contentId`. SMTP, SES and SendGrid send them; `LogProvider` logs their names and
+  sizes only. `send` and `sendTemplate` refuse a filename, content type or content id that could
+  break a header.
+- **Whole-source replacement up to 5,000 records (M139c, #578, `@setu-ts/vector-store-plugin`,
+  V12-9).** One `replaceSource` call takes 5,000 records (`upsert` stays at 500), written in slices
+  of 500 inside pgvector's one transaction. Before, a source over 500 records could not be held: a
+  second call deleted the first call's records.
+- **One credential per route (M139a, #576, `@setu-ts/auth-plugin`, V12-37).**
+  `requireAuth({ credentials: 'cookie' | 'header' })` admits only a principal the plugin
+  authenticated with that kind of credential (`'any'` is the default). A mismatch, or a request
+  whose credential kind was never recorded, is answered as unauthenticated: `401`, or the
+  `signInPage` redirect. Header strategies run first, so a request carrying a bearer token and a
+  session cookie counts as `'header'`; a caller-supplied strategy that declares no `credential`
+  satisfies only `'any'`.
+- **Tokens bound to the tenant (M139a, #576, `@setu-ts/auth-plugin`, V12-19).** `jwt.tenantClaim`
+  and a per-issuer `tenantClaim` name the claim that carries the tenant id. When set, a token whose
+  verified claim differs from `request.tenant.id` is refused, and so is a token carrying the claim
+  on a request with no tenant; an issuer token refused this way is reported as `tenant-mismatch`.
+  Opt-in, with no default claim name.
+- **The request reaches the password check (M139a, #576, `@setu-ts/common`, `@setu-ts/auth-plugin`,
+  V12-19).** `IAuthService.verifyCredentials(credentials, request?)` and
+  `local.verify(identifier, secret, request?)` take an optional request, so a multi-tenant
+  application can look the user up within `request.tenant`; `apiKey.validate(key, request?)` gets it
+  too, so a key can be bound to its tenant. The auth README's full-stack sign-in recipe passes
+  `ctx.request`; the multi-tenancy README explains why a lookup by email alone lets a user sign in
+  on another tenant's host. Existing callbacks and implementations still type-check.
+- **`CSRF_EXEMPT_STATE_KEY` (M139a, #576, `@setu-ts/common`, `@setu-ts/session-plugin`).**
+  In-process middleware that runs before form CSRF may set this flag to `true` for an exact route
+  that enforces its own cross-site rule; form CSRF then skips the request and commits no session for
+  it.
+
+- **HTTP/2 and native gRPC (M139b, #581, `@setu-ts/runtime`, `@setu-ts/common`, `@setu-ts/kernel`,
+  `@setu-ts/grpc-plugin`).** `RuntimePlugin({ http2: true })` serves cleartext HTTP/2 (h2c) and
+  HTTP/1.1 on one port: each connection is classified by its first bytes, as `Deno.serve` and Go's
+  unencrypted HTTP/2 do, so browsers, probes and WebSocket upgrades keep working beside gRPC
+  clients, and a connection that sends nothing for 10 s is closed.
+  `RuntimePlugin({ http2: { key, cert } })` serves HTTP/2 over TLS with ALPN and HTTP/1.1 on the
+  same port; `Http2TlsOptions` is its type. Bun is served by the Node adapter while the option is
+  set (WebSockets then need `ws`); Deno passes TLS to `Deno.serve`; Workers ignore it. Closing sends
+  `GOAWAY` to open HTTP/2 sessions, as does 75 s with no stream open on one, and HTTP/1.1 on the
+  shared port keeps `node:http`'s header and request timeouts. Common gains
+  `IRequest.responseTrailers`, `StreamOptions` for `IResponse.stream(body, { trailers })`, a
+  `trailers` member on the streaming `ResponseSnapshot`, and `RpcTransport`, `RpcCall` and
+  `RpcReply` with the optional `IGrpcService.handleRpc` and `IGrpcService.streamsRequest` members;
+  `refuses` takes an optional transport. The Node adapter writes trailers on HTTP/2, and
+  `GrpcPlugin` serves native `application/grpc` there, so `grpcurl`, `ghz` and grpc-go clients — and
+  reflection through `grpcurl` — reach Setu directly; HTTP/1.1, Deno and Workers keep the
+  Trailers-Only `UNIMPLEMENTED`. `GrpcPluginOptions.readMaxBytes` (default 4 MiB) bounds each
+  request message, and each reply message the plugin's clients receive. Ships in 0.13.0.
+- **`grpcClient`: the gRPC plugin calls other services as well as serving (M139b, #581,
+  `@setu-ts/grpc-plugin`, `@setu-ts/common`, `@setu-ts/cli`).**
+  `grpcClient(services, definition, target, options?)` returns a typed Connect client through the
+  optional `IGrpcService.client`. A target that is a service name resolves through service discovery
+  on every call and reports each outcome back, so an instance that refuses connections is ejected;
+  an absolute URL is used as is. A unary call the server refused before processing it (HTTP/2
+  `REFUSED_STREAM`, as a server shutting down does) is sent once more on a fresh pick, which spares
+  most unary calls during a rolling restart; a call whose retry is refused too (by the only
+  instance, say) still fails, and an error a server sent is never resent. A target carrying
+  credentials (`user:password@`), a query or a fragment, or a name outside the service-name grammar
+  (letters, digits, `.`, `_`, `-`), is refused without being repeated. Calls share one HTTP/2
+  session per instance, allowed to buffer 64 MB rather than Node's 10 MB (which reset streams with
+  several 1 MB replies in flight), have a 5 s deadline, carry the active span as `traceparent`, and
+  are refused with `Unavailable` once the application stops. `GrpcClientOptions` (`basePath`,
+  `protocol`, `httpVersion`, `timeoutMs`) can be set per target in the new
+  `GrpcPluginOptions.clients`, and `GrpcPluginOptions.serve: false` registers the plugin for calling
+  only. `@connectrpc/connect-node` is a new optional peer, loaded on a client's first call. A
+  workspace member generated with `--depends-on` a gRPC member now gets that client-only
+  `GrpcPlugin` and its packages from the CLI, and `setu workspace rpc` re-renders the members that
+  call the one it changes. `grpcClientProvider(token, definition, target, options?)` is the same
+  client as a DI provider: `@Module({ providers })` now also takes factory entries
+  (`ModuleFactoryProvider` in `@setu-ts/common`: `{ provide, useFactory, inject?, scope? }`), so a
+  decorated class `@Inject`s the client. The client runs on Node and Bun; on Cloudflare Workers it
+  refuses with a `TypeError` where it is asked for, and on Deno it is not yet safe, because Deno's
+  Node-style HTTP clients can crash the process when their peer goes away. Ships in 0.13.0.
+- **BREAKING — workspace member names are the ones `generate app` writes (M139b, #581,
+  `@setu-ts/cli`).** A `setu.workspace.json` member whose name is not its own lowercase kebab-case
+  form, or whose derived identifiers are unsafe (`Orders_V2`), is refused, with a message that names
+  the member and suggests a rename (`orders-v2`), by every command that refuses an unreadable
+  manifest: `generate app`, `generate library`, `setu workspace`, `setu check` and
+  `setu devtool enable`. Commands that read a manifest only to find a workspace (`setu add`,
+  `setu agents`) treat it, as before, as no workspace. Before, such a name reached generated source,
+  YAML and shell commands unchecked. To restore a workspace, rename the member's entry and its
+  directory, and the old name wherever another member still uses it: its `dependsOn` list, its
+  generated discovery module, and code that calls the member by name.
+
+### Fixed
+
+- **Documentation (M140e, M139e, #597; `@setu-ts/agent-runs-plugin`, `@setu-ts/auth-plugin`,
+  `@setu-ts/config-plugin`, `@setu-ts/decorator-plugin`, `@setu-ts/events-plugin`,
+  `@setu-ts/mail-plugin`, `@setu-ts/multi-tenancy-plugin`, `@setu-ts/secrets-plugin`,
+  `@setu-ts/session-plugin`, `@setu-ts/sse-plugin`, `@setu-ts/vector-store-plugin`,
+  `@setu-ts/websocket-plugin`, `@setu-ts/worker-pool-plugin`, `@setu-ts/full-stack-starter`,
+  `@setu-ts/cli`; V12-5, V12-6, V12-7, V12-8, V12-13, V12-14, V12-15, V12-17, V12-38, V12-88,
+  V9-29).** The docs, READMEs, agent cards and PUBLIC_API now match the M140a–d output. The
+  session-secret error names configuration as a source, and the decorator-plugin injection error
+  gives the standard-decorators reason. The agent brief's `config.get` rule says the default applies
+  only to an absent key, and Workers projects get a test rule. Auth-plugin's full-stack recipe gains
+  sign-out, and the ai-chat example's budget middleware takes a budget scope so a durable run can be
+  budgeted. The website counts its packages from the published list.
+
+- **V12-140 (`@setu-ts/cli`, #595).** `setu check` E017 scans every path a symlink gives a page
+  directory under `app/`, not only the first one walked, so a relative kernel import reached through
+  a second alias is reported. Each alias resolves relative imports from its own location, as Vite
+  does with `resolve.preserveSymlinks: true`; only a link back to one of its own parent directories
+  is skipped, and the 4,096-directory cap reports a larger walk as `setu.E018`.
+
+- **V12-102, V12-103, V12-104, V12-105, V12-106, V12-107, V12-109, V12-118, V12-80, V12-124 (M140b,
+  #591, `@setu-ts/cli`).** Workers projects no longer emit `deno.json`. `setu add queue` is refused
+  on Workers, because its default queue lives in one isolate's memory, and `setu generate job` there
+  names that reason instead of suggesting the refused command; use
+  `CloudflarePlugin({ queue: { binding } })` with a `queue` export. The Workers entry routes `fetch`
+  and every export through one `withApplication`, and the `wrangler.toml` queue and Cron comments
+  match the exports the entry has. The commented Durable Object example uses the realtime
+  backplane's `REALTIME` binding. Every Workers README has a Deploy section (queue creation where
+  the template declares queues, `wrangler secret put` for each generated secret) and, where `/live`,
+  `/ready` and `/metrics` are served, says what they mean on Workers. The full-stack README omits
+  its TLS-proxy section on Workers, and `.dev.vars` describes `wrangler dev`. The module sample's
+  storage comment names isolate memory. A Deno README lists only tasks the project has. An empty
+  port, broker, Redis or discovery value now falls back to the generated default on every runtime,
+  in `config.get` reads too; `setu adopt` and the dev-entry recognizers still accept the nullish
+  form earlier releases wrote.
+
+- **V12-58 (#585, `@setu-ts/cli`):** the workspace `AGENTS.md` and the root `README.md` transport
+  section mask the userinfo of a `brokerUrl` override, keeping the host and the default fallback.
+- **V12-59 (#585, `@setu-ts/cli`):** `setu.W006` warns about installed zero-config providers and MCP
+  without a call in the config, exempts starter-owned arms, and supports check silences.
+- **V12-61 (#585, `@setu-ts/cli`):** full-stack scaffolds expose a validated `TRUST_FORWARDED_HOST`
+  switch alongside `TRUSTED_PROXIES`, with proxy guidance and safe defaults.
+- **`setu add graphql` and `setu add grpc` record their runtime peers (#584, `@setu-ts/cli`).**
+  `add graphql` now pins `graphql` and `add grpc` pins `@connectrpc/connect` and
+  `@bufbuild/protobuf`, in `package.json` or the Deno import map. Both are optional peers that no
+  package manager installs for you, so an app registering either plugin failed at start.
+- **Install hints name every package manager (#584, `@setu-ts/graphql-plugin`,
+  `@setu-ts/logger-plugin`).** The graphql runtime and Pino load errors told Node and Bun projects
+  to run `deno add`; they now list the npm, Bun and Deno commands, as the gRPC loader already did.
+- **M139d (#582, `@setu-ts/cli`, V12-42).** A `--module` route on functional full-stack now mounts
+  at `/api/<m>/<name>`; controller, SSE and page-shadow bases use the same module mount.
+- **M139d (#582, `@setu-ts/cli`, V12-47).** The telemetry preload hooks only instrumented HTTP,
+  Redis, AMQP and Kafka modules, leaving application TSX views unwrapped.
+- **M139d (#582, `@setu-ts/cli`, V12-46).** Full-stack SSR failures log the request id and a
+  URL-masked stack.
+- **M139d (#582, `@setu-ts/cli`, V12-24).** Generated Node and Bun entries print a plain listening
+  URL after successful startup; Deno keeps its runtime banner.
+- **M139d (#582, `@setu-ts/cli`, V12-48).** A Vite bind failure exits 1 with a named port and
+  standalone or workspace remedy.
+- **M139d (#582, `@setu-ts/cli`, V12-44).** The devtool boot refusal says the application did not
+  start and the connector is not running.
+- **M139d (#582, `@setu-ts/kernel`, V8-14).** The kernel duplicate-plugin message names
+  starter-owned options and distinguishes service replacement under another plugin name.
+- **M139d (#582, `@setu-ts/cli`, V12-2).** `setu add mcp` preserves config and prints
+  `McpPlugin({})` with the requirement to mark at least one route with `mcpTool()` or `@McpTool()`
+  before boot.
+- **M139d (#582, `@setu-ts/cli`, V12-3).** Full-stack inserts zero-config plugins above its managed
+  registration loop when the starter does not own them.
+- **M139d (#582, `@setu-ts/cli`, V12-28).** Database adds preserve schema migration scripts and
+  create-only Drizzle or Prisma 7 config files, without writing application schemas.
+- **M139d (#582, `@setu-ts/cli`, V12-30).** Full-stack directly declares `exceptions`; it is addable
+  without registration and error-factory brief guidance requires it installed.
+- **M139d (#582, `@setu-ts/cli`, V12-33).** Non-memory full-stack queue scaffolds declare the queue
+  package and its processor barrel so generated jobs run.
+- **M139d (#582, `@setu-ts/cli`, V12-60).** `setu workspace broker` moving a full-stack member to a
+  broker that backs a queue (Redis, RabbitMQ) adds `@setu-ts/queue-plugin` to the member manifest,
+  so `setu g job` works there as on a member generated with that broker. `setu.config.ts` stays the
+  developer's, so the command prints the `processors: [...QUEUE_PROCESSORS]` lines `setu check`
+  requires once a job exists, until the config reads them.
+- **M139d (#582, `@setu-ts/cli`, V12-1).** Agent briefs use formatter-stable lists and
+  whitespace-normalized freshness; Deno preserves prose wrapping.
+- **M139d (#582, `@setu-ts/cli`, V12-22).** Agent briefs distinguish starter-provided options from
+  packages that must be added.
+- **M139d (#582, `@setu-ts/cli`, V12-23).** Full-stack brief rules resolve services with
+  `getService(context, TOKEN)` and reserve context keys for non-service values.
+- **M139d (#582, `@setu-ts/cli`, V12-16).** Generated jobs and plugins barrel headers describe both
+  plugin-list and starter/full-stack registration forms.
+- **M139d (#582, `@setu-ts/cli`, V12-31).** Generated middleware points to
+  `app/server/require-user.server.ts` for page middleware.
+- **M139d (#582, `@setu-ts/cli`, V12-43).** Workers config comments identify both Deno and Node as
+  diagnostics-listener runtimes.
+- **M139d (#582, `@setu-ts/cli`, V12-45).** Generated Kubernetes guidance documents repeatable
+  `--pull-secret <name>` for existing namespace Secrets.
+- **M139d (#582, `@setu-ts/cli`, X91-1).** Full-stack can adopt a same-named controller while
+  retaining its generated service, token, types and page; the controller tests are omitted.
+  Same-named services remain refused because the token and index import the generated service types
+  and factory.
+- **M139d (#582, `@setu-ts/cli`, V12-32).** Read-only wiring checks accept ordinary templates,
+  regexes and division while retaining stops on reflection, computed access, dynamic execution and
+  ambiguous syntax. Automatic edits keep the strict lexer.
+- **M139d (#582, `@setu-ts/cli`, X93-3).** Example download refusals read the deepest bounded cause
+  and code, terminate cycles and mask URL credentials.
+
+- **A discovery backend URL with credentials is refused at startup (#580,
+  `@setu-ts/service-discovery-plugin`, V12-52).** A Consul `address` or Kubernetes `apiServer` with
+  userinfo (`http://user:pass@host`) never worked with the default HTTP transport, because `fetch`
+  refuses such a URL, and its refusal named the whole URL: the password reached the
+  self-registration start error and the `cause` of a resolve error. The provider now refuses it
+  before any request with a fixed message that names the `token` option, whatever transport is
+  configured, and refuses the same way an address that does not parse as a URL (an out-of-range port
+  or a stray space after `user:pass@` made `fetch` quote it too). **Upgrade:** an application whose
+  custom `http` option accepted such an address moves the credential out of the URL, into `token` or
+  into its transport.
+- **`close()` ends a backplane SUBSCRIBE that never answers (#580,
+  `@setu-ts/realtime-backplane-plugin`, V12-53).** With `commandTimeoutMs: 0`, an open whose
+  SUBSCRIBE went unanswered held on forever and `close()` did not release it. `close()` now cancels
+  the wait, and an open that a `close()` overtakes during the publisher-ready wait no longer waits
+  on UNSUBSCRIBE or QUIT: the connections the backplane built are force-closed, and an injected pair
+  is left connected and is not left subscribed. With a bound, nothing changes.
+- **pgvector `ensure: 'verify'` checks what the indexes are (M139c, #578,
+  `@setu-ts/vector-store-plugin`, V12-10).** `ensureCollection` now requires `vs_<name>_src` on
+  `(scope, source_id)` and `vs_<name>_hnsw` as `USING hnsw (embedding vector_cosine_ops)`, both on
+  the collection's table, and names the expected definition when one differs. Before, an index of
+  the right name passed whatever it was, so an L2 index served cosine queries. **Upgrade:** both
+  `ensure: 'verify'` and `ensure: 'create'` now refuse such an index at startup with
+  `VectorCollectionMismatchError`, and `CREATE INDEX IF NOT EXISTS` does not replace it: drop the
+  index and recreate it with the definition the error names.
+- **Agent cards describe the M139a behaviour (M139c, #578).** The auth, multi-tenancy and MCP
+  `AGENT_CARD.md` files, which `setu agents` briefs point agents at, now state scoped-token
+  confinement, the `sub` requirement, `requireAuth({ credentials })`, `tenantClaim`, the request on
+  `local.verify`, and the MCP path's form-CSRF exemption.
+- **MCP discovery behind form CSRF (M139a, #576, `@setu-ts/mcp-plugin`, V12-35).** In a full-stack
+  app, an anonymous `POST /mcp` was answered `403 CSRF token validation failed` before
+  authentication could send the `401` with `WWW-Authenticate: Bearer resource_metadata="…"` that an
+  MCP client needs to start discovery. `McpPlugin` now marks `POST` on its own path exempt through
+  `CSRF_EXEMPT_STATE_KEY`; the route's `Origin` check still refuses a cross-site browser, and tool
+  calls are still verified by form CSRF on their inner requests. The session plugin commits no
+  session for a request carrying the marker, even without form CSRF. `McpPlugin({ path })` now
+  refuses a path ending in `/`: the router lets `/x/` reach a route registered as `/x`, so such a
+  path could share its request path with an application route that the exemption would then cover.
+- **Issuer principals keep their mapped scopes (M139a, #576, `@setu-ts/auth-plugin`).** When an
+  issuer's `toPrincipal` returned an object whose `scopes` was inherited or non-enumerable, the
+  strategy's object spread dropped them, so a scoped token escaped `confineScopedTokens`. The mapped
+  scopes are now read once and written back.
+- **`*.localhost` URLs (M139a, #576, `@setu-ts/auth-plugin`, V12-34).** `resource`,
+  `authorizationServers`, sign-in redirect and authorization URLs, SAML `acsUrl` and `idp.ssoUrl`,
+  and passkey origins accept `http` on any `*.localhost` name (RFC 6761 §6.3), so
+  `http://acme.localhost:3000` starts. URLs the server fetches (JWKS, discovery issuers, token and
+  userinfo endpoints) still accept `http` only on `localhost`, `127.0.0.1` or `[::1]`, and the
+  refusal says which rule applied.
+- **The full-stack template rotates the session at login (M139a, #576, `@setu-ts/cli`, V12-11).**
+  The generated `app/routes/_auth/login.tsx` calls `session.regenerate()` before writing the
+  signed-in user, so a session id planted before login no longer carries into the signed-in session.
+  Projects already generated should add the same call.
+- **A failing discovery readiness probe logs why (M139f, #579, `@setu-ts/service-discovery-plugin`,
+  X10-3).** One `warn` names the cause when the failure starts (a Deno `UnknownIssuer` without
+  `DENO_CERT`, an HTTP status), repeats log at `debug`, and the recovery at `info`. A cold-resolve
+  error message ends with the same cause; the `503` body is unchanged. A Kubernetes service-account
+  token or Consul ACL token holding anything but visible ASCII is refused with a fixed message
+  before any request, so `fetch`'s error, which quotes the whole header value, can no longer carry
+  the token into a log. The refusal is a configuration fault, so a request that needs a cold resolve
+  answers `500`, not `503`.
+- **A pg pool acquire timeout reads as saturation (M139f, #579, `@setu-ts/database-plugin`, V8-3).**
+  With `poolStats`, a probe that timed out waiting for a pool client keeps the indicator `up`
+  (`reachable: 'unknown'`) while queries are completing, where `connectionTimeoutMillis` under the
+  2-second probe bound used to fail `/ready` while PostgreSQL was up.
+- **A queue loop outage logs at `warn` and its recovery at `info` (M139f, #579,
+  `@setu-ts/queue-plugin`, X88-9).** The plugin now passes the logger's `warn` and `info`, so the
+  M131a state tracker no longer falls back to `error` and the recovery line is written.
+- **A connection lost under a statement says so (M139f, #579, `@setu-ts/database-plugin`, V12-50).**
+  It is still a `504` `DatabaseTimeoutError`, but its message no longer claims the driver call bound
+  fired.
+- **Alerting advice names `HealthPlugin({ details: true })` (M139f, #579, V12-49).** Seven READMEs
+  that say to alert on a `data.<field>` now say the default `/health` body omits `data`.
+
+- **gRPC server streams arrived as one chunk at the end (M139b, #581, V12-39, `@setu-ts/kernel`).**
+  The kernel read the whole Connect response before writing it, so five messages sent 500 ms apart
+  reached the client together at 2.5 s, and a stream that never ends delivered nothing while holding
+  memory.
+- **The grpc-plugin README's HTTP/2 claim was not true on Node (M139b, #581, V12-40,
+  `@setu-ts/grpc-plugin`).** Node served HTTP/1.1 only; `RuntimePlugin({ http2 })` makes Connect and
+  gRPC-Web over HTTP/2 real, and the README now states what each runtime serves.
+- **A client could choose the scheme of `request.url` (M139b, #581, V12-51, `@setu-ts/runtime`).**
+  Over cleartext HTTP/2 the scheme came from the client's `:scheme` (Deno at `0.12.0`), and on Node
+  an absolute-form request line (`GET https://… HTTP/1.1`) set it, so `requestOriginOf` saw `https`
+  on a plain connection. Served requests now take the listener's scheme, `https` only under TLS.
+
 ## [0.12.0] — 2026-11-07
 
 ### Added
@@ -1180,13 +1851,13 @@ All notable changes to this project are documented here. The format follows
 - **Per-request work on the request path (#518, 0.11.0, `@setu-ts/kernel`, `@setu-ts/common`,
   `@setu-ts/runtime`, `@setu-ts/metrics-plugin`, `@setu-ts/http-security-plugin`).** From a Bun CPU
   profile of the REST scaffold, each change measured alone first: the middleware chain runs without
-  an `async` wrapper per stage when diagnostics are off (koa-compose's shape); the request identity
-  guard is installed once per request class rather than per request; log redaction fills its copy
-  without per-call scaffolding and walks only into nested values; a request path without `%` skips
-  `decodeURIComponent`; a request-scoped service registry allocates storage only when something
-  registers into it; a metric with distinct label names validates and keys an observation in one
-  pass, and a histogram counts in a typed array; the default security headers are copied into each
-  response in one step. Behaviour is unchanged apart from the two entries under Changed.
+  an `async` wrapper per stage when diagnostics are off (the composed-middleware shape); the request
+  identity guard is installed once per request class rather than per request; log redaction fills
+  its copy without per-call scaffolding and walks only into nested values; a request path without
+  `%` skips `decodeURIComponent`; a request-scoped service registry allocates storage only when
+  something registers into it; a metric with distinct label names validates and keys an observation
+  in one pass, and a histogram counts in a typed array; the default security headers are copied into
+  each response in one step. Behaviour is unchanged apart from the two entries under Changed.
 
 - **Histogram boundaries: repeats, `Infinity` and `NaN` (#518, 0.11.0, `@setu-ts/metrics-plugin`).**
   A `Histogram` configured with the same boundary twice counted each observation once per repeat in
@@ -3559,7 +4230,7 @@ All notable changes to this project are documented here. The format follows
   start command, and showed the workspace discovery map without its `<MEMBER>_HOST` override. Each
   corrected claim was checked against a project the CLI scaffolded.
 
-- **The NestJS migration guide mapped several NestJS features to hand-written code the framework
+- **The migration guide mapped several framework features to hand-written code the framework
   replaces (`docs/migration-nestjs.md`, PR #426).** Guards now map to `AuthPlugin` with
   `requireAuth()`/`requireRole()`, in place of a hand-written global middleware that would also have
   refused `/health`. Exception filters map to `errorHandler({ respond })`, WebSocket gateways to
@@ -3578,15 +4249,14 @@ All notable changes to this project are documented here. The format follows
   a result and exit, or which port each app uses. Each deep dive now gives the commands it was
   checked with against the running app, and links to that app's source.
 
-- **The Fastify migration guide's testing example threw at startup, and several sections described
-  behaviour the framework does not have (`docs/migration-fastify.md`, PR #426).** `createTestApp()`
-  with no plugins throws, because the kernel requires a runtime plugin. The example now passes
-  `RuntimePlugin()`, and the guide points at `app.inject()`, which works as Fastify's does. The
-  shutdown hooks' comments were reversed (`onStopping` runs while the application still serves;
-  `onShutdown` runs after the socket closes). The encapsulation section claimed capability tokens
-  scope a service, but every registered service is application-wide. Validation and error handling
-  now show `validateBody(...)` and `errorHandler()` in place of hand-written equivalents, and query
-  parameters come from `ctx.query`.
+- **The migration guide's testing example threw at startup, and several sections described behaviour
+  the framework does not have (`docs/migration-fastify.md`, PR #426).** `createTestApp()` with no
+  plugins throws, because the kernel requires a runtime plugin. The example now passes
+  `RuntimePlugin()`, and the guide points at `app.inject()`. The shutdown hooks' comments were
+  reversed (`onStopping` runs while the application still serves; `onShutdown` runs after the socket
+  closes). The encapsulation section claimed capability tokens scope a service, but every registered
+  service is application-wide. Validation and error handling now show `validateBody(...)` and
+  `errorHandler()` in place of hand-written equivalents, and query parameters come from `ctx.query`.
 
 - **The React Router development guide's loop failed for the CLI's full-stack skeleton on Deno
   (`docs/react-router-dev.md`, PR #426).** Re-verified on Deno 2.9.6, Vite 8.3.1 and react-router
@@ -4170,8 +4840,7 @@ All notable changes to this project are documented here. The format follows
   its generated CQRS and event ingress classes register through `DecoratorPlugin({ ingress })` — the
   functional `src/cqrs` and `src/events` barrels are not emitted, so nothing is registered twice.
   `docs/migration-nestjs.md` gains `Scaffolding` and `Microservices` sections naming the decorator
-  route for `@MessagePattern`, `@EventPattern`, `@nestjs/cqrs`, `@nestjs/bull` and
-  `@nestjs/schedule`.
+  route for message and event patterns, commands and queries, queues and scheduled tasks.
 - **Health observations (M98d): an opt-in, minimized view of health-check outcomes through the M98b
   diagnostics connector.** `HealthPlugin` accepts a `diagnostics` option (`HealthDiagnosticsOptions`
   / `HealthDiagnosticsScheduledOptions`, exported from `@setu-ts/health-plugin`) that retains only
@@ -6501,10 +7170,10 @@ live — see [Versioning](docs/versioning.md).
   Only `send()` with no argument worked. Present since the M23 fetch model; unrelated to M88, which
   changed the header source and left body handling byte-identical.
 
-  The body is now dropped rather than the throw propagated — what Express and Fastify both do, and
-  what RFC 9110 §15.3.5 implies, since a `204` has no content. Headers are preserved (RFC 9110
-  permits representation metadata on a `204`), and a dropped **stream** body is `cancel()`led rather
-  than discarded, so its source is released instead of leaking.
+  The body is now dropped rather than the throw propagated — what RFC 9110 §15.3.5 implies, since a
+  `204` has no content. Headers are preserved (RFC 9110 permits representation metadata on a `204`),
+  and a dropped **stream** body is `cancel()`led rather than discarded, so its source is released
+  instead of leaking.
 
 - **`setu add` refuses extra arguments instead of silently discarding them.** The contract is
   singular; `setu add auth cache` used to add one package, report `updated deno.json` and exit 0
@@ -6613,11 +7282,10 @@ why this is `0.3.0` rather than a patch.
 The request path was rebuilt around two principles: allocate nothing a route did not ask for, and
 never enter the microtask queue when the answer is already known. Measured with bombardier on Node
 (`-c 64`, medians of interleaved runs), bare `/json` went from **41,437 to ~100,000 rps** — from
-roughly **34% to ~90% of the bare Hono router** the framework is built on, and from ~65% to
-**130–160% of NestJS-Express**. With three middleware registered — the shape any real application
-has — Setu-TS runs at **132% of Hono** and **113% of raw Express**, because Hono's `compose()`
-awaits every stage and loses 40.6% of its throughput to three middleware where this pipeline loses
-17.9%.
+roughly **34% to ~90% of the bare Hono router** the framework is built on. With three middleware
+registered — the shape any real application has — Setu-TS runs at **132% of Hono**, because Hono's
+`compose()` awaits every stage and loses 40.6% of its throughput to three middleware where this
+pipeline loses 17.9%.
 
 Every change below except the global-objects one is runtime-agnostic, so Deno and Bun benefit too.
 Measured the same way, Deno goes from **62,637 to 160,130 rps** — **2.56x**, and from 33% to **~85%
@@ -8742,9 +9410,9 @@ refuses dependencies younger than 24 hours unless you pass `--min-dep-age 0`.
 
 - **`--template nest` was renamed to `--template class-based`.** The composition is unchanged — the
   REST set plus `DecoratorPlugin` and `DiPlugin`, with a decorated controller and an injected
-  service written for you. The framework has a class-based mode, not a NestJS mode, and the name
-  said otherwise. The old name is refused with a message naming the new one rather than falling into
-  the generic unknown-template error.
+  service written for you. The framework has a class-based mode, not a framework-flavoured one, and
+  the name said otherwise. The old name is refused with a message naming the new one rather than
+  falling into the generic unknown-template error.
 - **`setu new --di` was removed**, and is refused with a message pointing at
   `--template class-based`. Decorators and dependency injection were independently selectable, which
   made four compositions out of one axis; two of them — decorators without a container, and a
@@ -8999,7 +9667,7 @@ migration.
   that decorators are optional, DI is optional, and that no feature requires either — but the CLI
   offered one coarse control. No template gave you neither and refused `g controller`/`g module`;
   `rest`/`microservice` gave decorators without a container; only `nest` gave both, along with a
-  worked NestJS-style example you may not have wanted.
+  worked decorator-first example you may not have wanted.
 
   `setu new --di` adds `DiPlugin` to any template, so a container is now a choice of its own:
 
@@ -9072,9 +9740,9 @@ migration.
 
 - **A documentation hub, and gates that keep it true** (M38). Nine curated guides under
   [`docs/`](docs/) — getting started, plugin architecture, the plugin catalog, the programmatic API,
-  decorators, writing custom plugins, migrating from NestJS and from Fastify, the examples index,
-  and runtime deployment — plus a reproducible `deno doc` API-site generator (`deno task docs:api`).
-  Every package README now links to its own `PUBLIC_API.md` section.
+  decorators, writing custom plugins, migration guides for teams arriving from another framework,
+  the examples index, and runtime deployment — plus a reproducible `deno doc` API-site generator
+  (`deno task docs:api`). Every package README now links to its own `PUBLIC_API.md` section.
 
   The guides are mechanically checked rather than trusted: committed fixtures representing all nine
   are type-checked against the workspace, a Markdown gate validates the package catalog and every
@@ -9931,7 +10599,7 @@ form CSRF; and the starter and template work that makes all of it composable in 
   throws during `register()` without an adequate secret; **no default changes**.
 - **Parameter-level `@Inject` in `@hono-enterprise/decorator-plugin`** (Milestone 36b) — `Inject`
   now works on a constructor parameter as well as on the class, binding one token to that argument
-  by position, which is the form a developer arriving from NestJS expects:
+  by position, which is the form a developer arriving from a decorator-first framework expects:
   `constructor(@Inject(CAPABILITIES.DATABASE) private db: IDatabase) {}`. The class-level positional
   list is **deprecated, not removed** (AI_GUIDELINES §9.2) and keeps working for the whole `0.x`
   line. A token is still always required — inferring it from the parameter's type needs
@@ -10513,10 +11181,11 @@ are never hard dependencies. Each is injected through plugin options or imported
 
 ### Milestones in this release
 
-Milestones 0–33 and 41–46. See [ROADMAP.md](ROADMAP.md) for scope per milestone and
+Milestones 0–33 and 41–46. See `ROADMAP.md` on the `develop` branch for scope per milestone and
 [PUBLIC_API.md](PUBLIC_API.md) for the full exported surface.
 
-[unreleased]: https://github.com/setu-ts/setu-ts/compare/v0.12.0...HEAD
+[unreleased]: https://github.com/setu-ts/setu-ts/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.13.0
 [0.12.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.12.0
 [0.11.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.11.0
 [0.10.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.10.0

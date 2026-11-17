@@ -6,6 +6,7 @@
 import type { ILogger, IRequestContext, MiddlewareFunction, NextFunction } from '@setu-ts/common';
 import {
   CAPABILITIES,
+  CSRF_EXEMPT_STATE_KEY,
   describeError,
   respondWithError,
   SESSION_STATE_KEY,
@@ -13,7 +14,7 @@ import {
   tenantBindingMismatch,
 } from '@setu-ts/common';
 
-import { BEARER_EXEMPT_STATE_KEY } from '../csrf/exclude.ts';
+import { NO_COMMIT_STATE_KEY } from '../csrf/exclude.ts';
 import type { SessionService } from '../services/session-service.ts';
 import { readTenantBinding, sealTenantBinding } from '../services/session-tenant-binding.ts';
 
@@ -109,11 +110,16 @@ export function sessionMiddleware(
       throw error;
     }
 
-    // A request the bearer exemption admitted restored no session; committing
+    // Bearer and in-process CSRF exemptions never commit a session. Committing
     // whatever its handler wrote would send that session as `Set-Cookie` and, on
     // a credentialed CORS response, plant it in a browser whose cookie was dead
     // (M113e, L4). A header-authenticated request gets no browser session.
-    if (ctx.state.get(BEARER_EXEMPT_STATE_KEY) === true) {
+    // The in-process exemption marker is honoured here too, so an exempted request commits no
+    // session even when form CSRF is not installed or ignores its method.
+    if (
+      ctx.state.get(NO_COMMIT_STATE_KEY) === true ||
+      ctx.state.get(CSRF_EXEMPT_STATE_KEY) === true
+    ) {
       return;
     }
 

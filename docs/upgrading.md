@@ -10,6 +10,205 @@ is the union of every section between the version you are on and the one you are
 `## Unreleased` holds entries written as their milestone landed, which is where the knowledge is;
 cutting a release renames that heading to the version and is a rename, not a recall.
 
+## 0.13.0
+
+### `pagePolicies` and `RouteDefinition.middlewareGroups` (0.13.0)
+
+Only two kinds of code need a change, and neither exists in a generated project:
+
+- **A custom `loadRequestHandler`** (a hand-written development entry) must also return
+  `pageRoutes: { build, matchRoutes }` — the build React Router serves and `matchRoutes` from the
+  same `react-router` module — before the application sets `pagePolicies`; `ReactRouterPlugin`
+  refuses to register without it. The default loader and the generated `dev.ts` already return it.
+- **Code that dispatches a `RouteDefinition` itself**, instead of through the kernel, must run
+  `middlewareGroups`: after the static `middleware`, call `select(ctx)` and run the named groups, in
+  that order, before the handler. A dispatcher that ignores them skips the guards in them.
+
+### `csrf.exemptBearer` and `IAgentRunService` (0.13.0)
+
+Custom `IAgentRunService` implementations must add the required
+`startAs({ tenantId, principalId }, definition, { messages })` member. It starts without a request
+and calls no background hook; a later sweep recovers work after process eviction. Tenant is a
+string; principal is a non-empty string or null.
+
+`apiKey.header` and `jwt.header` set to `cookie` in any case now fail registration with
+`AuthPluginConfigurationError`. Use a dedicated header such as `X-API-Key`, or session
+authentication for cookies. Authenticated header credentials with a new session skip form CSRF by
+default; a restored session or any non-Bearer Authorization still needs a token.
+`csrf.exemptBearer: false` checks every unsafe request. An exempt request also commits no session
+and sends no `Set-Cookie`, even on a `csrf.exclude`d path, so an API-key-to-cookie exchange route
+needs `csrf.exemptBearer: false`, as a bearer exchange route already does. API-key validator throws
+now propagate as `AuthenticationUnavailableError` (503 with `errorHandler`), including public
+key-bearing routes; return null to reject an invalid key.
+
+### Vector-store readiness (M140d, `@setu-ts/vector-store-plugin`, `@setu-ts/common`, `@setu-ts/cloudflare-plugin`)
+
+`VectorStorePlugin` now registers a `vector-store` health indicator that joins `/ready`, so a
+replica leaves readiness while its vector backend is unreachable, or while Qdrant refuses its API
+key. To keep the previous behaviour, pass
+`HealthPlugin({ readiness: { exclude: ['vector-store'] } })`. A custom `IVectorStoreAdapter` needs
+no change: without the new optional `isHealthy()` it stays `up` as `reachable: 'unknown'`.
+
+### Deployment output (M140c, `@setu-ts/cli`)
+
+Images set `NODE_ENV=production`. New Bun and Deno `start` scripts set it too; a new Node `start`
+script defaults it to `production` only when it is unset, keeping a preset value. A regenerated
+Compose file adds healthchecks and `depends_on`. Broker defaults move from Deployment `env:` entries
+to a `<member>-transport` ConfigMap listed before the Secret, so a value in
+`k8s/secrets/<member>/.env` now takes effect.
+
+A workspace member's config must call the transport module's `runtimeOptions()`, which serves gRPC
+members over cleartext HTTP/2: `runtime: runtimeOptions(),` in a full-stack starter's options, or
+`RuntimePlugin({ ...runtimeOptions(), <its existing options> })` in a plugin-list config, imported
+from `./src/transport/index.ts`. `setu workspace broker`, `setu workspace rpc` and `setu add grpc`
+refuse until it does and print the line to add. `setu sync` adds the export to each member's
+transport module; `setu workspace ports --reallocate` rewrites the Dockerfile, Compose file and
+Kubernetes manifest (it also reassigns every member's port). A Bun image now needs a `bun.lock`
+beside `package.json` (run `bun install` and commit it; a project with only `bun.lockb` converts
+with `bun install --save-text-lockfile`), and Bun and Deno images run the project's own `check`, so
+an image no longer builds from code that check refuses. Existing members get no values written into
+`k8s/secrets/<member>/.env`; only secrets recorded from now on are.
+
+### Security defaults (M140a, `@setu-ts/auth-plugin`, `@setu-ts/session-plugin`, `@setu-ts/websocket-plugin`, `@setu-ts/sse-plugin`, `@setu-ts/cli`)
+
+Use HS256 keys of at least 32 UTF-8 bytes; a missing or shorter key now raises
+`AuthPluginConfigurationError`. Configure `jwt: {}` to resolve JWT_SECRET from secrets,
+configuration or the environment. Fetch a fresh form-CSRF token after session regeneration,
+including sign-in and MFA promotion. WebSocket messages default to a 1 MiB bound (`0` opts out); SSE
+defaults to a 30-second heartbeat (`heartbeatMs: 0` opts out).
+
+`@Roles`, `@Permissions`, `@RequirePolicy`, `@ScopedRoles`, `@ScopedPermissions` and method-level
+`@Public` on a `@Gateway`'s WebSocket handlers now fail startup. Class-level HTTP authorization is
+also refused unless the class also serves HTTP routes and the gateway declares its own handshake
+guards. Authorize the handshake with `@Gateway(path, { guards })`.
+
+`SessionPlugin` now reads `SESSION_SECRET` from configuration before the environment, and the
+secrets plugin's `configFallback: false` no longer prevents a dotenv value from reaching it. An
+invalid `maxMessageBytes` or `heartbeatMs` now throws instead of becoming unlimited or a 1 ms timer.
+A generated `migration --down` reverses the newest migration; `--down=<n>` and `--down=all` reverse
+more.
+
+When upgrading a generated Deno project, update the exact CLI version in its `check` task alongside
+the `@setu-ts/*` dependency versions. There is no `setu upgrade` command. Run the full-stack `build`
+task before `start`; `start` no longer installs or builds. Installation runs without blanket
+lifecycle-script permission, and third-party dependencies retain a one-day cooldown.
+
+### Workers, Deno and Bun output (M140b, `@setu-ts/cli`)
+
+`setu add queue` is refused on Workers. Use `CloudflarePlugin({ queue: { binding } })` with a
+`queue` export. An empty `PORT`, broker, Redis or discovery value now falls back to its default.
+Workers projects carry no `deno.json`.
+
+### Generated code (M140d, `@setu-ts/cli`)
+
+Generated event type names are PascalCase. `setu g schema` writes `z.strictObject({})`, which
+refuses bodies with fields until fields are added. The devtool `dev` script runs `tsx` with the
+telemetry preload and the project's dotenv flag.
+
+### Typed capability lookups (M139g, `@setu-ts/common`, `@setu-ts/kernel`, `@setu-ts/testing`, `@setu-ts/react-router-plugin`, `@setu-ts/cli`)
+
+`services.get(CAPABILITIES.LOGGER)` now infers `ILogger`. Correct explicit interfaces and widening
+still work; downcasts and wrong token/interface pairs fail. Use the bound interface's methods, or
+narrow with `instanceof` for an implementation's extra method
+(`if (cache instanceof CacheService) await cache.getOrSet(…)`). `register` and `registerFactory`
+require the whole bound contract: an empty or partial object no longer compiles, so tests use a full
+double or `overrideCapability` for a partial replacement. A write under a `serviceToken` or
+`requestServiceToken` takes its type from the token: drop an explicit type argument such as
+`register<ProductsService>(PRODUCTS, …)`.
+
+Replace `serviceToken<T>(name)` with `requestServiceToken<T>(name)` for entries registered with
+`requestService`. Read those entries with `resolveRequestService` or React Router's `getService`;
+raw `get` and `getAll` refuse them. Singleton entries keep `serviceToken`. Neither typed token can
+be assigned from a plain string now. Custom strings, derived tokens and unbound standard tokens
+retain explicit service types. Single generic registry implementations still compile.
+
+A standard token reported as "not assignable to parameter of type 'UnboundToken'" can indicate a
+wrong explicit interface or two installed copies of `@setu-ts/common`. Correct the pairing, or
+dedupe common so all packages share its unique-symbol brands.
+
+New full-stack scaffolds read `TRUST_FORWARDED_HOST`: leave it empty or `false` unless your listed
+`TRUSTED_PROXIES` overwrite `X-Forwarded-Host`. `true` requires a nonempty proxy list; other values
+fail configuration without echoing the value. `setu check` now warns with `setu.W006` when an
+installed plugin has no call in `setu.config.ts`: a zero-config provider, or one whose registration
+`setu add` prints (`session`, `telemetry`, `feature-flags`, `localization`, `multi-tenancy`,
+`notification`, `service-discovery`, `static`, `graphql`, `grpc`, `database`, `vector-store`, `mcp`,
+`di`, `cloudflare`, `react-router`). `auth-plugin` is not checked, because its quota helpers work
+without the plugin. A config built on a starter gets the warning for an installed package whose
+starter arm is unset, for the arms the starter registers only when set (`database`, `session`, `di`,
+`graphql`, `serviceDiscovery`, `realtime.backplane`, `realtime.websocket`, `realtime.sse`,
+`featureFlags`, `notifications`, `multiTenancy`, `reactRouter`, `static`). A project that registers
+one of these from another module now gets the warning, and `setu check --strict` fails on it:
+silence that id in `.setu-ts/check.json`. On Cloudflare Workers, `setu add cache` and
+`setu add storage` are refused; serve both from `CloudflarePlugin`'s KV and R2 arms instead.
+
+### Form bodies and file uploads (M137c, `@setu-ts/validation-plugin`, `@setu-ts/openapi-plugin`, `@setu-ts/sdk`)
+
+Run `setu client` once to regenerate clients for routes with `forms: true`: `setu client --check`
+reports drift until regeneration. Their document now lists JSON, urlencoded and multipart, or
+multipart alone when a file field is present. Generated binary fields are typed `Blob`; a `File` is
+assignable and keeps its name, while a bare `Blob` is named `blob` by the runtime.
+
+Install `zod` (`^4.6.6`) when using `formFile` from `@setu-ts/validation-plugin/zod`. It is an
+optional peer needed only by that subpath.
+
+An operation whose request body lists only unsupported media types now throws `OpenApiCodegenError`
+with `path` and `method`:
+`request body media types … are not supported: the generated method would drop the body`. Previously
+it silently generated a method with no body argument. List `application/json` or
+`multipart/form-data` for that body, matching what the route accepts. Codegen selects JSON when
+listed, otherwise multipart.
+
+Code that reads a document through the `OpenApiDocument` type and indexes
+`requestBody.content['application/json'].schema` no longer compiles under `strict`: the JSON entry
+is optional because a file route lists `multipart/form-data` alone. Use `?.`, or check which media
+type the body lists.
+
+### Derived error responses (M137b, `@setu-ts/openapi-plugin`, `@setu-ts/rest-starter`, `@setu-ts/cli`)
+
+The generated OpenAPI document now lists the errors a route's guards, body validator, route-level
+rate limiter and idempotency middleware answer with, and emits each operation's responses in
+ascending status order. Run `setu client` once to regenerate the typed client; until you do,
+`setu client --check` reports the changed document as drift.
+
+To stop the derived statuses, pass `OpenApiPlugin({ deriveErrorResponses: false })`. The ordering
+stays, and a declared 409, 415, 422 or 429 without a description now reads by its status name rather
+than `Response`.
+
+`createRestApp()` sets `errorSchema: 'rfc9457'` while its validation format is RFC 9457, so derived
+errors carry a `ProblemDetails` body. `buildRestPlugins()` installs no error handler and sets no
+`errorSchema`, and neither does `createMicroserviceApp()`, which composes from it: pass
+`openapi: { errorSchema: 'rfc9457' }` where an RFC 9457 `errorHandler` is installed. New `rest` and
+`microservice` projects pass the same option in `setu.config.ts`; an existing project adds it there
+to get the body.
+
+### `trustForwardedHost`, worker-pool labels and the starter body limit (`@setu-ts/http-security-plugin`, `@setu-ts/worker-pool-plugin`, `@setu-ts/rest-starter`)
+
+- **Behind a proxy, the public host is the `Host` header unless you opt in**
+  (`@setu-ts/http-security-plugin`). If your proxy rewrites `Host` to an internal name and puts the
+  public one in `X-Forwarded-Host`, add `trustForwardedHost: true` to `ipSecurity`; the table in
+  [deployment](deployment.md) lists common proxies. Leave it off behind Cloudflare Tunnel, which
+  passes a client's `X-Forwarded-Host` through. Nothing changes for `forwardedHeader: 'forwarded'`.
+- **`X-Forwarded-Proto` is read from its rightmost entry** (`@setu-ts/http-security-plugin`), the
+  value the proxy next to the application wrote; it was the leftmost. Behind two trusted proxies
+  where the outer one terminates TLS and the inner one appends, the header arrives as `https, http`,
+  so the published origin turns from `https://` into `http://`: `secure: 'auto'` session cookies
+  lose `Secure`, `publicRequestUrl` builds `http://` links, and the WebSocket origin check refuses
+  `https://` pages. Have the inner proxy overwrite `X-Forwarded-Proto` with the scheme the outer one
+  received (nginx: `proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto` behind a
+  TLS-terminating outer proxy), or switch to `forwardedHeader: 'forwarded'`.
+- **Worker-pool dashboards** (`@setu-ts/worker-pool-plugin`). `task_module` values and the health
+  payload's pool name are now the module's file name (`resize-image`), not its URL, and the health
+  key is `task`, not `taskModule`. Update alert rules and dashboards that match the old values; set
+  `pools[<specifier>].label` for a name of your choosing.
+- **Starter applications refuse bodies over 1 MiB** (`@setu-ts/rest-starter`,
+  `@setu-ts/microservice-starter`, `@setu-ts/full-stack-starter`). Routes that accept larger bodies
+  (file uploads) raise the bound with `runtime: { maxBodyBytes: 10 * 1024 * 1024 }` in the starter
+  options or the `setu.config.ts` builder.
+- **A malformed `Content-Length` answers `400`** where `requestSize` is enabled. A correct client
+  never sends one; no change is needed unless a test sends one deliberately.
+
+<!-- version:history -->
+
 ## 0.12.0
 
 ### Workspace broker and RPC style (M138, `@setu-ts/cli`)
@@ -24,7 +223,8 @@ cutting a release renames that heading to the version and is a rename, not a rec
   upgrade every machine that runs `setu` in the workspace together.
 - **Existing members.** Run `setu sync` in the workspace to write each member's
   `src/transport/index.ts`. Then make each `setu.config.ts` call it — `setu workspace broker` and
-  `setu workspace rpc` refuse until it does, and print exactly these lines:
+  `setu workspace rpc` refuse until it does, and print exactly these lines (since 0.13.0 also the
+  `runtimeOptions()` call; see Deployment output above):
   - `import { messagingOptions, queueOptions, transportPlugins } from './src/transport/index.ts';`
     (a full-stack member also imports `csrfExclusions`);
   - `MessagingPlugin(messagingOptions())` and `...queueOptions()` inside `QueuePlugin`, in place of
@@ -211,8 +411,8 @@ with 0.11 keeps working but does not match what `setu new` now writes. To port o
 - Add `"~kernel/*": ["./src/*"]` to `tsconfig.json` `paths` (a Deno project also adds the prefix
   entry `"~kernel/": "./src/"` to `imports` in `deno.json`), and import kernel code from `app/` only
   as `import type` or from a `*.token.ts` module. `setu check` now reports any other value import as
-  `setu.E017`, and a page it cannot parse as `setu.E018`; silence either in `.setu-ts/check.json`
-  while porting.
+  `setu.E017` (except React Router `.server` modules), and a page it cannot parse as `setu.E018`;
+  silence either in `.setu-ts/check.json` while porting.
 - Unsafe `/api` requests still pass the session's CSRF check. Browser code sends the page's token in
   `x-csrf-token`; generated tests sign a session through `/login` first.
 - The full-stack starter now adds `react-router-plugin` to `openapi.excludeOwners` and `/__vite/*`
@@ -569,7 +769,7 @@ enabled the devtool):
 ```json
 {
   "tasks": {
-    "check": "deno check main.ts setu.config.ts && deno run -A npm:@setu-ts/cli@^0.12.0 check"
+    "check": "deno check main.ts setu.config.ts && deno run -A npm:@setu-ts/cli@^0.13.0 check"
   }
 }
 ```
@@ -1356,7 +1556,9 @@ return createApp(env, waitUntil);
 <!-- version:history -->
 
 A project scaffolded by 0.10.0 already has the parameter, named `_waitUntil` while nothing reads it;
-rename it to `waitUntil` when you add the registration.
+rename it to `waitUntil` when you add the registration. From 0.13.0, `setu add cloudflare` adds the
+`CloudflarePlugin` call and renames the parameter itself in a generated minimal, `rest` or
+class-based configuration.
 
 Without `waitUntil`, `CloudflarePlugin` now logs one warning at startup on Workers, and
 `cacheApiMiddleware` awaits its cache write before answering instead of losing it.

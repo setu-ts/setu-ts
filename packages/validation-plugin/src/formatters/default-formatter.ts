@@ -1,9 +1,10 @@
 /**
- * Default and NestJS error formatters.
+ * Default and compatibility error formatters.
  *
  * The **default** formatter produces the framework-standard error shape.
- * The **NestJS** formatter produces a body compatible with NestJS's default
- * validation pipe responses.
+ * The **compatibility** formatter produces a body shaped as
+ * `{ statusCode, message: string[], error, errors }`, where `errors` lists each
+ * issue as `{ field, message, code? }`.
  *
  * @module
  */
@@ -39,15 +40,16 @@ export const defaultFormatter: ValidationErrorFormatter = (
 };
 
 /**
- * NestJS-compatible validation error formatter.
+ * Compatibility validation error formatter.
  *
  * Returns a body shaped as:
  *
  * ```json
  * {
  *   "statusCode": 400,
- *   "message": [ "Invalid email" ],
- *   "error": "Bad Request"
+ *   "message": [ "email: Invalid email" ],
+ *   "error": "Bad Request",
+ *   "errors": [ { "field": "email", "message": "Invalid email", "code": "invalid_string" } ]
  * }
  * ```
  *
@@ -55,7 +57,7 @@ export const defaultFormatter: ValidationErrorFormatter = (
  * issue in the format `"field: message"`.
  *
  * @param issues - The validation issues to format
- * @returns The NestJS-compatible formatted error body
+ * @returns The compatibility-formatted error body
  */
 export const nestjsFormatter: ValidationErrorFormatter = (
   issues: readonly ValidationIssue[],

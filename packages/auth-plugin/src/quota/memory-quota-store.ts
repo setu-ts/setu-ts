@@ -20,6 +20,11 @@ export class MemoryQuotaStore implements IQuotaStore {
     this.#runtime = runtime;
   }
 
+  /** Reads used units, treating an absent or expired window as zero. @since 0.13.0 */
+  read(key: string, windowId: string): Promise<number> {
+    return Promise.resolve(this.#used(quotaStoreKey(key, windowId)));
+  }
+
   #used(storeKey: string): number {
     const now = this.#runtime.now();
     this.#sweepAt = sweepExpired(this.#windows, this.#sweepAt, (entry) => entry.expireAt <= now);

@@ -9,6 +9,7 @@
  * @module
  */
 
+import { reportAgentsHint } from '../utils/agents-hint.ts';
 import { formatForTarget } from '../utils/prettier-format.ts';
 import type { IFileSystem } from '@setu-ts/common';
 
@@ -45,7 +46,11 @@ import {
   BUNFIG_FILE,
   planBunWorkspaceLinker,
 } from '../workspace/library.ts';
-import { readWorkspaceManifest, WORKSPACE_MANIFEST } from '../workspace/manifest.ts';
+import {
+  manifestProblemDetail,
+  readWorkspaceManifest,
+  WORKSPACE_MANIFEST,
+} from '../workspace/manifest.ts';
 import { planRootWorkspaceGlob } from '../workspace/root-manifest.ts';
 import { workspaceProfile } from '../workspace/runtime-profile.ts';
 
@@ -80,6 +85,7 @@ function printUsage(log: (message: string) => void): void {
   log('  --scope <scope>     Import scope, without the @ (default: the workspace directory)');
   log('  --dir <path>        The workspace root, instead of the working directory');
   log('  --dry-run           Print what would be created, write nothing');
+  log('  --yes, -y           Accepted for scripts; generate never prompts');
 }
 
 /**
@@ -144,6 +150,8 @@ export async function runLibraryCommand(
         deps.dir,
       )}, so this is not a Setu workspace.`,
     );
+    const detail = manifestProblemDetail(read.problem);
+    if (detail !== undefined) deps.error(detail);
     deps.error(
       `A library is resolved by the workspace, so it needs one: create it with ` +
         `\`${PROGRAM_NAME} new <name> --workspace\`.`,
@@ -271,5 +279,6 @@ export async function runLibraryCommand(
     deps.log(`Run \`${profile.install}\` first — a workspace package is linked into node_modules`);
     deps.log(`by the install, so the import above cannot resolve until it does.`);
   }
+  await reportAgentsHint(deps, deps.dir, profile.runtime);
   return EXIT_OK;
 }

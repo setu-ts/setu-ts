@@ -79,7 +79,7 @@ async function bootApp(format: ErrorFormat) {
       // The REAL RuntimePlugin: `app.fetch` needs an `IHttpAdapter`, and the
       // whole point of this file is the bytes that reach the wire.
       RuntimePlugin(),
-      AuthPlugin({ jwt: { secret: 'format-secret' } }),
+      AuthPlugin({ jwt: { secret: 'format-secret-at-least-32-characters' } }),
       {
         name: 'routes',
         version: '1.0.0',

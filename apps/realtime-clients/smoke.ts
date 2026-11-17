@@ -31,11 +31,11 @@ describe('realtime-clients example', () => {
   });
 
   it('works from Node with type stripping', async () => {
-    await runOrFail('node', ['--experimental-strip-types', 'driver.ts', baseUrl]);
+    await runOrFail('node', ['--experimental-strip-types', 'run-driver.ts', baseUrl]);
   });
 
   it('works from Bun', async () => {
-    await runOrFail('bun', ['driver.ts', baseUrl]);
+    await runOrFail('bun', ['run-driver.ts', baseUrl]);
   });
 
   it('works from workerd', async () => {

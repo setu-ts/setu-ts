@@ -9,10 +9,23 @@
  * @module
  */
 
+import type { RuntimeOptions } from '@setu-ts/runtime';
 import type { IPlugin } from '@setu-ts/common';
 import type { MessagingPluginOptions } from '@setu-ts/messaging-plugin';
 import type { QueuePluginOptions } from '@setu-ts/queue-plugin';
 import { GrpcPlugin } from '@setu-ts/grpc-plugin';
+
+/**
+ * Serve gRPC over cleartext HTTP/2 beside HTTP/1.1 on the member's port.
+ * For TLS use RuntimePlugin({ http2: { key, cert } }) with discovery secure: true.
+ * On Bun HTTP/2 uses the Node adapter; WebSockets then need the optional ws peer.
+ *
+ * @returns The runtime options for this member's RPC style
+ * @since 0.13.0
+ */
+export function runtimeOptions(): RuntimeOptions {
+  return { http2: true };
+}
 
 /**
  * The memory broker's `MessagingPlugin` options.

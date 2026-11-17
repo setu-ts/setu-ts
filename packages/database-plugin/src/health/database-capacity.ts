@@ -118,6 +118,40 @@ export class PoolSaturatedProbeSkipped extends Error {
 }
 
 /**
+ * Symbol key under which an adapter exposes whether its last reachability
+ * probe timed out waiting for a busy pool client (M139f V8-3).
+ *
+ * pg-pool removes the waiter before it rejects, so `waiting` reads 0 by the
+ * time the indicator looks: the timeout itself is the saturation evidence.
+ * Attached beside {@linkcode DATABASE_POOL_CAPACITY} and
+ * {@linkcode DATABASE_QUERY_PROGRESS}, because only the progress count can
+ * then tell a saturated pool from a hung database.
+ */
+export const DATABASE_PROBE_ACQUIRE_TIMEOUT: unique symbol = Symbol.for(
+  'setu-ts.database-plugin.probe-acquire-timeout',
+);
+
+/**
+ * Reads whether the adapter's last reachability probe timed out waiting for
+ * a pool client.
+ *
+ * @param adapter - The connected adapter
+ * @returns `true` only when the adapter exposes the seam and it reports
+ *   `true`; an absent or throwing reader is `false`
+ */
+export function probeHitAcquireTimeout(adapter: IDatabaseAdapter): boolean {
+  const reader = (adapter as unknown as Record<symbol, unknown>)[DATABASE_PROBE_ACQUIRE_TIMEOUT];
+  if (typeof reader !== 'function') {
+    return false;
+  }
+  try {
+    return (reader as () => unknown)() === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Symbol key under which an adapter exposes a monotonically increasing count
  * of the queries it has seen COMPLETE (M101a V8-3 review fix). Attached beside
  * {@linkcode DATABASE_POOL_CAPACITY}, by the same adapter, for the same reason:

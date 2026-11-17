@@ -42,6 +42,23 @@ function apply(existing: Map<string, string>, result: ReturnType<typeof plan>) {
 }
 
 describe('add view planner', () => {
+  it('V12-26 plugin-only configures JSX without adding view or CSS artifacts', () => {
+    const result = planViewSetup({
+      runtime: 'node',
+      existing: fresh('node'),
+      pluginOnly: true,
+      viewPluginRegistered: true,
+      wireStatic: () => {
+        throw new Error('must not wire static');
+      },
+      controllerDir: 'unused',
+      registration: REGISTRATION,
+    });
+    expect(result.files).toEqual([]);
+    expect(result.manifestEdits).toEqual([]);
+    expect(result.configEdits.map((file) => file.path)).toEqual(['tsconfig.json']);
+    expect(result.configEdits[0]?.contents).toContain('hono/jsx');
+  });
   for (const runtime of ['node', 'bun', 'deno', 'cloudflare-workers'] as const) {
     it(`plans each absent piece and preserves every present piece on ${runtime}`, () => {
       const existing = fresh(runtime);

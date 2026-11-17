@@ -36,11 +36,11 @@ describe('wrapPluginArgs', () => {
 
   it('wraps a long literal one member per line', () => {
     const wrapped = wrapPluginArgs(
-      "{ broker: 'redis-streams', url: Deno.env.get('REDIS_URL') ?? 'redis://127.0.0.1:6379' }",
+      "{ broker: 'redis-streams', url: Deno.env.get('REDIS_URL') || 'redis://127.0.0.1:6379' }",
     );
     expect(wrapped).toBe(
       "{\n        broker: 'redis-streams',\n" +
-        "        url: Deno.env.get('REDIS_URL') ?? 'redis://127.0.0.1:6379',\n      }",
+        "        url: Deno.env.get('REDIS_URL') || 'redis://127.0.0.1:6379',\n      }",
     );
   });
 

@@ -68,7 +68,8 @@ const PLUGIN_NAME = 'websocket-plugin';
  * @returns The plugin instance
  * @throws {Error} If `idleTimeoutMs` is set without a `heartbeatMs` to sweep on,
  *   `allowedOrigins` holds an entry that is not an absolute http(s) origin, or
- *   `checkOrigin` is not a boolean
+ *   `checkOrigin` is not a boolean, or `maxMessageBytes` is not a whole number
+ *   from 0 to 2^31-1; refused when `WebSocketPlugin()` is called
  * @since 0.1.0
  */
 export function WebSocketPlugin(options?: WebSocketPluginOptions): IPlugin {

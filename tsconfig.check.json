@@ -34,6 +34,9 @@
       ],
       "@setu-ts/localization-plugin/format": [
         "./packages/localization-plugin/src/format/index.ts"
+      ],
+      "@setu-ts/validation-plugin/zod": [
+        "./packages/validation-plugin/src/zod/index.ts"
       ]
     }
   },

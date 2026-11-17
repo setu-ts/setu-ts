@@ -3,8 +3,22 @@ import type { IPrincipal } from '@setu-ts/common';
 import { encodeBase64Url } from '../../src/utils/base64url.ts';
 import { generateTestKey, rawToken, signToken } from '../fixtures/issuer-tokens.ts';
 import { request, setupStrategy, valid } from '../fixtures/issuer-strategy-setup.ts';
+import { AuthPluginConfigurationError } from '../../src/errors.ts';
+import { IssuerStrategy } from '../../src/strategies/issuer-strategy.ts';
+import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 
 describe('IssuerStrategy routing', () => {
+  it.each(['cookie', 'COOKIE', 'Cookie'])('refuses ambient issuer header %s', (header) => {
+    expect(
+      () =>
+        new IssuerStrategy({
+          bindings: [],
+          runtime: createFakeRuntime(0),
+          report: () => {},
+          header,
+        }),
+    ).toThrow(AuthPluginConfigurationError);
+  });
   it('authenticates a token from the configured issuer', async () => {
     const t = await setupStrategy();
     const token = await signToken(t.key, valid());
@@ -82,6 +96,19 @@ describe('IssuerStrategy resource-server mapping', () => {
       scopes: ['app:scope'],
       actor: { id: 'app-actor', claims: { source: 'app' } },
     });
+  });
+
+  it('keeps mapped scopes the spread would drop (inherited or non-enumerable)', async () => {
+    const inherited = Object.create({ scopes: ['app:scope'] }) as { id: string };
+    inherited.id = 'u-inherited';
+    const hidden = { id: 'u-hidden' };
+    Object.defineProperty(hidden, 'scopes', { value: ['app:scope'], enumerable: false });
+    for (const mapped of [inherited, hidden]) {
+      const t = await setupStrategy({ issuer: { toPrincipal: () => mapped } });
+      const token = await signToken(t.key, valid({ scope: 'token:scope' }));
+      const principal = await t.strategy.authenticate(request(`Bearer ${token}`));
+      expect(principal?.scopes).toEqual(['app:scope']);
+    }
   });
 
   it('refuses a malformed act before the application maps claims', async () => {
@@ -263,5 +290,41 @@ describe('IssuerStrategy refusals', () => {
     );
     expect(Object.isFrozen(seen)).toBe(true);
     expect(seen?.roles).toEqual(['a']);
+  });
+});
+
+describe('M139a issuer tenant binding', () => {
+  it.each([
+    ['acme', 'acme', true],
+    ['globex', 'acme', false],
+    [undefined, 'acme', false],
+    [42, 'acme', false],
+    [null, 'acme', false],
+    [undefined, undefined, true],
+    ['acme', undefined, false],
+    [42, undefined, false],
+  ] as const)('checks verified tid %j on %j before mapping: %j', async (tid, tenant, allowed) => {
+    let mapped = 0;
+    const t = await setupStrategy({
+      issuer: {
+        tenantClaim: 'tid',
+        toPrincipal: () => {
+          mapped++;
+          return { id: 'u1' };
+        },
+      },
+    });
+    const token = await signToken(t.key, valid(tid === undefined ? {} : { tid }));
+    const req = request(`Bearer ${token}`);
+    if (tenant !== undefined) req.tenant = { id: tenant };
+    expect((await t.strategy.authenticate(req))?.id ?? null).toBe(allowed ? 'u1' : null);
+    expect(mapped).toBe(allowed ? 1 : 0);
+    expect(t.refusals).toEqual(allowed ? [] : ['tenant-mismatch']);
+  });
+  it('keeps tenant binding opt-in', async () => {
+    const t = await setupStrategy();
+    const req = request(`Bearer ${await signToken(t.key, valid({ tid: 'other' }))}`);
+    req.tenant = { id: 'acme' };
+    expect(await t.strategy.authenticate(req)).toEqual({ id: 'u1' });
   });
 });

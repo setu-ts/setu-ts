@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import * as runtimeDetector from '../../src/utils/runtime-detector.ts';
 import type { IFileSystem } from '@setu-ts/common';
@@ -14,7 +15,10 @@ import { WORKSPACE_MANIFEST } from '../../src/workspace/manifest.ts';
 import { DISCOVERY_MODULE } from '../../src/workspace/discovery-module.ts';
 import { COMPOSE_FILE, DOCKERFILE } from '../../src/workspace/compose.ts';
 import { InterruptedError } from '../../src/utils/interruption.ts';
-import { renderFullStackDevEntry } from '../../src/templates/full-stack-build-files.ts';
+import {
+  fullStackDevEntryVariants,
+  renderFullStackDevEntry,
+} from '../../src/templates/full-stack-build-files.ts';
 import { formatForTarget } from '../../src/utils/prettier-format.ts';
 
 it('prints no dev.ts note for a full-stack project without dev.ts (CodeRabbit #560)', async () => {
@@ -145,6 +149,88 @@ it('X87-2 X87-6 adoption records dev ports and rewrites only canonical entries a
     }
   }
 });
+
+it('M139d review L7 rewrites a 0.12.0 full-stack dev.ts, recognised from its real rendering', async () => {
+  // Rendered by the 0.12.0 template (develop 4ec5eaa01), before M139d's Vite
+  // listen guard and startup line; the recognition variant must equal it,
+  // nullish port reads included (M140b changed them to logical-or).
+  const previous = readFileSync(
+    new URL('../fixtures/full-stack-dev-entry-0.12.0-node.txt', import.meta.url),
+    'utf8',
+  );
+  expect(fullStackDevEntryVariants('node')[1]!.contents).toBe(previous);
+  expect(fullStackDevEntryVariants('bun')[1]!.contents).toBe(
+    readFileSync(
+      new URL('../fixtures/full-stack-dev-entry-0.12.0-bun.txt', import.meta.url),
+      'utf8',
+    ),
+  );
+  const h = harness({
+    ...NODE_PROJECT,
+    '/work/svc/package.json': JSON.stringify({
+      dependencies: { '@setu-ts/react-router-plugin': '^0.12.0' },
+      scripts: { 'start:debug': 'node --inspect dev.ts' },
+    }),
+    '/work/svc/dev.ts': previous,
+  });
+  expect(await h.run(['--name', 'web'], new AbortController().signal), h.err.text()).toBe(0);
+  expect(h.fs.read('/work/svc/apps/web/dev.ts')).toContain('const vitePort = VITE_PORT;');
+  expect(h.out.text()).not.toContain('Set the two development port lines');
+});
+
+it('M140b rewrites the guarded full-stack dev.ts develop wrote with nullish port reads', async () => {
+  // Rendered by develop 8f4f226f2's own renderFullStackDevEntry (M139d's guarded
+  // layout, before M140b turned its port reads into logical-or).
+  const develop = (runtime: 'node' | 'bun'): string =>
+    readFileSync(
+      new URL(`../fixtures/full-stack-dev-entry-develop-${runtime}.txt`, import.meta.url),
+      'utf8',
+    );
+  for (const runtime of ['node', 'bun'] as const) {
+    expect(develop(runtime)).not.toContain('pageRoutes:');
+    expect(develop(runtime)).not.toContain('matchRoutes');
+    expect(fullStackDevEntryVariants(runtime)[2]!.contents).toBe(develop(runtime));
+  }
+  const guardedNullish = { path: 'dev.ts', contents: develop('node') };
+  const [written] = await formatForTarget([guardedNullish], 'node', undefined, () => {});
+  const h = harness({
+    ...NODE_PROJECT,
+    '/work/svc/package.json': JSON.stringify({
+      dependencies: { '@setu-ts/react-router-plugin': '^0.12.0' },
+      scripts: { 'start:debug': 'node --inspect dev.ts' },
+    }),
+    '/work/svc/dev.ts': written!.contents,
+  });
+  expect(await h.run(['--name', 'web'], new AbortController().signal), h.err.text()).toBe(0);
+  expect(h.fs.read('/work/svc/apps/web/dev.ts')).toContain('const vitePort = VITE_PORT;');
+  expect(h.out.text()).not.toContain('Set the two development port lines');
+});
+
+it.each(['node', 'bun'] as const)(
+  'recognizes and adopts a pre-pageRoutes %s entry with runtimeEnvRead port reads',
+  async (runtime) => {
+    const previous = renderFullStackDevEntry(undefined, runtime)
+      .contents.replace(
+        "import {\n  createRequestHandler,\n  matchRoutes,\n  RouterContextProvider,\n  type ServerBuild,\n} from 'react-router';",
+        "import { createRequestHandler, RouterContextProvider, type ServerBuild } from 'react-router';",
+      )
+      .replace('        pageRoutes: { build: loadServerBuild, matchRoutes },\n', '');
+    expect(previous).toContain("runtime.env.PORT || '3000'");
+    const h = harness({
+      ...NODE_PROJECT,
+      ...(runtime === 'bun' ? { '/work/svc/bun.lock': '' } : {}),
+      '/work/svc/package.json': JSON.stringify({
+        dependencies: { '@setu-ts/react-router-plugin': '^0.12.0' },
+        scripts: { 'start:debug': 'node --inspect dev.ts' },
+      }),
+      '/work/svc/dev.ts': previous,
+    });
+    expect(await h.run(['--name', 'web'], new AbortController().signal), h.err.text()).toBe(0);
+    expect(h.fs.read('/work/svc/apps/web/dev.ts')).toContain('const vitePort = VITE_PORT;');
+    expect(h.out.text()).not.toContain('Set the two development port lines');
+    expect(fullStackDevEntryVariants(runtime)[3]?.contents).toBe(previous);
+  },
+);
 
 it('X87-2 refuses an exhausted development range before moving any project files', async () => {
   const h = harness(NODE_PROJECT);
@@ -659,19 +745,17 @@ describe('runAdoptCommand', () => {
       expect(fs.has('/work/svc/.env')).toBe(true);
     });
 
-    // The generated .dockerignore covers .env and .env.* only. A custom name would
-    // be copied into the image, so the step to add it is printed.
-    it('prints the .dockerignore step only for a name the generic rules miss', async () => {
+    // The generated .dockerignore covers .env and .env.* only, so a custom name is
+    // recorded on the member and listed in the managed root file (M140a F9).
+    it('lists only a name the generic rules miss in the managed .dockerignore', async () => {
       const covered = withEnv('.env', { '/work/svc/.env': 'SECRET=1\n' });
       expect(await covered.run([])).toBe(0);
-      expect(covered.out.text()).not.toContain('to .dockerignore');
+      expect(covered.fs.read('/work/svc/.dockerignore')).not.toContain('apps/svc/');
 
       const custom = withEnv('local.env', { '/work/svc/local.env': 'SECRET=1\n' });
       expect(await custom.run([])).toBe(0);
-      expect(custom.out.text()).toContain(
-        'Add apps/svc/local.env to .dockerignore: the generated rules cover only .env and .env.* names, ' +
-          'so this file would be copied into the image.',
-      );
+      expect(custom.fs.read('/work/svc/.dockerignore').split('\n')).toContain('apps/svc/local.env');
+      expect(custom.out.text()).not.toContain('to .dockerignore');
     });
 
     it('does not move a multi-segment path, and prints the step to take', async () => {

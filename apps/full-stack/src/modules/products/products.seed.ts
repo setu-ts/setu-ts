@@ -26,8 +26,8 @@ const INITIAL_PRODUCTS: readonly Product[] = [
  * Writes the initial catalogue through the database capability.
  *
  * Takes the service rather than a request context because seeding is startup
- * wiring, not a request path: `main.ts` and `smoke.ts` resolve it from the
- * application's own registry after `start()`.
+ * wiring, not a request path: `main.ts`, `dev.ts` and `smoke.ts` resolve it
+ * from the application's own registry after `start()`.
  *
  * @param database - The service registered under `CAPABILITIES.DATABASE`
  * @returns The rows as persisted

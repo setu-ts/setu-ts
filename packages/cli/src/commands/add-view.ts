@@ -12,6 +12,7 @@ import {
 
 interface IViewSetupInput {
   readonly runtime: TargetRuntime;
+  readonly pluginOnly?: boolean;
   /** Relative paths, with pending manifest/config edits already applied. */
   readonly existing: ReadonlyMap<string, string>;
   /**
@@ -64,6 +65,15 @@ export function planViewSetup(input: IViewSetupInput): IViewSetupPlan {
   const compilerFile =
     runtime === 'deno' ? (existing.has('deno.json') ? 'deno.json' : 'deno.jsonc') : 'tsconfig.json';
   const manifestFile = runtime === 'deno' ? compilerFile : 'package.json';
+  let react = false;
+  try {
+    const manifest = object(JSON.parse(existing.get(manifestFile) ?? '{}'));
+    react = ['dependencies', 'devDependencies', 'peerDependencies', 'imports'].some((section) =>
+      Object.hasOwn(object(manifest?.[section]) ?? {}, 'react'),
+    );
+  } catch {
+    /* An unreadable manifest cannot establish a React default. */
+  }
   const paths = new Set([
     compilerFile,
     manifestFile,
@@ -94,6 +104,7 @@ export function planViewSetup(input: IViewSetupInput): IViewSetupPlan {
         parsed['compilerOptions'] === undefined ? {} : object(parsed['compilerOptions']);
       if (
         options === undefined ||
+        (react && options['jsx'] === 'react-jsx' && options['jsxImportSource'] === undefined) ||
         (options['jsx'] !== undefined && options['jsx'] !== 'react-jsx') ||
         (options['jsxImportSource'] !== undefined && options['jsxImportSource'] !== 'hono/jsx')
       ) {
@@ -105,7 +116,7 @@ export function planViewSetup(input: IViewSetupInput): IViewSetupPlan {
         changed = true;
       } else note(`${path} compilerOptions`);
     }
-    if (!workers && path === manifestFile) {
+    if (!input.pluginOnly && !workers && path === manifestFile) {
       const deno = runtime === 'deno';
       const section = deno ? 'imports' : 'devDependencies';
       const pins = parsed[section] === undefined ? {} : object(parsed[section]);
@@ -158,7 +169,11 @@ export function planViewSetup(input: IViewSetupInput): IViewSetupPlan {
       }
     }
     // A hybrid npm scaffold can also carry a Deno import map for plugin detection.
-    if (!workers && (path === 'package.json' || path === 'deno.json' || path === 'deno.jsonc')) {
+    if (
+      !input.pluginOnly &&
+      !workers &&
+      (path === 'package.json' || path === 'deno.json' || path === 'deno.jsonc')
+    ) {
       const section = path === 'package.json' ? 'dependencies' : 'imports';
       const pins = parsed[section] === undefined ? {} : object(parsed[section]);
       const specifier = '@setu-ts/static-plugin';
@@ -185,6 +200,8 @@ export function planViewSetup(input: IViewSetupInput): IViewSetupPlan {
       (path === 'tsconfig.json' ? configEdits : manifestEdits).push(edit);
     }
   }
+
+  if (input.pluginOnly) return { files, manifestEdits, configEdits, notes };
 
   const viewFiles: GeneratedFile[] = [
     { path: 'src/views/layout.tsx', contents: renderLayout(workers) },
@@ -225,7 +242,19 @@ export function planViewSetup(input: IViewSetupInput): IViewSetupPlan {
       notes.push(
         `Register StaticPlugin(${STATIC_ARGS}) from @setu-ts/static-plugin in setu.config.ts; existing registration or config shape was preserved.`,
       );
-    else config = wired;
+    else {
+      config = wired;
+      notes.push(
+        "StaticPlugin now serves /assets from ./build/assets. It is the project's one StaticPlugin: a second registration (an earlier `setu add static` line, say) fails startup with a duplicate plugin name, so serve other files from build/assets too.",
+      );
+    }
+    const readme = existing.get('README.md');
+    // `/assets` is listed only when this run wired the CSS StaticPlugin call.
+    // Whether an existing call is a live registration cannot be read from the
+    // text (an unused helper can hold the same call), so it is never inferred.
+    const assetsServed = wired !== undefined;
+    const served = readme === undefined ? undefined : withServedRoutes(readme, assetsServed);
+    if (served !== undefined) configEdits.push({ path: 'README.md', contents: served });
     const ignore = existing.get('.gitignore');
     if (ignore !== undefined) {
       if (/^\/?build\/?\s*$/m.test(ignore)) note('.gitignore build/');
@@ -375,4 +404,38 @@ export function Layout({ title, children }: { title: string; children: Child }) 
   );
 }
 `;
+}
+
+/**
+ * The README with the view's routes added to its "What it serves" list, after
+ * the list's last bullet, or `undefined` when there is no such list or it
+ * already names `/ui`.
+ *
+ * @param readme - The project's README
+ * @param assets - Whether StaticPlugin serves `/assets`; without it only `/ui` is listed
+ * @returns The updated README, or `undefined` to leave it as it is
+ */
+export function withServedRoutes(readme: string, assets = true): string | undefined {
+  const heading = readme.indexOf('\n## What it serves\n');
+  if (heading < 0 || readme.includes('- `/ui`')) return undefined;
+  const next = readme.indexOf('\n## ', heading + 1);
+  const section = readme.slice(heading, next < 0 ? readme.length : next);
+  const lastBullet = section.lastIndexOf('\n- ');
+  if (lastBullet < 0) return undefined;
+  // The list ends where the last bullet does: past its indented continuation
+  // lines when it wraps, and at the section's end when no line feed follows it.
+  const lines = section.slice(lastBullet + 1).split('\n');
+  let end = lastBullet + 1 + lines[0]!.length;
+  for (const line of lines.slice(1)) {
+    if (!/^\s+\S/.test(line)) break;
+    end += 1 + line.length;
+  }
+  const at = heading + end;
+  return (
+    `${readme.slice(0, at)}\n- \`/ui\` — the example page \`setu add view\` wrote, rendered by ViewPlugin` +
+    (assets
+      ? `\n- \`/assets\` — its built CSS, served by StaticPlugin from \`build/assets\``
+      : '') +
+    readme.slice(at)
+  );
 }

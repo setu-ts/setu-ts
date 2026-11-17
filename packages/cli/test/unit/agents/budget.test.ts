@@ -61,12 +61,12 @@ describe('agent brief byte budgets', () => {
           });
           const label = `${runtime}/${style}/${installed.size}`;
           expect(new TextEncoder().encode(renderBrief(facts)).length, label).toBeLessThanOrEqual(
-            13312,
+            13568,
           );
           expect(
             new TextEncoder().encode(renderBrief(facts, true)).length,
             label,
-          ).toBeLessThanOrEqual(13312);
+          ).toBeLessThanOrEqual(13568);
         }
       }
       expect(

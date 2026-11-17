@@ -41,6 +41,7 @@ import {
   upsertStatement,
 } from './pgvector-sql.ts';
 import type { SqlTag, Statement } from './pgvector-sql.ts';
+import { MAX_RECORDS_PER_CALL } from '../../services/limits.ts';
 
 /** HNSW indexes `vector` columns of at most this many dimensions. */
 const MAX_INDEXED_DIMENSIONS = 2000;
@@ -125,6 +126,22 @@ export class PgVectorStore implements IVectorStoreAdapter {
   readonly #onClose: (() => void | Promise<void>) | undefined;
   readonly #load: DrizzleLoader;
   #sql: SqlTag | undefined;
+  /** The runtime's monotonic clock, from `open()`; without it progress is unobservable. */
+  #hrtime: (() => number) | undefined;
+  /** This adapter's statements now running, for the readiness progress rule. */
+  #inFlight = 0;
+  /**
+   * When one of this adapter's statements last completed, or the first of a
+   * busy spell started, on {@linkcode #hrtime}: a statement that has only just
+   * begun waiting for a connection is not yet evidence of a stall.
+   */
+  #lastProgressAt: number | undefined;
+  /**
+   * When each readiness probe still unsettled was started: a probe the indicator
+   * gave up on keeps its pool checkout pending, and enough of them fill the
+   * pool, so one outstanding past the window is evidence of a stall too.
+   */
+  readonly #probeStarts: number[] = [];
 
   /**
    * @param options - The database, ensure mode and shutdown callback
@@ -160,11 +177,13 @@ export class PgVectorStore implements IVectorStoreAdapter {
    * otherwise be an unhandled `'error'` event that exits the process. The
    * application's own pool listener is kept.
    *
-   * @param _runtime - Unused; part of the adapter contract
+   * @param runtime - Its monotonic clock dates statement completions for the
+   *   readiness progress rule (see {@linkcode isHealthy})
    * @param logger - Where a dropped connection is reported, when registered
    * @returns Once the extension is present and at least 0.8.0
    */
-  async open(_runtime?: IRuntimeServices, logger?: ILogger): Promise<void> {
+  async open(runtime?: IRuntimeServices, logger?: ILogger): Promise<void> {
+    this.#hrtime = runtime === undefined ? undefined : () => runtime.hrtime();
     attachPoolErrorListener(this.#db, (message, meta) => logger?.warn(message, meta));
     this.#sql = await this.#load();
     const version = await this.#versionOf();
@@ -209,9 +228,10 @@ export class PgVectorStore implements IVectorStoreAdapter {
         `pgvector: '${table}' stores ${row.dimensions}-dimension vectors; collection '${spec.name}' declares ${spec.dimensions}.`,
       );
     }
-    if (!row.source_index || !row.vector_index) {
+    // Only a real boolean true passes: a driver returning 'f' must not read as present.
+    if (row.source_index !== true || row.vector_index !== true) {
       throw new VectorCollectionMismatchError(
-        `pgvector: '${table}' is missing its ${!row.vector_index ? 'HNSW' : 'source'} index.`,
+        `pgvector: '${table}' is missing its ${row.vector_index !== true ? 'HNSW' : 'source'} index: expected ${row.vector_index !== true ? `${table}_hnsw ON ${table} USING hnsw (embedding vector_cosine_ops)` : `${table}_src ON ${table} (scope, source_id)`}.`,
       );
     }
     if (!row.source_version && this.#ensure === 'create') {
@@ -244,7 +264,7 @@ export class PgVectorStore implements IVectorStoreAdapter {
     const sql = this.#tag();
     await this.#run(() =>
       this.#db.transaction(async (tx) => {
-        await tx.execute(sourceLockStatement(sql, spec, scope, sourceId));
+        await this.#step(() => tx.execute(sourceLockStatement(sql, spec, scope, sourceId)));
         if (version !== undefined) {
           const [row] = await this.#rows<{ version: number | string | null }>(
             tx,
@@ -258,16 +278,28 @@ export class PgVectorStore implements IVectorStoreAdapter {
             );
           }
         }
-        if (records.length > 0) {
-          await tx.execute(upsertStatement(sql, spec, scope, records, version));
+        for (let start = 0; start < records.length; start += MAX_RECORDS_PER_CALL) {
+          await this.#step(() =>
+            tx.execute(
+              upsertStatement(
+                sql,
+                spec,
+                scope,
+                records.slice(start, start + MAX_RECORDS_PER_CALL),
+                version,
+              ),
+            ),
+          );
         }
-        await tx.execute(
-          deleteStaleStatement(
-            sql,
-            spec,
-            scope,
-            sourceId,
-            records.map((record) => record.id),
+        await this.#step(() =>
+          tx.execute(
+            deleteStaleStatement(
+              sql,
+              spec,
+              scope,
+              sourceId,
+              records.map((record) => record.id),
+            ),
           ),
         );
       }),
@@ -283,7 +315,9 @@ export class PgVectorStore implements IVectorStoreAdapter {
     const sql = this.#tag();
     const rows = await this.#run(() =>
       this.#db.transaction(async (tx) => {
-        for (const setting of querySettings(sql, query.topK)) await tx.execute(setting);
+        for (const setting of querySettings(sql, query.topK)) {
+          await this.#step(() => tx.execute(setting));
+        }
         return await this.#rows<{
           id: string;
           source_id: string | null;
@@ -312,6 +346,46 @@ export class PgVectorStore implements IVectorStoreAdapter {
     await this.#run(() => this.#db.execute(deleteScopeStatement(this.#tag(), spec, scope)));
   }
 
+  /**
+   * Reachability for readiness: `SELECT 1` through the application's database.
+   *
+   * A saturated pool is not by itself an outage, so it gets database-plugin's
+   * progress rule (M101a V8-3, M139f): while the pool has no idle connection
+   * and either callers waiting or every connection it may open already open (a
+   * node-postgres pool's own counters), no probe is queued behind that traffic;
+   * and when the probe itself times out waiting for a busy connection (pg-pool
+   * drops the waiter first, so the counters no longer show it; only possible
+   * when `connectionTimeoutMillis` is under the 2 s probe bound), the timeout is
+   * that same evidence. Either way the answer is
+   * `undefined` (could not tell) while this adapter's statements are still
+   * completing, and `false` once they have stopped for
+   * {@linkcode QUERY_PROGRESS_WINDOW_MS}. A pool exposing no counters is probed.
+   *
+   * @returns `true` once the database answered, `undefined` for a saturated
+   *   pool that is still serving, `false` for one that has stopped
+   */
+  async isHealthy(): Promise<boolean | undefined> {
+    if (poolSaturated((this.#db as { readonly $client?: unknown }).$client)) {
+      return this.#progressing() ? undefined : false;
+    }
+    const sql = this.#tag();
+    // Outside #run: the probe is not one of the application's statements, so a
+    // probe still queued must not count as a stalled statement next poll. Its
+    // own start is kept instead, until it settles; the oldest one counts.
+    const started = this.#hrtime?.();
+    if (started !== undefined) this.#probeStarts.push(started);
+    try {
+      await this.#db.execute(sql`SELECT 1`);
+    } catch (error) {
+      if (isPoolAcquireTimeout(error)) return this.#progressing() ? undefined : false;
+      throw toBackendFault(error, 'vector-store-plugin: pgvector') ?? error;
+    } finally {
+      const at = started === undefined ? -1 : this.#probeStarts.indexOf(started);
+      if (at >= 0) this.#probeStarts.splice(at, 1);
+    }
+    return true;
+  }
+
   /** @inheritdoc */
   async close(): Promise<void> {
     await this.#onClose?.();
@@ -333,11 +407,51 @@ export class PgVectorStore implements IVectorStoreAdapter {
 
   /** Runs a driver call, turning a connection failure into a 503/504 backend fault. */
   async #run<T>(call: () => Promise<T>): Promise<T> {
+    if (this.#inFlight === 0) this.#lastProgressAt = this.#hrtime?.();
+    this.#inFlight += 1;
     try {
-      return await call();
+      const result = await call();
+      this.#lastProgressAt = this.#hrtime?.();
+      return result;
     } catch (error) {
       throw toBackendFault(error, 'vector-store-plugin: pgvector') ?? error;
+    } finally {
+      this.#inFlight -= 1;
     }
+  }
+
+  /**
+   * One statement inside a transaction {@linkcode #run} already counts: its
+   * completion is progress, so a long transaction is not read as a stall.
+   */
+  async #step<T>(call: () => Promise<T>): Promise<T> {
+    try {
+      return await call();
+    } finally {
+      this.#lastProgressAt = this.#hrtime?.();
+    }
+  }
+
+  /**
+   * Whether a saturated pool is still serving, by database-plugin's rule
+   * (M101a): one of this adapter's statements completed within
+   * {@linkcode QUERY_PROGRESS_WINDOW_MS} (or the first of the current busy spell
+   * started within it), or none is running (the pool is busy
+   * with the application's own work, which this adapter cannot see), or there
+   * is no clock to tell.
+   */
+  #progressing(): boolean {
+    const now = this.#hrtime?.();
+    if (now === undefined) return true;
+    const recent =
+      this.#lastProgressAt !== undefined && now - this.#lastProgressAt <= QUERY_PROGRESS_WINDOW_MS;
+    // Starts are pushed in clock order, so the first is the oldest outstanding.
+    // A probe waiting past the window is a stall only when no statement has
+    // completed within it: behind traffic that is still completing, it is queued.
+    const oldestProbe = this.#probeStarts[0];
+    if (oldestProbe !== undefined && now - oldestProbe > QUERY_PROGRESS_WINDOW_MS) return recent;
+    if (this.#inFlight === 0) return true;
+    return recent;
   }
 
   #tag(): SqlTag {
@@ -351,4 +465,56 @@ export class PgVectorStore implements IVectorStoreAdapter {
 function atLeast(version: string, [major, minor]: readonly [number, number]): boolean {
   const [a, b] = version.split('.').map((part) => Number.parseInt(part, 10));
   return a !== undefined && b !== undefined && (a > major || (a === major && b >= minor));
+}
+
+/** How long a saturated pool may go without one of this adapter's statements completing. */
+export const QUERY_PROGRESS_WINDOW_MS = 10_000;
+
+/** pg-pool's text when a checkout waited for a busy client past `connectionTimeoutMillis`. */
+const PG_POOL_TIMEOUT_ANCHOR = 'timeout exceeded when trying to connect';
+
+/**
+ * Whether node-postgres's pool timed out waiting for a busy client: the exact
+ * pg-pool text anywhere in the cause chain, with no driver error code (a code
+ * means the database answered). database-plugin reads it the same way.
+ */
+export function isPoolAcquireTimeout(error: unknown): boolean {
+  let hasCode = false;
+  let anchored = false;
+  const seen = new Set<unknown>();
+  for (
+    let current = error;
+    current !== null && typeof current === 'object' && !seen.has(current);
+  ) {
+    seen.add(current);
+    const { code, message, cause } = current as {
+      code?: unknown;
+      message?: unknown;
+      cause?: unknown;
+    };
+    if (typeof code === 'string') hasCode = true;
+    if (message === PG_POOL_TIMEOUT_ANCHOR) anchored = true;
+    current = cause;
+  }
+  return anchored && !hasCode;
+}
+
+/**
+ * Whether a node-postgres pool is saturated by its own counters: no idle
+ * connection, and either callers waiting or every connection it may open
+ * (`options.max`, pg's default 10) already open. A pool exposing no counters
+ * is not judged saturated, so it is probed.
+ */
+export function poolSaturated(client: unknown): boolean {
+  if (client === null || typeof client !== 'object') return false;
+  const pool = client as {
+    readonly idleCount?: unknown;
+    readonly waitingCount?: unknown;
+    readonly totalCount?: unknown;
+    readonly options?: { readonly max?: unknown };
+  };
+  if (typeof pool.idleCount !== 'number' || pool.idleCount !== 0) return false;
+  if (typeof pool.waitingCount === 'number' && pool.waitingCount > 0) return true;
+  const max = typeof pool.options?.max === 'number' ? pool.options.max : 10;
+  return typeof pool.totalCount === 'number' && pool.totalCount >= max;
 }

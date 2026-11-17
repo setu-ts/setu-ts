@@ -88,7 +88,8 @@ export function fullStackHttpSecurityOptions(
  * @returns Array of {@linkcode IPlugin} instances in registration order.
  */
 export function buildFullStackPlugins(options: FullStackStarterOptions = {}): IPlugin[] {
-  return composeFullStackPlugins(options, detectRuntime());
+  // An explicit `runtime.platform` wins, as it does for RuntimePlugin itself.
+  return composeFullStackPlugins(options, options.runtime?.platform ?? detectRuntime());
 }
 
 /**

@@ -54,9 +54,9 @@ a production build. Node uses `npm run start:dev`, Bun `bun run start:dev`, and 
 without the in-process Vite loop or hot module replacement.
 
 Production uses built output: Node runs `npm run build` then `npm start`; Bun runs `bun run build`
-then `bun run start`; Deno's `deno task start` builds first. Workers ships with `npm run deploy`.
-See [React Router development](./react-router-dev.md#in-a-scaffolded-project) for the loop and
-[production builds](./cli.md#production-build-setu-build) for the service build.
+then `bun run start`; Deno runs `deno task build` then `deno task start`. Workers ships with
+`npm run deploy`. See [React Router development](./react-router-dev.md#in-a-scaffolded-project) for
+the loop and [production builds](./cli.md#production-build-setu-build) for the service build.
 
 ## Installation
 
@@ -329,9 +329,9 @@ import { AuthPlugin } from '@setu-ts/auth-plugin';
 app.register(
   AuthPlugin({
     jwt: {
-      // Read this from configuration in a real application — never commit it.
-      secret: 'your-secret-key',
-      // 'HS256' pairs with `secret`; 'RS256' pairs with `privateKey`/`publicKey`.
+      // No `secret` here: JWT_SECRET (32+ random bytes) is read from secrets, configuration
+      // or the environment, so no key is committed.
+      // 'HS256' pairs with that secret; 'RS256' pairs with `privateKey`/`publicKey`.
       algorithm: 'HS256',
     },
   }),
@@ -446,7 +446,8 @@ its `wrangler.toml`.
   which test helper replaces them
 - [Plugin Architecture](./plugin-architecture.md) - How plugins, capabilities, and lifecycle work
 - [Programmatic API](./programmatic-api.md) - Complete API reference
-- [Decorators](./decorators.md) - The optional class-based style, for teams coming from NestJS
+- [Decorators](./decorators.md) - The optional class-based style, for teams coming from a
+  decorator-first framework
 - [Examples](./examples.md) - Runnable example applications
 - [Runtime Deployment](./runtime-deployment.md) and [Deployment](./deployment.md) - Containers,
   Kubernetes, and Workers

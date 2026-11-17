@@ -187,7 +187,13 @@ describe('validateFilter', () => {
     );
     let recordMessage = '';
     try {
-      validateRecords([{ id: 'r', vector: [1, 0, 0], metadata: { [long]: 'x' } }], 3, FIELDS);
+      validateRecords(
+        [{ id: 'r', vector: [1, 0, 0], metadata: { [long]: 'x' } }],
+        3,
+        FIELDS,
+        500,
+        'upsert',
+      );
     } catch (error) {
       recordMessage = (error as Error).message;
     }
@@ -197,12 +203,29 @@ describe('validateFilter', () => {
 });
 
 describe('record validation', () => {
+  it('M139c accepts each operation boundary and names the refused cap', () => {
+    const records = Array.from({ length: 5001 }, (_, i) => ({ id: `r${i}`, vector: [1, 0, 0] }));
+    const cases = [
+      [500, 'upsert', 'an upsert'],
+      [5000, 'replaceSource', 'a replaceSource call'],
+      // The refusal names the operation, not a label guessed from the number.
+      [500, 'replaceSource', 'a replaceSource call'],
+    ] as const;
+    for (const [max, operation, named] of cases) {
+      expect(validateRecords(records.slice(0, max), 3, FIELDS, max, operation)).toHaveLength(max);
+      expect(() => validateRecords(records.slice(0, max + 1), 3, FIELDS, max, operation)).toThrow(
+        `${named} takes at most ${max} records`,
+      );
+    }
+  });
   it('accepts and copies a valid record', () => {
     const vector = [1, 0, 0];
     const [record] = validateRecords(
       [{ id: 'r1', vector, sourceId: 's1', content: 'text', metadata: { tag: 'a', year: 1 } }],
       3,
       FIELDS,
+      500,
+      'upsert',
     );
     expect(record).toEqual({
       id: 'r1',
@@ -213,11 +236,13 @@ describe('record validation', () => {
     });
     vector[0] = 9;
     expect(record!.vector[0]).toBe(1);
-    expect(validateRecords([{ id: 'r2', vector: [0, 1, 0] }], 3, FIELDS)[0]).toEqual({
-      id: 'r2',
-      vector: [0, 1, 0],
-      metadata: {},
-    });
+    expect(validateRecords([{ id: 'r2', vector: [0, 1, 0] }], 3, FIELDS, 500, 'upsert')[0]).toEqual(
+      {
+        id: 'r2',
+        vector: [0, 1, 0],
+        metadata: {},
+      },
+    );
   });
 
   it.each([
@@ -272,8 +297,8 @@ describe('record validation', () => {
     ],
     ['a string boolean', [{ id: 'r', vector: [1, 0, 0], metadata: { public: 'yes' } }], 'boolean'],
   ])('refuses %s', (_label, records, message) => {
-    expect(() => validateRecords(records, 3, FIELDS)).toThrow(VectorRecordError);
-    expect(() => validateRecords(records, 3, FIELDS)).toThrow(message);
+    expect(() => validateRecords(records, 3, FIELDS, 500, 'upsert')).toThrow(VectorRecordError);
+    expect(() => validateRecords(records, 3, FIELDS, 500, 'upsert')).toThrow(message);
   });
 
   it('reads only own properties of a record', () => {
@@ -281,7 +306,7 @@ describe('record validation', () => {
       id: 'r',
       vector: [1, 0, 0],
     });
-    expect(validateRecords([inherited], 3, FIELDS)[0]!.metadata).toEqual({});
+    expect(validateRecords([inherited], 3, FIELDS, 500, 'upsert')[0]!.metadata).toEqual({});
   });
 
   it.each([

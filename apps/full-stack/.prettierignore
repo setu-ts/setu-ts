@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.wrangler/
+src/gen/
+build/
+.react-router/
+package-lock.json
+bun.lock

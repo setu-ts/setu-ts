@@ -170,7 +170,7 @@ const NEW: ICommandFlagSpec = spec(
 /** `setu generate` for a schematic: the schematic word plus one name. */
 const GENERATE: ICommandFlagSpec = spec(
   'generate',
-  ['dir', 'dry-run', 'runtime', 'module', 'adopt-controllers', 'page'],
+  ['dir', 'dry-run', 'runtime', 'module', 'adopt-controllers', 'page', 'yes', 'y'],
   [],
   {
     fixed: 2,
@@ -182,7 +182,7 @@ const GENERATE: ICommandFlagSpec = spec(
 /** `setu generate custom <schematic-name> <name>`: two names after the verb. */
 const GENERATE_CUSTOM: ICommandFlagSpec = spec(
   'generate custom',
-  ['dir', 'dry-run', 'runtime'],
+  ['dir', 'dry-run', 'runtime', 'yes', 'y'],
   [],
   { fixed: 2, taken: 2, noun: 'two names: the custom schematic and the artifact name' },
 );
@@ -202,6 +202,8 @@ const GENERATE_APP: ICommandFlagSpec = spec(
     'rpc',
     'dir',
     'dry-run',
+    'yes',
+    'y',
   ],
   // Read ONLY to be refused with their own guidance: the broker/client flags
   // name the workspace-wide alternative, `--runtime` names the workspace's own
@@ -213,7 +215,7 @@ const GENERATE_APP: ICommandFlagSpec = spec(
 /** `setu generate library`. */
 const GENERATE_LIBRARY: ICommandFlagSpec = spec(
   'generate library',
-  ['scope', 'dir', 'dry-run'],
+  ['scope', 'dir', 'dry-run', 'yes', 'y'],
   [],
   { fixed: 2, taken: 1, noun: 'one library name' },
 );
@@ -225,6 +227,13 @@ const GENERATE_LIBRARY: ICommandFlagSpec = spec(
  * that message with a second way of saying the same thing.
  */
 const ADD: ICommandFlagSpec = spec('add', [
+  'plugin-only',
+  'provider',
+  'type',
+  'adapter',
+  'dialect',
+  'yes',
+  'y',
   'dir',
   'dry-run',
   'broker',

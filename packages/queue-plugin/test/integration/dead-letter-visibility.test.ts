@@ -1,3 +1,4 @@
+import { loggerDouble } from '../../../../test/fixtures/capability-doubles.ts';
 /**
  * X8-4 — a dead-lettered job, seen through a REAL application.
  *
@@ -136,14 +137,17 @@ describe('a refusing metrics backend cannot break the queue (X8-4)', () => {
       provides: [CAPABILITIES.LOGGER],
       priority: PLUGIN_PRIORITY.HIGHEST,
       register(ctx) {
-        ctx.services.register(CAPABILITIES.LOGGER, {
-          warn: (message: string, metadata?: Record<string, unknown>) => {
-            warnings.push({ message, ...(metadata === undefined ? {} : { metadata }) });
-          },
-          error: () => {},
-          info: () => {},
-          debug: () => {},
-        });
+        ctx.services.register(
+          CAPABILITIES.LOGGER,
+          loggerDouble({
+            warn: (message: string, metadata?: Record<string, unknown>) => {
+              warnings.push({ message, ...(metadata === undefined ? {} : { metadata }) });
+            },
+            error: () => {},
+            info: () => {},
+            debug: () => {},
+          }),
+        );
       },
     };
 

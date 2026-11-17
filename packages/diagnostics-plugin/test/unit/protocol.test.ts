@@ -30,7 +30,7 @@ import {
   statusBody,
 } from '../../src/protocol/protocol.ts';
 import { minimalBatch, minimalSnapshot, TEST_INSTANCE_ID } from '../fixtures/helpers.ts';
-import { m98bIsStatusBody } from '../fixtures/m98b-status-validator.ts';
+import { originalIsStatusBody } from '../fixtures/original-status-validator.ts';
 
 describe('Protocol — canonical target parsing', () => {
   it('accepts exactly the four canonical targets', () => {
@@ -493,12 +493,12 @@ describe('Protocol — status-body release skew, BOTH directions (M98d gate)', (
 
   it('an OLD (shipped M98b) client REJECTS the new four-field body — why the gate exists', () => {
     // The frozen M98b validator accepts the body it was written for...
-    expect(m98bIsStatusBody(legacy)).toBe(true);
+    expect(originalIsStatusBody(legacy)).toBe(true);
     // ...and refuses the M98d body outright. A published M98b client would
     // therefore latch pairingFailed against any M98d server, and the request
     // carries no signal a server could branch on: the status body had to be
     // settled before the package's first publication.
-    expect(m98bIsStatusBody(current)).toBe(false);
+    expect(originalIsStatusBody(current)).toBe(false);
   });
 });
 

@@ -87,6 +87,7 @@ RuntimePlugin({ platform: 'node' });
 | `adapters`     | `RuntimeAdapterFactories` | —                 | Internal: override runtime adapter factories.                                 |
 | `httpAdapters` | `HttpAdapterFactories`    | built-in four     | Internal: override HTTP adapter factories.                                    |
 | `maxBodyBytes` | `number`                  | — (unbounded)     | Cap on the request-body read, enforced where the body is consumed.            |
+| `http2`        | `true \| Http2TlsOptions` | — (HTTP/1.1)      | Serve HTTP/2 beside HTTP/1.1 on one port; see [HTTP/2](#http2).               |
 
 ### Bounding the request body
 
@@ -103,7 +104,8 @@ length, and since the body read became lazy it happens inside the handler, after
 has returned. So the middleware bounds declared lengths and this option bounds the read itself.
 There are two knobs because the request mapping runs before any plugin and there is no channel
 between them: `mapWebRequestToFrameworkRequest` receives a `Request` and nothing else. Set both, and
-set `maxBodyBytes` to the same value as `maxBodySize` or higher.
+set `maxBodyBytes` to the same value as `maxBodySize`: a higher one admits an undeclared body larger
+than `maxBodySize`.
 
 A body past the cap rejects with `RequestBodyTooLargeError`, branded with a `413` HTTP status hint,
 so an application running `errorHandler` answers `413 Payload Too Large` in its configured format
@@ -116,13 +118,61 @@ the one way to say unbounded. A value that is not a non-negative integer throws 
 `RuntimePlugin(...)`; `NaN` in particular would make every comparison against the cap `false` and
 silently disable the bound, and `Number()` of an unset environment variable is exactly `NaN`.
 
-For in-process oversized-upload tests on Node 24 or Node 26 (up to 26.12.0), build the multipart
-request body from a `Blob` or use `inject()` instead of
-`app.fetch(new Request(..., { body: formData }))` with a file. Those releases bundle undici
-7.20.0–8.11.2, whose `FormData` request body throws an uncaught `ERR_INVALID_STATE` when the runtime
-cancels it after the cap is exceeded; undici 8.12.0 fixes it, and no released Node bundles that yet.
-Node 22, Bun and Deno are unaffected, as are real-socket uploads and `inject()`. The runtime still
-cancels oversized bodies to enforce the read bound.
+In-process oversized `FormData` requests on Node still reject with the same 413. On a Node host, a
+request with no socket peer (an in-process `app.fetch()`, on any adapter `platform` selects) that
+carries undici's exact generated multipart content type releases the reader lock instead of
+cancelling: undici's in-memory producer can enqueue after cancel and throw an uncaught
+`ERR_INVALID_STATE`. A request with a peer, every other body, and every request on Bun, Deno or
+Workers keep cancellation, so an oversized socket upload stops draining. Two cases also release, and
+the 413 still holds in both: socket traffic an application forwards through `app.fetch()` itself,
+which has no peer, and a Worker without a global `navigator` (`no_global_navigator`, or a
+compatibility date before 2022-03-21), which is detected as Node. No Blob or `inject()` workaround
+is required.
+
+A client- or bidi-streaming gRPC call is the exception: the kernel hands its unread body to the
+procedure, and `GrpcPlugin({ readMaxBytes })` bounds each message instead. A total cap would end
+every long-lived stream.
+
+### HTTP/2
+
+```typescript
+import { readFileSync } from 'node:fs';
+
+RuntimePlugin({ http2: true }); // cleartext: h2c and HTTP/1.1 on one port
+RuntimePlugin({
+  http2: { key: readFileSync('tls/key.pem', 'utf8'), cert: readFileSync('tls/cert.pem', 'utf8') },
+}); // TLS, ALPN h2 or HTTP/1.1
+```
+
+With `http2: true`, each new connection is classified by its first bytes: the HTTP/2 client preface
+goes to an HTTP/2 server, anything else to HTTP/1.1 at the first byte that differs, the way
+`Deno.serve` and Go's `http.Server` with unencrypted HTTP/2 behave. Browsers, plain `fetch`, health
+probes and WebSocket upgrades keep working on the port gRPC clients use. A connection that has not
+shown which protocol it speaks within 10 s is closed. With `{ key, cert }` (PEM), TLS negotiates
+`h2` or `http/1.1` by ALPN on one port.
+
+| Runtime | `true`                                                   | `{ key, cert }`        |
+| ------- | -------------------------------------------------------- | ---------------------- |
+| Node    | shared-port h2c and HTTP/1.1                             | TLS, `h2` and HTTP/1.1 |
+| Bun     | as Node: served by the Node adapter on `node:http2`      | as Node                |
+| Deno    | no change: `Deno.serve` already answers h2c and HTTP/1.1 | passed to `Deno.serve` |
+| Workers | ignored: the edge terminates HTTP/2 and HTTP/3           | ignored                |
+
+On Bun the option swaps `Bun.serve` for the Node adapter, so WebSockets there need the optional `ws`
+peer, as on Node. As on Node, `@hono/node-server` then installs its own `Request` and `Response`
+globals, which a native `Bun.serve` server started later in the same process does not accept: run
+one listener kind per process. `close()` sends `GOAWAY` to every open HTTP/2 session, so a client
+that keeps its session open cannot hold the listener past shutdown. An HTTP/2 session with no stream
+open for 75 s is closed the same way (a stream open but silent, such as a server stream waiting for
+events, keeps it, as does a request whose body never ends — as in grpc-go, nothing bounds an open
+stream), and HTTP/1.1 on the shared port keeps `node:http`'s own `headersTimeout` (60 s) and
+`requestTimeout` (300 s), as on the plain listener.
+
+An HTTP/2 request on the Node adapter carries `IRequest.responseTrailers: true`, and a streamed
+response's trailers (`IResponse.stream(body, { trailers })`) are written after its last chunk. That
+is what native gRPC needs; see the grpc-plugin README. Every served request's URL takes its scheme
+from the listener (`https` only under TLS), never from the client's `:scheme` or an absolute-form
+request line, so `requestOriginOf` cannot be told a plain connection is secure.
 
 ### Reporting a failed WebSocket handshake
 
@@ -259,6 +309,7 @@ native runtime's own limit.
 | `DenoWebSocketLike`                    | interface |
 | `DenoWebSocketUpgrade`                 | interface |
 | `GlobalScope`                          | interface |
+| `Http2TlsOptions`                      | interface |
 | `HttpAdapterFactories`                 | interface |
 | `HttpAdapterOptions`                   | interface |
 | `NodeDnsModule`                        | interface |

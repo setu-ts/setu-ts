@@ -52,8 +52,13 @@ describe('withWorkspaceMember', () => {
   it('leaves every other wiring untouched', () => {
     const base = hostOf('microservice');
     const member = withWorkspaceMember(base, HTTP, HTTP_RPC, 'orders');
-    // The discovery, messaging and queue wirings are the only ones the overlay reads.
-    const owned = new Set(['service-discovery-plugin', 'messaging-plugin', 'queue-plugin']);
+    // Discovery, runtime, messaging and queue are the wirings the overlay owns.
+    const owned = new Set([
+      'runtime',
+      'service-discovery-plugin',
+      'messaging-plugin',
+      'queue-plugin',
+    ]);
     const others = member.plugins.filter((p) => !owned.has(p.pkg));
     expect(others).toEqual(base.plugins.filter((p) => !owned.has(p.pkg)));
   });
@@ -62,10 +67,28 @@ describe('withWorkspaceMember', () => {
   // properties. A member without the plugin still appears in every other
   // member's map; adding the import here would put an identifier in its config
   // that no wiring reads.
+  it("spreads runtimeOptions() before a template's own RuntimePlugin options, adding none", () => {
+    const runtimeArgs = (base: ReturnType<typeof hostOf>): string | undefined =>
+      withWorkspaceMember(base, HTTP, HTTP_RPC, 'orders').plugins.find((p) => p.pkg === 'runtime')
+        ?.args;
+    // rest carries the 1 MiB body cap; it is kept, after the spread.
+    expect(runtimeArgs(hostOf('rest'))).toBe('{ ...runtimeOptions(), maxBodyBytes: 1_048_576 }');
+    // A RuntimePlugin with no options gains only the call, never an unchosen cap.
+    const bare = {
+      ...hostOf('rest'),
+      plugins: hostOf('rest').plugins.map((p) =>
+        p.pkg === 'runtime' ? { pkg: p.pkg, symbol: p.symbol } : p,
+      ),
+    };
+    expect(runtimeArgs(bare)).toBe('runtimeOptions()');
+  });
+
   it('adds no discovery wiring to a member without the discovery plugin', () => {
     for (const base of [hostOf('rest'), resolveHost(MINIMAL_HOST, 'deno')]) {
       const member = withWorkspaceMember(base, HTTP, HTTP_RPC, 'orders');
-      expect(member.plugins).toEqual(base.plugins);
+      expect(member.plugins.filter((p) => p.pkg !== 'runtime')).toEqual(
+        base.plugins.filter((p) => p.pkg !== 'runtime'),
+      );
       expect(member.localImports.some((entry) => entry.from === DISCOVERY_SPECIFIER)).toBe(false);
     }
   });
@@ -75,6 +98,7 @@ describe('withWorkspaceMember', () => {
 
     expect(member.plugins).toEqual([]);
     expect(member.appFactoryContext.serviceEndpoints).toBe(SERVICE_ENDPOINTS_EXPORT);
+    expect(member.appFactoryContext.runtimeOptions).toBe('runtimeOptions()');
     expect(member.localImports).toContainEqual({
       symbols: [SERVICE_ENDPOINTS_EXPORT],
       from: DISCOVERY_SPECIFIER,
@@ -85,6 +109,9 @@ describe('withWorkspaceMember', () => {
         ...member.appFactoryContext,
       }),
     ).toContain(`serviceDiscovery: { provider: 'static', services: ${SERVICE_ENDPOINTS_EXPORT} }`);
+    expect(member.appFactory?.args?.({ runtime: 'deno', ...member.appFactoryContext })).toContain(
+      'runtime: runtimeOptions(),',
+    );
   });
 });
 
@@ -134,7 +161,7 @@ describe('withWorkspaceMember — the transport module', () => {
     );
     expect(member.pluginSpreads[0]).toBe('...transportPlugins()');
     expect(member.localImports).toContainEqual({
-      symbols: ['messagingOptions', 'queueOptions', 'transportPlugins'],
+      symbols: ['runtimeOptions', 'messagingOptions', 'queueOptions', 'transportPlugins'],
       from: TRANSPORT_SPECIFIER,
     });
   });
@@ -184,7 +211,9 @@ describe('withWorkspaceMember — the transport module', () => {
   it('adds no messaging wiring to a member whose template has none', () => {
     const base = hostOf('rest');
     const { member, module } = memberOf('rest', 'redis');
-    expect(member.plugins).toEqual(base.plugins);
+    expect(member.plugins.filter((p) => p.pkg !== 'runtime')).toEqual(
+      base.plugins.filter((p) => p.pkg !== 'runtime'),
+    );
     expect(module?.contents).not.toContain('messagingOptions');
   });
 
@@ -201,6 +230,29 @@ describe('withWorkspaceMember — the transport module', () => {
     const http = memberOf('microservice', 'redis');
     expect(http.member.extraFrameworkPackages).toEqual([]);
     expect(http.member.files.some((file) => file.path === 'buf.gen.yaml')).toBe(false);
+  });
+
+  it('gives a member that calls a gRPC member the plugin client and its packages, no toolchain', () => {
+    const member = withWorkspaceMember(
+      hostOf('microservice'),
+      HTTP,
+      HTTP_RPC,
+      'orders',
+      workspaceProfile('deno'),
+      undefined,
+      ['billing'],
+    );
+    const module = member.files.find((file) => file.path === TRANSPORT_MODULE);
+    expect(module?.contents).toContain(
+      "return [GrpcPlugin({ serve: false, clients: { billing: { basePath: '/grpc' } } })];",
+    );
+    expect(member.extraFrameworkPackages).toEqual(['grpc-plugin']);
+    expect(member.extraDependencies).toMatchObject({
+      '@connectrpc/connect': '^2.1.2',
+      '@connectrpc/connect-node': '^2.1.2',
+      '@bufbuild/protobuf': '^2.7.0',
+    });
+    expect(member.files.some((file) => file.path === 'buf.gen.yaml')).toBe(false);
   });
 
   it('gives an npm member the scripts and devDependencies half of the toolchain', () => {
@@ -221,7 +273,7 @@ describe('withWorkspaceMember — the transport module', () => {
     expect(member.plugins).toEqual([]);
     expect(member.appFactoryContext).toMatchObject({
       messaging: 'messagingOptions(config)',
-      queue: '{ ...queueOptions(config) }',
+      queue: '{ processors: [...QUEUE_PROCESSORS], ...queueOptions(config) }',
       csrfExclude: 'csrfExclusions()',
     });
     expect(member.setupCalls[0]).toBe(

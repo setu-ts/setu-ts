@@ -1,5 +1,23 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IServiceRegistry, IMailer } from '@setu-ts/common';
 import { MockServiceRegistry } from '../../src/mock-registry.ts';
+
+it('keeps the public overloads identical to IServiceRegistry', () => {
+  expectTypeOf<MockServiceRegistry['get']>().toEqualTypeOf<IServiceRegistry['get']>();
+  expectTypeOf<MockServiceRegistry['getAll']>().toEqualTypeOf<IServiceRegistry['getAll']>();
+  expectTypeOf<MockServiceRegistry['register']>().toEqualTypeOf<IServiceRegistry['register']>();
+  expectTypeOf<MockServiceRegistry['registerFactory']>().toEqualTypeOf<
+    IServiceRegistry['registerFactory']
+  >();
+  const check = (registry: MockServiceRegistry): void => {
+    // @ts-expect-error The logger token cannot resolve a mailer.
+    registry.get<IMailer>(CAPABILITIES.LOGGER);
+    // @ts-expect-error A partial double cannot register under the bound logger token.
+    registry.register<object>(CAPABILITIES.LOGGER, {});
+  };
+  expectTypeOf(check).toBeFunction();
+});
 
 describe('MockServiceRegistry', () => {
   it('register then get returns the service', () => {

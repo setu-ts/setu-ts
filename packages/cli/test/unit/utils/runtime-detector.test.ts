@@ -34,6 +34,18 @@ describe('detectTargetRuntime', () => {
     expect(await detectTargetRuntime(fs, '/app')).toBe('bun');
   });
 
+  it.each([
+    ['NODE_ENV=production bun run main.ts', 'bun'],
+    ['NODE_ENV=production bun --env-file=local.env run main.ts', 'bun'],
+    ['NODE_ENV=production node x.js', 'node'],
+    ['bun run main.ts', 'bun'],
+    ['A=first B= C_2=third\tbun run main.ts', 'bun'],
+  ])('skips leading environment assignments in %s', async (start, runtime) => {
+    expect(
+      await detectTargetRuntime(createFakeFs({ '/app/package.json': pkg(start) }), '/app'),
+    ).toBe(runtime);
+  });
+
   it('reads node from its loader-based start script', async () => {
     const fs = createFakeFs({ '/app/package.json': pkg('tsx main.ts') });
     expect(await detectTargetRuntime(fs, '/app')).toBe('node');

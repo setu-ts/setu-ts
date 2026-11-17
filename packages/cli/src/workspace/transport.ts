@@ -239,28 +239,6 @@ const SQL_EDGE_PASSWORD_VARIABLE = 'MSSQL_SA_PASSWORD';
  */
 const NATS_STREAM_SUBJECTS = ['app.>', 'rr.req.app.>', 'rr.inbox.>'] as const;
 
-/**
- * Re-indents a rendered connection expression by one nesting level.
- *
- * {@linkcode WorkspaceRuntimeProfile.envRead} bakes a FIXED continuation indent
- * into its output (`Deno.env.get('X') ??\n<10 spaces>'fallback'`), which is
- * what `deno fmt` wants for a value sitting directly under a plugin option at
- * eight spaces. Kafka is the one arm that nests the connection inside a bracket
- * — `brokers: [...]` — where the element sits two columns deeper and the
- * formatter therefore wants its continuation two columns deeper too. Emitting
- * the unshifted form made a fresh `--broker kafka` (standalone or workspace)
- * scaffold fail its OWN `deno fmt --check`, which is the bar M63 set.
- *
- * Adds two spaces to every line after the first rather than rewriting a known
- * indent, so it stays correct if a profile ever renders a different one.
- *
- * @param connection - The rendered connection expression
- * @returns The expression, indented for one extra nesting level
- */
-function nestConnection(connection: string): string {
-  return connection.replaceAll('\n', '\n  ');
-}
-
 const BROKER_SPECS: Readonly<Record<BrokerName, BrokerSpec>> = {
   ['memory']: {
     name: 'memory',
@@ -290,8 +268,8 @@ const BROKER_SPECS: Readonly<Record<BrokerName, BrokerSpec>> = {
     ports:
       - '\${REDIS_PORT:-6379}:6379'
     healthcheck:
-      # Members wait on this: the messaging plugin connects during registration,
-      # so a member that starts first fails at app.start() rather than retrying.
+      # Plugins that use Redis connect during registration, so a service started
+      # before Redis is healthy fails at app.start() rather than retrying.
       test: ['CMD', 'redis-cli', 'ping']
       interval: 5s
       timeout: 3s
@@ -382,10 +360,13 @@ const BROKER_SPECS: Readonly<Record<BrokerName, BrokerSpec>> = {
     // shape differs, which is why each spec renders its own literal instead of a
     // shared `{ broker, url }` template.
     description: 'Kafka broker shared by every member',
+    // The connection goes in as rendered, inside the bracket. `deno fmt` keeps a
+    // logical-or continuation at the element's own column inside an array (a
+    // nullish one it indents two more), and `envRead`'s continuation already
+    // sits at ten, the element's column — so a shifted form fails the project's
+    // own `deno fmt --check` (M63's bar; measured on deno fmt, M140b).
     messagingArgs: (connection) =>
-      `{\n        broker: 'kafka',\n        brokers: [\n          ${nestConnection(
-        connection,
-      )},\n        ],\n      }`,
+      `{\n        broker: 'kafka',\n        brokers: [\n          ${connection},\n        ],\n      }`,
     connection: {
       variable: 'KAFKA_BROKERS',
       localDefault: '127.0.0.1:9092',
@@ -583,6 +564,12 @@ export function renderConnection(
 
 /**
  * Reads a transport from the registered ConfigPlugin, including dotenv values.
+ *
+ * A logical-or fallback rather than `config.get`'s `default` option: the
+ * option applies only when the key is absent, and a copied `.env.example`
+ * sets `REDIS_URL=` — an empty value that would reach the plugin (M140b,
+ * V12-124). An empty connection value is never valid, so empty means unset.
+ *
  * @param connection - The transport's connection declaration
  * @param override - The workspace's replacement fallback
  * @param column - Column at which the expression begins (zero based)
@@ -597,21 +584,16 @@ export function renderConfigConnection(
 ): string {
   const quote = (value: string): string =>
     `'${value.replaceAll('\\', '\\\\').replaceAll("'", "\\'").replaceAll('\n', '\\n').replaceAll('\r', '\\r')}'`;
-  const variable = quote(connection.variable);
+  const read = `config.get<string>(${quote(connection.variable)})`;
   const fallback = quote(override ?? connection.localDefault);
-  const single = `config.get<string>(${variable}, { default: ${fallback} })`;
+  const single = `${read} || ${fallback}`;
   if (column + single.length + 1 <= 100) return single;
-  // What `deno fmt` and Prettier both print when the call overflows (measured on
-  // the Service Bus emulator default, 2026-10-28): the last argument hugs the call,
-  // and `default:` breaks onto its own line only when its value still overflows.
-  // Callers render in the inline frame and shift the literal two spaces deeper, so
-  // the property's final inner column is `depth + 4`.
-  const inner = ' '.repeat(depth + 2);
-  const property =
-    depth + 4 + `default: ${fallback},`.length <= 100
-      ? `${inner}default: ${fallback},`
-      : `${inner}default:\n${inner}  ${fallback},`;
-  return `config.get<string>(${variable}, {\n${property}\n${' '.repeat(depth)}})`;
+  // What `deno fmt` prints when the expression overflows (measured on the Service
+  // Bus emulator default, M140b): the operator ends the first line and the
+  // fallback continues two columns past the property. Deno output is written as
+  // rendered; an npm target is reformatted by Prettier, which moves the whole
+  // expression under the property instead.
+  return `${read} ||\n${' '.repeat(depth + 2)}${fallback}`;
 }
 
 /**

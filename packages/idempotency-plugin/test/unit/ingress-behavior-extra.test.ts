@@ -51,7 +51,13 @@ function behavior(
 ) {
   const defaults = resolveDefaults(undefined);
   return createIngressBehavior(
-    { store, runtime: createClockRuntime(), logger: () => logger, defaults },
+    {
+      transactionalConfigured: false,
+      store,
+      runtime: createClockRuntime(),
+      logger: () => logger,
+      defaults,
+    },
     resolveIngressOptions(options, defaults),
   );
 }

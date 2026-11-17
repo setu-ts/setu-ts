@@ -77,6 +77,25 @@ async function workspace(
 }
 
 describe('setu workspace broker', () => {
+  it.each(['microservice', 'full-stack'])(
+    'refuses a %s config missing runtimeOptions and names the call to add',
+    async (template) => {
+      const ws = await workspace({ members: [['orders', template]] });
+      await ws.write(
+        'apps/orders/setu.config.ts',
+        ws.read('apps/orders/setu.config.ts').replace(/runtimeOptions\(\)/g, '{}'),
+      );
+      const before = ws.fs.writes.length;
+      const result = await ws.run(['workspace', 'broker', 'nats']);
+      expect(result.code).toBe(1);
+      expect(result.err).toContain(
+        template === 'full-stack'
+          ? 'runtime: runtimeOptions(),'
+          : 'RuntimePlugin({ ...runtimeOptions(), <its existing options> }),',
+      );
+      expect(ws.fs.writes).toHaveLength(before);
+    },
+  );
   it('rewrites every CLI-owned file and merges the clients the broker needs', async () => {
     const ws = await workspace({
       members: [
@@ -92,7 +111,7 @@ describe('setu workspace broker', () => {
     expect(ws.read('apps/web/src/transport/index.ts')).toContain("config.get<string>('REDIS_URL'");
     expect(JSON.parse(ws.read('setu.workspace.json'))).toMatchObject({ broker: 'redis' });
     expect(ws.read('docker/compose.yaml')).toContain('image: redis:7');
-    expect(ws.read('README.md')).toContain('Members share the **redis** broker');
+    expect(ws.read('README.md')).toContain('share the **redis** broker');
     // Class 2: merged, never removed.
     expect(JSON.parse(ws.read('apps/orders/deno.json')).imports).toMatchObject({
       ioredis: expect.stringContaining('npm:ioredis@'),
@@ -118,8 +137,8 @@ describe('setu workspace broker', () => {
     const after = ws.read('README.md');
     expect(after).toContain('# Mine\n\nMy notes.');
     expect(after).toContain('My footer.');
-    expect(after).toContain('Members share the **kafka** broker');
-    expect(after).not.toContain('Members share the **memory** broker');
+    expect(after).toContain('share the **kafka** broker');
+    expect(after).not.toContain('share the **memory** broker');
   });
 
   it('leaves a README without markers alone and prints the section', async () => {
@@ -129,7 +148,7 @@ describe('setu workspace broker', () => {
     expect(result.code).toBe(0);
     expect(ws.read('README.md')).toBe('# My own README\n');
     expect(result.out).toContain(`README.md has no ${TRANSPORT_README_MARKERS.start} section`);
-    expect(result.out).toContain('Members share the **redis** broker');
+    expect(result.out).toContain('share the **redis** broker');
   });
 
   // A no-op on each field the change compares.
@@ -294,11 +313,173 @@ describe('setu workspace rpc', () => {
     expect(ws.read('apps/orders/buf.gen.yaml')).toBe('# mine\n');
   });
 
+  it('gives a member that depends on a gRPC member its client, and takes it away again (M139b §3.12)', async () => {
+    const ws = await workspace({ members: [['billing', 'microservice', 'grpc']] });
+    const orders = await ws.run([
+      'g',
+      'app',
+      'orders',
+      '--template',
+      'microservice',
+      '--depends-on',
+      'billing',
+    ]);
+    expect(orders.code, orders.err).toBe(0);
+    expect(ws.read('apps/orders/src/transport/index.ts')).toContain(
+      "return [GrpcPlugin({ serve: false, clients: { billing: { basePath: '/grpc' } } })];",
+    );
+    expect(JSON.parse(ws.read('apps/orders/deno.json'))).toMatchObject({
+      imports: {
+        '@setu-ts/grpc-plugin': expect.any(String),
+        '@connectrpc/connect': expect.any(String),
+        '@connectrpc/connect-node': expect.any(String),
+        '@bufbuild/protobuf': expect.any(String),
+      },
+    });
+    // The caller gets no proto toolchain: it serves nothing.
+    expect(() => ws.read('apps/orders/buf.gen.yaml')).toThrow();
+
+    // billing stops serving gRPC: its caller's module loses the client with it.
+    expect((await ws.run(['workspace', 'rpc', 'billing', 'http'])).code).toBe(0);
+    expect(ws.read('apps/orders/src/transport/index.ts')).toContain('  return [];');
+    expect((await ws.run(['workspace', 'rpc', 'billing', 'grpc'])).code).toBe(0);
+    expect(ws.read('apps/orders/src/transport/index.ts')).toContain(
+      "GrpcPlugin({ serve: false, clients: { billing: { basePath: '/grpc' } } })",
+    );
+  });
+
+  it("refuses to take a caller's gRPC client away while its code still uses it (M139b review)", async () => {
+    const ws = await workspace({ members: [['billing', 'microservice', 'grpc']] });
+    const added = await ws.run([
+      'g',
+      'app',
+      'orders',
+      '--template',
+      'microservice',
+      '--depends-on',
+      'billing',
+    ]);
+    expect(added.code, added.err).toBe(0);
+    await ws.write(
+      'apps/orders/src/clients/billing.client.ts',
+      "import { grpcClient } from '@setu-ts/grpc-plugin';\nexport const make = grpcClient;\n",
+    );
+    const refused = await ws.run(['workspace', 'rpc', 'billing', 'http']);
+    expect(refused.code).not.toBe(0);
+    expect(refused.err).toContain('apps/orders/src/clients/billing.client.ts');
+    expect(refused.err).toContain('once billing stops serving gRPC');
+    // Nothing was written: orders still registers the client.
+    expect(ws.read('apps/orders/src/transport/index.ts')).toContain('GrpcPlugin({ serve: false');
+
+    const forced = await ws.run(['workspace', 'rpc', 'billing', 'http', '--force']);
+    expect(forced.code, forced.err).toBe(0);
+    expect(ws.read('apps/orders/src/transport/index.ts')).toContain('  return [];');
+  });
+
+  it('lets a caller that serves gRPC keep its own services, but not its client calls (M139b review)', async () => {
+    const ws = await workspace({ members: [['billing', 'microservice', 'grpc']] });
+    const added = await ws.run([
+      'g',
+      'app',
+      'orders',
+      '--template',
+      'microservice',
+      '--depends-on',
+      'billing',
+      '--rpc',
+      'grpc',
+    ]);
+    expect(added.code, added.err).toBe(0);
+    // orders' own gRPC service: it imports the plugin and resolves it, and keeps both.
+    await ws.write(
+      'apps/orders/src/grpc/orders.service.ts',
+      "import { CAPABILITIES } from '@setu-ts/common';\nimport type { GrpcPluginOptions } from '@setu-ts/grpc-plugin';\nexport const token = CAPABILITIES.GRPC;\nexport type O = GrpcPluginOptions;\n",
+    );
+    await ws.write(
+      'apps/orders/src/clients/billing.client.ts',
+      "import { grpcClient } from '@setu-ts/grpc-plugin';\nexport const make = grpcClient;\n",
+    );
+    const refused = await ws.run(['workspace', 'rpc', 'billing', 'http']);
+    expect(refused.code).not.toBe(0);
+    expect(refused.err).toContain('apps/orders/src/clients/billing.client.ts');
+    expect(refused.err).toContain('calls billing over gRPC, which it will no longer serve');
+    expect(refused.err).not.toContain('orders.service.ts');
+
+    await ws.write('apps/orders/src/clients/billing.client.ts', 'export const make = null;\n');
+    const changed = await ws.run(['workspace', 'rpc', 'billing', 'http']);
+    expect(changed.code, changed.err).toBe(0);
+    expect(ws.read('apps/orders/src/transport/index.ts')).toContain('GrpcPlugin(');
+  });
+
   it('changes nothing when the member already has the style', async () => {
     const ws = await workspace();
     const result = await ws.run(['workspace', 'rpc', 'orders', 'http']);
     expect(result.code).toBe(0);
     expect(result.out).toContain('orders is already http; nothing changed');
+  });
+
+  for (const [runtime, broker] of [
+    ['node', 'redis'],
+    ['deno', 'redis'],
+    ['node', 'rabbitmq'],
+  ] as const) {
+    it(`gives a full-stack member the queue package on a ${broker} switch (V12-60, ${runtime})`, async () => {
+      const ws = await workspace({ runtime, members: [['web', 'full-stack']] });
+      const manifest = runtime === 'node' ? 'apps/web/package.json' : 'apps/web/deno.json';
+      const member = `${ROOT}/apps/web`;
+      // On the memory broker the member has no queue package, so `setu g job` refuses.
+      expect((await ws.run(['g', 'job', 'sync'], member)).code).not.toBe(0);
+
+      const switched = await ws.run(['workspace', 'broker', broker]);
+      expect(switched.code, switched.err).toBe(0);
+      expect(ws.read(manifest)).toContain('@setu-ts/queue-plugin');
+      // No seam is pre-created: a barrel the config does not read yet would fail
+      // the member's own gate before any job exists (review of c333e06d0).
+      expect(() => ws.fs.read(`${member}/src/jobs/index.ts`)).toThrow();
+      expect((await ws.run(['check'], member)).code).toBe(0);
+      // The config stays the developer's: the planner names the lines instead.
+      expect(switched.out).toContain('setu.E006');
+      expect(switched.out).toContain('processors: [...QUEUE_PROCESSORS]');
+      expect(ws.read('apps/web/setu.config.ts')).not.toContain('QUEUE_PROCESSORS');
+
+      const job = await ws.run(['g', 'job', 'sync'], member);
+      expect(job.code, job.err).toBe(0);
+      expect(ws.fs.read(`${member}/src/jobs/index.ts`)).toContain('sync');
+      // Exactly what the note said: E006 until the config takes the two lines.
+      const unwired = await ws.run(['check'], member);
+      expect(unwired.code).not.toBe(0);
+      expect(unwired.err + unwired.out).toContain('setu.E006');
+      const config = ws.read('apps/web/setu.config.ts');
+      await ws.write(
+        'apps/web/setu.config.ts',
+        `import { QUEUE_PROCESSORS } from './src/jobs/index.ts';\n${config.replace(
+          /queue: \{ /,
+          'queue: { processors: [...QUEUE_PROCESSORS], ',
+        )}`,
+      );
+      const wired = await ws.run(['check'], member);
+      expect(wired.code, wired.err + wired.out).toBe(0);
+
+      // Leaving the queue broker keeps the package without calling it unused.
+      const back = await ws.run(['workspace', 'broker', 'memory']);
+      expect(back.code, back.err).toBe(0);
+      expect(back.out).not.toContain('@setu-ts/queue-plugin');
+    });
+  }
+
+  it('does not repeat the processors note once the config reads them (V12-60)', async () => {
+    const ws = await workspace({ runtime: 'node', members: [['web', 'full-stack']] });
+    const config = ws.read('apps/web/setu.config.ts');
+    await ws.write(
+      'apps/web/setu.config.ts',
+      `import { QUEUE_PROCESSORS } from './src/jobs/index.ts';\n${config.replace(
+        'queue: { ...queueOptions(config) }',
+        'queue: { processors: [...QUEUE_PROCESSORS], ...queueOptions(config) }',
+      )}`,
+    );
+    const switched = await ws.run(['workspace', 'broker', 'redis']);
+    expect(switched.code, switched.err).toBe(0);
+    expect(switched.out).not.toContain('start its queue option with processors');
   });
 
   it('exempts the gRPC mount from form CSRF on a full-stack member', async () => {
@@ -361,6 +542,19 @@ describe('refusing a member that does not read the module', () => {
     const result = await ws.run(['workspace', 'broker', 'redis', '--force']);
     expect(result.code).toBe(1);
     expect(result.err).toContain('...transportPlugins(),');
+  });
+
+  it('decides through the strict lexer, which a template literal stops (M139d audit F2)', async () => {
+    const ws = await workspace();
+    // The module IS called; only the read-only check's tolerant mask could see
+    // that past the template literal, and an automatic edit must not rely on it.
+    const config = ws.read('apps/orders/setu.config.ts');
+    await ws.write('apps/orders/setu.config.ts', `${config}\nconst label = \`orders\`;\n`);
+    const before = ws.fs.writes.length;
+    const result = await ws.run(['workspace', 'broker', 'redis']);
+    expect(result.code).toBe(1);
+    expect(result.err).toContain('Nothing was written.');
+    expect(ws.fs.writes.length).toBe(before);
   });
 
   it('refuses a member manifest that is not plain JSON, writing nothing', async () => {
@@ -640,7 +834,8 @@ describe('a workspace made by 0.11.0', () => {
       )
       .replace(/\nimport \{[^}]*\} from '\.\/src\/transport\/index\.ts';/, '')
       .replace(', ...queueOptions()', '')
-      .replace('      ...transportPlugins(),\n', '');
+      .replace('      ...transportPlugins(),\n', '')
+      .replace('...runtimeOptions(), ', '');
     await ws.write('apps/orders/setu.config.ts', literal);
     await ws.fs.rm(`${ROOT}/apps/orders/src/transport/index.ts`);
     const manifest = JSON.parse(ws.read('setu.workspace.json'));
@@ -658,7 +853,7 @@ describe('a workspace made by 0.11.0', () => {
     const refused = await ws.run(['workspace', 'broker', 'nats']);
     expect(refused.code).toBe(1);
     expect(refused.err).toContain(
-      "import { messagingOptions, queueOptions, transportPlugins } from './src/transport/index.ts';",
+      "import { runtimeOptions, messagingOptions, queueOptions, transportPlugins } from './src/transport/index.ts';",
     );
 
     await ws.write(
@@ -667,11 +862,15 @@ describe('a workspace made by 0.11.0', () => {
         .read('apps/orders/setu.config.ts')
         .replace(
           "import { MessagingPlugin } from '@setu-ts/messaging-plugin';",
-          "import { MessagingPlugin } from '@setu-ts/messaging-plugin';\nimport { messagingOptions, queueOptions, transportPlugins } from './src/transport/index.ts';",
+          "import { MessagingPlugin } from '@setu-ts/messaging-plugin';\nimport { runtimeOptions, messagingOptions, queueOptions, transportPlugins } from './src/transport/index.ts';",
         )
         .replace(
           "MessagingPlugin({ broker: 'redis-streams', url: 'redis://127.0.0.1:6379' })",
           'MessagingPlugin(messagingOptions())',
+        )
+        .replace(
+          'RuntimePlugin({ maxBodyBytes:',
+          'RuntimePlugin({ ...runtimeOptions(), maxBodyBytes:',
         )
         .replace(
           'processors: [...QUEUE_PROCESSORS] }',

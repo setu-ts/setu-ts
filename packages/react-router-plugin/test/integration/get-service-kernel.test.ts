@@ -13,7 +13,7 @@ import type { ServerBuild } from 'react-router';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import type { IRequestContext } from '@setu-ts/common';
-import { requestService, resolveRequestService, serviceToken } from '@setu-ts/common';
+import { requestService, resolveRequestService, requestServiceToken } from '@setu-ts/common';
 import { ReactRouterPlugin } from '../../src/plugin/react-router-plugin.ts';
 import { getService } from '../../src/handler/get-service.ts';
 import type { RouterLoadContext, SsrRequestHandler } from '../../src/interfaces/index.ts';
@@ -22,8 +22,8 @@ interface Session {
   readonly id: number;
   readonly user: string;
 }
-const SESSION = serviceToken<Session>('module.session-probe');
-const MISSING = serviceToken<Session>('module.not-registered');
+const SESSION = requestServiceToken<Session>('module.session-probe');
+const MISSING = requestServiceToken<Session>('module.not-registered');
 type Loader = (args: { request: Request; context: RouterLoadContext }) => unknown;
 
 function serverBuild(loaders: Record<string, Loader>, errors: unknown[]): unknown {

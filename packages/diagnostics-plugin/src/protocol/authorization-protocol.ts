@@ -69,6 +69,7 @@ const REASONS: ReadonlySet<string> = new Set<AuthorizationDecisionReason>([
   'role-permission',
   'role-wildcard',
   'not-held',
+  'token-confined',
   'compound-satisfied',
   'compound-unsatisfied',
 ]);

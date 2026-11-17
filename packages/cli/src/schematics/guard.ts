@@ -37,7 +37,7 @@ import { requirePermission } from '@setu-ts/auth-plugin';
  *
  * \`\`\`typescript
  * AuthPlugin({
- *   jwt: { secret: '<your-secret>' },
+ *   jwt: {}, // Resolves JWT_SECRET from secrets, config or the environment.
  *   rbac: { roles: { admin: { permissions: ['${names.kebab}'] } } },
  * })
  * \`\`\`

@@ -19,6 +19,49 @@ import type { QdrantClientLike } from '../../src/adapters/qdrant/qdrant-store.ts
 import { translate } from '../../src/adapters/qdrant/qdrant-filter.ts';
 
 const runtime = { subtle: globalThis.crypto.subtle } as IRuntimeServices;
+
+it.each([undefined, 7])(
+  'M139c slices Qdrant replacements before count/delete (version %s)',
+  async (version) => {
+    const client = recordingClient();
+    const store = new QdrantVectorStore({ client });
+    await store.open(runtime);
+    const records = Array.from({ length: 1201 }, (_, i) => ({
+      id: `r${i}`,
+      sourceId: 'source',
+      vector: [1, 0, 0],
+    }));
+    await store.replaceSource(spec, 'tenant-a', 'source', records, version);
+    const calls = client.calls.filter((c) => c.method === 'upsert');
+    const bodies = calls.map(
+      (c) => c.body as { points: { payload: Record<string, unknown> }[]; update_filter?: unknown },
+    );
+    expect(bodies.map((b) => b.points.length)).toEqual([500, 500, 201]);
+    for (const body of bodies) {
+      for (const point of body.points) {
+        expect(point.payload['scope']).toBe('tenant-a');
+      }
+      if (version === undefined) expect(body).not.toHaveProperty('update_filter');
+      else
+        expect(body.update_filter).toEqual({
+          must_not: [
+            {
+              must: [
+                { key: 'source_id', match: { value: 'source' } },
+                { key: 'source_version', range: { gt: version } },
+              ],
+            },
+          ],
+        });
+    }
+    expect(client.calls.filter((c) => c.method === 'delete')).toHaveLength(1);
+    expect(client.calls.at(-1)!.method).toBe('delete');
+    expect(JSON.stringify(client.calls.at(-1)!.body)).toContain('tenant-a');
+    expect(client.calls.filter((c) => c.method === 'count')).toHaveLength(
+      version === undefined ? 0 : 1,
+    );
+  },
+);
 const spec: VectorCollectionSpec = Object.freeze({
   name: 'documents',
   dimensions: 3,
@@ -471,5 +514,36 @@ describe('qdrant filter translation', () => {
     expect(() => translate({ field: 'tag', op: 'contains', value: 'x' } as never)).toThrow(
       "unsupported filter operator 'contains'",
     );
+  });
+});
+
+describe('QdrantVectorStore.isHealthy', () => {
+  it('checks the first ensured collection, which needs the API key, and reads a missing one as down', async () => {
+    const present = await opened(
+      recordingClient({ exists: true, vectors: { size: 3, distance: 'Cosine' } }),
+    );
+    await present.store.ensureCollection({ name: 'documents', dimensions: 3, filterable: {} });
+    await present.store.ensureCollection({ name: 'notes', dimensions: 3, filterable: {} });
+    const before = present.client.calls.length;
+    expect(await present.store.isHealthy()).toBe(true);
+    const probe = present.client.calls.slice(before);
+    expect(probe.map((call) => call.method)).toEqual(['collectionExists']);
+    expect(probe[0]!.name).toBe(
+      present.client.calls.find((c) => c.method === 'collectionExists')!.name,
+    );
+    const missing = await opened(recordingClient({ exists: false }));
+    await missing.store.ensureCollection({ name: 'documents', dimensions: 3, filterable: {} });
+    expect(await missing.store.isHealthy()).toBe(false);
+  });
+
+  it('asks the version endpoint before any collection is ensured, and rejects when it fails', async () => {
+    const { store, client } = await opened();
+    const before = client.calls.length;
+    expect(await store.isHealthy()).toBe(true);
+    expect(client.calls.slice(before).map((call) => call.method)).toEqual(['versionInfo']);
+    const down = await opened(
+      recordingClient({ versionFailures: [new Error('ECONNREFUSED'), new Error('ECONNREFUSED')] }),
+    );
+    await expect(down.store.isHealthy()).rejects.toThrow('ECONNREFUSED');
   });
 });

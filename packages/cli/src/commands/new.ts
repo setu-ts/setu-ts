@@ -100,6 +100,8 @@ import { runExampleNew } from '../examples/new.ts';
  * Everything `runNewCommand` reaches the outside world through.
  */
 export interface NewDependencies {
+  /** Creates a fresh secret for ignored local configuration. */
+  readonly secret: () => string;
   /** The filesystem to write the project through. */
   readonly fs: IFileSystem;
   /** The directory new projects are created under (absolute). */
@@ -448,6 +450,7 @@ async function planProject(
   name: string,
   runtime: TargetRuntime,
   args: ParsedArgs,
+  secret: () => string,
   probe?: PortProbe,
 ): Promise<
   | {
@@ -583,7 +586,7 @@ async function planProject(
   if (!devtoolRequested) {
     return {
       ok: true,
-      files: projectFiles(name, runtime, overlaid),
+      files: projectFiles(name, runtime, overlaid, undefined, { secret }),
       ...(loggerChoice.logger === undefined ? {} : { logger: loggerChoice.logger }),
       ...(notice === undefined ? {} : { notice }),
     };
@@ -598,11 +601,15 @@ async function planProject(
     };
   }
   const devHost = withDevtool(overlaid, devtoolPort, runtime);
-  const files = [...projectFiles(name, runtime, devHost)];
+  const files = [...projectFiles(name, runtime, devHost, undefined, { secret })];
   if (runtime === 'node') {
     const index = files.findIndex((file) => file.path === 'package.json');
     const manifest = files[index]!;
-    const plan = planNodeDevtool(manifest.contents);
+    const plan = planNodeDevtool(
+      manifest.contents,
+      manifest.path,
+      `--env-file-if-exists=${devHost.manifest?.envFilePath ?? '.env'} `,
+    );
     if (!plan.ok) return plan;
     if (plan.contents !== undefined) files[index] = { ...manifest, contents: plan.contents };
   }
@@ -770,7 +777,13 @@ export async function runNewCommand(args: ParsedArgs, deps: NewDependencies): Pr
   if (workspace) {
     plan = planWorkspace(projectName, runtime, chosen);
   } else {
-    const projectPlan = await planProject(projectName, runtime, chosen, deps.portAvailable);
+    const projectPlan = await planProject(
+      projectName,
+      runtime,
+      chosen,
+      deps.secret,
+      deps.portAvailable,
+    );
     if (projectPlan.ok) {
       planNotice = projectPlan.notice;
       planLogger = projectPlan.logger;
@@ -814,6 +827,8 @@ export async function runNewCommand(args: ParsedArgs, deps: NewDependencies): Pr
   const files = plan.files.map((file) => ({
     path: joinPath(root, file.path),
     contents: file.contents,
+    // A file holding a generated secret is created owner-only (M140c audit F2).
+    ...(file.secret === true ? { secret: true } : {}),
   }));
 
   if (args.flags['dry-run'] === true) {

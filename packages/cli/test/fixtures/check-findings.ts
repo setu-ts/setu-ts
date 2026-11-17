@@ -69,4 +69,5 @@ export const CHECK_FINDINGS: readonly Finding[] = [
   },
   { kind: 'page-unreadable', path: 'app/routes/broken.tsx' },
   { kind: 'artifact-unlisted', path: 'src/services/plain.service.ts', missing: ['describePlain'] },
+  { kind: 'plugin-unregistered', pkg: 'mcp-plugin', symbol: 'McpPlugin' },
 ];

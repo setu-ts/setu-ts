@@ -37,4 +37,9 @@ describe('guard schematic', () => {
     expect(file.contents).toContain('every authenticated request answers `501`');
     expect(file.contents).toContain("rbac: { roles: { admin: { permissions: ['order-item'] } } },");
   });
+
+  it('uses the environment-resolved JWT strategy in its registration example', () => {
+    expect(file.contents).toContain('jwt: {}, // Resolves JWT_SECRET');
+    expect(file.contents).not.toContain('<your-secret>');
+  });
 });

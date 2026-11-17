@@ -38,6 +38,7 @@ import {
 } from './full-stack-build-files.ts';
 import { SWAGGER_UI_DIST_VERSION } from './swagger-version.ts';
 import { defaultLogger } from './logger.ts';
+import { siteUrl } from '../utils/repository-links.ts';
 
 /**
  * Framework packages the emitted `app/` tree imports.
@@ -131,7 +132,17 @@ function fullStackArgs(context: AppFactoryRenderContext): string {
     (config): FullStackStarterOptions => {
       const trustedProxies = config.get<string>('TRUSTED_PROXIES', { default: '' })
         .split(',').map((entry) => entry.trim()).filter((entry) => entry.length > 0);
-      return {
+      const forwardedHost = config.get<string>('TRUST_FORWARDED_HOST', { default: '' });
+      if (forwardedHost !== '' && forwardedHost !== 'false' && forwardedHost !== 'true') {
+        throw new Error("TRUST_FORWARDED_HOST must be 'true', 'false' or empty");
+      }
+      const trustForwardedHost = forwardedHost === 'true';
+      if (trustForwardedHost && trustedProxies.length === 0) {
+        throw new Error(
+          'TRUST_FORWARDED_HOST=true needs TRUSTED_PROXIES: list the proxies that overwrite X-Forwarded-Host',
+        );
+      }
+      return {${context.runtimeOptions === undefined ? '' : `\n        runtime: ${context.runtimeOptions},`}
         reactRouter: {
           // Production entries pass the compiled server build as a MODULE so
           // bundling cannot relocate a path relative to import.meta.url.
@@ -144,6 +155,7 @@ function fullStackArgs(context: AppFactoryRenderContext): string {
             // which the plugin binds to this request. The keys come from
             // contextKeyFor(), so the copy of context-keys.server.ts inlined into
             // the server build resolves to the same key objects this module holds.
+            context.set(requestIdContext, ctx.id);
             context.set(sessionContext, getSession(ctx));
             context.set(csrfContext, getCsrfToken(ctx));
           },
@@ -164,7 +176,7 @@ function fullStackArgs(context: AppFactoryRenderContext): string {
         httpSecurity: {
           headers: { referrerPolicy: 'same-origin' },
           ...(trustedProxies.length > 0
-            ? { ipSecurity: { trustProxy: true, trustedProxies } }
+            ? { ipSecurity: { trustProxy: true, trustedProxies, trustForwardedHost } }
             : {}),
         },${context.swaggerAssets === 'cdn' ? "\n        openapi: { swagger: { assets: 'cdn' } }," : ''}
       };
@@ -181,7 +193,10 @@ function fullStackArgs(context: AppFactoryRenderContext): string {
  * winning.
  */
 const FULL_STACK_LOCAL_IMPORTS: readonly LocalImport[] = [
-  { symbols: ['csrfContext', 'sessionContext'], from: './app/server/context-keys.server.ts' },
+  {
+    symbols: ['csrfContext', 'requestIdContext', 'sessionContext'],
+    from: './app/server/context-keys.server.ts',
+  },
   // Modular from the start (M130 §3.4): the template ships src/modules/, and
   // `setu g module` adds to the barrel this import reads.
   { symbols: [REGISTER_MODULES_EXPORT], from: './src/modules/index.ts' },
@@ -234,7 +249,7 @@ export const FULL_STACK_TEMPLATE: TemplateDefinition = {
     parameter: {
       name: 'ssr',
       type: "{ serverBuild: unknown } | Pick<ReactRouterPluginOptions, 'loadRequestHandler' | 'mode'>",
-      doc: 'The Vite runtime start:dev supplies; production entries pass the compiled server build module.',
+      doc: 'Supplied by the entry: the compiled server build in production, the Vite runtime in local development.',
       readOn: ['deno', 'node', 'bun', 'cloudflare-workers'],
     },
   },
@@ -245,13 +260,14 @@ export const FULL_STACK_TEMPLATE: TemplateDefinition = {
     { path: '/api/products', purpose: 'the products module API, the same service the page reads' },
   ],
   packageImports: [
+    { pkg: 'exceptions' },
     // The annotation that restores excess-property checking on the resolver
     // (X5-2). A type-only import, so it costs the generated project nothing at
     // runtime.
     { pkg: 'full-stack-starter', symbols: ['type FullStackStarterOptions'] },
     // The load-context bridge in the generated setu.config.ts.
     { pkg: 'session-plugin', symbols: ['getCsrfToken', 'getSession'] },
-    // Imported by the products module (serviceToken, requestService,
+    // Imported by the products module (requestServiceToken, requestService,
     // resolveRequestService) and by app/entry.server.tsx; setu.config.ts names
     // no common symbol beyond IPlugin.
     { pkg: 'common' },
@@ -278,16 +294,22 @@ export const FULL_STACK_TEMPLATE: TemplateDefinition = {
   manifest: {
     readmeSection: (cli, runtime, member) =>
       FULL_STACK_README_SECTION(cli, runtime, member) +
-      `
+      (runtime === 'cloudflare-workers'
+        ? ''
+        : `
 ## Behind a TLS proxy
 
 React Router actions answer 400 behind TLS termination unless the proxy is trusted. Set
 TRUSTED_PROXIES to a comma-separated list of your proxies (for example, 10.0.0.0/8). This trusts
-their forwarded client IP, host and protocol headers. Leave it empty for direct access. List IPv4
+their forwarded client IP and protocol headers. The public host stays the Host header the proxy
+sends; if your proxy rewrites Host and writes X-Forwarded-Host itself, also set
+TRUST_FORWARDED_HOST=true (keep it off behind a proxy that passes a
+client's X-Forwarded-Host through), as the deployment guide describes:
+${siteUrl('docs/deployment/')}. Leave TRUSTED_PROXIES empty for direct access. List IPv4
 proxies as addresses or CIDRs, and IPv6 proxies as single addresses: an IPv6 CIDR is compared
 literally and matches nothing. Never use 0.0.0.0/0, which trusts every IPv4 client's forwarded
 headers, so any client can choose its own address and origin.
-`,
+`),
     envFilePath: '.env',
     // `fullStackArgs` emits `config.getOrThrow<string>('SESSION_SECRET')`, so
     // without this the template scaffolds a project that throws at startup.
@@ -295,22 +317,32 @@ headers, so any client can choose its own address and origin.
       {
         name: 'TRUSTED_PROXIES',
         description:
-          'Your proxies (IPv4 CIDRs or single IPv6 addresses), comma-separated; trusts their forwarded client IP, host and protocol, fixing TLS-proxy action 400s. Never 0.0.0.0/0: it trusts every client.',
+          'Your proxies (IPv4 CIDRs or single IPv6 addresses), comma-separated; trusts their forwarded client IP and protocol (behind a TLS-terminating proxy, actions otherwise answer 400); the forwarded host also needs TRUST_FORWARDED_HOST=true. Never 0.0.0.0/0: it trusts every client.',
+        develop: '',
+      },
+      {
+        name: 'TRUST_FORWARDED_HOST',
+        description:
+          'Set true only when TRUSTED_PROXIES overwrite X-Forwarded-Host; leave empty otherwise.',
         develop: '',
       },
       {
         name: 'SESSION_SECRET',
         description: 'Signs and encrypts session cookies. Use a long random value in production.',
-        develop: 'dev-only-insecure-session-secret-change-me',
+        generated: 'secret',
       },
     ],
     // The one template with a real frontend build, and the only one that should
     // therefore carry an npm manifest on a Deno or Workers target.
     npmBuild: {
       script: 'react-router build',
-      // The npm specifier, not the bin shim: a Deno task resolves the package,
-      // while `package.json` resolves the shim from `node_modules`.
-      denoCommand: 'deno run -A --no-lock npm:@react-router/dev build',
+      // The bin of the project's own installed copy, resolved from `package.json`
+      // and `deno.lock`: locked, matching the app's react-router range, and adding
+      // nothing to the lock. Named rather than given as a path because a workspace
+      // member on Deno before 2.9 has no `node_modules` of its own; Deno's task
+      // runner finds the bin in the root's. An unversioned `npm:` specifier with
+      // `--no-lock` fetched the newest release on every build.
+      denoCommand: 'react-router build',
       outputDir: 'build',
       // React Router's typegen writes here (`react-router typegen`, and the Vite
       // plugin during dev/build). It is generated source, not the project's, so

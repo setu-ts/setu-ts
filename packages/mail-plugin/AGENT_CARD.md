@@ -45,10 +45,10 @@ export function registerWelcomeRoutes(router: IRouterApi): void {
 - Component templates require `CAPABILITIES.VIEW` at registration; an absent provider fails startup.
   Their data is passed as props without the string arm's missing-variable check.
 - Sending resolves when the provider accepts the message; it does not prove recipient delivery.
-- SMTP needs raw sockets on Node, Deno or Bun; the other providers also work on Workers.
-
-## Other options
-
+- `attachments: [{ filename, content, contentType?, contentId? }]` takes `Uint8Array` or UTF-8 text;
+  a `contentId` makes it inline (`cid:`). Invalid header fields are refused with a TypeError.
+- SMTP: raw sockets (Node, Deno, Bun), peer `nodemailer`; SES: peer `@aws-sdk/client-sesv2`. Others
+  run on Workers too.
 - `provider` also selects `'log'`, `'smtp'` or `'ses'`; `send` sends an untemplated message.
 - SMTP uses `host`, `port`, `secure`, `auth` or injected `transport`; SES uses `region`,
   `accessKeyId`, `secretAccessKey` or injected `client` inside `options`.

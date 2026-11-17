@@ -132,10 +132,11 @@ describe('runtime swaps', () => {
     // One boot, not two: a second application would carry its own broker and
     // its own dispatch table, and the subscriptions registered on one would be
     // invisible to the other.
-    // M70l X9-8: every export claims its app through the shared `acquire`
+    // M70l X9-8: every export claims its app through `withApplication` and the shared `acquire`
     // cache, which keeps only a SUCCESSFUL boot — one `boot(env)` definition,
-    // two claim sites.
-    expect(entry?.match(/const booted = acquire\(env\);/g)).toHaveLength(2);
+    // one acquire/release implementation and two callback sites.
+    expect(entry?.match(/const booted = acquire\(env\);/g)).toHaveLength(1);
+    expect(entry?.match(/withApplication\(env, async \(app\) =>/g)).toHaveLength(2);
     expect(entry?.match(/async function boot/g)).toHaveLength(1);
     expect(entry).not.toContain('??=');
 
@@ -144,7 +145,7 @@ describe('runtime swaps', () => {
   });
 
   it('declares cloudflare-plugin in the generated manifest on Workers', () => {
-    const manifest = fileAt(MICROSERVICE_TEMPLATE, 'cloudflare-workers', 'deno.json');
+    const manifest = fileAt(MICROSERVICE_TEMPLATE, 'cloudflare-workers', 'package.json');
 
     // The renderer and the manifest writer are separate functions reading one
     // swapped plugin list; if they disagreed, the project would import a

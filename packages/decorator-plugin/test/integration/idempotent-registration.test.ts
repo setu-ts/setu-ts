@@ -37,6 +37,7 @@ const itZod = z === undefined ? it.skip : it;
 /** A provider plugin recording every `middleware()` call. */
 function providerPlugin(calls: unknown[]): IPlugin {
   const service: IIdempotencyService = {
+    transactional: false,
     middleware: (options) => {
       calls.push(options);
       return (_ctx, next) => next();
@@ -151,6 +152,7 @@ describe('@Idempotent runs AFTER the validation band (M109a §3.9, negative cont
       provides: [CAPABILITIES.IDEMPOTENCY],
       register(ctx: IPluginContext): void {
         const service: IIdempotencyService = {
+          transactional: false,
           middleware: (): MiddlewareFunction => (_ctx, next) => {
             entered++;
             return next();

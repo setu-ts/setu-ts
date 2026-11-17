@@ -311,11 +311,11 @@ export async function planModuleSwitch(input: IModuleSwitchInput): Promise<Modul
         `Cannot adopt src/${adoptedController && !controllerAdmitted ? `controllers/${module}.controller.ts` : `services/${module}.service.ts`} as the module's own: setu check skips it, so the module's index would import what it does not export. Fix it (setu check names what is missing), or choose another module name; nothing was moved.`,
       ],
     };
-  if ((adoptedController || adoptedService) && input.fullStack === true)
+  if (adoptedService && input.fullStack === true)
     return {
       kind: 'refused',
       lines: [
-        'Cannot adopt same-named files into a full-stack module: its index imports the generated service factory and token by name. Choose another module name; nothing was moved.',
+        `Cannot adopt a same-named service into a full-stack module: its token and index import ${deriveNames(module).pascal}Service and ${deriveNames(module).camel}Service from the generated service factory. Choose another module name; nothing was moved.`,
       ],
     };
   if (adoptedService && !adoptedController)

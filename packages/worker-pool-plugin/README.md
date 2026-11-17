@@ -42,7 +42,7 @@ A task module is an ES module **your application owns**. It registers its handle
 level with `defineWorkerTask` from the runtime package's `./worker` subpath:
 
 ```typescript
-// tasks/resize-image.ts — runs on a worker thread
+// tasks/resize-image.task.ts — runs on a worker thread
 import { defineWorkerTask } from '@setu-ts/runtime/worker';
 
 // Whatever CPU-bound work belongs on a thread; your application owns it.
@@ -75,7 +75,7 @@ const imageBytes = new Uint8Array([137, 80, 78, 71]);
 
 const pool = app.services.get<IWorkerPool>(CAPABILITIES.WORKER_POOL);
 const thumb = await pool.run<Uint8Array, Uint8Array>(
-  new URL('./tasks/resize-image.ts', import.meta.url).href,
+  new URL('./tasks/resize-image.task.ts', import.meta.url).href,
   imageBytes,
 );
 ```
@@ -89,7 +89,7 @@ const thumb = await pool.run<Uint8Array, Uint8Array>(
 | `defaultPoolSize`  | `number`                          | `availableParallelism()` | Workers per pool.                                                                                                                                         |
 | `maxQueue`         | `number`                          | `1024`                   | Pending-task bound per pool; exceeding it throws.                                                                                                         |
 | `taskTimeoutMs`    | `number`                          | `30000`                  | Per-task timeout; `0` disables; at most 2147483647. Timed-out worker dies.                                                                                |
-| `pools`            | `Record<string, TaskPoolOptions>` | `{}`                     | Per-module `{ size?, maxQueue?, taskTimeoutMs? }`.                                                                                                        |
+| `pools`            | `Record<string, TaskPoolOptions>` | `{}`                     | Per-module `{ size?, maxQueue?, taskTimeoutMs?, label? }`; `label` names the pool on `/metrics` and `/health`.                                            |
 | `host`             | `IWorkerHost`                     | `runtime.workers`        | Injected host, wins over the runtime's; for tests.                                                                                                        |
 
 ## Semantics
@@ -233,7 +233,8 @@ worker managed to report, while a thread that simply stops raises nothing at all
 ## Health
 
 Registers a `worker-pool` health indicator reporting `{ available, exitDetection, pools, budget }`,
-where `pools` is one `{ taskModule, workers, busy, queued, completed, failed }` snapshot per pool.
+where `pools` is one `{ task, workers, busy, queued, completed, failed }` snapshot per pool. `task`
+is the pool's task label, never the module specifier (see "Task labels").
 
 `budget` is `{ maxWorkers, workers }`: the resolved bound (`null` for `Infinity`) and the sum of all
 pools' worker slots. It counts slots, not threads: on Deno a timed-out CPU-bound worker can keep
@@ -242,7 +243,11 @@ running after its slot is released (see Sizing).
 The status is `up` even when `data.available` is false: registering this plugin on Cloudflare
 Workers is deliberate, and the absence of threads does not stop the app serving requests. Every
 `run()` still rejects with `WorkerPoolUnavailableError` on that runtime, and `data.reason` explains
-why. Alert on `data.available` when workers are required by your application.
+why. Alert on `data.available` when workers are required by your application. `/health` includes
+`data` only with `HealthPlugin({ details: true })`; the default body carries each check's `status`
+alone. Detailed reports expose every indicator's data, so protect the health endpoints when they
+carry it
+([Statuses](https://github.com/setu-ts/setu-ts/blob/main/packages/health-plugin/README.md#statuses)).
 
 The pool counters are DATA, never a threshold. `failed` is cumulative, so any status derived from it
 would need a failure rate this plugin cannot choose on an application's behalf; watch it through the
@@ -282,6 +287,27 @@ tasks, which the health payload cannot see at all.
 The gauges are written from the same snapshot the health indicator reads, on every pool state change
 — no polling interval is armed, so there is no timer to leak at shutdown.
 
+### Task labels
+
+`task_module` on every series, and `task` in the health payload, is a task label — never the
+specifier you pass to `run()`. That specifier is normally
+`new URL('./tasks/resize-image.task.ts', import.meta.url).href`, a `file:` URL naming the machine's
+directories and its user, and `/metrics` and `/health` leave the process. The label is
+`pools[<specifier>].label` when set, otherwise the module's file name without its final extension
+(`resize-image.task`, for both the source `.task.ts` and the `.task.js` that `setu build` emits). A
+`data:` or `blob:` module is `inline`. If two modules share a file name, the second one used becomes
+`resize-image.task_2` and the plugin warns once; give each a `label` to make the names stable. A
+`label` must be 1–64 characters of letters, digits, `_`, `.` or `-` and unique across pools, or the
+plugin throws `RangeError` when constructed. `stats()`, errors and warning logs keep the specifier.
+
+```typescript
+import { WorkerPoolPlugin } from '@setu-ts/worker-pool-plugin';
+
+WorkerPoolPlugin({
+  pools: { [new URL('./tasks/resize.task.ts', import.meta.url).href]: { label: 'thumbnails' } },
+});
+```
+
 ## Exports
 
 | Export                       | Kind      |
@@ -303,3 +329,15 @@ drifts.
 
 Every export and option is documented in
 [PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#workerpoolplugin-setu-tsworker-pool-plugin).
+
+## Building with `setu build`
+
+On Node, keep task specifiers as literal `new URL('./tasks/resize-image.task.ts', import.meta.url)`
+expressions. `setu build` bundles each referenced `*.task.ts` into `dist/` and rewrites the URL to
+its emitted `.js` path relative to each application output, including the migration runner. A
+non-literal reference that names the `.task.ts` path in the call (a template literal, a
+concatenation, `import.meta.resolve`) is refused with the file and line, but a path held in a
+variable (`new URL(taskPath, import.meta.url)`) cannot be detected: it builds, and the task is
+missing from `dist/` at run time, so keep the literal in the call. `--dry-run` lists task outputs.
+Development uses the same `.task.ts` specifier through the source loader. Deno and Bun run source
+directly.

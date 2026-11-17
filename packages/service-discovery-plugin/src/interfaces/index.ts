@@ -67,6 +67,11 @@ export interface DiscoveryProvider {
    * fact (reachability), not a policy: the indicator owns the `up`/`degraded`/
    * `down` mapping.
    *
+   * A provider may reject with the reason instead of resolving `false`; the
+   * service logs that reason once per outage at `warn` (and the recovery at
+   * `info`) and counts the rejection as unreachable. Since 0.13.0 the
+   * Kubernetes provider rejects this way.
+   *
    * @returns `true` when the backend is reachable
    * @since 0.2.0
    */

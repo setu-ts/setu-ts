@@ -38,8 +38,9 @@ import type { DatabaseAdapterType } from '../interfaces/index.ts';
  * - `'duplicate'` — the write would duplicate a primary key or a unique
  *   index; the operation did not happen and repeating it fails the same way
  *   (`409`).
- * - `'timeout'` — the driver call bound elapsed; a write's outcome is
- *   unknown and retries must be idempotent (`504`).
+ * - `'timeout'` — the driver call bound elapsed, or the connection was lost
+ *   while a statement was in flight; either way a write's outcome is unknown
+ *   and retries must be idempotent (`504`).
  *
  * @since 0.5.0
  */
@@ -297,6 +298,52 @@ export function isUnansweredConnect(error: unknown): boolean {
   const candidates = causeChainMembers(error);
   const hasStringCode = candidates.some(({ code }) => typeof code === 'string');
   return candidates.some(({ message }) => classifyPgTimeout(message, hasStringCode) !== null);
+}
+
+/**
+ * Whether node-postgres's pool timed out waiting for a busy client.
+ *
+ * Internal (M139f V8-3). pg-pool raises this exact text only on the checkout
+ * branch that waits for an existing client — the pool is full — and removes
+ * the waiter before rejecting, so `waitingCount` already reads 0. The message
+ * is therefore the saturation evidence the pool counters no longer show. A
+ * new-connection handshake timeout is a different text and does not count.
+ *
+ * @param error - The thrown value
+ * @returns `true` when a chain with no string code carries the pool anchor
+ */
+export function isPoolAcquireTimeout(error: unknown): boolean {
+  const candidates = causeChainMembers(error);
+  if (candidates.some(({ code }) => typeof code === 'string')) return false;
+  return candidates.some(({ message }) => message === PG_POOL_TIMEOUT_ANCHOR);
+}
+
+/**
+ * Whether a `'timeout'` classification came from a connection lost under a
+ * statement rather than from a bound elapsing.
+ *
+ * Internal (M139f V12-50). Both mean "outcome unknown" (504), so the class is
+ * shared; only the message differs. It agrees with
+ * {@linkcode classifyDriverError} by construction: it is `false` unless that
+ * classifies the error as `'timeout'`, and then checks the same members.
+ *
+ * @param error - The thrown value
+ * @param adapterType - The adapter that threw, as for `classifyDriverError`
+ * @returns `true` when the connection was lost mid-statement
+ */
+export function isConnectionLostMidCall(
+  error: unknown,
+  adapterType?: DatabaseAdapterType,
+): boolean {
+  if (classifyDriverError(error, adapterType) !== 'timeout') return false;
+  const candidates = classificationMembers(error);
+  const hasStringCode = candidates.some(({ code }) => typeof code === 'string');
+  return candidates.some(
+    ({ code, namespace, message }) =>
+      code === MYSQL_CONNECTION_LOST ||
+      (namespace === 'mysql-adapter' && code === MARIADB_SOCKET_CLOSED) ||
+      classifyPgConnectionLoss(message, hasStringCode) === 'timeout',
+  );
 }
 
 /** The class 22 codes a supplied value can cause; see {@linkcode isValueTypeRefusal}. */

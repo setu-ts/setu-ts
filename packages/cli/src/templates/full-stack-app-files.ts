@@ -105,10 +105,11 @@ export function ErrorBoundary() {
 
 const entryServerModule = `import { renderToReadableStream } from 'react-dom/server';
 import { type EntryContext, isRouteErrorResponse, ServerRouter } from 'react-router';
-import { CAPABILITIES, describeError, type ILogger } from '@setu-ts/common';
+import { CAPABILITIES, describeError, type ILogger, maskUrlUserinfo } from '@setu-ts/common';
 import { getService } from '@setu-ts/react-router-plugin';
 
 import type { AppLoadContext } from '~/lib/load-context.ts';
+import { requestIdContext } from '~/server/context-keys.server.ts';
 
 /**
  * Server entry.
@@ -166,7 +167,14 @@ export function handleError(
   if (isRouteErrorResponse(error) && error.status === 404) return;
   getService<ILogger>(context, CAPABILITIES.LOGGER).error('SSR request failed', {
     path: new URL(request.url).pathname,
+    requestId: context.get(requestIdContext),
     error: describeError(error),
+    // Masked first, so a cut cannot split a URL before its userinfo is hidden;
+    // then bounded like describeError's 8192, so one failing request cannot
+    // write an unbounded log record.
+    ...(error instanceof Error && error.stack
+      ? { stack: maskUrlUserinfo(error.stack).slice(0, 8192) }
+      : {}),
   });
 }
 `;
@@ -232,6 +240,9 @@ export interface CurrentUser {
   /** The address the user signed in with. */
   readonly email: string;
 }
+
+/** The kernel request id, for correlating SSR failures with request logs. */
+export const requestIdContext = contextKeyFor<string | null>('app.request-id', null);
 
 /** The session for the current request; set in \`setu.config.ts\`. */
 export const sessionContext = contextKeyFor<ISession | null>('app.session', null);
@@ -322,7 +333,7 @@ export interface NavItem {
   readonly label: string;
 }
 
-/** The signed-in application navigation. */
+/** The signed-in application navigation: add an entry for each signed-in page. */
 export const APP_NAV: readonly NavItem[] = [
   { to: '/products', label: 'Products' },
 ];
@@ -370,8 +381,8 @@ import { currentUserContext, sessionContext } from '~/server/context-keys.server
  * \`\`\`
  *
  * Exported from a LAYOUT module (\`app/components/layouts/AppLayout.tsx\`) it guards
- * every route in that group. This scaffold attaches it to \`/products\` alone,
- * because the same layout also serves the public landing page at \`/\`.
+ * every route in that group. This scaffold attaches it page by page: each guarded
+ * page exports \`middleware = [requireUser]\`.
  *
  * The \`.server.ts\` suffix is safe here: React Router strips the \`middleware\`
  * export — and the imports only it uses — from the browser bundle.
@@ -631,13 +642,15 @@ export async function action({ request, context }: { request: Request; context: 
   const form = await request.formData();
   const email = String(form.get('email') ?? '');
 
-  // Replace with a real credential check — resolve the auth service with
-  // getService(context, CAPABILITIES.AUTH), exactly as any service is resolved.
+  // Replace with a real credential check through a request-bound module service:
+  // getService(context, <TOKEN>). See auth-plugin's README, "In the full-stack template".
   if (email === '') {
     return { error: 'Email is required.' };
   }
 
   const session = getSession(context);
+  // Rotate against session fixation before recording the signed-in user.
+  session.regenerate();
   session.set('userEmail', email);
 
   return redirect('/products');
@@ -739,12 +752,9 @@ export const FULL_STACK_README_SECTION = (
     runtime !== 'cloudflare-workers'
       ? ''
       : `
-## Deploying to Cloudflare Workers
+## Cloudflare Workers build
 
-\`npx wrangler deploy\` builds the client and server, then bundles the Worker. The session secret is a
-Cloudflare secret, not a file: run \`npx wrangler secret put SESSION_SECRET\` once per environment
-before the first deploy. Local development reads \`.dev.vars\` instead, which the scaffold creates
-with a labelled-insecure development value.
+\`npm run deploy\` builds the client and server, then bundles the Worker.
 
 Everything in \`build/client\` is served by the platform before the Worker runs, so those requests
 skip the application's middleware: no security headers and no authentication apply to them. Put only
@@ -768,7 +778,7 @@ const products: readonly Product[] = await getService(context, PRODUCTS).list();
 \`\`\`
 
 \`app/\` imports kernel code only through \`~kernel/*\`, and only types and \`*.token.ts\` modules:
-\`setu check\` refuses any other value import (setu.E017), so no server code reaches the browser
+\`setu check\` refuses any other value import (setu.E017), except in React Router .server modules, so no server code reaches the browser
 bundle. Keep a token file to its token. Add a module, and optionally its page, with
 \`${invocation} generate module <name> --page\`.
 

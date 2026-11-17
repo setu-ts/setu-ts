@@ -89,6 +89,66 @@ describe('WorkerPoolPlugin — register', () => {
     expect((after?.data as { pools: unknown[] }).pools).toHaveLength(1);
   });
 
+  // The health payload leaves the process, so it carries the task label and
+  // never the specifier, which is normally a `file:` URL naming the machine's
+  // directories and its user.
+  it('should publish pools by task label, never by task-module path', async () => {
+    const host = new FakeHost();
+    const fake = createFakeContext(createFakeRuntime(new FakeTimers(), host));
+    WorkerPoolPlugin().register(fake.ctx);
+    const pool = fake.registered.get(CAPABILITIES.WORKER_POOL) as IWorkerPool;
+    const spec = 'file:///home/someone/projects/mohor/src/tasks/resize-image.ts';
+    void pool.run(spec, 1).catch(() => undefined);
+
+    const data = (await fake.healthIndicators.get('worker-pool')?.())?.data as {
+      pools: Record<string, unknown>[];
+    };
+    expect(data.pools[0]).toEqual({
+      task: 'resize-image',
+      workers: 1,
+      busy: 0,
+      queued: 1,
+      completed: 0,
+      failed: 0,
+    });
+    expect(JSON.stringify(data)).not.toContain('file:');
+    expect(JSON.stringify(data)).not.toContain('/home/');
+    // The in-process stats keep the specifier: it is the key `run()` takes.
+    expect(pool.stats()[0]?.taskModule).toBe(spec);
+  });
+
+  it('should warn once when two task modules derive the same label', async () => {
+    const host = new FakeHost(4);
+    const fake = createFakeContext(createFakeRuntime(new FakeTimers(), host));
+    WorkerPoolPlugin().register(fake.ctx);
+    const pool = fake.registered.get(CAPABILITIES.WORKER_POOL) as IWorkerPool;
+    void pool.run('file:///app/a/resize.ts', 1).catch(() => undefined);
+    void pool.run('file:///app/b/resize.ts', 1).catch(() => undefined);
+    void pool.run('file:///app/b/resize.ts', 2).catch(() => undefined);
+
+    const warnings = fake.logged.filter((entry) => entry.message.includes('share a file name'));
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.metadata).toEqual({
+      taskModule: 'file:///app/b/resize.ts',
+      label: 'resize_2',
+    });
+    const data = (await fake.healthIndicators.get('worker-pool')?.())?.data as {
+      pools: { task: string }[];
+    };
+    expect(data.pools.map((entry) => entry.task)).toEqual(['resize', 'resize_2']);
+  });
+
+  it('should refuse a malformed or duplicated explicit label at construction', () => {
+    expect(() => WorkerPoolPlugin({ pools: { 'file:///a.ts': { label: 'has space' } } })).toThrow(
+      RangeError,
+    );
+    expect(() =>
+      WorkerPoolPlugin({
+        pools: { 'file:///a.ts': { label: 'same' }, 'file:///b.ts': { label: 'same' } },
+      }),
+    ).toThrow(/already the label of pools\["file:\/\/\/a.ts"\]/);
+  });
+
   it('reports up with available false on a runtime without workers', async () => {
     // Availability stays in data; determineStatusCode withdraws non-up replicas.
     const fake = createFakeContext(createFakeRuntime(new FakeTimers()));
@@ -164,9 +224,7 @@ describe('WorkerPoolPlugin — optional metrics wiring', () => {
     await expect(promise).resolves.toBe('done');
 
     expect(
-      metrics
-        .require(WORKER_POOL_METRICS.COMPLETED)
-        .valueFor({ [TASK_MODULE_LABEL]: 'file:///t.ts' }),
+      metrics.require(WORKER_POOL_METRICS.COMPLETED).valueFor({ [TASK_MODULE_LABEL]: 't' }),
     ).toBe(1);
   });
 
@@ -221,7 +279,7 @@ describe('WorkerPoolPlugin — optional metrics wiring', () => {
     // signal that work was attempted at all.
     expect(
       metrics.require(WORKER_POOL_METRICS.REJECTED).valueFor({
-        [TASK_MODULE_LABEL]: 'file:///t.ts',
+        [TASK_MODULE_LABEL]: 't',
         [REASON_LABEL]: 'unavailable',
       }),
     ).toBe(1);

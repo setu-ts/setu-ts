@@ -9,6 +9,7 @@
 
 import '../metadata/symbol-metadata.ts';
 
+import type { RouteResponseHeader } from '@setu-ts/common';
 import { classDecorator, methodDecorator } from '../metadata/context-bridge.ts';
 import type { SetuClassDecorator, SetuMethodDecorator } from '../metadata/context-bridge.ts';
 
@@ -24,6 +25,10 @@ export interface ApiOperationConfig {
   readonly summary?: string;
   /** Longer description. */
   readonly description?: string;
+  /** Marks the operation deprecated in OpenAPI when true. @since 0.13.0 */
+  readonly deprecated?: boolean;
+  /** Omits only this operation from OpenAPI when true; it stays served. @since 0.13.0 */
+  readonly excludeFromDocument?: boolean;
 }
 
 /**
@@ -38,6 +43,12 @@ export interface ApiResponseConfig {
   readonly description?: string;
   /** Response body schema. */
   readonly schema?: unknown;
+  /**
+   * Response headers keyed by header name, emitted as the OpenAPI response's
+   * `headers` object (for example `Location` on a `201`).
+   * @since 0.13.0
+   */
+  readonly headers?: Readonly<Record<string, RouteResponseHeader>>;
 }
 
 /**
@@ -57,7 +68,7 @@ export function ApiTags(...tags: string[]): SetuClassDecorator {
 /**
  * Describes the OpenAPI operation for a route handler.
  *
- * @param config - Operation id, summary, and/or description
+ * @param config - Operation id, summary, description, deprecation and document exclusion
  * @returns A method decorator
  * @since 0.1.0
  */
@@ -77,6 +88,12 @@ export function ApiOperation(config: ApiOperationConfig): SetuMethodDecorator {
       if (config.description !== undefined) {
         oa.description = config.description;
       }
+      if (config.deprecated !== undefined) {
+        oa.deprecated = config.deprecated;
+      }
+      if (config.excludeFromDocument !== undefined) {
+        oa.excludeFromDocument = config.excludeFromDocument;
+      }
     });
   });
 }
@@ -85,7 +102,7 @@ export function ApiOperation(config: ApiOperationConfig): SetuMethodDecorator {
  * Documents a response status for a route handler. May be applied multiple
  * times to describe several responses.
  *
- * @param config - Status code, optional description and schema
+ * @param config - Status code, optional description, schema and headers
  * @returns A method decorator
  * @since 0.1.0
  */
@@ -101,6 +118,7 @@ export function ApiResponse(config: ApiResponseConfig): SetuMethodDecorator {
       meta.openapi.responses[String(config.status)] = {
         ...(config.description !== undefined ? { description: config.description } : {}),
         ...(config.schema !== undefined ? { schema: config.schema } : {}),
+        ...(config.headers !== undefined ? { headers: config.headers } : {}),
       };
     });
   });

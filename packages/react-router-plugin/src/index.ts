@@ -46,6 +46,8 @@ export type {
   ViteResolvedEnvironments,
 } from './dev/vite-dev-externals.ts';
 export type {
+  PagePolicy,
+  PageRouteSource,
   PopulateLoadContext,
   ReactRouterPluginOptions,
   RouterContextKey,

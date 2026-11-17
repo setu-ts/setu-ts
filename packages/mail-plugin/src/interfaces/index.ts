@@ -3,16 +3,23 @@
  *
  * @module
  */
-import type { Component, ILogger, MailMessage } from '@setu-ts/common';
+import type { Component, ILogger, MailAttachment, MailMessage } from '@setu-ts/common';
 
 /**
  * An outgoing email whose sender has already been resolved by
  * {@linkcode MailService} (from the message or the configured default). This is
  * the shape every {@linkcode MailProvider} receives — `from` is never absent.
+ * Attachments have been validated and their text content encoded to UTF-8 bytes.
  *
  * @since 0.1.0
  */
-export type OutgoingMail = MailMessage & { readonly from: string };
+export type OutgoingMail = Omit<MailMessage, 'attachments'> & {
+  readonly from: string;
+  /** Validated attachments with text encoded to UTF-8 bytes. @since 0.13.0 */
+  readonly attachments?: readonly (Omit<MailAttachment, 'content'> & {
+    readonly content: Uint8Array;
+  })[];
+};
 
 /**
  * Supported mail provider backends.
@@ -53,6 +60,19 @@ export interface ISmtpTransport {
     html?: string;
     cc?: string;
     bcc?: string;
+    /** Portable nodemailer attachments using base64 content. @since 0.13.0 */
+    attachments?: {
+      /** Attachment filename. @since 0.13.0 */
+      filename: string;
+      /** Base64-encoded attachment bytes. @since 0.13.0 */
+      content: string;
+      /** Tells nodemailer to decode the content. @since 0.13.0 */
+      encoding: 'base64';
+      /** MIME type without parameters. @since 0.13.0 */
+      contentType?: string;
+      /** Inline content id. @since 0.13.0 */
+      cid?: string;
+    }[];
   }): Promise<unknown>;
   /**
    * M70c: verifies the SMTP connection. nodemailer's real transport exposes

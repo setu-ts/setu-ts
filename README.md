@@ -24,7 +24,7 @@ Enterprise architecture without the weight. Runtime freedom without the chaos.
 
 ---
 
-> [!IMPORTANT] **Status: `v0.12.0` publishes 55 packages to npm under `@setu-ts`.** Versions
+> [!IMPORTANT] **Status: `v0.13.0` publishes 55 packages to npm under `@setu-ts`.** Versions
 > published before the move to npm remain on JSR, and nothing new is published there.
 >
 > <!-- version:history -->
@@ -47,14 +47,11 @@ Enterprise architecture without the weight. Runtime freedom without the chaos.
 
 ## Why This Exists
 
-Building enterprise backends today forces a difficult choice:
-
-| Option      | Problem                                                                                                                   |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------- |
-| **Hono**    | Extremely fast and runtime-portable, but intentionally minimal — no DI, no modules, no enterprise patterns.               |
-| **NestJS**  | Rich enterprise features, but tightly coupled to Node.js, requires decorators and DI, and carries a steep learning curve. |
-| **Fastify** | Fast and plugin-oriented, but lacks enterprise abstractions like repository patterns, CQRS, and multi-tenancy.            |
-| **Express** | Ubiquitous but aging, callback-based, and Node.js-only.                                                                   |
+Building enterprise backends today forces a difficult choice. A minimal, runtime-portable router is
+extremely fast but intentionally bare — no DI, no modules, no enterprise patterns. A
+decorator-and-DI-first framework brings rich enterprise features but couples the application to
+Node.js, requires reflection, and carries a steep learning curve. A lightweight, plugin-oriented
+server is fast but lacks enterprise abstractions like repository patterns, CQRS, and multi-tenancy.
 
 Every existing solution forces a compromise: **power vs. portability, features vs. simplicity,
 opinion vs. flexibility.**
@@ -100,7 +97,7 @@ Every ✅ row is a package in this repository with 90%+ test coverage on branch,
 | Feature             | Status | Package              | Description                                            |
 | ------------------- | ------ | -------------------- | ------------------------------------------------------ |
 | Plugin system       | ✅     | `kernel`             | Capability-token-based plugin architecture             |
-| Middleware pipeline | ✅     | `kernel`             | ASP.NET Core-style ordered middleware                  |
+| Middleware pipeline | ✅     | `kernel`             | Ordered middleware with priority bands                 |
 | Routing             | ✅     | `kernel`             | Hono `LinearRouter` under the framework's own pipeline |
 | Runtime abstraction | ✅     | `runtime`            | Node.js, Deno, Bun, Cloudflare Workers with detection  |
 | Streaming responses | ✅     | `kernel` + `runtime` | `IResponse.stream()` with request `AbortSignal`        |
@@ -113,7 +110,7 @@ Every ✅ row is a package in this repository with 90%+ test coverage on branch,
 | -------------- | ------ | ---------------------- | -------------------------------------------------------------------------------- |
 | Logging        | ✅     | `logger-plugin`        | Console, pino, noop; request/response middleware                                 |
 | Configuration  | ✅     | `config-plugin`        | Env loading, variable expansion, schema validation                               |
-| Validation     | ✅     | `validation-plugin`    | Zod-based, with RFC 9457 / NestJS / default error shapes                         |
+| Validation     | ✅     | `validation-plugin`    | Zod-based, with RFC 9457 / compatibility / default error shapes                  |
 | HTTP security  | ✅     | `http-security-plugin` | CORS, security headers, CSRF, request size, IP rules                             |
 | Authentication | ✅     | `auth-plugin`          | JWT (HS256/RS256 via Web Crypto), API keys, local, refresh tokens, rate limiting |
 | Authorization  | ✅     | `auth-plugin`          | RBAC with transitive role hierarchy and permission guards                        |
@@ -144,7 +141,7 @@ Every ✅ row is a package in this repository with 90%+ test coverage on branch,
 | Feature           | Status | Package                    | Description                                                               |
 | ----------------- | ------ | -------------------------- | ------------------------------------------------------------------------- |
 | Service discovery | ✅     | `service-discovery-plugin` | Static, Consul, Kubernetes, DNS-SRV; balancing, watch, ejection           |
-| gRPC              | ✅     | `grpc-plugin`              | Co-serve gRPC, Connect, and gRPC-Web on the same port                     |
+| gRPC              | ✅     | `grpc-plugin`              | Co-serve gRPC, Connect, and gRPC-Web on one port, and call other services |
 | Cloudflare        | ✅     | `cloudflare-plugin`        | Worker bindings; KV cache, R2 storage, D1, Queues, messaging, KV sessions |
 | Static files      | ✅     | `static-plugin`            | ETag, Range, precompressed sidecars, SPA fallback, streaming              |
 
@@ -180,7 +177,7 @@ Every ✅ row is a package in this repository with 90%+ test coverage on branch,
 | Notifications        | ✅     | `notification-plugin`  | Email, SMS, push, Slack over one HTTP seam                      |
 | Feature flags        | ✅     | `feature-flags-plugin` | Percentage rollout, user targeting, pluggable providers         |
 | Dependency injection | ✅     | `di-plugin`            | **Optional.** Singleton/scoped/transient, constructor injection |
-| Decorators           | ✅     | `decorator-plugin`     | **Optional.** NestJS-style, no `reflect-metadata`               |
+| Decorators           | ✅     | `decorator-plugin`     | **Optional.** Decorator-based, no `reflect-metadata`            |
 
 ### Tooling
 
@@ -197,16 +194,16 @@ Every ✅ row is a package in this repository with 90%+ test coverage on branch,
 
 ```bash
 # Node (pnpm add / yarn add work the same way)
-npm install @setu-ts/kernel@^0.12.0 @setu-ts/runtime@^0.12.0
+npm install @setu-ts/kernel@^0.13.0 @setu-ts/runtime@^0.13.0
 
 # Bun
-bun add @setu-ts/kernel@^0.12.0 @setu-ts/runtime@^0.12.0
+bun add @setu-ts/kernel@^0.13.0 @setu-ts/runtime@^0.13.0
 
 # Deno
-deno add npm:@setu-ts/kernel@^0.12.0 npm:@setu-ts/runtime@^0.12.0
+deno add npm:@setu-ts/kernel@^0.13.0 npm:@setu-ts/runtime@^0.13.0
 ```
 
-**The `@^0.12.0` is recommended, not required.** npm points `latest` at the current release, so a
+**The `@^0.13.0` is recommended, not required.** npm points `latest` at the current release, so a
 bare `npm install @setu-ts/kernel` resolves without a version. Pin anyway if you would rather meet
 the next breaking release as a deliberate upgrade than as a surprise — see
 [Versioning](#versioning). Earlier releases are on JSR only; see the
@@ -253,7 +250,7 @@ freeze — is [docs/versioning.md](docs/versioning.md).
 ## Quick Example
 
 A small application — the kernel, a runtime, and a logger. Add the logger to the two packages
-installed above (`npm install @setu-ts/logger-plugin@^0.12.0`), save this as `main.ts`:
+installed above (`npm install @setu-ts/logger-plugin@^0.13.0`), save this as `main.ts`:
 
 ```typescript
 import { createApplication } from '@setu-ts/kernel';
@@ -376,7 +373,6 @@ setu-ts/
 ├── ARCHITECTURE.md        # Technical architecture guide
 ├── PUBLIC_API.md          # Public API contract
 ├── AI_GUIDELINES.md       # Engineering guidelines
-├── ROADMAP.md             # Implementation roadmap, milestones 0–75
 ├── CHANGELOG.md           # Release notes
 └── README.md              # This file
 ```
@@ -395,7 +391,7 @@ be replaced without touching the others.
 | [**ARCHITECTURE.md**](ARCHITECTURE.md)     | Framework contributors  | How the framework works internally and why it was designed this way      |
 | [**PUBLIC_API.md**](PUBLIC_API.md)         | Application developers  | How to use the framework — complete examples for every plugin            |
 | [**AI_GUIDELINES.md**](AI_GUIDELINES.md)   | All contributors        | Permanent engineering rules — TypeScript, testing, security, performance |
-| [**ROADMAP.md**](ROADMAP.md)               | Implementation tracking | Milestone-by-milestone implementation roadmap with package details       |
+| **ROADMAP.md** (`develop` only)            | Implementation tracking | Milestone-by-milestone implementation roadmap with package details       |
 | [**CHANGELOG.md**](CHANGELOG.md)           | Everyone                | What each release contains, and its known limitations                    |
 | [**docs/releasing.md**](docs/releasing.md) | Maintainers             | npm release runbook — setup, trust, and the per-release sequence         |
 
@@ -410,7 +406,7 @@ Each package also carries its own README with options, semantics, and a worked e
 - Found a reproducible problem?
   [Open a bug report](https://github.com/setu-ts/setu-ts/issues/new?template=bug-report.yml).
 - Want to contribute? Read [CONTRIBUTING.md](CONTRIBUTING.md).
-- Want to understand the plan? Read **ROADMAP.md**.
+- Want to understand the plan? Read **ROADMAP.md** on the `develop` branch.
 
 ---
 
@@ -460,6 +456,6 @@ production.
 <div align="center">
 
 **[Documentation Hub](docs/README.md)** · **[Architecture](ARCHITECTURE.md)** ·
-**[Public API](PUBLIC_API.md)** · **[Guidelines](AI_GUIDELINES.md)** · **[Roadmap](ROADMAP.md)**
+**[Public API](PUBLIC_API.md)** · **[Guidelines](AI_GUIDELINES.md)**
 
 </div>

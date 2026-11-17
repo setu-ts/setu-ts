@@ -15,6 +15,7 @@ function service() {
   const runtime = createClockRuntime();
   const store = new MemoryIdempotencyStore();
   return new IdempotencyService({
+    transactionalConfigured: false,
     store,
     runtime,
     logger: () => undefined,
@@ -44,6 +45,7 @@ describe('IdempotencyService (M109a §3.14)', () => {
     const runtime = createClockRuntime();
     const store = new MemoryIdempotencyStore();
     const instance = new IdempotencyService({
+      transactionalConfigured: false,
       store,
       runtime,
       logger: () => undefined,

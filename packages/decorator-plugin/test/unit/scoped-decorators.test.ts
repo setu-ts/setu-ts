@@ -269,7 +269,7 @@ describe('createScopedRbacMiddleware', () => {
 
   it('brands the middleware as requiring authentication', () => {
     const middleware = createScopedRbacMiddleware(ROLES, 'any', ORG('o1'));
-    expect(securityMetadataOf(middleware)).toEqual({ authenticated: true });
+    expect(securityMetadataOf(middleware)).toEqual({ authenticated: true, forbids: true });
   });
 });
 

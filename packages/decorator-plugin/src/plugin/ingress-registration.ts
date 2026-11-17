@@ -165,6 +165,39 @@ function pipelineBehaviors(
 
 /** Refuses HTTP guards whose request context cannot exist on non-HTTP ingress. */
 function refuseHttpGuards(target: Constructor, entries: readonly IngressMetadata[]): void {
+  if (entries.some((entry) => entry.kind === 'gateway')) {
+    // Only the declarations a WebSocket handshake would have to honour: the
+    // WebSocket handler methods, and the class itself. On a class that also
+    // serves HTTP routes, class-level authorization applies to those routes, so
+    // it is accepted there only when the gateway declares its own handshake
+    // guards; otherwise the upgrade would be open while the routes are not.
+    const methods = metadataStore.getMethods(target);
+    const gateway = entries.find((entry) => entry.kind === 'gateway');
+    const guarded = gateway?.kind === 'gateway' && (gateway.options?.guards?.length ?? 0) > 0;
+    const declarations = [
+      ...(metadataStore.getRoutesFor(target).length === 0 || !guarded
+        ? [metadataStore.getController(target)]
+        : []),
+      ...entries.filter(isWebsocketEntry).map((entry) => methods.get(entry.handler)),
+    ];
+    for (const declaration of declarations) {
+      if (
+        declaration !== undefined &&
+        (declaration.roles !== undefined ||
+          declaration.permissions !== undefined ||
+          ('isPublic' in declaration && declaration.isPublic === true) ||
+          ('policies' in declaration && declaration.policies !== undefined) ||
+          ('scopedRoles' in declaration && declaration.scopedRoles !== undefined) ||
+          ('scopedPermissions' in declaration && declaration.scopedPermissions !== undefined))
+      ) {
+        throw new Error(
+          `${className(target)} uses @Roles, @Permissions, @Public, @RequirePolicy, @ScopedRoles or ` +
+            '@ScopedPermissions on a gateway. ' +
+            'Use @Gateway(path, { guards }) for handshake authorization.',
+        );
+      }
+    }
+  }
   if ((metadataStore.getController(target)?.guards.length ?? 0) > 0) {
     throw new Error(
       `${className(target)} uses @UseGuards with non-HTTP ingress. ` +
@@ -411,7 +444,7 @@ export async function registerIngresses(
           };
         }
       }
-      websocket.route(gateway.path, handlers);
+      websocket.route(gateway.path, handlers, gateway.options);
     }
   }
 }

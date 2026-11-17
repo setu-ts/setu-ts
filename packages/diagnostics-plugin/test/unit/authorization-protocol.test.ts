@@ -96,6 +96,36 @@ describe('readAuthorizationSourceBatch — the exact source validator', () => {
     expect(validated!.decisions).not.toBe(batch.decisions);
   });
 
+  it('accepts a token-confined refusal as a decision reason and as a step reason', () => {
+    // auth-plugin's confineScopedTokens (0.13.0) records a capped refusal under this reason;
+    // a closed reason set that omitted it would make the whole batch undecodable.
+    const confined = sourceBatch(0, {
+      decisions: [
+        decision(1, {
+          result: false,
+          steps: [{ ruleAlias: 'A', reason: 'token-confined' }],
+          reason: 'token-confined',
+        }),
+        compoundDecision(2, [
+          { ruleAlias: 'A', reason: 'token-confined' },
+          { ruleAlias: 'E', reason: 'token-confined' },
+        ]),
+      ],
+      next: 2,
+      lost: 0,
+    });
+    const validated = readAuthorizationSourceBatch(confined, INSTANCE, 0, 128);
+    expect(validated).not.toBeNull();
+    expect(validated!.decisions.map((entry) => entry.reason)).toEqual([
+      'token-confined',
+      'compound-unsatisfied',
+    ]);
+    expect(validated!.decisions[1]!.steps.map((step) => step.reason)).toEqual([
+      'token-confined',
+      'token-confined',
+    ]);
+  });
+
   it('accepts an empty batch that echoes the cursor', () => {
     const validated = readAuthorizationSourceBatch(sourceBatch(7), INSTANCE, 7, 128);
     expect(validated).not.toBeNull();

@@ -4,6 +4,16 @@ import { deriveNames } from '../../../src/utils/names.ts';
 import { options } from './_shared.ts';
 
 describe('ws-route schematic', () => {
+  it('shows guards in the class decorator and functional third argument', () => {
+    const names = deriveNames('board');
+    const functional = generateWsRoute(names, options(['websocket-plugin']))[0]!.contents;
+    const decorated = generateWsRoute(names, options(['websocket-plugin', 'decorator-plugin']))[0]!
+      .contents;
+    expect(functional).toContain("// websocket.route('/ws/board', handlers, { guards: [...] });");
+    expect(decorated).toContain(
+      "// Authorize the handshake: @Gateway('/ws/board', { guards: [...] })",
+    );
+  });
   it('emits a websocket-plugin-gated route plugin and its managed barrel', () => {
     const files = generateWsRoute(deriveNames('board'), options(['websocket-plugin']));
     expect(files.map((file) => file.path)).toEqual([

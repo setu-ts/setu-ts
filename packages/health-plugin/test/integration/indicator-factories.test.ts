@@ -1,3 +1,4 @@
+import { databaseDouble } from '../../../../test/fixtures/capability-doubles.ts';
 /**
  * HealthPlugin factory-arm integration — driven through a REAL kernel
  * application. A `HealthPlugin` registered BEFORE a provider plugin at
@@ -31,9 +32,7 @@ function databaseProviderPlugin(): IPlugin {
     provides: [CAPABILITIES.DATABASE],
     priority: PLUGIN_PRIORITY.NORMAL,
     register(ctx) {
-      ctx.services.register(CAPABILITIES.DATABASE, {
-        ping: () => Promise.resolve({ ok: true, latencyMs: 3 }),
-      });
+      ctx.services.register(CAPABILITIES.DATABASE, databaseDouble());
     },
   };
 }
@@ -55,16 +54,14 @@ describe('HealthPlugin indicator factories (through the real kernel)', () => {
             // with resolution moved back into `register()`, this fails and the lazy
             // shape did not.)
             (services) => {
-              const db = services.get<{
-                ping: () => Promise<{ ok: boolean; latencyMs: number }>;
-              }>(CAPABILITIES.DATABASE);
+              const db = services.get(CAPABILITIES.DATABASE);
               return {
                 name: 'database',
                 check: async () => {
-                  const result = await db.ping();
+                  const ok = await db.isHealthy();
                   return {
-                    status: result.ok ? 'up' : 'down',
-                    data: { latencyMs: result.latencyMs },
+                    status: ok ? 'up' : 'down',
+                    data: { reachable: ok },
                   };
                 },
               };
@@ -84,7 +81,7 @@ describe('HealthPlugin indicator factories (through the real kernel)', () => {
       // register(), where the priority-500 provider has not registered yet.
       expect(report.checks['database']).toBeDefined();
       expect(report.checks['database'].status).toBe('up');
-      expect(report.checks['database'].data).toEqual({ latencyMs: 3 });
+      expect(report.checks['database'].data).toEqual({ reachable: true });
     } finally {
       await app.stop();
     }

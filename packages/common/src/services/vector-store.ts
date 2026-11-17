@@ -185,7 +185,8 @@ export interface IVectorStore {
   upsert(collection: string, scope: string, records: readonly VectorRecord[]): Promise<void>;
   /**
    * Writes a source's new records, then deletes that source's other records in
-   * the scope, so a re-run with the same ids leaves one copy.
+   * the scope, so a re-run with the same ids leaves one copy. One call replaces
+   * the WHOLE source (up to 5,000 records); do not split a source across calls.
    *
    * With `options.version`, the write is conditional: it is refused when the
    * source's stored records carry a higher version, so a late retry of an
@@ -195,7 +196,7 @@ export interface IVectorStore {
    * @param collection - A declared collection
    * @param scope - The tenant scope
    * @param sourceId - The source every record carries
-   * @param records - The source's complete new set (at most 500)
+   * @param records - The source's complete new set (at most 5,000)
    * @param options - The version to write under
    * @returns Once both steps finish
    * @throws {VectorVersionConflictError} When a newer version is stored
@@ -282,6 +283,9 @@ export interface IVectorStoreAdapter {
    */
   readonly versionedReplace?: boolean;
   /**
+   * Receives up to 5,000 records for the WHOLE source. Write every slice
+   * before deleting stale records; separate calls replace each other.
+   *
    * @param spec - The declared collection
    * @param scope - The tenant scope
    * @param sourceId - The source
@@ -324,6 +328,21 @@ export interface IVectorStoreAdapter {
    * @returns Once deleted
    */
   deleteScope(spec: VectorCollectionSpec, scope: string): Promise<void>;
+  /**
+   * Whether the backend answers now, for readiness. Optional: without it the
+   * plugin's `vector-store` indicator reports `reachable: 'unknown'` and stays
+   * up. The plugin calls it through a cached, time-bounded probe, so a slow
+   * call counts as unreachable and a rejection as `false`; it must not change
+   * data. Resolve `undefined` when the adapter cannot tell without making
+   * things worse, such as a saturated connection pool, where one more queued
+   * probe would wait behind the traffic it measures: the indicator then stays
+   * up with `reachable: 'unknown'`.
+   *
+   * @returns `true` when the backend answered, `false` when it refused, or
+   *   `undefined` when the adapter could not tell
+   * @since 0.13.0
+   */
+  isHealthy?(): Promise<boolean | undefined>;
   /**
    * Called once at application shutdown. Built-in adapters never close a
    * client the application injected; they call their `onClose` option.

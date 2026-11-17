@@ -1,0 +1,109 @@
+import * as vite from 'vite';
+import { createRequestHandler, RouterContextProvider, type ServerBuild } from 'react-router';
+import { CAPABILITIES, describeError, type ILogger } from '@setu-ts/common';
+import { viteDevExternals } from '@setu-ts/react-router-plugin';
+import { createRuntimeServices } from '@setu-ts/runtime';
+import { createApp } from './setu.config.ts';
+import { frameworkPackages, workspaceLibraries } from './vite.config.ts';
+
+/**
+ * Development server: React Router with hot module replacement.
+ *
+ * Vite serves the route modules and the client graph; the application still
+ * owns the port, the plugins and every non-page route. Client URLs are
+ * namespaced under `/__vite/` so one proxy route reaches Vite without
+ * colliding with application routes. Production does not use this file: the
+ * production entry runs the built output.
+ */
+const BASE = '/__vite/';
+const runtime = createRuntimeServices();
+const port = Number(runtime.env.PORT ?? '3000');
+const vitePort = Number(runtime.env.VITE_PORT ?? '5173');
+
+// A file module always has a directory; the fallback only satisfies the type.
+const root = import.meta.dirname ?? '.';
+
+const viteServer = await vite.createServer({
+  root,
+  configFile: `${root}/vite.config.ts`,
+  base: BASE,
+  // Vite's own port for the HMR socket on every runtime, never the app port:
+  // the app-port upgrade failed on Node and Deno and reloaded the page on Bun
+  // (X85-2, X85-3). An explicit host also makes strictPort refuse a second
+  // server: unhosted, one bound IPv4 and the other IPv6, and both started.
+  server: {
+    host: '127.0.0.1',
+    port: vitePort,
+    strictPort: true,
+    hmr: { host: 'localhost', port: vitePort, clientPort: vitePort },
+  },
+  plugins: [viteDevExternals({
+    packages: [...frameworkPackages, ...workspaceLibraries],
+    // Resolve with the runtime: routes share this entry's module and context-key identity.
+    resolve: (specifier) => import.meta.resolve(specifier),
+  })],
+});
+await viteServer.listen();
+
+// Re-read on every request, so an edited route is served without a restart.
+const loadServerBuild = async (): Promise<ServerBuild> =>
+  (await viteServer.ssrLoadModule('virtual:react-router/server-build')) as ServerBuild;
+
+// Creation, route registration and start share one failure path: one masked
+// line, Vite closed, exit 1 — as main.ts does. The default printer would dump a
+// malformed REDIS_URL, password included, and leave Vite running.
+async function boot() {
+  const app = await createApp(undefined, undefined, {
+    mode: 'development',
+    loadRequestHandler: (_path, mode) => {
+      const handler = createRequestHandler(loadServerBuild, mode);
+      return Promise.resolve({
+        handler: (request, loadContext) => handler(request, loadContext as RouterContextProvider),
+        // From the same react-router module as the handler: React Router checks
+        // the context with instanceof.
+        createLoadContext: () => new RouterContextProvider(),
+      });
+    },
+  });
+
+  app.router.get(`${BASE}*`, async (ctx) => {
+    const url = new URL(ctx.request.url);
+    const upstream = await fetch(`http://localhost:${vitePort}${url.pathname}${url.search}`, {
+      headers: ctx.request.headers,
+    });
+    ctx.response.status(upstream.status);
+    for (const [key, value] of upstream.headers.entries()) {
+      const lower = key.toLowerCase();
+      if (lower !== 'content-encoding' && lower !== 'content-length') {
+        ctx.response.appendHeader(key, value);
+      }
+    }
+    return upstream.body === null ? ctx.response.text('') : ctx.response.stream(upstream.body);
+  });
+
+  await app.start({ port });
+  return app;
+}
+
+const app = await boot().catch(async (error: unknown) => {
+  console.error(`Startup failed: ${describeError(error)}`);
+  await viteServer.close();
+  return runtime.exit(1);
+});
+
+const logger = app.services.has(CAPABILITIES.LOGGER)
+  ? app.services.get<ILogger>(CAPABILITIES.LOGGER)
+  : undefined;
+
+for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+  runtime.onSignal?.(signal, () => {
+    // Both are stopped even when one fails; any failure exits 1, like main.ts.
+    void Promise.allSettled([app.stop(), viteServer.close()]).then((results) => {
+      const failures = results.filter((result) => result.status === 'rejected');
+      for (const failure of failures) {
+        logger?.error('Graceful shutdown failed', { error: failure.reason });
+      }
+      runtime.exit(failures.length === 0 ? 0 : 1);
+    });
+  });
+}

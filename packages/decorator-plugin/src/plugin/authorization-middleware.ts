@@ -30,9 +30,13 @@ import {
 
 /**
  * Brand carried by every appended middleware, so M57's `deriveSecurity` sees
- * a decorated route's enforcement the same way it sees a guard's.
+ * a decorated route's enforcement the same way it sees a guard's. Every one
+ * can answer `403`, so it also carries `forbids` (M137b §3.1).
  */
-const AUTHENTICATED: RouteSecurityMetadata = Object.freeze({ authenticated: true });
+const AUTHENTICATED_FORBIDS: RouteSecurityMetadata = Object.freeze({
+  authenticated: true,
+  forbids: true,
+});
 
 /**
  * Builds one enforcing middleware for one restriction kind: `401` without a
@@ -64,7 +68,7 @@ function authorizationMiddleware(
 
     await next();
   };
-  return withSecurityMetadata(middleware, AUTHENTICATED);
+  return withSecurityMetadata(middleware, AUTHENTICATED_FORBIDS);
 }
 
 /**

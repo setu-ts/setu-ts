@@ -1,6 +1,6 @@
 {
   "name": "@setu-ts/create",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "description": "npm create @setu-ts — scaffolds a Setu-TS project with setu new",
   "repository": {
     "type": "git",
@@ -42,8 +42,7 @@
     "build": "tsc -b"
   },
   "dependencies": {
-    "@setu-ts/cli": "workspace:^",
-    "@setu-ts/runtime": "workspace:^"
+    "@setu-ts/cli": "workspace:^"
   },
   "devDependencies": {
     "@types/node": "^24",

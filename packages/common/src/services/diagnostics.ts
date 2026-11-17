@@ -1242,6 +1242,8 @@ export type AuthorizationDecisionReason =
   | 'role-permission'
   | 'role-wildcard'
   | 'not-held'
+  /** A scoped token was refused by the confinement cap (added in 0.13.0). */
+  | 'token-confined'
   | 'compound-satisfied'
   | 'compound-unsatisfied';
 

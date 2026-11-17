@@ -37,6 +37,7 @@ function makeInstrumentedPool(overrides?: {
   const pool = new TaskPool(
     {
       specifier: SPEC,
+      label: SPEC,
       size: overrides?.size ?? 2,
       maxQueue: overrides?.maxQueue ?? 1024,
       taskTimeoutMs: overrides?.taskTimeoutMs ?? 0,

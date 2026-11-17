@@ -368,3 +368,48 @@ describe('isMissingFile — the not-found shapes IRuntimeServices.fs produces', 
     expect(isMissingFile(error)).toBe(missing);
   });
 });
+
+describe('KubernetesProvider token characters (M139f audit M1)', () => {
+  const REFUSAL =
+    'The Kubernetes service-account token contains a character an HTTP header cannot carry; ' +
+    'check the token option or the projected token file.';
+
+  // fetch quotes the whole `Bearer <token>` value in its error for any of these,
+  // and that error used to reach the readiness log and the cold-resolve message.
+  for (const [label, token] of [
+    ['LF', 'eyJ.canary-tok\n.sig'],
+    ['CR', 'eyJ.canary-tok\r.sig'],
+    ['NUL', 'eyJ.canary-tok\u0000.sig'],
+    ['space', 'eyJ.canary-tok .sig'],
+    ['non-ASCII', 'eyJ.canary-tök.sig'],
+  ] as const) {
+    it(`refuses a configured token with ${label} before any request, without echoing it`, async () => {
+      const { provider, http } = setup({ token });
+      for (const call of [() => provider.isHealthy(), () => provider.resolve('orders')]) {
+        const error: unknown = await call().then(
+          () => undefined,
+          (thrown: unknown) => thrown,
+        );
+        expect(error).toBeInstanceOf(DiscoveryUnavailableError);
+        expect((error as Error).message).toBe(REFUSAL);
+        expect((error as Error).message).not.toContain('canary');
+      }
+      expect(http.calls).toHaveLength(0);
+    });
+  }
+
+  it('refuses a projected token file with a control character the same way', async () => {
+    const { fs } = tokenFs(['eyJ.canary-file\u0001.sig']);
+    const { provider, http } = setup({}, createFakeHttp(), createFakeRuntime({ fs }));
+    await expect(provider.isHealthy()).rejects.toThrow(new DiscoveryUnavailableError(REFUSAL));
+    expect(http.calls).toHaveLength(0);
+  });
+
+  it('still sends a visible-ASCII token unchanged', async () => {
+    const { provider, http } = setup({ token: 'eyJhbGciOi.payload_-~+/=.sig' });
+    expect(await provider.isHealthy()).toBe(true);
+    expect(new Headers(http.calls[0]?.init?.headers).get('Authorization')).toBe(
+      'Bearer eyJhbGciOi.payload_-~+/=.sig',
+    );
+  });
+});

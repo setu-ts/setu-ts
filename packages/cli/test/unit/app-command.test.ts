@@ -2,6 +2,65 @@ import { describe, expect, it, vi } from 'vitest';
 import * as templates from '../../src/templates/registry.ts';
 import { FULL_STACK_TEMPLATE } from '../../src/templates/full-stack.ts';
 
+it('records generated secrets only for the template that generates them', async () => {
+  const h = harness([], 3000, 'memory', undefined, 'node');
+  await h.fs.writeFile(
+    '/ws/README.md',
+    new TextEncoder().encode(
+      'custom intro\n<!-- setu:transport -->\nold transport\n<!-- /setu:transport -->\ncustom footer',
+    ),
+  );
+  expect(await h.run(['app', 'web', '--template', 'full-stack']), h.err.text()).toBe(0);
+  expect(await h.run(['app', 'api', '--template', 'rest']), h.err.text()).toBe(0);
+  const members = JSON.parse(h.fs.read('/ws/setu.workspace.json')).members;
+  expect(members[0].generatedSecrets).toEqual(['SESSION_SECRET']);
+  expect(members[1].generatedSecrets).toBeUndefined();
+  expect(h.fs.read('/ws/docker/compose.yaml')).toContain('WEB_SESSION_SECRET:?');
+  const readme = h.fs.read('/ws/README.md');
+  expect(readme).toContain('export WEB_SESSION_SECRET="$(openssl rand -hex 32)"');
+  expect(readme).toContain('custom intro');
+  expect(readme).toContain('custom footer');
+  const operator = h.fs.read('/ws/k8s/secrets/web/.env');
+  expect(/^SESSION_SECRET=[a-f0-9]{64}\n$/.test(operator)).toBe(true);
+  const value = operator.trim().split('=')[1]!;
+  expect(h.out.text().includes(value) || h.err.text().includes(value)).toBe(false);
+  expect(h.fs.read('/ws/apps/web/.env').includes(value)).toBe(false);
+  expect(h.fs.has('/ws/k8s/secrets/api/.env')).toBe(false);
+});
+
+it.each([false, true])(
+  'preserves an existing operator key when adding a member (dry run %s)',
+  async (dry) => {
+    const h = harness([], 3000, 'memory', undefined, 'node');
+    const path = '/ws/k8s/secrets/web/.env';
+    const before = '# keep\nSESSION_SECRET=operator-owned\n';
+    await h.fs.writeFile(path, new TextEncoder().encode(before));
+    const writes = h.fs.writes.length;
+    expect(
+      await h.run(['app', 'web', '--template', 'full-stack', ...(dry ? ['--dry-run'] : [])]),
+      h.err.text(),
+    ).toBe(0);
+    expect(h.fs.read(path) === before).toBe(true);
+    expect(h.out.text()).not.toContain('Operator secrets for web:');
+    expect(h.fs.writes.slice(writes)).not.toContain(path);
+    expect(h.out.text().includes('operator-owned')).toBe(false);
+    if (dry) expect(h.fs.writes).toHaveLength(writes);
+  },
+);
+
+it('refuses an operator path through a link before writing the member', async () => {
+  const h = harness([], 3000, 'memory', undefined, 'node');
+  const original = h.fs.realPath!.bind(h.fs);
+  h.fs.realPath = (path) =>
+    path.startsWith('/ws/k8s')
+      ? Promise.resolve(path.replace('/ws/k8s', '/outside'))
+      : original(path);
+  const writes = h.fs.writes.length;
+  expect(await h.run(['app', 'web', '--template', 'full-stack'])).toBe(1);
+  expect(h.err.text()).toContain('link');
+  expect(h.fs.writes).toHaveLength(writes);
+});
+
 it('L3 refuses Workers workspace members without allocating ports or printing edit notes', async () => {
   const h = harness([], 3000, 'memory', undefined, 'cloudflare-workers');
   const before = h.fs.read('/ws/setu.workspace.json');
@@ -79,7 +138,9 @@ describe('Node workspace devtool scaffold', () => {
     const rootBefore = h.fs.read('/ws/package.json');
     expect(await h.run(['app', 'a', '--devtool']), h.err.text()).toBe(0);
     const member = JSON.parse(h.fs.read('/ws/apps/a/package.json'));
-    expect(member.scripts.dev).toBe('tsx main.dev.ts');
+    expect(member.scripts.dev).toBe(
+      'tsx --import ./instrumentation.mjs --env-file-if-exists=.env main.dev.ts',
+    );
     expect(member.devDependencies['@setu-ts/diagnostics-plugin']).toBeDefined();
     expect(member.dependencies['@setu-ts/diagnostics-plugin']).toBeUndefined();
     expect(h.fs.read('/ws/package.json')).toBe(rootBefore);
@@ -270,7 +331,11 @@ describe('runAppCommand', () => {
         // The config calls the CLI-owned module; the module carries the options.
         const config = h.fs.read('/ws/apps/shop/setu.config.ts');
         expect(config).toContain('messaging: messagingOptions(config),');
-        expect(config).toContain('queue: { ...queueOptions(config) },');
+        expect(config).toContain(
+          ['redis', 'rabbitmq'].includes(transport)
+            ? 'queue: { processors: [...QUEUE_PROCESSORS], ...queueOptions(config) },'
+            : 'queue: { ...queueOptions(config) },',
+        );
         const module = h.fs.read('/ws/apps/shop/src/transport/index.ts');
         expect(module).toContain('config.get<string>(');
         expect(module.includes('adapter:')).toBe(['redis', 'rabbitmq'].includes(transport));
@@ -849,23 +914,28 @@ describe('runAppCommand', () => {
       expect(h.fs.writes).toEqual([]);
     });
 
-    // The generated .dockerignore covers .env and .env.* names only. A custom name
-    // still boots, but would be copied into the image, so the step is printed (F2).
-    it('names a custom env-file the generated container rules do not cover', async () => {
+    // The generated .dockerignore covers .env and .env.* names only, so a custom
+    // name is recorded on the member and listed in the managed root file (M140a F9).
+    it('lists a custom env-file the generated container rules do not cover', async () => {
       const custom = harness([{ name: 'orders', port: 3000 }]);
       expect(
         await custom.run(['app', 'billing', '--template', 'rest', '--env-file', 'local.env']),
       ).toBe(0);
-      expect(custom.out.text()).toContain(
-        'Add apps/billing/local.env to .dockerignore: the generated rules cover only .env and .env.* names, ' +
-          'so this file would be copied into the image.',
-      );
+      expect(custom.fs.read('/ws/.dockerignore').split('\n')).toContain('apps/billing/local.env');
+      expect(
+        (
+          JSON.parse(custom.fs.read('/ws/setu.workspace.json')) as {
+            members: { name: string; envFilePaths?: string[] }[];
+          }
+        ).members.find((member) => member.name === 'billing')?.envFilePaths,
+      ).toEqual(['local.env']);
 
       const covered = harness([{ name: 'orders', port: 3000 }]);
       expect(
         await covered.run(['app', 'billing', '--template', 'rest', '--env-file', '.env.prod']),
       ).toBe(0);
-      expect(covered.out.text()).not.toContain('to .dockerignore:');
+      expect(covered.fs.read('/ws/.dockerignore')).not.toContain('apps/billing/');
+      expect(covered.fs.read('/ws/setu.workspace.json')).not.toContain('envFilePaths');
     });
   });
 
@@ -934,7 +1004,7 @@ describe('runAppCommand', () => {
     it('rewrites the first member map to name it', async () => {
       const h = await twoMembers();
       const orders = h.fs.read(`/ws/apps/orders/${DISCOVERY_MODULE}`);
-      expect(orders).toContain("host: Deno.env.get('BILLING_HOST') ?? '127.0.0.1'");
+      expect(orders).toContain("host: Deno.env.get('BILLING_HOST') || '127.0.0.1'");
       expect(orders).toContain('port: 3001,');
       expect(orders).not.toContain(`'orders':`);
     });
@@ -942,7 +1012,7 @@ describe('runAppCommand', () => {
     it('gives the new member the first one address', async () => {
       const h = await twoMembers();
       const billing = h.fs.read(`/ws/apps/billing/${DISCOVERY_MODULE}`);
-      expect(billing).toContain("host: Deno.env.get('ORDERS_HOST') ?? '127.0.0.1'");
+      expect(billing).toContain("host: Deno.env.get('ORDERS_HOST') || '127.0.0.1'");
       expect(billing).toContain('port: 3000,');
     });
 

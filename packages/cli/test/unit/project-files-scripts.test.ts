@@ -55,7 +55,7 @@ for (const host of [
           `${full ? 'react-router build && ' : ''}tsc --noEmit && setu build`,
         );
         expect(scripts['start']).toBe(
-          `${NODE_START_BUILD_CHECK} && node ${envFile}--enable-source-maps dist/main.js`,
+          `${NODE_START_BUILD_CHECK} && node --import "data:text/javascript,process.env.NODE_ENV??='production'" ${envFile}--enable-source-maps dist/main.js`,
         );
         expect(scripts['start:dev']).toBe(
           full ? `tsx ${envFile}dev.ts` : `tsx watch ${envFile}main.ts`,
@@ -65,7 +65,7 @@ for (const host of [
         );
         expect(files.find((file) => file.path === '.gitignore')!.contents).toContain('dist/');
       } else if (runtime === 'bun') {
-        expect(scripts['start']).toBe('bun run main.ts');
+        expect(scripts['start']).toBe('NODE_ENV=production bun run main.ts');
         expect(scripts['start:dev']).toBe(full ? 'bun run dev.ts' : 'bun --watch main.ts');
         expect(scripts['start:debug']).toBe(`bun --inspect ${full ? 'dev.ts' : 'main.ts'}`);
         expect(scripts['build']).toBe(full ? 'react-router build' : undefined);
@@ -77,7 +77,10 @@ for (const host of [
           expect(command).toBe(
             full
               ? `deno task install && deno run -A --${flag} ${envFile}dev.ts`
-              : scripts['start']!.replace('deno run ', `deno run --${flag} `),
+              : scripts['start']!.replace('NODE_ENV=production ', '').replace(
+                  'deno run ',
+                  `deno run --${flag} `,
+                ),
           );
         }
         if (full) expect(scripts['check']).toMatch(/^deno task build && deno check main.ts/);
@@ -131,7 +134,9 @@ it('keeps a single full-stack socket entry and leaves Workers deployment with Wr
       (file) => file.path === 'main.ts',
     )!.contents;
   });
-  expect(new Set(entries).size).toBe(1);
+  expect(entries[0]).toBe(entries[1]);
+  expect(entries[2]).not.toContain('Listening on http://localhost:');
+  expect(entries[0]).toContain('Listening on http://localhost:');
   expect(entries[0]).toContain('createApp(undefined, undefined, { serverBuild })');
   const worker = projectFiles(
     'probe',

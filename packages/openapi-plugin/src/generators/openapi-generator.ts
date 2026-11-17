@@ -19,6 +19,38 @@ import {
   DEFAULT_EXCLUDED_OWNERS,
   isRouteExcluded,
 } from './declared-operation-ids.ts';
+import { buildDocumentMetadata, validateDocumentMetadata } from './document-metadata.ts';
+import { fileMetadataOf, formFileFieldsOf } from './form-fields.ts';
+import {
+  collectErrorFacts,
+  deriveErrorStatuses,
+  documentsBearerChallenge,
+  PROBLEM_DETAILS_SCHEMA,
+} from './error-responses.ts';
+
+/**
+ * External documentation for an API or a document tag.
+ * @since 0.13.0
+ */
+export interface OpenApiExternalDocs {
+  /** Documentation URL. @since 0.13.0 */
+  readonly url: string;
+  /** Documentation description. @since 0.13.0 */
+  readonly description?: string;
+}
+
+/**
+ * A named document tag with optional description and documentation.
+ * @since 0.13.0
+ */
+export interface OpenApiTag {
+  /** Unique tag name within the document's tags list. @since 0.13.0 */
+  readonly name: string;
+  /** Tag description. @since 0.13.0 */
+  readonly description?: string;
+  /** External tag documentation. @since 0.13.0 */
+  readonly externalDocs?: OpenApiExternalDocs;
+}
 
 /** Prefix of a component reference in the generated document. */
 const COMPONENT_REF_PREFIX = '#/components/schemas/';
@@ -139,6 +171,12 @@ export interface OpenApiDocument {
     readonly title: string;
     readonly version: string;
     readonly description?: string;
+    /** Terms of service URL. @since 0.13.0 */
+    readonly termsOfService?: string;
+    /** API contact details. @since 0.13.0 */
+    readonly contact?: NonNullable<OpenApiGeneratorOptions['contact']>;
+    /** API license details. @since 0.13.0 */
+    readonly license?: NonNullable<OpenApiGeneratorOptions['license']>;
   };
   /** Server URLs. */
   readonly servers?: readonly {
@@ -168,6 +206,10 @@ export interface OpenApiDocument {
     readonly schemas?: Record<string, OpenApiSchemaObject>;
     readonly securitySchemes?: Record<string, unknown>;
   };
+  /** Document tag descriptions, in declaration order. @since 0.13.0 */
+  readonly tags?: readonly OpenApiTag[];
+  /** External API documentation. @since 0.13.0 */
+  readonly externalDocs?: OpenApiExternalDocs;
 }
 
 /**
@@ -187,6 +229,8 @@ export interface OpenApiOperation {
   readonly description?: string;
   /** Operation tags. */
   readonly tags?: readonly string[];
+  /** Whether this operation is deprecated. Emitted only when true. @since 0.13.0 */
+  readonly deprecated?: boolean;
   /** Path/query parameters. */
   readonly parameters?: readonly OpenApiParameter[];
   /** Request body. */
@@ -246,10 +290,24 @@ export interface OpenApiRequestBody {
   readonly required: boolean;
   /** Content types. */
   readonly content: {
-    readonly 'application/json': {
-      readonly schema: OpenApiSchemaObject;
-    };
+    readonly 'application/json'?: OpenApiMediaTypeObject;
+    readonly 'application/x-www-form-urlencoded'?: OpenApiMediaTypeObject;
+    readonly 'multipart/form-data'?: OpenApiMediaTypeObject;
   };
+}
+
+/** Per-field multipart encoding constraints. @since 0.13.0 */
+export interface OpenApiEncoding {
+  /** Accepted MIME types, separated by commas. */
+  readonly contentType?: string;
+}
+
+/** A request body's schema and optional multipart encodings. @since 0.13.0 */
+export interface OpenApiMediaTypeObject {
+  /** Schema shared by every accepted media type. */
+  readonly schema: OpenApiSchemaObject;
+  /** Multipart encoding constraints keyed by field name. */
+  readonly encoding?: Readonly<Record<string, OpenApiEncoding>>;
 }
 
 /**
@@ -260,12 +318,40 @@ export interface OpenApiRequestBody {
 export interface OpenApiResponse {
   /** Response description. */
   readonly description: string;
+  /**
+   * Response headers keyed by name: declared through a response's `headers`,
+   * or derived from the route's branded middleware.
+   * @since 0.13.0
+   */
+  readonly headers?: Readonly<Record<string, OpenApiHeader>>;
   /** Response content. */
   readonly content?: {
     readonly 'application/json'?: {
       readonly schema: OpenApiSchemaObject;
     };
+    /**
+     * The RFC 9457 Problem Details body of a generated error response, present
+     * when {@linkcode OpenApiGeneratorOptions.errorSchema} is `'rfc9457'`.
+     * @since 0.13.0
+     */
+    readonly 'application/problem+json'?: {
+      readonly schema: OpenApiSchemaObject;
+    };
   };
+}
+
+/**
+ * OpenAPI response header definition.
+ *
+ * @since 0.13.0
+ */
+export interface OpenApiHeader {
+  /** What the header carries. @since 0.13.0 */
+  readonly description?: string;
+  /** Whether the header is always present on the response. @since 0.13.0 */
+  readonly required?: boolean;
+  /** The header value's schema. @since 0.13.0 */
+  readonly schema: OpenApiSchemaObject;
 }
 
 /**
@@ -280,6 +366,33 @@ export interface OpenApiGeneratorOptions {
   readonly version?: string;
   /** API description. */
   readonly description?: string;
+  /** API contact details, copied to info.contact. @since 0.13.0 */
+  readonly contact?: {
+    /** Contact name. @since 0.13.0 */
+    readonly name?: string;
+    /** Contact URL. @since 0.13.0 */
+    readonly url?: string;
+    /** Contact email. @since 0.13.0 */
+    readonly email?: string;
+  };
+  /**
+   * API license, copied to info.license. Identifier and URL are mutually exclusive.
+   * @since 0.13.0
+   */
+  readonly license?: {
+    /** License name. @since 0.13.0 */
+    readonly name: string;
+    /** SPDX license expression; mutually exclusive with url. @since 0.13.0 */
+    readonly identifier?: string;
+    /** License URL; mutually exclusive with identifier. @since 0.13.0 */
+    readonly url?: string;
+  };
+  /** Terms of service URL, copied verbatim to info.termsOfService. @since 0.13.0 */
+  readonly termsOfService?: string;
+  /** External API documentation. @since 0.13.0 */
+  readonly externalDocs?: OpenApiExternalDocs;
+  /** Document tags with unique names; an empty list is omitted. @since 0.13.0 */
+  readonly tags?: readonly OpenApiTag[];
   /** Server URLs. */
   readonly servers?: readonly {
     readonly url: string;
@@ -397,6 +510,38 @@ export interface OpenApiGeneratorOptions {
    * @defaultValue `true`
    */
   readonly deriveResponseStatus?: boolean;
+  /**
+   * Document the error statuses and headers a route's OWN middleware answers
+   * with, read from the brands that middleware carries: `401` for a guard
+   * that requires a principal, `403` for one that can refuse an authenticated
+   * caller (`forbids`), `415` for a body validator, `429` with `Retry-After`
+   * (and `RateLimit`/`RateLimit-Policy` when the limiter writes them) for a
+   * branded limiter, and the idempotency middleware's `400`, `401`, `409`,
+   * `422` and `429` plus `Idempotent-Replayed` on success responses.
+   *
+   * `WWW-Authenticate` is listed only when
+   * {@linkcode OpenApiGeneratorOptions.deriveSecurity} names an HTTP bearer,
+   * OAuth 2.0 or OpenID Connect scheme, because only bearer-token
+   * authentication sends it. A status the route DECLARES is never changed.
+   * App-wide middleware (`app.middleware.add`) is not visible to the
+   * generator; declare its statuses on the routes instead.
+   *
+   * @defaultValue `true`
+   * @since 0.13.0
+   */
+  readonly deriveErrorResponses?: boolean;
+  /**
+   * Attach one shared RFC 9457 `ProblemDetails` component, under
+   * `application/problem+json`, to every GENERATED error response (the
+   * validation `400` and the statuses from
+   * {@linkcode OpenApiGeneratorOptions.deriveErrorResponses}). Set it when the
+   * application answers errors in RFC 9457 format (`ValidationPlugin({
+   * errorFormat: 'rfc9457' })` and `errorHandler({ format: 'rfc9457' })`), which
+   * the generator cannot read. Declared responses are untouched; omitted,
+   * error responses carry no body schema.
+   * @since 0.13.0
+   */
+  readonly errorSchema?: 'rfc9457';
 }
 
 /**
@@ -500,6 +645,15 @@ export class OpenApiGenerator {
    * are deliberately NOT tracked, so contributor registrations survive.
    */
   readonly #perDocComponents = new Set<string>();
+  /**
+   * The one `$ref` every generated error response points at when
+   * `errorSchema` is set. Shared and filled in after every operation is
+   * built, so the component name is claimed last and an application schema
+   * named `ProblemDetails` keeps its name (M137b §3.7).
+   */
+  #problemRef: { $ref: string } = { $ref: '' };
+  /** Whether an emitted operation used {@linkcode #problemRef} this pass. */
+  #problemUsed = false;
   /** Whether a `generate` call is in flight; gates `#perDocComponents` recording. */
   #generating = false;
   /** Guards hoisting reentrancy: the node being hoisted must transform normally. */
@@ -553,12 +707,19 @@ export class OpenApiGenerator {
    * Creates a new OpenAPI generator.
    *
    * @param options - Generator options
+   * @throws {OpenApiDocumentOptionsError} If license keys conflict, tag names repeat or `errorSchema` is unknown
    */
   constructor(options: OpenApiGeneratorOptions) {
+    validateDocumentMetadata(options);
     this.#options = {
       title: options.title ?? 'API',
       version: options.version ?? '1.0.0',
       ...(options.description !== undefined ? { description: options.description } : {}),
+      ...(options.contact !== undefined ? { contact: options.contact } : {}),
+      ...(options.license !== undefined ? { license: options.license } : {}),
+      ...(options.termsOfService !== undefined ? { termsOfService: options.termsOfService } : {}),
+      ...(options.externalDocs !== undefined ? { externalDocs: options.externalDocs } : {}),
+      ...(options.tags !== undefined ? { tags: options.tags } : {}),
       ...(options.servers !== undefined ? { servers: options.servers } : {}),
       ...(options.securitySchemes !== undefined
         ? { securitySchemes: options.securitySchemes }
@@ -573,6 +734,10 @@ export class OpenApiGenerator {
       ...(options.deriveResponseStatus !== undefined
         ? { deriveResponseStatus: options.deriveResponseStatus }
         : {}),
+      ...(options.deriveErrorResponses !== undefined
+        ? { deriveErrorResponses: options.deriveErrorResponses }
+        : {}),
+      ...(options.errorSchema !== undefined ? { errorSchema: options.errorSchema } : {}),
     } as OpenApiGeneratorOptions & {
       title: string;
       version: string;
@@ -698,6 +863,8 @@ export class OpenApiGenerator {
         this.#createOperation(route, this.#convertPath(route.path));
       }
       this.#pass = 'emit';
+      this.#problemRef = { $ref: '' };
+      this.#problemUsed = false;
 
       // Declared ids win even when their routes follow a colliding derived route.
       for (const id of claimDeclaredOperationIds(routes, (route) => this.#isExcluded(route))) {
@@ -735,6 +902,13 @@ export class OpenApiGenerator {
         (paths[openApiPath] as Record<string, OpenApiOperation>)[method] = operation;
       }
 
+      if (this.#problemUsed) {
+        const name = this.#claimComponentName('ProblemDetails');
+        this.#componentSchemas.set(name, PROBLEM_DETAILS_SCHEMA as OpenApiSchemaObject);
+        this.#perDocComponents.add(name);
+        this.#problemRef.$ref = `#/components/schemas/${name}`;
+      }
+
       // Build components section
       const components: Record<string, unknown> = {};
       if (this.#componentSchemas.size > 0) {
@@ -744,6 +918,7 @@ export class OpenApiGenerator {
         components.securitySchemes = this.#options.securitySchemes;
       }
 
+      const metadata = buildDocumentMetadata(this.#options);
       return {
         openapi: '3.1.0',
         info: {
@@ -752,11 +927,13 @@ export class OpenApiGenerator {
           ...(this.#options.description !== undefined
             ? { description: this.#options.description }
             : {}),
+          ...metadata.info,
         },
         ...(this.#options.servers !== undefined ? { servers: this.#options.servers } : {}),
         ...(this.#options.security !== undefined ? { security: this.#options.security } : {}),
         paths,
         ...(Object.keys(components).length > 0 ? { components } : {}),
+        ...metadata.top,
       };
     } finally {
       // Restored even when a schema throws mid-pass. A stranded
@@ -798,30 +975,64 @@ export class OpenApiGenerator {
 
     // Declared schema merged with what the route's validation middleware
     // enforces; declared wins per field.
-    const { schema, derived } = this.#effectiveSchema(route);
+    const { schema, validated } = this.#effectiveSchema(route);
 
     // Build parameters from params and query schemas
     const parameters = this.#buildParameters(route, schema, operationId);
 
     // Build request body from body schema
-    const requestBody = schema?.body
-      ? {
+    let requestBody: OpenApiRequestBody | undefined;
+    if (schema?.body) {
+      const resolved = this.#resolveSchema(schema.body, `${operationId}Body`, 'input');
+      const brands = (route.definition.middleware ?? [])
+        .map(validationMetadataOf)
+        .filter((brand) => brand?.target === 'body');
+      const forms = brands.length > 0 && brands.every((brand) => brand?.forms === true);
+      const files = formFileFieldsOf(schema.body);
+      const media = { schema: resolved };
+      if (!forms) {
+        requestBody = { required: true, content: { 'application/json': media } };
+      } else if (files.size === 0) {
+        requestBody = {
           required: true,
           content: {
-            'application/json': {
-              schema: this.#resolveSchema(schema.body, `${operationId}Body`, 'input'),
+            'application/json': media,
+            'application/x-www-form-urlencoded': media,
+            'multipart/form-data': media,
+          },
+        };
+      } else {
+        const encoding = Object.fromEntries(
+          [...files].flatMap(([key, metadata]) =>
+            metadata.mimeTypes === undefined
+              ? []
+              : [[key, { contentType: metadata.mimeTypes.join(', ') }]],
+          ),
+        );
+        requestBody = {
+          required: true,
+          content: {
+            'multipart/form-data': {
+              ...media,
+              ...(Object.keys(encoding).length === 0 ? {} : { encoding }),
             },
           },
-        }
-      : undefined;
+        };
+      }
+    }
 
-    // Build responses from response schema. A route whose request shape was
-    // DERIVED also answers 400 when validation fails, so the document says so
-    // unless the route declares its own 400 — Redocly flags an operation with
+    // Build responses from response schema. A route carrying a validation
+    // brand with a schema answers 400 when validation fails — whether or not
+    // the route also declares that target's schema — so the document says so
+    // unless the route declares its own 400. Redocly flags an operation with
     // no 4XX and is right.
     const responses = this.#buildResponses(schema?.response, operationId);
-    if (derived && responses['400'] === undefined) {
+    // Statuses the generator adds, as opposed to ones the route declared; only
+    // these carry the `errorSchema` body (M137b §3.7).
+    const generated = new Set<string>();
+    if (validated && responses['400'] === undefined) {
       responses['400'] = { description: 'Bad request' };
+      generated.add('400');
     }
     // Re-key the default `200` when the handler declared a different success
     // status. Done here rather than inside `#buildResponses`, which receives no
@@ -834,15 +1045,17 @@ export class OpenApiGenerator {
         description: this.#getStatusDescription(derivedStatus),
       };
     }
+    this.#addDerivedErrorResponses(route, responses, generated);
 
     return {
       operationId,
       ...(schema?.summary ? { summary: schema.summary } : {}),
       ...(schema?.description !== undefined ? { description: schema.description } : {}),
       ...(schema?.tags && schema.tags.length > 0 ? { tags: schema.tags } : {}),
+      ...(schema?.deprecated === true ? { deprecated: true } : {}),
       ...(parameters.length > 0 ? { parameters } : {}),
       ...(requestBody ? { requestBody } : {}),
-      responses,
+      responses: sortResponses(responses),
       // Absent when empty, so a document full of representable schemas is
       // byte-identical with the pre-annotation output.
       ...(this.#operationDiagnostics.length > 0
@@ -871,6 +1084,69 @@ export class OpenApiGenerator {
   }
 
   /**
+   * Adds the error statuses and headers the route's branded middleware answers
+   * with (M137b §3.2–§3.6), then attaches the Problem Details body to every
+   * generated error response when `errorSchema` is set.
+   *
+   * A status already in `responses` — declared by the route, or the derived
+   * validation `400` — is never replaced. Derived success-response headers
+   * (`RateLimit`, `Idempotent-Replayed`) join every `2xx`, a declared header of
+   * the same name (case-insensitive) winning.
+   *
+   * @param route - The route being documented
+   * @param responses - The operation's responses so far, mutated in place
+   * @param generated - Statuses the generator added, extended in place
+   */
+  #addDerivedErrorResponses(
+    route: RouteInfo,
+    responses: Record<string, OpenApiResponse>,
+    generated: Set<string>,
+  ): void {
+    if (this.#options.deriveErrorResponses !== false) {
+      const challenge = documentsBearerChallenge(
+        this.#options.deriveSecurity?.scheme,
+        this.#options.securitySchemes,
+      );
+      const { errors, successHeaders } = deriveErrorStatuses(collectErrorFacts(route), challenge);
+      for (const { status, headers } of errors) {
+        const key = String(status);
+        if (responses[key] !== undefined) continue;
+        responses[key] = {
+          description: this.#getStatusDescription(status),
+          ...(Object.keys(headers).length > 0 ? { headers: sortHeaders(headers) } : {}),
+        };
+        generated.add(key);
+      }
+      if (Object.keys(successHeaders).length > 0) {
+        for (const [key, response] of Object.entries(responses)) {
+          if (!/^2\d\d$/.test(key)) continue;
+          const merged: Record<string, OpenApiHeader> = { ...successHeaders };
+          for (const [name, header] of Object.entries(response.headers ?? {})) {
+            for (const existing of Object.keys(merged)) {
+              if (existing.toLowerCase() === name.toLowerCase()) delete merged[existing];
+            }
+            merged[name] = header;
+          }
+          responses[key] = withHeaders(response, sortHeaders(merged));
+        }
+      }
+    }
+    if (this.#options.errorSchema === 'rfc9457') {
+      for (const key of generated) {
+        const response = responses[key];
+        if (response === undefined) continue;
+        this.#problemUsed = true;
+        responses[key] = {
+          ...response,
+          content: {
+            'application/problem+json': { schema: this.#problemRef as OpenApiSchemaObject },
+          },
+        };
+      }
+    }
+  }
+
+  /**
    * Merges the route's DECLARED schema with what its validation middleware
    * enforces, per field, declared winning.
    *
@@ -878,12 +1154,13 @@ export class OpenApiGenerator {
    * {@linkcode OpenApiGeneratorOptions.deriveRequestSchemas} for why.
    *
    * @param route - The route being documented
-   * @returns The effective schema and whether any field came from a brand
+   * @returns The effective schema, and whether any brand validates the request
+   *   against a schema (so the route answers a validation `400`)
    */
-  #effectiveSchema(route: RouteInfo): { schema: RouteSchema | undefined; derived: boolean } {
+  #effectiveSchema(route: RouteInfo): { schema: RouteSchema | undefined; validated: boolean } {
     const declared = route.definition.schema;
     if (this.#options.deriveRequestSchemas === false) {
-      return { schema: declared, derived: false };
+      return { schema: declared, validated: false };
     }
 
     const brands: RouteValidationMetadata[] = [];
@@ -891,8 +1168,9 @@ export class OpenApiGenerator {
       const metadata = validationMetadataOf(middleware);
       if (metadata !== undefined) brands.push(metadata);
     }
-    if (brands.length === 0) return { schema: declared, derived: false };
+    if (brands.length === 0) return { schema: declared, validated: false };
 
+    let validated = false;
     const additions: {
       body?: unknown;
       query?: unknown;
@@ -906,6 +1184,9 @@ export class OpenApiGenerator {
       // creates an OWN key, which counted as a derivation and added a `400` to
       // an operation whose request shape had not changed at all.
       if (schema === undefined) continue;
+      // From here the brand validates against a schema, so the route answers
+      // a validation `400` even when its declared schema wins the field.
+      validated = true;
       // A route may carry two brands for one target (a merged chain). The LAST
       // one wins, because that is what the handler actually receives: each
       // middleware writes `validated:<target>` on its way through, so the final
@@ -919,8 +1200,8 @@ export class OpenApiGenerator {
     }
 
     const keys = Object.keys(additions);
-    if (keys.length === 0) return { schema: declared, derived: false };
-    return { schema: { ...declared, ...additions }, derived: true };
+    if (keys.length === 0) return { schema: declared, validated };
+    return { schema: { ...declared, ...additions }, validated };
   }
 
   /**
@@ -1179,10 +1460,15 @@ export class OpenApiGenerator {
     if (responseSchema) {
       for (const [status, value] of Object.entries(responseSchema)) {
         const statusCode = parseInt(status, 10);
-        const { schema, description } = this.#normalizeResponse(value, statusCode);
+        const { schema, description, headers } = this.#normalizeResponse(value, statusCode);
+        const builtHeaders =
+          headers === undefined
+            ? undefined
+            : this.#buildHeaders(headers, `${operationId}Response${statusCode}`);
 
         responses[String(statusCode)] = {
           description,
+          ...(builtHeaders !== undefined ? { headers: builtHeaders } : {}),
           ...(schema !== undefined
             ? {
                 content: {
@@ -1222,7 +1508,10 @@ export class OpenApiGenerator {
    * @param statusCode - The HTTP status code (for the default description)
    * @returns The inner schema (if any) and the resolved description
    */
-  #normalizeResponse(value: unknown, statusCode: number): { schema: unknown; description: string } {
+  #normalizeResponse(
+    value: unknown,
+    statusCode: number,
+  ): { schema: unknown; description: string; headers?: Readonly<Record<string, unknown>> } {
     const fallback = this.#getStatusDescription(statusCode);
 
     if (value === null || typeof value !== 'object') {
@@ -1234,15 +1523,53 @@ export class OpenApiGenerator {
     // transformer's unrecognized-schema diagnostic without inspecting internals.
     if (
       typeof (value as { toJSONSchema?: unknown }).toJSONSchema === 'function' ||
-      (!Object.hasOwn(value, 'schema') && !Object.hasOwn(value, 'description'))
+      (!Object.hasOwn(value, 'schema') &&
+        !Object.hasOwn(value, 'description') &&
+        !Object.hasOwn(value, 'headers'))
     ) {
       return { schema: value, description: fallback };
     }
 
-    // Decorator `{ schema?, description? }` wrapper.
-    const wrapper = value as { schema?: unknown; description?: unknown };
+    // `{ schema?, description?, headers? }` wrapper (`RouteResponseDocumentation`,
+    // `@ApiResponse`).
+    const wrapper = value as { schema?: unknown; description?: unknown; headers?: unknown };
     const description = typeof wrapper.description === 'string' ? wrapper.description : fallback;
-    return { schema: wrapper.schema, description };
+    const headers =
+      typeof wrapper.headers === 'object' && wrapper.headers !== null
+        ? (wrapper.headers as Readonly<Record<string, unknown>>)
+        : undefined;
+    return { schema: wrapper.schema, description, ...(headers !== undefined ? { headers } : {}) };
+  }
+
+  /**
+   * Builds a response's `headers` object from declared
+   * `RouteResponseHeader` values: the schema resolved like a body schema (a
+   * string when absent), `description` and `required` copied when set.
+   *
+   * @param headers - Declared headers keyed by name
+   * @param hint - Name hint prefix for hoisted header schemas
+   * @returns The header objects, sorted by name; `undefined` when empty
+   */
+  #buildHeaders(
+    headers: Readonly<Record<string, unknown>>,
+    hint: string,
+  ): Record<string, OpenApiHeader> | undefined {
+    const built: Record<string, OpenApiHeader> = {};
+    for (const [name, raw] of Object.entries(headers)) {
+      const header =
+        typeof raw === 'object' && raw !== null
+          ? (raw as { schema?: unknown; description?: unknown; required?: unknown })
+          : {};
+      built[name] = {
+        ...(typeof header.description === 'string' ? { description: header.description } : {}),
+        ...(typeof header.required === 'boolean' ? { required: header.required } : {}),
+        schema:
+          header.schema === undefined
+            ? { type: 'string' }
+            : this.#resolveSchema(header.schema, `${hint}${toPascalCase(name)}Header`, 'output'),
+      };
+    }
+    return Object.keys(built).length > 0 ? sortHeaders(built) : undefined;
   }
 
   /**
@@ -1268,6 +1595,10 @@ export class OpenApiGenerator {
       401: 'Unauthorized',
       403: 'Forbidden',
       404: 'Not found',
+      409: 'Conflict',
+      415: 'Unsupported media type',
+      422: 'Unprocessable content',
+      429: 'Too many requests',
       500: 'Internal server error',
     };
     return descriptions[status] ?? 'Response';
@@ -1395,6 +1726,16 @@ export class OpenApiGenerator {
     // The node currently BEING hoisted must transform normally, or it would
     // answer itself with a `$ref` to the component it is building.
     if (this.#hoisting.has(schema)) return undefined;
+
+    if (fileMetadataOf(schema) !== undefined) {
+      const description = (schema as { description?: unknown }).description;
+      return {
+        type: 'string',
+        format: 'binary',
+        contentMediaType: 'application/octet-stream',
+        ...(typeof description === 'string' ? { description } : {}),
+      };
+    }
 
     if (this.#pass === 'count') {
       const bucket = this.#bucket(schema);
@@ -1606,4 +1947,61 @@ export class OpenApiGenerator {
       if (!taken(candidate)) return reserve(candidate);
     }
   }
+}
+
+/**
+ * Orders an operation's responses by ascending numeric status, keeping any
+ * non-numeric key (`default`, a range) after them in its original order
+ * (M137b §3.9).
+ *
+ * @param responses - The responses to order
+ * @returns A new object in document order
+ */
+function sortResponses(
+  responses: Readonly<Record<string, OpenApiResponse>>,
+): Record<string, OpenApiResponse> {
+  const keys = Object.keys(responses);
+  const numeric = keys.filter((key) => /^\d+$/.test(key)).sort((a, b) => Number(a) - Number(b));
+  const rest = keys.filter((key) => !/^\d+$/.test(key));
+  const sorted: Record<string, OpenApiResponse> = {};
+  for (const key of [...numeric, ...rest]) sorted[key] = responses[key] as OpenApiResponse;
+  return sorted;
+}
+
+/**
+ * Orders headers by name, case-insensitively, by UTF-16 code unit rather
+ * than by locale, so the served document is the same bytes on every host.
+ *
+ * @param headers - Headers keyed by name
+ * @returns A new object in name order
+ */
+function sortHeaders<T>(headers: Readonly<Record<string, T>>): Record<string, T> {
+  const sorted: Record<string, T> = {};
+  for (const name of Object.keys(headers).sort((a, b) => {
+    const x = a.toLowerCase();
+    const y = b.toLowerCase();
+    return x < y ? -1 : x > y ? 1 : 0;
+  })) {
+    sorted[name] = headers[name] as T;
+  }
+  return sorted;
+}
+
+/**
+ * Rebuilds a response with `headers` between `description` and `content`, the
+ * key order every response uses.
+ *
+ * @param response - The response
+ * @param headers - Its new headers
+ * @returns The rebuilt response
+ */
+function withHeaders(
+  response: OpenApiResponse,
+  headers: Readonly<Record<string, OpenApiHeader>>,
+): OpenApiResponse {
+  return {
+    description: response.description,
+    headers,
+    ...(response.content !== undefined ? { content: response.content } : {}),
+  };
 }

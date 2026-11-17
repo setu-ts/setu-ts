@@ -84,21 +84,26 @@ await app.start({ port: 3000 });
 Creating plugins via factory functions allows configuration and encapsulation:
 
 ```typescript
+import { CAPABILITIES } from '@setu-ts/common';
+import type { ICacheStore, IPlugin } from '@setu-ts/common';
+
+export interface CachePluginOptions {
+  readonly store: ICacheStore & { close?(): void | Promise<void> };
+}
+
 export function CachePlugin(options: CachePluginOptions): IPlugin {
-  const config = { ...defaultConfig, ...options };
+  const { store } = options;
 
   return {
     name: 'cache',
     version: '1.0.0',
-    optionalDependencies: [CAPABILITIES.LOGGER],
     provides: [CAPABILITIES.CACHE],
-    async register(ctx) {
-      const cache = createCache(config);
-
-      ctx.services.register(CAPABILITIES.CACHE, cache);
+    register(ctx) {
+      // The supplied store implements the complete bound ICacheStore contract.
+      ctx.services.register(CAPABILITIES.CACHE, store);
 
       ctx.lifecycle.onClose(() => {
-        cache.close();
+        return store.close?.();
       });
     },
   };
@@ -314,6 +319,10 @@ ctx.environment.validate({
 // registered, and keys are flat names as they appear in the environment.
 const greeting = ctx.config?.get<string>('MY_PLUGIN_GREETING', { default: 'Hello' }) ?? 'Hello';
 ```
+
+The default applies only to an absent key: an empty value, such as `PORT=` in a dotenv file, is
+returned as `''`, so use `config.get(key) || fallback` for a string value where empty means unset.
+Do not use `||` on a validated boolean or number: it would also replace `false` or `0`.
 
 ## Using Runtime Services
 
@@ -577,10 +586,10 @@ my-plugin/
   "files": ["dist"],
   "scripts": { "build": "tsc" },
   "peerDependencies": {
-    "@setu-ts/common": "^0.12.0"
+    "@setu-ts/common": "^0.13.0"
   },
   "devDependencies": {
-    "@setu-ts/common": "^0.12.0",
+    "@setu-ts/common": "^0.13.0",
     "typescript": "^6.0.3"
   }
 }

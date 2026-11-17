@@ -102,7 +102,9 @@ export function createExtensionStatement(sql: SqlTag): Statement {
 
 /**
  * Describes an existing collection: the embedding column's declared length,
- * whether both indexes exist and whether the `source_version` column does.
+ * whether both indexes have their expected table and key shape and whether
+ * the `source_version` column exists. The vector index must be cosine HNSW;
+ * neither index may be partial or invalid (a failed `CREATE INDEX CONCURRENTLY`).
  *
  * @param sql - The `sql` tag
  * @param spec - The collection
@@ -110,7 +112,22 @@ export function createExtensionStatement(sql: SqlTag): Statement {
  */
 export function describeStatement(sql: SqlTag, spec: VectorCollectionSpec): Statement {
   const { table, sourceIndex, vectorIndex } = tableNames(spec);
-  return sql`SELECT a.atttypmod AS dimensions, to_regclass(${sourceIndex}) IS NOT NULL AS source_index, to_regclass(${vectorIndex}) IS NOT NULL AS vector_index, EXISTS (SELECT 1 FROM pg_attribute v WHERE v.attrelid = a.attrelid AND v.attname = 'source_version' AND NOT v.attisdropped) AS source_version FROM pg_attribute a WHERE a.attrelid = to_regclass(${table}) AND a.attname = 'embedding' AND NOT a.attisdropped`;
+  return sql`SELECT a.atttypmod AS dimensions,
+    EXISTS (SELECT 1 FROM pg_index i
+      JOIN pg_attribute s ON s.attrelid = i.indrelid AND s.attnum = i.indkey[0]
+      JOIN pg_attribute t ON t.attrelid = i.indrelid AND t.attnum = i.indkey[1]
+      WHERE i.indexrelid = to_regclass(${sourceIndex}) AND i.indrelid = a.attrelid
+        AND i.indnkeyatts = 2 AND s.attname = 'scope' AND t.attname = 'source_id'
+        AND i.indisvalid AND i.indpred IS NULL) AS source_index,
+    EXISTS (SELECT 1 FROM pg_index i
+      JOIN pg_class c ON c.oid = i.indexrelid
+      JOIN pg_am m ON m.oid = c.relam
+      JOIN pg_opclass o ON o.oid = i.indclass[0]
+      WHERE i.indexrelid = to_regclass(${vectorIndex}) AND i.indrelid = a.attrelid
+        AND i.indnkeyatts = 1 AND i.indkey[0] = a.attnum
+        AND m.amname = 'hnsw' AND o.opcname = 'vector_cosine_ops'
+        AND i.indisvalid AND i.indpred IS NULL) AS vector_index,
+    EXISTS (SELECT 1 FROM pg_attribute v WHERE v.attrelid = a.attrelid AND v.attname = 'source_version' AND NOT v.attisdropped) AS source_version FROM pg_attribute a WHERE a.attrelid = to_regclass(${table}) AND a.attname = 'embedding' AND NOT a.attisdropped`;
 }
 
 /**

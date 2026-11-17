@@ -20,6 +20,7 @@ export function generateWsRoute(
 import { Gateway, OnMessage, OnOpen } from '@setu-ts/decorator-plugin';
 
 /** Decorated WebSocket gateway, registered through the ingress barrel. */
+// Authorize the handshake: @Gateway('/ws/${names.kebab}', { guards: [...] })
 @Gateway('/ws/${names.kebab}')
 export class ${ingress.pascal}Ingress {
   @OnOpen
@@ -57,6 +58,8 @@ export function ${names.pascal}Plugin(): IPlugin {
     dependencies: ['websocket-plugin'],
     register(ctx: IPluginContext): void {
       const websocket = ctx.services.get<IWebSocketService>(CAPABILITIES.WEBSOCKET);
+      // For handshake authorization, pass guards as the third argument:
+      // websocket.route('/ws/${names.kebab}', handlers, { guards: [...] });
       websocket.route('/ws/${names.kebab}', {
         onOpen: (connection, context) => {
           const room = context.query['room'] ?? DEFAULT_ROOM;

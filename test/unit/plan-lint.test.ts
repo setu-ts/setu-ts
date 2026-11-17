@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { isCanonicalPlanName, lintText } from '../../scripts/plan-lint.ts';
+import { isCanonicalPlanName, lintText, planRootFiles } from '../../scripts/plan-lint.ts';
 
 const SECTIONS = [
   '## 0. Objective & scope',
@@ -96,5 +96,30 @@ describe('plan-lint canonical root names', () => {
     expect(isCanonicalPlanName('milestone-111e12-x.md')).toBe(false);
     expect(isCanonicalPlanName('fix-round-2.md')).toBe(false);
     expect(isCanonicalPlanName('milestone-111e1.md')).toBe(false);
+  });
+});
+
+describe('planRootFiles', () => {
+  const entry = (name: string, file = true) => ({ name, isFile: () => file });
+
+  it('lists only Markdown files', async () => {
+    const files = await planRootFiles(() =>
+      Promise.resolve([entry('milestone-1-x.md'), entry('notes.txt'), entry('reviews', false)]),
+    );
+    expect(files).toEqual(['milestone-1-x.md']);
+  });
+
+  it('reads a tree without plans/ as holding no plans', async () => {
+    const missing = Object.assign(new Error('no plans'), { code: 'ENOENT' });
+    expect(await planRootFiles(() => Promise.reject(missing))).toEqual([]);
+  });
+
+  it('rethrows any other read failure', async () => {
+    const denied = Object.assign(new Error('denied'), { code: 'EACCES' });
+    await expect(planRootFiles(() => Promise.reject(denied))).rejects.toThrow('denied');
+  });
+
+  it('reads the real directory by default', async () => {
+    expect(Array.isArray(await planRootFiles())).toBe(true);
   });
 });

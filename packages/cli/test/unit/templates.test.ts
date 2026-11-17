@@ -29,8 +29,7 @@ describe('the scaffolded application smoke test', () => {
           expect(
             files.find((file) => file.path === 'test/e2e/app.e2e.test.ts')?.contents,
           ).toContain('startTestServer');
-          const deno = files.find((file) => file.path === 'deno.json')!.contents;
-          expect(deno).not.toContain('deno test');
+          expect(files.some((file) => file.path === 'deno.json')).toBe(false);
           expect(files.find((file) => file.path === 'README.md')!.contents).toContain(
             'npm run test:e2e',
           );
@@ -402,6 +401,8 @@ describe('class-based template', () => {
     // wiring as well would be a second source of truth that `--env-file`
     // silently overrides.
     const withArgs = new Set([
+      'runtime',
+      'http-security-plugin',
       'decorator-plugin',
       'health-plugin',
       'metrics-plugin',
@@ -413,6 +414,9 @@ describe('class-based template', () => {
       // paths it excludes, so every template built from it — this one included —
       // carries that argument.
       'logger-plugin',
+      // M137b §3.8: the document describes that same Problem Details shape, so
+      // OpenAPI carries `errorSchema: 'rfc9457'`.
+      'openapi-plugin',
     ]);
     for (const wiring of resolveHost(CLASS_BASED_TEMPLATE, 'deno').plugins) {
       if (withArgs.has(wiring.pkg)) {

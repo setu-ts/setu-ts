@@ -212,5 +212,5 @@ export function requirePolicy<A extends string, T>(
   };
 
   brandPolicyGuard(guard, { policy: name, abilities: [ability], anonymous });
-  return withSecurityMetadata(guard, { authenticated: !anonymous });
+  return withSecurityMetadata(guard, { authenticated: !anonymous, forbids: true });
 }

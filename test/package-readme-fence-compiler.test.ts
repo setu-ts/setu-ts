@@ -65,16 +65,16 @@ const READMES: Readonly<Record<string, number>> = {
   'packages/messaging-plugin/README.md': 17,
   // M89c: the tenant-in-a-behaviour recipe (`getRepositoryFor`) is the one new
   // fence — gated so it cannot ship uncompilable.
-  'packages/multi-tenancy-plugin/README.md': 6,
+  'packages/multi-tenancy-plugin/README.md': 7,
   'packages/scheduler-plugin/README.md': 3,
   // M90i: +1 for the trace-propagation example.
   'packages/queue-plugin/README.md': 10,
-  'packages/worker-pool-plugin/README.md': 3,
+  'packages/worker-pool-plugin/README.md': 4,
   // M98b: +1 for the development-only composition example, which must
   // really compile — it is the answer to "how do I keep this out of
   // production" and a broken one would be worse than none.
   'packages/diagnostics-plugin/README.md': 3,
-  'packages/grpc-plugin/README.md': 2,
+  'packages/grpc-plugin/README.md': 4,
   'packages/graphql-plugin/README.md': 6,
   // M70n: every README the documentation workstream touched, folded into this
   // gate rather than a second one (plan §3.16). Counts are pinned so a fence
@@ -90,7 +90,8 @@ const READMES: Readonly<Record<string, number>> = {
   // M101h: +1 for the authorization-diagnostics registration example.
   // M131d: +4 for the full-stack password sign-in recipe (the arm, the account module's
   // request-bound service, the login action, and the requireUser guard).
-  'packages/auth-plugin/README.md': 29,
+  // M140e: +1 for the sign-out route action.
+  'packages/auth-plugin/README.md': 33,
   'packages/static-plugin/README.md': 3,
   // M94c: +1 for the escaping Hono-template `raw(csrfTokenField(ctx))` example.
   // M101c: +1 for the Tenant binding opt-out example.
@@ -113,15 +114,16 @@ const READMES: Readonly<Record<string, number>> = {
   // the view-rendering path, the React Router loader recipe, and both halves
   // of the browser recipe (the exposing plugin and the `/format` client).
   'packages/localization-plugin/README.md': 7,
-  'packages/validation-plugin/README.md': 3,
+  // M137c: +1 for the formFile() upload example (imports the `/zod` subpath).
+  'packages/validation-plugin/README.md': 4,
   'packages/sse-plugin/README.md': 6,
   'packages/websocket-plugin/README.md': 11,
   'packages/realtime-backplane-plugin/README.md': 3,
   'packages/resilience-plugin/README.md': 2,
-  'packages/react-router-plugin/README.md': 5,
-  'packages/starters/rest-starter/README.md': 7,
+  'packages/react-router-plugin/README.md': 6,
+  'packages/starters/rest-starter/README.md': 8,
   'packages/starters/microservice-starter/README.md': 6,
-  'packages/starters/full-stack-starter/README.md': 8,
+  'packages/starters/full-stack-starter/README.md': 9,
   // v0.6.0 follow-up: half of the package READMEs had never had a single fence
   // compiled — the list only ever grew when a milestone happened to touch a
   // README, so `kernel`, `runtime`, `sdk`, `exceptions` and `testing` sat
@@ -149,9 +151,10 @@ const READMES: Readonly<Record<string, number>> = {
   'packages/kernel/README.md': 3,
   'packages/logger-plugin/README.md': 4,
   // M102: +1 for the component-template example rendered through the view engine.
-  'packages/mail-plugin/README.md': 3,
+  // M140e: the Installation bash fence is skipped, so the compilable count stays 4.
+  'packages/mail-plugin/README.md': 4,
   'packages/metrics-plugin/README.md': 2,
-  'packages/runtime/README.md': 3,
+  'packages/runtime/README.md': 4,
   // M98n: +1 for the devtool-gated observed-fetch composition.
   'packages/sdk/README.md': 15,
   'packages/telemetry-plugin/README.md': 2,
@@ -167,7 +170,7 @@ const READMES: Readonly<Record<string, number>> = {
   'packages/cqrs-plugin/README.md': 2,
   'packages/database-plugin/README.md': 19,
   'packages/notification-plugin/README.md': 3,
-  'packages/openapi-plugin/README.md': 6,
+  'packages/openapi-plugin/README.md': 7,
   'packages/secrets-plugin/README.md': 6,
   'packages/service-discovery-plugin/README.md': 6,
 };
@@ -242,32 +245,39 @@ describe('package README fences compile (X8-8, X6-2/X7-1)', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('should compile every Setu-TS fence in every listed README', async () => {
-    await mkdir(SCRATCH_DIR, { recursive: true });
-    await writeProjectStubs(SCRATCH_DIR);
-    const failures: string[] = [];
-    const compiler = {};
+  // Measured on CI's tooling shard: 374 s and 455 s, then over the member's
+  // 600 s default twice on slower runners, with no change to the fences
+  // (326 TypeScript fences on both develop and the branch that timed out).
+  it(
+    'should compile every Setu-TS fence in every listed README',
+    { timeout: 1_200_000 },
+    async () => {
+      await mkdir(SCRATCH_DIR, { recursive: true });
+      await writeProjectStubs(SCRATCH_DIR);
+      const failures: string[] = [];
+      const compiler = {};
 
-    for (const readme of Object.keys(READMES)) {
-      for (const { fence, classified } of await compilableFences(readme)) {
-        const file =
-          `${SCRATCH_DIR}/${readme.replaceAll('/', '_')}-${fence.index}` +
-          `.${fenceExtension(fence.lang)}`;
-        await writeFile(file, assembleSource(fence, classified));
-        const { code, stderr } = await compileFence(file, compiler);
-        if (code !== 0) {
-          failures.push(
-            `${readme} fence #${fence.index} at line ${fence.line} ` +
-              `(heading: "${fence.heading}") failed deno check (exit ${code}):\n${stderr}`,
-          );
+      for (const readme of Object.keys(READMES)) {
+        for (const { fence, classified } of await compilableFences(readme)) {
+          const file =
+            `${SCRATCH_DIR}/${readme.replaceAll('/', '_')}-${fence.index}` +
+            `.${fenceExtension(fence.lang)}`;
+          await writeFile(file, assembleSource(fence, classified));
+          const { code, stderr } = await compileFence(file, compiler);
+          if (code !== 0) {
+            failures.push(
+              `${readme} fence #${fence.index} at line ${fence.line} ` +
+                `(heading: "${fence.heading}") failed deno check (exit ${code}):\n${stderr}`,
+            );
+          }
         }
       }
-    }
 
-    if (failures.length > 0) {
-      throw new Error(
-        `${failures.length} README fence(s) failed:\n\n${failures.join('\n\n---\n\n')}`,
-      );
-    }
-  });
+      if (failures.length > 0) {
+        throw new Error(
+          `${failures.length} README fence(s) failed:\n\n${failures.join('\n\n---\n\n')}`,
+        );
+      }
+    },
+  );
 });

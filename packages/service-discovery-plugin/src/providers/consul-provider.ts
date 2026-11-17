@@ -8,6 +8,7 @@ import type { IRuntimeServices, ServiceInstance, Unsubscribe } from '@setu-ts/co
 import type { DiscoveryProvider, IDiscoveryHttp, SelfRegistration } from '../interfaces/index.ts';
 import { watchConsulService } from './consul-watch.ts';
 import { instanceUrl } from '../url/instance-url.ts';
+import { headerSafeToken } from '../http/header-token.ts';
 
 /** One entry of `GET /v1/health/service/:service`. */
 interface ConsulHealthEntry {
@@ -86,9 +87,23 @@ export class ConsulProvider implements DiscoveryProvider {
     return `${this.#base}/v1/health/service/${encodeURIComponent(serviceName)}?${params}`;
   }
 
-  /** Headers every request carries; the ACL header is omitted when unset. */
+  /**
+   * Headers every request carries; the ACL header is omitted when unset.
+   *
+   * @returns The headers
+   * @throws {DiscoveryUnavailableError} When the ACL token holds a character a
+   *   header cannot carry, with a message that never contains it (M139f N1)
+   */
   headers(): Record<string, string> {
-    return this.#options.token !== undefined ? { 'X-Consul-Token': this.#options.token } : {};
+    return this.#options.token !== undefined
+      ? {
+          'X-Consul-Token': headerSafeToken(
+            this.#options.token,
+            'The Consul ACL token contains a character an HTTP header cannot carry; ' +
+              'check the token option.',
+          ),
+        }
+      : {};
   }
 
   /**
@@ -165,11 +180,13 @@ export class ConsulProvider implements DiscoveryProvider {
     }
   }
 
-  watch(
+  // `async` so a refused ACL token rejects like every other path, rather than
+  // throwing synchronously out of `watch()` (M139f N1).
+  async watch(
     serviceName: string,
     listener: (instances: readonly ServiceInstance[]) => void,
   ): Promise<Unsubscribe> {
-    return watchConsulService({
+    return await watchConsulService({
       serviceName,
       listener,
       http: this.#http,

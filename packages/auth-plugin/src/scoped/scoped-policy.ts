@@ -50,6 +50,7 @@ const CLIENT_REASONS: ReadonlySet<string> = new Set([
   'scope-unresolved',
   'scope-invalid',
   'tenant-mismatch',
+  'token-confined',
 ]);
 
 /** What the evaluator reads besides its configuration. */
@@ -148,6 +149,9 @@ export class ScopedEvaluator {
     target: unknown,
     requirement: ScopedRequirement,
   ): Promise<boolean | Failure> {
+    if (this.#config.confineScopedTokens && Array.isArray(principal.scopes)) {
+      return { ok: false, reason: 'token-confined' };
+    }
     const { scope, context } = readTarget(target);
     if (scope === 'unresolved') {
       return { ok: false, reason: 'scope-unresolved' };

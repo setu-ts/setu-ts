@@ -40,6 +40,71 @@ describe('validateSmtpTransport', () => {
 });
 
 describe('toNodemailerMessage', () => {
+  it('M139c maps byte attachments with base64 encoding and optional inline fields', () => {
+    const envelope = { from: 'from@x.com', to: 'to@x.com', subject: 'file' };
+    expect(
+      toNodemailerMessage({
+        ...envelope,
+        attachments: [
+          { filename: 'file.bin', content: new Uint8Array([0, 255]) },
+          {
+            filename: 'image.png',
+            content: new Uint8Array([1, 2, 3]),
+            contentType: 'image/png',
+            contentId: 'image@x',
+          },
+        ],
+      }).attachments,
+    ).toEqual([
+      { filename: 'file.bin', content: 'AP8=', encoding: 'base64' },
+      {
+        filename: 'image.png',
+        content: 'AQID',
+        encoding: 'base64',
+        contentType: 'image/png',
+        cid: 'image@x',
+      },
+    ]);
+    expect(toNodemailerMessage(envelope)).not.toHaveProperty('attachments');
+  });
+  it('M139c real nodemailer streamTransport emits the original bytes and inline cid', async (ctx) => {
+    const mod = await import('nodemailer').catch(() => undefined);
+    if (mod === undefined) {
+      ctx.skip();
+      return;
+    }
+    const transport = mod.createTransport({ streamTransport: true, buffer: true, newline: 'unix' });
+    try {
+      const bytes = new Uint8Array([0, 255, 128, 13, 10]);
+      const result = await transport.sendMail(
+        toNodemailerMessage({
+          from: 'from@x.com',
+          to: 'to@x.com',
+          subject: 'inline',
+          html: '<img src="cid:image@x">',
+          attachments: [
+            {
+              filename: 'image.bin',
+              content: bytes,
+              contentType: 'application/octet-stream',
+              contentId: 'image@x',
+            },
+          ],
+        }),
+      );
+      const mime = result.message.toString();
+      expect(mime).toContain('Content-ID: <image@x>');
+      const part = mime.split('Content-Type: application/octet-stream')[1]!;
+      expect(part).toContain('Content-Transfer-Encoding: base64');
+      const encoded = part
+        .split(/\r?\n\r?\n/)[1]!
+        .split(/\r?\n--/)[0]!
+        .replace(/\s/g, '');
+      expect(Uint8Array.from(atob(encoded), (c) => c.charCodeAt(0))).toEqual(bytes);
+    } finally {
+      transport.close();
+    }
+  });
   it('maps all fields, joining recipient arrays', () => {
     const message: OutgoingMail = {
       from: 'me@x.com',

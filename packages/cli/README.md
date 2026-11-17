@@ -141,12 +141,12 @@ The frontend build runs on npm even when the server runs on Deno. Deno and Worke
 standalone `package.json` for Vite and React Router; Node and Bun get those dev dependencies merged
 into the manifest they already have.
 
-| Runtime              | Emits                                                                                          |
-| -------------------- | ---------------------------------------------------------------------------------------------- |
-| `node` (default)     | `package.json` (`@setu-ts/*` from npm), `tsconfig.json`, ESLint and Prettier config, `main.ts` |
-| `bun`                | the same npm manifests as `node`, run with `bun`                                               |
-| `deno`               | `deno.json` (`npm:@setu-ts/*` imports, `nodeModulesDir: "auto"`, `start` task), `main.ts`      |
-| `cloudflare-workers` | `deno.json`, `package.json`, `wrangler.toml`, `src/index.ts` exporting `fetch` — no `listen`   |
+| Runtime              | Emits                                                                                                                        |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `node` (default)     | `package.json` (`@setu-ts/*` from npm), `tsconfig.json`, ESLint and Prettier config, `main.ts`                               |
+| `bun`                | the same npm manifests as `node`, run with `bun`                                                                             |
+| `deno`               | `deno.json` (`npm:@setu-ts/*` imports, `nodeModulesDir: "auto"`, `start` task), `main.ts`                                    |
+| `cloudflare-workers` | `package.json`, `tsconfig.json`, ESLint and Prettier config, `wrangler.toml`, `src/index.ts` exporting `fetch` — no `listen` |
 
 No target emits an `.npmrc` or a JSR registry mapping: every target takes the framework from npm.
 
@@ -233,22 +233,26 @@ rolls out; or `build-<UTC timestamp>` outside git). `--registry <prefix>` names 
   `<member>-env` Secret, applied with `kubectl apply --server-side --force-conflicts` from stdin
   (deploy owns that Secret, so it takes over keys an earlier hand-made one set) with base64 `data:`
   — a client-side apply would store every value in plaintext in an annotation. Generated Deployments
-  read it through `envFrom`; explicit `env:` entries still win. Deploy writes each Secret's
-  `resourceVersion` into its member's pod-template annotation (`setu-ts.dev/secret-version`), so a
-  changed Secret rolls the member out even when the tag and manifest are unchanged, and a deploy
-  re-run after failing part-way still does. Afterwards deploy reads each member's pod template back
-  from the cluster and, when it does not carry the Secret's current version (a `members.yaml` from
-  before the annotation, a hand-edited one, an earlier deploy that failed part-way), sets it with
-  `kubectl patch`, which rolls the member out. `--force-conflicts` takes over keys another writer
-  set in `<member>-env`; keys only that writer owns are left in place, so remove them by hand (or
-  delete the Secret once) when moving an existing Secret to deploy. Compose follows a symbolic link
-  at `apps/<member>/.env`, so `setu check` refuses one. That is the only part of Compose it checks:
-  a branch can also edit `docker/compose.yaml` to name any host file, so review a branch's `docker/`
-  changes before running `docker compose up` on it. Values files, `.env.example` and
-  `k8s/members.yaml` are read only as regular files of at most 1 MiB inside the workspace — never
-  through a symbolic link — and a values file is refused when git cannot confirm it is uncommitted
-  (a missing `git` included; outside a repository there is nothing to commit). kubectl's message for
-  a failed Secret apply is never printed, because it can quote the values.
+  read it through `envFrom`; explicit `env:` entries still win. A broker's connection defaults are
+  in a generated `<member>-transport` ConfigMap listed before the Secret, so a Secret value
+  overrides them. `generate app` and `setu add auth|session` append a random value for each newly
+  generated secret name to `k8s/secrets/<member>/.env`, keeping existing entries. Deploy writes each
+  Secret's `resourceVersion` into its member's pod-template annotation
+  (`setu-ts.dev/secret-version`), so a changed Secret rolls the member out even when the tag and
+  manifest are unchanged, and a deploy re-run after failing part-way still does. Afterwards deploy
+  reads each member's pod template back from the cluster and, when it does not carry the Secret's
+  current version (a `members.yaml` from before the annotation, a hand-edited one, an earlier deploy
+  that failed part-way), sets it with `kubectl patch`, which rolls the member out.
+  `--force-conflicts` takes over keys another writer set in `<member>-env`; keys only that writer
+  owns are left in place, so remove them by hand (or delete the Secret once) when moving an existing
+  Secret to deploy. Compose follows a symbolic link at `apps/<member>/.env`, so `setu check` refuses
+  one. That is the only part of Compose it checks: a branch can also edit `docker/compose.yaml` to
+  name any host file, so review a branch's `docker/` changes before running `docker compose up` on
+  it. Values files, `.env.example` and `k8s/members.yaml` are read only as regular files of at most
+  1 MiB inside the workspace — never through a symbolic link — and a values file is refused when git
+  cannot confirm it is uncommitted (a missing `git` included; outside a repository there is nothing
+  to commit). kubectl's message for a failed Secret apply is never printed, because it can quote the
+  values.
 - **Where images go.** The context is `--context` or the current one. A `kind-<cluster>` context
   loads each image into that cluster; any other context needs `--registry`, and the images are
   pushed there.
@@ -338,8 +342,11 @@ the CI step; it deliberately answers without an install, and `--strict` (valid o
 adds card presence so a run whose cards were not delivered fails. A brief whose bytes already match
 is reported `unchanged` and is not rewritten; `--dry-run` prints `would create`, `would update` or
 `unchanged`, and both modes refuse an unwritable target before writing anything. After a successful
-`setu add` the CLI prints a reminder to run `agents` through the project's pinned CLI invocation
-(for example `npx @setu-ts/cli@<version> agents`) when the project already has a sectioned brief.
+`setu add`, `generate`, `generate app` or `generate library`, a `setu sync` that rewrote a barrel,
+or a successful `setu devtool enable`, the CLI prints
+``Run `npx @setu-ts/cli@<version> agents` to update AGENTS.md. Check freshness with `npx @setu-ts/cli@<version> agents --check`.``
+through the project's pinned CLI invocation (for example `npx @setu-ts/cli@<version> agents`) when
+the project already has a sectioned brief.
 
 Writing a workspace on POSIX, from its root or a member, checks every target's directory chain up to
 `/`: each directory must belong to the invoking user or root and must not be a symlink, the same
@@ -393,22 +400,29 @@ mention in a comment or a string does not count as wired.
 
 In a generated full-stack configuration, `setu add events`, `setu add cqrs` and `setu add queue`
 install the package, create its managed barrel and wire that barrel into the starter's `events`,
-`cqrs` or `queue` arm. The starter already registers those plugins. Queue processors and a selected
-`--queue redis` backend are merged in either add order. Existing properties, spreads, non-literal
-arms and unfamiliar callback shapes are preserved; the CLI prints manual guidance when it cannot
-safely edit them. A job in a starter that owns the queue requires `setu add queue` first; otherwise
-generation refuses before writing and explains that the starter already runs the queue. Functional
-jobs outside a queue-owning starter remain ungated.
+`cqrs` or `queue` arm. The starter already registers those plugins. `setu add health` and
+`setu add metrics` wire their generated barrels the same way
+(`health: { indicators: [...HEALTH_INDICATORS] }`,
+`metrics: { customMetrics: [...CUSTOM_METRICS] }`), and an opt-in arm that takes no settings is set
+to `{}` (`setu add sse` writes `realtime: { sse: {} }`; likewise `websocket` and
+`realtime-backplane`). For every other arm the note says which kind it is: "already registers this
+plugin with its defaults" for an arm that is always on, or "registers this plugin only once its …
+arm is set" for one, such as `auth`, that needs values only you can supply. An arm already present
+is left as it is. Queue processors and a selected `--queue redis` backend are merged in either add
+order. Existing properties, spreads, non-literal arms and unfamiliar callback shapes are preserved;
+the CLI prints manual guidance when it cannot safely edit them. A job in a starter that owns the
+queue requires `setu add queue` first; otherwise generation refuses before writing and explains that
+the starter already runs the queue. Functional jobs outside a queue-owning starter remain ungated.
 
 Generating a route, controller or module checks React Router's resolved page tree with the project's
 installed `react-router routes --json`. A kernel group that would take precedence over an existing
 page is refused, naming the page file. For example, `setu g route products` conflicts with the
-scaffold's `/products` page. Use another name, or run `setu g module api` (with
-`--adopt-controllers` when the project already has controllers) followed by
-`setu g route products --module api` to serve `/api/products`. If the local route-tree command is
-unavailable or takes over 15 seconds, generation continues with a notice naming the paths to check
-by hand. This executes the project's route configuration. `setu check` remains a file-reading wiring
-gate: it does not execute React Router or detect a page added after a kernel route.
+scaffold's `/products` page. Run `setu g module orders` for `/api/orders`, followed by
+`setu g route summary --module orders` for `/api/orders/summary` (use `--adopt-controllers` when
+switching a project with flat controllers). If the local route-tree command is unavailable or takes
+over 15 seconds, generation continues with a notice naming the paths to check by hand. This executes
+the project's route configuration. `setu check` remains a file-reading wiring gate: it does not
+execute React Router or detect a page added after a kernel route.
 
 ### Plugin awareness
 
@@ -433,8 +447,8 @@ install, and `setu generate --help` lists only what is available here.
 | `--queue <name>`        | `new` and `add queue`: the job queue backend (`memory`, `redis`, `rabbitmq`). Same overlay as `--broker`, for the queue wiring.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `--redis-client <name>` | `new` and `add` with a Redis arm: `ioredis` (default) or `node-redis`. node-redis projects depend on `redis` and wire each plugin through a generated `src/node-redis.ts` (`nodeRedisClient(url)` over `fromNodeRedis`). A workspace records it as `redisClient`; members and `generate app` follow the workspace and refuse the flag. Refused without a Redis arm and on Workers.                                                                                                                                                                                                                                                          |
 | `--logger <name>`       | `new`, `generate app`: `console` or `pino` for templates with logging. Defaults to `pino` on Node, Deno and Bun, `console` on Cloudflare Workers. Adds `pino` at `10.x` only when chosen (the same range in Deno's import map). Pino on Workers, minimal hosts and workspace roots refuse the flag by name. `--dry-run` reports the choice. Since 0.11.0.                                                                                                                                                                                                                                                                                   |
-| `--yes`, `-y`           | `new` only: take every default and ask nothing. A no-op when no prompter is present.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `--depends-on <name>`   | `generate app`: repeat for prerequisites; root `dev` waits for their `/ready` endpoints.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `--yes`, `-y`           | `new` and `add`: take every default and ask nothing; `generate`, `generate custom`, `generate app` and `generate library` accept it and never prompt. A no-op when no prompter is present.                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `--depends-on <name>`   | `generate app`: repeat for prerequisites; root `dev` waits for their `/ready` endpoints, and Compose waits for a prerequisite with health probes to be healthy (started, otherwise).                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `--module <name>`       | `generate`: place a `controller`, `route`, `service`, `sse` or `schema` in the named feature module (required for the first four once the project has modules; refused while it has none); `add view`: place the views controller there. See [Controllers and modules](#controllers-and-modules).                                                                                                                                                                                                                                                                                                                                           |
 | `--adopt-controllers`   | `generate module`, first module only: move the flat controllers and services into it, rewriting imports and keeping URLs.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `--config <path>`       | Load the app from this module instead of `./setu.config.ts`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
@@ -465,11 +479,11 @@ The devtool supports Deno and Node projects. `setu new --devtool`, `setu generat
 `setu devtool enable` opt a project into the
 [local diagnostics connector](https://github.com/setu-ts/setu-ts/blob/main/packages/diagnostics-plugin/README.md).
 They emit a runtime-neutral `main.dev.ts` development entry the production graph never imports. Node
-adds the non-watching `dev` script (`tsx main.dev.ts`) and pins `@setu-ts/diagnostics-plugin` in
-`devDependencies`; its existing `check` script already covers the entry. Deno adds `dev` and widens
-`check`. A workspace member also records a `devtoolPort` in `setu.workspace.json`, allocated without
-colliding with any member's application port (`setu workspace ports --reallocate` moves both
-together).
+adds the non-watching `dev` script (`tsx` with the telemetry preload and the project's dotenv flag,
+then `main.dev.ts`) and pins `@setu-ts/diagnostics-plugin` in `devDependencies`; its existing
+`check` script already covers the entry. Deno adds `dev` and widens `check`. A workspace member also
+records a `devtoolPort` in `setu.workspace.json`, allocated without colliding with any member's
+application port (`setu workspace ports --reallocate` moves both together).
 
 ```bash
 setu new my-app --devtool               # Node by default; connector probes from 4919
@@ -572,8 +586,17 @@ request-bound module instead: `<name>.token.ts`, a service factory taking the re
 `/api/<name>` routes and tests that sign a session and send its CSRF token. `--page` also writes a
 guarded page, `app/routes/_app/<name>._index.tsx`, whose loader reads the service with `getService`.
 Pages may import kernel code only as `import type` or from a `*.token.ts` module; `setu check`
-refuses any other value import (`setu.E017`) and a page it cannot parse (`setu.E018`). It reads only
-a page's own imports, not re-exports in files outside `app/`.
+refuses other value imports (`setu.E017`), except in React Router `.server` modules confirmed inside
+`app/`: both the path the page is reached by and its real path must be server-only, so a file or
+directory symlink cannot move a page out of the check. Confirmed `.server` modules are skipped
+entirely, so neither E017 nor an oversized-file `setu.E018` is reported for them; a symlink leaving
+`app/` is still E018. Where the file system cannot resolve real paths, nothing is confirmed and
+`.server` modules are scanned like any page. Every path a symlink gives a page directory is scanned,
+each resolving its relative imports from where it sits, as Vite does under
+`resolve.preserveSymlinks`, and each path's findings are reported (and silenced) separately; only a
+link back to one of its own parent directories is skipped. A walk past 4,096 directories, every
+symlink path counted, reports the rest as `setu.E018`. It reads only a page's own imports, not
+re-exports in files outside `app/`.
 
 A module holds `<name>.controller.ts` (`GET /<name>`, `GET /<name>/:id`, `POST /<name>`,
 `PATCH /<name>/:id`), `<name>.service.ts` (an in-memory `Map` the JSDoc says to replace with a
@@ -585,10 +608,11 @@ repository), `<name>.schemas.ts` (only when `validation-plugin` is installed), a
 also `MODULES` for `DecoratorPlugin({ modules })`.
 
 `--module <name>` writes into an existing module. A module-scoped controller mounts at
-`/<module>/<name>`, and a static path such as `/invoices/summary` outranks `GET /invoices/:id`, so
-an `id` equal to `summary` is unreachable through `/:id`. The module's `index.ts` registers its
-function controllers. In a class-based module, a generated class controller or service is added to
-the `controllers` or `providers` array of `<module>.module.ts`, as the NestJS CLI does, when that
+`/api/<module>/<name>` on functional full-stack and `/<module>/<name>` elsewhere, including
+class-based full-stack. SSE adds `/sse/` before the name. A static `/api/invoices/summary` outranks
+`GET /api/invoices/:id`, so an `id` equal to `summary` is unreachable through `/:id`. The module's
+`index.ts` registers its function controllers. In a class-based module, a generated class controller
+or service is added to the `controllers` or `providers` array of `<module>.module.ts`, when that
 array is a plain literal; otherwise the declaration is left alone and the line to add is printed. A
 module-scoped service is registered under the token `<module>.<name>-service`. Every other schematic
 is app-wide and refuses the flag.
@@ -613,8 +637,9 @@ project.
 ## Realtime starting points
 
 `setu generate sse <name>` writes an SSE controller under `src/controllers/`, or into a module with
-`--module`, where it is served at `/<module>/sse/<name>`. When the project already has both
-`@setu-ts/react-router-plugin` (and therefore React) and `@setu-ts/sdk`, it also writes an
+`--module`, where it is served at `/api/<module>/sse/<name>` on functional full-stack and
+`/<module>/sse/<name>` elsewhere, including class-based full-stack. When the project already has
+both `@setu-ts/react-router-plugin` (and therefore React) and `@setu-ts/sdk`, it also writes an
 application-local `src/hooks/use-<name>.ts` React hook that imports `createSseClient`. Add the SDK
 with `setu add sdk` before generating the hook. React belongs to the consuming application, never a
 published Setu package.
@@ -743,6 +768,12 @@ host with logging also asks `Logger?`, with the runtime's default first; Workers
 only. Every prompted value is expressible as a flag, so prompts are never a second way to configure
 a project, and `--dry-run` stays exact.
 
+Each question is a list: ↑/↓ (or `j`/`k`) moves the highlight, a number jumps to that option, Enter
+chooses and Escape or Ctrl+C cancels. The highlight is a cyan-to-violet gradient on a 24-bit colour
+terminal, bold cyan on a 16/256-colour one, and plain under `NO_COLOR`. A terminal that cannot read
+single keys, or one with `TERM=dumb`, gets a typed answer instead. `setu add` asks its backend
+questions the same way.
+
 Non-interactive by construction in three layers: `runCli`'s dependency bundle takes prompting as an
 OPTIONAL `ask` member no programmatic caller passes; the installed executable supplies it only when
 stdin is a terminal; and the reader answers `null` once input ends. All three fail closed to the
@@ -788,6 +819,7 @@ MIT
 | --------------- | --------- |
 | `emitInterrupt` | function  |
 | `nodeProcess`   | function  |
+| `nodeRuntime`   | function  |
 | `runMain`       | function  |
 | `MainProcess`   | interface |
 | `MainRuntime`   | interface |
@@ -809,11 +841,11 @@ factory receives its devtool argument; production keeps disabled defaults. Unkno
 receive manual guidance, including the `DEVTOOL_SOURCES` import and the `sources` declaration those
 lines read. The module is regenerated, so preserve application-specific policy outside that file.
 
-Full-stack accepts `new --broker redis --queue redis`, and workspace full-stack members pass their
-transport module's `messagingOptions(config)` / `queueOptions(config)` to the starter. Standalone
-projects can use `setu add messaging --broker redis` or `setu add queue --queue redis`; a member's
-`setu add messaging|queue` calls its transport module instead and refuses per-member flags. The
-selected client is recorded in runtime dependencies or Deno imports (run the printed install
+Full-stack accepts `new --broker redis --queue redis`, and workspace full-stack members pass
+`runtime: runtimeOptions()`, `messagingOptions(config)` and `queueOptions(config)` to the starter.
+Standalone projects can use `setu add messaging --broker redis` or `setu add queue --queue redis`; a
+member's `setu add messaging|queue` calls its transport module instead and refuses per-member flags.
+The selected client is recorded in runtime dependencies or Deno imports (run the printed install
 command). An absent generated full-stack option is inserted; missing queue transport properties can
 merge with its processors. Existing values and unfamiliar configs receive the exact property to
 configure manually. With no broker the starter uses memory. `add` appends the connection variable to
@@ -827,10 +859,13 @@ without the selected broker's service, it prints the service block to add.
 Use `setu new <name> --template full-stack` or `setu generate app <name> --template full-stack` in a
 workspace to create the frontend and build setup.
 
-Adding one of the twelve safe zero-configuration providers wires its emitted plugin-list anchor in
-either style. Starter compositions instead name their option arm; configure that arm to avoid a
-duplicate registration. In a functional project, `events`, `cqrs`, `health` and `metrics` are
-registered with the generated-artifact barrel they consume, for example
+Adding one of the 21 safe zero-configuration providers (validation, worker-pool, secrets, storage,
+audit, mail, resilience, view, idempotency, cqrs, events, messaging, queue, scheduler, websocket,
+cache, health, metrics, openapi, sse, realtime-backplane) wires its emitted plugin-list anchor in
+either style. Full-stack inserts zero-config plugins the starter does not own above its generated
+plugin loop. Starter-owned plugins name their option arm; configure that arm to avoid a duplicate
+registration. In a functional project, `events`, `cqrs`, `health` and `metrics` are registered with
+the generated-artifact barrel they consume, for example
 `EventsPlugin({ handlers: EVENT_HANDLERS })`, and an empty barrel is created when absent, so a
 handler a later `setu generate` writes is live. Class-based projects keep the bare call; their
 handlers arrive through the ingress barrel. Manifest updates preserve existing key order. Deno
@@ -839,12 +874,12 @@ package.json.
 
 <!-- version:history -->
 
-On a `cloudflare-workers` project, `setu add cloudflare` prints the registration that reads the
-platform sink — `CloudflarePlugin({ env, ...(waitUntil ? { waitUntil } : {}) })` — because the
-generated entry passes `waitUntil` to `createApp` as its second parameter (M113d §3.8). The factory
-names that parameter `_waitUntil` while nothing reads it, so the command also tells you to rename
-it. A project scaffolded before 0.10.0 has no such parameter, and its entry does not pass one; the
-command points at
+On a `cloudflare-workers` project, `setu add cloudflare` registers the plugin with the platform sink
+— `CloudflarePlugin({ env, ...(waitUntil ? { waitUntil } : {}) })` — because the generated entry
+passes `waitUntil` to `createApp` as its second parameter (M113d §3.8). The factory names that
+parameter `_waitUntil` while nothing reads it, so the same edit renames it, and its JSDoc tag, to
+`waitUntil`. A configuration the command cannot edit gets both steps printed instead: one scaffolded
+before 0.10.0 has no such parameter and its entry does not pass one, and the command points at
 [docs/upgrading.md](https://github.com/setu-ts/setu-ts/blob/main/docs/upgrading.md) for both edits.
 
 ### Styled server-rendered views
@@ -862,3 +897,27 @@ dependencies, JSX and example view files only; CSS there belongs to Wrangler sta
 
 The full-stack template includes Tailwind through Vite, copied shadcn Button/Card, a fixed app shell
 and a light/dark/system toggle. Run `npx shadcn add <component>` to add more components.
+
+`setu add` accepts several names and validates the complete request before writing. Backend flags
+are `--provider` (mail), `--type` (database), `--adapter` (vector-store), and `--dialect` for
+Drizzle. A terminal asks for each one left out, and for each left-out transport backend (`--broker`,
+`--queue`, `--store`, `--lock`, `--backplane`) outside a workspace member or Workers project, and
+for `--dialect` after Drizzle is chosen; a Workers project is not asked for the vector-store
+adapter, since only `memory` applies there. `--yes` takes every default. Existing peer pins, scripts
+and config files are preserved. Drizzle and Prisma add schema migration scripts and create-only
+configs; schemas and client instances belong to the application. Deno prints schema commands and
+Workers writes none. `view --plugin-only` installs only the capability and compatible JSX settings;
+it is the full-stack default and refuses `--module`. `mcp` leaves `setu.config.ts` unchanged and
+prints `McpPlugin({})` with the note that the app boots with it only once at least one route is
+marked with `mcpTool()` or `@McpTool()`, and that each marked route also needs a security guard
+(`publicRoute()` or `requireAuth()`, or `@Public()`) or `schema.security`.
+
+`setu add auth` and `setu add session` write a random 64-hex `JWT_SECRET` or `SESSION_SECRET` into
+the project's env file, append that file to `.gitignore` (printing a `git rm --cached` hint when it
+was already there), and append a custom env path to an existing `.dockerignore`.
+
+Worker tasks named `*.task.ts` referenced by a literal
+`new URL('./src/tasks/hash.task.ts', import.meta.url)` are built by `setu build` and their URLs
+relocated for each output, including migrations. A non-literal reference naming `.task.ts` in the
+call is refused with the file and line; a path held in a variable is not detected (it builds without
+the task), so keep the literal in the call. `--dry-run` lists task outputs.

@@ -27,7 +27,11 @@
 export { AuthPlugin } from './plugin/auth-plugin.ts';
 export type { AuthMiddlewareOption, AuthPluginOptions } from './interfaces/index.ts';
 export type { ResourceServerOptions } from './interfaces/index.ts';
-export { AuthPluginConfigurationError, SamlRuntimeLoadError } from './errors.ts';
+export {
+  AuthenticationUnavailableError,
+  AuthPluginConfigurationError,
+  SamlRuntimeLoadError,
+} from './errors.ts';
 
 // Option types
 export type { JwtOptions } from './interfaces/index.ts';
@@ -181,7 +185,13 @@ export { RateLimitStoreUnavailableError } from './errors.ts';
 
 // Weighted reserve-then-settle quotas (M134)
 export { createQuota } from './quota/quota.ts';
-export type { IQuota, IQuotaStore, QuotaOptions, QuotaReservation } from './quota/quota.ts';
+export type {
+  IQuota,
+  IQuotaStore,
+  QuotaOptions,
+  QuotaReservation,
+  QuotaUsage,
+} from './quota/quota.ts';
 export { MemoryQuotaStore } from './quota/memory-quota-store.ts';
 export { RedisQuotaStore } from './quota/redis-quota-store.ts';
 export type { IQuotaRedisClient } from './quota/redis-quota-store.ts';

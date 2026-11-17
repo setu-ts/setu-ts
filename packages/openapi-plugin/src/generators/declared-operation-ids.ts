@@ -13,12 +13,13 @@ import { OperationIdError } from '../errors.ts';
  */
 export const DEFAULT_EXCLUDED_OWNERS: readonly string[] = ['health-plugin', 'metrics-plugin'];
 
-/** Shared path/owner exclusion rule for startup validation and document generation. */
+/** Shared route/path/owner exclusion rule for startup validation and document generation. */
 export function isRouteExcluded(
   route: RouteInfo,
   excludedPaths: ReadonlySet<string>,
   excludedOwners: ReadonlySet<string>,
 ): boolean {
+  if (route.definition.schema?.excludeFromDocument === true) return true;
   if (excludedPaths.has(route.path)) return true;
   return route.owner !== undefined && excludedOwners.has(route.owner);
 }

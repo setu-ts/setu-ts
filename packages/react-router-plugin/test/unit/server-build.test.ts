@@ -16,6 +16,58 @@ import {
 import { createFakeLoadContextFactory, createSimpleFakeHandler } from '../fixtures/fake-handler.ts';
 
 describe('server-build', () => {
+  it.each(['createRequestHandler', 'matchRoutes', 'RouterContextProvider'])(
+    'names the React Router 8 contract when %s is missing',
+    async (missing) => {
+      const module: Record<string, unknown> = {
+        createRequestHandler: () => () => {},
+        matchRoutes: () => null,
+        RouterContextProvider: class {},
+      };
+      delete module[missing];
+      let thrown: unknown;
+      try {
+        await loadRequestHandler('<module>', 'production', {
+          serverBuild: {},
+          rrImportHook: () => Promise.resolve(module),
+        });
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown).toBeInstanceOf(Error);
+      expect((thrown as Error).message).toContain(`exposes no '${missing}' export`);
+      expect((thrown as Error).message).toContain('React Router 8');
+      expect((thrown as Error).message).not.toContain('or later');
+    },
+  );
+  it('supplies the unwrapped build and the exact module matcher', async () => {
+    const build = { routes: {} };
+    const matchRoutes = () => null;
+    const runtime = await loadRequestHandler('<module>', 'production', {
+      serverBuild: { default: build },
+      rrImportHook: () =>
+        Promise.resolve({
+          createRequestHandler: () => () => Promise.resolve(new Response('ok')),
+          RouterContextProvider: class {},
+          matchRoutes,
+        }),
+    });
+    expect(await runtime.pageRoutes!.build()).toBe(build);
+    expect(runtime.pageRoutes!.matchRoutes).toBe(matchRoutes);
+  });
+
+  it('names a missing matchRoutes export', async () => {
+    await expect(
+      loadRequestHandler('<module>', 'production', {
+        serverBuild: {},
+        rrImportHook: () =>
+          Promise.resolve({
+            createRequestHandler: () => () => {},
+            RouterContextProvider: class {},
+          }),
+      }),
+    ).rejects.toThrow("exposes no 'matchRoutes' export");
+  });
   it('assembleHandler returns a handler that calls createRequestHandler(build, mode)', () => {
     let factoryCalled = false;
     let capturedBuild: unknown = null;
@@ -194,7 +246,7 @@ describe('server-build', () => {
   it('loadRequestHandler rejects when server build path does not exist', async () => {
     const nonExistentPath = './__non_existent_build_path_for_test__';
     await expect(loadRequestHandler(nonExistentPath, 'production')).rejects.toThrow(
-      'Failed to load React Router server build',
+      'If the app has not been built, run its `build` task first.',
     );
   });
 });
@@ -204,6 +256,7 @@ describe('server-build', () => {
 describe('loadRequestHandler — the module arm (M113d §3.10)', () => {
   const fakeRR = (): Record<string, unknown> =>
     ({
+      matchRoutes: () => null,
       createRequestHandler: (build: unknown, mode: string) => (_request: Request) =>
         Promise.resolve(new Response(`${mode}:${String(build)}`)),
       RouterContextProvider: class {},

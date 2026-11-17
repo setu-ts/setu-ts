@@ -151,6 +151,7 @@ describe('requireScopes', () => {
     expect(securityMetadataOf(guard)).toEqual({
       authenticated: true,
       scopes: ['tools:read', 'tools:list'],
+      forbids: true,
     });
   });
 });

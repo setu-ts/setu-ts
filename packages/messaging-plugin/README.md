@@ -207,6 +207,8 @@ capability their adapter provides.
 against its real backend — both were driven for the first time in M90d, which is why the column
 above is stated per broker rather than left implied.
 
+<!-- version:history -->
+
 With `'redis-streams'`, connection errors of the `ioredis` client the broker builds go to the
 application logger — the first error of an outage at `warn`, identical repeats at `debug`, the
 recovery at `info` — instead of `ioredis` printing every reconnect failure to `console.error`. Since
@@ -2010,5 +2012,9 @@ Every export and option is documented in
 
 Inbox parked rows and all six outbox reasons keep the indicator `up` and `/ready` at 200. Alert on
 inbox `data.parked` / `data.reasons` and outbox `data.reasons` (`oldest-pending-age`, `failed-rows`,
-`failed-scan-cap`, `blocked-key-cap`, `store-write-failing`, `relay-overlap`). Lifecycle and
-unreachable-store `down` arms remain.
+`failed-scan-cap`, `blocked-key-cap`, `store-write-failing`, `relay-overlap`). `/health` includes
+`data` only with `HealthPlugin({ details: true })`; the default body carries each check's `status`
+alone. Detailed reports expose every indicator's data, so protect the health endpoints when they
+carry it
+([Statuses](https://github.com/setu-ts/setu-ts/blob/main/packages/health-plugin/README.md#statuses)).
+Lifecycle and unreachable-store `down` arms remain.

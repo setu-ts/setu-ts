@@ -82,6 +82,7 @@ it('refuses a non-kernel application without dispatch', async () => {
   const plugin = McpPlugin({ tools: [declaration] });
   plugin.register({
     app: {},
+    middleware: { add() {} },
     router: { get() {}, post() {}, delete() {} },
     lifecycle: {
       onBootstrap(fn: () => void | Promise<void>) {

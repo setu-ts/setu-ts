@@ -230,7 +230,7 @@ function getRequestOrigin(url: string): string | null {
 }
 
 /**
- * The zero-configuration proxy candidate: an `X-Forwarded-Proto`/`X-Forwarded-Host`
+ * The zero-configuration proxy candidate: the leftmost `X-Forwarded-Proto`/`X-Forwarded-Host`
  * origin, consulted only when the browser reports the request same-origin.
  *
  * `X-Forwarded-*` are not forbidden request headers, and the CORS middleware
@@ -246,10 +246,17 @@ function sameOriginBehindProxy(
   const url = new URL(ctx.request.url);
   return (
     sourceOrigin ===
-    xForwardedOrigin(ctx, {
-      protocol: url.protocol === 'https:' ? 'https' : 'http',
-      host: url.host,
-      origin: requestOrigin,
-    }).origin
+    xForwardedOrigin(
+      ctx,
+      {
+        protocol: url.protocol === 'https:' ? 'https' : 'http',
+        host: url.host,
+        origin: requestOrigin,
+      },
+      // The browser-owned Sec-Fetch-Site is the trust source here, not a
+      // proxy, and an append chain's public value is its outermost entry.
+      'outermost',
+      true,
+    ).origin
   );
 }

@@ -86,11 +86,12 @@ export class WorkerPoolCollector {
    * gauges and `/health` can never disagree. Gauges are absolute (`set`), so a
    * snapshot is the correct input — unlike the counters below.
    *
+   * @param label - The pool's task label (never its specifier)
    * @param stats - A snapshot of one pool's state
    */
-  syncGauges(stats: TaskPoolStats): void {
+  syncGauges(label: string, stats: TaskPoolStats): void {
     this.#guard(() => {
-      const labels = { [TASK_MODULE_LABEL]: stats.taskModule };
+      const labels = { [TASK_MODULE_LABEL]: label };
       this.#workers.set(stats.workers, labels);
       this.#busy.set(stats.busy, labels);
       this.#queued.set(stats.queued, labels);
@@ -125,11 +126,11 @@ export class WorkerPoolCollector {
    * cumulative — feeding a cumulative snapshot into `ICounter.inc` would
    * double-count on every call.
    *
-   * @param taskModule - The pool's task-module specifier
+   * @param label - The pool's task label (never its specifier)
    */
-  taskCompleted(taskModule: string): void {
+  taskCompleted(label: string): void {
     this.#guard(() => {
-      this.#completed.inc(1, { [TASK_MODULE_LABEL]: taskModule });
+      this.#completed.inc(1, { [TASK_MODULE_LABEL]: label });
     });
   }
 
@@ -137,12 +138,12 @@ export class WorkerPoolCollector {
    * Records one admitted task that failed. Summed over `reason`, this equals
    * `TaskPoolStats.failed` for the same module.
    *
-   * @param taskModule - The pool's task-module specifier
+   * @param label - The pool's task label (never its specifier)
    * @param reason - Why the task failed
    */
-  taskFailed(taskModule: string, reason: TaskFailureReason): void {
+  taskFailed(label: string, reason: TaskFailureReason): void {
     this.#guard(() => {
-      this.#failed.inc(1, { [TASK_MODULE_LABEL]: taskModule, [REASON_LABEL]: reason });
+      this.#failed.inc(1, { [TASK_MODULE_LABEL]: label, [REASON_LABEL]: reason });
     });
   }
 
@@ -151,12 +152,12 @@ export class WorkerPoolCollector {
    * {@linkcode taskFailed}: these never became tasks, so the pool's own
    * `failed` count cannot see them either.
    *
-   * @param taskModule - The task-module specifier the caller asked for
+   * @param label - The task label of the module the caller asked for
    * @param reason - Why the task was refused
    */
-  taskRejected(taskModule: string, reason: TaskRejectionReason): void {
+  taskRejected(label: string, reason: TaskRejectionReason): void {
     this.#guard(() => {
-      this.#rejected.inc(1, { [TASK_MODULE_LABEL]: taskModule, [REASON_LABEL]: reason });
+      this.#rejected.inc(1, { [TASK_MODULE_LABEL]: label, [REASON_LABEL]: reason });
     });
   }
 }

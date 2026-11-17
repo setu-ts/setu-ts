@@ -4,7 +4,9 @@
  * @module
  */
 
+import { reportAgentsHint } from '../utils/agents-hint.ts';
 import { formatForTarget } from '../utils/prettier-format.ts';
+import { moduleRouteBase } from '../schematics/module-route-base.ts';
 import type { IFileSystem } from '@setu-ts/common';
 import { diagnoseProject, type ProjectDiagnosis } from '../diagnostics/diagnose.ts';
 import { refuseDuplicateNames, renderGenerateFindings } from '../diagnostics/render.ts';
@@ -23,6 +25,7 @@ import {
   type TargetRuntime,
 } from '../constants.ts';
 import { runAppCommand } from './app.ts';
+import { RUNTIME_RESTRICTIONS } from './add.ts';
 import type { PortProbe } from '../workspace/port-probe.ts';
 import { runLibraryCommand } from './library.ts';
 import {
@@ -75,12 +78,15 @@ import { interruptionMessage } from '../utils/interruption.ts';
 
 import { createCommandRunner, type CommandRunner } from '../utils/run-command.ts';
 import { kernelShadows, readPagePaths } from '../utils/react-router-routes.ts';
+import { isMissingPath } from '../utils/filesystem-errors.ts';
 import { cliInvocation } from '../templates/project-files.ts';
 
 /**
  * Everything `runGenerateCommand` reaches the outside world through.
  */
 export interface GenerateDependencies {
+  /** Creates a fresh secret for a new workspace member. */
+  readonly secret?: () => string;
   /** The filesystem to detect plugins on and write generated files through. */
   readonly fs: IFileSystem;
   /** Runs the installed React Router route-tree command. */
@@ -138,6 +144,7 @@ function printSchematics(installed: ReadonlySet<string>, log: (message: string) 
   log('');
   log('Options:');
   log('  --dry-run          Print what would be created, write nothing');
+  log('  --yes, -y          Accepted for scripts; generate never prompts');
   log('  --dir <path>       Generate into this directory instead of the CWD');
   log(
     `  --runtime <target>  ${TARGET_RUNTIMES.join(' | ')} (detected from the project by default)`,
@@ -177,6 +184,7 @@ export async function runGenerateCommand(
   // installs nothing) would say nothing about the member being created.
   if (args.positionals[0] === APP_VERB) {
     return await runAppCommand(args, {
+      ...(deps.secret === undefined ? {} : { secret: deps.secret }),
       fs: deps.fs,
       dir,
       log: deps.log,
@@ -393,6 +401,15 @@ export async function runGenerateCommand(
       `The "${schematicName}" schematic requires @setu-ts/${requiredPlugin}, ` +
         `which is not installed in ${escapeName(dir)}.`,
     );
+    // A package `add` refuses on this runtime (M140b: queue-plugin on Workers)
+    // gets the refusal's reason, not an `add` command that would then refuse.
+    const restriction = RUNTIME_RESTRICTIONS.get(requiredPlugin);
+    if (restriction !== undefined && !restriction.runtimes.includes(runtime)) {
+      deps.error(
+        `@setu-ts/${requiredPlugin} is not available on a ${runtime} project: ${restriction.reason}.`,
+      );
+      return EXIT_ERROR;
+    }
     if (diagnosis.starter?.arms.has(requiredPlugin) === true) {
       deps.error(
         `${diagnosis.starter.symbol} already runs ${requiredPlugin}; add installs its package and wires the generated handlers into setu.config.ts.`,
@@ -498,8 +515,31 @@ export async function runGenerateCommand(
     // and its page of the same name never collide.
     const base =
       schematicName === 'module'
-        ? `/api/${names.kebab}`
-        : `/${module === undefined ? '' : `${module}/`}${names.kebab}`;
+        ? moduleRouteBase(names.kebab, installed)
+        : `${module === undefined ? '' : moduleRouteBase(module, installed)}/${names.kebab}`;
+    // An adopted same-named controller keeps its own routes, which this
+    // command cannot read, and a kernel route outranks a React Router page:
+    // refuse rather than write a page its controller may shadow.
+    if (schematicName === 'module' && page && adoptControllers) {
+      const adopting = await deps.fs
+        .stat(joinPath(dir, `src/controllers/${names.kebab}.controller.ts`))
+        .then(
+          (stat) => stat.isFile,
+          (cause: unknown) => {
+            if (isMissingPath(cause)) return false;
+            throw cause;
+          },
+        );
+      if (adopting) {
+        deps.error(
+          `Cannot generate module "${names.kebab}" with --page while adopting src/controllers/${names.kebab}.controller.ts: that controller keeps its own routes, and one at /${names.kebab} would take precedence over the page.`,
+        );
+        deps.error(
+          'Generate the module without --page, or adopt the controller under another module name.',
+        );
+        return EXIT_ERROR;
+      }
+    }
     const pages = await readPagePaths(dir, deps.runCommand ?? createCommandRunner(), deps.fs);
     if (!pages.ok) {
       deps.error(
@@ -513,14 +553,15 @@ export async function runGenerateCommand(
         );
         deps.error(
           schematicName === 'module'
-            ? `Choose another module name: a full-stack module's routes are mounted at /api/<module name>.`
-            : `Choose another name, or place the ${schematicName} in a module: setu g module api (with --adopt-controllers if the project has controllers), then setu g ${schematicName} ${names.kebab} --module api (which yields /api/${names.kebab}).`,
+            ? `Choose another module name: this project's module routes are mounted at ${moduleRouteBase('<module name>', installed)}.`
+            : `Choose another name, or place the ${schematicName} in a module: setu g module orders (with --adopt-controllers if the project has controllers), then setu g ${schematicName} ${names.kebab} --module orders (which yields ${moduleRouteBase('orders', installed)}/${names.kebab}).`,
         );
         return EXIT_ERROR;
       }
       // `--page` adds a page at /<name>: an existing page there would be
       // shadowed or, for /login, the guarded page would redirect to itself.
       const pagePath = `/${names.kebab}`;
+
       const existing = page
         ? pages.paths.find((path) => path.replace(/\/+$/, '') === pagePath)
         : undefined;
@@ -559,7 +600,7 @@ export async function runGenerateCommand(
   }
 
   // A class controller or service generated into a class-based module joins the
-  // module's own `@Module` declaration, as the NestJS CLI does. A declaration the
+  // module's own `@Module` declaration. A declaration the
   // editor cannot read exactly is left alone and the line to add is printed.
   let declarationAdvice: string | undefined;
   const declaration =
@@ -735,6 +776,19 @@ export async function runGenerateCommand(
         ? await write(deps.fs)
         : await applyModuleSwitch(deps, dir, moduleSwitch, write);
     for (const outcome of outcomes) deps.log(`${outcome.outcome} ${escapeName(outcome.path)}`);
+    if (schematicName === 'schema') {
+      const file = generated.find((entry) => entry.path.endsWith('.schemas.ts'))!;
+      deps.log(
+        `Bind ${file.path}: ${mode === 'class-based' ? `@ValidateBody(${names.pascal})` : `const body = validateBody(${names.pascal}); use body as route middleware and read body.value(ctx)`}.`,
+      );
+    }
+    if (schematicName === 'job' && !installed.has('queue-plugin'))
+      deps.log(`Install the queue: ${cliInvocation(runtime)} add queue`);
+    if (schematicName === 'module' && args.flags['page'] === true)
+      deps.log(
+        `Add { to: '/${names.kebab}', label: '${names.pascal}' } to APP_NAV in app/lib/nav-utils.ts to link the page.`,
+      );
+    await reportAgentsHint(deps, dir, runtime);
     if (schematicName === 'migration' && customName === undefined) {
       deps.log(
         `Add readiness: { migrations: MIGRATION_NAMES } from ./src/migrations/index.ts to DatabasePlugin(...) and create the setu_migrations table: ${repositoryFileUrl('packages/database-plugin/README.md#migrations-and-readiness')}`,

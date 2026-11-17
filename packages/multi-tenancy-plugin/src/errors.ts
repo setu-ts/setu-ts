@@ -5,6 +5,20 @@
  */
 import { withHttpStatusHint } from '@setu-ts/common';
 
+/** A tenant store cannot join the caller's transaction. @since 0.13.0 */
+export class TenantUnitOfWorkUnsupportedError extends Error {
+  /** @param store - The unsupported store's class name */
+  constructor(store: string) {
+    super(`Tenant store ${store} does not support a unit of work.`);
+    this.name = 'TenantUnitOfWorkUnsupportedError';
+    withHttpStatusHint(this, {
+      status: 500,
+      title: 'Tenant Unit of Work Unsupported',
+      detail: 'The tenant store cannot join a transaction.',
+    });
+  }
+}
+
 /**
  * Title of the `503` a registry fault answers — written by the tenant
  * middleware and carried by {@linkcode TenantRegistryUnavailableError}'s status

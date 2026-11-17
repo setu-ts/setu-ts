@@ -21,7 +21,7 @@ function makeContext(): {
   const onInit: (() => void)[] = [];
   const ctx: IPluginContext = {
     services: {
-      register: (token, service) => {
+      register: (token: string, service: object) => {
         services.set(token, service);
       },
       registerFactory: () => {},

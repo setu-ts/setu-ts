@@ -3,6 +3,8 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { attachAuthorizationObserver } from '../../src/diagnostics/authorization-observer.ts';
+import type { AuthorizationObserver } from '../../src/diagnostics/authorization-observer.ts';
 import { RbacService } from '../../src/services/rbac-service.ts';
 import type { IPrincipal, RbacConfig } from '@setu-ts/common';
 
@@ -322,4 +324,57 @@ describe('RbacService', () => {
       expect(svc.hasRole(principal, 'loop')).toBe(true);
     });
   });
+});
+
+describe('M139a RBAC confinement', () => {
+  it('reports token-confined for single checks and compound steps', () => {
+    const reasons: string[] = [];
+    const observer: AuthorizationObserver = {
+      onRole: (_role, _result, reason) => {
+        reasons.push(reason);
+      },
+      onPermission: (_permission, _result, reason) => {
+        reasons.push(reason);
+      },
+      onAnyRole: (_roles, steps) => {
+        reasons.push(...steps.map((step) => step.reason));
+      },
+      onAllPermissions: (_permissions, steps) => {
+        reasons.push(...steps.map((step) => step.reason));
+      },
+    };
+    const service = new RbacService({ roles: { admin: { permissions: ['*'] } } }, true);
+    attachAuthorizationObserver(service, observer);
+    const user = { id: 'u1', roles: ['admin'], scopes: [] };
+    service.hasRole(user, 'admin');
+    service.hasPermission(user, 'x');
+    service.hasAnyRole(user, ['admin']);
+    service.hasAllPermissions(user, ['x']);
+    expect(reasons).toEqual([
+      'token-confined',
+      'token-confined',
+      'token-confined',
+      'token-confined',
+    ]);
+  });
+  for (const cap of [undefined, true, false])
+    for (const scopes of [undefined, [], ['x']]) {
+      it(`cap ${cap}, scopes ${JSON.stringify(scopes)} across every method`, () => {
+        const config = { roles: { admin: { permissions: ['*'] } } };
+        const service = cap === undefined ? new RbacService(config) : new RbacService(config, cap);
+        const user = {
+          id: 'u1',
+          roles: ['admin'],
+          permissions: ['*'],
+          ...(scopes === undefined ? {} : { scopes }),
+        };
+        const expected = cap === false || scopes === undefined;
+        expect(service.hasRole(user, 'admin')).toBe(expected);
+        expect(service.hasPermission(user, 'anything')).toBe(expected);
+        expect(service.hasAnyRole(user, ['admin'])).toBe(expected);
+        expect(service.hasAllPermissions(user, ['anything'])).toBe(expected);
+        expect(service.hasAllPermissions(user, [])).toBe(expected);
+        expect(service.hasAnyRole(user, [])).toBe(false);
+      });
+    }
 });

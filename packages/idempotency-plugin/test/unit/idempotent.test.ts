@@ -35,6 +35,7 @@ function serviceReturning(
   onCall?: () => void,
 ): IIdempotencyService {
   return {
+    transactional: false,
     middleware: () => {
       onCall?.();
       return middleware;
@@ -80,6 +81,7 @@ describe('idempotent (M109a §3.9)', () => {
     } as unknown as ILogger;
     const error = new IdempotencyConfigurationError('ttlMs', 'ttlMs must be at least leaseMs');
     const service: IIdempotencyService = {
+      transactional: false,
       middleware: () => {
         throw error;
       },
@@ -108,6 +110,7 @@ describe('idempotent (M109a §3.9)', () => {
     } as unknown as ILogger;
     const error = new IdempotencyConfigurationError('ttlMs', 'ttlMs must be at least leaseMs');
     const service: IIdempotencyService = {
+      transactional: false,
       middleware: () => {
         throw error;
       },
@@ -137,6 +140,7 @@ describe('idempotent (M109a §3.9)', () => {
   it('rethrows a non-configuration error without caching it', async () => {
     const boom = new Error('bad');
     const service: IIdempotencyService = {
+      transactional: false,
       middleware: () => {
         throw boom;
       },

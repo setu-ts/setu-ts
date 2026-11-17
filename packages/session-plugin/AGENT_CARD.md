@@ -1,8 +1,7 @@
 # @setu-ts/session-plugin — cookie sessions and form CSRF
 
 **Add it:** `setu add session` prints the registration for `setu.config.ts`; use
-`SessionPlugin({ secret: process.env.SESSION_SECRET!, csrf: {} })`. It provides
-`CAPABILITIES.SESSION` (`ISessionService`).
+`SessionPlugin({ csrf: {} })`. It provides `CAPABILITIES.SESSION` (`ISessionService`).
 
 ## Save and read a shopping cart
 
@@ -40,17 +39,21 @@ export function registerCartFormRoutes(router: IRouterApi): void {
 
 ## Behaviour the types do not show
 
-- The default cookie encrypts the payload. `mode: 'sign'` leaves it readable.
-- `maxAge` defaults to 7200 seconds; `idleTimeoutMs` uses milliseconds and is omitted by default.
-- Cookies default to `secure: true`, `httpOnly: true`, `sameSite: 'lax'`; plain HTTP development
-  needs `cookie: { secure: false }`.
-- Missing session keys return `undefined`. Nested mutations need another `set` to mark a change.
-- `csrf: {}` enables verification: the default field is `_csrf`, the header is `x-csrf-token`, and
-  safe methods are skipped. The helper follows the configured field name.
-- Secrets need at least 32 characters; an array rotates secrets, with index 0 sealing new cookies.
+- Cookies encrypt by default; `mode: 'sign'` exposes payloads. `maxAge`: 7200 seconds; optional
+  `idleTimeoutMs`: milliseconds. Defaults: secure, httpOnly, sameSite lax; local HTTP needs
+  `cookie: { secure: false }`.
+- Missing keys return `undefined`. Nested mutations need another `set`.
+- `csrf: {}` checks unsafe methods: `_csrf` field or `x-csrf-token` header. The helper follows
+  config.
+- `csrf.exemptBearer` defaults true: authenticated header credentials with a new session skip CSRF
+  and commit no cookie, even on excluded paths. Restored sessions/non-Bearer Authorization prevent
+  exemption. Bearer/API-key-to-cookie exchanges need false; see README.
+- Secrets: option → secrets manager → config → environment; ≥32 characters. Arrays rotate keys, with
+  index 0 sealing new cookies.
 
 ## Other options
 
 - `store: 'memory'`, `'cache'` or an `ISessionStore` enables server-side payload storage.
-- `regenerate` rotates the session id after a privilege change; `destroy` logs the session out.
+- `regenerate` rotates the session id and clears the form-CSRF token; fetch a fresh token after
+  sign-in or MFA promotion. Other data, including the tenant binding, stays. `destroy` logs out.
 - `rolling` renews expiry; `tenantBinding` defaults to true and refuses a tenant mismatch with 403.

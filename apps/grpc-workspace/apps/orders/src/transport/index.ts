@@ -9,9 +9,22 @@
  * @module
  */
 
+import type { RuntimeOptions } from '@setu-ts/runtime';
 import type { IPlugin } from '@setu-ts/common';
 import type { MessagingPluginOptions } from '@setu-ts/messaging-plugin';
 import type { QueuePluginOptions } from '@setu-ts/queue-plugin';
+import { GrpcPlugin } from '@setu-ts/grpc-plugin';
+
+/**
+ * No runtime options: this member does not serve gRPC. `setu workspace rpc`
+ * switching it to gRPC makes this return `{ http2: true }`.
+ *
+ * @returns The runtime options for this member's RPC style
+ * @since 0.13.0
+ */
+export function runtimeOptions(): RuntimeOptions {
+  return {};
+}
 
 /**
  * The memory broker's `MessagingPlugin` options.
@@ -32,10 +45,10 @@ export function queueOptions(): QueuePluginOptions {
 }
 
 /**
- * The plugins this member's RPC style adds: none for HTTP, which every template already serves.
+ * The plugins this member's RPC style adds: `GrpcPlugin` for calling `billing` only — this member serves no gRPC.
  *
  * @returns The plugins to register
  */
 export function transportPlugins(): readonly IPlugin[] {
-  return [];
+  return [GrpcPlugin({ serve: false, clients: { billing: { basePath: '/grpc' } } })];
 }

@@ -1,11 +1,9 @@
 # @setu-ts/websocket-plugin — bidirectional socket messaging
 
-**Add it:** `setu add websocket` adds it and wires `WebSocketPlugin()` in a recognized functional
-config; Node also gets the `ws` peer. It provides `CAPABILITIES.WEBSOCKET` (`IWebSocketService`).
+**Add it:** `setu add websocket` wires `WebSocketPlugin()` in recognized functional config; Node
+gets the `ws` peer. Provides `CAPABILITIES.WEBSOCKET` (`IWebSocketService`).
 
 ## Put clients in a chat room
-
-Use this registration in `setu.config.ts`:
 
 ```ts
 import { WebSocketPlugin } from '@setu-ts/websocket-plugin';
@@ -44,7 +42,7 @@ const ws = ctx.services.get<IWebSocketService>(CAPABILITIES.WEBSOCKET);
 ws.peek('lobby')?.broadcastJson({ event: 'deployment', version: '1.2' });
 ```
 
-## Behaviour the types do not show
+## Behaviour
 
 - Paths match exactly; send variable data through the query. Route factories resolve at `onInit`.
 - Without an adapter upgrade seam, `available` is false and registering a route throws
@@ -58,7 +56,8 @@ ws.peek('lobby')?.broadcastJson({ event: 'deployment', version: '1.2' });
 
 ## Other options
 
-- `maxMessageBytes` closes oversized inbound frames with code 1009; its default `0` disables it.
+- `maxMessageBytes` defaults to 1 MiB; `0` disables it. Oversized messages close 1009. Node bounds
+  the read; Bun's transport cap is 16 MB. Bun/Deno check after buffering.
 - Route `options.guards` checks upgrades before acceptance; `protocols` selects a subprotocol.
 - `behaviors` wraps incoming messages; `diagnostics` opts into observations and `scalingNotice`
   controls the local-only startup notice.

@@ -57,7 +57,7 @@ describe('derived request schemas through a real application', () => {
     // The whole channel: `validation-plugin` brands, `openapi-plugin` reads,
     // and neither imports the other. A locally-created symbol on either side
     // would leave this `undefined`.
-    expect(spec.paths['/orders']?.post?.requestBody?.content['application/json'].schema).toEqual({
+    expect(spec.paths['/orders']?.post?.requestBody?.content['application/json']?.schema).toEqual({
       type: 'object',
       properties: { sku: { type: 'string', minLength: 1 }, qty: { type: 'number' } },
       required: ['sku', 'qty'],

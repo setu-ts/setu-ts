@@ -13,6 +13,7 @@
  */
 
 import { planNodeDevtool } from '../devtool/npm-manifest.ts';
+import { reportAgentsHint } from '../utils/agents-hint.ts';
 import { formatForTarget } from '../utils/prettier-format.ts';
 import type { IFileSystem } from '@setu-ts/common';
 
@@ -50,6 +51,7 @@ import { listTemplates } from '../templates/registry.ts';
 import { deriveNames, escapeName, IDENTIFIER_NAME_RULE, isIdentifierSafe } from '../utils/names.ts';
 import {
   findExisting,
+  readExistingText,
   reportDryRunPlan,
   firstDuplicatePath,
   type GeneratedFile,
@@ -64,13 +66,21 @@ import {
   SERVICE_PORT_EXPORT,
 } from '../workspace/discovery-module.ts';
 import { workspaceContainerFiles } from '../workspace/compose.ts';
+import { renderTransportSection, replaceTransportSection } from '../workspace/root-files.ts';
 import { workspaceK8sFiles } from '../workspace/k8s.ts';
 import { workspaceProfile, type WorkspaceRuntimeProfile } from '../workspace/runtime-profile.ts';
 import type { PortProbe } from '../workspace/port-probe.ts';
 import { withWorkspaceMember } from '../workspace/member-host.ts';
 import { planRootNodeModulesDir, ROOT_MANIFEST } from '../workspace/root-manifest.ts';
 import { BROKERS, type BrokerSpec, brokerSpec } from '../workspace/transport.ts';
-import { RPC_ALIASES, RPC_STYLES, getRpc, rpcSpec, type RpcStyle } from '../workspace/rpc.ts';
+import {
+  RPC_ALIASES,
+  RPC_STYLES,
+  getRpc,
+  grpcTargets,
+  rpcSpec,
+  type RpcStyle,
+} from '../workspace/rpc.ts';
 import { memberTransportModule } from '../workspace/rewire.ts';
 import {
   allocateDevtoolPort,
@@ -87,14 +97,20 @@ import {
   WORKSPACE_VERSION,
   type WorkspaceManifest,
   type WorkspaceManifestProblem,
+  findSecretCollision,
+  manifestProblemDetail,
+  workspaceSecretVariables,
 } from '../workspace/manifest.ts';
 import { describeReconcileFailure, reconcileMembers } from '../workspace/reconcile.ts';
 import { interruptionMessage } from '../utils/interruption.ts';
+import { operatorSecretFiles } from '../workspace/operator-secrets.ts';
 
 /**
  * Everything `runAppCommand` reaches the outside world through.
  */
 export interface AppDependencies {
+  /** Creates secrets for ignored member configuration. */
+  readonly secret?: () => string;
   /** The filesystem to read the workspace through and write the member with. */
   readonly fs: IFileSystem;
   /** The workspace root to operate on (absolute, already `--dir`-resolved). */
@@ -183,6 +199,7 @@ function printUsage(log: (message: string) => void): void {
   );
   log('  --dir <path>        The workspace root, instead of the working directory');
   log('  --dry-run           Print what would be created, write nothing');
+  log('  --yes, -y           Accepted for scripts; generate never prompts');
   log('');
   log(`The broker is the workspace's, recorded in ${WORKSPACE_MANIFEST}, and every member`);
   log('inherits it — services can only talk over a bus they share. Change it for every');
@@ -246,6 +263,11 @@ function reportNoWorkspace(
     );
     return EXIT_ERROR;
   }
+  const detail = manifestProblemDetail(problem);
+  if (detail !== undefined) {
+    error(`${escapeName(joinPath(dir, WORKSPACE_MANIFEST))} cannot be used. ${detail}`);
+    return EXIT_ERROR;
+  }
   error(`${escapeName(joinPath(dir, WORKSPACE_MANIFEST))} is not a readable workspace manifest.`);
   error(`It must be JSON carrying \`version\`, \`basePort\`, and a \`members\` array.`);
   return EXIT_ERROR;
@@ -275,6 +297,7 @@ function planMember(
   profile: WorkspaceRuntimeProfile,
   rootManifest: string,
   rootGitignore: string,
+  secret: (() => string) | undefined,
   devtoolPort?: number,
 ):
   | {
@@ -341,9 +364,8 @@ function planMember(
     rpcSpec(next.members.find((member) => member.name === name)?.rpc),
     name,
     profile,
-    // Omitted rather than passed as `undefined`: `exactOptionalPropertyTypes` is
-    // on, and the parameter is optional.
-    ...((next.brokerUrl === undefined ? [] : [next.brokerUrl]) as [string?]),
+    next.brokerUrl,
+    grpcTargets(next.members, name),
   );
   // A starter factory owns its construction, and kernel diagnostics reach the
   // constructor only — refused here, before anything is planned, because the
@@ -363,18 +385,28 @@ function planMember(
           from: DISCOVERY_SPECIFIER,
         });
 
-  const files: GeneratedFile[] = projectFiles(name, profile.runtime, devHost, {
-    symbol: SERVICE_PORT_EXPORT,
-    from: DISCOVERY_SPECIFIER,
-    ...(next.members.find((member) => member.name === name)?.inspectPort === undefined
-      ? {}
-      : { inspectPort: next.members.find((member) => member.name === name)!.inspectPort! }),
-  }).map((file) => ({ ...file, path: joinPath(memberRoot, file.path) }));
+  const files: GeneratedFile[] = projectFiles(
+    name,
+    profile.runtime,
+    devHost,
+    {
+      symbol: SERVICE_PORT_EXPORT,
+      from: DISCOVERY_SPECIFIER,
+      ...(next.members.find((member) => member.name === name)?.inspectPort === undefined
+        ? {}
+        : { inspectPort: next.members.find((member) => member.name === name)!.inspectPort! }),
+    },
+    secret === undefined ? undefined : { secret },
+  ).map((file) => ({ ...file, path: joinPath(memberRoot, file.path) }));
 
   if (devtoolPort !== undefined && profile.runtime === 'node') {
     const index = files.findIndex((file) => file.path === joinPath(memberRoot, 'package.json'));
     const manifest = files[index]!;
-    const plan = planNodeDevtool(manifest.contents, manifest.path);
+    const plan = planNodeDevtool(
+      manifest.contents,
+      manifest.path,
+      `--env-file-if-exists=${devHost.manifest?.envFilePath ?? '.env'} `,
+    );
     if (!plan.ok) return plan;
     if (plan.contents !== undefined) files[index] = { ...manifest, contents: plan.contents };
   }
@@ -750,6 +782,18 @@ export async function runAppCommand(args: ParsedArgs, deps: AppDependencies): Pr
     return EXIT_USAGE;
   }
   const portHost = resolveHost(choice.host ?? MINIMAL_HOST, read.manifest.runtime);
+  const generatedSecrets = (portHost.manifest?.envVariables ?? [])
+    .filter((variable) => variable.generated === 'secret')
+    .map((variable) => variable.name);
+  // A custom dotenv name the generated `.env`/`.env.*` rules miss is recorded,
+  // so the managed root .dockerignore lists it on every regeneration.
+  const envFlag = readEnvFilePath(args.flags);
+  const envFilePath =
+    envFlag.ok &&
+    envFlag.path !== undefined &&
+    !isCoveredDotenvName(envFlag.path.split('/').at(-1) ?? '')
+      ? envFlag.path
+      : undefined;
 
   let next: WorkspaceManifest = {
     ...read.manifest,
@@ -766,6 +810,8 @@ export async function runAppCommand(args: ParsedArgs, deps: AppDependencies): Pr
       {
         name,
         port,
+        ...(generatedSecrets.length === 0 ? {} : { generatedSecrets }),
+        ...(envFilePath === undefined ? {} : { envFilePaths: [envFilePath] }),
         ...(devtoolPort === undefined ? {} : { devtoolPort }),
         ...(dependsOn.length === 0 ? {} : { dependsOn }),
         // Read from the FLAG rather than the resolved template, because the
@@ -783,6 +829,13 @@ export async function runAppCommand(args: ParsedArgs, deps: AppDependencies): Pr
       },
     ],
   };
+  // Refused before anything is written: the reader would refuse the manifest
+  // this would write, and the member would share a signing key with another.
+  const collision = findSecretCollision(next.members);
+  if (collision !== undefined) {
+    deps.error(`${escapeName(name)} cannot be added. ${manifestProblemDetail(collision)}`);
+    return EXIT_ERROR;
+  }
 
   for (const field of (portHost.manifest?.npmBuild?.devEntry !== undefined
     ? ['inspectPort', 'vitePort']
@@ -849,6 +902,7 @@ export async function runAppCommand(args: ParsedArgs, deps: AppDependencies): Pr
     profile,
     rootManifest,
     rootGitignore,
+    deps.secret,
     ...(devtoolPort === undefined ? ([] as const) : ([devtoolPort] as const)),
   );
   if (!plan.ok) {
@@ -876,11 +930,49 @@ export async function runAppCommand(args: ParsedArgs, deps: AppDependencies): Pr
       .filter((member) => member.name !== name)
       .map((member) => memberTransportModule(deps.fs, deps.dir, next, member)),
   );
+  const section = renderTransportSection(
+    brokerSpec(next.broker, next.redisClient),
+    profile,
+    next.brokerUrl,
+    workspaceSecretVariables(next.members),
+  );
+  const readme = await readExistingText(deps.fs, joinPath(deps.dir, 'README.md'));
+  const updatedReadme = replaceTransportSection(readme, section);
+  if (updatedReadme !== undefined) {
+    modules.push({ path: 'README.md', contents: updatedReadme, managed: true });
+  } else {
+    deps.log(
+      `README.md has no transport section; it was left as it is. The current section is:\n${section}`,
+    );
+  }
   const files = [
     ...plan.files,
     ...modules,
     ...(devtoolRunnerFile === undefined ? [] : [devtoolRunnerFile]),
   ].map((file) => ({ ...file, path: joinPath(deps.dir, file.path) }));
+
+  if (generatedSecrets.length > 0) {
+    try {
+      const operator = await operatorSecretFiles(
+        deps.fs,
+        deps.dir,
+        name,
+        generatedSecrets,
+        deps.secret,
+      );
+      if (operator.files.length > 0) {
+        files.push(...operator.files);
+        deps.log(
+          `Operator secrets for ${name}: ${operator.appended.join(', ')} (k8s/secrets/${name}/.env).`,
+        );
+      }
+    } catch (cause) {
+      deps.error(
+        `Cannot prepare operator secrets: ${escapeName(cause instanceof Error ? cause.message : String(cause))}`,
+      );
+      return EXIT_ERROR;
+    }
+  }
 
   if (args.flags['dry-run'] === true) {
     if (plan.logger !== undefined) deps.log(`Logger: ${plan.logger}`);
@@ -917,26 +1009,6 @@ export async function runAppCommand(args: ParsedArgs, deps: AppDependencies): Pr
     return EXIT_ERROR;
   }
 
-  // The generated .dockerignore covers only .env and .env.* names, so a custom
-  // name would travel into the image. Nothing here can add the rule for the
-  // developer without guessing at a file they own, so it is named once. Named by
-  // its workspace-relative path: `.dockerignore` sits at the workspace root, and
-  // a pattern without a slash matches only there, so the bare name would exclude
-  // nothing under the member.
-  const envFilePath = readEnvFilePath(args.flags);
-  const envFileName = envFilePath.ok ? envFilePath.path?.split('/').at(-1) : undefined;
-  if (
-    envFilePath.ok &&
-    envFilePath.path !== undefined &&
-    envFileName !== undefined &&
-    !isCoveredDotenvName(envFileName)
-  ) {
-    deps.log(
-      `Add ${escapeName(joinPath(MEMBERS_DIR, name, envFilePath.path))} to .dockerignore: the ` +
-        `generated rules cover only .env and .env.* names, so this file would be copied into the image.`,
-    );
-  }
-
   deps.log('');
   deps.log(`Added ${name} on port ${port}. Next:`);
   // From the profile, and from `runScript` rather than `manifestKind`: a Node
@@ -955,5 +1027,6 @@ export async function runAppCommand(args: ParsedArgs, deps: AppDependencies): Pr
         `${profile.runScript('dev')} (the launcher supplies the session credentials)`,
     );
   }
+  await reportAgentsHint(deps, deps.dir, profile.runtime);
   return EXIT_OK;
 }

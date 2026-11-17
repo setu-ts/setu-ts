@@ -78,9 +78,7 @@ describe('createTestApp — integration with real app', () => {
     const app = await createTestApp({ plugins: [runtimeMock, mockDb] });
 
     // The mock's service should be resolvable under its token
-    const dbService = app.services.get<typeof mockDb extends { service: infer T } ? T : never>(
-      CAPABILITIES.DATABASE,
-    );
+    const dbService = app.services.get(CAPABILITIES.DATABASE);
     expect(dbService).toBeDefined();
 
     // getAll should include single registrations (matching kernel semantics)

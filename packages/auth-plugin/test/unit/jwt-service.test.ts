@@ -129,7 +129,7 @@ describe('JwtService', () => {
     beforeAll(() => {
       const runtime = createFakeRuntime(1000000);
       jwt = new JwtService(runtime, {
-        secret: 'test-secret',
+        secret: 'test-secret-at-least-32-characters',
         algorithm: 'HS256',
       });
     });
@@ -169,7 +169,7 @@ describe('JwtService', () => {
     beforeAll(() => {
       const runtime = createFakeRuntime(1000000);
       jwt = new JwtService(runtime, {
-        secret: 'test-secret',
+        secret: 'test-secret-at-least-32-characters',
         algorithm: 'HS256',
       });
     });
@@ -196,7 +196,7 @@ describe('JwtService', () => {
           new JwtService(runtime, {
             algorithm: 'HS256',
           }),
-      ).toThrow('HS256 requires a secret key');
+      ).toThrow('JWT_SECRET');
     });
 
     it('throws when RS256 is selected without keys', () => {

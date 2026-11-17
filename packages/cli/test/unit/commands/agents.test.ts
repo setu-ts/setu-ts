@@ -174,7 +174,7 @@ describe('setu agents', () => {
       });
       expect(await h.run(['agents', '--dir', 'apps/a'])).toBe(0);
       expect(h.fs.read('/work/apps/a/AGENTS.md')).toContain(
-        '| ../../node_modules/@setu-ts/common/AGENT_CARD.md |',
+        '../../node_modules/@setu-ts/common/AGENT_CARD.md',
       );
       expect(h.err.lines).toEqual(
         location === undefined

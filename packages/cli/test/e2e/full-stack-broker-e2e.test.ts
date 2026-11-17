@@ -63,6 +63,7 @@ describe.skipIf(process.env['REDIS_URL'] === undefined).each(['ioredis', 'node-r
           ]),
         ).toBe(0);
         const project = `${root}/ws/apps/portal`;
+        expect(await cli(['g', 'job', 'digest', '--dir', project])).toBe(0);
         const overlay = await startOverlay();
         try {
           const installed = await npmInstall(`${root}/ws`, overlay);
@@ -152,9 +153,12 @@ try {
             'full-stack',
             '--broker',
             'redis',
+            '--queue',
+            'redis',
           ]),
         ).toBe(0);
         const project = `${root}/portal`;
+        expect(await cli(['g', 'job', 'digest', '--dir', project])).toBe(0);
         const overlay = await startOverlay();
         try {
           const installed = await npmInstall(project, overlay);

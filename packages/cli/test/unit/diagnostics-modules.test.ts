@@ -64,7 +64,7 @@ describe('module activation', () => {
   it('treats source it cannot classify as inactive', () => {
     expect(
       moduleActive(
-        'const s = `registerOrdersModule(router)`;\nregisterOrdersModule(router);\n',
+        'const s = globalThis;\nregisterOrdersModule(router);\n',
         'registerOrdersModule',
         'functional',
       ),

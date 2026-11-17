@@ -8,7 +8,16 @@
  * @module
  */
 import { describe, expect, it } from 'vitest';
+
+it('exports the route middleware scanner', async () => {
+  const common = await import('../../src/index.ts');
+  expect(common.routeMiddlewareOf({ handler: (ctx) => ctx.response.text('ok') })).toEqual([]);
+});
 import * as common from '../../src/index.ts';
+
+it('exports the request-bound token constructor', () => {
+  expect(common.requestServiceToken('module.counter')).toBe('module.counter');
+});
 
 it('exports the shared OpenAPI service contract', () => {
   const service: common.IOpenApiService = {

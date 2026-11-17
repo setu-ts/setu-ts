@@ -9,6 +9,7 @@ import { compileTools } from '../compile/compile-tools.ts';
 import { discoverTools } from '../compile/discovery.ts';
 import type { CompiledTool } from '../compile/compile-tools.ts';
 import { innerRequest } from '../call/inner-request.ts';
+import { csrfExempt } from '../serve/csrf-exempt.ts';
 import { originAllowed } from '../serve/origin.ts';
 import { accessGate } from '../serve/visibility.ts';
 import { CALL_CONTEXT, createServerFactory } from '../sdk/server-factory.ts';
@@ -40,6 +41,7 @@ export function McpPlugin(options: McpPluginOptions): IPlugin {
     name: 'mcp',
     version: VERSION,
     register(ctx: IPluginContext): void {
+      ctx.middleware.add(csrfExempt(resolved.path), { priority: 320, name: 'mcp-csrf-exempt' });
       let tools: readonly CompiledTool[] = [];
       let handler: McpHttpHandler;
       ctx.lifecycle.onBootstrap(async () => {

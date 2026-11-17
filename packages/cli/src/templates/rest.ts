@@ -21,7 +21,9 @@ import { composeHost } from './style.ts';
 export const RUNTIME_WIRING: Wiring = {
   pkg: 'runtime',
   symbol: 'RuntimePlugin',
-  workersArgs: '{ env }',
+  // Matches rest-starter's DEFAULT_STARTER_MAX_BODY_BYTES without a starter dependency.
+  args: '{ maxBodyBytes: 1_048_576 }',
+  workersArgs: '{ env, maxBodyBytes: 1_048_576 }',
 };
 
 /**
@@ -51,10 +53,16 @@ export const REST_PLUGINS: readonly Wiring[] = [
   // Problem Details shape the `errorHandler` below emits for thrown errors
   // (C3): before this, the two disagreed on format in a scaffolded project.
   { pkg: 'validation-plugin', symbol: 'ValidationPlugin', args: "{ errorFormat: 'rfc9457' }" },
-  { pkg: 'http-security-plugin', symbol: 'HttpSecurityPlugin' },
+  {
+    pkg: 'http-security-plugin',
+    symbol: 'HttpSecurityPlugin',
+    args: '{ requestSize: { maxBodySize: 1_048_576 } }',
+  },
   { pkg: 'health-plugin', symbol: 'HealthPlugin' },
   { pkg: 'metrics-plugin', symbol: 'MetricsPlugin' },
-  { pkg: 'openapi-plugin', symbol: 'OpenApiPlugin' },
+  // `errorSchema: 'rfc9457'` documents the Problem Details body the
+  // validation and error-handler wirings above answer with (M137b §3.8).
+  { pkg: 'openapi-plugin', symbol: 'OpenApiPlugin', args: "{ errorSchema: 'rfc9457' }" },
 ];
 
 /**
@@ -97,7 +105,11 @@ export const REST_RECIPE: TemplateRecipe = {
     'cloudflare-workers': {
       removePackages: ['openapi-plugin'],
       addPlugins: [
-        { pkg: 'openapi-plugin', symbol: 'OpenApiPlugin', args: "{ swagger: { assets: 'cdn' } }" },
+        {
+          pkg: 'openapi-plugin',
+          symbol: 'OpenApiPlugin',
+          args: "{ swagger: { assets: 'cdn' }, errorSchema: 'rfc9457' }",
+        },
       ],
     },
   },

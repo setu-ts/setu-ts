@@ -25,6 +25,7 @@ export const FINDING_IDS = {
   'page-kernel-value-import': 'setu.E017',
   'page-unreadable': 'setu.E018',
   'artifact-unlisted': 'setu.W005',
+  'plugin-unregistered': 'setu.W006',
 } as const;
 
 /** Looks up an identity without parsing rendered prose. */

@@ -6,6 +6,22 @@ import tseslint from 'typescript-eslint';
 export default defineConfig(
   { ignores: ['node_modules/', 'dist/', '.wrangler/', 'src/gen/'] },
   js.configs.recommended,
+  {
+    // The page script under public/ runs in the browser, not in Node.
+    files: ['public/**/*.js'],
+    languageOptions: {
+      globals: {
+        AbortController: 'readonly',
+        document: 'readonly',
+        fetch: 'readonly',
+        history: 'readonly',
+        location: 'readonly',
+        setTimeout: 'readonly',
+        TextDecoderStream: 'readonly',
+        URLSearchParams: 'readonly',
+      },
+    },
+  },
   tseslint.configs.recommended,
   {
     files: ['**/*.ts', '**/*.tsx'],

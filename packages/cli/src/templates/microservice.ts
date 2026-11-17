@@ -3,11 +3,20 @@
  *
  * @module
  */
-import type { RuntimeSwap, TemplateDefinition, Wiring } from './registry.ts';
+import type {
+  RuntimeSwap,
+  TemplateDefinition,
+  TemplateHost,
+  TemplateManifest,
+  Wiring,
+} from './registry.ts';
 import { REST_MIDDLEWARE, REST_PLUGINS } from './rest.ts';
 import { FUNCTIONAL_MODULE_MANIFEST } from './module-seam.ts';
 import type { TemplateRecipe } from './style.ts';
 import { composeHost } from './style.ts';
+import { wrapProse } from '../utils/wrap-prose.ts';
+import type { TargetRuntime } from '../constants.ts';
+import type { ResolvedHost } from './project-files.ts';
 
 /**
  * What `microservice` adds on top of the REST set.
@@ -60,11 +69,10 @@ const REPLY_INBOX_MODULE = `/**
  * Cloudflare requires the Durable Object class to be exported by YOUR Worker,
  * which no library can do on your behalf.
  *
- * It deliberately does NOT \`extends DurableObject\`. That base class lives in
- * \`cloudflare:workers\`, a specifier only a Worker toolchain can resolve — so
- * importing it would break \`deno check\` on this project. workerd accepts a
- * plain class that takes \`(ctx, env)\`, which is the older and still-supported
- * form. Extend the base class instead if you want \`this.env\`.
+ * It is a plain class that takes \`(ctx, env)\` rather than \`extends
+ * DurableObject\`: workerd accepts that older, still-supported form, and the
+ * core needs nothing from the base class. Extend \`DurableObject\` (from
+ * \`cloudflare:workers\`) instead if you want \`this.env\`.
  */
 import type { IDurableObjectState, IDurableObjectWebSocket } from '@setu-ts/cloudflare-plugin';
 import { ReplyInboxObjectCore } from '@setu-ts/cloudflare-plugin';
@@ -113,7 +121,11 @@ export class ReplyInboxObject {
 const WORKERS_SWAP = {
   removePackages: ['messaging-plugin', 'queue-plugin', 'openapi-plugin'],
   addPlugins: [
-    { pkg: 'openapi-plugin', symbol: 'OpenApiPlugin', args: "{ swagger: { assets: 'cdn' } }" },
+    {
+      pkg: 'openapi-plugin',
+      symbol: 'OpenApiPlugin',
+      args: "{ swagger: { assets: 'cdn' }, errorSchema: 'rfc9457' }",
+    },
     {
       pkg: 'cloudflare-plugin',
       symbol: 'CloudflarePlugin',
@@ -188,6 +200,53 @@ new_classes = ["ReplyInboxObject"]
 `,
 } as const satisfies RuntimeSwap;
 
+/** Development-transport guidance shared by both microservice styles. */
+const MICROSERVICE_MANIFEST = {
+  ...FUNCTIONAL_MODULE_MANIFEST,
+  readmeSection: (cli: string, runtime: TargetRuntime, member?: boolean, host?: ResolvedHost) => {
+    // A workspace member's messaging and queue options come from its CLI-owned
+    // transport module (the workspace broker), and its discovery map is generated,
+    // so neither the call text nor an empty map says anything about it.
+    if (member === true)
+      return `## Development transports\n\n${[
+        `- Messaging and queue options come from \`src/transport/index.ts\`, which the CLI writes from the workspace broker in setu.workspace.json. With the \`memory\` broker both are in-memory: one process, lost on restart. \`nats\`, \`kafka\`, \`pubsub\` and \`service-bus\` have no queue arm, so with them the queue stays in memory. Change the broker for every member with \`${cli} workspace broker <name>\`.`,
+        '- Telemetry has no exporter: spans are dropped. Set the `TelemetryPlugin` `exporter` option.',
+      ]
+        .map((line) => wrapProse(line, '  '))
+        .join('\n')}\n`;
+    const memory = (pkg: string, option: string): boolean =>
+      runtime !== 'cloudflare-workers' &&
+      !host?.plugins.find((plugin) => plugin.pkg === pkg)?.args?.includes(option);
+    return `## Development transports\n\n${[
+      ...(memory('messaging-plugin', 'broker:')
+        ? [
+            `- Messaging is in-memory: one process, lost on restart. Change it with \`${cli} add messaging --broker <name>\`.`,
+          ]
+        : []),
+      ...(memory('queue-plugin', 'adapter:')
+        ? [
+            `- Queue is in-memory: one process, lost on restart. Change it with \`${cli} add queue --queue <name>\`.`,
+          ]
+        : []),
+      '- Telemetry has no exporter: spans are dropped. Set the `TelemetryPlugin` `exporter` option.',
+      '- Discovery is static and empty. Populate the discovery `services` map.',
+    ]
+      .map((line) => wrapProse(line, '  '))
+      .join('\n')}\n`;
+  },
+} satisfies TemplateManifest;
+
+/** Keeps the class-based host's own manifest and adds only the transport README section. */
+function withReadmeSection(host: TemplateHost): TemplateHost {
+  return {
+    ...host,
+    manifest: {
+      ...host.manifest,
+      readmeSection: MICROSERVICE_MANIFEST.readmeSection,
+    },
+  };
+}
+
 /**
  * The microservice composition as data: the plugin set, middleware, manifest
  * and the shared Workers swap.
@@ -199,7 +258,7 @@ new_classes = ["ReplyInboxObject"]
 export const MICROSERVICE_RECIPE: TemplateRecipe = {
   plugins: MICROSERVICE_PLUGINS,
   middleware: REST_MIDDLEWARE,
-  manifest: FUNCTIONAL_MODULE_MANIFEST,
+  manifest: MICROSERVICE_MANIFEST,
   runtimeSwaps: { 'cloudflare-workers': WORKERS_SWAP },
 };
 
@@ -226,5 +285,5 @@ export const MICROSERVICE_TEMPLATE: TemplateDefinition = {
   description:
     'REST plus messaging, queues, resilience, telemetry, service discovery, CQRS, and events',
   ...composeHost(MICROSERVICE_RECIPE, 'functional'),
-  classBased: composeHost(MICROSERVICE_RECIPE, 'class-based'),
+  classBased: withReadmeSection(composeHost(MICROSERVICE_RECIPE, 'class-based')),
 };

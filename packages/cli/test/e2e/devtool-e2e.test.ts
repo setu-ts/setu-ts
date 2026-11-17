@@ -44,7 +44,7 @@ import {
 import { tmpdir } from 'node:os';
 import { eventually, launchGroup, liveProcesses } from '../fixtures/process-group.ts';
 import { createDiagnosticsClient } from '../../../diagnostics-plugin/src/index.ts';
-import { createConnection } from 'node:net';
+import { createConnection, createServer } from 'node:net';
 
 const runtime = createNodeRuntimeServices();
 const fs: IFileSystem = runtime.fs!;
@@ -196,6 +196,7 @@ describe('a scaffolded Node devtool project, driven end to end', () => {
       const appPort = await unusedPort();
       expect(await run(['new', 'node-shop', '--devtool', '--devtool-port', String(port)])).toBe(0);
       const project = `${root}/node-shop`;
+      await nodeFs.writeFile(`${project}/.env`, `PORT=${appPort}\n`);
       // The same registry fixture as the Deno cases serves packages packed from
       // this exact worktree, including its current CLI, runtime and connector.
       const installed = await npmInstall(project, overlay);
@@ -208,7 +209,6 @@ describe('a scaffolded Node devtool project, driven end to end', () => {
       const launched = launchGroup('npm', ['run', 'dev'], project, {
         ...pair.env,
         SETU_DEVTOOL_MEMBER: '',
-        PORT: String(appPort),
       });
       const client = nodeClient(port, pair);
       try {
@@ -835,8 +835,8 @@ const snapshot = await client.snapshot();`,
             '): IKernelApplication {',
         )
         .replace(
-          '      RuntimePlugin(),\n',
-          '      RuntimePlugin(),\n      ...(devtool?.plugins ?? []),\n',
+          '      RuntimePlugin({ maxBodyBytes: 1_048_576 }),\n',
+          '      RuntimePlugin({ maxBodyBytes: 1_048_576 }),\n      ...(devtool?.plugins ?? []),\n',
         )
         .replace(
           '    ],\n  });',
@@ -903,3 +903,45 @@ const snapshot = await client.snapshot();`,
     }
   });
 });
+
+it(
+  'V12-44 names an application bind failure after connector startup',
+  { timeout: 120_000 },
+  async () => {
+    const appPort = await unusedPort();
+    const devtoolPort = await unusedPort();
+    const occupant = createServer();
+    await new Promise<void>((resolve, reject) => {
+      occupant.once('error', reject);
+      occupant.listen(appPort, resolve);
+    });
+    try {
+      expect(
+        await run([
+          'new',
+          '--runtime',
+          'deno',
+          'taken',
+          '--devtool',
+          '--devtool-port',
+          String(devtoolPort),
+        ]),
+      ).toBe(0);
+      const project = `${root}/taken`;
+      await useWorkspacePackages(project);
+      const result = await denoRun(project, ['task', 'dev'], {
+        ...credentials().env,
+        PORT: String(appPort),
+      });
+      expect(result.code, result.output).toBe(1);
+      expect(result.output).toContain(
+        'The application did not start, and the connector is not running.',
+      );
+      expect(result.output).not.toContain('The connector did not start.');
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        occupant.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
+  },
+);

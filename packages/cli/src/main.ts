@@ -11,12 +11,16 @@
 import process from 'node:process';
 import { createServer } from 'node:net';
 import type { IFileSystem } from '@setu-ts/common';
+import { createNodeRuntimeServices } from '@setu-ts/runtime';
 import { runCli } from './cli.ts';
+import { generateSecret } from './templates/secret.ts';
 import { EXIT_ERROR } from './constants.ts';
-import { createTerminalPrompter } from './prompt.ts';
+import { createTerminalPrompter, type PickerTerminal } from './prompt.ts';
+import { createPicker } from './terminal-keys.ts';
 import { createLineReader } from './terminal-line.ts';
 import { logicalCwdFor } from './utils/logical-cwd.ts';
 import { createCommandRunner, type CommandRunner } from './utils/run-command.ts';
+import { withRegularFileReads } from './utils/node-regular-file.ts';
 
 /** @ignore Runtime capabilities used by the executable boundary. */
 export interface MainRuntime {
@@ -42,6 +46,21 @@ export interface MainProcess {
   readonly runCommand?: CommandRunner;
   /** Releases anything the host opened for the run (the terminal reader). */
   readonly dispose?: () => void;
+  /** The arrow-key option list, when the terminal can read single keys. */
+  readonly picker?: PickerTerminal;
+}
+
+/**
+ * The Node runtime both executables (`setu` and `npm create @setu-ts`) run with: the runtime
+ * services with the CLI's regular-file reader and writer installed, so a write never follows a
+ * link and a new file holding a generated secret is created owner-only.
+ *
+ * @returns The runtime for {@linkcode runMain}
+ * @since 0.13.0
+ */
+export function nodeRuntime(): MainRuntime {
+  const runtime = createNodeRuntimeServices();
+  return runtime.fs === undefined ? runtime : { ...runtime, fs: withRegularFileReads(runtime.fs) };
 }
 
 /** @ignore Runs the CLI boundary and returns the code the host should exit with. */
@@ -55,13 +74,20 @@ export async function runMain(runtime: MainRuntime, host: MainProcess): Promise<
   }
 
   const prompter = host.isTerminal()
-    ? createTerminalPrompter(host.isTerminal, host.prompt, host.log, interruption.signal)
+    ? createTerminalPrompter(
+        host.isTerminal,
+        host.prompt,
+        host.log,
+        interruption.signal,
+        host.picker,
+      )
     : undefined;
   const cwd = host.cwd();
   const logicalCwd = logicalCwdFor(cwd);
 
   try {
     return await runCli(host.args, {
+      secret: generateSecret,
       fs: runtime.fs,
       cwd,
       ...(logicalCwd === undefined ? {} : { logicalCwd }),
@@ -97,7 +123,17 @@ export function nodeProcess(onInterrupt: () => void = emitInterrupt): MainProces
     terminal: process.stdin.isTTY === true,
     onInterrupt,
   });
+  // One reader owns stdin at a time: a picker read closes the line reader's
+  // interface first, and the next text question opens a new one.
+  const picker = createPicker(
+    process.stdin as Parameters<typeof createPicker>[0],
+    process.stdout,
+    onInterrupt,
+    process.env,
+    () => reader.suspend(),
+  );
   return {
+    ...(picker === undefined ? {} : { picker }),
     args: process.argv.slice(2),
     cwd: () => process.cwd(),
     isTerminal: () => process.stdin.isTTY === true,

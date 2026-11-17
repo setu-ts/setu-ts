@@ -194,3 +194,13 @@ describe('library configuration', () => {
     expect(SAML_PENDING_TTL_MS).toBe(600_000);
   });
 });
+
+describe('M139a SAML browser URLs', () => {
+  it('accepts localhost names at both browser redirect sites', () => {
+    const provider = saml({
+      acsUrl: 'http://app.localhost/auth/corp/acs',
+      idp: { entityId: 'https://idp.test', ssoUrl: 'http://idp.localhost/sso', certs: [PEM] },
+    });
+    expect(() => compile(provider)).not.toThrow();
+  });
+});

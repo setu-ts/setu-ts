@@ -36,7 +36,8 @@ export async function endInspection(connector: IDiagnosticsPlugin): Promise<void
 - Activation supports Deno and Node and binds IPv4 loopback. Missing kernel diagnostics or an
   unavailable port fails startup; there is no fallback port or address.
 - Every request and response is MAC-verified. The launcher supplies a fresh session id and 32-byte
-  key in memory; the plugin has no environment fallback.
+  key through the generated development entry's environment. The entry reads and deletes the key
+  before creating the application; the plugin receives it in memory and has no environment fallback.
 - `ttlMs` is monotonic milliseconds, defaults to 900000 and is capped at 3600000.
 - Client reads pair automatically and validate deeply frozen responses; failed pairing is terminal.
 - `read` takes a cursor and a limit of 1–128; continue from the returned `next` cursor.

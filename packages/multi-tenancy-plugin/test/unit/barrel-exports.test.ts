@@ -19,6 +19,7 @@ import {
   tenantMiddleware,
   TenantNotResolvedError,
   TenantRegistryUnavailableError,
+  TenantUnitOfWorkUnsupportedError,
 } from '../../src/index.ts';
 import { describe, expect, it } from 'vitest';
 
@@ -38,6 +39,7 @@ const EXPECTED_VALUES = [
   'TenantDataStoreNotReadyError',
   'TenantNotResolvedError',
   'TenantRegistryUnavailableError',
+  'TenantUnitOfWorkUnsupportedError',
   'getTenantCachePrefix',
   'tenantMiddleware',
 ] as const;
@@ -68,6 +70,7 @@ describe('barrel exports', () => {
     expect(TenantDataStoreNotReadyError.prototype instanceof Error).toEqual(true);
     expect(typeof TenantRegistryUnavailableError).toEqual('function');
     expect(TenantRegistryUnavailableError.prototype instanceof Error).toEqual(true);
+    expect(TenantUnitOfWorkUnsupportedError.prototype instanceof Error).toEqual(true);
     expect(typeof CAPABILITIES.MULTI_TENANCY).toEqual('string');
     expect(CAPABILITIES.MULTI_TENANCY).toEqual('multi-tenancy');
   });

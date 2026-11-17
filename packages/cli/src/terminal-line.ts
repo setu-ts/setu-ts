@@ -44,6 +44,12 @@ export interface LineReader {
   read(message: string, signal?: AbortSignal): Promise<string | null>;
   /** Releases the interface; later reads resolve `null`. */
   close(): void;
+  /**
+   * Closes the interface between questions, so another reader (the arrow-key
+   * picker) owns the input alone; the next question opens a new one. Lines
+   * already queued are kept. Does nothing while a question waits.
+   */
+  suspend(): void;
 }
 
 /**
@@ -55,6 +61,8 @@ export interface LineReader {
 export function createLineReader(options: LineReaderOptions): LineReader {
   let rl: Interface | undefined;
   let ended = false;
+  // Set while suspend() closes the interface, so that close is not end of input.
+  let suspending = false;
   const queued: string[] = [];
   // The one question that may be pending; `settle` resolves it.
   let pending: ((value: string | null) => void) | undefined;
@@ -80,7 +88,9 @@ export function createLineReader(options: LineReaderOptions): LineReader {
       if (pending === undefined) queued.push(line);
       else settle(line);
     });
-    rl.on('close', end);
+    rl.on('close', () => {
+      if (!suspending) end();
+    });
     rl.on('error', end);
     rl.on('SIGINT', () => {
       options.onInterrupt();
@@ -112,6 +122,17 @@ export function createLineReader(options: LineReaderOptions): LineReader {
       ended = true;
       settle(null);
       current?.close();
+    },
+    suspend() {
+      if (rl === undefined || pending !== undefined) return;
+      const current = rl;
+      rl = undefined;
+      suspending = true;
+      try {
+        current.close();
+      } finally {
+        suspending = false;
+      }
     },
   };
 }

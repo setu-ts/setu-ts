@@ -9,16 +9,20 @@ import {
 } from '../../../../../test/fixtures/snippets/agent-card-checks.ts';
 
 describe('composition-specific rule blocks', () => {
-  const always = [
-    'verify',
-    'generate',
-    'services',
-    'add-first',
-    'time',
-    'errors',
-    'config',
-    'imports',
-  ];
+  it('V12-30 gives error-factory advice only with a direct exceptions dependency', () => {
+    const rule = RULE_BLOCKS.find((entry) => entry.id === 'errors')!;
+    expect(rule.applies(agentFacts())).toBe(false);
+    expect(rule.applies(agentFacts({ installed: new Set(['exceptions']) }))).toBe(true);
+  });
+  it('V12-23 resolves loader services through getService in both full-stack rules', () => {
+    for (const id of ['full-stack', 'full-stack-workers']) {
+      const text = RULE_BLOCKS.find((entry) => entry.id === id)!.text;
+      expect(text).toContain('getService(context, TOKEN)');
+      expect(text).toContain('@setu-ts/react-router-plugin');
+      expect(text).toContain('context keys carry only non-service values');
+    }
+  });
+  const always = ['verify', 'generate', 'services', 'add-first', 'time', 'config', 'imports'];
   for (const [runtime, style, plugins, expected] of [
     ['node', 'functional', [], ['functional', 'node-tests']],
     ['bun', 'class-based', ['decorator-plugin', 'di-plugin'], ['class-based', 'bun-tests']],
@@ -28,12 +32,17 @@ describe('composition-specific rule blocks', () => {
       ['react-router-plugin', 'messaging-plugin'],
       ['functional', 'deno-tests', 'full-stack', 'messaging'],
     ],
-    ['cloudflare-workers', 'class-based', ['decorator-plugin'], ['class-based', 'workers']],
+    [
+      'cloudflare-workers',
+      'class-based',
+      ['decorator-plugin'],
+      ['class-based', 'workers-tests', 'workers'],
+    ],
     [
       'cloudflare-workers',
       'functional',
       ['react-router-plugin'],
-      ['functional', 'full-stack-workers', 'workers'],
+      ['functional', 'workers-tests', 'full-stack-workers', 'workers'],
     ],
     ['node', 'functional', ['full-stack-starter'], ['functional', 'node-tests', 'messaging']],
     ['bun', 'functional', ['microservice-starter'], ['functional', 'bun-tests', 'messaging']],
@@ -53,6 +62,19 @@ describe('composition-specific rule blocks', () => {
     expect(text).toContain('wrangler dev');
     expect(text).not.toContain('start:dev');
   });
+  it('states the absent-key default and empty-value fallback in the config rule', () => {
+    const text = RULE_BLOCKS.find((rule) => rule.id === 'config')!.text;
+    expect(text).toContain('`config.get(k, { default })` absent only');
+    expect(text).toContain('`config.get(k) || v` blank strings');
+  });
+  it('gives Workers the generated server test harness after the Deno rule', () => {
+    const index = RULE_BLOCKS.findIndex((rule) => rule.id === 'workers-tests');
+    expect(RULE_BLOCKS[index - 1]!.id).toBe('deno-tests');
+    expect(RULE_BLOCKS[index]!.packages).toEqual(['testing']);
+    expect(RULE_BLOCKS[index]!.text).toBe(
+      'Tests: node:test, node:assert under `tsx --test`; `startTestServer()` from `test/support/server.ts`, `fetch(server.baseUrl + path)`; `await server.stop()` in finally.',
+    );
+  });
   it('tells agents to add a listed package rather than hand-write it, only while one is listed', () => {
     const rule = RULE_BLOCKS.find((r) => r.id === 'add-first')!;
     expect(rule.text).toContain('Never hand-write what a package under Not installed provides');
@@ -70,6 +92,8 @@ describe('composition-specific rule blocks', () => {
       const allowed = new Set(
         ['common', ...rule.packages].flatMap((pkg) => [...inventory.get(`packages/${pkg}`)!]),
       );
+      // The Workers rule names a generated project helper, not a package export.
+      if (rule.id === 'workers-tests') allowed.add('startTestServer');
       expect(identifierProblems(rule.text, allowed), rule.id).toEqual([]);
       expect(await checkFences(rule.id, rule.text, '.tmp/agent-rule-fences')).toBe(0);
     }
@@ -77,7 +101,7 @@ describe('composition-specific rule blocks', () => {
   it('tells a functional project to read the validated value from the same validator instance', () => {
     // Each validateBody(S) call makes a new instance whose value(ctx) throws unless
     // that instance ran; "read validateBody(S).value(ctx)" invites a second call.
-    const functional = RULE_BLOCKS.find((rule) => rule.id === 'functional')!.text;
+    const functional = RULE_BLOCKS.find((rule) => rule.id === 'functional-validation')!.text;
     expect(functional).toContain('const body = validateBody(S)');
     expect(functional).toContain('body.value(ctx)');
     expect(functional).not.toContain('validateBody(S).value(ctx)');

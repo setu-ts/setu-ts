@@ -124,13 +124,14 @@ describe('M119e pool error reporting at registration', () => {
                   register(ctx: import('@setu-ts/common').IPluginContext) {
                     ctx.services.register(
                       CAPABILITIES.LOGGER,
-                      loggerMode === 'no-warn'
+                      // A deliberately partial logger: the plugin must tolerate a missing `warn`.
+                      (loggerMode === 'no-warn'
                         ? {}
                         : {
                             warn(message: string, meta: unknown) {
                               logs.push({ message, meta });
                             },
-                          },
+                          }) as import('@setu-ts/common').ILogger,
                     );
                   },
                 },

@@ -9,7 +9,14 @@ function setup(size = 1) {
   const budget = new WorkerBudget(size);
   const make = (specifier: string) =>
     new TaskPool(
-      { specifier, size, maxQueue: 10, taskTimeoutMs: 0, startupTimeoutMs: 60_000 },
+      {
+        specifier,
+        label: specifier,
+        size,
+        maxQueue: 10,
+        taskTimeoutMs: 0,
+        startupTimeoutMs: 60_000,
+      },
       host,
       createFakeRuntime(timers),
       budget,

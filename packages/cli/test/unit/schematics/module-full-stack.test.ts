@@ -48,7 +48,7 @@ describe('generateModule in a full-stack project', () => {
 
   it('names the token module.<name> and serves /api/<name> through resolveRequestService', () => {
     expect(byPath(files, 'src/modules/articles/articles.token.ts')).toContain(
-      "export const ARTICLES = serviceToken<ArticlesService>('module.articles');",
+      "export const ARTICLES = requestServiceToken<ArticlesService>('module.articles');",
     );
     const controller = byPath(files, 'src/modules/articles/articles.controller.ts');
     expect(controller).toContain("router.group('/api/articles'");
@@ -70,10 +70,7 @@ describe('generateModule in a full-stack project', () => {
   });
 
   it('writes tests that sign a session and send its token on unsafe requests (X91-2)', () => {
-    for (const path of [
-      'src/modules/articles/articles.test.ts',
-      'src/modules/articles/articles.e2e.test.ts',
-    ]) {
+    for (const path of ['src/modules/articles/articles.e2e.test.ts']) {
       const test = byPath(files, path);
       expect(test, path).toContain(
         "import { signedSession } from '../../../test/support/session.ts';",
@@ -110,7 +107,7 @@ describe('generateModule in a full-stack project', () => {
   it('uses the Deno harness idiom on Deno', () => {
     const deno = generateFullStackModule(names, { runtime: 'deno' });
     expect(byPath(deno, 'src/modules/articles/articles.test.ts')).toContain(
-      'expect(created.status).toEqual(201);',
+      'expect(await service.get(record.id)).toEqual(record);',
     );
   });
 });

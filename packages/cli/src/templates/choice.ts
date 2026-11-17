@@ -55,7 +55,7 @@ export type TemplateChoice =
  *
  * A refusal rather than an alias: the two names would otherwise both work
  * indefinitely, and the point of the rename is that the framework does not have
- * a NestJS mode, it has a class-based one.
+ * a framework-flavoured mode, it has a class-based one.
  */
 const RENAMED_TEMPLATES: ReadonlyMap<string, string> = new Map([['nest', 'class-based']]);
 

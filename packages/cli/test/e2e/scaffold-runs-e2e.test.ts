@@ -54,6 +54,94 @@ import {
 const runtime = createNodeRuntimeServices();
 const fs: IFileSystem = runtime.fs!;
 
+it('the full-stack Node production preload defaults NODE_ENV before imports and preserves a preset value', async () => {
+  expect(
+    await run(['new', 'production-start', '--template', 'full-stack', '--runtime', 'node']),
+  ).toBe(0);
+  const manifest = JSON.parse(
+    await nodeFs.readFile(`${root}/production-start/package.json`, 'utf8'),
+  ) as { scripts: Record<string, string> };
+  // \x22 for the double quote: the manifest generator's import scanner misreads a quote
+  // inside a regex literal as a string opening.
+  const token = new RegExp('--import \\x22([^\\x22]+)\\x22').exec(manifest.scripts['start']!)?.[1];
+  expect(token).toBeDefined();
+  for (const preset of [false, true]) {
+    const result = await runProcess(process.execPath, {
+      args: ['--import', token!, '-p', 'process.env.NODE_ENV'],
+      clearEnv: true,
+      env: preset ? { NODE_ENV: 'test' } : {},
+      stdout: 'piped',
+      stderr: 'piped',
+    });
+    expect(result.code, new TextDecoder().decode(result.stderr)).toBe(0);
+    expect(new TextDecoder().decode(result.stdout).trim()).toBe(preset ? 'test' : 'production');
+  }
+});
+
+it(
+  'setu add auth then the project own tests boot with JWT_SECRET from config',
+  { timeout: 900_000 },
+  async () => {
+    expect(await run(['new', 'auth-app', '--template', 'rest', '--runtime', 'node'])).toBe(0);
+    const project = `${root}/auth-app`;
+    const output: string[] = [];
+    expect(
+      await runCli(['add', 'auth'], {
+        fs,
+        cwd: project,
+        now: () => runtime.now(),
+        log: (line) => output.push(line),
+        error: (line) => output.push(line),
+      }),
+      output.join('\n'),
+    ).toBe(0);
+    const hint = 'AuthPlugin({ jwt: {}, rbac: { roles: {} } })';
+    expect(output.join('\n')).toContain(hint);
+    const configPath = `${project}/setu.config.ts`;
+    const config = await nodeFs.readFile(configPath, 'utf8');
+    expect(config).toContain('plugins: [');
+    // Auth requires application choices, so apply the exact printed registration.
+    await nodeFs.writeFile(
+      configPath,
+      "import { AuthPlugin } from '@setu-ts/auth-plugin';\n" +
+        config.replace('plugins: [', `plugins: [\n      ${hint},`),
+    );
+    await nodeFs.writeFile(
+      `${project}/test/auth-config.test.ts`,
+      `import { it } from 'node:test';
+import assert from 'node:assert/strict';
+import { CAPABILITIES } from '@setu-ts/common';
+import { createApp } from '../setu.config.ts';
+it('boots JWT from dotenv configuration without process JWT_SECRET', async () => {
+  assert.equal(process.env.JWT_SECRET, undefined);
+  const app = createApp();
+  await app.start();
+  try {
+    const jwt = app.services.get(CAPABILITIES.JWT);
+    const token = await jwt.sign({ sub: 'config-user' });
+    assert.equal((await jwt.verify(token)).sub, 'config-user');
+  } finally { await app.stop(); }
+});
+`,
+    );
+    const overlay = await startOverlay();
+    try {
+      const installed = await npmInstall(project, overlay);
+      expect(installed.code, installed.output).toBe(0);
+      const env: Record<string, string> = {};
+      for (const [key, value] of Object.entries(process.env))
+        if (key !== 'JWT_SECRET' && value !== undefined) env[key] = value;
+      const tested = await runProcess('npm', { args: ['test'], cwd: project, clearEnv: true, env });
+      const text =
+        new TextDecoder().decode(tested.stdout) + new TextDecoder().decode(tested.stderr);
+      expect(tested.code, text).toBe(0);
+      expect(text).toContain('boots JWT from dotenv configuration without process JWT_SECRET');
+    } finally {
+      await overlay.close();
+    }
+  },
+);
+
 // `class-based` runs the same request logger behind DI and decorator dispatch,
 // so it gets the same one-line proof rather than relying on `rest`'s.
 for (const template of ['rest', 'class-based'] as const) {
@@ -63,6 +151,21 @@ for (const template of ['rest', 'class-based'] as const) {
     async () => {
       expect(await run(['new', 'pino-app', '--template', template, '--runtime', 'node'])).toBe(0);
       const project = `${root}/pino-app`;
+      if (template === 'rest') {
+        const configPath = `${project}/setu.config.ts`;
+        const config = await nodeFs.readFile(configPath, 'utf8');
+        await nodeFs.writeFile(
+          configPath,
+          config.replace(
+            '  return app;',
+            `  app.router.post('/body-probe', async (ctx) => {
+    const body = await ctx.request.text();
+    return ctx.response.text(String(body.length));
+  });
+  return app;`,
+          ),
+        );
+      }
       const overlay = await startOverlay();
       try {
         const installed = await npmInstall(project, overlay);
@@ -72,6 +175,33 @@ for (const template of ['rest', 'class-based'] as const) {
         const built = await npmRun(project, 'build');
         expect(built.code, built.output).toBe(0);
         const result = await withNodeServer(project, async (origin, output) => {
+          if (template === 'rest') {
+            for (const chunked of [false, true]) {
+              const body = 'x'.repeat(1_048_577);
+              const response = await fetch(`${origin}/body-probe`, {
+                method: 'POST',
+                ...(chunked
+                  ? {
+                      body: new ReadableStream({
+                        start(controller) {
+                          controller.enqueue(new TextEncoder().encode(body));
+                          controller.close();
+                        },
+                      }),
+                      duplex: 'half',
+                    }
+                  : { body }),
+              } as RequestInit);
+              expect(response.status).toBe(413);
+              await response.body?.cancel();
+            }
+            const within = await fetch(`${origin}/body-probe`, {
+              method: 'POST',
+              body: 'x'.repeat(1_048_576),
+            });
+            expect(within.status).toBe(200);
+            expect(await within.text()).toBe('1048576');
+          }
           const response = await fetch(`${origin}/greetings/log-probe`);
           await response.body?.cancel();
           // Pino's default stdout destination writes asynchronously, and the
@@ -148,6 +278,67 @@ for (const target of ['deno', 'bun'] as const) {
   );
 }
 
+for (const target of ['node', 'deno'] as const) {
+  it(
+    `removes the devtool key before ${target} config and app runtime are created`,
+    { timeout: 900_000 },
+    async () => {
+      expect(
+        await run([
+          'new',
+          'key-probe',
+          '--template',
+          'rest',
+          '--runtime',
+          target,
+          '--devtool',
+          '--devtool-port',
+          String(await unusedPort()),
+        ]),
+      ).toBe(0);
+      const project = `${root}/key-probe`;
+      const entryPath = `${project}/main.dev.ts`;
+      await nodeFs.appendFile(
+        entryPath,
+        `
+const appConfig = app.services.get(CAPABILITIES.CONFIG);
+const appRuntime = app.services.get(CAPABILITIES.RUNTIME);
+if (appConfig.get('SETU_DEVTOOL_SESSION_KEY') !== undefined || appRuntime.env['SETU_DEVTOOL_SESSION_KEY'] !== undefined) {
+  throw new Error('The launcher key reached application configuration');
+}
+console.log('M140a key absent from config and application environment');
+await app.stop();
+`,
+      );
+      const overlay = await startOverlay();
+      try {
+        const installed = await runIn(
+          project,
+          target === 'node' ? 'npm' : 'deno',
+          ['install'],
+          overlay,
+        );
+        expect(installed.code, installed.output).toBe(0);
+        const probe = await runIn(
+          project,
+          target === 'node' ? 'npm' : 'deno',
+          [target === 'node' ? 'run' : 'task', 'dev'],
+          overlay,
+          {
+            PORT: String(await unusedPort()),
+            SETU_DEVTOOL_SESSION_ID: 'a'.repeat(32),
+            SETU_DEVTOOL_SESSION_KEY: 'b'.repeat(64),
+          },
+        );
+        expect(probe.code, probe.output).toBe(0);
+        expect(probe.output).toContain('M140a key absent from config and application environment');
+      } finally {
+        await overlay.close();
+      }
+    },
+  );
+}
+
 // The full-stack Deno manifest is the other `denoTasks` arm (it has an npm
 // build), so its `check` task is proven separately: it must pass on a fresh
 // install without a prior build, and say it found no CLI-owned seams.
@@ -175,7 +366,9 @@ for (const target of ['deno', 'bun'] as const) {
     `g module --page keeps a ${target} full-stack project formatted, checked and tested`,
     { timeout: 900_000 },
     async () => {
-      expect(await run(['new', 'shop', '--runtime', target, '--template', 'full-stack'])).toBe(0);
+      expect(
+        await run(['new', 'shop', '--runtime', target, '--template', 'full-stack', '--agents']),
+      ).toBe(0);
       const project = `${root}/shop`;
       expect(await run(['g', 'module', 'articles', '--page', '--dir', project])).toBe(0);
       const overlay = await startOverlay();
@@ -191,6 +384,7 @@ for (const target of ['deno', 'bun'] as const) {
           overlay,
         );
         expect(install.code, install.output).toBe(0);
+        expect(await run(['agents', '--check', '--strict', '--dir', project])).toBe(0);
         const task = (name: string): string[] =>
           target === 'deno' ? ['task', name] : ['run', name];
         const checked = await runIn(project, target, task('check'), overlay);
@@ -246,6 +440,23 @@ const HOSTS: readonly (readonly [label: string, args: readonly string[]])[] = [
     ['--template', 'microservice', '--style', 'class-based', '--runtime', 'cloudflare-workers'],
   ],
 ];
+
+it('V12-59 fresh scaffolds of every host have no unregistered provider warning', async () => {
+  for (const [label, args] of HOSTS) {
+    const name = label.replaceAll(' ', '-');
+    expect(await run(['new', name, ...args])).toBe(0);
+    const output: string[] = [];
+    const code = await runCli(['check', '--dir', `${root}/${name}`], {
+      fs,
+      cwd: root,
+      now: () => runtime.now(),
+      log: (line) => output.push(line),
+      error: (line) => output.push(line),
+    });
+    expect(code, output.join('\n')).toBe(0);
+    expect(output.join('\n'), label).not.toContain('setu.W006');
+  }
+});
 
 let root = '';
 
@@ -543,6 +754,8 @@ import { createApp } from './setu.config.ts';
 const options = [undefined, '', ',', ' , ', '192.0.2.1/32', '127.0.0.1/32', 'example', '10.0.0.0/33', '::1/129'];
 const port = Number(process.argv[2]);
 const origin = 'http://127.0.0.1:' + port;
+const csrfTokenOf = (html: string) => /name="_csrf"\\s+value="([^"]+)"/.exec(html)?.[1];
+delete process.env['TRUST_FORWARDED_HOST'];
 for (const proxies of options) {
   if (proxies === undefined) delete process.env['TRUSTED_PROXIES'];
   else process.env['TRUSTED_PROXIES'] = proxies;
@@ -558,21 +771,47 @@ for (const proxies of options) {
     const headers = { 'X-Forwarded-For': '203.0.113.9', 'X-Forwarded-Host': 'public.example', 'X-Forwarded-Proto': 'https' };
     const trusted = proxies === '127.0.0.1/32';
     const identity = await fetch(origin + '/identity-probe', { headers });
-    assert.deepEqual(await identity.json(), { ip: trusted ? '203.0.113.9' : '127.0.0.1', origin: trusted ? 'https://public.example' : origin });
+    // With TRUST_FORWARDED_HOST unset, even a trusted peer cannot change the host.
+    assert.deepEqual(await identity.json(), { ip: trusted ? '203.0.113.9' : '127.0.0.1', origin: trusted ? 'https://127.0.0.1:' + port : origin });
     const page = await fetch(origin + '/login', { headers });
     assert.equal(page.status, 200);
-    const token = /name="_csrf"\\s+value="([^"]+)"/.exec(await page.text())?.[1];
+    const token = csrfTokenOf(await page.text());
     assert.ok(token);
     const cookie = page.headers.getSetCookie().map((line) => line.split(';', 1)[0]).join('; ');
     // The scaffold uses the session plugin's secure:true default on both paths.
     assert.equal(page.headers.getSetCookie().some((line) => /; Secure/i.test(line)), true);
     const action = await fetch(origin + '/login', { method: 'POST', redirect: 'manual', headers: {
-      ...headers, cookie, Origin: 'https://public.example', 'Sec-Fetch-Site': 'same-origin',
+      // V10-17 is TLS termination: the browser posts from the host it addressed, over https.
+      // X-Forwarded-Host stays in headers and is ignored without trustForwardedHost.
+      ...headers, cookie, Origin: 'https://127.0.0.1:' + port, 'Sec-Fetch-Site': 'same-origin',
     }, body: new URLSearchParams({ _csrf: token, email: 'ada@example.com' }) });
     assert.equal(action.status, trusted ? 302 : 400, String(proxies) + ': ' + await action.text());
     console.log('PROXY_CASE', JSON.stringify(proxies), action.status);
   } finally { await app.stop(); }
 }
+// V12-61: opt in only behind a peer that overwrites the forwarded host.
+process.env['TRUSTED_PROXIES'] = '127.0.0.1/32';
+process.env['TRUST_FORWARDED_HOST'] = 'true';
+{
+  const app = await createApp();
+  app.router.get('/identity-probe', (ctx) => ctx.response.json({ origin: requestOriginOf(ctx).origin }));
+  await app.start({ port, hostname: '127.0.0.1' });
+  try {
+    // The forwarded origin is believed only once the walk resolves a client (M113n F2).
+    const headers = { 'X-Forwarded-For': '203.0.113.9', 'X-Forwarded-Host': 'public.example', 'X-Forwarded-Proto': 'https' };
+    assert.deepEqual(await (await fetch(origin + '/identity-probe', { headers })).json(), { origin: 'https://public.example' });
+    const page = await fetch(origin + '/login', { headers });
+    const token = csrfTokenOf(await page.text());
+    assert.ok(token);
+    const cookie = page.headers.getSetCookie().map((line) => line.split(';', 1)[0]).join('; ');
+    const action = await fetch(origin + '/login', { method: 'POST', redirect: 'manual', headers: {
+      ...headers, cookie, Origin: 'https://public.example', 'Sec-Fetch-Site': 'same-origin',
+    }, body: new URLSearchParams({ _csrf: token, email: 'ada@example.com' }) });
+    assert.equal(action.status, 302, await action.text());
+    console.log('FORWARDED_HOST_CASE', action.status);
+  } finally { await app.stop(); }
+}
+delete process.env['TRUST_FORWARDED_HOST'];
 // §8a.1.6: a CIDR width that is not plain digits fails start() with the named
 // error rather than compiling to a mask that trusts every address.
 for (const proxies of ['10.0.0.1/', '10.0.0.0/0x20']) {
@@ -592,6 +831,7 @@ for (const proxies of ['10.0.0.1/', '10.0.0.0/0x20']) {
       ]);
       expect(proof.code, proof.output).toBe(0);
       expect(proof.output.match(/PROXY_CASE/g)).toHaveLength(11);
+      expect(proof.output).toContain('FORWARDED_HOST_CASE 302');
     } finally {
       await overlay.close();
     }
@@ -694,23 +934,29 @@ try {
   });
 
   it('boots a Node REST scaffold with self-hosted Swagger assets', async () => {
-    expect(await run(['new', '--runtime', 'node', 'shop', '--template', 'rest'])).toBe(0);
+    expect(await run(['new', '--runtime', 'node', 'shop', '--template', 'rest', '--agents'])).toBe(
+      0,
+    );
     const project = `${root}/shop`;
     const overlay = await startOverlay();
     try {
       const installed = await npmInstall(project, overlay);
       expect(installed.code, installed.output).toBe(0);
+      const formatting = await npmRun(project, 'format:check');
+      expect(formatting.code, formatting.output).toBe(0);
+      expect(await run(['agents', '--check', '--strict', '--dir', project])).toBe(0);
       const readme = await nodeFs.readFile(`${project}/README.md`, 'utf8');
       const command = readme
         .split('\n')
-        .find((line) => /^npx @setu-ts\/cli@\S+ generate service billing$/.test(line));
+        .find((line) => /^npx @setu-ts\/cli@\S+ generate module billing$/.test(line));
       expect(command).toBeDefined();
       const [executable, ...args] = command!.split(' ');
       const generated = await runIn(project, executable!, args, overlay);
       expect(generated.code, generated.output).toBe(0);
-      expect(await nodeFs.readFile(`${project}/src/services/billing.service.ts`, 'utf8')).toContain(
-        'billing',
-      );
+      expect(
+        await nodeFs.readFile(`${project}/src/modules/billing/billing.service.ts`, 'utf8'),
+      ).toContain('billing');
+      expect(await run(['g', 'middleware', 'timing', '--dir', project])).toBe(0);
       const built = await npmRun(project, 'build');
       expect(built.code, built.output).toBe(0);
       const booted = await withNodeServer(project, async (origin) => {
@@ -726,7 +972,7 @@ try {
       // M113h §3.9: Node used to boot silently. The kernel announces the bound
       // port, the opt-in request logger reports a normal request, and the
       // generated `excludePaths` keeps a probe's line out of the log.
-      expect(booted.output).toContain('Server listening');
+      expect(booted.output).toContain('Listening on http://localhost:');
       expect(booted.output).toContain('"msg":"request completed"');
       expect(booted.output).toContain('"path":"/"');
       expect(booted.output).not.toContain('"/health"');
@@ -869,6 +1115,39 @@ try {
     const tested = await denoRun(project, ['task', 'test']);
     expect(tested.code, tested.output).toBe(0);
     expect(tested.output).toContain('1 passed');
+    // V12-62/V12-65: installing validation on minimal must make a real route answer 400.
+    expect(await run(['add', 'validation', '--dir', project])).toBe(0);
+    expect(await run(['g', 'schema', 'request-body', '--dir', project])).toBe(0);
+    await useWorkspacePackages(project);
+    await nodeFs.writeFile(
+      `${project}/validation-proof.ts`,
+      `import { createApp } from './setu.config.ts';
+import { createTestApp } from '@setu-ts/testing';
+import { validateBody } from '@setu-ts/validation-plugin';
+import { RequestBody } from './src/shared/schemas/request-body.schemas.ts';
+
+const app = await createApp();
+const body = validateBody(RequestBody);
+app.router.post('/validated', {
+  middleware: [body],
+  handler: (ctx) => ctx.response.json(body.value(ctx)),
+});
+const test = await createTestApp({ app });
+try {
+  const response = await test.inject({
+    method: 'POST', url: '/validated',
+    headers: { 'content-type': 'application/json' }, body: { unexpected: true },
+  });
+  if (response.statusCode !== 400) throw new Error('Expected 400, got ' + response.statusCode);
+  console.log('M140d validation refused the body with 400');
+} finally {
+  await test.stop();
+}
+`,
+    );
+    const validated = await denoRun(project, ['run', '-A', 'validation-proof.ts']);
+    expect(validated.code, validated.output).toBe(0);
+    expect(validated.output).toContain('M140d validation refused the body with 400');
   });
 
   // The styled host gets its OWN boot case rather than a `HOSTS` entry: `HOSTS`
@@ -908,7 +1187,11 @@ describe('a scaffolded Workers project retries a failed boot and never leaks the
       await run(['new', 'shop', '--template', 'rest', '--runtime', 'cloudflare-workers']),
     ).toBe(0);
     const project = `${root}/shop`;
-    await useWorkspacePackages(project);
+    await expect(nodeFs.stat(`${project}/deno.json`)).rejects.toMatchObject({ code: 'ENOENT' });
+    // This synthetic boot-logic probe runs on Deno with a stub platform sink,
+    // independently of the workerd-backed bundle/install proofs. Its private
+    // config belongs to the probe: Workers scaffolds no longer emit one.
+    await nodeFs.writeFile(`${project}/deno.json`, '{}\n');
 
     // A config whose FIRST construction fails with an error carrying a path
     // marker — under the old memoisation both requests would replay this
@@ -967,11 +1250,10 @@ describe('a scaffolded project configures itself from a dotenv file', () => {
 
     expect((await nodeFs.stat(`${project}/.env`)).isFile()).toBe(true);
     expect((await nodeFs.stat(`${project}/.env.example`)).isFile()).toBe(true);
-    // The example is the committed one, so the ignore rule must name only the
-    // real file — an ignore of `.env*` would take the example with it.
+    // Local variants are ignored; the explicit negation keeps the tracked example.
     const gitignore = await nodeFs.readFile(`${project}/.gitignore`, 'utf8');
     expect(gitignore).toContain('.env\n');
-    expect(gitignore).not.toContain('.env.example');
+    expect(gitignore).toContain('!.env.example');
   });
 
   it('boots with no dotenv file at all — the state of every fresh clone', async () => {
@@ -1122,7 +1404,7 @@ describe('a scaffolded project can install the versions it was pinned to', () =>
    * @param project - The project directory
    * @param value - The value to set, or null to remove the key entirely
    */
-  async function setDependencyAge(project: string, value: number | null): Promise<void> {
+  async function setDependencyAge(project: string, value: unknown): Promise<void> {
     const path = `${project}/deno.json`;
     const manifest = JSON.parse(await nodeFs.readFile(path, 'utf8')) as Record<string, unknown>;
     delete manifest['minimumDependencyAge'];
@@ -1138,8 +1420,8 @@ describe('a scaffolded project can install the versions it was pinned to', () =>
     // The overlay stamps the tree's own packs as published NOW, and the policy is
     // raised to ten years, which makes every version "too new" — reproducing the
     // refusal deterministically and forever. The scaffold's own
-    // `minimumDependencyAge: 0` is then the only thing that can let the install
-    // through. The pinned version is the tree's own, which the overlay always
+    // scoped framework exclusion is then what lets the install through, while
+    // the one-day third-party cooldown stays on. The pinned version is the tree's own, which the overlay always
     // serves, so a release bump can never deadlock this test against the
     // publish that would satisfy it.
     expect(await run(['new', 'shop', '--runtime', 'deno'])).toBe(0);
@@ -1152,7 +1434,7 @@ describe('a scaffolded project can install the versions it was pinned to', () =>
     const emitted = JSON.parse(await nodeFs.readFile(`${project}/deno.json`, 'utf8')) as {
       minimumDependencyAge?: unknown;
     };
-    expect(emitted.minimumDependencyAge).toBe(0);
+    expect(emitted.minimumDependencyAge).toEqual({ age: 'P1D', exclude: ['npm:@setu-ts/*'] });
     expect(await nodeFs.readFile(`${project}/deno.json`, 'utf8')).toContain(
       'npm:@setu-ts/kernel@^',
     );
@@ -1174,7 +1456,7 @@ describe('a scaffolded project can install the versions it was pinned to', () =>
 
       // What the CLI actually emits. Expected to SUCCEED, through the retrying
       // runner, while a real refusal is still returned on its first attempt.
-      await setDependencyAge(project, 0);
+      await setDependencyAge(project, emitted.minimumDependencyAge);
       const allowed = await denoRunRetry(project, ['install'], env);
       expect(allowed.code, allowed.output).toBe(0);
       expect(allowed.output).not.toContain('minimum dependency age');
@@ -1247,6 +1529,18 @@ describe('a scaffolded full-stack project runs both middleware layers', () => {
       const project = `${root}/shop`;
       // The kernel layer, exactly as a developer adds it.
       expect(await run(['g', 'middleware', 'audit', '--dir', project])).toBe(0);
+      const auditPath = `${project}/src/middleware/audit.middleware.ts`;
+      const auditSource = await nodeFs.readFile(auditPath, 'utf8');
+      const timingHeader = "ctx.response.header('Server-Timing', `audit;dur=${ms.toFixed(1)}`);";
+      expect(auditSource).toContain(timingHeader);
+      await nodeFs.writeFile(
+        auditPath,
+        "import { getSession } from '@setu-ts/session-plugin';\n" +
+          auditSource.replace(
+            timingHeader,
+            `${timingHeader}\n    ctx.response.header('X-Session-Id', getSession(ctx).id);`,
+          ),
+      );
       await useWorkspacePackages(project);
 
       const built = await runProcess(denoBinary(), {
@@ -1285,24 +1579,36 @@ describe('a scaffolded full-stack project runs both middleware layers', () => {
         });
         await submitted.body?.cancel();
         const signedIn = await get('/products', cookiesOf(submitted));
+        const planted = await get('/products', cookiesOf(loginPage));
+        await planted.body?.cancel();
 
         return {
-          audit: [health, landing, anonymous, signedIn].map((r) => r.headers.get('x-audit')),
+          audit: [health, landing, anonymous, signedIn].map((r) => r.headers.get('server-timing')),
           landing: landing.status,
           anonymous: { status: anonymous.status, location: anonymous.headers.get('location') },
           submitted: submitted.status,
+          beforeCookie: cookiesOf(loginPage),
+          afterCookie: cookiesOf(submitted),
+          beforeId: loginPage.headers.get('x-session-id'),
+          afterId: submitted.headers.get('x-session-id'),
+          plantedStatus: planted.status,
           signedIn: { status: signedIn.status, body: await signedIn.text() },
         };
       });
 
       // Kernel layer: on a non-SSR route, an SSR page, a route-middleware redirect and
       // a rendered page alike — it wraps everything the application serves.
-      expect(result.audit, output).toEqual(['true', 'true', 'true', 'true']);
+      for (const timing of result.audit) expect(timing, output).toMatch(/^audit;dur=\d+\.\d$/);
       // Route layer: `/` shares the layout but is not guarded…
       expect(result.landing).toBe(200);
       // …while `/products` sends an anonymous visitor to sign in, before its loader runs.
       expect(result.anonymous).toEqual({ status: 302, location: '/login' });
       expect(result.submitted).toBe(302);
+      expect(result.beforeCookie).not.toBe('');
+      expect(result.afterCookie).not.toBe(result.beforeCookie);
+      expect(result.beforeId).not.toBeNull();
+      expect(result.afterId).not.toBe(result.beforeId);
+      expect(result.plantedStatus).toBe(302);
       // Signed in, the loader reads the user the route middleware put on the context.
       expect(result.signedIn.status).toBe(200);
       expect(result.signedIn.body).toContain('Signed in as');
@@ -1462,7 +1768,9 @@ describe('styled scaffolds (M123)', () => {
   }
   for (const target of ['node', 'bun', 'deno', 'cloudflare-workers'] as const) {
     it(`builds full-stack token and shell CSS on ${target}`, { timeout: 900_000 }, async () => {
-      expect(await run(['new', 'shop', '--runtime', target, '--template', 'full-stack'])).toBe(0);
+      expect(
+        await run(['new', 'shop', '--runtime', target, '--template', 'full-stack', '--agents']),
+      ).toBe(0);
       const project = `${root}/shop`;
       const formatted =
         target === 'deno'
@@ -1495,6 +1803,16 @@ describe('styled scaffolds (M123)', () => {
           const merged = await runIn(project, 'node', ['--import', 'tsx', '.tmp/cn-probe.ts']);
           expect(merged.code, merged.output).toBe(0);
           expect(merged.output.trim()).toBe('p-6');
+          const served = await withNodeServer(
+            project,
+            async (origin) => {
+              const response = await fetch(origin);
+              expect(response.status).toBe(200);
+              await response.text();
+            },
+            { NODE_ENV: 'production' },
+          );
+          expect(served.output).not.toMatch(/development build/i);
         }
         const assets = `${project}/build/client/assets`;
         const css = (

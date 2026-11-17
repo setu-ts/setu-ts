@@ -160,3 +160,9 @@ describe('MemoryVectorStore', () => {
     expect(closed).toBe(1);
   });
 });
+
+describe('MemoryVectorStore.isHealthy', () => {
+  it('is always reachable: the records live in this process', async () => {
+    expect(await new MemoryVectorStore().isHealthy()).toBe(true);
+  });
+});

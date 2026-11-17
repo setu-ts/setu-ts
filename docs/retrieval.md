@@ -8,6 +8,8 @@ rules separate it from a generic vector library:
 - **A filter is refused, never ignored.** Only declared metadata fields may be filtered, with a
   small operator set. A clause the backend cannot honour throws instead of matching everything.
 
+<!-- version:history -->
+
 The store takes vectors. It does not embed text: embed chunks and queries with the AI SDK and pass
 the vectors in. This guide covers the plugin, the three adapters it ships, the Cloudflare Workers
 adapter in `@setu-ts/cloudflare-plugin`, and how the `semantic-search` example puts them together.
@@ -21,7 +23,9 @@ npm install @setu-ts/vector-store-plugin
 ```
 
 `setu add vector-store` installs the package and prints the registration; it does not insert one,
-because collections and the adapter's client belong to the application.
+because the collections belong to the application. With `--adapter qdrant` or `pgvector` it also
+writes `src/vector-store.ts`, which builds the client, plus the connection variable and a Compose
+service.
 
 Compose the plugin after the multi-tenancy plugin. Collections are validated when the plugin is
 created, and the adapter creates or verifies them during registration, so a bad backend fails
@@ -76,6 +80,11 @@ source's new records, then deletes that source's other records in the same scope
 carry the same `sourceId`. Re-running an ingestion with the same chunk ids leaves one copy, and a
 document that shrank leaves no stale chunk behind. A record id already used by another source in the
 scope is reassigned to this source; it never leaves the tenant.
+
+One call replaces the WHOLE source and takes at most 5,000 records, so write a document in one call:
+a second call for the same source deletes every record the first one wrote. On pgvector the call is
+one transaction. Qdrant has no transactions, so a failed call can leave part of it written; retry
+the whole call.
 
 Pass `{ version }` as a fifth argument when submissions of one source can be processed out of order,
 as queue retries can be. The version is a non-negative safe integer that grows with each newer
@@ -228,20 +237,21 @@ without the field never matches a comparison on it.
 
 ## Limits
 
-| Limit                                | Value             |
-| ------------------------------------ | ----------------- |
-| Dimensions per collection            | 4,096             |
-| Filterable fields per collection     | 10                |
-| Matches per query (`topK`)           | 50                |
-| Records per `upsert`/`replaceSource` | 500               |
-| Ids per `delete`                     | 1,000             |
-| Scope                                | 64 UTF-8 bytes    |
-| Record or source id                  | 256 UTF-8 bytes   |
-| Record `content`                     | 8,192 UTF-8 bytes |
-| String metadata or filter value      | 64 UTF-8 bytes    |
-| Values in one `in` clause            | 100               |
-| `and` nesting depth                  | 4                 |
-| Clauses in one filter                | 32                |
+| Limit                            | Value             |
+| -------------------------------- | ----------------- |
+| Dimensions per collection        | 4,096             |
+| Filterable fields per collection | 10                |
+| Matches per query (`topK`)       | 50                |
+| Records per `upsert`             | 500               |
+| Records per `replaceSource`      | 5,000             |
+| Ids per `delete`                 | 1,000             |
+| Scope                            | 64 UTF-8 bytes    |
+| Record or source id              | 256 UTF-8 bytes   |
+| Record `content`                 | 8,192 UTF-8 bytes |
+| String metadata or filter value  | 64 UTF-8 bytes    |
+| Values in one `in` clause        | 100               |
+| `and` nesting depth              | 4                 |
+| Clauses in one filter            | 32                |
 
 The service enforces every limit before the adapter sees the call, and each value is the tightest of
 the four backends so a request behaves the same everywhere. A vector must have exactly the
@@ -266,7 +276,6 @@ application's raw Drizzle database — `drizzle(pool)` from `drizzle-orm/node-po
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
 import { PgVectorStore, VectorStorePlugin } from '@setu-ts/vector-store-plugin';
-import type { PgVectorDatabase } from '@setu-ts/vector-store-plugin';
 
 // Bounds: a hung database answers 503/504 instead of holding the request.
 const pool = new Pool({
@@ -277,7 +286,7 @@ const pool = new Pool({
 
 export const plugin = VectorStorePlugin({
   adapter: new PgVectorStore({
-    db: drizzle(pool) as unknown as PgVectorDatabase,
+    db: drizzle(pool),
     onClose: () => pool.end(),
   }),
   collections: [{ name: 'documents', dimensions: 1024, filterable: { tag: 'string' } }],
@@ -465,6 +474,9 @@ pgvector and Qdrant when those URLs are set.
   reported through the application's logger instead of exiting the process.
 - A failed registration fails startup. That includes an unreachable backend, a missing extension, a
   dimension mismatch and a refused declaration.
+- After startup, the plugin's `vector-store` health indicator joins `/ready`: a backend that stops
+  answering takes the replica out of rotation. Its probe is cached for 5 seconds and bounded at 2;
+  see the plugin README's Readiness section, which also shows how to exclude it.
 - The pgvector and Qdrant adapters classify transport failures: an unreachable backend answers 503,
   an unanswered request answers 504, and the served detail carries no connection string.
 - Concurrent writes to one source are the application's concern. `replaceSource` serialises them on

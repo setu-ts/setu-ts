@@ -75,37 +75,76 @@ describe('requestSizeMiddleware', () => {
   });
 
   describe('malformed Content-Length', () => {
-    it('passes through for non-numeric Content-Length', async () => {
-      const { ctx, nextCalled } = createFakeContext({
-        request: { headers: { 'Content-Length': 'abc' } },
+    // Treated as absent, each of these let a body through unbounded. A correct
+    // client sends plain decimal digits only (RFC 9110 §8.6).
+    const MALFORMED = [
+      'abc',
+      '-1',
+      'NaN',
+      '1.5',
+      '1e9',
+      '+5',
+      '0x10',
+      '',
+      '   ',
+      '5, 5',
+      'Infinity',
+    ];
+    for (const value of MALFORMED) {
+      it(`answers 400 without calling next() for ${JSON.stringify(value)}`, async () => {
+        const { ctx, nextCalled, response } = createFakeContext({
+          request: { headers: { 'Content-Length': value } },
+        });
+        await requestSizeMiddleware()(ctx, async () => {
+          nextCalled.push(true);
+        });
+        expect(nextCalled).toHaveLength(0);
+        expect(response.statuses).toContain(400);
+        const body = response.body as { error: string; detail: string };
+        expect(body.error).toBe('Bad Request');
+        expect(body.detail).toBe('Content-Length must be a non-negative decimal byte count');
       });
-      const mw = requestSizeMiddleware();
-      await mw(ctx, async () => {
-        nextCalled.push(true);
-      });
-      expect(nextCalled).toHaveLength(1);
+    }
+
+    it('accepts surrounding whitespace and leading zeros as a byte count', async () => {
+      for (const value of [' 10 ', '0010']) {
+        const { ctx, nextCalled } = createFakeContext({
+          request: { headers: { 'Content-Length': value } },
+        });
+        await requestSizeMiddleware()(ctx, async () => {
+          nextCalled.push(true);
+        });
+        expect(nextCalled, value).toHaveLength(1);
+      }
     });
 
-    it('passes through for negative Content-Length', async () => {
-      const { ctx, nextCalled } = createFakeContext({
-        request: { headers: { 'Content-Length': '-1' } },
+    it('answers 413 for a digit string too large to represent', async () => {
+      const { ctx, nextCalled, response } = createFakeContext({
+        request: { headers: { 'Content-Length': '9'.repeat(400) } },
       });
-      const mw = requestSizeMiddleware();
-      await mw(ctx, async () => {
+      await requestSizeMiddleware()(ctx, async () => {
         nextCalled.push(true);
       });
-      expect(nextCalled).toHaveLength(1);
+      expect(nextCalled).toHaveLength(0);
+      expect(response.statuses).toContain(413);
     });
+  });
 
-    it('passes through for NaN Content-Length', async () => {
-      const { ctx, nextCalled } = createFakeContext({
-        request: { headers: { 'Content-Length': 'NaN' } },
-      });
-      const mw = requestSizeMiddleware();
-      await mw(ctx, async () => {
-        nextCalled.push(true);
-      });
-      expect(nextCalled).toHaveLength(1);
+  describe('maxBodySize validation', () => {
+    // NaN (an unset env var through Number()) and Infinity both disabled the
+    // bound silently (security audit finding 1).
+    it('refuses a value that is not a non-negative integer at construction', () => {
+      for (const maxBodySize of [Number.NaN, Infinity, -1, 1.5, Number.MAX_SAFE_INTEGER + 2]) {
+        expect(() => requestSizeMiddleware({ maxBodySize }), String(maxBodySize)).toThrow(
+          /maxBodySize must be a non-negative integer/,
+        );
+      }
+    });
+    it('accepts 0 and a disabled middleware with any value', () => {
+      expect(() => requestSizeMiddleware({ maxBodySize: 0 })).not.toThrow();
+      expect(() =>
+        requestSizeMiddleware({ enabled: false, maxBodySize: Number.NaN }),
+      ).not.toThrow();
     });
   });
 

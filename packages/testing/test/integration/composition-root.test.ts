@@ -1,3 +1,4 @@
+import { databaseDouble } from '../../../../test/fixtures/capability-doubles.ts';
 import { describe, expect, it } from 'vitest';
 import { brandErrorResponder, CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type {
@@ -6,6 +7,8 @@ import type {
   IPlugin,
   IPluginContext,
   MiddlewareFunction,
+  IMailer,
+  MailMessage,
 } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
 import type { IKernelApplication } from '@setu-ts/kernel';
@@ -14,9 +17,8 @@ import { overrideCapability } from '../../src/override-capability.ts';
 import { createMockPlugin } from '../../src/mock-plugin.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 
-interface Mailer {
+interface Mailer extends IMailer {
   readonly sent: string[];
-  send(to: string): void;
 }
 
 /**
@@ -56,7 +58,7 @@ function createRoot(trace: RootTrace, extra: readonly IPlugin[] = []): IKernelAp
     provides: [CAPABILITIES.DATABASE],
     register(ctx: IPluginContext) {
       trace.connected.push('database');
-      ctx.services.register(CAPABILITIES.DATABASE, { rows: () => ['real'] });
+      ctx.services.register(CAPABILITIES.DATABASE, databaseDouble());
     },
   };
 
@@ -92,8 +94,10 @@ function createRoot(trace: RootTrace, extra: readonly IPlugin[] = []): IKernelAp
   });
   app.middleware.add(handler, { priority: 0, name: 'root-error-handler' });
 
-  app.router.get('/mail', (ctx) => {
-    ctx.services.get<Mailer>(CAPABILITIES.MAIL).send('a@example.test');
+  app.router.get('/mail', async (ctx) => {
+    await ctx.services
+      .get(CAPABILITIES.MAIL)
+      .send({ to: 'a@example.test', subject: 'test', text: 'test' });
     return ctx.response.json({ ok: true });
   });
   app.router.get('/boom', () => {
@@ -107,7 +111,14 @@ function newTrace(): RootTrace {
   const sent: string[] = [];
   return {
     connected: [],
-    realMailer: { sent, send: (to: string) => void sent.push(to) },
+    realMailer: {
+      sent,
+      send: (message: MailMessage) => {
+        sent.push(String(message.to));
+        return Promise.resolve();
+      },
+      sendTemplate: () => Promise.resolve(),
+    },
   };
 }
 
@@ -118,7 +129,7 @@ function newTrace(): RootTrace {
  * rather than imported: `@setu-ts/testing` depends on `common` and `kernel`
  * only (M33), and AI_GUIDELINES §2.2 forbids importing a plugin.
  */
-function eagerConsumer(captured: { mailer: Mailer | null }): IPlugin {
+function eagerConsumer(captured: { mailer: IMailer | null }): IPlugin {
   return {
     name: 'notifier',
     version: '1.0.0',
@@ -127,7 +138,7 @@ function eagerConsumer(captured: { mailer: Mailer | null }): IPlugin {
     // plugin and fail for a reason unrelated to what the test asserts.
     optionalDependencies: [CAPABILITIES.MAIL],
     register(ctx: IPluginContext) {
-      captured.mailer = ctx.services.get<Mailer>(CAPABILITIES.MAIL);
+      captured.mailer = ctx.services.get(CAPABILITIES.MAIL);
     },
   };
 }
@@ -144,19 +155,23 @@ describe('overrideCapability against an eagerly-capturing consumer', () => {
     // AFTER the provider, and an early priority, which orders it BEFORE
     // ordinary consumers. The kernel's resolver does the work.
     const trace = newTrace();
-    const captured: { mailer: Mailer | null } = { mailer: null };
+    const captured: { mailer: IMailer | null } = { mailer: null };
     const fakeSent: string[] = [];
     await createTestApp({
       app: createRoot(trace, [eagerConsumer(captured)]),
       overrides: [
         overrideCapability(CAPABILITIES.MAIL, {
           sent: fakeSent,
-          send: (to: string) => void fakeSent.push(to),
+          send: (message: MailMessage) => {
+            fakeSent.push(String(message.to));
+            return Promise.resolve();
+          },
+          sendTemplate: () => Promise.resolve(),
         } satisfies Mailer),
       ],
     });
 
-    captured.mailer?.send('a@example.test');
+    await captured.mailer?.send({ to: 'a@example.test', subject: 'test' });
 
     expect(fakeSent).toEqual(['a@example.test']);
     expect(trace.realMailer.sent).toEqual([]);
@@ -172,7 +187,8 @@ describe('overrideCapability against an eagerly-capturing consumer', () => {
       overrides: [
         overrideCapability(CAPABILITIES.MAIL, {
           sent: [],
-          send: () => {},
+          send: () => Promise.resolve(),
+          sendTemplate: () => Promise.resolve(),
         } satisfies Mailer),
       ],
     });
@@ -185,7 +201,7 @@ describe('overrideCapability against an eagerly-capturing consumer', () => {
     // The other composition: remove the provider entirely — which also prevents
     // its eager side effects — and supply the double as a provider.
     const trace = newTrace();
-    const captured: { mailer: Mailer | null } = { mailer: null };
+    const captured: { mailer: IMailer | null } = { mailer: null };
     const fakeSent: string[] = [];
     await createTestApp({
       app: createRoot(trace, [eagerConsumer(captured)]),
@@ -197,13 +213,17 @@ describe('overrideCapability against an eagerly-capturing consumer', () => {
           priority: PLUGIN_PRIORITY.HIGH,
           service: {
             sent: fakeSent,
-            send: (to: string) => void fakeSent.push(to),
+            send: (message: MailMessage) => {
+              fakeSent.push(String(message.to));
+              return Promise.resolve();
+            },
+            sendTemplate: () => Promise.resolve(),
           } satisfies Mailer,
         }),
       ],
     });
 
-    captured.mailer?.send('b@example.test');
+    await captured.mailer?.send({ to: 'b@example.test', subject: 'test' });
 
     expect(fakeSent).toEqual(['b@example.test']);
     expect(trace.realMailer.sent).toEqual([]);
@@ -240,7 +260,11 @@ describe('createTestApp against a real composition root', () => {
       overrides: [
         overrideCapability(CAPABILITIES.MAIL, {
           sent: fakeSent,
-          send: (to: string) => void fakeSent.push(to),
+          send: (message: MailMessage) => {
+            fakeSent.push(String(message.to));
+            return Promise.resolve();
+          },
+          sendTemplate: () => Promise.resolve(),
         } satisfies Mailer),
       ],
     });
@@ -263,7 +287,11 @@ describe('createTestApp against a real composition root', () => {
       overrides: [
         overrideCapability(CAPABILITIES.MAIL, {
           sent: fakeSent,
-          send: (to: string) => void fakeSent.push(to),
+          send: (message: MailMessage) => {
+            fakeSent.push(String(message.to));
+            return Promise.resolve();
+          },
+          sendTemplate: () => Promise.resolve(),
         } satisfies Mailer),
       ],
     });

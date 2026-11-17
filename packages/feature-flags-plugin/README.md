@@ -165,4 +165,7 @@ Every export and option is documented in
 
 A failed provider keeps `feature-flags` `up` with `data.healthy: false` and `data.detail` when
 available. `/ready` stays 200 while the last good snapshot serves. Alert on `data.healthy` instead
-of the overall health status.
+of the overall health status. `/health` includes `data` only with `HealthPlugin({ details: true })`;
+the default body carries each check's `status` alone. Detailed reports expose every indicator's
+data, so protect the health endpoints when they carry it
+([Statuses](https://github.com/setu-ts/setu-ts/blob/main/packages/health-plugin/README.md#statuses)).

@@ -23,11 +23,7 @@ const host = typeof globalThis.Bun === 'undefined' ? 'node' : 'bun';
  * would deadlock the milestone PR that introduces it. Remove the entry once the
  * package ships. Anything else missing is a coverage hole and fails check 1.
  */
-const PENDING_FIRST_PUBLISH = [
-  '@setu-ts/mcp-plugin',
-  '@setu-ts/vector-store-plugin',
-  '@setu-ts/agent-runs-plugin',
-];
+const PENDING_FIRST_PUBLISH = [];
 
 let failures = 0;
 

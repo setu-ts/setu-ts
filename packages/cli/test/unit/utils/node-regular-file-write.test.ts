@@ -56,6 +56,34 @@ describe('Node regular-file writer', () => {
     },
   );
 
+  it.skipIf(process.platform === 'win32')(
+    "creates a secret file owner-only and keeps an existing file's mode (M140c audit F2)",
+    async () => {
+      const fresh = `${root}/fresh.env`;
+      await writeRegularFile(fresh, bytes('S=1\n'), MAX_EXISTING_FILE_BYTES, { secret: true });
+      expect((await stat(fresh)).mode & 0o777).toBe(0o600);
+      // An existing file is the operator's: its mode survives a secret append.
+      const kept = `${root}/kept.env`;
+      await writeFile(kept, 'A=1\n');
+      await chmod(kept, 0o640);
+      await writeRegularFile(kept, bytes('A=1\nS=2\n'), MAX_EXISTING_FILE_BYTES, { secret: true });
+      expect((await stat(kept)).mode & 0o777).toBe(0o640);
+      // Without the flag a new file keeps today's 0o666-minus-umask mode.
+      const plain = `${root}/plain.txt`;
+      await writeRegularFile(plain, bytes('x'), MAX_EXISTING_FILE_BYTES);
+      const umask = process.umask();
+      expect((await stat(plain)).mode & 0o777).toBe(0o666 & ~umask);
+      // writeFiles carries the flag through the CLI's filesystem.
+      const fs = withRegularFileReads(createNodeRuntimeServices().fs!);
+      const batched = `${root}/batched.env`;
+      await writeFiles(fs, [{ path: batched, contents: 'S=3\n', secret: true }], { root });
+      expect((await stat(batched)).mode & 0o777).toBe(0o600);
+      const unflagged = `${root}/unflagged.env`;
+      await writeFiles(fs, [{ path: unflagged, contents: 'S=4\n' }], { root });
+      expect((await stat(unflagged)).mode & 0o777).toBe(0o666 & ~umask);
+    },
+  );
+
   it('accepts exactly 1 MiB and replaces it with an empty file', async () => {
     const path = `${root}/boundary`;
     const before = new Uint8Array(MAX_EXISTING_FILE_BYTES).fill(65);

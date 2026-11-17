@@ -19,6 +19,7 @@ import type { IssuerKeySet } from '../issuers/key-set-cache.ts';
 import type { CompiledIssuer } from '../issuers/trusted-issuer.ts';
 import { decodeJsonSegment, JwtVerifier } from '../issuers/jwt-verifier.ts';
 import { parseActClaim, parseScopeClaim } from '../resource-server/claims.ts';
+import { AuthPluginConfigurationError } from '../errors.ts';
 
 /** Reports why a token was refused. `reason` is a fixed code. */
 export type TokenRefusalReporter = (issuer: string, reason: string) => void;
@@ -34,6 +35,7 @@ export interface IssuerStrategyOptions {
   readonly bindings: readonly IssuerBinding[];
   readonly runtime: IRuntimeServices;
   readonly report: TokenRefusalReporter;
+  /** Token header; Cookie in any case is refused because it is ambient. */
   readonly header?: string;
   readonly scheme?: string;
 }
@@ -52,6 +54,7 @@ export class IssuerStrategy implements IAuthStrategy {
 
   /**
    * @param options - Bindings, runtime, reporter, and the header/scheme to read
+   * @throws {AuthPluginConfigurationError} When the token header is Cookie
    */
   constructor(options: IssuerStrategyOptions) {
     this.#byIssuer = new Map(options.bindings.map((binding) => [binding.issuer.issuer, binding]));
@@ -73,6 +76,9 @@ export class IssuerStrategy implements IAuthStrategy {
     );
     this.#report = options.report;
     this.#header = options.header ?? 'authorization';
+    if (this.#header.toLowerCase() === 'cookie') {
+      throw new AuthPluginConfigurationError('Issuer header must not be Cookie');
+    }
     this.#scheme = (options.scheme ?? 'bearer').toLowerCase();
   }
 
@@ -140,12 +146,28 @@ export class IssuerStrategy implements IAuthStrategy {
         this.#report(binding.issuer.name, 'act-malformed');
         return null;
       }
+      const tenantClaim = binding.issuer.tenantClaim;
+      if (tenantClaim !== undefined) {
+        const tenant = outcome.claims[tenantClaim];
+        if (
+          request.tenant === undefined
+            ? Object.hasOwn(outcome.claims, tenantClaim)
+            : typeof tenant !== 'string' || tenant !== request.tenant.id
+        ) {
+          this.#report(binding.issuer.name, 'tenant-mismatch');
+          return null;
+        }
+      }
       const principal = await binding.issuer.toPrincipal(outcome.claims);
       if (principal === null) {
         return null;
       }
       // The application's own mapping wins: only fill a member it left absent.
-      const scopes = principal.scopes === undefined ? parseScopeClaim(outcome.claims) : undefined;
+      // Read once and written back explicitly: a mapper may return an object whose
+      // `scopes` is inherited or non-enumerable, which the spread below would drop,
+      // turning a scoped token into an unconfined one.
+      const mappedScopes = principal.scopes;
+      const scopes = mappedScopes === undefined ? parseScopeClaim(outcome.claims) : mappedScopes;
       return {
         ...principal,
         ...(scopes === undefined ? {} : { scopes }),

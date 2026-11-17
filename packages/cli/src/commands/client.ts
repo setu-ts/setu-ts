@@ -114,7 +114,7 @@ export async function runClientCommand(
     }
     // Generation imports the project's sdk on every path, so an uninstalled Deno
     // project is refused here too, not only by the boot path. Deno projects only:
-    // a Workers project's gating deno.json would otherwise get Deno guidance.
+    // Workers installs and resolves its sdk through package.json and npm.
     const runtime = await detectTargetRuntime(deps.fs, dir);
     const refusal = runtime === 'deno' ? await denoInstallRefusal(deps.fs, dir) : undefined;
     if (refusal !== undefined) {

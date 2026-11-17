@@ -10,7 +10,7 @@ import { describe, expect, it } from 'vitest';
 import type { IPlugin } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
-import { composeFullStackPlugins } from '../../src/app.ts';
+import { buildFullStackPlugins, composeFullStackPlugins } from '../../src/app.ts';
 
 const names = (plugins: readonly IPlugin[]): string[] => plugins.map((p) => p.name);
 
@@ -27,6 +27,15 @@ describe('full-stack-starter / scheduler on Cloudflare Workers', () => {
     const deno = names(composeFullStackPlugins({}, 'deno'));
     expect(workers).not.toContain('scheduler-plugin');
     expect(workers).toEqual(deno.filter((name) => name !== 'scheduler-plugin'));
+  });
+
+  it('follows runtime.platform rather than the detected platform', () => {
+    expect(
+      names(buildFullStackPlugins({ runtime: { platform: 'cloudflare-workers' } })),
+    ).not.toContain('scheduler-plugin');
+    expect(names(buildFullStackPlugins({ runtime: { platform: 'node' } }))).toContain(
+      'scheduler-plugin',
+    );
   });
 
   it('registers the scheduler on every server runtime', () => {

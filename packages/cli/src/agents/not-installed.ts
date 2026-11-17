@@ -1,5 +1,6 @@
 /** The addable packages a brief lists as not installed: one predicate for the list and the rule. */
 import { ADDABLE, RUNTIME_RESTRICTIONS } from '../commands/add.ts';
+import { STARTER_ARMS } from '../utils/starter-arms.ts';
 import type { ProjectFacts } from './facts.ts';
 
 /**
@@ -10,10 +11,11 @@ import type { ProjectFacts } from './facts.ts';
  * @returns The add name and package of every package the brief lists as not installed
  */
 export function notInstalledAddables(facts: ProjectFacts): readonly (readonly [string, string])[] {
+  const starter = STARTER_ARMS.find((entry) => facts.installed.has(entry.pkg));
   const absent: (readonly [string, string])[] = [];
   for (const [name, { pkg }] of ADDABLE) {
     const restriction = RUNTIME_RESTRICTIONS.get(pkg);
-    if (facts.installed.has(pkg)) continue;
+    if (facts.installed.has(pkg) || starter?.arms.has(pkg)) continue;
     if (restriction !== undefined && !restriction.runtimes.includes(facts.runtime)) continue;
     absent.push([name, pkg]);
   }

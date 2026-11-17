@@ -10,10 +10,22 @@ import {
 import { VERSION } from '../../src/version.ts';
 
 describe('renderDevEntry', () => {
+  it('uses ambient process deletion for a Bun rendering', () => {
+    const entry = renderDevEntry({ devtoolPort: 4919 }, 'bun');
+    const deletion = "delete process.env['SETU_DEVTOOL_SESSION_KEY'];";
+    expect(entry.indexOf(deletion)).toBeGreaterThan(entry.indexOf('const rawSessionKey'));
+    expect(entry.indexOf(deletion)).toBeLessThan(entry.indexOf('const app = await createApp'));
+  });
   for (const runtime of ['deno', 'node'] as const) {
     it(`renders portable credential reads and exits for ${runtime}`, () => {
       const entry = renderDevEntry({ devtoolPort: 4919 }, runtime);
-      expect(entry).not.toMatch(/Deno\.|process\./);
+      const deletion =
+        runtime === 'deno'
+          ? "Deno.env.delete('SETU_DEVTOOL_SESSION_KEY');"
+          : "delete process.env['SETU_DEVTOOL_SESSION_KEY'];";
+      expect(entry).toContain(deletion);
+      expect(entry.indexOf(deletion)).toBeLessThan(entry.indexOf('const app = await createApp'));
+      expect(entry.indexOf(deletion)).toBeGreaterThan(entry.indexOf('const rawSessionKey'));
       expect(entry).toContain("runtime.env['SETU_DEVTOOL_SESSION_ID']");
       expect(entry).toContain("runtime.env['SETU_DEVTOOL_SESSION_KEY']");
       expect(entry.match(/runtime.exit\(1\)/g)).toHaveLength(5);
@@ -122,7 +134,7 @@ describe('renderDevEntry', () => {
     expect(entry).toContain("import { createApp } from './setu.config.ts';");
     expect(entry).toContain('await createApp(undefined, {');
     expect(entry).toContain('diagnostics: {},');
-    expect(entry).toContain("await app.start({ port: Number(runtime.env.PORT ?? '3000') });");
+    expect(entry).toContain("await app.start({ port: Number(runtime.env.PORT || '3000') });");
     expect(entry).toContain('runtime.onSignal?.(signal, () => {');
   });
 
@@ -168,7 +180,7 @@ it('M131b 3.2 catches creation and startup failures', () => {
   expect(entry).toContain('async function boot()');
   expect(entry).toContain('const app = await boot().catch((error: unknown) => {');
   expect(entry).toContain(
-    'setu devtool: startup failed: ${describeError(error)}. The connector did not start.',
+    'setu devtool: startup failed: ${\n      describeError(error)\n    }. The application did not start, and the connector is not running.',
   );
   expect(entry.indexOf('async function boot()')).toBeLessThan(
     entry.indexOf('const app = await createApp'),

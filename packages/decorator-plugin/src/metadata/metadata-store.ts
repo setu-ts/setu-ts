@@ -20,12 +20,14 @@ import type {
   IMetadataStore,
   IPipelineBehavior,
   MiddlewareFunction,
+  ModuleFactoryProvider,
   PolicyDefinition,
   ProcessOptions,
   RouteMcpToolMetadata,
   ScheduleOptions,
   ScopeSource,
   SubscribeOptions,
+  WebSocketRouteOptions,
 } from '@setu-ts/common';
 
 import { takePending } from './pending.ts';
@@ -88,6 +90,10 @@ export interface OpenApiMetadata {
   summary?: string;
   /** Longer description. */
   description?: string;
+  /** Whether the operation is deprecated. @since 0.13.0 */
+  deprecated?: boolean;
+  /** Whether the operation is omitted from OpenAPI. @since 0.13.0 */
+  excludeFromDocument?: boolean;
   /** Responses keyed by status code. */
   responses?: Record<string, unknown>;
   /** Operation tags (method-level). */
@@ -162,8 +168,11 @@ export interface ServiceMetadata {
 export interface ModuleMetadata {
   /** Controller classes this module contributes. */
   readonly controllers: readonly Constructor[];
-  /** Provider classes this module contributes. */
-  readonly providers: readonly Constructor[];
+  /**
+   * Providers this module contributes: classes, and factory entries naming
+   * their own token (`ModuleFactoryProvider`, since 0.13.0).
+   */
+  readonly providers: readonly (Constructor | ModuleFactoryProvider)[];
   /** Imported module classes, expanded before this module's own entries. */
   readonly imports: readonly Constructor[];
 }
@@ -195,7 +204,7 @@ export type IngressMetadata =
       readonly topic: string;
       readonly options?: SubscribeOptions;
     }
-  | { readonly kind: 'gateway'; readonly path: string }
+  | { readonly kind: 'gateway'; readonly path: string; readonly options?: WebSocketRouteOptions }
   | { readonly kind: 'websocket-open'; readonly handler: string }
   | { readonly kind: 'websocket-message'; readonly handler: string }
   | { readonly kind: 'websocket-close'; readonly handler: string }

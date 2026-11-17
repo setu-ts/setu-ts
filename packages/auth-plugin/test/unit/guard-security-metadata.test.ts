@@ -13,8 +13,10 @@ import {
   requireAnyRole,
   requireAnyRole as requireAnyRoleAlias,
   requireAuth,
+  requireMfa,
   requirePermission,
   requireRole,
+  requireScopes,
 } from '../../src/guards/index.ts';
 
 /** Records what a guard did to the response, and whether it continued. */
@@ -68,14 +70,63 @@ describe('guard security metadata', () => {
     expect(securityMetadataOf(requireAuth())).toEqual({ authenticated: true });
   });
 
-  it('should brand every authorization guard as requiring authentication', () => {
+  it('should brand every authorization guard as requiring authentication and able to forbid', () => {
     // Each of these rejects an anonymous caller with 401 before it ever
-    // reaches its role/permission check, so all four require authentication.
-    expect(securityMetadataOf(requireRole('admin'))).toEqual({ authenticated: true });
-    expect(securityMetadataOf(requirePermission('users:create'))).toEqual({ authenticated: true });
-    expect(securityMetadataOf(requireAnyRole(['admin']))).toEqual({ authenticated: true });
-    expect(securityMetadataOf(requireAllPermissions(['a', 'b']))).toEqual({ authenticated: true });
+    // reaches its role/permission check, and a caller lacking the grant with
+    // 403 — so each carries `forbids` (M137b §3.1).
+    const forbidding = { authenticated: true, forbids: true };
+    expect(securityMetadataOf(requireRole('admin'))).toEqual(forbidding);
+    expect(securityMetadataOf(requirePermission('users:create'))).toEqual(forbidding);
+    expect(securityMetadataOf(requireAnyRole(['admin']))).toEqual(forbidding);
+    expect(securityMetadataOf(requireAllPermissions(['a', 'b']))).toEqual(forbidding);
   });
+
+  // The brand of every auth-plugin guard factory call, as data (M137b §3.1):
+  // `forbids` exactly where the guard can answer 403.
+  const brandTable: readonly {
+    readonly name: string;
+    readonly guard: () => ReturnType<typeof requireAuth>;
+    readonly brand: object;
+  }[] = [
+    { name: 'requireAuth()', guard: () => requireAuth(), brand: { authenticated: true } },
+    {
+      name: "requireAuth({ delegation: 'allow' })",
+      guard: () => requireAuth({ delegation: 'allow' }),
+      brand: { authenticated: true },
+    },
+    {
+      name: "requireAuth({ delegation: 'forbid' })",
+      guard: () => requireAuth({ delegation: 'forbid' }),
+      brand: { authenticated: true, forbids: true },
+    },
+    {
+      name: "requireAuth({ signInPage, delegation: 'require' })",
+      guard: () => requireAuth({ signInPage: '/login', delegation: 'require' }),
+      brand: { authenticated: true, forbids: true },
+    },
+    {
+      name: 'requireAuth({ signInPage })',
+      guard: () => requireAuth({ signInPage: '/login' }),
+      brand: { authenticated: true },
+    },
+    {
+      name: 'requireMfa()',
+      guard: () => requireMfa(),
+      brand: { authenticated: true, forbids: true },
+    },
+    {
+      name: "requireScopes('a', 'b')",
+      guard: () => requireScopes('a', 'b'),
+      brand: { authenticated: true, scopes: ['a', 'b'], forbids: true },
+    },
+    { name: 'publicRoute()', guard: () => publicRoute(), brand: { authenticated: false } },
+  ];
+
+  for (const row of brandTable) {
+    it(`brands ${row.name} as ${JSON.stringify(row.brand)}`, () => {
+      expect(securityMetadataOf(row.guard())).toEqual(row.brand);
+    });
+  }
 
   it('should brand publicRoute as explicitly public', () => {
     expect(securityMetadataOf(publicRoute())).toEqual({ authenticated: false });
@@ -87,8 +138,8 @@ describe('guard security metadata', () => {
     // would be a field nothing reads.
     const metadata = securityMetadataOf(requireRole('admin'));
 
-    expect(metadata).toEqual({ authenticated: true });
-    expect(Object.keys(metadata as object)).toEqual(['authenticated']);
+    expect(metadata).toEqual({ authenticated: true, forbids: true });
+    expect(Object.keys(metadata as object)).toEqual(['authenticated', 'forbids']);
   });
 
   it('should leave requireAuth rejecting an anonymous caller with 401', async () => {
@@ -139,6 +190,9 @@ describe('guard security metadata', () => {
   });
 
   it('should expose the same guard through every import path', () => {
-    expect(securityMetadataOf(requireAnyRoleAlias(['x']))).toEqual({ authenticated: true });
+    expect(securityMetadataOf(requireAnyRoleAlias(['x']))).toEqual({
+      authenticated: true,
+      forbids: true,
+    });
   });
 });

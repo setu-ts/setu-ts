@@ -1,3 +1,4 @@
+import { maskUrlUserinfo } from '@setu-ts/common';
 import type { ParsedArgs } from '../args.ts';
 import { stringFlag } from '../args.ts';
 import type { NewDependencies } from '../commands/new.ts';
@@ -35,17 +36,36 @@ export const FETCH_TIMEOUT_MS = 30_000;
  * @returns A leading-space sentence, or an empty string when there is no nested Error
  */
 function nestedCause(cause: unknown): string {
-  if (!(cause instanceof Error) || !(cause.cause instanceof Error)) return '';
-  const nested = cause.cause;
-  // A refused dual-stack connect is an AggregateError with an empty message;
-  // its first attempt carries the text.
-  const first = nested instanceof AggregateError ? (nested.errors[0] as unknown) : undefined;
-  const message =
-    nested.message !== '' ? nested.message : first instanceof Error ? first.message : '';
-  const code = (nested as { readonly code?: unknown }).code;
+  if (!(cause instanceof Error)) return '';
+  let current: unknown = cause;
+  let message = '';
+  let code: string | undefined;
+  const seen = new Set<object>();
+  for (let depth = 0; depth <= 8 && typeof current === 'object' && current !== null; depth++) {
+    if (seen.has(current)) break;
+    seen.add(current);
+    const nested = current as {
+      readonly message?: unknown;
+      readonly code?: unknown;
+      readonly cause?: unknown;
+    };
+    try {
+      if (depth > 0) {
+        const value = nested.message;
+        const nestedCode = nested.code;
+        if (typeof value === 'string' && value.trim() !== '') message = value;
+        if (typeof nestedCode === 'string') code = nestedCode;
+      }
+      current =
+        nested.cause ??
+        (current instanceof AggregateError ? (current.errors[0] as unknown) : undefined);
+    } catch {
+      break;
+    }
+  }
   const parts = [
-    ...(message === '' ? [] : [escapeName(message)]),
-    ...(typeof code === 'string' ? [`(code ${escapeName(code)})`] : []),
+    ...(message === '' ? [] : [escapeName(maskUrlUserinfo(message.replace(/\.$/, '')))]),
+    ...(code === undefined ? [] : [`(code ${escapeName(maskUrlUserinfo(code))})`]),
   ];
   return parts.length === 0 ? '' : ` Cause: ${parts.join(' ')}.`;
 }

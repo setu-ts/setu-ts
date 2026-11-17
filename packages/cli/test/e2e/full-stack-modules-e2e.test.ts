@@ -59,6 +59,14 @@ it(
         output.join('\n'),
       ).toBe(0);
       expect(await nodeFs.readFile(`${project}/setu.config.ts`, 'utf8')).toBe(configBefore);
+      expect(
+        await nodeFs.readFile(`${project}/src/modules/articles/articles.token.ts`, 'utf8'),
+      ).toContain('requestServiceToken<ArticlesService>');
+
+      expect(
+        await cli(['g', 'route', 'summary', '--module', 'articles', '--dir', project]),
+        output.join('\n'),
+      ).toBe(0);
 
       // The project's own gates: setu check is part of `check`.
       const checked = await npmRun(project, 'check');
@@ -73,7 +81,10 @@ it(
       expect(e2e.code, e2e.output).toBe(0);
 
       const { result, output: serverOutput } = await withNodeServer(project, async (origin) => {
-        // Sign in through /login, keeping the session cookie and CSRF token.
+        const summary = await fetch(`${origin}/api/articles/summary`);
+        expect(summary.status).toBe(200);
+        expect(await summary.json()).toEqual({ items: [] });
+        // Sign in through /login; regeneration invalidates this anonymous form token.
         const loginPage = await fetch(`${origin}/login`);
         const token = /name="_csrf"\s+value="([^"]+)"/.exec(await loginPage.text())?.[1] ?? '';
         const submitted = await fetch(`${origin}/login`, {
@@ -86,7 +97,18 @@ it(
           body: new URLSearchParams({ _csrf: token, email: 'ada@example.com', password: 'x' }),
         });
         await submitted.body?.cancel();
-        const cookie = cookiesOf(submitted);
+        let cookie = cookiesOf(submitted);
+        const stale = await fetch(`${origin}/api/articles`, {
+          method: 'POST',
+          headers: { cookie, 'x-csrf-token': token, 'content-type': 'application/json' },
+          body: JSON.stringify({ name: 'Stale token' }),
+        });
+        await stale.body?.cancel();
+        const freshForm = await fetch(`${origin}/login`, { headers: { cookie } });
+        const freshToken = /name="_csrf"\s+value="([^"]+)"/.exec(await freshForm.text())?.[1] ?? '';
+        expect(freshToken).not.toBe('');
+        expect(freshToken).not.toBe(token);
+        cookie = cookiesOf(freshForm) || cookie;
 
         // (O3) An unsafe /api request without the token is refused; with it, created.
         const refused = await fetch(`${origin}/api/articles`, {
@@ -105,10 +127,32 @@ it(
         // (2) Seed through the API with the session cookie and CSRF token.
         const seeded = await fetch(`${origin}/api/articles`, {
           method: 'POST',
-          headers: { cookie, 'x-csrf-token': token, 'content-type': 'application/json' },
+          headers: { cookie, 'x-csrf-token': freshToken, 'content-type': 'application/json' },
           body: JSON.stringify({ name: 'Hello from the module' }),
         });
         const record = (await seeded.json()) as { id: string; name: string };
+        // V12-90: application errors pass through the starter's RFC 9457 renderer.
+        for (const [path, init, status, title, detail] of [
+          ['/api/articles/missing', {}, 404, 'Not Found', 'Articles not found.'],
+          [
+            '/api/articles',
+            {
+              method: 'POST',
+              headers: { cookie, 'x-csrf-token': freshToken, 'content-type': 'application/json' },
+              body: JSON.stringify({ name: '' }),
+            },
+            400,
+            'Bad Request',
+            'A non-empty name is required.',
+          ],
+        ] as const) {
+          const response = await fetch(`${origin}${path}`, init);
+          expect(response.status).toBe(status);
+          expect(response.headers.get('content-type')).toContain('application/problem+json');
+          const problem = await response.json();
+          expect(problem).toMatchObject({ type: 'about:blank', title, status, detail });
+          expect(problem).not.toHaveProperty('message');
+        }
 
         // (2) The page lists what the module's service holds.
         const page = await fetch(`${origin}/articles`, { headers: { cookie } });
@@ -138,6 +182,7 @@ it(
           submitted: submitted.status,
           refused: refused.status,
           bearer: bearer.status,
+          stale: stale.status,
           seeded: seeded.status,
           record,
           page: { status: page.status, html },
@@ -152,6 +197,7 @@ it(
       expect(result.submitted, serverOutput).toBe(302);
       expect(result.refused).toBe(403);
       expect(result.bearer).toBe(403);
+      expect(result.stale).toBe(403);
       expect(result.seeded).toBe(201);
       expect(result.page.status).toBe(200);
       expect(result.page.html).toContain('Hello from the module');

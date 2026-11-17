@@ -12,7 +12,9 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { loadWsModule } from '../../src/adapters/node/node-ws-upgrader.ts';
+import { loadWsModule, NodeUpgradeCoordinator } from '../../src/adapters/node/node-ws-upgrader.ts';
+import { createServer } from 'node:http';
+import type { IWebSocketTransport } from '@setu-ts/common';
 
 /** Probes once whether the optional dependency is resolvable. */
 const wsAvailable = await (async (): Promise<boolean> => {
@@ -25,6 +27,60 @@ const wsAvailable = await (async (): Promise<boolean> => {
 })();
 
 describe('loadWsModule (real npm:ws)', () => {
+  it(
+    'refuses 1 MiB + 1 while reading, before delivering to the sink',
+    { skip: !wsAvailable, timeout: 15_000 },
+    async () => {
+      const coordinator = new NodeUpgradeCoordinator(await loadWsModule());
+      let transport: IWebSocketTransport | undefined;
+      let delivered = 0;
+      const server = createServer();
+      server.on('upgrade', (request, socket, head) => {
+        void coordinator
+          .handshake(request, socket, head, {
+            maxMessageBytes: 1_048_576,
+            onOpen(value) {
+              transport = value;
+            },
+            onMessage() {
+              delivered++;
+              transport!.send('accepted');
+            },
+            onError() {},
+            onClose() {},
+          })
+          .catch(() => socket.destroy());
+      });
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+      const address = server.address();
+      if (address === null || typeof address === 'string')
+        throw new Error('Expected an IP listener');
+      const client = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+      try {
+        await new Promise<void>((resolve, reject) => {
+          client.onopen = () => resolve();
+          client.onerror = () => reject(new Error('Handshake failed'));
+        });
+        const accepted = new Promise<string>((resolve) => {
+          client.onmessage = (event) => resolve(String(event.data));
+        });
+        client.send('x'.repeat(1_048_576));
+        expect(await accepted).toBe('accepted');
+        expect(delivered).toBe(1);
+        const closed = new Promise<number>((resolve) => {
+          client.onclose = (event) => resolve(event.code);
+        });
+        client.send('x'.repeat(1_048_577));
+        expect(await closed).toBe(1009);
+        expect(delivered).toBe(1);
+      } finally {
+        client.close();
+        transport?.close();
+        coordinator.close();
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
+    },
+  );
   it('resolves the real ws module and satisfies WsModuleLike', { skip: !wsAvailable }, async () => {
     const module = await loadWsModule();
 

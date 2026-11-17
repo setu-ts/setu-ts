@@ -145,10 +145,10 @@ describe('workspaceK8sFiles', () => {
     );
     for (const name of ['orders', 'portal']) {
       expect(yaml).toContain(
-        `          envFrom:\n            - secretRef:\n                name: ${name}-env\n                optional: true\n`,
+        `          envFrom:\n            - configMapRef:\n                name: ${name}-transport\n            - secretRef:\n                name: ${name}-env\n                optional: true\n`,
       );
     }
-    expect(yaml.indexOf('- name: REDIS_URL')).toBeLessThan(yaml.indexOf('envFrom:'));
+    expect(yaml).not.toContain('- name: REDIS_URL');
     expect(yaml).toContain('`setu workspace deploy` builds this member and replaces this line');
   });
 
@@ -163,8 +163,67 @@ describe('workspaceK8sFiles', () => {
 
   it('carries the transport connection variable too', () => {
     const yaml = objectsFor([{ name: 'orders', port: 3000 }], 'redis');
-    expect(yaml).toContain('- name: REDIS_URL');
-    expect(yaml).toContain("value: 'redis://redis:6379'");
+    expect(yaml).toContain("data:\n  REDIS_URL: 'redis://redis:6379'");
+    expect(yaml).not.toContain('- name: REDIS_URL');
+    expect(yaml).toContain(
+      'kind: ConfigMap\nmetadata:\n  name: orders-transport\n  namespace: ${NAMESPACE}',
+    );
+  });
+
+  it('names each member its own transport ConfigMap, so workspaces cannot share one (CodeRabbit #592)', () => {
+    const yaml = objectsFor(
+      [
+        { name: 'orders', port: 3000 },
+        { name: 'portal', port: 3001 },
+      ],
+      'redis',
+    );
+    expect(yaml.match(/^kind: ConfigMap$/gm)).toHaveLength(2);
+    for (const name of ['orders', 'portal']) {
+      expect(yaml).toContain(`kind: ConfigMap\nmetadata:\n  name: ${name}-transport\n`);
+      // The ConfigMap is the document right before its member's Deployment.
+      expect(yaml.indexOf(`name: ${name}-transport\n  namespace`)).toBeLessThan(
+        yaml.indexOf(`kind: Deployment\nmetadata:\n  name: ${name}\n`),
+      );
+    }
+    expect(yaml).not.toContain('setu-transport');
+  });
+
+  it('stamps sorted transport defaults, changing the pod template with the broker', () => {
+    const members = [{ name: 'api', port: 3000 }];
+    const redis = objectsFor(members, 'redis');
+    const nats = objectsFor(members, 'nats');
+    expect(redis).toContain("setu-ts.dev/transport-config: 'REDIS_URL=redis://redis:6379'");
+    expect(nats).toContain('setu-ts.dev/transport-config:');
+    expect(nats).not.toContain('REDIS_URL=');
+    const memory = objectsFor(members);
+    expect(memory).not.toContain('kind: ConfigMap');
+    expect(memory).not.toContain('configMapRef:');
+    expect(memory).not.toContain('setu-ts.dev/transport-config:');
+    const broker = brokerSpec('redis');
+    const custom = {
+      ...broker,
+      compose: { ...broker.compose!, memberEnv: { Z: "last's", A: 'first' } },
+    };
+    const yaml = workspaceK8sFiles(manifestOf(members), custom)[0]!.contents;
+    expect(yaml).toContain("setu-ts.dev/transport-config: 'A=first,Z=last''s'");
+    expect(yaml).toContain("  Z: 'last''s'");
+  });
+
+  it('explains start order and cached hand-applied tags', () => {
+    const readme = workspaceK8sFiles(
+      manifestOf([{ name: 'api', port: 3000 }]),
+      brokerSpec('memory'),
+    )[1]!.contents.replace(/\s+/g, ' ');
+    expect(readme).toContain('Kubernetes has no start order between members.');
+    expect(readme).toContain(
+      'A member with probes stays out of its Service until it answers `/ready`',
+    );
+    expect(readme).toContain('Generated callers resolve a sibling per call');
+    expect(readme).toContain(
+      '`imagePullPolicy: IfNotPresent` reuses whatever image a node already holds',
+    );
+    expect(readme).toContain('After rebuilding, use a new tag.');
   });
 
   // A guessed Ingress silently routes nothing, and a broker for a cluster is a

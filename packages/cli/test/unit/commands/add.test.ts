@@ -1,5 +1,11 @@
+import { generateSecret } from '../../../src/templates/secret.ts';
 import { cliInvocation } from '../../../src/templates/project-files.ts';
 import * as nodeFs from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { tempDir } from '../../../../../test/node-helpers.ts';
+import * as ts from 'typescript';
+import type { Config as DrizzleKitConfig } from 'drizzle-kit';
 /**
  * Tests for `setu add <plugin>` (D3).
  *
@@ -29,7 +35,513 @@ import { COMMAND_HANDLER_SEAM } from '../../../src/seams/cqrs.ts';
 import { runCli } from '../../../src/cli.ts';
 import { CLIENT_RANGES } from '../../../src/templates/client-dependencies.ts';
 import { SWAGGER_UI_DIST_VERSION } from '../../../src/templates/swagger-version.ts';
+import { BACKEND_PEERS } from '../../../src/commands/add.ts';
 import { BROKERS, brokerSpec } from '../../../src/workspace/transport.ts';
+import { GATED_STARTER_ARMS, STARTER_ARMS } from '../../../src/utils/starter-arms.ts';
+import { ZERO_CONFIG_WIRINGS } from '../../../src/utils/plugin-wirings.ts';
+import { STARTER_SEAMS } from '../../../src/templates/seam.ts';
+import { starterArmSet } from '../../../src/commands/starter-options.ts';
+
+describe('M140a installed signing secrets', () => {
+  it.each(['node', 'cloudflare-workers'] as const)(
+    'writes auth local/example values once on %s',
+    async (runtime) => {
+      const h = harness();
+      const deps = {
+        fs: h.fs,
+        cwd: '/app',
+        now: () => 0,
+        log: (line: string) => h.out.push(line),
+        error: (line: string) => h.err.push(line),
+        secret: () => 'a'.repeat(64),
+      };
+      expect(await runCli(['new', 'shop', '--template', 'rest', '--runtime', runtime], deps)).toBe(
+        0,
+      );
+      const member = { ...deps, cwd: '/app/shop' };
+      expect(await runCli(['add', 'auth'], member), h.err.join('\n')).toBe(0);
+      expect(h.out.join('\n')).toContain('AuthPlugin({ jwt: {}, rbac: { roles: {} } })');
+      const path = `/app/shop/${runtime === 'node' ? '.env' : '.dev.vars'}`;
+      const before = h.read(path);
+      expect(before).toContain(`JWT_SECRET=${'a'.repeat(64)}`);
+      expect(h.read(`${path}.example`)).toContain('JWT_SECRET=\n');
+      expect(await runCli(['add', 'auth'], { ...member, secret: () => 'b'.repeat(64) })).toBe(0);
+      expect(h.read(path)).toBe(before);
+    },
+  );
+
+  it('asks the writer to create every file holding a generated secret owner-only (audit F2)', async () => {
+    const h = harness();
+    const secretPaths: string[] = [];
+    // The CLI binary installs writeRegularFile; this one records which writes are secret.
+    const fs = {
+      ...h.fs,
+      writeRegularFile: async (
+        path: string,
+        bytes: Uint8Array,
+        _max: number,
+        options?: { readonly secret?: boolean },
+      ) => {
+        if (options?.secret === true) secretPaths.push(path);
+        const before = h.fs.has(path) ? await h.fs.readFile(path) : undefined;
+        await h.fs.writeFile(path, bytes);
+        return { before };
+      },
+    };
+    const deps = {
+      fs,
+      cwd: '/app',
+      now: () => 0,
+      log: (line: string) => h.out.push(line),
+      error: (line: string) => h.err.push(line),
+      secret: () => 'a'.repeat(64),
+    };
+    expect(
+      await runCli(['new', 'shop', '--template', 'full-stack', '--runtime', 'node'], deps),
+    ).toBe(0);
+    // SESSION_SECRET lands in the ignored .env; its committed example is not secret.
+    expect(secretPaths).toEqual(['/app/shop/.env']);
+    secretPaths.length = 0;
+    expect(await runCli(['add', 'auth'], { ...deps, cwd: '/app/shop' }), h.err.join('\n')).toBe(0);
+    expect(secretPaths).toEqual(['/app/shop/.env']);
+    // The DATABASE_URL arm shares the same env-file planner, so its local file is
+    // owner-only too and its example is not.
+    secretPaths.length = 0;
+    expect(
+      await runCli(['add', 'database', '--type', 'drizzle'], { ...deps, cwd: '/app/shop' }),
+      h.err.join('\n'),
+    ).toBe(0);
+    expect(secretPaths).toEqual(['/app/shop/.env']);
+  });
+
+  it('records member keys once and replans Compose and the owned README section', async () => {
+    const h = harness();
+    const deps = {
+      fs: h.fs,
+      cwd: '/app',
+      now: () => 0,
+      log: (line: string) => h.out.push(line),
+      error: (line: string) => h.err.push(line),
+      secret: () => 'c'.repeat(64),
+    };
+    expect(await runCli(['new', 'ws', '--workspace'], deps)).toBe(0);
+    const root = { ...deps, cwd: '/app/ws' };
+    for (const name of ['api', 'admin-web'])
+      expect(await runCli(['g', 'app', name, '--template', 'rest'], root)).toBe(0);
+    const original = h.read('/app/ws/README.md');
+    await h.fs.writeFile(
+      '/app/ws/README.md',
+      new TextEncoder().encode(`custom intro\n${original}\ncustom footer`),
+    );
+    for (const name of ['api', 'admin-web']) {
+      const member = { ...deps, cwd: `/app/ws/apps/${name}` };
+      for (const plugin of ['auth', 'session', 'auth'])
+        expect(await runCli(['add', plugin], member), h.err.join('\n')).toBe(0);
+    }
+    const manifest = JSON.parse(h.read('/app/ws/setu.workspace.json'));
+    for (const member of manifest.members)
+      expect(member.generatedSecrets).toEqual(['JWT_SECRET', 'SESSION_SECRET']);
+    for (const member of manifest.members) {
+      const file = h.read(`/app/ws/k8s/secrets/${member.name}/.env`);
+      expect(
+        file
+          .split('\n')
+          .filter(Boolean)
+          .map((line) => line.split('=')[0]),
+      ).toEqual(['JWT_SECRET', 'SESSION_SECRET']);
+      expect(h.out.join('\n').includes('c'.repeat(64))).toBe(false);
+    }
+    const compose = h.read('/app/ws/docker/compose.yaml');
+    expect(compose).toContain('API_JWT_SECRET:?');
+    expect(compose).toContain('ADMIN_WEB_SESSION_SECRET:?');
+    const readme = h.read('/app/ws/README.md');
+    expect(readme).toContain('export API_JWT_SECRET="$(openssl rand -hex 32)"');
+    expect(readme.match(/export API_JWT_SECRET=/g)).toHaveLength(1);
+    expect(readme).toContain('custom intro');
+    expect(readme).toContain('custom footer');
+    expect(await runCli(['workspace', 'broker', 'redis'], root), h.err.join('\n')).toBe(0);
+    expect(h.read('/app/ws/README.md')).toContain('export API_JWT_SECRET=');
+    await h.fs.writeFile('/app/ws/README.md', new TextEncoder().encode('developer-owned README'));
+    expect(await runCli(['add', 'auth'], { ...deps, cwd: '/app/ws/apps/api' })).toBe(0);
+    expect(h.read('/app/ws/README.md')).toBe('developer-owned README');
+    expect(h.out.join('\n')).toContain('README.md has no transport section');
+  });
+
+  it.each(['dry', 'existing', 'link'])(
+    'handles %s operator files when generatedSecrets grows',
+    async (mode) => {
+      const h = harness();
+      const deps = {
+        fs: h.fs,
+        cwd: '/app',
+        now: () => 0,
+        secret: () => 'test-only-placeholder',
+        log: (line: string) => h.out.push(line),
+        error: (line: string) => h.err.push(line),
+      };
+      expect(await runCli(['new', 'ws', '--workspace'], deps)).toBe(0);
+      expect(
+        await runCli(['g', 'app', 'api', '--template', 'rest', '--dir', '/app/ws'], deps),
+      ).toBe(0);
+      const path = '/app/ws/k8s/secrets/api/.env';
+      if (mode === 'existing')
+        await h.fs.writeFile(
+          path,
+          new TextEncoder().encode('JWT_SECRET=operator-owned\nOTHER=kept'),
+        );
+      if (mode === 'link') {
+        const original = h.fs.realPath!.bind(h.fs);
+        h.fs.realPath = (path) =>
+          path.startsWith('/app/ws/k8s')
+            ? Promise.resolve(path.replace('/app/ws/k8s', '/outside'))
+            : original(path);
+      }
+      const writes = h.fs.writes.length;
+      const code = await runCli(['add', 'auth', ...(mode === 'dry' ? ['--dry-run'] : [])], {
+        ...deps,
+        cwd: '/app/ws/apps/api',
+      });
+      expect(code, h.err.join('\n')).toBe(mode === 'link' ? 1 : 0);
+      if (mode === 'existing') {
+        expect(h.read(path) === 'JWT_SECRET=operator-owned\nOTHER=kept').toBe(true);
+        expect(h.fs.writes.slice(writes)).not.toContain(path);
+        expect(h.out.join('\n')).not.toContain('Operator secrets for api:');
+      } else expect(h.fs.writes).toHaveLength(writes);
+      if (mode === 'dry')
+        expect(h.out.join('\n')).toContain('Operator secrets for api: JWT_SECRET');
+      if (mode === 'link') expect(h.err.join('\n')).toContain('link');
+      expect(h.out.join('\n').includes('test-only-placeholder')).toBe(false);
+    },
+  );
+});
+
+describe('M139d add request and backend contracts', () => {
+  async function stack(runtime: 'node' | 'bun' = 'node') {
+    const h = harness();
+    expect(
+      await runNewCommand(parseArgs(['shop', '--template', 'full-stack', '--runtime', runtime]), {
+        secret: generateSecret,
+        fs: h.fs,
+        cwd: '/app',
+        log: () => {},
+        error: () => {},
+      }),
+    ).toBe(0);
+    return h;
+  }
+  it.each([{ flags: [] as string[] }, { flags: ['--redis-client', 'node-redis'] }])(
+    'H1 refuses factory transport insertion %j',
+    async ({ flags }) => {
+      const h = await stack();
+      const before = h.read('/app/shop/setu.config.ts');
+      expect(await h.run(['idempotency', '--store', 'redis', ...flags, '--dir', '/app/shop'])).toBe(
+        0,
+      );
+      expect(h.read('/app/shop/setu.config.ts')).toBe(before);
+      expect(h.out.join('\n')).toContain('where config is in scope');
+      expect(h.out.join('\n')).not.toContain('app.register(IdempotencyPlugin');
+    },
+  );
+  it('H1 refuses workspace-derived factory transport insertion', async () => {
+    const h = harness();
+    const deps = { fs: h.fs, cwd: '/app', now: () => 0, log: () => {}, error: () => {} };
+    expect(await runCli(['new', 'ws', '--workspace', '--broker', 'redis'], deps)).toBe(0);
+    expect(
+      await runCli(['g', 'app', 'portal', '--template', 'full-stack', '--dir', '/app/ws'], deps),
+    ).toBe(0);
+    const path = '/app/ws/apps/portal/setu.config.ts';
+    const before = h.read(path);
+    expect(await h.run(['idempotency', '--dir', '/app/ws/apps/portal'])).toBe(0);
+    expect(h.read(path)).toBe(before);
+    expect(h.out.join('\n')).toContain('where config is in scope');
+  });
+  it.each(['node', 'bun'] as const)(
+    'H2 leaves React JSX defaults unchanged on %s',
+    async (runtime) => {
+      const h = await stack(runtime);
+      const before = h.read('/app/shop/tsconfig.json');
+      expect(await h.run(['view', '--dir', '/app/shop'])).toBe(0);
+      expect(h.read('/app/shop/tsconfig.json')).toBe(before);
+      expect(h.out.join('\n')).toContain('@jsxImportSource hono/jsx');
+    },
+  );
+  it('M1 suppresses registration advice after successful factory insertion', async () => {
+    const h = await stack();
+    expect(await h.run(['worker-pool', '--dir', '/app/shop'])).toBe(0);
+    expect(h.read('/app/shop/setu.config.ts')).toContain('app.register(WorkerPoolPlugin());');
+    expect(h.out.join('\n')).not.toContain('Register it after the factory returns');
+  });
+  it.each([
+    ['mail', 'smtp', '--provider', 'MailPlugin', 'mail'],
+    ['database', 'drizzle', '--type', 'DatabasePlugin', 'database'],
+  ])('M2 prints the starter backend arm for %s', async (name, arm, flag, symbol, property) => {
+    const h = await stack();
+    expect(await h.run([name, flag, arm, '--dir', '/app/shop'])).toBe(0);
+    const output = h.out.join('\n');
+    expect(output).toContain(
+      `${property}: { ${property === 'mail' ? 'provider' : 'type'}: '${arm}'`,
+    );
+    // No plugin registration line: the starter owns the arm. (The smtp arm's
+    // test-override line names MailPlugin() for createTestApp, which is not one.)
+    expect(output).not.toContain(`In setu.config.ts: ${symbol}(`);
+    expect(output).not.toContain(`Register ${symbol}(`);
+  });
+  it('L5 refuses named modules on full-stack view', async () => {
+    const h = await stack();
+    expect(await h.run(['view', '--module', 'products', '--dir', '/app/shop'])).toBe(2);
+    expect(h.err.join('\n')).toContain('--module products');
+  });
+  it.each(['drizzle', 'prisma'])(
+    'L6 loads declared env files and links the %s setup',
+    async (arm) => {
+      const h = harness({
+        '/app/package.json': '{}',
+        '/app/setu.config.ts': "const options = {envFilePath: ['env/first.env', 'env/local.env']};",
+      });
+      expect(await h.run(['database', '--type', arm])).toBe(0);
+      const source = h.read(`/app/${arm}.config.ts`);
+      expect(source).toContain('process.loadEnvFile(file)');
+      expect(source).toContain('if (existsSync(file))');
+      expect(source).toContain('env/first.env');
+      expect(source).toContain('env/local.env');
+      expect(h.out.join('\n')).toContain(
+        arm === 'drizzle' ? '#drizzle-pool-setup' : '#prisma-7-setup',
+      );
+    },
+  );
+  it('L8 names the package in a multi-add preflight refusal', async () => {
+    const h = harness({ '/app/package.json': '{}' });
+    expect(await h.run(['cache', 'mail', '--provider', 'invalid'])).toBe(2);
+    expect(h.err.join('\n')).toContain('@setu-ts/mail-plugin:');
+    expect(h.fs.writes).toEqual([]);
+  });
+  it('V12-30 adds exceptions without importing or registering a plugin', async () => {
+    const h = harness({
+      '/app/package.json': '{}',
+      '/app/setu.config.ts': CLASS_BASED_INGRESS_CONFIG,
+    });
+    expect(await h.run(['exceptions'])).toBe(0);
+    expect(h.read('/app/package.json')).toContain('@setu-ts/exceptions');
+    expect(h.read('/app/setu.config.ts')).toBe(CLASS_BASED_INGRESS_CONFIG);
+  });
+  it('V12-27 defaults to log or memory without a terminal and --yes skips the question', async () => {
+    for (const yes of [false, true]) {
+      const fs = createFakeFs({
+        '/app/package.json': '{}',
+        '/app/setu.config.ts': CLASS_BASED_INGRESS_CONFIG,
+      });
+      const deps = {
+        fs,
+        cwd: '/app',
+        now: () => 0,
+        log: () => {},
+        error: () => {},
+        ...(yes ? { ask: { select: () => Promise.reject(new Error('must not ask')) } } : {}),
+      };
+      expect(
+        await runCli(['add', 'mail', 'database', 'vector-store', ...(yes ? ['--yes'] : [])], deps),
+      ).toBe(0);
+      expect(fs.read('/app/setu.config.ts')).toContain('MailPlugin()');
+      for (const peer of ['nodemailer', 'drizzle-orm', 'drizzle-kit'])
+        expect(fs.read('/app/package.json')).not.toContain(peer);
+    }
+  });
+  const drizzleTypes = ts.resolveModuleName(
+    'drizzle-kit',
+    `${process.cwd()}/packages/cli/package.json`,
+    { moduleResolution: ts.ModuleResolutionKind.NodeNext },
+    ts.sys,
+  ).resolvedModule;
+  it('type-checks each generated drizzle dialect against the installed defineConfig types', async () => {
+    expect(drizzleTypes?.resolvedFileName).toBeDefined();
+    // The dialects `--dialect` accepts are values of drizzle-kit's own union.
+    const dialects: readonly DrizzleKitConfig['dialect'][] = ['postgresql', 'sqlite'];
+    for (const dialect of dialects) {
+      const h = harness({ '/app/package.json': '{}' });
+      expect(await h.run(['database', '--type', 'drizzle', '--dialect', dialect])).toBe(0);
+      const file = `${process.cwd()}/packages/cli/.tmp/drizzle.config.mts`;
+      const source = h.read('/app/drizzle.config.ts');
+      const options: ts.CompilerOptions = {
+        strict: true,
+        noEmit: true,
+        skipLibCheck: true,
+        target: ts.ScriptTarget.ESNext,
+        module: ts.ModuleKind.NodeNext,
+        moduleResolution: ts.ModuleResolutionKind.NodeNext,
+        types: ['node'],
+      };
+      const host = ts.createCompilerHost(options);
+      const getSource = host.getSourceFile;
+      host.getSourceFile = (path, languageVersion, onError, create) =>
+        path === file
+          ? ts.createSourceFile(file, source, ts.ScriptTarget.ESNext, true)
+          : getSource(path, languageVersion, onError, create);
+      const program = ts.createProgram([file], options, host);
+      expect(
+        ts
+          .getPreEmitDiagnostics(program)
+          .map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n')),
+      ).toEqual([]);
+    }
+  });
+  it('validates every name, alias and flag before the first write', async () => {
+    for (const args of [
+      ['cache', 'unknown'],
+      ['cache', '@setu-ts/cache-plugin'],
+      ['cache', '--provider', 'smtp'],
+      ['cache', 'mail', '--provider', 'bad'],
+    ]) {
+      const h = harness({ '/app/package.json': '{}' });
+      expect(await h.run(args)).toBe(2);
+      expect(h.fs.writes).toEqual([]);
+    }
+  });
+  it('gives the devtool guidance for diagnostics in a multi-add, and lists the addable names', async () => {
+    for (const name of ['diagnostics', '@setu-ts/diagnostics-plugin']) {
+      const h = harness({ '/app/package.json': '{}' });
+      expect(await h.run([name, 'cache'])).toBe(2);
+      expect(h.err.join('\n')).toContain('devtool enable');
+      expect(h.err.join('\n')).not.toContain('is not a Setu-TS package');
+      expect(h.fs.writes).toEqual([]);
+    }
+    const h = harness({ '/app/package.json': '{}' });
+    expect(await h.run(['cache', 'unknown'])).toBe(2);
+    expect(h.err.join('\n')).toContain('Available: ');
+  });
+  it('reports exactly where a multi-add stopped after an I/O failure', async () => {
+    const h = harness({ '/app/package.json': '{}' });
+    const write = h.fs.writeFile;
+    let writes = 0;
+    h.fs.writeFile = (path, data) =>
+      ++writes === 2 ? Promise.reject(new Error('disk full')) : write(path, data);
+    expect(await h.run(['common', 'exceptions', 'sdk'])).toBe(1);
+    expect(h.err.join('\n')).toContain('added common; stopped at exceptions; sdk not attempted');
+  });
+  it('supports a modular view capability without creating controllers or CSS', async () => {
+    const h = harness({ '/app/package.json': '{}', '/app/src/modules/orders/index.ts': '' });
+    expect(await h.run(['view', '--plugin-only'])).toBe(0);
+    expect(
+      h.fs.writes.every((file) => !file.includes('/views/') && !file.includes('/controllers/')),
+    ).toBe(true);
+    expect(await h.run(['view', '--plugin-only', '--module', 'orders'])).toBe(2);
+  });
+  for (const [bare, backend] of Object.entries(BACKEND_PEERS)) {
+    for (const [arm, peers] of Object.entries(backend.arms)) {
+      for (const deno of [false, true])
+        it(`records ${bare} ${arm} peers on ${deno ? 'Deno' : 'npm'}`, async () => {
+          const file = deno ? 'deno.json' : 'package.json';
+          const h = harness({ [`/app/${file}`]: '{}' });
+          expect(
+            await runCli(['add', bare, `--${backend.flag}`, arm], {
+              fs: h.fs,
+              cwd: '/app',
+              now: () => 0,
+              log: (line) => h.out.push(line),
+              error: (line) => h.err.push(line),
+            }),
+            h.err.join('\n'),
+          ).toBe(0);
+          if (!['memory', 'log'].includes(arm)) {
+            const printed = h.out.find((line) => line.startsWith('  In setu.config.ts: '));
+            expect(printed).toBeDefined();
+            expect(
+              await nodeFs.readFile(
+                new URL('../../fixtures/registration-lines.ts', import.meta.url),
+                'utf8',
+              ),
+            ).toContain(printed!.slice('  In setu.config.ts: '.length));
+          }
+          const manifest = JSON.parse(h.read(`/app/${file}`)) as Record<
+            string,
+            Record<string, string>
+          >;
+          for (const peer of peers)
+            expect(manifest[deno ? 'imports' : 'dependencies']?.[peer]).toBe(
+              deno ? `npm:${peer}@${CLIENT_RANGES[peer]}` : CLIENT_RANGES[peer],
+            );
+          if (bare === 'database-plugin' && arm === 'prisma')
+            expect(manifest[deno ? 'imports' : 'dependencies']).not.toHaveProperty(
+              '@prisma/client',
+            );
+        });
+    }
+  }
+  it('asks once when allowed; --yes takes the default without asking', async () => {
+    const fs = createFakeFs({ '/app/package.json': '{}' });
+    let asked = 0;
+    const deps = {
+      fs,
+      cwd: '/app',
+      now: () => 0,
+      log: () => {},
+      error: () => {},
+      ask: {
+        select: () => {
+          asked++;
+          return Promise.resolve({ kind: 'answer' as const, value: 'smtp' });
+        },
+      },
+    };
+    expect(await runCli(['add', 'mail'], deps)).toBe(0);
+    expect(asked).toBe(1);
+    expect(fs.read('/app/package.json')).toContain('nodemailer');
+    expect(await runCli(['add', 'mail', '--yes'], deps)).toBe(0);
+    expect(asked).toBe(1);
+  });
+  it('keeps hand-pinned peers and adds schema tooling only once', async () => {
+    const h = harness({
+      '/app/package.json':
+        '{"dependencies":{"drizzle-orm":"custom"},"scripts":{"db:migrate":"custom migrate"}}',
+    });
+    expect(await h.run(['database', '--type', 'drizzle', '--dialect', 'sqlite'])).toBe(0);
+    const manifest = JSON.parse(h.read('/app/package.json')) as {
+      dependencies: Record<string, string>;
+      devDependencies: Record<string, string>;
+      scripts: Record<string, string>;
+    };
+    expect(manifest.dependencies['drizzle-orm']).toBe('custom');
+    expect(manifest.devDependencies['drizzle-kit']).toBe('^0.31.11');
+    expect(manifest.scripts['db:generate']).toBe('drizzle-kit generate');
+    expect(manifest.scripts['db:migrate']).toBe('custom migrate');
+    expect(h.read('/app/drizzle.config.ts')).toContain("dialect: 'sqlite'");
+    // The Promise-aware libsql client, not pg, and never a synchronous driver.
+    expect(h.out.join('\n')).toContain('@libsql/client');
+    expect(h.out.join('\n')).not.toContain(' pg');
+    await h.fs.writeFile('/app/drizzle.config.ts', new TextEncoder().encode('// user config'));
+    expect(await h.run(['database', '--type', 'drizzle'])).toBe(0);
+    expect(h.read('/app/drizzle.config.ts')).toBe('// user config');
+    expect(await h.run(['database', '--type', 'mongodb', '--dialect', 'sqlite'])).toBe(2);
+    // MySQL lacks RETURNING, which the Drizzle adapter writes through.
+    expect(await h.run(['database', '--type', 'drizzle', '--dialect', 'mysql'])).toBe(2);
+    expect(h.err.join('\n')).toContain('RETURNING');
+  });
+  it('prints the chosen backend for an installed plugin with nothing to edit (CodeRabbit #582)', async () => {
+    const h = harness({ '/app/package.json': '{}' });
+    expect(await h.run(['mail', '--provider', 'sendgrid'])).toBe(0);
+    h.out.length = 0;
+    expect(await h.run(['mail', '--provider', 'sendgrid'])).toBe(0);
+    const out = h.out.join('\n');
+    expect(out).toContain('is already installed');
+    expect(out).toContain("provider: 'sendgrid'");
+  });
+  it('writes Prisma 7 config and deploy scripts without writing either schema', async () => {
+    const h = harness({ '/app/package.json': '{}' });
+    expect(await h.run(['database', '--type', 'prisma'])).toBe(0);
+    expect(h.read('/app/prisma.config.ts')).toContain("schema: './prisma/schema.prisma'");
+    expect(h.read('/app/package.json')).toContain('prisma migrate deploy');
+    expect(h.fs.has('/app/prisma/schema.prisma')).toBe(false);
+    expect(h.fs.has('/app/src/database/schema.ts')).toBe(false);
+  });
+  it('prints Deno schema scripts without writing them; mongodb has none', async () => {
+    const h = harness({ '/app/deno.json': '{}' });
+    expect(await h.run(['database', '--type', 'drizzle'])).toBe(0);
+    expect(h.out.join('\n')).toContain('db:generate: drizzle-kit generate');
+    expect(h.read('/app/deno.json')).not.toContain('db:generate');
+    const mongo = harness({ '/app/package.json': '{}' });
+    expect(await mongo.run(['database', '--type', 'mongodb'])).toBe(0);
+    expect(mongo.read('/app/package.json')).not.toContain('db:generate');
+  });
+});
 
 describe('setu add openapi Swagger UI dependency (M129)', () => {
   for (const runtime of ['node', 'deno', 'bun', 'cloudflare-workers'] as const) {
@@ -37,6 +549,7 @@ describe('setu add openapi Swagger UI dependency (M129)', () => {
       const h = harness();
       expect(
         await runNewCommand(parseArgs(['api', '--runtime', runtime]), {
+          secret: generateSecret,
           fs: h.fs,
           cwd: '/app',
           log: (line) => h.out.push(line),
@@ -141,6 +654,7 @@ describe('M121 transport additions', () => {
     const h = harness();
     expect(
       await runNewCommand(parseArgs(['shop', '--template', 'full-stack', '--runtime', 'node']), {
+        secret: generateSecret,
         fs: h.fs,
         cwd: '/app',
         log: () => {},
@@ -160,7 +674,7 @@ describe('M121 transport additions', () => {
   });
   it('does not take an unrelated object with the same literal for the configured call', async () => {
     const source = `import { MessagingPlugin } from '@setu-ts/messaging-plugin';
-const unrelated = { broker: 'redis-streams', url: process.env.REDIS_URL ?? 'redis://127.0.0.1:6379' };
+const unrelated = { broker: 'redis-streams', url: process.env.REDIS_URL || 'redis://127.0.0.1:6379' };
 export function createApp(): IKernelApplication {
   return createApplication({ plugins: [MessagingPlugin(), ...(devtool?.plugins ?? [])] });
 }
@@ -173,8 +687,12 @@ export function createApp(): IKernelApplication {
     });
     expect(await h.run(['messaging', '--broker', 'redis'])).toBe(0);
     const out = h.out.join('\n');
-    expect(out).toContain('Set MessagingPlugin(');
+    // The bare call takes the options; the unrelated object is not mistaken for them.
+    expect(out).toContain('MessagingPlugin() in setu.config.ts now takes the selected options.');
     expect(out).not.toContain('already passes these options');
+    expect(h.read('/app/setu.config.ts').replace(/\s+/g, ' ')).toContain(
+      "const unrelated = { broker: 'redis-streams', url: process.env.REDIS_URL || 'redis://127.0.0.1:6379', };",
+    );
   });
   // PR #519 review: an existing Compose file is never rewritten, and a selected service it
   // lacks is printed rather than silently skipped.
@@ -182,6 +700,7 @@ export function createApp(): IKernelApplication {
     const h = harness();
     expect(
       await runNewCommand(parseArgs(['shop', '--template', 'rest', '--runtime', 'node']), {
+        secret: generateSecret,
         fs: h.fs,
         cwd: '/app',
         log: () => {},
@@ -211,6 +730,7 @@ export function createApp(): IKernelApplication {
       const h = harness();
       expect(
         await runNewCommand(parseArgs(['shop', '--template', template, '--runtime', 'node']), {
+          secret: generateSecret,
           fs: h.fs,
           cwd: '/app',
           log: () => {},
@@ -296,7 +816,7 @@ export function createApp(): IKernelApplication {
             // `add queue` wires the starter's queue arm with the job barrel on every
             // broker; only Redis also selects a queue backend, in the module.
             expect(config).toContain('processors: [...QUEUE_PROCESSORS]');
-            expect(config).toContain('...queueOptions(config),');
+            expect(config).toContain('...queueOptions(config)');
             expect(module.includes("adapter: 'redis'")).toBe(transport === 'redis');
           } else {
             // Generated with the workspace transport, so a re-add finds it already set.
@@ -317,7 +837,13 @@ export function createApp(): IKernelApplication {
           expect(
             await runNewCommand(
               parseArgs(['portal', '--runtime', runtime, '--template', 'full-stack']),
-              { fs: h.fs, cwd: '/app', log: () => {}, error: () => {} },
+              {
+                secret: generateSecret,
+                fs: h.fs,
+                cwd: '/app',
+                log: () => {},
+                error: () => {},
+              },
             ),
           ).toBe(0);
           const env = h.read('/app/portal/.env');
@@ -394,7 +920,9 @@ export function createApp(): IKernelApplication {
       expect(await h.run([flag === 'broker' ? 'messaging' : 'queue', `--${flag}`, 'redis'])).toBe(
         2,
       );
-      expect(h.err.join('\n')).toContain('Cloudflare Workers');
+      expect(h.err.join('\n')).toContain(
+        flag === 'queue' ? 'cloudflare-workers' : 'Cloudflare Workers',
+      );
       expect(h.fs.writes).toEqual([]);
     });
     it(`refuses --${flag} in a workspace member`, async () => {
@@ -468,6 +996,7 @@ export function createApp(): IKernelApplication {
     expect(h.fs.writes).toEqual([]);
     expect(
       await runNewCommand(parseArgs(['portal', '--template', 'full-stack']), {
+        secret: generateSecret,
         fs: h.fs,
         cwd: '/app',
         log: () => {},
@@ -557,7 +1086,13 @@ describe('the connection variable in the dotenv pair (X91-9)', () => {
           '--env-file',
           'config/app.env',
         ]),
-        { fs: h.fs, cwd: '/app', log: () => {}, error: () => {} },
+        {
+          secret: generateSecret,
+          fs: h.fs,
+          cwd: '/app',
+          log: () => {},
+          error: () => {},
+        },
       ),
     ).toBe(0);
     await h.fs.writeFile(
@@ -579,7 +1114,13 @@ describe('the connection variable in the dotenv pair (X91-9)', () => {
       expect(
         await runNewCommand(
           parseArgs(['portal', '--runtime', 'node', '--template', 'full-stack']),
-          { fs: h.fs, cwd: '/app', log: () => {}, error: () => {} },
+          {
+            secret: generateSecret,
+            fs: h.fs,
+            cwd: '/app',
+            log: () => {},
+            error: () => {},
+          },
         ),
       ).toBe(0);
       return h;
@@ -624,7 +1165,13 @@ describe('the connection variable in the dotenv pair (X91-9)', () => {
       expect(
         await runNewCommand(
           parseArgs(['portal', '--runtime', 'node', '--template', 'full-stack']),
-          { fs: h.fs, cwd: '/app', log: () => {}, error: () => {} },
+          {
+            secret: generateSecret,
+            fs: h.fs,
+            cwd: '/app',
+            log: () => {},
+            error: () => {},
+          },
         ),
       ).toBe(0);
       return h;
@@ -689,6 +1236,7 @@ describe('the connection variable in the dotenv pair (X91-9)', () => {
     const h = harness();
     expect(
       await runNewCommand(parseArgs(['portal', '--runtime', 'node', '--template', 'full-stack']), {
+        secret: generateSecret,
         fs: h.fs,
         cwd: '/app',
         log: () => {},
@@ -714,6 +1262,7 @@ describe('safe-default additions (M119c)', () => {
       const h = harness();
       expect(
         await runNewCommand(parseArgs(['api', '--runtime', runtime]), {
+          secret: generateSecret,
           fs: h.fs,
           cwd: '/app',
           log: (m) => h.out.push(m),
@@ -1298,6 +1847,22 @@ describe('resolveAddablePackage', () => {
       expect(h.fs.writes).toEqual([]);
     });
   }
+  it("gives the devtool guidance despite another package's flags (review round 3)", async () => {
+    const h = harness({ '/app/package.json': '{}' });
+    expect(
+      await h.run(['diagnostics', 'database', '--type', 'drizzle', '--dialect', 'sqlite']),
+    ).toBe(2);
+    expect(h.err.join('\n')).toContain('devtool enable');
+    expect(h.err.join('\n')).not.toContain('--dialect requires');
+  });
+  it('names the Node runner in the devtool guidance on a Node project (review round 2)', async () => {
+    for (const args of [['diagnostics'], ['diagnostics', 'cache']]) {
+      const h = harness({ '/app/package.json': '{}' });
+      expect(await h.run(args)).toBe(2);
+      expect(h.err.join('\n')).toContain(`npx @setu-ts/cli@${VERSION} devtool enable`);
+      expect(h.err.join('\n')).not.toContain('deno run');
+    }
+  });
   const inserted = [
     ['worker-pool', 'WorkerPoolPlugin'],
     ['secrets', 'SecretsPlugin'],
@@ -1523,6 +2088,51 @@ describe('withDependency', () => {
 });
 
 describe('withPluginWiring', () => {
+  it('V12-3 refuses ambiguous full-stack loop edits and preserves an aliased binding', async () => {
+    const { withFactoryRegistration } = await import('../../../src/commands/add.ts');
+    const fs = createFakeFs();
+    const deps = { secret: generateSecret, fs, cwd: '/', log: () => {}, error: () => {} };
+    expect(await runNewCommand(parseArgs(['shop', '--template', 'full-stack']), deps)).toBe(0);
+    const source = fs.read('/shop/setu.config.ts');
+    const loop = 'for (const generated of GENERATED_PLUGINS) app.register(generated);';
+    expect(
+      withFactoryRegistration(source.replace(loop, `${loop}\n  ${loop}`), 'worker-pool-plugin'),
+    ).toBeUndefined();
+    const alias = `import { WorkerPoolPlugin as Pool } from '@setu-ts/worker-pool-plugin';\n${source}`;
+    expect(withFactoryRegistration(alias, 'worker-pool-plugin')).toContain('app.register(Pool());');
+    expect(
+      withFactoryRegistration(
+        alias.replace(loop, `app.register(Pool());\n  ${loop}`),
+        'worker-pool-plugin',
+      ),
+    ).toBeUndefined();
+  });
+  it('L4 removes unused wiring metadata and fixture injection', async () => {
+    const source = await nodeFs.readFile(
+      new URL('../../../src/commands/add.ts', import.meta.url),
+      'utf8',
+    );
+    const ast = ts.createSourceFile('add.ts', source, ts.ScriptTarget.Latest, true);
+    const helper = ast.statements.find(
+      (node) => ts.isFunctionDeclaration(node) && node.name?.text === 'withPluginWiring',
+    );
+    expect(helper && ts.isFunctionDeclaration(helper) && helper.parameters.length).toBe(4);
+    const wirings = await nodeFs.readFile(
+      new URL('../../../src/utils/plugin-wirings.ts', import.meta.url),
+      'utf8',
+    );
+    const wiringsAst = ts.createSourceFile(
+      'plugin-wirings.ts',
+      wirings,
+      ts.ScriptTarget.Latest,
+      true,
+    );
+    const wiring = wiringsAst.statements.find(
+      (node) => ts.isInterfaceDeclaration(node) && node.name.text === 'IPluginWiring',
+    );
+    expect(wiring && ts.isInterfaceDeclaration(wiring) && wiring.members.length).toBe(1);
+    expect(source).not.toContain('if (backendLine === undefined)');
+  });
   // Codex review (M111d): an npm-target scaffold is Prettier-formatted, which
   // puts a short plugin array on ONE line — so an anchor matched only as its own
   // line left `setu new demo` → `setu add cache` writing the dependency and
@@ -1530,14 +2140,20 @@ describe('withPluginWiring', () => {
   it('wires a provider into the default (Prettier-formatted) Node scaffold', async () => {
     const fs = createFakeFs();
     const quiet = { fs, log: () => {}, error: () => {} };
-    expect(await runNewCommand(parseArgs(['demo']), { ...quiet, cwd: '/' })).toBe(0);
+    expect(
+      await runNewCommand(parseArgs(['demo']), {
+        secret: generateSecret,
+        ...quiet,
+        cwd: '/',
+      }),
+    ).toBe(0);
     const before = fs.read('/demo/setu.config.ts');
-    expect(before).toMatch(/plugins: \[[^\n]*\.\.\.\(devtool\?\.plugins \?\? \[\]\)\]/);
+    expect(before).toMatch(/plugins: \[[\s\S]*\.\.\.\(devtool\?\.plugins \?\? \[\]\)/);
 
     expect(await runAddCommand(parseArgs(['cache']), { ...quiet, cwd: '/demo' })).toBe(0);
     const after = fs.read('/demo/setu.config.ts');
     expect(after).toContain("import { CachePlugin } from '@setu-ts/cache-plugin';");
-    expect(after).toContain('CachePlugin(), ...(devtool?.plugins ?? [])');
+    expect(after).toMatch(/CachePlugin\(\),\s+\.\.\.\(devtool\?\.plugins \?\? \[\]\)/);
   });
 
   it('refuses a factory carrying the spread twice', () => {
@@ -1790,8 +2406,15 @@ describe('runAddCommand', () => {
         const arm = ['websocket', 'sse', 'backplane'].includes(key) ? `realtime.${key}` : key;
         const h = harness({ '/app/deno.json': DENO_MANIFEST, '/app/setu.config.ts': config });
         expect(await h.run([bare]), bare).toBe(0);
-        if (['messaging', 'queue'].includes(arm)) {
+        const seam = addSeam(bare, new Set([bare]));
+        if (bare === 'messaging-plugin' || bare === 'queue-plugin') {
           expect(h.out.join('\n'), bare).toContain('in memory by default');
+        } else if (seam === undefined) {
+          expect(h.out.join('\n'), bare).toContain(
+            GATED_STARTER_ARMS.has(bare)
+              ? `registers this plugin only once its ${arm} arm is set`
+              : `already registers this plugin with its defaults; set its ${arm} arm`,
+          );
         } else {
           expect(h.out.join('\n'), bare).toContain(`configure its ${arm} arm`);
         }
@@ -1817,7 +2440,9 @@ describe('runAddCommand', () => {
       const config = `import { ${symbol} } from '@setu-ts/${pkg}';\nexport async function createApp() {}\n`;
       const h = harness({ '/app/deno.json': DENO_MANIFEST, '/app/setu.config.ts': config });
       expect(await h.run(['auth'])).toBe(0);
-      expect(h.out.join('\n')).toContain('configure its auth arm');
+      expect(h.out.join('\n')).toContain(
+        pkg === 'full-stack-starter' ? 'only once its auth arm is set' : 'configure its auth arm',
+      );
       expect(h.out.join('\n')).toContain(
         `https://github.com/setu-ts/setu-ts/blob/v${VERSION}/packages/starters/${pkg}/README.md`,
       );
@@ -1838,7 +2463,11 @@ describe('runAddCommand', () => {
       // Another starter-owned arm on the same starter prints no recipe either.
       const session = harness({ '/app/deno.json': DENO_MANIFEST, '/app/setu.config.ts': config });
       expect(await session.run(['session'])).toBe(0);
-      expect(session.out.join('\n')).toContain('configure its session arm');
+      expect(session.out.join('\n')).toContain(
+        pkg === 'full-stack-starter'
+          ? 'only once its session arm is set'
+          : 'configure its session arm',
+      );
       expect(session.out.join('\n')).not.toContain(recipe);
     }
   });
@@ -1878,9 +2507,8 @@ describe('runAddCommand', () => {
     expect(worker.out.join('\n')).toContain(
       'Register CloudflarePlugin({ env, ...(waitUntil ? { waitUntil } : {}) })',
     );
-    // The printed line reads `waitUntil`, while a 0.10.0 factory names the
-    // unread parameter `_waitUntil` and an older one has none (M113d §3.8):
-    // both steps are printed, and the file itself is never classified.
+    // With no setu.config.ts to edit, the call and the parameter rename are
+    // both printed, with the step for a factory that has no such parameter.
     expect(worker.out.join('\n')).toContain("rename the '_waitUntil' parameter to 'waitUntil'");
     expect(worker.out.join('\n')).toContain('docs/upgrading.md');
   });
@@ -1921,9 +2549,7 @@ describe('runAddCommand', () => {
     // The guard schematic composes requirePermission, which answers 501 unless
     // AuthPlugin registers an authorization service — so the auth line must
     // carry the rbac arm, not just jwt.
-    expect(printed[0]).toBe(
-      "AuthPlugin({ jwt: { secret: '<your-secret>' }, rbac: { roles: {} } })",
-    );
+    expect(printed[0]).toBe('AuthPlugin({ jwt: {}, rbac: { roles: {} } })');
   });
 
   // Audit round 6 (T-R6): the CLI's own rewrite `RealtimeBackplanePlugin({ ...sources.backplane })`
@@ -2109,7 +2735,7 @@ describe('runAddCommand', () => {
     const h = harness({ '/app/deno.json': DENO_MANIFEST });
     await h.run(['auth']);
 
-    expect(h.out.join('\n')).toContain('deno install --min-dep-age 0');
+    expect(h.out.join('\n')).toMatch(/^\s*deno install$/m);
   });
 
   it('updates BOTH manifests when a project carries both', async () => {
@@ -2225,18 +2851,14 @@ describe('runAddCommand', () => {
     expect(await h.run([])).toBe(2);
   });
 
-  it('refuses a second positional with exit 2, writing nothing (X18-1)', async () => {
-    // X18-1: five requested packages used to report `updated deno.json` and
-    // exit 0 with one added — the contract is singular and exceeding it is a
-    // usage error, like every other misapplied input to this CLI.
+  it('adds every requested package (X18-1)', async () => {
     const h = harness({ '/app/deno.json': DENO_MANIFEST });
-
-    expect(await h.run(['auth', 'cache', 'logger'])).toBe(2);
-
-    expect(h.err.join('\n')).toContain('takes one package; got 3');
-    expect(h.err.join('\n')).toContain('Run it once per package');
-    // The manifest is untouched: refused, not partially applied.
-    expect(h.read('/app/deno.json')).toBe(DENO_MANIFEST);
+    expect(await h.run(['auth', 'cache', 'logger'])).toBe(0);
+    const imports = (JSON.parse(h.read('/app/deno.json')) as { imports: Record<string, string> })
+      .imports;
+    for (const name of ['auth', 'cache', 'logger'])
+      expect(imports[`@setu-ts/${name}-plugin`]).toBeDefined();
+    expect(h.out.filter((line) => line === 'Next:')).toHaveLength(1);
   });
 
   it('keeps the one-positional form unchanged', async () => {
@@ -2333,7 +2955,7 @@ describe('setu add — install command per runtime', () => {
       '/app/deno.json': DENO_MANIFEST,
       '/app/package.json': pkg('wrangler dev'),
     });
-    await h.run(['cache']);
+    await h.run(['resilience']);
     expect(h.out.join('\n')).toContain('  npm install');
   });
 
@@ -2351,7 +2973,7 @@ describe('setu add — install command per runtime', () => {
   it('keeps the release-day flag for a Deno project', async () => {
     const h = harness({ '/app/deno.json': DENO_MANIFEST });
     await h.run(['cache']);
-    expect(h.out.join('\n')).toContain('  deno install --min-dep-age 0');
+    expect(h.out.join('\n')).toContain('  deno install\n');
   });
 
   // From 0.9 the framework installs from npm under its own names, so an npm
@@ -2380,7 +3002,7 @@ describe('setu add — install command per runtime', () => {
     });
     expect(await h.run(['cache'])).toBe(0);
     const out = h.out.join('\n');
-    expect(out).toContain('  deno install --min-dep-age 0');
+    expect(out).toContain('  deno install\n');
     expect(out).not.toContain('.npmrc');
   });
 
@@ -2773,6 +3395,7 @@ describe('setu add view styling (M123)', () => {
       const h = harness();
       expect(
         await runNewCommand(parseArgs(['shop', '--template', 'rest', '--runtime', runtime]), {
+          secret: generateSecret,
           fs: h.fs,
           cwd: '/app',
           log: (line) => h.out.push(line),
@@ -2801,6 +3424,7 @@ describe('setu add view styling (M123)', () => {
     const h = harness();
     expect(
       await runNewCommand(parseArgs(['shop', '--template', 'rest', '--runtime', 'node']), {
+        secret: generateSecret,
         fs: h.fs,
         cwd: '/app',
         log: () => {},
@@ -2825,6 +3449,7 @@ describe('setu add view styling (M123)', () => {
     const h = harness();
     expect(
       await runNewCommand(parseArgs(['shop', '--template', 'rest', '--runtime', 'node']), {
+        secret: generateSecret,
         fs: h.fs,
         cwd: '/app',
         log: () => {},
@@ -2851,6 +3476,7 @@ describe('setu add view styling (M123)', () => {
     const h = harness();
     expect(
       await runNewCommand(parseArgs(['shop', '--template', 'rest', '--runtime', 'node']), {
+        secret: generateSecret,
         fs: h.fs,
         cwd: '/app',
         log: () => {},
@@ -2919,6 +3545,7 @@ it('does not wire either view provider through a retargeted framework import map
   const h = harness();
   expect(
     await runNewCommand(parseArgs(['shop', '--template', 'rest', '--runtime', 'node']), {
+      secret: generateSecret,
       fs: h.fs,
       cwd: '/app',
       log: () => {},
@@ -2972,6 +3599,7 @@ describe('starter handler-arm wiring', () => {
     const h = harness();
     expect(
       await runNewCommand(parseArgs(['shop', '--template', 'full-stack', '--runtime', 'node']), {
+        secret: generateSecret,
         fs: h.fs,
         cwd: '/app',
         log: () => {},
@@ -2980,6 +3608,274 @@ describe('starter handler-arm wiring', () => {
     ).toBe(0);
     return h;
   }
+  const arms = STARTER_ARMS.find(({ symbol }) => symbol === 'createFullStackAppFromConfig')!.arms;
+  const rules = Array.from(arms, ([bare, arm]) => {
+    const seam = addSeam(bare, new Set([bare]));
+    const rule =
+      seam !== undefined
+        ? 2
+        : !GATED_STARTER_ARMS.has(bare)
+          ? 3
+          : ZERO_CONFIG_WIRINGS.has(bare)
+            ? 1
+            : 4;
+    return { bare, arm, seam, rule };
+  });
+  it.each(STARTER_SEAMS)(
+    'merges an existing $arm arm with its generated seam and preserves user text',
+    async ({ plugin, arm, entries }) => {
+      const h = await fullStack();
+      const path = '/app/shop/setu.config.ts';
+      await h.fs.writeFile(
+        path,
+        new TextEncoder().encode(
+          h.read(path).replace('return {', `return { ${arm}: { /* keep my options */ },`),
+        ),
+      );
+      expect(await h.run([plugin, '--dir', '/app/shop'])).toBe(0);
+      const source = h.read(path);
+      expect(source).toContain('/* keep my options */');
+      for (const [property, value] of entries) expect(source).toContain(`${property}: ${value}`);
+      const writes = h.fs.writes.length;
+      expect(await h.run([plugin, '--dir', '/app/shop'])).toBe(0);
+      expect(h.read(path)).toBe(source);
+      expect(h.fs.writes.length).toBe(writes);
+    },
+  );
+  it.each([
+    ['metrics', 'metrics', 'CUSTOM_METRICS', './src/metrics/index.ts'],
+    ['health', 'health', 'HEALTH_INDICATORS', './src/health/index.ts'],
+  ] as const)(
+    'keeps seam pass-through and import guidance for an existing %s arm without its symbol',
+    async (plugin, arm, symbol, from) => {
+      const h = await fullStack();
+      const path = '/app/shop/setu.config.ts';
+      const before = h.read(path).replace('return {', `return { ${arm}: {},`);
+      await h.fs.writeFile(path, new TextEncoder().encode(before));
+      expect(await h.run([plugin, '--dir', '/app/shop'])).toBe(0);
+      expect(h.read(path)).toBe(before);
+      expect(h.out.join('\n')).toContain(`Pass the generated artifacts through it: ${arm}:`);
+      expect(h.out).toContain(`  Import ${symbol} from '${from}' for it.`);
+      expect(h.out.join('\n')).not.toContain(`already sets its ${arm} arm`);
+    },
+  );
+  it.each(['session', 'react-router', 'logger', 'http-security'])(
+    'reports the scaffolded %s arm as already configured without replacement instructions',
+    async (plugin) => {
+      const h = await fullStack();
+      const path = '/app/shop/setu.config.ts';
+      const before = h.read(path);
+      expect(await h.run([plugin, '--dir', '/app/shop'])).toBe(0);
+      expect(h.read(path)).toBe(before);
+      expect(h.out.join('\n')).toContain('arm; it was left as it is.');
+      expect(h.out.join('\n')).not.toContain('Its arm:');
+      expect(h.out.join('\n')).not.toContain('with its defaults');
+    },
+  );
+  it.each(rules)(
+    'applies rule $rule to full-stack $bare ($arm), idempotently',
+    async ({ bare, arm, seam, rule }) => {
+      const h = await fullStack();
+      const path = '/app/shop/setu.config.ts';
+      const before = h.read(path);
+      const code = await h.run([bare, '--dir', '/app/shop']);
+      if (bare === 'decorator-plugin') {
+        expect(code).toBe(1);
+        expect(h.err.join('\n')).toContain('This project uses the functional style.');
+        expect(h.read(path)).toBe(before);
+        return;
+      }
+      expect(code, h.err.join('\n')).toBe(0);
+      const after = h.read(path);
+      const output = h.out.join('\n');
+      if (rule === 1) {
+        const [parent, child] = arm.split('.');
+        expect(after).toContain(child === undefined ? `${arm}: {}` : `${parent}: { ${child}: {} }`);
+        expect(output).toContain(`wired ${arm} in setu.config.ts`);
+        expect(after).not.toBe(before);
+      } else if (rule === 2) {
+        for (const { from, symbols } of seam!.imports) {
+          expect(after).toContain(`from '${from}'`);
+          for (const symbol of symbols)
+            expect(
+              after.match(new RegExp(`import \\{[^}]*\\b${symbol}\\b[^}]*\\}`, 'g')),
+            ).toHaveLength(1);
+        }
+        expect(after).toContain(`${arm}: ${seam!.args}`);
+        expect(output).toContain(`wired ${arm} in setu.config.ts`);
+      } else {
+        expect(after).toBe(before);
+        const present = starterArmSet(before, arm, true) === true;
+        expect(output).toContain(
+          bare === 'messaging-plugin'
+            ? 'already registers messaging in memory by default'
+            : present
+              ? `already sets its ${arm} arm; it was left as it is.`
+              : rule === 3
+                ? `createFullStackAppFromConfig already registers this plugin with its defaults; set its ${arm} arm in setu.config.ts only to configure it.`
+                : `createFullStackAppFromConfig registers this plugin only once its ${arm} arm is set in setu.config.ts.`,
+        );
+        if (rule === 4 && !present) expect(output).toContain('Its arm:');
+      }
+      const writes = h.fs.writes.length;
+      h.out.length = 0;
+      expect(await h.run([bare, '--dir', '/app/shop']), h.err.join('\n')).toBe(0);
+      expect(h.read(path)).toBe(after);
+      expect(h.fs.writes.length).toBe(writes);
+      if (rule === 1 || rule === 2) {
+        expect(h.out.filter((line) => line.startsWith('  '))).toEqual([
+          bare === 'queue-plugin'
+            ? '  setu.config.ts already sets its own queue option; it was left as it is.'
+            : `  setu.config.ts already sets its ${arm} arm; it was left as it is.`,
+        ]);
+      }
+    },
+  );
+  it('keeps nested-arm guidance when a real add created only the other child', async () => {
+    const h = await fullStack();
+    const path = '/app/shop/setu.config.ts';
+    expect(await h.run(['sse', '--dir', '/app/shop'])).toBe(0);
+    const before = h.read(path);
+    expect(before).toContain('realtime: { sse: {} }');
+    h.out.length = 0;
+    expect(await h.run(['websocket', '--dir', '/app/shop'])).toBe(0);
+    expect(h.read(path)).toBe(before);
+    expect(h.out).toContain('  Inside its existing realtime arm, add: websocket: {}');
+    expect(h.out.join('\n')).not.toContain('already sets its realtime.websocket arm');
+  });
+  it.each(['undefined', 'null', 'false'])(
+    'preserves disabled arms with value %s and retains guidance for an unwired seam',
+    async (value) => {
+      const h = await fullStack();
+      const path = '/app/shop/setu.config.ts';
+      const before = h
+        .read(path)
+        .replace('return {', `return { metrics: ${value}, realtime: { sse: ${value} },`);
+      await h.fs.writeFile(path, new TextEncoder().encode(before));
+      for (const [plugin, arm] of [
+        ['metrics', 'metrics'],
+        ['sse', 'realtime.sse'],
+      ] as const) {
+        expect(await h.run([plugin, '--dir', '/app/shop'])).toBe(0);
+        const writes = h.fs.writes.length;
+        h.out.length = 0;
+        expect(await h.run([plugin, '--dir', '/app/shop'])).toBe(0);
+        expect(h.read(path)).toBe(before);
+        expect(h.fs.writes.length).toBe(writes);
+        if (plugin === 'metrics') {
+          expect(h.out.join('\n')).toContain('Pass the generated artifacts through it: metrics:');
+          expect(h.out.join('\n')).toContain("Import CUSTOM_METRICS from './src/metrics/index.ts'");
+          expect(h.out.join('\n')).not.toContain('already sets its metrics arm');
+        } else {
+          expect(h.out.filter((line) => line.startsWith('  '))).toEqual([
+            `  setu.config.ts already sets its ${arm} arm; it was left as it is.`,
+          ]);
+        }
+      }
+    },
+  );
+  for (const entry of rules.filter(({ rule }) => rule === 1)) {
+    it(
+      `type-checks inserted ${entry.arm} and every seam against FullStackStarterOptions`,
+      { timeout: 120_000 },
+      async () => {
+        const h = await fullStack();
+        for (const { bare } of [...rules.filter(({ rule }) => rule === 2), entry])
+          expect(await h.run([bare, '--dir', '/app/shop']), h.err.join('\n')).toBe(0);
+        const files = [...new Set(h.fs.writes)]
+          .filter((path) => path.startsWith('/app/shop/'))
+          .map((path) => ({ path: path.slice('/app/shop/'.length), contents: h.read(path) }));
+        const directory = await tempDir({ prefix: 'full-stack-options-' });
+        const path = `${directory}/input.json`;
+        await nodeFs.writeFile(path, JSON.stringify(files));
+        const input = await nodeFs.open(path, 'r');
+        const output = await nodeFs.open(`${directory}/output.json`, 'w');
+        const errors = await nodeFs.open(`${directory}/errors.txt`, 'w');
+        try {
+          // Regular descriptors also work where the sandbox refuses subprocess pipe sockets.
+          const result = spawnSync(
+            process.execPath,
+            [
+              fileURLToPath(
+                new URL('../../fixtures/full-stack-options-compiler.ts', import.meta.url),
+              ),
+            ],
+            {
+              cwd: fileURLToPath(new URL('../../../../../', import.meta.url)),
+              stdio: [input.fd, output.fd, errors.fd],
+              timeout: 110_000,
+            },
+          );
+          expect(result.error, result.error?.message).toBeUndefined();
+          expect(result.status, await nodeFs.readFile(`${directory}/errors.txt`, 'utf8')).toBe(0);
+          const diagnostics = JSON.parse(
+            await nodeFs.readFile(`${directory}/output.json`, 'utf8'),
+          ) as {
+            valid: readonly { code: number; message: string }[];
+            misspelled: readonly { code: number; message: string }[];
+            unannotated: readonly { code: number; message: string }[];
+          };
+          expect(diagnostics.valid).toEqual([]);
+          expect(
+            diagnostics.misspelled.some(
+              ({ code, message }) => code === 2561 && message.includes('messaging'),
+            ),
+          ).toBe(true);
+          expect(diagnostics.unannotated).toEqual([]);
+        } finally {
+          await input.close();
+          await output.close();
+          await errors.close();
+          await nodeFs.rm(directory, { recursive: true, force: true });
+        }
+      },
+    );
+  }
+  it.each([
+    [
+      'existing parent',
+      'sse',
+      (source: string) => source.replace('return {', 'return { realtime: { websocket: {} },'),
+    ],
+    [
+      'missing callback',
+      'metrics',
+      (source: string) => source.replace('(config): FullStackStarterOptions =>', '(config) =>'),
+    ],
+    [
+      'repeated callback',
+      'metrics',
+      (source: string) => `${source}\nconst other = (config): FullStackStarterOptions => {};`,
+    ],
+    [
+      'unclassifiable callback',
+      'metrics',
+      (source: string) => source + '\nconst note = `${CUSTOM_METRICS}`;',
+    ],
+    [
+      'conflicting import',
+      'metrics',
+      (source: string) => `import { CUSTOM_METRICS } from './other.ts';\n${source}`,
+    ],
+    [
+      'existing top-level seam',
+      'metrics',
+      (source: string) => source.replace('return {', 'return { metrics: {},'),
+    ],
+  ] as const)('refuses %s without a partial config edit', async (_label, plugin, edit) => {
+    const h = await fullStack();
+    const path = '/app/shop/setu.config.ts';
+    const before = edit(h.read(path));
+    await h.fs.writeFile(path, new TextEncoder().encode(before));
+    expect(await h.run([plugin, '--dir', '/app/shop']), h.err.join('\n')).toBe(0);
+    expect(h.read(path)).toBe(before);
+    expect(h.out.join('\n')).not.toContain(`wired ${plugin} in setu.config.ts`);
+    expect(h.out.join('\n')).toContain(
+      plugin === 'sse'
+        ? 'realtime.sse arm is set in setu.config.ts'
+        : 'metrics arm in setu.config.ts',
+    );
+  });
   for (const [name, arm, symbols] of [
     ['events', 'events', ['EVENT_HANDLERS']],
     ['cqrs', 'cqrs', ['COMMAND_HANDLERS', 'QUERY_HANDLERS']],
@@ -3068,9 +3964,32 @@ describe('starter handler-arm wiring', () => {
     expect(h.read(path).match(/import \{ EVENT_HANDLERS \}/g)).toHaveLength(1);
     expect(h.read(path)).toContain('events: { handlers: EVENT_HANDLERS }');
   });
+  it('leaves a shadowed seam import unwired and prints pass-through guidance', async () => {
+    const h = await fullStack();
+    const path = '/app/shop/setu.config.ts';
+    const before = `import { CUSTOM_METRICS } from './src/metrics/index.ts';\n${h.read(path).replace('return {', 'const CUSTOM_METRICS = [];\n      return {')}`;
+    await h.fs.writeFile(path, new TextEncoder().encode(before));
+    expect(await h.run(['metrics', '--dir', '/app/shop'])).toBe(0);
+    expect(h.read(path)).toBe(before);
+    expect(h.out.join('\n')).not.toContain('wired metrics in setu.config.ts');
+    expect(h.out.join('\n')).toContain('Pass the generated artifacts through it: metrics:');
+    expect(h.out.join('\n')).toContain("Import CUSTOM_METRICS from './src/metrics/index.ts'");
+  });
 });
 
 describe('M133 setu add mcp', () => {
+  it('V12-2 leaves the config unchanged and prints the required options and marked-route prerequisite', async () => {
+    const h = harness({
+      '/app/package.json': '{}',
+      '/app/setu.config.ts': CLASS_BASED_INGRESS_CONFIG,
+    });
+    expect(await h.run(['mcp'])).toBe(0);
+    expect(h.read('/app/setu.config.ts')).toBe(CLASS_BASED_INGRESS_CONFIG);
+    expect(h.out.join('\n')).toContain('McpPlugin({})');
+    expect(h.out.join('\n')).toContain(
+      'boots with it only once at least one route is marked with mcpTool() or @McpTool()',
+    );
+  });
   it('adds the package and SDK optional peer to npm without inventing zero-config registration', async () => {
     const h = harness({
       '/app/package.json': JSON.stringify({ type: 'module', dependencies: {} }),
@@ -3093,6 +4012,46 @@ describe('M133 setu add mcp', () => {
   });
 });
 
+// The graphql and gRPC plugins load their runtime lazily from an OPTIONAL peer,
+// which no package manager installs for the consumer: before these entries the
+// app failed at start with GraphqlRuntimeLoadError / the connect load error.
+describe('setu add graphql and grpc record their runtime peers', () => {
+  const CASES: readonly (readonly [name: string, peers: Readonly<Record<string, string>>])[] = [
+    ['graphql', { graphql: '^16' }],
+    ['grpc', { '@connectrpc/connect': '^2.1.2', '@bufbuild/protobuf': '^2.7.0' }],
+  ];
+  it.each(CASES)('%s on npm', async (name, peers) => {
+    const h = harness({
+      '/app/package.json': JSON.stringify({ type: 'module', dependencies: {} }),
+    });
+    expect(await h.run([name])).toBe(0);
+    const { dependencies } = JSON.parse(h.read('/app/package.json')) as {
+      dependencies: Record<string, string>;
+    };
+    expect(dependencies).toEqual({ [`@setu-ts/${name}-plugin`]: `^${VERSION}`, ...peers });
+    expect(h.out.join('\n')).toContain('npm install');
+  });
+  it.each(CASES)('%s on Deno', async (name, peers) => {
+    const h = harness({ '/app/deno.json': DENO_MANIFEST });
+    expect(await h.run([name])).toBe(0);
+    const { imports } = JSON.parse(h.read('/app/deno.json')) as { imports: Record<string, string> };
+    for (const [peer, range] of Object.entries(peers))
+      expect(imports[peer]).toBe(`npm:${peer}@${range}`);
+  });
+  it('both in one command', async () => {
+    const h = harness({
+      '/app/package.json': JSON.stringify({ type: 'module', dependencies: {} }),
+    });
+    expect(await h.run(['graphql', 'grpc'])).toBe(0);
+    const { dependencies } = JSON.parse(h.read('/app/package.json')) as {
+      dependencies: Record<string, string>;
+    };
+    expect(Object.keys(dependencies)).toEqual(
+      expect.arrayContaining(['graphql', '@connectrpc/connect', '@bufbuild/protobuf']),
+    );
+  });
+});
+
 it('setu add mcp installs the SDK peer for a Workers project', async () => {
   const h = harness({
     '/app/package.json': JSON.stringify({ scripts: { dev: 'wrangler dev' }, dependencies: {} }),
@@ -3102,4 +4061,120 @@ it('setu add mcp installs the SDK peer for a Workers project', async () => {
   expect(JSON.parse(h.read('/app/package.json')).dependencies['@modelcontextprotocol/server']).toBe(
     '^2.4.0',
   );
+});
+
+describe('M140b Workers additions', () => {
+  it.each(['node', 'cloudflare-workers'] as const)(
+    'queue installation follows the runtime restriction on %s',
+    async (runtime) => {
+      const h = harness();
+      expect(
+        await runNewCommand(parseArgs(['shop', '--runtime', runtime]), {
+          fs: h.fs,
+          secret: generateSecret,
+          cwd: '/app',
+          log: (line) => h.out.push(line),
+          error: (line) => h.err.push(line),
+        }),
+      ).toBe(0);
+      const before = h.read('/app/shop/package.json');
+      const writesBefore = [...h.fs.writes];
+      expect(await h.run(['queue', '--dir', '/app/shop'])).toBe(
+        runtime === 'cloudflare-workers' ? 2 : 0,
+      );
+      if (runtime === 'cloudflare-workers') {
+        expect(h.err.join('\n')).toContain("its default queue lives in one isolate's memory");
+        expect(h.err.join('\n')).toContain('CloudflarePlugin({ queue: { binding } })');
+        expect(h.read('/app/shop/package.json')).toBe(before);
+        expect(h.fs.writes).toEqual(writesBefore);
+      } else {
+        expect(h.read('/app/shop/package.json')).toContain('@setu-ts/queue-plugin');
+      }
+    },
+  );
+  it('adds cloudflare through package.json and prints the shared accessor guidance', async () => {
+    const h = harness();
+    expect(
+      await runNewCommand(parseArgs(['shop', '--runtime', 'cloudflare-workers']), {
+        fs: h.fs,
+        secret: generateSecret,
+        cwd: '/app',
+        log: (line) => h.out.push(line),
+        error: (line) => h.err.push(line),
+      }),
+    ).toBe(0);
+    expect(h.fs.has('/app/shop/deno.json')).toBe(false);
+    expect(await h.run(['cloudflare', '--dir', '/app/shop'])).toBe(0);
+    expect(h.read('/app/shop/package.json')).toContain('@setu-ts/cloudflare-plugin');
+    expect(h.fs.has('/app/shop/deno.json')).toBe(false);
+    expect(h.out.join('\n')).toContain('through withApplication — wrangler.toml shows both.');
+    // The generated config is edited, so neither step is left to the developer.
+    const config = h.read('/app/shop/setu.config.ts');
+    expect(config).toContain('CloudflarePlugin({ env, ...(waitUntil ? { waitUntil } : {}) }),');
+    expect(config).toContain('  waitUntil?: (promise: Promise<unknown>) => void,');
+    expect(config).not.toContain('_waitUntil');
+    expect(h.out.join('\n')).toContain(
+      "Registered CloudflarePlugin in setu.config.ts; createApp's sink parameter is now 'waitUntil', which the call reads.",
+    );
+    expect(h.out.join('\n')).not.toContain('rename the');
+    expect(h.out.join('\n')).not.toContain('Register CloudflarePlugin(');
+  });
+});
+
+it('prints the shape of a gated starter arm, with a prefix for full-stack static files', async () => {
+  const h = harness();
+  expect(
+    await runNewCommand(parseArgs(['shop', '--template', 'full-stack']), {
+      fs: h.fs,
+      secret: generateSecret,
+      cwd: '/app',
+      log: (line) => h.out.push(line),
+      error: (line) => h.err.push(line),
+    }),
+  ).toBe(0);
+  const arms: readonly (readonly [string, string])[] = [
+    ['graphql', "graphql: { typeDefs: '<your-schema>', resolvers: {} }"],
+    ['static', "static: { root: '<public-directory>', urlPrefix: '/files' }"],
+    ['feature-flags', "featureFlags: { provider: 'memory' }"],
+    ['websocket', 'realtime: { websocket: {} }'],
+    ['database', "database: { type: 'memory' }"],
+  ];
+  for (const [pkg, arm] of arms) {
+    h.out.length = 0;
+    expect(await h.run([pkg, '--dir', '/app/shop', '--yes']), h.err.join('\n')).toBe(0);
+    if (pkg === 'websocket') {
+      expect(h.read('/app/shop/setu.config.ts')).toContain(arm);
+      expect(h.out).toContain('wired realtime.websocket in setu.config.ts');
+    } else expect(h.out).toContain(`  Its arm: ${arm}`);
+    expect(h.out.some((line) => line.includes('The urlPrefix is required here'))).toBe(
+      pkg === 'static',
+    );
+  }
+  // A second realtime arm goes inside the existing `realtime` object.
+  const configPath = '/app/shop/setu.config.ts';
+  const before = h.read(configPath);
+  h.out.length = 0;
+  expect(await h.run(['sse', '--dir', '/app/shop', '--yes'])).toBe(0);
+  expect(h.read(configPath)).toBe(before);
+  expect(h.out).toContain('  Inside its existing realtime arm, add: sse: {}');
+  // An always-on arm needs no value.
+  h.out.length = 0;
+  expect(await h.run(['cache', '--dir', '/app/shop', '--yes'])).toBe(0);
+  expect(h.out.some((line) => line.startsWith('  Its arm:'))).toBe(false);
+  // Full-stack's auth keeps its own recipe line.
+  h.out.length = 0;
+  expect(await h.run(['auth', '--dir', '/app/shop', '--yes'])).toBe(0);
+  expect(h.out.filter((line) => line.startsWith('  Its arm:'))).toEqual([
+    '  Its arm: auth: { signIn: { providers: [] }, local: { verify: (email, password, request) => <your credential check> } }',
+  ]);
+});
+
+it('prints the auth arm on a hand-written REST starter config', async () => {
+  const config =
+    "import { createRestApp } from '@setu-ts/rest-starter';\n" +
+    'export function createApp() {\n  return createRestApp({});\n}\n';
+  const h = harness({ '/app/deno.json': DENO_MANIFEST, '/app/setu.config.ts': config });
+  expect(await h.run(['auth'])).toBe(0);
+  expect(h.out).toContain('  Its arm: auth: { jwt: {}, rbac: { roles: {} } }');
+  expect(h.read('/app/setu.config.ts')).toBe(config);
 });

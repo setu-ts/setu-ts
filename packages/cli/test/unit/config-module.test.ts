@@ -37,7 +37,12 @@ describe('the generated config module factory signature', () => {
       'export function createApp(\n  env: Readonly<Record<string, unknown>> = {},',
     );
     expect(source).toContain('_devtool?: { plugins?: readonly IPlugin[];');
-    // The devtool is Deno-only: the Workers factory never reads it.
+    expect(source.replace(/\n \* /g, ' ')).toContain(
+      '@param _devtool - Accepted for one signature on every target; the diagnostics listener runs only on Deno and Node, so Workers never supplies it and nothing here reads it.',
+    );
+    for (const line of source.split('\n').filter((line) => line.startsWith(' * ')))
+      expect(line.length).toBeLessThanOrEqual(100);
+    // Workers never reads a diagnostics composition.
     expect(source).not.toContain('...(devtool?.plugins ?? [])');
     expect(source).not.toContain('devtool?.diagnostics');
   });

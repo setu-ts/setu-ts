@@ -5,6 +5,8 @@ change application data. Each tool call re-enters Setu's normal request pipeline
 scopes, validation, rate limiting and idempotency all run again. Nothing is exposed automatically.
 Tool output is untrusted model input; the agent host owns prompt-injection defence.
 
+<!-- version:history -->
+
 The plugin, weighted quotas and offered example are available **from 0.12.0**. After that release,
 `setu new demo --example mcp-tools` downloads the example from GitHub at the CLI's own release tag.
 Before release, the CLI e2e against packed packages is the verification path. After publication,
@@ -12,6 +14,8 @@ repeat that command against the published CLI. GitHub must be reachable for `--e
 complete source below also lets you build the application without downloading the example.
 
 ## Install and generate the layout
+
+<!-- version:history -->
 
 Use the 0.12.0 or later CLI. These commands start a REST project and adopt its greeting into the
 first feature module. `setu add` installs dependencies; it does not wire these plugins.
@@ -627,7 +631,8 @@ const runtime = createRuntimeServices();
 // REDIS_URL's TypeError carries the URL, password included, as `input`.
 async function boot() {
   const app = await createApp();
-  await app.start({ port: Number(runtime.env.PORT ?? '3000') });
+  await app.start({ port: Number(runtime.env.PORT || '3000') });
+  console.log(`Listening on http://localhost:${Number(runtime.env.PORT || '3000')}/`);
   return app;
 }
 
@@ -645,7 +650,7 @@ const app = await boot().catch((error: unknown) => {
 // Windows has no SIGTERM to catch.
 //
 // The logger is resolved only if one is registered: a project scaffolded
-// without LoggerPlugin still shuts down cleanly, it just reports nothing.
+// without LoggerPlugin still shuts down cleanly; failures fall back to stderr.
 const logger = app.services.has(CAPABILITIES.LOGGER)
   ? app.services.get<ILogger>(CAPABILITIES.LOGGER)
   : undefined;
@@ -658,7 +663,8 @@ for (const signal of ['SIGTERM', 'SIGINT'] as const) {
       .stop()
       .then(() => runtime.exit(0))
       .catch((error: unknown) => {
-        logger?.error('Graceful shutdown failed', { error });
+        if (logger !== undefined) logger.error('Graceful shutdown failed', { error });
+        else console.error(`Graceful shutdown failed: ${describeError(error)}`);
         runtime.exit(1);
       });
   });
@@ -866,9 +872,13 @@ checked-in configuration. No stdio bridge is part of this example.
 
 ## Runtimes
 
+<!-- version:history -->
+
 Node integration tests and one native Deno proof exercise list and call. The workerd condition has a
 bundle-resolution proof; a live Workers run is a follow-on. Bun compatibility is unproven until the
 0.12.0 artifacts are published and the compat row runs.
+
+<!-- version:history -->
 
 That paragraph is the package reference's verification status; 0.12.0 availability does not extend
 those runtime proofs. This example targets Node. See the

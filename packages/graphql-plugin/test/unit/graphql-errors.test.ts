@@ -34,10 +34,15 @@ describe('GraphqlRuntimeLoadError', () => {
     expect(error.specifier).toBe('npm:graphql@^16');
   });
 
-  it('includes install command in message', () => {
-    const error = new GraphqlRuntimeLoadError('npm:graphql@^16', new Error('Failed'));
-    expect(error.message).toContain('deno add npm:graphql@^16');
-  });
+  // The plugin cannot tell which package manager the project uses, so a Node or
+  // Bun project must not be told only to run `deno add`.
+  it.each(['npm i graphql@^16', 'bun add graphql@^16', 'deno add npm:graphql@^16'])(
+    'names the install command %s',
+    (command) => {
+      const error = new GraphqlRuntimeLoadError('npm:graphql@^16', new Error('Failed'));
+      expect(error.message).toContain(command);
+    },
+  );
 
   it('preserves cause', () => {
     const cause = new Error('Import failed');

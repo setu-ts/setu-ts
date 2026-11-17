@@ -19,6 +19,9 @@ export function registerSettingsRoutes(router: IRouterApi): void {
 }
 ```
 
+The default fills only an absent key; an empty dotenv value returns `''`, so use
+`config.get(key) || fallback` for a string where empty means unset (not for booleans or numbers).
+
 ## Load once before constructing plugins
 
 Pass the runtime used by your composition root, then register the returned plugin:

@@ -21,6 +21,8 @@ import { WORKER_POOL_METRICS } from '../../src/metrics/metric-names.ts';
 import { FakeHost } from '../fixtures/fakes.ts';
 
 const SPEC = 'file:///tasks/echo.ts';
+/** The label `/metrics` carries for SPEC: its file name, never the URL. */
+const LABEL = 'echo';
 
 function createApp(host: FakeHost) {
   return createApplication({
@@ -64,10 +66,10 @@ describe('WorkerPoolPlugin — metrics through a real MetricsPlugin', () => {
     await expect(promise).resolves.toBe('done');
 
     const body = await scrape(app);
-    expect(body).toContain(`${WORKER_POOL_METRICS.COMPLETED}{task_module="${SPEC}"} 1`);
-    expect(body).toContain(`${WORKER_POOL_METRICS.WORKERS}{task_module="${SPEC}"} 1`);
-    expect(body).toContain(`${WORKER_POOL_METRICS.BUSY}{task_module="${SPEC}"} 0`);
-    expect(body).toContain(`${WORKER_POOL_METRICS.QUEUED}{task_module="${SPEC}"} 0`);
+    expect(body).toContain(`${WORKER_POOL_METRICS.COMPLETED}{task_module="${LABEL}"} 1`);
+    expect(body).toContain(`${WORKER_POOL_METRICS.WORKERS}{task_module="${LABEL}"} 1`);
+    expect(body).toContain(`${WORKER_POOL_METRICS.BUSY}{task_module="${LABEL}"} 0`);
+    expect(body).toContain(`${WORKER_POOL_METRICS.QUEUED}{task_module="${LABEL}"} 0`);
 
     await app.stop();
   });
@@ -85,7 +87,7 @@ describe('WorkerPoolPlugin — metrics through a real MetricsPlugin', () => {
 
     const body = await scrape(app);
     expect(body).toContain(
-      `${WORKER_POOL_METRICS.FAILED}{reason="handler",task_module="${SPEC}"} 1`,
+      `${WORKER_POOL_METRICS.FAILED}{reason="handler",task_module="${LABEL}"} 1`,
     );
 
     await app.stop();
@@ -112,11 +114,11 @@ describe('WorkerPoolPlugin — metrics through a real MetricsPlugin', () => {
     // The operator-facing shape of a saturated pool: every worker busy, the
     // queue occupied, and overflow counted separately from task failures.
     const saturated = await scrape(app);
-    expect(saturated).toContain(`${WORKER_POOL_METRICS.BUSY}{task_module="${SPEC}"} 1`);
-    expect(saturated).toContain(`${WORKER_POOL_METRICS.WORKERS}{task_module="${SPEC}"} 1`);
-    expect(saturated).toContain(`${WORKER_POOL_METRICS.QUEUED}{task_module="${SPEC}"} 1`);
+    expect(saturated).toContain(`${WORKER_POOL_METRICS.BUSY}{task_module="${LABEL}"} 1`);
+    expect(saturated).toContain(`${WORKER_POOL_METRICS.WORKERS}{task_module="${LABEL}"} 1`);
+    expect(saturated).toContain(`${WORKER_POOL_METRICS.QUEUED}{task_module="${LABEL}"} 1`);
     expect(saturated).toContain(
-      `${WORKER_POOL_METRICS.REJECTED}{reason="queue_full",task_module="${SPEC}"} 1`,
+      `${WORKER_POOL_METRICS.REJECTED}{reason="queue_full",task_module="${LABEL}"} 1`,
     );
     expect(saturated).not.toContain(`${WORKER_POOL_METRICS.FAILED}{`);
 
@@ -126,8 +128,8 @@ describe('WorkerPoolPlugin — metrics through a real MetricsPlugin', () => {
     await expect(queued).resolves.toBe('second');
 
     const drained = await scrape(app);
-    expect(drained).toContain(`${WORKER_POOL_METRICS.QUEUED}{task_module="${SPEC}"} 0`);
-    expect(drained).toContain(`${WORKER_POOL_METRICS.COMPLETED}{task_module="${SPEC}"} 2`);
+    expect(drained).toContain(`${WORKER_POOL_METRICS.QUEUED}{task_module="${LABEL}"} 0`);
+    expect(drained).toContain(`${WORKER_POOL_METRICS.COMPLETED}{task_module="${LABEL}"} 2`);
 
     await app.stop();
   });
@@ -183,14 +185,72 @@ describe('WorkerPoolPlugin — metrics through a real MetricsPlugin', () => {
     const stats = pool.stats()[0];
     const body = await scrape(app);
     expect(body).toContain(
-      `${WORKER_POOL_METRICS.WORKERS}{task_module="${SPEC}"} ${stats.workers}`,
+      `${WORKER_POOL_METRICS.WORKERS}{task_module="${LABEL}"} ${stats.workers}`,
     );
-    expect(body).toContain(`${WORKER_POOL_METRICS.BUSY}{task_module="${SPEC}"} ${stats.busy}`);
-    expect(body).toContain(`${WORKER_POOL_METRICS.QUEUED}{task_module="${SPEC}"} ${stats.queued}`);
+    expect(body).toContain(`${WORKER_POOL_METRICS.BUSY}{task_module="${LABEL}"} ${stats.busy}`);
+    expect(body).toContain(`${WORKER_POOL_METRICS.QUEUED}{task_module="${LABEL}"} ${stats.queued}`);
     expect(body).toContain(
-      `${WORKER_POOL_METRICS.COMPLETED}{task_module="${SPEC}"} ${stats.completed}`,
+      `${WORKER_POOL_METRICS.COMPLETED}{task_module="${LABEL}"} ${stats.completed}`,
     );
 
+    await app.stop();
+  });
+
+  // The specifier is normally `new URL('./tasks/x.ts', import.meta.url).href`,
+  // a `file:` URL naming the machine's directories and its user. It must not
+  // reach the scrape.
+  it('should label series by file name, never by the task-module path', async () => {
+    const host = new FakeHost();
+    const app = createApp(host);
+    await app.start();
+    const leaky = 'file:///home/someone/projects/mohor/src/tasks/resize-image.ts';
+    const pool = app.services.get<IWorkerPool>(CAPABILITIES.WORKER_POOL);
+    const promise = pool.run<number, string>(leaky, 1);
+    host.handles[0].emitReady();
+    host.handles[0].replyOk('done');
+    await expect(promise).resolves.toBe('done');
+
+    const body = await scrape(app);
+    expect(body).toContain(`${WORKER_POOL_METRICS.COMPLETED}{task_module="resize-image"} 1`);
+    expect(body).not.toContain('file:');
+    expect(body).not.toContain('/home/');
+    expect(body).not.toContain('someone');
+    await app.stop();
+  });
+
+  it('should label a rejection on a runtime without workers by file name', async () => {
+    const app = createApplication({
+      plugins: [RuntimePlugin(), MetricsPlugin(), WorkerPoolPlugin()],
+    });
+    await app.start();
+    const pool = app.services.get<IWorkerPool>(CAPABILITIES.WORKER_POOL);
+    await pool.shutdown();
+    await expect(pool.run('file:///home/someone/app/tasks/thumb.mjs', 1)).rejects.toThrow();
+    const body = await scrape(app);
+    expect(body).toContain(
+      `${WORKER_POOL_METRICS.REJECTED}{reason="pool_closed",task_module="thumb"} 1`,
+    );
+    expect(body).not.toContain('/home/');
+    await app.stop();
+  });
+
+  it('should use an explicit pools[specifier].label', async () => {
+    const host = new FakeHost();
+    const spec = 'file:///home/someone/app/tasks/resize-image.ts';
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        MetricsPlugin(),
+        WorkerPoolPlugin({ host, pools: { [spec]: { label: 'thumbs' } } }),
+      ],
+    });
+    await app.start();
+    const pool = app.services.get<IWorkerPool>(CAPABILITIES.WORKER_POOL);
+    const promise = pool.run<number, string>(spec, 1);
+    host.handles[0].emitReady();
+    host.handles[0].replyOk('done');
+    await promise;
+    expect(await scrape(app)).toContain(`${WORKER_POOL_METRICS.COMPLETED}{task_module="thumbs"} 1`);
     await app.stop();
   });
 });

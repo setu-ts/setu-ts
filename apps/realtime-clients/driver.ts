@@ -76,9 +76,3 @@ export async function exerciseRealtimeClients(baseUrl: string): Promise<void> {
   await checkSseClient(baseUrl);
   await checkIdleSocket(baseUrl);
 }
-
-if (import.meta.main) {
-  const baseUrl = process.argv[2];
-  if (baseUrl === undefined) throw new Error('Expected the realtime server URL.');
-  await exerciseRealtimeClients(baseUrl);
-}

@@ -40,6 +40,22 @@ function registry(...policies: PolicyDefinition[]): PolicyService {
 }
 
 describe('scanPolicyGuards', () => {
+  it('scans guards in declared groups even when selection is empty', () => {
+    const grouped: RouteInfo = {
+      ...route('/*'),
+      definition: {
+        handler: (ctx) => ctx.response.text('page'),
+        middlewareGroups: {
+          groups: { page: [requirePolicy(docPolicy, 'edit')] },
+          select: () => [],
+        },
+      },
+    };
+    expect(() => scanPolicyGuards([grouped], registry())).toThrow(
+      'no such policy ability is registered',
+    );
+    expect(() => scanPolicyGuards([grouped], registry(docPolicy))).not.toThrow();
+  });
   it('passes registered guards, routes without middleware, and ordinary middleware', () => {
     const ordinary: MiddlewareFunction = (_ctx, next) => next();
     expect(() =>

@@ -5,13 +5,15 @@
  *
  * @module
  */
-import { describe, expect, it } from 'vitest';
-import type { IRequestContext, IServiceRegistry } from '../../src/index.ts';
+import { describe, expect, expectTypeOf, it } from 'vitest';
+import type { ILogger, IMailer, IRequestContext, IServiceRegistry } from '../../src/index.ts';
 import {
   RequestServiceUnavailableError,
   requestService,
   resolveRequestService,
   serviceToken,
+  requestServiceToken,
+  CAPABILITIES,
 } from '../../src/index.ts';
 
 interface Counter {
@@ -53,7 +55,38 @@ function contextWithoutSlot(services: IServiceRegistry, principal = 'p'): IReque
   return { services, state: new Map([['principal', principal]]) } as unknown as IRequestContext;
 }
 
-const COUNTER = serviceToken<Counter>('module.counter');
+const COUNTER = requestServiceToken<Counter>('module.counter');
+
+describe('requestServiceToken', () => {
+  it('validates request-bound token names', () => {
+    expect(requestServiceToken<Counter>('module.counter')).toBe('module.counter');
+    for (const name of ['Bad:Name', 'module:counter', 'Module.counter', '']) {
+      expect(() => requestServiceToken<Counter>(name)).toThrow(TypeError);
+    }
+  });
+  it('infers every request resolver arm and refuses wrong bound pairs', () => {
+    const check = (ctx: IRequestContext): void => {
+      expectTypeOf(resolveRequestService(ctx, CAPABILITIES.LOGGER)).toEqualTypeOf<ILogger>();
+      expectTypeOf(
+        resolveRequestService<ILogger>(ctx, CAPABILITIES.LOGGER),
+      ).toEqualTypeOf<ILogger>();
+      expectTypeOf(resolveRequestService<object>(ctx, CAPABILITIES.LOGGER)).toEqualTypeOf<object>();
+      expectTypeOf(
+        resolveRequestService<{ name: string }>(ctx, CAPABILITIES.CLI_COMMAND),
+      ).toEqualTypeOf<{ name: string }>();
+      expectTypeOf(
+        resolveRequestService(ctx, serviceToken<Counter>('app.counter')),
+      ).toEqualTypeOf<Counter>();
+      expectTypeOf(resolveRequestService(ctx, COUNTER)).toEqualTypeOf<Counter>();
+      expectTypeOf(resolveRequestService<Counter>(ctx, 'app.custom')).toEqualTypeOf<Counter>();
+      // @ts-expect-error A logger token cannot serve mail.
+      resolveRequestService<IMailer>(ctx, CAPABILITIES.LOGGER);
+      // @ts-expect-error A bound interface cannot be downcast.
+      resolveRequestService<ILogger & { extra: string }>(ctx, CAPABILITIES.LOGGER);
+    };
+    expectTypeOf(check).toBeFunction();
+  });
+});
 
 function counterEntries(): { entries: Record<string, object>; calls: () => number } {
   let n = 0;

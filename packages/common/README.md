@@ -32,13 +32,15 @@ message actionable; it is used only in the message, with no new instance field:
 `Optional dependency 'ioredis' could not be loaded by '@setu-ts/cache-plugin'. Install it where '@setu-ts/cache-plugin' is installed, in the version range that package declares for it — in an npm, Yarn or Bun workspace that is usually the workspace root, not the member — or choose an option that does not need it on this runtime.`
 Without `requiredBy`, the message says `the package that loads it` generically.
 
+<!-- version:history -->
+
 | Area                | Exports                                                                                                                                                                                                                                                                                                         |
 | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Capability tokens   | `CAPABILITIES`, `createCapabilityToken()`, `CapabilityToken`, `StandardCapability`                                                                                                                                                                                                                              |
 | Plugin contract     | `IPlugin`, `IPluginContext`, `IApplication`, context APIs (`IRouterApi`, `IMiddlewareApi`, `ILifecycleApi`, …)                                                                                                                                                                                                  |
 | Service registry    | `IServiceRegistry`, `RegisterOptions`, `ServiceFactory`                                                                                                                                                                                                                                                         |
 | HTTP abstractions   | `IRequest`, `IResponse`, `IRequestContext`, `IMiddleware`, `MiddlewareFunction`, `RouteHandler`, `RouteDefinition`, `ResponseSnapshot`, `ResponseSnapshotInit`                                                                                                                                                  |
-| Request services    | `serviceToken()`, `ServiceToken`, `requestService()`, `RequestBoundService`, `resolveRequestService()`, `RequestServiceUnavailableError` — one instance per request and token, shared by kernel routes and React Router loaders (0.12.0)                                                                        |
+| Request services    | `serviceToken()`, `ServiceToken`, `requestServiceToken()`, `RequestServiceToken`, `requestService()`, `RequestBoundService`, `resolveRequestService()`, `RequestServiceUnavailableError` — one instance per request and token, shared by kernel routes and React Router loaders (0.12.0)                        |
 | Runtime abstraction | `IRuntimeServices`, `IFileSystem`, `IHttpAdapter`                                                                                                                                                                                                                                                               |
 | Optional DI         | `IContainer`, `Provider`, `ServiceScope`, `createToken`, `InjectionToken`, `ContainerToken`, `InjectEntry`                                                                                                                                                                                                      |
 | Domain contracts    | `ILogger`, `IConfig`, `IValidationService`, `IHealthIndicator`, `IMetric`, `IJwtService`, `IOrmAdapter`, `ICacheStore`, `IEventBus`, `IMessageBroker`, `IQueue`, `ISecretManager`, `IAuditLogger`, `ICircuitBreaker`, `IStorage`, `IMailer`, `INotifier`, `IFeatureFlags`, `ITenantResolver`, `ITenantRegistry` |
@@ -47,10 +49,20 @@ Without `requiredBy`, the message says `the package that loads it` generically.
 
 ## Usage
 
+Since 0.13.0, standard tokens infer their interfaces from the augmentable `CapabilityServices` map.
+`StandardCapabilityToken<K>` carries a standard key; `CapabilityKey` is the plain key union.
+`KeysServing<T>` permits correct explicit types and widening on reads; `KeysAccepting<T>` makes a
+write supply the whole bound contract, and a write under a typed token reads its entry type from the
+token (`TokenEntry<Tok>`). `UnboundCapability` and `UnboundToken` preserve explicit lookups of
+unmapped and custom tokens. `ServiceToken<T>` carries a singleton type;
+`requestServiceToken<T>(name)` creates a `RequestServiceToken<T>` for a `requestService` wrapper.
+Resolve that token through `resolveRequestService`, which builds one instance per request; `get` and
+`getAll` refuse request-bound tokens at compilation.
+
 Resolve capabilities by token, typed by the interfaces defined here:
 
 ```typescript
-import { CAPABILITIES, type ILogger, type IPlugin } from '@setu-ts/common';
+import { CAPABILITIES, type IPlugin } from '@setu-ts/common';
 
 export function MyPlugin(): IPlugin {
   return {
@@ -58,7 +70,7 @@ export function MyPlugin(): IPlugin {
     version: '1.0.0',
     dependencies: [CAPABILITIES.LOGGER],
     register(ctx) {
-      const logger = ctx.services.get<ILogger>(CAPABILITIES.LOGGER);
+      const logger = ctx.services.get(CAPABILITIES.LOGGER);
       logger.info('my-plugin registered');
     },
   };
@@ -254,6 +266,7 @@ package fits the plugin architecture.
 | `fallbackErrorHint`                   | function  |
 | `fallbackErrorStatus`                 | function  |
 | `formEncodingOf`                      | function  |
+| `formFileMetadataOf`                  | function  |
 | `fromNodeRedis`                       | function  |
 | `fromNullable`                        | function  |
 | `fullJitterDelay`                     | function  |
@@ -291,11 +304,13 @@ package fits the plugin architecture.
 | `publishHeaderNameProblem`            | function  |
 | `publishHeaderValueProblem`           | function  |
 | `publishIdProblem`                    | function  |
+| `rateLimitMetadataOf`                 | function  |
 | `replaceLocale`                       | function  |
 | `replacePrincipal`                    | function  |
 | `replaceTenant`                       | function  |
 | `requestOriginOf`                     | function  |
 | `requestService`                      | function  |
+| `requestServiceToken`                 | function  |
 | `resolveKeysetSort`                   | function  |
 | `resolveProbeTiming`                  | function  |
 | `resolveRegistryEntry`                | function  |
@@ -304,6 +319,7 @@ package fits the plugin architecture.
 | `respondWithAuthorizationFailure`     | function  |
 | `respondWithError`                    | function  |
 | `responseMetadataOf`                  | function  |
+| `routeMiddlewareOf`                   | function  |
 | `scopedPermissionAbility`             | function  |
 | `scopedRoleAbility`                   | function  |
 | `scopeFromParam`                      | function  |
@@ -326,9 +342,11 @@ package fits the plugin architecture.
 | `vectorRecordKey`                     | function  |
 | `watchConnection`                     | function  |
 | `withDeadline`                        | function  |
+| `withFormFileMetadata`                | function  |
 | `withHttpStatusHint`                  | function  |
 | `withIdempotencyMetadata`             | function  |
 | `withMcpToolMetadata`                 | function  |
+| `withRateLimitMetadata`               | function  |
 | `withResponseMetadata`                | function  |
 | `withSecurityMetadata`                | function  |
 | `withValidationMetadata`              | function  |
@@ -363,11 +381,13 @@ package fits the plugin architecture.
 | `CAPABILITIES`                        | const     |
 | `CLIENT_IP_STATE_KEY`                 | const     |
 | `CREDENTIAL_SOURCE_STATE_KEY`         | const     |
+| `CSRF_EXEMPT_STATE_KEY`               | const     |
 | `DATA_CLASSIFICATIONS`                | const     |
 | `DEDUPLICATION_ID_HEADER`             | const     |
 | `DEFAULT_SECRET_FIELD_PATTERNS`       | const     |
 | `ERROR_RESPONDER_BRAND`               | const     |
 | `ERROR_RESPONDER_STATE_KEY`           | const     |
+| `FORM_FILE_METADATA`                  | const     |
 | `HTTP_STATUS_HINT`                    | const     |
 | `IDEMPOTENCY_METADATA`                | const     |
 | `IDEMPOTENCY_RECORD_KIND`             | const     |
@@ -381,6 +401,7 @@ package fits the plugin architecture.
 | `ORDERING_KEY_HEADER`                 | const     |
 | `OUTBOX_RECORD_KIND`                  | const     |
 | `PLUGIN_PRIORITY`                     | const     |
+| `RATE_LIMIT_METADATA`                 | const     |
 | `REQUEST_ORIGIN_STATE_KEY`            | const     |
 | `REQUIRED_SCOPES_STATE_KEY`           | const     |
 | `RESERVED_HEADER_NAMES`               | const     |
@@ -413,6 +434,7 @@ package fits the plugin architecture.
 | `CacheDiagnosticsResponse`            | interface |
 | `CacheDiagnosticsSnapshot`            | interface |
 | `CachedProbeOptions`                  | interface |
+| `CapabilityServices`                  | interface |
 | `CircuitBreakerPolicy`                | interface |
 | `ClassProvider`                       | interface |
 | `ConfigDiagnosticsSnapshot`           | interface |
@@ -445,12 +467,14 @@ package fits the plugin architecture.
 | `FlagContext`                         | interface |
 | `FormBody`                            | interface |
 | `FormFile`                            | interface |
+| `FormFileMetadata`                    | interface |
 | `GraphqlConnectionInfo`               | interface |
 | `GraphqlExecutionOutcome`             | interface |
 | `GraphqlExecutionResult`              | interface |
 | `GraphqlFormattedError`               | interface |
 | `GraphqlOperationContext`             | interface |
 | `GraphqlRequestParams`                | interface |
+| `GrpcClientOptions`                   | interface |
 | `GrpcServiceDefinition`               | interface |
 | `HandlerResult`                       | interface |
 | `HealthCheckResult`                   | interface |
@@ -584,6 +608,7 @@ package fits the plugin architecture.
 | `ITenantRegistry`                     | interface |
 | `ITenantRepository`                   | interface |
 | `ITenantResolver`                     | interface |
+| `ITenantUnitOfWork`                   | interface |
 | `ITraceDiagnosticsSource`             | interface |
 | `ITransaction`                        | interface |
 | `ITransactionalIdempotencyStore`      | interface |
@@ -600,12 +625,14 @@ package fits the plugin architecture.
 | `IWorkerPool`                         | interface |
 | `JwtSignOptions`                      | interface |
 | `LocalDiagnosticsListenerOptions`     | interface |
+| `MailAttachment`                      | interface |
 | `MailMessage`                         | interface |
 | `MaskOptions`                         | interface |
 | `MessageMetadata`                     | interface |
 | `MetricConfig`                        | interface |
 | `MetricOptions`                       | interface |
 | `MiddlewareOptions`                   | interface |
+| `ModuleFactoryProvider`               | interface |
 | `None`                                | interface |
 | `NormalizedQuery`                     | interface |
 | `NotificationMessage`                 | interface |
@@ -661,10 +688,17 @@ package fits the plugin architecture.
 | `RouteIdempotencyMetadata`            | interface |
 | `RouteInfo`                           | interface |
 | `RouteMcpToolMetadata`                | interface |
+| `RouteMiddlewareGroups`               | interface |
+| `RouteRateLimitMetadata`              | interface |
+| `RouteResponseDocumentation`          | interface |
+| `RouteResponseHeader`                 | interface |
 | `RouteResponseMetadata`               | interface |
 | `RouteSchema`                         | interface |
 | `RouteSecurityMetadata`               | interface |
 | `RouteValidationMetadata`             | interface |
+| `RpcCall`                             | interface |
+| `RpcReply`                            | interface |
+| `RpcTransport`                        | interface |
 | `ScheduledJob`                        | interface |
 | `ScheduleOptions`                     | interface |
 | `SchedulerDiagnosticsRecord`          | interface |
@@ -690,6 +724,7 @@ package fits the plugin architecture.
 | `StorageDiagnosticsRecord`            | interface |
 | `StorageDiagnosticsResponse`          | interface |
 | `StorageDiagnosticsSnapshot`          | interface |
+| `StreamOptions`                       | interface |
 | `SubscribeOptions`                    | interface |
 | `TaskPoolStats`                       | interface |
 | `TelemetryContext`                    | interface |
@@ -734,6 +769,7 @@ package fits the plugin architecture.
 | `BackendFault`                        | type      |
 | `BackoffStrategy`                     | type      |
 | `CacheDiagnosticsOperation`           | type      |
+| `CapabilityKey`                       | type      |
 | `CapabilityToken`                     | type      |
 | `ChannelSendResult`                   | type      |
 | `CircuitState`                        | type      |
@@ -787,6 +823,8 @@ package fits the plugin architecture.
 | `ITenantIsolationStrategy`            | type      |
 | `JobProcessor`                        | type      |
 | `JsonValue`                           | type      |
+| `KeysAccepting`                       | type      |
+| `KeysServing`                         | type      |
 | `LifecyclePhase`                      | type      |
 | `LoadBalanceStrategy`                 | type      |
 | `LocalizationMessage`                 | type      |
@@ -831,6 +869,7 @@ package fits the plugin architecture.
 | `RegistryFactory`                     | type      |
 | `RequestHandler`                      | type      |
 | `RequestOrigin`                       | type      |
+| `RequestServiceToken`                 | type      |
 | `ResilientCall`                       | type      |
 | `ResponseSnapshot`                    | type      |
 | `ResponseSnapshotInit`                | type      |
@@ -856,14 +895,18 @@ package fits the plugin architecture.
 | `SpanKind`                            | type      |
 | `SpanStatus`                          | type      |
 | `StandardCapability`                  | type      |
+| `StandardCapabilityToken`             | type      |
 | `StorageDiagnosticsOperation`         | type      |
 | `TimerHandle`                         | type      |
+| `TokenEntry`                          | type      |
 | `TraceCoverage`                       | type      |
 | `TraceInstrumentationKind`            | type      |
 | `TraceOutcome`                        | type      |
 | `TraceParentVisibility`               | type      |
 | `TraceSourceState`                    | type      |
 | `TransactionIsolationLevel`           | type      |
+| `UnboundCapability`                   | type      |
+| `UnboundToken`                        | type      |
 | `Unsubscribe`                         | type      |
 | `ValidationTarget`                    | type      |
 | `VectorFieldType`                     | type      |

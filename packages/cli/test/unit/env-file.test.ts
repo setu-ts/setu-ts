@@ -7,6 +7,40 @@ import {
   readEnvFilePath,
 } from '../../src/templates/env-file.ts';
 
+it('V12-127 reads active dotenv declarations inside nested template substitutions', () => {
+  for (const quote of ["'", '"']) {
+    const call = `ConfigPlugin({ envFilePath: ${quote}local.env${quote} })`;
+    for (const source of [
+      'const text = `raw envFilePath: "wrong.env" ${' + call + '}`;',
+      'const text = `raw envFilePath: "wrong.env" ${`nested ${' + call + '}`}`;',
+    ])
+      expect(envFileDeclaration(source)).toEqual({ kind: 'paths', paths: ['local.env'] });
+  }
+});
+
+it('V12-127 finishes scanning malformed template substitutions without stalling', () => {
+  expect(
+    envFileDeclaration('const text = `${42; ConfigPlugin({ envFilePath: "local.env" })'),
+  ).toEqual({
+    kind: 'paths',
+    paths: ['local.env'],
+  });
+});
+
+it('M140d review: a quote inside a regex literal or a substitution does not hide the declaration', () => {
+  const call = "ConfigPlugin({ envFilePath: 'local.env' })";
+  for (const prefix of [
+    "const quote = /'/;",
+    "const text = `${/'/.source}`;",
+    "const text = `${'`'}`;",
+    'const slash = /"/u.test(value);',
+  ])
+    expect(envFileDeclaration(`${prefix}\n${call}`), prefix).toEqual({
+      kind: 'paths',
+      paths: ['local.env'],
+    });
+});
+
 describe('isCoveredDotenvName', () => {
   it('covers the default name and .env.* names the container rules match', () => {
     for (const name of ['.env', '.env.local', '.env.prod']) {
@@ -50,6 +84,24 @@ describe('readEnvFilePath', () => {
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.message).toContain('inside the generated project');
     }
+  });
+
+  it('rejects a path ending in .example, the committed example name', () => {
+    for (const value of [
+      '.env.example',
+      'secrets.example',
+      'config/local.example',
+      '.env.EXAMPLE',
+      'secrets.Example',
+    ]) {
+      const result = readEnvFilePath({ 'env-file': value });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.message).toContain('must not end in .example');
+    }
+    expect(readEnvFilePath({ 'env-file': 'example.env' })).toEqual({
+      ok: true,
+      path: 'example.env',
+    });
   });
 });
 

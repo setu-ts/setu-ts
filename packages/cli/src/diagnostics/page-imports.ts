@@ -22,7 +22,11 @@
 
 import { transform } from 'esbuild';
 import type { IFileSystem } from '@setu-ts/common';
-import { lexImportSpecifiers, type ISpecifierSpan } from '../utils/import-specifiers.ts';
+import {
+  lexImportSpecifiers,
+  type ISpecifierSpan,
+  type LexedImports,
+} from '../utils/import-specifiers.ts';
 import { maskComments } from '../devtool/sources.ts';
 import { normalizeRelative } from '../utils/artifact-path.ts';
 import { joinPath, MAX_EXISTING_FILE_BYTES } from '../utils/file-writer.ts';
@@ -53,6 +57,11 @@ const PAGE_ALIAS = '~/';
  * {@linkcode TokenResolver}).
  */
 const TOKEN_MODULE = /^src\/modules\/[^/]+\/[^/]+\.token(?:\.[jt]s)?$/;
+
+// React Router @react-router/dev 8.5.1 vite.js server-only module rules.
+// Its client build refuses imports of these modules before they can enter the browser.
+const SERVER_FILE = /\.server(\.[cm]?[jt]sx?)?$/;
+const SERVER_DIRECTORY = /\/\.server\//;
 
 /**
  * Reports whether a token import written without `.ts` (`x.token` or
@@ -269,6 +278,27 @@ export async function scanPageSource(
   root?: string,
   resolveToken?: TokenResolver,
 ): Promise<readonly PageImportViolation[] | 'unreadable'> {
+  const page = await lexPage(path, source);
+  return page === 'unreadable' ? page : resolvePage(path, page, root, resolveToken);
+}
+
+/** A page as esbuild emits it, with its lexed imports: the path-independent half of a scan. */
+interface LexedPage {
+  readonly source: string;
+  readonly emitted: string;
+  readonly lexed: Extract<LexedImports, { kind: 'ok' }>;
+}
+
+/**
+ * Transforms and lexes one page source. Nothing here depends on where the page
+ * sits, only on its loader (its extension) and text, so one result serves every
+ * path a symlink gives the same file.
+ *
+ * @param path - The page, for its loader
+ * @param source - Its contents
+ * @returns The emitted code and its imports, or `unreadable` when esbuild or the lexer refuses it
+ */
+async function lexPage(path: string, source: string): Promise<LexedPage | 'unreadable'> {
   let emitted: string;
   try {
     emitted = (
@@ -283,7 +313,24 @@ export async function scanPageSource(
     return 'unreadable';
   }
   const lexed = lexImportSpecifiers(emitted);
-  if (lexed.kind !== 'ok') return 'unreadable';
+  return lexed.kind === 'ok' ? { source, emitted, lexed } : 'unreadable';
+}
+
+/**
+ * Resolves a lexed page's imports from one path: the path-dependent half of a scan.
+ *
+ * @param path - The page as walked, project-relative
+ * @param page - Its lexed form
+ * @param root - The project's absolute directory
+ * @param resolveToken - Checks a token import written without `.ts`
+ * @returns The violations, or `unreadable` when a glob call cannot be read
+ */
+async function resolvePage(
+  path: string,
+  { source, emitted, lexed }: LexedPage,
+  root?: string,
+  resolveToken?: TokenResolver,
+): Promise<readonly PageImportViolation[] | 'unreadable'> {
   const violations: PageImportViolation[] = [];
   const occurrences = new Map<string, number>();
   for (const span of lexed.spans) {
@@ -349,21 +396,46 @@ function globLine(
 const MAX_PAGE_DEPTH = 32;
 
 /**
- * Directories one walk reads. Without `realPath` a directory reached twice
- * through symlinks cannot be recognised, so several link loops multiply the
- * walk; this bound ends it whatever the links do.
+ * Directories one walk reads, aliases included. Every path a symlink gives a
+ * directory is walked unless it closes a cycle, and without `realPath` a cycle
+ * cannot be recognised at all, so cross-links can multiply the walk; this bound
+ * ends it whatever the links do, reporting the cut-off prefix as unreadable.
  */
 const MAX_PAGE_DIRECTORIES = 4096;
 
-/** One walk's state: what it has seen and what it has collected so far. */
+/** One walk's state: what it has collected so far. */
 interface PageWalk {
   readonly fs: IFileSystem;
   readonly dir: string;
-  readonly seen: Set<string>;
-  readonly pages: string[];
+  /** Each page as walked, with its real path when `realPath` resolved one. */
+  readonly pages: { readonly path: string; readonly real?: string }[];
   readonly unreadable: string[];
   directories: number;
   appReal?: string;
+}
+
+/** Whether a path below `app/` (starting with `/`) matches React Router's two server-only rules. */
+function serverOnlyInApp(inApp: string): boolean {
+  return SERVER_FILE.test(inApp) || SERVER_DIRECTORY.test(inApp);
+}
+
+/**
+ * Whether a page file is a React Router server-only module under both of the
+ * ids a bundler may test: its real path (Vite's default) and the path it was
+ * reached by (`resolve.preserveSymlinks: true`). A file server-only under only
+ * one of them is scanned, so a symlink cannot move a page out of the check.
+ *
+ * @param walk - The walk, holding the real path of `app/`
+ * @param relative - The page's path as walked, starting with `app/`
+ * @param real - The page's real path, already confirmed inside `app/`
+ * @returns `true` only when both paths are a `.server` file or under a `.server/` directory
+ */
+function isServerOnly(walk: PageWalk, relative: string, real: string): boolean {
+  // realInsideApp records app/'s real path before it confirms any path inside it.
+  return (
+    serverOnlyInApp(real.slice(walk.appReal!.length)) &&
+    serverOnlyInApp(relative.slice('app'.length))
+  );
 }
 
 /**
@@ -393,12 +465,25 @@ async function realInsideApp(
  * none becomes a silent pass: a page over {@linkcode MAX_EXISTING_FILE_BYTES}, a
  * directory past {@linkcode MAX_PAGE_DEPTH} or beyond
  * {@linkcode MAX_PAGE_DIRECTORIES}, a directory or page a symlink places outside
- * `app/`, and an entry whose `stat` or `readdir` fails (`ELOOP`, `EACCES`). With
- * `realPath` available a directory reached twice through symlinks is walked
- * once, so a link loop costs one visit; without it the directory bound ends the
- * walk.
+ * `app/`, and an entry whose `stat` or `readdir` fails (`ELOOP`, `EACCES`).
+ *
+ * Every path a symlink gives a directory is walked, because under
+ * `resolve.preserveSymlinks` each is its own module id and resolves relative
+ * imports from its own location. With `realPath` available a directory is
+ * skipped only when its real path is one of its own ancestors' (a link cycle
+ * such as `app/x -> .`); without it the directory bound ends the walk.
+ *
+ * @param walk - The walk's shared state
+ * @param prefix - The directory as walked, starting with `app`
+ * @param depth - Directories below `app/`
+ * @param ancestors - Real paths of the directories from `app/` down to this one's parent
  */
-async function pageFiles(walk: PageWalk, prefix: string, depth = 0): Promise<void> {
+async function pageFiles(
+  walk: PageWalk,
+  prefix: string,
+  depth = 0,
+  ancestors: ReadonlySet<string> = new Set(),
+): Promise<void> {
   const { fs, dir } = walk;
   const path = joinPath(dir, prefix);
   if (walk.directories >= MAX_PAGE_DIRECTORIES) {
@@ -406,6 +491,7 @@ async function pageFiles(walk: PageWalk, prefix: string, depth = 0): Promise<voi
     return;
   }
   walk.directories += 1;
+  let below = ancestors;
   if (fs.realPath !== undefined) {
     const real = await realInsideApp(walk, fs.realPath.bind(fs), path);
     if (real === 'missing') return;
@@ -413,8 +499,10 @@ async function pageFiles(walk: PageWalk, prefix: string, depth = 0): Promise<voi
       walk.unreadable.push(prefix);
       return;
     }
-    if (walk.seen.has(real)) return;
-    walk.seen.add(real);
+    // Only a cycle is skipped: a second, non-cycle path to a real directory is a
+    // second module location under preserveSymlinks, so it is scanned too.
+    if (ancestors.has(real)) return;
+    below = new Set([...ancestors, real]);
   }
   let entries: readonly string[];
   try {
@@ -434,17 +522,72 @@ async function pageFiles(walk: PageWalk, prefix: string, depth = 0): Promise<voi
     }
     if (stat.isDirectory) {
       if (depth >= MAX_PAGE_DEPTH) walk.unreadable.push(relative);
-      else await pageFiles(walk, relative, depth + 1);
+      else await pageFiles(walk, relative, depth + 1, below);
     } else if (stat.isFile && PAGE_FILE.test(entry)) {
       // A page file linked from outside `app/` is bundled like any other, so it
       // is resolved too: one that leaves `app/` is reported, never scanned as a page.
-      const outside =
-        fs.realPath !== undefined &&
-        (await realInsideApp(walk, fs.realPath.bind(fs), joinPath(dir, relative))) === 'outside';
-      (outside || stat.size > MAX_EXISTING_FILE_BYTES ? walk.unreadable : walk.pages).push(
-        relative,
-      );
+      const real =
+        fs.realPath === undefined
+          ? undefined
+          : await realInsideApp(walk, fs.realPath.bind(fs), joinPath(dir, relative));
+      const outside = real === 'outside';
+      // React Router tests the module id: the real path by default, the walked path
+      // under preserveSymlinks. Only a file server-only under both is skipped. A link
+      // inside a `.server/` directory that leaves app/ stays reported above.
+      if (
+        real !== undefined &&
+        real !== 'missing' &&
+        !outside &&
+        isServerOnly(walk, relative, real)
+      )
+        continue;
+      if (outside || stat.size > MAX_EXISTING_FILE_BYTES) walk.unreadable.push(relative);
+      else
+        walk.pages.push(
+          real === undefined || real === 'missing' ? { path: relative } : { path: relative, real },
+        );
     }
+  }
+}
+
+/**
+ * Loads shared by several walked paths. A key one path uses is never held; a
+ * key several paths use is held from its first take to its last, then dropped,
+ * so a project without aliases holds one page at a time.
+ *
+ * @internal - exported for its unit test, not from the package index
+ */
+export class SharedLoads<T> {
+  readonly #remaining = new Map<string, number>();
+  readonly #held = new Map<string, T>();
+
+  /** @param keys - Every key the walk will take, once per path; undefined is never shared */
+  constructor(keys: Iterable<string | undefined>) {
+    for (const key of keys)
+      if (key !== undefined) this.#remaining.set(key, (this.#remaining.get(key) ?? 0) + 1);
+  }
+
+  /** Loads currently held. */
+  get size(): number {
+    return this.#held.size;
+  }
+
+  /**
+   * The load for one path: the held one for a shared key, else a fresh one.
+   *
+   * @param key - The path's key, or undefined for a path that is never shared
+   * @param load - Starts the load
+   * @returns The load
+   */
+  take(key: string | undefined, load: () => T): T {
+    if (key === undefined) return load();
+    const left = this.#remaining.get(key)! - 1;
+    this.#remaining.set(key, left);
+    const held = this.#held.get(key);
+    const value = held ?? load();
+    if (left === 0) this.#held.delete(key);
+    else if (held === undefined) this.#held.set(key, value);
+    return value;
   }
 }
 
@@ -456,7 +599,9 @@ export interface PageImportScan {
 }
 
 /**
- * Scans every `app/**\/*.{ts,tsx}` for kernel value imports. A project without
+ * Scans page modules under `app/` for kernel value imports, excluding React Router
+ * `.server` files and directories only after realpath confirms containment in `app/`.
+ * A project without
  * `app/` has no pages and yields nothing.
  *
  * @param fs - The filesystem to read through
@@ -465,23 +610,39 @@ export interface PageImportScan {
  */
 export async function scanPageImports(fs: IFileSystem, dir: string): Promise<PageImportScan> {
   const violations: PageImportViolation[] = [];
-  const walk: PageWalk = { fs, dir, seen: new Set(), pages: [], unreadable: [], directories: 0 };
+  const walk: PageWalk = { fs, dir, pages: [], unreadable: [], directories: 0 };
   await pageFiles(walk, 'app');
   const unreadable = walk.unreadable.sort();
   const decoder = new TextDecoder();
   const resolveToken = tokenResolverFor(fs, dir);
-  for (const path of walk.pages.sort()) {
-    // A page `stat` could see may still fail to read (EACCES, or removed since
-    // the walk): it is reported like any other page the check cannot read.
+  const root = dir.replace(/\/+$/, '');
+  // Every symlink path to a file is scanned, so a file several paths reach is read
+  // and lexed once, keyed by loader and real path; only resolving its specifiers
+  // happens per path.
+  const keyOf = ({ path, real }: { path: string; real?: string }): string | undefined =>
+    real === undefined ? undefined : `${loaderFor(path)}\0${real}`;
+  const shared = new SharedLoads<Promise<LexedPage | 'unreadable' | undefined>>(
+    walk.pages.map(keyOf),
+  );
+  const load = async (path: string): Promise<LexedPage | 'unreadable' | undefined> => {
     let source: string;
     try {
       source = decoder.decode(await fs.readFile(joinPath(dir, path)));
     } catch {
-      unreadable.push(path);
-      continue;
+      return undefined;
     }
-    const result = await scanPageSource(path, source, dir.replace(/\/+$/, ''), resolveToken);
-    if (result === 'unreadable') unreadable.push(path);
+    return lexPage(path, source);
+  };
+  for (const page of walk.pages.sort((a, b) => (a.path < b.path ? -1 : 1))) {
+    const loading = shared.take(keyOf(page), () => load(page.path));
+    // A page `stat` could see may still fail to read (EACCES, or removed since
+    // the walk): it is reported like any other page the check cannot read.
+    const lexed = await loading;
+    const result =
+      lexed === undefined || lexed === 'unreadable'
+        ? 'unreadable'
+        : await resolvePage(page.path, lexed, root, resolveToken);
+    if (result === 'unreadable') unreadable.push(page.path);
     else violations.push(...result);
   }
   return { violations, unreadable };

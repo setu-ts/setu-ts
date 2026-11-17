@@ -57,6 +57,15 @@ describe('the transport module', () => {
           const value = input({ broker, host, rpc });
           const module = renderTransportModule(value);
           const shape = transportModuleShape(value);
+          expect(module).toContain("import type { RuntimeOptions } from '@setu-ts/runtime';");
+          expect(module).toContain(
+            `export function runtimeOptions(): RuntimeOptions {\n  return ${rpc === 'grpc' ? '{ http2: true }' : '{}'};\n}`,
+          );
+          // The TLS form is named only where it applies: a member that serves gRPC.
+          expect(
+            module.includes('RuntimePlugin({ http2: { key, cert } }) with discovery secure: true'),
+          ).toBe(rpc === 'grpc');
+          expect(module.includes('this member does not serve gRPC')).toBe(rpc !== 'grpc');
           expect(module.includes('export function messagingOptions(')).toBe(shape.messaging);
           expect(module.includes('export function queueOptions(')).toBe(shape.queue);
           expect(module.includes('export function csrfExclusions(')).toBe(shape.csrf);
@@ -89,7 +98,7 @@ describe('the transport module', () => {
   it('returns the same options the standalone overlay passes, on a plugin-list host', () => {
     const module = renderTransportModule(input({ broker: 'redis' }));
     expect(module).toContain(
-      "  return {\n    broker: 'redis-streams',\n    url: Deno.env.get('REDIS_URL') ??\n      'redis://127.0.0.1:6379',\n  };",
+      "  return {\n    broker: 'redis-streams',\n    url: Deno.env.get('REDIS_URL') ||\n      'redis://127.0.0.1:6379',\n  };",
     );
     expect(module).toContain("    adapter: 'redis',");
   });
@@ -115,9 +124,7 @@ describe('the transport module', () => {
     expect(redis).toContain(
       'export function messagingOptions(config: IConfig): StarterMessagingOptions {',
     );
-    expect(redis).toContain(
-      "config.get<string>('REDIS_URL', { default: 'redis://127.0.0.1:6379' })",
-    );
+    expect(redis).toContain("config.get<string>('REDIS_URL') || 'redis://127.0.0.1:6379'");
     // NATS has no queue arm: the queue stays in memory and reads nothing.
     const nats = renderTransportModule(input({ broker: 'nats', host: 'app-factory' }));
     expect(nats).toContain('export function queueOptions(_config: IConfig): StarterQueueOptions {');
@@ -166,5 +173,40 @@ describe('the transport module', () => {
     expect(http).not.toContain('new RegExp');
     // The config's own reader refuses a backslash or a regex literal.
     expect(grpc).not.toContain('\\');
+  });
+});
+
+describe('the transport module — gRPC callers (M139b §3.12)', () => {
+  it('registers the client only, serving nothing, for a member that calls gRPC members', () => {
+    const module = renderTransportModule(input({ grpcTargets: ['billing', 'tax-rates'] }));
+    expect(module).toContain("import { GrpcPlugin } from '@setu-ts/grpc-plugin';");
+    expect(module).toContain(
+      "  return [GrpcPlugin({ serve: false, clients: { billing: { basePath: '/grpc' }, 'tax-rates': { basePath: '/grpc' } } })];",
+    );
+    expect(module).toContain(
+      " * The plugins this member's RPC style adds: `GrpcPlugin` for calling `billing`, `tax-rates` only — this member serves no gRPC.",
+    );
+  });
+
+  it('adds the clients to a gRPC member that also calls, and exempts only its own mount', () => {
+    const module = renderTransportModule(
+      input({ host: 'app-factory', rpc: 'grpc', grpcTargets: ['billing'] }),
+    );
+    expect(module).toContain(
+      "  return [GrpcPlugin({ basePath: '/grpc', clients: { billing: { basePath: '/grpc' } } })];",
+    );
+    expect(module).toContain(
+      " * The plugins this member's RPC style adds: `GrpcPlugin`, mounted under `/grpc`, with clients for `billing`.",
+    );
+    expect(module).toContain("  return [new RegExp('^/grpc(?:/|$)')];");
+  });
+
+  it('a caller on an app-factory host exempts nothing from CSRF', () => {
+    const module = renderTransportModule(input({ host: 'app-factory', grpcTargets: ['billing'] }));
+    expect(module).toContain('export function csrfExclusions(): readonly RegExp[] {\n  return [];');
+  });
+
+  it('an empty target list renders as before', () => {
+    expect(renderTransportModule(input({ grpcTargets: [] }))).toBe(renderTransportModule(input()));
   });
 });

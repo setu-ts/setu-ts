@@ -147,8 +147,9 @@ export interface ScopedHarness extends ScopedRbac {
 export function scopedHarness(
   options: ScopedRbacOptions,
   rbac: RbacConfig = CATALOGUE,
+  confineScopedTokens = true,
 ): ScopedHarness {
-  const config = compileScopedRbac(options, rbac, true);
+  const config = compileScopedRbac(options, rbac, true, confineScopedTokens);
   const timing = manualTiming();
   const logger = recordingLogger();
   const parts = createScopedRbac(config, timing, () => logger);

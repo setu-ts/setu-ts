@@ -19,6 +19,22 @@ function createProvider(kind: 'consul' | 'kubernetes', http: IDiscoveryHttp, run
       );
 }
 
+/**
+ * A failed probe's outcome per provider: Consul resolves `false`, while the
+ * Kubernetes provider rejects with the reason since M139f (X10-3).
+ */
+function failed(kind: 'consul' | 'kubernetes'): false | 'rejected' {
+  return kind === 'consul' ? false : 'rejected';
+}
+
+/** Settles a probe into its value, or `'rejected'`. */
+function settle(read: Promise<boolean>): Promise<boolean | 'rejected'> {
+  return read.then(
+    (value) => value,
+    () => 'rejected' as const,
+  );
+}
+
 describe.each(['consul', 'kubernetes'] as const)('%s probe cancellation', (kind) => {
   it('aborts a hung probe request at 2000 ms through the runtime timer', async () => {
     const runtime = createFakeRuntime();
@@ -33,12 +49,10 @@ describe.each(['consul', 'kubernetes'] as const)('%s probe cancellation', (kind)
       },
       stream: () => Promise.reject(new Error('unused stream')),
     };
-    const read = createProvider(kind, http, runtime)
-      .isHealthy()
-      .then((value) => {
-        settled = true;
-        return value;
-      });
+    const read = settle(createProvider(kind, http, runtime).isHealthy()).then((value) => {
+      settled = true;
+      return value;
+    });
     await Promise.resolve();
     expect(signal).toBeInstanceOf(AbortSignal);
     expect(signal?.aborted).toBe(false);
@@ -50,7 +64,7 @@ describe.each(['consul', 'kubernetes'] as const)('%s probe cancellation', (kind)
     runtime.advance(1);
     runtime.runTimeouts();
     expect(signal?.aborted).toBe(true);
-    expect(await read).toBe(false);
+    expect(await read).toBe(failed(kind));
     expect(runtime.timeouts[0]?.cleared).toBe(true);
   });
 
@@ -63,7 +77,9 @@ describe.each(['consul', 'kubernetes'] as const)('%s probe cancellation', (kind)
           ? { error: new Error('unreachable') }
           : { status: outcome === 'success' ? 200 : 503 },
       ]);
-      expect(await createProvider(kind, http, runtime).isHealthy()).toBe(outcome === 'success');
+      expect(await settle(createProvider(kind, http, runtime).isHealthy())).toBe(
+        outcome === 'success' ? true : failed(kind),
+      );
       const init = http.calls[0]?.init;
       expect(init?.signal).toBeInstanceOf(AbortSignal);
       expect(init?.signal?.aborted).toBe(false);

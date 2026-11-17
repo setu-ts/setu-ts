@@ -89,7 +89,7 @@ export async function resolveNewChoices(
     if (selection.kind === 'cancelled') return false;
     if (selection.kind === 'unavailable') return true;
     flags[flag] = selection.value;
-    log(`${question} ${selection.value}`);
+    if (selection.shown !== true) log(`${question} ${selection.value}`);
     return true;
   }
 
@@ -147,7 +147,7 @@ export async function resolveNewChoices(
       // The default arm records NOTHING: an absent flag is exactly how the
       // pipeline — and `--yes` — reach MINIMAL_HOST.
       if (selection.value !== TEMPLATE_PROMPT_DEFAULT) flags['template'] = selection.value;
-      log(`Template? ${selection.value}`);
+      if (selection.shown !== true) log(`Template? ${selection.value}`);
     }
   }
 

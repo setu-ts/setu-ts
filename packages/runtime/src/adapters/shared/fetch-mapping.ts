@@ -14,6 +14,7 @@
  */
 
 import type { FormBody, HttpMethod, IRequest, ResponseSnapshot } from '@setu-ts/common';
+import { detectRuntime } from '../../detector/runtime-detector.ts';
 import {
   installRequestIdentityGuard,
   parseFormBody,
@@ -122,13 +123,15 @@ function bodyReadFailure(error: unknown, maxBodyBytes?: number): never {
  * fresh object literal per request carrying three closures, which gave every
  * request its own hidden class and made these call sites megamorphic. Defining
  * the same members once on a prototype is the discipline `@hono/node-server`
- * and Fastify both use for their own per-request objects.
+ * uses for its own per-request objects.
  */
 class FrameworkRequest implements IRequest {
   readonly method: HttpMethod;
   readonly url: string;
   readonly path: string;
   readonly ip?: string;
+  // Always assigned, so h1 and h2 requests share one hidden class.
+  readonly responseTrailers: boolean;
 
   readonly #raw: Request;
   #body: Promise<Uint8Array> | undefined;
@@ -144,6 +147,7 @@ class FrameworkRequest implements IRequest {
     path: string,
     maxBodyBytes?: number,
     peerAddress?: string,
+    responseTrailers = false,
   ) {
     // The single-write guard over `user`, `tenant` and `locale` lives on this
     // class's prototype, installed by the first construction (idempotent after
@@ -157,6 +161,7 @@ class FrameworkRequest implements IRequest {
     this.url = url;
     this.path = path;
     this.#maxBodyBytes = maxBodyBytes;
+    this.responseTrailers = responseTrailers;
     const ip = normalizePeerAddress(peerAddress);
     if (ip !== undefined) this.ip = ip;
   }
@@ -290,7 +295,8 @@ class FrameworkRequest implements IRequest {
         (error: unknown) => bodyReadFailure(error),
       );
     }
-    return readBounded(this.#raw, this.#maxBodyBytes).catch((error: unknown) =>
+    const cancelOnRefusal = !releasesOnRefusal(this.ip, this.#raw.headers.get('content-type'));
+    return readBounded(this.#raw, this.#maxBodyBytes, cancelOnRefusal).catch((error: unknown) =>
       bodyReadFailure(error, this.#maxBodyBytes),
     );
   }
@@ -310,7 +316,9 @@ class FrameworkRequest implements IRequest {
  * at most one chunk beyond the limit is ever held. The reader is cancelled on
  * refusal rather than merely abandoned: an abandoned `ReadableStream` holds its
  * source open (the M70k HEAD-descriptor-leak class), which on a server means
- * the connection stays draining.
+ * the connection stays draining. The one exception is
+ * {@linkcode releasesOnRefusal}: Node's in-memory undici FormData producer can
+ * enqueue after cancel and crash the process, so that body releases its lock.
  *
  * `raw.body` is read only on this path. That matters on Node, where touching
  * `.body` materializes the full undici `Request` the lightweight facade exists
@@ -318,10 +326,15 @@ class FrameworkRequest implements IRequest {
  *
  * @param raw - The web-standard request
  * @param maxBodyBytes - The cap, in bytes
+ * @param cancelOnRefusal - False only where {@linkcode releasesOnRefusal} holds
  * @returns The body bytes
  * @throws {RequestBodyTooLargeError} When the body exceeds the cap
  */
-async function readBounded(raw: Request, maxBodyBytes: number): Promise<Uint8Array> {
+async function readBounded(
+  raw: Request,
+  maxBodyBytes: number,
+  cancelOnRefusal: boolean,
+): Promise<Uint8Array> {
   const stream = raw.body;
   if (stream === null) {
     // Framing headers were present but there is no stream: an empty body.
@@ -347,7 +360,17 @@ async function readBounded(raw: Request, maxBodyBytes: number): Promise<Uint8Arr
     // Releasing the lock is not enough — the source stays open until the
     // stream is cancelled. `cancel()` rejects on an already-errored stream,
     // which must not replace the refusal with a different failure.
-    await reader.cancel().catch(() => {});
+    if (cancelOnRefusal) await reader.cancel().catch(() => {});
+    else {
+      // undici's in-memory FormData producer can enqueue after cancel and crash Node.
+      // A request with a socket peer, or any request off Node, still cancels, so its
+      // socket stops draining on refusal.
+      try {
+        reader.releaseLock();
+      } catch {
+        /* Preserve the original body-read result. */
+      }
+    }
   }
 
   // One chunk is the overwhelmingly common case; returning it directly avoids
@@ -362,6 +385,36 @@ async function readBounded(raw: Request, maxBodyBytes: number): Promise<Uint8Arr
     offset += chunk.byteLength;
   }
   return body;
+}
+
+/** Only undici's generated, unquoted FormData content type; media types are case-insensitive. */
+const UNDICI_FORM_DATA = /^multipart\/form-data; boundary=----formdata-undici-0\d{11}$/i;
+
+/**
+ * Whether a capped read that refuses a body releases its reader instead of cancelling it.
+ *
+ * Only Node's in-memory undici FormData producer can enqueue after cancel and crash the
+ * process (`ERR_INVALID_STATE`), so only a Node host releases. There, a request with no socket
+ * peer is in-process (`app.fetch` on any adapter, including one forced by `platform`) or its
+ * socket is already closed, where cancelling drains nothing. A served request with a peer, and
+ * every request on Bun, Deno or Workers, cancels: their hosts can serve a peer-less request.
+ *
+ * @param ip - The request's normalized socket peer, if any
+ * @param contentType - The request's `content-type` header
+ * @param globals - Injectable global scope for host detection
+ * @returns True only for a peer-less undici FormData body on a Node host
+ * @internal
+ */
+export function releasesOnRefusal(
+  ip: string | undefined,
+  contentType: string | null,
+  globals: typeof globalThis = globalThis,
+): boolean {
+  return (
+    ip === undefined &&
+    UNDICI_FORM_DATA.test(contentType ?? '') &&
+    detectRuntime(globals) === 'node'
+  );
 }
 
 /**
@@ -438,6 +491,39 @@ export function extractPath(url: string): string {
 }
 
 /**
+ * What the adapter knows about the connection a request arrived on, and the
+ * request itself cannot be trusted to say (M139b §3.4–§3.5).
+ */
+export interface ListenerTransport {
+  /**
+   * The scheme of the listener — `https` only when the adapter terminated TLS.
+   * The request's own URL is rewritten to it: over cleartext HTTP/2 the scheme
+   * comes from the client's `:scheme`, and over HTTP/1.1 an absolute-form
+   * request line sets it, so either way a client could claim `https` on a
+   * plain connection (V12-51). Omitted, the URL is used as given — the
+   * Workers platform and in-process callers own theirs.
+   */
+  readonly scheme?: 'http' | 'https';
+  /** Whether the response to this request can carry trailers. */
+  readonly responseTrailers?: boolean;
+}
+
+/**
+ * Replaces a URL's scheme with the listener's, leaving authority, path and
+ * query untouched. The common case — the URL already carries the listener's
+ * scheme — is one `startsWith` and no allocation.
+ *
+ * @param url - An absolute request URL
+ * @param scheme - The listener's scheme
+ * @returns The URL under the listener's scheme
+ */
+export function withListenerScheme(url: string, scheme: 'http' | 'https'): string {
+  if (url.startsWith(scheme) && url.startsWith('://', scheme.length)) return url;
+  const separator = url.indexOf('://');
+  return separator === -1 ? url : `${scheme}${url.slice(separator)}`;
+}
+
+/**
  * Maps a web-standard `Request` to the framework's `IRequest`.
  *
  * Body access is memoized-lazy — see {@linkcode FrameworkRequest}, so the
@@ -453,20 +539,25 @@ export function extractPath(url: string): string {
  *   header can disable. `RuntimePlugin({ maxBodyBytes })` is what threads it
  *   here.
  * @param peerAddress - Optional socket peer supplied by the runtime host
+ * @param transport - What the adapter knows about the connection
  * @returns The framework request
  */
 export function mapWebRequestToFrameworkRequest(
   request: Request,
   maxBodyBytes?: number,
   peerAddress?: string,
+  transport?: ListenerTransport,
 ): IRequest {
+  const scheme = transport?.scheme;
+  const url = scheme === undefined ? request.url : withListenerScheme(request.url, scheme);
   return new FrameworkRequest(
     request,
     request.method.toUpperCase() as HttpMethod,
-    request.url,
-    extractPath(request.url),
+    url,
+    extractPath(url),
     maxBodyBytes,
     peerAddress,
+    transport?.responseTrailers === true,
   );
 }
 
@@ -514,7 +605,7 @@ function normalizePeerAddress(address: string | undefined): string | undefined {
  * the request died with an unhandled `TypeError`.
  *
  * The body is therefore dropped rather than the throw being propagated, which
- * is what Express and Fastify both do and what RFC 9110 §15.3.5 implies — a
+ * is what RFC 9110 §15.3.5 implies — a
  * `204` has no content, so serving it without one is the conformant answer.
  * Headers are left alone: RFC 9110 permits representation metadata on a `204`.
  */
@@ -534,9 +625,14 @@ const NULL_BODY_STATUSES: ReadonlySet<number> = new Set([204, 205, 304]);
  * leaking.
  *
  * @param snapshot - The response snapshot
+ * @param streamBody - A stream to send in place of a streaming snapshot's own
+ *   body — an adapter that wraps the body (to write trailers) passes it here
  * @returns A web-standard `Response`
  */
-export function mapSnapshotToWebResponse(snapshot: ResponseSnapshot): Response {
+export function mapSnapshotToWebResponse(
+  snapshot: ResponseSnapshot,
+  streamBody?: ReadableStream<Uint8Array>,
+): Response {
   const { status, body, streaming } = snapshot;
   // Consult the kernel's typed init protocol before public `headers`: reading
   // that live view materializes a framework Headers object, while the common
@@ -551,7 +647,7 @@ export function mapSnapshotToWebResponse(snapshot: ResponseSnapshot): Response {
     // the stream is already errored or locked, which must not replace a valid
     // response with a throw, so the rejection is swallowed.
     if (streaming && body !== null) {
-      void body.cancel().catch(() => {});
+      void (streamBody ?? body).cancel().catch(() => {});
     }
     return new Response(null, { status, headers });
   }
@@ -560,7 +656,7 @@ export function mapSnapshotToWebResponse(snapshot: ResponseSnapshot): Response {
     // Pass the ReadableStream straight through — the web fetch model pumps it
     // lazily on every platform (Node/Deno/Bun/Workers) with no buffer-then-send.
     // ReadableStream<Uint8Array> is a valid BodyInit, so no cast needed.
-    return new Response(body, { status, headers });
+    return new Response(streamBody ?? body, { status, headers });
   }
 
   // Buffered path — unchanged from M23.

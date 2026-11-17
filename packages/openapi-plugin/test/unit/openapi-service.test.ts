@@ -106,6 +106,41 @@ describe('OpenApiService', () => {
     } as unknown as IApplication;
   });
 
+  it.each([
+    {
+      options: { license: { name: 'MIT', identifier: 'MIT', url: '/license' } },
+      reason: 'license-identifier-and-url',
+    },
+    { options: { tags: [{ name: 'users' }, { name: 'users' }] }, reason: 'duplicate-tag' },
+  ])('refuses $reason at service construction before getSpec', ({ options, reason }) => {
+    expect(() => new OpenApiService({ app, ...options })).toThrow(
+      expect.objectContaining({ name: 'OpenApiDocumentOptionsError', reason }),
+    );
+  });
+
+  it('passes every document option to getSpec', () => {
+    const metadata = {
+      contact: { email: 'team@example.com' },
+      license: { name: 'MIT', url: '/license' },
+      termsOfService: '/terms',
+      tags: [{ name: 'users' }],
+      externalDocs: { url: '/guide' },
+    };
+    expect(new OpenApiService({ app, ...metadata }).getSpec()).toEqual({
+      openapi: '3.1.0',
+      info: {
+        title: 'API',
+        version: '1.0.0',
+        contact: metadata.contact,
+        license: metadata.license,
+        termsOfService: metadata.termsOfService,
+      },
+      paths: {},
+      tags: metadata.tags,
+      externalDocs: metadata.externalDocs,
+    });
+  });
+
   it('should generate spec on first getSpec call', () => {
     const service = new OpenApiService({
       app,

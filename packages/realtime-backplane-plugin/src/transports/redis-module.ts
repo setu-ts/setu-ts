@@ -47,12 +47,14 @@ export function adaptRedisModule(module: unknown): IRedisModule {
     );
   }
 
+  /** The options the transport passes, forwarded to ioredis unchanged. */
+  type ClientOptions = Parameters<IRedisModule['create']>[1];
   const RedisCtor = constructor as new (
     url: string,
-    options?: { readonly commandTimeout?: number },
+    options?: ClientOptions,
   ) => IRedisBackplaneClient;
   return {
-    create: (url: string, options?: { readonly commandTimeout?: number }): IRedisBackplaneClient =>
+    create: (url: string, options?: ClientOptions): IRedisBackplaneClient =>
       new RedisCtor(url, options),
   };
 }

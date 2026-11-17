@@ -123,7 +123,7 @@ const out: Record<string, unknown> = {};
 
 const read = async (url: string) => {
   const r = await app.fetch(new Request(url));
-  return { status: r.status, body: await r.text(), widgetHeader: r.headers.get('x-widget') };
+  return { status: r.status, body: await r.text(), widgetHeader: r.headers.get('server-timing') };
 };
 
 // route: the generated route group answers. middleware: its header is on that response.
@@ -363,7 +363,7 @@ const out: Record<string, unknown> = {};
 
 const r = await app.fetch(new Request('http://x/widget-route/'));
 out['route'] = { status: r.status, body: await r.text() };
-out['middlewareHeader'] = r.headers.get('x-widget');
+out['middlewareHeader'] = r.headers.get('server-timing');
 
 const c = await app.fetch(new Request('http://x/gadget-ctl/'));
 out['controller'] = { status: c.status, body: await c.text() };
@@ -483,7 +483,7 @@ try {
     // Function controllers register their own routes through the controllers barrel.
     expect(result['controller']).toEqual({ status: 200, body: '{"items":[]}' });
     // The generated middleware was added at its own declared priority, and ran.
-    expect(result['middlewareHeader']).toBe('true');
+    expect(result['middlewareHeader']).toMatch(/^widget;dur=\d+\.\d$/);
     // The generated plugin was spread into `createApplication({ plugins })`.
     expect(result['pluginToken']).toBe('widget');
   });
@@ -543,7 +543,7 @@ try {
       // The generated route module was called with `app.router` from `createApp()`.
       expect(result['route']).toEqual({ status: 200, body: '{"items":[]}' });
       // The generated middleware was added, and ran — its header is on that response.
-      expect(result['middlewareHeader']).toBe('true');
+      expect(result['middlewareHeader']).toMatch(/^widget;dur=\d+\.\d$/);
       // The module answers in whichever style this host generates: the M58
       // decorated aggregate, or the M65 functional route module.
       expect(result['module']).toEqual({ status: 200, body: '{"items":[]}' });
@@ -630,7 +630,7 @@ try {
 
     // The HTTP and DI results the class-based arm already asserts.
     expect(result['route']).toEqual({ status: 200, body: '{"items":[]}' });
-    expect(result['middlewareHeader']).toBe('true');
+    expect(result['middlewareHeader']).toMatch(/^widget;dur=\d+\.\d$/);
     expect(result['module']).toEqual({ status: 200, body: '{"items":[]}' });
     expect(result['pluginToken']).toBe('widget');
     expect(result['healthChecks']).toContain('widget');

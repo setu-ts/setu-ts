@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ILogger, LogLevel, LogMetadata } from '@setu-ts/common';
 import { createRedactionService } from '@setu-ts/common';
@@ -159,6 +159,24 @@ describe('PinoLogger', () => {
       // pino not available — the error path should be exercised.
     }
     await expect(PinoLogger.create({ level: 'info' })).rejects.toThrow(/PinoLogger requires Pino/);
+  });
+
+  // The logger cannot tell which package manager the project uses, so a Node or
+  // Bun project must not be told only to run `deno add`.
+  it('names every package manager when Pino fails to load', async () => {
+    vi.resetModules();
+    vi.doMock('pino', () => {
+      throw new Error('Cannot find package pino');
+    });
+    try {
+      const { PinoLogger: Fresh } = await import('../../src/loggers/pino-logger.ts');
+      const failure = Fresh.create({ level: 'info' });
+      await expect(failure).rejects.toThrow('npm i pino · bun add pino · deno add npm:pino');
+      await expect(failure).rejects.toThrow(/or use the console transport/);
+    } finally {
+      vi.doUnmock('pino');
+      vi.resetModules();
+    }
   });
 
   it('passes bindings as base to Pino', async () => {

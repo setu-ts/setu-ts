@@ -100,7 +100,12 @@ describe('GrpcPlugin — descriptor', () => {
     const plugin = GrpcPlugin();
     expect(plugin.name).toBe('grpc-plugin');
     expect(plugin.provides).toEqual([CAPABILITIES.GRPC]);
-    expect(plugin.optionalDependencies).toEqual(['logger', CAPABILITIES.HEALTH]);
+    expect(plugin.optionalDependencies).toEqual([
+      'logger',
+      CAPABILITIES.HEALTH,
+      CAPABILITIES.SERVICE_DISCOVERY,
+      CAPABILITIES.TELEMETRY,
+    ]);
     expect(plugin.priority).toBe(PLUGIN_PRIORITY.NORMAL);
   });
 });
@@ -214,5 +219,123 @@ describe('GrpcPlugin — no logger capability', () => {
     const harness = createHarness({ logger: false });
     await GrpcPlugin({ connectModule: runtimeWith() }).register?.(harness.ctx);
     expect(harness.registered.has(CAPABILITIES.GRPC)).toBe(true);
+  });
+});
+
+describe('GrpcPlugin — calling side (M139b §3.12)', () => {
+  it('serve: false claims nothing and serves no procedure, health or reflection', async () => {
+    const harness = createHarness();
+    const runtime = runtimeWith();
+    await GrpcPlugin({ connectModule: runtime, serve: false, basePath: '/grpc' }).register?.(
+      harness.ctx,
+    );
+    const service = harness.registered.get(CAPABILITIES.GRPC) as IGrpcService;
+    for (const path of [
+      '/grpc',
+      `/grpc/${HEALTH}/Check`,
+      `/grpc/${REFLECTION}/ServerReflectionInfo`,
+    ]) {
+      expect(service.claims?.(new Request(`http://x${path}`, { method: 'POST' }))).toBe(false);
+    }
+    expect(service.streamsRequest?.(new Request(`http://x/grpc/${HEALTH}/Check`))).toBe(false);
+    const reply = await service.handleRequest(
+      new Request(`http://x/grpc/${HEALTH}/Check`, { method: 'POST' }),
+    );
+    expect(reply.status).toBe(404);
+    expect(runtime.routerOptions).toHaveLength(0);
+    expect(runtime.registered).toHaveLength(0);
+  });
+
+  it('serve defaults to true', async () => {
+    const harness = createHarness();
+    const runtime = runtimeWith();
+    await GrpcPlugin({ connectModule: runtime, basePath: '/grpc' }).register?.(harness.ctx);
+    const service = harness.registered.get(CAPABILITIES.GRPC) as IGrpcService;
+    expect(service.claims?.(new Request(`http://x/grpc/${HEALTH}/Check`, { method: 'POST' }))).toBe(
+      true,
+    );
+    await service.handleRequest(new Request(`http://x/grpc/${HEALTH}/Check`, { method: 'POST' }));
+    expect(runtime.routerOptions).toHaveLength(1);
+  });
+
+  it.each([
+    [{ serve: 'no' }, 'GrpcPlugin: serve must be a boolean, received no'],
+    [
+      { serve: false, services: [{ definition: { typeName: 'a.B', method: {} } }] },
+      'GrpcPlugin: serve: false serves nothing, so services must be empty',
+    ],
+    [
+      { clients: { billing: { basePath: 'grpc' } } },
+      'GrpcPlugin: clients["billing"]: basePath must be \'\' or start with \'/\' and not end with one, received "grpc"',
+    ],
+    // A URL key is named by its origin only, never its path.
+    [
+      { clients: { 'http://billing:3410/s3cret-path': { timeoutMs: 0 } } },
+      'GrpcPlugin: clients["http://billing:3410"]: timeoutMs must be an integer from 1 to 2147483647, received 0',
+    ],
+    // A key is a target: refused the same way, unechoed.
+    [
+      { clients: { 'http://u:s3cret@billing': { timeoutMs: 0 } } },
+      'grpc client: a target must not carry credentials (user:password@); send them as call headers',
+    ],
+    [
+      { clients: { 'http://billing?token=s3cret': {} } },
+      'grpc client: a target URL must not carry a query or fragment; Connect never sends them',
+    ],
+  ])('refuses %j at construction', (options, message) => {
+    expect(() => GrpcPlugin(options as never)).toThrow(new TypeError(message));
+  });
+
+  it('resolves discovery when a client is made, and closes clients with the service', async () => {
+    const registered = new Map<string, unknown>();
+    const closeHooks: Array<() => void | Promise<void>> = [];
+    const ctx = {
+      services: {
+        has: (token: string) => registered.has(token),
+        get(token: string) {
+          if (!registered.has(token)) throw new Error(`Service not registered: ${token}`);
+          return registered.get(token);
+        },
+        register: (token: string, service: unknown) => registered.set(token, service),
+      },
+      health: { register: () => {} },
+      lifecycle: { onClose: (hook: () => void) => closeHooks.push(hook) },
+    } as unknown as IPluginContext;
+    await GrpcPlugin({ connectModule: runtimeWith(), serve: false }).register?.(ctx);
+    const service = registered.get(CAPABILITIES.GRPC) as IGrpcService;
+    const definition = { typeName: 'billing.v1.BillingService', method: {} };
+    expect(() => service.client?.(definition, 'billing')).toThrow(TypeError);
+    registered.set(CAPABILITIES.SERVICE_DISCOVERY, { pick: () => Promise.resolve(null) });
+    registered.set(CAPABILITIES.TELEMETRY, { withSpan: () => undefined });
+    const client = service.client?.(definition, 'billing') as {
+      transport: { unary(...args: unknown[]): Promise<unknown> };
+    };
+    await expect(client.transport.unary({}, undefined, undefined, undefined, {})).rejects.toThrow(
+      'no instance of "billing" is available',
+    );
+    for (const hook of closeHooks) await hook();
+    await expect(client.transport.unary({}, undefined, undefined, undefined, {})).rejects.toThrow(
+      'the gRPC client is closed',
+    );
+  });
+
+  it('a registry that throws on lookup reads as no discovery', async () => {
+    const registered = new Map<string, unknown>();
+    const ctx = {
+      services: {
+        has: () => {
+          throw new Error('registry broke');
+        },
+        get: (token: string) => registered.get(token),
+        register: (token: string, service: unknown) => registered.set(token, service),
+      },
+      health: { register: () => {} },
+      lifecycle: { onClose: () => {} },
+    } as unknown as IPluginContext;
+    await GrpcPlugin({ connectModule: runtimeWith(), serve: false }).register?.(ctx);
+    const service = registered.get(CAPABILITIES.GRPC) as IGrpcService;
+    expect(() => service.client?.({ typeName: 'a.B', method: {} }, 'billing')).toThrow(
+      'no service discovery is registered',
+    );
   });
 });

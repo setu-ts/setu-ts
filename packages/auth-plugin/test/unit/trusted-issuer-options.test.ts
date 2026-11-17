@@ -187,3 +187,36 @@ describe('TrustedIssuer validation at construction', () => {
     expect(plugin.provides).not.toContain('jwt');
   });
 });
+
+describe('M139a issuer options and URL classification', () => {
+  it.each(['', 42, null])('refuses tenantClaim %j', (tenantClaim) => {
+    expect(() => compileIssuers([{ ...base, tenantClaim } as unknown as TrustedIssuer])).toThrow(
+      AuthPluginConfigurationError,
+    );
+  });
+  it('retains a validated tenantClaim', () => {
+    expect(compileIssuers([{ ...base, tenantClaim: 'tid' }])[0].tenantClaim).toBe('tid');
+  });
+  it.each(['http://acme.localhost/keys', 'http://a.b.localhost/keys'])(
+    'refuses server-fetched %s',
+    (url) => {
+      expect(() => compileIssuers([{ ...base, keys: { jwksUri: url } }])).toThrow(
+        'http on localhost, 127.0.0.1 or [::1]',
+      );
+      expect(() => compileIssuers([{ ...base, issuer: url, keys: { discovery: true } }])).toThrow(
+        'http on localhost, 127.0.0.1 or [::1]',
+      );
+    },
+  );
+  it('uses the name rule for browser URLs with printable ASCII', () => {
+    expect(isAcceptableUrl('http://acme.localhost/path')).toBe(true);
+    for (const url of [
+      'http://localhost.evil.test',
+      'http://evil-localhost',
+      'http://127.0.0.2',
+      'https://idp.test/\n',
+      'https://idp.test/é',
+    ])
+      expect(isAcceptableUrl(url)).toBe(false);
+  });
+});

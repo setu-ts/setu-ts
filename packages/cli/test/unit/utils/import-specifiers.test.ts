@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { lexImportSpecifiers, readImportSpecifiers } from '../../../src/utils/import-specifiers.ts';
+import {
+  hasNonImportBinding,
+  lexImportSpecifiers,
+  readImportSpecifiers,
+} from '../../../src/utils/import-specifiers.ts';
 
 const SOURCE = [
   "import { b } from './b.ts';",
@@ -25,6 +29,75 @@ const SOURCE = [
 ].join('\n');
 
 describe('lexImportSpecifiers', () => {
+  it.each([
+    ["import Default from './x.ts'", ['Default'], []],
+    ["import type Default from './x.ts'", ['Default'], []],
+    ["import {} from './x.ts'", [], []],
+    ["import { same as same } from './x.ts'", ['same'], ['same']],
+    ["import { type as local } from './x.ts'", ['local'], []],
+    ["import { type T as Alias, A } from './x.ts'", ['Alias', 'A'], ['A']],
+    ["import Default, * as namespace from './x.ts'", ['Default', 'namespace'], []],
+    ["import './x.ts'", [], []],
+    ["import { A } from './x.ts' assert { type: 'json' }", ['A'], ['A']],
+  ] as const)('reads bindings and value names in %s', (source, bindings, named) => {
+    const lexed = lexImportSpecifiers(source);
+    if (lexed.kind !== 'ok') throw new Error(lexed.reason);
+    expect(lexed.spans[0]?.declaration).toEqual({ start: 0, end: source.length, bindings, named });
+  });
+  it.each([
+    "import { a b } from './x.ts'",
+    "import { a as } from './x.ts'",
+    "import * as namespace, { a } from './x.ts'",
+    "import * other from './x.ts'",
+    "import Default, other from './x.ts'",
+    "import Default { a } from './x.ts'",
+    "import { , } from './x.ts'",
+    "import { a, from './x.ts'",
+    "import { a } extra from './x.ts'",
+  ])('withholds declaration metadata for an unreadable clause: %s', (source) => {
+    const lexed = lexImportSpecifiers(source);
+    expect(lexed.kind === 'ok' && lexed.spans[0]?.declaration).toBeUndefined();
+  });
+  it.each([
+    "import './x.ts' with options",
+    "import { a } from './x.ts' with options",
+    "import './x.ts' with { type: 'json'",
+    "import { a } from './x.ts' assert { type: 'json'",
+  ])('refuses incomplete import attributes: %s', (source) => {
+    expect(lexImportSpecifiers(source).kind).toBe('unclassifiable');
+  });
+  it('reports only real import clauses, their local bindings, and complete statement spans', () => {
+    const lines = [
+      "import Default, { same, other as alias, type T } from './real.ts'",
+      "import type { OnlyType } from './types.ts';",
+      "import * as namespace from './namespace.ts'",
+      "import './side.ts' with { type: 'json' };",
+      "import { value } from './data.json' with {\n type: 'json'\n};",
+      'const note = "import { fake } from \'./fake.ts\'";',
+      'const template = `import { fake } from "./fake.ts" ${import("./lazy.ts")}`;',
+      'const regex = /import.*from/;',
+      "export { same } from './export.ts';",
+    ];
+    const source = lines.join('\n');
+    const lexed = lexImportSpecifiers(source);
+    if (lexed.kind !== 'ok') throw new Error(lexed.reason);
+    const declarations = lexed.spans.filter((span) => span.declaration !== undefined);
+    expect(
+      declarations.map((span) => [span.value, span.declaration!.bindings, span.declaration!.named]),
+    ).toEqual([
+      ['./real.ts', ['Default', 'same', 'alias', 'T'], ['same']],
+      ['./types.ts', ['OnlyType'], []],
+      ['./namespace.ts', ['namespace'], []],
+      ['./side.ts', [], []],
+      ['./data.json', ['value'], ['value']],
+    ]);
+    expect(
+      declarations.map((span) => source.slice(span.declaration!.start, span.declaration!.end)),
+    ).toEqual(lines.slice(0, 5));
+    expect(lexed.spans.filter((span) => span.kind === 'dynamic').map((span) => span.value)).toEqual(
+      ['./lazy.ts'],
+    );
+  });
   it('finds every specifier with its span, and nothing inside strings, regexes or comments', () => {
     const lexed = lexImportSpecifiers(SOURCE);
     if (lexed.kind !== 'ok') throw new Error(lexed.reason);
@@ -130,6 +203,44 @@ describe('lexImportSpecifiers', () => {
       globs: 'unreadable',
     });
   });
+});
+
+describe('hasNonImportBinding', () => {
+  it.each([
+    'function* CUSTOM_METRICS() {}',
+    'enum CUSTOM_METRICS { A }',
+    'namespace CUSTOM_METRICS {}',
+    'const f = CUSTOM_METRICS => CUSTOM_METRICS;',
+    'function f(CUSTOM_METRICS: unknown): void {}',
+    'const f = (CUSTOM_METRICS) => CUSTOM_METRICS;',
+    'try {} catch (CUSTOM_METRICS) {}',
+    'const { x: { CUSTOM_METRICS } } = source;',
+    'const first = "in", CUSTOM_METRICS = [];',
+    'const first = "of", CUSTOM_METRICS = [];',
+    'const [other, CUSTOM_METRICS] = source;',
+    'using CUSTOM_METRICS = resource;',
+    'const value = `${(() => { const CUSTOM_METRICS = []; })()}`;',
+  ])('refuses a possible shadowing binding in %s', (source) => {
+    expect(hasNonImportBinding(source, ['CUSTOM_METRICS'])).toBe(true);
+  });
+  it.each([
+    "import { CUSTOM_METRICS } from './metrics.ts';",
+    'const copy = CUSTOM_METRICS;',
+    'let copy: unknown[] = [...CUSTOM_METRICS];',
+    'const first = f({ value: CUSTOM_METRICS }), second = [...CUSTOM_METRICS];',
+    'const opts = { CUSTOM_METRICS: [] };',
+    'const note = "const CUSTOM_METRICS = []"; /* let CUSTOM_METRICS; */',
+    'const f = () => CUSTOM_METRICS;',
+    '(CUSTOM_METRICS)\n"{";',
+  ])('allows an unshadowed reference in %s', (source) => {
+    expect(hasNonImportBinding(source, ['CUSTOM_METRICS'])).toBe(false);
+  });
+  it.each(['const [x = [];', 'const value = {;', 'function f(', 'const s = "unterminated'])(
+    'refuses unreadable groups in %s',
+    (source) => {
+      expect(hasNonImportBinding(source, ['CUSTOM_METRICS'])).toBeUndefined();
+    },
+  );
 });
 
 describe('readImportSpecifiers', () => {

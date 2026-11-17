@@ -48,6 +48,8 @@ import {
   withDevtoolSourceWiring,
 } from '../devtool/sources.ts';
 import { planNodeDevtool } from '../devtool/npm-manifest.ts';
+import { envFileDeclaration } from '../templates/env-file.ts';
+import { reportAgentsHint } from '../utils/agents-hint.ts';
 import { devEntryPort, isDevEntry, renderDevEntry } from '../devtool/dev-entry.ts';
 import {
   DEFAULT_DEVTOOL_PORT,
@@ -67,6 +69,7 @@ import { DISCOVERY_SPECIFIER, SERVICE_PORT_EXPORT } from '../workspace/discovery
 import {
   allocateDevtoolPort,
   devtoolRangeStart,
+  manifestProblemDetail,
   MAX_PORT,
   MEMBERS_DIR,
   readPortFlag,
@@ -115,11 +118,12 @@ interface PlannedWrite {
   readonly creating: boolean;
 }
 
-/** Reads only the target project's npm manifest and plans its conservative merge. */
+/** Reads the target manifest and dotenv declaration and plans its conservative merge. */
 async function planNodeManifestWrite(
   fs: IFileSystem,
   dir: string,
   planned: PlannedWrite[],
+  configSource?: string,
 ): Promise<string | undefined> {
   const path = joinPath(dir, 'package.json');
   let source: string;
@@ -130,7 +134,22 @@ async function planNodeManifestWrite(
       return `No deno.json or package.json in ${escapeName(dir)} — this is not a Setu-TS project.`;
     return `Cannot read ${escapeName(path)} — this is not a readable Setu-TS project: ${escapeName(describeCause(cause))}`;
   }
-  const plan = planNodeDevtool(source, path);
+  if (configSource === undefined) {
+    try {
+      configSource = new TextDecoder().decode(await fs.readFile(joinPath(dir, CONFIG_MODULE)));
+    } catch {
+      // The command reports the missing configuration after the manifest's own refusals.
+      configSource = '';
+    }
+  }
+  const declaration = envFileDeclaration(configSource);
+  const envFiles = declaration.kind === 'paths' ? declaration.paths : ['.env'];
+  // ConfigPlugin lets earlier files win; Node's repeated flags let later files win.
+  const envFileFlag = envFiles
+    .toReversed()
+    .map((file) => `--env-file-if-exists=${file} `)
+    .join('');
+  const plan = planNodeDevtool(source, path, envFileFlag);
   if (!plan.ok) return plan.message;
   if (plan.contents !== undefined) planned.push({ path, contents: plan.contents, creating: false });
   return undefined;
@@ -429,6 +448,8 @@ export async function runDevtoolCommand(
         }),` +
         ` so the devtool cannot tell whether this is a workspace. Fix or remove the manifest first.`,
     );
+    const detail = manifestProblemDetail(read.problem);
+    if (detail !== undefined) deps.error(detail);
     return EXIT_ERROR;
   }
   return enableStandalone(dir, memberName, requestedPort.port, args, deps);
@@ -515,7 +536,12 @@ async function enableInWorkspace(
   const planned: PlannedWrite[] = [];
 
   if (manifest.runtime === 'node') {
-    const refusal = await planNodeManifestWrite(deps.fs, joinPath(dir, memberRoot), planned);
+    const refusal = await planNodeManifestWrite(
+      deps.fs,
+      joinPath(dir, memberRoot),
+      planned,
+      configSource,
+    );
     if (refusal !== undefined) return reportInapplicable(deps, refusal);
   } else {
     const memberRead = await readWritableDenoManifest(deps.fs, joinPath(dir, memberRoot));
@@ -760,6 +786,8 @@ async function enableInWorkspace(
     `  SETU_DEVTOOL_MEMBER=${escapeName(member.name)} ${workspaceProfile(manifest.runtime).runScript('dev')}`,
   );
   deps.log('The launcher supplies the session credentials through the environment.');
+  if (!(await reportAgentsHint(deps, dir, manifest.runtime)))
+    await reportAgentsHint(deps, joinPath(dir, memberRoot), manifest.runtime);
   return EXIT_OK;
 }
 
@@ -947,6 +975,7 @@ async function enableStandalone(
   if (runtime === 'node') deps.log('  npm install');
   deps.log(`  ${workspaceProfile(runtime).runScript('dev')}`);
   deps.log('The launcher supplies the session credentials through the environment.');
+  await reportAgentsHint(deps, dir, runtime);
   return EXIT_OK;
 }
 

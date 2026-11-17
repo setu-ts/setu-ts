@@ -23,8 +23,9 @@ wrapper's return type to consume that type without a separate provider dependenc
 
 ## Stream a UI response
 
-This is the example's whole controller, compiled as written; its imports point at the example's
-files. In an application it is `src/modules/chat/chat.controller.ts`, created by
+This block is the example's controller, shortened: it omits the `GET /chat/model` route, the
+`history` handling and `messageMetadata: usageMetadata`. Its imports point at the example's files.
+In an application it is `src/modules/chat/chat.controller.ts`, created by
 `setu generate module chat`, with `registerChatRoutes(router, services?)` kept as generated. The
 models come from the `CHAT_MODELS` capability of a plugin made with
 `setu generate plugin chat-models`, which reads the provider settings from the environment, and the
@@ -46,7 +47,7 @@ import { QuotaExceededError, respondQuotaExceeded } from '@setu-ts/auth-plugin';
 import { validateBody } from '@setu-ts/validation-plugin';
 import { CHAT_MODELS } from '../../apps/ai-chat/src/plugins/chat-models.plugin.ts';
 import type { IChatModelsService } from '../../apps/ai-chat/src/plugins/chat-models.plugin.ts';
-import { budgetedModel } from '../../apps/ai-chat/src/modules/chat/chat.budget.ts';
+import { budgetedModel, requestScope } from '../../apps/ai-chat/src/modules/chat/chat.budget.ts';
 import { ChatBody } from '../../apps/ai-chat/src/modules/chat/chat.schemas.ts';
 import { chatQuota } from '../../apps/ai-chat/src/modules/chat/chat.service.ts';
 
@@ -94,7 +95,7 @@ export function registerChatRoutes(router: IRouterApi, services?: IServiceRegist
       const tenantId = ctx.request.tenant?.id;
       if (!tenantId) throw new TypeError('A server-resolved tenant is required');
       const { models } = ctx.services.get<IChatModelsService>(CHAT_MODELS);
-      const { model, ready } = budgetedModel(ctx, models, quota(ctx));
+      const { model, ready } = budgetedModel(requestScope(ctx), models, quota(ctx));
       const result = streamText({
         model,
         prompt,
@@ -321,7 +322,15 @@ export function quotaRefusal(): MiddlewareFunction {
     catch (error) { if (error instanceof QuotaExceededError) respondQuotaExceeded(ctx, error); else throw error; }
   };
 }
+export async function budgetMeter(quota: IQuota, tenantId: string): Promise<{ used: number; remaining: number | undefined; resetsAt: string }> {
+  const { used, remaining, windowEndsAt } = await quota.usage(tenantId);
+  return { used, remaining, resetsAt: new Date(windowEndsAt).toISOString() };
+}
 ```
+
+`budgetMeter` reads the same counter `reserve` charges, so a page showing "40 000 of 200 000 tokens
+this month" needs no second ledger. `usage` never charges, and `remaining` is `undefined` for an
+unlimited key.
 
 For `redisQuota`, construct the injected client with a command bound: ioredis
 `new Redis(url, { commandTimeout: 15_000 })` or `fromNodeRedis(createClient({ url }))`, which bounds
@@ -378,7 +387,7 @@ usage; otherwise the middleware settles at the reservation. The compatible adapt
 
 ```typescript
 import type { LanguageModelMiddleware } from 'ai';
-import type { IRequestContext, IRuntimeServices, ILogger } from '@setu-ts/common';
+import type { IRequestContext, IRuntimeServices, IServiceRegistry, ILogger } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IQuota } from '@setu-ts/auth-plugin';
 import { z } from 'zod';
@@ -392,6 +401,23 @@ export const usageSchema = z.object({
 /** One provider call, identified before the provider is invoked. */
 export type UsageRecord = z.infer<typeof usageSchema>;
 
+/** Who a model call is billed to and when it stops; a request or an agent run supplies it. */
+export interface BudgetScope {
+  readonly tenantId: string | undefined;
+  readonly principalId: string | null | undefined;
+  readonly signal: AbortSignal;
+  readonly services: IServiceRegistry;
+}
+
+/** The budget scope of one request: its server-resolved tenant and user, signal and services. */
+export function requestScope(ctx: IRequestContext): BudgetScope {
+  return {
+    tenantId: ctx.request.tenant?.id,
+    principalId: ctx.request.user?.id,
+    signal: ctx.signal,
+    services: ctx.services,
+  };
+}
 
 // ai's public alias retains the V4 middleware shape; specifying v4 below keeps
 // provider types selected by the pinned ai release, with no independent provider pin.
@@ -403,11 +429,12 @@ export type BudgetPrices = { inputPrice: number; outputPrice: number; perMessage
 
 /**
  * Reserves each provider call separately and records its settlement through the outbox.
- * Identity is server-set on ctx.request; neither the body nor model arguments select the key.
- * @returns AI SDK V4 middleware for one request and one model's prices
+ * Identity is server-set on the scope; neither the body nor model arguments select the key.
+ * @param scope - Billing identity, cancellation and services for a request or agent run
+ * @returns AI SDK V4 middleware for one scope and one model's prices
  */
-export function budgetMiddleware(ctx: IRequestContext, quota: IQuota, runtime: IRuntimeServices, prices: BudgetPrices, write: (record: UsageRecord) => Promise<unknown>): LanguageModelMiddleware {
-  const tenantId = ctx.request.tenant?.id;
+export function budgetMiddleware(scope: BudgetScope, quota: IQuota, runtime: IRuntimeServices, prices: BudgetPrices, write: (record: UsageRecord) => Promise<unknown>): LanguageModelMiddleware {
+  const tenantId = scope.tenantId;
   if (!tenantId) throw new TypeError('A server-resolved tenant is required');
   const encoder = new TextEncoder();
 
@@ -446,10 +473,10 @@ export function budgetMiddleware(ctx: IRequestContext, quota: IQuota, runtime: I
         completed = true;
         const priced = countsKnown(usage) ? usage!.inputTokens.total! * prices.inputPrice + usage!.outputTokens.total! * prices.outputPrice : undefined;
         // Safe counts can still price past MAX_SAFE_INTEGER; those settle at the reservation.
-        const known = !ctx.signal.aborted && Number.isSafeInteger(priced);
+        const known = !scope.signal.aborted && Number.isSafeInteger(priced);
         const settledAmount = known ? priced! : receipt.amount;
         await quota.settle(receipt, settledAmount);
-        await write({ id, occurredAt, tenantId: tenantId!, ...(ctx.request.user?.id === undefined ? {} : { principalId: ctx.request.user.id }), provider: model.provider, model: model.modelId, usageKnown: known, settledAmount,
+        await write({ id, occurredAt, tenantId: tenantId!, ...(scope.principalId === null || scope.principalId === undefined ? {} : { principalId: scope.principalId }), provider: model.provider, model: model.modelId, usageKnown: known, settledAmount,
           ...(known ? { inputTokens: usage!.inputTokens.total!, outputTokens: usage!.outputTokens.total!, ...optional('cacheReadTokens', usage!.inputTokens.cacheRead), ...optional('cacheWriteTokens', usage!.inputTokens.cacheWrite), ...optional('reasoningTokens', usage!.outputTokens.reasoning) } : {}) });
       },
     };
@@ -477,16 +504,16 @@ export function budgetMiddleware(ctx: IRequestContext, quota: IQuota, runtime: I
       } catch (error) { await call.release(); throw error; }
       let usage: Usage | undefined;
       let pending = true;
-      const abort = () => { void reader.cancel().catch((error: unknown) => { if (ctx.services.has(CAPABILITIES.LOGGER)) ctx.services.get<ILogger>(CAPABILITIES.LOGGER).warn('Provider stream cancellation failed', { error: String(error) }); }); };
-      ctx.signal.addEventListener('abort', abort, { once: true });
-      if (ctx.signal.aborted) abort();
+      const abort = () => { void reader.cancel().catch((error: unknown) => { if (scope.services.has(CAPABILITIES.LOGGER)) scope.services.get<ILogger>(CAPABILITIES.LOGGER).warn('Provider stream cancellation failed', { error: String(error) }); }); };
+      scope.signal.addEventListener('abort', abort, { once: true });
+      if (scope.signal.aborted) abort();
       const stream = new ReadableStream({
         async pull(controller) {
           try {
             const part = pending ? first : await reader.read();
             pending = false;
-            if (part.done || ctx.signal.aborted) {
-              ctx.signal.removeEventListener('abort', abort);
+            if (part.done || scope.signal.aborted) {
+              scope.signal.removeEventListener('abort', abort);
               await call.finish(usage);
               controller.close();
             } else {
@@ -495,13 +522,13 @@ export function budgetMiddleware(ctx: IRequestContext, quota: IQuota, runtime: I
               controller.enqueue(part.value);
             }
           } catch (error) {
-            ctx.signal.removeEventListener('abort', abort);
+            scope.signal.removeEventListener('abort', abort);
             await call.finish();
             controller.error(error);
           }
         },
         async cancel() {
-          ctx.signal.removeEventListener('abort', abort);
+          scope.signal.removeEventListener('abort', abort);
           try {
             await reader.cancel();
           } finally {
@@ -515,7 +542,7 @@ export function budgetMiddleware(ctx: IRequestContext, quota: IQuota, runtime: I
 }
 ```
 
-The module's `budgetedModel(ctx, models, quota)` resolves runtime, database and outbox services,
+The module's `budgetedModel(scope, models, quota)` resolves runtime, database and outbox services,
 wraps each model with its own prices, applies the fallback predicate, and exposes the readiness
 promise used by the controller. The complete
 [budget middleware](../apps/ai-chat/src/modules/chat/chat.budget.ts) and

@@ -29,7 +29,7 @@ import { TelemetryPlugin } from '@setu-ts/telemetry-plugin';
 import type { TelemetryPluginOptions } from '@setu-ts/telemetry-plugin';
 import { createApp } from './setu.config.ts';
 import { tenantTool } from './src/modules/chat/chat.controller.ts';
-import { budgetMiddleware } from './src/modules/chat/chat.budget.ts';
+import { budgetedModel, budgetMiddleware, requestScope } from './src/modules/chat/chat.budget.ts';
 import type { PricedModel } from './src/modules/chat/chat.budget.ts';
 import { CHAT_MODELS } from './src/plugins/chat-models.plugin.ts';
 import type { IChatModelsService } from './src/plugins/chat-models.plugin.ts';
@@ -416,7 +416,7 @@ describe('AI SDK recipes through Setu (Node)', () => {
           const wrap = (model: Model) =>
             wrapLanguageModel({
               model,
-              middleware: budgetMiddleware(ctx, quota, runtime, prices, (record) =>
+              middleware: budgetMiddleware(requestScope(ctx), quota, runtime, prices, (record) =>
                 writeUsage(db, outbox, record),
               ),
             });
@@ -673,6 +673,7 @@ describe('AI SDK recipes through Setu (Node)', () => {
                 return memory.reserve(key, window, amount, limit, expiry);
               },
               adjust: (...args) => memory.adjust(...args),
+              read: (...args) => memory.read(...args),
             },
           });
           const abort = new AbortController();
@@ -761,7 +762,7 @@ describe('AI SDK recipes through Setu (Node)', () => {
           const wrapped = wrapLanguageModel({
             model,
             middleware: budgetMiddleware(
-              { ...ctx, signal: abort.signal },
+              { ...requestScope(ctx), signal: abort.signal },
               quota,
               runtime,
               prices,
@@ -865,6 +866,40 @@ describe('AI SDK recipes through Setu (Node)', () => {
       const response = await app.inject({ method: 'GET', url: '/accounting' });
       assert.equal(response.statusCode, 200, response.body ?? undefined);
       assert.equal(response.body, 'accounting checked');
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('budgets an agent-run scope by its tenant and refuses a tenant-less run', async () => {
+    const app = await appWith([{ model: mock(), prices }]);
+    await app.start();
+    try {
+      const quota = createQuota({
+        name: 'run-budget',
+        limit: 100_000,
+        window: 'utc-day',
+        store: new MemoryQuotaStore(runtime),
+        runtime,
+      });
+      // Shaped exactly like the AgentRunContext a definition's model(run) receives.
+      const run = {
+        runId: 'r1',
+        tenantId: 'run-tenant',
+        principalId: null,
+        signal: new AbortController().signal,
+        services: app.services,
+      };
+      const { model, ready } = budgetedModel(run, [{ model: mock(), prices }], quota);
+      void ready.catch(() => undefined);
+      await generateText({ model, prompt: 'run budget', maxOutputTokens: 10 });
+      // The provider reported 3 input and 2 output tokens, priced at 1 and 2.
+      assert.equal((await quota.usage('run-tenant')).used, 7);
+      assert.throws(
+        () =>
+          budgetMiddleware({ ...run, tenantId: '' }, quota, runtime, prices, async () => undefined),
+        /A server-resolved tenant is required/,
+      );
     } finally {
       await app.stop();
     }

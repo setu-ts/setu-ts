@@ -7,7 +7,7 @@ import type { IKernelApplication } from '@setu-ts/kernel';
  *
  * A deployed API reads its secret from configuration instead.
  */
-export const DEMO_JWT_SECRET = 'rest-api-example-secret';
+export const DEMO_JWT_SECRET = 'rest-api-example-secret-at-least-32-characters';
 
 /** Issues a short-lived token for a started application. */
 export async function issueDemoToken(app: IKernelApplication): Promise<string> {

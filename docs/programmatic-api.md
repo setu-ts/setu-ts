@@ -348,6 +348,7 @@ interface IRequest {
   locale?: string; // populated by the localization middleware (M103); replaceLocale() to override
   signal?: AbortSignal; // fires on client disconnect
   readonly raw?: Request; // The undisturbed web-standard Request, preserved for WebSocket upgrade and gRPC dispatch after the middleware pipeline.
+  readonly responseTrailers?: boolean; // set by the adapter: true only where the response can carry HTTP trailers (HTTP/2 on Node)
 
   // Body readers (consume the body exactly once)
   json<T = unknown>(): Promise<T>;

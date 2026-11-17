@@ -540,9 +540,9 @@ describe('MessagingPlugin outbox wiring — scheduler, tenancy and reporting sea
       ],
     });
     await app.start();
-    const outbox = app.services.get<IOutbox & { readonly closing: boolean }>(CAPABILITIES.OUTBOX);
+    const outbox = app.services.get(CAPABILITIES.OUTBOX);
     await app.stop();
-    expect(outbox.closing).toBe(true);
+    expect(outbox).toHaveProperty('closing', true);
     expect(warnings).toEqual([
       'outbox: could not remove a scheduled job while draining',
       'outbox: could not remove a scheduled job while draining',

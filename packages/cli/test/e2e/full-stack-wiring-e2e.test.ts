@@ -38,7 +38,7 @@ it(
         output.join('\n'),
       ).toBe(0);
       const project = `${root}/shop`;
-      for (const plugin of ['events', 'cqrs', 'queue'])
+      for (const plugin of ['events', 'cqrs', 'queue', 'sse', 'metrics', 'health'])
         expect(await cli(['add', plugin, '--dir', project]), output.join('\n')).toBe(0);
       const installed = await npmInstall(project, overlay);
       expect(installed.code, installed.output).toBe(0);
@@ -47,6 +47,8 @@ it(
         ['command-handler', 'place-order'],
         ['query-handler', 'get-order'],
         ['job', 'send-email'],
+        ['metric', 'checkout'],
+        ['health-indicator', 'checkout'],
       ]) {
         expect(await cli(['g', schematic!, name!, '--dir', project]), output.join('\n')).toBe(0);
       }
@@ -93,6 +95,10 @@ it(
         expect(source).toContain(before);
         await nodeFs.writeFile(file, source.replace(before!, after!));
       }
+      await nodeFs.writeFile(
+        `${project}/app/routes/_auth/failure.tsx`,
+        `export function loader() { throw new Error('SSR canary https://user:secret-password@example.com/'); }\nexport default function Failure() { return null; }\n`,
+      );
       const built = await npmRun(project, 'build');
       expect(built.code, built.output).toBe(0);
       const probe = `import { createApp } from './setu.config.ts';
@@ -113,9 +119,17 @@ try {
   await app.services.get<IQueue>(CAPABILITIES.QUEUE).add(SEND_EMAIL_JOB, { id: 'job-proof' });
   for (let i = 0; i < 200 && processed.length === 0; i++) await new Promise((resolve) => setTimeout(resolve, 50));
   if (received[0] !== 'event-proof' || processed[0] !== 'job-proof') throw new Error('event/job handler did not run');
+  if (!app.services.has(CAPABILITIES.SSE)) throw new Error('SSE plugin was not registered');
+  const metrics = await app.fetch(new Request('http://localhost/metrics'));
+  if (metrics.status !== 200 || !(await metrics.text()).includes('checkout_total')) throw new Error('generated custom metric was not wired');
+  const health = await app.fetch(new Request('http://localhost/health'));
+  if (health.status !== 200 || !(await health.text()).includes('checkout')) throw new Error('generated health indicator was not wired');
   const response = await app.fetch(new Request('http://localhost/'));
   const html = await response.text();
   if (response.status !== 200 || !html.includes('<html')) throw new Error('SSR did not boot');
+  const failed = await app.fetch(new Request('http://localhost/failure'));
+  await failed.text();
+  if (failed.status !== 500) throw new Error('throwing loader did not fail');
   console.log('FULL_STACK_WIRING_READBACK=' + JSON.stringify({ command, query, received, processed, page: response.status }));
 } finally { await app.stop(); }
 `;
@@ -125,6 +139,11 @@ try {
       const result = await runIn(project, 'node', ['--import', 'tsx', 'wiring-probe.ts']);
       expect(result.code, result.output).toBe(0);
       expect(result.output).toContain('FULL_STACK_WIRING_READBACK=');
+      expect(result.output).toContain('SSR request failed');
+      expect(result.output).toContain('requestId');
+      expect(result.output).toContain('stack');
+      expect(result.output).toContain('https://***@example.com/');
+      expect(result.output).not.toContain('secret-password');
       console.log(result.output);
     } finally {
       await overlay.close();

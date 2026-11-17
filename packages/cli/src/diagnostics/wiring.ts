@@ -1,21 +1,48 @@
+import { CONFIGURED_PROVIDERS, ZERO_CONFIG_WIRINGS } from '../utils/plugin-wirings.ts';
 /** Three-outcome config wiring inspection shared by the command renderers. @module */
-import { maskSourceCode } from '../devtool/sources.ts';
+import { maskComments, maskSourceCode } from '../devtool/sources.ts';
+import { referenceMask } from './reference-mask.ts';
 import { hostSeamSpecs, scanSeamSpecs } from '../seams/registry.ts';
 import { decoratorKeyFor, decoratorExportFor } from '../templates/seam.ts';
-import { composingStarter } from '../utils/starter-arms.ts';
+import { starterArmSet } from '../commands/starter-options.ts';
+import { composingStarter, GATED_STARTER_ARMS } from '../utils/starter-arms.ts';
 import type { Finding } from './diagnose.ts';
 import { withoutImports } from './modules.ts';
 
 /** Tests a value reference in code outside import declarations. */
 export function referencedOutsideImports(config: string, symbol: string): boolean | undefined {
-  const code = withoutImports(maskSourceCode(config));
+  const code = withoutImports(referenceMask(config));
   return code === undefined ? undefined : new RegExp(`\\b${symbol}\\b`).test(code);
 }
 
 /** Tests a call in code outside import declarations, matching module activation. */
 export function calledOutsideImports(config: string, symbol: string): boolean | undefined {
+  const code = withoutImports(referenceMask(config));
+  // Identifier-aware boundaries: `\b` treats `$` as a non-word character, so it
+  // neither matches before `$name` nor stops `$Name(` matching `Name(`.
+  return code === undefined
+    ? undefined
+    : new RegExp(`(?<![\\w$])${symbol.replaceAll('$', () => '\\$')}\\s*\\(`).test(code);
+}
+
+/**
+ * The same call test through the strict, audited lexer, for a decision that
+ * leads to an automatic edit (`setu workspace broker|rpc`): the tolerant
+ * reference mask may only decide what a read-only check reports (V12-32,
+ * M139d audit F2).
+ */
+export function strictlyCalledOutsideImports(config: string, symbol: string): boolean | undefined {
   const code = withoutImports(maskSourceCode(config));
   return code === undefined ? undefined : new RegExp(`\\b${symbol}\\s*\\(`).test(code);
+}
+
+/** The strict-lexer value-reference test, for a note an automatic edit prints. */
+export function strictlyReferencedOutsideImports(
+  config: string,
+  symbol: string,
+): boolean | undefined {
+  const code = withoutImports(maskSourceCode(config));
+  return code === undefined ? undefined : new RegExp(`\\b${symbol}\\b`).test(code);
 }
 
 /** Wiring requires a value use outside imports; registerModules requires a call. */
@@ -67,7 +94,7 @@ export function wiringFinding(
   const unusedImports = missing.filter(
     (symbol) =>
       referencedOutsideImports(config, symbol) === false &&
-      new RegExp(`\\b${symbol}\\b`).test(maskSourceCode(config) ?? ''),
+      new RegExp(`\\b${symbol}\\b`).test(referenceMask(config) ?? ''),
   );
   return {
     kind: 'unwired',
@@ -78,4 +105,82 @@ export function wiringFinding(
     ...(unusedImports.length === 0 ? {} : { unusedImports }),
     ...(starter === undefined ? {} : { starter }),
   };
+}
+
+/**
+ * The local names a config gives `symbol` when importing it from
+ * `@setu-ts/<pkg>`: the symbol itself plus every `symbol as alias` binding.
+ * Type-only bindings and commented-out imports are skipped.
+ */
+export function importedCallNames(config: string, pkg: string, symbol: string): readonly string[] {
+  const names = new Set([symbol]);
+  const from = new RegExp(`import\\s*\\{([^}]*)\\}\\s*from\\s*['"]@setu-ts/${pkg}['"]`, 'g');
+  // Comments are blanked so a commented-out import adds no alias; strings stay, so
+  // the package specifier still matches. Unclassifiable source yields no aliases.
+  for (const [, bindings = ''] of (maskComments(config) ?? '').matchAll(from)) {
+    for (const binding of bindings.split(',')) {
+      const [, exported, local = ''] =
+        /^\s*(?!type\s)([A-Za-z_$][\w$]*)\s+as\s+([A-Za-z_$][\w$]*)\s*$/.exec(binding) ?? [];
+      if (exported === symbol) names.add(local);
+    }
+  }
+  return [...names];
+}
+
+/**
+ * Finds installed providers absent from this config's calls: every zero-config
+ * provider, plus every provider `setu add` prints a registration for because it
+ * needs options (`CONFIGURED_PROVIDERS`), which an installed package left
+ * unregistered is just as likely to be.
+ * Registration elsewhere can be silenced by id in the project's check config.
+ * @since 0.13.0
+ */
+export function unregisteredPluginFindings(
+  config: string,
+  installed: ReadonlySet<string>,
+): Finding[] {
+  const starter = composingStarter(config);
+  const candidates = new Map([...ZERO_CONFIG_WIRINGS, ...CONFIGURED_PROVIDERS]);
+  const findings: Finding[] = [];
+  // A workspace member's CLI-owned transport module registers `GrpcPlugin`, and
+  // the config reaches it only through `...transportPlugins()` (M138).
+  const transportModule = calledOutsideImports(config, 'transportPlugins') === true;
+  // A Workers config's createApp takes `waitUntil` (or `_waitUntil`); there the
+  // cache and store come from CloudflarePlugin's KV and R2 arms, never an
+  // in-memory CachePlugin or StoragePlugin, which `setu add` refuses there.
+  const workers = /\b_?waitUntil\??\s*:/.test(maskComments(config) ?? config);
+  for (const [pkg, { symbol }] of candidates) {
+    if (pkg === 'grpc-plugin' && transportModule) continue;
+    if (workers && (pkg === 'cache-plugin' || pkg === 'storage-plugin')) continue;
+    if (
+      installed.has(pkg) &&
+      !starter?.arms.has(pkg) &&
+      importedCallNames(config, pkg, symbol).every(
+        (name) => calledOutsideImports(config, name) === false,
+      )
+    ) {
+      findings.push({ kind: 'plugin-unregistered', pkg, symbol });
+    }
+  }
+  // A starter registers its gated arms only when they are set, so an installed
+  // package whose arm is absent is as unregistered as an inline one with no call.
+  // `auth-plugin` stays exempt here too: its quota helpers work without the plugin.
+  for (const [pkg, arm] of starter?.arms ?? []) {
+    const symbol = GATED_STARTER_ARMS.get(pkg);
+    if (symbol === undefined || pkg === 'auth-plugin' || !installed.has(pkg)) continue;
+    if (starterArmSet(config, arm) !== false) continue;
+    if (
+      importedCallNames(config, pkg, symbol).some(
+        (name) => calledOutsideImports(config, name) !== false,
+      )
+    )
+      continue;
+    findings.push({
+      kind: 'plugin-unregistered',
+      pkg,
+      symbol,
+      starterArm: { arm, starter: starter!.symbol },
+    });
+  }
+  return findings;
 }

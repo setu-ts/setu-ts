@@ -112,7 +112,12 @@ export type {
 
 // Capability tokens
 export { CAPABILITIES, createCapabilityToken } from './tokens.ts';
-export type { CapabilityToken, StandardCapability } from './tokens.ts';
+export type {
+  CapabilityKey,
+  CapabilityToken,
+  StandardCapability,
+  StandardCapabilityToken,
+} from './tokens.ts';
 
 // Shared types
 export { PLUGIN_PRIORITY } from './types.ts';
@@ -137,6 +142,9 @@ export type { None, Option, Some } from './option.ts';
 export { resolveRegistryEntry } from './registry.ts';
 export type {
   IServiceRegistry,
+  KeysAccepting,
+  KeysServing,
+  UnboundToken,
   RegisterOptions,
   RegistryFactory,
   ServiceFactory,
@@ -155,6 +163,7 @@ export {
   CLIENT_IP_STATE_KEY,
   REQUEST_ORIGIN_STATE_KEY,
   CREDENTIAL_SOURCE_STATE_KEY,
+  CSRF_EXEMPT_STATE_KEY,
   SESSION_STATE_KEY,
   SESSION_TENANT_BINDING_STATE_KEY,
 } from './state-keys.ts';
@@ -186,7 +195,9 @@ export type {
   NextFunction,
   ResponseSnapshot,
   ResponseSnapshotInit,
+  StreamOptions,
   RouteDefinition,
+  RouteMiddlewareGroups,
   RouteHandler,
   RouteResponseMetadata,
   RouteSchema,
@@ -194,9 +205,13 @@ export type {
   RouteValidationMetadata,
   RouteIdempotencyMetadata,
   RouteMcpToolMetadata,
+  RouteRateLimitMetadata,
+  RouteResponseDocumentation,
+  RouteResponseHeader,
   SecurityRequirement,
   WebSocketUpgradeIntent,
 } from './http.ts';
+export { routeMiddlewareOf } from './route-middleware.ts';
 export {
   isPromiseLike,
   isWebSocketUpgradeRequest,
@@ -219,12 +234,21 @@ export {
   withResponseMetadata,
   withSecurityMetadata,
   withValidationMetadata,
+  RATE_LIMIT_METADATA,
+  withRateLimitMetadata,
+  rateLimitMetadataOf,
 } from './http.ts';
 
 // Form body reading (M94b) — the ONE parse every `IRequest.formData?()`
 // producer shares, and the ONE classifier both form consumers read
 export { formEncodingOf, parseFormBody } from './form/form-body.ts';
 export type { FormBody, FormEncoding, FormFile, FormValue } from './form/form-body.ts';
+export {
+  FORM_FILE_METADATA,
+  withFormFileMetadata,
+  formFileMetadataOf,
+} from './form/form-file-metadata.ts';
+export type { FormFileMetadata } from './form/form-file-metadata.ts';
 // Unsupported form encoding (M94b) — the 415-branded rejection every
 // `IRequest.formData?()` producer rejects with
 export { UnsupportedFormEncodingError } from './errors/unsupported-form-encoding.ts';
@@ -260,6 +284,7 @@ export type {
   InjectionToken,
   ContainerToken,
   InjectEntry,
+  ModuleFactoryProvider,
 } from './container.ts';
 export { createToken } from './container.ts';
 
@@ -295,8 +320,14 @@ export {
   requestService,
   resolveRequestService,
   serviceToken,
+  requestServiceToken,
 } from './services/request-service.ts';
-export type { RequestBoundService, ServiceToken } from './services/request-service.ts';
+export type {
+  RequestBoundService,
+  ServiceToken,
+  RequestServiceToken,
+  TokenEntry,
+} from './services/request-service.ts';
 export type { ILogger, LogMetadata } from './services/logger.ts';
 export type { IConfig } from './services/config.ts';
 export { validatedStateKey } from './services/validation.ts';
@@ -451,12 +482,13 @@ export type {
   WrapOptions,
 } from './services/resilience.ts';
 export type { IStorage, PutObjectOptions, SignedUrlOptions } from './services/storage.ts';
-export type { IMailer, MailMessage } from './services/mail.ts';
+export type { IMailer, MailAttachment, MailMessage } from './services/mail.ts';
 export type { ChannelSendResult, INotifier, NotificationMessage } from './services/notification.ts';
 export type { FlagContext, IFeatureFlags } from './services/feature-flags.ts';
 export type {
   IMultiTenancyService,
   ITenant,
+  ITenantUnitOfWork,
   ITenantDataStore,
   ITenantIsolationStrategy,
   ITenantRegistry,
@@ -697,8 +729,12 @@ export type {
 
 // gRPC contracts
 export type {
+  GrpcClientOptions,
   GrpcServiceDefinition,
   GrpcServingStatus,
+  RpcCall,
+  RpcReply,
+  RpcTransport,
   IGrpcService,
   RpcFetchHandler,
 } from './services/grpc.ts';
@@ -827,3 +863,5 @@ export {
   AgentRunLeaseLostError,
   AgentRunStoreUnavailableError,
 } from './errors/agent-runs.ts';
+
+export type { CapabilityServices, UnboundCapability } from './capability-services.ts';

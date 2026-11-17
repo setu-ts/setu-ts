@@ -109,6 +109,19 @@ export interface IRequest {
    */
   readonly raw?: Request;
   /**
+   * Whether the connection this request arrived on can carry HTTP trailers on
+   * its response.
+   *
+   * Set by the HTTP adapter, never from request input: `true` only for an
+   * HTTP/2 request served by an adapter that writes trailers (the Node
+   * adapter, and Bun with `RuntimePlugin({ http2 })`). Absent everywhere else —
+   * HTTP/1.1, Deno, Workers, `inject()` — which means trailers would be lost,
+   * so a producer that needs them (native `application/grpc`) must refuse.
+   *
+   * @since 0.13.0
+   */
+  readonly responseTrailers?: boolean;
+  /**
    * Reads and parses the body as JSON.
    *
    * @typeParam T - The expected body shape (validate before trusting)
@@ -306,11 +319,16 @@ export interface IResponse {
    * `new Response(streamBody, { status, headers })`, streaming is free on every
    * platform (Node via Hono, Deno, Bun, Cloudflare Workers) with no buffer-then-send.
    *
+   * Trailers are written only where {@linkcode IRequest.responseTrailers} is
+   * `true`; elsewhere an adapter drops them, so check that flag before relying
+   * on them.
+   *
    * @param body - A `ReadableStream` of `Uint8Array` chunks
+   * @param options - Optional trailers, sent after the last chunk (since 0.13.0)
    * @returns The handler result
    * @since 0.2.0
    */
-  stream(body: ReadableStream<Uint8Array>): HandlerResult;
+  stream(body: ReadableStream<Uint8Array>, options?: StreamOptions): HandlerResult;
   /**
    * Returns a snapshot of the current response state (status, headers, body).
    * Enables middleware to inspect the response after `next()` returns —
@@ -546,6 +564,19 @@ export interface RouteSchema {
    */
   readonly description?: string;
   /**
+   * Marks the OpenAPI operation deprecated when true. Documentation only;
+   * does not change route handling or emit Deprecation/Sunset headers.
+   * @since 0.13.0
+   */
+  readonly deprecated?: boolean;
+  /**
+   * Omits this operation from the OpenAPI document when true. The route stays
+   * registered, served and listed by the router, and remains an MCP tool when
+   * marked as one. This flag does not enforce access control.
+   * @since 0.13.0
+   */
+  readonly excludeFromDocument?: boolean;
+  /**
    * OpenAPI security requirements for this operation, overriding any
    * document-level default. Each entry names a scheme declared in the
    * document's `components.securitySchemes` and lists the scopes it needs
@@ -752,6 +783,14 @@ export interface RouteSecurityMetadata {
    * "scopes".
    */
   readonly scopes?: readonly string[];
+  /**
+   * `true` when the middleware can refuse an authenticated caller with `403`
+   * (a role, permission, scope, policy or second-factor check, or a delegation
+   * rule). Absent on a guard that only authenticates, such as `requireAuth()`,
+   * so a document lists `403` only where one can occur.
+   * @since 0.13.0
+   */
+  readonly forbids?: true;
 }
 
 /**
@@ -826,8 +865,11 @@ function isRouteSecurityMetadata(value: unknown): value is RouteSecurityMetadata
   if (typeof value !== 'object' || value === null) {
     return false;
   }
-  const candidate = value as { authenticated?: unknown; scopes?: unknown };
+  const candidate = value as { authenticated?: unknown; scopes?: unknown; forbids?: unknown };
   if (typeof candidate.authenticated !== 'boolean') {
+    return false;
+  }
+  if (candidate.forbids !== undefined && candidate.forbids !== true) {
     return false;
   }
   const scopes = candidate.scopes;
@@ -874,6 +916,8 @@ export interface RouteValidationMetadata {
   readonly target: ValidationTarget;
   /** The schema it validates against, exactly as the caller supplied it. */
   readonly schema: unknown;
+  /** Whether this body validator also accepts form encodings. @since 0.13.0 */
+  readonly forms?: true;
 }
 
 /**
@@ -956,6 +1000,7 @@ function isRouteValidationMetadata(value: unknown): value is RouteValidationMeta
   // derivation — adding a `400` response to an operation from which nothing was
   // actually derived.
   if (!('schema' in value)) return false;
+  if ('forms' in value && value.forms !== true) return false;
   const target = (value as { target?: unknown }).target;
   return (
     target === 'body' ||
@@ -1098,8 +1143,42 @@ export interface RouteDefinition {
   readonly handler: RouteHandler;
   /** Route-level middleware, executed before the handler. */
   readonly middleware?: readonly MiddlewareFunction[];
+  /**
+   * Middleware selected after the static chain. A custom dispatcher must run
+   * these groups as well, or route guards fail open.
+   * @since 0.13.0
+   */
+  readonly middlewareGroups?: RouteMiddlewareGroups;
   /** Validation and OpenAPI schemas. */
   readonly schema?: RouteSchema;
+}
+
+/**
+ * Declared route middleware groups, selected per request in the returned order.
+ * @since 0.13.0
+ */
+export interface RouteMiddlewareGroups {
+  /** Every selectable group, also visible to startup scans. */
+  readonly groups: Readonly<Record<string, readonly MiddlewareFunction[]>>;
+  /** Selects declared keys after the static route middleware has continued. */
+  readonly select: (ctx: IRequestContext) => readonly string[] | Promise<readonly string[]>;
+}
+
+/**
+ * Options for {@linkcode IResponse.stream}.
+ * @since 0.13.0
+ */
+export interface StreamOptions {
+  /**
+   * HTTP trailers to send after the body's last chunk. A promise, because a
+   * streaming producer (a gRPC call above all) knows its trailers only once
+   * the body ends; it should resolve no later than the body closes. A
+   * rejection aborts the response.
+   *
+   * Sent only where {@linkcode IRequest.responseTrailers} is `true`; dropped
+   * elsewhere.
+   */
+  readonly trailers?: Promise<Headers>;
 }
 
 /**
@@ -1128,6 +1207,14 @@ export type ResponseSnapshot =
       readonly status: number;
       readonly headers: Headers;
       readonly body: ReadableStream<Uint8Array>;
+      /**
+       * Trailers to send after the last chunk, from
+       * {@linkcode StreamOptions.trailers}. Absent when the producer supplied
+       * none. Written only by an adapter whose request carried
+       * {@linkcode IRequest.responseTrailers}.
+       * @since 0.13.0
+       */
+      readonly trailers?: Promise<Headers>;
       /**
        * Snapshot-local header input the runtime may pass to a native response
        * before it reads the lazy {@linkcode headers} view.
@@ -1176,6 +1263,13 @@ export interface RouteIdempotencyMetadata {
    * unprotected (`false`). Absent means required, the middleware default.
    */
   readonly required?: boolean;
+  /**
+   * Whether the middleware refuses an anonymous request with `401` (`true`,
+   * the `principal: 'required'` default) or accepts it (`false`). Absent
+   * means required.
+   * @since 0.13.0
+   */
+  readonly principalRequired?: boolean;
 }
 
 /** Brands a middleware in place, preserving its behavior and identity.
@@ -1215,9 +1309,117 @@ export function idempotencyMetadataOf(
     'idempotent' in value &&
     value.idempotent === true &&
     (!('keyHeader' in value) || typeof value.keyHeader === 'string') &&
-    (!('required' in value) || typeof value.required === 'boolean')
+    (!('required' in value) || typeof value.required === 'boolean') &&
+    (!('principalRequired' in value) || typeof value.principalRequired === 'boolean')
     ? (value as RouteIdempotencyMetadata)
     : undefined;
+}
+
+/**
+ * Key under which a rate-limiting {@linkcode MiddlewareFunction} carries its
+ * {@linkcode RouteRateLimitMetadata}. `Symbol.for`, like
+ * {@linkcode SECURITY_METADATA}, so two copies of this package agree; exported
+ * so a limiter outside `@setu-ts/auth-plugin` can be branded too.
+ * @since 0.13.0
+ */
+export const RATE_LIMIT_METADATA: unique symbol = Symbol.for('setu.rate-limit.metadata');
+
+/**
+ * What a rate-limiting middleware sends, for documentation generators. A
+ * description, not a mechanism: removing it changes no runtime behaviour.
+ * @since 0.13.0
+ */
+export interface RouteRateLimitMetadata {
+  /**
+   * `true` when the limiter writes the `RateLimit` and `RateLimit-Policy`
+   * fields on every response it governs; it always writes `Retry-After` on
+   * its `429`.
+   */
+  readonly standardHeaders: boolean;
+}
+
+/**
+ * Brands a rate-limiting middleware in place, preserving its identity and
+ * behaviour. The property is symbol-keyed and non-enumerable.
+ * @param middleware - The limiter to brand
+ * @param metadata - What the limiter sends
+ * @returns The same `middleware` reference, branded
+ * @example
+ * ```typescript
+ * const limiter = withRateLimitMetadata((ctx, next) => inner(ctx, next), {
+ *   standardHeaders: true,
+ * });
+ * ```
+ * @since 0.13.0
+ */
+export function withRateLimitMetadata<T extends MiddlewareFunction>(
+  middleware: T,
+  metadata: RouteRateLimitMetadata,
+): T {
+  Object.defineProperty(middleware, RATE_LIMIT_METADATA, {
+    value: metadata,
+    enumerable: false,
+    configurable: true,
+    writable: false,
+  });
+  return middleware;
+}
+
+/**
+ * Reads a valid rate-limit brand; a foreign value is treated as absent.
+ * @param middleware - The middleware to inspect
+ * @returns Its metadata, or `undefined`
+ * @since 0.13.0
+ */
+export function rateLimitMetadataOf(
+  middleware: MiddlewareFunction,
+): RouteRateLimitMetadata | undefined {
+  const value: unknown = (
+    middleware as MiddlewareFunction & { readonly [RATE_LIMIT_METADATA]?: unknown }
+  )[RATE_LIMIT_METADATA];
+  return typeof value === 'object' &&
+    value !== null &&
+    'standardHeaders' in value &&
+    typeof value.standardHeaders === 'boolean'
+    ? (value as RouteRateLimitMetadata)
+    : undefined;
+}
+
+/**
+ * One documented response header, for {@linkcode RouteResponseDocumentation}
+ * and `@ApiResponse({ headers })`.
+ * @since 0.13.0
+ */
+export interface RouteResponseHeader {
+  /** The header value's schema (a Zod schema by default); a string when absent. */
+  readonly schema?: unknown;
+  /** What the header carries. */
+  readonly description?: string;
+  /** Whether the header is always present on this response. */
+  readonly required?: boolean;
+}
+
+/**
+ * A documented response, the value a route may put under a status in
+ * {@linkcode RouteSchema.response} instead of a bare schema.
+ * @example
+ * ```typescript
+ * const created: RouteResponseDocumentation = {
+ *   schema: Item,
+ *   description: 'Created',
+ *   headers: { Location: { description: 'The new item URL', required: true } },
+ * };
+ * app.router.post('/items', { schema: { response: { 201: created } }, handler });
+ * ```
+ * @since 0.13.0
+ */
+export interface RouteResponseDocumentation {
+  /** The response body schema. */
+  readonly schema?: unknown;
+  /** The response description. */
+  readonly description?: string;
+  /** Response headers keyed by header name. */
+  readonly headers?: Readonly<Record<string, RouteResponseHeader>>;
 }
 
 /** Route tool marker shared by functional and decorated routes.

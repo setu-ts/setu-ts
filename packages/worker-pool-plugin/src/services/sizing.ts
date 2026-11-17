@@ -1,5 +1,6 @@
 /** Internal worker-budget option validation and resolution. @module */
 import type { WorkerPoolPluginOptions } from '../interfaces/index.ts';
+import { assertTaskLabel } from '../metrics/task-label.ts';
 
 /** Default `startupTimeoutMs`: how long a spawned worker may take to signal ready. */
 export const DEFAULT_STARTUP_TIMEOUT_MS = 10_000;
@@ -40,6 +41,8 @@ export interface SizingSnapshot {
    * invisible to validation and visible to a later property lookup.
    */
   readonly pools: ReadonlyMap<string, PoolOverridesSnapshot>;
+  /** Explicit `pools[specifier].label` values, validated and unique. */
+  readonly labels: ReadonlyMap<string, string>;
 }
 
 /**
@@ -51,7 +54,8 @@ export interface SizingSnapshot {
  * @returns The validated snapshot
  * @throws {RangeError} When `maxWorkers` is neither `Infinity` nor a positive
  * safe integer, or `startupTimeoutMs` is not a positive integer no greater
- * than {@linkcode MAX_TIMER_DELAY_MS}
+ * than {@linkcode MAX_TIMER_DELAY_MS}, or a pool `label` is malformed or
+ * shared by two pools
  */
 export function readSizingOptions(options?: WorkerPoolPluginOptions): SizingSnapshot {
   const maxWorkers: unknown = options?.maxWorkers;
@@ -82,6 +86,8 @@ export function readSizingOptions(options?: WorkerPoolPluginOptions): SizingSnap
   const taskTimeoutMs: unknown = options?.taskTimeoutMs;
   assertTaskTimeout(taskTimeoutMs, 'taskTimeoutMs');
   const pools = new Map<string, PoolOverridesSnapshot>();
+  const labels = new Map<string, string>();
+  const labelOwners = new Map<string, string>();
   for (const [specifier, entry] of Object.entries(options?.pools ?? {})) {
     // A `null`/`undefined` entry (easy to produce from JSON config) means "no
     // overrides", exactly as the pool lookup treated it before validation was
@@ -90,6 +96,19 @@ export function readSizingOptions(options?: WorkerPoolPluginOptions): SizingSnap
       Partial<Record<keyof PoolOverridesSnapshot, unknown>> | null | undefined;
     const poolTimeout: unknown = fields?.taskTimeoutMs;
     assertTaskTimeout(poolTimeout, `pools[${JSON.stringify(specifier)}].taskTimeoutMs`);
+    const label: unknown = (entry as { readonly label?: unknown } | null | undefined)?.label;
+    if (label !== undefined) {
+      assertTaskLabel(label, `pools[${JSON.stringify(specifier)}].label`);
+      const owner = labelOwners.get(label);
+      if (owner !== undefined) {
+        throw new RangeError(
+          `pools[${JSON.stringify(specifier)}].label ${JSON.stringify(label)} is already the ` +
+            `label of pools[${JSON.stringify(owner)}]; each pool needs its own label.`,
+        );
+      }
+      labelOwners.set(label, specifier);
+      labels.set(specifier, label);
+    }
     pools.set(specifier, {
       size: fields?.size as number | undefined,
       maxQueue: fields?.maxQueue as number | undefined,
@@ -103,6 +122,7 @@ export function readSizingOptions(options?: WorkerPoolPluginOptions): SizingSnap
     maxQueue: options?.maxQueue,
     taskTimeoutMs: taskTimeoutMs as number | undefined,
     pools,
+    labels,
   };
 }
 

@@ -12,7 +12,7 @@ import { QuotaExceededError, respondQuotaExceeded } from '@setu-ts/auth-plugin';
 import { validateBody } from '@setu-ts/validation-plugin';
 import { CHAT_MODELS } from '../../plugins/chat-models.plugin.ts';
 import type { IChatModelsService } from '../../plugins/chat-models.plugin.ts';
-import { budgetedModel } from './chat.budget.ts';
+import { budgetedModel, requestScope } from './chat.budget.ts';
 import { ChatBody, ChatModelInfo } from './chat.schemas.ts';
 import type { ChatUsageMetadata } from './chat.schemas.ts';
 import { chatQuota } from './chat.service.ts';
@@ -99,7 +99,7 @@ export function registerChatRoutes(router: IRouterApi, services?: IServiceRegist
       const tenantId = ctx.request.tenant?.id;
       if (!tenantId) throw new TypeError('A server-resolved tenant is required');
       const { models } = ctx.services.get<IChatModelsService>(CHAT_MODELS);
-      const { model, ready } = budgetedModel(ctx, models, quota(ctx));
+      const { model, ready } = budgetedModel(requestScope(ctx), models, quota(ctx));
       const result = streamText({
         model,
         // The client resends the conversation; the server keeps none.

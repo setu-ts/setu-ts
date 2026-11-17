@@ -25,8 +25,9 @@ npm install @setu-ts/vector-store-plugin
 ```
 
 `setu add vector-store` installs the package and prints a registration to paste into
-`setu.config.ts`; it never inserts one, because collections and the adapter's client belong to the
-application.
+`setu.config.ts`; it never inserts one, because the collections belong to the application. With
+`--adapter qdrant` or `pgvector` it also writes `src/vector-store.ts`, which builds the client, plus
+the connection variable and a Compose service.
 
 The pgvector adapter loads `drizzle-orm` lazily and declares it as an optional peer (`0.45.2`).
 Install it beside the plugin, then install your PostgreSQL driver (`pg` or `postgres`):
@@ -212,6 +213,11 @@ that source's other records in the scope. Every record must carry `sourceId`. A 
 ids therefore leaves one copy, and a shorter document leaves no stale chunk. A record id already
 used by another source in the same scope is reassigned to this source.
 
+One call replaces the WHOLE source and takes at most 5,000 records, so write a document in one call:
+a second call for the same source deletes every record the first one wrote. On pgvector the call is
+one transaction. Qdrant has no transactions, so a failed call can leave part of it written; retry
+the whole call.
+
 Pass `{ version }` as a fifth argument when submissions of one source can be processed out of order,
 as queue retries can be. The version is a non-negative safe integer that grows with each newer
 submission, such as the time the submission was accepted. The write is refused with
@@ -227,20 +233,21 @@ every record of one tenant in the collection, for offboarding.
 
 ## Limits
 
-| Limit                                | Value             |
-| ------------------------------------ | ----------------- |
-| Dimensions per collection            | 4,096             |
-| Filterable fields per collection     | 10                |
-| Matches per query (`topK`)           | 50                |
-| Records per `upsert`/`replaceSource` | 500               |
-| Ids per `delete`                     | 1,000             |
-| Scope                                | 64 UTF-8 bytes    |
-| Record or source id                  | 256 UTF-8 bytes   |
-| Record `content`                     | 8,192 UTF-8 bytes |
-| String metadata or filter value      | 64 UTF-8 bytes    |
-| Values in one `in` clause            | 100               |
-| `and` nesting depth                  | 4                 |
-| Clauses in one filter                | 32                |
+| Limit                            | Value             |
+| -------------------------------- | ----------------- |
+| Dimensions per collection        | 4,096             |
+| Filterable fields per collection | 10                |
+| Matches per query (`topK`)       | 50                |
+| Records per `upsert`             | 500               |
+| Records per `replaceSource`      | 5,000             |
+| Ids per `delete`                 | 1,000             |
+| Scope                            | 64 UTF-8 bytes    |
+| Record or source id              | 256 UTF-8 bytes   |
+| Record `content`                 | 8,192 UTF-8 bytes |
+| String metadata or filter value  | 64 UTF-8 bytes    |
+| Values in one `in` clause        | 100               |
+| `and` nesting depth              | 4                 |
+| Clauses in one filter            | 32                |
 
 Every limit is enforced by the service before the adapter sees the call, and is the tightest of the
 four backends so a request behaves the same everywhere. A vector must have exactly the collection's
@@ -262,7 +269,6 @@ database without `execute` and `transaction`. pgvector 0.8 or later is required.
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
 import { PgVectorStore, VectorStorePlugin } from '@setu-ts/vector-store-plugin';
-import type { PgVectorDatabase } from '@setu-ts/vector-store-plugin';
 
 // Bounds: a hung database answers 503/504 instead of holding the request.
 const pool = new Pool({
@@ -273,7 +279,7 @@ const pool = new Pool({
 
 export const plugin = VectorStorePlugin({
   adapter: new PgVectorStore({
-    db: drizzle(pool) as unknown as PgVectorDatabase,
+    db: drizzle(pool),
     onClose: () => pool.end(),
   }),
   collections: [{ name: 'documents', dimensions: 1024, filterable: { tag: 'string' } }],
@@ -284,7 +290,18 @@ export const plugin = VectorStorePlugin({
 key and an HNSW cosine index. `ensure: 'create'` (default) creates missing objects;
 `ensure: 'verify'` only checks them and refuses a missing table, for applications whose migrations
 own the DDL (concurrent replica start-up can race on `CREATE`). Both modes check the `vector`
-extension version and the column's dimensions.
+extension version, the column's dimensions and the two indexes. A migration must create them with
+these names and shapes:
+
+```sql
+CREATE INDEX vs_documents_src ON vs_documents (scope, source_id);
+CREATE INDEX vs_documents_hnsw ON vs_documents USING hnsw (embedding vector_cosine_ops);
+```
+
+An index with the right name but another table, columns, access method or operator class (an L2
+`vector_l2_ops` HNSW index, say) is refused with `VectorCollectionMismatchError` naming the expected
+definition. `ensure: 'create'` does not replace such an index either, so it refuses it too. Every
+collection uses cosine distance.
 
 Every query runs in a transaction with `hnsw.ef_search` raised to at least 40 and
 `hnsw.iterative_scan = strict_order`, so filtered searches keep recall and results stay in distance
@@ -390,6 +407,31 @@ Vectorize cannot delete by namespace or by filter: `replaceSource` and `deleteSc
 `VectorOperationUnsupportedError` instead of being emulated. Upsert deterministic ids and delete the
 stale ones yourself, or give each tenant group its own index.
 
+## Readiness
+
+The plugin registers a `vector-store` health indicator, which joins `/ready` by default, so a
+replica whose backend stops answering leaves the load balancer instead of failing every search. It
+calls the adapter's `isHealthy()` through a probe cached for 5 seconds and bounded at 2 seconds. A
+probe that fails, rejects or runs past that bound reports `down` with `reachable: false`:
+
+| Adapter                | Probe                                                                                    |
+| ---------------------- | ---------------------------------------------------------------------------------------- |
+| `QdrantVectorStore`    | whether the first declared collection exists, an endpoint that needs the API key         |
+| `PgVectorStore`        | `SELECT 1` through the application's db, skipped while the pool is saturated (see below) |
+| `VectorizeVectorStore` | the index's `describe()`                                                                 |
+| `MemoryVectorStore`    | always reachable                                                                         |
+
+A saturated node-postgres pool, with no idle connection and either callers waiting or every
+connection it may open already open, is not by itself an outage. `PgVectorStore` queues no probe
+behind that traffic. When the pool's `connectionTimeoutMillis` is under the 2-second probe bound, it
+also reads the probe's own pool-acquire timeout as the same saturation. The indicator stays `up`
+with `reachable: 'unknown'` while the adapter's own statements keep completing, or none is running.
+Once they have stopped completing for 10 seconds it reports `down`. This is database-plugin's
+progress rule; database-plugin reports that last case as `degraded`, and both fail `/ready`. An
+adapter without `isHealthy()` stays `up` with `reachable: 'unknown'`. After shutdown the indicator
+reports `down` with `state: 'closed'`. To keep it out of readiness, exclude it in
+`HealthPlugin({ readiness: { exclude: ['vector-store'] } })`.
+
 ## Errors
 
 | Error                             | Thrown when                                                                              | Status hint |
@@ -400,7 +442,7 @@ stale ones yourself, or give each tenant group its own index.
 | `VectorDimensionError`            | A vector has the wrong length, a component that is not finite as a float32, or zero norm | 400         |
 | `VectorRecordError`               | A record, id, metadata value, batch, `topK` or `minScore` is invalid                     | 400         |
 | `VectorCollectionUnknownError`    | A call names a collection the plugin was not configured with                             | 500         |
-| `VectorCollectionMismatchError`   | An existing collection's dimensions or metric disagree                                   | —           |
+| `VectorCollectionMismatchError`   | An existing collection's dimensions, `source_version` column or index shape disagree     | —           |
 | `VectorOperationUnsupportedError` | The backend cannot perform the operation or support the declaration                      | 501         |
 
 `VectorCollectionMismatchError` and a refused declaration fail registration, so the application does

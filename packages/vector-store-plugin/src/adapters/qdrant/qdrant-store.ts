@@ -31,6 +31,7 @@ import {
   scopeCondition,
   scopedFilter,
 } from './qdrant-filter.ts';
+import { MAX_RECORDS_PER_CALL } from '../../services/limits.ts';
 
 const CLIENT_METHODS = [
   'collectionExists',
@@ -125,6 +126,8 @@ export class QdrantVectorStore implements IVectorStoreAdapter {
   /** @inheritdoc */
   readonly versionedReplace = true;
   readonly #client: QdrantClientLike;
+  /** The collection the readiness probe checks: the first one ensured. */
+  #probeCollection: string | undefined;
   /** Settles once the server is known to take `update_filter`; reset after a failed probe. */
   #versionChecked: Promise<void> | undefined;
   readonly #onClose: (() => void | Promise<void>) | undefined;
@@ -159,6 +162,7 @@ export class QdrantVectorStore implements IVectorStoreAdapter {
   /** @inheritdoc */
   async ensureCollection(spec: VectorCollectionSpec): Promise<void> {
     const name = collectionName(spec);
+    this.#probeCollection ??= name;
     const { exists } = await this.#run(() => this.#client.collectionExists(name));
     if (!exists) {
       await this.#run(() =>
@@ -212,7 +216,7 @@ export class QdrantVectorStore implements IVectorStoreAdapter {
   /**
    * @inheritdoc
    *
-   * Qdrant has no transactions: the write and the stale-delete are two calls,
+   * Qdrant has no transactions: the write slices precede the stale-delete,
    * so two replacements of the SAME source must not run at once (one could
    * delete the other's records). Serialise them per source, e.g. one queue job
    * per document at a time, or pass a `version`.
@@ -234,7 +238,8 @@ export class QdrantVectorStore implements IVectorStoreAdapter {
     const source = [scopeCondition(scope), { key: SOURCE_KEY, match: { value: sourceId } }];
     const kept = await Promise.all(records.map((record) => this.#pointId(scope, record.id)));
     if (version === undefined) {
-      if (records.length > 0) await this.upsert(spec, scope, records);
+      for (let start = 0; start < records.length; start += MAX_RECORDS_PER_CALL)
+        await this.upsert(spec, scope, records.slice(start, start + MAX_RECORDS_PER_CALL));
       await this.#deleteSource(name, { must: source, ...notKept(kept) });
       return;
     }
@@ -243,9 +248,11 @@ export class QdrantVectorStore implements IVectorStoreAdapter {
     // are inserted, and a point of another source is reassigned as usual.
     const newer = { key: VERSION_KEY, range: { gt: version } };
     const newerOfSource = { must: [source[1], newer] };
-    if (records.length > 0) {
+    for (let start = 0; start < records.length; start += MAX_RECORDS_PER_CALL) {
       const points = await Promise.all(
-        records.map((record) => this.#point(scope, record, version)),
+        records
+          .slice(start, start + MAX_RECORDS_PER_CALL)
+          .map((record) => this.#point(scope, record, version)),
       );
       await this.#run(() =>
         this.#client.upsert(name, {
@@ -322,6 +329,24 @@ export class QdrantVectorStore implements IVectorStoreAdapter {
     await this.#run(() =>
       this.#client.delete(collectionName(spec), { wait: true, filter: scopedFilter(scope) }),
     );
+  }
+
+  /**
+   * Reachability for readiness: whether the first ensured collection exists
+   * (`GET /collections/{name}/exists`). That endpoint needs the API key, which
+   * the server's version endpoint does not check, so a revoked key or a deleted
+   * collection reads as unreachable. Before any collection is ensured, the
+   * version endpoint answers instead.
+   *
+   * @returns `true` once the collection answered as present
+   */
+  async isHealthy(): Promise<boolean> {
+    const name = this.#probeCollection;
+    if (name === undefined) {
+      await this.#client.versionInfo();
+      return true;
+    }
+    return (await this.#client.collectionExists(name)).exists;
   }
 
   /** @inheritdoc */

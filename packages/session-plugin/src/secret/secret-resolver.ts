@@ -7,13 +7,13 @@
  *
  * @module
  */
-import type { ISecretManager, IServiceRegistry } from '@setu-ts/common';
+import type { IConfig, ISecretManager, IServiceRegistry } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 
 import { SessionSecretMissingError } from '../errors.ts';
 import type { SessionPluginOptions } from '../options.ts';
 
-/** Default name looked up in the secret manager and the environment. */
+/** Default name looked up in the secrets manager, configuration and the environment. */
 const DEFAULT_SECRET_NAME = 'SESSION_SECRET';
 
 /**
@@ -24,7 +24,7 @@ export const MIN_SECRET_LENGTH = 32;
 
 /** What the resolver needs to look a secret up. */
 export interface SecretResolverDeps {
-  /** The registry, used to find `CAPABILITIES.SECRETS` when it is registered. */
+  /** The registry, used to find `CAPABILITIES.SECRETS` and `CAPABILITIES.CONFIG` when they are registered. */
   readonly services: IServiceRegistry;
   /** Environment variables, from `IRuntimeServices.env`. */
   readonly env: Readonly<Record<string, string | undefined>>;
@@ -34,7 +34,7 @@ export interface SecretResolverDeps {
  * Resolves the ordered secret list.
  *
  * Precedence: an explicitly supplied `secret` option wins; otherwise
- * `CAPABILITIES.SECRETS` when registered; otherwise the environment. The secrets
+ * `CAPABILITIES.SECRETS` when registered; then configuration; then the environment. The secrets
  * manager is tried inside a `catch` because `ISecretManager.get` throws on a
  * missing secret rather than returning `null`, which is the same shape as the
  * reference implementation's Key-Vault-then-env fallback.
@@ -60,6 +60,13 @@ export async function resolveSecrets(
     return validate([fromManager], `secret '${name}' from the secrets manager`);
   }
 
+  const fromConfig = deps.services.has(CAPABILITIES.CONFIG)
+    ? deps.services.get<IConfig>(CAPABILITIES.CONFIG).get<unknown>(name)
+    : undefined;
+  if (typeof fromConfig === 'string' && fromConfig !== '') {
+    return validate(normalizeEnv(fromConfig), `configuration ${name}`);
+  }
+
   const fromEnv = deps.env[name];
   if (fromEnv !== undefined && fromEnv !== '') {
     return validate(normalizeEnv(fromEnv), `environment variable ${name}`);
@@ -67,7 +74,7 @@ export async function resolveSecrets(
 
   throw new SessionSecretMissingError(
     `No session secret. Supply SessionPlugin({ secret }), register a secrets provider ` +
-      `holding '${name}', or set the ${name} environment variable ` +
+      `holding '${name}', set ${name} in configuration, or set the ${name} environment variable ` +
       `(minimum ${MIN_SECRET_LENGTH} characters).`,
   );
 }

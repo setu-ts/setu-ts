@@ -10,18 +10,24 @@
  * 1. CLI-owned, rewritten: each member's `src/transport/index.ts`, the manifest,
  *    the Compose stack, the Kubernetes objects, and the README's marked section.
  * 2. Merged, never removed: the member manifest gains the packages the new
- *    choice loads; packages no longer needed are listed, not deleted.
+ *    choice loads (a full-stack member on a broker that backs a queue gains
+ *    `@setu-ts/queue-plugin`); packages no longer needed are listed, not deleted.
  * 3. Create-only: the proto toolchain and the node-redis helper.
  * 4. User-owned: `setu.config.ts` and all other source. The planner checks the
  *    config CALLS the module, and refuses — writing nothing — when it does not,
  *    printing the lines to add. That refusal is also the migration path for a
- *    member made before the module existed.
+ *    member made before the module existed. A config that does not yet pass
+ *    its queue the generated job processors is told the lines in a note.
  *
  * @module
  */
 
 import type { IFileSystem } from '@setu-ts/common';
-import { calledOutsideImports } from '../diagnostics/wiring.ts';
+import {
+  strictlyCalledOutsideImports,
+  strictlyReferencedOutsideImports,
+} from '../diagnostics/wiring.ts';
+import { JOBS_SEAM, QUEUE_PROCESSORS_EXPORT } from '../seams/jobs.ts';
 import { maskComments } from '../devtool/sources.ts';
 import { CLIENT_RANGES } from '../templates/client-dependencies.ts';
 import { frameworkSpecifier } from '../templates/framework-specifier.ts';
@@ -37,12 +43,13 @@ import {
   MEMBERS_DIR,
   renderWorkspaceManifest,
   WORKSPACE_MANIFEST,
+  workspaceSecretVariables,
   type WorkspaceManifest,
   type WorkspaceMember,
 } from './manifest.ts';
 import { PROTO_OUT_DIR } from './proto-toolchain.ts';
 import { renderTransportSection, TRANSPORT_README_MARKERS } from './root-files.ts';
-import { rpcSpec, type RpcStyle } from './rpc.ts';
+import { GRPC_CALLER_CLIENTS, GRPC_PLUGIN, grpcTargets, rpcSpec, type RpcStyle } from './rpc.ts';
 import { workspaceProfile } from './runtime-profile.ts';
 import { type BrokerName, brokerSpec } from './transport.ts';
 import {
@@ -144,6 +151,7 @@ function moduleInput(manifest: WorkspaceManifest, context: MemberContext): Trans
   return {
     broker: brokerSpec(manifest.broker, manifest.redisClient),
     rpc: rpcSpec(context.member.rpc),
+    grpcTargets: grpcTargets(manifest.members, context.member.name),
     host: context.host,
     profile: workspaceProfile(manifest.runtime),
     messaging: context.installed.has('messaging-plugin'),
@@ -215,6 +223,12 @@ function missingCalls(config: string | undefined, input: TransportModuleInput): 
   const shape = transportModuleShape(input);
   const factory = input.host === 'app-factory';
   const wanted: readonly (readonly [string, string])[] = [
+    [
+      TRANSPORT_EXPORTS.runtime,
+      factory
+        ? 'runtime: runtimeOptions(),'
+        : 'RuntimePlugin({ ...runtimeOptions(), <its existing options> }),',
+    ],
     ...(shape.messaging
       ? [
           [
@@ -249,7 +263,7 @@ function missingCalls(config: string | undefined, input: TransportModuleInput): 
   // planner cannot show the module is read, and writing it anyway could leave a
   // member on the old broker with nothing saying so.
   const missing = wanted.filter(
-    ([symbol]) => config === undefined || calledOutsideImports(config, symbol) !== true,
+    ([symbol]) => config === undefined || strictlyCalledOutsideImports(config, symbol) !== true,
   );
   if (missing.length === 0) return [];
   const imported = wanted.map(([symbol]) => symbol).join(', ');
@@ -378,6 +392,28 @@ function mergeManifest(
   return changed ? { contents: `${JSON.stringify(next, null, 2)}\n` } : {};
 }
 
+/** The framework package a full-stack member's Redis-backed queue needs. */
+const QUEUE_PACKAGE = 'queue-plugin';
+
+/**
+ * Whether a member under these inputs needs the queue package, as generating it
+ * on that broker gives it (`member-host.ts`, M139d V12-33): a full-stack member on
+ * a broker that backs a queue (Redis, RabbitMQ). Switching to one later merges the
+ * package so `setu g job` works (V12-60). The jobs seam is NOT pre-created: the
+ * config is the developer's, and a barrel it does not read yet would fail
+ * `setu check` with setu.E006 before any job exists; `setu g job` writes it.
+ *
+ * @param input - The module's inputs
+ * @returns `true` when the member needs them
+ */
+function needsQueueSeam(input: TransportModuleInput): boolean {
+  return (
+    input.host === 'app-factory' &&
+    input.broker.connection !== undefined &&
+    input.broker.queueArgs !== undefined
+  );
+}
+
 /**
  * The packages and manifest entries a member needs under a manifest.
  *
@@ -395,8 +431,14 @@ function neededEntries(
       : []),
     ...(shape.queue && broker.queueArgs !== undefined ? (broker.queueClients ?? []) : []),
     ...(rpc.clients ?? []),
+    ...((input.grpcTargets ?? []).length === 0 ? [] : GRPC_CALLER_CLIENTS),
   ].filter((name, index, all) => all.indexOf(name) === index);
-  const framework = rpc.plugin === undefined ? [] : [rpc.plugin.pkg];
+  const framework = [
+    ...(needsQueueSeam(input) ? [QUEUE_PACKAGE] : []),
+    ...(rpc.plugin === undefined && (input.grpcTargets ?? []).length === 0
+      ? []
+      : [GRPC_PLUGIN.pkg]),
+  ];
   if (input.profile.manifestKind === 'deno') {
     return {
       imports: {
@@ -500,9 +542,14 @@ export async function planTransportChange(
   const profile = workspaceProfile(next.runtime);
   const before = brokerSpec(manifest.broker, manifest.redisClient);
   const after = brokerSpec(next.broker, next.redisClient);
+  // An RPC change reaches the member and every member that calls it: a caller's
+  // module registers the plugin's client for its gRPC targets (M139b §3.12).
   const affected =
     change.kind === 'rpc'
-      ? next.members.filter((member) => member.name === change.member)
+      ? next.members.filter(
+          (member) =>
+            member.name === change.member || (member.dependsOn ?? []).includes(change.member),
+        )
       : next.members;
 
   const files: GeneratedFile[] = [];
@@ -538,7 +585,12 @@ export async function planTransportChange(
         `reads ${oldVariable}, whose ${before.name} service the Compose stack will no longer start`,
       ]);
     }
-    if (change.kind === 'rpc' && previous.rpc === 'grpc' && change.rpc === 'http') {
+    if (
+      change.kind === 'rpc' &&
+      member.name === change.member &&
+      previous.rpc === 'grpc' &&
+      change.rpc === 'http'
+    ) {
       patterns.push(
         [
           /\bCAPABILITIES\.GRPC\b/,
@@ -553,6 +605,34 @@ export async function planTransportChange(
           'imports generated proto descriptors no plugin will serve',
         ],
       );
+    }
+    // A caller whose gRPC targets this change empties loses the plugin's client
+    // with them (M139b §3.12), so code still calling it is orphaned the same way.
+    // A caller that serves gRPC itself keeps the plugin: only its client calls lose
+    // their target, and its own services still import the plugin and resolve it.
+    if (
+      change.kind === 'rpc' &&
+      member.name !== change.member &&
+      grpcTargets(manifest.members, member.name).length > 0 &&
+      grpcTargets(next.members, member.name).length === 0
+    ) {
+      if (member.rpc === 'grpc') {
+        patterns.push([
+          /\bgrpcClient(?:Provider)?\b/,
+          `calls ${change.member} over gRPC, which it will no longer serve`,
+        ]);
+      } else {
+        patterns.push(
+          [
+            /['"]@setu-ts\/grpc-plugin['"]/,
+            `imports the gRPC plugin, whose client this member will no longer register once ${change.member} stops serving gRPC`,
+          ],
+          [
+            /\bCAPABILITIES\.GRPC\b/,
+            `resolves the gRPC service, which this member will no longer register`,
+          ],
+        );
+      }
     }
     orphaned.push(...(await orphans(fs, dir, context, patterns)));
 
@@ -610,10 +690,26 @@ export async function planTransportChange(
         .filter(([section]) => section === 'dependencies' || section === 'imports')
         .flatMap(([, map]) => Object.keys(map));
     const nowNeeded = new Set(names(neededEntries(input)));
-    const left = names(neededEntries(previousInput)).filter((name) => !nowNeeded.has(name));
+    // The starter registers the queue on every broker, and a jobs seam imports
+    // the package, so leaving a broker that backs a queue never orphans it.
+    const left = names(neededEntries(previousInput)).filter(
+      (name) => !nowNeeded.has(name) && name !== `@setu-ts/${QUEUE_PACKAGE}`,
+    );
     if (left.length > 0) {
       notes.push(
         `${escapeName(context.root)}: its transport module no longer uses ${left.join(', ')}; left in its manifest, so remove what nothing else needs.`,
+      );
+    }
+    // The config is the developer's: the planner never writes it, so a member that
+    // does not yet hand its jobs to the queue is told the two lines that do, and
+    // that `setu check` requires them once `setu g job` has written a job.
+    if (
+      needsQueueSeam(input) &&
+      config !== undefined &&
+      strictlyReferencedOutsideImports(config, QUEUE_PROCESSORS_EXPORT) !== true
+    ) {
+      notes.push(
+        `${escapeName(joinPath(context.root, CONFIG_FILE))}: once \`setu g job\` writes a job, \`setu check\` reports setu.E006 until this file imports { ${QUEUE_PROCESSORS_EXPORT} } from './${JOBS_SEAM.barrel}' and starts its queue option with processors: [...${QUEUE_PROCESSORS_EXPORT}],`,
       );
     }
     if (previous.rpc === 'grpc' && member.rpc !== 'grpc') {
@@ -644,7 +740,12 @@ export async function planTransportChange(
     );
     files.push(...workspaceK8sFiles(next, after).map((file) => ({ ...file, managed: true })));
     const readme = await readText(fs, joinPath(dir, 'README.md'));
-    const section = renderTransportSection(after, profile, next.brokerUrl);
+    const section = renderTransportSection(
+      after,
+      profile,
+      next.brokerUrl,
+      workspaceSecretVariables(next.members),
+    );
     const start = readme?.indexOf(TRANSPORT_README_MARKERS.start) ?? -1;
     const end = readme?.indexOf(TRANSPORT_README_MARKERS.end) ?? -1;
     if (readme !== undefined && start >= 0 && end > start) {

@@ -10,12 +10,11 @@
  */
 
 import process from 'node:process';
-import { nodeProcess, runMain } from '@setu-ts/cli/main';
-import { createNodeRuntimeServices } from '@setu-ts/runtime';
+import { nodeProcess, nodeRuntime, runMain } from '@setu-ts/cli/main';
 import { createArgs } from './index.ts';
 
 const host = nodeProcess();
-process.exitCode = await runMain(createNodeRuntimeServices(), {
+process.exitCode = await runMain(nodeRuntime(), {
   ...host,
   args: createArgs(host.args),
 });

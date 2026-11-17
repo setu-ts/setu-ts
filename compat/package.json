@@ -9,6 +9,8 @@
     "test:bun": "bun compat.test.mjs"
   },
   "dependencies": {
+    "@modelcontextprotocol/server": "^2.4.0",
+    "@setu-ts/agent-runs-plugin": "latest",
     "@setu-ts/audit-plugin": "latest",
     "@setu-ts/auth-plugin": "latest",
     "@setu-ts/cache-plugin": "latest",
@@ -35,6 +37,7 @@
     "@setu-ts/localization-plugin": "latest",
     "@setu-ts/logger-plugin": "latest",
     "@setu-ts/mail-plugin": "latest",
+    "@setu-ts/mcp-plugin": "latest",
     "@setu-ts/messaging-plugin": "latest",
     "@setu-ts/metrics-plugin": "latest",
     "@setu-ts/microservice-starter": "latest",
@@ -58,9 +61,9 @@
     "@setu-ts/telemetry-plugin": "latest",
     "@setu-ts/testing": "latest",
     "@setu-ts/validation-plugin": "latest",
+    "@setu-ts/vector-store-plugin": "latest",
     "@setu-ts/view-plugin": "latest",
     "@setu-ts/websocket-plugin": "latest",
-    "@setu-ts/worker-pool-plugin": "latest",
-    "@modelcontextprotocol/server": "^2.4.0"
+    "@setu-ts/worker-pool-plugin": "latest"
   }
 }

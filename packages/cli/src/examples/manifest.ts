@@ -114,6 +114,7 @@ export const EXAMPLE_MANIFEST: Readonly<
       '.env.example',
       '.prettierignore',
       '.prettierrc.json',
+      '.setu-ts/check.json',
       'Dockerfile',
       'README.md',
       'db-setup.ts',

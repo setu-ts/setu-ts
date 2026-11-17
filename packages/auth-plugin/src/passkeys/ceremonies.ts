@@ -10,6 +10,7 @@
  * @module
  */
 
+import { isPasskeyLoopbackName } from '../utils/loopback.ts';
 import type {
   IAuthSessionService,
   IPrincipal,
@@ -185,16 +186,6 @@ function refuse(reason: string): never {
 }
 
 /**
- * The loopback hostnames an `http` origin may use (the `isAcceptableUrl`
- * rule). The IPv6 loopback is deliberately excluded: an RP ID can never
- * contain a colon, so `http://[::1]` could never satisfy the host check and
- * admitting it would be a dead branch.
- */
-function isLoopbackHost(hostname: string): boolean {
-  return hostname === 'localhost' || hostname === '127.0.0.1';
-}
-
-/**
  * Validates and compiles the `signIn.passkeys` option. `AuthPlugin` calls it
  * from its factory, so every refusal happens before an application exists
  * rather than at the first ceremony (plan §3.6).
@@ -240,9 +231,9 @@ export function compilePasskeys(options: PasskeyOptions): CompiledPasskeys {
     }
     if (
       parsed.protocol !== 'https:' &&
-      !(parsed.protocol === 'http:' && isLoopbackHost(parsed.hostname))
+      !(parsed.protocol === 'http:' && isPasskeyLoopbackName(parsed.hostname))
     ) {
-      refuse(`origin '${origin}' must be https, or http on a loopback host`);
+      refuse(`origin '${origin}' must be https, or http on a localhost name`);
     }
     if (parsed.pathname !== '/' || parsed.search !== '' || parsed.hash !== '') {
       refuse(`origin '${origin}' must be a bare origin, without a path, query or fragment`);

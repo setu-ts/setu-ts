@@ -14,7 +14,7 @@ describe('first-party JWT time boundaries', () => {
         const runtime = createFakeRuntime(boundary - 1000);
         const service = new JwtService(runtime, {
           algorithm: 'HS256',
-          secret: 'time-boundary-test-secret',
+          secret: 'time-boundary-test-secret-at-least-32-characters',
         });
         const token = await service.sign({ sub: 'user', exp: boundary / 1000 });
         runtime.setNow(boundary + offset);
@@ -26,7 +26,7 @@ describe('first-party JWT time boundaries', () => {
         const runtime = createFakeRuntime(boundary - 1000);
         const service = new JwtService(runtime, {
           algorithm: 'HS256',
-          secret: 'time-boundary-test-secret',
+          secret: 'time-boundary-test-secret-at-least-32-characters',
         });
         const token = await service.sign({ sub: 'user', nbf: boundary / 1000 });
         runtime.setNow(boundary + offset);

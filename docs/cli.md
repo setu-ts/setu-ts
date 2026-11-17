@@ -100,6 +100,8 @@ failed download leaves the target untouched and names a template alternative. Dr
 manifest's output paths without fetching anything. Existing file collisions are refused through the
 same writer used by template scaffolds.
 
+<!-- version:history -->
+
 Choose `minimal`, `rest-api`, `mcp-tools` (from 0.12.0), `semantic-search` (from 0.12.0),
 `database`, `di-decorators`, `cqrs`, `multi-tenant`, `static-site`, `worker-pool`, `graphql-demo`,
 `grpc`, `microservices` or `realtime`. Unknown names list those choices; excluded names explain the
@@ -178,12 +180,12 @@ provider on the container when one is present and never touches the kernel regis
 
 ### Runtime targets
 
-| `--runtime`          | Entry                         | Manifests                                                        | Start command          |
-| -------------------- | ----------------------------- | ---------------------------------------------------------------- | ---------------------- |
-| `node` (default)     | `main.ts` → `app.start()`     | `package.json` + `tsconfig.json` + ESLint + Prettier             | `npm start` (compiled) |
-| `deno`               | `main.ts` → `app.start()`     | `deno.json`                                                      | `deno task start`      |
-| `bun`                | `main.ts` → `app.start()`     | `package.json` + `tsconfig.json` + ESLint + Prettier             | `bun run start`        |
-| `cloudflare-workers` | `src/index.ts` `fetch` export | `deno.json` + `package.json` + `tsconfig.json` + `wrangler.toml` | `npm run dev`          |
+| `--runtime`          | Entry                         | Manifests                                                              | Start command          |
+| -------------------- | ----------------------------- | ---------------------------------------------------------------------- | ---------------------- |
+| `node` (default)     | `main.ts` → `app.start()`     | `package.json` + `tsconfig.json` + ESLint + Prettier                   | `npm start` (compiled) |
+| `deno`               | `main.ts` → `app.start()`     | `deno.json`                                                            | `deno task start`      |
+| `bun`                | `main.ts` → `app.start()`     | `package.json` + `tsconfig.json` + ESLint + Prettier                   | `bun run start`        |
+| `cloudflare-workers` | `src/index.ts` `fetch` export | `package.json` + `tsconfig.json` + ESLint + Prettier + `wrangler.toml` | `npm run dev`          |
 
 Every target takes the framework from npm: `package.json` names `@setu-ts/*` at `^<version>`, and
 `deno.json` maps each to `npm:@setu-ts/<name>@^<version>`. A Deno project sets
@@ -198,11 +200,12 @@ API, only `createRuntimeServices()`, and `RuntimePlugin` detects the platform wh
 Only the manifest and the start command differ, so moving a project between those three is a
 manifest change:
 
-- **Node → Bun:** keep `package.json`, set its scripts to `bun run main.ts` and `bun test`, and
-  replace the `tsx` and `@types/node` dev dependencies with `@types/bun`. A `full-stack` project
-  builds the frontend before production, keeps `start: bun run main.ts`, prefixes tests with
-  `react-router build && ` and uses `start:dev: bun run dev.ts`. Bun workspaces need the hoisted
-  linker setting described in the upgrade guide.
+- **Node → Bun:** keep `package.json`, set its scripts to `NODE_ENV=production bun run main.ts` and
+  `bun test`, and replace the `tsx` and `@types/node` dev dependencies with `@types/bun`. A
+  `full-stack` project builds the frontend before production, keeps
+  `start: NODE_ENV=production bun run main.ts`, prefixes tests with `react-router build && ` and
+  uses `start:dev: bun run dev.ts`. Bun workspaces need the hoisted linker setting described in the
+  upgrade guide.
 - **Node or Bun → Deno:** _replace_ `package.json`, `tsconfig.json`, the ESLint and Prettier files
   and the npm lockfile with the `deno.json` that `setu new --runtime deno` emits. A `deno.json`
   added beside a kept `package.json` still serves, but `setu generate` checks `package.json` first,
@@ -227,8 +230,8 @@ before launching Node. If it is absent, it exits 1 with
 `dist/main.js is missing; run the build script first`. Run the generated `build` script, then start
 again. The check is in `start`, not a `prestart` hook (package managers do not all run those hooks).
 Bun and Deno starts are unchanged. The devtool entry also catches creation/start failures, prints
-`setu devtool: startup failed: ... The connector did not start.`, and exits 1. Devtool usage names
-`setu devtool enable`.
+`setu devtool: startup failed: ... The application did not start, and the connector is not running.`,
+and exits 1. Devtool usage names `setu devtool enable`.
 
 **Node development runs TypeScript through `tsx`; production runs the bundle.** Node's built-in
 support (`--experimental-strip-types`) erases types without transforming code, so it cannot run a
@@ -236,13 +239,13 @@ decorator — V8 has not shipped them, so even a TC39 standard decorator is a ba
 the constructor parameter property `setu generate module` emits
 (`ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`). A generated Node project therefore declares `tsx` in
 `devDependencies` and develops with `tsx watch main.ts`, which transforms both. Its `tsconfig.json`
-needs no decorator option. Bun compiles TypeScript outright and Deno and Workers never invoke a
-runner, so no other target carries the dependency.
+needs no decorator option. Bun compiles TypeScript outright and Deno never invokes a runner, so Deno
+carries no such dependency; Workers declares `tsx` to run its `node:test` tests.
 
-**The Workers target carries an npm manifest as well as `deno.json`.** `wrangler` bundles
-`src/index.ts` with esbuild, which reads no Deno import map, so the project emits `package.json`
-(the `@setu-ts/*` dependencies, `wrangler` pinned) and `npm install && npm run dev` works as
-printed. The `deno.json` beside it is what `setu generate` reads for plugin gating.
+**The Workers target carries an npm manifest.** `wrangler` bundles `src/index.ts` with esbuild,
+which reads no Deno import map, so the project emits `package.json` (the `@setu-ts/*` dependencies,
+`wrangler` pinned) and `npm install && npm run dev` works as printed. `package.json` is what
+`setu generate` reads for plugin gating.
 
 `--template microservice --runtime cloudflare-workers` is supported. The template swaps
 `messaging-plugin` and `queue-plugin` — both need a socket — for `@setu-ts/cloudflare-plugin`, and
@@ -286,16 +289,23 @@ option: `setu add cache --store redis`, `setu add idempotency --store redis`,
 the plugin's Redis arm on `REDIS_URL` through the project's Redis client (below). These flags apply
 only to their named package; Workers and workspace members refuse them. Members instead read the
 workspace transport. `add` records the selected client in the manifest (run the install command it
-prints), writes only an absent inline call or generated full-stack option, and prints the exact
-configuration when it already exists or cannot safely be edited. An absent `docker/compose.yaml` is
-created for a standalone selection; an existing one is preserved. The connection variable is
-appended to the project's dotenv file (with its local default) and to that file's `.example` (empty)
-— the rows `setu new --broker` writes — only where the file exists and does not already assign it; a
-file the project does not have is named, not created. The file is the `envFilePath` that
-`setu.config.ts` declares (the last entry of an array, which ConfigPlugin overrides with the earlier
-ones). When the configuration declares none, or names it in a form the CLI cannot read (a variable,
-a template literal), nothing is written and the command says where to set the variable instead.
-Without a selection the full-stack starter uses memory. Changing an existing value is a manual edit.
+prints), writes an absent inline call or generated full-stack option, gives the bare zero-argument
+call it wrote earlier (`CachePlugin()`) the chosen options, and prints the exact configuration when
+the call already has arguments or cannot safely be edited. When `add` writes or rewrites the call,
+it then says that the app and its generated tests connect to the backend at startup, prints the
+`docker compose` command that starts it and the `createTestApp` override that keeps tests offline,
+and gives a standalone README without a "Local transport services" section the one
+`setu new --broker` writes, before `## Run`. When it only prints the configuration, it still writes
+the dotenv rows and creates an absent `docker/compose.yaml`, and prints a Compose block only when
+the file exists without the service. An absent `docker/compose.yaml` is created for a standalone
+selection; an existing one is preserved. The connection variable is appended to the project's dotenv
+file (with its local default) and to that file's `.example` (empty) — the rows `setu new --broker`
+writes — only where the file exists and does not already assign it; a file the project does not have
+is named, not created. The file is the `envFilePath` that `setu.config.ts` declares (the last entry
+of an array, which ConfigPlugin overrides with the earlier ones). When the configuration declares
+none, or names it in a form the CLI cannot read (a variable, a template literal), nothing is written
+and the command says where to set the variable instead. Without a selection the full-stack starter
+uses memory. Changing an existing value is a manual edit.
 
 #### Choosing the Redis client
 
@@ -349,10 +359,17 @@ Workers skip them; full-stack offers both. A host with logging also asks for its
 invents a question whose answer no flag can express, and `--dry-run` stays exact because prompting
 only rewrites the flag record before the ordinary pipeline runs.
 
+Each question is a list: ↑ and ↓ (or `j` and `k`) move the highlight and wrap, a number jumps to
+that option, Enter chooses it, and Escape or Ctrl+C cancels. The default is highlighted first. The
+highlighted option is drawn in a cyan-to-violet gradient on a 24-bit colour terminal, in bold cyan
+on a 16- or 256-colour one, and plain under `NO_COLOR`; a chosen answer collapses to one line. A
+terminal that cannot read single keys, or one with `TERM=dumb`, gets a typed answer instead: the
+option's value, or Enter for the default. `setu add` asks its backend questions the same way.
+
 It fails closed in three layers, so scripts, CI and editors are never blocked: programmatic callers
 pass no prompter at all; the installed executable supplies one only when stdin is a terminal; and
-Deno's own prompt returns `null` on a non-terminal anyway. `--yes` (or `-y`) is the explicit escape
-hatch: take every default and ask nothing.
+its line reader resolves `null` when it cannot read, which ends the question unanswered. `--yes` (or
+`-y`) is the explicit escape hatch: take every default and ask nothing.
 
 ## Generating code
 
@@ -394,33 +411,43 @@ corresponding handler generator. The command imports the managed barrel and wire
 `events: { handlers: EVENT_HANDLERS }`,
 `cqrs: { commandHandlers: COMMAND_HANDLERS, queryHandlers: QUERY_HANDLERS }` or
 `queue: { processors: [...QUEUE_PROCESSORS] }` arm when the generated callback can be safely edited.
-Existing queue transport options are retained, and `add queue --queue redis` merges with the
-processor arm in either add order. Uncertain edits retain the existing configuration and print
-guidance. The starter owns these plugins; use its arm instead of registering a second instance. A
-job in a starter that owns the queue requires `setu add queue` first; otherwise generation refuses
-before writing and explains that the starter already runs the queue. Functional jobs outside a
-queue-owning starter remain ungated.
+`setu add health` and `setu add metrics` wire their generated barrels the same way
+(`health: { indicators: [...HEALTH_INDICATORS] }`,
+`metrics: { customMetrics: [...CUSTOM_METRICS] }`), and an opt-in arm that takes no settings is set
+to `{}` (`setu add sse` writes `realtime: { sse: {} }`; likewise `websocket` and
+`realtime-backplane`). For every other arm the note says which kind it is: "already registers this
+plugin with its defaults" for an arm that is always on, or "registers this plugin only once its …
+arm is set" for one, such as `auth`, that needs values only you can supply. An arm already present
+is left as it is. Existing queue transport options are retained, and `add queue --queue redis`
+merges with the processor arm in either add order. Uncertain edits retain the existing configuration
+and print guidance. The starter owns these plugins; use its arm instead of registering a second
+instance. For an arm the starter registers only when set, `setu add` prints its shape, for example
+`Its arm: graphql: { typeDefs: '<your-schema>', resolvers: {} }`. On full-stack the `static` arm
+carries `urlPrefix: '/files'`, because React Router already serves `GET /*`. When a `realtime` arm
+already exists, a second realtime package is printed as the entry to add inside it. A job in a
+starter that owns the queue requires `setu add queue` first; otherwise generation refuses before
+writing and explains that the starter already runs the queue. Functional jobs outside a queue-owning
+starter remain ungated.
 
 In a full-stack project, `setu g module <name>` writes a request-bound module: `<name>.token.ts`
-(`serviceToken`), a service factory taking the request context, `/api/<name>` routes that resolve it
-with `resolveRequestService`, generated tests that sign a session through `/login` and send its CSRF
-token, and a managed `index.ts` that registers the service with `requestService`. `--page` also
-writes `app/routes/_app/<name>._index.tsx`, a page guarded by `requireUser` whose loader reads the
-service with `getService`. `--page` is refused outside the full-stack template. A page may import
-kernel code only as `import type` or from a `*.token.ts` module through `~kernel/*`; `setu check`
-refuses any other value import (`setu.E017`), including an `import.meta.glob` that reaches `src/`.
-The check reads only the imports a page makes itself: a file outside `app/` that re-exports kernel
-code is not followed.
+(`requestServiceToken`), a service factory taking the request context, `/api/<name>` routes that
+resolve it with `resolveRequestService`, generated tests that sign a session through `/login` and
+send its CSRF token, and a managed `index.ts` that registers the service with `requestService`.
+`--page` also writes `app/routes/_app/<name>._index.tsx`, a page guarded by `requireUser` whose
+loader reads the service with `getService`. `--page` is refused outside the full-stack template. A
+page may import kernel code only as `import type` or from a `*.token.ts` module through `~kernel/*`;
+`setu check` refuses any other value import (`setu.E017`) outside React Router `.server` modules,
+including an `import.meta.glob` that reaches `src/`. The check reads only the imports a page makes
+itself: a file outside `app/` that re-exports kernel code is not followed.
 
 In projects with `react-router-plugin`, `g route`, `g controller` and `g module` refuse kernel
-routes that would shadow an existing page, with its file named. To put an API at `/api/products`
-while keeping the `/products` page, run `setu g module api`, then
-`setu g route products --module api`. The check runs the installed `react-router routes --json` in
-the project with a 15-second deadline. In a workspace it searches from the member up to the
-workspace root for the first installed binary; outside a workspace it searches only the project
-directory; if it cannot run, generation continues with a notice and the paths to check manually.
-`setu check` does not run React Router, so a page added after the route is not detected. On a shared
-path, the kernel route answers document requests.
+routes that would shadow an existing page, with its file named. Run `setu g module orders` for
+`/api/orders`, then `setu g route summary --module orders` for `/api/orders/summary`. The check runs
+the installed `react-router routes --json` in the project with a 15-second deadline. In a workspace
+it searches from the member up to the workspace root for the first installed binary; outside a
+workspace it searches only the project directory; if it cannot run, generation continues with a
+notice and the paths to check manually. `setu check` does not run React Router, so a page added
+after the route is not detected. On a shared path, the kernel route answers document requests.
 
 `guard`, `migration` and `schema` are unwired deliberately, not by omission. A `guard` answers `401`
 when `ctx.request.user` is absent, so registering it globally would 401 `/health`, `/metrics` and
@@ -454,7 +481,8 @@ Run `setu add auth`, then this command again.
 ```
 
 For generated projects in either style, `setu add` registers the safe zero-configuration defaults
-for cqrs, events, messaging, queue, scheduler, websocket, cache, health, metrics, openapi, sse and
+for validation, worker-pool, secrets, storage, audit, mail, resilience, view, idempotency, cqrs,
+events, messaging, queue, scheduler, websocket, cache, health, metrics, openapi, sse and
 realtime-backplane above the emitted development-plugin anchor. In a functional project, `events`,
 `cqrs`, `health` and `metrics` are registered with the generated-artifact barrel they consume, for
 example `EventsPlugin({ handlers: EVENT_HANDLERS })`, and an empty barrel is created when absent, so
@@ -463,16 +491,24 @@ handlers arrive through the ingress barrel. Other shapes receive registration gu
 compositions receive their named option arm and a link to the starter README; configure that arm
 rather than registering the same plugin twice.
 
-`setu add vector-store` installs `@setu-ts/vector-store-plugin` and prints a registration using the
-memory adapter and one `documents` collection. Collections and backend clients belong to the
-application, so the command does not insert the call. See
-[Retrieval (vector search)](./retrieval.md).
+`setu add vector-store` installs `@setu-ts/vector-store-plugin` and prints a registration with one
+`documents` collection, using the memory adapter by default. With `--adapter qdrant` or `pgvector`
+it also writes `src/vector-store.ts`, which builds the client, plus the connection variable, a
+Compose service and the README's local-services section, and prints
+`VectorStorePlugin({ adapter: vectorStoreAdapter(), … })`. It never inserts the call, because the
+collections are the application's. See [Retrieval (vector search)](./retrieval.md).
 
 Class-based `generate job` requires queue; functional projects keep the standalone job recipe.
 Generated guards use `requirePermission` from auth-plugin. The permission is evaluated by the
 authorization service `AuthPlugin` registers only when given an `rbac` option, which is why
-`setu add auth` prints `AuthPlugin({ jwt: { … }, rbac: { roles: {} } })`; without it, every
-authenticated request to a guarded route answers `501` and the handler never runs.
+`setu add auth` prints `AuthPlugin({ jwt: {}, rbac: { roles: {} } })`; without it, every
+authenticated request to a guarded route answers `501` and the handler never runs. With `jwt: {}`,
+`JWT_SECRET` is resolved from a secrets provider, then configuration, then the environment, and a
+value shorter than 32 bytes is refused.
+
+`setu add auth` and `setu add session` write a random 64-hex `JWT_SECRET` or `SESSION_SECRET` into
+the project's env file, append that file to `.gitignore` (printing a `git rm --cached` hint when it
+was already there), and append a custom env path to an existing `.dockerignore`.
 
 `new --devtool`, `app --devtool` and `devtool enable` write the CLI-managed
 `src/devtool/diagnostics.ts` policy. `add` refreshes it only when it already exists. Recognized
@@ -482,7 +518,8 @@ Empty job/operation/role/permission maps approve no observations. This module is
 application-specific policies belong in application-owned configuration.
 
 Dependency additions preserve existing key order. Deno projects update imports only, including
-full-stack projects with a frontend package.json; Node, Bun and Workers update both manifests.
+full-stack projects with a frontend package.json; Node, Bun and Workers update every manifest they
+carry.
 
 ### Managed barrels
 
@@ -617,13 +654,14 @@ folder.
 
 - The file is written into `src/modules/<module>/`, and a controller is registered by regenerating
   the module's `index.ts` (a function controller) or by adding it to the module's declaration (a
-  class controller). A module-scoped controller mounts at `/<module>/<name>` (an SSE controller at
-  `/<module>/sse/<name>`); a static path such as `GET /invoices/summary` outranks
-  `GET /invoices/:id`, so an `id` equal to `summary` is unreachable through `/:id`.
+  class controller). Functional full-stack controllers mount at `/api/<module>/<name>` (SSE at
+  `/api/<module>/sse/<name>`); other projects, including class-based full-stack, keep
+  `/<module>/<name>` (SSE at `/<module>/sse/<name>`). A static `/api/orders/summary` outranks
+  `/api/orders/:id`, so an `id` equal to `summary` is unreachable through `/:id`.
 - **Class-based:** a class controller or service is added to the `controllers` or `providers` array
-  of `<module>.module.ts`, as the NestJS CLI does, when that array is a plain literal. Anything else
-  is left unchanged and the line to add is printed. A module-scoped service is registered under the
-  token `<module>.<name>-service`.
+  of `<module>.module.ts`, when that array is a plain literal. Anything else is left unchanged and
+  the line to add is printed. A module-scoped service is registered under the token
+  `<module>.<name>-service`.
 
 ### `src/shared/` and the one rule
 
@@ -701,10 +739,9 @@ Type". Generated modules do not opt in. With the option, a server-rendered form 
 against the module's `<P>Body` like a JSON client does. The limits to know: a field sent once is a
 single value and a repeated field becomes an array in wire order, with a name ending `[]` always an
 array (kept under the name as written); values are strings or the framework's `FormFile` (not a web
-`File`, so `z.instanceof(File)` refuses it), and numbers arrive as strings — use `z.coerce`; the
-generated OpenAPI document still describes a validated body as JSON; a `_csrf` field from the
-session plugin reaches the schema, where a Zod object strips it by default and
-`forbidNonWhitelisted` refuses it; and an over-limit body answers 413 when
+`File`, so `z.instanceof(File)` refuses it), and numbers arrive as strings — use `z.coerce`; a
+`_csrf` field from the session plugin reaches the schema, where a Zod object strips it by default
+and `forbidNonWhitelisted` refuses it; and an over-limit body answers 413 when
 `RuntimePlugin({ maxBodyBytes })` is set. The full behaviour is documented in the
 [`@setu-ts/validation-plugin` README](../packages/validation-plugin/README.md).
 
@@ -737,7 +774,7 @@ acme/
 ├── setu.workspace.json     # members, their ports and RPC styles, the broker, the runtime
 ├── scripts/dev.mjs         # the root `dev` runner: starts every member (dev.ts on Deno)
 ├── docker/                 # a Compose stack for the members
-├── k8s/                    # members.yaml: a Deployment and Service per member
+├── k8s/                    # members.yaml: a Deployment and a Service per member, plus a `<member>-transport` ConfigMap when the broker has connection defaults
 └── apps/
     ├── orders/
     └── billing/
@@ -776,9 +813,11 @@ Two choices decide how members talk, and they are recorded in different places:
 
 Each member carries a CLI-owned `src/transport/index.ts`, regenerated from `setu.workspace.json`.
 Its `setu.config.ts` calls it instead of holding literal options:
-`MessagingPlugin(messagingOptions())`, `...queueOptions()` inside `QueuePlugin`, and
-`...transportPlugins()` in the plugin list (a full-stack member passes `messagingOptions(config)`
-and `queueOptions(config)` to its starter and registers `transportPlugins()` after it). The config's
+`RuntimePlugin({ ...runtimeOptions(), <its options> })` (`{ http2: true }` for a member that serves
+gRPC, so Node callers reach it over HTTP/2), `MessagingPlugin(messagingOptions())`,
+`...queueOptions()` inside `QueuePlugin`, and `...transportPlugins()` in the plugin list (a
+full-stack member passes `runtime: runtimeOptions()`, `messagingOptions(config)` and
+`queueOptions(config)` to its starter and registers `transportPlugins()` after it). The config's
 calls are the same on every broker and style, so changing either regenerates the module and leaves
 the config alone.
 
@@ -789,6 +828,8 @@ setu workspace broker redis --redis-client node-redis
 setu workspace rpc orders grpc                  # one member
 setu workspace rpc orders http --dry-run        # print the plan, write nothing
 ```
+
+<!-- version:history -->
 
 A change rewrites the files the CLI owns — each affected member's module, the manifest, the Compose
 stack, the Kubernetes objects, and the README section between `<!-- setu:transport -->` markers —
@@ -1016,16 +1057,93 @@ A `CLAUDE.md` can include the same brief with `@AGENTS.md` rather than keeping a
 
 `setu new --agents` runs the same writer on the new project after scaffolding (on a workspace, on
 the new root), so a project can start with a brief. It is opt-in: `setu new` writes no brief by
-default, and neither `setu add` nor `setu generate app` runs the command, because re-running it
-silently would edit a file the developer may not have staged. After a successful `setu add`, the CLI
-prints one reminder when the project already has a sectioned brief:
+default, and none of `setu add`, `setu generate` (including `generate custom`, `generate app` and
+`generate library`), `setu sync` or `setu devtool enable` runs the command, because re-running it
+silently would edit a file the developer may not have staged. After a successful `setu add`,
+`generate`, `generate app` or `generate library`, a `setu sync` that rewrote a barrel, or a
+successful `setu devtool enable`, the CLI prints one reminder when the project already has a
+sectioned brief:
 
 ```
-Run `npx @setu-ts/cli@<version> agents` to update AGENTS.md.
+Run `npx @setu-ts/cli@<version> agents` to update AGENTS.md. Check freshness with `npx @setu-ts/cli@<version> agents --check`.
 ```
 
 The command named is the project's pinned CLI invocation for its runtime: on Bun it is
-`bunx @setu-ts/cli@<version>`, and on Deno it is `deno run -A npm:@setu-ts/cli@<version>`.
+`bunx @setu-ts/cli@<version>`, and on Deno it is `deno run -A --no-lock npm:@setu-ts/cli@<version>`.
+
+`setu add mail database --provider smtp --type drizzle --dialect postgresql` validates every name,
+alias, runtime and applicable flag before writing, then adds packages in order. An I/O failure stops
+at that package and lists the packages already added and those not attempted. There is one install
+command and one brief reminder. A flag must apply to at least one listed package; `--dry-run`
+previews each against the current disk.
+
+Backend choices are `--provider log|smtp|ses|sendgrid` for mail,
+`--type memory|drizzle|prisma|mongodb|dynamodb|cosmos|bigtable` for database, and
+`--adapter memory|pgvector|qdrant` for vector-store. `--dialect postgresql|sqlite` follows
+`--type drizzle`. Transport backends are `--broker` for messaging, `--queue` for queue,
+`--store memory|redis` for cache and idempotency, `--lock memory|redis` for scheduler and
+`--backplane memory|redis` for realtime-backplane. At a terminal, every one of these left out is
+asked, default first, and a flag two listed packages share is asked once; `--dialect` is asked only
+after Drizzle is chosen. A workspace member and a Workers project are not asked for a transport
+backend, because the command refuses one there. A given flag that works with only one value narrows
+the question to it: `--dialect` offers only `--type drizzle`, and `--redis-client` offers only
+`redis` backends. Before asking, the command dry-runs the request with the flags given and each
+question's default, and asks nothing when it would refuse that, so a question is never followed by a
+refusal no answer could avoid. `--yes` or a non-terminal takes the defaults: `log` for mail,
+`postgresql` for the dialect and `memory` for everything else. Only plugin peers are recorded.
+App-owned clients such as `pg`, `@prisma/client` and `@prisma/adapter-pg` appear in the install
+guidance. Backend configuration remains application-owned; only mail's default `MailPlugin()` is
+inserted. The printed `smtp` and `sendgrid` calls read `SMTP_HOST` and `SMTP_PORT`, or
+`SENDGRID_API_KEY`, which `add` writes to the dotenv file and its example (on Workers it writes
+nothing, so supply the value as a Workers var or secret); `ses` passes `{}`, since the AWS SDK reads
+`AWS_REGION` and credentials from its own default chain. `smtp` also gets a local Mailpit in
+`docker/compose.yaml` (`SMTP_PORT=1025`, inbox at `http://localhost:8025`) and the `createTestApp`
+override that keeps generated tests offline. The `qdrant` and `pgvector` vector-store adapters get a
+CLI-written `src/vector-store.ts` that builds the adapter on its application-owned client, so
+`setu.config.ts` keeps only framework and relative imports and stays readable to `setu check`;
+`QDRANT_URL` or `PGVECTOR_URL` in the dotenv pair (pgvector's own variable, so an application
+database on `DATABASE_URL` is left alone); a Compose service; and the printed call
+`VectorStorePlugin({ adapter: vectorStoreAdapter(), … })` with its imports. Every printed
+registration names its imports. Mailpit, Qdrant and pgvector also get the README's "Local transport
+services" section, as a broker does. On Cloudflare Workers, zero-config providers are inserted like
+elsewhere, but `setu add cache` and `setu add storage` are refused, because their in-memory stores
+would live in one isolate: the refusal names `CloudflarePlugin`'s KV and R2 arms
+(`setu add cloudflare`) instead. The vector-store adapter is not asked on Workers, and
+`--adapter qdrant` or `pgvector` is refused there in favour of `VectorizeVectorStore`. In a
+generated minimal, `rest` or class-based Workers config, `setu add cloudflare` inserts
+`CloudflarePlugin({ env, ...(waitUntil ? { waitUntil } : {}) })` and renames the factory's unread
+`_waitUntil` parameter to `waitUntil` in the same edit; any other config gets both steps printed.
+`setu add decorator` refuses a functional project, because the installed plugin is what switches
+`generate` and `setu check` to class-based rules; start a class-based `rest` or `microservice`
+project with `--style class-based` (full-stack has no class-based variant). A SQLite database file
+is added to `.gitignore` and `.dockerignore`, and Drizzle's `drizzle/` output to `.prettierignore`.
+An existing `drizzle.config.ts` is left as it is, and `add` says so, naming its dialect when it
+differs from the one chosen.
+
+`setu add view --plugin-only` installs and wires the view capability and compatible JSX settings
+without examples, controllers, Tailwind or StaticPlugin. It cannot be combined with `--module`. This
+is the default on full-stack, where React Router owns pages. `setu add mcp` leaves `setu.config.ts`
+unchanged and prints `McpPlugin({})` with the note that the app boots with it only once at least one
+route is marked with `mcpTool()` or `@McpTool()`, and that each marked route also needs a security
+guard (`publicRoute()` or `requireAuth()`, or `@Public()`) or `schema.security`. Zero-config plugins
+a full-stack starter does not own are registered above the managed plugin loop; starter-provided
+plugins are configured through their starter option.
+
+On Node and Bun, `add database --type drizzle` adds `db:generate` / `db:migrate`, drizzle-kit and a
+create-only `drizzle.config.ts` (`--dialect postgresql|sqlite`, default postgresql; the Drizzle
+adapter writes through `RETURNING`, which MySQL lacks). `--type prisma` adds `db:generate`,
+`db:migrate`, `db:deploy`, Prisma 7 and `prisma.config.ts`. Existing scripts and configs are
+preserved. Create the schema at `src/database/schema.ts` or `prisma/schema.prisma` yourself; see the
+[database setup](../packages/database-plugin/README.md#prisma-7-setup). Deno prints the commands;
+Workers adds no schema scripts. Schema migrations are separate from `setu g migration` data
+migrations in `src/migrations/run.ts`.
+
+Briefs tolerate formatter whitespace and distinguish starter-provided packages from packages to add.
+The full-stack request context includes the request id; SSR fault logs carry that id and a
+URL-masked stack. Node and Bun entries print `Listening on http://localhost:<port>/` after startup;
+Deno prints its runtime banner. A taken Vite port exits 1 with `VITE_PORT` guidance (workspace
+members name `setu.workspace.json`). A non-memory full-stack queue scaffold includes its queue
+package and processor barrel, so `setu g job` works immediately.
 
 ## Wiring check (`setu check` and `setu sync`)
 
@@ -1060,31 +1178,32 @@ outside the workspace through it. Inside a project, `sync` also refuses to write
 `check` reads through one. A project with no seam directories (one that has never generated
 anything) prints `No CLI-owned seams in <dir>; nothing to check.` and exits `0`.
 
-| Id          | Severity | Finding                                                                                                                                                                                                                                                                                       |
-| ----------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `setu.E001` | error    | An artifact in a registering seam does not export what its barrel imports, so it is skipped                                                                                                                                                                                                   |
-| `setu.E002` | error    | An artifact's file name is not a kebab-case identifier, so it is skipped                                                                                                                                                                                                                      |
-| `setu.E003` | error    | A barrel does not list an artifact in its directory, or lists one that is not there                                                                                                                                                                                                           |
-| `setu.E004` | error    | A barrel is not a regular file, is over 1 MiB, or cannot be classified                                                                                                                                                                                                                        |
-| `setu.E005` | error    | An artifact is registered both by its barrel and by hand in `setu.config.ts`                                                                                                                                                                                                                  |
-| `setu.E006` | error    | `setu.config.ts` does not use a barrel outside imports; `registerModules` must be called                                                                                                                                                                                                      |
-| `setu.E007` | error    | A feature module is missing its activation export or `@Module` declaration                                                                                                                                                                                                                    |
-| `setu.E008` | error    | A feature module's directory name is not a kebab-case identifier                                                                                                                                                                                                                              |
-| `setu.E009` | error    | A feature module is not activated in `src/modules/index.ts`                                                                                                                                                                                                                                   |
-| `setu.E010` | error    | `src/routes/` still holds files; it was merged into `src/controllers/`, so nothing imports them                                                                                                                                                                                               |
-| `setu.E011` | error    | `.setu-ts/check.json` is invalid                                                                                                                                                                                                                                                              |
-| `setu.E012` | error    | `setu.config.ts` exists but cannot be read: a directory, a special file, over 1 MiB, or no permission                                                                                                                                                                                         |
-| `setu.E013` | error    | An artifact in a seam directory cannot be read (a special file, over 1 MiB, or no permission), so its wiring is unknown                                                                                                                                                                       |
-| `setu.E014` | error    | A project has modules and also keeps controllers or services outside them; move them into a module and run `setu sync`                                                                                                                                                                        |
-| `setu.E015` | error    | A CLI-managed file — a controllers, services or modules barrel, a module's `index.ts` or class-based `.module.ts`, or a registration import in `setu.config.ts` — imports a relative specifier that does not exist; run `setu sync` to rewrite it from the files present, or restore the file |
-| `setu.E016` | error    | Two files in one family share a base name and would bind one symbol; rename one of them                                                                                                                                                                                                       |
-| `setu.E017` | error    | A page under `app/` imports `~kernel/*` or `src/` code by value (only `import type` and `*.token.ts` modules are allowed; `x.token` and `x.token.js` count only when they resolve to `x.token.ts`), so kernel code would reach the browser bundle                                             |
-| `setu.E018` | error    | A page under `app/` cannot be parsed or read safely (over 1 MiB, too deep, or a symlink leaving `app/`), so its kernel imports cannot be checked                                                                                                                                              |
-| `setu.W001` | warning  | `setu.config.ts` could not be classified: one warning names the construct, line and affected symbols                                                                                                                                                                                          |
-| `setu.W002` | warning  | There is no `setu.config.ts`, so nothing can be checked for wiring                                                                                                                                                                                                                            |
-| `setu.W003` | warning  | `setu.config.ts` calls `registerGeneratedRoutes(app.router)` without `app.services`                                                                                                                                                                                                           |
-| `setu.W004` | warning  | A `.setu-ts/check.json` entry matched no finding                                                                                                                                                                                                                                              |
-| `setu.W005` | warning  | A plain-function service is not re-exported from `src/services/index.ts` because it lacks `describe<Name>`                                                                                                                                                                                    |
+| Id          | Severity | Finding                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| ----------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `setu.E001` | error    | An artifact in a registering seam does not export what its barrel imports, so it is skipped                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `setu.E002` | error    | An artifact's file name is not a kebab-case identifier, so it is skipped                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `setu.E003` | error    | A barrel does not list an artifact in its directory, or lists one that is not there                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `setu.E004` | error    | A barrel is not a regular file, is over 1 MiB, or cannot be classified                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `setu.E005` | error    | An artifact is registered both by its barrel and by hand in `setu.config.ts`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `setu.E006` | error    | `setu.config.ts` does not use a barrel outside imports; `registerModules` must be called                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `setu.E007` | error    | A feature module is missing its activation export or `@Module` declaration                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `setu.E008` | error    | A feature module's directory name is not a kebab-case identifier                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `setu.E009` | error    | A feature module is not activated in `src/modules/index.ts`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `setu.E010` | error    | `src/routes/` still holds files; it was merged into `src/controllers/`, so nothing imports them                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `setu.E011` | error    | `.setu-ts/check.json` is invalid                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `setu.E012` | error    | `setu.config.ts` exists but cannot be read: a directory, a special file, over 1 MiB, or no permission                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `setu.E013` | error    | An artifact in a seam directory cannot be read (a special file, over 1 MiB, or no permission), so its wiring is unknown                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `setu.E014` | error    | A project has modules and also keeps controllers or services outside them; move them into a module and run `setu sync`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `setu.E015` | error    | A CLI-managed file — a controllers, services or modules barrel, a module's `index.ts` or class-based `.module.ts`, or a registration import in `setu.config.ts` — imports a relative specifier that does not exist; run `setu sync` to rewrite it from the files present, or restore the file                                                                                                                                                                                                                                                                                                                              |
+| `setu.E016` | error    | Two files in one family share a base name and would bind one symbol; rename one of them                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `setu.E017` | error    | A page under `app/` (except React Router `.server` files and `.server/` directories) imports `~kernel/*` or `src/` code by value (only `import type` and `*.token.ts` modules are allowed; `x.token` and `x.token.js` count only when they resolve to `x.token.ts`), so kernel code would reach the browser bundle                                                                                                                                                                                                                                                                                                         |
+| `setu.E018` | error    | A page under `app/` cannot be parsed or read safely (over 1 MiB, too deep, a symlink leaving `app/`, or past 4,096 directories walked, each symlink path counted), so its kernel imports cannot be checked; a `.server` module confirmed inside `app/` is skipped, not reported                                                                                                                                                                                                                                                                                                                                            |
+| `setu.W001` | warning  | `setu.config.ts` could not be classified: one warning names the construct, line and affected symbols                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `setu.W002` | warning  | There is no `setu.config.ts`, so nothing can be checked for wiring                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `setu.W003` | warning  | `setu.config.ts` calls `registerGeneratedRoutes(app.router)` without `app.services`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `setu.W004` | warning  | A `.setu-ts/check.json` entry matched no finding                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `setu.W005` | warning  | A plain-function service is not re-exported from `src/services/index.ts` because it lacks `describe<Name>`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `setu.W006` | warning  | An installed plugin has no call in `setu.config.ts`: a zero-config provider, or one whose registration `setu add` prints (database, vector store, telemetry, session and others; not `auth-plugin`, whose helpers work without the plugin). On a starter-composed config, a package the starter registers only when its arm is set (`graphql`, `static`, `realtime.websocket` and the like) is reported when that arm is unset. A workspace member's transport module counts for `GrpcPlugin`, and a Workers config is not asked for `CachePlugin` or `StoragePlugin`. Silence it when another module registers the plugin |
 
 Barrels are compared as **sets of names**, read from their import and export declarations, so a
 barrel your formatter rewrote, reordered or re-quoted still passes. Ids are never reused: a retired
@@ -1093,10 +1212,13 @@ in a module call or the flat barrel's registrar array. An imported registrar wit
 is E003; run `setu sync` to restore its registration.
 
 Config wiring requires a value use outside import declarations; importing a barrel alone is `E006`,
-and `registerModules` must be called. An unclassifiable config produces one `W001` on
-`setu.config.ts`, naming the construct, line and affected symbols; the check cannot tell whether it
-registers them. A plain-function service missing `describe<Name>` receives `W005`: it is not
-re-exported from `src/services/index.ts`, which is a convenience listing rather than a registration.
+and `registerModules` must be called. Ordinary template literals, regex literals and division
+classify for reference checks. Computed access, reflection, dynamic execution/imports and ambiguous
+syntax still stop classification; automatic edits retain their stricter lexer. An unclassifiable
+config produces one `W001` on `setu.config.ts`, naming the construct, line and affected symbols; the
+check cannot tell whether it registers them. A plain-function service missing `describe<Name>`
+receives `W005`: it is not re-exported from `src/services/index.ts`, which is a convenience listing
+rather than a registration.
 
 `setu sync` rewrites the managed barrels — each seam family's `index.ts`, `src/modules/index.ts`,
 and each functional module's `index.ts` — with the same renderer `setu generate` uses, so a synced
@@ -1153,12 +1275,12 @@ a workspace, each member reads its own file.
 A scaffolded project carries the CLI as a pinned development dependency and runs `setu check` from
 its `check` script, after the type check:
 
-| Target               | `check`                                                                              |
-| -------------------- | ------------------------------------------------------------------------------------ |
-| Node, Bun, Workers   | `tsc --noEmit && setu check` (`@setu-ts/cli` in `devDependencies`)                   |
-| Node/Bun full-stack  | `react-router build && tsc --noEmit && setu check`                                   |
-| Workers with a build | `npm run build && tsc --noEmit && setu check`                                        |
-| Deno                 | `deno check main.ts setu.config.ts && deno run -A npm:@setu-ts/cli@^<version> check` |
+| Target               | `check`                                                                                       |
+| -------------------- | --------------------------------------------------------------------------------------------- |
+| Node, Bun, Workers   | `tsc --noEmit && setu check` (`@setu-ts/cli` in `devDependencies`)                            |
+| Node/Bun full-stack  | `react-router build && tsc --noEmit && setu check`                                            |
+| Workers with a build | `npm run build && tsc --noEmit && setu check`                                                 |
+| Deno                 | `deno check main.ts setu.config.ts && deno run -A --no-lock npm:@setu-ts/cli@<version> check` |
 
 Deno full-stack prefixes its check task with `deno task build && `. The generated `start:dev`,
 `start:debug` and `start` scripts do not run the wiring gate, so the edit loop is never blocked. The
@@ -1176,8 +1298,17 @@ name.
 exists. A workspace root refuses with exit 2: use `setu build --dir apps/orders`. Bun and Deno run
 source natively; Workers uses Wrangler. The command never boots the application.
 
+Worker-pool tasks use a literal `new URL('./src/tasks/hash.task.ts', import.meta.url)`. `setu build`
+emits `dist/src/tasks/hash.task.js` and rewrites the URL relative to each containing bundle,
+including the migration runner. A non-literal reference naming `.task.ts` in the call is refused
+with the file and line; a path held in a variable is not detected (it builds without the task), so
+keep the literal in the call. `--dry-run` lists task outputs. Keep the `.task.ts` source suffix in
+development.
+
 Generated Node `build` runs `tsc --noEmit && setu build`; full-stack prefixes `react-router build`.
-`npm start` runs `node --enable-source-maps dist/main.js` after building. `start:dev` runs
+`npm start` defaults `NODE_ENV` to `production` (keeping a preset value), checks that `dist/main.js`
+exists and runs `node … dist/main.js`; it does not build, and exits 1 with
+`dist/main.js is missing; run the build script first` when the build has not run. `start:dev` runs
 `tsx watch main.ts`, or `tsx dev.ts` for full-stack. `start:debug` runs
 `node --inspect --import tsx main.ts` (full-stack uses `dev.ts`). The CLI command itself does not
 run TypeScript: use the project's build script for type-checking.

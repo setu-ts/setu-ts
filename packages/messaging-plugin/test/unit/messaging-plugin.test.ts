@@ -249,11 +249,11 @@ describe('MessagingPlugin', () => {
     // Should register the broker
     const broker = ctx.services.get(CAPABILITIES.MESSAGING);
     expect(broker).toBeDefined();
-    expect(typeof (broker as { isReady: () => boolean }).isReady).toBe('function');
-    expect(typeof (broker as { connect: () => Promise<void> }).connect).toBe('function');
-    expect(typeof (broker as { disconnect: () => Promise<void> }).disconnect).toBe('function');
-    expect(typeof (broker as { publish: () => Promise<void> }).publish).toBe('function');
-    expect(typeof (broker as { subscribe: () => Promise<unknown> }).subscribe).toBe('function');
+    expect('isReady' in broker ? typeof broker.isReady : 'undefined').toBe('function');
+    expect(typeof broker.connect).toBe('function');
+    expect(typeof broker.disconnect).toBe('function');
+    expect(typeof broker.publish).toBe('function');
+    expect(typeof broker.subscribe).toBe('function');
   });
 
   it('redis-streams broker registers successfully with fake client', async () => {
@@ -271,9 +271,9 @@ describe('MessagingPlugin', () => {
     // Should register the broker
     const broker = ctx.services.get(CAPABILITIES.MESSAGING);
     expect(broker).toBeDefined();
-    expect(typeof (broker as { isReady: () => boolean }).isReady).toBe('function');
-    expect(typeof (broker as { connect: () => Promise<void> }).connect).toBe('function');
-    expect(typeof (broker as { disconnect: () => Promise<void> }).disconnect).toBe('function');
+    expect('isReady' in broker ? typeof broker.isReady : 'undefined').toBe('function');
+    expect(typeof broker.connect).toBe('function');
+    expect(typeof broker.disconnect).toBe('function');
   });
 
   it('unknown broker type throws error', async () => {
@@ -338,9 +338,9 @@ describe('MessagingPlugin', () => {
     }
 
     // Broker should be disconnected (isReady should return false after disconnect)
-    const broker = ctx.services.get(CAPABILITIES.MESSAGING) as { isReady: () => boolean };
+    const broker = ctx.services.get(CAPABILITIES.MESSAGING);
     // For memory broker, disconnect sets isReady to false
-    expect(broker.isReady()).toBe(false);
+    expect(brokerReady(broker)).toBe(false);
   });
 
   it('health indicator returns down after disconnect', async () => {
@@ -464,9 +464,9 @@ describe('MessagingPlugin', () => {
     await plugin.register(ctx);
 
     // Default to memory broker
-    const broker = ctx.services.get(CAPABILITIES.MESSAGING) as { isReady: () => boolean };
+    const broker = ctx.services.get(CAPABILITIES.MESSAGING);
     expect(broker).toBeDefined();
-    expect(broker.isReady()).toBe(true);
+    expect(brokerReady(broker)).toBe(true);
   });
 
   it('health indicator data includes broker type', async () => {
@@ -568,14 +568,22 @@ describe('MessagingPlugin', () => {
     // by creating a broker that returns false for isReady()
 
     const unreadyBroker = {
-      connect() {},
-      disconnect() {},
+      request: () => Promise.reject(new Error('Not configured')),
+      respond: () => Promise.resolve({ unsubscribe: () => Promise.resolve() }),
+      connect() {
+        return Promise.resolve();
+      },
+      disconnect() {
+        return Promise.resolve();
+      },
       isReady(): boolean {
         return false; // Force the 'down' branch
       },
-      publish() {},
+      publish() {
+        return Promise.resolve();
+      },
       subscribe() {
-        return { unsubscribe: async () => {} };
+        return Promise.resolve({ unsubscribe: () => Promise.resolve() });
       },
     };
 
@@ -621,8 +629,8 @@ describe('MessagingPlugin', () => {
 
     const broker = ctx.services.get(CAPABILITIES.MESSAGING);
     expect(broker).toBeDefined();
-    expect(typeof (broker as { isReady: () => boolean }).isReady).toBe('function');
-    expect((broker as { isReady: () => boolean }).isReady()).toBe(true);
+    expect('isReady' in broker ? typeof broker.isReady : 'undefined').toBe('function');
+    expect(brokerReady(broker)).toBe(true);
   });
 
   // M70c review: the per-arm option passthroughs in the broker factory were
@@ -741,8 +749,8 @@ describe('MessagingPlugin', () => {
 
     const broker = ctx.services.get(CAPABILITIES.MESSAGING);
     expect(broker).toBeDefined();
-    expect(typeof (broker as { isReady: () => boolean }).isReady).toBe('function');
-    expect((broker as { isReady: () => boolean }).isReady()).toBe(true);
+    expect('isReady' in broker ? typeof broker.isReady : 'undefined').toBe('function');
+    expect(brokerReady(broker)).toBe(true);
   });
 
   // P3: Kafka broker registers with injected client
@@ -760,8 +768,8 @@ describe('MessagingPlugin', () => {
 
     const broker = ctx.services.get(CAPABILITIES.MESSAGING);
     expect(broker).toBeDefined();
-    expect(typeof (broker as { isReady: () => boolean }).isReady).toBe('function');
-    expect((broker as { isReady: () => boolean }).isReady()).toBe(true);
+    expect('isReady' in broker ? typeof broker.isReady : 'undefined').toBe('function');
+    expect(brokerReady(broker)).toBe(true);
   });
 
   // P4: RabbitMQ broker with logger
@@ -947,8 +955,8 @@ describe('MessagingPlugin', () => {
 
     const broker = ctx.services.get(CAPABILITIES.MESSAGING);
     expect(broker).toBeDefined();
-    expect(typeof (broker as { isReady: () => boolean }).isReady).toBe('function');
-    expect((broker as { isReady: () => boolean }).isReady()).toBe(true);
+    expect('isReady' in broker ? typeof broker.isReady : 'undefined').toBe('function');
+    expect(brokerReady(broker)).toBe(true);
   });
 
   // service-bus arm with injected IServiceBusTransport
@@ -972,8 +980,8 @@ describe('MessagingPlugin', () => {
 
     const broker = ctx.services.get(CAPABILITIES.MESSAGING);
     expect(broker).toBeDefined();
-    expect(typeof (broker as { isReady: () => boolean }).isReady).toBe('function');
-    expect((broker as { isReady: () => boolean }).isReady()).toBe(true);
+    expect('isReady' in broker ? typeof broker.isReady : 'undefined').toBe('function');
+    expect(brokerReady(broker)).toBe(true);
   });
 
   // custom arm with instance that has isReady
@@ -998,7 +1006,7 @@ describe('MessagingPlugin', () => {
 
     const broker = ctx.services.get(CAPABILITIES.MESSAGING);
     expect(broker).toBeDefined();
-    expect((broker as { isReady: () => boolean }).isReady()).toBe(true);
+    expect(brokerReady(broker)).toBe(true);
   });
 
   // custom arm with instance WITHOUT isReady (wrapper tracks connect/disconnect)
@@ -1023,7 +1031,7 @@ describe('MessagingPlugin', () => {
     const broker = ctx.services.get(CAPABILITIES.MESSAGING);
     expect(broker).toBeDefined();
     // Wrapper should report isReady true after connect
-    expect((broker as { isReady: () => boolean }).isReady()).toBe(true);
+    expect(brokerReady(broker)).toBe(true);
 
     // Health indicator should report up
     const indicator = healthIndicators.get(CAPABILITIES.MESSAGING) as () => Promise<{
@@ -1056,9 +1064,7 @@ describe('MessagingPlugin', () => {
     await plugin.register(ctx);
 
     // Before disconnect: ready
-    expect((ctx.services.get(CAPABILITIES.MESSAGING) as { isReady: () => boolean }).isReady()).toBe(
-      true,
-    );
+    expect(brokerReady(ctx.services.get(CAPABILITIES.MESSAGING))).toBe(true);
 
     // Disconnect
     for (const handler of onCloseHandlers) {
@@ -1066,9 +1072,7 @@ describe('MessagingPlugin', () => {
     }
 
     // After disconnect: not ready
-    expect((ctx.services.get(CAPABILITIES.MESSAGING) as { isReady: () => boolean }).isReady()).toBe(
-      false,
-    );
+    expect(brokerReady(ctx.services.get(CAPABILITIES.MESSAGING))).toBe(false);
   });
 
   // ─── Bare-call regression (default arm) ───────────────────────────────────
@@ -1079,9 +1083,9 @@ describe('MessagingPlugin', () => {
 
     await plugin.register(ctx);
 
-    const broker = ctx.services.get(CAPABILITIES.MESSAGING) as { isReady: () => boolean };
+    const broker = ctx.services.get(CAPABILITIES.MESSAGING);
     expect(broker).toBeDefined();
-    expect(broker.isReady()).toBe(true);
+    expect(brokerReady(broker)).toBe(true);
   });
 
   it('MessagingPlugin({}) empty object registers memory broker', async () => {
@@ -1090,9 +1094,9 @@ describe('MessagingPlugin', () => {
 
     await plugin.register(ctx);
 
-    const broker = ctx.services.get(CAPABILITIES.MESSAGING) as { isReady: () => boolean };
+    const broker = ctx.services.get(CAPABILITIES.MESSAGING);
     expect(broker).toBeDefined();
-    expect(broker.isReady()).toBe(true);
+    expect(brokerReady(broker)).toBe(true);
   });
 
   // ─── pubsub/service-bus with logger ───────────────────────────────────────
@@ -1220,7 +1224,7 @@ describe('MessagingPlugin', () => {
 
     const broker = ctx.services.get(CAPABILITIES.MESSAGING);
     expect(broker).toBeDefined();
-    expect((broker as { isReady: () => boolean }).isReady()).toBe(true);
+    expect(brokerReady(broker)).toBe(true);
   });
 
   // ─── chainReadyTimeoutMs option domain (M89c review fix) ──────────────────
@@ -1314,3 +1318,10 @@ describe('MessagingPlugin', () => {
     }
   });
 });
+
+/** Checks the adapter's lifecycle seam without downcasting the public broker. */
+function brokerReady(broker: object): boolean {
+  if (!('isReady' in broker) || typeof broker.isReady !== 'function')
+    throw new Error('Missing lifecycle seam');
+  return broker.isReady() === true;
+}

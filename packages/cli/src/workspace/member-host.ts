@@ -12,11 +12,12 @@
  * @module
  */
 
+import { JOBS_SEAM } from '../seams/jobs.ts';
 import type { ResolvedHost } from '../templates/project-files.ts';
 import { DISCOVERY_SPECIFIER, SERVICE_ENDPOINTS_EXPORT } from './discovery-module.ts';
 import { workspaceProfile, type WorkspaceRuntimeProfile } from './runtime-profile.ts';
 import type { BrokerSpec } from './transport.ts';
-import type { RpcSpec } from './rpc.ts';
+import { GRPC_CALLER_CLIENTS, GRPC_PLUGIN, type RpcSpec } from './rpc.ts';
 import { withClientDependencies } from '../templates/client-dependencies.ts';
 import { NODE_REDIS_MODULE_PATH, nodeRedisModuleFile } from '../templates/node-redis.ts';
 import {
@@ -51,6 +52,7 @@ const QUEUE_PACKAGE = 'queue-plugin';
  * @param member - The member's kebab-case name, which names its proto package
  * @param profile - The workspace's runtime profile
  * @param endpoint - The workspace's `brokerUrl`, when it set one
+ * @param targets - The gRPC members this member calls (M139b §3.12)
  * @returns The host reading both CLI-owned modules
  */
 export function withWorkspaceMember(
@@ -60,12 +62,14 @@ export function withWorkspaceMember(
   member: string,
   profile: WorkspaceRuntimeProfile = workspaceProfile('node'),
   endpoint?: string,
+  targets: readonly string[] = [],
 ): ResolvedHost {
   return withTransportModule(
     withDiscoveryMap(host),
     {
       broker,
       rpc,
+      grpcTargets: targets,
       host: host.appFactory === undefined ? 'plugin-list' : 'app-factory',
       profile,
       messaging: host.plugins.some((wiring) => wiring.pkg === MESSAGING_PACKAGE),
@@ -142,6 +146,7 @@ function withTransportModule(
   const factory = input.host === 'app-factory';
   const onDeno = input.profile.manifestKind === 'deno';
   const symbols = [
+    TRANSPORT_EXPORTS.runtime,
     ...(shape.messaging ? [TRANSPORT_EXPORTS.messaging] : []),
     ...(shape.queue ? [TRANSPORT_EXPORTS.queue] : []),
     TRANSPORT_EXPORTS.plugins,
@@ -158,8 +163,9 @@ function withTransportModule(
       ? {
           appFactoryContext: {
             ...host.appFactoryContext,
+            runtimeOptions: `${TRANSPORT_EXPORTS.runtime}()`,
             messaging: `${TRANSPORT_EXPORTS.messaging}(config)`,
-            queue: `{ ...${TRANSPORT_EXPORTS.queue}(config) }`,
+            queue: `{ ${broker.connection !== undefined && broker.queueArgs !== undefined ? 'processors: [...QUEUE_PROCESSORS], ' : ''}...${TRANSPORT_EXPORTS.queue}(config) }`,
             csrfExclude: `${TRANSPORT_EXPORTS.csrf}()`,
           },
           setupCalls: [
@@ -173,11 +179,19 @@ function withTransportModule(
               ? { ...wiring, args: `${TRANSPORT_EXPORTS.messaging}()` }
               : wiring.pkg === QUEUE_PACKAGE
                 ? { ...wiring, args: withQueueSpread(wiring.args) }
-                : wiring,
+                : wiring.pkg === 'runtime'
+                  ? { ...wiring, args: withRuntimeSpread(wiring.args) }
+                  : wiring,
           ),
           pluginSpreads: [`...${TRANSPORT_EXPORTS.plugins}()`, ...host.pluginSpreads],
         }),
-    localImports: [...host.localImports, { symbols, from: TRANSPORT_SPECIFIER }],
+    localImports: [
+      ...host.localImports,
+      { symbols, from: TRANSPORT_SPECIFIER },
+      ...(factory && broker.connection !== undefined && broker.queueArgs !== undefined
+        ? [{ symbols: ['QUEUE_PROCESSORS'], from: './src/jobs/index.ts' }]
+        : []),
+    ],
     files: [
       ...host.files.filter(
         (file) =>
@@ -185,6 +199,12 @@ function withTransportModule(
           (nodeRedis.length === 0 || file.path !== NODE_REDIS_MODULE_PATH),
       ),
       { path: TRANSPORT_MODULE, contents: renderTransportModule(input), managed: true },
+      ...(factory &&
+      broker.connection !== undefined &&
+      broker.queueArgs !== undefined &&
+      !host.files.some((file) => file.path === JOBS_SEAM.barrel)
+        ? [{ path: JOBS_SEAM.barrel, contents: JOBS_SEAM.renderBarrel({}), managed: true }]
+        : []),
       ...nodeRedis,
       ...(rpc.memberFiles?.(member, onDeno) ?? []),
     ],
@@ -195,7 +215,13 @@ function withTransportModule(
       : { transportNotes: [...(host.transportNotes ?? []), note] }),
     extraFrameworkPackages: [
       ...host.extraFrameworkPackages,
-      ...(rpc.plugin === undefined ? [] : [rpc.plugin.pkg]),
+      ...(factory ? ['runtime'] : []),
+      ...(factory && broker.connection !== undefined && broker.queueArgs !== undefined
+        ? [QUEUE_PACKAGE]
+        : []),
+      ...(rpc.plugin === undefined && (input.grpcTargets ?? []).length === 0
+        ? []
+        : [GRPC_PLUGIN.pkg]),
     ],
     // Each manifest kind gets only its own half: a Deno member's tasks and import
     // map, an npm member's scripts and devDependencies.
@@ -217,8 +243,27 @@ function withTransportModule(
         : []),
       ...(shape.queue && broker.queueArgs !== undefined ? (broker.queueClients ?? []) : []),
       ...(rpc.clients ?? []),
+      ...((input.grpcTargets ?? []).length === 0 ? [] : GRPC_CALLER_CLIENTS),
     ].filter((name, index, all) => all.indexOf(name) === index),
   );
+}
+
+/**
+ * The host's own `RuntimePlugin` options with the transport's runtime options spread first, so a
+ * template's options (the REST body cap) are kept and a template with none gains none.
+ *
+ * @param args - The template's `RuntimePlugin` argument text, if any
+ * @returns The argument text calling the transport module's runtime options
+ */
+function withRuntimeSpread(args: string | undefined): string {
+  const call = `${TRANSPORT_EXPORTS.runtime}()`;
+  const body =
+    args
+      ?.trim()
+      .replace(/^\{|\}$/g, '')
+      .trim()
+      .replace(/,$/, '') ?? '';
+  return body === '' ? call : `{ ...${call}, ${body} }`;
 }
 
 /**

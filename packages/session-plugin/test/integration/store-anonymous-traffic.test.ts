@@ -117,10 +117,14 @@ describe('anonymous traffic on the store strategy (V9-46)', () => {
       );
       expect(await json(me)).toEqual({ user: 'ann' });
 
+      const fresh = await app.fetch(
+        new Request('http://localhost/login', { headers: { cookie: signedIn } }),
+      );
+      const { token: freshToken } = await json(fresh);
       const logout = await app.fetch(
         new Request('http://localhost/logout', {
           method: 'POST',
-          headers: { cookie: signedIn, 'x-csrf-token': token as string },
+          headers: { cookie: signedIn, 'x-csrf-token': freshToken as string },
         }),
       );
       expect(logout.status).toBe(200);

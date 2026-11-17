@@ -1,15 +1,15 @@
 /**
- * Shared form-CSRF exemption: path exclusion and the credential-based bearer
+ * Shared form-CSRF exemption: path exclusion and the header-credential
  * rule.
  *
- * A bearer request is exempt ONLY when a header-credential strategy
+ * A header-credential request is exempt ONLY when a header-credential strategy
  * authenticated it AND the request restored no session (the session parked under
  * `SESSION_STATE_KEY`, if any, is new). A request carrying a valid session
  * cookie must present a CSRF token even with a valid bearer token, because the
  * handler would otherwise act on that browser's session (M113e, L3). A
  * non-browser API client sends no session cookie, so its new session keeps the
  * exemption. It fails closed when the session or the credential source is
- * missing.
+ * missing. Non-Bearer Authorization prevents exemption, even with X-API-Key.
  *
  * The middleware and {@linkcode verifyCsrfToken} use this one implementation
  * so an action verifying inline cannot disagree with the global policy.
@@ -17,7 +17,11 @@
  * @module
  */
 import type { IRequestContext, ISession } from '@setu-ts/common';
-import { CREDENTIAL_SOURCE_STATE_KEY, SESSION_STATE_KEY } from '@setu-ts/common';
+import {
+  CSRF_EXEMPT_STATE_KEY,
+  CREDENTIAL_SOURCE_STATE_KEY,
+  SESSION_STATE_KEY,
+} from '@setu-ts/common';
 
 import type { CsrfFormOptions, ResolvedCsrfConfig } from '../options.ts';
 
@@ -42,28 +46,28 @@ export function isCsrfExcluded(ctx: IRequestContext, exclude: CsrfFormOptions['e
 }
 
 /**
- * Whether the request carries a bearer credential (M113e, V9-27).
+ * Whether Authorization carries an ambient or unrecognized credential.
  *
  * @param headers - The request headers
- * @returns `true` for `Authorization: Bearer <token>`
+ * @returns `true` for any present non-Bearer Authorization value
  */
-export function isBearerRequest(headers: Headers): boolean {
+function carriesAmbientAuthorization(headers: Headers): boolean {
   const value = headers.get('authorization');
-  return value !== null && BEARER.test(value);
+  return value !== null && !BEARER.test(value);
 }
 
 /**
- * The `ctx.state` key under which form CSRF marks a request the BEARER exemption
+ * The `ctx.state` key under which form CSRF marks a request a bearer or in-process exemption
  * admitted, so `sessionMiddleware` does not commit its session (M113e, L4).
  *
  * Internal to `session-plugin` — both writer and reader live here — so it is
  * not in `common` and not on the barrel.
  */
-export const BEARER_EXEMPT_STATE_KEY = 'session-plugin:bearer-exempt';
+export const NO_COMMIT_STATE_KEY = 'session-plugin:no-commit';
 
 /**
  * Whether the bearer rule exempts this request: `exemptBearer` is on, the
- * request carries `Authorization: Bearer <token>`, a `'header'`-credential
+ * request carries no non-Bearer `Authorization`, a `'header'`-credential
  * strategy authenticated it (recorded under `CREDENTIAL_SOURCE_STATE_KEY` by the
  * authentication middleware), AND it restored no session — the session
  * `session-plugin` parked under `SESSION_STATE_KEY` is new (`isNew === true`).
@@ -84,14 +88,15 @@ export function isBearerExempt(ctx: IRequestContext, config: ResolvedCsrfConfig)
   const session = ctx.state.get(SESSION_STATE_KEY) as ISession | undefined;
   return (
     config.exemptBearer &&
-    isBearerRequest(ctx.request.headers) &&
+    !carriesAmbientAuthorization(ctx.request.headers) &&
     ctx.state.get(CREDENTIAL_SOURCE_STATE_KEY) === 'header' &&
     session?.isNew === true
   );
 }
 
 /**
- * Whether form-CSRF verification is skipped for this request: the bearer rule
+ * Whether form-CSRF verification is skipped for this request: the in-process
+ * boolean flag, the bearer rule
  * ({@linkcode isBearerExempt}) or an explicit path exclusion. Pure — it records
  * nothing; the entry points call {@linkcode applyCsrfExemption}.
  *
@@ -105,12 +110,16 @@ export function isCsrfExempt(
   config: ResolvedCsrfConfig,
   exclude: CsrfFormOptions['exclude'],
 ): boolean {
-  return isBearerExempt(ctx, config) || isCsrfExcluded(ctx, exclude);
+  return (
+    ctx.state.get(CSRF_EXEMPT_STATE_KEY) === true ||
+    isBearerExempt(ctx, config) ||
+    isCsrfExcluded(ctx, exclude)
+  );
 }
 
 /**
- * {@linkcode isCsrfExempt}, and when the BEARER rule is what exempts the request,
- * marks it under {@linkcode BEARER_EXEMPT_STATE_KEY} so its session is not
+ * {@linkcode isCsrfExempt}, and when a bearer or in-process flag exempts the request,
+ * marks it under {@linkcode NO_COMMIT_STATE_KEY} so its session is not
  * committed (M113e, L4).
  *
  * The bearer rule admits only a request that restored no session, but the
@@ -130,8 +139,8 @@ export function applyCsrfExemption(
   config: ResolvedCsrfConfig,
   exclude: CsrfFormOptions['exclude'],
 ): boolean {
-  if (isBearerExempt(ctx, config)) {
-    ctx.state.set(BEARER_EXEMPT_STATE_KEY, true);
+  if (ctx.state.get(CSRF_EXEMPT_STATE_KEY) === true || isBearerExempt(ctx, config)) {
+    ctx.state.set(NO_COMMIT_STATE_KEY, true);
     return true;
   }
   return isCsrfExcluded(ctx, exclude);

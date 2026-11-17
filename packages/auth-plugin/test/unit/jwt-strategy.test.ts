@@ -8,6 +8,7 @@ import { JwtService } from '../../src/services/jwt-service.ts';
 import { MemoryAccessTokenRevocationStore } from '../../src/stores/access-token-revocation-store.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 import type { IRequest } from '@setu-ts/common';
+import { AuthPluginConfigurationError } from '../../src/errors.ts';
 
 describe('JwtStrategy', () => {
   let jwt: JwtService;
@@ -16,10 +17,15 @@ describe('JwtStrategy', () => {
   beforeAll(() => {
     const runtime = createFakeRuntime(1000000);
     jwt = new JwtService(runtime, {
-      secret: 'test-secret-key',
+      secret: 'test-secret-key-at-least-32-characters',
       algorithm: 'HS256',
     });
     strategy = new JwtStrategy({ jwtService: jwt });
+  });
+  it.each(['cookie', 'COOKIE', 'Cookie'])('refuses ambient JWT header %s', (header) => {
+    expect(() => new JwtStrategy({ jwtService: jwt, header })).toThrow(
+      AuthPluginConfigurationError,
+    );
   });
 
   function createRequest(headers: Record<string, string> = {}): IRequest {
@@ -145,14 +151,6 @@ describe('JwtStrategy', () => {
     expect(principal!.id).toBe('user123');
   });
 
-  it('returns unknown id when sub claim is missing', async () => {
-    const token = await jwt.sign({ data: 'no-sub' });
-    const request = createRequest({ authorization: `Bearer ${token}` });
-    const principal = await strategy.authenticate(request);
-    expect(principal).not.toBeNull();
-    expect(principal!.id).toBe('unknown');
-  });
-
   it('does not include standard claims in the claims object', async () => {
     const token = await jwt.sign({
       sub: 'user123',
@@ -186,7 +184,7 @@ describe('JwtStrategy', () => {
     expect(principal?.claims?.scope).toBe('tools:read tools:list');
   });
 
-  it('fills scopes from scp and refuses a malformed one', async () => {
+  it('audit F1 keeps malformed scp authenticated with empty scopes', async () => {
     const token = await jwt.sign({ sub: 'user123', scp: ['tools:read'] });
     const principal = await strategy.authenticate(
       createRequest({ authorization: `Bearer ${token}` }),
@@ -198,7 +196,7 @@ describe('JwtStrategy', () => {
       createRequest({ authorization: `Bearer ${malformed}` }),
     );
     expect(noScopes).not.toBeNull();
-    expect(noScopes?.scopes).toBeUndefined();
+    expect(noScopes?.scopes).toEqual([]);
   });
 
   it('fills the actor from the outermost act claim', async () => {
@@ -229,5 +227,44 @@ describe('JwtStrategy', () => {
 
   it('has the name "jwt"', () => {
     expect(strategy.name).toBe('jwt');
+  });
+});
+
+describe('M139a JWT boundaries', () => {
+  const jwt = new JwtService(createFakeRuntime(1000000), {
+    secret: 'test-secret-key-at-least-32-characters',
+    algorithm: 'HS256',
+  });
+  const request = (token: string, tenant?: string): IRequest =>
+    ({
+      headers: new Headers({ authorization: `Bearer ${token}` }),
+      ...(tenant === undefined ? {} : { tenant: { id: tenant } }),
+    }) as IRequest;
+  it.each([undefined, 42, '', null, ['a']])('refuses unusable sub %j', async (sub) => {
+    const token = await jwt.sign(sub === undefined ? {} : { sub });
+    expect(await new JwtStrategy({ jwtService: jwt }).authenticate(request(token))).toBeNull();
+  });
+  it.each([
+    ['acme', 'acme', true],
+    ['globex', 'acme', false],
+    [undefined, 'acme', false],
+    [42, 'acme', false],
+    [null, 'acme', false],
+    ['', 'acme', false],
+    [undefined, undefined, true],
+    ['acme', undefined, false],
+    [null, undefined, false],
+  ] as const)('binds verified tid %j on tenant %j: %j', async (tid, tenant, allowed) => {
+    const token = await jwt.sign({ sub: 'u1', ...(tid === undefined ? {} : { tid }) });
+    const strategy = new JwtStrategy({ jwtService: jwt, tenantClaim: 'tid' });
+    expect((await strategy.authenticate(request(token, tenant)))?.id ?? null).toBe(
+      allowed ? 'u1' : null,
+    );
+  });
+  it('keeps tenant binding opt-in', async () => {
+    const token = await jwt.sign({ sub: 'u1', tid: 'globex' });
+    expect(
+      (await new JwtStrategy({ jwtService: jwt }).authenticate(request(token, 'acme')))?.id,
+    ).toBe('u1');
   });
 });

@@ -11,8 +11,10 @@ export const MAX_DIMENSIONS = 4096;
 export const MAX_FILTERABLE_FIELDS = 10;
 /** Matches per query (Vectorize's limit when metadata is returned). */
 export const MAX_TOP_K = 50;
-/** Records per `upsert` or `replaceSource` (pgvector's bind-parameter budget). */
+/** Records per `upsert` or backend write slice (pgvector's bind-parameter budget). */
 export const MAX_RECORDS_PER_CALL = 500;
+/** Records in one whole-source replacement. @since 0.13.0 */
+export const MAX_RECORDS_PER_REPLACE = 5_000;
 /** Ids per `delete`. */
 export const MAX_IDS_PER_CALL = 1000;
 /** UTF-8 bytes in a scope (Vectorize's namespace limit). */

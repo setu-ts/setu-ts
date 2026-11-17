@@ -7,6 +7,7 @@ import type {
   IRuntimeServices,
   IServiceRegistry,
   ResponseSnapshot,
+  StreamOptions,
   TimerHandle,
 } from '@setu-ts/common';
 import type { HttpMethod } from '@setu-ts/common';
@@ -289,6 +290,7 @@ export class MockResponse implements IResponse {
   #body: Uint8Array | string | null = null;
   #streaming = false;
   #streamBody: ReadableStream<Uint8Array> | null = null;
+  #trailers: Promise<Headers> | undefined;
   #ended = false;
 
   get ended(): boolean {
@@ -368,9 +370,14 @@ export class MockResponse implements IResponse {
     return { __handlerResult: true };
   }
 
-  stream(body: ReadableStream<Uint8Array>): HandlerResult {
+  stream(body: ReadableStream<Uint8Array>, options?: StreamOptions): HandlerResult {
     this.#streaming = true;
     this.#streamBody = body;
+    // Recorded as given and observed, as the kernel's builder does, so a test
+    // can assert the trailers a middleware or handler attached.
+    const trailers = options?.trailers;
+    if (trailers !== undefined) trailers.catch(() => undefined);
+    this.#trailers = trailers;
     this.#ended = true;
     return { __handlerResult: true };
   }
@@ -382,6 +389,7 @@ export class MockResponse implements IResponse {
         status: this.#status,
         headers: this.#headers,
         body: this.#streamBody,
+        ...(this.#trailers !== undefined ? { trailers: this.#trailers } : {}),
       };
     }
     return {

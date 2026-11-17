@@ -19,6 +19,7 @@ import { WorkerBudget } from '../pool/worker-budget.ts';
 import { assertTaskTimeout, readSizingOptions, resolveMaxWorkers } from './sizing.ts';
 import type { SizingSnapshot } from './sizing.ts';
 import type { WorkerPoolCollector } from '../metrics/worker-pool-collector.ts';
+import { TaskLabels } from '../metrics/task-label.ts';
 
 /** Default pending-queue bound per pool. */
 const DEFAULT_MAX_QUEUE = 1024;
@@ -43,6 +44,69 @@ export function setUnsettledErrorReporter(
   reporter: (taskModule: string, error: Error) => void,
 ): void {
   unsettledErrorReporters.set(service, reporter);
+}
+
+const taskLabels = new WeakMap<WorkerPoolService, TaskLabels>();
+
+/**
+ * Internal: the operator-facing label for a task module, assigned on first
+ * sight. Kept off the exported class so it adds no public surface.
+ *
+ * @param service - The service that owns the labels
+ * @param taskModule - The task-module specifier
+ * @returns Its label for `/metrics` and `/health`
+ */
+export function taskLabelOf(service: WorkerPoolService, taskModule: string): string {
+  return taskLabels.get(service)!.labelOf(taskModule);
+}
+
+const labelCollisionReporters = new WeakMap<
+  WorkerPoolService,
+  (specifier: string, label: string) => void
+>();
+
+/**
+ * Internal: lets the plugin warn when a derived task label was already taken
+ * and the pool got a suffixed one. Deliberately absent from the public barrel.
+ *
+ * @param service - The service whose labels report through `reporter`
+ * @param reporter - Receives the specifier and the label it got instead
+ */
+export function setLabelCollisionReporter(
+  service: WorkerPoolService,
+  reporter: (specifier: string, label: string) => void,
+): void {
+  labelCollisionReporters.set(service, reporter);
+}
+
+/** One pool's state as it leaves the process: labelled, with no specifier. */
+export interface LabelledPoolStats {
+  /** The pool's task label (never its specifier). */
+  readonly task: string;
+  /** Workers currently alive in the pool. */
+  readonly workers: number;
+  /** Workers currently executing a task. */
+  readonly busy: number;
+  /** Tasks waiting in the pool's queue. */
+  readonly queued: number;
+  /** Tasks completed successfully since the pool was created. */
+  readonly completed: number;
+  /** Tasks failed (error, crash, or timeout) since the pool was created. */
+  readonly failed: number;
+}
+
+/**
+ * Internal health accessor: every pool's stats under its task label. The
+ * specifier stays in-process (`stats()`); this is what `/health` publishes.
+ *
+ * @param service - The service to read
+ * @returns One labelled snapshot per pool
+ */
+export function labelledStatsOf(service: WorkerPoolService): readonly LabelledPoolStats[] {
+  return service.stats().map(({ taskModule, ...counts }) => ({
+    task: taskLabelOf(service, taskModule),
+    ...counts,
+  }));
 }
 
 /** Internal health accessor; deliberately absent from the public barrel. */
@@ -80,6 +144,19 @@ export class WorkerPoolService implements IWorkerPool {
     private readonly collector?: WorkerPoolCollector | undefined,
   ) {
     this.sizing = readSizingOptions(options);
+    taskLabels.set(
+      this,
+      new TaskLabels(this.sizing.labels, (specifier, label) => {
+        // Reporting a renamed label must never fail the run() that caused it:
+        // a throwing logger would otherwise surface as a synchronous throw from
+        // a Promise-returning method.
+        try {
+          labelCollisionReporters.get(this)?.(specifier, label);
+        } catch {
+          // The label is assigned either way; only the warning is lost.
+        }
+      }),
+    );
     this.host = options?.host ?? runtime.workers;
     const limit = resolveMaxWorkers(this.sizing, this.host?.availableParallelism() ?? 0);
     this.budget = new WorkerBudget(limit);
@@ -114,7 +191,7 @@ export class WorkerPoolService implements IWorkerPool {
       return Promise.reject(error);
     }
     if (this.closed) {
-      this.collector?.taskRejected(taskModule, 'pool_closed');
+      this.collector?.taskRejected(taskLabelOf(this, taskModule), 'pool_closed');
       return Promise.reject(new WorkerPoolUnavailableError('Worker pool has been shut down'));
     }
     const host = this.host;
@@ -122,7 +199,7 @@ export class WorkerPoolService implements IWorkerPool {
       // No pool exists to report through, so the rejection is recorded here.
       // On a runtime without threads (Cloudflare Workers) this series is the
       // only signal that work was attempted at all.
-      this.collector?.taskRejected(taskModule, 'unavailable');
+      this.collector?.taskRejected(taskLabelOf(this, taskModule), 'unavailable');
       return Promise.reject(new WorkerPoolUnavailableError());
     }
     let pool = this.pools.get(taskModule);
@@ -167,6 +244,7 @@ export class WorkerPoolService implements IWorkerPool {
     host: IWorkerHost,
   ): {
     specifier: string;
+    label: string;
     size: number;
     maxQueue: number;
     taskTimeoutMs: number;
@@ -177,6 +255,7 @@ export class WorkerPoolService implements IWorkerPool {
     const overrides = sizing.pools.get(taskModule);
     return {
       specifier: taskModule,
+      label: taskLabelOf(this, taskModule),
       size: overrides?.size ?? sizing.defaultPoolSize ?? host.availableParallelism(),
       maxQueue: overrides?.maxQueue ?? sizing.maxQueue ?? DEFAULT_MAX_QUEUE,
       taskTimeoutMs: overrides?.taskTimeoutMs ?? sizing.taskTimeoutMs ?? DEFAULT_TASK_TIMEOUT_MS,

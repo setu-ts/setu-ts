@@ -113,6 +113,7 @@ describe('IdempotentRouteOptions contract (M109a §3.2)', () => {
 describe('IIdempotencyService contract (M109a §3.2)', () => {
   it('builds a middleware and a behavior synchronously', () => {
     const service: IIdempotencyService = {
+      transactional: false,
       middleware: () => (ctx, next) => {
         expect(ctx).toBeDefined();
         return next();
@@ -141,6 +142,7 @@ interface ChargeResult {
 describe('IIdempotencyService tier-C contract (M109b §3.2)', () => {
   it('accepts a `within` whose result is a named interface', async () => {
     const service: IIdempotencyService = {
+      transactional: false,
       middleware: () => (_ctx, next) => next(),
       behavior: () => ({ handle: (_ctx, next) => next() }),
       within: <R>(): Promise<IdempotentWithinResult<R>> =>

@@ -3,7 +3,7 @@
  *
  * Before this milestone the style and the plugin set were one choice: `rest`
  * and `microservice` were functional, and `class-based` was the REST set plus
- * the decorator and DI pair. A NestJS team migrating a microservice had no
+ * the decorator and DI pair. A team migrating a microservice had no
  * scaffold, because no template carried both the microservice plugins and the
  * decorators.
  *

@@ -103,7 +103,25 @@ export function toSesInput(message: OutgoingMail): Record<string, unknown> {
   return {
     FromEmailAddress: message.from,
     Destination: destination,
-    Content: { Simple: { Subject: { Data: message.subject }, Body: body } },
+    Content: {
+      Simple: {
+        Subject: { Data: message.subject },
+        Body: body,
+        ...(message.attachments === undefined
+          ? {}
+          : {
+              Attachments: message.attachments.map((attachment) => ({
+                FileName: attachment.filename,
+                RawContent: attachment.content,
+                ContentDisposition: attachment.contentId === undefined ? 'ATTACHMENT' : 'INLINE',
+                ...(attachment.contentType === undefined
+                  ? {}
+                  : { ContentType: attachment.contentType }),
+                ...(attachment.contentId === undefined ? {} : { ContentId: attachment.contentId }),
+              })),
+            }),
+      },
+    },
   };
 }
 

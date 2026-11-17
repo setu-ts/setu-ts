@@ -207,6 +207,7 @@ describe('appendPolicyMiddleware', () => {
     ).toBe(false);
     expect(securityMetadataOf(anonymousOnly[0] as MiddlewareFunction)).toEqual({
       authenticated: false,
+      forbids: true,
     });
     const both: MiddlewareFunction[] = [];
     expect(
@@ -227,8 +228,8 @@ describe('appendPolicyMiddleware', () => {
       ),
     ).toBe(true);
     expect(both.map((m) => securityMetadataOf(m))).toEqual([
-      { authenticated: false },
-      { authenticated: true },
+      { authenticated: false, forbids: true },
+      { authenticated: true, forbids: true },
     ]);
   });
 });

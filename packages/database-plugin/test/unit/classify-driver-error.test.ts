@@ -12,7 +12,12 @@
  */
 import { describe, expect, it } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
-import { classifyDriverError, isUnansweredConnect } from '../../src/errors/classify.ts';
+import {
+  classifyDriverError,
+  isConnectionLostMidCall,
+  isPoolAcquireTimeout,
+  isUnansweredConnect,
+} from '../../src/errors/classify.ts';
 import {
   DatabaseTimeoutError,
   DatabaseUnavailableError,
@@ -658,5 +663,53 @@ describe('classifyDriverError — X94 connection-loss signals (M128)', () => {
   it('isUnansweredConnect is unchanged by the connection-loss anchors', () => {
     expect(isUnansweredConnect(new Error('Connection terminated unexpectedly'))).toBe(false);
     expect(isUnansweredConnect(new Error('Client was closed and is not queryable'))).toBe(false);
+  });
+});
+
+describe('isConnectionLostMidCall (M139f V12-50)', () => {
+  // The same table: every `'timeout'` row in it is a connection lost under a
+  // statement, so the helper must be true for exactly those rows.
+  for (const { signal, error, adapterType, expected } of CONNECTION_LOSS_SIGNALS) {
+    it(`${signal} → ${expected === 'timeout'}`, () => {
+      expect(isConnectionLostMidCall(error, adapterType)).toBe(expected === 'timeout');
+    });
+  }
+
+  it('is false for a timeout that a bound produced, not a lost connection', () => {
+    expect(classifyDriverError(new Error('Query read timeout'))).toBe('timeout');
+    expect(isConnectionLostMidCall(new Error('Query read timeout'))).toBe(false);
+  });
+
+  it('is false for mariadb 45009 outside the MySQL adapter cause', () => {
+    expect(isConnectionLostMidCall({ code: '45009' })).toBe(false);
+    expect(isConnectionLostMidCall(prismaAdapterError('P2039', 'postgres', '45009'))).toBe(false);
+  });
+
+  it('is false for an unknown error', () => {
+    expect(isConnectionLostMidCall(new Error('boom'))).toBe(false);
+  });
+});
+
+describe('isPoolAcquireTimeout (M139f V8-3)', () => {
+  it('is true for the pg pool anchor, bare or one level down', () => {
+    expect(isPoolAcquireTimeout(new Error('timeout exceeded when trying to connect'))).toBe(true);
+    expect(
+      isPoolAcquireTimeout(drizzleWrapped(new Error('timeout exceeded when trying to connect'))),
+    ).toBe(true);
+  });
+
+  it('is false for the new-connection and query-read anchors', () => {
+    expect(isPoolAcquireTimeout(new Error('Connection terminated due to connection timeout'))).toBe(
+      false,
+    );
+    expect(isPoolAcquireTimeout(new Error('Query read timeout'))).toBe(false);
+  });
+
+  it('is false when a string code is on the chain', () => {
+    expect(
+      isPoolAcquireTimeout(
+        Object.assign(new Error('timeout exceeded when trying to connect'), { code: 'XX000' }),
+      ),
+    ).toBe(false);
   });
 });

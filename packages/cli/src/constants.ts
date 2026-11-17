@@ -68,6 +68,10 @@ export type TemplateName = (typeof TEMPLATES)[number];
  * which flags take a value.
  */
 export const VALUE_FLAGS: ReadonlySet<string> = new Set([
+  'provider',
+  'type',
+  'adapter',
+  'dialect',
   'output',
   'input',
   'factory',
@@ -124,7 +128,7 @@ export const APP_VERB = 'app';
 /**
  * The `generate` verb that adds a shared library to a workspace.
  *
- * Spelled to match its NestJS analogue (`nest g library`). Not a schematic, for
+ * Spelled as the conventional library-generator verb is. Not a schematic, for
  * the same reason {@linkcode APP_VERB} is not: it reads the workspace manifest and
  * may edit the root's member glob, while a schematic performs no I/O at all.
  */

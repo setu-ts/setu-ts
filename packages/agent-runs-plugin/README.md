@@ -27,10 +27,23 @@ export function runs(model: LanguageModel) {
 
 Register `RuntimePlugin`, `DatabasePlugin` and
 `IdempotencyPlugin({ transactional: { store: createDatabaseIdempotencyStore(), purge: { schedule: false } } })`
-before this plugin. Scheduled idempotency purging instead needs a scheduler. The run plugin provides
+before this plugin. Without the `transactional` option the plugin refuses to start: `register`
+throws a `TypeError` naming the option, because every tool call runs inside `idempotency.within`.
+Scheduled idempotency purging instead needs a scheduler. The run plugin provides
 `CAPABILITIES.AGENT_RUNS` (`IAgentRunService`); no routes are installed automatically. See the
 [complete route guide](https://github.com/setu-ts/setu-ts/blob/main/docs/durable-runs.md) and
 [public API](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#durable-agent-runs-setu-tscommon--setu-tsagent-runs-plugin--setu-tsdatabase-plugin).
+
+## Starting from a job or scheduler
+
+Since 0.13.0, `runs.startAs({ tenantId: 't1', principalId: 'u1' }, 'assistant', { messages: [] })`
+creates a run without retaining a request context. Resolve `runs` from `CAPABILITIES.AGENT_RUNS`.
+The tenant must be a string (empty means no tenant), and the principal must be a non-empty string or
+`null`; invalid identity fails with `AgentRunStateError` before storage. Request reads, streams and
+decisions retain the same tenant and principal access rules. `startAs` does not invoke
+`background(ctx, work)`: on a runtime that ends work with a request, such as Workers, execution
+continues in that process or is picked up by the next sweep. Custom implementations of
+`IAgentRunService` must add this required member when upgrading.
 
 ## Configuration
 
@@ -49,6 +62,14 @@ before this plugin. Scheduled idempotency purging instead needs a scheduler. The
 | `pollIntervalMs`  | 250      | Cross-instance stream polling                                                                  |
 | `maxInputBytes`   | 262144   | UTF-8 JSON input bound; refusal carries 413                                                    |
 | `background`      | absent   | Receives `(ctx, work)` for hosts requiring explicit background lifetime                        |
+
+Input messages may be `user` or `assistant`; their parts pass through except tool parts
+(`tool-call`, `tool-result`, `tool-approval-*`), and `role: 'tool'` messages are dropped. `image`
+and `file` parts survive a JSON round trip, so their `data` must already be a JSON value: a base64
+string or a URL. A `Uint8Array` becomes an index-keyed object, not bytes. The whole encoded input
+counts against `maxInputBytes` (default 262144; over it, `start` is refused with 413). A tool's
+result reaches the model as `{ type: 'json' }` or `{ type: 'error-text' }`, so a tool cannot return
+an image to the model as an image.
 
 Definitions require `name`, `version`, `model(run)` and `maxOutputTokens`; `maxSteps` defaults to 20
 (1–1000). Optional `system`, `tools`, `toolsContext`, `compatibleVersions`, `approval`,
@@ -70,7 +91,8 @@ on something else, and `statement_timeout` bounds a single SQL statement that is
 first covers a hung tool, the second only a slow query. Bound outside calls inside the tool itself.
 `canAccess` governs `get`, `respond` and `cancel`; by default only the starting principal (or, for a
 run started without one, anyone in the tenant) passes, and a refusal is a 404. Models are supplied
-per call, so tenant quotas and budget middleware can wrap them using the persisted run identity.
+per call, so tenant quotas and budget middleware can wrap them using the persisted run identity; see
+[Budgeting a run](https://github.com/setu-ts/setu-ts/blob/main/docs/durable-runs.md#budgeting-a-run).
 Approval policies map tool names to `true` or an async predicate, with `timeoutMs` default 86400000,
 maximum 2592000000, and optional `canDecide(principal, run)`. The default requires matching, defined
 principal ids. Custom tool context comes only from that tool's entry in `toolsContext(run, call)`.

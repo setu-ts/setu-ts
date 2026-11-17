@@ -1,6 +1,6 @@
 {
   "name": "@setu-ts/openapi-plugin",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "description": "OpenAPI 3.1 generated from routes, with a Zod transformer and Swagger UI",
   "repository": {
     "type": "git",
@@ -50,7 +50,9 @@
   "devDependencies": {
     "@setu-ts/auth-plugin": "workspace:^",
     "@setu-ts/decorator-plugin": "workspace:^",
+    "@setu-ts/exceptions": "workspace:^",
     "@setu-ts/health-plugin": "workspace:^",
+    "@setu-ts/idempotency-plugin": "workspace:^",
     "@setu-ts/kernel": "workspace:^",
     "@setu-ts/metrics-plugin": "workspace:^",
     "@setu-ts/runtime": "workspace:^",

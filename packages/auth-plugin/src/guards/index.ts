@@ -7,6 +7,7 @@
 import type { IAuthorizationService, IRequestContext, MiddlewareFunction } from '@setu-ts/common';
 import {
   CAPABILITIES,
+  CREDENTIAL_SOURCE_STATE_KEY,
   respondWithAuthorizationFailure,
   withSecurityMetadata,
 } from '@setu-ts/common';
@@ -24,6 +25,16 @@ import { REQUIRED_SCOPES_STATE_KEY } from '@setu-ts/common';
  * mutable object a consumer could legitimately write to.
  */
 const AUTHENTICATED: RouteSecurityMetadata = Object.freeze({ authenticated: true });
+
+/**
+ * Brand for a guard that can also refuse an authenticated caller with `403`.
+ * Kept apart from {@linkcode AUTHENTICATED} so `requireAuth()` documents no
+ * `403` (M137b §3.1).
+ */
+const AUTHENTICATED_FORBIDS: RouteSecurityMetadata = Object.freeze({
+  authenticated: true,
+  forbids: true,
+});
 
 /** Brand for a guard that explicitly marks a route public. */
 const PUBLIC: RouteSecurityMetadata = Object.freeze({ authenticated: false });
@@ -76,11 +87,11 @@ const URL_BASE = 'http://localhost';
  *
  * Only `GET` and `HEAD`: a redirect would turn a form `POST` into a `GET` and
  * drop its body. An `X-Requested-With: XMLHttpRequest` request is script, never
- * a navigation (ASP.NET Core, Spring). `Sec-Fetch-Mode` decides when present —
+ * a navigation. `Sec-Fetch-Mode` decides when present —
  * a browser sends `navigate` for a page load and something else for `fetch()`.
  * Without it, `Accept` must NAME `text/html` or `application/xhtml+xml`; the bare
  * any-type wildcard is not enough, because `curl` and most HTTP clients send
- * only that (Spring).
+ * only that.
  *
  * @param method - The request method
  * @param headers - The request headers
@@ -177,10 +188,13 @@ function delegationRefuses(
  * an `actor`, RFC 8693 `act`) can be refused (`'forbid'`) or required
  * (`'require'`) with `403`.
  *
+ * Credential restrictions read CREDENTIAL_SOURCE_STATE_KEY and treat a mismatch
+ * or missing source as unauthenticated, before the delegation check.
+ *
  * @param options - Optional sign-in page and delegation policy
  * @returns Middleware function
  * @throws {AuthPluginConfigurationError} When `signInPage` is not a same-origin
- *   absolute path, or `delegation` is not `'allow'`, `'forbid'` or `'require'`
+ *   absolute path, credentials is unknown, or delegation is unknown
  *
  * @example
  * ```typescript
@@ -193,6 +207,14 @@ function delegationRefuses(
  * ```
  */
 export function requireAuth(options?: RequireAuthOptions): MiddlewareFunction {
+  const credentials = options?.credentials === undefined ? 'any' : options.credentials;
+  if (credentials !== 'any' && credentials !== 'cookie' && credentials !== 'header') {
+    throw new AuthPluginConfigurationError(
+      "auth-plugin: requireAuth credentials must be 'any', 'cookie' or 'header'",
+    );
+  }
+  const matchesCredential = (ctx: IRequestContext): boolean =>
+    credentials === 'any' || ctx.state.get(CREDENTIAL_SOURCE_STATE_KEY) === credentials;
   const delegation = options?.delegation ?? 'allow';
   if (!DELEGATION_MODES.has(delegation)) {
     throw new AuthPluginConfigurationError(
@@ -201,11 +223,13 @@ export function requireAuth(options?: RequireAuthOptions): MiddlewareFunction {
       )}'`,
     );
   }
+  // Only a delegation rule can make requireAuth answer 403.
+  const authBrand = delegation === 'allow' ? AUTHENTICATED : AUTHENTICATED_FORBIDS;
   const signInPage = options?.signInPage;
   if (signInPage === undefined) {
     const guard = async (ctx: IRequestContext, next: () => Promise<void>): Promise<void> => {
       const user = ctx.request.user;
-      if (!user) {
+      if (!user || !matchesCredential(ctx)) {
         respondWithAuthorizationFailure(ctx, 'authentication-required');
         return;
       }
@@ -215,13 +239,13 @@ export function requireAuth(options?: RequireAuthOptions): MiddlewareFunction {
       }
       await next();
     };
-    return withSecurityMetadata(guard, AUTHENTICATED);
+    return withSecurityMetadata(guard, authBrand);
   }
 
   const page = compileSignInPage(signInPage);
   const guard = async (ctx: IRequestContext, next: () => Promise<void>): Promise<void> => {
     const user = ctx.request.user;
-    if (user) {
+    if (user && matchesCredential(ctx)) {
       if (delegationRefuses(delegation, user)) {
         respondWithAuthorizationFailure(ctx, 'insufficient-privileges');
         return;
@@ -249,7 +273,7 @@ export function requireAuth(options?: RequireAuthOptions): MiddlewareFunction {
     );
     ctx.response.redirect(target.pathname + target.search + target.hash, 302);
   };
-  return withSecurityMetadata(guard, AUTHENTICATED);
+  return withSecurityMetadata(guard, authBrand);
 }
 
 /**
@@ -298,7 +322,11 @@ export function requireScopes(first: string, ...rest: string[]): MiddlewareFunct
     required.push(scope);
   }
   const scopes: readonly string[] = Object.freeze(required);
-  const brand: RouteSecurityMetadata = Object.freeze({ authenticated: true, scopes });
+  const brand: RouteSecurityMetadata = Object.freeze({
+    authenticated: true,
+    scopes,
+    forbids: true,
+  });
   const guard = async (ctx: IRequestContext, next: () => Promise<void>): Promise<void> => {
     const user = ctx.request.user;
     if (!user) {
@@ -349,7 +377,7 @@ export function requireRole(role: string): MiddlewareFunction {
 
     await next();
   };
-  return withSecurityMetadata(guard, AUTHENTICATED);
+  return withSecurityMetadata(guard, AUTHENTICATED_FORBIDS);
 }
 
 /**
@@ -382,7 +410,7 @@ export function requirePermission(permission: string): MiddlewareFunction {
 
     await next();
   };
-  return withSecurityMetadata(guard, AUTHENTICATED);
+  return withSecurityMetadata(guard, AUTHENTICATED_FORBIDS);
 }
 
 /**
@@ -415,7 +443,7 @@ export function requireAnyRole(roles: readonly string[]): MiddlewareFunction {
 
     await next();
   };
-  return withSecurityMetadata(guard, AUTHENTICATED);
+  return withSecurityMetadata(guard, AUTHENTICATED_FORBIDS);
 }
 
 /**
@@ -451,7 +479,7 @@ export function requireAllPermissions(permissions: readonly string[]): Middlewar
 
     await next();
   };
-  return withSecurityMetadata(guard, AUTHENTICATED);
+  return withSecurityMetadata(guard, AUTHENTICATED_FORBIDS);
 }
 
 /**
@@ -497,7 +525,7 @@ export function requireMfa(): MiddlewareFunction {
     }
     await next();
   };
-  return withSecurityMetadata(guard, AUTHENTICATED);
+  return withSecurityMetadata(guard, AUTHENTICATED_FORBIDS);
 }
 
 /**

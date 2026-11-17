@@ -28,10 +28,12 @@ import manifest from '../../deno.json' with { type: 'json' };
 function createFakeContext(): {
   ctx: IPluginContext;
   onCloseHandlers: Array<() => Promise<void>>;
+  onInitHandlers: Array<() => void | Promise<void>>;
   registered: Map<string, unknown>;
   middlewareAdded: Array<{ fn: MiddlewareFunction; options?: MiddlewareOptions }>;
 } {
   const registered = new Map<string, unknown>();
+  const onInitHandlers: Array<() => void | Promise<void>> = [];
   const onCloseHandlers: Array<() => Promise<void>> = [];
   const middlewareAdded: Array<{ fn: MiddlewareFunction; options?: MiddlewareOptions }> = [];
 
@@ -92,7 +94,9 @@ function createFakeContext(): {
         onCloseHandlers.push(fn);
       },
       onRegister: () => {},
-      onInit: () => {},
+      onInit: (fn) => {
+        onInitHandlers.push(fn);
+      },
       onBootstrap: () => {},
       onRequest: () => {},
       onResponse: () => {},
@@ -105,7 +109,7 @@ function createFakeContext(): {
     app: null as unknown as IPluginContext['app'],
   };
 
-  return { ctx, onCloseHandlers, registered, middlewareAdded };
+  return { ctx, onCloseHandlers, onInitHandlers, registered, middlewareAdded };
 }
 
 describe('AuthPlugin', () => {
@@ -177,7 +181,7 @@ describe('AuthPlugin', () => {
   });
 
   it('supports JWT-only registration without an RBAC configuration', async () => {
-    const plugin = AuthPlugin({ jwt: { secret: 'test-secret' } });
+    const plugin = AuthPlugin({ jwt: { secret: 'test-secret-at-least-32-characters' } });
     const { ctx, registered } = createFakeContext();
 
     await plugin.register!(ctx);
@@ -204,7 +208,7 @@ describe('AuthPlugin', () => {
 
   it('answers unsupported (rbac-not-configured) when the option is present without RBAC', async () => {
     const plugin = AuthPlugin({
-      jwt: { secret: 'test-secret' },
+      jwt: { secret: 'test-secret-at-least-32-characters' },
       authorizationDiagnostics: { enabled: true, roles: {}, permissions: {} },
     });
     const { ctx, registered } = createFakeContext();
@@ -220,11 +224,14 @@ describe('AuthPlugin', () => {
   it('refuses a malformed authorizationDiagnostics option at construction, with or without RBAC', () => {
     const malformed = { enabled: false, roles: {}, permissions: {} };
     expect(() =>
-      AuthPlugin({ jwt: { secret: 'test-secret' }, authorizationDiagnostics: malformed }),
+      AuthPlugin({
+        jwt: { secret: 'test-secret-at-least-32-characters' },
+        authorizationDiagnostics: malformed,
+      }),
     ).toThrow('Authorization diagnostics: enabled must be the literal true.');
     expect(() =>
       AuthPlugin({
-        jwt: { secret: 'test-secret' },
+        jwt: { secret: 'test-secret-at-least-32-characters' },
         rbac: { roles: {} },
         authorizationDiagnostics: malformed,
       }),
@@ -233,7 +240,7 @@ describe('AuthPlugin', () => {
 
   it('returns a plugin with correct name and version', () => {
     const plugin = AuthPlugin({
-      jwt: { secret: 'test-secret' },
+      jwt: { secret: 'test-secret-at-least-32-characters' },
       rbac: { roles: {} },
     });
     expect(plugin.name).toBe('auth-plugin');
@@ -242,7 +249,7 @@ describe('AuthPlugin', () => {
 
   it('lists the three capability tokens in provides', () => {
     const plugin = AuthPlugin({
-      jwt: { secret: 'test-secret' },
+      jwt: { secret: 'test-secret-at-least-32-characters' },
       rbac: { roles: {} },
     });
     expect(plugin.provides).toContain(CAPABILITIES.JWT);
@@ -252,24 +259,22 @@ describe('AuthPlugin', () => {
 
   it('has NORMAL priority', () => {
     const plugin = AuthPlugin({
-      jwt: { secret: 'test-secret' },
+      jwt: { secret: 'test-secret-at-least-32-characters' },
       rbac: { roles: {} },
     });
     expect(plugin.priority).toBe(PLUGIN_PRIORITY.NORMAL);
   });
 
-  it('throws when jwt.secret and jwt keys are both missing', () => {
-    expect(() =>
-      AuthPlugin({
-        jwt: {},
-        rbac: { roles: {} },
-      }),
-    ).toThrow();
+  it('throws during registration when no JWT_SECRET source or RS256 keys exist', () => {
+    const { ctx } = createFakeContext();
+    expect(() => AuthPlugin({ jwt: {}, rbac: { roles: {} } }).register!(ctx)).toThrow(
+      AuthPluginConfigurationError,
+    );
   });
 
   it('registers IJwtService under jwt token', async () => {
     const plugin = AuthPlugin({
-      jwt: { secret: 'test-secret' },
+      jwt: { secret: 'test-secret-at-least-32-characters' },
       rbac: { roles: {} },
     });
     const { ctx, registered } = createFakeContext();
@@ -279,7 +284,7 @@ describe('AuthPlugin', () => {
 
   it('registers IAuthService under authentication token', async () => {
     const plugin = AuthPlugin({
-      jwt: { secret: 'test-secret' },
+      jwt: { secret: 'test-secret-at-least-32-characters' },
       rbac: { roles: {} },
     });
     const { ctx, registered } = createFakeContext();
@@ -289,7 +294,7 @@ describe('AuthPlugin', () => {
 
   it('registers IAuthorizationService under authorization token', async () => {
     const plugin = AuthPlugin({
-      jwt: { secret: 'test-secret' },
+      jwt: { secret: 'test-secret-at-least-32-characters' },
       rbac: { roles: {} },
     });
     const { ctx, registered } = createFakeContext();
@@ -299,7 +304,7 @@ describe('AuthPlugin', () => {
 
   it('onClose handlers run without error', async () => {
     const plugin = AuthPlugin({
-      jwt: { secret: 'test-secret' },
+      jwt: { secret: 'test-secret-at-least-32-characters' },
       rbac: { roles: {} },
     });
     const { ctx, onCloseHandlers } = createFakeContext();
@@ -312,7 +317,7 @@ describe('AuthPlugin', () => {
 
   it('builds with HS256 when secret is provided', async () => {
     const plugin = AuthPlugin({
-      jwt: { secret: 'my-secret-key' },
+      jwt: { secret: 'my-secret-key-at-least-32-characters' },
       rbac: { roles: {} },
     });
     const { ctx, registered } = createFakeContext();
@@ -351,7 +356,7 @@ describe('AuthPlugin', () => {
 
   it('includes apiKey strategy when configured', async () => {
     const plugin = AuthPlugin({
-      jwt: { secret: 'test-secret' },
+      jwt: { secret: 'test-secret-at-least-32-characters' },
       apiKey: {
         validate: () => Promise.resolve(null as IPrincipal | null),
       },
@@ -364,7 +369,7 @@ describe('AuthPlugin', () => {
 
   it('includes local strategy when configured', async () => {
     const plugin = AuthPlugin({
-      jwt: { secret: 'test-secret' },
+      jwt: { secret: 'test-secret-at-least-32-characters' },
       local: {
         verify: () => Promise.resolve(null as IPrincipal | null),
       },
@@ -377,7 +382,7 @@ describe('AuthPlugin', () => {
 
   it('uses the default (always-null) local strategy when local is not configured', async () => {
     const plugin = AuthPlugin({
-      jwt: { secret: 'test-secret' },
+      jwt: { secret: 'test-secret-at-least-32-characters' },
       rbac: { roles: {} },
     });
     const { ctx, registered } = createFakeContext();
@@ -390,7 +395,7 @@ describe('AuthPlugin', () => {
 
   it('registers with jwt.audience option set', async () => {
     const plugin = AuthPlugin({
-      jwt: { secret: 'test-secret', audience: 'my-audience' },
+      jwt: { secret: 'test-secret-at-least-32-characters', audience: 'my-audience' },
       rbac: { roles: {} },
     });
     const { ctx, registered } = createFakeContext();
@@ -400,7 +405,7 @@ describe('AuthPlugin', () => {
 
   it('registers with jwt.issuer option set', async () => {
     const plugin = AuthPlugin({
-      jwt: { secret: 'test-secret', issuer: 'my-issuer' },
+      jwt: { secret: 'test-secret-at-least-32-characters', issuer: 'my-issuer' },
       rbac: { roles: {} },
     });
     const { ctx, registered } = createFakeContext();
@@ -410,7 +415,7 @@ describe('AuthPlugin', () => {
 
   it('registers with apiKey.header option set', async () => {
     const plugin = AuthPlugin({
-      jwt: { secret: 'test-secret' },
+      jwt: { secret: 'test-secret-at-least-32-characters' },
       apiKey: {
         header: 'x-api-key',
         validate: () => Promise.resolve(null as IPrincipal | null),
@@ -424,7 +429,11 @@ describe('AuthPlugin', () => {
 
   it('forwards jwt.header and jwt.scheme to the JWT strategy', async () => {
     const plugin = AuthPlugin({
-      jwt: { secret: 'test-secret', header: 'x-auth-token', scheme: 'token' },
+      jwt: {
+        secret: 'test-secret-at-least-32-characters',
+        header: 'x-auth-token',
+        scheme: 'token',
+      },
       rbac: { roles: {} },
     });
     const { ctx, registered } = createFakeContext();
@@ -448,13 +457,13 @@ describe('AuthPlugin', () => {
 
 describe('AuthPlugin — session strategy and caller strategies (M73)', () => {
   it('declares the session capability as an optional dependency', () => {
-    const plugin = AuthPlugin({ jwt: { secret: 'test-secret' } });
+    const plugin = AuthPlugin({ jwt: { secret: 'test-secret-at-least-32-characters' } });
     expect(plugin.optionalDependencies).toContain(CAPABILITIES.SESSION);
   });
 
   it('throws at register() when options.session is set but the session capability is absent', () => {
     const plugin = AuthPlugin({
-      jwt: { secret: 'test-secret' },
+      jwt: { secret: 'test-secret-at-least-32-characters' },
       session: { toPrincipal: () => null },
     });
     const { ctx } = createFakeContext();
@@ -469,7 +478,7 @@ describe('AuthPlugin — session strategy and caller strategies (M73)', () => {
     // Simulate SessionPlugin having registered its service under the token.
     registered.set(CAPABILITIES.SESSION, fakeSessionService({ id: 's1', data: { uid: 'u1' } }));
     const plugin = AuthPlugin({
-      jwt: { secret: 'test-secret' },
+      jwt: { secret: 'test-secret-at-least-32-characters' },
       session: { toPrincipal: (view) => ({ id: String(view.data.uid) }) },
     });
     await plugin.register!(ctx);
@@ -485,7 +494,7 @@ describe('AuthPlugin — session strategy and caller strategies (M73)', () => {
       fakeSessionService({ id: 's1', data: { uid: 'session-user' } }),
     );
     const plugin = AuthPlugin({
-      jwt: { secret: 'test-secret' },
+      jwt: { secret: 'test-secret-at-least-32-characters' },
       session: { toPrincipal: (view) => ({ id: String(view.data.uid) }) },
     });
     await plugin.register!(ctx);
@@ -517,7 +526,7 @@ describe('AuthPlugin — session strategy and caller strategies (M73)', () => {
       },
     };
     const plugin = AuthPlugin({
-      jwt: { secret: 'test-secret' },
+      jwt: { secret: 'test-secret-at-least-32-characters' },
       strategies: [first, second],
     });
     await plugin.register!(ctx);
@@ -536,7 +545,7 @@ describe('AuthPlugin — session strategy and caller strategies (M73)', () => {
       authenticate: () => Promise.resolve(null),
     };
     const plugin = AuthPlugin({
-      jwt: { secret: 'test-secret' },
+      jwt: { secret: 'test-secret-at-least-32-characters' },
       strategies: [duplicate],
     });
     expect(() => plugin.register!(ctx)).toThrow("duplicate strategy name 'jwt'");
@@ -553,7 +562,7 @@ describe('AuthPlugin — session strategy and caller strategies (M73)', () => {
       authenticate: () => Promise.resolve(null),
     };
     const plugin = AuthPlugin({
-      jwt: { secret: 'test-secret' },
+      jwt: { secret: 'test-secret-at-least-32-characters' },
       strategies: [a, b],
     });
     expect(() => plugin.register!(ctx)).toThrow("duplicate strategy name 'custom'");
@@ -561,7 +570,7 @@ describe('AuthPlugin — session strategy and caller strategies (M73)', () => {
 
   it('leaves the chain unchanged when neither session nor strategies is configured', async () => {
     const { ctx, registered } = createFakeContext();
-    const plugin = AuthPlugin({ jwt: { secret: 'test-secret' } });
+    const plugin = AuthPlugin({ jwt: { secret: 'test-secret-at-least-32-characters' } });
     await plugin.register!(ctx);
     const jwt = registered.get(CAPABILITIES.JWT) as IJwtService;
     const auth = registered.get(CAPABILITIES.AUTH) as IAuthService;
@@ -619,3 +628,55 @@ function formatPem(der: Uint8Array, label: string): string {
   lines.push(`-----END ${label}-----`);
   return lines.join('\n');
 }
+
+describe('M139a option validation', () => {
+  it.each([undefined, true, false])('wires confinement %j into both services', async (cap) => {
+    const { ctx, registered, onInitHandlers } = createFakeContext();
+    await AuthPlugin({
+      jwt: { secret: 'm139a-secret-at-least-32-characters' },
+      ...(cap === undefined ? {} : { confineScopedTokens: cap }),
+      rbac: { roles: { admin: { permissions: ['read'] } } },
+      scopedRbac: {
+        sources: [{ kind: 'static', grants: [{ subject: 'u1', role: 'admin', scope: null }] }],
+      },
+    }).register(ctx);
+    for (const init of onInitHandlers) await init();
+    const user = { id: 'u1', roles: ['admin'], scopes: [] };
+    const rbac = registered.get(
+      CAPABILITIES.AUTHORIZATION,
+    ) as import('@setu-ts/common').IAuthorizationService;
+    const policies = registered.get(
+      CAPABILITIES.AUTHORIZATION_POLICIES,
+    ) as import('@setu-ts/common').IAuthorizationPolicyService;
+    expect(rbac.hasRole(user, 'admin')).toBe(cap === false);
+    expect(await policies.can(user, 'scoped-rbac', 'perm:read', { scope: null })).toBe(
+      cap === false,
+    );
+  });
+  it.each(['yes', null, 1])('refuses confineScopedTokens %j', (value) => {
+    expect(() =>
+      AuthPlugin({ confineScopedTokens: value } as unknown as Parameters<typeof AuthPlugin>[0]),
+    ).toThrow(AuthPluginConfigurationError);
+  });
+  it.each(['', 42, null])('refuses jwt.tenantClaim %j', (value) => {
+    expect(() =>
+      AuthPlugin({
+        jwt: { secret: 'tenant-claim-test-secret-at-least-32-characters', tenantClaim: value },
+      } as unknown as Parameters<typeof AuthPlugin>[0]),
+    ).toThrow(AuthPluginConfigurationError);
+  });
+  it('wires JWT tenantClaim through registration', async () => {
+    const { ctx, registered } = createFakeContext();
+    await AuthPlugin({
+      jwt: { secret: 'tenant-claim-test-secret-at-least-32-characters', tenantClaim: 'tid' },
+    }).register(ctx);
+    const jwt = registered.get(CAPABILITIES.JWT) as IJwtService;
+    const auth = registered.get(CAPABILITIES.AUTH) as IAuthService;
+    const token = await jwt.sign({ sub: 'u1', tid: 'acme' });
+    const request = {
+      headers: new Headers({ authorization: `Bearer ${token}` }),
+      tenant: { id: 'other' },
+    } as IRequest;
+    expect(await auth.authenticate(request)).toBeNull();
+  });
+});

@@ -115,6 +115,21 @@ describe('barrel exports', () => {
 });
 
 describe('getService exports (M130)', () => {
+  it('keeps page-policy types public and configuration errors internal', async () => {
+    const barrel = await import('../../src/index.ts');
+    const policy: import('../../src/index.ts').PagePolicy = {
+      middleware: [(_ctx, next) => next()],
+    };
+    const source: import('../../src/index.ts').PageRouteSource = {
+      build: () => ({}),
+      matchRoutes: () => null,
+    };
+    expect(policy.middleware).toHaveLength(1);
+    expect(source.matchRoutes([], '/')).toBeNull();
+    expect(barrel).not.toHaveProperty('PagePolicy');
+    expect(barrel).not.toHaveProperty('PageRouteSource');
+    expect(barrel).not.toHaveProperty('PagePolicyConfigurationError');
+  });
   it('exports getService, its key, error and resolver type', async () => {
     const barrel = await import('../../src/index.ts');
     const resolver: import('../../src/index.ts').ServiceResolver = <T>() => ({ ok: true }) as T;

@@ -81,22 +81,22 @@ plugins/consumers resolve them by token.
 ### Registering Services
 
 ```typescript
-import type { RegisterOptions } from '@setu-ts/common';
+import type { ICacheStore, IPluginContext, RegisterOptions, ServiceFactory } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 
-async function registerServices(ctx: IPluginContext) {
+function registerServices(ctx: IPluginContext, createCache: ServiceFactory<ICacheStore>): void {
+  const cache = createCache();
   // Register a service
-  ctx.services.register(CAPABILITIES.CACHE, new MyService());
+  ctx.services.register(CAPABILITIES.CACHE, cache);
 
   // Register with options
   const options: RegisterOptions = {
     override: true, // Replace existing registration
-    multi: true, // Allow multiple providers
   };
-  ctx.services.register(CAPABILITIES.CACHE, new MyService(), options);
+  ctx.services.register(CAPABILITIES.CACHE, cache, options);
 
-  // Register a factory (lazy instantiation)
-  ctx.services.registerFactory(CAPABILITIES.CACHE, () => new MyService());
+  // Replace the singleton with a factory, constructed lazily on its first lookup.
+  ctx.services.registerFactory(CAPABILITIES.CACHE, createCache, { override: true });
 }
 ```
 

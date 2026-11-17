@@ -5,6 +5,8 @@
 import { describe, expect, it } from 'vitest';
 import { AuthService, LocalStrategy } from '../../src/services/auth-service.ts';
 import type { IAuthStrategy, IPrincipal, IRequest } from '@setu-ts/common';
+import { ApiKeyStrategy } from '../../src/strategies/api-key-strategy.ts';
+import { AuthenticationUnavailableError } from '../../src/errors.ts';
 
 function createRequest(): IRequest {
   return {
@@ -19,6 +21,23 @@ function createRequest(): IRequest {
 }
 
 describe('AuthService', () => {
+  it('propagates API-key validator outages through both authentication methods', async () => {
+    const cause = new Error('backend down');
+    const service = new AuthService(
+      [new ApiKeyStrategy({ validate: () => Promise.reject(cause) })],
+      new LocalStrategy(() => Promise.resolve(null)),
+    );
+    const request = createRequest();
+    request.headers.set('X-API-Key', 'key');
+    for (const call of [
+      () => service.authenticate(request),
+      () => service.authenticateWithSource(request),
+    ]) {
+      const error = await call().catch((error: unknown) => error);
+      expect(error).toBeInstanceOf(AuthenticationUnavailableError);
+      expect((error as AuthenticationUnavailableError).cause).toBe(cause);
+    }
+  });
   describe('authenticateWithSource', () => {
     it('returns the first match with the header credential of a header strategy', async () => {
       const principal: IPrincipal = { id: 'p1' };
@@ -43,7 +62,7 @@ describe('AuthService', () => {
       expect(result).toEqual({ principal, credential: 'cookie' });
     });
 
-    it('treats a strategy without a credential as cookie (fail closed)', async () => {
+    it('audit F2 reports an undeclared credential as undefined', async () => {
       const principal: IPrincipal = { id: 'p3' };
       const strategies: IAuthStrategy[] = [
         { name: 's1', authenticate: () => Promise.resolve(principal) },
@@ -51,7 +70,7 @@ describe('AuthService', () => {
       const service = new AuthService(strategies, new LocalStrategy(() => Promise.resolve(null)));
 
       const result = await service.authenticateWithSource(createRequest());
-      expect(result).toEqual({ principal, credential: 'cookie' });
+      expect(result).toEqual({ principal, credential: undefined });
     });
 
     it('returns null when nothing matches', async () => {
@@ -157,5 +176,21 @@ describe('AuthService', () => {
       const result = await service.verifyCredentials({ identifier: 'x', secret: 'y' });
       expect(result).toBeNull();
     });
+  });
+});
+
+describe('M139a request forwarding', () => {
+  it.each([true, false])('forwards optional request: %j', async (supplied) => {
+    const request = supplied ? createRequest() : undefined;
+    const calls: unknown[][] = [];
+    const local = new LocalStrategy((...args) => {
+      calls.push(args);
+      return Promise.resolve({ id: 'u1' });
+    });
+    const service = new AuthService([], local);
+    expect(await service.verifyCredentials({ identifier: 'u1', secret: 'pw' }, request)).toEqual({
+      id: 'u1',
+    });
+    expect(calls).toEqual([['u1', 'pw', request]]);
   });
 });

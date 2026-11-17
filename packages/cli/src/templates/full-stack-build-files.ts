@@ -10,6 +10,8 @@
  * @module
  */
 
+import { runtimeEnvRead, withNullishEnvReads } from './env-fallback.ts';
+import type { TargetRuntime } from '../constants.ts';
 import type { EntryPort } from './project-files.ts';
 import type { GeneratedFile } from '../utils/file-writer.ts';
 import { TAILWIND_RANGE } from './ui-tokens.ts';
@@ -228,9 +230,6 @@ export function buildFullStackBuildFiles(
 export const FULL_STACK_NPM_DEV_DEPENDENCIES: Readonly<Record<string, string>> = {
   '@react-router/dev': REACT_ROUTER_RANGE,
   '@react-router/fs-routes': REACT_ROUTER_RANGE,
-  'react-router': REACT_ROUTER_RANGE,
-  react: '^19.2.0',
-  'react-dom': '^19.2.0',
   '@types/react': '^19.2.0',
   '@types/react-dom': '^19.2.0',
   // The tooling's pin, not a second opinion: `npm-tooling.ts` holds the whole
@@ -350,15 +349,23 @@ export const FULL_STACK_CHECK_TASK: Readonly<Record<string, string>> = {
  * @returns The full-stack development entry file
  * @since 0.12.0
  */
-export function renderFullStackDevEntry(port?: EntryPort): {
+export function renderFullStackDevEntry(
+  port?: EntryPort,
+  targetRuntime: TargetRuntime = 'node',
+): {
   readonly path: string;
   readonly contents: string;
 } {
   return {
     path: 'dev.ts',
     contents: `import * as vite from 'vite';
-import { createRequestHandler, RouterContextProvider, type ServerBuild } from 'react-router';
-import { CAPABILITIES, describeError, type ILogger } from '@setu-ts/common';
+import {
+  createRequestHandler,
+  matchRoutes,
+  RouterContextProvider,
+  type ServerBuild,
+} from 'react-router';
+import { CAPABILITIES, describeError, type ILogger, type IRuntimeServices } from '@setu-ts/common';
 import { viteDevExternals } from '@setu-ts/react-router-plugin';
 import { createRuntimeServices } from '@setu-ts/runtime';
 import { createApp } from './setu.config.ts';
@@ -374,34 +381,50 @@ import { frameworkPackages, workspaceLibraries } from './vite.config.ts';${port 
  * production entry runs the built output.
  */
 const BASE = '/__vite/';
-const runtime = createRuntimeServices();
-const port = ${port === undefined ? `Number(runtime.env.PORT ?? '3000')` : port.symbol};
-const vitePort = ${port === undefined ? `Number(runtime.env.VITE_PORT ?? '5173')` : 'VITE_PORT'};
+const runtime: IRuntimeServices = createRuntimeServices();
+const port = ${port === undefined ? `Number(${runtimeEnvRead('PORT', '3000')})` : port.symbol};
+const vitePort = ${port === undefined ? `Number(${runtimeEnvRead('VITE_PORT', '5173')})` : 'VITE_PORT'};
 
 // A file module always has a directory; the fallback only satisfies the type.
 const root = import.meta.dirname ?? '.';
 
-const viteServer = await vite.createServer({
-  root,
-  configFile: \`\${root}/vite.config.ts\`,
-  base: BASE,
-  // Vite's own port for the HMR socket on every runtime, never the app port:
-  // the app-port upgrade failed on Node and Deno and reloaded the page on Bun
-  // (X85-2, X85-3). An explicit host also makes strictPort refuse a second
-  // server: unhosted, one bound IPv4 and the other IPv6, and both started.
-  server: {
-    host: '127.0.0.1',
-    port: vitePort,
-    strictPort: true,
-    hmr: { host: 'localhost', port: vitePort, clientPort: vitePort },
-  },
-  plugins: [viteDevExternals({
-    packages: [...frameworkPackages, ...workspaceLibraries],
-    // Resolve with the runtime: routes share this entry's module and context-key identity.
-    resolve: (specifier) => import.meta.resolve(specifier),
-  })],
-});
-await viteServer.listen();
+let server: vite.ViteDevServer | undefined;
+let listening = false;
+try {
+  server = await vite.createServer({
+    root,
+    configFile: \`\${root}/vite.config.ts\`,
+    base: BASE,
+    // Vite's own port for the HMR socket on every runtime, never the app port:
+    // the app-port upgrade failed on Node and Deno and reloaded the page on Bun
+    // (X85-2, X85-3). An explicit host also makes strictPort refuse a second
+    // server: unhosted, one bound IPv4 and the other IPv6, and both started.
+    server: {
+      host: '127.0.0.1',
+      port: vitePort,
+      strictPort: true,
+      hmr: { host: 'localhost', port: vitePort, clientPort: vitePort },
+    },
+    plugins: [viteDevExternals({
+      packages: [...frameworkPackages, ...workspaceLibraries],
+      // Resolve with the runtime: routes share this entry's module and context-key identity.
+      resolve: (specifier) => import.meta.resolve(specifier),
+    })],
+  });
+  listening = true;
+  await server.listen();
+} catch (error: unknown) {
+  await server?.close();
+  if (listening) {
+    console.error(
+      \`Startup failed: Vite could not listen on \${vitePort} (VITE_PORT): \${describeError(error)}\`,
+    );
+    console.error('${port === undefined ? 'If the port is taken, choose another VITE_PORT in the environment.' : 'If the port is taken, choose another Vite port in setu.workspace.json.'}');
+  } else console.error(\`Startup failed: \${describeError(error)}\`);
+  runtime.exit(1);
+}
+
+const viteServer = server;
 
 // Re-read on every request, so an edited route is served without a restart.
 const loadServerBuild = async (): Promise<ServerBuild> =>
@@ -420,6 +443,7 @@ async function boot() {
         // From the same react-router module as the handler: React Router checks
         // the context with instanceof.
         createLoadContext: () => new RouterContextProvider(),
+        pageRoutes: { build: loadServerBuild, matchRoutes },
       });
     },
   });
@@ -440,7 +464,7 @@ async function boot() {
   });
 
   await app.start({ port });
-  return app;
+${targetRuntime === 'deno' ? '' : '  console.log(`Listening on http://localhost:${port}/`);\n'}  return app;
 }
 
 const app = await boot().catch(async (error: unknown) => {
@@ -467,4 +491,55 @@ for (const signal of ['SIGTERM', 'SIGINT'] as const) {
 }
 `,
   };
+}
+
+/** Removes the page-route source seam for recognition of entries rendered before it existed. */
+function withoutPageRouteSource(source: string): string {
+  return source
+    .replace(
+      "import {\n  createRequestHandler,\n  matchRoutes,\n  RouterContextProvider,\n  type ServerBuild,\n} from 'react-router';",
+      "import { createRequestHandler, RouterContextProvider, type ServerBuild } from 'react-router';",
+    )
+    .replace('        pageRoutes: { build: loadServerBuild, matchRoutes },\n', '');
+}
+
+/**
+ * Current and recognition-only standalone entries (0.12.0's, and pre-pageRoutes
+ * guarded layouts with nullish or runtimeEnvRead port reads), for workspace adoption.
+ */
+export function fullStackDevEntryVariants(
+  runtime: TargetRuntime,
+): readonly { path: string; contents: string }[] {
+  const current = renderFullStackDevEntry(undefined, runtime);
+  const start = current.contents.indexOf('let server: vite.ViteDevServer | undefined;');
+  const end =
+    current.contents.indexOf('const viteServer = server;') + 'const viteServer = server;'.length;
+  const argsStart =
+    current.contents.indexOf('await vite.createServer(', start) + 'await vite.createServer('.length;
+  // The current options object sits one level deeper, inside the try block.
+  const argsEnd = current.contents.indexOf('\n  });', argsStart) + '\n  }'.length;
+  const args = current.contents.slice(argsStart, argsEnd).replace(/\n {2}/g, '\n');
+  const legacy = withoutPageRouteSource(
+    current.contents.slice(0, start) +
+      `const viteServer = await vite.createServer(${args});\nawait viteServer.listen();` +
+      current.contents.slice(end),
+  )
+    .replace(', type IRuntimeServices', '')
+    .replace('const runtime: IRuntimeServices =', 'const runtime =')
+    .replace('  console.log(`Listening on http://localhost:${port}/`);\n', '');
+  // 0.12.0 wrote the nullish port reads M140b replaced, and so did the guarded
+  // layout develop generated before M140b; both stay recognisable.
+  const nullish: readonly (readonly [string, string])[] = [
+    ['PORT', '3000'],
+    ['VITE_PORT', '5173'],
+  ];
+  return [
+    current,
+    { path: current.path, contents: withNullishEnvReads(legacy, nullish) },
+    {
+      path: current.path,
+      contents: withNullishEnvReads(withoutPageRouteSource(current.contents), nullish),
+    },
+    { path: current.path, contents: withoutPageRouteSource(current.contents) },
+  ];
 }

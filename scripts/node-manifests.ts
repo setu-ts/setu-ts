@@ -342,6 +342,10 @@ export function classifyMember(
       peerDependencies.delete(override.dependency);
       devDependencies.delete(override.dependency);
       dependencies.set(override.dependency, scanned);
+    } else if (override.kind === 'optional-peer') {
+      dependencies.delete(override.dependency);
+      peerDependencies.set(override.dependency, scanned);
+      devDependencies.set(override.dependency, scanned);
     } else if (override.kind === 'dev-dependency-types') {
       devDependencies.set(override.dependency, scanned);
     }
@@ -1063,6 +1067,7 @@ export function sourcePaths(prefix = './'): Record<string, string[]> {
     '@setu-ts/runtime/worker': ['./packages/runtime/src/worker/define-worker-task.ts'],
     '@setu-ts/cli/main': ['./packages/cli/src/main.ts'],
     '@setu-ts/localization-plugin/format': ['./packages/localization-plugin/src/format/index.ts'],
+    '@setu-ts/validation-plugin/zod': ['./packages/validation-plugin/src/zod/index.ts'],
   };
   return Object.fromEntries(
     Object.entries(paths).map(([key, values]) => [
@@ -1107,6 +1112,9 @@ export function renderAppTsconfig(app: string): string {
           ? {
               compilerOptions: {
                 jsx: 'react-jsx',
+                // main.ts imports the compiled React Router server build, as the
+                // scaffold's own tsconfig allows.
+                allowJs: true,
                 paths: {
                   ...sourcePaths('../../'),
                   '~/*': ['./app/*'],

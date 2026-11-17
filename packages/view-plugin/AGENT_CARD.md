@@ -1,7 +1,8 @@
 # @setu-ts/view-plugin — render HTML from components
 
-**Add it:** `setu add view` adds it and inserts `ViewPlugin()` into `setu.config.ts`. It provides
-`CAPABILITIES.VIEW` (`IViewEngine`); the default authoring mode is `hono-jsx`.
+**Add it:** `setu add view --plugin-only` adds it and inserts `ViewPlugin()` into a recognized
+functional or full-stack `setu.config.ts` without example pages; full-stack defaults to this path.
+It provides `CAPABILITIES.VIEW` (`IViewEngine`); the default authoring mode is `hono-jsx`.
 
 ## Render a page from a module route
 

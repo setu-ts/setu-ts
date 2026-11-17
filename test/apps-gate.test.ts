@@ -1028,6 +1028,8 @@ describe('M111b workflow lanes', () => {
     for (const i of [1, 2, 3]) {
       expect(node).toContain(`name: cli-blob-${i}`);
       expect(node).toContain(`path: .vitest-reports/cli/blob-${i}.json`);
+      // A failing shard must still upload its blob, or cli-coverage cannot name the failures.
+      expect(node).toContain(`if: always() && matrix.shard == 'cli-${i}'`);
     }
     expect(node.match(/include-hidden-files: true/g)).toHaveLength(3);
     expect(node.match(/if-no-files-found: error/g)).toHaveLength(3);
@@ -1105,11 +1107,7 @@ describe('M111c declared artifact coverage', () => {
       [...installable, '@modelcontextprotocol/server'].sort(),
     );
     expect(expected).toHaveLength(55);
-    expect(pending).toEqual([
-      '@setu-ts/mcp-plugin',
-      '@setu-ts/vector-store-plugin',
-      '@setu-ts/agent-runs-plugin',
-    ]);
+    expect(pending).toEqual([]);
     expect(installable.every((name) => compat.dependencies[name] === 'latest')).toBe(true);
     expect(compat.dependencies['@modelcontextprotocol/server']).toBe('^2.4.0');
     expect(workspace.scripts['release:publish']).toBe('node scripts/npm-publish.ts');

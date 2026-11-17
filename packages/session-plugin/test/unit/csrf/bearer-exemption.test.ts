@@ -14,8 +14,8 @@ import { CREDENTIAL_SOURCE_STATE_KEY, SESSION_STATE_KEY } from '@setu-ts/common'
 
 import {
   applyCsrfExemption,
-  BEARER_EXEMPT_STATE_KEY,
-  isBearerRequest,
+  NO_COMMIT_STATE_KEY,
+  isBearerExempt,
   isCsrfExempt,
 } from '../../../src/csrf/exclude.ts';
 import { resolveCsrfConfig } from '../../../src/options.ts';
@@ -48,7 +48,7 @@ function stateFor(source: 'header' | 'cookie' | undefined, isNew?: boolean): Map
   return state;
 }
 
-describe('isBearerRequest', () => {
+describe('Bearer Authorization recognition', () => {
   it.each([
     ['Bearer abc', true],
     ['bearer abc', true],
@@ -61,15 +61,39 @@ describe('isBearerRequest', () => {
     ['Basic dXNlcjpwYXNz', false],
     ['Token abc', false],
   ])('%j → %s', (value, expected) => {
-    expect(isBearerRequest(headers(value))).toBe(expected);
+    expect(isBearerExempt(ctx('/api', value, stateFor('header', true)), resolveCsrfConfig())).toBe(
+      expected,
+    );
   });
 
-  it('is false with no Authorization header', () => {
-    expect(isBearerRequest(headers())).toBe(false);
+  it('requires a recorded authenticating credential source even without Authorization', () => {
+    expect(
+      isBearerExempt(ctx('/api', undefined, stateFor(undefined, true)), resolveCsrfConfig()),
+    ).toBe(false);
   });
 });
 
 describe('isCsrfExempt — the credential-based bearer rule', () => {
+  it.each([
+    ['header', true, undefined, true, true],
+    ['header', false, undefined, true, false],
+    ['header', true, 'Basic x', true, false],
+    ['header', true, 'Digest x', true, false],
+    ['header', true, 'Negotiate x', true, false],
+    ['cookie', true, 'Bearer x', true, false],
+    ['header', true, undefined, false, false],
+  ] as const)(
+    'V12-136 applies the header-credential rule: %s %s %s %s',
+    (source, isNew, authorization, exemptBearer, expected) => {
+      const request = ctx('/api', authorization, stateFor(source, isNew));
+      request.request.headers.set('X-API-Key', 'key');
+      expect(isBearerExempt(request, resolveCsrfConfig({ exemptBearer }))).toBe(expected);
+      expect(applyCsrfExemption(request, resolveCsrfConfig({ exemptBearer }), undefined)).toBe(
+        expected,
+      );
+      expect(request.state.get(NO_COMMIT_STATE_KEY)).toBe(expected ? true : undefined);
+    },
+  );
   it('exempts a bearer request a header strategy authenticated, with a new session', () => {
     expect(
       isCsrfExempt(
@@ -166,18 +190,29 @@ describe('applyCsrfExemption marks only a bearer exemption (M113e, L4)', () => {
   it('marks a request the bearer rule exempts', () => {
     const state = stateFor('header', true);
     expect(applyCsrfExemption(ctx('/api', 'Bearer x', state), config, undefined)).toBe(true);
-    expect(state.get(BEARER_EXEMPT_STATE_KEY)).toBe(true);
+    expect(state.get(NO_COMMIT_STATE_KEY)).toBe(true);
   });
 
   it('does not mark a path exclusion', () => {
     const state = stateFor(undefined);
     expect(applyCsrfExemption(ctx('/rpc', undefined, state), config, ['/rpc'])).toBe(true);
-    expect(state.has(BEARER_EXEMPT_STATE_KEY)).toBe(false);
+    expect(state.has(NO_COMMIT_STATE_KEY)).toBe(false);
   });
 
   it('does not mark a request that is verified', () => {
     const state = stateFor('header', false);
     expect(applyCsrfExemption(ctx('/api', 'Bearer x', state), config, undefined)).toBe(false);
-    expect(state.has(BEARER_EXEMPT_STATE_KEY)).toBe(false);
+    expect(state.has(NO_COMMIT_STATE_KEY)).toBe(false);
+  });
+});
+
+describe('M139a explicit in-process CSRF flag', () => {
+  it.each([true, undefined, 'true', false])('honours only boolean true: %j', (flag) => {
+    const request = ctx('/mcp');
+    if (flag !== undefined) request.state.set('session-plugin:csrf-exempt', flag);
+    const config = resolveCsrfConfig({});
+    expect(isCsrfExempt(request, config, [])).toBe(flag === true);
+    expect(applyCsrfExemption(request, config, [])).toBe(flag === true);
+    expect(request.state.get(NO_COMMIT_STATE_KEY)).toBe(flag === true ? true : undefined);
   });
 });

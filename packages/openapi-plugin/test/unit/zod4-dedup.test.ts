@@ -45,7 +45,7 @@ it('degrades legacy request, bare response and wrapped response schemas with dia
     }),
   ]);
   const operation = doc.paths['/legacy']?.post;
-  expect(operation?.requestBody?.content['application/json'].schema).toEqual({});
+  expect(operation?.requestBody?.content['application/json']?.schema).toEqual({});
   for (const status of ['200', '400']) {
     expect(operation?.responses[status]?.content?.['application/json']?.schema).toEqual({});
   }
@@ -58,7 +58,7 @@ it('degrades legacy request, bare response and wrapped response schemas with dia
 });
 
 function bodySchema(doc: ReturnType<OpenApiGenerator['generate']>, path: string): unknown {
-  return doc.paths[path]?.post?.requestBody?.content['application/json'].schema;
+  return doc.paths[path]?.post?.requestBody?.content['application/json']?.schema;
 }
 
 function responseSchema(

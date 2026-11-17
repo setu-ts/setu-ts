@@ -83,7 +83,7 @@ describe('ports --reallocate', () => {
   });
   it('names the dev.ts lines when a full-stack member does not read VITE_PORT (CodeRabbit #560)', async () => {
     for (const [dev, noted] of [
-      ["const vitePort = Number(process.env.VITE_PORT ?? '5173');\n", true],
+      ["const vitePort = Number(process.env.VITE_PORT || '5173');\n", true],
       [`import { SERVICE_PORT, VITE_PORT } from '${DISCOVERY_SPECIFIER}';\n`, false],
     ] as const) {
       const h = harness([{ name: 'web', port: 3000, inspectPort: 5900, vitePort: 5901 }], 'node');
@@ -111,7 +111,7 @@ describe('ports --reallocate', () => {
     const source = h.fs.read('/ws/apps/a/main.dev.ts');
     expect(source).toContain('port: 4000,');
     expect(source).toContain('npx @setu-ts/cli@');
-    expect(source).not.toMatch(/Deno\.|process\./);
+    expect(source).toContain("delete process.env['SETU_DEVTOOL_SESSION_KEY'];");
     expect(source).toContain('await app.start({ port: SERVICE_PORT });');
   });
   it('moves a member application port and devtool port together', async () => {

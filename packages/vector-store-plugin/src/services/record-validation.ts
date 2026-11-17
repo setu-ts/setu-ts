@@ -11,7 +11,6 @@ import {
   MAX_CONTENT_BYTES,
   MAX_ID_BYTES,
   MAX_IDS_PER_CALL,
-  MAX_RECORDS_PER_CALL,
   MAX_SCOPE_BYTES,
   MAX_STRING_VALUE_BYTES,
   isBoundedString,
@@ -108,6 +107,8 @@ export function validateIds(ids: unknown): string[] {
  * @param records - The records
  * @param dimensions - The collection's declared length
  * @param fields - The collection's declared fields
+ * @param max - The operation's record cap
+ * @param operation - The operation the refusal names
  * @returns Validated copies
  * @throws {VectorRecordError} On a bad batch, id, content or metadata
  * @throws {VectorDimensionError} On a bad vector
@@ -116,10 +117,12 @@ export function validateRecords(
   records: unknown,
   dimensions: number,
   fields: ReadonlyMap<string, VectorFieldType>,
+  max: number,
+  operation: 'upsert' | 'replaceSource',
 ): VectorRecord[] {
-  if (!Array.isArray(records) || records.length > MAX_RECORDS_PER_CALL) {
+  if (!Array.isArray(records) || records.length > max) {
     throw new VectorRecordError(
-      `a write takes an array of at most ${MAX_RECORDS_PER_CALL} records`,
+      `${operation === 'upsert' ? 'an upsert' : 'a replaceSource call'} takes at most ${max} records`,
     );
   }
   const valid = (records as unknown[]).map((record) => validateRecord(record, dimensions, fields));

@@ -137,3 +137,56 @@ describe('compilePasskeys', () => {
     ).toThrow(AuthPluginConfigurationError);
   });
 });
+
+describe('M139a passkey localhost names', () => {
+  it('verifies a ceremony issued for a localhost subdomain', async () => {
+    const { createCeremoniesHarness, registrationOptionsOf } =
+      await import('../fixtures/passkey-ceremonies.ts');
+    const { VirtualAuthenticator, toBase64Url } =
+      await import('../fixtures/virtual-authenticator.ts');
+    const harness = createCeremoniesHarness({
+      passkeys: { rpId: 'acme.localhost', origins: ['http://acme.localhost:3000'] },
+    });
+    const options = await registrationOptionsOf(harness);
+    const authenticator = await VirtualAuthenticator.create('ES256');
+    const config = harness.ceremonies.config;
+    const body = await authenticator.registrationResult({
+      challenge: options.challenge,
+      rpId: config.rpId,
+      origin: config.origins[0]!,
+    });
+    expect(await harness.ceremonies.verifyRegistration(harness.ctx, body, { id: 'alice' })).toEqual(
+      { ok: true, credentialId: toBase64Url(authenticator.credentialId) },
+    );
+  });
+  it('accepts localhost subdomains and still refuses IPv6 RP IDs', () => {
+    expect(
+      compilePasskeys(valid({ rpId: 'acme.localhost', origins: ['http://acme.localhost:3000'] }))
+        .origins,
+    ).toEqual(['http://acme.localhost:3000']);
+    expect(() => compilePasskeys(valid({ origins: ['http://[::1]'] }))).toThrow(
+      AuthPluginConfigurationError,
+    );
+  });
+});
+
+describe('passkey client-data refusal controls', () => {
+  it.each([null, 42])('refuses JSON primitives in clientDataJSON: %j', async (value) => {
+    const { createCeremoniesHarness } = await import('../fixtures/passkey-ceremonies.ts');
+    const { VirtualAuthenticator, toBase64Url } =
+      await import('../fixtures/virtual-authenticator.ts');
+    const harness = createCeremoniesHarness();
+    const options = await harness.ceremonies.authenticationOptions(harness.ctx);
+    const authenticator = await VirtualAuthenticator.create('ES256');
+    const body = await authenticator.assertionResult({
+      challenge: options.challenge,
+      rpId: 'localhost',
+      origin: 'http://localhost',
+    });
+    body.response.clientDataJSON = toBase64Url(new TextEncoder().encode(JSON.stringify(value)));
+    expect(await harness.ceremonies.verifyAuthentication(harness.ctx, body)).toEqual({
+      ok: false,
+      reason: 'malformed',
+    });
+  });
+});

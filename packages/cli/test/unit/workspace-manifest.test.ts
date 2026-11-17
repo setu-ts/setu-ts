@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import type { IFileSystem } from '@setu-ts/common';
 
 import {
+  isMemberName,
+  manifestProblemDetail,
   readWorkspaceManifest,
   renderWorkspaceManifest,
   WORKSPACE_VERSION,
@@ -23,6 +25,113 @@ function fsWith(files: Record<string, string>): IFileSystem {
 function baseManifest(members: WorkspaceManifest['members']): WorkspaceManifest {
   return { version: 2, basePort: 3000, broker: 'memory', runtime: 'deno', members };
 }
+
+describe('generatedSecrets in the workspace manifest', () => {
+  it('round-trips valid names and drops absent or empty lists', async () => {
+    for (const generatedSecrets of [undefined, [], ['SESSION_SECRET', 'JWT_SECRET']]) {
+      const member = {
+        name: 'web',
+        port: 3000,
+        ...(generatedSecrets === undefined ? {} : { generatedSecrets }),
+      };
+      const read = await readWorkspaceManifest(
+        fsWith({
+          '/ws/setu.workspace.json': renderWorkspaceManifest(baseManifest([member])),
+        }),
+        '/ws',
+      );
+      expect(read.ok).toBe(true);
+      if (read.ok)
+        expect(read.manifest.members[0]?.generatedSecrets).toEqual(
+          generatedSecrets?.length ? generatedSecrets : undefined,
+        );
+    }
+  });
+
+  it.each([null, 'JWT_SECRET', [42], ['lower_case'], [''], ['_SECRET'], ['JWT-SECRET']])(
+    'refuses malformed generated secrets %j',
+    async (generatedSecrets) => {
+      const source = {
+        ...baseManifest([]),
+        members: [{ name: 'web', port: 3000, generatedSecrets }],
+      };
+      expect(
+        (
+          await readWorkspaceManifest(
+            fsWith({
+              '/ws/setu.workspace.json': JSON.stringify(source),
+            }),
+            '/ws',
+          )
+        ).ok,
+      ).toBe(false);
+    },
+  );
+
+  it.each([
+    'secrets.env',
+    [42],
+    [''],
+    ['/abs.env'],
+    ['../up.env'],
+    ['a//b.env'],
+    ['bad name.env'],
+    ['.env.example'],
+  ])('refuses member env file paths outside the --env-file grammar (%j)', async (envFilePaths) => {
+    const source = { ...baseManifest([]), members: [{ name: 'web', port: 3000, envFilePaths }] };
+    expect(
+      (
+        await readWorkspaceManifest(
+          fsWith({ '/ws/setu.workspace.json': JSON.stringify(source) }),
+          '/ws',
+        )
+      ).ok,
+    ).toBe(false);
+  });
+
+  it('round-trips member env file paths', async () => {
+    const read = await readWorkspaceManifest(
+      fsWith({
+        '/ws/setu.workspace.json': renderWorkspaceManifest(
+          baseManifest([{ name: 'web', port: 3000, envFilePaths: ['config/local.env', 'a.env'] }]),
+        ),
+      }),
+      '/ws',
+    );
+    expect(read.ok && read.manifest.members[0]?.envFilePaths).toEqual([
+      'config/local.env',
+      'a.env',
+    ]);
+  });
+
+  it('refuses two members whose secrets need the same Compose variable', async () => {
+    const read = await readWorkspaceManifest(
+      fsWith({
+        '/ws/setu.workspace.json': renderWorkspaceManifest(
+          baseManifest([
+            { name: 'admin', port: 3000, generatedSecrets: ['WEB_SESSION_SECRET'] },
+            { name: 'admin-web', port: 3001, generatedSecrets: ['SESSION_SECRET'] },
+          ]),
+        ),
+      }),
+      '/ws',
+    );
+    expect(read.ok).toBe(false);
+    if (!read.ok) {
+      expect(read.problem).toEqual({
+        kind: 'secret-collision',
+        variable: 'ADMIN_WEB_SESSION_SECRET',
+        first: 'admin (WEB_SESSION_SECRET)',
+        second: 'admin-web (SESSION_SECRET)',
+      });
+      expect(manifestProblemDetail(read.problem)).toBe(
+        'Members admin (WEB_SESSION_SECRET) and admin-web (SESSION_SECRET) both need the Compose ' +
+          'variable ADMIN_WEB_SESSION_SECRET, so they would share one signing key. Rename a member ' +
+          'or its generated secret in the manifest.',
+      );
+    }
+  });
+});
 
 it('X87-2 X87-6 round-trips and validates development ports without dropping fields', async () => {
   const manifest = {
@@ -135,5 +244,43 @@ describe('devtoolPort in the workspace manifest', () => {
     return readWorkspaceManifest(fsWith(files), '/ws').then((read) => {
       expect(read.ok).toBe(true);
     });
+  });
+});
+
+describe('member names in the workspace manifest (M139b audit F9)', () => {
+  /** Reads a one-member manifest under a name. */
+  async function readNamed(name: unknown): Promise<boolean> {
+    const source = JSON.stringify({
+      ...baseManifest([{ name: 'placeholder', port: 3000 }]),
+      members: [{ name, port: 3000 }],
+    });
+    return (await readWorkspaceManifest(fsWith({ '/ws/setu.workspace.json': source }), '/ws')).ok;
+  }
+
+  it.each(['billing', 'orders', 'api-gateway', 'svc2', 'a'])('accepts %s', async (name) => {
+    expect(await readNamed(name)).toBe(true);
+  });
+
+  it.each([
+    ['empty', ''],
+    ['a separator', 'a/b'],
+    ['a backslash', 'a\\b'],
+    ['a dot segment', '..'],
+    ['a single quote breaking an object key', "billing': (globalThis.CANARY = 1), '"],
+    ['a JSDoc terminator', 'billing */ globalThis.CANARY = 1; /*'],
+    ['a backtick', 'bill`ing'],
+    ['a space', 'bill ing'],
+    ['upper case (generate app writes kebab)', 'Billing'],
+    ['an underscore (generate app writes kebab)', 'bill_ing'],
+    ['a leading digit', '2fa'],
+    ['a Windows device name', 'con'],
+    ['not a string', 7],
+  ])('refuses %s', async (_label, name) => {
+    expect(await readNamed(name)).toBe(false);
+  });
+
+  it('isMemberName agrees with what generate app derives', () => {
+    expect(isMemberName('api-gateway')).toBe(true);
+    expect(isMemberName("x'y")).toBe(false);
   });
 });

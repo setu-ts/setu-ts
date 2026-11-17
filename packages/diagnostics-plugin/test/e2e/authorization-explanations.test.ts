@@ -53,7 +53,7 @@ async function startAuthorizationApplication(): Promise<App> {
         sessionKey: TEST_KEY_BYTES,
       }),
       AuthPlugin({
-        jwt: { secret: 'e2e-authorization-secret' },
+        jwt: { secret: 'e2e-authorization-secret-at-least-32-characters' },
         rbac: {
           roles: {
             admin: { permissions: ['*'], inherits: ['user'] },
@@ -200,7 +200,7 @@ describe('Authorization decision explanations (M98h) — end to end', () => {
           sessionKey: TEST_KEY_BYTES,
         }),
         AuthPlugin({
-          jwt: { secret: 'jwt-only-e2e-secret' },
+          jwt: { secret: 'jwt-only-e2e-secret-at-least-32-characters' },
           authorizationDiagnostics: { enabled: true, roles: {}, permissions: {} },
         }),
       ],
@@ -249,7 +249,7 @@ describe('Authorization decision explanations (M98h) — end to end', () => {
           sessionKey: TEST_KEY_BYTES,
         }),
         AuthPlugin({
-          jwt: { secret: 'replacement-e2e-secret' },
+          jwt: { secret: 'replacement-e2e-secret-at-least-32-characters' },
           rbac: {
             roles: { admin: { permissions: ['users:read'] } },
           },

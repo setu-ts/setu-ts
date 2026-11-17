@@ -1,7 +1,12 @@
 import { VERSION } from '../../../src/constants.ts';
 import { describe, expect, it } from 'vitest';
 import { firstDuplicatePath } from '../../../src/utils/file-writer.ts';
-import { workspaceRootFiles } from '../../../src/workspace/root-files.ts';
+import {
+  workspaceRootFiles,
+  renderTransportSection,
+  replaceTransportSection,
+  TRANSPORT_README_MARKERS,
+} from '../../../src/workspace/root-files.ts';
 import { frameworkSpecifier } from '../../../src/templates/framework-specifier.ts';
 import { WORKSPACE_MANIFEST, WORKSPACE_VERSION } from '../../../src/workspace/manifest.ts';
 import { brokerSpec } from '../../../src/workspace/transport.ts';
@@ -31,6 +36,33 @@ function contentsOf(path: string): string {
 }
 
 describe('workspaceRootFiles', () => {
+  it('prints member-specific export lines even without a backing service', () => {
+    for (const broker of ['memory', 'redis'] as const) {
+      const section = renderTransportSection(brokerSpec(broker), DENO, undefined, [
+        'WEB_SESSION_SECRET',
+        'ADMIN_WEB_SESSION_SECRET',
+      ]);
+      expect(section).toContain('## Run the stack');
+      expect(section).toContain('export WEB_SESSION_SECRET="$(openssl rand -hex 32)"');
+      expect(section).toContain('export ADMIN_WEB_SESSION_SECRET="$(openssl rand -hex 32)"');
+      expect(section).toContain('Compose refuses to start');
+      expect(section.indexOf('export WEB_SESSION_SECRET')).toBeLessThan(
+        section.indexOf('docker compose'),
+      );
+    }
+    const section = renderTransportSection(HTTP, DENO);
+    const before = `user intro\n${section}\nuser footer`;
+    expect(replaceTransportSection(before, 'replacement')).toBe(
+      'user intro\nreplacement\nuser footer',
+    );
+    for (const source of [
+      undefined,
+      '',
+      TRANSPORT_README_MARKERS.start,
+      TRANSPORT_README_MARKERS.end + TRANSPORT_README_MARKERS.start,
+    ])
+      expect(replaceTransportSection(source, section)).toBeUndefined();
+  });
   it('ignores production outputs and selects the hoisted linker only on Bun', () => {
     for (const runtime of ['deno', 'node', 'bun'] as const) {
       const files = workspaceRootFiles('acme', 3000, HTTP, workspaceProfile(runtime));
@@ -221,7 +253,7 @@ describe('the workspace README transport section', () => {
 
   it('says nothing about a connection for a broker that has none', () => {
     const readme = readmeFor('memory');
-    expect(readme).toContain('Members share the **memory** broker');
+    expect(readme).toContain('share the **memory** broker');
     // The call style is each member's own choice, and the README says how to make it.
     expect(readme).toContain('generate app <name> --rpc grpc');
     expect(readme).not.toContain('reads its connection value');
@@ -234,12 +266,35 @@ describe('the workspace README transport section', () => {
     expect(readme).toContain('REDIS_URL');
     expect(readme).toContain('redis://127.0.0.1:6379');
     expect(readme).toContain('Run the stack');
+    const prose = readme.replace(/\s+/g, ' ');
+    expect(prose).toContain(
+      'Members that register `MessagingPlugin` or `QueuePlugin` share the **redis** broker',
+    );
+    expect(prose).toContain('Each reads its connection value from `REDIS_URL`');
+    expect(prose).toContain(
+      'receives the variable but connects to nothing until `setu add messaging` (or `queue`)',
+    );
   });
 
   it('shows the override in place of the local default when one is given', () => {
     const readme = readmeFor('redis', 'redis://shared:6379');
     expect(readme).toContain('redis://shared:6379');
     expect(readme).not.toContain('redis://127.0.0.1:6379');
+  });
+
+  // M139g audit F2: the README is committed beside AGENTS.md, so it masks the
+  // override's userinfo the same way the brief does (V12-58).
+  it('masks credentials in the override it shows', () => {
+    const readme = readmeFor('redis', 'redis://user:canary-secret@shared:6379');
+    expect(readme).toContain('redis://***@shared:6379');
+    expect(readme).not.toContain('canary-secret');
+    expect(readme).not.toContain('user:');
+    expect(readme).toMatch(/`redis:\/\/\*\*\*@shared:6379`\s+\(credentials\s+redacted\)/);
+    // An override without credentials is shown as written, with no redaction note.
+    const plain = readmeFor('redis', 'redis://shared:6379');
+    expect(plain).toContain('`redis://shared:6379`');
+    expect(plain).not.toContain('redacted');
+    expect(readmeFor('redis')).not.toContain('redacted');
   });
 
   // Both cloud arms carry an operational fact a developer cannot guess, and the

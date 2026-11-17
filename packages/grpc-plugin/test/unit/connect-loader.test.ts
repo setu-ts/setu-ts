@@ -13,6 +13,7 @@ import { readFileSync } from 'node:fs';
  */
 
 import { describe, expect, it, vi } from 'vitest';
+import { importConnectNode } from '../../src/client/connect-node-loader.ts';
 import {
   adaptConnectModule,
   type ConnectImporters,
@@ -26,7 +27,6 @@ import type { FileRegistryLike } from '../../src/interfaces/connect-runtime.ts';
 /** Records every call the adapter makes into the fake modules. */
 interface Calls {
   createConnectRouter: number;
-  createFetchHandler: unknown[];
   fromBinary: unknown[];
   toBinary: unknown[];
   createFileRegistry: unknown[];
@@ -38,7 +38,6 @@ function createFakeModules(overrides: { fromBinaryThrows?: boolean } = {}): {
 } {
   const calls: Calls = {
     createConnectRouter: 0,
-    createFetchHandler: [],
     fromBinary: [],
     toBinary: [],
     createFileRegistry: [],
@@ -55,12 +54,9 @@ function createFakeModules(overrides: { fromBinaryThrows?: boolean } = {}): {
         calls.createConnectRouter++;
         return { handlers: [], service: () => undefined };
       },
-    },
-    protocol: {
-      createFetchHandler: (handler) => {
-        calls.createFetchHandler.push(handler);
-        return () => Promise.resolve(new Response('ok'));
-      },
+      createClient: (service, transport) => ({ service, transport }),
+      ConnectError: FakeConnectError,
+      Code: { Unavailable: 14 },
     },
     protobuf: {
       createFileRegistry: (fdSet) => {
@@ -93,26 +89,6 @@ describe('adaptConnectModule', () => {
     const { modules, calls } = createFakeModules();
     adaptConnectModule(modules).createConnectRouter();
     expect(calls.createConnectRouter).toBe(1);
-  });
-
-  it('delegates createFetchHandler to the protocol subpath, not the core module', () => {
-    const { modules, calls } = createFakeModules();
-    const handler = { requestPath: '/pkg.Svc/Method' };
-    adaptConnectModule(modules).createFetchHandler(handler);
-    expect(calls.createFetchHandler).toEqual([handler]);
-  });
-
-  it('leaves httpVersion unset so Connect does not refuse bidi streams', () => {
-    // Connect refuses a bidi method with 505 when httpVersion starts with '1.'.
-    // The plugin cannot know the negotiated version, so it must pass no option.
-    const { modules } = createFakeModules();
-    let received: unknown = 'not-called';
-    modules.protocol.createFetchHandler = (_handler, options) => {
-      received = options;
-      return () => Promise.resolve(new Response('ok'));
-    };
-    adaptConnectModule(modules).createFetchHandler({ requestPath: '/x/Y' });
-    expect(received).toBeUndefined();
   });
 
   it('revives a descriptor set through fromBinary then createFileRegistry', () => {
@@ -150,18 +126,12 @@ describe('adaptConnectModule', () => {
 });
 
 describe('loadConnectModule', () => {
-  /** The four specifiers in load order. */
-  const SPECIFIERS = [
-    '@connectrpc/connect',
-    '@connectrpc/connect/protocol',
-    '@bufbuild/protobuf',
-    '@bufbuild/protobuf/wkt',
-  ];
+  /** The three specifiers in load order. */
+  const SPECIFIERS = ['@connectrpc/connect', '@bufbuild/protobuf', '@bufbuild/protobuf/wkt'];
 
   /** The specifier each importer key loads, in load order. */
   const SPECIFIER_BY_KEY: Record<keyof ConnectImporters, string> = {
     connect: '@connectrpc/connect',
-    protocol: '@connectrpc/connect/protocol',
     protobuf: '@bufbuild/protobuf',
     wkt: '@bufbuild/protobuf/wkt',
   };
@@ -171,7 +141,6 @@ describe('loadConnectModule', () => {
     const { modules } = createFakeModules();
     const byKey: Record<keyof ConnectImporters, unknown> = {
       connect: modules.connect,
-      protocol: modules.protocol,
       protobuf: modules.protobuf,
       wkt: modules.wkt,
     };
@@ -186,10 +155,10 @@ describe('loadConnectModule', () => {
     return importers;
   }
 
-  it('assembles a runtime when all four specifiers resolve', async () => {
+  it('assembles a runtime when all three specifiers resolve', async () => {
     const runtime = await loadConnectModule(importersFailing('none'));
     expect(typeof runtime.createConnectRouter).toBe('function');
-    expect(typeof runtime.createFetchHandler).toBe('function');
+    expect(typeof runtime.handleUniversal).toBe('function');
     expect(typeof runtime.reviveDescriptorSet).toBe('function');
     expect(typeof runtime.getService).toBe('function');
     expect(typeof runtime.serializeFileDescriptor).toBe('function');
@@ -255,7 +224,6 @@ describe('DEFAULT_IMPORTERS — the guarded imports (M113d §3.1)', () => {
     const { DEFAULT_IMPORTERS } = await import('../../src/transports/connect-loader.ts');
     const cases: ReadonlyArray<[keyof typeof DEFAULT_IMPORTERS, string]> = [
       ['connect', '@connectrpc/connect'],
-      ['protocol', '@connectrpc/connect/protocol'],
       ['protobuf', '@bufbuild/protobuf'],
       ['wkt', '@bufbuild/protobuf/wkt'],
     ];
@@ -277,6 +245,87 @@ describe('DEFAULT_IMPORTERS — the guarded imports (M113d §3.1)', () => {
       } finally {
         vi.doUnmock(specifier);
       }
+    }
+  });
+});
+
+describe('adaptConnectModule — handleUniversal (M139b §3.11)', () => {
+  it('hands the universal request to the handler as-is and returns its response', async () => {
+    const { modules } = createFakeModules();
+    const seen: unknown[] = [];
+    const handler = Object.assign(
+      (universal: unknown) => {
+        seen.push(universal);
+        return Promise.resolve({ status: 201 });
+      },
+      { requestPath: '/p.S/M' },
+    );
+    const request = {
+      httpVersion: '',
+      method: 'POST',
+      url: 'http://x/p.S/M',
+      header: new Headers(),
+      body: (async function* () {})(),
+    };
+    const reply = await adaptConnectModule(modules).handleUniversal(handler, request);
+    expect(reply.status).toBe(201);
+    expect(seen).toEqual([request]);
+    expect(seen[0]).toBe(request);
+  });
+});
+
+/** Stands in for `@connectrpc/connect`'s `ConnectError`. */
+class FakeConnectError extends Error {
+  readonly code: number;
+  /** Connect's own arity: `(message, code, metadata?, details?, cause?)`. */
+  constructor(message: string, code: number, ...rest: [unknown?, unknown?, unknown?]) {
+    super(message, { cause: rest[2] });
+    this.code = code;
+  }
+}
+
+describe('adaptConnectModule — the client side (M139b §3.12)', () => {
+  it('builds clients with createClient and classifies Unavailable by code', () => {
+    const { modules } = createFakeModules();
+    const runtime = adaptConnectModule(modules);
+    const transport = { unary: () => Promise.resolve(1), stream: () => Promise.resolve(2) };
+    expect(runtime.createClient('svc', transport)).toEqual({ service: 'svc', transport });
+    const unavailable = runtime.unavailable('down');
+    expect(unavailable).toBeInstanceOf(FakeConnectError);
+    expect([unavailable.message, (unavailable as FakeConnectError).code]).toEqual(['down', 14]);
+    expect(runtime.isUnavailable(unavailable)).toBe(true);
+    expect(runtime.isUnavailable(new FakeConnectError('bad', 3))).toBe(false);
+    expect(runtime.isUnavailable(new Error('down'))).toBe(false);
+    const cause = new Error('refused');
+    expect((runtime.unavailable('again', cause) as Error & { cause?: unknown }).cause).toBe(cause);
+  });
+});
+
+describe('importConnectNode — the guarded import (M113d §3.1)', () => {
+  it('keeps the specifier a literal awaited import()', () => {
+    const source = readFileSync(
+      new URL('../../src/client/connect-node-loader.ts', import.meta.url),
+      'utf8',
+    );
+    expect(source).toContain("return await import('@connectrpc/connect-node');");
+  });
+
+  it('rejects with OptionalDependencyUnavailableError when the package is absent', async () => {
+    // No resetModules: the import() inside importConnectNode runs at call time,
+    // so the mock reaches the module instance coverage measures.
+    vi.doMock('@connectrpc/connect-node', () => {
+      throw new Error('Cannot find package');
+    });
+    try {
+      const caught = (await importConnectNode().catch((e: unknown) => e)) as Error & {
+        dependency: string;
+      };
+      expect([caught.name, caught.dependency]).toEqual([
+        'OptionalDependencyUnavailableError',
+        '@connectrpc/connect-node',
+      ]);
+    } finally {
+      vi.doUnmock('@connectrpc/connect-node');
     }
   });
 });

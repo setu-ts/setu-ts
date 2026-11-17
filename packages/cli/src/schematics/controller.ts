@@ -17,6 +17,7 @@ import {
   HTTP_SEAM_DIR,
   withControllerArtifact,
 } from '../seams/http.ts';
+import { moduleRouteBase } from './module-route-base.ts';
 import { generatorMode } from '../utils/generator-mode.ts';
 import { renderHttpModule } from './http-module.ts';
 import { renderModuleIndex } from '../seams/modules.ts';
@@ -28,13 +29,17 @@ import { deriveNames } from '../utils/names.ts';
  * @param names - Naming forms derived from the user's input
  * @returns The module contents
  */
-function renderControllerClass(names: DerivedNames, module?: string): string {
+function renderControllerClass(
+  names: DerivedNames,
+  module?: string,
+  plugins: ReadonlySet<string> = new Set(),
+): string {
   if (module !== undefined) {
     return `import { Body, Controller, Ctx, Get, Params, Post } from '@setu-ts/decorator-plugin';
 import type { IRequestContext } from '@setu-ts/common';
 
 /** Listed in ${module}.module.ts by \`setu g controller … --module ${module}\`. */
-@Controller('/${module}/${names.kebab}')
+@Controller('${moduleRouteBase(module, plugins)}/${names.kebab}')
 export class ${names.pascal}Controller {
   @Get('/')
   list(): { readonly items: readonly Record<string, unknown>[] } {
@@ -126,8 +131,8 @@ export function generateController(
         path: `${dir}/${names.kebab}.controller.ts`,
         contents:
           controllerShape === 'class'
-            ? renderControllerClass(names, options.targetModule)
-            : renderHttpModule(names, options.targetModule),
+            ? renderControllerClass(names, options.targetModule, options.plugins)
+            : renderHttpModule(names, options.targetModule, options.plugins),
       },
       {
         path: `${dir}/index.ts`,

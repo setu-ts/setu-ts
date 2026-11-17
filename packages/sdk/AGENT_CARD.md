@@ -35,6 +35,8 @@ export function watchUpdates(signal: AbortSignal): ISseClient {
 
 ## Behaviour the types do not show
 
+- A `deprecated: true` operation gets `@deprecated` on its generated interface member, so editors
+  flag the call site.
 - `request` returns status, headers and parsed JSON data; data is `undefined` for `204` or an empty
   body. Non-2xx responses throw `HttpClientError`.
 - `retry.limit` counts total attempts, not extra retries; `delay` is milliseconds. Request
@@ -48,6 +50,7 @@ export function watchUpdates(signal: AbortSignal): ISseClient {
 
 ## Other options
 
+- `multipart` sends form fields; `generateOpenApiClient` selects JSON when listed, else multipart.
 - `fetch` and `timing` inject transport and time; `circuitBreaker` and `rateLimit` add resilience.
 - `createBearerAuthInterceptor` and `createApiKeyAuthInterceptor` add credentials;
   `createTraceContextInterceptor` propagates traces.

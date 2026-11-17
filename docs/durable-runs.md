@@ -66,7 +66,13 @@ run started without a principal. A definition's `canAccess(principal, run)` repl
 example to let a support role read every run in the tenant. Every refusal, like another tenant's
 run, is the same 404 as a missing id. `get` supplies status, rebuilt messages and pending approvals
 for a page reload. Input messages may be `user` or `assistant`; the system prompt belongs to the
-definition's `system`, and a `system` message is refused at `start`.
+definition's `system`, and a `system` message is refused at `start`. Their parts pass through except
+tool parts (`tool-call`, `tool-result`, `tool-approval-*`), and `role: 'tool'` messages are dropped.
+`image` and `file` parts survive a JSON round trip, so their `data` must already be a JSON value: a
+base64 string or a URL. A `Uint8Array` becomes an index-keyed object, not bytes. The whole encoded
+input counts against `maxInputBytes` (default 262144; over it, `start` is refused with 413). A
+tool's result reaches the model as `{ type: 'json' }` or `{ type: 'error-text' }`, so a tool cannot
+return an image to the model as an image.
 
 ## Tools and approvals
 
@@ -75,6 +81,49 @@ tool name, and each tool receives only its own entry, validated by its `contextS
 includes `idempotencyKey` and `unitOfWork`; the run includes the persisted tenant/principal
 identity, services and abort signal. The `model(run)` callback is evaluated per model call, so wrap
 tenant budgeting there using that identity rather than a request that no longer exists.
+
+### Budgeting a run
+
+A run has no request, but `AgentRunContext` already carries the tenant, principal, abort signal and
+services the budget middleware reads, so it satisfies `BudgetScope` as it is. The recipe reuses the
+`ai-chat` example's budget code, so the application must register what that code resolves: the
+example's `CHAT_MODELS` provider plugin (its priced models), a database and the messaging outbox
+(`CAPABILITIES.DATABASE` and `CAPABILITIES.OUTBOX`, which record usage), as `apps/ai-chat` does. The
+`createRunsApp` composition above registers the database but neither `CHAT_MODELS` nor the outbox,
+so it needs those two added first.
+
+```ts
+import { defineAgentRun } from '@setu-ts/agent-runs-plugin';
+import { budgetedModel } from '../../apps/ai-chat/src/modules/chat/chat.budget.ts';
+import { chatQuota } from '../../apps/ai-chat/src/modules/chat/chat.service.ts';
+import { CHAT_MODELS } from '../../apps/ai-chat/src/plugins/chat-models.plugin.ts';
+import type { IChatModelsService } from '../../apps/ai-chat/src/plugins/chat-models.plugin.ts';
+
+const quota = chatQuota();
+
+export const assistant = defineAgentRun({
+  name: 'assistant',
+  version: '1',
+  maxOutputTokens: 1024,
+  model: (run) => {
+    const { models } = run.services.get<IChatModelsService>(CHAT_MODELS);
+    const { model, ready } = budgetedModel(run, models, quota(run));
+    void ready.catch(() => undefined);
+    return model;
+  },
+});
+```
+
+`ready` is consumed only because a failing call already fails the run's step, so leaving its
+rejection unobserved would surface as an unhandled rejection. A run started without a tenant
+(`tenantId: ''`) is still accepted by `start`, but its first model call throws the middleware's
+`A server-resolved tenant is required`, so the run ends `execution-failed`: start budgeted
+definitions only with a tenant. `chatQuota()` builds a separate in-memory quota per call, and the
+example's chat route builds its own, so as written the chat route and this definition keep separate
+budgets. For one budget, call `chatQuota()` once and give the resolver it returns to both the run
+definition and the chat route (the example's `registerChatRoutes` would need a parameter for it).
+
+### Approvals
 
 Set `approval.tools` to a map of tool names to `true` or
 `(input, run) => boolean | Promise<boolean>`. The policy outcome is stored before execution.
@@ -99,9 +148,10 @@ Event ids are `<batch>.<index>.<epoch>`, the epoch being the lease version of th
 wrote the chunk. `Last-Event-ID` resumes after that exact chunk while the log agrees with it.
 Without a header, the SDK replays from the start; its transport's default `resumeStreamIsReplay`
 applies that replay to the same message. A waiting response ends after the approval request without
-a finish chunk; the decide route returns another `respond` stream. A terminal run without an event
-id returns 204, the SDK's nothing-to-resume signal. A terminal run with an event id serves the
-retained remainder.
+a finish chunk; the guide's sample decide route streams the continued run from the decide request,
+while the example app answers `202` and its client reopens `GET /runs/:id/stream` with
+`Last-Event-ID` and backoff. A terminal run without an event id returns 204, the SDK's
+nothing-to-resume signal. A terminal run with an event id serves the retained remainder.
 
 An id the log cannot honour means the client's view has diverged: it names a position past the
 committed log, or one a different instance wrote, which happens when an instance dies with chunks it
@@ -139,7 +189,9 @@ PostgreSQL, `idle_in_transaction_session_timeout` ends a transaction left idle w
 on something else, and `statement_timeout` bounds a single SQL statement that is still running; the
 first covers a hung tool, the second only a slow query. Model deadlines (`timeouts.modelMs`) still
 fail with `execution-failed`. Configuration, store and oversized-result errors fail the run.
-Configure a transactional idempotency store as above.
+Configure a transactional idempotency store as above. Without the `transactional` option the plugin
+refuses to start: `register` throws a `TypeError` naming the option, because every tool call runs
+inside `idempotency.within`.
 
 ## Workers, bounds and storage
 
@@ -147,7 +199,10 @@ On Workers use `sweepIntervalMs: 0` and call `sweep()` from a Cron Trigger. Supp
 `background: (ctx, work) => ctx.services.get<ICloudflareBindings>(CAPABILITIES.CLOUDFLARE).waitUntil(work)`
 in application code, importing that interface from the Cloudflare plugin. A host may cut off work
 after its background lifetime; the sweep resumes from stored state. Runs do not execute in
-`ctx.defer`. Node, Deno and Bun keep the detached promise in process.
+`ctx.defer`. Node, Deno and Bun keep the detached promise in process. To start a run outside a
+request, for example from a queue job, call `startAs({ tenantId, principalId }, definition, input)`
+with a server-owned identity; it calls no background hook, so on Workers a run cut off by eviction
+resumes at the next sweep.
 
 Await `sweep()` or pass its promise to the Cron Trigger's execution context. It claims its whole
 batch and purges retention first, then waits for the work it recovered to finish or park, keeping

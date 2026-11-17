@@ -30,6 +30,15 @@ docker build -t my-app .            # the generated Dockerfile at the project ro
 docker run --rm -p 3000:3000 my-app # PORT still selects the port at run time
 ```
 
+A project with a generated secret passes it from the shell, because `**/.env` is excluded from the
+image and the development value in `.env` is not copied in. A `full-stack` project has
+`SESSION_SECRET`, and its generated README shows the command:
+`docker run --rm -p 3000:3000 -e SESSION_SECRET my-app`. `setu add session` adds `SESSION_SECRET`
+and `setu add auth` adds `JWT_SECRET`; those commands do not rewrite the README, so add `-e` for
+each yourself. Set every such variable in the shell to a value of at least 32 characters first: a
+name that is not set in the shell passes nothing, and the application refuses to start without its
+secret.
+
 The image installs from the project's lockfile, which `setu new` does not write: install once first
 (`npm install`, `bun install` or `deno install`, which write `package-lock.json`, `bun.lock` or
 `deno.lock`) and commit it.
@@ -37,10 +46,10 @@ The image installs from the project's lockfile, which `setu new` does not write:
 The generated `Dockerfile` installs and builds inside the image, so no host build is needed: on Node
 its build stage runs `npm ci` and `npm run build` (which type-checks, then `setu build` bundles the
 service into `dist/`) and the image runs `dist/main.js`; a Bun image runs `bun run main.ts` and a
-Deno image `deno run … main.ts`. The entry reads `PORT` (default `3000`). Run the tests before
-building an image (`npm test`, `bun run test`, or `deno task test` in a Deno project): DI graph
-validation happens at boot. A Workers project is not a container at all — deploy it with
-`wrangler deploy` (see [Cloudflare Workers](#cloudflare-workers)).
+Deno image `deno run … main.ts`. Every runtime stage sets `ENV NODE_ENV=production`. The entry reads
+`PORT` (default `3000`). Run the tests before building an image (`npm test`, `bun run test`, or
+`deno task test` in a Deno project): DI graph validation happens at boot. A Workers project is not a
+container at all — deploy it with `wrangler deploy` (see [Cloudflare Workers](#cloudflare-workers)).
 
 In a workspace, `setu generate app` (and `setu adopt`) writes one parameterized image, a Compose
 stack and Kubernetes objects for its members; see
@@ -65,31 +74,51 @@ direct caller's forged headers cannot choose its client IP or public origin. The
 retained when no peer is available. IPv4 CIDR is supported; list native IPv6 proxies literally.
 `proxyHops` and the leftmost default retain header-only selection and never check the peer; use
 `trustedProxies` when proxy addresses are stable; only `trustedProxies` mode with a trusted socket
-peer publishes a forwarded origin. Configure the proxy to overwrite `X-Forwarded-Proto` and
-`X-Forwarded-Host` rather than pass a client's copy through, and restrict direct access to the
-application where possible.
+peer publishes a forwarded origin. Configure the proxy to overwrite `X-Forwarded-Proto` rather than
+pass a client's copy through, and restrict direct access to the application where possible.
+
+The public **host** is the `Host` header the proxy sent unless you set
+`ipSecurity: { trustForwardedHost: true }` (since 0.13.0). Set it only when the proxy next to the
+application writes `X-Forwarded-Host` itself; the rightmost entry is then read. A proxy that passes
+a client's `X-Forwarded-Host` through would otherwise let the client choose the host of every
+absolute URL the application builds, password-reset and sign-in links included, and nothing in the
+request tells the two kinds of proxy apart.
+
+| Proxy in front of the application                                           | `X-Forwarded-Host`                    | `trustForwardedHost` | Scaffold `TRUST_FORWARDED_HOST`     |
+| --------------------------------------------------------------------------- | ------------------------------------- | -------------------- | ----------------------------------- |
+| Cloudflare Tunnel (cloudflared)                                             | passes the client's copy through      | leave `false`        | empty or `false`                    |
+| ingress-nginx, Compose with no proxy                                        | `Host` already carries the public one | leave `false`        | empty or `false`                    |
+| nginx with `proxy_set_header Host $host` (no `X-Forwarded-Host`)            | passes the client's copy through      | leave `false`        | empty or `false`                    |
+| nginx with `proxy_set_header X-Forwarded-Host $host` and a rewritten `Host` | overwritten by the proxy              | `true`               | `true` (requires `TRUSTED_PROXIES`) |
+| a load balancer that rewrites `Host` and sets `X-Forwarded-Host`            | written by the proxy                  | `true`               | `true` (requires `TRUSTED_PROXIES`) |
+
+Behind a chain of appending proxies the rightmost entry is the innermost proxy's view, for
+`X-Forwarded-Proto` as well as `X-Forwarded-Host`: an outer proxy that terminates TLS and an inner
+one that appends send `X-Forwarded-Proto: https, http`, which publishes `http`. Have the inner proxy
+overwrite both headers with the values the outer one received (the public host, and the scheme the
+browser used), or switch to `forwardedHeader: 'forwarded'`.
 
 Every examined `X-Forwarded-For` or custom `ipHeader` entry must be an IP address; numeric ports are
 stripped from IPv4 and bracketed IPv6 entries. An unbracketed IPv6 entry never carries a port. An
 invalid entry stops resolution with `CLIENT_IP_STATE_KEY` set to `undefined`, never the socket peer,
 and leaves the origin as the URL origin.
 
-The default `forwardedHeader: 'x-forwarded'` uses `X-Forwarded-For`, the leftmost
-`X-Forwarded-Proto`, and the leftmost `X-Forwarded-Host`. Choose `forwardedHeader: 'forwarded'` when
-your proxy writes RFC 7239 `Forwarded`; this reads only that family and conflicts with `ipHeader`.
-Its `proto` and `host` come from the selected client's element. A malformed element is a boundary,
-not a void: the elements to its right were written by later hops and are still read, while the walk
-stops at the boundary and never continues left of it. An oversized field (over 8 KiB or 64 elements)
-is read from the right within those bounds instead of voiding the field, so a trusted proxy that
-appends its element still resolves the client behind a padded or malformed prefix. A trusted proxy
-that writes a comma inside a quoted value to the right of malformed input loses that element to the
-boundary and resolves no client (fail closed). A direct client keeps its own address, and a boundary
-with only trusted entries to its right yields no client rather than the proxy's own address. Unknown
-and obfuscated hops cannot be returned as clients, and a `proxyHops` header too short for the chain,
-or a chain of only trusted proxies, yields no client in either family; with `trustedProxies`, so
-does a trusted proxy that sends no forwarding header. Only `http`/`https` protocols, and DNS-name or
-bracketed-IPv6 hosts with an optional numeric port, are accepted; missing or rejected components use
-the request URL.
+The default `forwardedHeader: 'x-forwarded'` uses `X-Forwarded-For`, the rightmost
+`X-Forwarded-Proto`, and — only with `trustForwardedHost` — the rightmost `X-Forwarded-Host`. Choose
+`forwardedHeader: 'forwarded'` when your proxy writes RFC 7239 `Forwarded`; this reads only that
+family and conflicts with `ipHeader`. Its `proto` and `host` come from the selected client's
+element. A malformed element is a boundary, not a void: the elements to its right were written by
+later hops and are still read, while the walk stops at the boundary and never continues left of it.
+An oversized field (over 8 KiB or 64 elements) is read from the right within those bounds instead of
+voiding the field, so a trusted proxy that appends its element still resolves the client behind a
+padded or malformed prefix. A trusted proxy that writes a comma inside a quoted value to the right
+of malformed input loses that element to the boundary and resolves no client (fail closed). A direct
+client keeps its own address, and a boundary with only trusted entries to its right yields no client
+rather than the proxy's own address. Unknown and obfuscated hops cannot be returned as clients, and
+a `proxyHops` header too short for the chain, or a chain of only trusted proxies, yields no client
+in either family; with `trustedProxies`, so does a trusted proxy that sends no forwarding header.
+Only `http`/`https` protocols, and DNS-name or bracketed-IPv6 hosts with an optional numeric port,
+are accepted; missing or rejected components use the request URL.
 
 IP security publishes one public origin, believed only when a trusted socket peer was walked and the
 client came from the forwarded chain. `requestOriginOf(ctx)` and `publicRequestUrl(ctx)` from
@@ -99,16 +128,18 @@ refused at construction because `SameSite=None` forces `Secure`. The React Route
 public URL to loaders and actions. Without IP security these consumers use `ctx.request.url` — and
 behind a TLS-terminating proxy that makes **every React Router action answer 400**, because React
 Router's own origin check compares the browser's `https` origin with the internal `http` URL
-(V10-41). A `setu new --template full-stack` project reads `TRUSTED_PROXIES` (a comma-separated CIDR
-list of your proxies) and registers IP security from it; empty leaves it off. Set it to your proxies
-only — IPv4 addresses or CIDRs, IPv6 proxies as single addresses (an IPv6 CIDR is compared literally
-and matches nothing). Never `0.0.0.0/0`: it trusts every IPv4 client's forwarded headers, so any
-client could choose its own address and origin.
+(V10-41). A `setu new --template full-stack` project reads `TRUST_FORWARDED_HOST` (empty/`false` by
+default; `true` only for proxies that overwrite the host) and `TRUSTED_PROXIES` (a comma-separated
+CIDR list of your proxies) and registers IP security from it; empty leaves it off. Set it to your
+proxies only — IPv4 addresses or CIDRs, IPv6 proxies as single addresses (an IPv6 CIDR is compared
+literally and matches nothing). Never `0.0.0.0/0`: it trusts every IPv4 client's forwarded headers,
+so any client could choose its own address and origin.
 
 `csrf: {}` implicitly trusts the URL origin, that published public origin, and, when the browser
 sends `Sec-Fetch-Site: same-origin`, the validated leftmost `X-Forwarded-Proto`/`X-Forwarded-Host`
-candidate (URL host when absent). The gate matters because scripts can set `X-Forwarded-*` on a CORS
-request the server admits, and cannot set `Sec-Fetch-Site`. It grants no proxy trust to other
+candidate (URL host when absent); that candidate is only compared with the browser's `Origin`, so it
+does not need `trustForwardedHost`. The gate matters because scripts can set `X-Forwarded-*` on a
+CORS request the server admits, and cannot set `Sec-Fetch-Site`. It grants no proxy trust to other
 consumers. A request whose `Sec-Fetch-Site` is present and anything but `same-origin` is checked
 against the URL origin and `trustedOrigins` only: a browser cannot send the target's real public
 origin cross-site, and a trusted proxy that passes a client's `X-Forwarded-Host` through would
@@ -125,7 +156,9 @@ request-derived host.
 
 This section describes the images that build the examples in this repository.
 
-Two Dockerfiles cover every example, selected with `--build-arg APP=<name>`:
+Two Dockerfiles cover the server examples, selected with `--build-arg APP=<name>`. The examples that
+need another image shape, such as `full-stack` (its frontend builds first) and `cloudflare`, are
+listed with their reasons in `scripts/check-deploy.ts`:
 
 | File                                                          | Base                            | Use it when                                                            |
 | ------------------------------------------------------------- | ------------------------------- | ---------------------------------------------------------------------- |
@@ -133,7 +166,7 @@ Two Dockerfiles cover every example, selected with `--build-arg APP=<name>`:
 | [`docker/Dockerfile.compiled`](../docker/Dockerfile.compiled) | `gcr.io/distroless/cc-debian12` | You want no shell, no package manager and no interpreter in the image. |
 
 ```bash
-# Any example under apps/
+# A server example under apps/
 docker build -f docker/Dockerfile --build-arg APP=rest-api -t setu/rest-api:m39 .
 
 # The single-binary variant
@@ -158,10 +191,11 @@ which is what you want during a version bump, when the pinned version is not on 
 The generated workspace `.dockerignore` excludes `**/.env` and `**/.env.*` and keeps
 `!**/.env.example`; the root `.gitignore` ignores `.env`/`.env.*` and keeps the example. The rules
 cover the default `.env` and any name beginning `.env.`. A custom `--env-file name` that does not
-match those patterns is **not** covered. `setu generate app` and `setu adopt` print one line naming
-such a file by its path from the workspace root (for example `apps/billing/local.env`), which is the
-form to add to `.dockerignore`: that file sits at the workspace root, and a pattern without a slash
-matches only there. The CLI cannot edit a file you own for you.
+match those patterns is recorded on the member's `envFilePaths` by `setu generate app`, `setu adopt`
+and `setu add auth|session`, and the managed `.dockerignore` lists it by its path from the workspace
+root (for example `apps/billing/local.env`): that file sits at the workspace root, and a pattern
+without a slash matches only there. Because the file is regenerated from the record, the entry
+survives every later `generate app`.
 
 `setu adopt` moves a configured single-segment dotenv pair into the member, where the member's
 `envFilePath` reads it, and writes `apps/<member>/.gitignore` with `/<name>` for the moved dotenv
@@ -484,9 +518,10 @@ into every pod at the fixed service-account path:
 - Node: `NODE_EXTRA_CA_CERTS=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt`
 
 A reader who gets the RBAC above right but omits the CA still fails — on a TLS error rather than a
-`403`, which is easy to misread as a permissions problem. The `http` option is the alternative:
-supply your own `IDiscoveryHttp` over a TLS-configured client. The full in-cluster setup, including
-token rotation, is documented in the
+`403`, which is easy to misread as a permissions problem. The readiness probe logs that cause once
+at `warn` (`service-discovery-plugin: kubernetes`), so a pod that never becomes ready says why. The
+`http` option is the alternative: supply your own `IDiscoveryHttp` over a TLS-configured client. The
+full in-cluster setup, including token rotation, is documented in the
 [service-discovery plugin](../packages/service-discovery-plugin/README.md#kubernetes-in-cluster-tls).
 
 > **Scope.** These are the platform objects. Resolving a name to instances, load-balancing across
@@ -499,11 +534,43 @@ Everything above is about **this repository's** images and objects, which build 
 [`apps/`](../apps/). A workspace created with `setu new --workspace` gets its own, generated and
 regenerated for every member:
 
-| Path                  | What it is                                                                                             |
-| --------------------- | ------------------------------------------------------------------------------------------------------ |
-| `docker/Dockerfile`   | One parameterized image: `docker build -f docker/Dockerfile --build-arg MEMBER=orders -t orders:dev .` |
-| `docker/compose.yaml` | Every member plus the transport's broker, each member on its allocated port                            |
-| `k8s/members.yaml`    | A Deployment and a Service per member                                                                  |
+| Path                  | What it is                                                                                                           |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `docker/Dockerfile`   | One parameterized image: `docker build -f docker/Dockerfile --build-arg MEMBER=orders -t orders:dev .`               |
+| `docker/compose.yaml` | Every member plus the transport's broker, each member on its allocated port                                          |
+| `k8s/members.yaml`    | A Deployment and a Service per member, plus a `<member>-transport` ConfigMap when the broker has connection defaults |
+
+Each member's optional `generatedSecrets` in `setu.workspace.json` records secret variable names
+such as `SESSION_SECRET` and `JWT_SECRET`. `generate app` records a template's generated secrets;
+`setu add auth` and `setu add session` append their names once and refresh Compose and the README's
+transport section. Adoption records no generated secrets. Names must match `^[A-Z][A-Z0-9_]*$`;
+malformed entries refuse the member, while absent or empty lists are omitted.
+
+A member's optional `envFilePaths` records the custom dotenv paths that the generic `.env`/`.env.*`
+rules do not cover. `generate app --env-file`, `setu adopt` and `setu add auth|session` add to it,
+and the managed root `.dockerignore` lists each as `apps/<member>/<path>` on every regeneration, so
+an image never copies the member's secrets. The list only grows: a path stays listed after the
+config moves to another file, because the old file may still hold a secret the CLI generated. Each
+path follows the `--env-file` grammar: relative segments of letters, digits, `.`, `_` and `-`, not
+ending in `.example`, which is the committed example's name.
+
+Compose requires a separate shell value per member, overriding its development `.env`. For a member
+named `web` with both secrets, export its required keys before starting the stack:
+
+```bash
+export WEB_SESSION_SECRET="$(openssl rand -hex 32)"
+export WEB_JWT_SECRET="$(openssl rand -hex 32)"
+docker compose -f docker/compose.yaml up --build
+```
+
+The member still reads `SESSION_SECRET` and `JWT_SECRET`. Shell names prefix the upper-cased member
+name with hyphens changed to underscores, so `admin-web` uses `ADMIN_WEB_SESSION_SECRET`. Compose's
+`:?` interpolation refuses to start until every required shell variable is set. The generated README
+lists the exact export lines, including workspaces whose broker needs no Compose service.
+
+Generate each value once and keep it, in a password manager or in a file Git ignores that you source
+before starting. A new value on every start invalidates every session cookie and token the previous
+one signed, which signs every user out.
 
 ```bash
 docker compose -f docker/compose.yaml up --build
@@ -563,10 +630,15 @@ including one first made by hand), values base64-encoded under `data:`: measured
 client-side apply stores every value in plaintext in the `last-applied-configuration` annotation,
 and `stringData` under a server-side apply keeps keys the file has dropped. Each generated
 Deployment reads `<member>-env` through `envFrom`, after its explicit `env:` entries, which keep
-precedence. envFrom is read when a container starts, so deploy writes each Secret's
-`resourceVersion` into its member's pod-template annotation (`setu-ts.dev/secret-version`): a
-changed Secret changes the template and Kubernetes rolls the member out — a rotation on a clean tree
-keeps the tag and the manifest and would otherwise leave the old value live, and the annotation
+precedence. When the broker has connection defaults (`REDIS_URL`, for one), `envFrom` lists the
+generated `<member>-transport` ConfigMap before the Secret, so a value in the Secret overrides the
+default; a `setu-ts.dev/transport-config` annotation rolls members when the defaults change.
+`generate app` and `setu add auth|session` append a random value for each newly generated secret
+name to `k8s/secrets/<member>/.env`, keeping existing entries and refusing symbolic links; a file it
+creates is owner-only (`0600`). envFrom is read when a container starts, so deploy writes each
+Secret's `resourceVersion` into its member's pod-template annotation (`setu-ts.dev/secret-version`):
+a changed Secret changes the template and Kubernetes rolls the member out — a rotation on a clean
+tree keeps the tag and the manifest and would otherwise leave the old value live, and the annotation
 keeps a re-run after a partial failure from losing the rollout. After the apply, deploy reads each
 member's pod template back from the cluster and sets the annotation with `kubectl patch` wherever it
 is not current — a `members.yaml` from before the annotation, a hand-edited one, or an earlier
@@ -663,15 +735,40 @@ source; production start never rebuilds. Full-stack main.ts passes its compiled 
 createApp so its location survives bundling. User import.meta.url paths move with the bundle:
 resolve application data from process.cwd() or pass modules in explicitly.
 
-Bun runs source with production dependencies, builds a declared frontend script first, and copies
-the workspace's hoisted-linker bunfig.toml. Deno builds a declared frontend in a `frontend` stage on
-`denoland/deno:debian-2.9.5` (Vite's native bundler binding has no musl build, so it cannot run on
-the Alpine image), copies only `build/` into the Alpine image before caching main.ts, then retains
-the frozen, scoped source run. When the root sets `nodeModulesDir: "auto"` (a workspace with a
-full-stack member does), the image switches it to `"manual"` after installing: under `"auto"` every
-start re-syncs `node_modules`, which a read-only root refuses. A full-stack socket server serves its
-own client bundle from `build/client/assets`. Native bun build and deno compile are optional custom
-packaging choices, not generated commands. Workers continues using Wrangler.
+Bun runs source with production dependencies on the pinned `oven/bun:1.4.0-alpine`, builds a
+declared frontend script, then runs the member's `check` script, refuses to build without a
+`bun.lock`, and copies the workspace's hoisted-linker bunfig.toml. Every runtime stage sets
+`NODE_ENV=production`. Deno runs the member's `check` task after `build` in a separate `check`
+stage, without the `npmrc` secret and without `main.dev.ts` (which the image excludes); the final
+image copies nothing from that stage (it only bind-mounts the stage's marker for one no-op step, so
+BuildKit runs the check), so nothing the check writes ships. Deno fetches a declared frontend's
+locked dependencies with the `npmrc` secret into its global cache only
+(`deno install --node-modules-dir=none`, so no lifecycle script runs, even one the project's
+`deno.json` approves with `allowScripts`), then creates `node_modules` from that cache and builds in
+a later step of its `frontend` stage without the secret, which is where approved scripts run (a
+member without a frontend but with a `check` task caches main.ts and setu.config.ts's graph in that
+same secret-mounted step). That step also copies the `npmrc`'s `registry` and `@scope:registry`
+lines, and nothing else, for the later steps. Each value is read as Deno reads it and copied as
+written, in double quotes so a `;` or `#` inside it survives; a URL that carries userinfo, a query
+or a fragment is written back in normalized form without them. A value holding a `${NAME}` reference
+is copied as written, but fails the build if, with its references removed, it still contains `@`,
+`?` or a quoted `#` anywhere, a path segment such as `/@org/` included (an unquoted `#` or `;`
+starts an `.npmrc` comment and is dropped first; with a reference present the value cannot be
+parsed, so the characters are the rule), and any other value that is not a URL, fails the build, and
+so does any value holding a double quote or a backslash. Keep a registry token in an `_authToken`
+line: one placed in the URL's path is kept, because Deno files a package under its registry URL's
+host and path, so a step without the secret must resolve the same registries to find the cache. The
+runtime dependencies are fetched the same way, in a `fetch` stage the image never ships; the image's
+one install step bind-mounts that stage's cache, lockfile and registry settings, copies the cache
+in, installs `node_modules` from it, verifies the lockfile and fixes ownership in one layer
+(`node_modules` hard-links into the cache, and a hard link cannot reach a lower layer). The frontend
+stage runs on `denoland/deno:debian-2.9.5` (Vite's native bundler binding has no musl build, so it
+cannot run on the Alpine image), copies only `build/` into the Alpine image before caching main.ts,
+then retains the frozen, scoped source run. When the root sets `nodeModulesDir: "auto"` (a workspace
+with a full-stack member does), the image switches it to `"manual"` after installing: under `"auto"`
+every start re-syncs `node_modules`, which a read-only root refuses. A full-stack socket server
+serves its own client bundle from `build/client/assets`. Native bun build and deno compile are
+optional custom packaging choices, not generated commands. Workers continues using Wrangler.
 
 Both standalone and workspace ignore files exclude host node_modules, dist, build, coverage, git and
 dotenv files, preserving .env.example, and every `.npmrc`. To use one in the image's install — a
@@ -705,11 +802,15 @@ read and write granted only to the member's and the root's `deno.json`/`deno.jso
 build cache removed in the same layer: it cannot float to a newer release, touch any other file in
 the image, alter the project lockfile, or add parser modules to the production cache.
 
-The build then runs
-`deno cache main.ts && deno install && deno install --frozen && deno install --entrypoint main.ts && deno install --entrypoint main.ts --frozen`.
-The full-map install/frozen pair completes and verifies lazy broker npm edges; the entrypoint checks
-verify the production entry too. The remaining import map is cached, including dependencies not
-reachable from `main.ts`. The verified exclusion is the development connector.
+The `fetch` stage then runs, with the registry secret mounted,
+`deno cache --node-modules-dir=none main.ts && deno install --node-modules-dir=none && deno install --node-modules-dir=none --frozen && deno install --node-modules-dir=none --entrypoint main.ts && deno install --node-modules-dir=none --entrypoint main.ts --frozen`,
+which fills only the global cache and runs no lifecycle script. The image's install step, without
+the secret, copies that cache in and runs
+`deno install --cached-only --frozen && deno install --cached-only --entrypoint main.ts --frozen`;
+any script the project approves with `allowScripts` runs there, never beside the token. The full-map
+install/frozen pair completes and verifies lazy broker npm edges; the entrypoint checks verify the
+production entry too. The remaining import map is cached, including dependencies not reachable from
+`main.ts`. The verified exclusion is the development connector.
 
 Deno can record a jsr package's npm edge list incompletely on a cold cache. An entrypoint-only
 frozen install can pass while lazy `amqplib`/`ioredis` imports later fail at startup. Retaining the
@@ -734,7 +835,9 @@ of changing it.
 For an existing generated workspace, regenerate the managed Dockerfile and `.dockerignore` with
 `setu devtool enable <member>` or `setu workspace ports --reallocate`, then rebuild the image. New
 member generation also refreshes these files. For a Dockerfile maintained by hand, keep the
-following two build steps after `WORKDIR /srv/apps/${MEMBER}` (the generated image uses UID 1000):
+following two build steps after `WORKDIR /srv/apps/${MEMBER}` (the generated image uses UID 1000).
+They mount no `npmrc` secret; a Dockerfile that does should copy the generated one's `fetch` stage,
+so that no install script runs beside the token:
 
 ```dockerfile
 RUN printf '%s' 'import { parse } from "jsr:@std/jsonc@1.0.3"; for (const directory of [".", "/srv"]) { for (const name of ["deno.json", "deno.jsonc"]) { const path = directory + "/" + name; let source; try { source = Deno.readTextFileSync(path); } catch (error) { if (error instanceof Deno.errors.NotFound) continue; throw error; } const manifest = parse(source); if (manifest.imports) delete manifest.imports["@setu-ts/diagnostics-plugin"]; Deno.writeTextFileSync(path, JSON.stringify(manifest)); break; } }' | DENO_DIR=/srv/.setu-build-cache deno run --no-config --no-lock --no-prompt --allow-read=./deno.json,./deno.jsonc,/srv/deno.json,/srv/deno.jsonc --allow-write=./deno.json,./deno.jsonc,/srv/deno.json,/srv/deno.jsonc - && rm -rf /srv/.setu-build-cache
@@ -773,14 +876,15 @@ address as the fallback.
 ### A standalone project
 
 A standalone non-Workers `setu new` emits a `Dockerfile` and `.dockerignore` beside the project, so
-`docker build -t app .` and `docker run --rm -p 3000:3000 app` work without adding anything; the
-image installs and builds inside its own build stage. A Workers project emits neither, because it is
-not a container. A standalone template with `--broker` or `--queue` can additionally emit
-`docker/compose.yaml` for the selected backing services; that does not supply a Kubernetes manifest.
-Use a workspace (`setu new --workspace`, then `setu generate app`) for generated per-member
-deployment artifacts, or `setu adopt` to bring an existing project into a workspace. For an
-independently maintained image, adapt the generated `Dockerfile`'s entrypoint and dependency
-installation to your runtime.
+`docker build -t app .` and `docker run --rm -p 3000:3000 app` work without adding anything, except
+that a generated secret is set in the shell and passed with `-e` (see
+[Deploy a scaffolded project](#deploy-a-scaffolded-project)); the image installs and builds inside
+its own build stage. A Workers project emits neither, because it is not a container. A standalone
+template with `--broker` or `--queue` can additionally emit `docker/compose.yaml` for the selected
+backing services; that does not supply a Kubernetes manifest. Use a workspace
+(`setu new --workspace`, then `setu generate app`) for generated per-member deployment artifacts, or
+`setu adopt` to bring an existing project into a workspace. For an independently maintained image,
+adapt the generated `Dockerfile`'s entrypoint and dependency installation to your runtime.
 
 ## Backup and restore
 

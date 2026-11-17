@@ -5,7 +5,12 @@
  * @since 0.1.0
  */
 
-import type { RouterLoadContext, SsrRequestHandler, SsrRuntime } from '../interfaces/index.ts';
+import type {
+  PageRouteSource,
+  RouterLoadContext,
+  SsrRequestHandler,
+  SsrRuntime,
+} from '../interfaces/index.ts';
 
 /**
  * Constructor shape of React Router's `RouterContextProvider` class.
@@ -36,7 +41,7 @@ export function createLoadContextFactory(rr: Record<string, unknown>): () => Rou
   if (typeof Provider !== 'function') {
     throw new Error(
       `The loaded 'react-router' module exposes no 'RouterContextProvider' export. ` +
-        `React Router 8 or later is required — 'createRequestHandler' rejects any ` +
+        `React Router 8 is required — 'createRequestHandler' rejects any ` +
         `context that is not an instance of that class.`,
     );
   }
@@ -124,7 +129,8 @@ export function assembleHandler(
  *
  * Lazily imports the app-provided server build (`import(serverBuildPath)`) and
  * the core `react-router` package (`import(react-router)`), unwraps
- * the `ServerBuild` (default export), then returns a callable request handler.
+ * the `ServerBuild` (default export), then returns the request handler, its
+ * context-provider factory, and the build and matcher used for page policies.
  *
  * Both the handler and the context-provider factory come from the SAME module
  * object, so the provider instance can never be tested against a different copy
@@ -133,8 +139,9 @@ export function assembleHandler(
  * @param serverBuildPath - Path to the RR Vite server build (app-provided)
  * @param mode - `'production'` or `'development'`
  * @param options - Optional override for the react-router import seam
- * @returns A promise resolving to the handler and its context factory
- * @throws {Error} When either import fails, with a message naming the missing specifier
+ * @returns A promise resolving to the handler, context factory, and page route source
+ * @throws {Error} When either import fails, or the module lacks `createRequestHandler`,
+ *   `matchRoutes`, or `RouterContextProvider`, naming the missing specifier or export
  * @since 0.1.0
  */
 export async function loadRequestHandler(
@@ -165,6 +172,7 @@ export async function loadRequestHandler(
       throw new Error(
         `Failed to load React Router server build from "${serverBuildPath}". ` +
           `Ensure the path is correct and the file exports a ServerBuild as default. ` +
+          `If the app has not been built, run its \`build\` task first. ` +
           `Cause: ${err instanceof Error ? err.message : String(err)}`,
         { cause: err },
       );
@@ -188,14 +196,25 @@ export async function loadRequestHandler(
   if (typeof rr.createRequestHandler !== 'function') {
     throw new Error(
       `The loaded 'react-router' module exposes no 'createRequestHandler' export. ` +
-        `Ensure the resolved package is React Router 8 or later.`,
+        `Ensure the resolved package is React Router 8.`,
     );
   }
 
   const createRequestHandler = rr.createRequestHandler as (build: unknown, mode: string) => unknown;
 
+  if (typeof rr.matchRoutes !== 'function') {
+    throw new Error(
+      `The loaded 'react-router' module exposes no 'matchRoutes' export. ` +
+        `Ensure the resolved package is React Router 8.`,
+    );
+  }
+
   return {
     handler: assembleHandler(build, createRequestHandler, mode),
     createLoadContext: createLoadContextFactory(rr),
+    pageRoutes: {
+      build: () => build,
+      matchRoutes: rr.matchRoutes as PageRouteSource['matchRoutes'],
+    },
   };
 }

@@ -400,6 +400,8 @@ export interface IdempotentWithinResult<R> {
  * @since 0.9.0
  */
 export interface IIdempotencyService {
+  /** Whether a transactional store is configured, independent of readiness. @since 0.13.0 */
+  readonly transactional: boolean;
   /**
    * Builds the HTTP middleware. SYNCHRONOUS. Resolves `options` against the provider's defaults
    * and throws when the result is invalid (`ttlMs < leaseMs`, an option shape the provider refuses).

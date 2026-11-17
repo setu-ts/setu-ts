@@ -46,10 +46,12 @@ import type {
   IWebSocketService,
   MetricConfig,
   RouteDefinition,
+  MiddlewareFunction,
+  RouteMiddlewareGroups,
   StartOptions,
   WebSocketUpgradeDecision,
 } from '@setu-ts/common';
-import type { IGrpcService } from '@setu-ts/common';
+import type { IGrpcService, RpcCall, RpcReply, RpcTransport } from '@setu-ts/common';
 
 import { MiddlewarePipeline } from '../pipeline/middleware-pipeline.ts';
 import { executeChain } from '../pipeline/execute-chain.ts';
@@ -1307,6 +1309,7 @@ class Application implements IKernelApplication {
     scope: 'global' | 'route',
     parentOperationId: string | undefined,
     routeEntryIndex: number | undefined,
+    positionOffset = 0,
   ): ChainObserver | undefined {
     const collector = this.#collector;
     if (collector === undefined) {
@@ -1318,7 +1321,7 @@ class Application implements IKernelApplication {
         collector.observeMiddlewareStage({
           parentOperationId: parentOperationId ?? '<unkeyed>',
           scope,
-          position: stage.position,
+          position: stage.position + positionOffset,
           routeEntryIndex,
           outcome: stage.outcome,
           startedAtMs: stage.startedAtMs,
@@ -1498,6 +1501,9 @@ class Application implements IKernelApplication {
     // stops stages after the response is ended. Positions follow the route's
     // own middleware array; the terminal observes the handler itself.
     const routeMiddleware = definition.middleware;
+    if (definition.middlewareGroups !== undefined) {
+      return this.#dispatchRouteGroups(ctx, handle, entry, definition, definition.middlewareGroups);
+    }
     if (routeMiddleware !== undefined && routeMiddleware.length > 0) {
       return executeChain(
         routeMiddleware,
@@ -1524,6 +1530,68 @@ class Application implements IKernelApplication {
       return undefined;
     }
     return this.#invokeHandlerObserved(ctx, entry, definition, handle);
+  }
+
+  /** Runs the optional selected-group path without allocating on the M87 bypass. */
+  async #dispatchRouteGroups(
+    ctx: IRequestContext,
+    handle: RequestContextHandle,
+    entry: RouteEntry,
+    definition: RouteDefinition,
+    middlewareGroups: RouteMiddlewareGroups,
+  ): Promise<void> {
+    // A route stage can answer while next() keeps selector or handler work running.
+    // Keep deferred cleanup and shutdown tied to that work on the fast path too.
+    handle.trackHandler = true;
+    const staticMiddleware = definition.middleware ?? [];
+    const selectAndRun = async (): Promise<void> => {
+      if ((ctx.response as ResponseBuilder).ended) return;
+      const keys = await middlewareGroups.select(ctx);
+      const selected: MiddlewareFunction[] = [];
+      // Validate the complete selection before any selected stage executes.
+      for (const key of keys) {
+        if (!Object.hasOwn(middlewareGroups.groups, key)) {
+          throw new Error(`route middleware group '${key}' is not declared`);
+        }
+        selected.push(...middlewareGroups.groups[key]!);
+      }
+      if (selected.length === 0) {
+        if (!(ctx.response as ResponseBuilder).ended) {
+          await this.#invokeHandlerObserved(ctx, entry, definition, handle);
+        }
+        return;
+      }
+      await executeChain(
+        selected,
+        ctx,
+        async () => {
+          await this.#invokeHandlerObserved(ctx, entry, definition, handle);
+        },
+        undefined,
+        this.#chainObserver(
+          'route',
+          this.#collector?.requestOperationIdOf(ctx),
+          entry.index,
+          staticMiddleware.length,
+        ),
+      );
+    };
+    const runSelected = (): Promise<void> => {
+      const pending = selectAndRun();
+      this.#trackHandler(handle, pending);
+      return pending;
+    };
+    if (staticMiddleware.length === 0) {
+      await runSelected();
+    } else {
+      await executeChain(
+        staticMiddleware,
+        ctx,
+        runSelected,
+        undefined,
+        this.#chainObserver('route', this.#collector?.requestOperationIdOf(ctx), entry.index),
+      );
+    }
   }
 
   /**
@@ -1746,13 +1814,32 @@ class Application implements IKernelApplication {
     return this.#settleRequest(ctx, handle, 'error');
   }
 
-  /** Retains a running terminal without changing the promise propagated to middleware. */
+  /** Retains selector and handler work without changing promises propagated to middleware. */
   #trackHandler(handle: RequestContextHandle, pending: Promise<unknown>): void {
+    const previous = handle.pendingHandler;
     const complete = (): void => {
-      handle.handlerSettled = true;
+      // An enclosing selector can settle before a handler detached by a group.
+      if (handle.pendingHandler === tracked) handle.handlerSettled = true;
     };
     handle.handlerSettled = false;
-    handle.pendingHandler = pending.then(complete, complete);
+    const tracked: Promise<void> = (
+      previous === undefined ? pending : Promise.allSettled([previous, pending])
+    ).then(complete, complete);
+    handle.pendingHandler = tracked;
+  }
+
+  /** Waits until tracked work settles without a newer promise replacing it. */
+  async #drainTracked(handle: RequestContextHandle, first: Promise<void>): Promise<void> {
+    let pending = first;
+    for (;;) {
+      await pending;
+      // A group stage that calls next() without awaiting it can track the
+      // handler after this wait began; #trackHandler then installs a newer
+      // promise that also waits for the earlier work.
+      const latest = handle.pendingHandler;
+      if (latest === undefined || latest === pending) return;
+      pending = latest;
+    }
   }
 
   /** Settles generic cleanup before releasing the request from shutdown drain. */
@@ -1765,7 +1852,7 @@ class Application implements IKernelApplication {
     const pendingHandler = handle.pendingHandler;
     if (pendingHandler !== undefined && !handle.handlerSettled) {
       // Keep the request in the shutdown drain, and leave defer open for work
-      // registered by the handler after this early response has been sent.
+      // registered by selector or handler work after this early response has been sent.
       const finish = async (): Promise<void> => {
         const cleanups = handle.takeDeferred();
         if (cleanups !== undefined) await runDeferred(cleanups, this.#registry);
@@ -1777,10 +1864,10 @@ class Application implements IKernelApplication {
         // The buffered response has already been returned. Settle against it:
         // a stream the handler sets later is never read, so cleanup must not
         // wait for it to be consumed.
-        void pendingHandler.then(finish);
+        void this.#drainTracked(handle, pendingHandler).then(finish);
       } else {
         const complete = (): void => {
-          void pendingHandler.then(finish);
+          void this.#drainTracked(handle, pendingHandler).then(finish);
         };
         response.stream(
           wrapDeferredStream(
@@ -1789,6 +1876,7 @@ class Application implements IKernelApplication {
             this.#registry,
             complete,
           ),
+          response.streamOptions,
         );
       }
       return response;
@@ -1800,6 +1888,7 @@ class Application implements IKernelApplication {
       // the event loop.
       response.stream(
         guardEmptyChunks(streamed, this.#registry.get<IRuntimeServices>(CAPABILITIES.RUNTIME)),
+        response.streamOptions,
       );
     }
     const cleanups = handle.takeDeferred();
@@ -1826,7 +1915,10 @@ class Application implements IKernelApplication {
       this.#inFlight--;
       this.#completeRequest(ctx, outcome);
     };
-    response.stream(wrapDeferredStream(body, cleanups, this.#registry, complete));
+    response.stream(
+      wrapDeferredStream(body, cleanups, this.#registry, complete),
+      response.streamOptions,
+    );
     return response;
   }
 
@@ -2017,59 +2109,161 @@ class Application implements IKernelApplication {
     // plugin's to know (an exact-match set — `startsWith('application/grpc')`
     // would also claim `application/grpc-web+proto`, the format that works),
     // and §2.2 forbids importing it to find out.
-    const refusal = grpcService.refuses?.(raw) ?? null;
+    //
+    // What the connection can carry, from the adapter's own flag — never from
+    // request input. Native `application/grpc` needs trailers, so the plugin
+    // refuses it unless this says they reach the client.
+    //
+    // The client's `signal` travels here rather than on the dispatched
+    // `Request`: following a signal from a freshly built `Request` costs about
+    // 8% of unary throughput on Node, and the service hands it straight to the
+    // call it cancels.
+    const transport: RpcTransport = {
+      trailers: ctx.request.responseTrailers === true,
+      signal: raw.signal,
+    };
+    const refusal = grpcService.refuses?.(raw, transport) ?? null;
     if (refusal !== null) {
-      await this.#sendRpcResponse(ctx, refusal);
+      this.#sendRpcResponse(ctx, await this.#replyFromResponse(refusal));
       return true;
     }
 
-    // Reconstruct a web Request from the mapped IRequest. Trailers do not
-    // survive the round trip — M49 records that native gRPC-binary trailers
-    // work on no runtime this plugin runs on.
-    //
-    // This read is what bounds the dispatch to requests whose body ENDS.
-    // Since M87 the mapping is lazy, so the body is still unread here and the
-    // buffering is this line's own doing, not something already spent — the
-    // comment that used to say otherwise predated that change. Passing `raw`
-    // straight through would preserve streaming, but only while nothing in
-    // the pipeline has read the body, and the kernel cannot see whether
-    // anything has; that is left as a named limitation rather than a guess.
-    const bodyBytes = await ctx.request.bytes();
-    const grpcRequest = new Request(ctx.request.url, {
-      method: ctx.request.method,
-      headers: ctx.request.headers,
-      // A `Uint8Array` is a valid `BodyInit`, but its backing `ArrayBufferLike`
-      // is not narrowed to `ArrayBuffer` under this compiler configuration.
-      ...(bodyBytes.length > 0 ? { body: bodyBytes as unknown as BodyInit } : {}),
-    });
-
-    const response = await grpcService.handleRequest(grpcRequest);
-    await this.#sendRpcResponse(ctx, response);
+    const body = await this.#rpcBody(ctx, raw, grpcService);
+    const reply: RpcReply =
+      grpcService.handleRpc !== undefined
+        ? await grpcService.handleRpc(this.#rpcCall(ctx, body), transport)
+        : // An implementor that predates `handleRpc` takes a fetch `Request`
+          // and says nothing about the procedure kind, so it keeps exactly the
+          // write it had: buffered. Streaming it instead would make `inject()`
+          // — which refuses a streaming body — throw on calls that answered.
+          await this.#replyFromResponse(
+            await grpcService.handleRequest(this.#rpcFetchRequest(ctx, body)),
+          );
+    this.#sendRpcResponse(ctx, reply);
     return true;
   }
 
   /**
-   * Writes an RPC {@linkcode Response} onto the framework response.
+   * Reads the body an RPC is dispatched with (M139b §3.2).
    *
-   * One implementation for both exits — the header-only refusal and a
-   * dispatched reply — so a refusal cannot come to carry different headers or
-   * a different status mapping from an ordinary answer.
+   * A client-streaming or bidirectional procedure whose body nothing in the
+   * pipeline has read gets the UNREAD body stream, so the call makes progress
+   * while the client is still sending — bidi and server reflection need that.
+   * `raw.bodyUsed` is the consumed flag: every `IRequest` body read either goes
+   * through `raw` (the runtime mapping) or leaves `raw` intact (`inject()`),
+   * and on Node it is a flag check that does not materialize the request.
+   *
+   * Everything else is buffered through `ctx.request.bytes()`, which is what
+   * keeps the runtime's `maxBodyBytes` bounding unary and server-streaming
+   * bodies; a streamed body is bounded per message by the service instead (a
+   * total would end every long-lived stream).
+   *
+   * @param ctx - The live request context
+   * @param raw - The undisturbed native request
+   * @param grpcService - The resolved service
+   * @returns The whole body, or the unread stream
+   */
+  #rpcBody(
+    ctx: IRequestContext,
+    raw: Request,
+    grpcService: IGrpcService,
+  ): Promise<Uint8Array | ReadableStream<Uint8Array>> {
+    if (grpcService.streamsRequest?.(raw) === true && !raw.bodyUsed && raw.body !== null) {
+      return Promise.resolve(raw.body);
+    }
+    return ctx.request.bytes();
+  }
+
+  /**
+   * The RPC handed to `IGrpcService.handleRpc` (M139b §3.11): plain fields, so
+   * no fetch `Request` is built per call — that construction, its header copy
+   * and its body stream were the largest share of the RPC path's CPU.
+   * `headers` is the mapped request's, so a header a middleware set is seen.
+   * The client's `signal` travels on `RpcTransport` (§3.2).
+   *
+   * @param ctx - The live request context
+   * @param body - The body from {@linkcode #rpcBody}
+   * @returns The call
+   */
+  #rpcCall(ctx: IRequestContext, body: Uint8Array | ReadableStream<Uint8Array>): RpcCall {
+    const { method, url, path, headers } = ctx.request;
+    return { method, url, path, headers, body };
+  }
+
+  /**
+   * The fetch `Request` for an implementor without `handleRpc`, as before.
+   *
+   * @param ctx - The live request context
+   * @param body - The body from {@linkcode #rpcBody}
+   * @returns The request
+   */
+  #rpcFetchRequest(ctx: IRequestContext, body: Uint8Array | ReadableStream<Uint8Array>): Request {
+    const base = { method: ctx.request.method, headers: ctx.request.headers };
+    if (body instanceof ReadableStream) {
+      // `duplex` is required by fetch for a stream body but absent from the DOM
+      // `RequestInit` this package compiles against.
+      const init: RequestInit & { duplex: 'half' } = { ...base, body, duplex: 'half' };
+      return new Request(ctx.request.url, init);
+    }
+    return new Request(ctx.request.url, {
+      ...base,
+      // A `Uint8Array` is a valid `BodyInit`, but its backing `ArrayBufferLike`
+      // is not narrowed to `ArrayBuffer` under this compiler configuration.
+      ...(body.length > 0 ? { body: body as unknown as BodyInit } : {}),
+    });
+  }
+
+  /**
+   * Turns a fetch `Response` — a header-only refusal, or the reply of an
+   * implementor without `handleRpc` — into the buffered reply it always was.
+   *
+   * @param response - The response
+   * @returns The reply
+   */
+  async #replyFromResponse(response: Response): Promise<RpcReply> {
+    return {
+      status: response.status,
+      headers: response.headers,
+      body: response.body === null ? null : new Uint8Array(await response.arrayBuffer()),
+    };
+  }
+
+  /**
+   * Writes an RPC reply onto the framework response (M139b §3.1).
+   *
+   * One implementation for every exit — a refusal, a legacy reply and a
+   * dispatched one — so none can come to carry different headers or a
+   * different status mapping from another.
+   *
+   * A stream body is written as a stream, so each message reaches the client
+   * as it is produced (V12-39: this used to read the whole body first, holding
+   * a server stream back until it ended and a stream that never ends forever).
+   * A single response message arrives whole and is sent as-is, which is the
+   * cheaper write on every adapter.
    *
    * @param ctx - The request context whose response is written
-   * @param response - The RPC response to copy across
+   * @param reply - The RPC reply to copy across
    */
-  async #sendRpcResponse(ctx: IRequestContext, response: Response): Promise<void> {
-    const snapshot = await response.arrayBuffer();
+  #sendRpcResponse(ctx: IRequestContext, reply: RpcReply): void {
+    const { body, trailers } = reply;
     const builder = ctx.response as ResponseBuilder;
-    builder.status(response.status);
+    builder.status(reply.status);
     // `appendHeader`, not `header`: `header` delegates to `Headers.set`, and a
     // Trailers-Only refusal or a Connect reply can carry repeated headers —
     // `Set-Cookie` above all, which `Headers.entries()` yields once per value
     // rather than comma-joining. Setting per entry would keep only the last.
-    for (const [key, value] of response.headers.entries()) {
+    for (const [key, value] of reply.headers.entries()) {
       builder.appendHeader(key, value);
     }
-    builder.send(new Uint8Array(snapshot));
+    if (body === null) {
+      builder.send();
+      return;
+    }
+    if (body instanceof ReadableStream) {
+      builder.stream(body, trailers === undefined ? undefined : { trailers });
+      return;
+    }
+    builder.send(body);
   }
 
   /**

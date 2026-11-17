@@ -1,10 +1,9 @@
-# @setu-ts/auth-plugin — authenticate requests and guard routes
+# @setu-ts/auth-plugin — request authentication
 
-**Add it:** `setu add auth` prints config; register `AuthPlugin` with `jwt.secret` and `rbac.roles`.
-It provides `CAPABILITIES.AUTH` (`IAuthService`), `CAPABILITIES.JWT` (`IJwtService`) with `jwt`, and
-`CAPABILITIES.AUTHORIZATION` (`IAuthorizationService`) with `rbac`.
+**Add it:** `setu add auth`; register `AuthPlugin({ jwt: {}, rbac: { roles: {} } })`. Provides
+`CAPABILITIES.AUTH`, `CAPABILITIES.JWT` with `jwt`, and `CAPABILITIES.AUTHORIZATION` with `rbac`.
 
-## Protect an order route
+## Protect orders
 
 ```ts
 import type { IRouterApi } from '@setu-ts/common';
@@ -18,16 +17,17 @@ export function registerOrderRoutes(router: IRouterApi): void {
 }
 ```
 
-## Verify credentials and sign
+## Sign a token
 
-Configure `local.verify` first.
+Needs `local: { verify }`.
 
 ```ts
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IAuthService, IJwtService } from '@setu-ts/common';
 
 const auth = ctx.services.get<IAuthService>(CAPABILITIES.AUTH);
-const principal = await auth.verifyCredentials(await ctx.request.json<{ identifier: string; secret: string }>());
+const body = await ctx.request.json<{ identifier: string; secret: string }>();
+const principal = await auth.verifyCredentials(body, ctx.request);
 if (principal === null) {
   ctx.response.status(401).json({ error: 'Invalid credentials' });
 } else {
@@ -37,21 +37,21 @@ if (principal === null) {
 }
 ```
 
-## Behaviour the types do not show
+## Behaviour and options
 
-- Passive authentication defaults to priority 300; put guards on routes.
-- Missing principal: 401; denied role/permission: 403; no `rbac`: those guards return 501.
-- `requireAuth({ signInPage })` redirects anonymous browser navigations with `returnTo`, except that
-  page itself; APIs keep 401.
-- Tokens expire at `exp`. `local` needs a passive strategy for later requests.
-
-## Other options
-
-- `apiKey`, `session`, `issuers` and `strategies` supply passive auth.
-- `requireScopes` (ALL-of OAuth scopes) and `resourceServer` (RFC 9728) serve token APIs.
-- `definePolicy` and `requirePolicy` evaluate policies; scoped guards use `scopedRbac`.
-- `signIn.mfa` and `signIn.passkeys` add factors; `createQuota` adds weighted budgets.
-- `signIn` with `providers: []` is password-only. A `signIn.sessionStamp` mismatch revokes the
-  session when the session strategy next checks its cookie (a valid bearer token wins first); reader
-  faults only suspend. Move stamps forward only: restoring an old value revives unpresented sessions
-  and copied cookie sessions. `fromHeaders` only suspends.
+- Passive auth runs at 300; add guards. Missing principal: 401; denied permission: 403; no
+  RBAC: 501.
+- API-key `validate`: return null for invalid keys; throws become `AuthenticationUnavailableError`
+  (503 with `errorHandler`; log names the cause's class only), even on public key-bearing routes.
+  Validate format first.
+- API-key, JWT and issuer headers refuse Cookie in any case. Use session authentication for cookies.
+- JWT_SECRET: option → secrets → config → environment. HS256 needs ≥32 UTF-8/raw bytes.
+  Missing/short keys throw `AuthPluginConfigurationError`; RS256 skips lookup.
+- Sign-in/MFA clear CSRF. Fetch a fresh token. `signIn.sessionStamp` revokes sessions.
+- JWTs need non-empty `sub`; scoped tokens fail RBAC guards. `tenantClaim` binds tokens to tenants.
+- `requireAuth({ credentials: 'header' })` restricts credential kind; `signInPage` redirects browser
+  navigations with `returnTo`. APIs keep 401.
+- `requireScopes` is ALL-of; `definePolicy`/`requirePolicy` cover policies; `scopedRbac` scopes
+  roles.
+- `createQuota({ message })` sets the shared 429 detail; empty/non-string messages are refused.
+  `quota.usage(key)` reads budgets. See README for factors and exchanges.

@@ -7,8 +7,8 @@
  * this ships beside sessions rather than as an option on the stateless
  * Origin/Referer middleware in `http-security-plugin`.
  *
- * It also means the token's lifetime is the session's lifetime, so it cannot
- * expire out from under a form that is still on screen inside a live session.
+ * The token lasts until the session ends or regenerates. Fetch a fresh form
+ * token after a privilege change such as sign-in.
  *
  * @module
  */

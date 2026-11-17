@@ -9,7 +9,7 @@ import { RuntimePlugin } from '@setu-ts/runtime';
 describe('testing package — e2e', () => {
   it('full flow: inject non-streaming, fetch streaming via collectStream, context, and fixture manager', async () => {
     const fixtures = new FixtureManager();
-    fixtures.mock('database', { query: () => [{ id: 1, name: 'Alice' }] });
+    fixtures.mock('database', { query: () => Promise.resolve([{ id: 1, name: 'Alice' }]) });
     fixtures.mock('cache', { get: () => null, set: () => {} });
 
     // Use the real RuntimePlugin for end-to-end testing on Deno — this is the
@@ -20,11 +20,9 @@ describe('testing package — e2e', () => {
     });
 
     // Register routes on the started app (post-start, verified in integration tests)
-    app.router.get('/users', (ctx) => {
-      const db = ctx.services.get<{ query: () => Array<{ id: number; name: string }> }>(
-        CAPABILITIES.DATABASE,
-      );
-      return ctx.response.json(db.query());
+    app.router.get('/users', async (ctx) => {
+      const db = ctx.services.get(CAPABILITIES.DATABASE);
+      return ctx.response.json(await db.query<{ id: number; name: string }>('SELECT users'));
     });
 
     // Exercise inject (non-streaming)

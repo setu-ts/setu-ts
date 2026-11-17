@@ -236,7 +236,8 @@ export class PinoLogger implements ILogger {
       return normalizePinoFactory(mod);
     } catch {
       throw new Error(
-        'PinoLogger requires Pino. Install it (deno add npm:pino) or use the console transport.',
+        'PinoLogger requires Pino. Install it (npm i pino · bun add pino · deno add npm:pino) ' +
+          'or use the console transport.',
       );
     }
   }

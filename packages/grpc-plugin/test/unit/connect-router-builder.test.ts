@@ -51,6 +51,7 @@ function build(
     services: [],
     embeddedDescriptors,
     healthService: undefined,
+    readMaxBytes: 4 * 1024 * 1024,
     ...overrides,
   });
 }
@@ -168,7 +169,7 @@ describe('buildConnectRouter — dispatch map', () => {
     expect([...dispatchMap.keys()]).toEqual(['/pkg.Svc/Method']);
   });
 
-  it('produces a working fetch handler per entry', async () => {
+  it('produces a working universal handler per entry', async () => {
     const runtime = createFakeConnectRuntime({
       services: [
         fakeService(HEALTH, ['Check'], fakeFile('h.proto')),
@@ -177,10 +178,65 @@ describe('buildConnectRouter — dispatch map', () => {
       requestPaths: ['/pkg.Svc/Method'],
     });
     const { dispatchMap } = build(runtime);
-    const handler = dispatchMap.get('/grpc/pkg.Svc/Method')!;
-    const response = await handler(new Request('http://x/grpc/pkg.Svc/Method'));
+    const entry = dispatchMap.get('/grpc/pkg.Svc/Method')!;
+    const request = {
+      httpVersion: '',
+      method: 'POST',
+      url: 'http://x/grpc/pkg.Svc/Method',
+      header: new Headers({ 'content-type': 'application/json' }),
+      body: (async function* () {})(),
+    };
+    const universal = await entry.handle(request);
 
-    expect(await response.text()).toBe('handled:/pkg.Svc/Method');
+    expect(universal.status).toBe(200);
+    expect(runtime.universalRequests).toEqual([request]);
+  });
+});
+
+describe('buildConnectRouter — M139b entries and read bound', () => {
+  it('forwards readMaxBytes to the router beside the interceptors', () => {
+    const runtime = createFakeConnectRuntime({ requestPaths: [] });
+    build(runtime, { readMaxBytes: 1024, interceptors: ['i'], health: false, reflection: false });
+    expect(runtime.routerOptions).toEqual([{ interceptors: ['i'], readMaxBytes: 1024 }]);
+  });
+
+  it('records which sides of each procedure stream', () => {
+    const runtime = createFakeConnectRuntime({
+      requestPaths: ['/p.S/Unary', '/p.S/Server', '/p.S/Client', '/p.S/Bidi', '/p.S/Bare'],
+      methodKinds: {
+        '/p.S/Unary': 'unary',
+        '/p.S/Server': 'server_streaming',
+        '/p.S/Client': 'client_streaming',
+        '/p.S/Bidi': 'bidi_streaming',
+      },
+    });
+    const { dispatchMap } = build(runtime, { health: false, reflection: false });
+    const sides = (path: string): [boolean, boolean] => {
+      const entry = dispatchMap.get(`/grpc${path}`)!;
+      return [entry.streamsRequest, entry.streamsResponse];
+    };
+    expect(sides('/p.S/Unary')).toEqual([false, false]);
+    expect(sides('/p.S/Server')).toEqual([false, true]);
+    expect(sides('/p.S/Client')).toEqual([true, false]);
+    expect(sides('/p.S/Bidi')).toEqual([true, true]);
+    expect(sides('/p.S/Bare')).toEqual([false, false]);
+  });
+
+  it('runs the native path through the same universal handler, keeping its trailer', async () => {
+    const runtime = createFakeConnectRuntime({ requestPaths: ['/pkg.Svc/Method'] });
+    const { dispatchMap } = build(runtime, { health: false, reflection: false });
+    const universal = await dispatchMap.get('/grpc/pkg.Svc/Method')!.handle({
+      httpVersion: '',
+      method: 'POST',
+      url: 'http://x/grpc/pkg.Svc/Method',
+      header: new Headers({ 'content-type': 'application/grpc' }),
+      body: (async function* () {})(),
+    });
+    expect(universal.header!.get('content-type')).toBe('application/grpc+proto');
+    let text = '';
+    for await (const chunk of universal.body!) text += new TextDecoder().decode(chunk);
+    expect(text).toBe('universal:/pkg.Svc/Method');
+    expect(universal.trailer!.get('grpc-status')).toBe('0');
   });
 });
 

@@ -14,8 +14,9 @@ import type { RealtimeDiagnosticsOptions } from '@setu-ts/common';
  */
 export interface SsePluginOptions {
   /**
-   * Heartbeat interval in milliseconds. When set, the plugin schedules a
-   * repeating `: heartbeat\n\n` comment frame. Omit to disable (no timer created).
+   * Heartbeat interval in milliseconds, default 30 000. The plugin schedules a
+   * repeating `: heartbeat\n\n` comment frame. Set `0` to disable (no timer created).
+   * A value that is not a whole number from 0 to 2^31-1 is refused when the plugin registers.
    *
    * @since 0.1.0
    */

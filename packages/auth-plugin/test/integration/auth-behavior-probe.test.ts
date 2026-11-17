@@ -186,7 +186,7 @@ describe('Auth Plugin behavioral probe', () => {
     runtime = createFakeRuntime(1_700_000_000_000);
 
     const plugin = AuthPlugin({
-      jwt: { secret: 'probe-hs256-secret' },
+      jwt: { secret: 'probe-hs256-secret-at-least-32-characters' },
       rbac: {
         roles: {
           admin: { permissions: ['*'], inherits: ['user'] },

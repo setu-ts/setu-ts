@@ -238,7 +238,8 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
     pseudocode: 0,
     skipped: 0,
   },
-  'docs/durable-runs.md': { total: 2, ts: 1, compile: 1, external: 0, pseudocode: 0, skipped: 1 },
+  // M140e: the run-budget recipe adds one compiling TypeScript fence.
+  'docs/durable-runs.md': { total: 3, ts: 2, compile: 2, external: 0, pseudocode: 0, skipped: 1 },
   'docs/ai.md': { total: 10, ts: 9, compile: 9, external: 0, pseudocode: 0, skipped: 1 },
   'docs/mcp.md': { total: 19, ts: 16, compile: 16, external: 0, pseudocode: 0, skipped: 3 },
   // M135: the retrieval guide; every TypeScript fence compiles.
@@ -288,9 +289,10 @@ const EXPECTED_AGGREGATE: FenceCounts = {
   // M136: +1 skipped shell fence in examples.md (durable-agent).
   // M138: +1 skipped shell fence in docs/cli.md (`setu workspace broker` / `rpc`).
   // grpc-workspace example: +2 skipped shell fences in docs/examples.md.
-  total: 362,
-  ts: 263,
-  compile: 230,
+  // M140e: docs/durable-runs.md's run-budget recipe (+1 compiling).
+  total: 363,
+  ts: 264,
+  compile: 231,
   external: 33,
   pseudocode: 0,
   skipped: 99,

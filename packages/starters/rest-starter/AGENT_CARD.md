@@ -37,6 +37,7 @@ await app.start({ port: 3000 });
 - Sessions require a secret; their cookies default to secure, so plain HTTP development needs
   `session.cookie: { secure: false }`.
 - OpenAPI self-hosts its UI unless CDN assets are selected; Workers select CDN automatically.
+- The OpenAPI document gives generated error responses an RFC 9457 body by default.
 - A messaging backplane needs a broker; the REST tier does not supply one.
 
 ## Other options

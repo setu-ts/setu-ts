@@ -387,3 +387,44 @@ describe('M131b 3.9 atomic setHeaders', () => {
     }
   }
 });
+
+describe('M139b §3.3 stream trailers', () => {
+  it('stream(body, { trailers }) carries the same promise onto the snapshot', () => {
+    const response = new ResponseBuilder();
+    const trailers = Promise.resolve(new Headers({ 'grpc-status': '0' }));
+    response.stream(new ReadableStream<Uint8Array>(), { trailers });
+    const snap = response.snapshot();
+    if (!snap.streaming) throw new Error('expected a stream');
+    expect(snap.trailers).toBe(trailers);
+    expect(response.streamOptions).toEqual({ trailers });
+  });
+
+  it('stream(body) leaves no trailers key, and a later call without them clears earlier ones', () => {
+    const response = new ResponseBuilder();
+    response.stream(new ReadableStream<Uint8Array>(), {
+      trailers: Promise.resolve(new Headers()),
+    });
+    response.stream(new ReadableStream<Uint8Array>());
+    const snap = response.snapshot();
+    expect('trailers' in snap).toBe(false);
+    expect(response.streamOptions).toBeUndefined();
+  });
+
+  it('a rejecting trailers promise is observed, so no unhandled rejection escapes', async () => {
+    const unhandled: unknown[] = [];
+    const listener = (reason: unknown): void => {
+      unhandled.push(reason);
+    };
+    process.on('unhandledRejection', listener);
+    try {
+      const response = new ResponseBuilder();
+      response.stream(new ReadableStream<Uint8Array>(), {
+        trailers: Promise.reject(new Error('never written')),
+      });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', listener);
+    }
+  });
+});

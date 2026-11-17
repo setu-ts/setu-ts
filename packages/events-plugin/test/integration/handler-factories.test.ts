@@ -1,3 +1,4 @@
+import { configDouble } from '../../../../test/fixtures/capability-doubles.ts';
 /**
  * EventsPlugin factory-arm integration: an event handler's factory resolves a
  * capability registered by a LATER plugin, and a published event reaches it
@@ -59,7 +60,7 @@ function configProviderPlugin(): IPlugin {
     version: '1.0.0',
     provides: [CAPABILITIES.CONFIG],
     register(ctx) {
-      ctx.services.register(CAPABILITIES.CONFIG, { value: 'dep-42' });
+      ctx.services.register(CAPABILITIES.CONFIG, configDouble({ value: 'dep-42' }));
     },
   };
 }
@@ -77,11 +78,11 @@ describe('EventsPlugin handler factories (integration)', () => {
               // The factory runs at onInit, after config-provider has registered,
               // so it can resolve the capability and build a handler around it.
               handler: (services): IEventHandler => {
-                const config = services.get<{ value: string }>(CAPABILITIES.CONFIG);
+                const config = services.get(CAPABILITIES.CONFIG);
                 return {
                   handle: (event) => {
                     const id = (event.data as { id: string }).id;
-                    observed.push(`${id}:${config.value}`);
+                    observed.push(`${id}:${config.getOrThrow<string>('value')}`);
                   },
                 };
               },

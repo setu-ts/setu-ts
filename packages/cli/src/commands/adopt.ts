@@ -71,7 +71,10 @@ import { detectProjectRuntime, workspaceProfile } from '../workspace/runtime-pro
 import { DEFAULT_BROKER, brokerSpec } from '../workspace/transport.ts';
 
 import { cliInvocation } from '../templates/project-files.ts';
-import { renderFullStackDevEntry } from '../templates/full-stack-build-files.ts';
+import {
+  renderFullStackDevEntry,
+  fullStackDevEntryVariants,
+} from '../templates/full-stack-build-files.ts';
 import { planInspectorRewrite } from '../workspace/development-ports.ts';
 
 /**
@@ -274,7 +277,14 @@ export async function runAdoptCommand(args: ParsedArgs, deps: AdoptDependencies)
     // service talks without being asked to. `--broker` belongs to a workspace
     // created fresh.
     broker: DEFAULT_BROKER,
-    members: [{ name: names.kebab, port: basePort, ...support }],
+    members: [
+      {
+        name: names.kebab,
+        port: basePort,
+        ...support,
+        ...(plan.envFilePath === undefined ? {} : { envFilePaths: [plan.envFilePath] }),
+      },
+    ],
   };
   for (const field of (workersProject
     ? []
@@ -502,26 +512,31 @@ export async function runAdoptCommand(args: ParsedArgs, deps: AdoptDependencies)
         if (plugins.has('react-router-plugin')) {
           const devPath = joinPath(memberDir, 'dev.ts');
           const source = await readExistingText(deps.fs, devPath);
-          const standalone = renderFullStackDevEntry();
+          const variants = fullStackDevEntryVariants(profile.runtime);
           const formattedStandalone = await formatForTarget(
-            [standalone],
+            variants,
             profile.runtime,
             memberDir,
             deps.error,
           );
           if (source === undefined) {
             // No dev.ts: nothing reads a Vite port to rewrite or to point at.
-          } else if (source === standalone.contents || source === formattedStandalone[0]!.contents)
+          } else if (
+            [...variants, ...formattedStandalone].some((variant) => source === variant.contents)
+          )
             await writeFiles(
               deps.fs,
               await formatForTarget(
                 [
                   {
                     path: devPath,
-                    contents: renderFullStackDevEntry({
-                      symbol: SERVICE_PORT_EXPORT,
-                      from: DISCOVERY_SPECIFIER,
-                    }).contents,
+                    contents: renderFullStackDevEntry(
+                      {
+                        symbol: SERVICE_PORT_EXPORT,
+                        from: DISCOVERY_SPECIFIER,
+                      },
+                      profile.runtime,
+                    ).contents,
                     managed: true,
                   },
                 ],
