@@ -150,6 +150,52 @@ For document navigation, throw `redirect('/login')` when the user is anonymous o
 `data(..., { status: 403 })` when the page is forbidden. A fetch caller that requires the API error
 shape should call the corresponding kernel API route.
 
+## Protecting page actions
+
+Every page is served by one kernel catch-all route, so route-level middleware such as
+`rateLimitMiddleware`, `requirePolicy`, `requireScopes`, `idempotent()` or an upload limit does not
+reach a page's loader or action by default. `pagePolicies` attaches ordinary Setu middleware to a
+page by its React Router **route id**:
+
+```typescript
+import { rateLimitMiddleware } from '@setu-ts/auth-plugin';
+import { ReactRouterPlugin } from '@setu-ts/react-router-plugin';
+
+export const frontend = ReactRouterPlugin({
+  serverBuildPath: new URL('./build/server/index.js', import.meta.url).href,
+  assetsDir: './build/client/assets',
+  pagePolicies: {
+    // Five sign-in attempts a minute per caller; page views are not limited.
+    'routes/_auth/login': {
+      methods: ['POST'],
+      middleware: [rateLimitMiddleware({ windowMs: 60_000, max: 5 })],
+    },
+  },
+});
+```
+
+- **Matched by React Router's own rules.** The plugin matches each request with the `matchRoutes` of
+  the `react-router` module that serves it, after the same `.data` normalization, so a policy
+  applies to the document request (`/login`), the single-fetch request (`/login.data`, `/_.data`)
+  and an index action (`?index`) alike. Guarding a page by its path instead misses those shapes.
+- **Layouts and the root apply beneath them.** A policy on a layout route or on `root` runs for
+  every page under it; when several match, they run outer first. A `POST` to a layout's path without
+  `?index` also runs its index child's policy, as React Router runs that child's middleware.
+- **`methods`** limits a policy to those HTTP methods; omitted means every method. A listed `GET`
+  also covers `HEAD`, because React Router runs the same loaders for both.
+- **Same semantics as kernel route middleware.** Policies run after the global pipeline, in the
+  kernel, with the page render as the terminal: a policy that answers without calling `next()` ends
+  the request (the action never runs), and its own response is what the client receives, not a React
+  Router error boundary. Middleware that reads the response after `next()` sees the rendered page. A
+  policy may read `ctx.request.formData()`; the action still receives the same body.
+- **Refused at startup:** an id naming no route in the build (the message lists known ids), an empty
+  `middleware` or `methods` array, or a custom `loadRequestHandler` that returns no `pageRoutes`. A
+  `requirePolicy` naming an unregistered policy is refused by `AuthPlugin` as it is on any route.
+- **Public files** (`/robots.txt`) are served before policies run, as before.
+- Route ids are file paths without the extension, relative to `app/`: `app/routes/_auth/login.tsx`
+  is `routes/_auth/login`. The conformance test runs against the installed `react-router`, which
+  must be in the plugin's peer range (`^8`).
+
 ## Routing
 
 The catch-all is mounted on all seven verbs at `joinWildcard(basename)`. `flatRoutes` and file-based
@@ -220,6 +266,8 @@ application's choice.
 | `ViteDevExternalsPlugin`          | interface |
 | `ViteHookContext`                 | interface |
 | `ViteResolvedEnvironments`        | interface |
+| `PagePolicy`                      | type      |
+| `PageRouteSource`                 | type      |
 | `PopulateLoadContext`             | type      |
 | `ReactRouterPluginOptions`        | type      |
 | `RouteHandler`                    | type      |

@@ -317,6 +317,7 @@ package fits the plugin architecture.
 | `respondWithAuthorizationFailure`     | function  |
 | `respondWithError`                    | function  |
 | `responseMetadataOf`                  | function  |
+| `routeMiddlewareOf`                   | function  |
 | `scopedPermissionAbility`             | function  |
 | `scopedRoleAbility`                   | function  |
 | `scopeFromParam`                      | function  |
@@ -685,6 +686,7 @@ package fits the plugin architecture.
 | `RouteIdempotencyMetadata`            | interface |
 | `RouteInfo`                           | interface |
 | `RouteMcpToolMetadata`                | interface |
+| `RouteMiddlewareGroups`               | interface |
 | `RouteRateLimitMetadata`              | interface |
 | `RouteResponseDocumentation`          | interface |
 | `RouteResponseHeader`                 | interface |

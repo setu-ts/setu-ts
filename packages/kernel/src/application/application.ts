@@ -46,6 +46,8 @@ import type {
   IWebSocketService,
   MetricConfig,
   RouteDefinition,
+  MiddlewareFunction,
+  RouteMiddlewareGroups,
   StartOptions,
   WebSocketUpgradeDecision,
 } from '@setu-ts/common';
@@ -1307,6 +1309,7 @@ class Application implements IKernelApplication {
     scope: 'global' | 'route',
     parentOperationId: string | undefined,
     routeEntryIndex: number | undefined,
+    positionOffset = 0,
   ): ChainObserver | undefined {
     const collector = this.#collector;
     if (collector === undefined) {
@@ -1318,7 +1321,7 @@ class Application implements IKernelApplication {
         collector.observeMiddlewareStage({
           parentOperationId: parentOperationId ?? '<unkeyed>',
           scope,
-          position: stage.position,
+          position: stage.position + positionOffset,
           routeEntryIndex,
           outcome: stage.outcome,
           startedAtMs: stage.startedAtMs,
@@ -1498,6 +1501,9 @@ class Application implements IKernelApplication {
     // stops stages after the response is ended. Positions follow the route's
     // own middleware array; the terminal observes the handler itself.
     const routeMiddleware = definition.middleware;
+    if (definition.middlewareGroups !== undefined) {
+      return this.#dispatchRouteGroups(ctx, handle, entry, definition, definition.middlewareGroups);
+    }
     if (routeMiddleware !== undefined && routeMiddleware.length > 0) {
       return executeChain(
         routeMiddleware,
@@ -1524,6 +1530,60 @@ class Application implements IKernelApplication {
       return undefined;
     }
     return this.#invokeHandlerObserved(ctx, entry, definition, handle);
+  }
+
+  /** Runs the optional selected-group path without allocating on the M87 bypass. */
+  async #dispatchRouteGroups(
+    ctx: IRequestContext,
+    handle: RequestContextHandle,
+    entry: RouteEntry,
+    definition: RouteDefinition,
+    middlewareGroups: RouteMiddlewareGroups,
+  ): Promise<void> {
+    const staticMiddleware = definition.middleware ?? [];
+    const selectAndRun = async (): Promise<void> => {
+      if ((ctx.response as ResponseBuilder).ended) return;
+      const keys = await middlewareGroups.select(ctx);
+      const selected: MiddlewareFunction[] = [];
+      // Validate the complete selection before any selected stage executes.
+      for (const key of keys) {
+        if (!Object.hasOwn(middlewareGroups.groups, key)) {
+          throw new Error(`route middleware group '${key}' is not declared`);
+        }
+        selected.push(...middlewareGroups.groups[key]!);
+      }
+      if (selected.length === 0) {
+        if (!(ctx.response as ResponseBuilder).ended) {
+          await this.#invokeHandlerObserved(ctx, entry, definition, handle);
+        }
+        return;
+      }
+      await executeChain(
+        selected,
+        ctx,
+        async () => {
+          await this.#invokeHandlerObserved(ctx, entry, definition, handle);
+        },
+        undefined,
+        this.#chainObserver(
+          'route',
+          this.#collector?.requestOperationIdOf(ctx),
+          entry.index,
+          staticMiddleware.length,
+        ),
+      );
+    };
+    if (staticMiddleware.length === 0) {
+      await selectAndRun();
+    } else {
+      await executeChain(
+        staticMiddleware,
+        ctx,
+        selectAndRun,
+        undefined,
+        this.#chainObserver('route', this.#collector?.requestOperationIdOf(ctx), entry.index),
+      );
+    }
   }
 
   /**

@@ -127,9 +127,10 @@ ARCHITECTURE §10 and the plugin table row at line 1649).
 - **Decision:** an internal matcher (`src/policies/page-route-matcher.ts`, not exported) takes the
   server build and React Router's `matchRoutes`:
   1. builds the route tree from `build.routes` exactly as `routes.js:17-69` groups it (by
-     `parentId`; `index` → `{ id, index: true }`; else `{ id, path, caseSensitive, children }`),
-     cached per build object in a `WeakMap`, so a development build re-read per request rebuilds
-     only when Vite hands back a new object;
+     `parentId`; `index` → `{ id, path, index: true }` — React Router keeps an index route's `path`,
+     which a flat route such as `app.settings._index` with no parent layout carries; else
+     `{ id, path, caseSensitive, children }`), cached per build object in a `WeakMap`, so a
+     development build re-read per request rebuilds only when Vite hands back a new object;
   2. if `build.routeDiscovery?.mode === 'lazy'` and the pathname equals
      `joinPaths([build.basename, build.routeDiscovery.manifestPath || '/__manifest'])`, returns
      `[]`;
@@ -149,14 +150,22 @@ ARCHITECTURE §10 and the plugin table row at line 1649).
 - **Decision:** `ReactRouterCommonOptions.pagePolicies?: Readonly<Record<string, PagePolicy>>`,
   keyed by route id;
   `PagePolicy = { readonly middleware: readonly MiddlewareFunction[]; readonly methods?: readonly HttpMethod[] }`.
-  Omitted `methods` means every method. When `pagePolicies` is absent or `{}`, the catch-all is
-  registered exactly as today (no `middlewareGroups`, no per-request matching). Otherwise each
-  catch-all verb registers `{ handler, middlewareGroups: { groups, select } }` with one group per
-  route id; `select(ctx)` matches (§3.4) and returns, root first, the ids that have a policy whose
-  `methods` include `ctx.request.method`. A policy on a layout or on `root` therefore applies to
-  every page beneath it, and both the layout's and the page's policies run, outer first. Static
-  `publicFiles` GETs keep their current order: a public file is served before SSR, so page policies
-  do not run for `/robots.txt` (they run only when the request reaches `renderRoute`).
+  Omitted `methods` means every method. A listed `GET` also selects `HEAD`: React Router answers a
+  `HEAD` request by running the same loaders as `GET`, so a `GET`-only guard that skipped `HEAD`
+  would let a loader run unguarded (fail closed). When `pagePolicies` is absent or `{}`, the
+  catch-all is registered exactly as today (no `middlewareGroups`, no per-request matching).
+  Otherwise each catch-all verb registers `{ handler, middlewareGroups: { groups, select } }` with
+  one group per route id; `select(ctx)` matches (§3.4) and returns, root first, the ids that have a
+  policy whose `methods` include `ctx.request.method`. A policy on a layout or on `root` therefore
+  applies to every page beneath it, and both the layout's and the page's policies run, outer first.
+  Static `publicFiles` GETs keep their current order: a public file is served before SSR, so page
+  policies do not run for `/robots.txt`. Today the public-file lookup lives inside the GET handler,
+  which runs AFTER route middleware (`react-router-plugin.ts:191`), so a root policy would refuse
+  `/robots.txt` (measured: 200 → 429). When policies are installed and public files are enabled, the
+  GET route therefore carries the lookup as its static `middleware` stage — it answers a hit (or the
+  `400` for an undecodable path) and ends the response, else calls `next()` — and its handler is
+  `renderRoute`; static middleware runs before the groups (§3.2). With no policies the GET route is
+  registered exactly as today.
 - **Validation at registration** (all reported in one internal `PagePolicyConfigurationError`, NOT
   exported — nothing outside the plugin branches on it, so tests match its message): a key naming no
   route id in the build (the message lists the unknown ids and up to ten known ones), an empty
@@ -169,15 +178,22 @@ ARCHITECTURE §10 and the plugin table row at line 1649).
 ### 3.6 Where the build comes from: `SsrRuntime.pageRoutes`
 
 - **Decision:** `SsrRuntime` gains optional `pageRoutes?: PageRouteSource`,
-  `PageRouteSource = { readonly build: () => unknown | Promise<unknown>; readonly matchRoutes: (routes: readonly unknown[], location: string, basename?: string) => readonly { readonly route: { readonly id: string } }[] | null }`.
-  The default loader (`server-build.ts`) always supplies it — `build: () => build` and
-  `matchRoutes: rr.matchRoutes` — and throws a plain `Error` naming the missing export when
-  `rr.matchRoutes` is not a function, the same form it throws for a missing `createRequestHandler`
-  (`server-build.ts:189-194`). A custom `loadRequestHandler` (the development entry) supplies its
-  own. `register()` refuses with `PagePolicyConfigurationError` when `pagePolicies` is non-empty and
-  the runtime has no `pageRoutes`, naming `docs/react-router-dev.md`. Route ids are validated
-  against `await build()` once at registration; per request, `select` awaits `build()` (a
-  development build may change).
+  `PageRouteSource = { readonly build: () => unknown | Promise<unknown>; matchRoutes(routes: readonly unknown[], location: string, basename?: string): readonly { readonly route: { readonly id?: string } }[] | null }`.
+  `matchRoutes` is declared with METHOD syntax on purpose: React Router declares its parameter as a
+  mutable `RouteObjectType[]` (`lib/router/utils.d.ts:678`), so a function-typed property with a
+  `readonly unknown[]` parameter rejects `rr.matchRoutes` under `strictFunctionTypes` (TS2322,
+  measured); method parameters are checked bivariantly, so the dev entry's plain
+  `{ build, matchRoutes }` type-checks with no cast. The returned `route.id` is optional for the
+  same reason (React Router's `AgnosticRouteObject.id?: string`, `utils.d.ts:497`); every route the
+  matcher builds carries an id, so a match without one is impossible in practice, and the matcher
+  throws on it (fail closed: `500`, page not rendered) rather than skip a policy. The default loader
+  (`server-build.ts`) always supplies it — `build: () => build` and `matchRoutes: rr.matchRoutes` —
+  and throws a plain `Error` naming the missing export when `rr.matchRoutes` is not a function, the
+  same form it throws for a missing `createRequestHandler` (`server-build.ts:189-194`). A custom
+  `loadRequestHandler` (the development entry) supplies its own. `register()` refuses with
+  `PagePolicyConfigurationError` when `pagePolicies` is non-empty and the runtime has no
+  `pageRoutes`, naming `docs/react-router-dev.md`. Route ids are validated against `await build()`
+  once at registration; per request, `select` awaits `build()` (a development build may change).
 - **Why:** the plugin must match against the same build React Router serves; a seam that cannot say
   which build that is must not let policies silently never apply (fail closed).
 - **Test home:** `test/unit/server-build.test.ts` (default loader supplies it);

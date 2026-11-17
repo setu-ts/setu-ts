@@ -359,7 +359,12 @@ export function renderFullStackDevEntry(
   return {
     path: 'dev.ts',
     contents: `import * as vite from 'vite';
-import { createRequestHandler, RouterContextProvider, type ServerBuild } from 'react-router';
+import {
+  createRequestHandler,
+  matchRoutes,
+  RouterContextProvider,
+  type ServerBuild,
+} from 'react-router';
 import { CAPABILITIES, describeError, type ILogger, type IRuntimeServices } from '@setu-ts/common';
 import { viteDevExternals } from '@setu-ts/react-router-plugin';
 import { createRuntimeServices } from '@setu-ts/runtime';
@@ -438,6 +443,7 @@ async function boot() {
         // From the same react-router module as the handler: React Router checks
         // the context with instanceof.
         createLoadContext: () => new RouterContextProvider(),
+        pageRoutes: { build: loadServerBuild, matchRoutes },
       });
     },
   });
@@ -508,6 +514,12 @@ export function fullStackDevEntryVariants(
     `const viteServer = await vite.createServer(${args});\nawait viteServer.listen();` +
     current.contents.slice(end)
   )
+    // Published 0.12.0 entries predate the page-route source seam.
+    .replace(
+      "import {\n  createRequestHandler,\n  matchRoutes,\n  RouterContextProvider,\n  type ServerBuild,\n} from 'react-router';",
+      "import { createRequestHandler, RouterContextProvider, type ServerBuild } from 'react-router';",
+    )
+    .replace('        pageRoutes: { build: loadServerBuild, matchRoutes },\n', '')
     .replace(', type IRuntimeServices', '')
     .replace('const runtime: IRuntimeServices =', 'const runtime =')
     .replace('  console.log(`Listening on http://localhost:${port}/`);\n', '');

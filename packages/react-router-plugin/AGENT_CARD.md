@@ -53,6 +53,8 @@ export async function loader({ context }: { context: RouterLoadContext }) {
 
 ## Other options
 
+- `pagePolicies` runs Setu middleware (a rate limit on sign-in POSTs) for a React Router route id
+  such as `routes/_auth/login`, on `.data` requests too.
 - `serverBuild` takes the module namespace instead of a path, for bundled Workers applications.
 - `populateLoadContext` adds values; use `contextKeyFor` for keys shared with the frontend build.
 - `loadRequestHandler` injects a runtime for a development server; `publicFiles: false` serves only

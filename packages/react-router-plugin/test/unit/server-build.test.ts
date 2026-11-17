@@ -16,6 +16,34 @@ import {
 import { createFakeLoadContextFactory, createSimpleFakeHandler } from '../fixtures/fake-handler.ts';
 
 describe('server-build', () => {
+  it('supplies the unwrapped build and the exact module matcher', async () => {
+    const build = { routes: {} };
+    const matchRoutes = () => null;
+    const runtime = await loadRequestHandler('<module>', 'production', {
+      serverBuild: { default: build },
+      rrImportHook: () =>
+        Promise.resolve({
+          createRequestHandler: () => () => Promise.resolve(new Response('ok')),
+          RouterContextProvider: class {},
+          matchRoutes,
+        }),
+    });
+    expect(await runtime.pageRoutes!.build()).toBe(build);
+    expect(runtime.pageRoutes!.matchRoutes).toBe(matchRoutes);
+  });
+
+  it('names a missing matchRoutes export', async () => {
+    await expect(
+      loadRequestHandler('<module>', 'production', {
+        serverBuild: {},
+        rrImportHook: () =>
+          Promise.resolve({
+            createRequestHandler: () => () => {},
+            RouterContextProvider: class {},
+          }),
+      }),
+    ).rejects.toThrow("exposes no 'matchRoutes' export");
+  });
   it('assembleHandler returns a handler that calls createRequestHandler(build, mode)', () => {
     let factoryCalled = false;
     let capturedBuild: unknown = null;
@@ -204,6 +232,7 @@ describe('server-build', () => {
 describe('loadRequestHandler — the module arm (M113d §3.10)', () => {
   const fakeRR = (): Record<string, unknown> =>
     ({
+      matchRoutes: () => null,
       createRequestHandler: (build: unknown, mode: string) => (_request: Request) =>
         Promise.resolve(new Response(`${mode}:${String(build)}`)),
       RouterContextProvider: class {},

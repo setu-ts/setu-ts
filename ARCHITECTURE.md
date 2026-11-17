@@ -1993,6 +1993,28 @@ const authMiddleware = () => async (ctx, next) => {
 };
 ```
 
+### Route middleware chosen per request
+
+A route's `middleware` array is fixed when the route is registered. One route can stand for many
+logical endpoints, though: `ReactRouterPlugin` serves every page through a single catch-all, and a
+guard meant for the sign-in action must not run on every page. `RouteDefinition.middlewareGroups`
+keeps both properties that matter:
+
+- **The middleware is still static data.** `groups` names every middleware the route can run, so a
+  startup scan (`routeMiddlewareOf`, read by `AuthPlugin`'s `requirePolicy` check) still sees all of
+  it.
+- **Only the choice is per request.** After the static chain calls through, the kernel calls
+  `select(ctx)`, which returns group keys; the named groups run through the same `executeChain`,
+  with the handler as terminal. Short-circuiting, the double-`next()` guard and the after-`next()`
+  view of the response are therefore identical to any other route middleware. An undeclared key, or
+  a `select` that fails, answers `500` without running the handler: the seam fails closed.
+
+The matching lives with the producer, not the kernel. `ReactRouterPlugin` selects by React Router
+route id using React Router's own `matchRoutes`, after its `.data` normalization, because a guard
+keyed on the URL path misses the single-fetch shapes (`/x.data`, `/_.data`) that reach the same
+action. Policies are not run inside React Router's own `middleware` export: there they would lose
+the kernel context and the after-`next()` response, which `idempotent()` depends on.
+
 ### Non-HTTP ingress behaviour chain
 
 Queue processors, scheduler jobs, messaging subscriptions, and WebSocket frames use a second,

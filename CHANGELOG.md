@@ -316,6 +316,20 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Page route policies (M141, `@setu-ts/react-router-plugin`, `@setu-ts/kernel`, `@setu-ts/common`,
+  `@setu-ts/auth-plugin`).** `pagePolicies` on `ReactRouterPlugin` attaches Setu middleware (a rate
+  limit, `requirePolicy`, `idempotent()`) to a page by its React Router route id, optionally per
+  HTTP method. Requests are matched with React Router's own `matchRoutes` after its `.data`
+  normalization, so document, single-fetch and `?index` requests all select the route; the kernel
+  runs the policies after the global pipeline with the page render as terminal. `PagePolicy` and
+  `PageRouteSource` are exported; `SsrRuntime.pageRoutes` is supplied by the default loader and by
+  the generated full-stack development entry. In `common`, `RouteDefinition.middlewareGroups`
+  (`RouteMiddlewareGroups`) selects static middleware groups per request, and `routeMiddlewareOf`
+  returns a route's whole middleware set, which `AuthPlugin`'s `requirePolicy` startup check now
+  reads. **Upgrade:** a custom `loadRequestHandler` must return `pageRoutes` before `pagePolicies`
+  can be used (`register()` refuses otherwise); anything that dispatches a `RouteDefinition` itself
+  must also run `middlewareGroups`, or its guards fail open.
+
 - **Form bodies and file uploads in the document and the client (M137c, #590, `@setu-ts/common`,
   `@setu-ts/validation-plugin`, `@setu-ts/openapi-plugin`, `@setu-ts/sdk`).** `formFile` and
   `FormFileOptions` from `@setu-ts/validation-plugin/zod` validate a file field's shape, accepted

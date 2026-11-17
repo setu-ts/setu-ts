@@ -5,7 +5,7 @@
  * @since 0.1.0
  */
 
-import type { IRequestContext } from '@setu-ts/common';
+import type { HttpMethod, IRequestContext, MiddlewareFunction } from '@setu-ts/common';
 export type { IRequestContext } from '@setu-ts/common';
 
 /**
@@ -79,7 +79,41 @@ export interface SsrRuntime {
   readonly handler: SsrRequestHandler;
   /** Constructs a fresh, empty per-request context provider. */
   readonly createLoadContext: () => RouterLoadContext;
+  /**
+   * Build and matcher from the handler's React Router module.
+   * @since 0.13.0
+   */
+  readonly pageRoutes?: PageRouteSource;
 }
+
+/**
+ * Middleware for a React Router route id, including its descendants.
+ * @since 0.13.0
+ */
+export type PagePolicy = {
+  /** Runs in order through the kernel's route middleware chain. */
+  readonly middleware: readonly MiddlewareFunction[];
+  /** Omitted means all methods; an empty array is refused at registration. */
+  readonly methods?: readonly HttpMethod[];
+};
+
+/**
+ * The build and public matcher used by the SSR handler.
+ * @since 0.13.0
+ */
+export type PageRouteSource = {
+  /** Returns the current unwrapped server build, including development rebuilds. */
+  readonly build: () => unknown | Promise<unknown>;
+  /**
+   * React Router's public matcher from the handler's module. Method syntax uses
+   * a bivariant parameter check to accept React Router's mutable route array.
+   */
+  matchRoutes(
+    routes: readonly unknown[],
+    location: string,
+    basename?: string,
+  ): readonly { readonly route: { readonly id?: string } }[] | null;
+};
 
 /**
  * Hook for adding application values to the per-request React Router context.
@@ -99,6 +133,13 @@ export type PopulateLoadContext = (ctx: IRequestContext, context: RouterLoadCont
  * @since 0.10.0
  */
 export interface ReactRouterCommonOptions {
+  /**
+   * Kernel middleware keyed by React Router route id. Unknown ids and empty
+   * middleware or method arrays refuse registration. Omitted or empty installs
+   * no selector; a custom loader must supply pageRoutes when policies are set.
+   * @since 0.13.0
+   */
+  readonly pagePolicies?: Readonly<Record<string, PagePolicy>>;
   /**
    * Injectable seam for lazy loading the RR runtime. When omitted, the default
    * loads the server build (by path or module) + `await import('react-router')`.
