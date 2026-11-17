@@ -35,6 +35,14 @@ export interface ISpecifierSpan {
   readonly typeOnly: boolean;
   /** A static declaration or an `import('…')` call. */
   readonly kind: 'static' | 'dynamic';
+  /** Static import declaration and its local bindings; absent for re-exports and dynamic loads. */
+  readonly declaration?: {
+    readonly start: number;
+    readonly end: number;
+    readonly bindings: readonly string[];
+    /** Value imports whose exported and local names are the same. */
+    readonly named: readonly string[];
+  };
 }
 
 /**
@@ -205,6 +213,78 @@ function literalOf(token: IToken | undefined): string | undefined {
   return undefined;
 }
 
+/** Reads local bindings from the already-tokenized clause before `from`. */
+function importBindings(
+  tokens: readonly IToken[],
+  start: number,
+  end: number,
+  typeOnly: boolean,
+): { bindings: readonly string[]; named: readonly string[] } | undefined {
+  const bindings: string[] = [];
+  const named: string[] = [];
+  let at = start + (typeOnly ? 1 : 0);
+  if (at < end && tokens[at]?.kind === 'word') {
+    bindings.push(tokens[at++]!.text);
+    if (at < end) {
+      if (tokens[at]?.text !== ',') return undefined;
+      at++;
+    }
+  }
+  if (at === end) return { bindings, named };
+  if (
+    tokens[at]?.text === '*' &&
+    tokens[at + 1]?.text === 'as' &&
+    tokens[at + 2]?.kind === 'word'
+  ) {
+    bindings.push(tokens[at + 2]!.text);
+    return at + 3 === end ? { bindings, named } : undefined;
+  }
+  if (tokens[at++]?.text !== '{') return undefined;
+  while (at < end && tokens[at]?.text !== '}') {
+    const entryType =
+      tokens[at]?.text === 'type' &&
+      tokens[at + 1]?.kind === 'word' &&
+      tokens[at + 1]?.text !== 'as';
+    if (entryType) at++;
+    const exported = tokens[at++];
+    if (exported?.kind !== 'word') return undefined;
+    let local = exported;
+    if (tokens[at]?.text === 'as') {
+      at++;
+      const alias = tokens[at++];
+      if (alias?.kind !== 'word') return undefined;
+      local = alias;
+    }
+    bindings.push(local.text);
+    if (!typeOnly && !entryType && local.text === exported.text) named.push(local.text);
+    if (tokens[at]?.text === ',') at++;
+    else if (tokens[at]?.text !== '}') return undefined;
+  }
+  return tokens[at]?.text === '}' && at + 1 === end ? { bindings, named } : undefined;
+}
+
+/** Finishes a static import, including attributes and an optional semicolon. */
+function importEnd(tokens: readonly IToken[], literal: number): number | undefined {
+  let end = literal + 1;
+  if (
+    tokens[end]?.kind === 'word' &&
+    (tokens[end]?.text === 'with' || tokens[end]?.text === 'assert')
+  ) {
+    end++;
+    if (tokens[end]?.text !== '{') return undefined;
+    let depth = 0;
+    do {
+      if (tokens[end]?.kind === 'punct') {
+        if (tokens[end]?.text === '{') depth++;
+        else if (tokens[end]?.text === '}') depth--;
+      }
+      end++;
+    } while (depth > 0 && end < tokens.length);
+    if (depth !== 0) return undefined;
+  }
+  return tokens[end]?.text === ';' ? tokens[end]!.end : tokens[end - 1]!.end;
+}
+
 /**
  * Reads the `import.meta.glob(…)` call whose `import` is at `i`.
  *
@@ -327,7 +407,18 @@ export function lexImportSpecifiers(source: string): LexedImports {
       continue;
     }
     if (token.text === 'import' && next?.kind === 'string') {
-      spans.push(span(next, false, 'static'));
+      const end = importEnd(tokens, i + 1);
+      if (end === undefined)
+        return { kind: 'unclassifiable', reason: 'unreadable import attributes' };
+      spans.push({
+        ...span(next, false, 'static'),
+        declaration: {
+          start: token.start,
+          end,
+          bindings: [],
+          named: [],
+        },
+      });
       continue;
     }
     const typeOnly = next?.kind === 'word' && next.text === 'type';
@@ -356,7 +447,22 @@ export function lexImportSpecifiers(source: string): LexedImports {
     const literal = tokens[j];
     if (literal?.kind !== 'string' || tokens[j - 1]?.text !== 'from')
       return { kind: 'unclassifiable', reason: 'an import declaration it cannot read' };
-    spans.push(span(literal, typeOnly, 'static'));
+    const clause = importBindings(tokens, i + 1, j - 1, typeOnly);
+    const end = importEnd(tokens, j);
+    if (end === undefined)
+      return { kind: 'unclassifiable', reason: 'unreadable import attributes' };
+    spans.push({
+      ...span(literal, typeOnly, 'static'),
+      ...(clause === undefined
+        ? {}
+        : {
+            declaration: {
+              start: token.start,
+              end,
+              ...clause,
+            },
+          }),
+    });
   }
   return { kind: 'ok', spans, globs: globsReadable ? globs : 'unreadable' };
 }

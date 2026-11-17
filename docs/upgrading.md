@@ -12,6 +12,18 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### Page route policies (0.13.0)
+
+Only two kinds of code need a change, and neither exists in a generated project:
+
+- **A custom `loadRequestHandler`** (a hand-written development entry) must also return
+  `pageRoutes: { build, matchRoutes }` — the build React Router serves and `matchRoutes` from the
+  same `react-router` module — before the application sets `pagePolicies`; `ReactRouterPlugin`
+  refuses to register without it. The default loader and the generated `dev.ts` already return it.
+- **Code that dispatches a `RouteDefinition` itself**, instead of through the kernel, must run
+  `middlewareGroups`: after the static `middleware`, call `select(ctx)` and run the named groups, in
+  that order, before the handler. A dispatcher that ignores them skips the guards in them.
+
 ### `csrf.exemptBearer` and `IAgentRunService` (0.13.0)
 
 Custom `IAgentRunService` implementations must add the required

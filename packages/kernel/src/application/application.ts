@@ -1540,6 +1540,9 @@ class Application implements IKernelApplication {
     definition: RouteDefinition,
     middlewareGroups: RouteMiddlewareGroups,
   ): Promise<void> {
+    // A route stage can answer while next() keeps the handler running. Keep
+    // deferred cleanup and shutdown tied to that handler on the fast path too.
+    handle.trackHandler = true;
     const staticMiddleware = definition.middleware ?? [];
     const selectAndRun = async (): Promise<void> => {
       if ((ctx.response as ResponseBuilder).ended) return;

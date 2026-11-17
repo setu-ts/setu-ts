@@ -13,6 +13,23 @@ const config = projectFiles('portal', 'deno', resolveHost(FULL_STACK_TEMPLATE, '
 )!.contents;
 
 describe('withStarterOption', () => {
+  it.each([
+    'const note = "import { CUSTOM_METRICS } from \'./other.ts\'";',
+    'const note = "import { CUSTOM_METRICS } from \'./src/metrics/index.ts\'";',
+    "import './side.ts'\nconst note = \"CUSTOM_METRICS from './other.ts'\"",
+  ])('reads only real import declarations when adding a seam: %s', (prefix) => {
+    const inserted = withStarterOption(
+      `${prefix}\n${config}`,
+      'metrics',
+      '{ customMetrics: [...CUSTOM_METRICS] }',
+      [{ symbols: ['CUSTOM_METRICS'], from: './src/metrics/index.ts' }],
+    );
+    expect(inserted).toBeDefined();
+    expect(
+      inserted!.match(/^import \{ CUSTOM_METRICS \} from '\.\/src\/metrics\/index\.ts';$/gm),
+    ).toHaveLength(1);
+    expect(inserted).toContain('metrics: { customMetrics: [...CUSTOM_METRICS] }');
+  });
   for (const key of ['messaging', 'queue'] as const) {
     it(`inserts absent ${key} first in the generated return object, only once`, () => {
       const literal = key === 'messaging' ? "{ broker: 'memory' }" : "{ adapter: 'memory' }";

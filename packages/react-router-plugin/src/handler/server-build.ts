@@ -41,7 +41,7 @@ export function createLoadContextFactory(rr: Record<string, unknown>): () => Rou
   if (typeof Provider !== 'function') {
     throw new Error(
       `The loaded 'react-router' module exposes no 'RouterContextProvider' export. ` +
-        `React Router 8 or later is required — 'createRequestHandler' rejects any ` +
+        `React Router 8 is required — 'createRequestHandler' rejects any ` +
         `context that is not an instance of that class.`,
     );
   }
@@ -140,7 +140,8 @@ export function assembleHandler(
  * @param mode - `'production'` or `'development'`
  * @param options - Optional override for the react-router import seam
  * @returns A promise resolving to the handler, context factory, and page route source
- * @throws {Error} When either import fails, with a message naming the missing specifier
+ * @throws {Error} When either import fails, or the module lacks `createRequestHandler`,
+ *   `matchRoutes`, or `RouterContextProvider`, naming the missing specifier or export
  * @since 0.1.0
  */
 export async function loadRequestHandler(
@@ -195,7 +196,7 @@ export async function loadRequestHandler(
   if (typeof rr.createRequestHandler !== 'function') {
     throw new Error(
       `The loaded 'react-router' module exposes no 'createRequestHandler' export. ` +
-        `Ensure the resolved package is React Router 8 or later.`,
+        `Ensure the resolved package is React Router 8.`,
     );
   }
 
@@ -204,7 +205,7 @@ export async function loadRequestHandler(
   if (typeof rr.matchRoutes !== 'function') {
     throw new Error(
       `The loaded 'react-router' module exposes no 'matchRoutes' export. ` +
-        `Ensure the resolved package is React Router 8 or later.`,
+        `Ensure the resolved package is React Router 8.`,
     );
   }
 

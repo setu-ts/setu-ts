@@ -1,7 +1,7 @@
 /** Conservative admission and placement of generated barrel imports. @module */
 import type { LocalImport } from '../templates/registry.ts';
-import { maskComments, referencesIdentifier } from '../devtool/sources.ts';
-import { afterLastImport } from './import-placement.ts';
+import { maskSourceCode, referencesIdentifier } from '../devtool/sources.ts';
+import { lexImportSpecifiers } from './import-specifiers.ts';
 
 /** Plans barrel imports; exclusive sources also refuse bindings named by another import. */
 export function barrelImportPlan(
@@ -10,41 +10,37 @@ export function barrelImportPlan(
   reuse: boolean,
   exclusiveSources = false,
 ): { text: string; at: number } | undefined {
-  const visible = maskComments(source);
-  if (visible === undefined) return undefined;
+  const lexed = lexImportSpecifiers(source);
+  const code = maskSourceCode(source);
+  if (lexed.kind !== 'ok' || code === undefined) return undefined;
+  const declarations = lexed.spans.filter((span) => span.declaration !== undefined);
   const missing: string[] = [];
   for (const item of imports) {
     if (
       exclusiveSources &&
-      [...visible.matchAll(/\bimport\s+([^;]+?)\s+from\s*(['"])([^'"]+)\2/g)].some(
-        (match) =>
-          match[3] !== item.from &&
-          item.symbols.some((symbol) => referencesIdentifier(match[1]!, symbol)),
+      declarations.some(
+        (span) =>
+          span.value !== item.from &&
+          item.symbols.some((symbol) => span.declaration!.bindings.includes(symbol)),
       )
     )
       return undefined;
-    const mentioned = visible.includes(`'${item.from}'`) || visible.includes(`"${item.from}"`);
-    if (mentioned) {
+    const matching = declarations.filter((span) => span.value === item.from);
+    if (matching.length > 0) {
       if (!reuse) return undefined;
-      const declarations = [
-        ...visible.matchAll(/\bimport\s*\{([^}]+)\}\s*from\s*(['"])([^'"]+)\2\s*;?/g),
-      ].filter((match) => match[3] === item.from);
       if (
-        declarations.length !== 1 ||
-        !item.symbols.every((symbol) =>
-          declarations[0]![1]!
-            .split(',')
-            .map((name) => name.trim())
-            .includes(symbol),
-        )
+        matching.length !== 1 ||
+        matching[0]!.typeOnly ||
+        !item.symbols.every((symbol) => matching[0]!.declaration!.named.includes(symbol))
       )
         return undefined;
     } else {
-      if (item.symbols.some((symbol) => referencesIdentifier(visible, symbol))) return undefined;
+      if (item.symbols.some((symbol) => referencesIdentifier(code, symbol))) return undefined;
       missing.push(`import { ${item.symbols.join(', ')} } from '${item.from}';`);
     }
   }
-  const at = afterLastImport(source, visible);
-  if (at === undefined) return undefined;
+  const end = Math.max(0, ...declarations.map((span) => span.declaration!.end));
+  const lineEnd = end === 0 ? 0 : source.indexOf('\n', end);
+  const at = lineEnd < 0 ? source.length : lineEnd;
   return { text: missing.length === 0 ? '' : `\n${missing.join('\n')}`, at };
 }

@@ -662,20 +662,7 @@ function printWiringNote(
     const arm = starter.arms.get(bare);
     if (arm !== undefined) {
       const fullStack = starter.symbol === 'createFullStackAppFromConfig';
-      if (
-        fullStack &&
-        transportArgs === undefined &&
-        (seam !== undefined || (GATED_STARTER_ARMS.has(bare) && ZERO_CONFIG_WIRINGS.has(bare))) &&
-        source !== undefined &&
-        starterArmSet(source, arm, true) === true
-      ) {
-        log(`  setu.config.ts already sets its ${arm} arm; it was left as it is.`);
-        return;
-      }
-      if (
-        (bare === 'messaging-plugin' || bare === 'queue-plugin') &&
-        (!fullStack || transportArgs !== undefined)
-      ) {
+      if (bare === 'messaging-plugin' || bare === 'queue-plugin') {
         const key = bare === 'messaging-plugin' ? 'messaging' : 'queue';
         const flag = key === 'messaging' ? 'broker' : 'queue';
         // The factory's own option, read with the same analysis withStarterOption edits
@@ -695,6 +682,15 @@ function printWiringNote(
         } else {
           log(`  In setu.config.ts: ${key}: ${transportArgs},`);
         }
+        return;
+      }
+      if (
+        fullStack &&
+        source !== undefined &&
+        starterArmSet(source, arm, true) === true &&
+        (seam === undefined || starterReferencesSeam(source, arm, seam))
+      ) {
+        log(`  setu.config.ts already sets its ${arm} arm; it was left as it is.`);
         return;
       }
       log(
@@ -1559,6 +1555,18 @@ function carriesStarterOptions(existing: string, literal: string): boolean {
   );
 }
 
+/** A seam is already passed through only when its bindings occur in the arm's code. */
+function starterReferencesSeam(source: string, arm: string, seam: AddSeam): boolean {
+  const existing = starterOptionValue(source, arm);
+  const code = existing === undefined ? undefined : maskSourceCode(existing);
+  const symbols = seam.imports.flatMap((item) => item.symbols);
+  return (
+    code !== undefined &&
+    symbols.length > 0 &&
+    symbols.every((symbol) => referencesIdentifier(code, symbol))
+  );
+}
+
 /** Merges seam options and selected transport atomically; uncertain edits retain guidance. */
 function withStarterWiring(
   source: string,
@@ -1569,7 +1577,12 @@ function withStarterWiring(
   const starter = composingStarter(source);
   const arm = starter?.arms.get(bare);
   if (arm === undefined) return undefined;
-  if (starter?.symbol === 'createFullStackAppFromConfig' && transportArgs === undefined) {
+  const shape = STARTER_SEAMS.find((entry) => entry.plugin === bare);
+  if (
+    starter?.symbol === 'createFullStackAppFromConfig' &&
+    transportArgs === undefined &&
+    shape === undefined
+  ) {
     const literal =
       seam?.args ??
       (GATED_STARTER_ARMS.has(bare) && ZERO_CONFIG_WIRINGS.has(bare) ? '{}' : undefined);
@@ -1577,7 +1590,6 @@ function withStarterWiring(
       ? undefined
       : withStarterOption(source, arm, literal, seam?.imports);
   }
-  const shape = STARTER_SEAMS.find((entry) => entry.plugin === bare);
   const key = shape?.arm ?? (bare === 'messaging-plugin' ? 'messaging' : undefined);
   if (key === undefined) return undefined;
   const plan = barrelImportPlan(source, seam?.imports ?? [], true);

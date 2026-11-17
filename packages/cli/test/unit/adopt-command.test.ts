@@ -187,6 +187,8 @@ it('M140b rewrites the guarded full-stack dev.ts develop wrote with nullish port
       'utf8',
     );
   for (const runtime of ['node', 'bun'] as const) {
+    expect(develop(runtime)).not.toContain('pageRoutes:');
+    expect(develop(runtime)).not.toContain('matchRoutes');
     expect(fullStackDevEntryVariants(runtime)[2]!.contents).toBe(develop(runtime));
   }
   const guardedNullish = { path: 'dev.ts', contents: develop('node') };

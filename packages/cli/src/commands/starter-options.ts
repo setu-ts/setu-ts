@@ -141,10 +141,7 @@ function walkTopLevel(object: IReturnedObject, visit: (at: number, depth: number
  * @param key - Starter option to read
  * @returns The property's value text, or undefined when absent or the shape is uncertain
  */
-export function starterOptionValue(
-  source: string,
-  key: 'messaging' | 'queue' | 'events' | 'cqrs',
-): string | undefined {
+export function starterOptionValue(source: string, key: string): string | undefined {
   const object = returnedObject(source) ?? callObject(source);
   if (object === undefined) return undefined;
   const property = new RegExp(`^(['"]?)${key}\\1\\s*:`);

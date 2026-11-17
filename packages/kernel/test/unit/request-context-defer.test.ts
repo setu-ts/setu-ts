@@ -102,9 +102,9 @@ it('continues cleanup without a logger and when the logger itself throws', async
   );
 });
 
-for (const routeMiddleware of [false, true]) {
+for (const routeMiddleware of [false, true, 'groups'] as const) {
   for (const fails of [false, true]) {
-    it(`M131b 3.10 waits for detached handler and shutdown routeMiddleware=${routeMiddleware} fails=${fails}`, async () => {
+    it(`waits for detached handler and shutdown routeMiddleware=${routeMiddleware} fails=${fails}`, async () => {
       const { createApplication } = await import('../../src/index.ts');
       const { RuntimePlugin } = await import('@setu-ts/runtime');
       const { promise, resolve } = Promise.withResolvers<void>();
@@ -116,9 +116,12 @@ for (const routeMiddleware of [false, true]) {
         void next().catch(() => {});
         return ctx.response.text('early');
       };
-      if (!routeMiddleware) app.middleware.add(early);
+      if (routeMiddleware === false) app.middleware.add(early);
       app.router.get('/', {
-        ...(routeMiddleware ? { middleware: [early] } : {}),
+        ...(routeMiddleware === true ? { middleware: [early] } : {}),
+        ...(routeMiddleware === 'groups'
+          ? { middlewareGroups: { groups: { early: [early] }, select: () => ['early'] } }
+          : {}),
         handler: async (ctx) => {
           ctx.defer?.(cleaned);
           started.resolve();

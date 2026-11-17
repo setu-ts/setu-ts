@@ -234,8 +234,10 @@ ARCHITECTURE §10 and the plugin table row at line 1649).
 
 - **Decision:** the CLI's generated full-stack dev entry and `apps/full-stack/dev.ts` return
   `pageRoutes: { build: loadServerBuild, matchRoutes }` (`matchRoutes` imported from `react-router`
-  beside `createRequestHandler`). The `develop` dev-entry fixtures change; the `0.12.0` fixtures do
-  not (they record the published output).
+  beside `createRequestHandler`). The recognition fixtures record what earlier versions rendered and
+  do not change: `workspace adopt` must still recognise a `dev.ts` written by develop before this
+  milestone, so the develop variant is derived from the current entry with `pageRoutes` and the
+  `matchRoutes` import stripped, as the `0.12.0` variant already is (code review 2026-11-17).
 - **Why:** without it, an application that adds `pagePolicies` fails to start under `npm run dev`
   (§3.6) — correct, but a scaffold should not need a hand-edit to use a documented option.
 - **Test home:** `packages/cli/test/unit/templates/project-files.test.ts` (fixture);
@@ -322,6 +324,14 @@ ARCHITECTURE §10 and the plugin table row at line 1649).
   4. **Opt-in arm that needs developer values** (e.g. `auth`): no edit; print "`<symbol>` registers
      this plugin only once its `<arm>` arm is set in setu.config.ts." followed by the existing hint.
      The CLI never writes a credential check or a secret.
+- **An arm that already exists (code review 2026-11-17).** Rules 1–4 apply only to an ABSENT arm.
+  When the arm is present: a generated-seam arm whose value already references the seam's symbol
+  (e.g. `EVENT_HANDLERS`) prints "already sets its X arm; it was left as it is."; one that does not
+  keeps the pre-milestone behaviour unchanged — the existing `STARTER_SEAMS` merge into `events`/
+  `cqrs`/`queue`, otherwise the "Pass the generated artifacts through it" and import lines. Every
+  other present arm prints that it is already set, never the opt-in or defaults note. `messaging`
+  and `queue` without a transport flag keep their pre-milestone notes (`starterOptionValue`), so a
+  `--broker redis` scaffold is never told it runs "with its defaults".
 - **Refusals (→ the printed line, nothing written), as M121's rule "write only what is absent":**
   the returned object already has the top-level key (for a dotted arm, the parent key such as
   `realtime` — never merge into a user's object); the `(config): FullStackStarterOptions =>`

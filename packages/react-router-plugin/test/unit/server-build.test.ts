@@ -16,6 +16,30 @@ import {
 import { createFakeLoadContextFactory, createSimpleFakeHandler } from '../fixtures/fake-handler.ts';
 
 describe('server-build', () => {
+  it.each(['createRequestHandler', 'matchRoutes', 'RouterContextProvider'])(
+    'names the React Router 8 contract when %s is missing',
+    async (missing) => {
+      const module: Record<string, unknown> = {
+        createRequestHandler: () => () => {},
+        matchRoutes: () => null,
+        RouterContextProvider: class {},
+      };
+      delete module[missing];
+      let thrown: unknown;
+      try {
+        await loadRequestHandler('<module>', 'production', {
+          serverBuild: {},
+          rrImportHook: () => Promise.resolve(module),
+        });
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown).toBeInstanceOf(Error);
+      expect((thrown as Error).message).toContain(`exposes no '${missing}' export`);
+      expect((thrown as Error).message).toContain('React Router 8');
+      expect((thrown as Error).message).not.toContain('or later');
+    },
+  );
   it('supplies the unwrapped build and the exact module matcher', async () => {
     const build = { routes: {} };
     const matchRoutes = () => null;
