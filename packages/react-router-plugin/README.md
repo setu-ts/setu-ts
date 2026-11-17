@@ -182,8 +182,8 @@ export const frontend = ReactRouterPlugin({
   every page under it; when several match, they run outer first. A `POST` to a layout's path without
   `?index` also runs its index child's policy, as React Router runs that child's middleware. Two
   more cases err the same way: an `'all'` policy also runs on an `OPTIONS` request, which React
-  Router refuses with `405`, and when the only policy that applies is on `root`, it runs for every
-  catch-all request, including one that matches no page.
+  Router refuses with `405`, and a policy on `root` runs for every catch-all request, including one
+  that matches no page.
 - **`on`** says what the policy guards. `'action'` runs it on every request React Router treats as a
   mutation (`POST`, `PUT`, `PATCH`, `DELETE`), which is every request that can run the route's
   action; page views are not affected. `'all'`, the default, runs it on every request that reaches
@@ -196,8 +196,11 @@ export const frontend = ReactRouterPlugin({
   policy may read `ctx.request.formData()`; the action still receives the same body.
 - **Refused at startup:** an id naming no route in the build (the message lists known ids), an empty
   `middleware` array, an `on` value other than `'action'` or `'all'`, or a custom
-  `loadRequestHandler` that returns no `pageRoutes`. A `requirePolicy` naming an unregistered policy
-  is refused by `AuthPlugin` as it is on any route.
+  `loadRequestHandler` that returns no `pageRoutes`, and a build with React Router's
+  `future.unstable_routePatternMatching`, which ranks routes differently from `matchRoutes`. In
+  development, a rebuild that drops a page holding a policy answers `500` naming its id until the
+  policy is removed or the page restored, rather than silently leaving the page unguarded. A
+  `requirePolicy` naming an unregistered policy is refused by `AuthPlugin` as it is on any route.
 - **Public files** (`/robots.txt`) are served before policies run, as before.
 - **Cost.** With no `pagePolicies`, nothing changes. With them, a request whose method no policy
   applies to (a page view, with only `on: 'action'` policies) skips matching, and one that cannot
