@@ -400,12 +400,19 @@ mention in a comment or a string does not count as wired.
 
 In a generated full-stack configuration, `setu add events`, `setu add cqrs` and `setu add queue`
 install the package, create its managed barrel and wire that barrel into the starter's `events`,
-`cqrs` or `queue` arm. The starter already registers those plugins. Queue processors and a selected
-`--queue redis` backend are merged in either add order. Existing properties, spreads, non-literal
-arms and unfamiliar callback shapes are preserved; the CLI prints manual guidance when it cannot
-safely edit them. A job in a starter that owns the queue requires `setu add queue` first; otherwise
-generation refuses before writing and explains that the starter already runs the queue. Functional
-jobs outside a queue-owning starter remain ungated.
+`cqrs` or `queue` arm. The starter already registers those plugins. `setu add health` and
+`setu add metrics` wire their generated barrels the same way
+(`health: { indicators: [...HEALTH_INDICATORS] }`,
+`metrics: { customMetrics: [...CUSTOM_METRICS] }`), and an opt-in arm that takes no settings is set
+to `{}` (`setu add sse` writes `realtime: { sse: {} }`; likewise `websocket` and
+`realtime-backplane`). For every other arm the note says which kind it is: "already registers this
+plugin with its defaults" for an arm that is always on, or "registers this plugin only once its …
+arm is set" for one, such as `auth`, that needs values only you can supply. An arm already present
+is left as it is. Queue processors and a selected `--queue redis` backend are merged in either add
+order. Existing properties, spreads, non-literal arms and unfamiliar callback shapes are preserved;
+the CLI prints manual guidance when it cannot safely edit them. A job in a starter that owns the
+queue requires `setu add queue` first; otherwise generation refuses before writing and explains that
+the starter already runs the queue. Functional jobs outside a queue-owning starter remain ungated.
 
 Generating a route, controller or module checks React Router's resolved page tree with the project's
 installed `react-router routes --json`. A kernel group that would take precedence over an existing

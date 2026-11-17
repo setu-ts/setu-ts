@@ -1,6 +1,9 @@
 import { generateSecret } from '../../../src/templates/secret.ts';
 import { cliInvocation } from '../../../src/templates/project-files.ts';
 import * as nodeFs from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { tempDir } from '../../../../../test/node-helpers.ts';
 import * as ts from 'typescript';
 import type { Config as DrizzleKitConfig } from 'drizzle-kit';
 /**
@@ -34,6 +37,8 @@ import { CLIENT_RANGES } from '../../../src/templates/client-dependencies.ts';
 import { SWAGGER_UI_DIST_VERSION } from '../../../src/templates/swagger-version.ts';
 import { BACKEND_PEERS } from '../../../src/commands/add.ts';
 import { BROKERS, brokerSpec } from '../../../src/workspace/transport.ts';
+import { GATED_STARTER_ARMS, STARTER_ARMS } from '../../../src/utils/starter-arms.ts';
+import { ZERO_CONFIG_WIRINGS } from '../../../src/utils/plugin-wirings.ts';
 
 describe('M140a installed signing secrets', () => {
   it.each(['node', 'cloudflare-workers'] as const)(
@@ -643,7 +648,7 @@ describe('setu add sdk client scripts', () => {
 
 describe('M121 transport additions', () => {
   // PR #519 review: guidance reads the starter's actual option and the provider's actual call.
-  it('reports a full-stack option the factory already sets instead of the memory default', async () => {
+  it('preserves full-stack transport choices when the default backend is requested', async () => {
     const h = harness();
     expect(
       await runNewCommand(parseArgs(['shop', '--template', 'full-stack', '--runtime', 'node']), {
@@ -655,13 +660,19 @@ describe('M121 transport additions', () => {
       }),
     ).toBe(0);
     expect(await h.run(['messaging', '--dir', '/app/shop'])).toBe(0);
-    expect(h.out.join('\n')).toContain('already registers messaging in memory by default');
+    expect(h.out.join('\n')).toContain(
+      'already registers this plugin with its defaults; set its messaging arm',
+    );
     expect(await h.run(['messaging', '--broker', 'redis', '--dir', '/app/shop'])).toBe(0);
+    const configured = h.read('/app/shop/setu.config.ts');
     for (const flags of [[], ['--broker', 'memory']]) {
       h.out.length = 0;
       expect(await h.run(['messaging', ...flags, '--dir', '/app/shop'])).toBe(0);
       const out = h.out.join('\n');
-      expect(out).toContain('setu.config.ts already sets its own messaging option');
+      expect(out).toContain(
+        'already registers this plugin with its defaults; set its messaging arm',
+      );
+      expect(h.read('/app/shop/setu.config.ts')).toBe(configured);
       expect(out).not.toContain('in memory by default');
     }
   });
@@ -2399,8 +2410,13 @@ describe('runAddCommand', () => {
         const arm = ['websocket', 'sse', 'backplane'].includes(key) ? `realtime.${key}` : key;
         const h = harness({ '/app/deno.json': DENO_MANIFEST, '/app/setu.config.ts': config });
         expect(await h.run([bare]), bare).toBe(0);
-        if (['messaging', 'queue'].includes(arm)) {
-          expect(h.out.join('\n'), bare).toContain('in memory by default');
+        const seam = addSeam(bare, new Set([bare]));
+        if (seam === undefined) {
+          expect(h.out.join('\n'), bare).toContain(
+            GATED_STARTER_ARMS.has(bare)
+              ? `registers this plugin only once its ${arm} arm is set`
+              : `already registers this plugin with its defaults; set its ${arm} arm`,
+          );
         } else {
           expect(h.out.join('\n'), bare).toContain(`configure its ${arm} arm`);
         }
@@ -2426,7 +2442,9 @@ describe('runAddCommand', () => {
       const config = `import { ${symbol} } from '@setu-ts/${pkg}';\nexport async function createApp() {}\n`;
       const h = harness({ '/app/deno.json': DENO_MANIFEST, '/app/setu.config.ts': config });
       expect(await h.run(['auth'])).toBe(0);
-      expect(h.out.join('\n')).toContain('configure its auth arm');
+      expect(h.out.join('\n')).toContain(
+        pkg === 'full-stack-starter' ? 'only once its auth arm is set' : 'configure its auth arm',
+      );
       expect(h.out.join('\n')).toContain(
         `https://github.com/setu-ts/setu-ts/blob/v${VERSION}/packages/starters/${pkg}/README.md`,
       );
@@ -2447,7 +2465,11 @@ describe('runAddCommand', () => {
       // Another starter-owned arm on the same starter prints no recipe either.
       const session = harness({ '/app/deno.json': DENO_MANIFEST, '/app/setu.config.ts': config });
       expect(await session.run(['session'])).toBe(0);
-      expect(session.out.join('\n')).toContain('configure its session arm');
+      expect(session.out.join('\n')).toContain(
+        pkg === 'full-stack-starter'
+          ? 'only once its session arm is set'
+          : 'configure its session arm',
+      );
       expect(session.out.join('\n')).not.toContain(recipe);
     }
   });
@@ -3588,6 +3610,212 @@ describe('starter handler-arm wiring', () => {
     ).toBe(0);
     return h;
   }
+  const arms = STARTER_ARMS.find(({ symbol }) => symbol === 'createFullStackAppFromConfig')!.arms;
+  const rules = Array.from(arms, ([bare, arm]) => {
+    const seam = addSeam(bare, new Set([bare]));
+    const rule =
+      seam !== undefined
+        ? 2
+        : !GATED_STARTER_ARMS.has(bare)
+          ? 3
+          : ZERO_CONFIG_WIRINGS.has(bare)
+            ? 1
+            : 4;
+    return { bare, arm, seam, rule };
+  });
+  it.each(rules)(
+    'applies rule $rule to full-stack $bare ($arm), idempotently',
+    async ({ bare, arm, seam, rule }) => {
+      const h = await fullStack();
+      const path = '/app/shop/setu.config.ts';
+      const before = h.read(path);
+      const code = await h.run([bare, '--dir', '/app/shop']);
+      if (bare === 'decorator-plugin') {
+        expect(code).toBe(1);
+        expect(h.err.join('\n')).toContain('This project uses the functional style.');
+        expect(h.read(path)).toBe(before);
+        return;
+      }
+      expect(code, h.err.join('\n')).toBe(0);
+      const after = h.read(path);
+      const output = h.out.join('\n');
+      if (rule === 1) {
+        const [parent, child] = arm.split('.');
+        expect(after).toContain(child === undefined ? `${arm}: {}` : `${parent}: { ${child}: {} }`);
+        expect(output).toContain(`wired ${arm} in setu.config.ts`);
+        expect(after).not.toBe(before);
+      } else if (rule === 2) {
+        for (const { from, symbols } of seam!.imports) {
+          expect(after).toContain(`from '${from}'`);
+          for (const symbol of symbols)
+            expect(
+              after.match(new RegExp(`import \\{[^}]*\\b${symbol}\\b[^}]*\\}`, 'g')),
+            ).toHaveLength(1);
+        }
+        expect(after).toContain(`${arm}: ${seam!.args}`);
+        expect(output).toContain(`wired ${arm} in setu.config.ts`);
+      } else {
+        expect(after).toBe(before);
+        expect(output).toContain(
+          rule === 3
+            ? `createFullStackAppFromConfig already registers this plugin with its defaults; set its ${arm} arm in setu.config.ts only to configure it.`
+            : `createFullStackAppFromConfig registers this plugin only once its ${arm} arm is set in setu.config.ts.`,
+        );
+        if (rule === 4) expect(output).toContain('Its arm:');
+      }
+      const writes = h.fs.writes.length;
+      h.out.length = 0;
+      expect(await h.run([bare, '--dir', '/app/shop']), h.err.join('\n')).toBe(0);
+      expect(h.read(path)).toBe(after);
+      expect(h.fs.writes.length).toBe(writes);
+      if (rule === 1 || rule === 2) {
+        expect(h.out.filter((line) => line.startsWith('  '))).toEqual([
+          `  setu.config.ts already sets its ${arm} arm; it was left as it is.`,
+        ]);
+      }
+    },
+  );
+  it('keeps nested-arm guidance when a real add created only the other child', async () => {
+    const h = await fullStack();
+    const path = '/app/shop/setu.config.ts';
+    expect(await h.run(['sse', '--dir', '/app/shop'])).toBe(0);
+    const before = h.read(path);
+    expect(before).toContain('realtime: { sse: {} }');
+    h.out.length = 0;
+    expect(await h.run(['websocket', '--dir', '/app/shop'])).toBe(0);
+    expect(h.read(path)).toBe(before);
+    expect(h.out).toContain('  Inside its existing realtime arm, add: websocket: {}');
+    expect(h.out.join('\n')).not.toContain('already sets its realtime.websocket arm');
+  });
+  it.each(['undefined', 'null', 'false'])(
+    'reports present disabled arms with value %s without asking to wire them again',
+    async (value) => {
+      const h = await fullStack();
+      const path = '/app/shop/setu.config.ts';
+      const before = h
+        .read(path)
+        .replace('return {', `return { metrics: ${value}, realtime: { sse: ${value} },`);
+      await h.fs.writeFile(path, new TextEncoder().encode(before));
+      for (const [plugin, arm] of [
+        ['metrics', 'metrics'],
+        ['sse', 'realtime.sse'],
+      ] as const) {
+        expect(await h.run([plugin, '--dir', '/app/shop'])).toBe(0);
+        const writes = h.fs.writes.length;
+        h.out.length = 0;
+        expect(await h.run([plugin, '--dir', '/app/shop'])).toBe(0);
+        expect(h.read(path)).toBe(before);
+        expect(h.fs.writes.length).toBe(writes);
+        expect(h.out.filter((line) => line.startsWith('  '))).toEqual([
+          `  setu.config.ts already sets its ${arm} arm; it was left as it is.`,
+        ]);
+      }
+    },
+  );
+  for (const entry of rules.filter(({ rule }) => rule === 1)) {
+    it(
+      `type-checks inserted ${entry.arm} and every seam against FullStackStarterOptions`,
+      { timeout: 120_000 },
+      async () => {
+        const h = await fullStack();
+        for (const { bare } of [...rules.filter(({ rule }) => rule === 2), entry])
+          expect(await h.run([bare, '--dir', '/app/shop']), h.err.join('\n')).toBe(0);
+        const files = [...new Set(h.fs.writes)]
+          .filter((path) => path.startsWith('/app/shop/'))
+          .map((path) => ({ path: path.slice('/app/shop/'.length), contents: h.read(path) }));
+        const directory = await tempDir({ prefix: 'full-stack-options-' });
+        const path = `${directory}/input.json`;
+        await nodeFs.writeFile(path, JSON.stringify(files));
+        const input = await nodeFs.open(path, 'r');
+        const output = await nodeFs.open(`${directory}/output.json`, 'w');
+        const errors = await nodeFs.open(`${directory}/errors.txt`, 'w');
+        try {
+          // Regular descriptors also work where the sandbox refuses subprocess pipe sockets.
+          const result = spawnSync(
+            process.execPath,
+            [
+              fileURLToPath(
+                new URL('../../fixtures/full-stack-options-compiler.ts', import.meta.url),
+              ),
+            ],
+            {
+              cwd: fileURLToPath(new URL('../../../../../', import.meta.url)),
+              stdio: [input.fd, output.fd, errors.fd],
+              timeout: 110_000,
+            },
+          );
+          expect(result.error, result.error?.message).toBeUndefined();
+          expect(result.status, await nodeFs.readFile(`${directory}/errors.txt`, 'utf8')).toBe(0);
+          const diagnostics = JSON.parse(
+            await nodeFs.readFile(`${directory}/output.json`, 'utf8'),
+          ) as {
+            valid: readonly { code: number; message: string }[];
+            misspelled: readonly { code: number; message: string }[];
+            unannotated: readonly { code: number; message: string }[];
+          };
+          expect(diagnostics.valid).toEqual([]);
+          expect(
+            diagnostics.misspelled.some(
+              ({ code, message }) => code === 2561 && message.includes('messaging'),
+            ),
+          ).toBe(true);
+          expect(diagnostics.unannotated).toEqual([]);
+        } finally {
+          await input.close();
+          await output.close();
+          await errors.close();
+          await nodeFs.rm(directory, { recursive: true, force: true });
+        }
+      },
+    );
+  }
+  it.each([
+    [
+      'existing parent',
+      'sse',
+      (source: string) => source.replace('return {', 'return { realtime: { websocket: {} },'),
+    ],
+    [
+      'missing callback',
+      'metrics',
+      (source: string) => source.replace('(config): FullStackStarterOptions =>', '(config) =>'),
+    ],
+    [
+      'repeated callback',
+      'metrics',
+      (source: string) => `${source}\nconst other = (config): FullStackStarterOptions => {};`,
+    ],
+    [
+      'unclassifiable callback',
+      'metrics',
+      (source: string) => source + '\nconst note = `${CUSTOM_METRICS}`;',
+    ],
+    [
+      'conflicting import',
+      'metrics',
+      (source: string) => `import { CUSTOM_METRICS } from './other.ts';\n${source}`,
+    ],
+    [
+      'existing top-level seam',
+      'metrics',
+      (source: string) => source.replace('return {', 'return { metrics: {},'),
+    ],
+  ] as const)('refuses %s without a partial config edit', async (label, plugin, edit) => {
+    const h = await fullStack();
+    const path = '/app/shop/setu.config.ts';
+    const before = edit(h.read(path));
+    await h.fs.writeFile(path, new TextEncoder().encode(before));
+    expect(await h.run([plugin, '--dir', '/app/shop']), h.err.join('\n')).toBe(0);
+    expect(h.read(path)).toBe(before);
+    expect(h.out.join('\n')).not.toContain(`wired ${plugin} in setu.config.ts`);
+    expect(h.out.join('\n')).toContain(
+      label === 'existing top-level seam'
+        ? 'already sets its metrics arm; it was left as it is.'
+        : plugin === 'sse'
+          ? 'realtime.sse arm is set in setu.config.ts'
+          : 'metrics arm in setu.config.ts',
+    );
+  });
   for (const [name, arm, symbols] of [
     ['events', 'events', ['EVENT_HANDLERS']],
     ['cqrs', 'cqrs', ['COMMAND_HANDLERS', 'QUERY_HANDLERS']],
@@ -3633,13 +3861,13 @@ describe('starter handler-arm wiring', () => {
     expect(h.read('/app/setu.config.ts')).toBe(source);
     expect(h.out.join('\n')).toContain('already sets its own queue option');
   });
-  for (const edit of [
-    (source: string) => source.replace('return {', 'return { events: options,'),
-    (source: string) => source.replace('return {', 'return { events: { ...options },'),
-    (source: string) => `import { OTHER } from './src/events/index.ts';\n${source}`,
-    (source: string) => `import * as handlers from './src/events/index.ts';\n${source}`,
-    (source: string) => `const EVENT_HANDLERS = [];\n${source}`,
-  ]) {
+  for (const [present, edit] of [
+    [true, (source: string) => source.replace('return {', 'return { events: options,')],
+    [true, (source: string) => source.replace('return {', 'return { events: { ...options },')],
+    [false, (source: string) => `import { OTHER } from './src/events/index.ts';\n${source}`],
+    [false, (source: string) => `import * as handlers from './src/events/index.ts';\n${source}`],
+    [false, (source: string) => `const EVENT_HANDLERS = [];\n${source}`],
+  ] as const) {
     it('fails closed and retains events guidance for an uncertain arm or import', async () => {
       const h = await fullStack();
       const path = '/app/shop/setu.config.ts';
@@ -3648,20 +3876,20 @@ describe('starter handler-arm wiring', () => {
       expect(await h.run(['events', '--dir', '/app/shop'])).toBe(0);
       expect(h.read(path)).toBe(source);
       expect(h.out.join('\n')).toContain(
-        'Pass the generated artifacts through it: events: { handlers: EVENT_HANDLERS }',
+        present
+          ? 'already sets its events arm; it was left as it is.'
+          : 'Pass the generated artifacts through it: events: { handlers: EVENT_HANDLERS }',
       );
     });
   }
-  it('does not mistake a nested handler mention for a wired top-level property', async () => {
+  it('preserves an existing arm even when only a nested handler is mentioned', async () => {
     const h = await fullStack();
     const path = '/app/shop/setu.config.ts';
     const source = `import { EVENT_HANDLERS } from './src/events/index.ts';\n${h.read(path).replace('return {', 'return { events: { custom: { handlers: EVENT_HANDLERS } },')}`;
     await h.fs.writeFile(path, new TextEncoder().encode(source));
     expect(await h.run(['events', '--dir', '/app/shop'])).toBe(0);
-    expect(h.read(path)).toContain(
-      'events: {\n          custom: { handlers: EVENT_HANDLERS },\n          handlers: EVENT_HANDLERS,',
-    );
-    expect(h.read(path)).toContain('custom: { handlers: EVENT_HANDLERS }');
+    expect(h.read(path)).toBe(source);
+    expect(h.out.join('\n')).toContain('already sets its events arm; it was left as it is.');
   });
   it('reuses an existing complete named barrel import while adding the absent arm', async () => {
     const h = await fullStack();
@@ -3843,23 +4071,20 @@ it('prints the shape of a gated starter arm, with a prefix for full-stack static
   for (const [pkg, arm] of arms) {
     h.out.length = 0;
     expect(await h.run([pkg, '--dir', '/app/shop', '--yes']), h.err.join('\n')).toBe(0);
-    expect(h.out).toContain(`  Its arm: ${arm}`);
+    if (pkg === 'websocket') {
+      expect(h.read('/app/shop/setu.config.ts')).toContain(arm);
+      expect(h.out).toContain('wired realtime.websocket in setu.config.ts');
+    } else expect(h.out).toContain(`  Its arm: ${arm}`);
     expect(h.out.some((line) => line.includes('The urlPrefix is required here'))).toBe(
       pkg === 'static',
     );
   }
   // A second realtime arm goes inside the existing `realtime` object.
   const configPath = '/app/shop/setu.config.ts';
-  await h.fs.writeFile(
-    configPath,
-    new TextEncoder().encode(
-      h
-        .read(configPath)
-        .replace('        session: {', '        realtime: { websocket: {} },\n        session: {'),
-    ),
-  );
+  const before = h.read(configPath);
   h.out.length = 0;
   expect(await h.run(['sse', '--dir', '/app/shop', '--yes'])).toBe(0);
+  expect(h.read(configPath)).toBe(before);
   expect(h.out).toContain('  Inside its existing realtime arm, add: sse: {}');
   // An always-on arm needs no value.
   h.out.length = 0;

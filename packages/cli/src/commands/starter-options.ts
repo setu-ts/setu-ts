@@ -8,6 +8,8 @@ import {
 } from '../devtool/sources.ts';
 import { reindentLiteral } from '../templates/plugin-args.ts';
 import { composingStarter } from '../utils/starter-arms.ts';
+import { barrelImportPlan } from '../utils/barrel-imports.ts';
+import type { LocalImport } from '../templates/registry.ts';
 
 /** The callback header every generated full-stack configuration carries (X5-2). */
 const CALLBACK = /\(config\): FullStackStarterOptions => \{/g;
@@ -175,9 +177,15 @@ const UNSET_VALUE = /^(?:undefined|null|false)$/;
  * object), answers `undefined`, so the check stays quiet rather than guessing.
  * @param source - Developer-owned configuration
  * @param arm - The starter option, as `STARTER_ARMS` names it
- * @returns `true` when set, `false` when absent or `undefined`/`null`/`false`, `undefined` when unknown
+ * @param presenceOnly - Count an existing key even when its value disables the arm
+ * @returns `true` when set (or present in presence-only mode), `false` when absent or disabled,
+ *   `undefined` when unknown
  */
-export function starterArmSet(source: string, arm: string): boolean | undefined {
+export function starterArmSet(
+  source: string,
+  arm: string,
+  presenceOnly = false,
+): boolean | undefined {
   const object = returnedObject(source) ?? callObject(source);
   if (object === undefined) {
     const code = maskSourceCode(source);
@@ -194,47 +202,58 @@ export function starterArmSet(source: string, arm: string): boolean | undefined 
   if (entry === undefined) return false;
   // Comments masked (offsets unchanged), so `undefined /* off */` still reads as unset.
   const value = object.visible.slice(entry.start, entry.end).trim();
+  if (child === undefined) return presenceOnly || !UNSET_VALUE.test(value);
   if (UNSET_VALUE.test(value)) return false;
-  if (child === undefined) return true;
   const inner = starterLiteralEntries(value);
   if (inner === undefined) return undefined;
   const nested = inner.find(([key]) => key === child);
-  return nested !== undefined && !UNSET_VALUE.test(nested[1]);
+  return nested !== undefined && (presenceOnly || !UNSET_VALUE.test(nested[1]));
 }
 
 /**
- * Inserts an absent transport option into the single generated typed callback.
+ * Inserts an absent option and its imports into the single generated typed callback.
  *
- * A mention of the key anywhere in the returned object, even in a string, refuses the edit
- * (fail closed), as does a top-level spread that could already supply it.
+ * Existing parent keys and uncertain literals refuse the edit, including spreads that could
+ * already supply the arm. Calls without seam imports retain the conservative text-mention check;
+ * seam edits check parsed keys and code, so URL strings such as '/metrics' are not option keys.
  * @param source - Developer-owned configuration
- * @param key - Starter option to insert
+ * @param key - Starter option to insert; dotted paths are wrapped in nested literals
  * @param literal - Option literal, indented for an eight-space property
+ * @param imports - Generated barrel bindings to reuse or add atomically with the option
  * @returns Edited source, or undefined when the shape or absence is uncertain
  */
 export function withStarterOption(
   source: string,
-  key: 'messaging' | 'queue' | 'events' | 'cqrs',
+  key: string,
   literal: string,
+  imports: readonly LocalImport[] = [],
 ): string | undefined {
   const object = returnedObject(source);
-  if (object === undefined) return undefined;
-  if (referencesIdentifier(object.visible.slice(object.start, object.end), key)) return undefined;
-
-  // A top-level spread can already supply the key, so its value is not ours to infer.
-  // Nested spreads belong to the generated reactRouter and httpSecurity arms.
-  let spread = false;
-  walkTopLevel(object, (at, depth) => {
-    if (depth === 0 && object.code.startsWith('...', at)) spread = true;
-  });
-  if (spread) return undefined;
+  if (object === undefined || object.otherReturns === true) return undefined;
+  const entries = literalEntries(object);
+  if (entries === undefined) return undefined;
+  const parts = key.split('.');
+  if (parts.some((part) => !/^[A-Za-z_$][\w$]*$/.test(part))) return undefined;
+  const parent = parts[0]!;
+  const mentions = imports.length === 0 ? object.visible : object.code;
+  if (
+    entries.some(({ key }) => key === parent) ||
+    referencesIdentifier(mentions.slice(object.start, object.end), parent)
+  )
+    return undefined;
+  const plan = barrelImportPlan(source, imports, true, true);
+  if (plan === undefined) return undefined;
 
   // The property sits two spaces inside the line that holds `return {`.
   const returned = object.start;
   const lineStart = source.lastIndexOf('\n', returned - 1) + 1;
   const indent = /^ */.exec(source.slice(lineStart))![0].length + 2;
-  const value = reindentLiteral(literal, LITERAL_DEPTH, indent);
-  return `${source.slice(0, returned)}\n${' '.repeat(indent)}${key}: ${value},${source.slice(returned)}`;
+  const nested = parts.slice(1).reduceRight((value, child) => `{ ${child}: ${value} }`, literal);
+  const value = reindentLiteral(nested, LITERAL_DEPTH, indent);
+  const inserted = `\n${' '.repeat(indent)}${parent}: ${value},`;
+  const edited = `${source.slice(0, returned)}${inserted}${source.slice(returned)}`;
+  const at = plan.at > returned ? plan.at + inserted.length : plan.at;
+  return `${edited.slice(0, at)}${plan.text}${edited.slice(at)}`;
 }
 
 /** Splits a located literal with the existing masked top-level walker. */

@@ -409,10 +409,17 @@ corresponding handler generator. The command imports the managed barrel and wire
 `events: { handlers: EVENT_HANDLERS }`,
 `cqrs: { commandHandlers: COMMAND_HANDLERS, queryHandlers: QUERY_HANDLERS }` or
 `queue: { processors: [...QUEUE_PROCESSORS] }` arm when the generated callback can be safely edited.
-Existing queue transport options are retained, and `add queue --queue redis` merges with the
-processor arm in either add order. Uncertain edits retain the existing configuration and print
-guidance. The starter owns these plugins; use its arm instead of registering a second instance. For
-an arm the starter registers only when set, `setu add` prints its shape, for example
+`setu add health` and `setu add metrics` wire their generated barrels the same way
+(`health: { indicators: [...HEALTH_INDICATORS] }`,
+`metrics: { customMetrics: [...CUSTOM_METRICS] }`), and an opt-in arm that takes no settings is set
+to `{}` (`setu add sse` writes `realtime: { sse: {} }`; likewise `websocket` and
+`realtime-backplane`). For every other arm the note says which kind it is: "already registers this
+plugin with its defaults" for an arm that is always on, or "registers this plugin only once its …
+arm is set" for one, such as `auth`, that needs values only you can supply. An arm already present
+is left as it is. Existing queue transport options are retained, and `add queue --queue redis`
+merges with the processor arm in either add order. Uncertain edits retain the existing configuration
+and print guidance. The starter owns these plugins; use its arm instead of registering a second
+instance. For an arm the starter registers only when set, `setu add` prints its shape, for example
 `Its arm: graphql: { typeDefs: '<your-schema>', resolvers: {} }`. On full-stack the `static` arm
 carries `urlPrefix: '/files'`, because React Router already serves `GET /*`. When a `realtime` arm
 already exists, a second realtime package is printed as the entry to add inside it. A job in a

@@ -316,6 +316,13 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`setu add` finishes full-stack wiring it can do safely (`@setu-ts/cli`, M141).** On a project
+  composed by `createFullStackAppFromConfig`, `setu add health` and `setu add metrics` now wire
+  their generated barrels into the starter's arm, and `setu add sse`, `websocket` and
+  `realtime-backplane` set their opt-in arm to `{}`. The note for every other arm says whether the
+  starter already registers the plugin with defaults or registers it only once the arm is set. An
+  existing arm is never rewritten.
+
 - **Page route policies (M141, `@setu-ts/react-router-plugin`, `@setu-ts/kernel`, `@setu-ts/common`,
   `@setu-ts/auth-plugin`).** `pagePolicies` on `ReactRouterPlugin` attaches Setu middleware (a rate
   limit, `requirePolicy`, `idempotent()`) to a page by its React Router route id; `on: 'action'`

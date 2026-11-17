@@ -21,6 +21,9 @@ plugin owns matching; nothing runs inside React Router's own middleware.
   `SsrRuntime` and the default loader supplying it; the development entry (CLI template and
   `apps/full-stack/dev.ts`) supplying it; README, AGENT_CARD, PUBLIC_API, ARCHITECTURE, CHANGELOG
   and `docs/react-router-dev.md`.
+- **Also in scope (§3.11, added at the maintainer's request):** `setu add` on a full-stack project
+  inserts value-free and generated-seam starter arms itself and words opt-in and always-on arms
+  differently.
 - **NOT this milestone:** a sign-in throttle in the generated full-stack template (the template
   carries no rate limiter package today; adding `auth-plugin` to it is a template decision for a
   later CLI milestone, see §9); OpenAPI or MCP discovery of page policies (§9); running Setu
@@ -297,6 +300,43 @@ ARCHITECTURE §10 and the plugin table row at line 1649).
   answers `404` with no route middleware), with or without other policies. In both, nothing guarded
   runs, so the extra policy run errs closed and is documented in the README.
 
+### 3.11 `setu add` finishes full-stack wiring it can do safely (maintainer request, 2026-11-17)
+
+- **Found by the M141 full-stack smoke:** on a full-stack project `setu add` edited `setu.config.ts`
+  for 1 of 9 plugins and printed "createFullStackAppFromConfig owns this plugin; configure its X
+  arm" for the rest — the same line for an opt-in arm that does nothing until set
+  (`GATED_STARTER_ARMS`, `packages/cli/src/utils/starter-arms.ts`) and an always-on arm the starter
+  already registers with defaults. `withStarterOption`
+  (`packages/cli/src/commands/starter-options.ts`, M121) can insert an arm but is used only for
+  `messaging`/`queue`. The maintainer asked for this on the M141 branch.
+- **Decision — one rule, derived from data the CLI already has, never a hand list:**
+  1. **Opt-in arm with no developer values** — a gated arm whose plugin `setu add` registers with NO
+     arguments on an inline plugin list (its `ZERO_CONFIG_WIRINGS` entry renders `<Symbol>()`):
+     insert the arm with `{}` (a dotted arm such as `realtime.sse` becomes `realtime: { sse: {} }`)
+     through `withStarterOption`.
+  2. **Arm with a generated seam** (`metrics`, `health`, and any arm whose wiring has a `seam`):
+     insert `<arm>: <seam.args>` and the seam's imports, whether the arm is gated or always-on — the
+     generated files are otherwise read by nothing.
+  3. **Always-on arm without a seam:** no edit; print "`<symbol>` already registers this plugin with
+     its defaults; set its `<arm>` arm in setu.config.ts only to configure it."
+  4. **Opt-in arm that needs developer values** (e.g. `auth`): no edit; print "`<symbol>` registers
+     this plugin only once its `<arm>` arm is set in setu.config.ts." followed by the existing hint.
+     The CLI never writes a credential check or a secret.
+- **Refusals (→ the printed line, nothing written), as M121's rule "write only what is absent":**
+  the returned object already has the top-level key (for a dotted arm, the parent key such as
+  `realtime` — never merge into a user's object); the `(config): FullStackStarterOptions =>`
+  callback is absent, repeated or unclassifiable; the seam's import binding already exists with
+  another source. The same `setu add` run twice writes once (idempotent).
+- **Scope:** the generated full-stack factory only. REST (inline plugin list) and hand-written
+  `createRestApp`/`createMicroserviceApp` configs keep today's behaviour.
+- **Test home:** `packages/cli/test/unit/commands/add.test.ts` (or the existing full-stack add test
+  file): a table over every full-stack arm asserting which of rules 1–4 applies, derived from
+  `GATED_STARTER_ARMS` and the wirings, so a new arm cannot fall through; each refusal; idempotence;
+  the inserted source type-checks against `FullStackStarterOptions` (the existing compiler-API check
+  M121 uses for broker arms). `packages/cli/test/e2e/full-stack-wiring-e2e.test.ts` (or a sibling):
+  a full-stack scaffold with `setu add sse metrics health` boots, `/metrics` serves a generated
+  custom metric's name and the SSE plugin is registered, with no hand edit.
+
 ## 4. Exported surface — every symbol names its consumer
 
 **Breaking for implementors:** none for callers. An implementor that dispatches `RouteDefinition`
@@ -339,6 +379,7 @@ repository (checked: §1 readers). Ships in minor 0.13.0, recorded under CHANGEL
 | `packages/react-router-plugin/src/plugin/react-router-plugin.ts`                                                                                                                                | install `middlewareGroups` on the catch-all when `pagePolicies` is non-empty                      |
 | `packages/react-router-plugin/src/index.ts`                                                                                                                                                     | barrel: `PagePolicy`, `PageRouteSource`                                                           |
 | `packages/cli/src/templates/full-stack-build-files.ts`                                                                                                                                          | dev entry returns `pageRoutes`                                                                    |
+| `packages/cli/src/commands/add.ts`, `packages/cli/src/commands/starter-options.ts`, `packages/cli/src/utils/starter-arms.ts`                                                                    | §3.11: classify the arm (rules 1–4), insert through `withStarterOption`, the new notes            |
 | `apps/full-stack/dev.ts`                                                                                                                                                                        | the same, in the example                                                                          |
 | Docs: `packages/react-router-plugin/README.md` ("Protecting page actions"), `AGENT_CARD.md` (≤ 2,560 bytes), `PUBLIC_API.md`, `ARCHITECTURE.md` §10, `CHANGELOG.md`, `docs/react-router-dev.md` | C1, C2 and the new surface                                                                        |
 

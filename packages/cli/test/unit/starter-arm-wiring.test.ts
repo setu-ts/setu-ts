@@ -93,6 +93,17 @@ describe('starter arms in setu check', () => {
     expect(reported(fullStack("'graphql': {},"), ['graphql-plugin'])).toEqual([]);
   });
 
+  it('distinguishes a present disabled key from an active arm without changing check warnings', () => {
+    for (const value of ['undefined', 'null', 'false']) {
+      const source = fullStack(`'metrics': ${value}, realtime: { 'sse': ${value} },`);
+      for (const arm of ['metrics', 'realtime.sse']) {
+        expect(starterArmSet(source, arm)).toBe(false);
+        expect(starterArmSet(source, arm, true)).toBe(true);
+      }
+      expect(starterArmSet(source, 'realtime.websocket', true)).toBe(false);
+    }
+  });
+
   it('reads an unset value through a trailing comment, top-level or nested', () => {
     for (const comment of ['/* disabled */', '// off\n']) {
       for (const value of ['undefined', 'null', 'false']) {

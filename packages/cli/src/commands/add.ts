@@ -30,6 +30,7 @@ import {
 import { renderModuleIndex } from '../seams/modules.ts';
 import { formatForTarget } from '../utils/prettier-format.ts';
 import { afterLastImport } from '../utils/import-placement.ts';
+import { barrelImportPlan } from '../utils/barrel-imports.ts';
 import type { IFileSystem } from '@setu-ts/common';
 import { deriveNames, escapeName, isKebabIdentifier } from '../utils/names.ts';
 import type { ParsedArgs } from '../args.ts';
@@ -660,7 +661,21 @@ function printWiringNote(
   if (starter !== undefined) {
     const arm = starter.arms.get(bare);
     if (arm !== undefined) {
-      if (bare === 'messaging-plugin' || bare === 'queue-plugin') {
+      const fullStack = starter.symbol === 'createFullStackAppFromConfig';
+      if (
+        fullStack &&
+        transportArgs === undefined &&
+        (seam !== undefined || (GATED_STARTER_ARMS.has(bare) && ZERO_CONFIG_WIRINGS.has(bare))) &&
+        source !== undefined &&
+        starterArmSet(source, arm, true) === true
+      ) {
+        log(`  setu.config.ts already sets its ${arm} arm; it was left as it is.`);
+        return;
+      }
+      if (
+        (bare === 'messaging-plugin' || bare === 'queue-plugin') &&
+        (!fullStack || transportArgs !== undefined)
+      ) {
         const key = bare === 'messaging-plugin' ? 'messaging' : 'queue';
         const flag = key === 'messaging' ? 'broker' : 'queue';
         // The factory's own option, read with the same analysis withStarterOption edits
@@ -682,7 +697,13 @@ function printWiringNote(
         }
         return;
       }
-      log(`  ${starter.symbol} owns this plugin; configure its ${arm} arm in setu.config.ts.`);
+      log(
+        fullStack && seam === undefined
+          ? GATED_STARTER_ARMS.has(bare)
+            ? `  ${starter.symbol} registers this plugin only once its ${arm} arm is set in setu.config.ts.`
+            : `  ${starter.symbol} already registers this plugin with its defaults; set its ${arm} arm in setu.config.ts only to configure it.`
+          : `  ${starter.symbol} owns this plugin; configure its ${arm} arm in setu.config.ts.`,
+      );
       // The barrel exists by now; without this line nothing would ever pass it to
       // the arm, so every handler generated into it would register nowhere.
       if (seam !== undefined) {
@@ -694,7 +715,6 @@ function printWiringNote(
       // A gated arm passes its value straight to the plugin's factory, so the
       // registration printed elsewhere gives the arm's shape. Full-stack's auth arm
       // gets the password sign-in recipe below instead.
-      const fullStack = starter.pkg === 'full-stack-starter';
       const line =
         seam === undefined && GATED_STARTER_ARMS.has(bare) && !(bare === 'auth-plugin' && fullStack)
           ? registrationLine(bare)
@@ -1523,42 +1543,6 @@ function withRegistration(
   return `${withImport.slice(0, insertion)}${call},${ownLine ? `\n${before}` : ' '}${withImport.slice(insertion)}`;
 }
 
-/** Shared fail-closed barrel admission for inline and starter composition. */
-function barrelImportPlan(
-  source: string,
-  imports: AddSeam['imports'],
-  reuse: boolean,
-): { text: string; at: number } | undefined {
-  const visible = maskComments(source);
-  if (visible === undefined) return undefined;
-  const missing: string[] = [];
-  for (const item of imports) {
-    const mentioned = visible.includes(`'${item.from}'`) || visible.includes(`"${item.from}"`);
-    if (mentioned) {
-      if (!reuse) return undefined;
-      const declarations = [
-        ...visible.matchAll(/\bimport\s*\{([^}]+)\}\s*from\s*(['"])([^'"]+)\2\s*;?/g),
-      ].filter((match) => match[3] === item.from);
-      if (
-        declarations.length !== 1 ||
-        !item.symbols.every((symbol) =>
-          declarations[0]![1]!
-            .split(',')
-            .map((name) => name.trim())
-            .includes(symbol),
-        )
-      )
-        return undefined;
-    } else {
-      if (item.symbols.some((symbol) => referencesIdentifier(visible, symbol))) return undefined;
-      missing.push(`import { ${item.symbols.join(', ')} } from '${item.from}';`);
-    }
-  }
-  const at = afterLastImport(source, visible);
-  if (at === undefined) return undefined;
-  return { text: missing.length === 0 ? '' : `\n${missing.join('\n')}`, at };
-}
-
 /** Existing top-level keys must bind the same expressions; nested mentions do not count. */
 function carriesStarterOptions(existing: string, literal: string): boolean {
   const actual = starterLiteralEntries(existing);
@@ -1585,6 +1569,14 @@ function withStarterWiring(
   const starter = composingStarter(source);
   const arm = starter?.arms.get(bare);
   if (arm === undefined) return undefined;
+  if (starter?.symbol === 'createFullStackAppFromConfig' && transportArgs === undefined) {
+    const literal =
+      seam?.args ??
+      (GATED_STARTER_ARMS.has(bare) && ZERO_CONFIG_WIRINGS.has(bare) ? '{}' : undefined);
+    return literal === undefined
+      ? undefined
+      : withStarterOption(source, arm, literal, seam?.imports);
+  }
   const shape = STARTER_SEAMS.find((entry) => entry.plugin === bare);
   const key = shape?.arm ?? (bare === 'messaging-plugin' ? 'messaging' : undefined);
   if (key === undefined) return undefined;
@@ -3638,7 +3630,13 @@ async function addOne(
       if (backendLine !== undefined)
         for (const guidance of backendGuidance(backendLine, configSource, bare)) deps.log(guidance);
     }
-    if (bare === 'messaging-plugin' || bare === 'queue-plugin') {
+    if (
+      bare === 'messaging-plugin' ||
+      bare === 'queue-plugin' ||
+      (configSource !== undefined &&
+        composingStarter(configSource)?.symbol === 'createFullStackAppFromConfig' &&
+        composingStarter(configSource)?.arms.has(bare) === true)
+    ) {
       printWiringNote(configSource, bare, deps.log, seam, transportArgs);
       printNodeRedisImportNote(configSource, transport?.clients ?? [], deps.log);
     }
