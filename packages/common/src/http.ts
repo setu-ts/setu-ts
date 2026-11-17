@@ -1143,8 +1143,25 @@ export interface RouteDefinition {
   readonly handler: RouteHandler;
   /** Route-level middleware, executed before the handler. */
   readonly middleware?: readonly MiddlewareFunction[];
+  /**
+   * Middleware selected after the static chain. A custom dispatcher must run
+   * these groups as well, or route guards fail open.
+   * @since 0.13.0
+   */
+  readonly middlewareGroups?: RouteMiddlewareGroups;
   /** Validation and OpenAPI schemas. */
   readonly schema?: RouteSchema;
+}
+
+/**
+ * Declared route middleware groups, selected per request in the returned order.
+ * @since 0.13.0
+ */
+export interface RouteMiddlewareGroups {
+  /** Every selectable group, also visible to startup scans. */
+  readonly groups: Readonly<Record<string, readonly MiddlewareFunction[]>>;
+  /** Selects declared keys after the static route middleware has continued. */
+  readonly select: (ctx: IRequestContext) => readonly string[] | Promise<readonly string[]>;
 }
 
 /**

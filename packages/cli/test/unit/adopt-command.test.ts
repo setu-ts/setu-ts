@@ -187,6 +187,8 @@ it('M140b rewrites the guarded full-stack dev.ts develop wrote with nullish port
       'utf8',
     );
   for (const runtime of ['node', 'bun'] as const) {
+    expect(develop(runtime)).not.toContain('pageRoutes:');
+    expect(develop(runtime)).not.toContain('matchRoutes');
     expect(fullStackDevEntryVariants(runtime)[2]!.contents).toBe(develop(runtime));
   }
   const guardedNullish = { path: 'dev.ts', contents: develop('node') };
@@ -203,6 +205,32 @@ it('M140b rewrites the guarded full-stack dev.ts develop wrote with nullish port
   expect(h.fs.read('/work/svc/apps/web/dev.ts')).toContain('const vitePort = VITE_PORT;');
   expect(h.out.text()).not.toContain('Set the two development port lines');
 });
+
+it.each(['node', 'bun'] as const)(
+  'recognizes and adopts a pre-pageRoutes %s entry with runtimeEnvRead port reads',
+  async (runtime) => {
+    const previous = renderFullStackDevEntry(undefined, runtime)
+      .contents.replace(
+        "import {\n  createRequestHandler,\n  matchRoutes,\n  RouterContextProvider,\n  type ServerBuild,\n} from 'react-router';",
+        "import { createRequestHandler, RouterContextProvider, type ServerBuild } from 'react-router';",
+      )
+      .replace('        pageRoutes: { build: loadServerBuild, matchRoutes },\n', '');
+    expect(previous).toContain("runtime.env.PORT || '3000'");
+    const h = harness({
+      ...NODE_PROJECT,
+      ...(runtime === 'bun' ? { '/work/svc/bun.lock': '' } : {}),
+      '/work/svc/package.json': JSON.stringify({
+        dependencies: { '@setu-ts/react-router-plugin': '^0.12.0' },
+        scripts: { 'start:debug': 'node --inspect dev.ts' },
+      }),
+      '/work/svc/dev.ts': previous,
+    });
+    expect(await h.run(['--name', 'web'], new AbortController().signal), h.err.text()).toBe(0);
+    expect(h.fs.read('/work/svc/apps/web/dev.ts')).toContain('const vitePort = VITE_PORT;');
+    expect(h.out.text()).not.toContain('Set the two development port lines');
+    expect(fullStackDevEntryVariants(runtime)[3]?.contents).toBe(previous);
+  },
+);
 
 it('X87-2 refuses an exhausted development range before moving any project files', async () => {
   const h = harness(NODE_PROJECT);

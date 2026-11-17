@@ -105,7 +105,7 @@ describe('rest-starter / integration', () => {
     expect(response.statusCode).toBe(200);
   });
 
-  // The NestJS-familiarity path end to end through the starter: parameter-level
+  // The decorator-based path end to end through the starter: parameter-level
   // @Inject, resolved by the container the `di` arm registers, serving a route
   // from a decorated controller. Proves the starter composes DiPlugin and
   // DecoratorPlugin correctly — the two are wired only by priority, in different

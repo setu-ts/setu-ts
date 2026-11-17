@@ -35,6 +35,14 @@ export interface ISpecifierSpan {
   readonly typeOnly: boolean;
   /** A static declaration or an `import('…')` call. */
   readonly kind: 'static' | 'dynamic';
+  /** Static import declaration and its local bindings; absent for re-exports and dynamic loads. */
+  readonly declaration?: {
+    readonly start: number;
+    readonly end: number;
+    readonly bindings: readonly string[];
+    /** Value imports whose exported and local names are the same. */
+    readonly named: readonly string[];
+  };
 }
 
 /**
@@ -205,6 +213,78 @@ function literalOf(token: IToken | undefined): string | undefined {
   return undefined;
 }
 
+/** Reads local bindings from the already-tokenized clause before `from`. */
+function importBindings(
+  tokens: readonly IToken[],
+  start: number,
+  end: number,
+  typeOnly: boolean,
+): { bindings: readonly string[]; named: readonly string[] } | undefined {
+  const bindings: string[] = [];
+  const named: string[] = [];
+  let at = start + (typeOnly ? 1 : 0);
+  if (at < end && tokens[at]?.kind === 'word') {
+    bindings.push(tokens[at++]!.text);
+    if (at < end) {
+      if (tokens[at]?.text !== ',') return undefined;
+      at++;
+    }
+  }
+  if (at === end) return { bindings, named };
+  if (
+    tokens[at]?.text === '*' &&
+    tokens[at + 1]?.text === 'as' &&
+    tokens[at + 2]?.kind === 'word'
+  ) {
+    bindings.push(tokens[at + 2]!.text);
+    return at + 3 === end ? { bindings, named } : undefined;
+  }
+  if (tokens[at++]?.text !== '{') return undefined;
+  while (at < end && tokens[at]?.text !== '}') {
+    const entryType =
+      tokens[at]?.text === 'type' &&
+      tokens[at + 1]?.kind === 'word' &&
+      tokens[at + 1]?.text !== 'as';
+    if (entryType) at++;
+    const exported = tokens[at++];
+    if (exported?.kind !== 'word') return undefined;
+    let local = exported;
+    if (tokens[at]?.text === 'as') {
+      at++;
+      const alias = tokens[at++];
+      if (alias?.kind !== 'word') return undefined;
+      local = alias;
+    }
+    bindings.push(local.text);
+    if (!typeOnly && !entryType && local.text === exported.text) named.push(local.text);
+    if (tokens[at]?.text === ',') at++;
+    else if (tokens[at]?.text !== '}') return undefined;
+  }
+  return tokens[at]?.text === '}' && at + 1 === end ? { bindings, named } : undefined;
+}
+
+/** Finishes a static import, including attributes and an optional semicolon. */
+function importEnd(tokens: readonly IToken[], literal: number): number | undefined {
+  let end = literal + 1;
+  if (
+    tokens[end]?.kind === 'word' &&
+    (tokens[end]?.text === 'with' || tokens[end]?.text === 'assert')
+  ) {
+    end++;
+    if (tokens[end]?.text !== '{') return undefined;
+    let depth = 0;
+    do {
+      if (tokens[end]?.kind === 'punct') {
+        if (tokens[end]?.text === '{') depth++;
+        else if (tokens[end]?.text === '}') depth--;
+      }
+      end++;
+    } while (depth > 0 && end < tokens.length);
+    if (depth !== 0) return undefined;
+  }
+  return tokens[end]?.text === ';' ? tokens[end]!.end : tokens[end - 1]!.end;
+}
+
 /**
  * Reads the `import.meta.glob(…)` call whose `import` is at `i`.
  *
@@ -327,7 +407,18 @@ export function lexImportSpecifiers(source: string): LexedImports {
       continue;
     }
     if (token.text === 'import' && next?.kind === 'string') {
-      spans.push(span(next, false, 'static'));
+      const end = importEnd(tokens, i + 1);
+      if (end === undefined)
+        return { kind: 'unclassifiable', reason: 'unreadable import attributes' };
+      spans.push({
+        ...span(next, false, 'static'),
+        declaration: {
+          start: token.start,
+          end,
+          bindings: [],
+          named: [],
+        },
+      });
       continue;
     }
     const typeOnly = next?.kind === 'word' && next.text === 'type';
@@ -356,7 +447,22 @@ export function lexImportSpecifiers(source: string): LexedImports {
     const literal = tokens[j];
     if (literal?.kind !== 'string' || tokens[j - 1]?.text !== 'from')
       return { kind: 'unclassifiable', reason: 'an import declaration it cannot read' };
-    spans.push(span(literal, typeOnly, 'static'));
+    const clause = importBindings(tokens, i + 1, j - 1, typeOnly);
+    const end = importEnd(tokens, j);
+    if (end === undefined)
+      return { kind: 'unclassifiable', reason: 'unreadable import attributes' };
+    spans.push({
+      ...span(literal, typeOnly, 'static'),
+      ...(clause === undefined
+        ? {}
+        : {
+            declaration: {
+              start: token.start,
+              end,
+              ...clause,
+            },
+          }),
+    });
   }
   return { kind: 'ok', spans, globs: globsReadable ? globs : 'unreadable' };
 }
@@ -364,6 +470,94 @@ export function lexImportSpecifiers(source: string): LexedImports {
 /** Counts each value, for an order-independent comparison. */
 function multiset(values: readonly string[]): string {
   return JSON.stringify([...values].sort());
+}
+
+/** The offset after a balanced punctuation group in the lexer's token stream. */
+function groupEnd(tokens: readonly IToken[], start: number): number | undefined {
+  const closes: string[] = [];
+  for (let at = start; at < tokens.length; at++) {
+    const token = tokens[at]!;
+    if (token.kind !== 'punct') continue;
+    const close =
+      token.text === '(' ? ')' : token.text === '[' ? ']' : token.text === '{' ? '}' : undefined;
+    if (close !== undefined) closes.push(close);
+    else if ([')', ']', '}'].includes(token.text) && closes.pop() !== token.text) return undefined;
+    if (closes.length === 0) return at + 1;
+  }
+  return undefined;
+}
+
+/**
+ * Conservatively checks for bindings that could shadow a reused module import.
+ * Any matching declaration anywhere in the file refuses reuse; destructuring and
+ * parameter patterns also refuse on a name mention rather than guessing its scope.
+ * @param source - TypeScript source
+ * @param names - Imported local names to protect
+ * @returns Whether a possible non-import binding exists, or undefined for unreadable groups
+ */
+export function hasNonImportBinding(source: string, names: readonly string[]): boolean | undefined {
+  const tokens = tokenize(source);
+  if (tokens === undefined) return undefined;
+  const mentions = (start: number, end: number): boolean =>
+    tokens.slice(start, end).some((token) => token.kind === 'word' && names.includes(token.text));
+  for (let at = 0; at < tokens.length; at++) {
+    const token = tokens[at]!;
+    if (token.kind === 'word') {
+      if (['function', 'class', 'enum', 'namespace'].includes(token.text)) {
+        const name = tokens[at + (tokens[at + 1]?.text === '*' ? 2 : 1)];
+        if (name?.kind === 'word' && names.includes(name.text)) return true;
+      }
+      if (
+        names.includes(token.text) &&
+        tokens[at + 1]?.text === '=' &&
+        tokens[at + 2]?.text === '>'
+      )
+        return true;
+      if (!['const', 'let', 'var', 'using'].includes(token.text)) continue;
+      let binding = at + 1;
+      while (binding < tokens.length) {
+        const head = tokens[binding]!;
+        if (head.kind === 'word') {
+          if (names.includes(head.text)) return true;
+          binding++;
+        } else if (head.kind === 'punct' && (head.text === '{' || head.text === '[')) {
+          const end = groupEnd(tokens, binding);
+          if (end === undefined) return undefined;
+          if (mentions(binding, end)) return true;
+          binding = end;
+        } else break;
+        // Skip the type and initializer, following only commas between declarators.
+        while (binding < tokens.length) {
+          const next = tokens[binding]!;
+          if (next.kind === 'punct' && ['(', '[', '{'].includes(next.text)) {
+            const end = groupEnd(tokens, binding);
+            if (end === undefined) return undefined;
+            binding = end;
+          } else if (
+            (next.kind === 'punct' && [',', ';', ')', '}'].includes(next.text)) ||
+            (next.kind === 'word' && ['in', 'of'].includes(next.text))
+          )
+            break;
+          else binding++;
+        }
+        if (tokens[binding]?.text !== ',') break;
+        binding++;
+      }
+    } else if (token.kind === 'punct' && token.text === '(') {
+      const end = groupEnd(tokens, at);
+      if (end === undefined) return undefined;
+      const after = tokens[end];
+      if (
+        after?.kind === 'punct' &&
+        (after.text === '{' ||
+          after.text === ':' ||
+          (after.text === '=' && tokens[end + 1]?.text === '>')) &&
+        mentions(at, end)
+      )
+        return true;
+    }
+  }
+  return false;
 }
 
 /**

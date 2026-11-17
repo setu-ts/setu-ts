@@ -414,8 +414,8 @@ app.router.get('/account', { middleware: [signedIn], handler });
 A request is a navigation when it is a `GET` or `HEAD`, is not `X-Requested-With: XMLHttpRequest`,
 and carries `Sec-Fetch-Mode: navigate` — or, from a client that sends no `Sec-Fetch-Mode`, an
 `Accept` that names `text/html` or `application/xhtml+xml`. A bare `*/*` is not enough: `curl` and
-most HTTP clients send it. This is the rule Laravel, Devise, ASP.NET Core and Spring Security apply.
-A `POST` is never redirected, because the redirect would turn it into a `GET` and drop its body.
+most HTTP clients send it. A `POST` is never redirected, because the redirect would turn it into a
+`GET` and drop its body.
 
 - **`signInPage`** must be a same-origin absolute path (`safeReturnTo` keeps it unchanged); anything
   else throws `AuthPluginConfigurationError` when the guard is built. Its own query and fragment are
@@ -1131,26 +1131,26 @@ also installs `POST <basePath>/logout` (default `/auth/logout`), so a form posti
 
 ### Ending every session of a user
 
-Keep a stamp on your user record — a `sessionVersion` counter, or a prefix of the password hash as
-Laravel, Django and Devise do — and give `signIn` a reader for it. `IAuthSessionService.signIn`
-records a SHA-256 digest of the stamp; every request compares the digest of the current stamp with
-it, in constant time. Change the stamp and every session of that user answers anonymous on its next
-request — `ctx.request.user` is unset, and passkey registration refuses it. A definite mismatch
-removes the auth record and regenerates the writable HTTP session when the old cookie is next
-presented on a request the session strategy authenticates, even if that request throws (strategies
-answer first-match, so a request that also carries a valid bearer token is authenticated by the JWT
-strategy and leaves the cookie unchecked); the store strategy deletes the old session id then, so a
-later stamp restore cannot revive it. When that request completes normally, the browser also
-receives a replacement cookie without its auth record; a request that throws sends none. Revocation
-needs that presentation: an id never presented while the stamp differed, and any copy of an
-encrypted-cookie session (which has no server-side record, even after it was presented),
-authenticate again if the stamp is restored. So a stamp must only move forward on either strategy:
-to end sessions, set a new value, never an old one. A throwing reader or malformed return suspends
-only this request and leaves the record and id unchanged, so an identity-store outage does not sign
-everyone out. `verifiedCurrent(ctx)` applies the same mutation for the plugin's own identity reads.
-Read-only `fromHeaders` callers (including WebSocket upgrades) remain suspension-only because they
-cannot commit a session change, and so does the auth middleware when a custom `middleware.priority`
-runs it before the session middleware has loaded the session.
+Keep a stamp on your user record — a `sessionVersion` counter, or a prefix of the password hash —
+and give `signIn` a reader for it. `IAuthSessionService.signIn` records a SHA-256 digest of the
+stamp; every request compares the digest of the current stamp with it, in constant time. Change the
+stamp and every session of that user answers anonymous on its next request — `ctx.request.user` is
+unset, and passkey registration refuses it. A definite mismatch removes the auth record and
+regenerates the writable HTTP session when the old cookie is next presented on a request the session
+strategy authenticates, even if that request throws (strategies answer first-match, so a request
+that also carries a valid bearer token is authenticated by the JWT strategy and leaves the cookie
+unchecked); the store strategy deletes the old session id then, so a later stamp restore cannot
+revive it. When that request completes normally, the browser also receives a replacement cookie
+without its auth record; a request that throws sends none. Revocation needs that presentation: an id
+never presented while the stamp differed, and any copy of an encrypted-cookie session (which has no
+server-side record, even after it was presented), authenticate again if the stamp is restored. So a
+stamp must only move forward on either strategy: to end sessions, set a new value, never an old one.
+A throwing reader or malformed return suspends only this request and leaves the record and id
+unchanged, so an identity-store outage does not sign everyone out. `verifiedCurrent(ctx)` applies
+the same mutation for the plugin's own identity reads. Read-only `fromHeaders` callers (including
+WebSocket upgrades) remain suspension-only because they cannot commit a session change, and so does
+the auth middleware when a custom `middleware.priority` runs it before the session middleware has
+loaded the session.
 
 ```typescript
 import type { IPrincipal } from '@setu-ts/common';

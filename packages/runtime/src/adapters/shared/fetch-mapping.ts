@@ -123,7 +123,7 @@ function bodyReadFailure(error: unknown, maxBodyBytes?: number): never {
  * fresh object literal per request carrying three closures, which gave every
  * request its own hidden class and made these call sites megamorphic. Defining
  * the same members once on a prototype is the discipline `@hono/node-server`
- * and Fastify both use for their own per-request objects.
+ * uses for its own per-request objects.
  */
 class FrameworkRequest implements IRequest {
   readonly method: HttpMethod;
@@ -605,7 +605,7 @@ function normalizePeerAddress(address: string | undefined): string | undefined {
  * the request died with an unhandled `TypeError`.
  *
  * The body is therefore dropped rather than the throw being propagated, which
- * is what Express and Fastify both do and what RFC 9110 §15.3.5 implies — a
+ * is what RFC 9110 §15.3.5 implies — a
  * `204` has no content, so serving it without one is the conformant answer.
  * Headers are left alone: RFC 9110 permits representation metadata on a `204`.
  */

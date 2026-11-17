@@ -47,14 +47,11 @@ Enterprise architecture without the weight. Runtime freedom without the chaos.
 
 ## Why This Exists
 
-Building enterprise backends today forces a difficult choice:
-
-| Option      | Problem                                                                                                                   |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------- |
-| **Hono**    | Extremely fast and runtime-portable, but intentionally minimal — no DI, no modules, no enterprise patterns.               |
-| **NestJS**  | Rich enterprise features, but tightly coupled to Node.js, requires decorators and DI, and carries a steep learning curve. |
-| **Fastify** | Fast and plugin-oriented, but lacks enterprise abstractions like repository patterns, CQRS, and multi-tenancy.            |
-| **Express** | Ubiquitous but aging, callback-based, and Node.js-only.                                                                   |
+Building enterprise backends today forces a difficult choice. A minimal, runtime-portable router is
+extremely fast but intentionally bare — no DI, no modules, no enterprise patterns. A
+decorator-and-DI-first framework brings rich enterprise features but couples the application to
+Node.js, requires reflection, and carries a steep learning curve. A lightweight, plugin-oriented
+server is fast but lacks enterprise abstractions like repository patterns, CQRS, and multi-tenancy.
 
 Every existing solution forces a compromise: **power vs. portability, features vs. simplicity,
 opinion vs. flexibility.**
@@ -100,7 +97,7 @@ Every ✅ row is a package in this repository with 90%+ test coverage on branch,
 | Feature             | Status | Package              | Description                                            |
 | ------------------- | ------ | -------------------- | ------------------------------------------------------ |
 | Plugin system       | ✅     | `kernel`             | Capability-token-based plugin architecture             |
-| Middleware pipeline | ✅     | `kernel`             | ASP.NET Core-style ordered middleware                  |
+| Middleware pipeline | ✅     | `kernel`             | Ordered middleware with priority bands                 |
 | Routing             | ✅     | `kernel`             | Hono `LinearRouter` under the framework's own pipeline |
 | Runtime abstraction | ✅     | `runtime`            | Node.js, Deno, Bun, Cloudflare Workers with detection  |
 | Streaming responses | ✅     | `kernel` + `runtime` | `IResponse.stream()` with request `AbortSignal`        |
@@ -113,7 +110,7 @@ Every ✅ row is a package in this repository with 90%+ test coverage on branch,
 | -------------- | ------ | ---------------------- | -------------------------------------------------------------------------------- |
 | Logging        | ✅     | `logger-plugin`        | Console, pino, noop; request/response middleware                                 |
 | Configuration  | ✅     | `config-plugin`        | Env loading, variable expansion, schema validation                               |
-| Validation     | ✅     | `validation-plugin`    | Zod-based, with RFC 9457 / NestJS / default error shapes                         |
+| Validation     | ✅     | `validation-plugin`    | Zod-based, with RFC 9457 / compatibility / default error shapes                  |
 | HTTP security  | ✅     | `http-security-plugin` | CORS, security headers, CSRF, request size, IP rules                             |
 | Authentication | ✅     | `auth-plugin`          | JWT (HS256/RS256 via Web Crypto), API keys, local, refresh tokens, rate limiting |
 | Authorization  | ✅     | `auth-plugin`          | RBAC with transitive role hierarchy and permission guards                        |
@@ -180,7 +177,7 @@ Every ✅ row is a package in this repository with 90%+ test coverage on branch,
 | Notifications        | ✅     | `notification-plugin`  | Email, SMS, push, Slack over one HTTP seam                      |
 | Feature flags        | ✅     | `feature-flags-plugin` | Percentage rollout, user targeting, pluggable providers         |
 | Dependency injection | ✅     | `di-plugin`            | **Optional.** Singleton/scoped/transient, constructor injection |
-| Decorators           | ✅     | `decorator-plugin`     | **Optional.** NestJS-style, no `reflect-metadata`               |
+| Decorators           | ✅     | `decorator-plugin`     | **Optional.** Decorator-based, no `reflect-metadata`            |
 
 ### Tooling
 

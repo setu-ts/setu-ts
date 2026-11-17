@@ -197,6 +197,7 @@ export type {
   ResponseSnapshotInit,
   StreamOptions,
   RouteDefinition,
+  RouteMiddlewareGroups,
   RouteHandler,
   RouteResponseMetadata,
   RouteSchema,
@@ -210,6 +211,7 @@ export type {
   SecurityRequirement,
   WebSocketUpgradeIntent,
 } from './http.ts';
+export { routeMiddlewareOf } from './route-middleware.ts';
 export {
   isPromiseLike,
   isWebSocketUpgradeRequest,

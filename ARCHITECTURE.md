@@ -42,68 +42,43 @@
 
 ### Why This Framework Exists
 
-Enterprise backend development faces a recurring tension: **frameworks that are powerful tend to be
-heavy and opinionated, while frameworks that are lightweight tend to lack enterprise features.**
+Setu-TS provides enterprise architecture through optional plugins for repositories, CQRS,
+multi-tenancy, audit logging, decorators, and dependency injection.
 
-NestJS provides excellent developer experience with decorators, DI, and modules, but it is tightly
-coupled to Node.js, requires reflection, and has a steep learning curve. Fastify is fast and
-plugin-oriented but lacks the enterprise abstractions (repository pattern, CQRS, multi-tenancy,
-audit logging) that large organizations need. Hono delivers exceptional performance and runtime
-portability but is intentionally minimal — it provides routing, not architecture.
-
-**Setu-TS exists to bridge this gap.** It combines:
-
-| Source       | What We Take                                                         |
-| ------------ | -------------------------------------------------------------------- |
-| Hono         | Performance, runtime portability, routing engine                     |
-| Spring Boot  | Plugin auto-configuration, conditional registration, starter bundles |
-| ASP.NET Core | Middleware pipeline, request/response abstractions                   |
-| Fastify      | Plugin encapsulation, decoration pattern, lifecycle hooks            |
+Setu combines Hono routing and runtime portability with plugin auto-configuration, starter bundles,
+an ordered middleware pipeline, request/response abstractions, plugin encapsulation, and lifecycle
+hooks.
 
 ### Problems It Solves
 
-1. **Runtime lock-in** — NestJS, Express, and Fastify are Node.js-first. Setu-TS runs on Node.js,
-   Deno, and Bun with zero code changes, and is designed for Cloudflare Workers extensibility.
+1. **Runtime portability** — Setu-TS runs on Node.js, Deno, and Bun with zero code changes, and is
+   designed for Cloudflare Workers extensibility.
 
-2. **Opinionated heaviness** — NestJS requires DI, decorators, and reflection. Setu-TS makes all of
-   these optional. Start with just a router and add capabilities as needed.
+2. **Optional composition** — DI, decorators, and reflection are optional. Start with just a router
+   and add capabilities as needed.
 
-3. **Monolithic frameworks** — Most frameworks bundle all features. Setu-TS is plugin-first: every
-   capability (logging, database, auth, validation) is a plugin that can be added, removed, or
-   replaced.
+3. **Plugin composition** — Every capability (logging, database, auth, validation) is a plugin that
+   can be added, removed, or replaced.
 
-4. **Poor replaceability** — In most frameworks, swapping the database layer or logger requires
-   touching application code. Setu-TS uses capability tokens, so any plugin can be replaced without
+4. **Replaceability** — Setu-TS uses capability tokens, so a plugin can be replaced without
    modifying business logic.
 
-5. **Enterprise feature gaps** — Lightweight frameworks lack secrets management, audit logging,
-   circuit breakers, feature flags, and multi-tenancy. Setu-TS provides these as plugins.
+5. **Enterprise capabilities** — Secrets management, audit logging, circuit breakers, feature flags,
+   and multi-tenancy are available as plugins.
 
-### Why It Is Not a NestJS Clone
+### Why It Is Not a Framework Clone
 
-NestJS is built around three mandatory pillars: **modules, dependency injection, and decorators**.
-Every NestJS application must use all three. This creates a steep learning curve and tight coupling
-to the framework's opinions.
+Setu-TS makes dependency injection, decorators, and reflection optional. Plugins provide the units
+of composition, and every capability has a programmatic API. Applications select the plugins they
+need and can replace any plugin through its capability contract. Runtime adapters support Node,
+Deno, Bun, and Cloudflare Workers.
 
-Setu-TS inverts this:
-
-| Aspect           | NestJS       | Setu-TS                     |
-| ---------------- | ------------ | --------------------------- |
-| DI               | Required     | Optional plugin             |
-| Decorators       | Required     | Optional plugin             |
-| Reflection       | Required     | Optional                    |
-| Modules          | Required     | Plugins (more granular)     |
-| Programmatic API | Limited      | Full API for everything     |
-| Replaceability   | Difficult    | Any plugin swappable        |
-| Runtime          | Node.js only | Node, Deno, Bun, CF Workers |
-| Bundle size      | Large        | Pay only for what you use   |
-
-> **Runtime vs build toolchain.** The Runtime row describes where the framework _runs_. The React
+> **Runtime vs build toolchain.** Runtime support describes where the framework _runs_. The React
 > Router SSR plugin (M44) is web-standard at runtime — it runs wherever `Request`/`Response` do —
 > but its _frontend build_ uses the Node/npm toolchain (Vite) outside the Deno workspace, and is
 > never a dependency of a JSR-published package (see AI_GUIDELINES §12.2). CF Workers support for
 > React Router framework mode specifically carries additional constraints and is not implied by this
-> row.
+> general support statement.
 
 A Setu-TS application can be as minimal as:
 
@@ -151,7 +126,7 @@ registration boundary through an internal sink.
 
 Hono is chosen for several reasons:
 
-1. **Performance** — Hono is one of the fastest TypeScript routers, competitive with Fastify.
+1. **Performance** — Hono is one of the fastest TypeScript routers.
 2. **Runtime portability** — Hono already runs on Node.js, Deno, Bun, and Cloudflare Workers.
 3. **Minimal** — Hono does not impose an architecture; it provides routing and lets the framework
    build on top.
@@ -1993,6 +1968,28 @@ const authMiddleware = () => async (ctx, next) => {
 };
 ```
 
+### Route middleware chosen per request
+
+A route's `middleware` array is fixed when the route is registered. One route can stand for many
+logical endpoints, though: `ReactRouterPlugin` serves every page through a single catch-all, and a
+guard meant for the sign-in action must not run on every page. `RouteDefinition.middlewareGroups`
+keeps both properties that matter:
+
+- **The middleware is still static data.** `groups` names every middleware the route can run, so a
+  startup scan (`routeMiddlewareOf`, read by `AuthPlugin`'s `requirePolicy` check) still sees all of
+  it.
+- **Only the choice is per request.** After the static chain calls through, the kernel calls
+  `select(ctx)`, which returns group keys; the named groups run through the same `executeChain`,
+  with the handler as terminal. Short-circuiting, the double-`next()` guard and the after-`next()`
+  view of the response are therefore identical to any other route middleware. An undeclared key, or
+  a `select` that fails, answers `500` without running the handler: the seam fails closed.
+
+The matching lives with the producer, not the kernel. `ReactRouterPlugin` selects by React Router
+route id using React Router's own `matchRoutes`, after its `.data` normalization, because a guard
+keyed on the URL path misses the single-fetch shapes (`/x.data`, `/_.data`) that reach the same
+action. Policies are not run inside React Router's own `middleware` export: there they would lose
+the kernel context and the after-`next()` response, which `idempotent()` depends on.
+
 ### Non-HTTP ingress behaviour chain
 
 Queue processors, scheduler jobs, messaging subscriptions, and WebSocket frames use a second,
@@ -2152,7 +2149,7 @@ register(ctx) {
 | Functional programming style   | Service Registry                            |
 | OOP with explicit dependencies | Manual Wiring                               |
 | Complex dependency graphs      | DI Plugin                                   |
-| NestJS migration               | DI Plugin + Decorator Plugin                |
+| Decorator-based migration      | DI Plugin + Decorator Plugin                |
 | Testing                        | Service Registry (mock by overriding token) |
 
 ---
@@ -2506,12 +2503,11 @@ policy-guard brand and fails `start()` before the server listens, then seals the
 `@RequirePolicy` is validated in DecoratorPlugin's own `register()`. A route added after `start()`
 is not scanned and fails closed per request.
 
-**Where attribute rules go.** Into policies. The framework ships no attribute language — ASP.NET
-Core, NestJS and Spring make the same choice. An external engine (OpenFGA, Casbin) is wrapped as a
-policy. Scoped grants (a role held in one tenant) are built on this layer — see Scoped Roles below.
-Non-HTTP ingress has no policy behaviour yet: `IngressContext` carries no principal, and a check
-that silently evaluated as anonymous would be worse than none; the imperative calls work there
-because the principal is an argument.
+**Where attribute rules go.** Into policies. The framework ships no attribute language. An external
+engine (OpenFGA, Casbin) is wrapped as a policy. Scoped grants (a role held in one tenant) are built
+on this layer — see Scoped Roles below. Non-HTTP ingress has no policy behaviour yet:
+`IngressContext` carries no principal, and a check that silently evaluated as anonymous would be
+worse than none; the imperative calls work there because the principal is an argument.
 
 ### Scoped Roles (Milestone 110b)
 

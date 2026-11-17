@@ -9,8 +9,8 @@ import { httpStatusHintOf, maskUrlUserinfo } from '@setu-ts/common';
 
 /**
  * The GraphQL `extensions.code` for each caller-error status a resolver can
- * throw. The names are Apollo's and `@nestjs/apollo`'s for `400`, `401`, `403`
- * and `422`; `404`, `409` and `429` get their own names rather than Nest's
+ * throw. The names follow Apollo's conventions for `400`, `401`, `403` and
+ * `422`; `404`, `409` and `429` get their own names rather than the generic
  * `INTERNAL_SERVER_ERROR`. Any other `4xx` maps to {@linkcode DEFAULT_CALLER_ERROR_CODE}.
  *
  * Internal: not exported from `src/index.ts`. The tests iterate it as data.

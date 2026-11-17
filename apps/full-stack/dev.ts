@@ -1,6 +1,11 @@
 /* eslint-disable no-console -- the development entry reports startup and shutdown failures. */
 import * as vite from 'vite';
-import { createRequestHandler, RouterContextProvider, type ServerBuild } from 'react-router';
+import {
+  createRequestHandler,
+  matchRoutes,
+  RouterContextProvider,
+  type ServerBuild,
+} from 'react-router';
 import { CAPABILITIES, describeError, type ILogger, type IRuntimeServices } from '@setu-ts/common';
 import { viteDevExternals } from '@setu-ts/react-router-plugin';
 import { createRuntimeServices } from '@setu-ts/runtime';
@@ -83,6 +88,7 @@ async function boot() {
         // From the same react-router module as the handler: React Router checks
         // the context with instanceof.
         createLoadContext: () => new RouterContextProvider(),
+        pageRoutes: { build: loadServerBuild, matchRoutes },
       });
     },
   });

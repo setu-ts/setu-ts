@@ -87,11 +87,11 @@ const URL_BASE = 'http://localhost';
  *
  * Only `GET` and `HEAD`: a redirect would turn a form `POST` into a `GET` and
  * drop its body. An `X-Requested-With: XMLHttpRequest` request is script, never
- * a navigation (ASP.NET Core, Spring). `Sec-Fetch-Mode` decides when present —
+ * a navigation. `Sec-Fetch-Mode` decides when present —
  * a browser sends `navigate` for a page load and something else for `fetch()`.
  * Without it, `Accept` must NAME `text/html` or `application/xhtml+xml`; the bare
  * any-type wildcard is not enough, because `curl` and most HTTP clients send
- * only that (Spring).
+ * only that.
  *
  * @param method - The request method
  * @param headers - The request headers

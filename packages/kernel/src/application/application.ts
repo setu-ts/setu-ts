@@ -46,6 +46,8 @@ import type {
   IWebSocketService,
   MetricConfig,
   RouteDefinition,
+  MiddlewareFunction,
+  RouteMiddlewareGroups,
   StartOptions,
   WebSocketUpgradeDecision,
 } from '@setu-ts/common';
@@ -1307,6 +1309,7 @@ class Application implements IKernelApplication {
     scope: 'global' | 'route',
     parentOperationId: string | undefined,
     routeEntryIndex: number | undefined,
+    positionOffset = 0,
   ): ChainObserver | undefined {
     const collector = this.#collector;
     if (collector === undefined) {
@@ -1318,7 +1321,7 @@ class Application implements IKernelApplication {
         collector.observeMiddlewareStage({
           parentOperationId: parentOperationId ?? '<unkeyed>',
           scope,
-          position: stage.position,
+          position: stage.position + positionOffset,
           routeEntryIndex,
           outcome: stage.outcome,
           startedAtMs: stage.startedAtMs,
@@ -1498,6 +1501,9 @@ class Application implements IKernelApplication {
     // stops stages after the response is ended. Positions follow the route's
     // own middleware array; the terminal observes the handler itself.
     const routeMiddleware = definition.middleware;
+    if (definition.middlewareGroups !== undefined) {
+      return this.#dispatchRouteGroups(ctx, handle, entry, definition, definition.middlewareGroups);
+    }
     if (routeMiddleware !== undefined && routeMiddleware.length > 0) {
       return executeChain(
         routeMiddleware,
@@ -1524,6 +1530,68 @@ class Application implements IKernelApplication {
       return undefined;
     }
     return this.#invokeHandlerObserved(ctx, entry, definition, handle);
+  }
+
+  /** Runs the optional selected-group path without allocating on the M87 bypass. */
+  async #dispatchRouteGroups(
+    ctx: IRequestContext,
+    handle: RequestContextHandle,
+    entry: RouteEntry,
+    definition: RouteDefinition,
+    middlewareGroups: RouteMiddlewareGroups,
+  ): Promise<void> {
+    // A route stage can answer while next() keeps selector or handler work running.
+    // Keep deferred cleanup and shutdown tied to that work on the fast path too.
+    handle.trackHandler = true;
+    const staticMiddleware = definition.middleware ?? [];
+    const selectAndRun = async (): Promise<void> => {
+      if ((ctx.response as ResponseBuilder).ended) return;
+      const keys = await middlewareGroups.select(ctx);
+      const selected: MiddlewareFunction[] = [];
+      // Validate the complete selection before any selected stage executes.
+      for (const key of keys) {
+        if (!Object.hasOwn(middlewareGroups.groups, key)) {
+          throw new Error(`route middleware group '${key}' is not declared`);
+        }
+        selected.push(...middlewareGroups.groups[key]!);
+      }
+      if (selected.length === 0) {
+        if (!(ctx.response as ResponseBuilder).ended) {
+          await this.#invokeHandlerObserved(ctx, entry, definition, handle);
+        }
+        return;
+      }
+      await executeChain(
+        selected,
+        ctx,
+        async () => {
+          await this.#invokeHandlerObserved(ctx, entry, definition, handle);
+        },
+        undefined,
+        this.#chainObserver(
+          'route',
+          this.#collector?.requestOperationIdOf(ctx),
+          entry.index,
+          staticMiddleware.length,
+        ),
+      );
+    };
+    const runSelected = (): Promise<void> => {
+      const pending = selectAndRun();
+      this.#trackHandler(handle, pending);
+      return pending;
+    };
+    if (staticMiddleware.length === 0) {
+      await runSelected();
+    } else {
+      await executeChain(
+        staticMiddleware,
+        ctx,
+        runSelected,
+        undefined,
+        this.#chainObserver('route', this.#collector?.requestOperationIdOf(ctx), entry.index),
+      );
+    }
   }
 
   /**
@@ -1746,13 +1814,32 @@ class Application implements IKernelApplication {
     return this.#settleRequest(ctx, handle, 'error');
   }
 
-  /** Retains a running terminal without changing the promise propagated to middleware. */
+  /** Retains selector and handler work without changing promises propagated to middleware. */
   #trackHandler(handle: RequestContextHandle, pending: Promise<unknown>): void {
+    const previous = handle.pendingHandler;
     const complete = (): void => {
-      handle.handlerSettled = true;
+      // An enclosing selector can settle before a handler detached by a group.
+      if (handle.pendingHandler === tracked) handle.handlerSettled = true;
     };
     handle.handlerSettled = false;
-    handle.pendingHandler = pending.then(complete, complete);
+    const tracked: Promise<void> = (
+      previous === undefined ? pending : Promise.allSettled([previous, pending])
+    ).then(complete, complete);
+    handle.pendingHandler = tracked;
+  }
+
+  /** Waits until tracked work settles without a newer promise replacing it. */
+  async #drainTracked(handle: RequestContextHandle, first: Promise<void>): Promise<void> {
+    let pending = first;
+    for (;;) {
+      await pending;
+      // A group stage that calls next() without awaiting it can track the
+      // handler after this wait began; #trackHandler then installs a newer
+      // promise that also waits for the earlier work.
+      const latest = handle.pendingHandler;
+      if (latest === undefined || latest === pending) return;
+      pending = latest;
+    }
   }
 
   /** Settles generic cleanup before releasing the request from shutdown drain. */
@@ -1765,7 +1852,7 @@ class Application implements IKernelApplication {
     const pendingHandler = handle.pendingHandler;
     if (pendingHandler !== undefined && !handle.handlerSettled) {
       // Keep the request in the shutdown drain, and leave defer open for work
-      // registered by the handler after this early response has been sent.
+      // registered by selector or handler work after this early response has been sent.
       const finish = async (): Promise<void> => {
         const cleanups = handle.takeDeferred();
         if (cleanups !== undefined) await runDeferred(cleanups, this.#registry);
@@ -1777,10 +1864,10 @@ class Application implements IKernelApplication {
         // The buffered response has already been returned. Settle against it:
         // a stream the handler sets later is never read, so cleanup must not
         // wait for it to be consumed.
-        void pendingHandler.then(finish);
+        void this.#drainTracked(handle, pendingHandler).then(finish);
       } else {
         const complete = (): void => {
-          void pendingHandler.then(finish);
+          void this.#drainTracked(handle, pendingHandler).then(finish);
         };
         response.stream(
           wrapDeferredStream(

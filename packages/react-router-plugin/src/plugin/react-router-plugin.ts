@@ -10,6 +10,7 @@ import type {
   IPlugin,
   IPluginContext,
   ISsrService,
+  MiddlewareFunction,
   RouteHandler,
 } from '@setu-ts/common';
 // IRuntimeServices type used via ctx.runtime (non-optional property)
@@ -18,6 +19,7 @@ import type { ReactRouterPluginOptions } from '../interfaces/index.ts';
 import { createPublicFileHandler, createStaticAssetHandler } from '../assets/static-assets.ts';
 import { SsrService } from '../services/ssr-service.ts';
 import { assertSsrRuntime, loadRequestHandler } from '../handler/server-build.ts';
+import { createPagePolicies } from '../policies/page-policies.ts';
 import { VERSION } from '../version.ts';
 
 /** Plugin name. */
@@ -138,9 +140,11 @@ export function ReactRouterPlugin(options: ReactRouterPluginOptions): IPlugin {
         'serverBuild' in options ? { serverBuild: options.serverBuild } : undefined;
       // Validated at registration: a seam returning the pre-0.2.0 bare handler
       // would otherwise register cleanly and 500 on every request instead.
-      const { handler, createLoadContext } = assertSsrRuntime(
+      const ssrRuntime = assertSsrRuntime(
         await getLoadRequestHandler(buildPath, mode, loaderOptions),
       );
+      const { handler, createLoadContext } = ssrRuntime;
+      const middlewareGroups = await createPagePolicies(options.pagePolicies, ssrRuntime);
 
       // Build and register the SSR service.
       const ssrService = new SsrService(handler, createLoadContext, options.populateLoadContext);
@@ -160,6 +164,7 @@ export function ReactRouterPlugin(options: ReactRouterPluginOptions): IPlugin {
       // caching (those files are not content-hashed); every miss falls through
       // to SSR unchanged.
       let getRoute = renderRoute;
+      let publicFileStage: MiddlewareFunction | undefined;
       if (options.publicFiles !== false && options.assetsDir != null && runtime.fs != null) {
         // Probe the client-build ROOT, not the assets subdir — `public/`
         // copies land beside `assets/`, not inside them. A root that cannot be
@@ -185,32 +190,50 @@ export function ReactRouterPlugin(options: ReactRouterPluginOptions): IPlugin {
             fs: runtime.fs,
             assetsDir: publicRoot,
           });
-          getRoute = async (routeCtx) => (await servePublicFile(routeCtx)) ?? renderRoute(routeCtx);
+          if (middlewareGroups === undefined) {
+            getRoute = async (routeCtx) =>
+              (await servePublicFile(routeCtx)) ?? renderRoute(routeCtx);
+          } else {
+            publicFileStage = async (routeCtx, next) => {
+              if ((await servePublicFile(routeCtx)) === undefined) {
+                await next();
+              }
+            };
+          }
         }
       }
 
+      const renderDefinition =
+        middlewareGroups === undefined ? renderRoute : { handler: renderRoute, middlewareGroups };
+      const getDefinition =
+        middlewareGroups === undefined
+          ? getRoute
+          : publicFileStage === undefined
+            ? renderDefinition
+            : { handler: renderRoute, middleware: [publicFileStage], middlewareGroups };
       for (const verb of ALL_VERBS) {
+        const definition = verb === 'GET' ? getDefinition : renderDefinition;
         switch (verb) {
           case 'GET':
-            ctx.router.get(catchAllPattern, getRoute);
+            ctx.router.get(catchAllPattern, definition);
             break;
           case 'POST':
-            ctx.router.post(catchAllPattern, renderRoute);
+            ctx.router.post(catchAllPattern, definition);
             break;
           case 'PUT':
-            ctx.router.put(catchAllPattern, renderRoute);
+            ctx.router.put(catchAllPattern, definition);
             break;
           case 'PATCH':
-            ctx.router.patch(catchAllPattern, renderRoute);
+            ctx.router.patch(catchAllPattern, definition);
             break;
           case 'DELETE':
-            ctx.router.delete(catchAllPattern, renderRoute);
+            ctx.router.delete(catchAllPattern, definition);
             break;
           case 'HEAD':
-            ctx.router.head(catchAllPattern, renderRoute);
+            ctx.router.head(catchAllPattern, definition);
             break;
           case 'OPTIONS':
-            ctx.router.options(catchAllPattern, renderRoute);
+            ctx.router.options(catchAllPattern, definition);
             break;
         }
       }

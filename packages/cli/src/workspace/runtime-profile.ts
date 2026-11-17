@@ -4,7 +4,7 @@
  * A Setu workspace was a **Deno** workspace by construction, which contradicted
  * the framework's own headline claim: Node and Bun are supported runtimes, a
  * scaffolded standalone project already runs on both, and only the MONOREPO was
- * Deno-only — which is precisely where the NestJS equivalent (`nest g app`) lives.
+ * Deno-only — which is precisely where the application generator lives.
  *
  * Declared as one record per runtime, the way {@linkcode BrokerSpec} is, so a
  * runtime difference is stated once rather than switched on at each of a dozen

@@ -24,7 +24,7 @@ function checkedSection(section: string): string {
 }
 
 function introduction(version: string, modules = 'node_modules'): string {
-  return `${BRIEF_BEGIN}\n\n\`setu agents\` reads manifests and overwrites these markers' contents.\n\n# Setu-TS ${version} — agent brief\n\nDo not guess Setu-TS APIs from NestJS, Express, Fastify or Hono.\n\n**Rule 0:** For symbols, options or patterns absent here and in project code, read \`${modules}/@setu-ts/<package>/AGENT_CARD.md\` and that package's \`dist/**/*.d.ts\`. What neither documents does not exist.\n`;
+  return `${BRIEF_BEGIN}\n\n\`setu agents\` reads manifests and overwrites these markers' contents.\n\n# Setu-TS ${version} — agent brief\n\nDo not guess Setu-TS APIs from other frameworks or Hono.\n\n**Rule 0:** For symbols, options or patterns absent here and in project code, read \`${modules}/@setu-ts/<package>/AGENT_CARD.md\` and that package's \`dist/**/*.d.ts\`. What neither documents does not exist.\n`;
 }
 
 /** A member always directs agents to the workspace-wide layout first. */

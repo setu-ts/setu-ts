@@ -119,7 +119,7 @@ function doubleNextError(
 
 /**
  * The dispatch path when no diagnostics observer is attached — every request
- * unless diagnostics are enabled. It is koa-compose's shape: each stage's own
+ * unless diagnostics are enabled. It is the composed-middleware shape: each stage's own
  * promise is handed back as `next()`'s result, with no `async` wrapper per
  * stage (half the chain's cost on Bun and Node). A synchronous throw from a
  * stage or the terminal becomes a rejection, as it was under the `async` form.

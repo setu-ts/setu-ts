@@ -1,5 +1,5 @@
 /**
- * Middleware pipeline — ASP.NET Core-style ordered execution with priority
+ * Middleware pipeline — ordered execution with priority
  * bands, short-circuiting, and double-next protection.
  *
  * @module

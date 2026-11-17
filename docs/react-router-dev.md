@@ -131,7 +131,12 @@ The React Router Vite plugin also **requires a real config file**: passing `conf
 
 ```typescript
 import * as vite from 'vite';
-import { createRequestHandler, RouterContextProvider, type ServerBuild } from 'react-router';
+import {
+  createRequestHandler,
+  matchRoutes,
+  RouterContextProvider,
+  type ServerBuild,
+} from 'react-router';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { ReactRouterPlugin, viteDevExternals } from '@setu-ts/react-router-plugin';
@@ -178,6 +183,9 @@ app.register(
         // Must come from the same react-router module as the handler — RR checks
         // `context instanceof RouterContextProvider` nominally.
         createLoadContext: () => new RouterContextProvider(),
+        // The build and matcher `pagePolicies` match each request against. The
+        // build is re-read per request, so a policy follows Vite's rebuilds.
+        pageRoutes: { build: loadServerBuild, matchRoutes },
       });
     },
   }),
@@ -187,7 +195,10 @@ app.register(
 Note the two halves of `SsrRuntime`. `createLoadContext` is not optional busywork: React Router 8
 rejects any context that is not a real `RouterContextProvider` instance with a 500, so a dev seam
 that returns only a handler cannot work. See the Notes section of PUBLIC_API.md for the full
-rationale.
+rationale. The third field, `pageRoutes`, is optional until the application sets `pagePolicies`: the
+plugin then refuses to start without it, because it cannot match a request to a route id without the
+build React Router serves. Return it whenever the seam can, so adding a page policy later needs no
+change here.
 
 #### 4. Add the single proxy route
 

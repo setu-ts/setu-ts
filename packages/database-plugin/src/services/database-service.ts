@@ -223,7 +223,7 @@ export class DatabaseService implements IDatabaseService {
   /**
    * Outer-scope repositories, one per entity (X94-3, M128). Building one —
    * the adapter's data source, the wrapper below and the repository — was
-   * the whole point-read gap against NestJS and Hono, and `getRepository`
+   * the whole point-read gap, and `getRepository`
    * per handler is the documented usage. A repository is a stateless facade
    * over the shared adapter, so concurrent requests can share it.
    * Transaction-scoped repositories are never stored here.

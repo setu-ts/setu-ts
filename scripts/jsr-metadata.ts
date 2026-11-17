@@ -111,7 +111,7 @@ export const PACKAGE_METADATA: Readonly<Record<string, PackageMetadata>> = {
     runtimeCompat: PORTABLE,
   },
   'decorator-plugin': {
-    description: 'Optional NestJS-style decorators and reflection, without reflect-metadata',
+    description: 'Optional decorators and reflection, without reflect-metadata',
     runtimeCompat: PORTABLE,
   },
 
@@ -125,7 +125,7 @@ export const PACKAGE_METADATA: Readonly<Record<string, PackageMetadata>> = {
     runtimeCompat: PORTABLE,
   },
   'validation-plugin': {
-    description: 'Zod-based validation with RFC 9457, NestJS, or default error shapes',
+    description: 'Zod-based validation with RFC 9457, compatibility, or default error shapes',
     runtimeCompat: PORTABLE,
   },
   'http-security-plugin': {

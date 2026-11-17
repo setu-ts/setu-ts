@@ -58,8 +58,8 @@ export interface IpSecurityOptions {
    * LEFT, starting with the socket peer when available, and the first entry
    * that is not one of these is the client.
    *
-   * This is the standard algorithm, and what Express `trust proxy` and Fastify
-   * `trustProxy` offer. It matters because the common nginx idiom
+   * This is the standard algorithm, and what a `trust proxy` / `trustProxy`
+   * setting offers. It matters because the common nginx idiom
    * (`proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for`) APPENDS the
    * peer address rather than overwriting the header — so with a request sent as
    * `X-Forwarded-For: 7.7.7.7` the proxy forwards
@@ -110,8 +110,7 @@ export interface IpSecurityOptions {
    * example) would otherwise let the client choose the host of every absolute
    * URL the application builds — sign-in and password-reset links included.
    * Nothing in the request can tell those proxies apart, so this is the
-   * operator's statement, the choice Django's `USE_X_FORWARDED_HOST` and
-   * ASP.NET Core's `ForwardedHeaders.XForwardedHost` make too.
+   * operator's explicit trust statement.
    *
    * When `true`, the RIGHTMOST entry is read — the one the nearest trusted
    * proxy wrote under both conventions — and a rightmost entry that fails

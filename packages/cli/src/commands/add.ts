@@ -30,6 +30,7 @@ import {
 import { renderModuleIndex } from '../seams/modules.ts';
 import { formatForTarget } from '../utils/prettier-format.ts';
 import { afterLastImport } from '../utils/import-placement.ts';
+import { barrelImportPlan } from '../utils/barrel-imports.ts';
 import type { IFileSystem } from '@setu-ts/common';
 import { deriveNames, escapeName, isKebabIdentifier } from '../utils/names.ts';
 import type { ParsedArgs } from '../args.ts';
@@ -660,6 +661,7 @@ function printWiringNote(
   if (starter !== undefined) {
     const arm = starter.arms.get(bare);
     if (arm !== undefined) {
+      const fullStack = starter.symbol === 'createFullStackAppFromConfig';
       if (bare === 'messaging-plugin' || bare === 'queue-plugin') {
         const key = bare === 'messaging-plugin' ? 'messaging' : 'queue';
         const flag = key === 'messaging' ? 'broker' : 'queue';
@@ -682,7 +684,22 @@ function printWiringNote(
         }
         return;
       }
-      log(`  ${starter.symbol} owns this plugin; configure its ${arm} arm in setu.config.ts.`);
+      if (
+        fullStack &&
+        source !== undefined &&
+        starterArmSet(source, arm, true) === true &&
+        (seam === undefined || starterReferencesSeam(source, arm, seam))
+      ) {
+        log(`  setu.config.ts already sets its ${arm} arm; it was left as it is.`);
+        return;
+      }
+      log(
+        fullStack && seam === undefined
+          ? GATED_STARTER_ARMS.has(bare)
+            ? `  ${starter.symbol} registers this plugin only once its ${arm} arm is set in setu.config.ts.`
+            : `  ${starter.symbol} already registers this plugin with its defaults; set its ${arm} arm in setu.config.ts only to configure it.`
+          : `  ${starter.symbol} owns this plugin; configure its ${arm} arm in setu.config.ts.`,
+      );
       // The barrel exists by now; without this line nothing would ever pass it to
       // the arm, so every handler generated into it would register nowhere.
       if (seam !== undefined) {
@@ -694,7 +711,6 @@ function printWiringNote(
       // A gated arm passes its value straight to the plugin's factory, so the
       // registration printed elsewhere gives the arm's shape. Full-stack's auth arm
       // gets the password sign-in recipe below instead.
-      const fullStack = starter.pkg === 'full-stack-starter';
       const line =
         seam === undefined && GATED_STARTER_ARMS.has(bare) && !(bare === 'auth-plugin' && fullStack)
           ? registrationLine(bare)
@@ -1523,42 +1539,6 @@ function withRegistration(
   return `${withImport.slice(0, insertion)}${call},${ownLine ? `\n${before}` : ' '}${withImport.slice(insertion)}`;
 }
 
-/** Shared fail-closed barrel admission for inline and starter composition. */
-function barrelImportPlan(
-  source: string,
-  imports: AddSeam['imports'],
-  reuse: boolean,
-): { text: string; at: number } | undefined {
-  const visible = maskComments(source);
-  if (visible === undefined) return undefined;
-  const missing: string[] = [];
-  for (const item of imports) {
-    const mentioned = visible.includes(`'${item.from}'`) || visible.includes(`"${item.from}"`);
-    if (mentioned) {
-      if (!reuse) return undefined;
-      const declarations = [
-        ...visible.matchAll(/\bimport\s*\{([^}]+)\}\s*from\s*(['"])([^'"]+)\2\s*;?/g),
-      ].filter((match) => match[3] === item.from);
-      if (
-        declarations.length !== 1 ||
-        !item.symbols.every((symbol) =>
-          declarations[0]![1]!
-            .split(',')
-            .map((name) => name.trim())
-            .includes(symbol),
-        )
-      )
-        return undefined;
-    } else {
-      if (item.symbols.some((symbol) => referencesIdentifier(visible, symbol))) return undefined;
-      missing.push(`import { ${item.symbols.join(', ')} } from '${item.from}';`);
-    }
-  }
-  const at = afterLastImport(source, visible);
-  if (at === undefined) return undefined;
-  return { text: missing.length === 0 ? '' : `\n${missing.join('\n')}`, at };
-}
-
 /** Existing top-level keys must bind the same expressions; nested mentions do not count. */
 function carriesStarterOptions(existing: string, literal: string): boolean {
   const actual = starterLiteralEntries(existing);
@@ -1575,6 +1555,18 @@ function carriesStarterOptions(existing: string, literal: string): boolean {
   );
 }
 
+/** A seam is already passed through only when its bindings occur in the arm's code. */
+function starterReferencesSeam(source: string, arm: string, seam: AddSeam): boolean {
+  const existing = starterOptionValue(source, arm);
+  const code = existing === undefined ? undefined : maskSourceCode(existing);
+  const symbols = seam.imports.flatMap((item) => item.symbols);
+  return (
+    code !== undefined &&
+    symbols.length > 0 &&
+    symbols.every((symbol) => referencesIdentifier(code, symbol))
+  );
+}
+
 /** Merges seam options and selected transport atomically; uncertain edits retain guidance. */
 function withStarterWiring(
   source: string,
@@ -1586,6 +1578,18 @@ function withStarterWiring(
   const arm = starter?.arms.get(bare);
   if (arm === undefined) return undefined;
   const shape = STARTER_SEAMS.find((entry) => entry.plugin === bare);
+  if (
+    starter?.symbol === 'createFullStackAppFromConfig' &&
+    transportArgs === undefined &&
+    shape === undefined
+  ) {
+    const literal =
+      seam?.args ??
+      (GATED_STARTER_ARMS.has(bare) && ZERO_CONFIG_WIRINGS.has(bare) ? '{}' : undefined);
+    return literal === undefined
+      ? undefined
+      : withStarterOption(source, arm, literal, seam?.imports);
+  }
   const key = shape?.arm ?? (bare === 'messaging-plugin' ? 'messaging' : undefined);
   if (key === undefined) return undefined;
   const plan = barrelImportPlan(source, seam?.imports ?? [], true);
@@ -1744,7 +1748,8 @@ function withTransportModuleImport(source: string, symbol: string): string | und
   const visible = maskComments(source);
   if (visible === undefined) return undefined;
   const declarations = [
-    ...visible.matchAll(/\bimport\s*\{([^}]*)\}\s*from\s*(['"])([^'"]+)\2\s*;?/g),
+    // Quotes as \x27/\x22: a literal quote in a regex desyncs the repo's import scanner.
+    ...visible.matchAll(/\bimport\s*\{([^}]*)\}\s*from\s*([\x27\x22])([^\x27\x22]+)\2\s*;?/g),
   ].filter((match) => match[3] === TRANSPORT_SPECIFIER);
   const mentions =
     visible.split(`'${TRANSPORT_SPECIFIER}'`).length +
@@ -3067,8 +3072,8 @@ async function addOne(
       const existing = await readProjectText(deps, joinPath(dir, envFile), envFile);
       if (existing === null) return EXIT_ERROR;
       // The file now holds a usable signing secret, so it is listed in
-      // .gitignore exactly as Rails lists `config/master.key`
-      // (EncryptionKeyFileGenerator): an exact entry, appended when absent. No
+      // .gitignore exactly as `config/master.key` is listed for an
+      // encrypted-credentials setup: an exact entry, appended when absent. No
       // pattern is evaluated; next to an existing `.env*` rule the entry is
       // merely redundant. Whether Git already TRACKS the file is not something a
       // CLI that does not run Git can know, so that case gets a hint.
@@ -3638,7 +3643,13 @@ async function addOne(
       if (backendLine !== undefined)
         for (const guidance of backendGuidance(backendLine, configSource, bare)) deps.log(guidance);
     }
-    if (bare === 'messaging-plugin' || bare === 'queue-plugin') {
+    if (
+      bare === 'messaging-plugin' ||
+      bare === 'queue-plugin' ||
+      (configSource !== undefined &&
+        composingStarter(configSource)?.symbol === 'createFullStackAppFromConfig' &&
+        composingStarter(configSource)?.arms.has(bare) === true)
+    ) {
       printWiringNote(configSource, bare, deps.log, seam, transportArgs);
       printNodeRedisImportNote(configSource, transport?.clients ?? [], deps.log);
     }

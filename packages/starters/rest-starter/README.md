@@ -245,23 +245,23 @@ On `0.8.0` and earlier the default was `false`, so write `di: { autoRegister: tr
 That is why it is an arm rather than always-on — a starter app that never asks for it composes
 exactly as it did before the option existed.
 
-## Coming from NestJS
+## Decorator and DI at a Glance
 
-| NestJS                        | Setu-TS                                                         |
-| ----------------------------- | --------------------------------------------------------------- |
-| `@Module({ … })`              | A plugin — `IPlugin` with `provides: [CAPABILITIES.X]`          |
-| `providers: [UserService]`    | `decorators: { services: [UserService] }`, or `app.register(…)` |
-| `@Injectable()`               | `@Injectable({ token, scope })`                                 |
-| Constructor injection by type | `@Inject(token, …)` on the class, one entry per argument        |
-| `@Controller('/users')`       | `@Controller('/users')` — identical                             |
-| `@Get()` / `@Post()`          | `@Get()` / `@Post()` — identical                                |
-| `@Body()` / `@Query()`        | `@Params(Body(), Query())` — sources, listed in argument order  |
-| Guard (`CanActivate`)         | `@UseGuards(fn)`, or an `auth-plugin` guard factory             |
-| Pipe (`ValidationPipe`)       | `@ValidateBody(schema)` (Zod)                                   |
-| Interceptor                   | `@UseInterceptors(fn)`                                          |
-| Exception filter              | `@UseFilters(fn)`, or `errorHandler()` middleware               |
-| `imports: [OtherModule]`      | `ctx.services.get(CAPABILITIES.X)` — no plugin imports another  |
-| DI is required                | DI is the optional `di` arm                                     |
+| Concern               | Setu-TS                                                         |
+| --------------------- | --------------------------------------------------------------- |
+| Modules               | A plugin — `IPlugin` with `provides: [CAPABILITIES.X]`          |
+| Service registration  | `decorators: { services: [UserService] }`, or `app.register(…)` |
+| Injectable service    | `@Injectable({ token, scope })`                                 |
+| Constructor injection | `@Inject(token, …)` on the class, one entry per argument        |
+| Controller            | `@Controller('/users')`                                         |
+| Route handlers        | `@Get()` / `@Post()`                                            |
+| Parameter sources     | `@Params(Body(), Query())` — sources, listed in argument order  |
+| Guards                | `@UseGuards(fn)`, or an `auth-plugin` guard factory             |
+| Validation            | `@ValidateBody(schema)` (Zod)                                   |
+| Interceptors          | `@UseInterceptors(fn)`                                          |
+| Exception filters     | `@UseFilters(fn)`, or `errorHandler()` middleware               |
+| Cross-plugin access   | `ctx.services.get(CAPABILITIES.X)` — no plugin imports another  |
+| DI                    | The optional `di` arm                                           |
 
 **The one difference that will bite you: constructor injection needs an explicit token.**
 

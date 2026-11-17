@@ -1,7 +1,7 @@
 {
   "name": "@setu-ts/validation-plugin",
   "version": "0.12.0",
-  "description": "Zod-based validation with RFC 9457, NestJS, or default error shapes",
+  "description": "Zod-based validation with RFC 9457, compatibility, or default error shapes",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/setu-ts/setu-ts.git",

@@ -124,6 +124,7 @@ export default {
     const { handler } = await loadRequestHandler(modulePath, 'production', {
       rrImportHook: () =>
         Promise.resolve({
+          matchRoutes: () => null,
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           createRequestHandler: ((build: any, _mode: string) => {
             capturedBuild = build;
@@ -153,6 +154,7 @@ export default {
       loadRequestHandler(modulePath, 'production', {
         rrImportHook: () =>
           Promise.resolve({
+            matchRoutes: () => null,
             createRequestHandler: () => () => Promise.resolve(new Response('ok')),
           }),
       }),

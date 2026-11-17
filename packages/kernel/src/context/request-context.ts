@@ -26,11 +26,11 @@ import type { DeferredCleanup } from './deferred.ts';
 export interface RequestContextHandle {
   /** The per-request context. */
   readonly ctx: IRequestContext;
-  /** Tracks terminal work only on middleware paths that can settle early. */
+  /** Tracks handler promises on middleware paths that can settle early. */
   trackHandler?: boolean;
-  /** Always settles successfully after the terminal handler, including failure. */
+  /** Always settles successfully after recorded selector and handler work, including rejection. */
   pendingHandler?: Promise<void>;
-  /** Whether the recorded terminal handler has settled. */
+  /** Whether the latest recorded selector and handler work has settled. */
   handlerSettled?: boolean;
   /** Replaces the params exposed by `ctx.params` (used after route match). */
   setParams(params: Record<string, string>): void;

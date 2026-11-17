@@ -505,6 +505,10 @@ describe('a template with a frontend build, on a Deno target', () => {
     expect(dev).toContain('packages: [...frameworkPackages, ...workspaceLibraries]');
     expect(dev).toContain('resolve: (specifier) => import.meta.resolve(specifier)');
     expect(dev).toContain("mode: 'development'");
+    expect(dev).toContain(
+      "  matchRoutes,\n  RouterContextProvider,\n  type ServerBuild,\n} from 'react-router';",
+    );
+    expect(dev).toContain('pageRoutes: { build: loadServerBuild, matchRoutes }');
     // The externals list dev.ts imports is the one the server build uses.
     const vite = contentsOf(files, 'vite.config.ts');
     expect(vite).toContain('export const frameworkPackages = [');
@@ -535,6 +539,12 @@ describe('a template with a frontend build, on a Deno target', () => {
       const files = [
         ...projectFiles('shop', runtime, resolveHost(getTemplate('full-stack')!, runtime)),
       ];
+      expect(contentsOf(files, 'dev.ts')).toContain(
+        "  matchRoutes,\n  RouterContextProvider,\n  type ServerBuild,\n} from 'react-router';",
+      );
+      expect(contentsOf(files, 'dev.ts')).toContain(
+        'pageRoutes: { build: loadServerBuild, matchRoutes }',
+      );
       expect(contentsOf(files, 'dev.ts').replace(/^.*console.log\(`Listening on.*\n/m, '')).toBe(
         deno,
       );

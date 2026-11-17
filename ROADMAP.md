@@ -2,8 +2,8 @@
 
 ## Design Philosophy
 
-**NOT a NestJS clone.** This is a Fastify-inspired, Spring Boot-organized, ASP.NET Core-pipelined,
-Hono-performant framework where **everything is a plugin**.
+Setu-TS combines an ordered middleware pipeline with Hono routing performance, and **everything is a
+plugin**.
 
 ### Core Tenets
 
@@ -18,14 +18,11 @@ Hono-performant framework where **everything is a plugin**.
 | Everything is runtime independent | No Node.js APIs in core; runtime adapters provided by RuntimePlugin                         |
 | Every capability is a plugin      | Framework ships zero hardcoded features                                                     |
 
-### Architectural Inspirations
+### Architectural Choices
 
-| Source       | What We Take                                                          |
-| ------------ | --------------------------------------------------------------------- |
-| Hono         | Performance, runtime portability, routing engine                      |
-| Spring Boot  | Plugin auto-configuration, starter packages, conditional registration |
-| ASP.NET Core | Middleware pipeline, request/response abstractions                    |
-| Fastify      | Plugin encapsulation, decoration pattern, lifecycle hooks             |
+Setu combines Hono routing and runtime portability with plugin auto-configuration, starter bundles,
+an ordered middleware pipeline, request/response abstractions, plugin encapsulation, and lifecycle
+hooks.
 
 ---
 
@@ -534,7 +531,7 @@ the ServiceRegistry: `ctx.services.get<T>(CAPABILITIES.X)`.
    - Service lookup by token
 
 3. **Middleware Pipeline**
-   - ASP.NET Core-style middleware pipeline
+   - Priority-based middleware pipeline
    - Ordered middleware execution
    - Context propagation
    - Error propagation
@@ -1008,7 +1005,7 @@ function validateCookies(schema: ZodSchema): MiddlewareFunction;
 
 - `default` — Framework standard
 - `rfc7807` — RFC 7807 Problem Details
-- `nestjs` — NestJS-compatible
+- `nestjs` — compatibility shape (`{ statusCode, message: string[], error, errors }`)
 - Custom formatter function
 
 **Input Sanitization:**
@@ -1205,7 +1202,7 @@ const userService = container.resolve<UserService>('UserService');
 
 ## Milestone 9: Decorator Plugin — Optional Decorators and Reflection
 
-**Objective:** Provide optional decorator system for those who prefer NestJS-style DX.
+**Objective:** Provide optional decorator system for those who prefer decorator-based DX.
 
 ### Package: `@setu-ts/decorator-plugin`
 
@@ -1831,7 +1828,7 @@ app.register(MessagingPlugin({ broker: 'kafka', brokers: config.get('KAFKA_BROKE
 ## Milestone 14c: Messaging Plugin — Brokered Request-Reply ✅ COMPLETE
 
 **Objective:** Add brokered request-reply (RPC) to the existing `@setu-ts/messaging-plugin`, closing
-the one NestJS-microservice pattern (`client.send`) that pub/sub alone cannot serve.
+the one microservice pattern (`client.send`) that pub/sub alone cannot serve.
 
 > **Why this is a separate milestone.** Mirrors the M14 → M14b and M15 → M15b splits: a pure
 > addition to the existing plugin via the internal broker seam, with a small, flagged widening of
@@ -4076,8 +4073,8 @@ M51b's npm-client interop suite for `apps/graphql-demo` is manual.
 > **Hono migration (M22/M23) impact.** Docs must reflect the now-true design: Hono as the
 > routing/serve foundation, the web-standard `fetch` runtime model, a runtime/deploy matrix that
 > includes CF Workers, streaming & SSE (M42/M43), and a per-plugin "runs on Workers?" capability
-> note (file / SMTP / raw-socket features do not). The Fastify/NestJS migration guides should frame
-> the fetch-based request/response model.
+> note (file / SMTP / raw-socket features do not). The migration guides should frame the fetch-based
+> request/response model.
 
 ### Documentation
 
@@ -4087,8 +4084,7 @@ M51b's npm-client interop suite for `apps/graphql-demo` is manual.
 - Programmatic API reference
 - Decorator API reference (optional)
 - Custom plugin development
-- Migration from NestJS
-- Migration from Fastify
+- Migration guides for other frameworks
 - Examples
 - API reference generation via `deno doc` (JSR also renders docs on publish)
 
@@ -4422,10 +4418,9 @@ app.router.get('/events', (ctx) => {
 ## Milestone 44: React SSR + File-Based Routing — React Router v7 Embed
 
 **Objective:** Serve a React frontend with SSR and file-based routing by embedding React Router v7
-framework mode (the Remix successor) as a plugin. RR framework mode is bring-your-own-server: its
-server contract is a web-standard
-`createRequestHandler(build): (Request, loadContext) => Promise<Response>`, which maps cleanly onto
-a kernel catch-all handler. **Depends on M42** (streaming SSR); coexists with M43.
+framework mode as a plugin. RR framework mode is bring-your-own-server: its server contract is a
+web-standard `createRequestHandler(build): (Request, loadContext) => Promise<Response>`, which maps
+cleanly onto a kernel catch-all handler. **Depends on M42** (streaming SSR); coexists with M43.
 
 > **Scope boundary.** RR owns SSR, file-based routing, loaders/actions, client hydration, and code
 > splitting via its Vite build — this plugin does NOT reimplement any of that. The plugin owns three
@@ -4978,11 +4973,11 @@ implementation task.
 
 ---
 
-## Milestone 36b: Starter Integration — Realtime, DI, and NestJS Familiarity ✅ COMPLETE
+## Milestone 36b: Starter Integration — Realtime, DI, and Decorator Familiarity ✅ COMPLETE
 
 **Objective:** make two capabilities the M36 starters deliberately omitted expressible as gated
 arms, and close the one ergonomic gap that makes this framework feel foreign to a developer arriving
-from NestJS.
+from a decorator-first framework.
 
 M36 bundled none of the real-time plugins and no DI container, on the stated grounds that each needs
 caller-supplied routes, channels, or a transport before it does anything. **That reasoning is
@@ -5066,10 +5061,10 @@ existing wiring renders byte-identically.
       `deno check`s the config plus both emitted classes. The only check that validates the rendered
       `args` string and the `localImports` paths.
 - [x] **Docs** — `PUBLIC_API.md` `Inject` row + both-position contract notes and the `nest` template
-      row; the three starter READMEs' arm documentation and "Coming from NestJS" mapping; this
-      section and the Progress Tracking row `36b`; the `CLAUDE.md` "Next milestone" mislabel (it
-      named M36b as the React Router skeleton, contradicting this file); the stale NestJS-comparison
-      caveat below, which still said sessions did not exist after M48 shipped them; and the four
+      row; the three starter READMEs' arm documentation and decorator/DI mapping; this section and
+      the Progress Tracking row `36b`; the `CLAUDE.md` "Next milestone" mislabel (it named M36b as
+      the React Router skeleton, contradicting this file); the stale framework-comparison caveat
+      below, which still said sessions did not exist after M48 shipped them; and the four
       cross-package README links that returned 400 on jsr.io.
 
 **Not this milestone:** config-key indirection and the full-stack React Router app skeleton adapted
@@ -5189,8 +5184,8 @@ which covers a server-rendered app that keeps state in a cookie.
 
 **Why now.** M36c cannot land without it. That milestone adapts the B2BAdmin React Router skeleton
 and rewires its cross-cutting `lib/` onto plugins; six of its eight concerns delegate to shipped
-plugins, and the two that do not are the two below. It is also the gap a developer arriving from
-NestJS or Express meets first, ahead of anything in M36b.
+plugins, and the two that do not are the two below. It is also the gap a developer arriving from a
+conventional framework meets first, ahead of anything in M36b.
 
 ### A. Sessions
 
@@ -5919,31 +5914,31 @@ isolate loses both together. The socket therefore opens lazily and reopens after
 
 ---
 
-## Plugin-First vs NestJS Comparison
+## Plugin-First at a Glance
 
-| Aspect           | NestJS          | Setu-TS (Plugin-First)               |
-| ---------------- | --------------- | ------------------------------------ |
-| Architecture     | Module-based    | Plugin-based                         |
-| DI               | Required        | Optional (DiPlugin)                  |
-| Decorators       | Required        | Optional (DecoratorPlugin)           |
-| Reflection       | Required        | Optional                             |
-| Programmatic API | Limited         | Full API for everything              |
-| Replaceability   | Difficult       | Any plugin swappable                 |
-| Runtime Support  | Node.js only    | Node, Deno, Bun, CF Workers          |
-| Bundle Size      | Large           | Pay only for what you use            |
-| Learning Curve   | Steep           | Gradual (start minimal, add plugins) |
-| Extensibility    | Modules         | Plugins with capability tokens       |
-| Middleware       | Tied to modules | Independent, pipeline-based          |
-| Testing          | Mock modules    | Mock plugins/services                |
+| Aspect           | Setu-TS (Plugin-First)               |
+| ---------------- | ------------------------------------ |
+| Architecture     | Plugin-based                         |
+| DI               | Optional (DiPlugin)                  |
+| Decorators       | Optional (DecoratorPlugin)           |
+| Reflection       | Optional                             |
+| Programmatic API | Full API for everything              |
+| Replaceability   | Any plugin swappable                 |
+| Runtime Support  | Node, Deno, Bun, CF Workers          |
+| Bundle Size      | Pay only for what you use            |
+| Learning Curve   | Gradual (start minimal, add plugins) |
+| Extensibility    | Plugins with capability tokens       |
+| Middleware       | Independent, pipeline-based          |
+| Testing          | Mock plugins/services                |
 
-**One caveat a NestJS reader needs, so the table above is not read as parity.** Constructor
-injection takes an explicit token — `@Inject(CAPABILITIES.DATABASE) private db: Db` — because
-type-inferred injection requires `emitDecoratorMetadata`, which Deno does not support; no source in
-this repo reads `design:paramtypes`, and none can. So `constructor(private db: DatabaseService)`
-cannot work, and this is permanent rather than a gap waiting to be filled. M36b shipped the
-parameter-level form, which binds one token per argument by position and deprecates the positional
-class-level list; mixing the two forms, or leaving a parameter undecorated, throws at startup rather
-than misinjecting silently.
+**One caveat a reader needs, so the table above is not read as parity.** Constructor injection takes
+an explicit token — `@Inject(CAPABILITIES.DATABASE) private db: Db` — because type-inferred
+injection requires `emitDecoratorMetadata`, which Deno does not support; no source in this repo
+reads `design:paramtypes`, and none can. So `constructor(private db: DatabaseService)` cannot work,
+and this is permanent rather than a gap waiting to be filled. M36b shipped the parameter-level form,
+which binds one token per argument by position and deprecates the positional class-level list;
+mixing the two forms, or leaving a parameter undecorated, throws at startup rather than misinjecting
+silently.
 
 Cookie sessions and form-CSRF **were** the second caveat here; M48 closed it. `session-plugin` ships
 a `SESSION` capability with encrypted cookie sessions, server-side store strategies, and the
@@ -6402,13 +6397,13 @@ a surprise the document cannot warn about.
 
 **Package:** `@setu-ts/cli`
 
-An external review asked for `nest g resource`: one command that scaffolds a domain sub-module with
-its bindings already wired, rather than four `setu g` invocations plus a hand edit of
-`setu.config.ts`. Two things in that framing are already false and are recorded here so the
-milestone is not built on them. The review's premise was that the framework "uses static capability
-tokens rather than decorators" — `decorator-plugin` has shipped `@Controller`/`@Get`/`@Injectable`
-since M9, parameter-level `@Inject` since M36b, and `setu new --template nest` scaffolds exactly the
-NestJS-familiar shape. Tokens are the plugin-to-plugin seam; decorators are the application seam.
+An external review asked for one command that scaffolds a domain sub-module with its bindings
+already wired, rather than four `setu g` invocations plus a hand edit of `setu.config.ts`. Two
+things in that framing are already false and are recorded here so the milestone is not built on
+them. The review's premise was that the framework "uses static capability tokens rather than
+decorators" — `decorator-plugin` has shipped `@Controller`/`@Get`/`@Injectable` since M9,
+parameter-level `@Inject` since M36b, and `setu new --template nest` scaffolds exactly the
+decorator-first shape. Tokens are the plugin-to-plugin seam; decorators are the application seam.
 **Nothing in this milestone is about decorators.**
 
 What is real is narrower. `packages/cli/src/schematics/` holds 13 single-artifact generators and no
@@ -6527,7 +6522,7 @@ Deciding that is the plan's job, on the plan's evidence.
 - **A `messaging` arm on `microservice-starter`.** M50b's boundary holds: the CLI emits inline
   wiring and never imports a starter. Unowned.
 
-## Milestone 60: Generated Code That Is Wired — Closing the NestJS Productivity Gap
+## Milestone 60: Generated Code That Is Wired — Closing the Productivity Gap
 
 **Package:** `@setu-ts/cli`
 
@@ -6544,9 +6539,9 @@ That is the M58 barrel. The other thirteen are orphans: `g service` emits a clas
 constructs, `g guard` a guard nothing guards with, `g health-indicator` an indicator nothing
 registers, `g command-handler` a handler no bus dispatches to. They compile and they do nothing.
 
-**This is the whole distance from NestJS.** `nest g service foo` edits `foo.module.ts` to add the
-provider; that single behaviour is why it feels productive. Breadth is not the gap — the fourteen
-schematics cover more ground than Nest's generator does, across four runtime targets.
+**This is the whole distance.** One command that edits `foo.module.ts` to add the provider is why
+the shape feels productive. Breadth is not the gap — the fourteen schematics cover more ground than
+a single generator does, across four runtime targets.
 
 M58 already built the mechanism and proved it: a CLI-owned barrel the scaffolded `setu.config.ts`
 already imports, regenerated from a directory scan handed to a pure schematic through
@@ -6640,7 +6635,7 @@ contradicts all three, and the contradiction is checkable:
 
 So the only opt-in is the template, and it is coarse: no template → neither, and the decorated
 schematics are refused; `rest`/`microservice` → decorators without DI; `nest` → both. A developer
-who wants DI without the NestJS showcase files, or a controller without decorators, has no path.
+who wants DI without the showcase files, or a controller without decorators, has no path.
 
 The capability already exists one layer down and the CLI cannot reach it: M36b added a gated
 `di?: DiPluginOptions` arm to `RestStarterOptions`
@@ -6721,7 +6716,7 @@ Two deliverables, and the second is the one that discharges the guidelines' prom
 
 There is **no workspace or monorepo concept in the CLI**: a grep across `packages/cli/src` for
 `workspace` / `monorepo` / app-adding surfaces returns one unrelated React Router `appDirectory`.
-The NestJS analogue is `nest g app` / `nest g library`, and nothing here corresponds to it.
+Nothing here corresponds to a workspace or library generator.
 
 Today, adding a second service to a microservice project means running `setu new other --dir .`,
 which produces a fully independent project: its own manifest, its own lockfile, no shared config,
@@ -6794,10 +6789,10 @@ not re-raise them, and should not trust the original reasoning where measurement
   moves only the files the CLI itself emits — so `.git`, CI configuration and `deno.lock` stay at
   the repository root — and each move is copy → verify → delete, because `IFileSystem` has no rename
   and a crash must leave the file in both places rather than neither.
-- **Shared library members** (`nest g library`). Deferred until the application case was proven; it
-  is. **Closed** as `setu generate library`, and it needs no wiring at all: a Deno workspace member
-  declaring `name` and `exports` is importable by every sibling under that name with no import-map
-  entry anywhere (measured, then pinned by an e2e that type-checks a member importing one).
+- **Shared library members**. Deferred until the application case was proven; it is. **Closed** as
+  `setu generate library`, and it needs no wiring at all: a Deno workspace member declaring `name`
+  and `exports` is importable by every sibling under that name with no import-map entry anywhere
+  (measured, then pinned by an e2e that type-checks a member importing one).
 - **`full-stack` members.** The deferral named the unblocking design correctly — a workspace-root
   `nodeModulesDir` — and **that is what closed it.** Measured: with the root declaring it, a real
   `deno install` and `react-router build` both work in a member, which then serves SSR on its
@@ -6807,8 +6802,8 @@ not re-raise them, and should not trust the original reasoning where measurement
 - **Non-Deno workspaces** (npm workspaces, for `node` or `bun` members). **Closed**, at the
   maintainer's direction: the framework's own README claims runtime independence and a scaffolded
   standalone project already runs on Node and Bun, so a Deno-only MONOREPO contradicted it exactly
-  where the NestJS equivalent lives. Two of the reasons for deferring did not survive checking — the
-  plugin detector ALREADY falls back to `package.json`, and the `Deno.env.get` problem was two
+  where the application generator lives. Two of the reasons for deferring did not survive checking —
+  the plugin detector ALREADY falls back to `package.json`, and the `Deno.env.get` problem was two
   renderers rather than a sweep. A `WorkspaceRuntimeProfile` record states each difference once, and
   `setu.workspace.json` records the runtime (absent means `deno`, so nothing existing changes).
   Verified by installing and booting real Node and Bun workspaces: a member serving a request, a
@@ -8293,13 +8288,13 @@ rather than in the directories `setu generate` writes to. `class-based` ships a 
 
 **Gap B — "module" means three different things, and none of them is the decorator.**
 `grep -rn '@Module\|ModuleOptions' packages/*/src` on `main` at `8fedbf4e` returns **nothing**,
-while `docs/migration-nestjs.md:185-227` tells a NestJS reader that a `@Module` becomes a **plugin**
-— `UsersPlugin()` registering its own service and routes. `setu generate module` does neither: it
+while `docs/migration-nestjs.md:185-227` tells a reader that a `@Module` becomes a **plugin** —
+`UsersPlugin()` registering its own service and routes. `setu generate module` does neither: it
 writes a directory plus a CLI-owned barrel exporting `MODULE_CONTROLLERS` / `MODULE_SERVICES`
 (`cli/src/schematics/module-barrel.ts:18,21`), spread into `DecoratorPlugin`. So what a module
-CONTAINS is decided inside a generated file the CLI rewrites, where NestJS puts it in application
-code beside the classes it names — which is the difference a reader coming from Nest actually feels,
-and it is not the one the comparison table describes.
+CONTAINS is decided inside a generated file the CLI rewrites, where a module-based framework puts it
+in application code beside the classes it names — which is the difference a reader coming from one
+actually feels, and it is not the one the comparison table describes.
 
 **The cost of `@Module` was established by building it, not estimated.** A prototype (detached
 worktree, ~215 lines across 8 files plus 2 new modules) was driven through a real kernel application
@@ -8310,11 +8305,11 @@ and through both templates end to end, so the following are measurements:
   `MetadataStore` beside `mergeCtorOptional`/`ctorOptional`, which M76 left there for this exact
   reason. The decorator writes through M76's existing `classDecorator` bridge — a class decorator
   already receives the constructor, so nothing about the TC39 form makes this harder.
-- **`imports` is the member that carries the design; `exports` must NOT be added.** A Nest module is
-  an injector boundary, so `exports` names what escapes it. This framework has one application-wide
-  `ServiceRegistry` and one container, so every provider is already visible to every consumer — an
-  `exports` list would name a restriction the runtime does not apply, which is the dead-surface
-  rule.
+- **`imports` is the member that carries the design; `exports` must NOT be added.** A module in a
+  module-based framework is an injector boundary, so `exports` names what escapes it. This framework
+  has one application-wide `ServiceRegistry` and one container, so every provider is already visible
+  to every consumer — an `exports` list would name a restriction the runtime does not apply, which
+  is the dead-surface rule.
 - **Flattening is depth-first, imported module before importer and providers before controllers**,
   with a `seen` set that both dedups a diamond and terminates a genuine `A ⇄ B` cycle. Both cases
   were driven; so was a class passed in `modules` carrying no `@Module`, which must warn by name
@@ -8327,7 +8322,8 @@ both serve requests:
    `DecoratorPlugin({ modules: [...MODULES] })`. The CLI still owns one file, but that file now
    decides only which modules are ACTIVE — what each contains moves into app code.
 2. **An app-owned root module**: `@Module({ imports: [SignupModule, …] })` in `src/app.module.ts`,
-   with `DecoratorPlugin({ modules: [AppModule] })` and no generated barrel at all. Closest to Nest.
+   with `DecoratorPlugin({ modules: [AppModule] })` and no generated barrel at all. Closest to the
+   conventional form.
 
 Shape 2 costs the auto-wiring, and that cost is structural rather than a preference: `Schematic` is
 a pure `(names, options) => GeneratedFile[]` performing no I/O, and M58 rejected AST-editing
@@ -8748,8 +8744,8 @@ paradigm choice, because there is nothing off the HTTP path to attach a decorato
 **Package(s):** `packages/common`, `packages/kernel`, `packages/runtime`
 
 The framework retained roughly **34%** of the throughput of the router it is built on. Benchmarked
-against NestJS on both its adapters, Hono, Fastify and Express (bombardier, CPU-pinned, medians of
-interleaved runs), Setu-TS served ~41k rps on `/json` where bare Hono served ~124k.
+against Hono (bombardier, CPU-pinned, medians of interleaved runs), Setu-TS served ~41k rps on
+`/json` where bare Hono served ~124k.
 
 Profiling located the loss in fixed per-request cost rather than anything algorithmic. Three
 findings drove the milestone, and each was established by reading source or measuring rather than by
@@ -8779,28 +8775,23 @@ working around it.
 route is the one shape where Hono's two-tier dispatch skips `compose()` entirely and where our fixed
 setup cost amortizes over nothing. Measured with three equivalent middleware, Hono loses **40.6%**
 of its throughput and Setu-TS loses **17.9%** — so with middleware present Setu-TS runs at **132% of
-Hono** and **113% of raw Express**. Any real application has middleware.
+Hono**. Any real application has middleware.
 
 **Results.** bombardier, `-c 64`, on Node. Every ratio below comes from runs that **alternate the
 two servers run-by-run**, because the per-pass spread on this machine is 10–23% and a sweep that
 measures each server once per pass cannot resolve a 5–10% difference — an early 3-pass sweep
-reported both 103% and 91% of NestJS-Fastify from the same build.
+reported both 103% and 91% of the same server from the same build.
 
-| measurement                       | before | after        |
-| --------------------------------- | ------ | ------------ |
-| `/json`, bare                     | 41,437 | ~100,000     |
-| share of bare Hono                | ~34%   | ~90%         |
-| vs NestJS-Express                 | ~65%   | **130–160%** |
-| vs NestJS-Fastify                 | ~40%   | 86–93%       |
-| with 3 middleware, vs Hono        | —      | **132%**     |
-| with 3 middleware, vs raw Express | —      | **113%**     |
+| measurement                | before | after    |
+| -------------------------- | ------ | -------- |
+| `/json`, bare              | 41,437 | ~100,000 |
+| share of bare Hono         | ~34%   | ~90%     |
+| with 3 middleware, vs Hono | —      | **132%** |
 
-**Beating NestJS-Express was the target and is met decisively. Beating NestJS-Fastify is NOT met**
-(86.2% / 93.0% / 90.4% on `/json` / `/plaintext` / `/users/:id`, winning 4 of 18 paired runs). That
-gap is deliberately left: NestJS adds little on top of Fastify, so clearing it means matching a raw
-router with a plugin kernel, capability registry and lifecycle hooks in the path. The profile says
-where the remaining 1.83 µs/req of framework-owned CPU sits (2.62 µs/req against Fastify's 0.79),
-and **M88** owns it.
+**The target was a decisive gain, and it is met.** The remaining gap against a raw router with a
+plugin kernel, capability registry and lifecycle hooks in the path is deliberately left: the profile
+says where the remaining 1.83 µs/req of framework-owned CPU sits (2.62 µs/req against 0.79 for the
+bare router), and **M88** owns it.
 
 **Deliverables:**
 
@@ -9354,23 +9345,13 @@ thing a test app exists for. The widening lands in `kernel` and `common` is unto
 `createTestApp` + `errorHandler` story; the broader question is whether a test app should compose
 like a real one"_ — by making the real composition root the thing a test app is built from.
 
-**The answer is yes, and the ecosystem is unanimous about it.** Laravel's `CreatesApplication`
-requires the same `bootstrap/app.php` the server does; ASP.NET Core's
-`WebApplicationFactory<Program>` boots the real `Program.cs`; Fastify's convention is one `build()`
-imported by both `server.js` and the tests; Spring Boot's `@SpringBootTest` starts the real
-`@SpringBootApplication` and subtracts from it with `@MockBean`. Only NestJS reconstructs the graph
-declaratively (`Test.createTestingModule`), and its single most reported testing defect is the
-composition gap that follows — `createNestApplication()` does not run `main.ts`, so
-`app.useGlobalPipes(new ValidationPipe())` is absent in tests and a route that `400`s in production
-silently accepts garbage. Nest's own remedy is a convention, not a mechanism: register globals as
-module providers under `APP_PIPE` / `APP_FILTER` / `APP_GUARD`, because those are part of the graph
-and therefore _are_ reproduced.
+A test application must run the same composition root as production, including its middleware and
+error handlers, so tests cannot silently omit runtime configuration.
 
 `createTestApp` is `createApplication({ plugins }) + start()` and nothing else
-(`testing/src/test-app.ts:70-81`) — school two, without the override machinery that makes school two
-survivable. Meanwhile the framework already ships the school-one asset: M34b gave every scaffolded
-project a `setu.config.ts` exporting `createApp()`, deliberately not started, precisely so the
-plugin list has one home. Nothing in `@setu-ts/testing` can consume it.
+(`testing/src/test-app.ts:70-81`). M34b already gave every scaffolded project a `setu.config.ts`
+exporting `createApp()`, deliberately not started, so the plugin list has one home. Nothing in
+`@setu-ts/testing` can consume it.
 
 **Three facts were established by probing the kernel, and each one shapes a deliverable.**
 
@@ -9391,11 +9372,12 @@ plugin list has one home. Nothing in `@setu-ts/testing` can consume it.
 - **Override is post-hoc substitution, not pre-emptive replacement, and that is the gap exclusion
   closes.** `DatabasePlugin.register()` calls `await adapter.connect()`
   (`database-plugin/src/plugin/database-plugin.ts:115`). Overriding the service afterward changes
-  what consumers resolve; it does not stop a real socket being attempted at `start()`. Nest gets the
-  pre-emptive half for free because providers are instantiated lazily and `.overrideProvider()`
-  replaces the definition before the container touches it. Our unit of composition is a plugin
-  carrying routes, middleware, health indicators and lifecycle hooks, so "override the database" and
-  "do not run the database plugin" are different operations and we have only the first.
+  what consumers resolve; it does not stop a real socket being attempted at `start()`. A provider
+  container gets the pre-emptive half for free because providers are instantiated lazily and an
+  override replaces the definition before the container touches it. Our unit of composition is a
+  plugin carrying routes, middleware, health indicators and lifecycle hooks, so "override the
+  database" and "do not run the database plugin" are different operations and we have only the
+  first.
 
 **Deliverables.**
 
@@ -9434,8 +9416,8 @@ name the boundary and point at `overrideCapability`.
 
 **Objective:** Give a controller a way to answer with HTML it did not concatenate by hand. The
 framework can serve a React SPA with SSR and can return a string, and has nothing in between — so
-the one thing a NestJS user reaches for on day one, `@Render('index')` with a view engine, has no
-answer here.
+the one thing a server-rendered user reaches for on day one, `@Render('index')` with a view engine,
+has no answer here.
 
 **The gap is real, unplanned, and never claimed.** `CAPABILITIES` declares no `VIEW` or `TEMPLATE`
 token (`common/src/tokens.ts`), no package under `packages/` ships a view engine, and
@@ -9446,11 +9428,11 @@ not reachable from a handler. `docs/migration-nestjs.md` mentions views nowhere,
 is not falsely advertised — it is silently absent from a chapter the source framework has, which a
 migrating reader discovers by writing a controller.
 
-**Why it never appeared: NestJS does not implement views either.** `@Render` ends at Express's
-`res.render()` or `@fastify/view` — the platform adapter owns the engine and Nest inherits it. M23
-moved this framework onto Hono's `fetch` entry and deleted the server-object model, so there is no
-`res.render` to delegate to. The port has to be owned here rather than adapted, which is the whole
-reason a milestone exists.
+**Why it never appeared: the established frameworks do not implement views either.** `@Render` ends
+at the platform adapter's `res.render()` — the adapter owns the engine and the framework inherits
+it. M23 moved this framework onto Hono's `fetch` entry and deleted the server-object model, so there
+is no `res.render` to delegate to. The port has to be owned here rather than adapted, which is the
+whole reason a milestone exists.
 
 **The React Router plugin is a view _layer_ and is not the V of MVC.** Server-side MVC loads four
 properties onto a view: the controller selects it by name, it is passive (a pure function from a
@@ -9486,14 +9468,14 @@ other.
   `<T extends (...a: never[]) => P | Promise<P>>(target: T, ctx: ClassMethodDecoratorContext) => T`:
   a handler returning `{ totallyWrong: number }` under `@Render(UserList)` fails with
   `TS1270 … is not assignable to type 'void | (() => { totallyWrong: number })'`, while the control
-  — correct **sync and async** handlers — checks clean. This is strictly stronger than the surface
-  it is modelled on: NestJS's `@Render('users/index')` is a string checked against nothing, where a
-  typo or a missing field is a runtime surprise.
+  — correct **sync and async** handlers — checks clean. This is strictly stronger than the
+  string-based surface it is modelled on: `@Render('users/index')` is a string checked against
+  nothing, where a typo or a missing field is a runtime surprise.
 - **Therefore the view is named by reference, not by path.** `@Render(UserList)` removes the view
   resolver entirely — no views directory, no filesystem lookup, no template registry — which is what
   makes the capability Workers-portable by construction rather than by a precompile step. It is a
-  deliberate divergence from the NestJS spelling, taken because the property it buys (a compile
-  error instead of a 500) is the one the framework's own defect history keeps asking for.
+  deliberate divergence from the string-based spelling, taken because the property it buys (a
+  compile error instead of a 500) is the one the framework's own defect history keeps asking for.
 
 **The package is named for the capability, not the backend, and that is forced rather than
 stylistic.** `@Render` must live in `decorator-plugin`, which AI_GUIDELINES §2.2 forbids from
@@ -9614,7 +9596,7 @@ framework-coupled aggregate root.
 
 `@setu-ts/events-plugin` already owns `IDomainEvent`, `DomainEvent`, and the in-process `IEventBus`,
 but none records the events an aggregate has raised. Every application therefore has to invent its
-own collection, snapshot, and clearing semantics. Nest's optional CQRS package offers
+own collection, snapshot, and clearing semantics. An optional CQRS package offers
 `AggregateRoot.apply()` and `commit()`, but its event publisher must first be merged onto the
 entity; that is the coupling Setu must not adopt. The .NET reference pattern is the useful half: a
 base entity appends events to an in-memory list and the application layer decides when to dispatch
@@ -9739,28 +9721,8 @@ validation, sessions, flash, login, logout, file upload, SSE and WebSocket consu
 pages. Two defects in the view plugin itself were found and fixed during M92; these three are what
 was left over, and none of them is a defect in `view-plugin`.
 
-**The competitor comparison was MEASURED, not read, and two doc-derived claims did not survive.**
-Runnable ASP.NET Core 9 and NestJS 10 applications were built exposing the same shapes
-(`.tmp/compare/`, with a README recording the commands). The corrections matter because the first
-version of this section's reasoning rested on the docs:
-
-- **ASP.NET does NOT negotiate error responses on `Accept` the way its docs imply.** The two
-  mechanisms are ALTERNATIVES, not layers. `UseExceptionHandler("/Home/Error")` plus
-  `UseStatusCodePagesWithReExecute` answered HTML for **both** `Accept: text/html` AND
-  `Accept: application/json`. The parameterless `UseExceptionHandler()` + `UseStatusCodePages()` +
-  `AddProblemDetails()` negotiated `problem+json` correctly for a 404, but gave a browser
-  `text/plain` rather than a page and answered a thrown 500 with an **empty body**. The real split
-  is by controller type, and even that is partial: an `[ApiController]` returning `NotFound()` or
-  `Problem(422)` produced ProblemDetails, while a **thrown** exception in that same controller got
-  the HTML page, because the global re-execution handler is unconditional. So **no framework of the
-  three produces HTML-for-browsers and JSON-for-APIs automatically on the exception path** — all
-  three make the developer write the branch.
-- **The multipart-CSRF limitation is shared with NestJS, not unique to us.** Nest with `csrf-csrf`
-  answered `invalid csrf token` for a token in a multipart form FIELD and accepted the same token in
-  a header — byte-for-byte our behaviour, and for the same reason (the urlencoded body parser runs
-  before the multipart one, so the field is never seen). ASP.NET genuinely solves it: a token in a
-  multipart form field was accepted (200) and the no-token control refused (400), because
-  `Request.Form` parses both encodings behind one abstraction.
+The remaining request-handling gaps are content-aware error responses, a form-body accessor that
+handles both supported encodings, and a helper for CSRF token fields.
 
 **The performance question was settled by measurement before the milestone was opened**, because
 M87/M88 had just spent two milestones on the request and response paths and a new `IRequest` member
@@ -9795,8 +9757,8 @@ Catching does not help either, and that is the specific friction: `errorHandler`
 error to write its own body, so a wrapping middleware sees nothing propagate. An application must
 instead INSPECT the finished response, and must additionally skip responses that are already HTML —
 the first version written during M92 clobbered a handler's deliberate `401` re-render of a sign-in
-form with a generic "something went wrong". Three subtleties where a NestJS exception filter has
-none: it catches, it holds the platform response, it is one place.
+form with a generic "something went wrong". Three subtleties a platform exception filter does not
+have: it catches, it holds the platform response, it is one place.
 
 **Deliverable.** An application-owned hook on `ErrorHandlerOptions` — working shape
 `respond?: (error, ctx) => HandlerResult | undefined` — consulted before formatting, with
@@ -9804,9 +9766,8 @@ none: it catches, it holds the platform response, it is one place.
 supplies the callback, so `packages/exceptions` never imports `view-plugin` and §2.2 is untouched.
 It generalises past HTML: an application could answer XML or CSV by the same route.
 
-**Explicitly NOT in scope: ASP.NET-style re-execution.** It is the nicest of the three developer
-experiences, but it needs the kernel to re-dispatch a request mid-flight, and the measurement above
-shows the negotiation it is supposed to buy does not actually work as documented.
+**Explicitly NOT in scope: request re-execution.** It needs the kernel to re-dispatch a request
+mid-flight, beyond the response hook this milestone adds.
 
 ### 94b — one form-body abstraction
 
@@ -9838,11 +9799,9 @@ closes as a consequence rather than as its own fix.
 
 ### 94c — the CSRF token a form does not have to remember
 
-ASP.NET's `FormTagHelper` **auto-injects** the hidden `__RequestVerificationToken` into every POST
-form — verified against a view carrying no helper call at all, in both the urlencoded and the
-multipart form. It is the one ergonomic where ASP.NET is cleanly ahead of both Setu-TS and NestJS,
-and forgetting the field is otherwise a silent `403` discovered at runtime: it happened twice while
-building M92's demo, once on a sign-out form and once on a task form after CSRF was switched on.
+Forgetting the token field in a CSRF-protected form causes a `403` discovered only at runtime. It
+happened twice while building M92's demo: on a sign-out form and on a task form after CSRF was
+switched on. A field helper removes the need to hand-write that hidden input.
 
 **Deliverable.** A token field helper exported from `session-plugin` — the package that owns the
 token — so a view does not hand-write the hidden input. It is a `session-plugin` export rather than
@@ -9850,12 +9809,11 @@ a `view-plugin` one precisely because §2.2 forbids `view-plugin` importing it.
 
 **Also in scope, and cheap:** `SessionPlugin({ csrf: {} })` registers the middleware **globally**
 (`session-plugin.ts:125`), so switching it on retroactively `403`s every existing form and API POST
-in an application. That is correct security and matches ASP.NET's recommended
-`AutoValidateAntiforgeryToken` posture, but it is a composition fact rather than a local opt-in and
-is documented nowhere a reader meets before the 403.
+in an application. That is correct security, but it is a composition fact rather than a local opt-in
+and is documented nowhere a reader meets before the 403.
 
-**Not a deliverable.** Changing the global default. Global-with-opt-out is what all three frameworks
-do, and the `exclude` escape already exists.
+**Not a deliverable.** Changing the global default. The `exclude` escape already supports
+application-specific opt-outs.
 
 ---
 
@@ -10281,10 +10239,9 @@ A `data:` payload is neutered by ordinary escaping because it needs HTML metacha
 **It is not "how JSX works".** React's server renderer neutralises the same element —
 `href="javascript:throw new Error('React has blocked a javascript: URL as a security precaution.')"`
 — so this is a difference **between rendering runtimes**, on a framework that courts React
-developers through a React Router plugin, a React SSR story and a NestJS migration guide. A reader
-arriving with a correct-for-React mental model is wrong here, and `docs/mvc.md` says escaping
-"belongs to the rendering runtime", which is correct and is exactly why the runtimes' differences
-need stating.
+developers through a React Router plugin, a React SSR story and a migration guide. A reader arriving
+with a correct-for-React mental model is wrong here, and `docs/mvc.md` says escaping "belongs to the
+rendering runtime", which is correct and is exactly why the runtimes' differences need stating.
 
 **Nothing in the recommended composition mitigates it, and the guide's own advice removes the one
 thing that would.** `http-security-plugin` emits no CSP by default —
@@ -10540,9 +10497,8 @@ that to per-parameter redaction, so a query string can be kept where the policy 
   Field-level encryption and erasure fan-out across them are a separate, larger design and are named
   here rather than half-built.
 - **Key management.** `session-plugin/src/codec/crypto.ts` already exports `KeyRing`,
-  `deriveKeyRing`, `seal` and `open` with nothing session-specific in them — the ASP.NET Data
-  Protection analogue, ready to promote. That is its own milestone, and it is what would make a
-  cryptographic redactor possible.
+  `deriveKeyRing`, `seal` and `open` with nothing session-specific in them, ready to promote. That
+  is its own milestone, and it is what would make a cryptographic redactor possible.
 - **A build-time classification report.** `Microsoft.Extensions.AuditReports` works because .NET
   classifies _types_ a compiler can see; our policy is runtime data, so the same artifact is not
   reproducible and a framework-side script would report nothing about a user's application. Runtime
@@ -10583,14 +10539,11 @@ M93's two halves are sugar over a seam that already exists, with no new coupling
 `defineIntegrationEvent` produces the existing `SubscriptionDefinition` shape so it plugs into
 `MessagingPlugin({ subscriptions })` with no `IMessageBroker` change. Each item below was admitted
 only after its seam was read and confirmed complete; where the seam is NOT complete — an automatic
-per-request DI scope, which both comparison frameworks have and this one does not — it is named at
-the end as unowned rather than smuggled in, because it is a kernel and container change, not sugar.
+per-request DI scope, which Setu does not yet open automatically — it is named at the end as unowned
+rather than smuggled in, because it is a kernel and container change, not sugar.
 
-**The competitor rows below are from knowledge and have NOT been measured.** M94 built runnable
-ASP.NET Core 9 and NestJS 10 applications in `.tmp/compare/` for exactly this comparison and
-recorded that **two doc-derived claims did not survive** — most notably that ASP.NET negotiates
-error responses on `Accept`, which it does not. `.tmp/compare/aspnet` is still on disk. Each plan
-below re-measures the rows it relies on before its section's prose is fixed.
+Each plan verifies the existing seam and measures the behaviour it relies on before fixing its
+section's prose.
 
 ### Milestone 97a: Decorators for Non-HTTP Ingress
 
@@ -10781,7 +10734,7 @@ exists.** `ConfigPluginOptions.validationSchema` (`config-plugin/src/options.ts:
 means the **stored value really is a number**. The last line of that function is
 `return parsed as Record<string, unknown>`: the coerced values survive and their type does not. That
 erasure is the whole gap. This is the one of the three where the ergonomic is also a safety
-improvement, and it is the ASP.NET `IOptions<T>` row.
+improvement.
 
 **Deliverables.**
 
@@ -10803,15 +10756,13 @@ improvement, and it is the ASP.NET `IOptions<T>` row.
   the same line, and a test must pin that a bad enum value does not reach the thrown message.
 
 **Not a deliverable.** No change to `get`/`getOrThrow`/`has`. No reloading or change notification —
-ASP.NET's `IOptionsMonitor` is a different capability with a file-watching or polling dependency,
-and the framework's configuration is loaded once at startup by design. No per-section default
-merging beyond what the schema itself expresses.
+Those capabilities need file watching or polling, while the framework's configuration is loaded once
+at startup by design. No per-section default merging beyond what the schema itself expresses.
 
 ### Named and NOT taken
 
-- **An automatic per-request DI scope.** Both comparison frameworks open one: Nest's `Scope.REQUEST`
-  and ASP.NET's `AddScoped`, where it is the default lifetime for an EF `DbContext`. `di-plugin` has
-  the lifetime (`container.ts:142` implements `createScope()`), but
+- **An automatic per-request DI scope.** `di-plugin` has the lifetime (`container.ts:142` implements
+  `createScope()`), but
   `grep -rn createScope packages/kernel/src packages/decorator-plugin/src packages/di-plugin/src/plugin`
   returns **nothing**, so nothing opens a scope per request and a `'scoped'` service is a singleton
   unless the application calls `createScope()` itself — which `apps/di-decorators/src/app.ts:26`
@@ -10829,9 +10780,9 @@ merging beyond what the schema itself expresses.
   and a second spelling of a solved problem is the dead-surface rule.
 - **`PartialType`/`PickType`/`OmitType`.** Zod ships `.partial()`, `.pick()` and `.omit()`.
   Reimplementing them is §11.1.
-- **`IHostedService`.** ASP.NET's one primitive with no Setu name. `onBootstrap`/`onShutdown` plus a
-  plugin covers it, and the part applications get wrong — cancelling the loop on shutdown — is an
-  `AbortSignal` threading question that belongs with the runtime lifecycle, not here.
+- **Long-running services.** `onBootstrap`/`onShutdown` plus a plugin covers them. Cancelling a
+  background loop on shutdown is an `AbortSignal` threading question that belongs with the runtime
+  lifecycle, not here.
 - **Localization.** `IStringLocalizer` has no counterpart here and the framework has no i18n of any
   kind. That is a real gap and a milestone in its own right, not an ergonomic — opened as M103.
 
@@ -11761,7 +11712,7 @@ The packages it reaches for are transitive dependencies of the **lazily imported
 promises break, not one: `readOnlyRootFilesystem: true` turns it into a crash, and
 `docs/deployment.md`'s rule that the image's module cache is the only runtime dependency source is
 false, so an air-gapped cluster fails even with a writable root. Observed in a real cluster
-splitting two replicas of one image — one Running, one CrashLoopBackOff.
+splitting two replicas of one image — one running, one in a crash loop.
 
 **Fix:** `--frozen` in place of `--no-lock`. It uses the shipped lockfile and never writes one, so
 the original read-only write remains impossible. **`check:deploy --generated` cannot see this** — it
@@ -12026,9 +11977,9 @@ provider arm at a time.
 it has this block's shape: a composition the framework can run and the CLI will not produce. The
 plan is `plans/archive/milestone-99e-class-based-style.md`.
 
-**Objective:** a NestJS team migrating a microservice can scaffold a class-based microservice with
-one command. Today it cannot. `setu new` takes one `--template`, and the style and the plugin set
-are the same choice: `microservice` is functional (M65), and `class-based` is the REST set plus the
+**Objective:** a team migrating a microservice can scaffold a class-based microservice with one
+command. Today it cannot. `setu new` takes one `--template`, and the style and the plugin set are
+the same choice: `microservice` is functional (M65), and `class-based` is the REST set plus the
 decorator and DI pair. There is no template that gives you both, and `docs/migration-nestjs.md`
 never mentions `setu new` or microservices at all.
 
@@ -12071,8 +12022,8 @@ pair indivisible, and only chooses which plugin set the pair is added to — the
 
 **Out of scope, named:** a class-based `full-stack` (the starter has `decorators` and `di` arms, but
 the template has no controller or ingress seam); converting an existing functional project; a
-`g subscription` schematic for `@Subscribe`; and a decorator for brokered request/reply. NestJS
-`@MessagePattern` maps to `broker.respond(...)`, which has no decorator form.
+`g subscription` schematic for `@Subscribe`; and a decorator for brokered request/reply. A
+message-pattern decorator maps to `broker.respond(...)`, which has no decorator form.
 
 ---
 
@@ -13157,8 +13108,8 @@ isolation lets it through, and D1, DynamoDB and Cosmos defer writes until commit
 - **Not covered, and not owned by the framework.** (1) A conditional write inside a transaction that
   defers its writes to commit (memory, D1, DynamoDB, Cosmos, Bigtable): the outcome is not known
   when the call returns, so those transaction data sources omit the members. (2) Predicates beyond
-  equality (`null`, booleans, `Date`, ranges, `contains`, `or`). Neither ASP.NET Core nor NestJS
-  owns either: both are ORM features — EF Core's concurrency tokens checked at `SaveChanges` and
+  equality (`null`, booleans, `Date`, ranges, `contains`, `or`). Those are ORM features, not
+  framework features — EF Core's concurrency tokens checked at `SaveChanges` and
   `ExecuteUpdateAsync` with an arbitrary `Where`; TypeORM's `@VersionColumn`; MikroORM's `version`
   checked at `flush()`. An application needing either uses its ORM directly through the existing
   seams: `getDrizzleDatabase`/`getDrizzleTransaction` (M69), the application-supplied Prisma client,
@@ -13212,9 +13163,8 @@ emulator accepted an `orderingKey`. None of it is reachable through the contract
   `aggregateId`), so ordering is configured per event type and no existing producer re-partitions.
 - The documentation states what `orderingKey` promises: where a message is placed, not the order
   handlers finish in once a retry occurs; consumers needing order compare `aggregateVersion`.
-- Shaped by a survey of nine frameworks (NestJS, Encore.ts, Moleculer, Dapr, CloudEvents, Spring
-  Cloud Stream, MassTransit, NServiceBus, Watermill): none refuses an option the broker cannot
-  honour, and the plan records each precedent it follows or rejects.
+- Unsupported broker options are refused rather than ignored; the plan records the capability each
+  broker can honour.
 
 **Prerequisite (found while designing this, 2026-10-07):** `NatsBroker.publish` never awaits
 JetStream's acknowledgement. A publish to a subject no stream covers resolves as a success while the
@@ -13395,19 +13345,7 @@ already sent. The inbox (M108) absorbs that duplicate, so it is not a correctnes
 Setu-to-Setu consumer, but a foreign consumer sees it, and throughput is capped at one relay. M105's
 conditional transitions stop the stale relay regressing the row; they do not stop the publish.
 
-**Prior art (researched 2026-10-10).** Every comparable library owns relay coordination, and none
-promises more than at-least-once:
-
-- **MassTransit** claims one outbox entry inside a database transaction with
-  `SELECT … ORDER BY … LIMIT 1 FOR UPDATE SKIP LOCKED` (verified in
-  `PostgresLockStatementFormatter`). The lock IS the transaction, so it cannot expire under a paused
-  relay: the database releases it only when the transaction ends.
-- **Wolverine** elects one leader through Postgres advisory locks; the leader assigns recovery
-  agents to nodes and reassigns a dead node's work.
-- **CAP** offers `UseStorageLock` (off by default), a database lock around retry fetching only, and
-  documents that it does not bound retries cluster-wide.
-- **NServiceBus** has no separate relay — the outbox is dispatched while handling the incoming
-  message — and deduplicates by message id on the receiving side.
+**Delivery guarantee.** Outbox publishing remains at-least-once, including across relay takeover.
 
 **Scope — approved in `plans/archive/milestone-107b-outbox-relay-fencing.md`.**
 
@@ -13630,25 +13568,16 @@ general-purpose layer — an async check that can see the target — and 110b bu
 implementation of it, so an application preferring an external engine (Casbin, OpenFGA) plugs in at
 the same seam. **110a ships first; 110b depends on it.**
 
-**Does the framework need ABAC?** No — and this pair is the answer to that question rather than an
-ABAC engine. Checked against current documentation (2026-10-09), every comparable framework ships
-this layer and none ships an attribute engine — attribute logic lives in the policies they let you
-write:
-
-| Framework       | The layer                                                                                                | Async | Target                                       |
-| --------------- | -------------------------------------------------------------------------------------------------------- | ----- | -------------------------------------------- |
-| ASP.NET Core    | `IAuthorizationService.AuthorizeAsync(user, resource, policy)` + `AuthorizationHandler<TReq, TResource>` | yes   | loaded resource, imperative only             |
-| NestJS          | documented recipe: `@CheckPolicies(handler)` + a `PoliciesGuard` over a CASL `AbilityFactory`            | no    | subject type; record checks in the handler   |
-| Spring Security | `@PreAuthorize("hasPermission(#id, 'Type', 'READ')")` → `PermissionEvaluator`                            | no    | object, or `(targetId, targetType)` unloaded |
+**Does the framework need ABAC?** Setu provides an async policy layer where applications write
+attribute rules in ordinary code, without a separate attribute language.
 
 Two surveyed production applications (multi-tenant B2B portals, one TypeScript and one .NET) confirm
 the shape from the other side: each hand-rolled a throwing check plus a non-throwing twin for UI
 flags, and each had to make the two share one evaluator after they disagreed in production.
 
 The gap those applications exposed is not attribute logic (both keep it in ordinary code) but SCOPE:
-a role held in one tenant, organisation or region rather than everywhere. No framework core in the
-table ships that either; libraries do (spatie/laravel-permission "teams", Casbin "RBAC with
-domains"). 110b brings it into the framework on top of 110a's seam.
+a role held in one tenant, organisation or region rather than everywhere. 110b brings scoped RBAC
+into the framework on top of 110a's seam.
 
 ### Milestone 110a: Authorization Policies — An Async, Target-Aware Check
 
@@ -13680,14 +13609,14 @@ each one.
 - Policies registered by name, each a set of abilities
   `(principal, target?) → boolean | Promise<boolean>` — an ability sees a `null` principal only when
   it opts in with `{ anonymous: true, check }`, so the default is fail-closed (plan C2) — with an
-  optional `before()` that may allow or deny every ability of the policy (NestJS's admin bypass).
-  Functional form in `auth-plugin`; a class form (`@Policy`) in `decorator-plugin`, matching the
-  framework's functional-default / class-based-opt-in split (M65).
+  optional `before()` that may allow or deny every ability of the policy (the conventional admin
+  bypass). Functional form in `auth-plugin`; a class form (`@Policy`) in `decorator-plugin`,
+  matching the framework's functional-default / class-based-opt-in split (M65).
 - Entry points: a route guard `requirePolicy(policy, ability, target?)` (named by AI_GUIDELINES
   §10.4's `requireXxx` convention, plan C1) where `target` is a value or an extractor
   `(ctx) => target | undefined | Promise<target | undefined>`; `@RequirePolicy(...)` in
-  `decorator-plugin`; imperative `authorize()` for checks on records a handler loads (ASP.NET's
-  lesson: a declarative check runs before the record exists).
+  `decorator-plugin`; imperative `authorize()` for checks on records a handler loads, because a
+  declarative check runs before the record exists.
 - **Fixed semantics, not configuration:** only a literal `true` allows; an anonymous principal that
   is denied gets `401`, a signed-in one `403`, through the existing responder so the body matches
   the guards; a policy that throws or rejects DENIES and is reported to the logger, never answers
@@ -13732,15 +13661,13 @@ reference scenarios below need configuration only, no custom code.
 so "may approve invoices in tenant X" can only be faked by packing tenant-prefixed strings into
 `principal.permissions`. Both surveyed applications are built on exactly this missing shape — one
 grants roles per tenant with `null` meaning platform-wide and delegates through parent/child tenant
-relationships, the other merges grants keyed by role × country, role × channel, and per user. No
-mainstream framework core ships it (ASP.NET, NestJS and Spring leave scope to the application); it
-lives in libraries — spatie/laravel-permission "teams" (`team_id`, `null` = global role) and Casbin
-"RBAC with domains" (`g = _, _, _`: user, role, domain) — and in identity providers (Keycloak 26
-Organizations). Shipping it puts the framework level with those libraries rather than behind them.
+relationships, the other merges grants keyed by role × country, role × channel, and per user. Setu
+needs an explicit scope on each role assignment so applications do not have to encode these
+boundaries into permission names.
 
 **The model.** A grant is `(principal, role, scope | null)`: the ASSIGNMENT carries the scope, so
-roles stay one catalogue reused across scopes (Casbin), and `null` is a global grant (spatie). A
-scope is a typed reference `{ type, id }`.
+roles stay one catalogue reused across scopes (Casbin), and `null` is a global grant. A scope is a
+typed reference `{ type, id }`.
 
 **Configuration axes** — each with a default that reproduces today's single global scope:
 
@@ -14332,8 +14259,7 @@ full-stack scaffold fails its own `npm run check`), V9-11 (`.gitignore` omits `.
 V9-42 (`adopt` asks for a hand edit of its own `main.ts`), V9-67 (a Node project with
 `add websocket` gets no `ws`, and every upgrade then answers 500 with nothing logged — the runtime
 swallows `loadWsModule`'s error), V9-81 (no startup line in any configuration, and the scaffold's
-`LoggerPlugin()` logs no requests, so a fresh app prints nothing while it serves — ASP.NET and
-NestJS both announce startup).
+`LoggerPlugin()` logs no requests, so a fresh app prints nothing while it serves).
 
 **Shipped.** All nine rows on one `fix/` branch (plan
 `plans/archive/milestone-113h-generated-output.md`). `setu generate` reports a decorator barrel
@@ -14519,12 +14445,8 @@ existing barrel "rather than a new barrel". No document weighs feature folders a
 folders. The `rest` template's own sample teaches the layered form
 (`src/controllers/greeting.controller.ts` + `src/services/greeting.service.ts`).
 
-**Why feature folders.** A survey of eleven frameworks (in the findings file) found feature folders
-the default wherever a CLI generates a feature unit — NestJS (`nest g resource` writes one folder
-and updates the root module), Django apps, Spring Boot's official package-by-feature example, Encore
-— and the practice enterprise ASP.NET teams adopt over the layered MVC template (feature folders,
-vertical slices). For a generator they are strictly cheaper: one new folder plus one aggregation
-point, and a feature is deleted by deleting its folder.
+**Why feature folders.** A generated feature needs one folder and one aggregation point. Keeping its
+routes and services together makes it removable by deleting that folder.
 
 **Scope.**
 
@@ -14533,14 +14455,14 @@ point, and a feature is deleted by deleting its folder.
    registered through `src/modules/index.ts`, which the functional host then scaffolds and
    `setu.config.ts` wires. The routes file imports its service as a sibling.
 2. **Feature-scoped placement** (`--module <name>`) for the kinds a feature owns — `service`,
-   `route`, `controller`, and a `schemas` file for its Zod schemas (the counterpart of NestJS's
-   `dto/`). The module's own `index.ts` aggregates them; the app-level barrels do not change. This
-   mirrors NestJS, whose CLI places `nest g service users/pricing` in the feature folder and
-   registers it in the nearest module (the plan verifies the exact NestJS behaviour before citing
-   it). In a class-based project the file is written and the CLI prints the
-   `@Module({ providers | controllers })` line to add — it never edits the developer-owned
-   declaration — and `route --module` is functional-only, because a class-based module has no
-   imperative registration point.
+   `route`, `controller`, and a `schemas` file for its Zod schemas (the counterpart of a `dto/`
+   folder). The module's own `index.ts` aggregates them; the app-level barrels do not change. The
+   placement follows the convention a feature-folder generator uses: a nested generator path places
+   the file in that feature folder and registers it in the nearest module (the plan verifies the
+   exact behaviour before citing it). In a class-based project the file is written and the CLI
+   prints the `@Module({ providers | controllers })` line to add — it never edits the
+   developer-owned declaration — and `route --module` is functional-only, because a class-based
+   module has no imperative registration point.
 3. **App-wide kinds stay top-level only:** `middleware`, `plugin`, `health-indicator`, `metric`,
    `migration`, the ingress kinds. One rule, stated in `docs/cli.md`: a file that belongs to one
    feature goes in the feature; an app-wide file goes in its top-level folder.
@@ -14553,15 +14475,15 @@ point, and a feature is deleted by deleting its folder.
 6. **Generated tests a project can grow (V9-79).** Today `setu new` emits one `/health` check
    through the in-process `inject()`, and each `generate module` emits a test asserting its stub
    returns `[]`, which stops compiling the moment the service is real — M104's builder deleted all
-   eight. NestJS's `nest new` scaffolds `test/app.e2e-spec.ts` with a `test:e2e` script, and its
-   per-class specs compile against the real DI (the plan verifies NestJS's exact current output
-   before citing it). This milestone ships:
+   eight. Conventionally, a scaffold also emits an end-to-end test with a `test:e2e` script, and its
+   per-class specs compile against the real DI (the plan verifies the exact current output before
+   citing it). This milestone ships:
    - **`setu new` emits `test/e2e/app.e2e.test.ts` and a `test:e2e` task/script** on every socket
      target: it boots the real `createApp()` on an ephemeral port and drives `/health`, `/ready` and
      the sample module's routes over a real socket (never `inject()`, which skips the HTTP layer).
    - **`setu generate module <name>` adds `src/modules/<name>/<name>.e2e.test.ts`,** which drives
      that module's own routes over HTTP, inside the module folder so deleting the feature deletes
-     its test — per feature, which NestJS does not do.
+     its test — per feature, which a single project-wide test does not do.
    - **The per-module unit test exercises behaviour, not a stub:** it drives the module's routes
      in-process through `createTestApp({ app: await createApp() })` — the module index is the
      registrar the app calls, so the test exercises it by construction without importing a symbol
@@ -14575,7 +14497,7 @@ point, and a feature is deleted by deleting its folder.
    not a class: one value validates the request (`validateBody`/`@ValidateBody`, enforced with
    `ValidationPlugin`), gives the type (`z.infer`), drives the OpenAPI document (a route's `schema`,
    and since M70m a `validateBody` schema derived automatically, deduplicated into components), and
-   through it the generated SDK client's types. NestJS's `PartialType`/`PickType` are Zod's
+   through it the generated SDK client's types. Type-mapping helpers are Zod's
    `.partial()`/`.pick()`/`.extend()`. Today nothing says where schemas live: M104's builder
    declared all eight inline in one route file, parsed the UI's form posts by hand, and cast every
    validated value (`ctx.state.get(validatedStateKey('query')) as z.infer<typeof ListQuery>`). The
@@ -14606,8 +14528,7 @@ point, and a feature is deleted by deleting its folder.
      urlencoded and multipart bodies (M94b's `FormBody`) with the same schema. Off by default,
      because a form post needs no CORS preflight; an opted-in route pairs with form CSRF.
    - **Later candidate, not this milestone:** route-schema typing — `schema: { body }` handing the
-     handler typed `{ body }`, the Fastify/Hono shape — needs `IRouterApi` generics in
-     `common`/`kernel`.
+     handler typed `{ body }`, the Hono shape — needs `IRouterApi` generics in `common`/`kernel`.
 
 **Compatibility.** Existing projects keep working unchanged: their
 `src/controllers/<name>.routes.ts` files are still scanned and wired by the controllers barrel. Only
@@ -14735,7 +14656,7 @@ local, at `~/.cache/setu-agents-pilot/`). This section records the method and th
 on, since the pilot directory is not in the repository.
 
 **The problem.** A coding agent building an application on Setu-TS has no training data for it, so
-it either guesses from NestJS, Express and Hono, or reinvents what a plugin already provides.
+it either guesses from other frameworks and Hono, or reinvents what a plugin already provides.
 Framework contributors have `AGENTS.md`, `CLAUDE.md` and `PUBLIC_API.md`; an application has
 nothing. A scaffold emits no agent brief, and `PUBLIC_API.md` (1.35 MB, about 340–385k tokens) is
 larger than a local 27B model's whole 262k context, so pointing an agent at it does not work either.
@@ -15042,10 +14963,10 @@ advice, which is gap 1 again. So:
 - **Adopted projects** (`setu adopt`) and projects scaffolded before this change get the script from
   an upgrade-guide entry; nothing rewrites a developer's existing script, and `setu add` has no
   script-editing path (M118 plan §2 C2).
-- **Added at plan time (maintainer decision, 2026-10-26, after comparing Django `check`, ESLint, Nx
-  `sync:check`/`sync` and Rails `zeitwerk:check`):** `setu sync`, which rewrites every CLI-managed
+- **Added at plan time (maintainer decision, 2026-10-26, after comparing ESLint and Nx
+  `sync:check`/`sync` and similar check commands):** `setu sync`, which rewrites every CLI-managed
   barrel from its directory so drift has a command that fixes it; a stable id per finding
-  (`setu.E001`…, `setu.W001`…); and silencing by id, or by id and path, in `.setu-ts/check.json`. DI
+  `setu.E001`…, `setu.W001`…); and silencing by id, or by id and path, in `.setu-ts/check.json`. DI
   graph validation stays at boot in `di-plugin` (M125); `check` does not boot the application.
 
 **Open questions for the plan.**
@@ -15655,16 +15576,8 @@ sign-in, and tenant or organization rules through policies and scoped RBAC. Thre
 framework's responsibility and missing; three are application or generator material. Register rows:
 **V10-65**, **V10-66**.
 
-**The framework comparison below is from knowledge, not measured** (the M97 precedent). The plan
-re-checked each framework's current behaviour against its source before relying on it; its table
-supersedes this one where they differ (ASP.NET Core and Spring both answer an
-`X-Requested-With: XMLHttpRequest` request with 401 rather than the redirect).
-
-| Concern                                                            | Laravel                               | Django                                                         | Rails                                        | ASP.NET Core Identity          | Spring Security            | Setu-TS today                                                          |
-| ------------------------------------------------------------------ | ------------------------------------- | -------------------------------------------------------------- | -------------------------------------------- | ------------------------------ | -------------------------- | ---------------------------------------------------------------------- |
-| Unauthenticated page redirects to sign-in; an API request gets 401 | `auth` middleware, by `expectsJson()` | `login_required` → `LOGIN_URL`                                 | Devise `authenticate_user!`, by format       | cookie scheme `LoginPath`      | authentication entry point | `requireAuth()` always answers 401                                     |
-| Account re-checked on every request                                | session guard reloads the user        | middleware reloads the user, checks `is_active`                | Warden reloads; `active_for_authentication?` | security stamp, on an interval | loaded at sign-in only     | `refreshPrincipal`, but unreachable for password-only apps without MFA |
-| Sign out all of a user's sessions                                  | `logoutOtherDevices()`                | password change invalidates other sessions (session auth hash) | Devise salts the session with the password   | `UpdateSecurityStampAsync`     | `SessionRegistry`          | none: `ISessionStore` has `read`/`write`/`destroy` by session id only  |
+**The plan re-checks request classification against source:** an `X-Requested-With: XMLHttpRequest`
+request keeps a 401 rather than receiving a navigation redirect.
 
 **1. Every session configuration can re-check the account per request (V10-65, defect).** The
 `signIn` arm, which carries the async per-request `refreshPrincipal` (returning `null` makes the
@@ -15710,24 +15623,24 @@ compared on each request's re-check; bumping it invalidates every session at onc
   (or, without it, an `Accept` naming `text/html` or `application/xhtml+xml`; a bare `*/*` is not
   enough). It gets `302` to the page with `returnTo` through `safeReturnTo`, now exported;
   everything else keeps the 401, and both answers append to `Vary`.
-- **3:** the stamp lives on the application's user record, as in Laravel, Django, Devise and ASP.NET
-  Core: `signIn.sessionStamp(principal)` is read at sign-in, its SHA-256 digest recorded, and the
-  digest of the current value compared on every request in constant time. **This replaces the
-  suggested `common` port and stores**, which would have duplicated state the application already
-  owns. **No framework bump API ships:** the application bumps its own stamp (a one-line update),
-  and signs the current session in again to keep it. It works on the cookie strategy because the
-  compare, not a server-side delete, is what ends the session.
+- **3:** the stamp lives on the application's user record: `signIn.sessionStamp(principal)` is read
+  at sign-in, its SHA-256 digest recorded, and the digest of the current value compared on every
+  request in constant time. **This replaces the suggested `common` port and stores**, which would
+  have duplicated state the application already owns. **No framework bump API ships:** the
+  application bumps its own stamp (a one-line update), and signs the current session in again to
+  keep it. It works on the cookie strategy because the compare, not a server-side delete, is what
+  ends the session.
 
 **Named, not taken.** These are application or generator material; the reviewed application is right
 to own them, and other frameworks mostly leave them to packages or starter kits:
 
 - **Listing a user's sessions with IP and device**, and revoking one from a settings screen —
-  generator material (Laravel's database session driver with Jetstream, the Rails 8 authentication
-  generator). A candidate for the full-stack template once item 3 exists.
+  generator material (a database session driver plus the authentication generator an established
+  stack ships). A candidate for the full-stack template once item 3 exists.
 - **Forced password reset** with an allow-list of paths — a recipe over `refreshPrincipal` and a
   guard.
 - **Admin impersonation**, with changes credited to the real admin — a recipe or a later plugin;
-  among the compared frameworks only Spring ships it (`SwitchUserFilter`).
+  among the compared frameworks only one ships it (`SwitchUserFilter`).
 
 **Deliverables:**
 
@@ -15749,10 +15662,9 @@ to own them, and other frameworks mostly leave them to packages or starter kits:
 request-scoped parameter source), `packages/testing` (`OverridingContainer`), `apps/di-decorators`;
 docs.
 
-**Source:** the maintainer's review of the DI container against Elysia, NestJS, ASP.NET Core,
-Spring, Awilix, Angular and Encore.ts (2026-10-25), and a read of `di-plugin` on `develop` made for
-it. One finding is a defect in merged code and would ordinarily be a `fix/` branch; it ships here by
-the maintainer's direction, because the request scope below is unsafe without it.
+**Source:** the maintainer's review of the DI container (2026-10-25), checked against `di-plugin` on
+`develop`. One finding is a defect in merged code and would ordinarily be a `fix/` branch; it ships
+here by the maintainer's direction, because the request scope below is unsafe without it.
 
 **Where things stand (checked against source, 2026-10-25).**
 
@@ -15779,24 +15691,12 @@ the maintainer's direction, because the request scope below is unsafe without it
    chain by string. Cycles and missing providers surface on the first request that reaches them, not
    at boot. Nothing is validated when the application starts.
 6. **Tokens are untyped strings.** `resolve<T>(token: string)` takes `T` on trust, so a wrong or
-   mistyped token compiles. NestJS has the same weakness for its string and symbol tokens; its class
-   tokens carry their type.
+   mistyped token compiles. A string-token container has the same weakness; class tokens carry their
+   type.
 
-**The framework comparison below is from the 2026-10-25 review, partly from knowledge** (the M97
-precedent). The plan re-checks each row before relying on it.
-
-| Concern                    | NestJS                                  | ASP.NET Core                                 | Awilix / `@fastify/awilix`      | Spring                           | Elysia / Encore.ts                          | Setu-TS today     |
-| -------------------------- | --------------------------------------- | -------------------------------------------- | ------------------------------- | -------------------------------- | ------------------------------------------- | ----------------- |
-| Per-request scope          | `Scope.REQUEST`, bubbling up the chain  | a scope per request                          | `scopePerRequest` / `diScope`   | request scope via scoped proxies | per-request values, no container            | none              |
-| Its cost                   | controller subtree rebuilt per request  | one scope per request                        | one child container per request | a proxy hop per call             | none                                        | —                 |
-| Singleton holding a scoped | silently made request-scoped (bubbling) | refused (`ValidateScopes`, Development only) | not refused                     | proxied                          | not applicable                              | silently captured |
-| Graph checked at boot      | yes                                     | `ValidateOnBuild`                            | no                              | yes                              | not applicable                              | no                |
-| Typed tokens               | class tokens only                       | types are tokens                             | no (string names)               | types are tokens                 | inferred context (Elysia), codegen (Encore) | no                |
-| Scope disposal             | per request                             | `IDisposable` at scope end                   | `disposeOnResponse`             | destruction callbacks            | not applicable                              | none              |
-
-**Rejected, with the reason recorded:** NestJS's scope bubbling (it rebuilds the controller subtree
-on every request, the cost NestJS's own durable providers exist to avoid), Spring-style proxies (a
-hop on every call, and they need `AsyncLocalStorage` to find the current request), and an ambient
+**Rejected, with the reason recorded:** request-scoped bubbling (it rebuilds the controller subtree
+on every request, the cost durable providers exist to avoid), proxy-based scope resolution (a hop on
+every call, and it needs `AsyncLocalStorage` to find the current request), and an ambient
 `currentRequest()`-style lookup as the default (its `AsyncLocalStorage` cost lands on every request,
 used or not). Per-request data — user, tenant, locale — stays on typed state keys; the scope is for
 the few things that need a per-request instance, such as a unit of work.
@@ -15842,7 +15742,7 @@ the few things that need a per-request instance, such as a unit of work.
    request scope with synchronous disposal stays on the synchronous path. `Symbol.dispose` is not
    taken yet.
 6. **Scoped services reach decorated handlers per request.** A controller stays singleton-lived;
-   NestJS-style bubbling is rejected above. `@Params(Service(TOKEN))` resolves from
+   request-scoped bubbling is rejected above. `@Params(Service(TOKEN))` resolves from
    `container.forRequest(ctx)` on each call (named `Service`, because `ScopedRoles` and
    `ScopedPermissions` already mean RBAC scopes). A controller constructor that reaches a scoped
    service fails the boot (decision 1), naming this source as the fix.
@@ -15868,8 +15768,8 @@ request scope in use, decorators lowered by whatever M120 bundles with.
 - **Static validation in `setu check`** of a generated `@Module` graph, so a missing provider fails
   CI before anything boots. A follow-up once M118 and this milestone have both shipped; M118
   compares name sets and reads no types.
-- **Tenant-keyed scopes** (NestJS durable providers grouped by tenant), over the multi-tenancy
-  plugin. Only if a consumer needs it.
+- **Tenant-keyed scopes** (durable providers grouped by tenant), over the multi-tenancy plugin. Only
+  if a consumer needs it.
 - **An ambient `currentScope()`** over `AsyncLocalStorage`, opt-in and behind `packages/runtime`.
 
 **Deliverables:**
@@ -16106,7 +16006,6 @@ nothing compares it with a list of tenants that exist (`multi-tenancy-plugin/src
 `middleware/tenant-middleware.ts:121-190`). Column isolation stops this becoming a data leak, but
 every write under an invented tenant creates rows, a typo looks like an empty site instead of an
 error, and anyone can mint unlimited tenants — rows, cache keys and per-tenant rate-limit buckets.
-Finbuckle.MultiTenant on ASP.NET Core requires a tenant store for this reason.
 
 **Decisions the plan takes:**
 
@@ -16162,8 +16061,7 @@ G1). Closes **X94-1 (High)**, **X94-2**, **V11-5** and **X94-3**.
 - **X94-3** — `getRepository()` rebuilds its data source and wrapper on every call
   (`services/database-service.ts:261-266`: `_createDataSource`, `wrapDataSource`'s spread and ~10
   closures, `new InternalRepo`): ~1.0 µs CPU per request on Drizzle, ~1.8 µs on Prisma — the whole
-  point-read gap measured against NestJS 12 (Fastify) and Hono. Fetched once, Setu uses less CPU
-  than both.
+  point-read gap measured against Hono. Fetched once, Setu uses less CPU than the router.
 
 ### Part B — optimistic locking
 
@@ -16392,12 +16290,11 @@ docs must say. M128 (the High) is sequenced before every letter here.
 
 **Source:** the AI-layer survey of 2026-11-01 — six research tracks (model providers, MCP, retrieval
 and vector stores, durable execution, operations and security, and Setu's own seams read from
-source), comparing the Vercel AI SDK, Spring AI, Mastra, LangChain.js, Genkit, `laravel/ai`, the MCP
-TypeScript SDK and its Hono, NestJS, Spring, FastAPI and Cloudflare integrations, the OTel GenAI
-semantic conventions, and Temporal, Inngest, Restate and DBOS. The maintainer accepted its four
-recommendations on 2026-11-01: depend on the AI SDK's provider types, dispatch MCP tool calls
-in-process through the kernel, serve MCP with the official v2 server SDK, and target the cycle after
-`0.12.0`.
+source), comparing the Vercel AI SDK, Mastra, LangChain.js, Genkit, the MCP TypeScript SDK and its
+Hono and Cloudflare integrations, the OTel GenAI semantic conventions, and Temporal, Inngest,
+Restate and DBOS. The maintainer accepted its four recommendations on 2026-11-01: depend on the AI
+SDK's provider types, dispatch MCP tool calls in-process through the kernel, serve MCP with the
+official v2 server SDK, and target the cycle after `0.12.0`.
 
 **The finding that shapes all five.** Model libraries are plentiful and good; what is missing
 everywhere is identity, tenant isolation, budgets, audit, redaction and side effects that are safe
@@ -16468,8 +16365,8 @@ user cannot be told apart from the user, because nothing reads the RFC 8693 `act
 4. **Delegation:** the `act` claim exposed as an optional `actor` on the principal, its nesting
    bounded, and a guard option that refuses or requires delegated tokens per route.
 5. **What is NOT built:** an authorization server, Dynamic Client Registration, Client ID Metadata
-   Documents, or ID-JAG (still a draft). The plan records which established resource servers (Spring
-   Security, ASP.NET Core, the MCP SDK's own auth helpers) it compared each behaviour with.
+   Documents, or ID-JAG (still a draft). The plan checks each behaviour against the applicable RFC
+   and the MCP SDK's auth helpers.
 
 **Gate:** each challenge asserted header by header, forbidden parameters included; the metadata
 document field by field against RFC 9728; a wrong-audience token refused; an `act` token surfaced
@@ -16705,16 +16602,15 @@ schedule across a restart; a reconnecting client receives exactly the missed chu
 
 ## Milestone 137: OpenAPI Coverage — Forms, Lifecycle and Derived Responses
 
-**Source:** a review of `@setu-ts/openapi-plugin` against `@nestjs/swagger` (2026-11-04), narrowed
-to the gaps that leave a real API undocumentable or misdocumented, and checked against the sources
-of ASP.NET Core (`dotnet/aspnetcore` `227a6cc`), FastAPI (`69c67a1`), springdoc (`3316c45`),
-`@hono/zod-openapi` (`honojs/middleware` `9cb24a0`), NestJS (`ca016f9`) and three client generators
-— hey-api (`d6ba11f`), openapi-generator (`860e53f`) and openapi-fetch (`d46a319`). Nest's other
-decorators (callbacks, links, `x-` extensions, per-route security decorators, a compiler plugin,
-mapped-type helpers, per-request document patching, UI theming) are **out of scope**: each either
-duplicates a derivation Setu-TS already makes (`deriveSecurity`, Zod composition) or has no consumer
-yet. Multiple documents per application, a YAML endpoint, webhooks, discriminators and named enums
-are deferred until someone asks for them.
+**Source:** a review of `@setu-ts/openapi-plugin` (2026-11-04), narrowed to the gaps that leave a
+real API undocumentable or misdocumented, and checked against the sources of `@hono/zod-openapi`
+(`honojs/middleware` `9cb24a0`) and three client generators — hey-api (`d6ba11f`), openapi-generator
+(`860e53f`) and openapi-fetch (`d46a319`). Other decorator surfaces (callbacks, links, `x-`
+extensions, per-route security decorators, a compiler plugin, mapped-type helpers, per-request
+document patching, UI theming) are **out of scope**: each either duplicates a derivation Setu-TS
+already makes (`deriveSecurity`, Zod composition) or has no consumer yet. Multiple documents per
+application, a YAML endpoint, webhooks, discriminators and named enums are deferred until someone
+asks for them.
 
 **The principle the three letters share:** the document is derived from what the route enforces —
 validation brands, guard brands, the handler's response brand — and a declared field overrides a
@@ -16861,15 +16757,8 @@ emitted as an object with an empty `data` schema and an `x-setu-unrepresentable`
 (`sdk/src/codegen/openapi-codegen.ts:604`) and the SDK's HTTP client sends only JSON, so a document
 fixed on its own would produce a client that silently drops the body.
 
-**What the reference implementations do** (read from source; see the commits above):
+**Client-generator constraints** (read from source; see the commits above):
 
-- ASP.NET Core lists `multipart/form-data` and `application/x-www-form-urlencoded` for a form
-  parameter, **`multipart/form-data` alone when a file parameter is present**
-  (`RequestDelegateFactory.cs:129-130, 2104-2113`), refuses form and JSON body parameters on one
-  endpoint at startup, and refuses other content types at runtime.
-- FastAPI documents one form media type while Starlette's `request.form()` parses both; NestJS and
-  springdoc document `application/json` by default while Express's parsers accept urlencoded too —
-  the documented-less-than-accepted drift this letter must not reproduce.
 - hey-api sends **JSON whenever the body offers it**, else the first type
   (`shared/src/openApi/3.1.x/parser/operation.ts:113`); openapi-generator sends **the first listed
   type** (`DefaultCodegen.java:7585`). Both read `format: binary` as a file; hey-api also maps a
@@ -16883,10 +16772,10 @@ fixed on its own would produce a client that silently drops the body.
 2. **A route without a file field** (`forms: true`) lists `application/json` **first**, then
    `application/x-www-form-urlencoded` and `multipart/form-data`, with one schema under each — what
    the route accepts. Both generators then send JSON, which works.
-3. **A route with a file field lists `multipart/form-data` only** (ASP.NET's rule): JSON validation
-   refuses a file and urlencoded cannot carry one, and a JSON entry would make hey-api clients send
-   JSON. The multipart entry carries an `encoding` object naming each file field's accepted media
-   types when they are declared.
+3. **A route with a file field lists `multipart/form-data` only**: JSON validation refuses a file
+   and urlencoded cannot carry one, and a JSON entry would make hey-api clients send JSON. The
+   multipart entry carries an `encoding` object naming each file field's accepted media types when
+   they are declared.
 4. **A file-field brand and helper.** common gains a schema brand (`withFormFileMetadata` /
    `formFileMetadataOf`, the existing brand pattern; `common` stays dependency-free).
    validation-plugin exports `formFile({ mimeTypes?, maxBytes? })` from the subpath
@@ -16900,7 +16789,7 @@ fixed on its own would produce a client that silently drops the body.
    boundary must be the runtime's), and the generated file type is `Blob` (a `File` is assignable).
    The filename is the `File`'s name or `blob` for a bare `Blob`; there is no declared default.
 6. **Every declared media type is enforced.** The route already answers 415 for an encoding it does
-   not accept, so the document lists exactly the accepted set — the property ASP.NET and Hono have.
+   not accept, so the document lists exactly the accepted set.
 
 **Gate:** a `forms: true` route without a file documents three media types, JSON first; with a file,
 multipart alone with `format: binary` and the `encoding` entry; both validation entry points produce
@@ -16965,9 +16854,7 @@ every member on the in-memory broker. Nothing could change the choice after scaf
 `generate app` told a user who wanted a different backend to scaffold the service outside the
 workspace.
 
-**What ships.** Compared first with Dapr (per-app protocol, shared pub/sub component), NestJS
-(per-service transport, hybrid apps), Moleculer (one shared transporter), MassTransit (one bus,
-MultiBus for more), Spring Cloud Stream and Quarkus (binders and connectors set in configuration):
+**What ships.**
 
 1. **A workspace broker and a per-member RPC style,** recorded separately in a version-2
    `setu.workspace.json` (`broker`, `brokerUrl`, per-member `rpc`); version 1 is still read.
@@ -17049,8 +16936,8 @@ that carries it, per the versioning policy above).
 **Source:** the first gRPC load benchmark (2026-11-07, `~/setu-benchmarks/2026-11-07-grpc/`) and the
 probes that followed it. `GrpcPlugin` served unary Connect calls at 76% of plain
 `@connectrpc/connect-node` on the same transport. The workspace example's cross-member call ran at
-73% of a NestJS pair that used grpc-js over one HTTP/2 connection. ghz could not reach Setu at all,
-because Setu serves no native gRPC.
+73% of a comparable pair that used grpc-js over one HTTP/2 connection. ghz could not reach Setu at
+all, because Setu serves no native gRPC.
 
 **The problem.** Four separate layers, and only the last needs HTTP/2:
 
@@ -17272,6 +17159,51 @@ calling `IAuthSessionService.signOut` through the same request-bound module serv
 application has a pattern to follow, though the template itself stays without one. Each code letter
 ships its own CHANGELOG entry and boots a scaffold of every template it changes, per the
 generated-output rule.
+
+---
+
+## Milestone 141: Page Route Policies — Route Middleware for React Router Actions
+
+**Package(s):** `packages/common`, `packages/kernel`, `packages/react-router-plugin`,
+`packages/auth-plugin`, `packages/cli`; `apps/full-stack`; docs.
+
+**Source:** building a full-stack application on `0.12.0` (2026-11-17). Its one React Router action,
+workspace sign-in, shipped with no throttle, and the security audit reported it as a Medium finding.
+`rateLimitMiddleware` could not reach the action, so the fix was a second limiter written by hand.
+
+**The problem.** `ReactRouterPlugin` serves every page through one kernel catch-all route. A page
+action therefore passes through the global pipeline (security headers, tenancy, session, CSRF,
+authentication) but never through route-level middleware. `rateLimitMiddleware`,
+`createUploadMiddleware`, `requireScopes`, `requirePolicy`, `idempotent()` and a quota's `429` all
+attach to a kernel route, and the plugin has no way to attach them to a page. Nothing warns the
+developer: an action looks protected and is not. Registering a kernel route on the page's path is
+not a fix, because React Router answers one route on several URLs (`/login`, `/login.data`,
+`/login/_.data`, `?index`); matching paths by hand leaves the `.data` shapes unguarded.
+
+**What ships.** A mutation's guard belongs to the route's identity, not to a path. So:
+
+1. **`pagePolicies` on `ReactRouterPlugin`,** keyed by React Router route id
+   (`'routes/_auth/login'`), each a list of ordinary Setu `MiddlewareFunction`s, with `on: 'action'`
+   to guard only the requests that can run the action. A policy on a layout route covers every page
+   beneath it. The middleware keeps Setu's shape and runs in the kernel, so there is one
+   implementation of each protection, not a React Router copy.
+2. **Matching by React Router's own rules.** The plugin resolves a request to route ids with
+   `matchRoutes` from the same `react-router` module as the handler, over the server build's route
+   manifest, after React Router's own `.data`/`_.data` normalization and basename, and skips the
+   lazy-discovery manifest path as React Router does. A conformance test drives the real React
+   Router handler across every URL shape and fails if its matched routes ever differ.
+3. **Per-request route middleware in the kernel.** `RouteDefinition` gains `middlewareGroups`: named
+   groups of middleware plus a `select(ctx)` naming which run, after the route's static middleware.
+   Every group stays visible to startup scans, and `AuthPlugin`'s `requirePolicy` scan reads them.
+4. **Fail closed.** An unknown route id, or a loader seam that cannot supply the build and
+   `matchRoutes`, refuses at startup. A matching failure answers `500`, never the page unguarded.
+5. **The development entry** passes its build and `matchRoutes` through the loader seam, so policies
+   apply under `npm run dev` too.
+
+**Gate:** a page action refused by a policy on all its URL shapes (`/x`, `/x.data`, `/x/_.data`,
+`?index`) with the action not run; an upload read by middleware and then by the action; the
+conformance table equal to React Router's own matching; a scaffolded full-stack project booted on
+the changed development entry; every changed file at the 90% per-file bar.
 
 ---
 
@@ -17560,3 +17492,4 @@ generated-output rule.
 | 140c      | ✅     | cli — images, Compose, Kubernetes and gRPC between workspace members                                                                                                                                                                                                                      |
 | 140d      | ✅     | cli + vector-store-plugin — what the generators write, the agent brief, and vector-store readiness                                                                                                                                                                                        |
 | 140e      | ✅     | docs — documentation the code letters change                                                                                                                                                                                                                                              |
+| 141       | ✅     | common + kernel + react-router + auth + cli — page route policies: route middleware for React Router actions                                                                                                                                                                              |

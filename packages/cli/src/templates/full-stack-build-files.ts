@@ -359,7 +359,12 @@ export function renderFullStackDevEntry(
   return {
     path: 'dev.ts',
     contents: `import * as vite from 'vite';
-import { createRequestHandler, RouterContextProvider, type ServerBuild } from 'react-router';
+import {
+  createRequestHandler,
+  matchRoutes,
+  RouterContextProvider,
+  type ServerBuild,
+} from 'react-router';
 import { CAPABILITIES, describeError, type ILogger, type IRuntimeServices } from '@setu-ts/common';
 import { viteDevExternals } from '@setu-ts/react-router-plugin';
 import { createRuntimeServices } from '@setu-ts/runtime';
@@ -438,6 +443,7 @@ async function boot() {
         // From the same react-router module as the handler: React Router checks
         // the context with instanceof.
         createLoadContext: () => new RouterContextProvider(),
+        pageRoutes: { build: loadServerBuild, matchRoutes },
       });
     },
   });
@@ -487,9 +493,19 @@ for (const signal of ['SIGTERM', 'SIGINT'] as const) {
   };
 }
 
+/** Removes the page-route source seam for recognition of entries rendered before it existed. */
+function withoutPageRouteSource(source: string): string {
+  return source
+    .replace(
+      "import {\n  createRequestHandler,\n  matchRoutes,\n  RouterContextProvider,\n  type ServerBuild,\n} from 'react-router';",
+      "import { createRequestHandler, RouterContextProvider, type ServerBuild } from 'react-router';",
+    )
+    .replace('        pageRoutes: { build: loadServerBuild, matchRoutes },\n', '');
+}
+
 /**
- * Current and recognition-only standalone entries (0.12.0's, and the guarded
- * layout with nullish port reads), for workspace adoption.
+ * Current and recognition-only standalone entries (0.12.0's, and pre-pageRoutes
+ * guarded layouts with nullish or runtimeEnvRead port reads), for workspace adoption.
  */
 export function fullStackDevEntryVariants(
   runtime: TargetRuntime,
@@ -503,10 +519,10 @@ export function fullStackDevEntryVariants(
   // The current options object sits one level deeper, inside the try block.
   const argsEnd = current.contents.indexOf('\n  });', argsStart) + '\n  }'.length;
   const args = current.contents.slice(argsStart, argsEnd).replace(/\n {2}/g, '\n');
-  const legacy = (
+  const legacy = withoutPageRouteSource(
     current.contents.slice(0, start) +
-    `const viteServer = await vite.createServer(${args});\nawait viteServer.listen();` +
-    current.contents.slice(end)
+      `const viteServer = await vite.createServer(${args});\nawait viteServer.listen();` +
+      current.contents.slice(end),
   )
     .replace(', type IRuntimeServices', '')
     .replace('const runtime: IRuntimeServices =', 'const runtime =')
@@ -520,6 +536,10 @@ export function fullStackDevEntryVariants(
   return [
     current,
     { path: current.path, contents: withNullishEnvReads(legacy, nullish) },
-    { path: current.path, contents: withNullishEnvReads(current.contents, nullish) },
+    {
+      path: current.path,
+      contents: withNullishEnvReads(withoutPageRouteSource(current.contents), nullish),
+    },
+    { path: current.path, contents: withoutPageRouteSource(current.contents) },
   ];
 }

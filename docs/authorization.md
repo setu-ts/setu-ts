@@ -16,11 +16,10 @@ service whether or not you configure roles.
 ## Does the framework need an attribute (ABAC) engine?
 
 No. Attribute rules are **policies you write**: a policy is a named set of abilities, each an
-asynchronous check that receives the principal and the target. ASP.NET Core
-(`IAuthorizationService.AuthorizeAsync` with resource handlers), NestJS's policy layer, and Spring's
-`PermissionEvaluator` make the same choice — none ships an attribute language; each gives you a
-place to put code. If you prefer an external engine (OpenFGA, Casbin, Cerbos), wrap it in a policy:
-the check calls the engine, and every entry point below works unchanged.
+asynchronous check that receives the principal and the target. Setu ships no attribute language;
+policies give you a place to put that code. If you prefer an external engine (OpenFGA, Casbin,
+Cerbos), wrap it in a policy: the check calls the engine, and every entry point below works
+unchanged.
 
 A role held in one tenant, organisation, or region rather than everywhere is scoped RBAC, built on
 this layer — see [Scoped Roles](#scoped-roles).

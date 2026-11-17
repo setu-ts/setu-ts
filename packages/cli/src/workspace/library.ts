@@ -1,7 +1,7 @@
 /**
  * Shared library members — the code two services in a workspace both need.
  *
- * The NestJS analogue is `nest g library`, and it was deferred until the
+ * A shared-library generator was deferred until the
  * application case was proven. It is: M62 shipped a three-member workspace whose
  * services resolve and call each other.
  *

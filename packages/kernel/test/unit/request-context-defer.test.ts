@@ -102,9 +102,9 @@ it('continues cleanup without a logger and when the logger itself throws', async
   );
 });
 
-for (const routeMiddleware of [false, true]) {
+for (const routeMiddleware of [false, true, 'groups'] as const) {
   for (const fails of [false, true]) {
-    it(`M131b 3.10 waits for detached handler and shutdown routeMiddleware=${routeMiddleware} fails=${fails}`, async () => {
+    it(`waits for detached handler and shutdown routeMiddleware=${routeMiddleware} fails=${fails}`, async () => {
       const { createApplication } = await import('../../src/index.ts');
       const { RuntimePlugin } = await import('@setu-ts/runtime');
       const { promise, resolve } = Promise.withResolvers<void>();
@@ -116,9 +116,12 @@ for (const routeMiddleware of [false, true]) {
         void next().catch(() => {});
         return ctx.response.text('early');
       };
-      if (!routeMiddleware) app.middleware.add(early);
+      if (routeMiddleware === false) app.middleware.add(early);
       app.router.get('/', {
-        ...(routeMiddleware ? { middleware: [early] } : {}),
+        ...(routeMiddleware === true ? { middleware: [early] } : {}),
+        ...(routeMiddleware === 'groups'
+          ? { middlewareGroups: { groups: { early: [early] }, select: () => ['early'] } }
+          : {}),
         handler: async (ctx) => {
           ctx.defer?.(cleaned);
           started.resolve();
@@ -151,6 +154,139 @@ for (const routeMiddleware of [false, true]) {
     });
   }
 }
+
+it.each([false, true])(
+  'waits for detached group selection and shutdown when selection rejects=%s',
+  async (fails) => {
+    const { createApplication } = await import('../../src/index.ts');
+    const { RuntimePlugin } = await import('@setu-ts/runtime');
+    const gate = Promise.withResolvers<void>();
+    const started = Promise.withResolvers<void>();
+    const cleaned = vi.fn();
+    const late = vi.fn();
+    const resumed = vi.fn();
+    const handler = vi.fn();
+    const app = createApplication({ plugins: [RuntimePlugin()] });
+    app.router.get('/', {
+      middleware: [
+        (ctx, next) => {
+          void next().catch(() => {});
+          return ctx.response.text('early');
+        },
+      ],
+      middlewareGroups: {
+        groups: {},
+        select: async (ctx) => {
+          ctx.defer?.(cleaned);
+          started.resolve();
+          await gate.promise;
+          resumed(cleaned.mock.calls.length);
+          ctx.defer?.(late);
+          if (fails) throw new Error('late selector failure');
+          return [];
+        },
+      },
+      handler,
+    });
+    await app.start();
+    try {
+      const response = await app.inject({ method: 'GET', url: '/' });
+      await started.promise;
+      expect(response.body).toBe('early');
+      expect(cleaned).not.toHaveBeenCalled();
+      let stopped = false;
+      const stopping = app.stop().then(() => {
+        stopped = true;
+      });
+      await new Promise<void>((done) => setTimeout(done, 25));
+      expect(stopped).toBe(false);
+      gate.resolve();
+      await stopping;
+      expect(resumed).toHaveBeenCalledExactlyOnceWith(0);
+      expect(late).toHaveBeenCalledOnce();
+      expect(cleaned).toHaveBeenCalledOnce();
+      expect(handler).not.toHaveBeenCalled();
+      expect(response.body).toBe('early');
+    } finally {
+      gate.resolve();
+      await app.stop();
+    }
+  },
+);
+
+it.each([false, true])(
+  'drains a newer handler tracked after early dispatch when handler rejects=%s',
+  async (fails) => {
+    const { createApplication } = await import('../../src/index.ts');
+    const { RuntimePlugin } = await import('@setu-ts/runtime');
+    const selection = Promise.withResolvers<void>();
+    const handlerGate = Promise.withResolvers<void>();
+    const started = Promise.withResolvers<void>();
+    const cleaned = vi.fn();
+    const late = vi.fn();
+    const selectedStage = vi.fn();
+    const app = createApplication({ plugins: [RuntimePlugin()] });
+    app.router.get('/', {
+      // Return the default buffered response while selection is still pending.
+      // No terminal response has ended the builder, so the selected group may run.
+      middleware: [
+        (_ctx, next) => {
+          void next().catch(() => {});
+        },
+      ],
+      middlewareGroups: {
+        groups: {
+          early: [
+            (ctx, next) => {
+              void next().catch(() => {});
+              selectedStage();
+              return ctx.response.text('group early');
+            },
+          ],
+        },
+        select: async () => {
+          await selection.promise;
+          return ['early'];
+        },
+      },
+      handler: async (ctx) => {
+        ctx.defer?.(cleaned);
+        started.resolve();
+        await handlerGate.promise;
+        ctx.defer?.(late);
+        if (fails) throw new Error('late handler failure');
+        return ctx.response.text('late');
+      },
+    });
+    await app.start();
+    try {
+      const response = await app.inject({ method: 'GET', url: '/' });
+      expect(response.body).toBeNull();
+      expect(selectedStage).not.toHaveBeenCalled();
+      selection.resolve();
+      await started.promise;
+      expect(selectedStage).toHaveBeenCalledOnce();
+      let stopped = false;
+      const stopping = app.stop().then(() => {
+        stopped = true;
+      });
+      await new Promise<void>((done) => setTimeout(done, 75));
+      expect({ cleaned: cleaned.mock.calls.length, stopped }).toEqual({
+        cleaned: 0,
+        stopped: false,
+      });
+      handlerGate.resolve();
+      await stopping;
+      expect(late).toHaveBeenCalledOnce();
+      expect(cleaned).toHaveBeenCalledOnce();
+      expect(response.body).toBeNull();
+    } finally {
+      selection.resolve();
+      handlerGate.resolve();
+      await app.stop();
+    }
+  },
+);
 
 it('M131b review: a handler that streams after an early buffered response still releases the request', async () => {
   const { createApplication } = await import('../../src/index.ts');
