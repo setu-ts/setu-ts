@@ -840,7 +840,14 @@ here.
   PascalCase event names, truthful README/comment text, brief refresh hints and devtool entries; 29
   V12 rows; plus `setu add` prompts for every choice, backend guidance for every broker, example
   apps on the current scaffold, and a `vector-store` readiness indicator) — complete (PR #594).
-- **Next milestone** — the remaining M139 letters, then M140e (generated code read as code).
+- **Milestone 140e** (docs + agent cards + `PUBLIC_API.md` + `CHANGELOG.md` + the website, also
+  closing **Milestone 139e** — documentation the code letters change: the CLI, deployment and
+  package docs matched to M140a–d output, the session-secret and `@Inject` error texts, agent-brief
+  rules for `config.get` and Workers tests, the full-stack sign-out recipe, a run-budget recipe
+  through the ai-chat example's budget scope, the homepage package count computed from the package
+  list, and a test that keeps the zero-config `setu add` list matching its source; V12-5…V12-8,
+  V12-13…V12-15, V12-17, V12-38, V12-88, V9-29) — complete (PR pending).
+- **Next milestone** — every M139 and M140 letter is complete; the `v0.13.0` release follows.
 
 ## Verification (run before declaring any work done)
 
