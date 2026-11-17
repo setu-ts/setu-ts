@@ -854,7 +854,7 @@ here.
   `routeMiddlewareOf` for the `requirePolicy` scan; `pageRoutes` from the default loader and the dev
   entry; `setu add` wiring value-free and generated-seam full-stack arms itself) — complete (PR
   #599).
-- **Release `v0.13.0`** — cut 2026-11-17 (PR pending); 55 packages. From this release `plans/` and
+- **Release `v0.13.0`** — cut 2026-11-17 (PR #600); 55 packages. From this release `plans/` and
   `ROADMAP.md` stay off `main` and completed plans are deleted, not archived.
 - **Next milestone** — not yet chosen.
 
