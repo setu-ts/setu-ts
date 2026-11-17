@@ -184,14 +184,35 @@ export function lintText(file: string, text: string): { errors: Finding[]; warni
   return { errors, warnings };
 }
 
+/**
+ * The Markdown file names at `plans/` root. A tree without `plans/` has none: `main` never holds
+ * the directory (docs/releasing.md, "Keep plans and the roadmap off `main`"), and linting it there
+ * must pass rather than crash.
+ *
+ * @param read - Directory reader, injectable for tests
+ * @returns The `.md` file names, unsorted
+ */
+export async function planRootFiles(
+  read: (dir: string) => Promise<readonly { name: string; isFile(): boolean }[]> = (dir) =>
+    readdir(dir, { withFileTypes: true }),
+): Promise<string[]> {
+  let entries: readonly { name: string; isFile(): boolean }[];
+  try {
+    entries = await read(PLANS_DIR);
+  } catch (err) {
+    if ((err as { code?: unknown }).code === 'ENOENT') return [];
+    throw err;
+  }
+  return entries.filter((entry) => entry.isFile() && entry.name.endsWith('.md')).map((e) => e.name);
+}
+
 /** Repo-hygiene: only canonical plan files may sit at plans/ root. */
 async function rootHygiene(): Promise<Finding[]> {
   const findings: Finding[] = [];
-  for await (const entry of await readdir(PLANS_DIR, { withFileTypes: true })) {
-    if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
-    if (!isCanonicalPlanName(entry.name)) {
+  for (const name of await planRootFiles()) {
+    if (!isCanonicalPlanName(name)) {
       findings.push({
-        file: `${PLANS_DIR}/${entry.name}`,
+        file: `${PLANS_DIR}/${name}`,
         line: null,
         message:
           'non-canonical file at plans/ root — only milestone-<N>-<desc>.md, ' +
@@ -204,11 +225,7 @@ async function rootHygiene(): Promise<Finding[]> {
 }
 
 async function defaultTargets(): Promise<string[]> {
-  const targets: string[] = [];
-  for await (const entry of await readdir(PLANS_DIR, { withFileTypes: true })) {
-    if (entry.isFile() && entry.name.endsWith('.md')) targets.push(`${PLANS_DIR}/${entry.name}`);
-  }
-  return targets.sort();
+  return (await planRootFiles()).map((name) => `${PLANS_DIR}/${name}`).sort();
 }
 
 function format(f: Finding): string {

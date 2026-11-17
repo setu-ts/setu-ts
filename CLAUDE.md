@@ -1125,8 +1125,8 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
   The release branch removes them as its last commit, a CI job fails any pull request into `main`
   whose tree still holds them, and the back-merge restores them on `develop`. `docs/releasing.md`
   ("Keep plans and the roadmap off `main`") has the commands. So no file outside `plans/` and
-  `ROADMAP.md` may link into either with a relative link: on `main` it points nowhere. Link
-  `https://github.com/setu-ts/setu-ts/blob/develop/ROADMAP.md` instead.
+  `ROADMAP.md` may link into either — not even to the `develop` copy on GitHub, which `check:docs`
+  resolves locally. Name them in text.
 
 ## Key conventions
 

@@ -239,8 +239,8 @@ git commit -m "chore(release): keep plans and the roadmap off main"
 ```
 
 The CI job **Main branch tree** fails any pull request into `main`, release or hotfix, whose tree
-still holds either path. Nothing outside them may link into them relatively, since on `main` such a
-link points nowhere; link the `develop` copy on GitHub instead.
+still holds either path. Nothing outside them may link into them — `check:docs` resolves even a
+GitHub URL to this repository locally — so name them in text.
 
 **The back-merge restores them.** Merging `main` into `develop` would carry the removal back, so
 take `develop`'s copies before committing the merge:
