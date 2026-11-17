@@ -434,6 +434,14 @@ jobs:
         continue-on-error: true
         run: pnpm run check
 
+      # script-entrypoints runs `check-deploy.ts --render`, which compares the
+      # committed manifests with `helm template`. Pinned to ci.yml's tooling
+      # shard: the runner image's own helm moves with the image, and the
+      # ubuntu-26.04 image's helm renders the chart differently (issue #575).
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.3
+
       - name: Test against fresh resolution
         id: test
         if: always() && steps.resolve.outcome == 'success'
