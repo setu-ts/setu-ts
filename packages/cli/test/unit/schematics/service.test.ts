@@ -106,8 +106,8 @@ describe('service schematic', () => {
     });
 
     it('decorates the class with an explicit token', () => {
-      // Explicit because `emitDecoratorMetadata` is unavailable under Deno, so a
-      // consumer's `@Inject` cannot read the parameter's type.
+      // Explicit because TC39 standard decorators carry no parameter type
+      // information on any runtime, so a consumer's `@Inject` names the token.
       expect(files[0].contents).toContain("@Injectable({ token: 'order-item-service' })");
       expect(files[0].contents).toContain(
         `import { Injectable } from '@setu-ts/decorator-plugin';`,

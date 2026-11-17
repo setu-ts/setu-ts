@@ -171,6 +171,9 @@ describe('resolveSecrets', () => {
     await expect(resolveSecrets({}, { services: new FakeRegistry(), env: {} })).rejects.toThrow(
       SessionSecretMissingError,
     );
+    await expect(resolveSecrets({}, { services: new FakeRegistry(), env: {} })).rejects.toThrow(
+      'set SESSION_SECRET in configuration',
+    );
   });
 
   it('treats an empty environment value as absent', async () => {

@@ -1848,9 +1848,10 @@ async function reportManifestRefusal(
  * In npm/Bun Setu workspaces, optional peers are also recorded in the root's
  * dependencies so hoisted framework packages can load them (since 0.11.0).
  *
- * Reports the install command rather than spawning it. That is deliberate: on
- * the day of a release `deno install` hits the 24-hour minimum-dependency-age
- * policy (D1), so the developer needs to SEE the command and its flags rather
+ * Reports the install command rather than spawning it. That is deliberate:
+ * `deno install` refuses third-party packages under 24 hours old under the
+ * minimum-dependency-age policy (D1); framework packages are exempt, so the
+ * developer needs to SEE the command and its flags rather
  * than watch an opaque subprocess fail. It also keeps this command free of the
  * `run` permission.
  *

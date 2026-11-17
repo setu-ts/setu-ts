@@ -269,7 +269,6 @@ database without `execute` and `transaction`. pgvector 0.8 or later is required.
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
 import { PgVectorStore, VectorStorePlugin } from '@setu-ts/vector-store-plugin';
-import type { PgVectorDatabase } from '@setu-ts/vector-store-plugin';
 
 // Bounds: a hung database answers 503/504 instead of holding the request.
 const pool = new Pool({
@@ -280,7 +279,7 @@ const pool = new Pool({
 
 export const plugin = VectorStorePlugin({
   adapter: new PgVectorStore({
-    db: drizzle(pool) as unknown as PgVectorDatabase,
+    db: drizzle(pool),
     onClose: () => pool.end(),
   }),
   collections: [{ name: 'documents', dimensions: 1024, filterable: { tag: 'string' } }],

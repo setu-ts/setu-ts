@@ -30,6 +30,15 @@ docker build -t my-app .            # the generated Dockerfile at the project ro
 docker run --rm -p 3000:3000 my-app # PORT still selects the port at run time
 ```
 
+A project with a generated secret passes it from the shell, because `**/.env` is excluded from the
+image and the development value in `.env` is not copied in. A `full-stack` project has
+`SESSION_SECRET`, and its generated README shows the command:
+`docker run --rm -p 3000:3000 -e SESSION_SECRET my-app`. `setu add session` adds `SESSION_SECRET`
+and `setu add auth` adds `JWT_SECRET`; those commands do not rewrite the README, so add `-e` for
+each yourself. Set every such variable in the shell to a value of at least 32 characters first: a
+name that is not set in the shell passes nothing, and the application refuses to start without its
+secret.
+
 The image installs from the project's lockfile, which `setu new` does not write: install once first
 (`npm install`, `bun install` or `deno install`, which write `package-lock.json`, `bun.lock` or
 `deno.lock`) and commit it.
@@ -37,10 +46,10 @@ The image installs from the project's lockfile, which `setu new` does not write:
 The generated `Dockerfile` installs and builds inside the image, so no host build is needed: on Node
 its build stage runs `npm ci` and `npm run build` (which type-checks, then `setu build` bundles the
 service into `dist/`) and the image runs `dist/main.js`; a Bun image runs `bun run main.ts` and a
-Deno image `deno run … main.ts`. The entry reads `PORT` (default `3000`). Run the tests before
-building an image (`npm test`, `bun run test`, or `deno task test` in a Deno project): DI graph
-validation happens at boot. A Workers project is not a container at all — deploy it with
-`wrangler deploy` (see [Cloudflare Workers](#cloudflare-workers)).
+Deno image `deno run … main.ts`. Every runtime stage sets `ENV NODE_ENV=production`. The entry reads
+`PORT` (default `3000`). Run the tests before building an image (`npm test`, `bun run test`, or
+`deno task test` in a Deno project): DI graph validation happens at boot. A Workers project is not a
+container at all — deploy it with `wrangler deploy` (see [Cloudflare Workers](#cloudflare-workers)).
 
 In a workspace, `setu generate app` (and `setu adopt`) writes one parameterized image, a Compose
 stack and Kubernetes objects for its members; see
@@ -525,11 +534,11 @@ Everything above is about **this repository's** images and objects, which build 
 [`apps/`](../apps/). A workspace created with `setu new --workspace` gets its own, generated and
 regenerated for every member:
 
-| Path                  | What it is                                                                                             |
-| --------------------- | ------------------------------------------------------------------------------------------------------ |
-| `docker/Dockerfile`   | One parameterized image: `docker build -f docker/Dockerfile --build-arg MEMBER=orders -t orders:dev .` |
-| `docker/compose.yaml` | Every member plus the transport's broker, each member on its allocated port                            |
-| `k8s/members.yaml`    | A Deployment and a Service per member                                                                  |
+| Path                  | What it is                                                                                                           |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `docker/Dockerfile`   | One parameterized image: `docker build -f docker/Dockerfile --build-arg MEMBER=orders -t orders:dev .`               |
+| `docker/compose.yaml` | Every member plus the transport's broker, each member on its allocated port                                          |
+| `k8s/members.yaml`    | A Deployment and a Service per member, plus a `<member>-transport` ConfigMap when the broker has connection defaults |
 
 Each member's optional `generatedSecrets` in `setu.workspace.json` records secret variable names
 such as `SESSION_SECRET` and `JWT_SECRET`. `generate app` records a template's generated secrets;
@@ -867,14 +876,15 @@ address as the fallback.
 ### A standalone project
 
 A standalone non-Workers `setu new` emits a `Dockerfile` and `.dockerignore` beside the project, so
-`docker build -t app .` and `docker run --rm -p 3000:3000 app` work without adding anything; the
-image installs and builds inside its own build stage. A Workers project emits neither, because it is
-not a container. A standalone template with `--broker` or `--queue` can additionally emit
-`docker/compose.yaml` for the selected backing services; that does not supply a Kubernetes manifest.
-Use a workspace (`setu new --workspace`, then `setu generate app`) for generated per-member
-deployment artifacts, or `setu adopt` to bring an existing project into a workspace. For an
-independently maintained image, adapt the generated `Dockerfile`'s entrypoint and dependency
-installation to your runtime.
+`docker build -t app .` and `docker run --rm -p 3000:3000 app` work without adding anything, except
+that a generated secret is set in the shell and passed with `-e` (see
+[Deploy a scaffolded project](#deploy-a-scaffolded-project)); the image installs and builds inside
+its own build stage. A Workers project emits neither, because it is not a container. A standalone
+template with `--broker` or `--queue` can additionally emit `docker/compose.yaml` for the selected
+backing services; that does not supply a Kubernetes manifest. Use a workspace
+(`setu new --workspace`, then `setu generate app`) for generated per-member deployment artifacts, or
+`setu adopt` to bring an existing project into a workspace. For an independently maintained image,
+adapt the generated `Dockerfile`'s entrypoint and dependency installation to your runtime.
 
 ## Backup and restore
 

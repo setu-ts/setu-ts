@@ -277,8 +277,8 @@ class UserService {
 ```
 
 `constructor(private db: DatabaseService)` cannot work here. Inferring the token from the
-parameter's type requires `emitDecoratorMetadata`, which Deno does not support — so the type is
-simply not available at runtime. This is permanent, not a gap waiting to be filled.
+parameter's type would need parameter type information, and TC39 standard decorators carry none on
+any runtime, so `@Inject` names the token. This is permanent, not a gap waiting to be filled.
 
 Two consequences follow from the list being positional:
 

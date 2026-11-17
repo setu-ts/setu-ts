@@ -127,6 +127,9 @@ That suppresses the message only. Channel delivery is identical either way.
 | `scalingNotice` | `boolean`                    | `true`   | Logs one `info` line at startup when no realtime backplane is registered. `false` silences it. |
 | `diagnostics`   | `RealtimeDiagnosticsOptions` | omitted  | Opt-in realtime observations (M98l); see below.                                                |
 
+`heartbeatMs` must be a whole number from 0 to 2147483647; a NaN, negative, fractional or larger
+value is refused when the plugin registers.
+
 ## Diagnostics (M98l)
 
 `SsePlugin({ diagnostics: { enabled: true, alias: 'feed' } })` counts, for the local diagnostics

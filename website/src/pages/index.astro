@@ -6,6 +6,12 @@
  */
 import Base from '../layouts/Base.astro';
 import FeatureIcon from '../components/FeatureIcon.astro';
+import { PACKAGES } from '../lib/repository';
+
+// Counted from the published-package list the packages page renders, so the
+// sentence cannot drift when a package is added.
+const pluginCount = PACKAGES.filter((pkg) => pkg.group === 'Plugins').length;
+const starterCount = PACKAGES.filter((pkg) => pkg.group === 'Starters').length;
 
 const capabilities = [
   {
@@ -98,8 +104,8 @@ const principles = [
   <section class="landing-section" aria-labelledby="capabilities-heading">
     <h2 id="capabilities-heading">Capabilities</h2>
     <p>
-      52 published packages — common, kernel, runtime, exceptions, 41 plugins, three starters,
-      the SDK, test utilities, the <code>setu</code> CLI and its create launcher. Add only what you use; heavy dependencies
+      {PACKAGES.length} published packages — common, kernel, runtime, exceptions, {pluginCount}
+      plugins, {starterCount} starters, the SDK, test utilities, the <code>setu</code> CLI and its create launcher. Add only what you use; heavy dependencies
       are injected or lazily loaded, never installed by default.
     </p>
     <p><a href="/packages/">Browse every package</a> · <a href="/docs/examples/">Runnable examples</a></p>

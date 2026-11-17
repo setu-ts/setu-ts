@@ -615,10 +615,11 @@ Each member has a single feature, so both stay flat, as any service does until i
 `setu generate module`: billing serves `Quote` from the plugin `setu generate plugin` wrote, and
 orders has a controller, a service and a schema. Billing is generated first so that orders can
 record it with `--depends-on`: the root `dev` script then starts orders only after billing answers
-`/ready`. Billing listens on 3410 and orders on 3411, the ports the workspace manifest and each
-member's `src/discovery/services.ts` record. The contract lives in `libs/contracts`, whose
-`proto:gen` script runs buf through `npx`; its output under `src/gen/` is committed, so nothing else
-needs buf.
+`/ready`, and Compose adds a `depends_on` that waits for billing to be healthy when it has health
+probes (started, otherwise). Billing listens on 3410 and orders on 3411, the ports the workspace
+manifest and each member's `src/discovery/services.ts` record. The contract lives in
+`libs/contracts`, whose `proto:gen` script runs buf through `npx`; its output under `src/gen/` is
+committed, so nothing else needs buf.
 
 ```bash
 pnpm --dir apps/grpc-workspace run smoke      # starts both members, makes the cross-member calls
@@ -826,7 +827,8 @@ pnpm --dir apps/cloudflare run smoke            # needs `wrangler` on PATH
   clears failed starts for retry, and supplies the same app to fetch and queue; scheduled writes its
   run count to KV.
 - [`wrangler.toml`](../apps/cloudflare/wrangler.toml) — The configuration declares EXAMPLE_KV, the
-  MESSAGES producer and consumer, the cron expression and REPLY_INBOX Durable Object binding.
+  MESSAGES producer and consumer, the cron expression, and the `REPLY_INBOX` Durable Object binding
+  — the messaging request/reply inbox class (`ReplyInboxObject`) with its migration.
 
 ---
 

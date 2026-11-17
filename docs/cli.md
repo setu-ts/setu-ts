@@ -178,12 +178,12 @@ provider on the container when one is present and never touches the kernel regis
 
 ### Runtime targets
 
-| `--runtime`          | Entry                         | Manifests                                                        | Start command          |
-| -------------------- | ----------------------------- | ---------------------------------------------------------------- | ---------------------- |
-| `node` (default)     | `main.ts` → `app.start()`     | `package.json` + `tsconfig.json` + ESLint + Prettier             | `npm start` (compiled) |
-| `deno`               | `main.ts` → `app.start()`     | `deno.json`                                                      | `deno task start`      |
-| `bun`                | `main.ts` → `app.start()`     | `package.json` + `tsconfig.json` + ESLint + Prettier             | `bun run start`        |
-| `cloudflare-workers` | `src/index.ts` `fetch` export | `deno.json` + `package.json` + `tsconfig.json` + `wrangler.toml` | `npm run dev`          |
+| `--runtime`          | Entry                         | Manifests                                                              | Start command          |
+| -------------------- | ----------------------------- | ---------------------------------------------------------------------- | ---------------------- |
+| `node` (default)     | `main.ts` → `app.start()`     | `package.json` + `tsconfig.json` + ESLint + Prettier                   | `npm start` (compiled) |
+| `deno`               | `main.ts` → `app.start()`     | `deno.json`                                                            | `deno task start`      |
+| `bun`                | `main.ts` → `app.start()`     | `package.json` + `tsconfig.json` + ESLint + Prettier                   | `bun run start`        |
+| `cloudflare-workers` | `src/index.ts` `fetch` export | `package.json` + `tsconfig.json` + ESLint + Prettier + `wrangler.toml` | `npm run dev`          |
 
 Every target takes the framework from npm: `package.json` names `@setu-ts/*` at `^<version>`, and
 `deno.json` maps each to `npm:@setu-ts/<name>@^<version>`. A Deno project sets
@@ -198,11 +198,12 @@ API, only `createRuntimeServices()`, and `RuntimePlugin` detects the platform wh
 Only the manifest and the start command differ, so moving a project between those three is a
 manifest change:
 
-- **Node → Bun:** keep `package.json`, set its scripts to `bun run main.ts` and `bun test`, and
-  replace the `tsx` and `@types/node` dev dependencies with `@types/bun`. A `full-stack` project
-  builds the frontend before production, keeps `start: NODE_ENV=production bun run main.ts`,
-  prefixes tests with `react-router build && ` and uses `start:dev: bun run dev.ts`. Bun workspaces
-  need the hoisted linker setting described in the upgrade guide.
+- **Node → Bun:** keep `package.json`, set its scripts to `NODE_ENV=production bun run main.ts` and
+  `bun test`, and replace the `tsx` and `@types/node` dev dependencies with `@types/bun`. A
+  `full-stack` project builds the frontend before production, keeps
+  `start: NODE_ENV=production bun run main.ts`, prefixes tests with `react-router build && ` and
+  uses `start:dev: bun run dev.ts`. Bun workspaces need the hoisted linker setting described in the
+  upgrade guide.
 - **Node or Bun → Deno:** _replace_ `package.json`, `tsconfig.json`, the ESLint and Prettier files
   and the npm lockfile with the `deno.json` that `setu new --runtime deno` emits. A `deno.json`
   added beside a kept `package.json` still serves, but `setu generate` checks `package.json` first,
@@ -236,13 +237,13 @@ decorator — V8 has not shipped them, so even a TC39 standard decorator is a ba
 the constructor parameter property `setu generate module` emits
 (`ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`). A generated Node project therefore declares `tsx` in
 `devDependencies` and develops with `tsx watch main.ts`, which transforms both. Its `tsconfig.json`
-needs no decorator option. Bun compiles TypeScript outright and Deno and Workers never invoke a
-runner, so no other target carries the dependency.
+needs no decorator option. Bun compiles TypeScript outright and Deno never invokes a runner, so Deno
+carries no such dependency; Workers declares `tsx` to run its `node:test` tests.
 
-**The Workers target carries an npm manifest as well as `deno.json`.** `wrangler` bundles
-`src/index.ts` with esbuild, which reads no Deno import map, so the project emits `package.json`
-(the `@setu-ts/*` dependencies, `wrangler` pinned) and `npm install && npm run dev` works as
-printed. The `deno.json` beside it is what `setu generate` reads for plugin gating.
+**The Workers target carries an npm manifest.** `wrangler` bundles `src/index.ts` with esbuild,
+which reads no Deno import map, so the project emits `package.json` (the `@setu-ts/*` dependencies,
+`wrangler` pinned) and `npm install && npm run dev` works as printed. `package.json` is what
+`setu generate` reads for plugin gating.
 
 `--template microservice --runtime cloudflare-workers` is supported. The template swaps
 `messaging-plugin` and `queue-plugin` — both need a socket — for `@setu-ts/cloudflare-plugin`, and
@@ -471,7 +472,8 @@ Run `setu add auth`, then this command again.
 ```
 
 For generated projects in either style, `setu add` registers the safe zero-configuration defaults
-for cqrs, events, messaging, queue, scheduler, websocket, cache, health, metrics, openapi, sse and
+for validation, worker-pool, secrets, storage, audit, mail, resilience, view, idempotency, cqrs,
+events, messaging, queue, scheduler, websocket, cache, health, metrics, openapi, sse and
 realtime-backplane above the emitted development-plugin anchor. In a functional project, `events`,
 `cqrs`, `health` and `metrics` are registered with the generated-artifact barrel they consume, for
 example `EventsPlugin({ handlers: EVENT_HANDLERS })`, and an empty barrel is created when absent, so
@@ -490,8 +492,14 @@ collections are the application's. See [Retrieval (vector search)](./retrieval.m
 Class-based `generate job` requires queue; functional projects keep the standalone job recipe.
 Generated guards use `requirePermission` from auth-plugin. The permission is evaluated by the
 authorization service `AuthPlugin` registers only when given an `rbac` option, which is why
-`setu add auth` prints `AuthPlugin({ jwt: { … }, rbac: { roles: {} } })`; without it, every
-authenticated request to a guarded route answers `501` and the handler never runs.
+`setu add auth` prints `AuthPlugin({ jwt: {}, rbac: { roles: {} } })`; without it, every
+authenticated request to a guarded route answers `501` and the handler never runs. With `jwt: {}`,
+`JWT_SECRET` is resolved from a secrets provider, then configuration, then the environment, and a
+value shorter than 32 bytes is refused.
+
+`setu add auth` and `setu add session` write a random 64-hex `JWT_SECRET` or `SESSION_SECRET` into
+the project's env file, append that file to `.gitignore` (printing a `git rm --cached` hint when it
+was already there), and append a custom env path to an existing `.dockerignore`.
 
 `new --devtool`, `app --devtool` and `devtool enable` write the CLI-managed
 `src/devtool/diagnostics.ts` policy. `add` refreshes it only when it already exists. Recognized
@@ -501,7 +509,8 @@ Empty job/operation/role/permission maps approve no observations. This module is
 application-specific policies belong in application-owned configuration.
 
 Dependency additions preserve existing key order. Deno projects update imports only, including
-full-stack projects with a frontend package.json; Node, Bun and Workers update both manifests.
+full-stack projects with a frontend package.json; Node, Bun and Workers update every manifest they
+carry.
 
 ### Managed barrels
 
@@ -756,7 +765,7 @@ acme/
 ├── setu.workspace.json     # members, their ports and RPC styles, the broker, the runtime
 ├── scripts/dev.mjs         # the root `dev` runner: starts every member (dev.ts on Deno)
 ├── docker/                 # a Compose stack for the members
-├── k8s/                    # members.yaml: a Deployment and Service per member
+├── k8s/                    # members.yaml: a Deployment and a Service per member, plus a `<member>-transport` ConfigMap when the broker has connection defaults
 └── apps/
     ├── orders/
     └── billing/
@@ -1037,16 +1046,19 @@ A `CLAUDE.md` can include the same brief with `@AGENTS.md` rather than keeping a
 
 `setu new --agents` runs the same writer on the new project after scaffolding (on a workspace, on
 the new root), so a project can start with a brief. It is opt-in: `setu new` writes no brief by
-default, and neither `setu add` nor `setu generate app` runs the command, because re-running it
-silently would edit a file the developer may not have staged. After a successful `setu add`, the CLI
-prints one reminder when the project already has a sectioned brief:
+default, and none of `setu add`, `setu generate` (including `generate custom`, `generate app` and
+`generate library`), `setu sync` or `setu devtool enable` runs the command, because re-running it
+silently would edit a file the developer may not have staged. After a successful `setu add`,
+`generate`, `generate app` or `generate library`, a `setu sync` that rewrote a barrel, or a
+successful `setu devtool enable`, the CLI prints one reminder when the project already has a
+sectioned brief:
 
 ```
-Run `npx @setu-ts/cli@<version> agents` to update AGENTS.md.
+Run `npx @setu-ts/cli@<version> agents` to update AGENTS.md. Check freshness with `npx @setu-ts/cli@<version> agents --check`.
 ```
 
 The command named is the project's pinned CLI invocation for its runtime: on Bun it is
-`bunx @setu-ts/cli@<version>`, and on Deno it is `deno run -A npm:@setu-ts/cli@<version>`.
+`bunx @setu-ts/cli@<version>`, and on Deno it is `deno run -A --no-lock npm:@setu-ts/cli@<version>`.
 
 `setu add mail database --provider smtp --type drizzle --dialect postgresql` validates every name,
 alias, runtime and applicable flag before writing, then adds packages in order. An I/O failure stops
@@ -1252,12 +1264,12 @@ a workspace, each member reads its own file.
 A scaffolded project carries the CLI as a pinned development dependency and runs `setu check` from
 its `check` script, after the type check:
 
-| Target               | `check`                                                                              |
-| -------------------- | ------------------------------------------------------------------------------------ |
-| Node, Bun, Workers   | `tsc --noEmit && setu check` (`@setu-ts/cli` in `devDependencies`)                   |
-| Node/Bun full-stack  | `react-router build && tsc --noEmit && setu check`                                   |
-| Workers with a build | `npm run build && tsc --noEmit && setu check`                                        |
-| Deno                 | `deno check main.ts setu.config.ts && deno run -A npm:@setu-ts/cli@^<version> check` |
+| Target               | `check`                                                                                       |
+| -------------------- | --------------------------------------------------------------------------------------------- |
+| Node, Bun, Workers   | `tsc --noEmit && setu check` (`@setu-ts/cli` in `devDependencies`)                            |
+| Node/Bun full-stack  | `react-router build && tsc --noEmit && setu check`                                            |
+| Workers with a build | `npm run build && tsc --noEmit && setu check`                                                 |
+| Deno                 | `deno check main.ts setu.config.ts && deno run -A --no-lock npm:@setu-ts/cli@<version> check` |
 
 Deno full-stack prefixes its check task with `deno task build && `. The generated `start:dev`,
 `start:debug` and `start` scripts do not run the wiring gate, so the edit loop is never blocked. The
@@ -1283,10 +1295,12 @@ keep the literal in the call. `--dry-run` lists task outputs. Keep the `.task.ts
 development.
 
 Generated Node `build` runs `tsc --noEmit && setu build`; full-stack prefixes `react-router build`.
-`npm start` defaults `NODE_ENV` to `production` (keeping a preset value) and runs
-`node … dist/main.js` after building. `start:dev` runs `tsx watch main.ts`, or `tsx dev.ts` for
-full-stack. `start:debug` runs `node --inspect --import tsx main.ts` (full-stack uses `dev.ts`). The
-CLI command itself does not run TypeScript: use the project's build script for type-checking.
+`npm start` defaults `NODE_ENV` to `production` (keeping a preset value), checks that `dist/main.js`
+exists and runs `node … dist/main.js`; it does not build, and exits 1 with
+`dist/main.js is missing; run the build script first` when the build has not run. `start:dev` runs
+`tsx watch main.ts`, or `tsx dev.ts` for full-stack. `start:debug` runs
+`node --inspect --import tsx main.ts` (full-stack uses `dev.ts`). The CLI command itself does not
+run TypeScript: use the project's build script for type-checking.
 
 `build` type-checks DI tokens; graph validation happens at boot, so run `npm test` before building
 an image.

@@ -70,9 +70,8 @@ export function Injectable(options?: InjectableOptions): SetuClassDecorator {
  * the DI container or the service registry) and passes the results to the
  * constructor.
  *
- * A token is always required: type-inferred injection needs
- * `emitDecoratorMetadata`, which Deno does not support, so parameter types
- * cannot be read.
+ * A token is always required: TC39 standard decorators carry no parameter type
+ * information on any runtime, so `@Inject` must name the token.
  *
  * Wrap a token in {@linkcode Optional} to let the argument receive `undefined`
  * when the token has no provider.

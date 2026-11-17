@@ -32,7 +32,8 @@ string, principal non-empty or null. No background hook runs; a sweep recovers e
 - Reading, streaming and cancelling default to the starting principal; `canAccess` widens it.
 - `decide`: 404 unless `canAccess` or `canDecide` passes, 403 when visible but not decidable;
   `reason` is a string of at most 1,024 characters.
-- Input messages are `user`/`assistant` text; `system` is refused, tool and approval parts stripped.
+- Input messages are `user` or `assistant`; `system` is refused and `role: 'tool'` messages dropped.
+  Tool parts are stripped; `image` and `file` parts pass through as JSON values.
 - The UI-message log resumes from a `<batch>.<index>.<epoch>` Last-Event-ID; a diverged id gets a
   `data-setu-replay` chunk and a full replay. Idle terminal reconnect returns 204.
 - `background(ctx, work)` integrates with host lifetime. `ctx.defer` does not run the agent.

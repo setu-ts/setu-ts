@@ -15,14 +15,18 @@ either unless you construct that store or configure that provider — the defaul
 [Optional npm drivers](https://setu-ts.dev/docs/plugins/#optional-npm-drivers) for what that means
 on npm versus Deno.
 
-The plugin always registers JWT and authentication services. It registers authorization only when
-the optional `rbac` configuration is supplied:
+Authentication, authorization policies and authorization diagnostics register on every boot. JWT
+registers only when the `jwt` option is set, RBAC authorization only when the optional `rbac`
+configuration is supplied, and the auth-session service only when `signIn` is set:
 
-| Service                | Token               | Interface                                           |
-| ---------------------- | ------------------- | --------------------------------------------------- |
-| JWT sign/verify/decode | `'jwt'`             | `IJwtService`                                       |
-| Authentication         | `CAPABILITIES.AUTH` | `IAuthService`                                      |
-| Authorization (RBAC)   | `'authorization'`   | `IAuthorizationService` (when `rbac` is configured) |
+| Service                | Token                                    | Interface                         | Registered           |
+| ---------------------- | ---------------------------------------- | --------------------------------- | -------------------- |
+| JWT sign/verify/decode | `CAPABILITIES.JWT`                       | `IJwtService`                     | When `jwt` is set    |
+| Authentication         | `CAPABILITIES.AUTH`                      | `IAuthService`                    | Always               |
+| Authorization (RBAC)   | `CAPABILITIES.AUTHORIZATION`             | `IAuthorizationService`           | When `rbac` is set   |
+| Authorization policies | `CAPABILITIES.AUTHORIZATION_POLICIES`    | `IAuthorizationPolicyService`     | Always               |
+| Diagnostics            | `CAPABILITIES.AUTHORIZATION_DIAGNOSTICS` | `IAuthorizationDiagnosticsSource` | Always               |
+| Auth session           | `CAPABILITIES.AUTH_SESSION`              | `IAuthSessionService`             | When `signIn` is set |
 
 The authentication capability is named `CAPABILITIES.AUTH` (value `'authentication'`) — there is no
 `CAPABILITIES.AUTHENTICATION` member.
@@ -762,7 +766,7 @@ claim that carries the tenant id, per source:
 import { AuthPlugin } from '@setu-ts/auth-plugin';
 
 AuthPlugin({
-  jwt: { secret: process.env.JWT_SECRET ?? '', tenantClaim: 'tenant' },
+  jwt: { tenantClaim: 'tenant' },
   issuers: [
     {
       name: 'entra',
@@ -1016,6 +1020,7 @@ import type { IAuthService, IAuthSessionService, IRequestContext } from '@setu-t
 /** What the sign-in page calls. Built once per request, so it can write the session. */
 export interface AccountService {
   signIn(email: string, password: string): Promise<boolean>;
+  signOut(): void;
 }
 
 export function accountService(ctx: IRequestContext): AccountService {
@@ -1030,6 +1035,9 @@ export function accountService(ctx: IRequestContext): AccountService {
       const authSession = ctx.services.get<IAuthSessionService>(CAPABILITIES.AUTH_SESSION);
       await authSession.signIn(ctx, principal, { methods: ['pwd'] });
       return true;
+    },
+    signOut() {
+      ctx.services.get<IAuthSessionService>(CAPABILITIES.AUTH_SESSION).signOut(ctx);
     },
   };
 }
@@ -1094,6 +1102,32 @@ export function requireUser({ context }: { context: Context }, next: () => Promi
 `principal.id` is the id your `local.verify` returned. Once the action no longer writes the session,
 remove `getSession` from the login route's imports: React Router refuses to build a route that keeps
 an import from a `.server.ts` module no loader or action uses.
+
+### Signing out
+
+`app/routes/_app/logout.tsx` — the action:
+
+```typescript
+import { getService } from '@setu-ts/react-router-plugin';
+import type { RouterContextKey } from '@setu-ts/react-router-plugin';
+import { ACCOUNT } from '~kernel/modules/account/account.token.ts';
+
+export async function action({
+  context,
+}: {
+  context: { get<V>(key: RouterContextKey<V>): V };
+}) {
+  getService(context, ACCOUNT).signOut();
+  return new Response(null, { status: 303, headers: { location: '/login' } });
+}
+```
+
+The page posts to it from a `<form method="post">` that keeps the hidden `_csrf` field, exactly as
+the login form does: the login route's loader returns `getCsrfToken(context)` from
+`~/server/session.server.ts`, and the form renders it as
+`<input type='hidden' name='_csrf' value={csrfToken} />`. With `signIn.providers: []`, the plugin
+also installs `POST <basePath>/logout` (default `/auth/logout`), so a form posting there with the
+`_csrf` field needs no account-service method. The template itself does not ship a sign-out route.
 
 ### Ending every session of a user
 

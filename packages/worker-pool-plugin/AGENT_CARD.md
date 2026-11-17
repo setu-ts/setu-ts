@@ -41,17 +41,15 @@ ctx.response.json(pools);
 
 - A pool is created on first use of each task-module specifier.
 - Payloads cross by structured clone; functions cannot be sent. Shared memory remains shared.
-- `taskTimeoutMs` defaults to 30000 milliseconds; `0` disables it. Per-call `timeoutMs` overrides
-  it.
-- `maxQueue` defaults to 1024; `startupTimeoutMs` defaults to 10000 milliseconds and cannot be
-  disabled.
+- `taskTimeoutMs` defaults to 30000 ms; `0` disables it; per-call `timeoutMs` overrides it.
+- `maxQueue` defaults to 1024; `startupTimeoutMs` defaults to 10000 ms and cannot be disabled.
 - Without runtime worker support, registration succeeds but `run` rejects with
   `WorkerPoolUnavailableError`; the health indicator reports up with `available: false`.
-- Application shutdown terminates workers and rejects pending tasks.
+- Shutdown terminates workers and rejects pending tasks.
 
 ## Other options
 
-- `maxWorkers` caps all pools together; `Infinity` disables that cap.
+- `maxWorkers` caps all pools' slots (`Infinity`: no cap); threads may briefly exceed it.
 - `defaultPoolSize` sets per-module sizing; `pools` overrides `size`, `maxQueue` and `taskTimeoutMs`
   by specifier.
 - `host` injects a worker host; `WorkerQueueFullError` and `WorkerTaskTimeoutError` identify

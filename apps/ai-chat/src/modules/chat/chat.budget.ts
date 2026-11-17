@@ -1,7 +1,7 @@
 import { APICallError, wrapLanguageModel } from 'ai';
 import type { LanguageModelMiddleware } from 'ai';
 import { createFallback, defaultShouldRetryThisError } from 'ai-fallback';
-import type { IRequestContext, IRuntimeServices, ILogger } from '@setu-ts/common';
+import type { IRequestContext, IRuntimeServices, IServiceRegistry, ILogger } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IQuota } from '@setu-ts/auth-plugin';
 import type { IDatabaseService } from '@setu-ts/database-plugin';
@@ -27,28 +27,46 @@ export type BudgetPrices = {
 /** A V4 model with its own billing prices and input allowances. */
 export type PricedModel = { model: ReturnType<typeof wrapLanguageModel>; prices: BudgetPrices };
 
+/** Who a model call is billed to and when it stops; a request or an agent run supplies it. */
+export interface BudgetScope {
+  readonly tenantId: string | undefined;
+  readonly principalId: string | null | undefined;
+  readonly signal: AbortSignal;
+  readonly services: IServiceRegistry;
+}
+
+/** The budget scope of one request: its server-resolved tenant and user, signal and services. */
+export function requestScope(ctx: IRequestContext): BudgetScope {
+  return {
+    tenantId: ctx.request.tenant?.id,
+    principalId: ctx.request.user?.id,
+    signal: ctx.signal,
+    services: ctx.services,
+  };
+}
+
 /**
- * Wires per-provider budgets, usage delivery and fallback for one request.
- * @param ctx - Live request context with trusted identity and cancellation
+ * Wires per-provider budgets, usage delivery and fallback for one scope.
+ * @param scope - Billing identity, cancellation and services for a request or agent run
  * @param models - Providers with their individual prices
  * @param quota - This application's shared quota
  * @returns The SDK model and readiness promise; readiness rejects on an initial provider or quota failure
  */
 export function budgetedModel(
-  ctx: IRequestContext,
+  scope: BudgetScope,
   models: readonly PricedModel[],
   quota: IQuota,
 ): {
   model: ReturnType<typeof wrapLanguageModel>;
   ready: Promise<void>;
 } {
-  const runtime = ctx.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
-  const db = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
-  const outbox = ctx.services.get<IOutbox>(CAPABILITIES.OUTBOX);
+  const runtime = scope.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
+  const db = scope.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+  const outbox = scope.services.get<IOutbox>(CAPABILITIES.OUTBOX);
   const wrapped = models.map(({ model, prices }) =>
     wrapLanguageModel({
       model,
-      middleware: budgetMiddleware(ctx, quota, runtime, prices, (record) =>
+      middleware: budgetMiddleware(scope, quota, runtime, prices, (record) =>
         writeUsage(db, outbox, record),
       ),
     }),
@@ -81,17 +99,18 @@ export function budgetedModel(
 
 /**
  * Reserves each provider call separately and records its settlement through the outbox.
- * Identity is server-set on ctx.request; neither the body nor model arguments select the key.
- * @returns AI SDK V4 middleware for one request and one model's prices
+ * Identity is server-set on the scope; neither the body nor model arguments select the key.
+ * @param scope - Billing identity, cancellation and services for a request or agent run
+ * @returns AI SDK V4 middleware for one scope and one model's prices
  */
 export function budgetMiddleware(
-  ctx: IRequestContext,
+  scope: BudgetScope,
   quota: IQuota,
   runtime: IRuntimeServices,
   prices: BudgetPrices,
   write: (record: UsageRecord) => Promise<unknown>,
 ): LanguageModelMiddleware {
-  const tenantId = ctx.request.tenant?.id;
+  const tenantId = scope.tenantId;
   if (!tenantId) throw new TypeError('A server-resolved tenant is required');
   const encoder = new TextEncoder();
 
@@ -160,14 +179,16 @@ export function budgetMiddleware(
             usage!.outputTokens.total! * prices.outputPrice
           : undefined;
         // Safe counts can still price past MAX_SAFE_INTEGER; those settle at the reservation.
-        const known = !ctx.signal.aborted && Number.isSafeInteger(priced);
+        const known = !scope.signal.aborted && Number.isSafeInteger(priced);
         const settledAmount = known ? priced! : receipt.amount;
         await quota.settle(receipt, settledAmount);
         await write({
           id,
           occurredAt,
           tenantId: tenantId!,
-          ...(ctx.request.user?.id === undefined ? {} : { principalId: ctx.request.user.id }),
+          ...(scope.principalId === null || scope.principalId === undefined
+            ? {}
+            : { principalId: scope.principalId }),
           provider: model.provider,
           model: model.modelId,
           usageKnown: known,
@@ -220,21 +241,21 @@ export function budgetMiddleware(
       let pending = true;
       const abort = () => {
         void reader.cancel().catch((error: unknown) => {
-          if (ctx.services.has(CAPABILITIES.LOGGER))
-            ctx.services
+          if (scope.services.has(CAPABILITIES.LOGGER))
+            scope.services
               .get<ILogger>(CAPABILITIES.LOGGER)
               .warn('Provider stream cancellation failed', { error: String(error) });
         });
       };
-      ctx.signal.addEventListener('abort', abort, { once: true });
-      if (ctx.signal.aborted) abort();
+      scope.signal.addEventListener('abort', abort, { once: true });
+      if (scope.signal.aborted) abort();
       const stream = new ReadableStream({
         async pull(controller) {
           try {
             const part = pending ? first : await reader.read();
             pending = false;
-            if (part.done || ctx.signal.aborted) {
-              ctx.signal.removeEventListener('abort', abort);
+            if (part.done || scope.signal.aborted) {
+              scope.signal.removeEventListener('abort', abort);
               await call.finish(usage);
               controller.close();
             } else {
@@ -246,13 +267,13 @@ export function budgetMiddleware(
               controller.enqueue(part.value);
             }
           } catch (error) {
-            ctx.signal.removeEventListener('abort', abort);
+            scope.signal.removeEventListener('abort', abort);
             await call.finish();
             controller.error(error);
           }
         },
         async cancel() {
-          ctx.signal.removeEventListener('abort', abort);
+          scope.signal.removeEventListener('abort', abort);
           try {
             await reader.cancel();
           } finally {

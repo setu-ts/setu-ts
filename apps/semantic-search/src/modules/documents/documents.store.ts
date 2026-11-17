@@ -1,6 +1,5 @@
 import type { IRuntimeServices, IVectorStoreAdapter } from '@setu-ts/common';
 import { MemoryVectorStore, PgVectorStore } from '@setu-ts/vector-store-plugin';
-import type { PgVectorDatabase } from '@setu-ts/vector-store-plugin';
 
 /**
  * The vector store backend: PostgreSQL with pgvector 0.8+ when `PGVECTOR_URL`
@@ -25,7 +24,7 @@ export async function createDocumentsAdapter(
     query_timeout: 15_000,
   });
   return new PgVectorStore({
-    db: drizzle(pool) as unknown as PgVectorDatabase,
+    db: drizzle(pool),
     onClose: () => pool.end(),
   });
 }
