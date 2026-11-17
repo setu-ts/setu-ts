@@ -612,10 +612,10 @@ also `MODULES` for `DecoratorPlugin({ modules })`.
 class-based full-stack. SSE adds `/sse/` before the name. A static `/api/invoices/summary` outranks
 `GET /api/invoices/:id`, so an `id` equal to `summary` is unreachable through `/:id`. The module's
 `index.ts` registers its function controllers. In a class-based module, a generated class controller
-or service is added to the `controllers` or `providers` array of `<module>.module.ts`, as the NestJS
-CLI does, when that array is a plain literal; otherwise the declaration is left alone and the line
-to add is printed. A module-scoped service is registered under the token `<module>.<name>-service`.
-Every other schematic is app-wide and refuses the flag.
+or service is added to the `controllers` or `providers` array of `<module>.module.ts`, when that
+array is a plain literal; otherwise the declaration is left alone and the line to add is printed. A
+module-scoped service is registered under the token `<module>.<name>-service`. Every other schematic
+is app-wide and refuses the flag.
 
 `setu generate schema <name>` (requires `validation-plugin`) writes
 `src/shared/schemas/<name>.schemas.ts` — or `src/modules/<module>/<name>.schemas.ts` with `--module`

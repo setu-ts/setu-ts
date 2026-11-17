@@ -1,6 +1,6 @@
 # @setu-ts/decorator-plugin
 
-Optional NestJS-style decorators as syntactic sugar over the kernel's programmatic API.
+Optional decorators as syntactic sugar over the kernel's programmatic API.
 
 Decorators capture metadata in a plain `MetadataStore` — **no `reflect-metadata`, no reflection
 polyfill**. `DecoratorPlugin` reads that store at registration time and registers routes, services,

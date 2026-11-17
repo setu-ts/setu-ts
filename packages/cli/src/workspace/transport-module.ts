@@ -8,8 +8,7 @@
  * and this file is regenerated from the workspace manifest whenever the broker
  * or the member's RPC style changes — the same split the discovery map already
  * makes for ports (`discovery-module.ts`). Changing a transport is then a
- * configuration change the code reads, which is how Dapr, Moleculer, Spring
- * Cloud Stream and Quarkus all change theirs (M138 §0).
+ * configuration change the code reads (M138 §0).
  *
  * Every export is a FUNCTION, not a constant: `setu commands` imports the
  * config, so a module-scope environment read or client construction would run

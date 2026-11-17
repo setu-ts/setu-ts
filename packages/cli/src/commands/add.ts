@@ -1736,7 +1736,8 @@ function withTransportModuleImport(source: string, symbol: string): string | und
   const visible = maskComments(source);
   if (visible === undefined) return undefined;
   const declarations = [
-    ...visible.matchAll(/\bimport\s*\{([^}]*)\}\s*from\s*(['"])([^'"]+)\2\s*;?/g),
+    // Quotes as \x27/\x22: a literal quote in a regex desyncs the repo's import scanner.
+    ...visible.matchAll(/\bimport\s*\{([^}]*)\}\s*from\s*([\x27\x22])([^\x27\x22]+)\2\s*;?/g),
   ].filter((match) => match[3] === TRANSPORT_SPECIFIER);
   const mentions =
     visible.split(`'${TRANSPORT_SPECIFIER}'`).length +
@@ -3059,8 +3060,8 @@ async function addOne(
       const existing = await readProjectText(deps, joinPath(dir, envFile), envFile);
       if (existing === null) return EXIT_ERROR;
       // The file now holds a usable signing secret, so it is listed in
-      // .gitignore exactly as Rails lists `config/master.key`
-      // (EncryptionKeyFileGenerator): an exact entry, appended when absent. No
+      // .gitignore exactly as `config/master.key` is listed for an
+      // encrypted-credentials setup: an exact entry, appended when absent. No
       // pattern is evaluated; next to an existing `.env*` rule the entry is
       // merely redundant. Whether Git already TRACKS the file is not something a
       // CLI that does not run Git can know, so that case gets a hint.

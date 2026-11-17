@@ -657,9 +657,9 @@ folder.
   `/<module>/<name>` (SSE at `/<module>/sse/<name>`). A static `/api/orders/summary` outranks
   `/api/orders/:id`, so an `id` equal to `summary` is unreachable through `/:id`.
 - **Class-based:** a class controller or service is added to the `controllers` or `providers` array
-  of `<module>.module.ts`, as the NestJS CLI does, when that array is a plain literal. Anything else
-  is left unchanged and the line to add is printed. A module-scoped service is registered under the
-  token `<module>.<name>-service`.
+  of `<module>.module.ts`, when that array is a plain literal. Anything else is left unchanged and
+  the line to add is printed. A module-scoped service is registered under the token
+  `<module>.<name>-service`.
 
 ### `src/shared/` and the one rule
 

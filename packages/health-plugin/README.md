@@ -174,9 +174,6 @@ readiness and takes the database out.
   on `/health`, where a `down` keeps it 503 and alerts firing; it is absent from the `/ready`
   report. `/live` is unchanged.
 
-Every framework comparison gives each check this membership — Spring Boot's health groups (its mail
-indicator is not in the readiness group by default), ASP.NET Core's health-check tags, and
-MicroProfile's `@Readiness` — and Setu's default follows them: the `mail` indicator is registered
-outside readiness, so an SMTP outage stays visible on `/health` without draining every replica (see
-the
+Each check has a readiness membership. By default, the `mail` indicator is registered outside
+readiness, so an SMTP outage stays visible on `/health` without draining every replica (see the
 [mail-plugin README](https://github.com/setu-ts/setu-ts/blob/main/packages/mail-plugin/README.md#health-indicator)).

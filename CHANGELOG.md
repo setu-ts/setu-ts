@@ -150,13 +150,13 @@ All notable changes to this project are documented here. The format follows
   and send ready. Deno full-stack installation runs without blanket scripts; build before start.
   Third-party dependencies keep a one-day cooldown, check pins the exact CLI, and the devtool key is
   removed before application creation. `setu add auth|session` adds an exact `.gitignore` entry for
-  the env file when there is none (as Rails does for `config/master.key`), with a `git rm --cached`
-  hint when the file already existed; a custom `--env-file` path is excluded from the generated
-  `.dockerignore`, and `setu add auth|session` lists a custom env path in an existing
-  `.dockerignore` (a workspace member's paths are recorded in `envFilePaths`, append-only, and
-  listed in the managed root `.dockerignore`; an env path ending in `.example` is refused); a
-  manifest whose members' secrets map to one Compose variable is refused; and the generated
-  `runMigrations` refuses a rollback count that is not a positive whole number or `Infinity`.
+  the env file when there is none, with a `git rm --cached` hint when the file already existed; a
+  custom `--env-file` path is excluded from the generated `.dockerignore`, and
+  `setu add auth|session` lists a custom env path in an existing `.dockerignore` (a workspace
+  member's paths are recorded in `envFilePaths`, append-only, and listed in the managed root
+  `.dockerignore`; an env path ending in `.example` is refused); a manifest whose members' secrets
+  map to one Compose variable is refused; and the generated `runMigrations` refuses a rollback count
+  that is not a positive whole number or `Infinity`.
 - **BREAKING — `@setu-ts/session-plugin` (M140a, #589).** Regeneration clears form CSRF while
   preserving other data. Fetch a fresh token after sign-in or MFA promotion. Secret resolution now
   checks configuration before the environment; supply an explicit option to override it.
@@ -1849,13 +1849,13 @@ All notable changes to this project are documented here. The format follows
 - **Per-request work on the request path (#518, 0.11.0, `@setu-ts/kernel`, `@setu-ts/common`,
   `@setu-ts/runtime`, `@setu-ts/metrics-plugin`, `@setu-ts/http-security-plugin`).** From a Bun CPU
   profile of the REST scaffold, each change measured alone first: the middleware chain runs without
-  an `async` wrapper per stage when diagnostics are off (koa-compose's shape); the request identity
-  guard is installed once per request class rather than per request; log redaction fills its copy
-  without per-call scaffolding and walks only into nested values; a request path without `%` skips
-  `decodeURIComponent`; a request-scoped service registry allocates storage only when something
-  registers into it; a metric with distinct label names validates and keys an observation in one
-  pass, and a histogram counts in a typed array; the default security headers are copied into each
-  response in one step. Behaviour is unchanged apart from the two entries under Changed.
+  an `async` wrapper per stage when diagnostics are off (the composed-middleware shape); the request
+  identity guard is installed once per request class rather than per request; log redaction fills
+  its copy without per-call scaffolding and walks only into nested values; a request path without
+  `%` skips `decodeURIComponent`; a request-scoped service registry allocates storage only when
+  something registers into it; a metric with distinct label names validates and keys an observation
+  in one pass, and a histogram counts in a typed array; the default security headers are copied into
+  each response in one step. Behaviour is unchanged apart from the two entries under Changed.
 
 - **Histogram boundaries: repeats, `Infinity` and `NaN` (#518, 0.11.0, `@setu-ts/metrics-plugin`).**
   A `Histogram` configured with the same boundary twice counted each observation once per repeat in
@@ -4228,7 +4228,7 @@ All notable changes to this project are documented here. The format follows
   start command, and showed the workspace discovery map without its `<MEMBER>_HOST` override. Each
   corrected claim was checked against a project the CLI scaffolded.
 
-- **The NestJS migration guide mapped several NestJS features to hand-written code the framework
+- **The migration guide mapped several framework features to hand-written code the framework
   replaces (`docs/migration-nestjs.md`, PR #426).** Guards now map to `AuthPlugin` with
   `requireAuth()`/`requireRole()`, in place of a hand-written global middleware that would also have
   refused `/health`. Exception filters map to `errorHandler({ respond })`, WebSocket gateways to
@@ -4247,15 +4247,14 @@ All notable changes to this project are documented here. The format follows
   a result and exit, or which port each app uses. Each deep dive now gives the commands it was
   checked with against the running app, and links to that app's source.
 
-- **The Fastify migration guide's testing example threw at startup, and several sections described
-  behaviour the framework does not have (`docs/migration-fastify.md`, PR #426).** `createTestApp()`
-  with no plugins throws, because the kernel requires a runtime plugin. The example now passes
-  `RuntimePlugin()`, and the guide points at `app.inject()`, which works as Fastify's does. The
-  shutdown hooks' comments were reversed (`onStopping` runs while the application still serves;
-  `onShutdown` runs after the socket closes). The encapsulation section claimed capability tokens
-  scope a service, but every registered service is application-wide. Validation and error handling
-  now show `validateBody(...)` and `errorHandler()` in place of hand-written equivalents, and query
-  parameters come from `ctx.query`.
+- **The migration guide's testing example threw at startup, and several sections described behaviour
+  the framework does not have (`docs/migration-fastify.md`, PR #426).** `createTestApp()` with no
+  plugins throws, because the kernel requires a runtime plugin. The example now passes
+  `RuntimePlugin()`, and the guide points at `app.inject()`. The shutdown hooks' comments were
+  reversed (`onStopping` runs while the application still serves; `onShutdown` runs after the socket
+  closes). The encapsulation section claimed capability tokens scope a service, but every registered
+  service is application-wide. Validation and error handling now show `validateBody(...)` and
+  `errorHandler()` in place of hand-written equivalents, and query parameters come from `ctx.query`.
 
 - **The React Router development guide's loop failed for the CLI's full-stack skeleton on Deno
   (`docs/react-router-dev.md`, PR #426).** Re-verified on Deno 2.9.6, Vite 8.3.1 and react-router
@@ -4839,8 +4838,7 @@ All notable changes to this project are documented here. The format follows
   its generated CQRS and event ingress classes register through `DecoratorPlugin({ ingress })` — the
   functional `src/cqrs` and `src/events` barrels are not emitted, so nothing is registered twice.
   `docs/migration-nestjs.md` gains `Scaffolding` and `Microservices` sections naming the decorator
-  route for `@MessagePattern`, `@EventPattern`, `@nestjs/cqrs`, `@nestjs/bull` and
-  `@nestjs/schedule`.
+  route for message and event patterns, commands and queries, queues and scheduled tasks.
 - **Health observations (M98d): an opt-in, minimized view of health-check outcomes through the M98b
   diagnostics connector.** `HealthPlugin` accepts a `diagnostics` option (`HealthDiagnosticsOptions`
   / `HealthDiagnosticsScheduledOptions`, exported from `@setu-ts/health-plugin`) that retains only
@@ -7170,10 +7168,10 @@ live — see [Versioning](docs/versioning.md).
   Only `send()` with no argument worked. Present since the M23 fetch model; unrelated to M88, which
   changed the header source and left body handling byte-identical.
 
-  The body is now dropped rather than the throw propagated — what Express and Fastify both do, and
-  what RFC 9110 §15.3.5 implies, since a `204` has no content. Headers are preserved (RFC 9110
-  permits representation metadata on a `204`), and a dropped **stream** body is `cancel()`led rather
-  than discarded, so its source is released instead of leaking.
+  The body is now dropped rather than the throw propagated — what RFC 9110 §15.3.5 implies, since a
+  `204` has no content. Headers are preserved (RFC 9110 permits representation metadata on a `204`),
+  and a dropped **stream** body is `cancel()`led rather than discarded, so its source is released
+  instead of leaking.
 
 - **`setu add` refuses extra arguments instead of silently discarding them.** The contract is
   singular; `setu add auth cache` used to add one package, report `updated deno.json` and exit 0
@@ -7282,11 +7280,10 @@ why this is `0.3.0` rather than a patch.
 The request path was rebuilt around two principles: allocate nothing a route did not ask for, and
 never enter the microtask queue when the answer is already known. Measured with bombardier on Node
 (`-c 64`, medians of interleaved runs), bare `/json` went from **41,437 to ~100,000 rps** — from
-roughly **34% to ~90% of the bare Hono router** the framework is built on, and from ~65% to
-**130–160% of NestJS-Express**. With three middleware registered — the shape any real application
-has — Setu-TS runs at **132% of Hono** and **113% of raw Express**, because Hono's `compose()`
-awaits every stage and loses 40.6% of its throughput to three middleware where this pipeline loses
-17.9%.
+roughly **34% to ~90% of the bare Hono router** the framework is built on. With three middleware
+registered — the shape any real application has — Setu-TS runs at **132% of Hono**, because Hono's
+`compose()` awaits every stage and loses 40.6% of its throughput to three middleware where this
+pipeline loses 17.9%.
 
 Every change below except the global-objects one is runtime-agnostic, so Deno and Bun benefit too.
 Measured the same way, Deno goes from **62,637 to 160,130 rps** — **2.56x**, and from 33% to **~85%
@@ -9411,9 +9408,9 @@ refuses dependencies younger than 24 hours unless you pass `--min-dep-age 0`.
 
 - **`--template nest` was renamed to `--template class-based`.** The composition is unchanged — the
   REST set plus `DecoratorPlugin` and `DiPlugin`, with a decorated controller and an injected
-  service written for you. The framework has a class-based mode, not a NestJS mode, and the name
-  said otherwise. The old name is refused with a message naming the new one rather than falling into
-  the generic unknown-template error.
+  service written for you. The framework has a class-based mode, not a framework-flavoured one, and
+  the name said otherwise. The old name is refused with a message naming the new one rather than
+  falling into the generic unknown-template error.
 - **`setu new --di` was removed**, and is refused with a message pointing at
   `--template class-based`. Decorators and dependency injection were independently selectable, which
   made four compositions out of one axis; two of them — decorators without a container, and a
@@ -9668,7 +9665,7 @@ migration.
   that decorators are optional, DI is optional, and that no feature requires either — but the CLI
   offered one coarse control. No template gave you neither and refused `g controller`/`g module`;
   `rest`/`microservice` gave decorators without a container; only `nest` gave both, along with a
-  worked NestJS-style example you may not have wanted.
+  worked decorator-first example you may not have wanted.
 
   `setu new --di` adds `DiPlugin` to any template, so a container is now a choice of its own:
 
@@ -9741,9 +9738,9 @@ migration.
 
 - **A documentation hub, and gates that keep it true** (M38). Nine curated guides under
   [`docs/`](docs/) — getting started, plugin architecture, the plugin catalog, the programmatic API,
-  decorators, writing custom plugins, migrating from NestJS and from Fastify, the examples index,
-  and runtime deployment — plus a reproducible `deno doc` API-site generator (`deno task docs:api`).
-  Every package README now links to its own `PUBLIC_API.md` section.
+  decorators, writing custom plugins, migration guides for teams arriving from another framework,
+  the examples index, and runtime deployment — plus a reproducible `deno doc` API-site generator
+  (`deno task docs:api`). Every package README now links to its own `PUBLIC_API.md` section.
 
   The guides are mechanically checked rather than trusted: committed fixtures representing all nine
   are type-checked against the workspace, a Markdown gate validates the package catalog and every
@@ -10600,7 +10597,7 @@ form CSRF; and the starter and template work that makes all of it composable in 
   throws during `register()` without an adequate secret; **no default changes**.
 - **Parameter-level `@Inject` in `@hono-enterprise/decorator-plugin`** (Milestone 36b) — `Inject`
   now works on a constructor parameter as well as on the class, binding one token to that argument
-  by position, which is the form a developer arriving from NestJS expects:
+  by position, which is the form a developer arriving from a decorator-first framework expects:
   `constructor(@Inject(CAPABILITIES.DATABASE) private db: IDatabase) {}`. The class-level positional
   list is **deprecated, not removed** (AI_GUIDELINES §9.2) and keeps working for the whole `0.x`
   line. A token is still always required — inferring it from the parameter's type needs

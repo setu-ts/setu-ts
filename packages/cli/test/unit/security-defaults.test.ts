@@ -190,7 +190,7 @@ describe('M140a scaffold security defaults', () => {
     ['a broad later negation', '.env\n!*.env\n', true, '.env\n!*.env\n.env\n', true],
     ['the entry after a negation', '!*.env\n.env\n', true, '!*.env\n.env\n', false],
   ] as const)(
-    'lists the written secret in .gitignore as Rails does, with %s',
+    'lists the written secret in .gitignore as an exact entry, with %s',
     async (_label, before, envExists, after, hint) => {
       const fs = createFakeFs();
       const lines: string[] = [];

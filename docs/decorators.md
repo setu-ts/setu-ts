@@ -1,25 +1,25 @@
 # Decorators Guide
 
-The Setu-TS framework provides optional decorator support for a NestJS-like development experience.
-Decorators are **optional** - all capabilities can be accessed programmatically.
+The Setu-TS framework provides optional decorator support for a decorator-based development
+experience. Decorators are **optional** - all capabilities can be accessed programmatically.
 
 ## Overview
 
 Decorators in Setu-TS are **metadata-only**. They do not automatically register routes or services.
 The `DecoratorPlugin` reads the metadata and translates it into framework capabilities.
 
-### Key Differences from NestJS
+### Key Differences from a Decorator-First Framework
 
 - **No reflection metadata**: Setu-TS does not use `reflect-metadata`. You must provide explicit
   injection tokens.
 - **No emitted design metadata**: Constructor parameter types are not automatically available. Use
   `@Inject(Token)` for disambiguation.
 - **Plugin-required**: Decorators are inert without `DecoratorPlugin` registration.
-- **No `ExecutionContext`/`CanActivate`/`NestInterceptor`**: Setu-TS has no NestJS-shaped guard or
-  interceptor interfaces. Guards and interceptors are bare
+- **No framework-shaped guard or interceptor contract**: Setu-TS has no
+  `ExecutionContext`/`CanActivate`/`NestInterceptor` interfaces. Guards and interceptors are bare
   [`MiddlewareFunction`](../packages/common/src/http.ts)s attached with `@UseGuards` /
   `@UseInterceptors` (or registered programmatically via `app.middleware.add`). Prose below explains
-  the NestJS differences; the copyable Setu-TS blocks never import those NestJS names.
+  the differences; the copyable Setu-TS blocks never import those names.
 
 ## Setup
 
@@ -801,11 +801,11 @@ export class UserController {
 
 ## Error Handling
 
-Setu-TS does not ship a NestJS-shaped `ExceptionFilter`/`ArgumentsHost` contract. Errors are handled
-by a single global error-handler middleware from `@setu-ts/exceptions`, registered as the outermost
-middleware so it wraps the whole pipeline. The `@UseFilters(...)` decorator attaches per-route
-filter middleware (bare `MiddlewareFunction`s or `IMiddleware` classes) that run last in the route's
-middleware chain, but the canonical, source-valid surface for global error handling is
+Setu-TS does not ship a framework-shaped `ExceptionFilter`/`ArgumentsHost` contract. Errors are
+handled by a single global error-handler middleware from `@setu-ts/exceptions`, registered as the
+outermost middleware so it wraps the whole pipeline. The `@UseFilters(...)` decorator attaches
+per-route filter middleware (bare `MiddlewareFunction`s or `IMiddleware` classes) that run last in
+the route's middleware chain, but the canonical, source-valid surface for global error handling is
 `errorHandler()`:
 
 ```typescript

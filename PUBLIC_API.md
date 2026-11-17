@@ -1626,7 +1626,7 @@ that was never derived from the status code, so it was already valid under RFC 9
 }
 ```
 
-#### NestJS format
+#### Compatibility format (`'nestjs'`)
 
 ```json
 {
@@ -3131,10 +3131,10 @@ the transaction's next statement answers `503` through the classifier.
 
 **`getRepository()` returns one repository per entity (M128, X94-3).** The outer-scope repository is
 built once and reused, removing the per-call data-source and wrapper construction that was the whole
-point-read gap against NestJS and Hono. It still refuses after `close()`. The cache holds one entry
-per distinct entity name the application passes, so **pass entity names from code, never from
-request input**: the memory and MongoDB adapters build a repository for any name, and each new name
-is kept for the service's lifetime (Drizzle and Prisma refuse an unknown entity and cache nothing).
+point-read gap against Hono. It still refuses after `close()`. The cache holds one entry per
+distinct entity name the application passes, so **pass entity names from code, never from request
+input**: the memory and MongoDB adapters build a repository for any name, and each new name is kept
+for the service's lifetime (Drizzle and Prisma refuse an unknown entity and cache nothing).
 Transaction-scoped repositories are never shared, and a data source reporting a per-call DynamoDB
 access path is built per call while `logQueries` is on, so its log line cannot show another
 request's path.
@@ -14205,10 +14205,10 @@ Contract notes:
   none is set; existing headers remain unchanged. Passing the SAME frozen object on every request
   lets the kernel validate it once and copy it into each response in one step; any other object is
   staged into scratch Headers before any response write. `HttpSecurityPlugin`'s security headers use
-  it. Fastify's `reply.headers(obj)`, Express's `res.set(obj)` and Koa's `ctx.set(obj)` are the
-  precedent for the batch call; the template cache is Setu's. **Breaking for `IResponse`
-  implementors**, including test fakes typed as `IResponse`: validate all entries before applying
-  them, or use `@setu-ts/testing`'s `createTestContext`.
+  it. The batch call is the established shape for setting several headers at once; the template
+  cache is Setu's. **Breaking for `IResponse` implementors**, including test fakes typed as
+  `IResponse`: validate all entries before applying them, or use `@setu-ts/testing`'s
+  `createTestContext`.
 - `IResponse.html(body: string): HandlerResult` — sends an HTML response with
   `content-type: text/html; charset=utf-8`. The charset is not optional: a bare `text/html` lets a
   browser sniff the encoding. Added because every CSRF-protected form example was setting the header
@@ -14239,9 +14239,9 @@ Contract notes:
   mapped to a web `Response`, and a stream body is `cancel()`led so its source is released. The
   `Response` constructor rejects a body at these statuses, and the mapping runs in the HTTP adapter
   after the pipeline, so passing one through raised a `TypeError` no middleware or `errorHandler`
-  could catch. Dropping matches Express and Fastify and follows RFC 9110 §15.3.5; headers are
-  preserved, which RFC 9110 permits. `IResponse.snapshot()` is unchanged and still reports whatever
-  body was written — the drop happens at the mapping boundary, not in the response model.
+  could catch. Dropping follows RFC 9110 §15.3.5; headers are preserved, which RFC 9110 permits.
+  `IResponse.snapshot()` is unchanged and still reports whatever body was written — the drop happens
+  at the mapping boundary, not in the response model.
 - `IRequest.ip?: string` — the socket peer on Node, Deno and Bun; behind a proxy read
   `CLIENT_IP_STATE_KEY` for the resolved client. Workers and plain fetch calls have no peer.
 - `IRequest.signal?: AbortSignal` — an abort signal that fires when the underlying HTTP connection
@@ -15175,8 +15175,8 @@ remains invalid on non-HTTP ingress. On a class that also serves HTTP routes, on
 handler methods are checked, and class-level authorization, which applies to those routes, is
 accepted only when `@Gateway(path, { guards })` declares the handshake's own guards.
 
-Optional decorator and metadata system plugin. Provides NestJS-style decorators as syntactic sugar
-over the kernel's programmatic API. Decorators capture metadata in a plain `MetadataStore` (no
+Optional decorator and metadata system plugin. Provides decorators as syntactic sugar over the
+kernel's programmatic API. Decorators capture metadata in a plain `MetadataStore` (no
 `reflect-metadata`); the `DecoratorPlugin` reads that store at registration and registers routes,
 services, and middleware with the kernel. The store is published under `CAPABILITIES.METADATA_STORE`
 so `ctx.metadata` resolves to it. Decorators are inert unless the `DecoratorPlugin` is registered —
@@ -17531,7 +17531,7 @@ The Setu-TS public API is designed for developer experience:
 1. **Start minimal** — Just kernel + runtime, add plugins as needed
 2. **Everything is replaceable** — Any plugin can be swapped via capability tokens
 3. **Full programmatic API** — No feature requires decorators or reflection
-4. **Optional decorators** — Available for those who prefer NestJS-style DX
+4. **Optional decorators** — Available for those who prefer decorator-based DX
 5. **Type-safe** — Full TypeScript support with no `any` in public APIs
 6. **Runtime independent** — Runs on Node.js, Deno, Bun, and Cloudflare Workers (future)
 7. **Testable** — Built-in test utilities, mock plugins, request injection

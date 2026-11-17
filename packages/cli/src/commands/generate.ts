@@ -600,7 +600,7 @@ export async function runGenerateCommand(
   }
 
   // A class controller or service generated into a class-based module joins the
-  // module's own `@Module` declaration, as the NestJS CLI does. A declaration the
+  // module's own `@Module` declaration. A declaration the
   // editor cannot read exactly is left alone and the line to add is printed.
   let declarationAdvice: string | undefined;
   const declaration =

@@ -84,7 +84,7 @@ describe('defaultFormatter', () => {
 });
 
 describe('nestjsFormatter', () => {
-  it('produces the documented NestJS shape', () => {
+  it('produces the documented compatibility shape', () => {
     const result = nestjsFormatter(ISSUES);
 
     expect(result.statusCode).toBe(400);

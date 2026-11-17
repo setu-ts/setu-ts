@@ -117,8 +117,8 @@ Check each item and note where it holds or fails:
   difference = dead option = FAIL.
 - **Both entry points, one implementation** — if a behavior is reachable two ways (service method +
   helper), confirm a test drives BOTH under a NON-default configuration.
-- **Spec-shaped output field-by-field** — anything claiming RFC 7807 / NestJS / OpenAPI shape has a
-  test asserting required fields PRESENT and forbidden fields ABSENT.
+- **Spec-shaped output field-by-field** — anything claiming RFC 7807, OpenAPI, or a compatibility
+  error shape has a test asserting required fields PRESENT and forbidden fields ABSENT.
 - **Short-circuit tests** — any chain/dispatch mechanism has an explicit test that a stage
   responding without `next()` stops downstream stages.
 - **No plugin imports another plugin** — cross-plugin needs go through

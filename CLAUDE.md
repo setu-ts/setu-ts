@@ -273,7 +273,7 @@ here.
   registering an `ISessionService` under a new `CAPABILITIES.SESSION` token, the capability the
   framework had none of —…) — complete (PR #105).
 - **Milestone 36b** (`packages/starters/*` + `packages/decorator-plugin` + `packages/cli` — starter
-  integration: realtime, DI, and NestJS familiarity) — complete (PR #107).
+  integration: realtime, DI, and decorator-based composition) — complete (PR #107).
 - **Milestone 36c** (`packages/cli` + `packages/starters/*` + `packages/config-plugin` +
   `packages/runtime` — React Router app skeleton and config-driven composition) — complete (PR
   #108).
@@ -847,7 +847,12 @@ here.
   through the ai-chat example's budget scope, the homepage package count computed from the package
   list, and a test that keeps the zero-config `setu add` list matching its source; V12-5…V12-8,
   V12-13…V12-15, V12-17, V12-38, V12-88, V9-29) — complete (PR #597).
-- **Next milestone** — every M139 and M140 letter is complete; the `v0.13.0` release follows.
+- **Milestone 141** (`react-router-plugin` + `kernel` + `common` + `auth-plugin` + `cli` — page
+  route policies: `pagePolicies` by React Router route id, matched with React Router's `matchRoutes`
+  after its `.data` normalization, run by the kernel through `RouteDefinition.middlewareGroups`;
+  `routeMiddlewareOf` for the `requirePolicy` scan; `pageRoutes` from the default loader and the dev
+  entry) — complete (PR pending).
+- **Next milestone** — every M139, M140 and M141 letter is complete; the `v0.13.0` release follows.
 
 ## Verification (run before declaring any work done)
 
@@ -1008,10 +1013,10 @@ because nothing defined what one was.
   ignored the plugin's configured `errorFormat` shipped green once). Add a test that drives BOTH
   entry points under a NON-default configuration and asserts identical output.
 - **Output that implements a named spec is asserted field-by-field, forbidden fields included.** For
-  any body claiming to be RFC 7807 Problem Details, a NestJS error, an OpenAPI fragment, etc., a
-  test must assert the exact documented shape from PUBLIC_API.md: required fields PRESENT and fields
-  that must NOT appear ABSENT (Problem Details carries `detail`, never `message`). Stray fields and
-  shape drift type-check and lint clean.
+  any body claiming to be RFC 7807 Problem Details, a compatibility error body, an OpenAPI fragment,
+  etc., a test must assert the exact documented shape from PUBLIC_API.md: required fields PRESENT
+  and fields that must NOT appear ABSENT (Problem Details carries `detail`, never `message`). Stray
+  fields and shape drift type-check and lint clean.
 - **Hoist per-request work to registration time**: parse route patterns, compile chains, and build
   lookup structures once at startup, never per request (AI_GUIDELINES §14).
 - **Test doubles must honor the real contract, or they hide the bug.** A fixture that stands in for
@@ -1084,8 +1089,8 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
   literally (`&amp;`/`&lt;`), never the raw characters — identity-replacement and entity-collapse
   bugs type-check and lint clean; (2) for each option or parameter you added, grep that it is READ
   somewhere other than its declaration and assignment; (3) diff each spec-named output (RFC 7807,
-  NestJS, OpenAPI) field-by-field against its PUBLIC_API.md example; (4) if a behavior has two entry
-  points, confirm one test drives BOTH under a non-default configuration.
+  compatibility, OpenAPI) field-by-field against its PUBLIC_API.md example; (4) if a behavior has
+  two entry points, confirm one test drives BOTH under a non-default configuration.
 - **Run the two publish gates on the committed tree.** `pnpm run release:publish --dry-run` and
   `pnpm run release:verify <version>` — see the Verification section for the three M51 defects that
   every other gate passed over. A milestone whose package cannot publish is not done, and CI's

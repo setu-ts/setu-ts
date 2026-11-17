@@ -151,7 +151,7 @@ describe('docs/decorators.md actual-fence compiler', () => {
   it('banned-symbol regression: fictional Setu-TS symbols are absent from code blocks', async () => {
     // The prior verification found these fictional names in copyable Setu-TS
     // code blocks. They must not return. Prose may mention them to explain
-    // NestJS differences; code blocks must not import or use them as Setu-TS
+    // framework differences; code blocks must not import or use them as Setu-TS
     // APIs.
     const markdown = await readFile(GUIDE, 'utf8');
     const all = extractFences(markdown);
