@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import type { ServerBuild } from 'react-router';
+import { unstable_preloadRoutePattern } from 'react-router/route-pattern';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import type { IRequestContext, MiddlewareFunction } from '@setu-ts/common';
@@ -7,6 +8,7 @@ import type { PagePolicy, PageRouteSource } from '../../src/index.ts';
 import { ReactRouterPlugin } from '../../src/index.ts';
 import { pagePolicyBuild } from '../fixtures/page-policy-build.ts';
 import type { PageProbe } from '../fixtures/page-policy-build.ts';
+import { assembleHandler, createLoadContextFactory } from '../../src/handler/server-build.ts';
 
 let rr: typeof import('react-router') | undefined;
 try {
@@ -98,7 +100,11 @@ describe.skipIf(rr === undefined)('page policies against real React Router', () 
         await response.body?.cancel();
         expect(response.status).not.toBe(500);
         expect(selected).toEqual(expect.arrayContaining(probe.middleware));
-        expect(selected).toEqual(probe.middleware);
+        if (response.status === 404 && probe.middleware.length === 0) {
+          expect(selected).toEqual(['root']);
+        } else {
+          expect(selected).toEqual(probe.middleware);
+        }
       } finally {
         await app.stop();
       }
@@ -293,16 +299,17 @@ describe.skipIf(rr === undefined)(
                 expect
                   .soft(selected, `${verb} ${url} required policy superset`)
                   .toEqual(expect.arrayContaining(expected));
-                const rootShortcut = applies && ids.length === 1 && ids[0] === 'root';
+                const rootShortcut = applies && ids.includes('root');
                 let overApplied: readonly string[] | undefined;
                 if (verb === 'OPTIONS' && on === 'all' && reference.status !== 204) {
                   // (a) React Router rejects OPTIONS before running route middleware.
                   expect.soft(reference.status, `${url} OPTIONS/all baseline status`).toBe(405);
                   expect.soft(reference.ids, `${url} OPTIONS/all baseline middleware`).toEqual([]);
                   const view = references.get(referenceKey(basename, 'GET', path))!;
-                  overApplied = rootShortcut
-                    ? ['root']
-                    : view.ids.filter((id) => Object.hasOwn(policies, id));
+                  overApplied = [
+                    ...(rootShortcut ? ['root'] : []),
+                    ...view.ids.filter((id) => id !== 'root' && Object.hasOwn(policies, id)),
+                  ];
                   expect
                     .soft(selected, `${url} OPTIONS/all exact over-applied ids`)
                     .toEqual(overApplied);
@@ -417,6 +424,119 @@ describe.skipIf(rr === undefined)(
         }
       },
     );
+
+    it('A1 refuses the unsupported route-pattern build at registration', async () => {
+      const probe: PageProbe = {
+        middleware: [],
+        actions: [],
+        loaders: [],
+        errors: [],
+        emptyDocument: true,
+      };
+      const build = pagePolicyBuild('/', probe, [
+        { id: 'root', path: '' },
+        { id: 'routes/public', parentId: 'root', path: 'a/:x/b/c' },
+        { id: 'routes/admin', parentId: 'root', path: 'a/b/:y/:z' },
+      ]);
+      const app = createApplication({
+        plugins: [
+          RuntimePlugin(),
+          ReactRouterPlugin({
+            serverBuild: {
+              ...build,
+              future: { ...build.future, unstable_routePatternMatching: true },
+            },
+            pagePolicies: {
+              'routes/admin': { middleware: [(ctx) => ctx.response.status(429).text('limited')] },
+            },
+          }),
+        ],
+      });
+      await expect(app.start()).rejects.toThrow('future.unstable_routePatternMatching');
+      expect(probe.actions).toEqual([]);
+    });
+
+    it('A1 a build swap to route-pattern ranking answers 500 before the admin action, which runs without policies', async () => {
+      unstable_preloadRoutePattern();
+      const probe: PageProbe = {
+        middleware: [],
+        actions: [],
+        loaders: [],
+        errors: [],
+        emptyDocument: true,
+      };
+      const initial = pagePolicyBuild('/', probe, [
+        { id: 'root', path: '' },
+        { id: 'routes/public', parentId: 'root', path: 'a/:x/b/c' },
+        { id: 'routes/admin', parentId: 'root', path: 'a/b/:y/:z' },
+      ]);
+      const url = 'http://local/a/b/b/c';
+      expect(
+        rr!
+          .matchRoutes(
+            [
+              {
+                id: 'root',
+                path: '',
+                children: [
+                  { id: 'routes/public', path: 'a/:x/b/c' },
+                  { id: 'routes/admin', path: 'a/b/:y/:z' },
+                ],
+              },
+            ],
+            new URL(url).pathname,
+          )
+          ?.map((match) => match.route.id),
+      ).toEqual(['root', 'routes/public']);
+      for (const guarded of [true, false]) {
+        resetProbe(probe);
+        let current = initial;
+        const app = createApplication({
+          plugins: [
+            RuntimePlugin(),
+            ReactRouterPlugin({
+              serverBuild: initial,
+              ...(guarded
+                ? {
+                    pagePolicies: {
+                      'routes/admin': {
+                        middleware: [
+                          (ctx: IRequestContext) => ctx.response.status(429).text('limited'),
+                        ],
+                      },
+                    },
+                  }
+                : {}),
+              loadRequestHandler: () =>
+                Promise.resolve({
+                  handler: assembleHandler(
+                    () => Promise.resolve(current),
+                    rr!.createRequestHandler as Parameters<typeof assembleHandler>[1],
+                    'development',
+                  ),
+                  createLoadContext: createLoadContextFactory(rr!),
+                  pageRoutes: { build: () => current, matchRoutes: rr!.matchRoutes },
+                }),
+            }),
+          ],
+        });
+        await app.start();
+        const flagged = {
+          ...initial,
+          future: { ...initial.future, unstable_routePatternMatching: true },
+        };
+        current = flagged;
+        try {
+          const response = await app.fetch(new Request(url, { method: 'POST' }));
+          await response.arrayBuffer();
+          expect(response.status).toBe(guarded ? 500 : 200);
+          expect(probe.actions).toEqual(guarded ? [] : ['routes/admin']);
+          expect(probe.middleware).toEqual(guarded ? [] : ['root', 'routes/admin']);
+        } finally {
+          await app.stop();
+        }
+      }
+    });
 
     it('F3 refuses /manifest with a slash-less manifest path and no build basename', async () => {
       const probe: PageProbe = {

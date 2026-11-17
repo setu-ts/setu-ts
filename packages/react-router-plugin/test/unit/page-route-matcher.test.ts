@@ -24,11 +24,13 @@ describe('page route selector matching', () => {
     layout: { id: 'layout', parentId: 'root', path: 'app', caseSensitive: true },
     index: { id: 'index', parentId: 'layout', index: true, path: 'settings', caseSensitive: true },
     page: { id: 'page', parentId: 'layout', path: ':id' },
+    sibling: { id: 'sibling', parentId: 'root', path: 'elsewhere' },
     absent: undefined,
   };
   const splatRoutes = {
     root: { id: 'root', path: '' },
     page: { id: 'page', parentId: 'root', path: '*' },
+    sibling: { id: 'sibling', parentId: 'root', path: 'elsewhere' },
   };
   it('groups both trees, preserves case sensitivity and index paths, and caches per build', async () => {
     const matcher = vi.fn<PageRouteSource['matchRoutes']>(() => [
@@ -37,8 +39,8 @@ describe('page route selector matching', () => {
       { route: { id: 'page' } },
     ]);
     let build = { routes, basename: '/shop/' };
-    const select = selector(() => build, matcher, ['root', 'page']);
-    expect(await select(request('/shop/app/one'))).toEqual(['root', 'page']);
+    const select = selector(() => build, matcher, ['root', 'layout', 'page']);
+    expect(await select(request('/shop/app/one'))).toEqual(['root', 'layout', 'page']);
     expect(matcher).toHaveBeenCalledTimes(2);
     const reduced = matcher.mock.calls[0]![0];
     const full = matcher.mock.calls[1]![0];
@@ -60,13 +62,18 @@ describe('page route selector matching', () => {
       },
     ];
     expect(reduced).toEqual(expected);
-    expect(full).toEqual(expected);
-    expect(await select(request('/shop/app/two'))).toEqual(['root', 'page']);
+    expect(full).toEqual([
+      {
+        ...expected[0],
+        children: [...expected[0]!.children, { id: 'sibling', path: 'elsewhere', children: [] }],
+      },
+    ]);
+    expect(await select(request('/shop/app/two'))).toEqual(['root', 'layout', 'page']);
     expect(matcher).toHaveBeenCalledTimes(4);
     expect(matcher.mock.calls[2]![0]).toBe(reduced);
     expect(matcher.mock.calls[3]![0]).toBe(full);
     build = { ...build };
-    expect(await select(request('/shop/app/three'))).toEqual(['root', 'page']);
+    expect(await select(request('/shop/app/three'))).toEqual(['root', 'layout', 'page']);
     expect(matcher).toHaveBeenCalledTimes(6);
     expect(matcher.mock.calls[4]![0]).not.toBe(reduced);
     expect(matcher.mock.calls[5]![0]).not.toBe(full);

@@ -216,7 +216,7 @@ describe('page policies through kernel dispatch', () => {
       expect((await app.inject({ method: 'POST', url: '/login' })).statusCode).toBe(429);
       const first = seen[0];
       expect((await app.inject({ method: 'POST', url: '/login' })).statusCode).toBe(429);
-      expect(seen).toHaveLength(2);
+      expect(seen).toHaveLength(1);
       current = {
         routes: {
           root: { id: 'root', path: '' },
@@ -224,8 +224,30 @@ describe('page policies through kernel dispatch', () => {
         },
       };
       expect((await app.inject({ method: 'POST', url: '/login' })).statusCode).toBe(202);
-      expect(seen[2]).not.toBe(first);
+      expect(seen).toHaveLength(2);
+      expect(seen[1]).not.toBe(first);
       expect(renders()).toBe(1);
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('a development build dropping the policied id answers 500 without rendering', async () => {
+    let current: unknown = build;
+    const { app, renders } = fakeApp([(_ctx, next) => next()], {
+      build: () => current,
+      matchRoutes: () => null,
+    });
+    await app.start();
+    try {
+      current = {
+        routes: {
+          root: build.routes.root,
+          signin: { id: 'signin', parentId: 'root', path: 'login' },
+        },
+      };
+      expect((await app.inject({ method: 'POST', url: '/login' })).statusCode).toBe(500);
+      expect(renders()).toBe(0);
     } finally {
       await app.stop();
     }

@@ -11,8 +11,15 @@ export interface PageProbe {
 }
 
 /** Route shapes include a pathless root, nested index and an index with its own path. */
-export function pagePolicyBuild(basename: string, probe: PageProbe): ServerBuild {
-  const definitions = [
+export function pagePolicyBuild(
+  basename: string,
+  probe: PageProbe,
+  definitions: readonly {
+    readonly id: string;
+    readonly path?: string;
+    readonly parentId?: string;
+    readonly index?: boolean;
+  }[] = [
     { id: 'root', path: '' },
     { id: 'routes/login', parentId: 'root', path: 'login' },
     { id: 'routes/app', parentId: 'root', path: 'app' },
@@ -22,7 +29,8 @@ export function pagePolicyBuild(basename: string, probe: PageProbe): ServerBuild
     { id: 'routes/index', parentId: 'root', index: true },
     { id: 'routes/splat', parentId: 'root', path: 'files/*' },
     { id: 'routes/readme', parentId: 'root', path: 'files/readme' },
-  ];
+  ],
+): ServerBuild {
   return {
     basename,
     ssr: true,

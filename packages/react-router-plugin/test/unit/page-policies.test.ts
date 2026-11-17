@@ -81,6 +81,53 @@ describe('page policies', () => {
       ),
     ).rejects.toThrow("'page' has invalid on value");
   });
+  it.each([true, 'enabled', 1])(
+    'aggregates unsupported route-pattern matching %j with policy errors',
+    async (flag) => {
+      await expect(
+        createPagePolicies(
+          { typo: { middleware: [] } },
+          {
+            ...runtime,
+            pageRoutes: {
+              build: () => ({ ...build, future: { unstable_routePatternMatching: flag } }),
+              matchRoutes,
+            },
+          },
+        ),
+      ).rejects.toMatchObject({
+        name: 'PagePolicyConfigurationError',
+        message: expect.stringContaining(
+          "future.unstable_routePatternMatching; unknown route id 'typo'",
+        ),
+      });
+    },
+  );
+  it('rejects a route-pattern matcher introduced by a development build, even on root-only requests', async () => {
+    let current: unknown = build;
+    const groups = (await createPagePolicies(
+      { root: { middleware: [middleware] } },
+      {
+        ...runtime,
+        pageRoutes: { build: () => current, matchRoutes },
+      },
+    ))!;
+    current = { ...build, future: { unstable_routePatternMatching: true } };
+    await expect(groups.select(context())).rejects.toThrow('future.unstable_routePatternMatching');
+  });
+  it('rejects enabling route-pattern matching on an already cached build object', async () => {
+    const current = { ...build, future: { unstable_routePatternMatching: false } };
+    const groups = (await createPagePolicies(
+      { root: { middleware: [middleware] } },
+      {
+        ...runtime,
+        pageRoutes: { build: () => current, matchRoutes },
+      },
+    ))!;
+    expect(await groups.select(context())).toEqual(['root']);
+    current.future.unstable_routePatternMatching = true;
+    await expect(groups.select(context())).rejects.toThrow('future.unstable_routePatternMatching');
+  });
   it('collects missing source and policy errors with development guidance', async () => {
     await expect(
       createPagePolicies(
@@ -169,6 +216,66 @@ describe('page policies', () => {
     expect(await groups.select(context('POST', '/other'))).toEqual([]);
     expect(matcher).toHaveBeenCalledOnce();
     expect(JSON.stringify(matcher.mock.calls[0]![0])).not.toContain('sibling');
+  });
+  it('root plus login policies do not rank the whole tree twice on a random POST path', async () => {
+    const sourceBuild = {
+      routes: {
+        root: { id: 'root', path: '' },
+        login: { id: 'login', parentId: 'root', path: 'login' },
+        sibling: { id: 'sibling', parentId: 'root', path: 'other' },
+      },
+    };
+    const matcher = vi.fn(matchRoutes);
+    const groups = (await createPagePolicies(
+      {
+        root: { middleware: [middleware] },
+        login: { middleware: [middleware] },
+      },
+      { ...runtime, pageRoutes: { build: () => sourceBuild, matchRoutes: matcher } },
+    ))!;
+    expect(await groups.select(context('POST', '/random/path'))).toEqual(['root']);
+    expect(matcher).toHaveBeenCalledOnce();
+    expect(JSON.stringify(matcher.mock.calls[0]![0])).not.toContain('sibling');
+    expect(await groups.select(context('POST', '/login'))).toEqual(['root', 'login']);
+    expect(matcher).toHaveBeenCalledTimes(3);
+    expect(JSON.stringify(matcher.mock.calls[2]![0])).toContain('sibling');
+  });
+  it('a top-level layout covering every route skips the prefilter', async () => {
+    const sourceBuild = {
+      routes: { root: build.routes.root, layout: build.routes.layout, page: build.routes.page },
+    };
+    const matcher = vi.fn(matchRoutes);
+    const groups = (await createPagePolicies(
+      { layout: { middleware: [middleware] } },
+      {
+        ...runtime,
+        pageRoutes: { build: () => sourceBuild, matchRoutes: matcher },
+      },
+    ))!;
+    expect(await groups.select(context())).toEqual(['layout']);
+    expect(matcher).toHaveBeenCalledOnce();
+    expect(await groups.select(context('POST', '/random/path'))).toEqual([]);
+    expect(matcher).toHaveBeenCalledTimes(2);
+  });
+  it('root plus login policies cost only one full-tree call when they cover the whole tree', async () => {
+    const sourceBuild = {
+      routes: {
+        root: { id: 'root', path: '' },
+        login: { id: 'login', parentId: 'root', path: 'login' },
+      },
+    };
+    const matcher = vi.fn(matchRoutes);
+    const groups = (await createPagePolicies(
+      {
+        root: { middleware: [middleware] },
+        login: { middleware: [middleware] },
+      },
+      { ...runtime, pageRoutes: { build: () => sourceBuild, matchRoutes: matcher } },
+    ))!;
+    expect(await groups.select(context('POST', '/random/path'))).toEqual(['root']);
+    expect(matcher).toHaveBeenCalledOnce();
+    expect(await groups.select(context('POST', '/login'))).toEqual(['root', 'login']);
+    expect(matcher).toHaveBeenCalledTimes(2);
   });
   it('uses the full ranking after a reduced splat hit and caches an empty answer', async () => {
     const matcher = vi.fn(matchRoutes);
@@ -286,18 +393,21 @@ describe('page policies', () => {
     expect(matcher).toHaveBeenCalledTimes(4);
     expect(matcher.mock.calls[2]![0]).not.toBe(first);
   });
-  it('does not retain a removed route in the next development build', async () => {
+  it('rejects a removed policy route in the next development build, naming its id', async () => {
     let current: unknown = build;
     const groups = (await createPagePolicies(
-      { page: { middleware: [middleware] } },
+      { root: { middleware: [middleware] }, page: { middleware: [middleware], on: 'action' } },
       {
         ...runtime,
         pageRoutes: { build: () => current, matchRoutes },
       },
     ))!;
-    expect(await groups.select(context())).toEqual(['page']);
+    expect(await groups.select(context())).toEqual(['root', 'page']);
     current = { routes: { root: { id: 'root', path: '' } } };
-    expect(await groups.select(context())).toEqual([]);
+    await expect(groups.select(context())).rejects.toThrow("page policy route 'page' is missing");
+    await expect(groups.select(context('GET'))).rejects.toThrow(
+      "page policy route 'page' is missing",
+    );
   });
   it('does not invent an ancestor absent from the manifest', async () => {
     const groups = (await createPagePolicies(

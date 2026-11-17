@@ -25,7 +25,11 @@ export async function createPagePolicies(
     problems.push('loadRequestHandler must supply pageRoutes; see docs/react-router-dev.md');
   } else {
     initialBuild = await source.build();
-    known = Object.values(pageBuildOf(initialBuild).routes)
+    const build = pageBuildOf(initialBuild);
+    if (build.future?.unstable_routePatternMatching) {
+      problems.push('page policies do not support future.unstable_routePatternMatching');
+    }
+    known = Object.values(build.routes)
       .filter((route) => route !== undefined)
       .map((route) => route.id);
   }

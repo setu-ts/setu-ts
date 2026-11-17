@@ -250,23 +250,36 @@ ARCHITECTURE §10 and the plugin table row at line 1649).
   1. **Method exit.** The policies that apply to this request's method are the `'all'` policies,
      plus the `'action'` ones on a mutation method. If none exist, return `[]` without parsing the
      URL. (A sign-in throttle with `on: 'action'` costs nothing on a page view: 0.05 µs measured.)
-  2. **Root shortcut.** If the only applicable policy is on the build's root route (the route with
-     no `parentId`), return `[that id]` without matching: React Router's root matches every request
-     the catch-all serves, and running it on an unmatched path too errs closed.
-  3. **Prefilter.** Match against a reduced tree (built with the same rules as §3.4 step 1) holding
-     only the routes that have an applicable policy, their ancestors and their descendants — one
-     reduced tree per method class (`'all'`-only, and all policies). An empty result returns `[]`.
-     **Exactness:** React Router returns the highest-ranked branch that matches. If that branch in
-     the full tree contains a policied route, the same branch is in the reduced tree and still
-     outranks every other reduced branch, so a non-empty full answer is never missed; an empty
-     reduced answer therefore proves no policy applies. (Measured: a post to an unguarded page, 3.9
-     µs at every size.)
+  2. **Root always applies.** A policy on the build's root route (the route with no `parentId`) that
+     applies to the method is selected on every request without matching — React Router's root
+     matches every request the catch-all serves, and running it on an unmatched path too errs closed
+     — and is left OUT of the policied set the prefilter's reduced tree is built from (root stays in
+     it only as an ancestor). If root's is the only applicable policy, return `[root]`. (Re-audit
+     A2: with root in the policied set, root's descendants are every route, the reduced tree became
+     the whole tree, and a request ranked it twice — 2,475 µs at 502 routes.)
+  3. **Prefilter.** When the reduced tree holds every route (a policy on a top-level layout that
+     wraps the app), skip this step — it could only repeat step 4. Otherwise match against a reduced
+     tree (built with the same rules as §3.4 step 1) holding only the routes that have an applicable
+     policy, their ancestors and their descendants — one reduced tree per method class
+     (`'all'`-only, and all policies). An empty result returns `[]`. **Exactness:** React Router
+     returns the highest-ranked branch that matches. If that branch in the full tree contains a
+     policied route, the same branch is in the reduced tree and still outranks every other reduced
+     branch, so a non-empty full answer is never missed; an empty reduced answer therefore proves no
+     policy applies. (Measured: a post to an unguarded page, 3.9 µs at every size.)
   4. **Full match.** Otherwise match the full tree (§3.4) and filter to applicable ids — the reduced
      match may differ from React Router's (a policied splat beside an unpolicied static sibling), so
      it is never returned itself. The result is cached in a per-build LRU keyed by method class and
      normalized pathname: at most 1,000 entries, and only pathnames of at most 512 bytes are cached,
      so the cache holds at most ~0.5 MB however the keys are chosen; a longer path is matched
-     uncached.
+     uncached. **At most one whole-tree ranking per request**, whatever the policies.
+  5. **Fail closed on a build the selector cannot mirror.** A build with
+     `future.unstable_routePatternMatching` truthy is refused at registration
+     (`PagePolicyConfigurationError`) and answers `500` per request (a development build may
+     change): React Router then ranks with its route-pattern matcher (`router.js:66-72`), which
+     orders routes differently from `matchRoutes` (re-audit A1: `a/:x/b/c` vs `a/b/:y/:z`). A
+     per-request build that no longer contains a policied route id (a development rebuild renamed or
+     removed the page) also answers `500`, naming the id, instead of silently not applying it
+     (re-audit A3).
 - **Why:** steps 1–3 remove the cost from requests that cannot reach a policy, which is most
   traffic; step 4 keeps the answer exactly React Router's for those that can. Mirroring React
   Router's flatten-and-rank to precompute branches was rejected: it is ~80 more lines of internals
@@ -280,9 +293,9 @@ ARCHITECTURE §10 and the plugin table row at line 1649).
   React Router's recorded middleware ids restricted to routes with an applicable policy — never
   fewer — and EQUAL to that set except in exactly two documented over-application cases, each
   asserted by name: (a) `OPTIONS` with an `'all'` policy, which React Router answers `405` before
-  any route middleware runs; (b) the root shortcut on a path React Router matches nothing for (it
-  answers `404` with no route middleware). In both, nothing guarded runs, so the extra policy run
-  errs closed and is documented in the README.
+  any route middleware runs; (b) a root policy on a path React Router matches nothing for (it
+  answers `404` with no route middleware), with or without other policies. In both, nothing guarded
+  runs, so the extra policy run errs closed and is documented in the README.
 
 ## 4. Exported surface — every symbol names its consumer
 
@@ -405,9 +418,12 @@ design changes it records (§3.5 `on`, §3.10) are reviewed here before they are
   - **O6** A public file never stands in for a page that has a policy unless a file with that exact
     path exists in the client build root (the operator's own build output).
   - **O7** The body a policy reads is the body the action receives.
-- **Accepted residual:** a request to a policied route with a parameterised path pays one full
-  `matchRoutes` (~1.3 ms at 502 routes, §3.10); the prefilter confines it to requests that can reach
-  a policy.
+- **Accepted residual:** a request that can reach a policied route with a parameterised path pays
+  one full `matchRoutes` (~1.2 ms at 502 routes, §3.10), never two; the prefilter confines it to
+  requests that can reach a policy (with a policy on a top-level layout, that is every request).
+- **Re-audit (2026-11-17, c24ccdced):** F0/F1/F3 closed; A1 (route-pattern matching), A2 (double
+  ranking with a root policy) and A3 (dev rebuild dropping a policied id) are fixed by §3.10 steps
+  2, 3 and 5.
 
 ## 8. Risks & mitigations
 

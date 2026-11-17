@@ -16,6 +16,7 @@ interface PageRoute {
 
 interface PageBuild {
   readonly routes: Readonly<Record<string, PageRoute | undefined>>;
+  readonly future?: { readonly unstable_routePatternMatching?: unknown };
   readonly basename?: string;
   readonly routeDiscovery?: { readonly mode?: string; readonly manifestPath?: string };
 }
@@ -30,8 +31,8 @@ interface MatchRoute {
 
 interface SelectionPlan {
   readonly ids: ReadonlySet<string>;
-  readonly root: readonly string[] | undefined;
-  readonly tree: readonly MatchRoute[];
+  readonly roots: readonly string[];
+  readonly tree: readonly MatchRoute[] | undefined;
 }
 
 interface PreparedBuild {
@@ -95,9 +96,8 @@ function selectionPlan(
   byId: ReadonlyMap<string, PageRoute>,
   byParent: ReadonlyMap<string, readonly PageRoute[]>,
 ): SelectionPlan {
-  const soleId = ids.size === 1 ? ids.values().next().value : undefined;
-  const soleRoute = soleId === undefined ? undefined : byId.get(soleId);
-  const root = soleRoute !== undefined && !soleRoute.parentId ? [soleRoute.id] : undefined;
+  const roots: string[] = [];
+  const matched = new Set<string>();
   const included = new Set<string>();
   const expanded = new Set<string>();
   const descendants = (id: string): void => {
@@ -107,8 +107,12 @@ function selectionPlan(
     for (const child of byParent.get(id) ?? []) descendants(child.id);
   };
   for (const id of ids) {
-    let route = byId.get(id);
-    if (route === undefined) continue;
+    let route: PageRoute | undefined = byId.get(id)!;
+    if (!route.parentId) {
+      roots.push(id);
+      continue;
+    }
+    matched.add(id);
     descendants(id);
     while (route.parentId) {
       included.add(route.parentId);
@@ -116,15 +120,24 @@ function selectionPlan(
       if (route === undefined) break;
     }
   }
-  return { ids, root, tree: routeTree(byParent, '', included) };
+  return {
+    ids: matched,
+    roots,
+    tree: Array.from(byId.keys()).every((id) => included.has(id))
+      ? undefined
+      : routeTree(byParent, '', included),
+  };
 }
 
 function buildReader(classes: ReadonlyMap<MethodClass, ReadonlySet<string>>) {
   const builds = new WeakMap<object, PreparedBuild>();
   return (value: unknown): PreparedBuild => {
     const cached = typeof value === 'object' && value !== null ? builds.get(value) : undefined;
+    const build = cached?.build ?? pageBuildOf(value);
+    if (build.future?.unstable_routePatternMatching) {
+      throw new Error('page policies do not support future.unstable_routePatternMatching');
+    }
     if (cached !== undefined) return cached;
-    const build = pageBuildOf(value);
     const byParent = new Map<string, PageRoute[]>();
     const byId = new Map<string, PageRoute>();
     for (const route of Object.values(build.routes)) {
@@ -134,6 +147,10 @@ function buildReader(classes: ReadonlyMap<MethodClass, ReadonlySet<string>>) {
       const siblings = byParent.get(parent) ?? [];
       siblings.push(route);
       byParent.set(parent, siblings);
+    }
+    for (const id of classes.get('action')!) {
+      if (!byId.has(id))
+        throw new Error(`page policy route '${id}' is missing from the server build`);
     }
     const discovery = build.routeDiscovery;
     const manifest = discovery?.manifestPath || '/__manifest';
@@ -199,7 +216,7 @@ export function createPageRouteSelector(
     const pathname = new URL(ctx.request.url).pathname;
     if (pathname === prepared.manifestPath) return [];
     const plan = prepared.plans.get(methodClass)!;
-    if (plan.root !== undefined) return plan.root;
+    if (plan.ids.size === 0) return plan.roots;
     const normalized = normalizedPath(pathname);
     const cacheable =
       normalized.length <= PAGE_MATCH_CACHE_PATH_BYTES &&
@@ -211,13 +228,18 @@ export function createPageRouteSelector(
       prepared.matches.set(key, cached);
       return cached;
     }
-    const prefilter = matchedIds(
-      source.matchRoutes(plan.tree, normalized, prepared.build.basename),
-    );
-    if (prefilter.length === 0) return [];
-    const selected = matchedIds(
-      source.matchRoutes(prepared.tree, normalized, prepared.build.basename),
-    ).filter((id) => plan.ids.has(id));
+    if (plan.tree !== undefined) {
+      const prefilter = matchedIds(
+        source.matchRoutes(plan.tree, normalized, prepared.build.basename),
+      );
+      if (prefilter.length === 0) return plan.roots;
+    }
+    const selected = [
+      ...plan.roots,
+      ...matchedIds(source.matchRoutes(prepared.tree, normalized, prepared.build.basename)).filter(
+        (id) => plan.ids.has(id),
+      ),
+    ];
     if (cacheable) {
       if (prepared.matches.size >= PAGE_MATCH_CACHE_LIMIT) {
         prepared.matches.delete(prepared.matches.keys().next().value!);
