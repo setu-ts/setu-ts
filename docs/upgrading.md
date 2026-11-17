@@ -39,10 +39,11 @@ no change: without the new optional `isHealthy()` it stays `up` as `reachable: '
 
 ### Deployment output (M140c, `@setu-ts/cli`)
 
-Images and new projects' `start` scripts set `NODE_ENV=production`. A regenerated Compose file adds
-healthchecks and `depends_on`. Broker defaults move from Deployment `env:` entries to a
-`<member>-transport` ConfigMap listed before the Secret, so a value in `k8s/secrets/<member>/.env`
-now takes effect.
+Images set `NODE_ENV=production`. New Bun and Deno `start` scripts set it too; a new Node `start`
+script defaults it to `production` only when it is unset, keeping a preset value. A regenerated
+Compose file adds healthchecks and `depends_on`. Broker defaults move from Deployment `env:` entries
+to a `<member>-transport` ConfigMap listed before the Secret, so a value in
+`k8s/secrets/<member>/.env` now takes effect.
 
 A workspace member's config must call the transport module's `runtimeOptions()`, which serves gRPC
 members over cleartext HTTP/2: `runtime: runtimeOptions(),` in a full-stack starter's options, or

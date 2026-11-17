@@ -20,7 +20,7 @@ export function registerSettingsRoutes(router: IRouterApi): void {
 ```
 
 The default fills only an absent key; an empty dotenv value returns `''`, so use
-`config.get(key) || fallback` where empty means unset.
+`config.get(key) || fallback` for a string where empty means unset (not for booleans or numbers).
 
 ## Load once before constructing plugins
 

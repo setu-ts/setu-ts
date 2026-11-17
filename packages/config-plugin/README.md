@@ -36,7 +36,8 @@ const port = config.get('PORT', { default: '3000' });
 ```
 
 The default applies only to an absent key: an empty value, such as `PORT=` in a dotenv file, is
-returned as `''`, so use `config.get(key) || fallback` where an empty value means unset.
+returned as `''`, so use `config.get(key) || fallback` for a string value where empty means unset.
+Do not use `||` on a validated boolean or number: it would also replace `false` or `0`.
 
 ## Configuration a plugin needs at construction
 

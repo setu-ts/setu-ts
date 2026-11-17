@@ -85,7 +85,12 @@ tenant budgeting there using that identity rather than a request that no longer 
 ### Budgeting a run
 
 A run has no request, but `AgentRunContext` already carries the tenant, principal, abort signal and
-services the budget middleware reads, so it satisfies `BudgetScope` as it is.
+services the budget middleware reads, so it satisfies `BudgetScope` as it is. The recipe reuses the
+`ai-chat` example's budget code, so the application must register what that code resolves: the
+example's `CHAT_MODELS` provider plugin (its priced models), a database and the messaging outbox
+(`CAPABILITIES.DATABASE` and `CAPABILITIES.OUTBOX`, which record usage), as `apps/ai-chat` does. The
+`createRunsApp` composition above registers the database but neither `CHAT_MODELS` nor the outbox,
+so it needs those two added first.
 
 ```ts
 import { defineAgentRun } from '@setu-ts/agent-runs-plugin';

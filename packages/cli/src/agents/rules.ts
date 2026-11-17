@@ -91,7 +91,7 @@ export const RULE_BLOCKS: readonly IRuleBlock[] = [
     id: 'config',
     packages: [],
     applies: () => true,
-    text: '`IConfig` (`CAPABILITIES.CONFIG`): `config.get(k, { default })` absent keys only; `config.get(k) || v` if blank; `config.getOrThrow(k)`. Options run before config loads.',
+    text: '`IConfig` (`CAPABILITIES.CONFIG`): `config.get(k, { default })` absent only; `config.get(k) || v` blank strings; `config.getOrThrow(k)`. Options run before config loads.',
   },
   {
     id: 'imports',

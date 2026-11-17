@@ -64,8 +64,8 @@ describe('composition-specific rule blocks', () => {
   });
   it('states the absent-key default and empty-value fallback in the config rule', () => {
     const text = RULE_BLOCKS.find((rule) => rule.id === 'config')!.text;
-    expect(text).toContain('`config.get(k, { default })` absent keys only');
-    expect(text).toContain('`config.get(k) || v` if blank');
+    expect(text).toContain('`config.get(k, { default })` absent only');
+    expect(text).toContain('`config.get(k) || v` blank strings');
   });
   it('gives Workers the generated server test harness after the Deno rule', () => {
     const index = RULE_BLOCKS.findIndex((rule) => rule.id === 'workers-tests');
