@@ -722,6 +722,8 @@ curl localhost:3400/events                                            # 401 with
 - [`driver.ts`](../apps/realtime-clients/driver.ts) — checkSseClient sends the bearer header and
   compares resumedWith to the first event id; checkIdleSocket waits longer than the idle timeout
   before closing intentionally.
+- [`run-driver.ts`](../apps/realtime-clients/run-driver.ts) — the Node and Bun command-line entry,
+  kept apart from driver.ts so the Worker that imports the driver never runs it.
 - [`smoke.ts`](../apps/realtime-clients/smoke.ts) — exerciseRealtimeClients runs against a real
   server from the current Node process, type-stripped Node, Bun and a workerd client host.
 
