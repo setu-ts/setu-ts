@@ -47,7 +47,7 @@ export const defaultFormatter: ValidationErrorFormatter = (
  * ```json
  * {
  *   "statusCode": 400,
- *   "message": [ "Invalid email" ],
+ *   "message": [ "email: Invalid email" ],
  *   "error": "Bad Request",
  *   "errors": [ { "field": "email", "message": "Invalid email", "code": "invalid_string" } ]
  * }

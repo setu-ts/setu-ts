@@ -1828,6 +1828,20 @@ class Application implements IKernelApplication {
     handle.pendingHandler = tracked;
   }
 
+  /** Waits until tracked work settles without a newer promise replacing it. */
+  async #drainTracked(handle: RequestContextHandle, first: Promise<void>): Promise<void> {
+    let pending = first;
+    for (;;) {
+      await pending;
+      // A group stage that calls next() without awaiting it can track the
+      // handler after this wait began; #trackHandler then installs a newer
+      // promise that also waits for the earlier work.
+      const latest = handle.pendingHandler;
+      if (latest === undefined || latest === pending) return;
+      pending = latest;
+    }
+  }
+
   /** Settles generic cleanup before releasing the request from shutdown drain. */
   #settleRequest(
     ctx: IRequestContext,
@@ -1850,10 +1864,10 @@ class Application implements IKernelApplication {
         // The buffered response has already been returned. Settle against it:
         // a stream the handler sets later is never read, so cleanup must not
         // wait for it to be consumed.
-        void pendingHandler.then(finish);
+        void this.#drainTracked(handle, pendingHandler).then(finish);
       } else {
         const complete = (): void => {
-          void pendingHandler.then(finish);
+          void this.#drainTracked(handle, pendingHandler).then(finish);
         };
         response.stream(
           wrapDeferredStream(
