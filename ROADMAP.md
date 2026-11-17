@@ -17275,6 +17275,56 @@ generated-output rule.
 
 ---
 
+## Milestone 141: Page Route Policies — Route Middleware for React Router Actions
+
+**Package(s):** `packages/common`, `packages/kernel`, `packages/react-router-plugin`,
+`packages/auth-plugin`, `packages/cli`; `apps/full-stack`; docs.
+
+**Source:** building a full-stack application on `0.12.0` (2026-11-17). Its one React Router action,
+workspace sign-in, shipped with no throttle, and the security audit reported it as a Medium finding.
+`rateLimitMiddleware` could not reach the action, so the fix was a second limiter written by hand.
+
+**The problem.** `ReactRouterPlugin` serves every page through one kernel catch-all route. A page
+action therefore passes through the global pipeline (security headers, tenancy, session, CSRF,
+authentication) but never through route-level middleware. `rateLimitMiddleware`,
+`createUploadMiddleware`, `requireScopes`, `requirePolicy`, `idempotent()` and a quota's `429` all
+attach to a kernel route, and the plugin has no way to attach them to a page. Nothing warns the
+developer: an action looks protected and is not. Registering a kernel route on the page's path is
+not a fix, because React Router answers one route on several URLs (`/login`, `/login.data`,
+`/login/_.data`, `?index`); matching paths by hand is the `.data` bypass Ethiack documented against
+Remix.
+
+**What ships.** Compared first with React Router's own route `middleware` export, TanStack Start
+(`createServerFn().middleware([...])`), AdonisJS (named middleware per route), HonoX (`createRoute`
+with Hono middleware beside the handler), Next.js Server Actions and Astro Actions (checks inside
+the action; path middleware documented as not enough) and SvelteKit (global `handle` only). Every
+one attaches a mutation's guard to the route's identity, not to a path. So:
+
+1. **`pagePolicies` on `ReactRouterPlugin`,** keyed by React Router route id
+   (`'routes/_auth/login'`), each a list of ordinary Setu `MiddlewareFunction`s with an optional
+   method filter. A policy on a layout route covers every page beneath it. The middleware keeps
+   Setu's shape and runs in the kernel, so there is one implementation of each protection, not a
+   React Router copy.
+2. **Matching by React Router's own rules.** The plugin resolves a request to route ids with
+   `matchRoutes` from the same `react-router` module as the handler, over the server build's route
+   manifest, after React Router's own `.data`/`_.data` normalization and basename, and skips the
+   lazy-discovery manifest path as React Router does. A conformance test drives the real React
+   Router handler across every URL shape and fails if its matched routes ever differ.
+3. **Per-request route middleware in the kernel.** `RouteDefinition` gains `middlewareGroups`: named
+   groups of middleware plus a `select(ctx)` naming which run, after the route's static middleware.
+   Every group stays visible to startup scans, and `AuthPlugin`'s `requirePolicy` scan reads them.
+4. **Fail closed.** An unknown route id, or a loader seam that cannot supply the build and
+   `matchRoutes`, refuses at startup. A matching failure answers `500`, never the page unguarded.
+5. **The development entry** passes its build and `matchRoutes` through the loader seam, so policies
+   apply under `npm run dev` too.
+
+**Gate:** a page action refused by a policy on all its URL shapes (`/x`, `/x.data`, `/x/_.data`,
+`?index`) with the action not run; an upload read by middleware and then by the action; the
+conformance table equal to React Router's own matching; a scaffolded full-stack project booted on
+the changed development entry; every changed file at the 90% per-file bar.
+
+---
+
 ## Progress Tracking
 
 | Milestone | Status | Package                                                                                                                                                                                                                                                                                   |
@@ -17560,3 +17610,4 @@ generated-output rule.
 | 140c      | ✅     | cli — images, Compose, Kubernetes and gRPC between workspace members                                                                                                                                                                                                                      |
 | 140d      | ✅     | cli + vector-store-plugin — what the generators write, the agent brief, and vector-store readiness                                                                                                                                                                                        |
 | 140e      | ✅     | docs — documentation the code letters change                                                                                                                                                                                                                                              |
+| 141       | ⬜     | common + kernel + react-router + auth + cli — page route policies: route middleware for React Router actions                                                                                                                                                                              |
