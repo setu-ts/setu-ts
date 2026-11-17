@@ -477,6 +477,16 @@ jobs:
         if: matrix.shard == 'deno-lane'
         run: pnpm run test:deno-lane
 
+      # script-entrypoints runs `check-deploy.ts --render`, which compares the
+      # committed manifests with `helm template`. Pinned to ci.yml's tooling
+      # shard: the runner image's own helm moves with the image, and the
+      # ubuntu-26.04 image's helm renders the chart differently (issue #575).
+      # v0.13.0's first tag run failed here without the pin.
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
+        if: matrix.shard == 'tooling'
+        with:
+          version: v3.16.3
+
       - name: Root and script tests with coverage
         if: matrix.shard == 'tooling'
         run: pnpm run test:tooling:coverage
