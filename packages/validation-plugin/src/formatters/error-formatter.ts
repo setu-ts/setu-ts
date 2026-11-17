@@ -8,7 +8,7 @@
  * - `'rfc7807'` — deprecated alias of `'rfc9457'`; RFC 7807 was obsoleted by
  *   RFC 9457 and the emitted body is identical
  * - `'nestjs'` — compatibility error shape,
- *   `{ statusCode, message: string[], error }` (from default-formatter)
+ *   `{ statusCode, message: string[], error, errors }` (from default-formatter)
  * - A custom function — used as-is
  *
  * @module

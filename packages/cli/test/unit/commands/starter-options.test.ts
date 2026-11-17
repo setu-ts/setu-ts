@@ -104,6 +104,57 @@ describe('withStarterOption', () => {
     );
   });
   it.each([
+    'const CUSTOM_METRICS = [];',
+    'let CUSTOM_METRICS = [];',
+    'var CUSTOM_METRICS = [];',
+    'function CUSTOM_METRICS() {}',
+    'class CUSTOM_METRICS {}',
+    'const { metrics: CUSTOM_METRICS } = config;',
+    'const [CUSTOM_METRICS] = [];',
+    'const other = 1, CUSTOM_METRICS = [];',
+    'var after = 1; if (after) { var CUSTOM_METRICS = []; }',
+  ])('refuses a reused import shadowed inside the callback: %s', (declaration) => {
+    const source = `import { CUSTOM_METRICS } from './src/metrics/index.ts';\n${config.replace('return {', `${declaration}\n      return {`)}`;
+    expect(
+      withStarterOption(source, 'metrics', '{ customMetrics: [...CUSTOM_METRICS] }', [
+        { symbols: ['CUSTOM_METRICS'], from: './src/metrics/index.ts' },
+      ]),
+    ).toBeUndefined();
+  });
+  it('reuses an unshadowed import referenced before the returned options', () => {
+    const source = `import { CUSTOM_METRICS } from './src/metrics/index.ts';\n${config.replace('return {', 'const count = CUSTOM_METRICS.length;\n      return {')}`;
+    expect(
+      withStarterOption(source, 'metrics', '{ customMetrics: [...CUSTOM_METRICS] }', [
+        { symbols: ['CUSTOM_METRICS'], from: './src/metrics/index.ts' },
+      ]),
+    ).toContain('metrics: { customMetrics: [...CUSTOM_METRICS] }');
+  });
+  it.each([
+    ' /* note\ncontinued */',
+    ' /* first\ncontinued */ /* second\ncontinued */',
+    ' // note',
+    ' // note /* this is a line comment',
+    '',
+  ])('keeps an inserted import outside trailing comments %j', (comment) => {
+    const statement = `import { OTHER } from './other.ts';${comment}`;
+    const source = `${config}\n${statement}\n`;
+    const inserted = withStarterOption(source, 'metrics', '{}', [
+      { symbols: ['CUSTOM_METRICS'], from: './src/metrics/index.ts' },
+    ])!;
+    expect(inserted).toContain(
+      `${statement}\nimport { CUSTOM_METRICS } from './src/metrics/index.ts';\n`,
+    );
+  });
+  it('does not treat a block-comment marker in a trailing string as a comment', () => {
+    const statement = "import { OTHER } from './other.ts'; const note = '/*';";
+    const inserted = withStarterOption(`${config}\n${statement}\n`, 'metrics', '{}', [
+      { symbols: ['CUSTOM_METRICS'], from: './src/metrics/index.ts' },
+    ])!;
+    expect(inserted).toContain(
+      `${statement}\nimport { CUSTOM_METRICS } from './src/metrics/index.ts';\n`,
+    );
+  });
+  it.each([
     "import { CUSTOM_METRICS } from './other.ts';",
     "import { VALUE as CUSTOM_METRICS } from './other.ts';",
     "import { CUSTOM_METRICS } from './src/metrics/index.ts';\nimport { VALUE as CUSTOM_METRICS } from './other.ts';",

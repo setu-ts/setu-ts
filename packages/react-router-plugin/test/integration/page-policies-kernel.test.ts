@@ -206,9 +206,15 @@ describe('page policies through kernel dispatch', () => {
     };
     const { app, renders } = fakeApp([(ctx) => ctx.response.status(429).text('blocked')], {
       build: () => current,
-      matchRoutes: (tree) => {
+      matchRoutes: (tree, pathname) => {
         seen.push(tree);
-        return current.routes.login.path === 'login' ? [{ route: { id: 'login' } }] : null;
+        const root = tree[0] as {
+          readonly children: readonly { readonly id: string; readonly path?: string }[];
+        };
+        const login = root.children.find((route) => route.id === 'login');
+        return login !== undefined && login.path === pathname.slice(1)
+          ? [{ route: { id: login.id } }]
+          : null;
       },
     });
     await app.start();
@@ -226,6 +232,7 @@ describe('page policies through kernel dispatch', () => {
       expect((await app.inject({ method: 'POST', url: '/login' })).statusCode).toBe(202);
       expect(seen).toHaveLength(2);
       expect(seen[1]).not.toBe(first);
+      expect(seen[1]).toMatchObject([{ id: 'root', children: [{ id: 'login', path: 'moved' }] }]);
       expect(renders()).toBe(1);
     } finally {
       await app.stop();

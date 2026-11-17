@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { lexImportSpecifiers, readImportSpecifiers } from '../../../src/utils/import-specifiers.ts';
+import {
+  hasNonImportBinding,
+  lexImportSpecifiers,
+  readImportSpecifiers,
+} from '../../../src/utils/import-specifiers.ts';
 
 const SOURCE = [
   "import { b } from './b.ts';",
@@ -199,6 +203,44 @@ describe('lexImportSpecifiers', () => {
       globs: 'unreadable',
     });
   });
+});
+
+describe('hasNonImportBinding', () => {
+  it.each([
+    'function* CUSTOM_METRICS() {}',
+    'enum CUSTOM_METRICS { A }',
+    'namespace CUSTOM_METRICS {}',
+    'const f = CUSTOM_METRICS => CUSTOM_METRICS;',
+    'function f(CUSTOM_METRICS: unknown): void {}',
+    'const f = (CUSTOM_METRICS) => CUSTOM_METRICS;',
+    'try {} catch (CUSTOM_METRICS) {}',
+    'const { x: { CUSTOM_METRICS } } = source;',
+    'const first = "in", CUSTOM_METRICS = [];',
+    'const first = "of", CUSTOM_METRICS = [];',
+    'const [other, CUSTOM_METRICS] = source;',
+    'using CUSTOM_METRICS = resource;',
+    'const value = `${(() => { const CUSTOM_METRICS = []; })()}`;',
+  ])('refuses a possible shadowing binding in %s', (source) => {
+    expect(hasNonImportBinding(source, ['CUSTOM_METRICS'])).toBe(true);
+  });
+  it.each([
+    "import { CUSTOM_METRICS } from './metrics.ts';",
+    'const copy = CUSTOM_METRICS;',
+    'let copy: unknown[] = [...CUSTOM_METRICS];',
+    'const first = f({ value: CUSTOM_METRICS }), second = [...CUSTOM_METRICS];',
+    'const opts = { CUSTOM_METRICS: [] };',
+    'const note = "const CUSTOM_METRICS = []"; /* let CUSTOM_METRICS; */',
+    'const f = () => CUSTOM_METRICS;',
+    '(CUSTOM_METRICS)\n"{";',
+  ])('allows an unshadowed reference in %s', (source) => {
+    expect(hasNonImportBinding(source, ['CUSTOM_METRICS'])).toBe(false);
+  });
+  it.each(['const [x = [];', 'const value = {;', 'function f(', 'const s = "unterminated'])(
+    'refuses unreadable groups in %s',
+    (source) => {
+      expect(hasNonImportBinding(source, ['CUSTOM_METRICS'])).toBeUndefined();
+    },
+  );
 });
 
 describe('readImportSpecifiers', () => {

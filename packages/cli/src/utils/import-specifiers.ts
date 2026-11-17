@@ -472,6 +472,94 @@ function multiset(values: readonly string[]): string {
   return JSON.stringify([...values].sort());
 }
 
+/** The offset after a balanced punctuation group in the lexer's token stream. */
+function groupEnd(tokens: readonly IToken[], start: number): number | undefined {
+  const closes: string[] = [];
+  for (let at = start; at < tokens.length; at++) {
+    const token = tokens[at]!;
+    if (token.kind !== 'punct') continue;
+    const close =
+      token.text === '(' ? ')' : token.text === '[' ? ']' : token.text === '{' ? '}' : undefined;
+    if (close !== undefined) closes.push(close);
+    else if ([')', ']', '}'].includes(token.text) && closes.pop() !== token.text) return undefined;
+    if (closes.length === 0) return at + 1;
+  }
+  return undefined;
+}
+
+/**
+ * Conservatively checks for bindings that could shadow a reused module import.
+ * Any matching declaration anywhere in the file refuses reuse; destructuring and
+ * parameter patterns also refuse on a name mention rather than guessing its scope.
+ * @param source - TypeScript source
+ * @param names - Imported local names to protect
+ * @returns Whether a possible non-import binding exists, or undefined for unreadable groups
+ */
+export function hasNonImportBinding(source: string, names: readonly string[]): boolean | undefined {
+  const tokens = tokenize(source);
+  if (tokens === undefined) return undefined;
+  const mentions = (start: number, end: number): boolean =>
+    tokens.slice(start, end).some((token) => token.kind === 'word' && names.includes(token.text));
+  for (let at = 0; at < tokens.length; at++) {
+    const token = tokens[at]!;
+    if (token.kind === 'word') {
+      if (['function', 'class', 'enum', 'namespace'].includes(token.text)) {
+        const name = tokens[at + (tokens[at + 1]?.text === '*' ? 2 : 1)];
+        if (name?.kind === 'word' && names.includes(name.text)) return true;
+      }
+      if (
+        names.includes(token.text) &&
+        tokens[at + 1]?.text === '=' &&
+        tokens[at + 2]?.text === '>'
+      )
+        return true;
+      if (!['const', 'let', 'var', 'using'].includes(token.text)) continue;
+      let binding = at + 1;
+      while (binding < tokens.length) {
+        const head = tokens[binding]!;
+        if (head.kind === 'word') {
+          if (names.includes(head.text)) return true;
+          binding++;
+        } else if (head.kind === 'punct' && (head.text === '{' || head.text === '[')) {
+          const end = groupEnd(tokens, binding);
+          if (end === undefined) return undefined;
+          if (mentions(binding, end)) return true;
+          binding = end;
+        } else break;
+        // Skip the type and initializer, following only commas between declarators.
+        while (binding < tokens.length) {
+          const next = tokens[binding]!;
+          if (next.kind === 'punct' && ['(', '[', '{'].includes(next.text)) {
+            const end = groupEnd(tokens, binding);
+            if (end === undefined) return undefined;
+            binding = end;
+          } else if (
+            (next.kind === 'punct' && [',', ';', ')', '}'].includes(next.text)) ||
+            (next.kind === 'word' && ['in', 'of'].includes(next.text))
+          )
+            break;
+          else binding++;
+        }
+        if (tokens[binding]?.text !== ',') break;
+        binding++;
+      }
+    } else if (token.kind === 'punct' && token.text === '(') {
+      const end = groupEnd(tokens, at);
+      if (end === undefined) return undefined;
+      const after = tokens[end];
+      if (
+        after?.kind === 'punct' &&
+        (after.text === '{' ||
+          after.text === ':' ||
+          (after.text === '=' && tokens[end + 1]?.text === '>')) &&
+        mentions(at, end)
+      )
+        return true;
+    }
+  }
+  return false;
+}
+
 /**
  * Reads the import specifiers of every file, refusing any file the two readers
  * disagree on.

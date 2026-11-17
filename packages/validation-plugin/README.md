@@ -161,8 +161,9 @@ request.
 
 `rfc9457Formatter` emits [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457.html) Problem Details
 (carrying `detail`, never `message`); `nestjsFormatter` emits the `'nestjs'` shape
-(`{ statusCode, message: string[], error }`). The middleware helpers and the service both honour the
-plugin's configured `errorFormat` — there is one implementation behind both entry points.
+(`{ statusCode, message: string[], error, errors }`, where `errors` lists each issue as
+`{ field, message, code? }`). The middleware helpers and the service both honour the plugin's
+configured `errorFormat` — there is one implementation behind both entry points.
 
 A validation failure carries an `errors` extension member, so it is a distinct problem type with a
 concrete `type` URI rather than the `about:blank` that `@setu-ts/exceptions` emits for status-only

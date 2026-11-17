@@ -504,8 +504,8 @@ function withoutPageRouteSource(source: string): string {
 }
 
 /**
- * Current and recognition-only standalone entries (0.12.0's, and the guarded
- * layout with nullish port reads), for workspace adoption.
+ * Current and recognition-only standalone entries (0.12.0's, and pre-pageRoutes
+ * guarded layouts with nullish or runtimeEnvRead port reads), for workspace adoption.
  */
 export function fullStackDevEntryVariants(
   runtime: TargetRuntime,
@@ -540,5 +540,6 @@ export function fullStackDevEntryVariants(
       path: current.path,
       contents: withNullishEnvReads(withoutPageRouteSource(current.contents), nullish),
     },
+    { path: current.path, contents: withoutPageRouteSource(current.contents) },
   ];
 }

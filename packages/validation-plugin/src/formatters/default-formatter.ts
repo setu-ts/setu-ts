@@ -3,7 +3,8 @@
  *
  * The **default** formatter produces the framework-standard error shape.
  * The **compatibility** formatter produces a body shaped as
- * `{ statusCode, message: string[], error }`.
+ * `{ statusCode, message: string[], error, errors }`, where `errors` lists each
+ * issue as `{ field, message, code? }`.
  *
  * @module
  */
@@ -47,7 +48,8 @@ export const defaultFormatter: ValidationErrorFormatter = (
  * {
  *   "statusCode": 400,
  *   "message": [ "Invalid email" ],
- *   "error": "Bad Request"
+ *   "error": "Bad Request",
+ *   "errors": [ { "field": "email", "message": "Invalid email", "code": "invalid_string" } ]
  * }
  * ```
  *

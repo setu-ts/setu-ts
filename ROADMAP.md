@@ -1005,7 +1005,7 @@ function validateCookies(schema: ZodSchema): MiddlewareFunction;
 
 - `default` — Framework standard
 - `rfc7807` — RFC 7807 Problem Details
-- `nestjs` — compatibility shape (`{ statusCode, message: string[], error }`)
+- `nestjs` — compatibility shape (`{ statusCode, message: string[], error, errors }`)
 - Custom formatter function
 
 **Input Sanitization:**

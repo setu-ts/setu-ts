@@ -1540,8 +1540,8 @@ class Application implements IKernelApplication {
     definition: RouteDefinition,
     middlewareGroups: RouteMiddlewareGroups,
   ): Promise<void> {
-    // A route stage can answer while next() keeps the handler running. Keep
-    // deferred cleanup and shutdown tied to that handler on the fast path too.
+    // A route stage can answer while next() keeps selector or handler work running.
+    // Keep deferred cleanup and shutdown tied to that work on the fast path too.
     handle.trackHandler = true;
     const staticMiddleware = definition.middleware ?? [];
     const selectAndRun = async (): Promise<void> => {
@@ -1576,13 +1576,18 @@ class Application implements IKernelApplication {
         ),
       );
     };
+    const runSelected = (): Promise<void> => {
+      const pending = selectAndRun();
+      this.#trackHandler(handle, pending);
+      return pending;
+    };
     if (staticMiddleware.length === 0) {
-      await selectAndRun();
+      await runSelected();
     } else {
       await executeChain(
         staticMiddleware,
         ctx,
-        selectAndRun,
+        runSelected,
         undefined,
         this.#chainObserver('route', this.#collector?.requestOperationIdOf(ctx), entry.index),
       );
@@ -1809,13 +1814,18 @@ class Application implements IKernelApplication {
     return this.#settleRequest(ctx, handle, 'error');
   }
 
-  /** Retains a running terminal without changing the promise propagated to middleware. */
+  /** Retains selector and handler work without changing promises propagated to middleware. */
   #trackHandler(handle: RequestContextHandle, pending: Promise<unknown>): void {
+    const previous = handle.pendingHandler;
     const complete = (): void => {
-      handle.handlerSettled = true;
+      // An enclosing selector can settle before a handler detached by a group.
+      if (handle.pendingHandler === tracked) handle.handlerSettled = true;
     };
     handle.handlerSettled = false;
-    handle.pendingHandler = pending.then(complete, complete);
+    const tracked: Promise<void> = (
+      previous === undefined ? pending : Promise.allSettled([previous, pending])
+    ).then(complete, complete);
+    handle.pendingHandler = tracked;
   }
 
   /** Settles generic cleanup before releasing the request from shutdown drain. */
@@ -1828,7 +1838,7 @@ class Application implements IKernelApplication {
     const pendingHandler = handle.pendingHandler;
     if (pendingHandler !== undefined && !handle.handlerSettled) {
       // Keep the request in the shutdown drain, and leave defer open for work
-      // registered by the handler after this early response has been sent.
+      // registered by selector or handler work after this early response has been sent.
       const finish = async (): Promise<void> => {
         const cleanups = handle.takeDeferred();
         if (cleanups !== undefined) await runDeferred(cleanups, this.#registry);

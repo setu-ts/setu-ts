@@ -155,6 +155,65 @@ for (const routeMiddleware of [false, true, 'groups'] as const) {
   }
 }
 
+it.each([false, true])(
+  'waits for detached group selection and shutdown when selection rejects=%s',
+  async (fails) => {
+    const { createApplication } = await import('../../src/index.ts');
+    const { RuntimePlugin } = await import('@setu-ts/runtime');
+    const gate = Promise.withResolvers<void>();
+    const started = Promise.withResolvers<void>();
+    const cleaned = vi.fn();
+    const late = vi.fn();
+    const resumed = vi.fn();
+    const handler = vi.fn();
+    const app = createApplication({ plugins: [RuntimePlugin()] });
+    app.router.get('/', {
+      middleware: [
+        (ctx, next) => {
+          void next().catch(() => {});
+          return ctx.response.text('early');
+        },
+      ],
+      middlewareGroups: {
+        groups: {},
+        select: async (ctx) => {
+          ctx.defer?.(cleaned);
+          started.resolve();
+          await gate.promise;
+          resumed(cleaned.mock.calls.length);
+          ctx.defer?.(late);
+          if (fails) throw new Error('late selector failure');
+          return [];
+        },
+      },
+      handler,
+    });
+    await app.start();
+    try {
+      const response = await app.inject({ method: 'GET', url: '/' });
+      await started.promise;
+      expect(response.body).toBe('early');
+      expect(cleaned).not.toHaveBeenCalled();
+      let stopped = false;
+      const stopping = app.stop().then(() => {
+        stopped = true;
+      });
+      await new Promise<void>((done) => setTimeout(done, 25));
+      expect(stopped).toBe(false);
+      gate.resolve();
+      await stopping;
+      expect(resumed).toHaveBeenCalledExactlyOnceWith(0);
+      expect(late).toHaveBeenCalledOnce();
+      expect(cleaned).toHaveBeenCalledOnce();
+      expect(handler).not.toHaveBeenCalled();
+      expect(response.body).toBe('early');
+    } finally {
+      gate.resolve();
+      await app.stop();
+    }
+  },
+);
+
 it('M131b review: a handler that streams after an early buffered response still releases the request', async () => {
   const { createApplication } = await import('../../src/index.ts');
   const { RuntimePlugin } = await import('@setu-ts/runtime');

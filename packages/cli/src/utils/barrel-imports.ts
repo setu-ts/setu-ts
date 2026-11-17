@@ -1,7 +1,22 @@
 /** Conservative admission and placement of generated barrel imports. @module */
 import type { LocalImport } from '../templates/registry.ts';
-import { maskSourceCode, referencesIdentifier } from '../devtool/sources.ts';
-import { lexImportSpecifiers } from './import-specifiers.ts';
+import { maskComments, maskSourceCode, referencesIdentifier } from '../devtool/sources.ts';
+import { hasNonImportBinding, lexImportSpecifiers } from './import-specifiers.ts';
+
+/** Keeps line-end placement, stepping over real block comments rather than their newlines. */
+function importLineEnd(source: string, visible: string, end: number): number {
+  let at = end;
+  while (at < source.length && source[at] !== '\n') {
+    if (visible[at] === ' ' && source.startsWith('/*', at)) {
+      // maskComments has already refused unterminated comments.
+      at = source.indexOf('*/', at + 2) + 2;
+    } else if (visible[at] === ' ' && source.startsWith('//', at)) {
+      const newline = source.indexOf('\n', at);
+      return newline < 0 ? source.length : newline;
+    } else at++;
+  }
+  return at;
+}
 
 /** Plans barrel imports; exclusive sources also refuse bindings named by another import. */
 export function barrelImportPlan(
@@ -12,7 +27,8 @@ export function barrelImportPlan(
 ): { text: string; at: number } | undefined {
   const lexed = lexImportSpecifiers(source);
   const code = maskSourceCode(source);
-  if (lexed.kind !== 'ok' || code === undefined) return undefined;
+  const visible = maskComments(source);
+  if (lexed.kind !== 'ok' || code === undefined || visible === undefined) return undefined;
   const declarations = lexed.spans.filter((span) => span.declaration !== undefined);
   const missing: string[] = [];
   for (const item of imports) {
@@ -31,7 +47,8 @@ export function barrelImportPlan(
       if (
         matching.length !== 1 ||
         matching[0]!.typeOnly ||
-        !item.symbols.every((symbol) => matching[0]!.declaration!.named.includes(symbol))
+        !item.symbols.every((symbol) => matching[0]!.declaration!.named.includes(symbol)) ||
+        hasNonImportBinding(source, item.symbols) !== false
       )
         return undefined;
     } else {
@@ -40,7 +57,6 @@ export function barrelImportPlan(
     }
   }
   const end = Math.max(0, ...declarations.map((span) => span.declaration!.end));
-  const lineEnd = end === 0 ? 0 : source.indexOf('\n', end);
-  const at = lineEnd < 0 ? source.length : lineEnd;
+  const at = end === 0 ? 0 : importLineEnd(source, visible, end);
   return { text: missing.length === 0 ? '' : `\n${missing.join('\n')}`, at };
 }

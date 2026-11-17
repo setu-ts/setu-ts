@@ -3964,6 +3964,17 @@ describe('starter handler-arm wiring', () => {
     expect(h.read(path).match(/import \{ EVENT_HANDLERS \}/g)).toHaveLength(1);
     expect(h.read(path)).toContain('events: { handlers: EVENT_HANDLERS }');
   });
+  it('leaves a shadowed seam import unwired and prints pass-through guidance', async () => {
+    const h = await fullStack();
+    const path = '/app/shop/setu.config.ts';
+    const before = `import { CUSTOM_METRICS } from './src/metrics/index.ts';\n${h.read(path).replace('return {', 'const CUSTOM_METRICS = [];\n      return {')}`;
+    await h.fs.writeFile(path, new TextEncoder().encode(before));
+    expect(await h.run(['metrics', '--dir', '/app/shop'])).toBe(0);
+    expect(h.read(path)).toBe(before);
+    expect(h.out.join('\n')).not.toContain('wired metrics in setu.config.ts');
+    expect(h.out.join('\n')).toContain('Pass the generated artifacts through it: metrics:');
+    expect(h.out.join('\n')).toContain("Import CUSTOM_METRICS from './src/metrics/index.ts'");
+  });
 });
 
 describe('M133 setu add mcp', () => {
